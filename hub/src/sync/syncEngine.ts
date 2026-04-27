@@ -503,6 +503,7 @@ export class SyncEngine {
         sessionType?: 'simple' | 'worktree',
         worktreeName?: string,
         resumeSessionId?: string,
+        importHistory?: boolean,
         effort?: string,
         permissionMode?: PermissionMode
     ): Promise<{ type: 'success'; sessionId: string } | { type: 'error'; message: string }> {
@@ -516,6 +517,7 @@ export class SyncEngine {
             sessionType,
             worktreeName,
             resumeSessionId,
+            importHistory,
             effort,
             permissionMode
         )
@@ -717,6 +719,7 @@ export class SyncEngine {
             undefined,
             undefined,
             resumeToken,
+            false,
             session.effort ?? undefined,
             preferredPermissionMode
         )

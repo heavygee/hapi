@@ -34,6 +34,7 @@ interface LoopOptions {
     collaborationMode?: CodexCollaborationMode;
     resumeSessionId?: string;
     replayTranscriptHistoryOnStart?: boolean;
+    importHistory?: boolean;
     onSessionReady?: (session: CodexSession) => void;
 }
 
@@ -58,7 +59,8 @@ export async function loop(opts: LoopOptions): Promise<void> {
         model: opts.model,
         modelReasoningEffort: opts.modelReasoningEffort,
         collaborationMode: opts.collaborationMode ?? 'default',
-        replayTranscriptHistoryOnStart: opts.replayTranscriptHistoryOnStart ?? false
+        replayTranscriptHistoryOnStart: opts.replayTranscriptHistoryOnStart ?? false,
+        importHistory: opts.importHistory
     });
 
     await runLocalRemoteSession({
