@@ -59,7 +59,7 @@ export default defineConfig({
     },
     server: {
         host: true,
-        allowedHosts: ['hapidev.weishu.me'],
+        allowedHosts: ['hapidev.weishu.me', 'garden.tail9944ee.ts.net'],
         proxy: {
             '/api': {
                 target: hubTarget,
