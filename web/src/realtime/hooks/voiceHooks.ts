@@ -10,12 +10,18 @@ import {
     extractLastAssistantSpeakable
 } from './contextFormatters'
 import { VOICE_CONFIG } from '../voiceConfig'
-import type { DecryptedMessage, Session } from '@/types/api'
+import { getFlavorLabel, isKnownFlavor } from '@hapi/protocol'
+import type { DecryptedMessage, Session, SessionMetadataSummary } from '@/types/api'
 
 interface SessionMetadata {
     summary?: { text?: string }
     path?: string
     machineId?: string
+}
+
+function getAgentLabel(session: Session | null): string {
+    const flavor = (session?.metadata as SessionMetadataSummary | undefined)?.flavor
+    return isKnownFlavor(flavor) ? getFlavorLabel(flavor) : 'coding agent'
 }
 
 // Track which sessions have been reported
@@ -65,7 +71,7 @@ function reportSession(sessionId: string) {
     if (!session) return
 
     const messages = messagesGetter?.(sessionId) ?? []
-    const contextUpdate = formatSessionFull(session, messages)
+    const contextUpdate = formatSessionFull(session, messages, getAgentLabel(session))
     reportContextualUpdate(contextUpdate)
 }
 
@@ -110,8 +116,9 @@ export const voiceHooks = {
     onPermissionRequested(sessionId: string, requestId: string, toolName: string, toolArgs: unknown) {
         if (VOICE_CONFIG.DISABLE_PERMISSION_REQUESTS) return
 
+        const session = sessionGetter?.(sessionId) ?? null
         reportSession(sessionId)
-        reportTextUpdate(formatPermissionRequest(sessionId, requestId, toolName, toolArgs))
+        reportTextUpdate(formatPermissionRequest(sessionId, requestId, toolName, toolArgs, getAgentLabel(session)))
     },
 
     /**
@@ -120,8 +127,9 @@ export const voiceHooks = {
     onMessages(sessionId: string, messages: DecryptedMessage[]) {
         if (VOICE_CONFIG.DISABLE_MESSAGES) return
 
+        const session = sessionGetter?.(sessionId) ?? null
         reportSession(sessionId)
-        reportContextualUpdate(formatNewMessages(sessionId, messages))
+        reportContextualUpdate(formatNewMessages(sessionId, messages, getAgentLabel(session)))
     },
 
     /**
@@ -136,7 +144,7 @@ export const voiceHooks = {
         const session = sessionGetter?.(sessionId) ?? null
         const messages = messagesGetter?.(sessionId) ?? []
 
-        let prompt = 'THIS IS AN ACTIVE SESSION: \n\n' + formatSessionFull(session, messages)
+        const prompt = 'THIS IS AN ACTIVE SESSION: \n\n' + formatSessionFull(session, messages, getAgentLabel(session))
         shownSessions.add(sessionId)
 
         return prompt
@@ -148,10 +156,11 @@ export const voiceHooks = {
     onReady(sessionId: string) {
         if (VOICE_CONFIG.DISABLE_READY_EVENTS) return
 
+        const session = sessionGetter?.(sessionId) ?? null
         reportSession(sessionId)
         const messages = messagesGetter?.(sessionId) ?? []
         const lastAssistantText = extractLastAssistantSpeakable(messages)
-        reportTextUpdate(formatReadyEvent(sessionId, lastAssistantText))
+        reportTextUpdate(formatReadyEvent(sessionId, lastAssistantText, getAgentLabel(session)))
     },
 
     /**

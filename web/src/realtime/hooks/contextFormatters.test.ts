@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { DecryptedMessage } from '@/types/api'
-import { extractLastAssistantSpeakable, formatMessage, formatNewMessages, formatReadyEvent } from './contextFormatters'
+import {
+    extractLastAssistantSpeakable,
+    formatMessage,
+    formatNewMessages,
+    formatPermissionRequest,
+    formatReadyEvent,
+} from './contextFormatters'
 
 function msg(partial: Pick<DecryptedMessage, 'id' | 'seq' | 'content'>): DecryptedMessage {
     return {
@@ -122,6 +128,17 @@ describe('formatReadyEvent', () => {
         const event = formatReadyEvent(sessionId, '   ')
         expect(event).toContain('Use the latest agent message already present in context')
     })
+
+    it('uses the provided agent label', () => {
+        const event = formatReadyEvent(sessionId, null, 'Codex')
+        expect(event).toContain('Codex finished working')
+        expect(event).not.toContain('Claude Code')
+    })
+
+    it('defaults to coding agent label', () => {
+        const event = formatReadyEvent(sessionId)
+        expect(event).toContain('coding agent finished working')
+    })
 })
 
 describe('formatMessage', () => {
@@ -141,7 +158,7 @@ describe('formatMessage', () => {
             }
         }))
 
-        expect(formatted).toContain('Claude Code:')
+        expect(formatted).toContain('coding agent:')
         expect(formatted).toContain('<text>Indexed 5,018 items in the search database.</text>')
     })
 
@@ -188,7 +205,54 @@ describe('formatMessage', () => {
         }))
 
         expect(formatted).toContain('Here is the result.')
-        expect(formatted).toContain('Claude Code is using Bash')
+        expect(formatted).toContain('coding agent is using Bash')
+    })
+
+    it('uses the provided label for assistant text', () => {
+        const formatted = formatMessage(
+            msg({ id: '1', seq: 1, content: { role: 'assistant', content: 'Refactor complete.' } }),
+            'Cursor'
+        )
+        expect(formatted).toContain('Cursor:')
+        expect(formatted).toContain('Refactor complete.')
+        expect(formatted).not.toContain('Claude Code')
+    })
+
+    it('defaults to coding agent when no label is given', () => {
+        const formatted = formatMessage(
+            msg({ id: '1', seq: 1, content: { role: 'assistant', content: 'Done.' } })
+        )
+        expect(formatted).toContain('coding agent:')
+        expect(formatted).not.toContain('Claude Code')
+    })
+
+    it('uses the provided label for tool-call lines', () => {
+        const formatted = formatMessage(
+            msg({
+                id: '1',
+                seq: 1,
+                content: {
+                    role: 'assistant',
+                    content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ls' } }]
+                }
+            }),
+            'Gemini'
+        )
+        expect(formatted).toContain('Gemini is using Bash')
+        expect(formatted).not.toContain('Claude Code')
+    })
+})
+
+describe('formatPermissionRequest', () => {
+    it('uses the provided label', () => {
+        const result = formatPermissionRequest('sid', 'rid', 'Bash', {}, 'OpenCode')
+        expect(result).toContain('OpenCode is requesting permission')
+        expect(result).not.toContain('Claude Code')
+    })
+
+    it('defaults to coding agent', () => {
+        const result = formatPermissionRequest('sid', 'rid', 'Bash', {})
+        expect(result).toContain('coding agent is requesting permission')
     })
 })
 
@@ -213,5 +277,13 @@ describe('formatNewMessages', () => {
 
         expect(update).toContain('New messages in session: session-1')
         expect(update).toContain('Local database file size is 2.43 GiB.')
+    })
+
+    it('uses the provided label in formatted message output', () => {
+        const result = formatNewMessages('session-1', [
+            msg({ id: '1', seq: 1, content: { role: 'assistant', content: 'Build succeeded.' } })
+        ], 'Cursor')
+        expect(result).toContain('Cursor:')
+        expect(result).not.toContain('Claude Code')
     })
 })

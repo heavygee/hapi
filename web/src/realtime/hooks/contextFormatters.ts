@@ -66,9 +66,9 @@ function unwrapOutputContent(content: unknown): { roleOverride: NormalizedRole |
     return { roleOverride, content: messageContent }
 }
 
-function formatPlainText(role: NormalizedRole | null, text: string): string {
+function formatPlainText(role: NormalizedRole | null, text: string, agentLabel = 'coding agent'): string {
     if (role === 'assistant') {
-        return `Claude Code: \n<text>${text}</text>`
+        return `${agentLabel}: \n<text>${text}</text>`
     }
     return `User sent message: \n<text>${text}</text>`
 }
@@ -80,9 +80,10 @@ export function formatPermissionRequest(
     sessionId: string,
     requestId: string,
     toolName: string,
-    toolArgs: unknown
+    toolArgs: unknown,
+    agentLabel = 'coding agent'
 ): string {
-    return `Claude Code is requesting permission to use ${toolName} (session ${sessionId}):
+    return `${agentLabel} is requesting permission to use ${toolName} (session ${sessionId}):
 <request_id>${requestId}</request_id>
 <tool_name>${toolName}</tool_name>
 <tool_args>${JSON.stringify(toolArgs)}</tool_args>`
@@ -91,7 +92,7 @@ export function formatPermissionRequest(
 /**
  * Format a single message for voice context
  */
-export function formatMessage(message: DecryptedMessage): string | null {
+export function formatMessage(message: DecryptedMessage, agentLabel = 'coding agent'): string | null {
     const { role, content: wrappedContent } = unwrapRoleWrappedContent(message)
     const { roleOverride, content } = unwrapOutputContent(wrappedContent)
     const normalizedRole = roleOverride ?? role
@@ -103,7 +104,7 @@ export function formatMessage(message: DecryptedMessage): string | null {
     const speakable = !isContentArray(content) ? extractSpeakableFromContent(content) : null
     if (speakable) {
         const roleForFormat = normalizedRole === 'user' ? 'user' : 'assistant'
-        return formatPlainText(roleForFormat, speakable)
+        return formatPlainText(roleForFormat, speakable, agentLabel)
     }
 
     if (!isContentArray(content)) {
@@ -122,13 +123,13 @@ export function formatMessage(message: DecryptedMessage): string | null {
 
     for (const item of content) {
         if (item.type === 'text' && item.text) {
-            lines.push(formatPlainText(isAssistant ? 'assistant' : 'user', item.text))
+            lines.push(formatPlainText(isAssistant ? 'assistant' : 'user', item.text, agentLabel))
         } else if (item.type === 'tool_use' && !VOICE_CONFIG.DISABLE_TOOL_CALLS) {
             const name = item.name || 'unknown'
             if (VOICE_CONFIG.LIMITED_TOOL_CALLS) {
-                lines.push(`Claude Code is using ${name}`)
+                lines.push(`${agentLabel} is using ${name}`)
             } else {
-                lines.push(`Claude Code is using ${name} with arguments: <arguments>${JSON.stringify(item.input)}</arguments>`)
+                lines.push(`${agentLabel} is using ${name} with arguments: <arguments>${JSON.stringify(item.input)}</arguments>`)
             }
         }
     }
@@ -214,18 +215,18 @@ export function extractLastAssistantSpeakable(messages: DecryptedMessage[]): str
     return null
 }
 
-export function formatNewSingleMessage(sessionId: string, message: DecryptedMessage): string | null {
-    const formatted = formatMessage(message)
+export function formatNewSingleMessage(sessionId: string, message: DecryptedMessage, agentLabel = 'coding agent'): string | null {
+    const formatted = formatMessage(message, agentLabel)
     if (!formatted) {
         return null
     }
     return 'New message in session: ' + sessionId + '\n\n' + formatted
 }
 
-export function formatNewMessages(sessionId: string, messages: DecryptedMessage[]): string | null {
+export function formatNewMessages(sessionId: string, messages: DecryptedMessage[], agentLabel = 'coding agent'): string | null {
     const formatted = [...messages]
         .sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))
-        .map(formatMessage)
+        .map(m => formatMessage(m, agentLabel))
         .filter(Boolean)
     if (formatted.length === 0) {
         return null
@@ -233,15 +234,15 @@ export function formatNewMessages(sessionId: string, messages: DecryptedMessage[
     return 'New messages in session: ' + sessionId + '\n\n' + formatted.join('\n\n')
 }
 
-export function formatHistory(sessionId: string, messages: DecryptedMessage[]): string {
+export function formatHistory(sessionId: string, messages: DecryptedMessage[], agentLabel = 'coding agent'): string {
     const messagesToFormat = VOICE_CONFIG.MAX_HISTORY_MESSAGES > 0
         ? messages.slice(-VOICE_CONFIG.MAX_HISTORY_MESSAGES)
         : messages
-    const formatted = messagesToFormat.map(formatMessage).filter(Boolean)
+    const formatted = messagesToFormat.map(m => formatMessage(m, agentLabel)).filter(Boolean)
     return 'History of messages in session: ' + sessionId + '\n\n' + formatted.join('\n\n')
 }
 
-export function formatSessionFull(session: Session | null, messages: DecryptedMessage[]): string {
+export function formatSessionFull(session: Session | null, messages: DecryptedMessage[], agentLabel = 'coding agent'): string {
     if (!session) {
         return 'Session not available'
     }
@@ -262,7 +263,7 @@ export function formatSessionFull(session: Session | null, messages: DecryptedMe
 
     lines.push('## Our interaction history so far')
     lines.push('')
-    lines.push(formatHistory(session.id, messages))
+    lines.push(formatHistory(session.id, messages, agentLabel))
 
     return lines.join('\n\n')
 }
@@ -279,10 +280,10 @@ export function formatSessionFocus(sessionId: string, _metadata?: SessionMetadat
     return `Session became focused: ${sessionId}`
 }
 
-export function formatReadyEvent(sessionId: string, lastAssistantText?: string | null): string {
+export function formatReadyEvent(sessionId: string, lastAssistantText?: string | null, agentLabel = 'coding agent'): string {
     const trimmed = lastAssistantText?.trim()
     if (trimmed) {
-        return `The coding agent finished working in session: ${sessionId}. Summarize this for the human immediately:\n<text>${trimmed}</text>`
+        return `${agentLabel} finished working in session: ${sessionId}. Summarize this for the human immediately:\n<text>${trimmed}</text>`
     }
-    return `The coding agent finished working in session: ${sessionId}. Use the latest agent message already present in context and summarize it for the human immediately.`
+    return `${agentLabel} finished working in session: ${sessionId}. Use the latest agent message already present in context and summarize it for the human immediately.`
 }
