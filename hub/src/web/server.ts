@@ -181,6 +181,26 @@ from GitHub Pages instead of through the relay tunnel.
 
     app.use('/assets/*', serveStatic({ root: distDir }))
 
+    app.use('/xr-poc/*', async (c, next) => {
+        if (c.req.path.startsWith('/api')) {
+            await next()
+            return
+        }
+
+        const response = await serveStatic({ root: distDir })(c, next)
+        if (response instanceof Response) {
+            const headers = new Headers(response.headers)
+            headers.set('Cache-Control', 'no-store, no-cache, must-revalidate')
+            headers.set('Pragma', 'no-cache')
+            return new Response(response.body, {
+                status: response.status,
+                statusText: response.statusText,
+                headers
+            })
+        }
+        return response
+    })
+
     app.use('*', async (c, next) => {
         if (c.req.path.startsWith('/api')) {
             await next()

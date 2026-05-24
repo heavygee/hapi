@@ -397,21 +397,27 @@ function AppInner() {
         )
     }
 
+    const isGarden = pathname === '/garden' || pathname.startsWith('/garden/')
+
     return (
         <AppContextProvider value={{ api, token, baseUrl }}>
             <VoiceProvider>
-                <SyncingBanner isSyncing={isSyncing} />
-                <ReconnectingBanner
-                    isReconnecting={sseDisconnected && !isSyncing}
-                    reason={sseDisconnectReason}
-                />
-                <VoiceErrorBanner />
-                <OfflineBanner />
+                {!isGarden && (
+                    <>
+                        <SyncingBanner isSyncing={isSyncing} />
+                        <ReconnectingBanner
+                            isReconnecting={sseDisconnected && !isSyncing}
+                            reason={sseDisconnectReason}
+                        />
+                        <VoiceErrorBanner />
+                        <OfflineBanner />
+                    </>
+                )}
                 <div className="h-full min-h-0 flex flex-col">
                     <Outlet />
                 </div>
                 <ToastContainer />
-                <InstallPrompt />
+                {!isGarden && <InstallPrompt />}
             </VoiceProvider>
         </AppContextProvider>
     )

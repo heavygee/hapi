@@ -41,6 +41,15 @@ function getVendorChunkName(id: string): string | undefined {
         return 'vendor-voice'
     }
 
+    if (
+        id.includes('/node_modules/three/')
+        || id.includes('/node_modules/@react-three/')
+        || id.includes('/node_modules/@pmndrs/')
+        || id.includes('/node_modules/@iwer/')
+    ) {
+        return 'vendor-xr'
+    }
+
     return undefined
 }
 
@@ -102,7 +111,15 @@ export default defineConfig({
                 ]
             },
             injectManifest: {
-                globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}']
+                globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+                globIgnores: ['**/xr-poc/**'],
+                maximumFileSizeToCacheInBytes: 8_000_000,
+                manifestTransforms: [
+                    (entries) => ({
+                        manifest: entries.filter((entry) => !entry.url.includes('vendor-xr')),
+                        warnings: [],
+                    }),
+                ],
             },
             devOptions: {
                 enabled: true,
@@ -113,7 +130,11 @@ export default defineConfig({
     base,
     resolve: {
         alias: {
-            '@': resolve(__dirname, 'src')
+            '@': resolve(__dirname, 'src'),
+            '@bufbuild/protobuf/wire': resolve(
+                __dirname,
+                '../node_modules/@bufbuild/protobuf/dist/esm/wire/index.js'
+            ),
         }
     },
     build: {

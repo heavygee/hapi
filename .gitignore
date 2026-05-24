@@ -39,6 +39,11 @@ coverage/
 localdocs/
 execplan/
 
+# Operator Garden / XR POC (local only until explicitly published)
+/web/public/xr-poc/
+/web/public/garden/
+/garden-xr/
+
 # Generated npm bundle output (local)
 cli/npm/main/
 .ace-tool/

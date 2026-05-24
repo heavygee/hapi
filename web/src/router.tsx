@@ -6,6 +6,7 @@ import {
     createRootRoute,
     createRoute,
     createRouter,
+    lazyRouteComponent,
     useLocation,
     useMatchRoute,
     useNavigate,
@@ -39,6 +40,8 @@ import FilesPage from '@/routes/sessions/files'
 import FilePage from '@/routes/sessions/file'
 import TerminalPage from '@/routes/sessions/terminal'
 import SettingsPage from '@/routes/settings'
+
+const GardenPage = lazyRouteComponent(() => import('@/garden/GardenPage').then((m) => ({ default: m.GardenPage })))
 
 function BackIcon(props: { className?: string }) {
     return (
@@ -690,8 +693,15 @@ const settingsRoute = createRoute({
     component: SettingsPage,
 })
 
+const gardenRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/garden',
+    component: GardenPage,
+})
+
 export const routeTree = rootRoute.addChildren([
     indexRoute,
+    gardenRoute,
     sessionsRoute.addChildren([
         sessionsIndexRoute,
         newSessionRoute,
