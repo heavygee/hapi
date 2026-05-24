@@ -1,6 +1,6 @@
 import type { SessionSummary } from '@/types/api'
 
-export const GARDEN_BUILD = 'r3f-v2'
+export const GARDEN_BUILD = 'r3f-v3'
 
 export const LAYOUT_ARC_RAD = (270 / 180) * Math.PI
 export const ORB_RADIUS = 4.8
@@ -46,8 +46,21 @@ export function sessionColor(session: SessionSummary): string {
 }
 
 export function filterGardenSessions(sessions: SessionSummary[]): SessionSummary[] {
-    return sessions
-        .filter((s) => s.active || s.thinking || s.pendingRequestsCount > 0)
+    const hot = sessions.filter((session) => session.active || session.thinking || session.pendingRequestsCount > 0)
+    const hotIds = new Set(hot.map((session) => session.id))
+
+    const recentRest = sessions
+        .filter((session) => !hotIds.has(session.id))
         .sort((a, b) => b.updatedAt - a.updatedAt)
+
+    return [...hot, ...recentRest]
+        .sort((a, b) => {
+            const aScore = (a.pendingRequestsCount > 0 ? 4 : 0) + (a.thinking ? 2 : 0) + (a.active ? 1 : 0)
+            const bScore = (b.pendingRequestsCount > 0 ? 4 : 0) + (b.thinking ? 2 : 0) + (b.active ? 1 : 0)
+            if (aScore !== bScore) {
+                return bScore - aScore
+            }
+            return b.updatedAt - a.updatedAt
+        })
         .slice(0, 8)
 }

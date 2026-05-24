@@ -82,15 +82,15 @@ describe('sessionColor', () => {
 })
 
 describe('filterGardenSessions', () => {
-    it('keeps active, thinking, or pending sessions only', () => {
+    it('prioritizes hot sessions then fills with recent idle', () => {
         const sessions = [
-            makeSession({ id: 'idle', updatedAt: 999 }),
+            makeSession({ id: 'idle-old', updatedAt: 10 }),
             makeSession({ id: 'active', active: true, updatedAt: 100 }),
-            makeSession({ id: 'thinking', thinking: true, updatedAt: 200 }),
-            makeSession({ id: 'pending', pendingRequestsCount: 1, updatedAt: 50 }),
+            makeSession({ id: 'idle-new', updatedAt: 200 }),
+            makeSession({ id: 'thinking', thinking: true, updatedAt: 50 }),
         ]
         const visible = filterGardenSessions(sessions)
-        expect(visible.map((s) => s.id)).toEqual(['thinking', 'active', 'pending'])
+        expect(visible.map((session) => session.id)).toEqual(['thinking', 'active', 'idle-new', 'idle-old'])
     })
 
     it('caps at eight sessions', () => {

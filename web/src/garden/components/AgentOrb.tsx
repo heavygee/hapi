@@ -144,46 +144,71 @@ export function AgentOrb(props: AgentOrbProps) {
                 </Text>
             </GardenYawBillboard>
 
-            {focused && <OrbContentPanel session={session} />}
+            <OrbSnippet session={session} compact={!focused} />
         </group>
     )
 }
 
-function OrbContentPanel(props: { session: SessionSummary }) {
+function sessionStatus(session: SessionSummary): string {
+    if (session.pendingRequestsCount > 0) {
+        return 'needs you'
+    }
+    if (session.thinking) {
+        return 'working'
+    }
+    if (session.active) {
+        return 'live'
+    }
+    return 'idle'
+}
+
+function useOrbPreview(sessionId: string) {
     const { api } = useAppContext()
-    const { data: preview } = useQuery({
-        queryKey: ['garden', 'preview', props.session.id],
+    return useQuery({
+        queryKey: ['garden', 'preview', sessionId],
         queryFn: async () => {
-            const res = await api.getMessages(props.session.id, { limit: 24 })
+            const res = await api.getMessages(sessionId, { limit: 24 })
             return extractLastMessageText(res.messages)
         },
-        staleTime: 4000
+        staleTime: 4000,
+        refetchInterval: 8000,
     })
+}
 
-    const status = props.session.thinking
-        ? 'working'
-        : props.session.pendingRequestsCount > 0
-            ? 'needs you'
-            : 'idle'
+function OrbSnippet(props: { session: SessionSummary; compact: boolean }) {
+    const { data: preview, isLoading, isError } = useOrbPreview(props.session.id)
+    const status = sessionStatus(props.session)
+    const body = isError
+        ? '(could not load messages)'
+        : isLoading
+            ? '…'
+            : preview ?? '(no speakable messages yet)'
 
-    const body = preview ?? '(loading message…)'
+    const y = props.compact ? 0.72 : 0.95
+    const fontSize = props.compact ? 0.08 : 0.11
+    const maxWidth = props.compact ? 1.8 : 2.5
+    const limit = props.compact ? 96 : 420
 
     return (
-        <GardenYawBillboard position={[0, 0.95, 0]}>
-            <mesh position={[0, 0, -0.02]}>
-                <planeGeometry args={[2.8, 1.5]} />
-                <meshBasicMaterial color="#111827" transparent opacity={0.93} />
-            </mesh>
+        <GardenYawBillboard position={[0, y, 0]}>
+            {!props.compact && (
+                <mesh position={[0, 0, -0.02]}>
+                    <planeGeometry args={[2.8, 1.5]} />
+                    <meshBasicMaterial color="#111827" transparent opacity={0.93} />
+                </mesh>
+            )}
             <Text
-                position={[0, 0.35, 0.01]}
-                fontSize={0.11}
-                color="#f8fafc"
+                position={props.compact ? [0, 0, 0.01] : [0, 0.35, 0.01]}
+                fontSize={fontSize}
+                color={props.compact ? '#94a3b8' : '#f8fafc'}
                 anchorX="center"
-                anchorY="top"
-                maxWidth={2.5}
+                anchorY={props.compact ? 'middle' : 'top'}
+                maxWidth={maxWidth}
                 textAlign="left"
             >
-                {`${sessionLabel(props.session)}\nstatus: ${status}\n---\n${body.slice(0, 420)}`}
+                {props.compact
+                    ? `[${status}] ${body.slice(0, limit)}`
+                    : `${sessionLabel(props.session)}\nstatus: ${status}\n---\n${body.slice(0, limit)}`}
             </Text>
         </GardenYawBillboard>
     )

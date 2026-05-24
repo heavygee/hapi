@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getTelegramWebApp, isTelegramEnvironment } from './useTelegram'
 import type { AuthSource } from './useAuth'
+import { isGardenPath, syncGardenAccessTokenFromSiblingHubs } from '@/garden/gardenAuthBootstrap'
 
 const ACCESS_TOKEN_PREFIX = 'hapi_access_token::'
 
@@ -95,6 +96,10 @@ export function useAuthSource(baseUrl: string): {
         }
 
         // Check for stored access token as fallback
+        if (typeof window !== 'undefined' && isGardenPath(window.location.pathname)) {
+            syncGardenAccessTokenFromSiblingHubs(baseUrl)
+        }
+
         const storedToken = getStoredAccessToken(accessTokenKey)
         if (storedToken) {
             setAuthSource({ type: 'accessToken', token: storedToken })
