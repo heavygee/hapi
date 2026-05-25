@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useTranslation, type Locale } from '@/lib/use-translation'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { getElevenLabsSupportedLanguages, getLanguageDisplayName, type Language } from '@/lib/languages'
+import { VOICES, getVoiceById } from '@/lib/voices'
 import { getFontScaleOptions, useFontScale, type FontScale } from '@/hooks/useFontScale'
 import { getTerminalFontSizeOptions, useTerminalFontSize, type TerminalFontSize } from '@/hooks/useTerminalFontSize'
 import { getComposerEnterBehaviorOptions, useComposerEnterBehavior, type ComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
@@ -274,6 +275,7 @@ export default function SettingsPage() {
     const [isChatOpen, setIsChatOpen] = useState(false)
     const [isTerminalToolDisplayOpen, setIsTerminalToolDisplayOpen] = useState(false)
     const [isVoiceOpen, setIsVoiceOpen] = useState(false)
+    const [isVoicePickerOpen, setIsVoicePickerOpen] = useState(false)
     const containerRef = useRef<HTMLDivElement>(null)
     const appearanceContainerRef = useRef<HTMLDivElement>(null)
     const fontContainerRef = useRef<HTMLDivElement>(null)
@@ -281,6 +283,7 @@ export default function SettingsPage() {
     const chatContainerRef = useRef<HTMLDivElement>(null)
     const terminalToolDisplayContainerRef = useRef<HTMLDivElement>(null)
     const voiceContainerRef = useRef<HTMLDivElement>(null)
+    const voicePickerContainerRef = useRef<HTMLDivElement>(null)
     const { fontScale, setFontScale } = useFontScale()
     const { terminalFontSize, setTerminalFontSize } = useTerminalFontSize()
     const { sessionPreviewLimit, setSessionPreviewLimit } = useSessionPreviewLimit()
@@ -299,6 +302,11 @@ export default function SettingsPage() {
         return localStorage.getItem('hapi-voice-lang')
     })
 
+    // Voice ID state - read from localStorage
+    const [voiceId, setVoiceId] = useState<string | null>(() => {
+        return localStorage.getItem('hapi-voice-id')
+    })
+
     const fontScaleOptions = getFontScaleOptions()
     const terminalFontSizeOptions = getTerminalFontSizeOptions()
     const composerEnterBehaviorOptions = getComposerEnterBehaviorOptions()
@@ -311,6 +319,7 @@ export default function SettingsPage() {
     const currentComposerEnterBehaviorLabel = composerEnterBehaviorOptions.find((opt) => opt.value === composerEnterBehavior)?.labelKey ?? 'settings.chat.enterBehavior.send'
     const currentTerminalToolDisplayModeLabel = terminalToolDisplayModeOptions.find((opt) => opt.value === terminalToolDisplayMode)?.labelKey ?? 'settings.chat.terminalToolDisplay.compact'
     const currentVoiceLanguage = voiceLanguages.find((lang) => lang.code === voiceLanguage)
+    const currentVoice = getVoiceById(voiceId)
 
     const handleLocaleChange = (newLocale: Locale) => {
         setLocale(newLocale)
@@ -352,9 +361,19 @@ export default function SettingsPage() {
         setIsVoiceOpen(false)
     }
 
+    const handleVoiceChange = (id: string | null) => {
+        setVoiceId(id)
+        if (id === null) {
+            localStorage.removeItem('hapi-voice-id')
+        } else {
+            localStorage.setItem('hapi-voice-id', id)
+        }
+        setIsVoicePickerOpen(false)
+    }
+
     // Close dropdown when clicking outside
     useEffect(() => {
-        if (!isOpen && !isAppearanceOpen && !isFontOpen && !isTerminalFontOpen && !isChatOpen && !isTerminalToolDisplayOpen && !isVoiceOpen) return
+        if (!isOpen && !isAppearanceOpen && !isFontOpen && !isTerminalFontOpen && !isChatOpen && !isTerminalToolDisplayOpen && !isVoiceOpen && !isVoicePickerOpen) return
 
         const handleClickOutside = (event: MouseEvent) => {
             if (isOpen && containerRef.current && !containerRef.current.contains(event.target as Node)) {
@@ -378,15 +397,18 @@ export default function SettingsPage() {
             if (isVoiceOpen && voiceContainerRef.current && !voiceContainerRef.current.contains(event.target as Node)) {
                 setIsVoiceOpen(false)
             }
+            if (isVoicePickerOpen && voicePickerContainerRef.current && !voicePickerContainerRef.current.contains(event.target as Node)) {
+                setIsVoicePickerOpen(false)
+            }
         }
 
         document.addEventListener('mousedown', handleClickOutside)
         return () => document.removeEventListener('mousedown', handleClickOutside)
-    }, [isOpen, isAppearanceOpen, isFontOpen, isTerminalFontOpen, isChatOpen, isTerminalToolDisplayOpen, isVoiceOpen])
+    }, [isOpen, isAppearanceOpen, isFontOpen, isTerminalFontOpen, isChatOpen, isTerminalToolDisplayOpen, isVoiceOpen, isVoicePickerOpen])
 
     // Close on escape key
     useEffect(() => {
-        if (!isOpen && !isAppearanceOpen && !isFontOpen && !isTerminalFontOpen && !isChatOpen && !isTerminalToolDisplayOpen && !isVoiceOpen) return
+        if (!isOpen && !isAppearanceOpen && !isFontOpen && !isTerminalFontOpen && !isChatOpen && !isTerminalToolDisplayOpen && !isVoiceOpen && !isVoicePickerOpen) return
 
         const handleEscape = (event: KeyboardEvent) => {
             if (event.key === 'Escape') {
@@ -397,12 +419,13 @@ export default function SettingsPage() {
                 setIsChatOpen(false)
                 setIsTerminalToolDisplayOpen(false)
                 setIsVoiceOpen(false)
+                setIsVoicePickerOpen(false)
             }
         }
 
         document.addEventListener('keydown', handleEscape)
         return () => document.removeEventListener('keydown', handleEscape)
-    }, [isOpen, isAppearanceOpen, isFontOpen, isTerminalFontOpen, isChatOpen, isTerminalToolDisplayOpen, isVoiceOpen])
+    }, [isOpen, isAppearanceOpen, isFontOpen, isTerminalFontOpen, isChatOpen, isTerminalToolDisplayOpen, isVoiceOpen, isVoicePickerOpen])
 
     return (
         <div className="flex h-full min-h-0 flex-col">
@@ -807,6 +830,68 @@ export default function SettingsPage() {
                                                         <CheckIcon />
                                                     </span>
                                                 )}
+                                            </button>
+                                        )
+                                    })}
+                                </div>
+                            )}
+                        </div>
+
+                        <div ref={voicePickerContainerRef} className="relative">
+                            <button
+                                type="button"
+                                onClick={() => setIsVoicePickerOpen(!isVoicePickerOpen)}
+                                className="flex w-full items-center justify-between px-3 py-3 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
+                                aria-expanded={isVoicePickerOpen}
+                                aria-haspopup="listbox"
+                            >
+                                <span className="text-[var(--app-fg)]">{t('settings.voice.voice')}</span>
+                                <span className="flex items-center gap-1 text-[var(--app-hint)]">
+                                    <span>{currentVoice ? currentVoice.name : t('settings.voice.voiceDefault')}</span>
+                                    <ChevronDownIcon className={`transition-transform ${isVoicePickerOpen ? 'rotate-180' : ''}`} />
+                                </span>
+                            </button>
+
+                            {isVoicePickerOpen && (
+                                <div
+                                    className="absolute right-3 top-full mt-1 min-w-[220px] max-h-[300px] overflow-y-auto rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] shadow-lg z-50"
+                                    role="listbox"
+                                    aria-label={t('settings.voice.voice')}
+                                >
+                                    <button
+                                        type="button"
+                                        role="option"
+                                        aria-selected={voiceId === null}
+                                        onClick={() => handleVoiceChange(null)}
+                                        className={`flex items-center justify-between w-full px-3 py-2 text-base text-left transition-colors ${
+                                            voiceId === null
+                                                ? 'text-[var(--app-link)] bg-[var(--app-subtle-bg)]'
+                                                : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'
+                                        }`}
+                                    >
+                                        <span>{t('settings.voice.voiceDefault')}</span>
+                                        {voiceId === null && <span className="ml-2 text-[var(--app-link)]"><CheckIcon /></span>}
+                                    </button>
+                                    {VOICES.map((voice) => {
+                                        const isSelected = voiceId === voice.id
+                                        return (
+                                            <button
+                                                key={voice.id}
+                                                type="button"
+                                                role="option"
+                                                aria-selected={isSelected}
+                                                onClick={() => handleVoiceChange(voice.id)}
+                                                className={`flex items-center justify-between w-full px-3 py-2 text-base text-left transition-colors ${
+                                                    isSelected
+                                                        ? 'text-[var(--app-link)] bg-[var(--app-subtle-bg)]'
+                                                        : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'
+                                                }`}
+                                            >
+                                                <span>
+                                                    {voice.name}
+                                                    <span className="ml-2 text-xs text-[var(--app-hint)]">{voice.description}</span>
+                                                </span>
+                                                {isSelected && <span className="ml-2 text-[var(--app-link)]"><CheckIcon /></span>}
                                             </button>
                                         )
                                     })}

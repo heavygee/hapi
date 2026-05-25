@@ -71,11 +71,14 @@ class RealtimeVoiceSessionImpl implements VoiceSession {
                     sessionId: config.sessionId,
                     initialConversationContext: config.initialContext || ''
                 },
-                // Language override - requires agent to have platform_settings.overrides enabled
+                // Language and voice overrides — requires platform_settings.overrides enabled on the agent
                 // See: https://elevenlabs.io/docs/agents-platform/customization/personalization/overrides
                 overrides: {
                     agent: {
                         language: config.language
+                    },
+                    tts: {
+                        voice_id: config.voiceId
                     }
                 }
             })
