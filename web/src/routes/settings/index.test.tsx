@@ -110,6 +110,7 @@ vi.mock('@/lib/voices', () => ({
     DEFAULT_VOICE_ID: 'voice1',
     getVoiceById: (id: string | null) =>
         id === 'voice1' ? { id: 'voice1', name: 'Jessica', gender: 'female', description: 'Default' } : undefined,
+    getFallbackVoices: () => [{ id: 'voice1', name: 'Jessica', gender: 'female', description: 'Default' }],
 }))
 
 // Mock fetchVoices to return a resolved list by default

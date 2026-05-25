@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useTranslation, type Locale } from '@/lib/use-translation'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { getElevenLabsSupportedLanguages, getLanguageDisplayName, type Language } from '@/lib/languages'
-import { VOICES } from '@/lib/voices'
+import { VOICES, getFallbackVoices } from '@/lib/voices'
 import { useAppContext } from '@/lib/app-context'
 import { fetchVoices, type VoiceInfo } from '@/api/voice'
 import { getFontScaleOptions, useFontScale, type FontScale } from '@/hooks/useFontScale'
@@ -359,12 +359,13 @@ export default function SettingsPage() {
     const currentVoiceLanguage = voiceLanguages.find((lang) => lang.code === voiceLanguage)
 
     // Voice list: dynamic (from ElevenLabs API, includes clones) or static fallback
+    const fallbackVoices = getFallbackVoices(locale)
     const voiceOptions: VoiceInfo[] = dynamicVoices && dynamicVoices.length > 0
         ? dynamicVoices
-        : VOICES.map(v => ({ id: v.id, name: v.name, previewUrl: '', category: 'premade' }))
+        : fallbackVoices.map(v => ({ id: v.id, name: v.name, previewUrl: '', category: 'premade' }))
 
     const currentVoiceName = voiceId
-        ? (voiceOptions.find(v => v.id === voiceId)?.name ?? VOICES.find(v => v.id === voiceId)?.name ?? voiceId)
+        ? (voiceOptions.find(v => v.id === voiceId)?.name ?? fallbackVoices.find(v => v.id === voiceId)?.name ?? voiceId)
         : null
 
     const handleLocaleChange = (newLocale: Locale) => {
