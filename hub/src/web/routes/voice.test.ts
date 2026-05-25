@@ -74,3 +74,62 @@ describe('GET /api/voice/voices', () => {
         else delete process.env.ELEVENLABS_API_KEY
     })
 })
+
+describe('POST /api/voice/token', () => {
+    it('creates/selects voice-specific agent when voiceId is provided', async () => {
+        const app = createApp()
+        const headers = {
+            ...(await authHeaders()),
+            'content-type': 'application/json'
+        }
+
+        const prevKey = process.env.ELEVENLABS_API_KEY
+        const prevAgent = process.env.ELEVENLABS_AGENT_ID
+        process.env.ELEVENLABS_API_KEY = 'test-key'
+        delete process.env.ELEVENLABS_AGENT_ID
+
+        const requests: Array<{ url: string; init?: RequestInit }> = []
+        const originalFetch = global.fetch
+        // @ts-expect-error test override
+        global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+            const url = String(input)
+            requests.push({ url, init })
+
+            if (url.endsWith('/convai/agents') && init?.method === 'GET') {
+                return new Response(JSON.stringify({ agents: [] }), { status: 200 })
+            }
+            if (url.endsWith('/convai/agents/create') && init?.method === 'POST') {
+                return new Response(JSON.stringify({ agent_id: 'agent_voice_alice' }), { status: 200 })
+            }
+            if (url.includes('/convai/conversation/token?agent_id=')) {
+                return new Response(JSON.stringify({ token: 'tok_alice' }), { status: 200 })
+            }
+            return new Response('not found', { status: 404 })
+        }) as typeof fetch
+
+        const res = await app.request('/api/voice/token', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ voiceId: 'alice-voice-id' })
+        })
+
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({
+            allowed: true,
+            token: 'tok_alice',
+            agentId: 'agent_voice_alice'
+        })
+
+        const createCall = requests.find(r => r.url.endsWith('/convai/agents/create'))
+        expect(createCall).toBeTruthy()
+        const createBody = JSON.parse(String(createCall?.init?.body))
+        expect(createBody.name).toContain('[voice:alice-voice-id]')
+        expect(createBody.conversation_config?.tts?.voice_id).toBe('alice-voice-id')
+
+        global.fetch = originalFetch
+        if (prevKey) process.env.ELEVENLABS_API_KEY = prevKey
+        else delete process.env.ELEVENLABS_API_KEY
+        if (prevAgent) process.env.ELEVENLABS_AGENT_ID = prevAgent
+        else delete process.env.ELEVENLABS_AGENT_ID
+    })
+})

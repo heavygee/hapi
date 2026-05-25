@@ -6,6 +6,7 @@ import { fetchVoiceToken } from '@/api/voice'
 import type { VoiceSession, VoiceSessionConfig, ConversationStatus, StatusCallback } from './types'
 import type { ApiClient } from '@/api/client'
 import type { Session } from '@/types/api'
+import { DEFAULT_VOICE_ID } from '@/lib/voices'
 
 // Debug logging
 const DEBUG = import.meta.env.DEV
@@ -15,6 +16,28 @@ let conversationInstance: ReturnType<typeof useConversation> | null = null
 
 // Store reference for status updates
 let statusCallback: StatusCallback | null = null
+let telemetryApi: ApiClient | null = null
+let activeVoiceContext: {
+    sessionId?: string
+    voiceId?: string
+    language?: string
+} = {}
+
+async function emitVoiceTelemetry(event: {
+    stage: string
+    message: string
+    sessionId?: string
+    voiceId?: string
+    language?: string
+    details?: Record<string, unknown>
+}): Promise<void> {
+    if (!telemetryApi) return
+    try {
+        await telemetryApi.sendVoiceTelemetry(event)
+    } catch {
+        // Telemetry must not break voice flows
+    }
+}
 
 // Global voice session implementation
 class RealtimeVoiceSessionImpl implements VoiceSession {
@@ -24,10 +47,41 @@ class RealtimeVoiceSessionImpl implements VoiceSession {
         this.api = api
     }
 
+    private async sendTelemetry(event: {
+        stage: string
+        message: string
+        sessionId?: string
+        voiceId?: string
+        language?: string
+        details?: Record<string, unknown>
+    }): Promise<void> {
+        await emitVoiceTelemetry(event)
+    }
+
     async startSession(config: VoiceSessionConfig): Promise<void> {
+        activeVoiceContext = {
+            sessionId: config.sessionId,
+            voiceId: config.voiceId,
+            language: config.language
+        }
+        await this.sendTelemetry({
+            stage: 'start-session',
+            message: 'Voice start requested',
+            sessionId: config.sessionId,
+            voiceId: config.voiceId,
+            language: config.language
+        })
+
         if (!conversationInstance) {
             const error = new Error('Realtime voice session not initialized')
             console.warn('[Voice] Realtime voice session not initialized')
+            await this.sendTelemetry({
+                stage: 'init-missing',
+                message: error.message,
+                sessionId: config.sessionId,
+                voiceId: config.voiceId,
+                language: config.language
+            })
             statusCallback?.('error', 'Voice session not initialized')
             throw error
         }
@@ -40,6 +94,13 @@ class RealtimeVoiceSessionImpl implements VoiceSession {
             permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true })
         } catch (error) {
             console.error('[Voice] Failed to get microphone permission:', error)
+            await this.sendTelemetry({
+                stage: 'mic-permission-denied',
+                message: error instanceof Error ? error.message : String(error),
+                sessionId: config.sessionId,
+                voiceId: config.voiceId,
+                language: config.language
+            })
             statusCallback?.('error', 'Microphone permission denied')
             throw error
         } finally {
@@ -49,46 +110,96 @@ class RealtimeVoiceSessionImpl implements VoiceSession {
         // Fetch conversation token from server
         let tokenResponse: Awaited<ReturnType<typeof fetchVoiceToken>>
         try {
-            tokenResponse = await fetchVoiceToken(this.api)
+            tokenResponse = await fetchVoiceToken(this.api, {
+                voiceId: config.voiceId
+            })
         } catch (error) {
             console.error('[Voice] Failed to fetch voice token:', error)
+            await this.sendTelemetry({
+                stage: 'token-fetch-error',
+                message: error instanceof Error ? error.message : String(error),
+                sessionId: config.sessionId,
+                voiceId: config.voiceId,
+                language: config.language
+            })
             statusCallback?.('error', 'Network error')
             throw error
         }
         if (!tokenResponse.allowed || !tokenResponse.token) {
             const error = new Error(tokenResponse.error ?? 'Voice not allowed or no token')
             console.error('[Voice] Voice not allowed or no token:', tokenResponse.error)
+            await this.sendTelemetry({
+                stage: 'token-not-allowed',
+                message: tokenResponse.error ?? 'Voice not allowed',
+                sessionId: config.sessionId,
+                voiceId: config.voiceId,
+                language: config.language,
+                details: {
+                    agentId: tokenResponse.agentId
+                }
+            })
             statusCallback?.('error', tokenResponse.error ?? 'Voice not allowed')
             throw error
         }
 
+        const baseSessionConfig = {
+            conversationToken: tokenResponse.token,
+            connectionType: 'webrtc' as const,
+            dynamicVariables: {
+                sessionId: config.sessionId,
+                initialConversationContext: config.initialContext || ''
+            },
+            // Language and voice overrides — requires platform_settings.overrides enabled on the agent
+            // See: https://elevenlabs.io/docs/agents-platform/customization/personalization/overrides
+            overrides: {
+                agent: {
+                    language: config.language
+                }
+            }
+        }
+
+        await this.sendTelemetry({
+            stage: 'override-decision',
+            message: 'Skipping runtime voice override; using token-selected agent voice',
+            sessionId: config.sessionId,
+            voiceId: config.voiceId,
+            language: config.language,
+            details: {
+                defaultVoiceId: DEFAULT_VOICE_ID,
+                selectedVoiceId: config.voiceId
+            }
+        })
+
         // Use conversation token from server (private agent flow)
         try {
-            const conversationId = await conversationInstance.startSession({
-                conversationToken: tokenResponse.token,
-                connectionType: 'webrtc',
-                dynamicVariables: {
-                    sessionId: config.sessionId,
-                    initialConversationContext: config.initialContext || ''
-                },
-                // Language and voice overrides — requires platform_settings.overrides enabled on the agent
-                // See: https://elevenlabs.io/docs/agents-platform/customization/personalization/overrides
-                overrides: {
-                    agent: {
-                        language: config.language
-                    },
-                    tts: {
-                        voiceId: config.voiceId
-                    }
-                }
-            })
+            const conversationId = await conversationInstance.startSession(baseSessionConfig)
 
             if (DEBUG) {
                 console.log('[Voice] Started conversation with ID:', conversationId)
             }
+            await this.sendTelemetry({
+                stage: 'start-success',
+                message: 'Voice session started successfully',
+                sessionId: config.sessionId,
+                voiceId: config.voiceId,
+                language: config.language
+            })
         } catch (error) {
-            console.error('[Voice] Failed to start realtime session:', error)
-            statusCallback?.('error', 'Failed to start voice session')
+            const errorMessage = error instanceof Error ? error.message : String(error)
+            console.error('[Voice] Failed to start realtime session:', {
+                error: errorMessage,
+                sessionId: config.sessionId,
+                language: config.language,
+                voiceId: config.voiceId
+            })
+            await this.sendTelemetry({
+                stage: 'start-failed',
+                message: errorMessage,
+                sessionId: config.sessionId,
+                voiceId: config.voiceId,
+                language: config.language
+            })
+            statusCallback?.('error', `Failed to start voice session: ${errorMessage}`)
             throw error
         }
     }
@@ -183,12 +294,30 @@ export function RealtimeVoiceSession({
     const handleDisconnect = useCallback(() => {
         if (DEBUG) console.log('[Voice] Realtime session disconnected')
         resetRealtimeSessionState()
+        void emitVoiceTelemetry({
+            stage: 'disconnect',
+            message: 'Realtime voice session disconnected',
+            ...activeVoiceContext
+        })
         onStatusChange?.('disconnected')
     }, [onStatusChange])
 
     const handleError = useCallback((error: unknown) => {
         if (DEBUG) console.error('[Voice] Realtime error:', error)
-        const errorMessage = error instanceof Error ? error.message : 'Connection error'
+        const errorMessage = error instanceof Error
+            ? error.message
+            : (() => {
+                try {
+                    return JSON.stringify(error)
+                } catch {
+                    return String(error ?? 'Connection error')
+                }
+            })()
+        void emitVoiceTelemetry({
+            stage: 'runtime-error',
+            message: errorMessage,
+            ...activeVoiceContext
+        })
         onStatusChange?.('error', errorMessage)
     }, [onStatusChange])
 
@@ -226,6 +355,7 @@ export function RealtimeVoiceSession({
     })
 
     useEffect(() => {
+        telemetryApi = api
         // Store the conversation instance globally
         conversationInstance = conversation
 
@@ -242,6 +372,7 @@ export function RealtimeVoiceSession({
         return () => {
             // Clean up on unmount
             conversationInstance = null
+            telemetryApi = null
         }
     }, [conversation, api])
 

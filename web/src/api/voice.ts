@@ -26,6 +26,7 @@ export interface VoiceTokenResponse {
 export interface VoiceTokenRequest {
     customAgentId?: string
     customApiKey?: string
+    voiceId?: string
 }
 
 /**
