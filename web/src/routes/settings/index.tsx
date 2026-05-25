@@ -978,16 +978,20 @@ export default function SettingsPage() {
                                                     </span>
                                                     {isSelected && <span className="ml-2 shrink-0"><CheckIcon /></span>}
                                                 </button>
-                                                {voice.previewUrl && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={(e) => handleVoicePreview(voice.previewUrl, voice.id, e)}
-                                                        aria-label={isPlaying ? 'Stop preview' : 'Preview voice'}
-                                                        className="flex h-full shrink-0 items-center px-3 py-2 text-[var(--app-hint)] hover:text-[var(--app-fg)]"
-                                                    >
-                                                        {isPlaying ? <StopIcon /> : <PlayIcon />}
-                                                    </button>
-                                                )}
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => handleVoicePreview(voice.previewUrl, voice.id, e)}
+                                                    aria-label={isPlaying ? 'Stop preview' : 'Preview voice'}
+                                                    title={voice.previewUrl ? (isPlaying ? 'Stop preview' : 'Preview voice') : 'Preview unavailable without an ElevenLabs API key'}
+                                                    disabled={!voice.previewUrl}
+                                                    className={`flex h-full shrink-0 items-center px-3 py-2 ${
+                                                        voice.previewUrl
+                                                            ? 'text-[var(--app-hint)] hover:text-[var(--app-fg)]'
+                                                            : 'text-[var(--app-divider)] cursor-not-allowed'
+                                                    }`}
+                                                >
+                                                    {isPlaying ? <StopIcon /> : <PlayIcon />}
+                                                </button>
                                             </div>
                                         )
                                     })}

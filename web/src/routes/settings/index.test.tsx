@@ -317,6 +317,22 @@ describe('SettingsPage', () => {
         })
     })
 
+
+    it('shows a disabled preview button with tooltip when previewUrl is missing', async () => {
+        mockFetchVoices.mockResolvedValue([
+            { id: 'dyn1', name: 'Alice', previewUrl: '', category: 'premade' },
+        ])
+
+        renderWithProviders(<SettingsPage />)
+
+        const pickerButton = screen.getByRole('button', { name: /Voice\s*Default/i })
+        fireEvent.click(pickerButton)
+
+        const previewButton = await screen.findByLabelText('Preview voice')
+        expect(previewButton).toBeDisabled()
+        expect(previewButton).toHaveAttribute('title', 'Preview unavailable without an ElevenLabs API key')
+    })
+
     it('shows a play button for voices with a previewUrl', async () => {
         mockFetchVoices.mockResolvedValue([
             { id: 'dyn1', name: 'Alice', previewUrl: 'https://example.com/alice.mp3', category: 'premade' },
@@ -327,7 +343,9 @@ describe('SettingsPage', () => {
         const pickerButton = screen.getByRole('button', { name: /Voice\s*Default/i })
         fireEvent.click(pickerButton)
 
-        expect(await screen.findByLabelText('Preview voice')).toBeInTheDocument()
+        await screen.findByText('Alice')
+        expect(screen.getByLabelText('Preview voice')).toBeInTheDocument()
+        expect(screen.getByLabelText('Preview voice')).not.toBeDisabled()
     })
 
     it('selecting a voice calls localStorage.setItem with the voice id', async () => {
