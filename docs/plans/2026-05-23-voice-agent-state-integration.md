@@ -1067,33 +1067,3 @@ gh pr checkout 401 --repo tiann/hapi
 Open PR with: dogfood conv IDs, **"default behavior unchanged"** regression note, PR #640/#401 relationship, and for PR C explicit **AGENT_NOTIFY is opt-in user agent convention**.
 
 **Explicit non-goals for upstream series:** stateful voice dispatcher; required AGENT_NOTIFY for all users; breaking ElevenLabs default; CursorVox/CursorRemote coupling; Docker/systemd in same PRs.
-
-### 16.11 Phase 0.5 handoff update (2026-05-25)
-
-#### Completed in `feat/voice-picker` (fork PR #2, upstream issue #686)
-
-- Added dynamic voice picker feed from ElevenLabs voices API (`GET /api/voice/voices` in hub)
-- Added web-side `fetchVoices` API client path + settings-page dynamic loading
-- Voice picker now shows cloned voices and keeps static `VOICES` fallback when API returns empty
-- Added per-voice preview control using ElevenLabs `preview_url`
-- Fixed ElevenLabs SDK override key in web realtime session: `voice_id` → `voiceId`
-
-#### Phase 2 framing (provider abstraction): align with upstream PR #401
-
-- Do **not** create a parallel abstraction while #401 is open
-- Preferred path is helping #401 merge, then extending the same provider contract
-- Follow §16.5.1 review-gate checklist for merge readiness issues
-
-#### Phase 3 framing (local speech stack)
-
-- Target local provider path via Pipecat orchestration (instead of ad-hoc direct endpoints)
-- STT candidate: Speaches
-- TTS candidate: Chatterbox
-- Goal: keep provider implementation behind the same transport/provider seam from Phase 2/#401
-
-#### Fleet command-center vision (voice-first operator workflow)
-
-- Long-horizon goal: one continuous voice conversation coordinating **all active agent sessions**
-- Model: attention routing for hands-free operation (e.g., walking/gardening) where agents escalate only when needed
-- Practical constraint: cloud-per-agent speech/LLM costs are prohibitive at fleet scale
-- Therefore local speech + local model path is treated as load-bearing for viability
