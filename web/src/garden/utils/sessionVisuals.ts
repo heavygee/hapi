@@ -1,6 +1,6 @@
 import type { SessionSummary } from '@/types/api'
 
-export const GARDEN_BUILD = 'r3f-v3'
+export const GARDEN_BUILD = 'r3f-v4'
 
 export const LAYOUT_ARC_RAD = (270 / 180) * Math.PI
 export const ORB_RADIUS = 4.8
@@ -9,6 +9,12 @@ export const ORB_BASE_Y = 0.38
 export const ORB_Y_STAGGER = 0.24
 export const DWELL_SECONDS = 1.2
 export const ATTENTION_COLOR = '#f97316'
+
+/** Local orb space: +Z toward the viewer (camera sits near origin, orbs at -Z). */
+export const ORB_LABEL_POSITION: [number, number, number] = [0, 0.42, -0.22]
+export const SNIPPET_COMPACT_POSITION: [number, number, number] = [0, 0.56, 0.48]
+export const SNIPPET_FOCUS_POSITION: [number, number, number] = [0, 0.78, 0.72]
+export const LIVE_WEB_PANEL_POSITION: [number, number, number] = [0, 0.92, 0.82]
 
 export function layoutPosition(index: number, total: number): [number, number, number] {
     const start = -LAYOUT_ARC_RAD / 2

@@ -27,7 +27,7 @@ export function GardenPage() {
                         </div>
                     )}
                     {!isLoading && !error && visible.length > 0 && (
-                        <div className="text-slate-500 mt-1">Head gaze ~1.2s · snippet on orb · dwell for full panel</div>
+                        <div className="text-slate-500 mt-1">VR: text panels · desktop focus: live HAPI chat iframe</div>
                     )}
                     <Link to="/sessions" className="text-sky-300 underline">Back to HAPI</Link>
                 </div>

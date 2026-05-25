@@ -1,12 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Text } from '@react-three/drei'
+import { useXR } from '@react-three/xr'
 import * as THREE from 'three'
 import { useQuery } from '@tanstack/react-query'
 import { useAppContext } from '@/lib/app-context'
 import { extractLastMessageText } from '@/garden/utils/messageText'
+import { GardenLiveWebPanel } from '@/garden/components/GardenLiveWebPanel'
 import { GardenYawBillboard } from '@/garden/components/GardenYawBillboard'
-import { ATTENTION_COLOR, DWELL_SECONDS, sessionColor, sessionLabel } from '@/garden/utils/sessionVisuals'
+import {
+    ATTENTION_COLOR,
+    DWELL_SECONDS,
+    ORB_LABEL_POSITION,
+    SNIPPET_COMPACT_POSITION,
+    SNIPPET_FOCUS_POSITION,
+    sessionColor,
+    sessionLabel,
+} from '@/garden/utils/sessionVisuals'
 import type { SessionSummary } from '@/types/api'
 
 type AgentOrbProps = {
@@ -31,6 +41,7 @@ export function AgentOrb(props: AgentOrbProps) {
         onCueSound,
         onHitTarget,
     } = props
+    const isPresenting = useXR((state) => state.session !== undefined)
     const groupRef = useRef<THREE.Group>(null)
     const hitRef = useRef<THREE.Mesh>(null)
     const meshRef = useRef<THREE.Mesh>(null)
@@ -98,6 +109,8 @@ export function AgentOrb(props: AgentOrbProps) {
         return () => window.clearInterval(id)
     }, [focused, targeted, onBlur, session.id])
 
+    const showLiveWeb = focused && !isPresenting
+
     return (
         <group ref={groupRef}>
             <mesh
@@ -138,13 +151,17 @@ export function AgentOrb(props: AgentOrbProps) {
                 <meshStandardMaterial color={baseColor} emissive={baseColor} emissiveIntensity={0.35} />
             </mesh>
 
-            <GardenYawBillboard position={[0, 0.52, 0]}>
-                <Text fontSize={0.14} color="#e2e8f0" anchorX="center" anchorY="middle" maxWidth={1.4}>
-                    {sessionLabel(session)}
-                </Text>
-            </GardenYawBillboard>
+            {!focused && (
+                <GardenYawBillboard position={ORB_LABEL_POSITION}>
+                    <Text fontSize={0.13} color="#cbd5e1" anchorX="center" anchorY="middle" maxWidth={1.3}>
+                        {sessionLabel(session)}
+                    </Text>
+                </GardenYawBillboard>
+            )}
 
-            <OrbSnippet session={session} compact={!focused} />
+            {!showLiveWeb && <OrbSnippet session={session} compact={!focused} />}
+
+            {showLiveWeb && <GardenLiveWebPanel sessionId={session.id} />}
         </group>
     )
 }
@@ -184,13 +201,13 @@ function OrbSnippet(props: { session: SessionSummary; compact: boolean }) {
             ? '…'
             : preview ?? '(no speakable messages yet)'
 
-    const y = props.compact ? 0.72 : 0.95
+    const position = props.compact ? SNIPPET_COMPACT_POSITION : SNIPPET_FOCUS_POSITION
     const fontSize = props.compact ? 0.08 : 0.11
     const maxWidth = props.compact ? 1.8 : 2.5
     const limit = props.compact ? 96 : 420
 
     return (
-        <GardenYawBillboard position={[0, y, 0]}>
+        <GardenYawBillboard position={position}>
             {!props.compact && (
                 <mesh position={[0, 0, -0.02]}>
                     <planeGeometry args={[2.8, 1.5]} />
