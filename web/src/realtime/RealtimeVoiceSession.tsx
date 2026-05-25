@@ -78,7 +78,7 @@ class RealtimeVoiceSessionImpl implements VoiceSession {
                         language: config.language
                     },
                     tts: {
-                        voice_id: config.voiceId
+                        voiceId: config.voiceId
                     }
                 }
             })

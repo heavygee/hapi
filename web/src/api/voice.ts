@@ -50,6 +50,22 @@ export async function fetchVoiceToken(
     }
 }
 
+export interface VoiceInfo {
+    id: string
+    name: string
+    previewUrl: string
+    category: string
+}
+
+export async function fetchVoices(api: ApiClient): Promise<VoiceInfo[]> {
+    try {
+        const result = await api.fetchVoices()
+        return result.voices
+    } catch {
+        return []
+    }
+}
+
 export interface ElevenLabsAgent {
     agent_id: string
     name: string

@@ -536,4 +536,8 @@ export class ApiClient {
             body: JSON.stringify(options || {})
         })
     }
+
+    async fetchVoices(): Promise<{ voices: Array<{ id: string; name: string; previewUrl: string; category: string }> }> {
+        return await this.request('/api/voice/voices')
+    }
 }

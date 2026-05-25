@@ -2,7 +2,9 @@ import { useState, useRef, useEffect } from 'react'
 import { useTranslation, type Locale } from '@/lib/use-translation'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { getElevenLabsSupportedLanguages, getLanguageDisplayName, type Language } from '@/lib/languages'
-import { VOICES, getVoiceById } from '@/lib/voices'
+import { VOICES } from '@/lib/voices'
+import { useAppContext } from '@/lib/app-context'
+import { fetchVoices, type VoiceInfo } from '@/api/voice'
 import { getFontScaleOptions, useFontScale, type FontScale } from '@/hooks/useFontScale'
 import { getTerminalFontSizeOptions, useTerminalFontSize, type TerminalFontSize } from '@/hooks/useTerminalFontSize'
 import { getComposerEnterBehaviorOptions, useComposerEnterBehavior, type ComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
@@ -85,6 +87,36 @@ function ChevronDownIcon(props: { className?: string }) {
             className={props.className}
         >
             <polyline points="6 9 12 15 18 9" />
+        </svg>
+    )
+}
+
+function PlayIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            className={props.className}
+        >
+            <polygon points="5 3 19 12 5 21 5 3" />
+        </svg>
+    )
+}
+
+function StopIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            className={props.className}
+        >
+            <rect x="3" y="3" width="18" height="18" rx="2" />
         </svg>
     )
 }
@@ -267,6 +299,7 @@ function ChatSurfaceColorControl(props: {
 
 export default function SettingsPage() {
     const { t, locale, setLocale } = useTranslation()
+    const { api } = useAppContext()
     const goBack = useAppGoBack()
     const [isOpen, setIsOpen] = useState(false)
     const [isAppearanceOpen, setIsAppearanceOpen] = useState(false)
@@ -307,6 +340,11 @@ export default function SettingsPage() {
         return localStorage.getItem('hapi-voice-id')
     })
 
+    // Dynamic voice list fetched from hub (includes user's cloned voices)
+    const [dynamicVoices, setDynamicVoices] = useState<VoiceInfo[] | null>(null)
+    const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null)
+    const currentAudioRef = useRef<HTMLAudioElement | null>(null)
+
     const fontScaleOptions = getFontScaleOptions()
     const terminalFontSizeOptions = getTerminalFontSizeOptions()
     const composerEnterBehaviorOptions = getComposerEnterBehaviorOptions()
@@ -319,7 +357,15 @@ export default function SettingsPage() {
     const currentComposerEnterBehaviorLabel = composerEnterBehaviorOptions.find((opt) => opt.value === composerEnterBehavior)?.labelKey ?? 'settings.chat.enterBehavior.send'
     const currentTerminalToolDisplayModeLabel = terminalToolDisplayModeOptions.find((opt) => opt.value === terminalToolDisplayMode)?.labelKey ?? 'settings.chat.terminalToolDisplay.compact'
     const currentVoiceLanguage = voiceLanguages.find((lang) => lang.code === voiceLanguage)
-    const currentVoice = getVoiceById(voiceId)
+
+    // Voice list: dynamic (from ElevenLabs API, includes clones) or static fallback
+    const voiceOptions: VoiceInfo[] = dynamicVoices && dynamicVoices.length > 0
+        ? dynamicVoices
+        : VOICES.map(v => ({ id: v.id, name: v.name, previewUrl: '', category: 'premade' }))
+
+    const currentVoiceName = voiceId
+        ? (voiceOptions.find(v => v.id === voiceId)?.name ?? VOICES.find(v => v.id === voiceId)?.name ?? voiceId)
+        : null
 
     const handleLocaleChange = (newLocale: Locale) => {
         setLocale(newLocale)
@@ -369,6 +415,35 @@ export default function SettingsPage() {
             localStorage.setItem('hapi-voice-id', id)
         }
         setIsVoicePickerOpen(false)
+    }
+
+    // Fetch available voices from hub on mount
+    useEffect(() => {
+        fetchVoices(api).then(voices => {
+            if (voices.length > 0) setDynamicVoices(voices)
+        })
+    }, [api])
+
+    const handleVoicePreview = (previewUrl: string, voiceId: string, event: React.MouseEvent) => {
+        event.stopPropagation()
+        if (!previewUrl) return
+
+        if (playingVoiceId === voiceId) {
+            currentAudioRef.current?.pause()
+            currentAudioRef.current = null
+            setPlayingVoiceId(null)
+            return
+        }
+
+        currentAudioRef.current?.pause()
+        const audio = new Audio(previewUrl)
+        currentAudioRef.current = audio
+        setPlayingVoiceId(voiceId)
+        audio.play().catch(() => setPlayingVoiceId(null))
+        audio.addEventListener('ended', () => {
+            setPlayingVoiceId(null)
+            currentAudioRef.current = null
+        })
     }
 
     // Close dropdown when clicking outside
@@ -847,7 +922,7 @@ export default function SettingsPage() {
                             >
                                 <span className="text-[var(--app-fg)]">{t('settings.voice.voice')}</span>
                                 <span className="flex items-center gap-1 text-[var(--app-hint)]">
-                                    <span>{currentVoice ? currentVoice.name : t('settings.voice.voiceDefault')}</span>
+                                    <span>{currentVoiceName ?? t('settings.voice.voiceDefault')}</span>
                                     <ChevronDownIcon className={`transition-transform ${isVoicePickerOpen ? 'rotate-180' : ''}`} />
                                 </span>
                             </button>
@@ -858,41 +933,62 @@ export default function SettingsPage() {
                                     role="listbox"
                                     aria-label={t('settings.voice.voice')}
                                 >
-                                    <button
-                                        type="button"
+                                    <div
                                         role="option"
                                         aria-selected={voiceId === null}
-                                        onClick={() => handleVoiceChange(null)}
-                                        className={`flex items-center justify-between w-full px-3 py-2 text-base text-left transition-colors ${
+                                        className={`flex items-center w-full text-base transition-colors ${
                                             voiceId === null
                                                 ? 'text-[var(--app-link)] bg-[var(--app-subtle-bg)]'
                                                 : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'
                                         }`}
                                     >
-                                        <span>{t('settings.voice.voiceDefault')}</span>
-                                        {voiceId === null && <span className="ml-2 text-[var(--app-link)]"><CheckIcon /></span>}
-                                    </button>
-                                    {VOICES.map((voice) => {
+                                        <button
+                                            type="button"
+                                            onClick={() => handleVoiceChange(null)}
+                                            className="flex flex-1 items-center justify-between px-3 py-2 text-left"
+                                        >
+                                            <span>{t('settings.voice.voiceDefault')}</span>
+                                            {voiceId === null && <span className="ml-2"><CheckIcon /></span>}
+                                        </button>
+                                    </div>
+                                    {voiceOptions.map((voice) => {
                                         const isSelected = voiceId === voice.id
+                                        const isPlaying = playingVoiceId === voice.id
                                         return (
-                                            <button
+                                            <div
                                                 key={voice.id}
-                                                type="button"
                                                 role="option"
                                                 aria-selected={isSelected}
-                                                onClick={() => handleVoiceChange(voice.id)}
-                                                className={`flex items-center justify-between w-full px-3 py-2 text-base text-left transition-colors ${
+                                                className={`flex items-center w-full text-base transition-colors ${
                                                     isSelected
                                                         ? 'text-[var(--app-link)] bg-[var(--app-subtle-bg)]'
                                                         : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'
                                                 }`}
                                             >
-                                                <span>
-                                                    {voice.name}
-                                                    <span className="ml-2 text-xs text-[var(--app-hint)]">{voice.description}</span>
-                                                </span>
-                                                {isSelected && <span className="ml-2 text-[var(--app-link)]"><CheckIcon /></span>}
-                                            </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleVoiceChange(voice.id)}
+                                                    className="flex flex-1 items-center justify-between px-3 py-2 text-left min-w-0"
+                                                >
+                                                    <span className="truncate">
+                                                        {voice.name}
+                                                        {voice.category === 'cloned' && (
+                                                            <span className="ml-2 text-xs text-[var(--app-hint)]">clone</span>
+                                                        )}
+                                                    </span>
+                                                    {isSelected && <span className="ml-2 shrink-0"><CheckIcon /></span>}
+                                                </button>
+                                                {voice.previewUrl && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => handleVoicePreview(voice.previewUrl, voice.id, e)}
+                                                        aria-label={isPlaying ? 'Stop preview' : 'Preview voice'}
+                                                        className="flex h-full shrink-0 items-center px-3 py-2 text-[var(--app-hint)] hover:text-[var(--app-fg)]"
+                                                    >
+                                                        {isPlaying ? <StopIcon /> : <PlayIcon />}
+                                                    </button>
+                                                )}
+                                            </div>
                                         )
                                     })}
                                 </div>

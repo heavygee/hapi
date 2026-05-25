@@ -193,5 +193,46 @@ export function createVoiceRoutes(): Hono<WebAppEnv> {
         }
     })
 
+    // Get available ElevenLabs voices (includes user's voice clones)
+    app.get('/voice/voices', async (c) => {
+        const apiKey = process.env.ELEVENLABS_API_KEY
+        if (!apiKey) {
+            return c.json({ voices: [] })
+        }
+
+        try {
+            const response = await fetch(`${ELEVENLABS_API_BASE}/voices`, {
+                headers: {
+                    'xi-api-key': apiKey,
+                    'Accept': 'application/json'
+                }
+            })
+
+            if (!response.ok) {
+                return c.json({ voices: [] })
+            }
+
+            const data = await response.json() as {
+                voices?: Array<{
+                    voice_id: string
+                    name: string
+                    preview_url: string
+                    category: string
+                }>
+            }
+
+            const voices = (data.voices ?? []).map(v => ({
+                id: v.voice_id,
+                name: v.name,
+                previewUrl: v.preview_url,
+                category: v.category
+            }))
+
+            return c.json({ voices })
+        } catch {
+            return c.json({ voices: [] })
+        }
+    })
+
     return app
 }
