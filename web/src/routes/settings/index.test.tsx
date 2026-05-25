@@ -114,7 +114,7 @@ vi.mock('@/lib/voices', () => ({
 
 // Mock fetchVoices to return a resolved list by default
 vi.mock('@/api/voice', () => ({
-    fetchVoices: (...args: unknown[]) => mockFetchVoices(...args),
+    fetchVoices: mockFetchVoices,
     fetchVoiceToken: vi.fn(() => Promise.resolve({ allowed: true, token: 'tok' })),
 }))
 
