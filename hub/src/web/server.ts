@@ -19,6 +19,7 @@ import { createGitRoutes } from './routes/git'
 import { createCliRoutes } from './routes/cli'
 import { createPushRoutes } from './routes/push'
 import { createVoiceRoutes } from './routes/voice'
+import { createJessicaMoodRoutes } from './routes/jessica-mood'
 import type { SSEManager } from '../sse/sseManager'
 import type { VisibilityTracker } from '../visibility/visibilityTracker'
 import type { Server as BunServer } from 'bun'
@@ -72,6 +73,9 @@ function createWebApp(options: {
 
     // Health check endpoint (no auth required)
     app.get('/health', (c) => c.json({ status: 'ok', protocolVersion: PROTOCOL_VERSION }))
+
+    // Jessica limbic portrait — public on tailnet (markdown <img> cannot attach Bearer tokens)
+    app.route('/', createJessicaMoodRoutes())
 
     const configuration = getConfiguration()
     const corsOrigins = options.corsOrigins ?? configuration.corsOrigins

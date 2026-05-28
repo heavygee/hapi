@@ -81,5 +81,33 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
         return c.json({ ok: true })
     })
 
+    app.post('/sessions/:id/interior-note', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+        const sessionId = sessionResult.sessionId
+
+        const body = await c.req.json().catch(() => null)
+        if (!body || typeof body !== 'object' || typeof (body as { text?: unknown }).text !== 'string') {
+            return c.json({ error: 'Body requires text string' }, 400)
+        }
+        const text = (body as { text: string }).text.trim()
+        if (!text) {
+            return c.json({ error: 'text must be non-empty' }, 400)
+        }
+        const label = (body as { label?: unknown }).label
+        engine.addInteriorNote(sessionId, {
+            text,
+            label: typeof label === 'string' ? label : null
+        })
+        return c.json({ ok: true })
+    })
+
     return app
 }

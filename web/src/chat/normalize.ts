@@ -1,9 +1,16 @@
 import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
-import { safeStringify } from '@hapi/protocol'
+import { isObject, safeStringify } from '@hapi/protocol'
 import type { DecryptedMessage } from '@/types/api'
 import type { NormalizedMessage } from '@/chat/types'
 import { isCodexContent, isSkippableAgentContent, normalizeAgentRecord } from '@/chat/normalizeAgent'
 import { normalizeUserRecord } from '@/chat/normalizeUser'
+
+function plainAgentTextFallback(content: unknown): string {
+    if (isObject(content) && content.type === 'text' && typeof content.text === 'string') {
+        return content.text
+    }
+    return safeStringify(content)
+}
 
 export function normalizeDecryptedMessage(message: DecryptedMessage): NormalizedMessage | null {
     const record = unwrapRoleWrappedRecordEnvelope(message.content)
@@ -53,7 +60,7 @@ export function normalizeDecryptedMessage(message: DecryptedMessage): Normalized
                 createdAt: message.createdAt,
                 role: 'agent',
                 isSidechain: false,
-                content: [{ type: 'text', text: safeStringify(record.content), uuid: message.id, parentUUID: null }],
+                content: [{ type: 'text', text: plainAgentTextFallback(record.content), uuid: message.id, parentUUID: null }],
                 meta: record.meta,
                 status: message.status,
                 originalText: message.originalText,
@@ -67,7 +74,7 @@ export function normalizeDecryptedMessage(message: DecryptedMessage): Normalized
         createdAt: message.createdAt,
         role: 'agent',
         isSidechain: false,
-        content: [{ type: 'text', text: safeStringify(record.content), uuid: message.id, parentUUID: null }],
+        content: [{ type: 'text', text: plainAgentTextFallback(record.content), uuid: message.id, parentUUID: null }],
         meta: record.meta,
         status: message.status,
         originalText: message.originalText,

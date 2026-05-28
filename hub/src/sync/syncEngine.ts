@@ -371,6 +371,14 @@ export class SyncEngine {
         this.sessionCache.recordSessionActivity(sessionId, Date.now())
     }
 
+    addInteriorNote(
+        sessionId: string,
+        payload: { text: string; label?: string | null }
+    ): void {
+        this.messageService.addInteriorNote(sessionId, payload)
+        this.sessionCache.recordSessionActivity(sessionId, Date.now())
+    }
+
     async cancelQueuedMessage(
         sessionId: string,
         messageId: string

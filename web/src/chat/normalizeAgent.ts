@@ -428,6 +428,19 @@ export function normalizeAgentRecord(
 ): NormalizedMessage | null {
     if (!isObject(content) || typeof content.type !== 'string') return null
 
+    // Interior-life notes and other hub-authored plain markdown/text payloads.
+    if (content.type === 'text' && typeof content.text === 'string') {
+        return {
+            id: messageId,
+            localId,
+            createdAt,
+            role: 'agent',
+            isSidechain: false,
+            content: [{ type: 'text', text: content.text, uuid: messageId, parentUUID: null }],
+            meta
+        }
+    }
+
     if (content.type === 'output') {
         const data = isObject(content.data) ? content.data : null
         if (!data || typeof data.type !== 'string') return null

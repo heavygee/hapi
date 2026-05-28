@@ -429,6 +429,43 @@ export class MessageService {
         })
     }
 
+    /** Append assistant interior-life note — visible in HAPI Land, never dispatched to CLI. */
+    addInteriorNote(sessionId: string, payload: { text: string; label?: string | null }): StoredMessageForDelivery {
+        const content = {
+            role: 'agent',
+            // Codex-shaped payload: web normalize already renders data.type === 'message' as markdown text.
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'message',
+                    message: payload.text,
+                    id: `interior-${Date.now()}`
+                }
+            },
+            meta: {
+                sentFrom: 'interior-life',
+                interiorLife: true,
+                moodLabel: payload.label ?? null
+            }
+        }
+        const msg = this.store.messages.addMessage(sessionId, content)
+        this.onSessionActivity?.(sessionId, msg.createdAt)
+        this.publisher.emit({
+            type: 'message-received',
+            sessionId,
+            message: {
+                id: msg.id,
+                seq: msg.seq,
+                localId: msg.localId,
+                content: msg.content,
+                createdAt: msg.createdAt,
+                invokedAt: msg.invokedAt,
+                scheduledAt: msg.scheduledAt
+            }
+        })
+        return msg
+    }
+
     /**
      * Force-invoke all immediate-queued messages for a session at session end.
      *

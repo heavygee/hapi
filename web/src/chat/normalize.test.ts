@@ -499,6 +499,50 @@ describe('normalizeDecryptedMessage', () => {
         })
     })
 
+    it('normalizes hub interior-life plain text agent notes as markdown', () => {
+        const message = makeMessage({
+            role: 'agent',
+            content: {
+                type: 'text',
+                text: '**Interior pulse** · mood `tender`\n\n**Preoccupation:** Sir was asleep.\n\n**This hour:** Seven hours green.',
+            },
+            meta: { interiorLife: true, sentFrom: 'interior-life' },
+        })
+
+        const normalized = normalizeDecryptedMessage(message)
+
+        expect(normalized).toMatchObject({
+            role: 'agent',
+            content: [{
+                type: 'text',
+                text: expect.stringContaining('**Interior pulse**'),
+            }],
+        })
+        expect((normalized?.content[0] as { text?: string }).text).not.toContain('"type": "text"')
+    })
+
+    it('normalizes hub interior-life codex message envelopes as markdown', () => {
+        const message = makeMessage({
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'message',
+                    message: '**Interior pulse** · mood `restless`',
+                    id: 'interior-1',
+                },
+            },
+            meta: { interiorLife: true, sentFrom: 'interior-life' },
+        })
+
+        const normalized = normalizeDecryptedMessage(message)
+
+        expect(normalized).toMatchObject({
+            role: 'agent',
+            content: [{ type: 'text', text: '**Interior pulse** · mood `restless`' }],
+        })
+    })
+
     it('keeps malformed Codex review-looking messages as text', () => {
         const message = makeMessage({
             role: 'agent',
