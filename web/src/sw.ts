@@ -215,7 +215,8 @@ function buildNotificationOptions(payload: PushPayload): HapiNotificationOptions
         badge: payload.badge ?? '/pwa-64x64.png',
         data,
         tag: payload.tag,
-        requireInteraction: type === 'permission-request' || type === 'ready'
+        // Sticky only for permissions; ready toasts + extra failure notifs anger Chrome spam filter.
+        requireInteraction: type === 'permission-request'
     }
 
     if (!sessionId) {
@@ -223,14 +224,15 @@ function buildNotificationOptions(payload: PushPayload): HapiNotificationOptions
     }
 
     if (type === 'ready') {
+        // Button actions only (no inline text): works on phone shade and Wear-bridged alerts
+        // without Chrome's "possible spam" path for broken RemoteInput replies.
         return {
             ...base,
             actions: [
                 {
-                    action: 'reply',
-                    title: 'Reply',
-                    type: 'text',
-                    placeholder: 'Tell the agent what to do…'
+                    action: 'continue',
+                    title: 'Continue',
+                    type: 'button'
                 },
                 {
                     action: 'open',
@@ -276,14 +278,6 @@ function buildNotificationOptions(payload: PushPayload): HapiNotificationOptions
     }
 }
 
-async function showActionFailed(title: string, body: string): Promise<void> {
-    await self.registration.showNotification(title, {
-        body,
-        tag: 'hapi-action-failed',
-        icon: '/pwa-192x192.png'
-    })
-}
-
 self.addEventListener('push', (event) => {
     const payload = event.data?.json() as PushPayload | undefined
     if (!payload) {
@@ -309,34 +303,36 @@ self.addEventListener('notificationclick', (event: HapiNotificationEvent) => {
         const authBase = auth?.baseUrl ?? self.location.origin
         const appUrl = resolveAppUrl(path, authBase)
 
-        if (action === 'reply') {
-            const reply = event.reply?.trim()
-            if (!reply || !sessionId) {
-                await focusOrOpenSession(appUrl)
-                return
-            }
+        const presetMessage = action === 'continue'
+            ? 'continue'
+            : action === 'reply'
+                ? event.reply?.trim()
+                : null
+
+        if (presetMessage && sessionId) {
             if (!auth) {
-                await showActionFailed('HAPI', 'Sign in on your phone, then try again.')
                 await focusOrOpenSession(appUrl)
                 return
             }
-            const ok = await sendSessionMessage(auth, sessionId, reply)
+            const ok = await sendSessionMessage(auth, sessionId, presetMessage)
             if (!ok) {
-                await showActionFailed('HAPI', 'Could not send your reply. Open the session to retry.')
                 await focusOrOpenSession(appUrl)
             }
             return
         }
 
+        if (action === 'reply') {
+            await focusOrOpenSession(appUrl)
+            return
+        }
+
         if (action === 'allow' && sessionId && requestId) {
             if (!auth) {
-                await showActionFailed('HAPI', 'Sign in on your phone, then try again.')
                 await focusOrOpenSession(appUrl)
                 return
             }
             const ok = await approvePermission(auth, sessionId, requestId)
             if (!ok) {
-                await showActionFailed('HAPI', 'Could not approve. Open the session to retry.')
                 await focusOrOpenSession(appUrl)
             }
             return
@@ -344,13 +340,11 @@ self.addEventListener('notificationclick', (event: HapiNotificationEvent) => {
 
         if (action === 'deny' && sessionId && requestId) {
             if (!auth) {
-                await showActionFailed('HAPI', 'Sign in on your phone, then try again.')
                 await focusOrOpenSession(appUrl)
                 return
             }
             const ok = await denyPermission(auth, sessionId, requestId)
             if (!ok) {
-                await showActionFailed('HAPI', 'Could not deny. Open the session to retry.')
                 await focusOrOpenSession(appUrl)
             }
             return
