@@ -19,9 +19,9 @@ export class PushNotificationChannel implements NotificationChannel {
         }
 
         const name = getSessionName(session)
-        const request = session.agentState?.requests
-            ? Object.values(session.agentState.requests)[0]
-            : null
+        const requests = session.agentState?.requests ?? null
+        const requestEntries = requests ? Object.entries(requests) : []
+        const [requestId, request] = requestEntries[0] ?? [undefined, null]
         const toolName = request?.tool ? ` (${request.tool})` : ''
 
         const payload: PushPayload = {
@@ -31,7 +31,8 @@ export class PushNotificationChannel implements NotificationChannel {
             data: {
                 type: 'permission-request',
                 sessionId: session.id,
-                url: this.buildSessionPath(session.id)
+                url: this.buildSessionPath(session.id),
+                requestId
             }
         }
 
