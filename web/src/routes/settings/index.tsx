@@ -301,7 +301,7 @@ function ChatSurfaceColorControl(props: {
 
 export default function SettingsPage() {
     const { t, locale, setLocale } = useTranslation()
-    const { api, token, baseUrl } = useAppContext()
+    const { api, baseUrl } = useAppContext()
     const goBack = useAppGoBack()
     const [isOpen, setIsOpen] = useState(false)
     const [isAppearanceOpen, setIsAppearanceOpen] = useState(false)
@@ -1119,7 +1119,7 @@ export default function SettingsPage() {
                             Companion
                         </div>
                         <div className="px-3 py-3">
-                            <CompanionPairing baseUrl={baseUrl} accessToken={token} />
+                            <CompanionPairing baseUrl={baseUrl} />
                         </div>
                     </div>
 
