@@ -4,6 +4,7 @@ import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { getElevenLabsSupportedLanguages, getLanguageDisplayName, type Language } from '@/lib/languages'
 import { VOICES, getFallbackVoices } from '@/lib/voices'
 import { useAppContext } from '@/lib/app-context'
+import { CompanionPairing } from '@/components/settings/CompanionPairing'
 import { fetchVoices, type VoiceInfo } from '@/api/voice'
 import { getFontScaleOptions, useFontScale, type FontScale } from '@/hooks/useFontScale'
 import { getTerminalFontSizeOptions, useTerminalFontSize, type TerminalFontSize } from '@/hooks/useTerminalFontSize'
@@ -300,7 +301,7 @@ function ChatSurfaceColorControl(props: {
 
 export default function SettingsPage() {
     const { t, locale, setLocale } = useTranslation()
-    const { api } = useAppContext()
+    const { api, token, baseUrl } = useAppContext()
     const goBack = useAppGoBack()
     const [isOpen, setIsOpen] = useState(false)
     const [isAppearanceOpen, setIsAppearanceOpen] = useState(false)
@@ -1109,6 +1110,16 @@ export default function SettingsPage() {
                                 </button>
                             </div>
                             <p className="mt-1 text-xs text-[var(--app-hint)]">{t('settings.voice.proactive.description')}</p>
+                        </div>
+                    </div>
+
+                    {/* Companion section */}
+                    <div className="border-b border-[var(--app-divider)]">
+                        <div className="px-3 py-2 text-xs font-semibold text-[var(--app-hint)] uppercase tracking-wide">
+                            Companion
+                        </div>
+                        <div className="px-3 py-3">
+                            <CompanionPairing baseUrl={baseUrl} accessToken={token} />
                         </div>
                     </div>
 
