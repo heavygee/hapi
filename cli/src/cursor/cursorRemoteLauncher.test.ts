@@ -21,8 +21,8 @@ const baseMetadata: Metadata = {
     host: 'test'
 };
 
-function makeSession(): CursorSession {
-    return { path: '/tmp' } as CursorSession;
+function makeSession(sessionId?: string): CursorSession {
+    return { path: '/tmp', sessionId } as CursorSession;
 }
 
 describe('cursorRemoteLauncher', () => {
@@ -96,6 +96,42 @@ describe('cursorRemoteLauncher', () => {
         acpLauncher.mockRejectedValueOnce(new Error('Failed to resume Cursor ACP session'));
 
         await expect(cursorRemoteLauncher(makeSession(), acpMetadata)).rejects.toThrow('Failed to resume Cursor ACP session');
+
+        expect(acpLauncher).toHaveBeenCalledTimes(1);
+        expect(legacyLauncher).not.toHaveBeenCalled();
+    });
+
+    it('falls back to stream-json when ACP session/load fails on a legacy resume token', async () => {
+        acpLauncher.mockRejectedValueOnce(
+            new Error('Failed to resume Cursor ACP session. Legacy stream-json sessions cannot be loaded via ACP.')
+        );
+
+        const result = await cursorRemoteLauncher(makeSession('legacy-cursor-uuid'), baseMetadata);
+
+        expect(acpLauncher).toHaveBeenCalledTimes(1);
+        expect(legacyLauncher).toHaveBeenCalledTimes(1);
+        expect(result).toBe('exit');
+    });
+
+    it('falls back to stream-json when ACP build does not support session/load', async () => {
+        acpLauncher.mockRejectedValueOnce(
+            new Error('Cursor ACP session/load is not supported by this agent build. Start a new Cursor session.')
+        );
+
+        await cursorRemoteLauncher(makeSession('legacy-cursor-uuid'), baseMetadata);
+
+        expect(acpLauncher).toHaveBeenCalledTimes(1);
+        expect(legacyLauncher).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT fall back when ACP fails on a session without a resume token (fresh session)', async () => {
+        acpLauncher.mockRejectedValueOnce(
+            new Error('Failed to resume Cursor ACP session. Legacy stream-json sessions cannot be loaded via ACP.')
+        );
+
+        await expect(cursorRemoteLauncher(makeSession(), baseMetadata)).rejects.toThrow(
+            /Legacy stream-json sessions cannot be loaded via ACP/
+        );
 
         expect(acpLauncher).toHaveBeenCalledTimes(1);
         expect(legacyLauncher).not.toHaveBeenCalled();
