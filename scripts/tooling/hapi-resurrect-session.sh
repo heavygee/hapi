@@ -358,4 +358,22 @@ if [[ "$LIVE_STATE" == "archived" ]]; then
     exit 4
 fi
 
+# Chain forward into PR #34 (auto-migrate). After resurrect the session is
+# back to lifecycleState=inactive with cursorSessionProtocol=stream-json by
+# design (the legacy launcher knows how to dispatch the stream-json store).
+# Once heavygee/hapi#34 lands, SyncEngine.resumeSession fires
+# maybeAutoMigrateLegacyCursorSession automatically on the operator's NEXT
+# Reopen — so resurrect + Reopen is the full crash-to-ACP chain with no
+# manual migrate command required.
+if [[ "$LIVE_PROTO" == "acp" ]]; then
+    echo "[hapi-resurrect-session] session is already on ACP. No further action needed."
+elif [[ "$LIVE_PROTO" == "stream-json" ]]; then
+    echo "[hapi-resurrect-session] session is on legacy stream-json."
+    echo "[hapi-resurrect-session]   next: open this session in the HAPI web UI and click Reopen."
+    echo "[hapi-resurrect-session]   once heavygee/hapi#34 (tiann/hapi#824) auto-migrate is live, that"
+    echo "[hapi-resurrect-session]   Reopen will transparently transplant this session to ACP"
+    echo "[hapi-resurrect-session]   (cp store.db, verify session/load, flip protocol; ~15-20s banner)."
+    echo "[hapi-resurrect-session]   kill-switch: HAPI_CURSOR_LEGACY_AUTO_MIGRATE=0 in hub env."
+fi
+
 echo "[hapi-resurrect-session] DONE. Open in HAPI web UI: session id $NEW_SID"
