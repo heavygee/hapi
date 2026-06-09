@@ -230,7 +230,8 @@ export function toClaudeBudgetState(usage: ClaudeUsage | undefined | null): Agen
     if (typeof usage.totalCostUSD === 'number' && usage.totalCostUSD > 0) {
         metadata.push({
             label: 'Cost (session)',
-            value: `$${usage.totalCostUSD.toFixed(4).replace(/\.?0+$/, '')}`
+            value: `$${usage.totalCostUSD.toFixed(4).replace(/\.?0+$/, '')}`,
+            title: 'Accumulated since this CLI connection. Resets to $0 if the session disconnects from hub.'
         })
     }
     if (usage.resolvedModel) {

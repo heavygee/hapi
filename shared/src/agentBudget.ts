@@ -86,6 +86,8 @@ export type AgentBudgetMetadataRow = {
     label: string
     value: string
     detail?: string
+    // HTML title attribute on the row (shown as browser tooltip on hover).
+    title?: string
 }
 
 export type AgentBudgetState = {
