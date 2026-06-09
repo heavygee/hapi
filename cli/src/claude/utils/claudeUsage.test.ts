@@ -240,20 +240,34 @@ describe('normalizeClaudeUsage', () => {
         expect(withAssistant.contextWindow?.limitTokens).toBe(200000)
     })
 
-    it('merges modelUsage entries shallowly', () => {
+    it('accumulates modelUsage token counts across turns', () => {
         const a = normalizeClaudeUsage(undefined, {
-            modelUsage: { 'claude-sonnet-4-5': { inputTokens: 100, costUSD: 0.01 } },
+            modelUsage: { 'claude-sonnet-4-5': { inputTokens: 100, costUSD: 0.01, contextWindow: 200000 } },
             occurredAt: 1
         })
         const b = normalizeClaudeUsage(a, {
-            modelUsage: { 'claude-sonnet-4-5': { outputTokens: 200, costUSD: 0.05 } },
+            modelUsage: { 'claude-sonnet-4-5': { inputTokens: 80, outputTokens: 200, costUSD: 0.05 } },
             occurredAt: 2
         })
-        expect(b.modelUsage?.['claude-sonnet-4-5']).toEqual({
-            inputTokens: 100,
-            outputTokens: 200,
-            costUSD: 0.05
+        const m = b.modelUsage?.['claude-sonnet-4-5']
+        // Token counts summed across both turns
+        expect(m?.inputTokens).toBe(180)
+        expect(m?.outputTokens).toBe(200)
+        // costUSD accumulated; contextWindow kept from first turn (structural metadata)
+        expect(m?.costUSD).toBeCloseTo(0.06, 4)
+        expect(m?.contextWindow).toBe(200000)
+    })
+
+    it('accumulates totalCostUSD across turns', () => {
+        const a = normalizeClaudeUsage(undefined, {
+            totalCostUSD: 0.12,
+            occurredAt: 1
         })
+        const b = normalizeClaudeUsage(a, {
+            totalCostUSD: 0.08,
+            occurredAt: 2
+        })
+        expect(b.totalCostUSD).toBeCloseTo(0.20, 5)
     })
 
     it('clamps context-window percent to 0..100 bounds', () => {

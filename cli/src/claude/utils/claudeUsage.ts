@@ -194,15 +194,33 @@ export function normalizeClaudeUsage(
     }
 
     if (input.modelUsage) {
+        // Accumulate token counts across turns. The SDK's result message gives
+        // per-turn modelUsage (NOT session-cumulative), so we sum rather than
+        // replace. contextWindow and maxOutputTokens are structural metadata
+        // that don't accumulate - take the latest value seen.
         const merged: ClaudeUsage['modelUsage'] = { ...next.modelUsage }
         for (const [model, usage] of Object.entries(input.modelUsage)) {
-            merged[model] = { ...(merged[model] ?? {}), ...usage }
+            const prev = merged[model] ?? {}
+            merged[model] = {
+                contextWindow: usage.contextWindow ?? prev.contextWindow,
+                maxOutputTokens: usage.maxOutputTokens ?? prev.maxOutputTokens,
+                inputTokens: (prev.inputTokens ?? 0) + (usage.inputTokens ?? 0),
+                outputTokens: (prev.outputTokens ?? 0) + (usage.outputTokens ?? 0),
+                cacheReadInputTokens: (prev.cacheReadInputTokens ?? 0) + (usage.cacheReadInputTokens ?? 0),
+                cacheCreationInputTokens: (prev.cacheCreationInputTokens ?? 0) + (usage.cacheCreationInputTokens ?? 0),
+                webSearchRequests: (prev.webSearchRequests ?? 0) + (usage.webSearchRequests ?? 0),
+                // costUSD also per-turn from SDK; accumulate it separately from
+                // totalCostUSD so the adapter can cross-check if needed.
+                costUSD: (prev.costUSD ?? 0) + (usage.costUSD ?? 0)
+            }
         }
         next.modelUsage = merged
     }
 
     if (typeof input.totalCostUSD === 'number') {
-        next.totalCostUSD = input.totalCostUSD
+        // SDK result.total_cost_usd is per-turn cost, not session-cumulative.
+        // Accumulate across turns to get the true session total.
+        next.totalCostUSD = (prev?.totalCostUSD ?? 0) + input.totalCostUSD
     }
 
     if (input.assistantUsage) {
