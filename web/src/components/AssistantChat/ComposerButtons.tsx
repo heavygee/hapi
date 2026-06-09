@@ -8,7 +8,9 @@ import { ScheduleTimePicker } from './ScheduleTimePicker'
 import type { PendingSchedule } from './ScheduleTimePicker'
 import { useFue } from '@/lib/use-fue'
 import { FueCallout, FueDot } from '@/components/Fue'
+import type { ClaudeUsage } from '@hapi/protocol/types'
 import { AgentBudgetIndicator } from './AgentBudgetIndicator'
+import { toClaudeBudgetState } from './claudeBudgetAdapter'
 import { toCodexBudgetState } from './codexBudgetAdapter'
 
 function VoiceAssistantIcon() {
@@ -472,7 +474,13 @@ export function ComposerButtons(props: {
     scratchlistMode?: boolean
     scratchlistCount?: number
     onScratchlistToggle?: () => void
+    // Agent budget indicator: rendered next to the schedule button on
+    // remote sessions when usage telemetry is available for the flavor.
+    // The flavor switch lives here so future flavors (cursor / gemini)
+    // wire in symmetrically via their own adapters.
+    agentFlavor?: string | null
     codexUsage?: CodexUsage | null
+    claudeUsage?: ClaudeUsage | null
 }) {
     const { t } = useTranslation()
     const isVoiceConnected = props.voiceStatus === 'connected'
@@ -622,7 +630,23 @@ export function ComposerButtons(props: {
             </div>
 
             <div className="flex items-center gap-1">
-                <CodexUsageIndicator usage={props.codexUsage} />
+                {/*
+                 * Agent budget indicator (umbrella tiann/hapi#846). Renders
+                 * per-flavor budget pressure (context window, rate limits,
+                 * credits) as a single small ring with state-driven colour.
+                 * The flavor switch lives here so future flavors (cursor /
+                 * gemini) wire in symmetrically via their own adapters.
+                 * Hidden when the flavor has no telemetry available yet -
+                 * adapter returns null and AgentBudgetIndicator no-ops.
+                 */}
+                {props.agentFlavor === 'codex' ? (
+                    <CodexUsageIndicator usage={props.codexUsage} />
+                ) : props.agentFlavor === 'claude' ? (
+                    <AgentBudgetIndicator
+                        state={toClaudeBudgetState(props.claudeUsage)}
+                        popoverTitle="Claude Usage"
+                    />
+                ) : null}
                 <UnifiedButton
                     canSend={props.canSend}
                     voiceStatus={props.voiceStatus}
