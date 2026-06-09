@@ -64,8 +64,11 @@ export type AgentBudgetAxis = {
     // The renderer should not re-derive this from pressure.
     valueText: string
     // Optional supplemental string for the popover (e.g.
-    // '54k / 258k tokens', 'resets Apr 27, 1:00 PM').
+    // '54k / 258k tokens', 'resets in 4h 32m').
     detail?: string
+    // HTML title for the detail text (shown as browser tooltip on hover).
+    // Used to surface the absolute timestamp when detail shows relative time.
+    detailTitle?: string
     // True when this axis is covering for another exhausted axis
     // (e.g. credits remaining substituting for an exhausted Codex Pro
     // weekly window). The popover highlights covering axes so the user

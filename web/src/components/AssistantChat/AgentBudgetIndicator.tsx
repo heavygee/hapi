@@ -157,9 +157,14 @@ export function AgentBudgetIndicator(props: { state: AgentBudgetState | null | u
                                 >
                                     <div className="min-w-0">
                                         <div style={{ color: labelColor }} className={emphasised ? 'font-semibold' : undefined}>{axis.label}</div>
-                                        {axis.detail ? (
-                                            <div className="mt-0.5 break-words text-xs text-[var(--app-hint)]">{axis.detail}</div>
-                                        ) : null}
+                        {axis.detail ? (
+                            <div
+                                className="mt-0.5 break-words text-xs text-[var(--app-hint)]"
+                                title={axis.detailTitle}
+                            >
+                                {axis.detail}
+                            </div>
+                        ) : null}
                                     </div>
                                     <div className="shrink-0 font-medium" style={{ color: valueColor }}>{axis.valueText}</div>
                                 </div>

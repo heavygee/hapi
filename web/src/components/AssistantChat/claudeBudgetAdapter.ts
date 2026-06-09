@@ -55,19 +55,52 @@ function formatTokens(tokens: number | undefined): string {
     return Math.round(tokens).toString()
 }
 
-function formatResetTimestamp(resetsAt: number | undefined): string | undefined {
-    if (typeof resetsAt !== 'number' || resetsAt <= 0) return undefined
+// Seconds < 1e10 (all unix dates for the next several decades).
+// Milliseconds >= 1e12. Anything between is ambiguous but treated as seconds
+// since ms would imply ~1971 which is never a valid reset date.
+function normalizeTimestampMs(resetsAt: number): number {
+    return resetsAt < 1e10 ? resetsAt * 1000 : resetsAt
+}
+
+function formatRelativeTime(ms: number): string {
+    const diff = ms - Date.now()
+    if (diff <= 0) return 'now'
+    const totalSecs = Math.round(diff / 1000)
+    const hours = Math.floor(totalSecs / 3600)
+    const mins = Math.floor((totalSecs % 3600) / 60)
+    if (hours >= 24) {
+        const days = Math.floor(hours / 24)
+        return `in ${days}d ${hours % 24}h`
+    }
+    if (hours > 0) return `in ${hours}h ${mins}m`
+    return `in ${mins}m`
+}
+
+function formatAbsoluteTimestamp(ms: number): string {
     try {
-        const date = new Date(resetsAt * 1000 < 1e12 ? resetsAt * 1000 : resetsAt)
-        // Heuristic: Anthropic emits resetsAt as unix seconds in some flows
-        // and unix ms in others; the < 1e12 check picks the correct multiplier.
-        if (Number.isNaN(date.getTime())) return undefined
-        return date.toLocaleString(undefined, {
-            month: 'short',
+        return new Date(ms).toLocaleString(undefined, {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
             day: 'numeric',
             hour: 'numeric',
             minute: '2-digit'
         })
+    } catch {
+        return ''
+    }
+}
+
+function formatResetDetail(resetsAt: number | undefined): { detail: string; detailTitle: string } | undefined {
+    if (typeof resetsAt !== 'number' || resetsAt <= 0) return undefined
+    try {
+        const ms = normalizeTimestampMs(resetsAt)
+        const date = new Date(ms)
+        if (Number.isNaN(date.getTime())) return undefined
+        return {
+            detail: `resets ${formatRelativeTime(ms)}`,
+            detailTitle: formatAbsoluteTimestamp(ms)
+        }
     } catch {
         return undefined
     }
@@ -91,15 +124,17 @@ function rateLimitPressure(limit: ClaudeRateLimit): number {
     return pct
 }
 
-function rateLimitDetail(limit: ClaudeRateLimit): string | undefined {
-    const reset = formatResetTimestamp(limit.resetsAt)
+function rateLimitDetail(limit: ClaudeRateLimit): { detail?: string; detailTitle?: string } {
+    const reset = formatResetDetail(limit.resetsAt)
     if (limit.status === 'rejected') {
-        return reset ? `Blocked - resets ${reset}` : 'Blocked'
+        return reset
+            ? { detail: `Blocked · ${reset.detail}`, detailTitle: reset.detailTitle }
+            : { detail: 'Blocked' }
     }
     if (limit.status === 'allowed_warning') {
-        return reset ? `Resets ${reset}` : 'Warning'
+        return reset ? reset : { detail: 'Approaching limit' }
     }
-    return reset ? `Resets ${reset}` : undefined
+    return reset ? reset : {}
 }
 
 function deriveEffective(
@@ -109,11 +144,11 @@ function deriveEffective(
     const rejected = Object.values(rateLimits).find((l) => l.status === 'rejected')
     if (rejected) {
         const label = formatRateLimitTypeLabel(rejected.rateLimitType)
-        const reset = formatResetTimestamp(rejected.resetsAt)
+        const reset = formatResetDetail(rejected.resetsAt)
         return {
             effective: 'blocked',
             reason: reset
-                ? `${label} limit reached - resets ${reset}`
+                ? `${label} limit reached · ${reset.detail}`
                 : `${label} limit reached`
         }
     }
@@ -177,12 +212,14 @@ export function toClaudeBudgetState(usage: ClaudeUsage | undefined | null): Agen
             : limit.rateLimitType.includes('weekly')
                 ? 'weekly'
                 : `rateLimit:${limit.rateLimitType}`
+        const rlDetail = rateLimitDetail(limit)
         axes.push({
             id: axisId,
             label: formatRateLimitTypeLabel(limit.rateLimitType),
             pressure,
             valueText: limit.status === 'rejected' ? 'Blocked' : formatPercent(pressure),
-            detail: rateLimitDetail(limit),
+            detail: rlDetail.detail,
+            detailTitle: rlDetail.detailTitle,
             critical: limit.status === 'rejected'
         })
     }
