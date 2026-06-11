@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { registerVoiceSession, resetRealtimeSessionState } from './RealtimeSession'
 import { registerSessionStore } from './realtimeClientTools'
+import { resetVoiceAudioLevels, setVoiceAudioLevels, rmsFromPcm16Base64, smoothLevel } from './voiceAudioLevels'
 import { fetchQwenToken } from '@/api/voice'
 import { GeminiAudioRecorder } from './gemini/audioRecorder'
 import { GeminiAudioPlayer } from './gemini/audioPlayer'
@@ -30,6 +31,9 @@ interface QwenState {
     apiKey: string | null
     wsBaseUrl: string | null
     micMuted: boolean
+    modelSpeaking: boolean
+    inputLevel: number
+    outputLevel: number
 }
 
 const state: QwenState = {
@@ -40,7 +44,10 @@ const state: QwenState = {
     statusCallback: null,
     apiKey: null,
     wsBaseUrl: null,
-    micMuted: false
+    micMuted: false,
+    modelSpeaking: false,
+    inputLevel: 0,
+    outputLevel: 0
 }
 
 let eventCounter = 0
@@ -67,6 +74,10 @@ function cleanup() {
         }
         state.ws = null
     }
+    state.modelSpeaking = false
+    state.inputLevel = 0
+    state.outputLevel = 0
+    resetVoiceAudioLevels()
 }
 
 function sendEvent(type: string, payload?: Record<string, unknown>): void {
@@ -228,6 +239,13 @@ class QwenVoiceSessionImpl implements VoiceSession {
                     const delta = data.delta as string
                     if (delta) {
                         state.player?.enqueue(delta)
+                        if (!state.modelSpeaking) {
+                            state.modelSpeaking = true
+                            setVoiceAudioLevels({ connected: true, isSpeaking: true, input: 0 })
+                        }
+                        const rms = rmsFromPcm16Base64(delta)
+                        state.outputLevel = smoothLevel(state.outputLevel, rms, 0.5)
+                        setVoiceAudioLevels({ output: state.outputLevel })
                     }
                     return
                 }
@@ -282,10 +300,17 @@ class QwenVoiceSessionImpl implements VoiceSession {
                 }
 
                 // Response done
-                if (eventType === 'response.done' && DEBUG) {
-                    const resp = data.response as Record<string, unknown> | undefined
-                    const usage = resp?.usage as Record<string, unknown> | undefined
-                    if (usage) console.log('[Qwen] Usage:', usage)
+                if (eventType === 'response.done') {
+                    if (state.modelSpeaking) {
+                        state.modelSpeaking = false
+                        state.outputLevel = 0
+                        setVoiceAudioLevels({ isSpeaking: false, output: 0 })
+                    }
+                    if (DEBUG) {
+                        const resp = data.response as Record<string, unknown> | undefined
+                        const usage = resp?.usage as Record<string, unknown> | undefined
+                        if (usage) console.log('[Qwen] Usage:', usage)
+                    }
                     return
                 }
 
@@ -361,6 +386,11 @@ async function startAudioCapture(playbackContext: AudioContext): Promise<void> {
     await state.recorder.start(
         (base64Pcm) => {
             sendEvent('input_audio_buffer.append', { audio: base64Pcm })
+            if (!state.modelSpeaking && !state.micMuted) {
+                const rms = rmsFromPcm16Base64(base64Pcm)
+                state.inputLevel = smoothLevel(state.inputLevel, rms, 0.5)
+                setVoiceAudioLevels({ connected: true, input: state.inputLevel })
+            }
         },
         (error) => {
             console.error('[Qwen] Audio capture error:', error)

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
     Navigate,
@@ -1086,6 +1087,20 @@ const settingsRoute = createRoute({
     component: SettingsPage,
 })
 
+const GardenPageLazy = React.lazy(() =>
+    import('@/garden/GardenPage').then(m => ({ default: m.GardenPage }))
+)
+
+const gardenRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/garden',
+    component: () => (
+        <React.Suspense fallback={null}>
+            <GardenPageLazy />
+        </React.Suspense>
+    ),
+})
+
 export const routeTree = rootRoute.addChildren([
     indexRoute,
     sessionsRoute.addChildren([
@@ -1099,6 +1114,7 @@ export const routeTree = rootRoute.addChildren([
     ]),
     browseRoute,
     settingsRoute,
+    gardenRoute,
 ])
 
 type RouterHistory = Parameters<typeof createRouter>[0]['history']
