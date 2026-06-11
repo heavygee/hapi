@@ -31,6 +31,7 @@ import { createAttachmentAdapter } from '@/lib/attachmentAdapter'
 import { useTranslation } from '@/lib/use-translation'
 import { SessionHeader } from '@/components/SessionHeader'
 import { CursorMigrationBanner } from '@/components/CursorMigrationBanner'
+import { ModelErrorBanner, hasActiveModelError } from '@/components/ModelErrorBanner'
 import { TeamPanel } from '@/components/TeamPanel'
 import { usePlatform } from '@/hooks/usePlatform'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
@@ -567,6 +568,11 @@ function SessionChatInner(props: SessionChatProps) {
         codexCollaborationModeSupported
     )
 
+    const handleAcknowledgeModelError = useCallback(async () => {
+        await props.api.acknowledgeModelError(props.session.id).catch(() => {})
+        props.onRefresh()
+    }, [props.api, props.session.id, props.onRefresh])
+
     // Voice assistant integration
     const voice = useVoiceOptional()
     const [voiceBackendReady, setVoiceBackendReady] = useState(false)
@@ -984,6 +990,11 @@ function SessionChatInner(props: SessionChatProps) {
             />
 
             <CursorMigrationBanner metadata={props.session.metadata} />
+
+            <ModelErrorBanner
+                metadata={props.session.metadata}
+                onDismiss={handleAcknowledgeModelError}
+            />
 
             {props.session.teamState && (
                 <TeamPanel teamState={props.session.teamState} />

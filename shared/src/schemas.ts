@@ -57,7 +57,16 @@ export const MetadataSchema = z.object({
     preferredPermissionMode: PermissionModeSchema.optional(),
     flavor: z.string().nullish(),
     capabilities: SessionCapabilitiesSchema.optional(),
-    worktree: WorktreeMetadataSchema.optional()
+    worktree: WorktreeMetadataSchema.optional(),
+    lastModelError: z.object({
+        kind: z.string(),
+        transient: z.boolean(),
+        rawSnippet: z.string(),
+        atTs: z.number(),
+        priorAssistantClaimsDone: z.boolean(),
+        retriedAndFailed: z.boolean().optional(),
+        acknowledgedAt: z.number().optional()
+    }).optional()
 })
 
 export type Metadata = z.infer<typeof MetadataSchema>

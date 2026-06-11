@@ -121,6 +121,15 @@ export default {
   'session.cursorMigration.banner.title': '正在升级 Cursor 会话',
   'session.cursorMigration.banner.body': '正在将此旧版会话切换到更安全的 ACP 协议。历史较长的会话需要 15-20 秒；对话会自动恢复，已输入但未发送的草稿不会丢失。',
 
+  // Model error banner
+  'session.modelError.banner.title': '模型错误 — {kind}',
+  'session.modelError.banner.subtitle.transient': '暂时性',
+  'session.modelError.banner.subtitle.nonTransient': '非暂时性',
+  'session.modelError.banner.claimedDone': '代理在此错误之前声称任务已完成。工作可能未完成。',
+  'session.modelError.banner.midExecution': '上一轮代理在执行过程中失败。',
+  'session.modelError.banner.dismiss': '忽略',
+  'session.modelError.banner.viewRaw': '查看原始错误',
+
   // Session inactive
   'session.inactive.autoResume': '此会话已停止。发送消息即可恢复。',
   'session.inactive.cannotResume': '此会话已停止，无法恢复。',

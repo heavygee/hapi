@@ -121,6 +121,15 @@ export default {
   'session.cursorMigration.banner.title': 'Upgrading Cursor session',
   'session.cursorMigration.banner.body': 'Switching this legacy chat to the safer ACP protocol. This takes 15-20 seconds for sessions with long history; your conversation will resume automatically and any draft text will survive.',
 
+  // Model error banner
+  'session.modelError.banner.title': 'MODEL ERROR \u2014 {kind}',
+  'session.modelError.banner.subtitle.transient': 'transient',
+  'session.modelError.banner.subtitle.nonTransient': 'non-transient',
+  'session.modelError.banner.claimedDone': 'The agent claimed completion before this error. The work is likely INCOMPLETE.',
+  'session.modelError.banner.midExecution': 'The last agent turn failed mid-execution.',
+  'session.modelError.banner.dismiss': 'Dismiss',
+  'session.modelError.banner.viewRaw': 'View raw error',
+
   // Session inactive
   'session.inactive.autoResume': 'This session is inactive. Send a message to resume.',
   'session.inactive.cannotResume': 'This session is inactive and cannot be resumed.',
