@@ -21,8 +21,11 @@ import { buildCursorModelsSeedPayload, seedCursorModelsCache } from '@/modules/c
 import { readSharedCursorModelsCache } from '@/modules/common/cursorModelsSharedCache';
 import type { AcpSdkBackend } from '@/agent/backends/acp';
 import {
+    classifyAcpRpcRejection,
     classifyCursorAgentMessage,
-    isCompletionClaim
+    isCompletionClaim,
+    mapAcpStderrToFailure,
+    type CursorAgentStreamFailure
 } from './cursorAgentMessageClassifier';
 
 class CursorAcpRemoteLauncher extends RemoteLauncherBase {
@@ -70,8 +73,14 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
 
         backend.onStderrError((error) => {
             logger.debug('[cursor-acp] stderr error', error);
+            // Surface to operator as status (existing behaviour).
             session.sendSessionEvent({ type: 'message', message: error.message });
             messageBuffer.addMessage(error.message, 'status');
+            // STRUCTURAL signal: route typed stderr error into the modelError
+            // pipeline so the banner + pulsing dot fire on the typed kind
+            // (rate_limited / quota_exhausted / auth_failed / model_not_found)
+            // without any text matching.
+            this.recordModelError(mapAcpStderrToFailure(error));
         });
 
         try {
@@ -218,6 +227,16 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                     message: `Cursor Agent failed: ${errMsg}`
                 });
                 messageBuffer.addMessage(`Cursor Agent failed: ${errMsg}`, 'status');
+                // STRUCTURAL signal: classify the RPC rejection. This catches
+                // transport_closed (WritableIterable / ACP closed), agent_crashed
+                // (process exit during prompt), rpc_timeout, and gRPC status
+                // strings that cursor-agent returned as JSON-RPC error.message
+                // (rather than stringifying as a text message). Returns null
+                // for user cancellations / aborts -- those are NOT model errors.
+                const failure = classifyAcpRpcRejection(error);
+                if (failure) {
+                    this.recordModelError(failure);
+                }
             } finally {
                 session.onThinkingChange(false);
                 await this.permissionAdapter?.cancelAll('Prompt finished');
@@ -289,35 +308,68 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
     }
 
     private handleTextMessageClassification(text: string): void {
+        // FALLBACK PATH ONLY. If a structural signal (stderr / RPC) already
+        // classified this turn, do not re-classify the agent's text -- the
+        // text is often the agent's own stringified version of the same
+        // error we already caught structurally, and re-classifying produces
+        // duplicate banners. We still record lastAssistantText so the
+        // priorAssistantClaimsDone heuristic works for any subsequent
+        // structural signal in this turn.
+        if (this.turnHasModelError) {
+            this.lastAssistantText = text;
+            return;
+        }
         const failure = classifyCursorAgentMessage(text);
         if (failure) {
-            this.turnHasModelError = true;
-            const priorAssistantClaimsDone = this.lastAssistantText !== null
-                && isCompletionClaim(this.lastAssistantText);
-            const rawSnippet = failure.raw.slice(0, 400);
-            const atTs = Date.now();
-
-            this.session.client.updateMetadata((metadata) => ({
-                ...metadata,
-                lastModelError: {
-                    kind: failure.kind,
-                    transient: failure.transient,
-                    rawSnippet,
-                    atTs,
-                    priorAssistantClaimsDone
-                }
-            }));
-
-            this.session.sendSessionEvent({
-                type: 'modelError',
-                kind: failure.kind,
-                transient: failure.transient,
-                rawSnippet,
-                priorAssistantClaimsDone
-            });
+            this.recordModelError(failure);
         } else {
             this.lastAssistantText = text;
         }
+    }
+
+    /**
+     * Single source of truth for emitting modelError. All signal paths
+     * (RPC catch / stderr subscriber / text fallback) route through here.
+     * First signal wins: subsequent signals in the same turn are dropped
+     * to avoid banner-flapping when the agent emits both an RPC rejection
+     * AND a stringified text version of the same failure.
+     */
+    private recordModelError(failure: CursorAgentStreamFailure): void {
+        if (this.turnHasModelError) {
+            logger.debug(
+                `[cursor-acp] modelError already recorded for this turn, dropping ${failure.source}/${failure.kind}`
+            );
+            return;
+        }
+        this.turnHasModelError = true;
+
+        const priorAssistantClaimsDone = this.lastAssistantText !== null
+            && isCompletionClaim(this.lastAssistantText);
+        const rawSnippet = failure.raw.slice(0, 400);
+        const atTs = Date.now();
+
+        logger.debug(
+            `[cursor-acp] modelError recorded source=${failure.source} kind=${failure.kind} transient=${failure.transient}`
+        );
+
+        this.session.client.updateMetadata((metadata) => ({
+            ...metadata,
+            lastModelError: {
+                kind: failure.kind,
+                transient: failure.transient,
+                rawSnippet,
+                atTs,
+                priorAssistantClaimsDone
+            }
+        }));
+
+        this.session.sendSessionEvent({
+            type: 'modelError',
+            kind: failure.kind,
+            transient: failure.transient,
+            rawSnippet,
+            priorAssistantClaimsDone
+        });
     }
 
     private installLiveSessionConfigSync(
