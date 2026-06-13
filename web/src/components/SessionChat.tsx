@@ -1091,6 +1091,7 @@ function SessionChatInner(props: SessionChatProps) {
                         contextCacheRead={reduced.latestUsage?.cacheRead}
                         contextWindow={reduced.latestUsage?.contextWindow}
                         codexUsage={agentFlavor === 'codex' ? props.session.metadata?.codexUsage : undefined}
+                        claudeUsage={agentFlavor === 'claude' ? props.session.metadata?.claudeUsage : undefined}
                         controlledByUser={controlledByUser}
                         onCollaborationModeChange={
                             codexCollaborationModeSupported && props.session.active && !controlledByUser

@@ -8,6 +8,7 @@ import { SDKAssistantMessage, SDKMessage, SDKUserMessage } from "./sdk";
 import { formatClaudeMessageForInk } from "@/ui/messageFormatterInk";
 import { logger } from "@/ui/logger";
 import { SDKToLogConverter } from "./utils/sdkToLogConverter";
+import { extractClaudeUsageInput, normalizeClaudeUsage } from "./utils/claudeUsage";
 import { PLAN_FAKE_REJECT } from "./sdk/prompts";
 import { EnhancedMode } from "./loop";
 import { OutgoingMessageQueue } from "./utils/OutgoingMessageQueue";
@@ -117,9 +118,29 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
         let planModeToolCalls = new Set<string>();
         let ongoingToolCalls = new Map<string, { parentToolCallId: string | null }>();
 
+        // Stream Claude SDK telemetry into session.metadata.claudeUsage so the
+        // web agent budget indicator can render rate-limit + context-window
+        // pressure for this session. Short-circuit on messages without usage
+        // telemetry (e.g. text deltas, tool calls, control responses) so we
+        // don't take the metadata lock + socket roundtrip per SDK message.
+        // Failures are swallowed so the chat path is never blocked.
+        const updateClaudeUsageMetadata = (message: SDKMessage): void => {
+            const input = extractClaudeUsageInput(message);
+            if (!input) return;
+            try {
+                session.client.updateMetadata((currentMetadata) => ({
+                    ...currentMetadata,
+                    claudeUsage: normalizeClaudeUsage(currentMetadata?.claudeUsage, input)
+                }));
+            } catch (error) {
+                logger.debug('[remote]: failed to update claudeUsage metadata', error);
+            }
+        };
+
         function onMessage(message: SDKMessage) {
             formatClaudeMessageForInk(message, messageBuffer);
             permissionHandler.onMessage(message);
+            updateClaudeUsageMetadata(message);
 
             if (message.type === 'assistant') {
                 let umessage = message as SDKAssistantMessage;

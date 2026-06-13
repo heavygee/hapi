@@ -81,6 +81,62 @@ export const CodexUsageSchema = z.object({
 
 export type CodexUsage = z.infer<typeof CodexUsageSchema>
 
+// Claude rate-limit event surfaced from @anthropic-ai/claude-code via
+// SDKMessage.type='rate_limit_event'. See cli/src/claude/utils/sdkToLogConverter.ts
+// for the source-side handling (today only flattened into chat text;
+// session.metadata.claudeUsage is the structured surface).
+//
+// rateLimitType is an opaque string set by Anthropic. Known values at
+// time of writing: 'session_5h' (Pro/Max 5h rolling window), 'weekly_max'
+// (weekly subscription window). Future variants are accepted as-is to
+// avoid blocking the indicator on a shared-enum churn.
+export const ClaudeRateLimitStatusSchema = z.enum(['allowed', 'allowed_warning', 'rejected'])
+
+export const ClaudeRateLimitSchema = z.object({
+    status: ClaudeRateLimitStatusSchema,
+    resetsAt: z.number().optional(),
+    utilization: z.number(),
+    rateLimitType: z.string(),
+    updatedAt: z.number()
+})
+
+export type ClaudeRateLimit = z.infer<typeof ClaudeRateLimitSchema>
+
+// Per-model usage from SDKResultMessage.modelUsage[model]. All fields
+// optional because the SDK does not guarantee every field on every
+// turn (e.g. costUSD only appears on certain plan types; webSearchRequests
+// only when web tools are invoked).
+export const ClaudeModelUsageSchema = z.object({
+    inputTokens: z.number().optional(),
+    outputTokens: z.number().optional(),
+    cacheReadInputTokens: z.number().optional(),
+    cacheCreationInputTokens: z.number().optional(),
+    webSearchRequests: z.number().optional(),
+    costUSD: z.number().optional(),
+    contextWindow: z.number().optional(),
+    maxOutputTokens: z.number().optional()
+})
+
+export type ClaudeModelUsage = z.infer<typeof ClaudeModelUsageSchema>
+
+export const ClaudeUsageSchema = z.object({
+    contextWindow: z.object({
+        usedTokens: z.number(),
+        limitTokens: z.number(),
+        percent: z.number(),
+        updatedAt: z.number()
+    }).optional(),
+    // Keyed by rateLimitType string (e.g. 'session_5h' / 'weekly_max').
+    // Record over the opaque-string key so the schema doesn't need an
+    // enum churn when Anthropic adds new rate-limit kinds.
+    rateLimits: z.record(z.string(), ClaudeRateLimitSchema).optional().default({}),
+    modelUsage: z.record(z.string(), ClaudeModelUsageSchema).optional(),
+    totalCostUSD: z.number().optional(),
+    resolvedModel: z.string().optional()
+})
+
+export type ClaudeUsage = z.infer<typeof ClaudeUsageSchema>
+
 export const MetadataSchema = z.object({
     path: z.string(),
     host: z.string(),
@@ -113,7 +169,12 @@ export const MetadataSchema = z.object({
     flavor: z.string().nullish(),
     capabilities: SessionCapabilitiesSchema.optional(),
     worktree: WorktreeMetadataSchema.optional(),
-    codexUsage: CodexUsageSchema.optional()
+    // Per-flavor usage metadata for the agent budget indicator
+    // (web/src/components/AssistantChat/AgentBudgetIndicator). Each
+    // flavor populates its own structure; the indicator routes via
+    // flavor + adapter.
+    codexUsage: CodexUsageSchema.optional(),
+    claudeUsage: ClaudeUsageSchema.optional()
 })
 
 export type Metadata = z.infer<typeof MetadataSchema>

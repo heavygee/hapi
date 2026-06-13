@@ -122,6 +122,11 @@ export function HappyComposer(props: {
     scratchlistMode?: boolean
     scratchlistCount?: number
     onScratchlistToggle?: () => void
+    // Per-flavor budget telemetry surfaced as the AgentBudgetIndicator on
+    // the composer toolbar. Each flavor populates its own field; the
+    // composer passes them through to ComposerButtons which routes via
+    // agentFlavor into the right adapter.
+    claudeUsage?: import('@hapi/protocol/types').ClaudeUsage | null
     // Set when the most recent send failed (4xx/5xx/network).  The composer
     // restores the original text once per `sendError.id` and renders an
     // inline error affordance until the user dismisses or starts editing.
@@ -1044,7 +1049,9 @@ export function HappyComposer(props: {
                             scratchlistMode={props.scratchlistMode}
                             scratchlistCount={props.scratchlistCount}
                             onScratchlistToggle={props.onScratchlistToggle}
+                            agentFlavor={agentFlavor}
                             codexUsage={agentFlavor === 'codex' ? codexUsage : undefined}
+                            claudeUsage={agentFlavor === 'claude' ? props.claudeUsage : undefined}
                         />
                     </div>
                 </ComposerPrimitive.Root>

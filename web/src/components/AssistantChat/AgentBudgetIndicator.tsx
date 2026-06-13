@@ -157,9 +157,14 @@ export function AgentBudgetIndicator(props: { state: AgentBudgetState | null | u
                                 >
                                     <div className="min-w-0">
                                         <div style={{ color: labelColor }} className={emphasised ? 'font-semibold' : undefined}>{axis.label}</div>
-                                        {axis.detail ? (
-                                            <div className="mt-0.5 break-words text-xs text-[var(--app-hint)]">{axis.detail}</div>
-                                        ) : null}
+                        {axis.detail ? (
+                            <div
+                                className="mt-0.5 break-words text-xs text-[var(--app-hint)]"
+                                title={axis.detailTitle}
+                            >
+                                {axis.detail}
+                            </div>
+                        ) : null}
                                     </div>
                                     <div className="shrink-0 font-medium" style={{ color: valueColor }}>{axis.valueText}</div>
                                 </div>
@@ -168,7 +173,7 @@ export function AgentBudgetIndicator(props: { state: AgentBudgetState | null | u
                         {state.metadata && state.metadata.length > 0 ? (
                             <div className="mt-3 border-t border-[var(--app-divider)] pt-2 space-y-2">
                                 {state.metadata.map((row) => (
-                                    <div key={row.label} className="flex items-start justify-between gap-3">
+                                    <div key={row.label} className="flex items-start justify-between gap-3" title={row.title}>
                                         <div className="min-w-0">
                                             <div className="text-[var(--app-fg)]">{row.label}</div>
                                             {row.detail ? (
