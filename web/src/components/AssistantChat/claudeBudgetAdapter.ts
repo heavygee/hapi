@@ -106,6 +106,14 @@ function formatResetDetail(resetsAt: number | undefined): { detail: string; deta
     }
 }
 
+function formatCostUSD(usd: number): string {
+    if (usd === 0) return '$0.00'
+    const twoDP = usd.toFixed(2)
+    // Sub-cent amounts that round to $0.00 get 4dp to preserve meaning
+    if (twoDP === '0.00') return `$${usd.toFixed(4).replace(/0+$/, '')}`
+    return `$${twoDP}`
+}
+
 function formatRateLimitTypeLabel(rateLimitType: string): string {
     const known = RATE_LIMIT_LABELS[rateLimitType]
     if (known) return known
@@ -230,7 +238,7 @@ export function toClaudeBudgetState(usage: ClaudeUsage | undefined | null): Agen
     if (typeof usage.totalCostUSD === 'number' && usage.totalCostUSD > 0) {
         metadata.push({
             label: 'Cost (session)',
-            value: `$${usage.totalCostUSD.toFixed(4).replace(/\.?0+$/, '')}`,
+            value: formatCostUSD(usage.totalCostUSD),
             title: 'Accumulated since this CLI connection. Resets to $0 if the session disconnects from hub.'
         })
     }
