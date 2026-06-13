@@ -1,7 +1,7 @@
 import type { ClientToServerEvents } from '@hapi/protocol'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
-import type { CodexCollaborationMode, PermissionMode } from '@hapi/protocol/types'
+import type { AgentState, CodexCollaborationMode, Metadata, PermissionMode } from '@hapi/protocol/types'
 import { isRedundantGoalStatusEventContent } from '@hapi/protocol/messages'
 import type { Store, StoredSession } from '../../../store'
 import type { SyncEvent } from '../../../sync/syncEngine'
@@ -136,7 +136,11 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
         if (todos) {
             const updated = store.sessions.setSessionTodos(sid, todos, msg.createdAt, session.namespace)
             if (updated) {
-                onWebappEvent?.({ type: 'session-updated', sessionId: sid })
+                onWebappEvent?.({
+                    type: 'session-updated',
+                    sessionId: sid,
+                    data: { todos }
+                })
             }
         }
 
@@ -147,7 +151,11 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             const newTeamState = applyTeamStateDelta(existingTeamState ?? null, teamDelta)
             const updated = store.sessions.setSessionTeamState(sid, newTeamState, msg.createdAt, session.namespace)
             if (updated) {
-                onWebappEvent?.({ type: 'session-updated', sessionId: sid })
+                onWebappEvent?.({
+                    type: 'session-updated',
+                    sessionId: sid,
+                    data: { teamState: newTeamState ?? undefined }
+                })
             }
         }
 
@@ -235,7 +243,16 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
                 }
             }
             socket.to(`session:${sid}`).emit('update', update)
-            onWebappEvent?.({ type: 'session-updated', sessionId: sid })
+            onWebappEvent?.({
+                type: 'session-updated',
+                sessionId: sid,
+                // The unknown-cast here mirrors the schema's MetadataSchema.nullable()
+                // shape: the store returns raw JSON, the wire schema parses it on
+                // both ends. Keeping the broadcast shape identical to the socket.io
+                // `update-session` body (line ~213) lets the same patch travel
+                // through both fan-out channels without divergence.
+                data: { metadata: { version: result.version, value: result.value as Metadata | null } }
+            })
         }
     }
 
@@ -282,7 +299,11 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
                 }
             }
             socket.to(`session:${sid}`).emit('update', update)
-            onWebappEvent?.({ type: 'session-updated', sessionId: sid })
+            onWebappEvent?.({
+                type: 'session-updated',
+                sessionId: sid,
+                data: { agentState: { version: result.version, value: agentState as AgentState | null } }
+            })
         }
     }
 
