@@ -6,20 +6,22 @@ import { tmpdir } from 'node:os'
 import { Store } from './index'
 
 /**
- * Tests for V9→V10 schema migration: introduces the `session_scratchlist`
- * typed table for tiann/hapi#893 (scratchlist v2 hub sync). Mirrors the
- * pattern in `migration-v9.test.ts`.
+ * Tests for V10→V11 schema migration: introduces the `session_scratchlist`
+ * typed table for tiann/hapi#893 (scratchlist v2 hub sync). Renumbered
+ * v10→v11 for soup integration where v10 is the fcm-push-api schema bump.
+ * Mirrors the pattern in `migration-v9.test.ts` (and `migration-v10.test.ts`
+ * for fcm).
  *
  * The new table is independent (no backfill from existing rows) so the
  * tests focus on:
  *   - presence on fresh DBs
- *   - presence on multi-hop legacy DBs (V6/V7/V8/V9 → V10)
+ *   - presence on multi-hop legacy DBs (V6/V7/V8/V9/V10 → V11)
  *   - idempotency on reopen
  *   - foreign-key cascade-delete from sessions(id)
  *   - the supporting (session_id, created_at) index
  *   - basic CRUD operations through the ScratchlistStore wrapper
  */
-describe('Store V9→V10 migration: session_scratchlist table', () => {
+describe('Store V10→V11 migration: session_scratchlist table', () => {
     it('fresh DB has session_scratchlist table with expected columns', () => {
         const store = new Store(':memory:')
         const cols = getColumns(store, 'session_scratchlist')
@@ -39,8 +41,8 @@ describe('Store V9→V10 migration: session_scratchlist table', () => {
         expect(rows).toHaveLength(1)
     })
 
-    it('V9 DB migrates to V10 via Store: session_scratchlist created', () => {
-        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v10-test-'))
+    it('V9 DB upgrades through ladder to V11: session_scratchlist created', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v11-test-'))
         const dbPath = join(dir, 'test.db')
         let store: Store | undefined
         try {
@@ -69,8 +71,8 @@ describe('Store V9→V10 migration: session_scratchlist table', () => {
         }
     })
 
-    it('V8 DB migrates to V10 (multi-hop V8→V9→V10)', () => {
-        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v8-to-v10-'))
+    it('V8 DB migrates to V11 (multi-hop V8→V9→V10→V11)', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v8-to-v11-'))
         const dbPath = join(dir, 'test.db')
         let store: Store | undefined
         try {
@@ -82,7 +84,7 @@ describe('Store V9→V10 migration: session_scratchlist table', () => {
             db.close()
 
             store = new Store(dbPath)
-            // After ladder runs, both v8→v9 (scheduled_at) AND v9→v10 (table) applied.
+            // After ladder runs, v8→v9 (scheduled_at) and v10→v11 (scratchlist table) applied.
             const messageCols = getColumns(store, 'messages')
             expect(messageCols).toContain('scheduled_at')
             const scratchCols = getColumns(store, 'session_scratchlist')
@@ -93,8 +95,8 @@ describe('Store V9→V10 migration: session_scratchlist table', () => {
         }
     })
 
-    it('V10 DB reopen is idempotent: schema unchanged', () => {
-        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v10-idempotent-'))
+    it('V11 DB reopen is idempotent: schema unchanged', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v11-idempotent-'))
         const dbPath = join(dir, 'test.db')
         let store1: Store | undefined
         let store2: Store | undefined
@@ -241,7 +243,8 @@ function getColumns(store: Store, table: string): string[] {
 
 /**
  * V9 schema: full pre-V10 shape. Used to seed legacy DBs to verify the
- * V9→V10 step adds the new table without disturbing existing rows.
+ * full migration ladder (V9 → V10 fcm-devices → V11 session_scratchlist)
+ * preserves rows and adds tables without disturbing existing data.
  */
 function createV9Schema(db: Database): void {
     db.exec(`

@@ -26,7 +26,7 @@ export { ScratchlistStore } from './scratchlistStore'
 export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
 
-const SCHEMA_VERSION: number = 10
+const SCHEMA_VERSION: number = 11
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -129,7 +129,7 @@ export class Store {
             6: () => this.migrateFromV6ToV7(),
             7: () => this.migrateFromV7ToV8(),
             8: () => this.migrateFromV8ToV9(),
-            9: () => this.migrateFromV9ToV10(),
+            10: () => this.migrateFromV10ToV11(),
         })
 
         if (currentVersion === 0) {
@@ -463,7 +463,7 @@ export class Store {
      * v2 hub-side entries (web client retains its localStorage offline
      * cache).
      */
-    private migrateFromV9ToV10(): void {
+    private migrateFromV10ToV11(): void {
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS session_scratchlist (
                 session_id TEXT NOT NULL,
