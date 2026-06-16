@@ -1,7 +1,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
 import { Stars } from '@react-three/drei'
-import { XROrigin, XR, createXRStore, useXR } from '@react-three/xr'
+import { XROrigin, XR, createXRStore, useXR, type XRStore } from '@react-three/xr'
 import * as THREE from 'three'
 import { useAppContext } from '@/lib/app-context'
 import { useSessions } from '@/hooks/queries/useSessions'
@@ -14,7 +14,7 @@ import { useGardenAttention } from '@/garden/hooks/useGardenAttention'
 import { useGardenSpatialAudio } from '@/garden/hooks/useGardenSpatialAudio'
 import { filterGardenSessions, GARDEN_BUILD, layoutPosition } from '@/garden/utils/sessionVisuals'
 
-export const xrStore = createXRStore({
+export const xrStore: XRStore = createXRStore({
     gaze: false,
     hand: false,
     controller: false,
