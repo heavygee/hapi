@@ -18,6 +18,7 @@ function makeSession(overrides: Partial<SessionSummary> = {}): SessionSummary {
         todoProgress: null,
         pendingRequestsCount: 0,
         pendingRequestKinds: [],
+        pendingRequests: [],
         backgroundTaskCount: 0,
         futureScheduledMessageCount: 0,
         model: null,
