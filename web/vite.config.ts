@@ -116,7 +116,30 @@ export default defineConfig(({ mode }) => {
                             type: 'image/png',
                             purpose: 'any'
                         }
-                    ]
+                    ],
+                    share_target: {
+                        action: '/share',
+                        method: 'POST',
+                        enctype: 'multipart/form-data',
+                        params: {
+                            title: 'title',
+                            text: 'text',
+                            url: 'url',
+                            files: [
+                                {
+                                    name: 'files',
+                                    accept: [
+                                        'image/*',
+                                        'application/pdf',
+                                        'text/*',
+                                        'application/json',
+                                        'application/zip',
+                                        '*/*'
+                                    ]
+                                }
+                            ]
+                        }
+                    }
                 },
                 injectManifest: {
                     globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}']

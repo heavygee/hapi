@@ -46,6 +46,7 @@ import FilesPage from '@/routes/sessions/files'
 import FilePage from '@/routes/sessions/file'
 import TerminalPage from '@/routes/sessions/terminal'
 import SettingsPage from '@/routes/settings'
+import SharePage from '@/routes/share'
 
 function BackIcon(props: { className?: string }) {
     return (
@@ -1087,6 +1088,22 @@ const settingsRoute = createRoute({
     component: SettingsPage,
 })
 
+const shareRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/share',
+    validateSearch: (search: Record<string, unknown>): { id?: string; error?: string } => {
+        const result: { id?: string; error?: string } = {}
+        if (typeof search.id === 'string' && search.id) {
+            result.id = search.id
+        }
+        if (typeof search.error === 'string' && search.error) {
+            result.error = search.error
+        }
+        return result
+    },
+    component: SharePage,
+})
+
 const GardenPageLazy = React.lazy(() =>
     import('@/garden/GardenPage').then(m => ({ default: m.GardenPage }))
 )
@@ -1114,6 +1131,7 @@ export const routeTree = rootRoute.addChildren([
     ]),
     browseRoute,
     settingsRoute,
+    shareRoute,
     gardenRoute,
 ])
 
