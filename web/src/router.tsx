@@ -47,6 +47,7 @@ import FilePage from '@/routes/sessions/file'
 import TerminalPage from '@/routes/sessions/terminal'
 import SettingsPage from '@/routes/settings'
 import SharePage from '@/routes/share'
+import { GardenXrEntryButton } from '@/garden/components/GardenXrEntryButton'
 
 function BackIcon(props: { className?: string }) {
     return (
@@ -479,6 +480,7 @@ function SessionsPage() {
                             >
                                 <CodexImportIcon className={`h-5 w-5 ${isLoadingCodexSessions ? 'animate-spin' : ''}`} />
                             </button>
+                            <GardenXrEntryButton />
                             <button
                                 type="button"
                                 onClick={() => navigate({ to: '/browse' })}
