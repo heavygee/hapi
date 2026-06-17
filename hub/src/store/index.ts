@@ -5,6 +5,7 @@ import { dirname } from 'node:path'
 import { MachineStore } from './machineStore'
 import { MessageStore } from './messageStore'
 import { PushStore } from './pushStore'
+import { FcmStore } from './fcmStore'
 import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
 
@@ -12,6 +13,7 @@ export type {
     StoredMachine,
     StoredMessage,
     StoredPushSubscription,
+    StoredFcmDevice,
     StoredSession,
     StoredUser,
     VersionedUpdateResult
@@ -20,16 +22,18 @@ export type { CancelQueuedMessageResult, LookupQueuedMessageResult } from './mes
 export { MachineStore } from './machineStore'
 export { MessageStore } from './messageStore'
 export { PushStore } from './pushStore'
+export { FcmStore } from './fcmStore'
 export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
 
-const SCHEMA_VERSION: number = 9
+const SCHEMA_VERSION: number = 10
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
     'messages',
     'users',
-    'push_subscriptions'
+    'push_subscriptions',
+    'fcm_devices'
 ] as const
 
 export class Store {
@@ -42,6 +46,7 @@ export class Store {
     readonly messages: MessageStore
     readonly users: UserStore
     readonly push: PushStore
+    readonly fcm: FcmStore
 
     /**
      * Filesystem path of the underlying SQLite database, or ':memory:' for
@@ -92,6 +97,7 @@ export class Store {
         this.messages = new MessageStore(this.db)
         this.users = new UserStore(this.db)
         this.push = new PushStore(this.db)
+        this.fcm = new FcmStore(this.db)
     }
 
     close(): void {
@@ -123,6 +129,7 @@ export class Store {
             6: () => this.migrateFromV6ToV7(),
             7: () => this.migrateFromV7ToV8(),
             8: () => this.migrateFromV8ToV9(),
+            9: () => this.migrateFromV9ToV10(),
         })
 
         if (currentVersion === 0) {
@@ -250,6 +257,19 @@ export class Store {
                 UNIQUE(namespace, endpoint)
             );
             CREATE INDEX IF NOT EXISTS idx_push_subscriptions_namespace ON push_subscriptions(namespace);
+
+            CREATE TABLE IF NOT EXISTS fcm_devices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                namespace TEXT NOT NULL,
+                token TEXT NOT NULL,
+                platform TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                UNIQUE(namespace, device_id, platform)
+            );
+            CREATE INDEX IF NOT EXISTS idx_fcm_devices_namespace ON fcm_devices(namespace);
+            CREATE INDEX IF NOT EXISTS idx_fcm_devices_token ON fcm_devices(token);
         `)
     }
 
@@ -404,6 +424,23 @@ export class Store {
         this.db.exec(`
             CREATE INDEX IF NOT EXISTS idx_messages_session_position
                 ON messages(session_id, COALESCE(invoked_at, created_at) DESC, seq DESC)
+        `)
+    }
+
+    private migrateFromV9ToV10(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS fcm_devices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                namespace TEXT NOT NULL,
+                token TEXT NOT NULL,
+                platform TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                UNIQUE(namespace, device_id, platform)
+            );
+            CREATE INDEX IF NOT EXISTS idx_fcm_devices_namespace ON fcm_devices(namespace);
+            CREATE INDEX IF NOT EXISTS idx_fcm_devices_token ON fcm_devices(token);
         `)
     }
 

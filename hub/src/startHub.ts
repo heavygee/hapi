@@ -11,6 +11,10 @@ import { SSEManager } from './sse/sseManager'
 import { getOrCreateVapidKeys } from './config/vapidKeys'
 import { PushService } from './push/pushService'
 import { PushNotificationChannel } from './push/pushNotificationChannel'
+import { FcmService } from './fcm/fcmService'
+import { FcmNotificationChannel } from './fcm/fcmNotificationChannel'
+import { resolveFcmConfig } from './fcm/fcmConfig'
+import { buildNativeFallbackProbe } from './fcm/nativeFallbackProbe'
 import { VisibilityTracker } from './visibility/visibilityTracker'
 import { TunnelManager } from './tunnel'
 import { waitForTunnelTlsReady } from './tunnel/tlsGate'
@@ -195,9 +199,45 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
 
     syncEngine = new SyncEngine(store, socketServer.io, socketServer.rpcRegistry, sseManager)
 
+    const fcmConfig = resolveFcmConfig()
+
+    // Build the optional FCM service early so the native-fallback probe
+    // can consult its health gate. When FCM is configured, `fcmService` is
+    // shared between the FcmNotificationChannel and the probe so a broken
+    // pipeline (expired credentials, sustained 5xx) lets web-push run as
+    // a last-resort surface for the namespace instead of silently muting
+    // both channels.
+    const fcmService = fcmConfig
+        ? new FcmService(fcmConfig.projectId, fcmConfig.serviceAccount, store)
+        : null
+
+    // Only suppress web-push when a native FCM channel is actually live
+    // AND a device is registered for the namespace AND the FCM pipeline is
+    // currently healthy. The fcmConfig gate is critical: without it, stale
+    // device rows from a prior FCM-enabled boot would silently drop
+    // web-push on a hub started without the service-account env var
+    // (notifications would vanish entirely). See `buildNativeFallbackProbe`
+    // for the full contract.
+    const nativeFallbackProbe = buildNativeFallbackProbe(
+        store,
+        fcmConfig,
+        fcmService ?? undefined
+    )
+
     const notificationChannels: NotificationChannel[] = [
-        new PushNotificationChannel(pushService, sseManager, visibilityTracker, config.publicUrl)
+        new PushNotificationChannel(
+            pushService,
+            sseManager,
+            visibilityTracker,
+            config.publicUrl,
+            nativeFallbackProbe
+        )
     ]
+
+    if (fcmConfig && fcmService) {
+        notificationChannels.push(new FcmNotificationChannel(fcmService, sseManager, visibilityTracker, store))
+        console.log('[Fcm] Native companion push enabled (project:', fcmConfig.projectId + ')')
+    }
 
     if (config.serverChanSendKey && config.serverChanNotification) {
         notificationChannels.push(new ServerChanChannel(config.serverChanSendKey, config.publicUrl))
@@ -297,6 +337,28 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
                 console.log(qrString)
             } catch {
                 // QR code generation failure should not affect main flow
+            }
+
+            // Companion app pairing QR (deeplink scheme; PWA users ignore, native app picks up).
+            const companionParams = new URLSearchParams({
+                hub: tunnelUrl,
+                code: config.cliApiToken
+            })
+            const companionDeeplink = `hapicompanion://bind?${companionParams.toString()}`
+            console.log('')
+            console.log('Or pair the HAPI companion app (Android phone / Wear OS):')
+            console.log(`  ${companionDeeplink}`)
+            try {
+                const companionQrString = await QRCode.toString(companionDeeplink, {
+                    type: 'terminal',
+                    small: true,
+                    margin: 1,
+                    errorCorrectionLevel: 'L'
+                })
+                console.log('')
+                console.log(companionQrString)
+            } catch {
+                // Non-fatal; deeplink text above is sufficient if QR rendering fails.
             }
         }
 
