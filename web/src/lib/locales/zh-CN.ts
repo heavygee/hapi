@@ -118,6 +118,8 @@ export default {
   'session.time.importedFromCodex.minutesAgo': '{n} 分钟前从codex客户端导入',
   'session.time.importedFromCodex.hoursAgo': '{n} 小时前从codex客户端导入',
   'session.time.importedFromCodex.daysAgo': '{n} 天前从codex客户端导入',
+  'session.cursorMigration.banner.title': '正在升级 Cursor 会话',
+  'session.cursorMigration.banner.body': '正在将此旧版会话切换到更安全的 ACP 协议。历史较长的会话需要 15-20 秒；对话会自动恢复，已输入但未发送的草稿不会丢失。',
 
   // Session header
   'session.title': '文件',
@@ -133,6 +135,7 @@ export default {
   'session.action.rename': '重命名',
   'session.action.export': '导出对话',
   'session.action.archive': '归档',
+  'session.action.reopen': '重新打开',
   'session.action.delete': '删除',
   'session.action.copy': '复制',
 
@@ -152,10 +155,14 @@ export default {
   'dialog.archive.confirm': '归档',
   'dialog.archive.confirming': '归档中…',
 
+  'dialog.reopen.errorTitle': '无法重新打开会话',
+  'dialog.reopen.dismiss': '关闭',
+
   'dialog.delete.title': '删除会话',
   'dialog.delete.description': '确定要删除 "{name}" 吗？此操作无法撤销。',
   'dialog.delete.confirm': '删除',
   'dialog.delete.confirming': '删除中…',
+
   'dialog.error.default': '操作失败，请重试。',
 
   // Session export
@@ -230,6 +237,7 @@ export default {
   'chat.settings': '设置',
   'chat.terminal': '终端',
   'chat.switchRemote': '切换到远程模式',
+  'chat.sendError.fallback': '消息未能发送。请修改后重试。',
 
   // Codex review
   'codexReview.title': 'Codex review',
@@ -403,6 +411,12 @@ export default {
   'scratchlist.count.one': '1 条',
   'scratchlist.count.other': '{n} 条',
   'scratchlist.emptyHint': '在此暂存笔记、草稿或想法。需点击发送或编辑后才会真正发出。',
+  'scratchlist.drawerHint': '在下方输入 — 发送会把内容存入此暂存清单，而不是发到对话。再次点击便签图标可退出。',
+  'scratchlist.toggleAriaLabel': '暂存清单抽屉',
+  'scratchlist.toggleTooltip': '暂存清单 — 暂存笔记与草稿（Ctrl/Cmd+Shift+S）',
+  'scratchlist.sendToScratchlist': '存入暂存清单',
+  'scratchlist.fueTitle': '新功能：暂存清单',
+  'scratchlist.fueBody': '在此暂存笔记和草稿，不会被发送。暂存模式下发送按钮会显示琥珀色；再次点击图标（或 Ctrl/Cmd+Shift+S）可退出。',
   'scratchlist.addPlaceholder': '笔记、草稿或想法 — 回车键添加',
   'scratchlist.addAriaLabel': '添加草稿夹条目',
   'scratchlist.add': '添加',
@@ -413,7 +427,12 @@ export default {
   'scratchlist.action.moveDown': '下移',
   'scratchlist.action.promoteToComposer': '复制到输入框',
   'scratchlist.action.promoteToQueue': '加入发送队列',
+  'scratchlist.action.copy': '复制到剪贴板',
+  'scratchlist.action.copied': '已复制！',
   'scratchlist.action.delete': '删除条目',
+  'fue.newFeatureDot': '新功能可用',
+  'fue.gotIt': '知道了',
+  'fue.closeAriaLabel': '关闭说明',
   'composer.codexSlashUnsupported.title': '无法执行 Codex 命令',
   'composer.codexSlashUnsupported.body': 'HAPI 远程模式暂不支持 {command} 这类 Codex 内建 slash command，请改用自然语言，或在本地 Codex TUI 中执行。',
 
