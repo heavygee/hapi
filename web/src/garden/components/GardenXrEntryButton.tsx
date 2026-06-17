@@ -16,8 +16,12 @@ function XrIcon(props: { className?: string }) {
     )
 }
 
-/** Toolbar affordance for session list header (Quest / WebXR browsers). */
-export function GardenXrEntryButton() {
+type GardenXrEntryButtonProps = {
+    className?: string
+}
+
+/** Header affordance on Quest Browser (sessions list + session chat). */
+export function GardenXrEntryButton(props: GardenXrEntryButtonProps) {
     const launcher = useGardenXrLauncherOptional()
     if (!launcher || launcher.webXRSupported !== true || launcher.overlayOpen) {
         return null
@@ -29,7 +33,10 @@ export function GardenXrEntryButton() {
             onClick={launcher.openOverlay}
             aria-label="Open Garden XR"
             title="Garden XR"
-            className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-sky-400 hover:bg-[var(--app-subtle-bg)] transition-colors"
+            className={
+                props.className
+                ?? 'p-1.5 rounded-full text-[var(--app-hint)] hover:text-sky-400 hover:bg-[var(--app-subtle-bg)] transition-colors'
+            }
         >
             <XrIcon className="h-5 w-5" />
         </button>

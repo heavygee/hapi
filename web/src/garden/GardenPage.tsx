@@ -2,15 +2,20 @@ import { useEffect } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useGardenXrLauncher } from '@/garden/GardenXrLauncher'
 
-/** Deep link: open Garden overlay, land on flat sessions list. */
+/** Deep link: open Garden overlay on Quest, land on flat sessions list. */
 export function GardenPage() {
     const navigate = useNavigate()
-    const { openOverlay } = useGardenXrLauncher()
+    const { openOverlay, webXRSupported } = useGardenXrLauncher()
 
     useEffect(() => {
-        openOverlay()
+        if (webXRSupported === null) {
+            return
+        }
+        if (webXRSupported) {
+            openOverlay()
+        }
         navigate({ to: '/sessions', replace: true })
-    }, [openOverlay, navigate])
+    }, [openOverlay, navigate, webXRSupported])
 
     return null
 }
