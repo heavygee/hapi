@@ -1,5 +1,6 @@
 import type { Session } from '../sync/syncEngine'
-import type { NotificationChannel, TaskNotification } from '../notifications/notificationTypes'
+import type { ModelErrorNotification, NotificationChannel, TaskNotification } from '../notifications/notificationTypes'
+import { formatModelErrorBody, formatModelErrorTitle } from '../notifications/modelErrorCopy'
 import { getAgentName, getSessionName } from '../notifications/sessionInfo'
 import { formatToolArgumentsCompact, formatToolArgumentsDetailed } from '../notifications/toolArgs'
 import { extractAssistantPlainText, extractNotifySummary, unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
@@ -222,6 +223,31 @@ export class FcmNotificationChannel implements NotificationChannel {
             sessionName: name,
             url: path,
             severity: isFailure ? 'error' : 'success'
+        })
+
+        await this.deliver(session, payload)
+    }
+
+    async sendModelError(session: Session, notification: ModelErrorNotification): Promise<void> {
+        if (!session.active) {
+            return
+        }
+
+        const agentName = getAgentName(session)
+        const sessionName = getSessionName(session)
+        const title = formatModelErrorTitle(notification.kind)
+        const body = formatModelErrorBody(notification, { agentName, sessionName })
+        const path = this.buildSessionPath(session.id)
+
+        const payload = this.buildPayload({
+            title,
+            body,
+            tag: `model-error-${session.id}-${notification.atTs}`,
+            type: 'model-error',
+            sessionId: session.id,
+            sessionName,
+            url: path,
+            severity: 'error'
         })
 
         await this.deliver(session, payload)
