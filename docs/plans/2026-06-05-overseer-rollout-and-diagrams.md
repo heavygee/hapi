@@ -127,7 +127,7 @@ The attention inbox is the **first concrete surface** of the Overseer: a persist
 
 > A persistent per-session attention queue that captures agent terminal states and operator-required follow-up, forming the event substrate for the future Overseer. It captures per-session terminal states as persistent operator work items, records operator responses as preference signals, and creates the event stream from which cross-session salience and attention-marketplace behaviour can later be learned.
 
-> Mock images live at `assets/overseer-attention-inbox-mock.png` and `assets/overseer-triage-stack-mock.png` (PNG binaries to be re-dropped by the operator). The faithful text reproductions below are the durable, implementer-facing record.
+> Mock images are embedded below (`assets/overseer-attention-inbox-mock.png`, `assets/overseer-triage-stack-mock.png`); the faithful text reproductions beneath them are the durable, implementer-facing record.
 
 ### View A — Attention Inbox (v1 default render)
 
