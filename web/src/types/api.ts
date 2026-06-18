@@ -293,7 +293,7 @@ export type ClaudeStatusResponse = {
     claudeProjectsAvailable: boolean
 }
 
-export type AgentImportFlavor = 'codex' | 'cursor'
+export type AgentImportFlavor = 'codex' | 'cursor' | 'claude'
 
 export type CursorImportSourceFormat = 'legacy' | 'acp'
 
