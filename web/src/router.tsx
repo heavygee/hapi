@@ -47,7 +47,7 @@ import FilePage from '@/routes/sessions/file'
 import TerminalPage from '@/routes/sessions/terminal'
 import SettingsPage from '@/routes/settings'
 import SharePage from '@/routes/share'
-import { GardenXrEntryButton } from '@/garden/components/GardenXrEntryButton'
+import { GardenXrEntryChip } from '@/garden/components/GardenXrEntryChip'
 
 function BackIcon(props: { className?: string }) {
     return (
@@ -464,11 +464,14 @@ function SessionsPage() {
                 style={{ '--sidebar-w': `${sidebar.width}px` } as React.CSSProperties}
             >
                 <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
-                    <div className="mx-auto w-full max-w-content flex items-center justify-between px-3 py-2">
-                        <div className="text-xs text-[var(--app-hint)]">
-                            {t('sessions.count', { n: sessions.length, m: projectCount })}
+                    <div className="mx-auto w-full max-w-content flex items-center justify-between gap-2 px-3 py-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                            <div className="shrink-0 text-xs text-[var(--app-hint)]">
+                                {t('sessions.count', { n: sessions.length, m: projectCount })}
+                            </div>
+                            <GardenXrEntryChip />
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex shrink-0 items-center gap-2">
                             <button
                                 type="button"
                                 onClick={() => void openCodexImportDialog()}
@@ -480,7 +483,6 @@ function SessionsPage() {
                             >
                                 <CodexImportIcon className={`h-5 w-5 ${isLoadingCodexSessions ? 'animate-spin' : ''}`} />
                             </button>
-                            <GardenXrEntryButton />
                             <button
                                 type="button"
                                 onClick={() => navigate({ to: '/browse' })}

@@ -11,7 +11,7 @@ import { formatReopenError } from '@/lib/reopenError'
 import { getSessionModelLabel } from '@/lib/sessionModelLabel'
 import { useTranslation } from '@/lib/use-translation'
 import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
-import { GardenXrEntryButton } from '@/garden/components/GardenXrEntryButton'
+import { GardenXrEntryChip } from '@/garden/components/GardenXrEntryChip'
 
 function getSessionTitle(session: Session): string {
     if (session.metadata?.name) {
@@ -174,6 +174,8 @@ export function SessionHeader(props: {
                         </svg>
                     </button>
 
+                    <GardenXrEntryChip />
+
                     {/* Session info - two lines: title and path */}
                     <div className="min-w-0 flex-1">
                         <div className="truncate font-semibold">
@@ -194,8 +196,6 @@ export function SessionHeader(props: {
                             ) : null}
                         </div>
                     </div>
-
-                    <GardenXrEntryButton className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-sky-400" />
 
                     {props.onViewFiles ? (
                         <button
