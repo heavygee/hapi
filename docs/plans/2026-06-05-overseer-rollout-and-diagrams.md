@@ -121,6 +121,125 @@ Rationale:
 
 ---
 
+## 4. Attention inbox — the v1 wedge (mocks + decisions)
+
+The attention inbox is the **first concrete surface** of the Overseer: a persistent per-session attention queue that captures agent terminal states as operator work items. It is **deliberately dumb** — its job is not to be smart, it is to be the *instrumented training ground* whose operator-action data later teaches the cross-session salience model. Strategic framing (adopt verbatim for the upstream pitch):
+
+> A persistent per-session attention queue that captures agent terminal states and operator-required follow-up, forming the event substrate for the future Overseer. It captures per-session terminal states as persistent operator work items, records operator responses as preference signals, and creates the event stream from which cross-session salience and attention-marketplace behaviour can later be learned.
+
+> Mock images live at `assets/overseer-attention-inbox-mock.png` and `assets/overseer-triage-stack-mock.png` (PNG binaries to be re-dropped by the operator). The faithful text reproductions below are the durable, implementer-facing record.
+
+### View A — Attention Inbox (v1 default render)
+
+Persistent queue, default-sorted by **coarse category rank, then oldest-first within each tier** (so a fresh `QUESTION`/permission sits above an old `FINALE`, but within a tier the oldest is forced up — email discipline preserved). One item per session terminal state. The mock's "Oldest first" subtitle reflects the pure-age variant; v1 ships rank-then-age.
+
+![Attention Inbox mock — persistent queue with per-card Open/Snooze/Done and a Sessions/Inbox/Overseer bottom nav](assets/overseer-attention-inbox-mock.png)
+
+```
+HAPI   120 sessions in 32 projects                 [↻] [■] [⚙] [+]
+┌──────────────────────────────────────────────────────────────┐
+│ Attention Inbox                                         INBOX  │
+│ ( Needs attention 17 | Snoozed 4 | Done today 23 )             │
+├──────────────────────────────────────────────────────────────┤
+│ ▎Cl  overseer prep   QUESTION  Agent asks whether to apply     │
+│      issue edits 1-4.        [Open] [Snooze] [Done]            │
+│ ▎Cu  meta HAPI triage  FINALE         [Open] [Snooze] [Done]   │
+│ ▎Cu  resume-eexist-symlink  BLOCKED   [Open] [Ask agent] [Snooze]│
+│ ▎Cu  retry styling bug  ERROR         [Open] [Retry] [Snooze]  │
+│   … rafflemoviebot (FINALE 41m) · inline-model (STALE 1h)      │
+├──────────────────────────────────────────────────────────────┤
+│ Sessions | [Inbox] | Overseer                                  │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### View B — Triage Stack (later, power-user toggle)
+
+Same items, grouped into severity buckets (the coarse rank), oldest inside each bucket. Useful once the queue gets noisy; **not** the v1 default.
+
+![Triage Stack mock — severity buckets (12 need you / 4 blocked / 3 errors / 23 finale) with Needs-operator + Completed-but-unread sections and bulk actions](assets/overseer-triage-stack-mock.png)
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ Triage Stack                                            STACK  │
+│  [12 need you]  [4 blocked]  [3 errors]  [23 finale]           │
+├── Needs operator (12) ─────────────────────────────────────────┤
+│ ▎Cl overseer prep QUESTION · ▎Cu resume BLOCKED · ▎Cu retry ERROR│
+├── Completed but unread (23) ───────────────────────────────────┤
+│ ▎Cu meta triage FINALE · rafflemoviebot FINALE · inline STALE  │
+│ Bulk: [Snooze all stale]  [Mark viewed]                        │
+└────────────────────────────────────────────────────────────────┘
+```
+
+**One inbox, two views** — not two products. View A (flat, rank-then-age) is the v1 default; View B (severity stack) is a later grouping toggle over the same items. Bottom nav (`Sessions / Inbox / Overseer`) is the settled IA: Inbox = read-only attention surface; Overseer = where you later converse about it.
+
+### Confirmed v1 decisions (operator, 2026-06-05 / 06-18)
+
+1. **Deliberately dumb, but coarse-ranked.** Default ordering = coarse category rank (`permission > blocked > error/needs-decision > completion`), **oldest-first within each tier** (email discipline). A **fixed, hand-set rank — NOT learned salience**. Renderable flat (rank-then-age) or as severity buckets. Keeps faith with the #691 "priority model first" commitment; only *learned* salience is deferred.
+2. **Strictly per-session.** One attention item per session terminal state. **No** cross-session dedupe / merge / root-cause in v1 — deferred to the Overseer (#25).
+3. **Operator actions logged as training labels from day one**, even though nothing consumes them yet — the dataset *is* the point. Operator-facing object name: **"Attention Item"** (schema = `inbox_items`, contracts §3).
+4. **Artifact-centric card titles where available** — prefer an `artifact_ref` (PR/issue/branch) as the title over the session name, falling back to the session name. Depends on workers emitting artifact handles (#22; reliability measured in #20).
+
+### Operator actions are labels (the training signal)
+
+| Action | Learned meaning |
+|---|---|
+| Open | deserved inspection |
+| Reply (→ navigates to the session chat) | required intervention |
+| Done | valid but finished |
+| Snooze | matters, but not now |
+| Dismiss | was noise |
+| Delete | should not have been surfaced |
+| Route | belonged elsewhere |
+| Retry | operational, not cognitive |
+
+`Reply`/`Ask agent`/`Retry`/`Route` are **dispatch** → Tier-B (#26); they must be **absent/disabled in the v1 read-only pane**. v1 ships `Open` / `Snooze` / `Done` / `Dismiss` + bulk only.
+
+### Failure mode — "do not become email"
+
+Guardrails: strong stale expiry, severity-label discipline, a clear `FYI` vs `you-must-decide` split (FYI ⇒ captured-only, never queued), bulk handling, and "why am I seeing this?" answerability (provenance, §11).
+
+## 5. Return-from-away briefing ("brief me" / fleet "standup") — #51
+
+When the operator starts work (or returns after being away), they want something resembling a scrum standup — but the *ceremony* is meatspace baggage and the *schedule* is irrelevant to a fleet.
+
+- **Drop the schedule.** Scheduled standups exist so humans can converge; an agent fleet needs no convergence. Trigger = **operator-initiated ("brief me") + attention-gap (return-from-away)**, never clock-driven.
+- **Keep the function, drop the roll-call.** Map the three scrum questions to the fleet: *what changed since last* (deltas) · *what's blocking* (top of inbox) · *what's the plan* (recommended focus). Deliver it **synthesized** ("3 finished, 2 routine, 1 needs you because it changes PR scope"), never a per-agent enumeration.
+- **Near-term primitive (trackable now):** a per-operator **`last_seen_at` / attention watermark** + a **since-last-seen delta query** over events/inbox (#22/#23). A second consumer falls out for free: *"what did you handle while I was away?"*
+- **Briefing interaction is gated on a nascent Overseer (#25)** — the synthesis needs the Overseer entity; not buildable on the dumb substrate alone.
+- **Relationship to "what's next?":** same data, different intent. *"What's next?"* = pull-one (Brazil bang-bang); *"Brief me"* = orient-all-with-deltas. Keep both. It is the §9 `digest` *content* minus the schedule, and the fleet-level analog of HAPI's per-session "Greet me / Brief me" split.
+
+Tracked in #51.
+
+## 6. Execution plan — ordered build sequence to "the Overseer"
+
+The ordered work an agent (or agents) execute. Waves respect dependencies; **within a wave, items can run in parallel agents.** Critical path = substrate→overseer→dispatch spine; transport and UI tracks run alongside. Tier-A = upstream-first; Tier-B = fork-led.
+
+### Critical path (sequential — each wave gates the next)
+
+| Wave | Issue | Delivers | Gated by | Tier |
+|---|---|---|---|---|
+| 0 | **#20** pre-flight emission sniff | emission compliance + delivery-channel (inline vs AGENTS.md) → recalibrates #22 | — | A |
+| 1 | **#22** events + per-turn-summary emission | `events` + `event_links` + FTS5; summary-carrier emission + hub-observed fallback | #20 | A |
+| 2 | **#23** inbox + dumb v1 ordering + action logging | `inbox_items`; per-session promotion; coarse-rank/oldest-within; action logging | #22 | A |
+| 3 | **#24** replay harness + CI gate | golden scenarios + one-boss invariant stub + CI gate | #23 | A |
+| 4 | **#25** read-only Overseer wired to voice | Overseer entity + read-only tools + voice route + `convo_turn` | #23, #24 | A |
+| 5 | **#26** dispatch + contradiction (**MVP BAR**) | dispatch envelope + confirm UX + one-boss activates + contradiction | #25 | B |
+| 6 | **#27** chrome voice switch (post-MVP) | conversation → chrome; per-session → dictate + read-back (atomic) | #26, #25, #29 | B |
+
+**MVP acceptance bar is met when Wave 5 (#26) lands.**
+
+### Parallel tracks
+
+- **Transport (anytime; depends only on landed #692):** **#21** voice persistence (habit-teacher); **#29** standalone STT+TTS endpoints. Both must finish before Wave 6's switch.
+- **UI (depends on #23):** the first-class **attention-inbox pane** (desktop+mobile) — separate agent; ships read-only (Open/Snooze/Done), dispatch actions deferred to #26.
+- **Riders:** **#51** watermark lands with #22/#23 (briefing rides #25); **#28** intent capture rides #23 + #25.
+
+### Fan-out guidance
+
+- Critical path is one agent handing to the next (#20→#22→#23→#24→#25→#26→#27).
+- From Wave 1 on, fan out a transport agent (#21/#29) and the UI-pane agent (after #23) in parallel.
+- Fold #51/#28 into the relevant substrate/voice wave or run as small follow-on agents.
+
 ## Architecture-shape diagrams (pending freeze lift)
 
 These describe the system rather than the rollout and belong in the frozen Rev 4 docs, replacing existing ASCII art. They are upstream-safe (sanitized). Not embedded here to avoid duplicating canon; to be added to the architecture docs once the freeze is lifted:

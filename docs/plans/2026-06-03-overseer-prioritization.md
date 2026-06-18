@@ -15,6 +15,10 @@
 
 ---
 
+> ## Rev 5 amendments (2026-06-18)
+>
+> Amended; the rollout companion (`docs/plans/2026-06-05-overseer-rollout-and-diagrams.md`) is the live source. **v0/v1 is deliberately dumb:** default ordering = a fixed coarse category rank (`permission > blocked > completion`), oldest-first *within* each tier; **no learned salience in v1** — the §5 feedback loop is trained later from operator actions the inbox logs from day one (#23). The §6 replay harness + one-boss invariant stub land in Step 2.75 (#24). "Brief me" / return-from-away briefing is the §9 `digest` *content* minus the schedule, gated on the nascent Overseer (#25), riding a since-last-seen watermark (#51).
+
 ## The prioritization loop
 
 The Overseer's salience-and-routing logic is not a single black-box judgement. It is a named loop drawn from three traditions:

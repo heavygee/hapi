@@ -14,6 +14,13 @@
 
 ---
 
+> ## Rev 5 amendments (2026-06-18)
+>
+> Amended after the maintainer endorsed the control-plane direction (`tiann/hapi` #691); the rollout companion (`docs/plans/2026-06-05-overseer-rollout-and-diagrams.md`) is the live source.
+> - **The voice layer splits, it does not merely relocate:** per-session voice becomes lightweight *speech transport* (dictation + read-back); the realtime *conversational* surface moves to chrome/Overseer. Cross-session conversation is justified because work sessions are things-to-do with completion states (an attention queue to arbitrate), unlike independent chat topics.
+> - **The attention-inbox is the first-class, pre-voice wedge** — the instrumented training ground whose operator-action data later trains the salience model / attention market.
+> - **Two-tier rollout:** read/surface side upstream-first (maintainer-endorsed); dispatch + one-boss fork-led.
+
 ## TL;DR
 
 The product HAPI is converging on is not "a voice agent." It is:

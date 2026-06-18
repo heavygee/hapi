@@ -15,6 +15,14 @@
 
 ---
 
+> ## Rev 5 amendments (2026-06-18)
+>
+> Amended after maintainer endorsement (`tiann/hapi` #691) + the inbox mock review; the rollout companion (`docs/plans/2026-06-05-overseer-rollout-and-diagrams.md`) is the live source where they disagree.
+> - **§1 emission is a *per-turn-summary carrier*:** every turn emits a summary (captured-only, memory-bearing) carrying zero+ called-out action events; map HAPI's native permission-prompt to a `permission_request`/`approval_requested` event ranked highest; strip the structured block from the default chat render. Delivery channel measured in #20. (#22)
+> - **§3 inbox v1 is dumb + per-session:** coarse-rank/oldest-within ordering, no learned salience, **no cross-session dedupe / merge / root-cause in v1** (deferred to the Overseer, #25); operator actions logged as training labels. (#23)
+> - **§15 intent capture** is tracked at fleet level as #28; the per-session scratchlist (#11) is absorbed after its v1 ships.
+> - **§13 dispatch + one-boss (ADR-001)** is Tier-B (fork-led); the read/surface contracts are Tier-A (upstream-first).
+
 ## SystemEvent stream - the substrate
 
 The substrate is the events table plus its companion link table and artifact-handle convention.

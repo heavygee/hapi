@@ -14,6 +14,19 @@
 
 ---
 
+> ## Rev 5 amendments (2026-06-18)
+>
+> This Rev 4 build sequence is amended by decisions made after the maintainer endorsed the control-plane direction (`tiann/hapi` discussion #691) and after the attention-inbox mock review. **Where this doc and the rollout companion disagree, the rollout companion wins.** Live source: `docs/plans/2026-06-05-overseer-rollout-and-diagrams.md` (§1 issue DAG · §2 voice reshaping · §3 two-tier rollout · §4 inbox decisions · §5 brief-me · §6 ordered build plan). Issue tree: #19 umbrella (+ #20–#29, #51).
+>
+> Key supersessions:
+> - **Step 2.5 is deliberately dumb and per-session.** Default ordering = coarse category rank (`permission > blocked > completion`), oldest-first *within* each tier; the category badge is a label, not learned salience. **No cross-session merge / `event_links` root-cause in v1** — deferred to the Overseer (#25). Operator actions are logged as training labels from day one. (rollout §4; #23)
+> - **Emission is a per-turn-summary carrier** (every turn emits a summary carrying zero+ called-out action items), stripped from the default chat render. Delivery channel (inline vs AGENTS.md) is measured in the pre-flight (#20). (#22)
+> - **Step 5 is "split, not retire."** Per-session voice is *repurposed* into dictation + read-back; only the *conversational* mode relocates to chrome — one atomic switch. Needs standalone STT/TTS endpoints (#29). (rollout §2; #27)
+> - **New first-class surfaces:** the attention-inbox pane is the visual, pre-voice surface of the read-only Overseer; "brief me" / return-from-away briefing rides a since-last-seen watermark (#51).
+> - **Two-tier upstream rollout:** Steps 1–3 (substrate + read-only) are Tier-A (upstream-first, endorsed); Step 4 (dispatch + one-boss) is Tier-B (fork-led). (rollout §3)
+
+---
+
 ## MVP acceptance bar
 
 The "first useful Overseer" finish line. Steps 1-4 work toward this; Step 5+ is post-MVP polish. Without an explicit acceptance bar the build acquires the gravity that pulls every architecture toward a neutron star of good intentions.
@@ -105,6 +118,8 @@ Scope:
 - Read-only events + inbox viewer in the UI debug pane (expand the Step 2 viewer to show inbox state too).
 - Still no Overseer entity, no voice attachment. Just the substrate that the Overseer will consume.
 
+> **Rev 5 (2026-06-18):** v1 is deliberately dumb and per-session — default ordering is coarse category rank (`permission > blocked > completion`) with oldest-first *within* each tier (a fixed hand-set rank, **not** learned salience), and there is **no cross-session merge / `event_links` root-cause in v1** (deferred to the Overseer, #25). Operator actions are logged as training labels. The promotion item is the carrier of a per-turn summary. See rollout doc §4 and #23.
+
 Substrate continues. UI gains an inbox view. From the outside this looks like "HAPI got a fleet inbox view," which is accurate.
 
 ### Step 2.75 - Replay harness v0 + CI gate
@@ -178,7 +193,7 @@ The combo - persistent target-side indicator + ephemeral source-side confirmatio
 Scope:
 
 - Chrome voice button becomes the primary voice surface; available on web, mobile-web, and webXR (all inherit HAPI's existing attachability).
-- Per-session voice button removed (or kept as legacy with deprecation note).
+- Per-session voice button **repurposed, not removed** (Rev 5): it becomes lightweight dictation (STT → composer, manual send) + on-demand "read back" (TTS); only the *conversational* mode relocates to chrome. One atomic switch; needs standalone STT/TTS endpoints (#29). See rollout doc §2 and #27.
 - PTT remains for fast dictation.
 
 By now persistence, indicator, events, Overseer-conversation infrastructure all exist. This is a UI cleanup, not an architectural change. From this point the "shower-speaker via mobile-web" use case is live.
