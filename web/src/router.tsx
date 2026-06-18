@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import React from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
     Navigate,
@@ -461,7 +460,7 @@ function SessionsPage() {
             <div className="flex h-full min-h-0">
             <div
                 className={`${isSessionsIndex ? 'flex' : 'hidden lg:flex'} w-full shrink-0 flex-col bg-[var(--app-bg)]`}
-                style={{ '--sidebar-w': `${sidebar.width}px` } as React.CSSProperties}
+                style={{ '--sidebar-w': `${sidebar.width}px` } as CSSProperties}
             >
                 <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
                     <div className="mx-auto w-full max-w-content flex items-center justify-between gap-2 px-3 py-2">
@@ -1108,7 +1107,7 @@ const shareRoute = createRoute({
     component: SharePage,
 })
 
-const GardenPageLazy = React.lazy(() =>
+const GardenPageLazy = lazy(() =>
     import('@/garden/GardenPage').then(m => ({ default: m.GardenPage }))
 )
 
@@ -1116,9 +1115,9 @@ const gardenRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/garden',
     component: () => (
-        <React.Suspense fallback={null}>
+        <Suspense fallback={null}>
             <GardenPageLazy />
-        </React.Suspense>
+        </Suspense>
     ),
 })
 
