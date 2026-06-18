@@ -56,7 +56,7 @@ import {
 } from '../modules/common/kimiModels'
 import type { SpawnSessionOptions, SpawnSessionResult } from '../modules/common/rpcTypes'
 import { applyVersionedAck } from './versionedUpdate'
-import { archiveLocalCodexSession, listLocalCodexSessionSummaries, listLocalCodexSessionsWithMessagesByIds } from '../modules/common/codexSessions'
+import { archiveLocalCodexSession, findCodexSessionPath, listLocalCodexSessionSummaries, listLocalCodexSessionsWithMessagesByIds } from '../modules/common/codexSessions'
 import { listLocalPiSessionSummaries, listLocalPiSessionsWithMessagesByIds } from '../modules/common/piSessions'
 import { buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
 import { collectMachineHealth } from '@/utils/machineHealth'
@@ -413,6 +413,13 @@ export class ApiMachineClient {
                     type: 'error',
                     errorMessage: 'Directory is outside this machine\'s workspace roots',
                     code: 'outside_workspace_roots',
+                }
+            }
+
+            if (agent === 'codex' && resumeSessionId) {
+                const codexSessionPath = await findCodexSessionPath(resumeSessionId)
+                if (!(await this.isLocalSessionWithinWorkspaceRoots({ cwd: codexSessionPath }))) {
+                    return { type: 'error', errorMessage: 'Codex session path is unavailable or outside workspace roots' }
                 }
             }
 
