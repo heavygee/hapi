@@ -9,6 +9,7 @@ export interface VoiceStartContext {
     bootstrap: string
     streamChunks?: string[]
     notice?: string | null
+    proactiveSummary?: boolean
 }
 
 export async function startRealtimeSession(
@@ -33,6 +34,7 @@ export async function startRealtimeSession(
             initialContext: normalized.bootstrap,
             streamContextChunks: normalized.streamChunks,
             contextNotice: normalized.notice,
+            proactiveSummary: normalized.proactiveSummary,
             language,
             voiceId,
             voiceName

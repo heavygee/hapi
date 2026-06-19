@@ -12,6 +12,8 @@ export interface VoiceSessionConfig {
     voiceId?: string
     /** Gemini Live / Qwen Realtime prebuilt voice name */
     voiceName?: string
+    /** Garden VR: brief from session context on connect without waiting for user turn. */
+    proactiveSummary?: boolean
 }
 
 export interface VoiceSession {

@@ -46,7 +46,14 @@ function getVendorChunkName(id: string): string | undefined {
     return undefined
 }
 
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+    const stubIwer = mode === 'production'
+    const iwerStub = resolve(__dirname, 'src/vendor-stubs/iwer-stub.ts')
+    const iwerAliases = stubIwer
+        ? { '@iwer/sem': iwerStub, '@iwer/devui': iwerStub, iwer: iwerStub }
+        : {}
+
+    return {
     define: {
         __APP_VERSION__: JSON.stringify(appVersion),
     },
@@ -147,7 +154,8 @@ export default defineConfig({
     base,
     resolve: {
         alias: {
-            '@': resolve(__dirname, 'src')
+            '@': resolve(__dirname, 'src'),
+            ...iwerAliases
         }
     },
     build: {
@@ -161,4 +169,5 @@ export default defineConfig({
             }
         }
     }
+}
 })
