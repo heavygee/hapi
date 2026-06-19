@@ -4,6 +4,7 @@ import { Store } from '../../store'
 import { SyncEngine } from '../../sync/syncEngine'
 import { RpcRegistry } from '../../socket/rpcRegistry'
 import { createSystemEventsRoutes } from './systemEvents'
+import type { WebAppEnv } from '../middleware/auth'
 
 describe('systemEvents routes', () => {
     it('lists persisted events', async () => {
@@ -23,7 +24,7 @@ describe('systemEvents routes', () => {
         const io = { of: () => ({ to: () => ({ emit: () => {}, timeout: () => ({ emit: () => {} }) }) }) } as never
         const engine = new SyncEngine(store, io, new RpcRegistry(), { broadcast: () => {} } as never)
 
-        const app = new Hono()
+        const app = new Hono<WebAppEnv>()
         app.use('*', async (c, next) => {
             c.set('namespace', 'default')
             await next()
