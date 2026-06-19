@@ -469,6 +469,16 @@ export default {
   'voice.error.notAllowed': 'Voice not allowed',
   'voice.error.connection': 'Connection error',
   'voice.dismiss': 'Dismiss',
+  'voice.focus.pill': 'voice → {target}',
+  'voice.focus.goToSession': 'Open',
+  'voice.focus.sessionCard': 'Voice is receiving on this session',
+  'voice.focus.badge': 'voice',
+  'voice.dropped.title': 'Voice session dropped',
+  'voice.dropped.description': '{session} is no longer active. End voice or start a fresh session.',
+  'voice.dropped.endVoice': 'End voice',
+  'voice.dropped.ending': 'Ending…',
+  'voice.dropped.spawnFresh': 'New session',
+  'voice.dropped.spawning': 'Opening…',
 
   // Banners
   'offline.title': 'Offline',

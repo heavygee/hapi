@@ -334,6 +334,7 @@ function LoadingIcon() {
 export function UnifiedButton(props: {
     canSend: boolean
     voiceStatus: ConversationStatus
+    voiceReceiving?: boolean
     voiceEnabled: boolean
     controlsDisabled: boolean
     onSend: () => void
@@ -356,8 +357,8 @@ export function UnifiedButton(props: {
 }) {
     const { t } = useTranslation()
 
-    const isConnecting = props.voiceStatus === 'connecting'
-    const isConnected = props.voiceStatus === 'connected'
+    const isConnecting = props.voiceReceiving && props.voiceStatus === 'connecting'
+    const isConnected = props.voiceReceiving && props.voiceStatus === 'connected'
     const isVoiceActive = isConnecting || isConnected
     const hasText = props.canSend
     const routesToScratchlist = props.routesToScratchlist ?? false
@@ -449,6 +450,7 @@ export function ComposerButtons(props: {
     onSwitch: () => void
     voiceEnabled: boolean
     voiceStatus: ConversationStatus
+    voiceReceiving?: boolean
     voiceMicMuted?: boolean
     onVoiceToggle: () => void
     onVoiceMicToggle?: () => void
@@ -479,7 +481,7 @@ export function ComposerButtons(props: {
     onScratchlistToggle?: () => void
 }) {
     const { t } = useTranslation()
-    const isVoiceConnected = props.voiceStatus === 'connected'
+    const isVoiceConnected = props.voiceReceiving && props.voiceStatus === 'connected'
     const [showSchedulePicker, setShowSchedulePicker] = useState(false)
     const scheduleButtonRef = useRef<HTMLButtonElement>(null)
 
@@ -664,6 +666,7 @@ export function ComposerButtons(props: {
             <UnifiedButton
                 canSend={props.canSend}
                 voiceStatus={props.voiceStatus}
+                voiceReceiving={props.voiceReceiving}
                 voiceEnabled={props.voiceEnabled}
                 controlsDisabled={props.controlsDisabled}
                 onSend={props.onSend}

@@ -132,6 +132,7 @@ export function HappyComposer(props: {
     // Voice assistant props
     voiceStatus?: ConversationStatus
     voiceMicMuted?: boolean
+    voiceReceiving?: boolean
     onVoiceToggle?: () => void
     onVoiceMicToggle?: () => void
     // Schedule props (lifted from internal state when provided)
@@ -192,6 +193,7 @@ export function HappyComposer(props: {
         autocompleteSuggestions = defaultSuggestionHandler,
         voiceStatus = 'disconnected',
         voiceMicMuted = false,
+        voiceReceiving = false,
         onVoiceToggle,
         onVoiceMicToggle,
         pendingSchedule: pendingScheduleProp,
@@ -1192,6 +1194,7 @@ export function HappyComposer(props: {
                             threadGoal={threadGoal}
                             agentFlavor={agentFlavor}
                             voiceStatus={voiceStatus}
+                            voiceReceiving={voiceReceiving}
                         />
                     ) : null}
 
@@ -1263,6 +1266,7 @@ export function HappyComposer(props: {
                             onSwitch={handleSwitch}
                             voiceEnabled={voiceEnabled}
                             voiceStatus={voiceStatus}
+                            voiceReceiving={voiceReceiving}
                             voiceMicMuted={voiceMicMuted}
                             onVoiceToggle={onVoiceToggle ?? (() => {})}
                             onVoiceMicToggle={onVoiceMicToggle}

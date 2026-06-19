@@ -44,13 +44,14 @@ function getConnectionStatus(
     thinking: boolean,
     agentState: AgentState | null | undefined,
     voiceStatus: ConversationStatus | undefined,
+    voiceReceiving: boolean | undefined,
     backgroundTaskCount: number,
     t: (key: string) => string
 ): { text: string; color: string; dotColor: string; isPulsing: boolean } {
     const hasPermissions = agentState?.requests && Object.keys(agentState.requests).length > 0
 
-    // Voice connecting takes priority
-    if (voiceStatus === 'connecting') {
+    // Voice connecting takes priority on the receiving session only
+    if (voiceReceiving && voiceStatus === 'connecting') {
         return {
             text: t('voice.connecting'),
             color: 'text-[#007AFF]',
@@ -161,11 +162,12 @@ export function StatusBar(props: {
     threadGoal?: ThreadGoal | null
     agentFlavor?: string | null
     voiceStatus?: ConversationStatus
+    voiceReceiving?: boolean
 }) {
     const { t } = useTranslation()
     const connectionStatus = useMemo(
-        () => getConnectionStatus(props.active, props.thinking, props.agentState, props.voiceStatus, props.backgroundTaskCount ?? 0, t),
-        [props.active, props.thinking, props.agentState, props.voiceStatus, props.backgroundTaskCount, t]
+        () => getConnectionStatus(props.active, props.thinking, props.agentState, props.voiceStatus, props.voiceReceiving, props.backgroundTaskCount ?? 0, t),
+        [props.active, props.thinking, props.agentState, props.voiceStatus, props.voiceReceiving, props.backgroundTaskCount, t]
     )
 
     const contextWarning = useMemo(

@@ -21,6 +21,8 @@ import { NewSession } from '@/components/NewSession'
 import { WorkspaceBrowser } from '@/components/WorkspaceBrowser'
 import { LoadingState } from '@/components/LoadingState'
 import { useAppContext } from '@/lib/app-context'
+import { useVoiceOptional } from '@/lib/voice-context'
+import { getReceivingSessionId, isVoiceTransportActive } from '@/lib/voice-focus'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { isTelegramApp } from '@/hooks/useTelegram'
 import { useSidebarResize } from '@/hooks/useSidebarResize'
@@ -164,6 +166,10 @@ function SessionsPage() {
     const { t } = useTranslation()
     const { addToast } = useToast()
     const { sessions, isLoading, error, refetch } = useSessions(api)
+    const voice = useVoiceOptional()
+    const voiceReceivingSessionId = voice && isVoiceTransportActive(voice.status)
+        ? getReceivingSessionId(voice.voiceFocus)
+        : null
     const { machines } = useMachines(api, true)
     const [isSyncingCodexSession, setIsSyncingCodexSession] = useState(false)
     const [codexSessions, setCodexSessions] = useState<CodexLocalSessionSummary[]>([])
@@ -530,6 +536,7 @@ function SessionsPage() {
                         renderHeader={false}
                         api={api}
                         machineLabelsById={machineLabelsById}
+                        voiceReceivingSessionId={voiceReceivingSessionId}
                     />
                 </div>
             </div>

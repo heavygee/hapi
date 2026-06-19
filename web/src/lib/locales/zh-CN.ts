@@ -473,6 +473,16 @@ export default {
   'voice.error.notAllowed': '语音功能不可用',
   'voice.error.connection': '连接错误',
   'voice.dismiss': '关闭',
+  'voice.focus.pill': '语音 → {target}',
+  'voice.focus.goToSession': '打开',
+  'voice.focus.sessionCard': '此会话正在接收语音',
+  'voice.focus.badge': '语音',
+  'voice.dropped.title': '语音会话已断开',
+  'voice.dropped.description': '{session} 已不再活跃。结束语音或新建会话。',
+  'voice.dropped.endVoice': '结束语音',
+  'voice.dropped.ending': '正在结束…',
+  'voice.dropped.spawnFresh': '新建会话',
+  'voice.dropped.spawning': '正在打开…',
 
   // Banners
   'offline.title': '离线',

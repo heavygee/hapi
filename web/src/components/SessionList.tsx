@@ -18,6 +18,7 @@ import { classifySessionAttention } from '@/lib/sessionAttention'
 import { getSessionLastSeenAt } from '@/lib/sessionLastSeen'
 import { getAttentionLabel, SessionAttentionIndicator } from '@/components/SessionAttentionIndicator'
 import { HoverTooltip, SESSION_ROW_TOOLTIP_FOCUS_CLASS, useSessionRowTooltipIds } from '@/components/HoverTooltip'
+import { VoiceReceivingIcon } from '@/components/VoiceReceivingIcon'
 import { formatRelativeTime } from '@/lib/relativeTime'
 import { formatScheduledTooltipDetail } from '@/lib/scheduledTime'
 import { getCodexImportedAt, subscribeCodexImportedSessions } from '@/lib/codexImportedSessions'
@@ -599,9 +600,10 @@ function SessionItem(props: {
     api: ApiClient | null
     selected?: boolean
     showDetailedStatus?: boolean
+    voiceReceiving?: boolean
 }) {
     const { t } = useTranslation()
-    const { session: s, onSelect, showPath = true, api, selected = false, showDetailedStatus = false } = props
+    const { session: s, onSelect, showPath = true, api, selected = false, showDetailedStatus = false, voiceReceiving = false } = props
     const { haptic } = usePlatform()
     const [menuOpen, setMenuOpen] = useState(false)
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
@@ -682,6 +684,15 @@ function SessionItem(props: {
                         </div>
                         {s.active && s.thinking ? (
                             <LoaderIcon className="h-3.5 w-3.5 shrink-0 text-[var(--app-hint)] animate-spin-slow" />
+                        ) : voiceReceiving ? (
+                            <span
+                                className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[var(--app-link)]/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--app-link)]"
+                                title={t('voice.focus.sessionCard')}
+                                data-testid="voice-receiving-indicator"
+                            >
+                                <VoiceReceivingIcon className="h-3 w-3 animate-pulse" />
+                                {t('voice.focus.badge')}
+                            </span>
                         ) : attention ? (
                             <SessionAttentionIndicator
                                 attention={attention}
@@ -803,9 +814,10 @@ export function SessionList(props: {
     api: ApiClient | null
     machineLabelsById?: Record<string, string>
     selectedSessionId?: string | null
+    voiceReceivingSessionId?: string | null
 }) {
     const { t } = useTranslation()
-    const { renderHeader = true, api, selectedSessionId, machineLabelsById = {}, onNewSessionInDirectory } = props
+    const { renderHeader = true, api, selectedSessionId, machineLabelsById = {}, onNewSessionInDirectory, voiceReceivingSessionId = null } = props
     const { sessionPreviewLimit } = useSessionPreviewLimit()
     const { sessionListStatusMode } = useSessionListStatusMode()
     const { showActiveSessionsOnly } = useShowActiveSessionsOnly()
@@ -1117,6 +1129,7 @@ export function SessionList(props: {
                                                                 api={api}
                                                                 selected={s.id === selectedSessionId}
                                                                 showDetailedStatus={showDetailedStatus}
+                                                                voiceReceiving={s.id === voiceReceivingSessionId}
                                                             />
                                                         ))}
                                                         {!isSearching && group.sessions.length > sessionPreviewLimit && (hiddenSessionCount > 0 || canCollapseSessions) ? (

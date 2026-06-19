@@ -26,6 +26,12 @@ export type VoiceBackendSessionProps = RealtimeVoiceSessionProps & {
  */
 export function VoiceBackendSession(props: VoiceBackendSessionProps) {
     const [backend, setBackend] = useState<VoiceBackendType | null>(null)
+    const sessionProps = {
+        getSession: props.getSession,
+        sendMessage: props.sendMessage,
+        approvePermission: props.approvePermission,
+        denyPermission: props.denyPermission,
+    }
 
     useEffect(() => {
         let cancelled = false
@@ -55,7 +61,7 @@ export function VoiceBackendSession(props: VoiceBackendSessionProps) {
     if (backend === 'gemini-live') {
         return (
             <Suspense fallback={null}>
-                <GeminiLiveVoiceSession {...props} onRegistered={handleRegistered} />
+                <GeminiLiveVoiceSession {...props} {...sessionProps} onRegistered={handleRegistered} />
             </Suspense>
         )
     }
@@ -63,10 +69,10 @@ export function VoiceBackendSession(props: VoiceBackendSessionProps) {
     if (backend === 'qwen-realtime') {
         return (
             <Suspense fallback={null}>
-                <QwenVoiceSession {...props} onRegistered={handleRegistered} />
+                <QwenVoiceSession {...props} {...sessionProps} onRegistered={handleRegistered} />
             </Suspense>
         )
     }
 
-    return <RealtimeVoiceSession {...props} onRegistered={handleRegistered} />
+    return <RealtimeVoiceSession {...props} {...sessionProps} onRegistered={handleRegistered} />
 }

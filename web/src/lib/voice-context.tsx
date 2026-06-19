@@ -4,14 +4,21 @@ import { startRealtimeSession, stopRealtimeSession, voiceHooks } from '@/realtim
 import { storeVoiceContextNotice } from '@/lib/voiceContextStream'
 import { getElevenLabsCodeFromPreference } from '@/lib/languages'
 import { readStoredVoiceSelection } from '@/lib/voicePickerPreferences'
+import type { VoiceFocus } from '@hapi/protocol/voice'
 
 interface VoiceContextValue {
     status: ConversationStatus
     errorMessage: string | null
     micMuted: boolean
+    /** @deprecated Prefer voiceFocus.ref when kind is 'session'. */
     currentSessionId: string | null
+    voiceFocus: VoiceFocus | null
+    backendReady: boolean
+    receivingSessionDropped: boolean
     setStatus: (status: ConversationStatus, errorMessage?: string) => void
     setMicMuted: (muted: boolean) => void
+    setBackendReady: (ready: boolean) => void
+    setReceivingSessionDropped: (dropped: boolean) => void
     toggleMic: () => void
     startVoice: (sessionId: string) => Promise<void>
     stopVoice: () => Promise<void>
@@ -23,7 +30,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     const [status, setStatusInternal] = useState<ConversationStatus>('disconnected')
     const [errorMessage, setErrorMessage] = useState<string | null>(null)
     const [micMuted, setMicMuted] = useState(false)
-    const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
+    const [voiceFocus, setVoiceFocus] = useState<VoiceFocus | null>(null)
+    const [backendReady, setBackendReady] = useState(false)
+    const [receivingSessionDropped, setReceivingSessionDropped] = useState(false)
+
+    const currentSessionId = voiceFocus?.kind === 'session' ? (voiceFocus.ref ?? null) : null
 
     const setStatus: StatusCallback = useCallback((newStatus, error) => {
         setStatusInternal(newStatus)
@@ -39,7 +50,12 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     }, [])
 
     const startVoice = useCallback(async (sessionId: string) => {
-        setCurrentSessionId(sessionId)
+        if (status === 'connected' || status === 'connecting') {
+            voiceHooks.onVoiceStopped()
+            await stopRealtimeSession()
+        }
+        setReceivingSessionDropped(false)
+        setVoiceFocus({ kind: 'session', ref: sessionId })
         const contextPlan = voiceHooks.prepareVoiceSession(sessionId)
         storeVoiceContextNotice(contextPlan.notice)
 
@@ -52,12 +68,13 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
             streamChunks: contextPlan.streamChunks,
             notice: contextPlan.notice
         }, elevenLabsLang, voiceId)
-    }, [])
+    }, [status])
 
     const stopVoice = useCallback(async () => {
         voiceHooks.onVoiceStopped()
         await stopRealtimeSession()
-        setCurrentSessionId(null)
+        setVoiceFocus(null)
+        setReceivingSessionDropped(false)
         setStatusInternal('disconnected')
         setErrorMessage(null)
     }, [])
@@ -69,8 +86,13 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
                 errorMessage,
                 micMuted,
                 currentSessionId,
+                voiceFocus,
+                backendReady,
+                receivingSessionDropped,
                 setStatus,
                 setMicMuted,
+                setBackendReady,
+                setReceivingSessionDropped,
                 toggleMic,
                 startVoice,
                 stopVoice

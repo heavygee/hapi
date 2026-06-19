@@ -19,6 +19,9 @@ import { clearMessageWindow, fetchLatestMessages } from '@/lib/message-window-st
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useTranslation } from '@/lib/use-translation'
 import { VoiceProvider } from '@/lib/voice-context'
+import { VoicePersistenceLayer } from '@/realtime/VoicePersistenceLayer'
+import { VoiceFocusPill } from '@/components/VoiceFocusPill'
+import { VoiceSessionDroppedDialog } from '@/components/VoiceSessionDroppedDialog'
 import { requireHubUrlForLogin } from '@/lib/runtime-config'
 import { getAppGlobalSseSubscription, getAppSessionSseSubscription } from '@/lib/appSseSubscriptions'
 import { LoginPrompt } from '@/components/LoginPrompt'
@@ -435,6 +438,9 @@ function AppInner() {
     return (
         <AppContextProvider value={{ api, token, baseUrl }}>
             <VoiceProvider>
+                <VoicePersistenceLayer />
+                <VoiceFocusPill />
+                <VoiceSessionDroppedDialog />
                 <PwaUpdateBannerWithStatusOffset
                     isSyncing={isSyncing}
                     isReconnecting={sseDisconnected && !isSyncing}

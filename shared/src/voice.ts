@@ -233,6 +233,19 @@ export function buildVoiceAgentConfig(): VoiceAgentConfig {
     }
 }
 
+/** Where conversational voice is routed (session today; overseer/fleet in later steps). */
+export type VoiceFocusKind = 'session' | 'overseer' | 'fleet'
+
+export type VoiceFocus = {
+    kind: VoiceFocusKind
+    /** Session id when kind is 'session'; overseer/fleet ref TBD in later steps. */
+    ref?: string
+}
+
+export function isSessionVoiceFocus(focus: VoiceFocus | null | undefined): focus is VoiceFocus & { kind: 'session'; ref: string } {
+    return focus?.kind === 'session' && typeof focus.ref === 'string' && focus.ref.length > 0
+}
+
 export type VoiceBackendType = 'elevenlabs' | 'gemini-live' | 'qwen-realtime'
 
 export const QWEN_REALTIME_MODEL = 'qwen3.5-omni-flash-realtime'
