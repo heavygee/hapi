@@ -6,6 +6,7 @@ import { MachineStore } from './machineStore'
 import { MessageStore } from './messageStore'
 import { PushStore } from './pushStore'
 import { FcmStore } from './fcmStore'
+import { ScratchlistStore } from './scratchlistStore'
 import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
 
@@ -14,6 +15,7 @@ export type {
     StoredMessage,
     StoredPushSubscription,
     StoredFcmDevice,
+    StoredScratchlistEntry,
     StoredSession,
     StoredUser,
     VersionedUpdateResult
@@ -23,6 +25,7 @@ export { MachineStore } from './machineStore'
 export { MessageStore } from './messageStore'
 export { PushStore } from './pushStore'
 export { FcmStore } from './fcmStore'
+export { ScratchlistStore } from './scratchlistStore'
 export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
 
@@ -33,7 +36,8 @@ const REQUIRED_TABLES = [
     'messages',
     'users',
     'push_subscriptions',
-    'fcm_devices'
+    'fcm_devices',
+    'session_scratchlist'
 ] as const
 
 export class Store {
@@ -47,6 +51,7 @@ export class Store {
     readonly users: UserStore
     readonly push: PushStore
     readonly fcm: FcmStore
+    readonly scratchlist: ScratchlistStore
 
     /**
      * Filesystem path of the underlying SQLite database, or ':memory:' for
@@ -98,6 +103,7 @@ export class Store {
         this.users = new UserStore(this.db)
         this.push = new PushStore(this.db)
         this.fcm = new FcmStore(this.db)
+        this.scratchlist = new ScratchlistStore(this.db)
     }
 
     close(): void {
@@ -272,6 +278,18 @@ export class Store {
             );
             CREATE INDEX IF NOT EXISTS idx_fcm_devices_namespace ON fcm_devices(namespace);
             CREATE INDEX IF NOT EXISTS idx_fcm_devices_token ON fcm_devices(token);
+
+            CREATE TABLE IF NOT EXISTS session_scratchlist (
+                session_id TEXT NOT NULL,
+                entry_id TEXT NOT NULL,
+                text TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (session_id, entry_id),
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_session_scratchlist_session_created
+                ON session_scratchlist(session_id, created_at DESC);
         `)
     }
 
@@ -429,23 +447,6 @@ export class Store {
         `)
     }
 
-    private migrateFromV9ToV10(): void {
-        this.db.exec(`
-            CREATE TABLE IF NOT EXISTS fcm_devices (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                namespace TEXT NOT NULL,
-                token TEXT NOT NULL,
-                platform TEXT NOT NULL,
-                device_id TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL,
-                UNIQUE(namespace, device_id, platform)
-            );
-            CREATE INDEX IF NOT EXISTS idx_fcm_devices_namespace ON fcm_devices(namespace);
-            CREATE INDEX IF NOT EXISTS idx_fcm_devices_token ON fcm_devices(token);
-        `)
-    }
-
     private migrateFromV8ToV9(): void {
         const columns = this.getMessageColumnNames()
         if (columns.size === 0) {
@@ -486,6 +487,18 @@ export class Store {
             );
             CREATE INDEX IF NOT EXISTS idx_fcm_devices_namespace ON fcm_devices(namespace);
             CREATE INDEX IF NOT EXISTS idx_fcm_devices_token ON fcm_devices(token);
+
+            CREATE TABLE IF NOT EXISTS session_scratchlist (
+                session_id TEXT NOT NULL,
+                entry_id TEXT NOT NULL,
+                text TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (session_id, entry_id),
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_session_scratchlist_session_created
+                ON session_scratchlist(session_id, created_at DESC);
         `)
     }
 
