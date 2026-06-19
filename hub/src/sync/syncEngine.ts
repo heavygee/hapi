@@ -10,7 +10,8 @@
 import { isKnownFlavor, type LocalResumeTarget, type ResumableSession } from '@hapi/protocol'
 import type { CursorMigrateOutcome, CursorMigrateToAcpRequest, SlashCommandsResponse } from '@hapi/protocol/apiTypes'
 import type { AgentFlavor, CodexCollaborationMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
-import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
+import { unwrapRoleWrappedRecordEnvelope, extractAssistantPlainText } from '@hapi/protocol/messages'
+import { AGENT_NOTIFY_CONTRACT_INLINE_PREFIX } from '@hapi/protocol'
 import type { Server } from 'socket.io'
 import type { Store, CancelQueuedMessageResult } from '../store'
 import type { HapiSessionExportResult } from '@hapi/protocol/sessionExport'
@@ -41,6 +42,8 @@ import {
     type RpcUploadFileResponse
 } from './rpcGateway'
 import { SessionCache } from './sessionCache'
+import { OverseerEventRecorder, shouldInjectNotifyContract, toSessionSnapshot } from './overseerEventRecorder'
+import type { ListSystemEventsOptions, StoredSystemEvent } from '../store'
 
 export type { Session, SyncEvent } from '@hapi/protocol/types'
 export type { Machine } from './machineCache'
@@ -135,6 +138,7 @@ export class SyncEngine {
     private readonly machineCache: MachineCache
     private readonly messageService: MessageService
     private readonly rpcGateway: RpcGateway
+    private readonly overseerEvents: OverseerEventRecorder
     private inactivityTimer: NodeJS.Timeout | null = null
     /** Sessions that emitted `session-ready` (Cursor ACP load/newSession complete). */
     private readonly sessionReadyIds = new Set<string>()
@@ -155,6 +159,7 @@ export class SyncEngine {
             (sessionId, updatedAt) => this.recordSessionActivity(sessionId, updatedAt)
         )
         this.rpcGateway = new RpcGateway(io, rpcRegistry)
+        this.overseerEvents = new OverseerEventRecorder(store.events)
         this.reloadAll()
         this.inactivityTimer = setInterval(() => this.expireInactive(), 5_000)
     }
@@ -316,14 +321,19 @@ export class SyncEngine {
             // legacy refresh-from-DB-and-broadcast path.
             this.sessionCache.refreshSession(event.sessionId)
             const after = this.sessionCache.getSession(event.sessionId)
+            if (after) {
+                this.overseerEvents.onSessionUpdated(after)
+            }
             if (after?.metadata && !this.hasSameAgentSessionIds(beforeMetadata, after.metadata)) {
                 if (!this.canRunCursorDedup(after)) {
+                    this.eventPublisher.emit(event)
                     return
                 }
                 void this.sessionCache.deduplicateByAgentSessionId(event.sessionId).catch(() => {
                     // best-effort: dedup failure is harmless, web-side safety net hides remaining duplicates
                 })
             }
+            this.eventPublisher.emit(event)
             return
         }
 
@@ -336,9 +346,35 @@ export class SyncEngine {
             if (!this.getSession(event.sessionId)) {
                 this.sessionCache.refreshSession(event.sessionId)
             }
+            const session = this.getSession(event.sessionId)
+            if (session && event.message) {
+                this.overseerEvents.onAgentMessage(
+                    toSessionSnapshot(session),
+                    event.message.id,
+                    event.message.content,
+                    event.message.createdAt
+                )
+            }
         }
 
         this.eventPublisher.emit(event)
+    }
+
+    getSystemEvents(options: ListSystemEventsOptions = {}): StoredSystemEvent[] {
+        return this.overseerEvents.list(options)
+    }
+
+    getSystemEventCount(): number {
+        return this.overseerEvents.count()
+    }
+
+    private getLastAgentPlainText(sessionId: string): string | null {
+        const messages = this.store.messages.getMessages(sessionId, 80)
+        for (let i = messages.length - 1; i >= 0; i -= 1) {
+            const text = extractAssistantPlainText(messages[i].content)
+            if (text) return text
+        }
+        return null
     }
 
     handleSessionAlive(payload: {
@@ -373,6 +409,15 @@ export class SyncEngine {
         const shouldRetryDedup = !isCursorAcp || this.sessionReadyIds.has(payload.sid)
 
         this.sessionCache.handleSessionEnd(payload)
+        const session = this.getSession(payload.sid)
+        if (session) {
+            this.overseerEvents.onSessionEnd(
+                session,
+                payload.time,
+                payload.reason,
+                () => this.getLastAgentPlainText(session.id)
+            )
+        }
         this.eventPublisher.emit({
             type: 'session-ended',
             sessionId: payload.sid,
@@ -518,6 +563,7 @@ export class SyncEngine {
             this.triggerDedupIfNeeded(session.id)
         }
         this.machineCache.expireInactive()
+        this.overseerEvents.checkStaleSessions(this.sessionCache.getSessions())
         // Piggybacked on the inactivity tick; not a logical part of expireInactive
         // but shares its 5s cadence (avoids a second timer).
         this.messageService.releaseMatureScheduledMessages(Date.now())
@@ -561,7 +607,16 @@ export class SyncEngine {
             scheduledAt?: number | null
         }
     ): Promise<void> {
-        await this.messageService.sendMessage(sessionId, payload)
+        const session = this.getSession(sessionId)
+        const flavor = session?.metadata?.flavor ?? 'claude'
+        const text = payload.text && shouldInjectNotifyContract(flavor)
+            ? `${AGENT_NOTIFY_CONTRACT_INLINE_PREFIX}${payload.text}`
+            : payload.text
+
+        await this.messageService.sendMessage(sessionId, {
+            ...payload,
+            text
+        })
         this.sessionCache.markMessageQueued(sessionId)
         this.sessionCache.recordSessionActivity(sessionId, Date.now())
     }

@@ -857,4 +857,21 @@ export class ApiClient {
             body: JSON.stringify({})
         })
     }
+
+    async fetchSystemEvents(params: {
+        limit?: number
+        beforeId?: number
+        sessionId?: string
+        attentionCandidate?: 0 | 1
+        eventType?: string
+    } = {}): Promise<{ total: number; events: unknown[] }> {
+        const query = new URLSearchParams()
+        if (params.limit !== undefined) query.set('limit', String(params.limit))
+        if (params.beforeId !== undefined) query.set('beforeId', String(params.beforeId))
+        if (params.sessionId) query.set('sessionId', params.sessionId)
+        if (params.attentionCandidate !== undefined) query.set('attentionCandidate', String(params.attentionCandidate))
+        if (params.eventType) query.set('eventType', params.eventType)
+        const suffix = query.toString()
+        return await this.request(`/api/system-events${suffix ? `?${suffix}` : ''}`)
+    }
 }

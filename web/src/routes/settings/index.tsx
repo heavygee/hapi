@@ -40,6 +40,7 @@ import { useAppearance, getAppearanceOptions, type AppearancePreference } from '
 import { useThemeColors, type ThemeColorKeyId } from '@/hooks/useThemeColors'
 import { PROTOCOL_VERSION } from '@hapi/protocol'
 import { VoiceRespondsControls, VoiceSoundsControls, VoicePersonaControls, VoiceDiagnosticsControls } from '@/components/settings/VoiceAdvancedControls'
+import { EventsDebugControls } from '@/components/settings/EventsDebugControls'
 
 const locales: { value: Locale; nativeLabel: string }[] = [
     { value: 'en', nativeLabel: 'English' },
@@ -1255,6 +1256,7 @@ export default function SettingsPage() {
                                 {t('settings.voice.advanced.section.title')}
                             </div>
                             <VoiceDiagnosticsControls t={t} voiceBackend={voiceBackend} />
+                            <EventsDebugControls />
                         </div>
                     </div>
 
