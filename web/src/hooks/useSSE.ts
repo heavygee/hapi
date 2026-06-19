@@ -17,7 +17,6 @@ import type {
     SessionPatch,
     SessionResponse,
     SessionSummary,
-    SessionSummaryMetadata,
     SessionsResponse,
     SyncEvent
 } from '@/types/api'
@@ -354,24 +353,8 @@ export function useSSE(options: {
             })
         }
 
-        const toSummaryMetadata = (metadata: NonNullable<SessionPatch['metadata']> | null): SessionSummaryMetadata | null =>
-            metadata ? {
-                name: metadata.name,
-                path: metadata.path,
-                machineId: metadata.machineId ?? undefined,
-                summary: metadata.summary ? { text: metadata.summary.text } : undefined,
-                flavor: metadata.flavor ?? null,
-                worktree: metadata.worktree,
-                agentSessionId: metadata.codexSessionId
-                    ?? metadata.claudeSessionId
-                    ?? metadata.geminiSessionId
-                    ?? metadata.opencodeSessionId
-                    ?? metadata.cursorSessionId
-                    ?? metadata.kimiSessionId
-                    ?? undefined,
-                lifecycleState: metadata.lifecycleState
-            } : null
-
+        // Soup fixup (#847 + #897): codex-usage added toSummaryMetadata for unwrapped
+        // metadata; sse-patch wraps metadata in {version, value}. Envelope path below wins.
         const patchSessionSummary = (sessionId: string, patch: SessionPatch): boolean => {
             let patched = false
             queryClient.setQueryData<SessionsResponse | undefined>(queryKeys.sessions, (previous) => {
@@ -392,9 +375,6 @@ export function useSSE(options: {
 
                 const nextSummary: SessionSummary = {
                     ...current,
-                    metadata: Object.prototype.hasOwnProperty.call(patch, 'metadata')
-                        ? toSummaryMetadata(patch.metadata ?? null)
-                        : current.metadata,
                     active: patch.active ?? current.active,
                     thinking: patch.thinking ?? current.thinking,
                     activeAt: patch.activeAt ?? current.activeAt,
