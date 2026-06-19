@@ -465,3 +465,140 @@ describe('POST /api/voice/qwen-token', () => {
         expect(body).not.toHaveProperty('apiKey')
     })
 })
+
+describe('GET /api/voice/transport/capabilities', () => {
+    test('returns capability map for configured backends', async () => {
+        process.env.ELEVENLABS_API_KEY = 'test-el'
+        process.env.GEMINI_API_KEY = 'test-gm'
+        const app = createApp()
+        const headers = await authHeaders()
+        const res = await app.request('/api/voice/transport/capabilities', { headers })
+        expect(res.status).toBe(200)
+        const body = await res.json() as {
+            backend: string
+            backends: string[]
+            capabilities: Record<string, { stt: boolean; tts: boolean }>
+        }
+        expect(body.backends).toContain('elevenlabs')
+        expect(body.backends).toContain('gemini-live')
+        expect(body.capabilities.elevenlabs).toEqual({ stt: true, tts: true })
+        expect(body.capabilities['gemini-live']).toEqual({ stt: true, tts: true })
+    })
+})
+
+describe('POST /api/voice/stt', () => {
+    test('returns 400 when body invalid', async () => {
+        const app = createApp()
+        const headers = {
+            ...(await authHeaders()),
+            'content-type': 'application/json'
+        }
+        const res = await app.request('/api/voice/stt', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ mimeType: 'audio/wav' })
+        })
+        expect(res.status).toBe(400)
+    })
+
+    test('proxies to ElevenLabs STT for configured backend', async () => {
+        process.env.ELEVENLABS_API_KEY = 'test-key'
+        process.env.VOICE_BACKEND = 'elevenlabs'
+        const app = createApp()
+        const headers = {
+            ...(await authHeaders()),
+            'content-type': 'application/json'
+        }
+
+        const originalFetch = global.fetch
+        // @ts-expect-error test override
+        global.fetch = async (input: RequestInfo | URL) => {
+            const url = String(input)
+            if (url.includes('/speech-to-text')) {
+                return new Response(JSON.stringify({ text: 'dictated text' }), { status: 200 })
+            }
+            return new Response('not found', { status: 404 })
+        }
+
+        const res = await app.request('/api/voice/stt', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+                backend: 'elevenlabs',
+                mimeType: 'audio/webm',
+                audioBase64: Buffer.from('abc').toString('base64')
+            })
+        })
+
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({
+            ok: true,
+            backend: 'elevenlabs',
+            text: 'dictated text'
+        })
+
+        global.fetch = originalFetch
+    })
+})
+
+describe('POST /api/voice/tts', () => {
+    test('returns 400 when text missing', async () => {
+        const app = createApp()
+        const headers = {
+            ...(await authHeaders()),
+            'content-type': 'application/json'
+        }
+        const res = await app.request('/api/voice/tts', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ backend: 'elevenlabs' })
+        })
+        expect(res.status).toBe(400)
+    })
+
+    test('proxies to ElevenLabs TTS for configured backend', async () => {
+        process.env.ELEVENLABS_API_KEY = 'test-key'
+        const app = createApp()
+        const headers = {
+            ...(await authHeaders()),
+            'content-type': 'application/json'
+        }
+
+        const originalFetch = global.fetch
+        // @ts-expect-error test override
+        global.fetch = async (input: RequestInfo | URL) => {
+            const url = String(input)
+            if (url.includes('/text-to-speech/')) {
+                return new Response(Buffer.from('mp3-bytes'), {
+                    status: 200,
+                    headers: { 'Content-Type': 'audio/mpeg' }
+                })
+            }
+            return new Response('not found', { status: 404 })
+        }
+
+        const res = await app.request('/api/voice/tts', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+                backend: 'elevenlabs',
+                text: 'Read this aloud',
+                voiceId: 'voice_123'
+            })
+        })
+
+        expect(res.status).toBe(200)
+        const body = await res.json() as {
+            ok: boolean
+            backend: string
+            mimeType: string
+            audioBase64: string
+        }
+        expect(body.ok).toBe(true)
+        expect(body.backend).toBe('elevenlabs')
+        expect(body.mimeType).toBe('audio/mpeg')
+        expect(Buffer.from(body.audioBase64, 'base64').toString()).toBe('mp3-bytes')
+
+        global.fetch = originalFetch
+    })
+})

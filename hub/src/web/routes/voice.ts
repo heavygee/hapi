@@ -6,9 +6,22 @@ import {
     VOICE_AGENT_NAME,
     buildVoiceAgentConfig,
     listConfiguredVoiceBackends,
-    resolveHubVoiceBackend
+    resolveHubVoiceBackend,
+    type VoiceBackendType
 } from '@hapi/protocol/voice'
-import type { VoiceBackendType } from '@hapi/protocol/voice'
+import {
+    buildVoiceTransportCapabilitiesResponse,
+    resolveVoiceTransportBackend,
+    voiceTransportSupports
+} from '@hapi/protocol/voiceTransport'
+import {
+    createVoiceTransportContext,
+    decodeVoiceSttAudio,
+    encodeVoiceTtsAudio,
+    runVoiceStt,
+    runVoiceTts,
+    type VoiceTransportEnv
+} from '../../voice/transport'
 
 function buildVoiceWsUrl(base: string, pathname: string): string {
     const url = new URL(base)
@@ -33,6 +46,36 @@ const telemetryEventSchema = z.object({
     language: z.string().optional(),
     details: z.record(z.string(), z.unknown()).optional()
 })
+
+const voiceBackendSchema = z.enum(['elevenlabs', 'gemini-live', 'qwen-realtime'])
+
+const voiceSttRequestSchema = z.object({
+    backend: voiceBackendSchema.optional(),
+    mimeType: z.string().min(1),
+    audioBase64: z.string().min(1),
+    language: z.string().optional()
+})
+
+const voiceTtsRequestSchema = z.object({
+    backend: voiceBackendSchema.optional(),
+    text: z.string().min(1),
+    voiceId: z.string().optional(),
+    language: z.string().optional()
+})
+
+function voiceTransportEnv(): VoiceTransportEnv {
+    return process.env as VoiceTransportEnv
+}
+
+function resolveVoiceRouteBackend(
+    requested: VoiceBackendType | undefined,
+    preference?: string | null
+): VoiceBackendType {
+    if (requested) {
+        return requested
+    }
+    return resolveVoiceTransportBackend(process.env, preference)
+}
 
 // Cache for auto-created agent IDs (keyed by API key hash)
 const agentIdCache = new Map<string, string>()
@@ -252,6 +295,75 @@ export function createVoiceRoutes(): Hono<WebAppEnv> {
         const backends = listConfiguredVoiceBackends(process.env)
         const backend = resolveHubVoiceBackend(process.env)
         return c.json({ backend, backends })
+    })
+
+    // Standalone STT/TTS capability map for configured backends (#29)
+    app.get('/voice/transport/capabilities', (c) => {
+        return c.json(buildVoiceTransportCapabilitiesResponse(process.env))
+    })
+
+    app.post('/voice/stt', async (c) => {
+        const json = await c.req.json().catch(() => null)
+        const parsed = voiceSttRequestSchema.safeParse(json ?? {})
+        if (!parsed.success) {
+            return c.json({ ok: false, error: 'Invalid STT request body' }, 400)
+        }
+
+        const backend = resolveVoiceRouteBackend(parsed.data.backend)
+        if (!voiceTransportSupports(backend, 'stt')) {
+            return c.json({ ok: false, error: `${backend} STT is not available` }, 501)
+        }
+
+        try {
+            const ctx = createVoiceTransportContext(voiceTransportEnv())
+            const result = await runVoiceStt(ctx, backend, {
+                audio: decodeVoiceSttAudio(parsed.data.audioBase64),
+                mimeType: parsed.data.mimeType,
+                language: parsed.data.language
+            })
+            return c.json({
+                ok: true,
+                backend,
+                text: result.text,
+                language: result.language
+            })
+        } catch (error) {
+            const status = (error as { status?: number }).status ?? 502
+            const message = error instanceof Error ? error.message : 'STT failed'
+            return c.json({ ok: false, error: message }, status as 400 | 501 | 502)
+        }
+    })
+
+    app.post('/voice/tts', async (c) => {
+        const json = await c.req.json().catch(() => null)
+        const parsed = voiceTtsRequestSchema.safeParse(json ?? {})
+        if (!parsed.success) {
+            return c.json({ ok: false, error: 'Invalid TTS request body' }, 400)
+        }
+
+        const backend = resolveVoiceRouteBackend(parsed.data.backend)
+        if (!voiceTransportSupports(backend, 'tts')) {
+            return c.json({ ok: false, error: `${backend} TTS is not available` }, 501)
+        }
+
+        try {
+            const ctx = createVoiceTransportContext(voiceTransportEnv())
+            const result = await runVoiceTts(ctx, backend, {
+                text: parsed.data.text,
+                voiceId: parsed.data.voiceId ?? '',
+                language: parsed.data.language
+            })
+            return c.json({
+                ok: true,
+                backend,
+                mimeType: result.mimeType,
+                audioBase64: encodeVoiceTtsAudio(result.audio)
+            })
+        } catch (error) {
+            const status = (error as { status?: number }).status ?? 502
+            const message = error instanceof Error ? error.message : 'TTS failed'
+            return c.json({ ok: false, error: message }, status as 400 | 501 | 502)
+        }
     })
 
     // Get Gemini API key for Gemini Live voice sessions

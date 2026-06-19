@@ -17,6 +17,7 @@
         "./sessionExport": "./src/sessionExport.ts",
         "./types": "./src/types.ts",
         "./voice": "./src/voice.ts",
+        "./voiceTransport": "./src/voiceTransport.ts",
         "./voicePickerCatalog": "./src/voicePickerCatalog.ts",
         "./voice-personality": "./src/voicePersonality.ts"
     },

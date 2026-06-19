@@ -253,3 +253,89 @@ export async function fetchGeminiToken(api: ApiClient): Promise<GeminiTokenRespo
         }
     }
 }
+
+// --- Standalone STT/TTS transport (#29) ---
+
+export interface VoiceTransportCapabilitiesResponse {
+    backend: VoiceBackendType
+    backends: VoiceBackendType[]
+    capabilities: Partial<Record<VoiceBackendType, { stt: boolean; tts: boolean }>>
+}
+
+export interface VoiceSttApiResponse {
+    ok: boolean
+    backend?: VoiceBackendType
+    text?: string
+    language?: string
+    error?: string
+}
+
+export interface VoiceTtsApiResponse {
+    ok: boolean
+    backend?: VoiceBackendType
+    mimeType?: string
+    audioBase64?: string
+    error?: string
+}
+
+export async function fetchVoiceTransportCapabilities(
+    api: ApiClient
+): Promise<VoiceTransportCapabilitiesResponse> {
+    const result = await api.fetchVoiceTransportCapabilities()
+    const backend = result.backend as VoiceBackendType
+    const backends = result.backends.filter(isVoiceBackendType)
+    const capabilities = Object.fromEntries(
+        Object.entries(result.capabilities).filter(([key]) => isVoiceBackendType(key))
+    ) as VoiceTransportCapabilitiesResponse['capabilities']
+    return { backend, backends, capabilities }
+}
+
+export async function transcribeVoice(
+    api: ApiClient,
+    body: {
+        backend?: VoiceBackendType
+        mimeType: string
+        audioBase64: string
+        language?: string
+    }
+): Promise<VoiceSttApiResponse> {
+    try {
+        const result = await api.transcribeVoice(body)
+        return {
+            ...result,
+            backend: result.backend && isVoiceBackendType(result.backend)
+                ? result.backend
+                : undefined
+        }
+    } catch (error) {
+        return {
+            ok: false,
+            error: error instanceof Error ? error.message : 'Network error'
+        }
+    }
+}
+
+export async function synthesizeVoice(
+    api: ApiClient,
+    body: {
+        backend?: VoiceBackendType
+        text: string
+        voiceId?: string
+        language?: string
+    }
+): Promise<VoiceTtsApiResponse> {
+    try {
+        const result = await api.synthesizeVoice(body)
+        return {
+            ...result,
+            backend: result.backend && isVoiceBackendType(result.backend)
+                ? result.backend
+                : undefined
+        }
+    } catch (error) {
+        return {
+            ok: false,
+            error: error instanceof Error ? error.message : 'Network error'
+        }
+    }
+}

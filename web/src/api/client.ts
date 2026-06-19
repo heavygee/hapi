@@ -741,4 +741,48 @@ export class ApiClient {
             body: JSON.stringify({})
         })
     }
+
+    async fetchVoiceTransportCapabilities(): Promise<{
+        backend: string
+        backends: string[]
+        capabilities: Record<string, { stt: boolean; tts: boolean }>
+    }> {
+        return await this.request('/api/voice/transport/capabilities')
+    }
+
+    async transcribeVoice(body: {
+        backend?: string
+        mimeType: string
+        audioBase64: string
+        language?: string
+    }): Promise<{
+        ok: boolean
+        backend?: string
+        text?: string
+        language?: string
+        error?: string
+    }> {
+        return await this.request('/api/voice/stt', {
+            method: 'POST',
+            body: JSON.stringify(body)
+        })
+    }
+
+    async synthesizeVoice(body: {
+        backend?: string
+        text: string
+        voiceId?: string
+        language?: string
+    }): Promise<{
+        ok: boolean
+        backend?: string
+        mimeType?: string
+        audioBase64?: string
+        error?: string
+    }> {
+        return await this.request('/api/voice/tts', {
+            method: 'POST',
+            body: JSON.stringify(body)
+        })
+    }
 }
