@@ -244,28 +244,39 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           logger.debug(`[RUNNER RUN] Resolved session awaiter for PID ${pid}`);
         }
       } else if (!existingSession) {
-        // No tracked session for this PID. Two possibilities:
+        // No tracked session for this PID. Three possibilities:
         //  1. The child was spawned externally from a terminal (legitimate).
         //  2. The child was runner-spawned but already had its tracking
         //     entry removed because its webhook arrived after the timeout
-        //     (orphaned / ghost-session case).
+        //     (orphaned / same-runner-instance ghost-session case). The
+        //     timeout handler should have already tree-killed the PID, so
+        //     the process is dead by now.
+        //  3. The child was runner-spawned by a PRIOR runner instance and
+        //     survived a runner restart because the runner systemd unit
+        //     uses `KillMode=process` (per docs/guide/installation.md
+        //     installer; closes #915 / closes #929). The PID is alive,
+        //     legitimately wants to be re-attached.
         //
-        // Differentiate via the webhook's own `startedBy` field: genuine
-        // terminal-launched children report `startedBy: 'terminal'`, so
-        // anything claiming `'runner'` here must be the second case and
-        // should be ignored + terminated instead of silently promoted.
+        // Differentiate cases 2 and 3 via process liveness: dead PID is
+        // case 2 (no-op, the timeout already handled it); alive PID is
+        // case 3 (adopt and re-attach).
         if (sessionMetadata.startedBy === 'runner') {
+          if (isProcessAlive(pid)) {
+            const adoptedSession: TrackedSession = {
+              startedBy: 'runner',
+              happySessionId: sessionId,
+              happySessionMetadataFromLocalWebhook: sessionMetadata,
+              pid
+            };
+            pidToTrackedSession.set(pid, adoptedSession);
+            logger.debug(
+              `[RUNNER RUN] Adopting orphaned runner-spawned session ${sessionId} (PID ${pid}). Likely a survivor of a prior runner restart.`
+            );
+            return;
+          }
           logger.debug(
-            `[RUNNER RUN] Ignoring late webhook from orphaned runner-spawned PID ${pid} (session ${sessionId}). Terminating child.`
+            `[RUNNER RUN] Ignoring late webhook from dead orphaned runner-spawned PID ${pid} (session ${sessionId}). Process already gone.`
           );
-          // Use killProcess (SIGTERM → SIGKILL escalation) rather than a
-          // bare process.kill() so the orphan is reliably reaped even if
-          // it ignores SIGTERM.  We don't have a ChildProcess reference
-          // here (tracking entry was already removed by the timeout
-          // handler), so tree-kill via killProcessByChildProcess is not
-          // available — but the timeout handler should have already
-          // tree-killed the process group; this is defence-in-depth.
-          void killProcess(pid);
           return;
         }
 
