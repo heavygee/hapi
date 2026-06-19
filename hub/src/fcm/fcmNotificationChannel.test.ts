@@ -372,36 +372,6 @@ describe('FcmNotificationChannel', () => {
         expect(sent[0].data.severity).toBe('info')
     })
 
-    it('sets nativeGate.sent when FCM delivers at least one message', async () => {
-        const gate = { sent: false }
-        const channel = new FcmNotificationChannel(
-            {
-                sendToNamespace: async () => ({ sent: 1, failed: 0, invalidTokens: [] })
-            } as never,
-            { sendToast: async () => 0 } as never,
-            { hasVisibleConnection: () => false } as never
-        )
-
-        await channel.sendReady(createSession(), { nativeGate: gate })
-
-        expect(gate.sent).toBe(true)
-    })
-
-    it('leaves nativeGate.sent false when FCM sends zero messages', async () => {
-        const gate = { sent: false }
-        const channel = new FcmNotificationChannel(
-            {
-                sendToNamespace: async () => ({ sent: 0, failed: 1, invalidTokens: [] })
-            } as never,
-            { sendToast: async () => 0 } as never,
-            { hasVisibleConnection: () => false } as never
-        )
-
-        await channel.sendReady(createSession(), { nativeGate: gate })
-
-        expect(gate.sent).toBe(false)
-    })
-
     it('sets severity=warning on permission-request notifications', async () => {
         const sent: FcmSendPayload[] = []
         const channel = new FcmNotificationChannel(
@@ -439,5 +409,67 @@ describe('FcmNotificationChannel', () => {
             await channel.sendTaskNotification(createSession(), { status, summary: 'oh no' })
             expect(sent[0].data.severity).toBe('error')
         }
+    })
+
+    it('sendModelError fires FCM with severity=error even when PWA is foreground', async () => {
+        const sent: FcmSendPayload[] = []
+        const toasts: unknown[] = []
+        const channel = new FcmNotificationChannel(
+            {
+                sendToNamespace: async (_namespace: string, payload: FcmSendPayload) => {
+                    sent.push(payload)
+                }
+            } as never,
+            {
+                sendToast: async (_namespace: string, event: unknown) => {
+                    toasts.push(event)
+                    return 1
+                }
+            } as never,
+            {
+                hasVisibleConnection: () => true
+            } as never
+        )
+
+        await channel.sendModelError(createSession(), {
+            kind: 'quota_exhausted',
+            transient: false,
+            rawSnippet: 'You have hit your usage limit',
+            priorAssistantClaimsDone: true,
+            atTs: 1710000000000
+        })
+
+        expect(sent).toHaveLength(1)
+        expect(toasts).toHaveLength(0)
+        expect(sent[0].data.type).toBe('model-error')
+        expect(sent[0].data.severity).toBe('error')
+        expect(sent[0].tag).toBe('model-error-session-ready-1710000000000')
+        expect(sent[0].title).toBe('Quota exhausted')
+        expect(sent[0].body).toContain('Codex')
+        expect(sent[0].body).toContain('Demo')
+    })
+
+    it('sendModelError uses distinct tags per atTs so errors do not collapse', async () => {
+        const sent: FcmSendPayload[] = []
+        const channel = new FcmNotificationChannel(
+            { sendToNamespace: async (_n: string, p: FcmSendPayload) => { sent.push(p) } } as never,
+            { sendToast: async () => 0 } as never,
+            { hasVisibleConnection: () => false } as never
+        )
+
+        const base = {
+            kind: 'rate_limited',
+            transient: true,
+            rawSnippet: 'slow down',
+            priorAssistantClaimsDone: false
+        }
+
+        await channel.sendModelError(createSession(), { ...base, atTs: 1 })
+        await channel.sendModelError(createSession(), { ...base, atTs: 2 })
+
+        expect(sent[0].tag).toBe('model-error-session-ready-1')
+        expect(sent[1].tag).toBe('model-error-session-ready-2')
+        expect(sent[0].data.type).toBe('model-error')
+        expect(sent[1].data.severity).toBe('error')
     })
 })

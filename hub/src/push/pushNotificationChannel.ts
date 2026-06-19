@@ -1,7 +1,12 @@
 import type { Session } from '../sync/syncEngine'
-import type { NotificationChannel, TaskNotification } from '../notifications/notificationTypes'
+import type {
+    ModelErrorNotification,
+    NotificationChannel,
+    TaskNotification
+} from '../notifications/notificationTypes'
 import type { NotificationSendContext } from '../notifications/notificationSendContext'
 import { getAgentName, getSessionName } from '../notifications/sessionInfo'
+import { formatModelErrorBody, formatModelErrorTitle } from '../notifications/modelErrorCopy'
 import type { SSEManager } from '../sse/sseManager'
 import type { VisibilityTracker } from '../visibility/visibilityTracker'
 import type { PushPayload, PushService } from './pushService'
@@ -98,6 +103,31 @@ export class PushNotificationChannel implements NotificationChannel {
         }
 
         await this.deliverWebOrToast(session, payload, ctx, 'task')
+    }
+
+    async sendModelError(session: Session, notification: ModelErrorNotification): Promise<void> {
+        if (!session.active) {
+            return
+        }
+
+        const agentName = getAgentName(session)
+        const sessionName = getSessionName(session)
+        const title = formatModelErrorTitle(notification.kind)
+        const body = formatModelErrorBody(notification, { agentName, sessionName })
+
+        const payload: PushPayload = {
+            title,
+            body,
+            tag: `model-error-${session.id}-${notification.atTs}`,
+            data: {
+                type: 'model-error',
+                sessionId: session.id,
+                url: this.buildSessionPath(session.id)
+            }
+        }
+
+        // Always web-push for model errors — banner covers foreground; push covers background.
+        await this.pushService.sendToNamespace(session.namespace, payload)
     }
 
     private async deliverWebOrToast(
