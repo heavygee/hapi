@@ -14,7 +14,6 @@ import { PushNotificationChannel } from './push/pushNotificationChannel'
 import { FcmService } from './fcm/fcmService'
 import { FcmNotificationChannel } from './fcm/fcmNotificationChannel'
 import { resolveFcmConfig } from './fcm/fcmConfig'
-import { buildNativeFallbackProbe } from './fcm/nativeFallbackProbe'
 import { VisibilityTracker } from './visibility/visibilityTracker'
 import { TunnelManager } from './tunnel'
 import { waitForTunnelTlsReady } from './tunnel/tlsGate'
@@ -212,26 +211,12 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         ? new FcmService(fcmConfig.projectId, fcmConfig.serviceAccount, store)
         : null
 
-    // Only suppress web-push when a native FCM channel is actually live
-    // AND a device is registered for the namespace AND the FCM pipeline is
-    // currently healthy. The fcmConfig gate is critical: without it, stale
-    // device rows from a prior FCM-enabled boot would silently drop
-    // web-push on a hub started without the service-account env var
-    // (notifications would vanish entirely). See `buildNativeFallbackProbe`
-    // for the full contract.
-    const nativeFallbackProbe = buildNativeFallbackProbe(
-        store,
-        fcmConfig,
-        fcmService ?? undefined
-    )
-
     const notificationChannels: NotificationChannel[] = [
         new PushNotificationChannel(
             pushService,
             sseManager,
             visibilityTracker,
-            config.publicUrl,
-            nativeFallbackProbe
+            config.publicUrl
         )
     ]
 
