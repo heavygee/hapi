@@ -229,26 +229,11 @@ export function countSystemEvents(db: Database): number {
     return row.count
 }
 
-/** Reverse migration helper for v11 -> v10 (used in tests + fork db-prep). */
-export function downgradeEventsSchemaV11ToV10(db: Database): void {
-    db.exec(`
-        DROP TRIGGER IF EXISTS events_fts_delete;
-        DROP TRIGGER IF EXISTS events_fts_update;
-        DROP TRIGGER IF EXISTS events_fts_insert;
-        DROP TABLE IF EXISTS events_fts;
-        DROP INDEX IF EXISTS idx_events_idempotency_key;
-        DROP INDEX IF EXISTS idx_event_links_to;
-        DROP INDEX IF EXISTS idx_event_links_from;
-        DROP TABLE IF EXISTS event_links;
-        DROP INDEX IF EXISTS idx_events_dedupe_key;
-        DROP INDEX IF EXISTS idx_events_type_ts;
-        DROP INDEX IF EXISTS idx_events_session_ts;
-        DROP TABLE IF EXISTS events;
-        PRAGMA user_version = 10;
-    `)
-}
-
-export function createEventsSchemaV11(db: Database): void {
+/**
+ * Idempotent Overseer events DDL — runs on every Store init, NOT gated on SCHEMA_VERSION.
+ * Additive Overseer tables must never own a version step (soup composability).
+ */
+export function ensureOverseerEventsSchema(db: Database): void {
     db.exec(`
         CREATE TABLE IF NOT EXISTS events (
             id INTEGER PRIMARY KEY,
@@ -296,22 +281,53 @@ export function createEventsSchemaV11(db: Database): void {
             payload_json,
             tokenize = 'porter'
         );
+    `)
 
-        CREATE TRIGGER IF NOT EXISTS events_fts_insert AFTER INSERT ON events BEGIN
+    // Recreate triggers every boot so a live DB with dropped/broken triggers self-heals.
+    db.exec(`
+        DROP TRIGGER IF EXISTS events_fts_insert;
+        DROP TRIGGER IF EXISTS events_fts_delete;
+        DROP TRIGGER IF EXISTS events_fts_update;
+
+        CREATE TRIGGER events_fts_insert AFTER INSERT ON events BEGIN
             INSERT INTO events_fts(rowid, summary, tags, payload_json)
             VALUES (new.id, new.summary, COALESCE(new.tags, ''), COALESCE(new.payload_json, ''));
         END;
 
-        CREATE TRIGGER IF NOT EXISTS events_fts_delete AFTER DELETE ON events BEGIN
-            INSERT INTO events_fts(events_fts, rowid, summary, tags, payload_json)
-            VALUES ('delete', old.id, old.summary, COALESCE(old.tags, ''), COALESCE(old.payload_json, ''));
+        CREATE TRIGGER events_fts_delete AFTER DELETE ON events BEGIN
+            DELETE FROM events_fts WHERE rowid = old.id;
         END;
 
-        CREATE TRIGGER IF NOT EXISTS events_fts_update AFTER UPDATE ON events BEGIN
-            INSERT INTO events_fts(events_fts, rowid, summary, tags, payload_json)
-            VALUES ('delete', old.id, old.summary, COALESCE(old.tags, ''), COALESCE(old.payload_json, ''));
+        CREATE TRIGGER events_fts_update AFTER UPDATE ON events BEGIN
+            DELETE FROM events_fts WHERE rowid = old.id;
             INSERT INTO events_fts(rowid, summary, tags, payload_json)
             VALUES (new.id, new.summary, COALESCE(new.tags, ''), COALESCE(new.payload_json, ''));
         END;
     `)
+}
+
+/** @deprecated use ensureOverseerEventsSchema */
+export const createEventsSchemaV11 = ensureOverseerEventsSchema
+
+/** Drop Overseer events tables (db-prep / layer removal). Does NOT change user_version. */
+export function dropOverseerEventsSchema(db: Database): void {
+    db.exec(`
+        DROP TRIGGER IF EXISTS events_fts_delete;
+        DROP TRIGGER IF EXISTS events_fts_update;
+        DROP TRIGGER IF EXISTS events_fts_insert;
+        DROP TABLE IF EXISTS events_fts;
+        DROP INDEX IF EXISTS idx_events_idempotency_key;
+        DROP INDEX IF EXISTS idx_event_links_to;
+        DROP INDEX IF EXISTS idx_event_links_from;
+        DROP TABLE IF EXISTS event_links;
+        DROP INDEX IF EXISTS idx_events_dedupe_key;
+        DROP INDEX IF EXISTS idx_events_type_ts;
+        DROP INDEX IF EXISTS idx_events_session_ts;
+        DROP TABLE IF EXISTS events;
+    `)
+}
+
+/** @deprecated use dropOverseerEventsSchema — events no longer own SCHEMA_VERSION */
+export function downgradeEventsSchemaV11ToV10(db: Database): void {
+    dropOverseerEventsSchema(db)
 }
