@@ -90,20 +90,20 @@ describe('PushNotificationChannel', () => {
             {
                 hasVisibleConnection: () => false
             } as never,
-            '',
-            (namespace: string) => namespace === 'default'
+            ''
         )
 
+        const nativeCtx = { nativeGate: { sent: true } }
         await channel.sendPermissionRequest(createSession({
             agentState: {
                 requests: { 'req-1': { tool: 'Bash', arguments: {} } }
             }
-        }))
-        await channel.sendReady(createSession())
+        }), nativeCtx)
+        await channel.sendReady(createSession(), nativeCtx)
         await channel.sendTaskNotification(createSession(), {
             status: 'completed',
             summary: 'Done'
-        })
+        }, nativeCtx)
 
         // Native companion handles all three; web-push must stay quiet to
         // avoid double-notifying the operator on phone+watch+browser.
@@ -124,8 +124,7 @@ describe('PushNotificationChannel', () => {
             {
                 hasVisibleConnection: () => false
             } as never,
-            '',
-            () => false
+            ''
         )
 
         await channel.sendReady(createSession())
@@ -151,18 +150,18 @@ describe('PushNotificationChannel', () => {
             {
                 hasVisibleConnection: () => true
             } as never,
-            '',
-            (namespace: string) => namespace === 'default'
+            ''
         )
 
-        await channel.sendReady(createSession())
+        const nativeCtx = { nativeGate: { sent: true } }
+        await channel.sendReady(createSession(), nativeCtx)
         await channel.sendPermissionRequest(createSession({
             agentState: { requests: { 'r-1': { tool: 'Bash', arguments: {} } } }
-        }))
+        }), nativeCtx)
         await channel.sendTaskNotification(createSession(), {
             status: 'completed',
             summary: 'Done'
-        })
+        }, nativeCtx)
 
         // Even when the PWA is foreground/visible, the operator asked to mute
         // it - the in-page React toast and the OS web-push are both dropped
