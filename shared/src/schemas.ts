@@ -122,15 +122,22 @@ export const MetadataSchema = z.object({
     flavor: z.string().nullish(),
     capabilities: SessionCapabilitiesSchema.optional(),
     worktree: WorktreeMetadataSchema.optional(),
-    // Cached Pi model list — written by CLI, read by web (inactive session fallback).
-    // Minimal shape: each entry must have modelId; other fields (provider, name, etc.) pass through.
     piAvailableModels: z.array(z.object({ modelId: z.string() }).passthrough()).optional(),
     // Pi-selected model with provider identity. The legacy `session.model`
     // field stores only modelId (shared across all flavors); this preserves
     // the provider so web can resolve the exact model when two providers
     // share a modelId.
     piSelectedModel: z.object({ provider: z.string(), modelId: z.string() }).nullable().optional(),
-    codexUsage: CodexUsageSchema.optional()
+    codexUsage: CodexUsageSchema.optional(),
+    lastModelError: z.object({
+        kind: z.string(),
+        transient: z.boolean(),
+        rawSnippet: z.string(),
+        atTs: z.number(),
+        priorAssistantClaimsDone: z.boolean(),
+        retriedAndFailed: z.boolean().optional(),
+        acknowledgedAt: z.number().optional()
+    }).optional()
 })
 
 export type Metadata = z.infer<typeof MetadataSchema>
