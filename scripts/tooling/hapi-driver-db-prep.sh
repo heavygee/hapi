@@ -4,18 +4,27 @@
 # Operator-fork soup helper (not used by upstream CI). See driver-soup.md.
 #
 # Known downgrade transitions (extend as new schema-bumping layers are added):
-#   v10 -> v9 : DROP TABLE fcm_devices + its 2 indexes
-#   v11 -> v10: DROP events/event_links/FTS5 (feat/overseer-events-substrate #22)
+#   v10 -> v9  : DROP fcm_devices + indexes
+#   v11 -> v10 : DROP soup v11 tables (fcm_devices, session_scratchlist) + PRAGMA 10
+#
+# Overseer events tables are NOT SCHEMA_VERSION-gated. When swinging away from
+# feat/overseer-events-substrate only (staying on soup v11), run drop-overseer-events.
 
 set -euo pipefail
 
 DRY_RUN=0
 TARGET=""
+DROP_OVERSEER_EVENTS=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run) DRY_RUN=1; shift ;;
-        -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+        --drop-overseer-events) DROP_OVERSEER_EVENTS=1; shift ;;
+        -h|--help)
+            sed -n '2,14p' "$0"
+            echo "  --drop-overseer-events  drop events/event_links/FTS only (no user_version change)"
+            exit 0
+            ;;
         *)
             if [[ -z "$TARGET" ]]; then TARGET="$1"; shift
             else echo "Unexpected arg: $1" >&2; exit 2; fi
@@ -23,7 +32,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-[[ -n "$TARGET" ]] || { echo "Usage: hapi-driver-db-prep.sh <target-worktree>" >&2; exit 2; }
+[[ -n "$TARGET" ]] || { echo "Usage: hapi-driver-db-prep.sh [--drop-overseer-events] <target-worktree>" >&2; exit 2; }
 TARGET="$(realpath "$TARGET")"
 
 PRIMARY="${HAPI_PRIMARY:-$HOME/coding/hapi}"
@@ -56,7 +65,9 @@ echo "  target_schema = $target_schema  (from $TARGET/hub/src/store/index.ts)"
 echo "  base_schema   = $base_schema  (from upstream/main)"
 echo "  live_schema   = $live_schema  (from $DB_PATH)"
 
-if [[ "$live_schema" -eq "$target_schema" ]]; then
+if [[ "$DROP_OVERSEER_EVENTS" -eq 1 ]]; then
+    decision="drop-overseer-events -- remove events substrate only (user_version unchanged)"
+elif [[ "$live_schema" -eq "$target_schema" ]]; then
     decision="match -- no migration needed"
 elif [[ "$live_schema" -lt "$target_schema" ]]; then
     decision="forward -- hub will auto-migrate $live_schema -> $target_schema via stepMigrations on boot"
@@ -82,6 +93,26 @@ if [[ "${HAPI_DB_PREP_NO_BACKUP:-}" != "1" ]]; then
     cp -a "$DB_PATH" "$BACKUP"
 fi
 
+apply_drop_overseer_events() {
+    echo "  dropping Overseer events tables (no user_version change)"
+    sqlite3 "$DB_PATH" <<'SQL'
+BEGIN IMMEDIATE;
+DROP TRIGGER IF EXISTS events_fts_delete;
+DROP TRIGGER IF EXISTS events_fts_update;
+DROP TRIGGER IF EXISTS events_fts_insert;
+DROP TABLE IF EXISTS events_fts;
+DROP INDEX IF EXISTS idx_events_idempotency_key;
+DROP INDEX IF EXISTS idx_event_links_to;
+DROP INDEX IF EXISTS idx_event_links_from;
+DROP TABLE IF EXISTS event_links;
+DROP INDEX IF EXISTS idx_events_dedupe_key;
+DROP INDEX IF EXISTS idx_events_type_ts;
+DROP INDEX IF EXISTS idx_events_session_ts;
+DROP TABLE IF EXISTS events;
+COMMIT;
+SQL
+}
+
 apply_downgrade_step() {
     local from="$1" to="$2"
     case "${from}_to_${to}" in
@@ -97,7 +128,7 @@ COMMIT;
 SQL
             ;;
         11_to_10)
-            echo "  applying v11 -> v10 downgrade: DROP events substrate + FTS5"
+            echo "  applying v11 -> v10 downgrade: DROP soup v11 (fcm + scratchlist + overseer events)"
             sqlite3 "$DB_PATH" <<'SQL'
 BEGIN IMMEDIATE;
 DROP TRIGGER IF EXISTS events_fts_delete;
@@ -112,6 +143,11 @@ DROP INDEX IF EXISTS idx_events_dedupe_key;
 DROP INDEX IF EXISTS idx_events_type_ts;
 DROP INDEX IF EXISTS idx_events_session_ts;
 DROP TABLE IF EXISTS events;
+DROP INDEX IF EXISTS idx_session_scratchlist_session_created;
+DROP TABLE IF EXISTS session_scratchlist;
+DROP INDEX IF EXISTS idx_fcm_devices_token;
+DROP INDEX IF EXISTS idx_fcm_devices_namespace;
+DROP TABLE IF EXISTS fcm_devices;
 PRAGMA user_version = 10;
 COMMIT;
 SQL
@@ -124,6 +160,13 @@ SQL
             ;;
     esac
 }
+
+if [[ "$DROP_OVERSEER_EVENTS" -eq 1 ]]; then
+    apply_drop_overseer_events || exit 1
+    echo "  overseer events dropped; user_version still $(sqlite3 "$DB_PATH" "PRAGMA user_version;")"
+    echo "  db-prep complete; safe to start hub on $TARGET"
+    exit 0
+fi
 
 if [[ "$live_schema" -gt "$target_schema" ]]; then
     cur="$live_schema"

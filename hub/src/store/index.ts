@@ -10,7 +10,7 @@ import { ScratchlistStore } from './scratchlistStore'
 import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
 import { EventStore } from './eventStore'
-import { createEventsSchemaV11 } from './events'
+import { ensureOverseerEventsSchema } from './events'
 
 export type {
     StoredMachine,
@@ -41,7 +41,9 @@ const REQUIRED_TABLES = [
     'users',
     'push_subscriptions',
     'fcm_devices',
-    'session_scratchlist'
+    'session_scratchlist',
+    'events',
+    'event_links'
 ] as const
 
 export class Store {
@@ -162,11 +164,13 @@ export class Store {
                 // a partially-built legacy DB may not have yet.
                 this.createSchema()
                 this.setUserVersion(SCHEMA_VERSION)
+                this.finishSchemaInit()
                 return
             }
 
             this.createSchema()
             this.setUserVersion(SCHEMA_VERSION)
+            this.finishSchemaInit()
             return
         }
 
@@ -178,6 +182,7 @@ export class Store {
                 step()
             }
             this.setUserVersion(SCHEMA_VERSION)
+            this.finishSchemaInit()
             return
         }
 
@@ -185,6 +190,12 @@ export class Store {
             throw this.buildSchemaMismatchError(currentVersion)
         }
 
+        this.finishSchemaInit()
+    }
+
+    /** Idempotent Overseer self-heal + loud missing-table check on every boot path. */
+    private finishSchemaInit(): void {
+        ensureOverseerEventsSchema(this.db)
         this.assertRequiredTablesPresent()
     }
 
@@ -296,70 +307,6 @@ export class Store {
             );
             CREATE INDEX IF NOT EXISTS idx_session_scratchlist_session_created
                 ON session_scratchlist(session_id, created_at DESC);
-
-            CREATE TABLE IF NOT EXISTS events (
-                id INTEGER PRIMARY KEY,
-                ts INTEGER NOT NULL,
-                source_kind TEXT NOT NULL,
-                source_ref TEXT,
-                sink_kind TEXT,
-                sink_ref TEXT,
-                event_type TEXT NOT NULL,
-                attention_candidate INTEGER NOT NULL DEFAULT 0,
-                operator_action_required INTEGER NOT NULL DEFAULT 0,
-                risk_detected INTEGER NOT NULL DEFAULT 0,
-                summary TEXT NOT NULL,
-                payload_json TEXT,
-                artifact_refs TEXT,
-                tags TEXT,
-                related_session_id TEXT REFERENCES sessions(id),
-                related_event_id INTEGER REFERENCES events(id),
-                dedupe_key TEXT,
-                expires_at INTEGER,
-                provenance TEXT,
-                idempotency_key TEXT,
-                confidence REAL,
-                severity INTEGER
-            );
-            CREATE INDEX IF NOT EXISTS idx_events_session_ts ON events(related_session_id, ts DESC);
-            CREATE INDEX IF NOT EXISTS idx_events_type_ts ON events(event_type, ts DESC);
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_events_dedupe_key ON events(dedupe_key) WHERE dedupe_key IS NOT NULL;
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_events_idempotency_key ON events(idempotency_key) WHERE idempotency_key IS NOT NULL;
-
-            CREATE TABLE IF NOT EXISTS event_links (
-                id TEXT PRIMARY KEY,
-                from_event_id INTEGER NOT NULL REFERENCES events(id),
-                to_event_id INTEGER NOT NULL REFERENCES events(id),
-                relation_type TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
-                metadata_json TEXT
-            );
-            CREATE INDEX IF NOT EXISTS idx_event_links_from ON event_links(from_event_id);
-            CREATE INDEX IF NOT EXISTS idx_event_links_to ON event_links(to_event_id);
-
-            CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
-                summary,
-                tags,
-                payload_json,
-                tokenize = 'porter'
-            );
-
-            CREATE TRIGGER IF NOT EXISTS events_fts_insert AFTER INSERT ON events BEGIN
-                INSERT INTO events_fts(rowid, summary, tags, payload_json)
-                VALUES (new.id, new.summary, COALESCE(new.tags, ''), COALESCE(new.payload_json, ''));
-            END;
-
-            CREATE TRIGGER IF NOT EXISTS events_fts_delete AFTER DELETE ON events BEGIN
-                INSERT INTO events_fts(events_fts, rowid, summary, tags, payload_json)
-                VALUES ('delete', old.id, old.summary, COALESCE(old.tags, ''), COALESCE(old.payload_json, ''));
-            END;
-
-            CREATE TRIGGER IF NOT EXISTS events_fts_update AFTER UPDATE ON events BEGIN
-                INSERT INTO events_fts(events_fts, rowid, summary, tags, payload_json)
-                VALUES ('delete', old.id, old.summary, COALESCE(old.tags, ''), COALESCE(old.payload_json, ''));
-                INSERT INTO events_fts(rowid, summary, tags, payload_json)
-                VALUES (new.id, new.summary, COALESCE(new.tags, ''), COALESCE(new.payload_json, ''));
-            END;
 
         `)
     }
@@ -571,13 +518,6 @@ export class Store {
             CREATE INDEX IF NOT EXISTS idx_session_scratchlist_session_created
                 ON session_scratchlist(session_id, created_at DESC);
         `)
-
-        const hasEvents = this.db.prepare(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'events' LIMIT 1"
-        ).get() as { name?: string } | undefined
-        if (!hasEvents?.name) {
-            createEventsSchemaV11(this.db)
-        }
     }
 
     private getSessionColumnNames(): Set<string> {

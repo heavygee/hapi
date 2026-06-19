@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'bun:test'
 import { Store } from './index'
-import { downgradeEventsSchemaV11ToV10 } from './events'
+import { dropOverseerEventsSchema, ensureOverseerEventsSchema } from './events'
+import { applySoupV10ToV11Migration } from './schemaV11Soup'
 import { Database } from 'bun:sqlite'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-describe('Store V10→V11 migration: events substrate', () => {
-    it('fresh DB has events, event_links, and events_fts', () => {
+describe('Overseer events schema (init-gated, not SCHEMA_VERSION)', () => {
+    it('fresh DB has events, event_links, and events_fts after Store init', () => {
         const store = new Store(':memory:')
         const db: Database = (store as unknown as { db: Database }).db
         const tables = db.prepare(
@@ -19,8 +20,41 @@ describe('Store V10→V11 migration: events substrate', () => {
         expect(names.has('events_fts')).toBe(true)
     })
 
-    it('V10 DB migrates to V11 and can insert events', () => {
-        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v11-test-'))
+    it('v11 DB stamped without events self-heals on Store open (incident regression)', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-incident-v11-no-events-'))
+        const dbPath = join(dir, 'test.db')
+        let store: Store | undefined
+        try {
+            const db = new Database(dbPath, { create: true, readwrite: true, strict: true })
+            db.exec('PRAGMA journal_mode = WAL')
+            db.exec('PRAGMA foreign_keys = ON')
+            createV10Schema(db)
+            applySoupV10ToV11Migration(db)
+            db.exec('PRAGMA user_version = 11')
+            db.exec(`INSERT INTO sessions (id, namespace, created_at, updated_at, seq)
+                     VALUES ('s1', 'default', 1000, 1000, 0)`)
+            db.close()
+
+            store = new Store(dbPath)
+            const event = store.events.insert({
+                ts: 2000,
+                sourceKind: 'worker',
+                sourceRef: 'test-agent',
+                eventType: 'completed',
+                attentionCandidate: 0,
+                summary: 'Self-healed after v11 stamp',
+                relatedSessionId: 's1',
+                provenance: 'test'
+            })
+            expect(event?.summary).toBe('Self-healed after v11 stamp')
+        } finally {
+            store?.close()
+            rmSync(dir, { recursive: true, force: true })
+        }
+    })
+
+    it('V10 DB gets events on Store open without running v11 migration step', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v10-events-init-'))
         const dbPath = join(dir, 'test.db')
         let store: Store | undefined
         try {
@@ -40,28 +74,66 @@ describe('Store V10→V11 migration: events substrate', () => {
                 sourceRef: 'test-agent',
                 eventType: 'completed',
                 attentionCandidate: 0,
-                summary: 'Migration smoke event',
+                summary: 'Init-gated event',
                 relatedSessionId: 's1',
                 provenance: 'test'
             })
-            expect(event?.summary).toBe('Migration smoke event')
-            expect(store.events.count()).toBe(1)
+            expect(event?.summary).toBe('Init-gated event')
         } finally {
             store?.close()
             rmSync(dir, { recursive: true, force: true })
         }
     })
 
-    it('downgrade v11 -> v10 removes events tables', () => {
+    it('dropOverseerEventsSchema removes events tables without changing user_version', () => {
         const store = new Store(':memory:')
         const db: Database = (store as unknown as { db: Database }).db
-        downgradeEventsSchemaV11ToV10(db)
+        db.exec('PRAGMA user_version = 11')
+        dropOverseerEventsSchema(db)
         const version = db.prepare('PRAGMA user_version').get() as { user_version: number }
-        expect(version.user_version).toBe(10)
+        expect(version.user_version).toBe(11)
         const events = db.prepare(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='events'"
         ).get()
         expect(events).toBeNull()
+    })
+
+    it('events_fts delete and update triggers use content-storing form', () => {
+        const db = new Database(':memory:')
+        createV10Schema(db)
+        ensureOverseerEventsSchema(db)
+        db.exec(`INSERT INTO sessions (id, namespace, created_at, updated_at, seq)
+                 VALUES ('s1', 'default', 1000, 1000, 0)`)
+        db.exec(`INSERT INTO events (ts, source_kind, event_type, attention_candidate, summary, related_session_id)
+                 VALUES (2000, 'worker', 'completed', 0, 'fts probe', 's1')`)
+
+        db.exec(`UPDATE events SET summary = 'fts updated' WHERE id = 1`)
+        const updated = db.prepare(
+            "SELECT summary FROM events_fts WHERE rowid = 1"
+        ).get() as { summary: string } | undefined
+        expect(updated?.summary).toBe('fts updated')
+
+        db.exec('DELETE FROM events WHERE id = 1')
+        const deleted = db.prepare(
+            "SELECT rowid FROM events_fts WHERE rowid = 1"
+        ).get()
+        expect(deleted).toBeNull()
+    })
+
+    it('ensureOverseerEventsSchema recreates broken delete/update triggers', () => {
+        const db = new Database(':memory:')
+        createV10Schema(db)
+        ensureOverseerEventsSchema(db)
+        db.exec('DROP TRIGGER IF EXISTS events_fts_delete')
+        db.exec('DROP TRIGGER IF EXISTS events_fts_update')
+
+        ensureOverseerEventsSchema(db)
+        db.exec(`INSERT INTO sessions (id, namespace, created_at, updated_at, seq)
+                 VALUES ('s1', 'default', 1000, 1000, 0)`)
+        db.exec(`INSERT INTO events (ts, source_kind, event_type, attention_candidate, summary)
+                 VALUES (2000, 'worker', 'completed', 0, 'before delete')`)
+
+        expect(() => db.exec('DELETE FROM events WHERE id = 1')).not.toThrow()
     })
 })
 
