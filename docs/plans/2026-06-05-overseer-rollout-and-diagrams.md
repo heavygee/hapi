@@ -240,6 +240,51 @@ The ordered work an agent (or agents) execute. Waves respect dependencies; **wit
 - From Wave 1 on, fan out a transport agent (#21/#29) and the UI-pane agent (after #23) in parallel.
 - Fold #51/#28 into the relevant substrate/voice wave or run as small follow-on agents.
 
+## 7. Emission contract — `AGENT_NOTIFY_SUMMARY` is the substrate (Phase 1 → Phase 2)
+
+The emission contract is **not** a new `HAPI_EVENTS` sentinel format. The operator already runs a canonical per-turn outcome contract at the top of the AGENTS stack (home-level `AGENTS.md`), wired to voice / tmux marquee / push via `~/coding/agent-notify` (`ACTUALSPEC.md` rev 16) and already parsed by `extractNotifySummary` (driver `shared/src/messages.ts`) — whose own comment anticipates *"the meta-event bus when Phase 2 lands."* **The Overseer events table IS that Phase 2.** Making the emission contract "first-class" = lifting it from an operator-stack instruction into HAPI-native infrastructure.
+
+### The contract (canonical)
+
+Last line of every agent response:
+
+```
+AGENT_NOTIFY_SUMMARY {"version":1,"agent":"..","project":"..","status":"done|blocked|needs_review|needs_decision|failed|stalled","action":"<concrete next user action>","summary":"<1-line triage>"}
+```
+
+Falls back to transcript / semantic summarization when missing (= the hub-observed fallback). Already works reliably for **Cursor** (reads home `AGENTS.md` natively).
+
+### Field mapping → Overseer
+
+| `AGENT_NOTIFY_SUMMARY` | Overseer | v1 inbox badge |
+|---|---|---|
+| `status` enum | `event_type` / category | done→FINALE · needs_decision→QUESTION · blocked→BLOCKED · failed→ERROR · stalled→STALE · needs_review→review |
+| `action` | `suggested_action` / "what you do next" | actionable line on the card |
+| `summary` | event summary | card body |
+| `agent` / `project` | source attribution | flavor chip + project |
+| `version` | `schema_version` | — |
+| missing → transcript fallback | hub-observed fallback | — |
+
+The **`status` enum is the v1 inbox taxonomy** — operator-proven, supersedes the ad-hoc QUESTION/BLOCKED/ERROR/FINALE/STALE labels (those were aliases for these). It also converges with the "Attention Item" shape sketched in `docs/chad-operator-overseer-chat.md`.
+
+### v1 `attention_candidate` derivation (no new agent fields)
+
+- `needs_decision` / `blocked` / `failed` / `needs_review` / `stalled` → `attention_candidate = 1`
+- `done` → candidate **iff** `action` is non-empty (review/deploy/follow-up), else captured-only
+
+### What this changes
+
+- **§1 (contracts):** emission wire format = `AGENT_NOTIFY_SUMMARY` (last-line JSON), **not** `HAPI_EVENTS` sentinels. Extend `NotifySummary` later with attention fields (`severity`, `artifact_refs`, `operator_action_required`, `risk_detected`); v1 derives them from `status` + `action`.
+- **#22 recast:** "**HAPI-native-ize `AGENT_NOTIFY_SUMMARY` → events table**" — HAPI injects the contract for non-Cursor flavors (inline message prefix, per #20); parse via `extractNotifySummary`; route `status → event_type` + derived `attention_candidate`. Emission + parse + reliability already exist, so #22 **shrinks** and the foundation emission-reliability risk is **largely retired**.
+- **#20 reinterpretation:** the "`AGENT_NOTIFY_SUMMARY` collision" was the signal to **standardize on it**, not strip it. Cursor's low sniff score (36%) was a **sandbox artifact** — the sniff tested the new `HAPI_EVENTS` format without home `AGENTS.md`; the real contract works best for Cursor. Surviving finding: **non-Cursor flavors (Claude/Codex) need HAPI to inject the contract** (inline prefix), and the hub can't attach `appendSystemPrompt` per-turn over REST yet.
+
+### References
+
+- The contract: home-level `AGENTS.md` (operator stack).
+- Reliability spec: `~/coding/agent-notify/ACTUALSPEC.md` (rev 16 — contract-wins, JSONL catch-up, EUREKA verification).
+- Parser: driver `shared/src/messages.ts` `extractNotifySummary` + `NotifySummary` type.
+- Live event-stream consumer: `scripts/hapi-voice-subscriber.ts`.
+
 ## Architecture-shape diagrams (pending freeze lift)
 
 These describe the system rather than the rollout and belong in the frozen Rev 4 docs, replacing existing ASCII art. They are upstream-safe (sanitized). Not embedded here to avoid duplicating canon; to be added to the architecture docs once the freeze is lifted:
