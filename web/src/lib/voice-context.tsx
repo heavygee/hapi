@@ -13,7 +13,7 @@ interface VoiceContextValue {
     setStatus: (status: ConversationStatus, errorMessage?: string) => void
     setMicMuted: (muted: boolean) => void
     toggleMic: () => void
-    startVoice: (sessionId: string) => Promise<void>
+    startVoice: (sessionId: string, options?: { proactiveSummary?: boolean }) => Promise<void>
     stopVoice: () => Promise<void>
 }
 
@@ -38,7 +38,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         setMicMuted((prev) => !prev)
     }, [])
 
-    const startVoice = useCallback(async (sessionId: string) => {
+    const startVoice = useCallback(async (sessionId: string, options?: { proactiveSummary?: boolean }) => {
         setCurrentSessionId(sessionId)
         const contextPlan = voiceHooks.prepareVoiceSession(sessionId)
         storeVoiceContextNotice(contextPlan.notice)
@@ -50,7 +50,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         await startRealtimeSession(sessionId, {
             bootstrap: contextPlan.bootstrap,
             streamChunks: contextPlan.streamChunks,
-            notice: contextPlan.notice
+            notice: contextPlan.notice,
+            proactiveSummary: options?.proactiveSummary,
         }, elevenLabsLang, voiceId)
     }, [])
 

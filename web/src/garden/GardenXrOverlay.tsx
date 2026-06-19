@@ -34,7 +34,7 @@ function GardenXrOverlayContent(props: GardenXrOverlayProps) {
                             ? 'Loading sessions…'
                             : error
                                 ? `Sessions error: ${error}`
-                                : `${visible.length} orb${visible.length === 1 ? '' : 's'} · ${sessions.length} total`}
+                                : `${visible.length} orb${visible.length === 1 ? '' : 's'} · ${sessions.filter((s) => s.active).length} active`}
                     </div>
                     {!isLoading && !error && visible.length === 0 && (
                         <div className="text-amber-300 mt-1">

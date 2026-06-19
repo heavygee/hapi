@@ -109,7 +109,7 @@ class RealtimeVoiceSessionImpl implements VoiceSession {
                 )
             }
 
-            if (isVoiceProactiveSummaryEnabled()) {
+            if (config.proactiveSummary ?? isVoiceProactiveSummaryEnabled()) {
                 this.sendTextMessage(
                     'Based on the session context you received, give me a brief spoken summary, then wait for my next request.'
                 )

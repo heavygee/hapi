@@ -14,6 +14,7 @@ import { VoiceReactiveRings } from '@/garden/components/VoiceReactiveRings'
 import {
     ATTENTION_COLOR,
     DWELL_SECONDS,
+    ORB_HIT_RADIUS,
     ORB_LABEL_POSITION,
     SNIPPET_COMPACT_POSITION,
     SNIPPET_FOCUS_POSITION,
@@ -111,7 +112,7 @@ export function AgentOrb(props: AgentOrbProps) {
                     setPointerHovered(false)
                 }}
             >
-                <sphereGeometry args={[0.62, 16, 16]} />
+                <sphereGeometry args={[ORB_HIT_RADIUS, 16, 16]} />
             </mesh>
 
             {voiceLinked && <VoiceReactiveRings />}

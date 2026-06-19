@@ -213,7 +213,7 @@ class GeminiLiveVoiceSessionImpl implements VoiceSession {
                         config.streamContextChunks ?? []
                     )
 
-                    const proactive = isVoiceProactiveSummaryEnabled()
+                    const proactive = config.proactiveSummary ?? isVoiceProactiveSummaryEnabled()
                     if (proactive) {
                         if (config.initialContext?.trim()) {
                             sendClientContent(`[Context] ${config.initialContext}`, false)

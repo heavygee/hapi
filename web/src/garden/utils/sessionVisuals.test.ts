@@ -3,6 +3,8 @@ import type { SessionSummary } from '@/types/api'
 import {
     ATTENTION_COLOR,
     DWELL_SECONDS,
+    GARDEN_VISIBLE_CAP,
+    LAYOUT_ROW_PITCH_RAD,
     filterGardenSessions,
     layoutPosition,
     sessionColor,
@@ -29,23 +31,29 @@ function makeSession(overrides: Partial<SessionSummary> & { id: string }): Sessi
 }
 
 describe('layoutPosition', () => {
-    it('places a single orb centered on the arc', () => {
-        const [x, , z] = layoutPosition(0, 1)
+    it('places a single orb on the horizon row', () => {
+        const [x, y, z] = layoutPosition(0, 1)
         expect(x).toBeCloseTo(0, 5)
+        expect(y).toBeCloseTo(0.38 + Math.sin(LAYOUT_ROW_PITCH_RAD) * 4.8, 3)
         expect(z).toBeLessThan(0)
     })
 
-    it('spreads multiple orbs across a 270 degree arc', () => {
-        const left = layoutPosition(0, 3)[0]
-        const right = layoutPosition(2, 3)[0]
-        expect(left).toBeLessThan(0)
-        expect(right).toBeGreaterThan(0)
+    it('stacks three elevation rows in the first column before spreading horizontally', () => {
+        const top = layoutPosition(0, 6)[1]
+        const mid = layoutPosition(1, 6)[1]
+        const bottom = layoutPosition(2, 6)[1]
+        expect(top).toBeGreaterThan(mid)
+        expect(mid).toBeGreaterThan(bottom)
+        const topX = layoutPosition(0, 6)[0]
+        const midX = layoutPosition(1, 6)[0]
+        expect(topX / midX).toBeCloseTo(Math.cos(LAYOUT_ROW_PITCH_RAD), 2)
     })
 
-    it('staggers y by index mod 3', () => {
-        const y0 = layoutPosition(0, 5)[1]
-        const y3 = layoutPosition(3, 5)[1]
-        expect(y3).toBe(y0)
+    it('spreads columns across a 270 degree arc', () => {
+        const left = layoutPosition(0, 6)[0]
+        const right = layoutPosition(3, 6)[0]
+        expect(left).toBeLessThan(0)
+        expect(right).toBeGreaterThan(0)
     })
 })
 
@@ -86,28 +94,30 @@ describe('sessionColor', () => {
 })
 
 describe('filterGardenSessions', () => {
-    it('prioritizes hot sessions then fills with recent idle', () => {
+    it('prioritizes hot sessions then fills with recent active', () => {
         const sessions = [
-            makeSession({ id: 'idle-old', updatedAt: 10 }),
+            makeSession({ id: 'idle-old', active: true, updatedAt: 10 }),
             makeSession({ id: 'active', active: true, updatedAt: 100 }),
-            makeSession({ id: 'idle-new', updatedAt: 200 }),
+            makeSession({ id: 'idle-new', active: true, updatedAt: 200 }),
             makeSession({ id: 'thinking', thinking: true, updatedAt: 50 }),
+            makeSession({ id: 'archived', active: false, updatedAt: 999 }),
         ]
         const visible = filterGardenSessions(sessions)
-        expect(visible.map((session) => session.id)).toEqual(['thinking', 'active', 'idle-new', 'idle-old'])
+        expect(visible.map((session) => session.id)).toEqual(['thinking', 'idle-new', 'active', 'idle-old'])
+        expect(visible).not.toContainEqual(expect.objectContaining({ id: 'archived' }))
     })
 
-    it('caps at eight sessions', () => {
-        const sessions = Array.from({ length: 12 }, (_, index) =>
+    it(`caps at ${GARDEN_VISIBLE_CAP} sessions`, () => {
+        const sessions = Array.from({ length: 30 }, (_, index) =>
             makeSession({ id: `s${index}`, active: true, updatedAt: index })
         )
-        expect(filterGardenSessions(sessions)).toHaveLength(8)
+        expect(filterGardenSessions(sessions)).toHaveLength(GARDEN_VISIBLE_CAP)
     })
 })
 
 describe('garden constants', () => {
     it('exports stable tuning values', () => {
-        expect(DWELL_SECONDS).toBe(1.2)
+        expect(DWELL_SECONDS).toBe(1.0)
         expect(ATTENTION_COLOR).toBe('#f97316')
     })
 })

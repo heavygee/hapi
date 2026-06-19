@@ -8,6 +8,11 @@ import { useSession } from '@/hooks/queries/useSession'
 import { useMessages } from '@/hooks/queries/useMessages'
 import { VoiceBackendSession, registerSessionStore, registerVoiceHooksStore, voiceHooks } from '@/realtime'
 import { useGardenRuntime } from '@/garden/context/GardenRuntimeContext'
+import {
+    notifyGardenSessionFocus,
+    prefetchGardenVoiceContext,
+    primeVoiceHooksForGarden,
+} from '@/garden/utils/gardenVoiceContext'
 import { filterGardenSessions } from '@/garden/utils/sessionVisuals'
 import { applyPersonaOverride } from '@/garden/utils/voicePersona'
 import { fetchVoiceBackend } from '@/api/voice'
@@ -146,28 +151,29 @@ export function GardenVoiceBridge() {
     }, [focusedId, focusedSession])
 
     const startVoiceForFocus = useCallback(async (sessionId: string) => {
-        if (!voice || startingRef.current) {
+        if (!voice || !api || startingRef.current) {
             return
         }
 
         startingRef.current = true
-        // Per-orb voice persona: stamp the persona id into the active backend's
-        // localStorage key just before startSession reads it. Restore the operator's
-        // global pick afterward so flat HAPI behaviour is unchanged.
         const personaOverride = backend
             ? applyPersonaOverride(sessionId, backend)
             : { persona: null, restore: () => {} }
         try {
-            const summary = visible.find((session) => session.id === sessionId)
-            if (summary) {
-                voiceHooks.onSessionFocus(sessionId, summary.metadata ?? undefined)
+            const prefetch = await prefetchGardenVoiceContext(api, sessionId)
+            if (!prefetch) {
+                console.warn('[Garden Voice] Session prefetch failed:', sessionId)
+                return
             }
+
+            primeVoiceHooksForGarden(prefetch)
+            notifyGardenSessionFocus(sessionId, prefetch.session.metadata)
 
             if (voice.currentSessionId && voice.currentSessionId !== sessionId) {
                 await voice.stopVoice()
             }
             if (voice.currentSessionId !== sessionId) {
-                await voice.startVoice(sessionId)
+                await voice.startVoice(sessionId, { proactiveSummary: true })
             }
         } catch (error) {
             console.error('[Garden Voice] Failed to start voice:', error)
@@ -175,7 +181,7 @@ export function GardenVoiceBridge() {
             personaOverride.restore()
             startingRef.current = false
         }
-    }, [voice, visible, backend])
+    }, [voice, api, backend])
 
     useEffect(() => {
         if (!voice) {

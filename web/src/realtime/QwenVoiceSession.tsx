@@ -213,7 +213,7 @@ class QwenVoiceSessionImpl implements VoiceSession {
                         config.streamContextChunks ?? []
                     )
 
-                    const proactive = isVoiceProactiveSummaryEnabled()
+                    const proactive = config.proactiveSummary ?? isVoiceProactiveSummaryEnabled()
                     if (proactive) {
                         if (config.initialContext?.trim()) {
                             this.sendContextualUpdate(config.initialContext)
