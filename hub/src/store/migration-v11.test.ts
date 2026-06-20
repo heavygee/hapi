@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { Store } from './index'
-import { dropOverseerEventsSchema, ensureOverseerEventsSchema } from './events'
+import { dropOverseerEventsSchema, ensureOverseerEventsSchema, repointSessionEvents } from './events'
+import { deleteSession } from './sessions'
 import { applySoupV10ToV11Migration } from './schemaV11Soup'
 import { Database } from 'bun:sqlite'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -134,6 +135,45 @@ describe('Overseer events schema (init-gated, not SCHEMA_VERSION)', () => {
                  VALUES (2000, 'worker', 'completed', 0, 'before delete')`)
 
         expect(() => db.exec('DELETE FROM events WHERE id = 1')).not.toThrow()
+    })
+
+    it('deleteSession detaches overseer events instead of FK-failing', () => {
+        const db = new Database(':memory:')
+        db.exec('PRAGMA foreign_keys = ON')
+        createV10Schema(db)
+        ensureOverseerEventsSchema(db)
+        db.exec(`INSERT INTO sessions (id, namespace, created_at, updated_at, seq)
+                 VALUES ('s-del', 'default', 1000, 1000, 0)`)
+        db.exec(`INSERT INTO events (ts, source_kind, event_type, attention_candidate, summary, related_session_id)
+                 VALUES (2000, 'system', 'stale', 0, 'No agent output', 's-del')`)
+
+        expect(deleteSession(db, 's-del', 'default')).toBe(true)
+        const event = db.prepare('SELECT related_session_id FROM events WHERE id = 1').get() as {
+            related_session_id: string | null
+        }
+        expect(event.related_session_id).toBeNull()
+        expect(db.prepare("SELECT id FROM sessions WHERE id = 's-del'").get()).toBeNull()
+    })
+
+    it('repointSessionEvents moves FK refs for merge/reopen id swap', () => {
+        const db = new Database(':memory:')
+        db.exec('PRAGMA foreign_keys = ON')
+        createV10Schema(db)
+        ensureOverseerEventsSchema(db)
+        db.exec(`INSERT INTO sessions (id, namespace, created_at, updated_at, seq)
+                 VALUES ('s-old', 'default', 1000, 1000, 0),
+                        ('s-new', 'default', 1000, 1000, 0)`)
+        db.exec(`INSERT INTO events (ts, source_kind, event_type, attention_candidate, summary, related_session_id)
+                 VALUES (2000, 'system', 'stale', 0, 'stale probe', 's-old'),
+                        (3000, 'worker', 'completed', 0, 'done probe', 's-old')`)
+
+        expect(repointSessionEvents(db, 's-old', 's-new')).toBe(2)
+        expect(deleteSession(db, 's-old', 'default')).toBe(true)
+
+        const rows = db.prepare(
+            'SELECT related_session_id FROM events ORDER BY id'
+        ).all() as Array<{ related_session_id: string | null }>
+        expect(rows).toEqual([{ related_session_id: 's-new' }, { related_session_id: 's-new' }])
     })
 })
 
