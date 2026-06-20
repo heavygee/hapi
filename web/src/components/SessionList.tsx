@@ -18,7 +18,6 @@ import { getSessionLastSeenAt } from '@/lib/sessionLastSeen'
 import { getAttentionLabel, SessionAttentionIndicator } from '@/components/SessionAttentionIndicator'
 import { getCodexImportedAt, subscribeCodexImportedSessions } from '@/lib/codexImportedSessions'
 import { formatReopenError } from '@/lib/reopenError'
-import { formatRelativeTime } from '@/lib/relative-time'
 
 type SessionGroup = {
     key: string
@@ -546,9 +545,6 @@ function MachineIcon(props: { className?: string }) {
     )
 }
 
-// formatRelativeTime now lives in `@/lib/relative-time` so the
-// scratchlist entry-age tooltip and any future surface can reuse the
-// same buckets / wording without copy-paste drift.
 
 function formatCodexImportedRelativeTime(value: number, t: (key: string, params?: Record<string, string | number>) => string): string | null {
     const ms = value < 1_000_000_000_000 ? value * 1000 : value
