@@ -3,8 +3,10 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { shareTargetPathnameFromBase } from './src/lib/sharePath'
 
 const base = process.env.VITE_BASE_URL || '/'
+const shareAction = shareTargetPathnameFromBase(base)
 const hubTarget = process.env.VITE_HUB_PROXY || 'http://127.0.0.1:3006'
 const appVersion = readAppVersion()
 
@@ -52,13 +54,10 @@ function getVendorChunkName(id: string): string | undefined {
 }
 
 export default defineConfig(({ mode }) => {
-    // In production we stub out the IWER WebXR emulator packages so they
-    // don't bloat the bundle or introduce the @bufbuild/protobuf 2.x conflict.
-    // In dev/test the real packages are live so IWER-based Playwright tests work.
     const stubIwer = mode === 'production'
     const iwerStub = resolve(__dirname, 'src/vendor-stubs/iwer-stub.ts')
     const iwerAliases = stubIwer
-        ? { '@iwer/sem': iwerStub, '@iwer/devui': iwerStub, 'iwer': iwerStub }
+        ? { '@iwer/sem': iwerStub, '@iwer/devui': iwerStub, iwer: iwerStub }
         : {}
 
     return {
@@ -82,7 +81,7 @@ export default defineConfig(({ mode }) => {
         plugins: [
             react(),
             VitePWA({
-                registerType: 'autoUpdate',
+                registerType: 'prompt',
                 includeAssets: ['favicon.ico', 'apple-touch-icon-180x180.png', 'mask-icon.svg'],
                 strategies: 'injectManifest',
                 srcDir: 'src',
@@ -118,7 +117,7 @@ export default defineConfig(({ mode }) => {
                         }
                     ],
                     share_target: {
-                        action: '/share',
+                        action: shareAction,
                         method: 'POST',
                         enctype: 'multipart/form-data',
                         params: {
@@ -154,7 +153,7 @@ export default defineConfig(({ mode }) => {
         resolve: {
             alias: {
                 '@': resolve(__dirname, 'src'),
-                ...iwerAliases,
+                ...iwerAliases
             }
         },
         build: {
