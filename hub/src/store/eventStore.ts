@@ -4,6 +4,7 @@ import {
     insertEventLink,
     insertSystemEvent,
     listSystemEvents,
+    repointSessionEvents,
     type InsertSystemEventInput,
     type ListSystemEventsOptions,
     type StoredSystemEvent
@@ -24,6 +25,10 @@ export class EventStore {
 
     count(): number {
         return countSystemEvents(this.db)
+    }
+
+    repointSession(fromSessionId: string, toSessionId: string): number {
+        return repointSessionEvents(this.db, fromSessionId, toSessionId)
     }
 
     linkEvents(input: {

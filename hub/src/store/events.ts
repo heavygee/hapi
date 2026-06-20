@@ -110,6 +110,32 @@ function mapRow(row: SystemEventRow): StoredSystemEvent {
     }
 }
 
+/** Clear session FK refs so DELETE FROM sessions succeeds (events are audit-retained). */
+export function detachSessionEvents(db: Database, sessionId: string): number {
+    const result = db.prepare(
+        'UPDATE events SET related_session_id = NULL WHERE related_session_id = ?'
+    ).run(sessionId)
+    return result.changes
+}
+
+/** Move overseer event refs when session rows merge (reopen/resume id swap). */
+export function repointSessionEvents(db: Database, fromSessionId: string, toSessionId: string): number {
+    if (fromSessionId === toSessionId) {
+        return 0
+    }
+    const countRow = db.prepare(
+        'SELECT COUNT(*) as count FROM events WHERE related_session_id = ?'
+    ).get(fromSessionId) as { count: number }
+    const pending = countRow.count
+    if (pending === 0) {
+        return 0
+    }
+    db.prepare(
+        'UPDATE events SET related_session_id = ? WHERE related_session_id = ?'
+    ).run(toSessionId, fromSessionId)
+    return pending
+}
+
 export function insertSystemEvent(db: Database, input: InsertSystemEventInput): StoredSystemEvent | null {
     if (input.idempotencyKey) {
         const existing = db.prepare(
