@@ -26,6 +26,72 @@ export const HAPI_EVENTS_END = '<!--HAPI_EVENTS_END-->'
 
 export const OVERSEER_STALE_SILENCE_MS = 30 * 60 * 1000
 
+/** Denormalized session identity written into every overseer event payload. */
+export type OverseerSessionIdentity = {
+    id: string
+    tag: string | null
+    name: string | null
+    project: string | null
+    flavor: string
+}
+
+export function deriveSessionDisplayName(
+    metadata: { name?: string } | null | undefined,
+    tag?: string | null
+): string | null {
+    const name = metadata?.name?.trim()
+    if (name) return name
+    const tagValue = tag?.trim()
+    return tagValue || null
+}
+
+export function deriveSessionProject(
+    metadata: { path?: string; worktree?: { name?: string } } | null | undefined
+): string | null {
+    if (!metadata) return null
+    const worktreeName = metadata.worktree?.name?.trim()
+    if (worktreeName) return worktreeName
+    const path = metadata.path?.trim()
+    if (!path) return null
+    const parts = path.split('/').filter(Boolean)
+    return parts.length > 0 ? parts[parts.length - 1]! : null
+}
+
+export function buildOverseerSessionIdentity(input: {
+    id: string
+    flavor: string
+    tag?: string | null
+    metadata?: { name?: string; path?: string; worktree?: { name?: string } } | null
+    notifyProject?: string | null
+}): OverseerSessionIdentity {
+    const tag = input.tag ?? null
+    const derivedProject = deriveSessionProject(input.metadata)
+    const notifyProject = input.notifyProject?.trim()
+    return {
+        id: input.id,
+        tag,
+        name: deriveSessionDisplayName(input.metadata, tag),
+        project: notifyProject || derivedProject,
+        flavor: input.flavor
+    }
+}
+
+export function mergeEventPayloadWithSession(
+    payloadFields: Record<string, unknown>,
+    session: OverseerSessionIdentity
+): string {
+    return JSON.stringify({
+        ...payloadFields,
+        session: {
+            id: session.id,
+            tag: session.tag,
+            name: session.name,
+            project: session.project,
+            flavor: session.flavor
+        }
+    })
+}
+
 export function mapNotifyStatusToEventType(status: string | undefined): string {
     switch (status) {
         case 'done':

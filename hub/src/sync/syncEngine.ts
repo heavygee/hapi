@@ -322,7 +322,10 @@ export class SyncEngine {
             this.sessionCache.refreshSession(event.sessionId)
             const after = this.sessionCache.getSession(event.sessionId)
             if (after) {
-                this.overseerEvents.onSessionUpdated(after)
+                this.overseerEvents.onSessionUpdated(
+                    after,
+                    this.store.sessions.getSession(after.id)?.tag ?? null
+                )
             }
             if (after?.metadata && !this.hasSameAgentSessionIds(beforeMetadata, after.metadata)) {
                 if (!this.canRunCursorDedup(after)) {
@@ -348,8 +351,9 @@ export class SyncEngine {
             }
             const session = this.getSession(event.sessionId)
             if (session && event.message) {
+                const storedSession = this.store.sessions.getSession(event.sessionId)
                 this.overseerEvents.onAgentMessage(
-                    toSessionSnapshot(session),
+                    toSessionSnapshot(session, storedSession?.tag ?? null),
                     event.message.id,
                     event.message.content,
                     event.message.createdAt
@@ -413,6 +417,7 @@ export class SyncEngine {
         if (session) {
             this.overseerEvents.onSessionEnd(
                 session,
+                this.store.sessions.getSession(session.id)?.tag ?? null,
                 payload.time,
                 payload.reason,
                 () => this.getLastAgentPlainText(session.id)

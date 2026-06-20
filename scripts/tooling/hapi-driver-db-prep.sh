@@ -109,6 +109,8 @@ DROP INDEX IF EXISTS idx_events_dedupe_key;
 DROP INDEX IF EXISTS idx_events_type_ts;
 DROP INDEX IF EXISTS idx_events_session_ts;
 DROP TABLE IF EXISTS events;
+DROP INDEX IF EXISTS idx_deleted_sessions_deleted_at;
+DROP TABLE IF EXISTS deleted_sessions;
 COMMIT;
 SQL
 }
@@ -143,6 +145,8 @@ DROP INDEX IF EXISTS idx_events_dedupe_key;
 DROP INDEX IF EXISTS idx_events_type_ts;
 DROP INDEX IF EXISTS idx_events_session_ts;
 DROP TABLE IF EXISTS events;
+DROP INDEX IF EXISTS idx_deleted_sessions_deleted_at;
+DROP TABLE IF EXISTS deleted_sessions;
 DROP INDEX IF EXISTS idx_session_scratchlist_session_created;
 DROP TABLE IF EXISTS session_scratchlist;
 DROP INDEX IF EXISTS idx_fcm_devices_token;

@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite'
 import { randomUUID } from 'node:crypto'
+import type { OverseerSessionIdentity } from '@hapi/protocol'
 
 export type InsertSystemEventInput = {
     ts: number
@@ -335,6 +336,45 @@ export function ensureOverseerEventsSchema(db: Database): void {
 /** @deprecated use ensureOverseerEventsSchema */
 export const createEventsSchemaV11 = ensureOverseerEventsSchema
 
+export function ensureDeletedSessionsSchema(db: Database): void {
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS deleted_sessions (
+            id TEXT PRIMARY KEY,
+            tag TEXT,
+            name TEXT,
+            project TEXT,
+            flavor TEXT,
+            deleted_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_deleted_sessions_deleted_at
+            ON deleted_sessions(deleted_at DESC);
+    `)
+}
+
+export function tombstoneDeletedSession(
+    db: Database,
+    identity: OverseerSessionIdentity,
+    deletedAt: number
+): void {
+    db.prepare(`
+        INSERT INTO deleted_sessions (id, tag, name, project, flavor, deleted_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            tag = excluded.tag,
+            name = excluded.name,
+            project = excluded.project,
+            flavor = excluded.flavor,
+            deleted_at = excluded.deleted_at
+    `).run(
+        identity.id,
+        identity.tag,
+        identity.name,
+        identity.project,
+        identity.flavor,
+        deletedAt
+    )
+}
+
 /** Drop Overseer events tables (db-prep / layer removal). Does NOT change user_version. */
 export function dropOverseerEventsSchema(db: Database): void {
     db.exec(`
@@ -350,6 +390,7 @@ export function dropOverseerEventsSchema(db: Database): void {
         DROP INDEX IF EXISTS idx_events_type_ts;
         DROP INDEX IF EXISTS idx_events_session_ts;
         DROP TABLE IF EXISTS events;
+        DROP TABLE IF EXISTS deleted_sessions;
     `)
 }
 
