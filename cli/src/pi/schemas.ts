@@ -17,20 +17,30 @@ import type { PiModelSummary } from '@hapi/protocol/apiTypes';
 // 字段级容错 schema
 // ============================================================================
 
-/** 提取 string 值，非 string 返回 undefined */
-const asOptStr = z.unknown().transform(v => typeof v === 'string' ? v : undefined);
+/** 提取 string 值，非 string 返回 undefined（字段 optional 时省略） */
+const asOptStr = z.preprocess(
+    (v) => (typeof v === 'string' ? v : undefined),
+    z.union([z.string(), z.undefined()]),
+);
 
 /** 提取 number 值，非 number 返回 undefined */
-const asOptNum = z.unknown().transform(v => typeof v === 'number' ? v : undefined);
+const asOptNum = z.preprocess(
+    (v) => (typeof v === 'number' ? v : undefined),
+    z.union([z.number(), z.undefined()]),
+);
 
 /** 提取 boolean 值，非 boolean 返回 undefined */
-const asOptBool = z.unknown().transform(v => typeof v === 'boolean' ? v : undefined);
+const asOptBool = z.preprocess(
+    (v) => (typeof v === 'boolean' ? v : undefined),
+    z.union([z.boolean(), z.undefined()]),
+);
 
 /** 提取 string 值，非 string 返回指定默认值 */
-const asStrOrDef = (def: string) => z.unknown().transform(v => typeof v === 'string' ? v : def);
+const asStrOrDef = (def: string) =>
+    z.union([z.string(), z.undefined(), z.null()]).transform(v => typeof v === 'string' ? v : def);
 
 /** 提取合法的 thinkingLevelMap，非法结构返回 undefined */
-const asOptThinkingLevelMap = z.unknown().transform((v): Record<string, string | null> | undefined => {
+const asOptThinkingLevelMap = z.preprocess((v): Record<string, string | null> | undefined => {
     if (typeof v !== 'object' || v === null) return undefined;
     const map: Record<string, string | null> = {};
     for (const [key, val] of Object.entries(v as Record<string, unknown>)) {
@@ -38,7 +48,7 @@ const asOptThinkingLevelMap = z.unknown().transform((v): Record<string, string |
         else if (val === null) map[key] = null;
     }
     return Object.keys(map).length > 0 ? map : undefined;
-});
+}, z.union([z.record(z.string(), z.union([z.string(), z.null()])), z.undefined()]));
 
 // ============================================================================
 // Pi Agent Event (stdin JSONL → event)
@@ -78,12 +88,11 @@ const PiCommandSummarySchema = z.object({
 
 /** 单条 command 的容错 schema：非法字段静默修正，空 name 返回 null */
 const PiCommandEntrySchema = z.object({
-    name: asStrOrDef(''),
+    name: asStrOrDef('').default(''),
     description: asOptStr,
-    source: z.unknown().transform(v =>
-        VALID_COMMAND_SOURCES.includes(v as PiCommandSource)
-            ? (v as PiCommandSource)
-            : ('skill' as const),
+    source: z.preprocess(
+        (v) => (VALID_COMMAND_SOURCES.includes(v as PiCommandSource) ? v : 'skill'),
+        z.enum(VALID_COMMAND_SOURCES),
     ),
 }).passthrough().transform((c) => {
     if (!c.name) return null;
@@ -110,8 +119,8 @@ const PiCommandsResponseDataSchema = z.object({
 
 /** 单条 model 的容错 schema：非法字段静默丢弃，空 id 返回 null */
 const PiModelEntrySchema = z.object({
-    id: asStrOrDef(''),
-    provider: asStrOrDef('unknown'),
+    id: asStrOrDef('').default(''),
+    provider: asStrOrDef('unknown').default('unknown'),
     name: asOptStr,
     contextWindow: asOptNum,
     reasoning: asOptBool,
@@ -195,9 +204,11 @@ export const PiAssistantMessageEventSchema = z.object({
 // ============================================================================
 
 export function parsePiCommands(data: unknown) {
-    return PiCommandsResponseDataSchema.safeParse(data).data ?? [];
+    const result = PiCommandsResponseDataSchema.safeParse(data);
+    return result.success ? result.data : [];
 }
 
 export function parsePiModels(data: unknown) {
-    return PiModelsResponseDataSchema.safeParse(data).data ?? [];
+    const result = PiModelsResponseDataSchema.safeParse(data);
+    return result.success ? result.data : [];
 }
