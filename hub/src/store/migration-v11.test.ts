@@ -1,24 +1,27 @@
 import { describe, expect, it } from 'bun:test'
+import type { Session } from '@hapi/protocol/types'
 import { Store } from './index'
-import { dropOverseerEventsSchema, ensureOverseerEventsSchema, repointSessionEvents } from './events'
+import { dropOverseerEventsSchema, ensureDeletedSessionsSchema, ensureOverseerEventsSchema, repointSessionEvents } from './events'
 import { deleteSession } from './sessions'
 import { applySoupV10ToV11Migration } from './schemaV11Soup'
+import { OverseerEventRecorder, toSessionSnapshot } from '../sync/overseerEventRecorder'
 import { Database } from 'bun:sqlite'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 describe('Overseer events schema (init-gated, not SCHEMA_VERSION)', () => {
-    it('fresh DB has events, event_links, and events_fts after Store init', () => {
+    it('fresh DB has events, event_links, events_fts, and deleted_sessions after Store init', () => {
         const store = new Store(':memory:')
         const db: Database = (store as unknown as { db: Database }).db
         const tables = db.prepare(
-            "SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual table') AND name IN ('events', 'event_links', 'events_fts')"
+            "SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual table') AND name IN ('events', 'event_links', 'events_fts', 'deleted_sessions')"
         ).all() as Array<{ name: string }>
         const names = new Set(tables.map((row) => row.name))
         expect(names.has('events')).toBe(true)
         expect(names.has('event_links')).toBe(true)
         expect(names.has('events_fts')).toBe(true)
+        expect(names.has('deleted_sessions')).toBe(true)
     })
 
     it('v11 DB stamped without events self-heals on Store open (incident regression)', () => {
@@ -142,8 +145,10 @@ describe('Overseer events schema (init-gated, not SCHEMA_VERSION)', () => {
         db.exec('PRAGMA foreign_keys = ON')
         createV10Schema(db)
         ensureOverseerEventsSchema(db)
-        db.exec(`INSERT INTO sessions (id, namespace, created_at, updated_at, seq)
-                 VALUES ('s-del', 'default', 1000, 1000, 0)`)
+        ensureDeletedSessionsSchema(db)
+        db.exec(`INSERT INTO sessions (id, tag, namespace, created_at, updated_at, seq, metadata)
+                 VALUES ('s-del', 'del-tag', 'default', 1000, 1000, 0,
+                 '{"flavor":"codex","path":"/coding/hapi","name":"meta HAPI triage","host":"local"}')`)
         db.exec(`INSERT INTO events (ts, source_kind, event_type, attention_candidate, summary, related_session_id)
                  VALUES (2000, 'system', 'stale', 0, 'No agent output', 's-del')`)
 
@@ -153,6 +158,85 @@ describe('Overseer events schema (init-gated, not SCHEMA_VERSION)', () => {
         }
         expect(event.related_session_id).toBeNull()
         expect(db.prepare("SELECT id FROM sessions WHERE id = 's-del'").get()).toBeNull()
+
+        const tombstone = db.prepare(
+            'SELECT id, tag, name, project, flavor FROM deleted_sessions WHERE id = ?'
+        ).get('s-del') as { id: string; tag: string; name: string; project: string; flavor: string }
+        expect(tombstone.tag).toBe('del-tag')
+        expect(tombstone.name).toBe('meta HAPI triage')
+        expect(tombstone.project).toBe('hapi')
+        expect(tombstone.flavor).toBe('codex')
+    })
+
+    it('event retains session identity in payload after deleteSession', () => {
+        const store = new Store(':memory:')
+        const recorder = new OverseerEventRecorder(store.events)
+        const stored = store.sessions.getOrCreateSession(
+            'meta-triage',
+            { flavor: 'codex', path: '/coding/hapi', name: 'meta HAPI triage', host: 'local' },
+            null,
+            'default'
+        )
+
+        const content = {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'message',
+                    message: 'AGENT_NOTIFY_SUMMARY {"version":1,"agent":"overseer","project":"hapi","status":"done","action":"","summary":"Triage complete"}'
+                }
+            }
+        }
+
+        recorder.onAgentMessage(
+            toSessionSnapshot(
+                {
+                    id: stored.id,
+                    namespace: 'default',
+                    seq: 0,
+                    createdAt: stored.createdAt,
+                    updatedAt: stored.updatedAt,
+                    active: true,
+                    activeAt: stored.activeAt ?? Date.now(),
+                    metadata: stored.metadata as Session['metadata'],
+                    metadataVersion: 1,
+                    agentState: null,
+                    agentStateVersion: 1,
+                    thinking: false,
+                    thinkingAt: 0,
+                    model: null,
+                    modelReasoningEffort: null,
+                    effort: null,
+                    serviceTier: null
+                },
+                stored.tag
+            ),
+            'msg-del',
+            content,
+            Date.now()
+        )
+
+        expect(store.sessions.deleteSession(stored.id, 'default')).toBe(true)
+
+        const events = store.events.list()
+        expect(events).toHaveLength(1)
+        expect(events[0]?.relatedSessionId).toBeNull()
+
+        const payload = JSON.parse(events[0]!.payloadJson!) as {
+            session: { name: string | null; id: string; project: string | null; flavor: string }
+        }
+        expect(payload.session.name).toBe('meta HAPI triage')
+        expect(payload.session.id).toBe(stored.id)
+        expect(payload.session.project).toBe('hapi')
+        expect(payload.session.flavor).toBe('codex')
+
+        const db: Database = (store as unknown as { db: Database }).db
+        const tombstone = db.prepare('SELECT name FROM deleted_sessions WHERE id = ?').get(stored.id) as {
+            name: string
+        }
+        expect(tombstone.name).toBe('meta HAPI triage')
+        expect(store.sessions.getSession(stored.id)).toBeNull()
     })
 
     it('repointSessionEvents moves FK refs for merge/reopen id swap', () => {
@@ -160,6 +244,7 @@ describe('Overseer events schema (init-gated, not SCHEMA_VERSION)', () => {
         db.exec('PRAGMA foreign_keys = ON')
         createV10Schema(db)
         ensureOverseerEventsSchema(db)
+        ensureDeletedSessionsSchema(db)
         db.exec(`INSERT INTO sessions (id, namespace, created_at, updated_at, seq)
                  VALUES ('s-old', 'default', 1000, 1000, 0),
                         ('s-new', 'default', 1000, 1000, 0)`)

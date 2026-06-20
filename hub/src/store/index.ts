@@ -10,7 +10,7 @@ import { ScratchlistStore } from './scratchlistStore'
 import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
 import { EventStore } from './eventStore'
-import { ensureOverseerEventsSchema } from './events'
+import { ensureOverseerEventsSchema, ensureDeletedSessionsSchema } from './events'
 
 export type {
     StoredMachine,
@@ -43,7 +43,8 @@ const REQUIRED_TABLES = [
     'fcm_devices',
     'session_scratchlist',
     'events',
-    'event_links'
+    'event_links',
+    'deleted_sessions'
 ] as const
 
 export class Store {
@@ -196,6 +197,7 @@ export class Store {
     /** Idempotent Overseer self-heal + loud missing-table check on every boot path. */
     private finishSchemaInit(): void {
         ensureOverseerEventsSchema(this.db)
+        ensureDeletedSessionsSchema(this.db)
         this.assertRequiredTablesPresent()
     }
 

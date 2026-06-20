@@ -3,7 +3,7 @@ import type { Session } from '@hapi/protocol/types'
 import { Store } from '../store'
 import { OverseerEventRecorder, toSessionSnapshot } from './overseerEventRecorder'
 
-function makeSession(id: string, flavor: string): Session {
+function makeSession(id: string, flavor: string, overrides?: Partial<Session>): Session {
     return {
         id,
         namespace: 'default',
@@ -21,7 +21,8 @@ function makeSession(id: string, flavor: string): Session {
         model: null,
         modelReasoningEffort: null,
         effort: null,
-        serviceTier: null
+        serviceTier: null,
+        ...overrides
     }
 }
 
@@ -29,7 +30,7 @@ describe('OverseerEventRecorder', () => {
     it('records AGENT_NOTIFY_SUMMARY from codex assistant text', () => {
         const store = new Store(':memory:')
         const recorder = new OverseerEventRecorder(store.events)
-        const session = store.sessions.getOrCreateSession('test', { flavor: 'codex', path: '/tmp' }, null, 'default')
+        const session = store.sessions.getOrCreateSession('test', { flavor: 'codex', path: '/tmp', host: 'local' }, null, 'default')
 
         const content = {
             role: 'agent',
@@ -43,7 +44,7 @@ describe('OverseerEventRecorder', () => {
         }
 
         const event = recorder.onAgentMessage(
-            toSessionSnapshot(makeSession(session.id, 'codex')),
+            toSessionSnapshot(makeSession(session.id, 'codex'), session.tag),
             'msg-1',
             content,
             Date.now()
@@ -53,12 +54,21 @@ describe('OverseerEventRecorder', () => {
         expect(event?.attentionCandidate).toBe(1)
         expect(event?.summary).toBe('Shipped fix')
         expect(store.events.count()).toBe(1)
+
+        const payload = JSON.parse(event!.payloadJson!) as {
+            session: { id: string; tag: string | null; name: string | null; project: string | null; flavor: string }
+            notify_summary: { project?: string }
+        }
+        expect(payload.session.id).toBe(session.id)
+        expect(payload.session.tag).toBe('test')
+        expect(payload.session.project).toBe('demo')
+        expect(payload.session.flavor).toBe('codex')
     })
 
     it('captures done without action as captured-only', () => {
         const store = new Store(':memory:')
         const recorder = new OverseerEventRecorder(store.events)
-        const session = store.sessions.getOrCreateSession('test2', { flavor: 'claude', path: '/tmp' }, null, 'default')
+        const session = store.sessions.getOrCreateSession('test2', { flavor: 'claude', path: '/tmp', host: 'local' }, null, 'default')
 
         const content = {
             role: 'agent',
@@ -72,7 +82,7 @@ describe('OverseerEventRecorder', () => {
         }
 
         const event = recorder.onAgentMessage(
-            toSessionSnapshot(makeSession(session.id, 'claude')),
+            toSessionSnapshot(makeSession(session.id, 'claude'), session.tag),
             'msg-2',
             content,
             Date.now()
@@ -84,7 +94,7 @@ describe('OverseerEventRecorder', () => {
     it('synthesizes approval_requested from permission prompts', () => {
         const store = new Store(':memory:')
         const recorder = new OverseerEventRecorder(store.events)
-        const session = store.sessions.getOrCreateSession('perm', { flavor: 'claude', path: '/tmp' }, null, 'default')
+        const session = store.sessions.getOrCreateSession('perm', { flavor: 'claude', path: '/tmp', host: 'local' }, null, 'default')
 
         const live = makeSession(session.id, 'claude')
         live.agentState = {
@@ -93,11 +103,55 @@ describe('OverseerEventRecorder', () => {
             }
         }
 
-        recorder.onSessionUpdated(live)
+        recorder.onSessionUpdated(live, session.tag)
 
         const events = store.events.list({ eventType: 'approval_requested' })
         expect(events).toHaveLength(1)
         expect(events[0]?.attentionCandidate).toBe(1)
         expect(events[0]?.summary).toContain('Bash')
+
+        const payload = JSON.parse(events[0]!.payloadJson!) as { session: { name: string | null } }
+        expect(payload.session.name).toBe('perm')
+    })
+
+    it('denormalizes session display name and project into payload.session', () => {
+        const store = new Store(':memory:')
+        const recorder = new OverseerEventRecorder(store.events)
+        const stored = store.sessions.getOrCreateSession(
+            'meta-triage',
+            { flavor: 'codex', path: '/coding/hapi', name: 'meta HAPI triage', host: 'local' },
+            null,
+            'default'
+        )
+        const live = makeSession(stored.id, 'codex', {
+            metadata: { flavor: 'codex', path: '/coding/hapi', name: 'meta HAPI triage', host: 'local' }
+        })
+
+        const content = {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'message',
+                    message: 'AGENT_NOTIFY_SUMMARY {"version":1,"agent":"overseer","project":"hapi","status":"done","action":"","summary":"Triage complete"}'
+                }
+            }
+        }
+
+        const event = recorder.onAgentMessage(
+            toSessionSnapshot(live, stored.tag),
+            'msg-meta',
+            content,
+            Date.now()
+        )
+
+        const payload = JSON.parse(event!.payloadJson!) as {
+            session: { id: string; tag: string | null; name: string | null; project: string | null; flavor: string }
+        }
+        expect(payload.session.name).toBe('meta HAPI triage')
+        expect(payload.session.tag).toBe('meta-triage')
+        expect(payload.session.project).toBe('hapi')
+        expect(payload.session.flavor).toBe('codex')
+        expect(payload.session.id).toBe(stored.id)
     })
 })

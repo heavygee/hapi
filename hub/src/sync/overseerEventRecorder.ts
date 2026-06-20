@@ -1,14 +1,17 @@
 import {
     buildEventSummaryFromNotify,
+    buildOverseerSessionIdentity,
     deriveAttentionCandidate,
     deriveOperatorActionRequired,
     deriveSeverity,
     detectEmptyHapiEventsSentinel,
     detectMalformedNotifySummaryLine,
     mapNotifyStatusToEventType,
+    mergeEventPayloadWithSession,
     OVERSEER_STALE_SILENCE_MS,
     isObject,
-    type NotifySummary
+    type NotifySummary,
+    type OverseerSessionIdentity
 } from '@hapi/protocol'
 import {
     extractAssistantPlainText,
@@ -18,15 +21,27 @@ import {
 import type { Session } from '@hapi/protocol/types'
 import type { EventStore, InsertSystemEventInput, StoredSystemEvent } from '../store'
 
-type SessionSnapshot = {
-    id: string
-    flavor: string
-    tag: string | null
-    machineId: string | null
-}
+export type SessionSnapshot = OverseerSessionIdentity
 
 function asRecord(value: unknown): Record<string, unknown> | null {
     return isObject(value) ? value as Record<string, unknown> : null
+}
+
+function buildPayload(
+    session: SessionSnapshot,
+    fields: Record<string, unknown>,
+    notifyProject?: string | null
+): string {
+    const identity = notifyProject
+        ? buildOverseerSessionIdentity({
+            id: session.id,
+            flavor: session.flavor,
+            tag: session.tag,
+            metadata: { name: session.name ?? undefined },
+            notifyProject
+        })
+        : session
+    return mergeEventPayloadWithSession(fields, identity)
 }
 
 function isAgentMessageContent(content: unknown): boolean {
@@ -65,10 +80,6 @@ function buildTags(notify: NotifySummary | null, flavor: string): string | null 
     return parts.length > 0 ? parts.join(' ') : null
 }
 
-function buildPayloadJson(fields: Record<string, unknown>): string {
-    return JSON.stringify(fields)
-}
-
 export class OverseerEventRecorder {
     private readonly lastAgentMessageAt = new Map<string, number>()
     private readonly emittedStaleSessions = new Set<string>()
@@ -98,7 +109,7 @@ export class OverseerEventRecorder {
         const plainText = extractAssistantPlainText(agentContent)
         if (plainText) {
             if (detectEmptyHapiEventsSentinel(plainText)) {
-                return this.insertSystemEvent({
+                return this.insertSystemEvent(session, {
                     ts,
                     sourceKind: 'system',
                     eventType: 'validation_error',
@@ -107,13 +118,13 @@ export class OverseerEventRecorder {
                     relatedSessionId: session.id,
                     provenance: 'hub-inferred from empty HAPI_EVENTS sentinel pair',
                     idempotencyKey: `session:${session.id}:message:${messageId}:validation_error:empty_hapi_events`,
-                    payloadJson: buildPayloadJson({ messageId, plainTextPreview: plainText.slice(0, 500) }),
+                    payloadFields: { messageId, plainTextPreview: plainText.slice(0, 500) },
                     severity: 1
                 })
             }
 
             if (detectMalformedNotifySummaryLine(plainText)) {
-                return this.insertSystemEvent({
+                return this.insertSystemEvent(session, {
                     ts,
                     sourceKind: 'system',
                     eventType: 'validation_error',
@@ -122,7 +133,7 @@ export class OverseerEventRecorder {
                     relatedSessionId: session.id,
                     provenance: 'hub-inferred from malformed AGENT_NOTIFY_SUMMARY JSON',
                     idempotencyKey: `session:${session.id}:message:${messageId}:validation_error:malformed_notify`,
-                    payloadJson: buildPayloadJson({ messageId }),
+                    payloadFields: { messageId },
                     severity: 1
                 })
             }
@@ -135,7 +146,7 @@ export class OverseerEventRecorder {
 
         const toolFailure = extractToolFailureSummary(agentContent)
         if (toolFailure) {
-            return this.insertSystemEvent({
+            return this.insertSystemEvent(session, {
                 ts,
                 sourceKind: 'system',
                 sourceRef: session.id,
@@ -146,7 +157,7 @@ export class OverseerEventRecorder {
                 relatedSessionId: session.id,
                 provenance: 'hub-inferred from tool-call-result exit code',
                 idempotencyKey: `session:${session.id}:message:${messageId}:tool_failed`,
-                payloadJson: buildPayloadJson({ messageId }),
+                payloadFields: { messageId },
                 severity: deriveSeverity('failed'),
                 tags: buildTags(null, session.flavor)
             })
@@ -155,12 +166,13 @@ export class OverseerEventRecorder {
         return null
     }
 
-    onSessionUpdated(session: Session): void {
-        this.syncPermissionRequests(session)
+    onSessionUpdated(session: Session, tag?: string | null): void {
+        this.syncPermissionRequests(session, tag ?? null)
     }
 
     onSessionEnd(
         session: Session,
+        tag: string | null,
         ts: number,
         reason: string | undefined,
         getLastAgentPlainText: () => string | null
@@ -177,8 +189,8 @@ export class OverseerEventRecorder {
             return null
         }
 
-        const flavor = session.metadata?.flavor ?? 'claude'
-        return this.insertSystemEvent({
+        const snapshot = toSessionSnapshot(session, tag)
+        return this.insertSystemEvent(snapshot, {
             ts,
             sourceKind: 'system',
             sourceRef: session.id,
@@ -188,9 +200,9 @@ export class OverseerEventRecorder {
             relatedSessionId: session.id,
             provenance: 'hub-inferred from session-end completed signal',
             idempotencyKey: `session:${session.id}:session_end:${ts}:completed_fallback`,
-            payloadJson: buildPayloadJson({ reason }),
+            payloadFields: { reason },
             severity: deriveSeverity('completed'),
-            tags: buildTags(null, flavor)
+            tags: buildTags(null, snapshot.flavor)
         })
     }
 
@@ -210,8 +222,8 @@ export class OverseerEventRecorder {
                 continue
             }
 
-            const flavor = session.metadata?.flavor ?? 'claude'
-            const event = this.insertSystemEvent({
+            const snapshot = toSessionSnapshot(session)
+            const event = this.insertSystemEvent(snapshot, {
                 ts: now,
                 sourceKind: 'system',
                 sourceRef: session.id,
@@ -222,9 +234,9 @@ export class OverseerEventRecorder {
                 relatedSessionId: session.id,
                 provenance: 'hub-inferred from session silence threshold',
                 idempotencyKey: `session:${session.id}:stale:${Math.floor(lastAt / OVERSEER_STALE_SILENCE_MS)}`,
-                payloadJson: buildPayloadJson({ lastAgentMessageAt: lastAt, thresholdMs: OVERSEER_STALE_SILENCE_MS }),
+                payloadFields: { lastAgentMessageAt: lastAt, thresholdMs: OVERSEER_STALE_SILENCE_MS },
                 severity: deriveSeverity('stale'),
-                tags: buildTags(null, flavor)
+                tags: buildTags(null, snapshot.flavor)
             })
             if (event) {
                 this.emittedStaleSessions.add(session.id)
@@ -249,7 +261,7 @@ export class OverseerEventRecorder {
         const operatorActionRequired = deriveOperatorActionRequired(notify.status, notify.action)
         const sourceRef = notify.agent ?? notify.project ?? session.tag ?? session.id
 
-        return this.insertSystemEvent({
+        return this.insertSystemEvent(session, {
             ts,
             sourceKind: 'worker',
             sourceRef,
@@ -260,23 +272,25 @@ export class OverseerEventRecorder {
             relatedSessionId: session.id,
             provenance: 'AGENT_NOTIFY_SUMMARY',
             idempotencyKey: `session:${session.id}:message:${messageId}:notify`,
-            payloadJson: buildPayloadJson({
+            payloadFields: {
                 messageId,
                 notify_summary: notify,
                 suggested_action: notify.action ?? null
-            }),
+            },
+            notifyProject: notify.project ?? null,
             severity: deriveSeverity(eventType),
             tags: buildTags(notify, session.flavor)
         })
     }
 
-    private syncPermissionRequests(session: Session): void {
+    private syncPermissionRequests(session: Session, tag: string | null): void {
         const requests = session.agentState?.requests ?? null
         if (!requests) {
             this.knownPermissionRequestIds.delete(session.id)
             return
         }
 
+        const snapshot = toSessionSnapshot(session, tag)
         const currentIds = new Set(Object.keys(requests))
         const known = this.knownPermissionRequestIds.get(session.id) ?? new Set<string>()
 
@@ -285,8 +299,7 @@ export class OverseerEventRecorder {
             const request = asRecord(requests[requestId])
             const toolName = typeof request?.tool === 'string' ? request.tool : 'tool'
             const summary = `Permission requested: ${toolName}`
-            const flavor = session.metadata?.flavor ?? 'claude'
-            this.insertSystemEvent({
+            this.insertSystemEvent(snapshot, {
                 ts: Date.now(),
                 sourceKind: 'system',
                 sourceRef: session.id,
@@ -297,30 +310,39 @@ export class OverseerEventRecorder {
                 relatedSessionId: session.id,
                 provenance: 'hub-inferred from permission prompt',
                 idempotencyKey: `session:${session.id}:permission:${requestId}`,
-                payloadJson: buildPayloadJson({ requestId, request }),
+                payloadFields: { requestId, request },
                 severity: deriveSeverity('approval_requested'),
-                tags: buildTags(null, flavor)
+                tags: buildTags(null, snapshot.flavor)
             })
         }
 
         this.knownPermissionRequestIds.set(session.id, currentIds)
     }
 
-    private insertSystemEvent(input: Omit<InsertSystemEventInput, 'riskDetected'> & { riskDetected?: 0 | 1 }): StoredSystemEvent | null {
+    private insertSystemEvent(
+        session: SessionSnapshot,
+        input: Omit<InsertSystemEventInput, 'riskDetected' | 'payloadJson'> & {
+            riskDetected?: 0 | 1
+            payloadFields?: Record<string, unknown>
+            notifyProject?: string | null
+        }
+    ): StoredSystemEvent | null {
+        const { payloadFields = {}, notifyProject, ...rest } = input
         return this.events.insert({
             riskDetected: 0,
-            ...input
+            ...rest,
+            payloadJson: buildPayload(session, payloadFields, notifyProject)
         })
     }
 }
 
-export function toSessionSnapshot(session: Session): SessionSnapshot {
-    return {
+export function toSessionSnapshot(session: Session, tag?: string | null): SessionSnapshot {
+    return buildOverseerSessionIdentity({
         id: session.id,
         flavor: session.metadata?.flavor ?? 'claude',
-        tag: session.metadata?.name ?? session.metadata?.path ?? null,
-        machineId: null
-    }
+        tag: tag ?? null,
+        metadata: session.metadata
+    })
 }
 
 export function shouldInjectNotifyContract(flavor: string | undefined | null): boolean {

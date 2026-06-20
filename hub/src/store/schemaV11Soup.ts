@@ -40,5 +40,6 @@ export const SOUP_V11_TABLES = [
     'session_scratchlist',
     'events',
     'event_links',
-    'events_fts'
+    'events_fts',
+    'deleted_sessions'
 ] as const
