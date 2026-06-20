@@ -10,6 +10,12 @@ const shareAction = shareTargetPathnameFromBase(base)
 const hubTarget = process.env.VITE_HUB_PROXY || 'http://127.0.0.1:3006'
 const appVersion = readAppVersion()
 
+const iwerStub = resolve(__dirname, 'src/vendor-stubs/iwer-stub.ts')
+const stubIwer = process.env.NODE_ENV === 'production'
+const iwerAliases = stubIwer
+    ? { '@iwer/sem': iwerStub, '@iwer/devui': iwerStub, iwer: iwerStub }
+    : {}
+
 function readAppVersion(): string {
     const buildInfoPath = resolve(__dirname, '../shared/src/buildInfo.ts')
     const buildInfo = readFileSync(buildInfoPath, 'utf8')
@@ -53,117 +59,118 @@ function getVendorChunkName(id: string): string | undefined {
     return undefined
 }
 
-export default defineConfig(({ mode }) => {
-    const stubIwer = mode === 'production'
-    const iwerStub = resolve(__dirname, 'src/vendor-stubs/iwer-stub.ts')
-    const iwerAliases = stubIwer
-        ? { '@iwer/sem': iwerStub, '@iwer/devui': iwerStub, iwer: iwerStub }
-        : {}
-
-    return {
-        define: {
-            __APP_VERSION__: JSON.stringify(appVersion),
-        },
-        server: {
-            host: true,
-            allowedHosts: ['hapidev.weishu.me'],
-            proxy: {
-                '/api': {
-                    target: hubTarget,
-                    changeOrigin: true
-                },
-                '/socket.io': {
-                    target: hubTarget,
-                    ws: true
-                }
+export default defineConfig({
+    define: {
+        __APP_VERSION__: JSON.stringify(appVersion),
+    },
+    server: {
+        host: true,
+        allowedHosts: ['hapidev.weishu.me'],
+        proxy: {
+            '/api': {
+                target: hubTarget,
+                changeOrigin: true
+            },
+            '/socket.io': {
+                target: hubTarget,
+                ws: true
             }
-        },
-        plugins: [
-            react(),
-            VitePWA({
-                registerType: 'prompt',
-                includeAssets: ['favicon.ico', 'apple-touch-icon-180x180.png', 'mask-icon.svg'],
-                strategies: 'injectManifest',
-                srcDir: 'src',
-                filename: 'sw.ts',
-                manifest: {
-                    name: 'HAPI',
-                    short_name: 'HAPI',
-                    description: 'AI-powered development assistant',
-                    theme_color: '#ffffff',
-                    background_color: '#ffffff',
-                    display: 'standalone',
-                    orientation: 'portrait',
-                    scope: base,
-                    start_url: base,
-                    icons: [
-                        {
-                            src: 'pwa-64x64.png',
-                            sizes: '64x64',
-                            type: 'image/png',
-                            purpose: 'any'
-                        },
-                        {
-                            src: 'pwa-192x192.png',
-                            sizes: '192x192',
-                            type: 'image/png',
-                            purpose: 'any'
-                        },
-                        {
-                            src: 'pwa-512x512.png',
-                            sizes: '512x512',
-                            type: 'image/png',
-                            purpose: 'any'
-                        }
-                    ],
-                    share_target: {
-                        action: shareAction,
-                        method: 'POST',
-                        enctype: 'multipart/form-data',
-                        params: {
-                            title: 'title',
-                            text: 'text',
-                            url: 'url',
-                            files: [
-                                {
-                                    name: 'files',
-                                    accept: [
-                                        'image/*',
-                                        'application/pdf',
-                                        'text/*',
-                                        'application/json',
-                                        'application/zip',
-                                        '*/*'
-                                    ]
-                                }
-                            ]
-                        }
+        }
+    },
+    plugins: [
+        react(),
+        VitePWA({
+            // User-controlled reload avoids mid-session surprise reloads (autoUpdate reloads all tabs).
+            registerType: 'prompt',
+            includeAssets: ['favicon.ico', 'apple-touch-icon-180x180.png', 'mask-icon.svg'],
+            strategies: 'injectManifest',
+            srcDir: 'src',
+            filename: 'sw.ts',
+            manifest: {
+                name: 'HAPI',
+                short_name: 'HAPI',
+                description: 'AI-powered development assistant',
+                theme_color: '#ffffff',
+                background_color: '#ffffff',
+                display: 'standalone',
+                orientation: 'portrait',
+                scope: base,
+                start_url: base,
+                icons: [
+                    {
+                        src: 'pwa-64x64.png',
+                        sizes: '64x64',
+                        type: 'image/png',
+                        purpose: 'any'
+                    },
+                    {
+                        src: 'pwa-192x192.png',
+                        sizes: '192x192',
+                        type: 'image/png',
+                        purpose: 'any'
+                    },
+                    {
+                        src: 'pwa-512x512.png',
+                        sizes: '512x512',
+                        type: 'image/png',
+                        purpose: 'any'
                     }
-                },
-                injectManifest: {
-                    globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}']
-                },
-                devOptions: {
-                    enabled: true,
-                    type: 'module'
+                ],
+                // Web Share Target — Android Chrome routes POSTs to /share
+                // when the user picks HAPI in the system share sheet. The
+                // service worker (`web/src/sw.ts`) intercepts POST /share,
+                // stashes the multipart payload in IndexedDB, and 303-
+                // redirects to /share?id=<transferId> for the SPA picker.
+                // `*/*` is the broad fallback; explicit MIME prefixes stay
+                // first because some Chrome versions only honor declared
+                // prefixes when surfacing in the share sheet.
+                share_target: {
+                    action: shareAction,
+                    method: 'POST',
+                    enctype: 'multipart/form-data',
+                    params: {
+                        title: 'title',
+                        text: 'text',
+                        url: 'url',
+                        files: [
+                            {
+                                name: 'files',
+                                accept: [
+                                    'image/*',
+                                    'application/pdf',
+                                    'text/*',
+                                    'application/json',
+                                    'application/zip',
+                                    '*/*'
+                                ]
+                            }
+                        ]
+                    }
                 }
-            })
-        ],
-        base,
-        resolve: {
-            alias: {
-                '@': resolve(__dirname, 'src'),
-                ...iwerAliases
+            },
+            injectManifest: {
+                globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}']
+            },
+            devOptions: {
+                enabled: true,
+                type: 'module'
             }
-        },
-        build: {
-            outDir: 'dist',
-            emptyOutDir: true,
-            rollupOptions: {
-                output: {
-                    manualChunks(id) {
-                        return getVendorChunkName(id)
-                    }
+        })
+    ],
+    base,
+    resolve: {
+        alias: {
+            '@': resolve(__dirname, 'src'),
+            ...iwerAliases,
+        }
+    },
+    build: {
+        outDir: 'dist',
+        emptyOutDir: true,
+        rollupOptions: {
+            output: {
+                manualChunks(id) {
+                    return getVendorChunkName(id)
                 }
             }
         }
