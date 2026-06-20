@@ -29,7 +29,7 @@ function makeSession(id: string, flavor: string, overrides?: Partial<Session>): 
 describe('OverseerEventRecorder', () => {
     it('records AGENT_NOTIFY_SUMMARY from codex assistant text', () => {
         const store = new Store(':memory:')
-        const recorder = new OverseerEventRecorder(store.events)
+        const recorder = new OverseerEventRecorder(store.events, store.inbox)
         const session = store.sessions.getOrCreateSession('test', { flavor: 'codex', path: '/tmp', host: 'local' }, null, 'default')
 
         const content = {
@@ -63,11 +63,17 @@ describe('OverseerEventRecorder', () => {
         expect(payload.session.tag).toBe('test')
         expect(payload.session.project).toBe('demo')
         expect(payload.session.flavor).toBe('codex')
+
+        expect(store.inbox.count()).toBe(1)
+        const item = store.inbox.list({ activeOnly: true })[0]
+        expect(item?.category).toBe('FINALE')
+        expect(item?.sourceEventIds).toEqual([event!.id])
+        expect(item?.title).toBe('test')
     })
 
     it('captures done without action as captured-only', () => {
         const store = new Store(':memory:')
-        const recorder = new OverseerEventRecorder(store.events)
+        const recorder = new OverseerEventRecorder(store.events, store.inbox)
         const session = store.sessions.getOrCreateSession('test2', { flavor: 'claude', path: '/tmp', host: 'local' }, null, 'default')
 
         const content = {
@@ -93,7 +99,7 @@ describe('OverseerEventRecorder', () => {
 
     it('synthesizes approval_requested from permission prompts', () => {
         const store = new Store(':memory:')
-        const recorder = new OverseerEventRecorder(store.events)
+        const recorder = new OverseerEventRecorder(store.events, store.inbox)
         const session = store.sessions.getOrCreateSession('perm', { flavor: 'claude', path: '/tmp', host: 'local' }, null, 'default')
 
         const live = makeSession(session.id, 'claude')
@@ -112,11 +118,14 @@ describe('OverseerEventRecorder', () => {
 
         const payload = JSON.parse(events[0]!.payloadJson!) as { session: { name: string | null } }
         expect(payload.session.name).toBe('perm')
+        expect(store.inbox.count()).toBe(1)
+        expect(store.inbox.list()[0]?.category).toBe('APPROVAL')
+        expect(store.inbox.list()[0]?.title).toBe('perm')
     })
 
     it('denormalizes session display name and project into payload.session', () => {
         const store = new Store(':memory:')
-        const recorder = new OverseerEventRecorder(store.events)
+        const recorder = new OverseerEventRecorder(store.events, store.inbox)
         const stored = store.sessions.getOrCreateSession(
             'meta-triage',
             { flavor: 'codex', path: '/coding/hapi', name: 'meta HAPI triage', host: 'local' },
@@ -153,5 +162,43 @@ describe('OverseerEventRecorder', () => {
         expect(payload.session.project).toBe('hapi')
         expect(payload.session.flavor).toBe('codex')
         expect(payload.session.id).toBe(stored.id)
+    })
+
+    it('titles inbox items from payload.session.name after session delete', () => {
+        const store = new Store(':memory:')
+        const recorder = new OverseerEventRecorder(store.events, store.inbox)
+        const stored = store.sessions.getOrCreateSession(
+            'meta-triage',
+            { flavor: 'codex', path: '/coding/hapi', name: 'meta HAPI triage', host: 'local' },
+            null,
+            'default'
+        )
+
+        recorder.onAgentMessage(
+            toSessionSnapshot(makeSession(stored.id, 'codex', {
+                metadata: { flavor: 'codex', path: '/coding/hapi', name: 'meta HAPI triage', host: 'local' }
+            }), stored.tag),
+            'msg-attn',
+            {
+                role: 'agent',
+                content: {
+                    type: 'codex',
+                    data: {
+                        type: 'message',
+                        message: 'AGENT_NOTIFY_SUMMARY {"version":1,"status":"blocked","action":"Fix CI","summary":"CI failed"}'
+                    }
+                }
+            },
+            Date.now()
+        )
+
+        const itemBefore = store.inbox.list()[0]
+        expect(itemBefore?.title).toBe('meta HAPI triage')
+
+        expect(store.sessions.deleteSession(stored.id, 'default')).toBe(true)
+
+        const itemAfter = store.inbox.getById(itemBefore!.id)
+        expect(itemAfter?.title).toBe('meta HAPI triage')
+        expect(itemAfter?.relatedSessionId).toBeNull()
     })
 })

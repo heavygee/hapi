@@ -2,6 +2,7 @@ import type { Database } from 'bun:sqlite'
 import { randomUUID } from 'node:crypto'
 
 import { detachSessionEvents, tombstoneDeletedSession } from './events'
+import { detachSessionInboxItems } from './inboxItems'
 import { buildOverseerSessionIdentity } from '@hapi/protocol'
 import type { Metadata } from '@hapi/protocol/types'
 import type { StoredSession, VersionedUpdateResult } from './types'
@@ -617,6 +618,7 @@ export function deleteSession(db: Database, id: string, namespace: string): bool
         Date.now()
     )
     detachSessionEvents(db, id)
+    detachSessionInboxItems(db, id)
     const result = db.prepare(
         'DELETE FROM sessions WHERE id = ? AND namespace = ?'
     ).run(id, namespace)

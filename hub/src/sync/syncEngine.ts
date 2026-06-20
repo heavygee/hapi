@@ -44,6 +44,8 @@ import {
 import { SessionCache } from './sessionCache'
 import { OverseerEventRecorder, shouldInjectNotifyContract, toSessionSnapshot } from './overseerEventRecorder'
 import type { ListSystemEventsOptions, StoredSystemEvent } from '../store'
+import type { InboxOperatorAction } from '@hapi/protocol'
+import type { ListInboxItemsOptions, StoredInboxItem } from '../store/inboxItems'
 
 export type { Session, SyncEvent } from '@hapi/protocol/types'
 export type { Machine } from './machineCache'
@@ -159,7 +161,7 @@ export class SyncEngine {
             (sessionId, updatedAt) => this.recordSessionActivity(sessionId, updatedAt)
         )
         this.rpcGateway = new RpcGateway(io, rpcRegistry)
-        this.overseerEvents = new OverseerEventRecorder(store.events)
+        this.overseerEvents = new OverseerEventRecorder(store.events, store.inbox)
         this.reloadAll()
         this.inactivityTimer = setInterval(() => this.expireInactive(), 5_000)
     }
@@ -370,6 +372,23 @@ export class SyncEngine {
 
     getSystemEventCount(): number {
         return this.overseerEvents.count()
+    }
+
+    getInboxItems(options: ListInboxItemsOptions = {}): StoredInboxItem[] {
+        return this.store.inbox.list(options)
+    }
+
+    getInboxItemCount(): number {
+        return this.store.inbox.count()
+    }
+
+    recordInboxOperatorAction(
+        inboxItemId: number,
+        action: InboxOperatorAction,
+        feedback: string | null = null,
+        snoozedUntil: number | null = null
+    ): StoredInboxItem | null {
+        return this.store.inbox.recordOperatorAction(inboxItemId, action, feedback, snoozedUntil)
     }
 
     private getLastAgentPlainText(sessionId: string): string | null {

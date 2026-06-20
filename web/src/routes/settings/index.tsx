@@ -41,6 +41,7 @@ import { useThemeColors, type ThemeColorKeyId } from '@/hooks/useThemeColors'
 import { PROTOCOL_VERSION } from '@hapi/protocol'
 import { VoiceRespondsControls, VoiceSoundsControls, VoicePersonaControls, VoiceDiagnosticsControls } from '@/components/settings/VoiceAdvancedControls'
 import { EventsDebugControls } from '@/components/settings/EventsDebugControls'
+import { InboxDebugControls } from '@/components/settings/InboxDebugControls'
 
 const locales: { value: Locale; nativeLabel: string }[] = [
     { value: 'en', nativeLabel: 'English' },
@@ -1257,6 +1258,7 @@ export default function SettingsPage() {
                             </div>
                             <VoiceDiagnosticsControls t={t} voiceBackend={voiceBackend} />
                             <EventsDebugControls />
+                            <InboxDebugControls />
                         </div>
                     </div>
 

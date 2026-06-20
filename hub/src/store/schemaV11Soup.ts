@@ -41,5 +41,8 @@ export const SOUP_V11_TABLES = [
     'events',
     'event_links',
     'events_fts',
-    'deleted_sessions'
+    'deleted_sessions',
+    'inbox_items',
+    'inbox_item_source_events',
+    'inbox_operator_actions'
 ] as const

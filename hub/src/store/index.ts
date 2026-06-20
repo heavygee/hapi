@@ -10,7 +10,9 @@ import { ScratchlistStore } from './scratchlistStore'
 import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
 import { EventStore } from './eventStore'
+import { InboxStore } from './inboxStore'
 import { ensureOverseerEventsSchema, ensureDeletedSessionsSchema } from './events'
+import { ensureOverseerInboxSchema } from './inboxItems'
 
 export type {
     StoredMachine,
@@ -31,7 +33,9 @@ export { ScratchlistStore } from './scratchlistStore'
 export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
 export { EventStore } from './eventStore'
+export { InboxStore } from './inboxStore'
 export type { InsertSystemEventInput, ListSystemEventsOptions, StoredSystemEvent } from './eventStore'
+export type { ListInboxItemsOptions, StoredInboxItem } from './inboxStore'
 
 const SCHEMA_VERSION: number = 11
 const REQUIRED_TABLES = [
@@ -44,7 +48,10 @@ const REQUIRED_TABLES = [
     'session_scratchlist',
     'events',
     'event_links',
-    'deleted_sessions'
+    'deleted_sessions',
+    'inbox_items',
+    'inbox_item_source_events',
+    'inbox_operator_actions'
 ] as const
 
 export class Store {
@@ -60,6 +67,7 @@ export class Store {
     readonly fcm: FcmStore
     readonly scratchlist: ScratchlistStore
     readonly events: EventStore
+    readonly inbox: InboxStore
 
     /**
      * Filesystem path of the underlying SQLite database, or ':memory:' for
@@ -113,6 +121,7 @@ export class Store {
         this.fcm = new FcmStore(this.db)
         this.scratchlist = new ScratchlistStore(this.db)
         this.events = new EventStore(this.db)
+        this.inbox = new InboxStore(this.db)
     }
 
     close(): void {
@@ -198,6 +207,7 @@ export class Store {
     private finishSchemaInit(): void {
         ensureOverseerEventsSchema(this.db)
         ensureDeletedSessionsSchema(this.db)
+        ensureOverseerInboxSchema(this.db)
         this.assertRequiredTablesPresent()
     }
 

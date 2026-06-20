@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import type { Session } from '@hapi/protocol/types'
 import { Store } from './index'
 import { dropOverseerEventsSchema, ensureDeletedSessionsSchema, ensureOverseerEventsSchema, repointSessionEvents } from './events'
+import { ensureOverseerInboxSchema } from './inboxItems'
 import { deleteSession } from './sessions'
 import { applySoupV10ToV11Migration } from './schemaV11Soup'
 import { OverseerEventRecorder, toSessionSnapshot } from '../sync/overseerEventRecorder'
@@ -11,17 +12,20 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 describe('Overseer events schema (init-gated, not SCHEMA_VERSION)', () => {
-    it('fresh DB has events, event_links, events_fts, and deleted_sessions after Store init', () => {
+    it('fresh DB has events, inbox, and deleted_sessions tables after Store init', () => {
         const store = new Store(':memory:')
         const db: Database = (store as unknown as { db: Database }).db
         const tables = db.prepare(
-            "SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual table') AND name IN ('events', 'event_links', 'events_fts', 'deleted_sessions')"
+            "SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual table') AND name IN ('events', 'event_links', 'events_fts', 'deleted_sessions', 'inbox_items', 'inbox_item_source_events', 'inbox_operator_actions')"
         ).all() as Array<{ name: string }>
         const names = new Set(tables.map((row) => row.name))
         expect(names.has('events')).toBe(true)
         expect(names.has('event_links')).toBe(true)
         expect(names.has('events_fts')).toBe(true)
         expect(names.has('deleted_sessions')).toBe(true)
+        expect(names.has('inbox_items')).toBe(true)
+        expect(names.has('inbox_item_source_events')).toBe(true)
+        expect(names.has('inbox_operator_actions')).toBe(true)
     })
 
     it('v11 DB stamped without events self-heals on Store open (incident regression)', () => {
@@ -146,6 +150,7 @@ describe('Overseer events schema (init-gated, not SCHEMA_VERSION)', () => {
         createV10Schema(db)
         ensureOverseerEventsSchema(db)
         ensureDeletedSessionsSchema(db)
+        ensureOverseerInboxSchema(db)
         db.exec(`INSERT INTO sessions (id, tag, namespace, created_at, updated_at, seq, metadata)
                  VALUES ('s-del', 'del-tag', 'default', 1000, 1000, 0,
                  '{"flavor":"codex","path":"/coding/hapi","name":"meta HAPI triage","host":"local"}')`)
@@ -245,6 +250,7 @@ describe('Overseer events schema (init-gated, not SCHEMA_VERSION)', () => {
         createV10Schema(db)
         ensureOverseerEventsSchema(db)
         ensureDeletedSessionsSchema(db)
+        ensureOverseerInboxSchema(db)
         db.exec(`INSERT INTO sessions (id, namespace, created_at, updated_at, seq)
                  VALUES ('s-old', 'default', 1000, 1000, 0),
                         ('s-new', 'default', 1000, 1000, 0)`)

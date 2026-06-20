@@ -20,6 +20,7 @@ import {
 } from '@hapi/protocol/messages'
 import type { Session } from '@hapi/protocol/types'
 import type { EventStore, InsertSystemEventInput, StoredSystemEvent } from '../store'
+import type { InboxStore } from '../store/inboxStore'
 
 export type SessionSnapshot = OverseerSessionIdentity
 
@@ -85,7 +86,10 @@ export class OverseerEventRecorder {
     private readonly emittedStaleSessions = new Set<string>()
     private readonly knownPermissionRequestIds = new Map<string, Set<string>>()
 
-    constructor(private readonly events: EventStore) {}
+    constructor(
+        private readonly events: EventStore,
+        private readonly inbox?: InboxStore
+    ) {}
 
     list(options: Parameters<EventStore['list']>[0] = {}): StoredSystemEvent[] {
         return this.events.list(options)
@@ -328,11 +332,15 @@ export class OverseerEventRecorder {
         }
     ): StoredSystemEvent | null {
         const { payloadFields = {}, notifyProject, ...rest } = input
-        return this.events.insert({
+        const stored = this.events.insert({
             riskDetected: 0,
             ...rest,
             payloadJson: buildPayload(session, payloadFields, notifyProject)
         })
+        if (stored && stored.attentionCandidate === 1 && this.inbox) {
+            this.inbox.promoteAttentionEvent(stored)
+        }
+        return stored
     }
 }
 

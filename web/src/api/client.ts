@@ -874,4 +874,33 @@ export class ApiClient {
         const suffix = query.toString()
         return await this.request(`/api/system-events${suffix ? `?${suffix}` : ''}`)
     }
+
+    async fetchInboxItems(params: {
+        limit?: number
+        activeOnly?: boolean
+        sessionId?: string
+    } = {}): Promise<{ total: number; items: unknown[] }> {
+        const query = new URLSearchParams()
+        if (params.limit !== undefined) query.set('limit', String(params.limit))
+        if (params.activeOnly) query.set('activeOnly', '1')
+        if (params.sessionId) query.set('sessionId', params.sessionId)
+        const suffix = query.toString()
+        return await this.request(`/api/inbox-items${suffix ? `?${suffix}` : ''}`)
+    }
+
+    async recordInboxOperatorAction(
+        inboxItemId: number,
+        action: import('@hapi/protocol').InboxOperatorAction,
+        feedback?: string | null,
+        snoozedUntil?: number | null
+    ): Promise<{ item: unknown }> {
+        return await this.request(`/api/inbox-items/${inboxItemId}/actions`, {
+            method: 'POST',
+            body: JSON.stringify({
+                action,
+                feedback: feedback ?? undefined,
+                snoozedUntil: snoozedUntil ?? undefined
+            })
+        })
+    }
 }
