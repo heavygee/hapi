@@ -64,6 +64,7 @@ import { useOpencodeReasoningEffortOptions } from '@/hooks/queries/useOpencodeRe
 import { useVoiceOptional } from '@/lib/voice-context'
 import { VoiceBackendSession, registerSessionStore, registerVoiceHooksStore, voiceHooks } from '@/realtime'
 import { isRemoteTerminalSupported } from '@/utils/terminalSupport'
+import { useMarkGardenSeenFromChat } from '@/garden/hooks/useMarkGardenSeenFromChat'
 
 /**
  * Returns whether a PendingSchedule should trigger an auto-clear timer.
@@ -424,6 +425,7 @@ function SessionChatInner(props: SessionChatProps) {
     const lastSyncedCursorModelRef = useRef<string | null | undefined>(undefined)
     const scratchlist = useHubScratchlist(props.session.id, props.api)
     const [scratchlistMode, setScratchlistMode] = useState(false)
+    useMarkGardenSeenFromChat(props.session.id, props.session.updatedAt, props.messages, props.messagesVersion)
     // Mode resets across sessions implicitly: SessionChat is keyed by
     // session.id at the public-export boundary, so a session switch
     // remounts SessionChatInner from scratch and `scratchlistMode`
