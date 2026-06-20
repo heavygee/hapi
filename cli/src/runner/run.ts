@@ -698,8 +698,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         }
       }
 
-      logger.debug(`[RUNNER RUN] Session ${sessionId} not found`);
-      return false;
+      logger.debug(`[RUNNER RUN] Session ${sessionId} not found (already stopped)`);
+      return true;
     };
 
     // Handle child process exit
