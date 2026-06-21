@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test'
+import { OVERSEER_STALE_SILENCE_MS } from '@hapi/protocol'
 import type { Session } from '@hapi/protocol/types'
 import { Store } from '../store'
 import { OverseerEventRecorder, toSessionSnapshot } from './overseerEventRecorder'
@@ -95,6 +96,30 @@ describe('OverseerEventRecorder', () => {
         )
 
         expect(event?.attentionCandidate).toBe(0)
+    })
+
+    it('records hub-inferred stale silence as captured-only (not inbox-promoted)', () => {
+        const store = new Store(':memory:')
+        const recorder = new OverseerEventRecorder(store.events, store.inbox)
+        const session = store.sessions.getOrCreateSession('idle', { flavor: 'claude', path: '/tmp', host: 'local' }, null, 'default')
+
+        const now = Date.now()
+        const silentSince = now - OVERSEER_STALE_SILENCE_MS - 60_000
+        const live = makeSession(session.id, 'claude', {
+            active: true,
+            activeAt: silentSince,
+            updatedAt: silentSince
+        })
+
+        const emitted = recorder.checkStaleSessions([live], now)
+
+        expect(emitted).toHaveLength(1)
+        expect(emitted[0]?.eventType).toBe('stale')
+        expect(emitted[0]?.attentionCandidate).toBe(0)
+        expect(store.events.count()).toBe(1)
+        // captured-only: the silence event is recorded for the Overseer/replay to query,
+        // but it must NOT flood the operator inbox (one item per idle session).
+        expect(store.inbox.count()).toBe(0)
     })
 
     it('synthesizes approval_requested from permission prompts', () => {
