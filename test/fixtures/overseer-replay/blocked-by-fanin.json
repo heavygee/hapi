@@ -1,0 +1,21 @@
+{
+    "name": "blocked-by-fanin",
+    "description": "Three worker sessions blocked on one shared upstream dependency, linked via event_links(blocked_by). Expected: root-cause traversal from any symptom returns the upstream event (surface root, not symptoms).",
+    "sessions": [
+        { "key": "infra", "tag": "infra", "flavor": "system", "name": "infra-dep" },
+        { "key": "w1", "tag": "peer-1", "flavor": "claude", "name": "peer-1" },
+        { "key": "w2", "tag": "peer-2", "flavor": "codex", "name": "peer-2" },
+        { "key": "w3", "tag": "peer-3", "flavor": "claude", "name": "peer-3" }
+    ],
+    "events": [
+        { "sid": 100, "ts": 1700000000000, "sessionKey": "infra", "sourceKind": "system", "eventType": "blocked", "attentionCandidate": 1, "operatorActionRequired": 1, "summary": "shared staging DB is down" },
+        { "sid": 1, "ts": 1700000060000, "sessionKey": "w1", "sourceKind": "worker", "eventType": "blocked", "attentionCandidate": 1, "operatorActionRequired": 1, "summary": "cannot run integration tests" },
+        { "sid": 2, "ts": 1700000070000, "sessionKey": "w2", "sourceKind": "worker", "eventType": "blocked", "attentionCandidate": 1, "operatorActionRequired": 1, "summary": "migration step times out" },
+        { "sid": 3, "ts": 1700000080000, "sessionKey": "w3", "sourceKind": "worker", "eventType": "blocked", "attentionCandidate": 1, "operatorActionRequired": 1, "summary": "seed script hangs" }
+    ],
+    "eventLinks": [
+        { "fromSid": 1, "toSid": 100, "relationType": "blocked_by" },
+        { "fromSid": 2, "toSid": 100, "relationType": "blocked_by" },
+        { "fromSid": 3, "toSid": 100, "relationType": "blocked_by" }
+    ]
+}

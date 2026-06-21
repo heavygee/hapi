@@ -1,0 +1,11 @@
+{
+    "name": "same-session-collapse",
+    "description": "Two attention events on the same session. Expected: collapse into ONE active inbox item with both source_event_ids merged.",
+    "sessions": [
+        { "key": "s", "tag": "peer-x", "flavor": "codex", "name": "peer-x" }
+    ],
+    "events": [
+        { "sid": 1, "ts": 1700000000000, "sessionKey": "s", "sourceKind": "worker", "eventType": "blocked", "attentionCandidate": 1, "operatorActionRequired": 1, "summary": "CI failed on push" },
+        { "sid": 2, "ts": 1700000060000, "sessionKey": "s", "sourceKind": "worker", "eventType": "needs_review", "attentionCandidate": 1, "operatorActionRequired": 1, "summary": "PR ready for review" }
+    ]
+}
