@@ -43,6 +43,7 @@ import {
 } from './rpcGateway'
 import { SessionCache } from './sessionCache'
 import { OverseerEventRecorder, shouldInjectNotifyContract, toSessionSnapshot } from './overseerEventRecorder'
+import { OverseerEntity } from './overseerEntity'
 import type { ListSystemEventsOptions, StoredSystemEvent } from '../store'
 import type { InboxOperatorAction } from '@hapi/protocol'
 import type { ListInboxItemsOptions, StoredInboxItem } from '../store/inboxItems'
@@ -141,6 +142,7 @@ export class SyncEngine {
     private readonly messageService: MessageService
     private readonly rpcGateway: RpcGateway
     private readonly overseerEvents: OverseerEventRecorder
+    private readonly overseer: OverseerEntity
     private inactivityTimer: NodeJS.Timeout | null = null
     /** Sessions that emitted `session-ready` (Cursor ACP load/newSession complete). */
     private readonly sessionReadyIds = new Set<string>()
@@ -162,6 +164,13 @@ export class SyncEngine {
         )
         this.rpcGateway = new RpcGateway(io, rpcRegistry)
         this.overseerEvents = new OverseerEventRecorder(store.events, store.inbox)
+        this.overseer = new OverseerEntity({
+            events: store.events,
+            inbox: store.inbox,
+            messages: store.messages,
+            getSession: (sessionId) => this.getSession(sessionId),
+            getSessions: () => this.getSessions()
+        })
         this.reloadAll()
         this.inactivityTimer = setInterval(() => this.expireInactive(), 5_000)
     }
@@ -364,6 +373,10 @@ export class SyncEngine {
         }
 
         this.eventPublisher.emit(event)
+    }
+
+    getOverseer(): OverseerEntity {
+        return this.overseer
     }
 
     getSystemEvents(options: ListSystemEventsOptions = {}): StoredSystemEvent[] {
