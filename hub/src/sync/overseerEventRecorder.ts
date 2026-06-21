@@ -232,7 +232,15 @@ export class OverseerEventRecorder {
                 sourceKind: 'system',
                 sourceRef: session.id,
                 eventType: 'stale',
-                attentionCandidate: 1,
+                // Captured-only: hub-inferred silence is ambient awareness, not an
+                // operator-action signal (operatorActionRequired stays 0). Auto-promoting
+                // it floods the inbox with one item per idle session ("narrating log file"
+                // failure mode); the framing doc mandates under-surface > over-surface.
+                // The event is still recorded so the Overseer/replay can synthesize a
+                // coalesced view ("N sessions idle") when it judges it worth attention.
+                // A worker that EXPLICITLY self-reports `stalled` keeps attention_candidate=1
+                // via deriveAttentionCandidate; only this inferred sweep is captured-only.
+                attentionCandidate: 0,
                 operatorActionRequired: 0,
                 summary: `No agent output for ${Math.round((now - lastAt) / 60_000)} minutes`,
                 relatedSessionId: session.id,
