@@ -26,7 +26,7 @@ export { ScratchlistStore } from './scratchlistStore'
 export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
 
-const SCHEMA_VERSION: number = 11
+const SCHEMA_VERSION: number = 12
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -131,6 +131,7 @@ export class Store {
             8: () => this.migrateFromV8ToV9(),
             9: () => this.migrateFromV9ToV10(),
             10: () => this.migrateFromV10ToV11(),
+            11: () => this.migrateFromV11ToV12(),
         })
 
         if (currentVersion === 0) {
@@ -266,6 +267,7 @@ export class Store {
                 text TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
+                attachments TEXT DEFAULT NULL,
                 PRIMARY KEY (session_id, entry_id),
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
@@ -487,6 +489,20 @@ export class Store {
             CREATE INDEX IF NOT EXISTS idx_session_scratchlist_session_created
                 ON session_scratchlist(session_id, created_at DESC);
         `)
+    }
+
+    /**
+     * tiann/hapi#921 (scratchlist v2.2): attachment metadata JSON column.
+     * Bytes live on hub filesystem under HAPI_HOME/scratchlist-attachments/.
+     *
+     * Rollback: `ALTER TABLE session_scratchlist DROP COLUMN attachments` is
+     * unsupported on older SQLite; rebuild DB or leave column unused.
+     */
+    private migrateFromV11ToV12(): void {
+        const columns = this.db.prepare('PRAGMA table_info(session_scratchlist)').all() as Array<{ name: string }>
+        if (!columns.some((col) => col.name === 'attachments')) {
+            this.db.exec(`ALTER TABLE session_scratchlist ADD COLUMN attachments TEXT DEFAULT NULL`)
+        }
     }
 
     private getSessionColumnNames(): Set<string> {

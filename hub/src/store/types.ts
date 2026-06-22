@@ -70,6 +70,7 @@ export type StoredScratchlistEntry = {
     text: string
     createdAt: number
     updatedAt: number
+    attachments: import('@hapi/protocol').ScratchlistAttachmentMetadata[]
 }
 
 export type VersionedUpdateResult<T> =

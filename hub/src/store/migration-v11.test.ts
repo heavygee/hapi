@@ -22,6 +22,7 @@ describe('Store V10→V11 migration: session_scratchlist table', () => {
         expect(cols).toContain('text')
         expect(cols).toContain('created_at')
         expect(cols).toContain('updated_at')
+        expect(cols).toContain('attachments')
     })
 
     it('fresh DB has the (session_id, created_at) index', () => {
@@ -79,6 +80,38 @@ describe('Store V10→V11 migration: session_scratchlist table', () => {
             expect(sessionCols).toContain('service_tier')
             const scratchCols = getColumns(store, 'session_scratchlist')
             expect(scratchCols).toContain('entry_id')
+        } finally {
+            store?.close()
+            rmSync(dir, { recursive: true, force: true })
+        }
+    })
+
+    it('V11 DB with text-only scratchlist migrates to V12 and gains attachments column', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v11-to-v12-'))
+        const dbPath = join(dir, 'test.db')
+        let store: Store | undefined
+        try {
+            const db = new Database(dbPath, { create: true, readwrite: true, strict: true })
+            db.exec('PRAGMA journal_mode = WAL')
+            db.exec('PRAGMA foreign_keys = ON')
+            createV10Schema(db)
+            db.exec(`
+                CREATE TABLE session_scratchlist (
+                    session_id TEXT NOT NULL,
+                    entry_id TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    PRIMARY KEY (session_id, entry_id),
+                    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                );
+            `)
+            db.exec('PRAGMA user_version = 11')
+            db.close()
+
+            store = new Store(dbPath)
+            const cols = getColumns(store, 'session_scratchlist')
+            expect(cols).toContain('attachments')
         } finally {
             store?.close()
             rmSync(dir, { recursive: true, force: true })
@@ -186,13 +219,13 @@ describe('ScratchlistStore: CRUD through the typed-table wrapper', () => {
         })
         if (created.outcome !== 'created') throw new Error('Expected created')
 
-        const updated = store.scratchlist.update(sessionId, 'u1', 'after')
+        const updated = store.scratchlist.update(sessionId, 'u1', { text: 'after' })
         expect(updated).not.toBeNull()
         expect(updated!.text).toBe('after')
         expect(updated!.createdAt).toBe(1000)
         expect(updated!.updatedAt).toBeGreaterThan(1000)
 
-        const missing = store.scratchlist.update(sessionId, 'does-not-exist', 'noop')
+        const missing = store.scratchlist.update(sessionId, 'does-not-exist', { text: 'noop' })
         expect(missing).toBeNull()
     })
 
