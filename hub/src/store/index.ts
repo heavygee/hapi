@@ -5,18 +5,16 @@ import { dirname } from 'node:path'
 import { MachineStore } from './machineStore'
 import { MessageStore } from './messageStore'
 import { PushStore } from './pushStore'
+import { FcmStore } from './fcmStore'
 import { ScratchlistStore } from './scratchlistStore'
 import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
-import { EventStore } from './eventStore'
-import { InboxStore } from './inboxStore'
-import { ensureOverseerEventsSchema, ensureDeletedSessionsSchema } from './events'
-import { ensureOverseerInboxSchema } from './inboxItems'
 
 export type {
     StoredMachine,
     StoredMessage,
     StoredPushSubscription,
+    StoredFcmDevice,
     StoredScratchlistEntry,
     StoredSession,
     StoredUser,
@@ -26,13 +24,10 @@ export type { CancelQueuedMessageResult, LookupQueuedMessageResult } from './mes
 export { MachineStore } from './machineStore'
 export { MessageStore } from './messageStore'
 export { PushStore } from './pushStore'
+export { FcmStore } from './fcmStore'
 export { ScratchlistStore } from './scratchlistStore'
 export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
-export { EventStore } from './eventStore'
-export { InboxStore } from './inboxStore'
-export type { InsertSystemEventInput, ListSystemEventsOptions, StoredSystemEvent } from './eventStore'
-export type { ListInboxItemsOptions, StoredInboxItem } from './inboxStore'
 
 const SCHEMA_VERSION: number = 12
 const REQUIRED_TABLES = [
@@ -42,14 +37,7 @@ const REQUIRED_TABLES = [
     'users',
     'push_subscriptions',
     'fcm_devices',
-    'session_scratchlist',
-    'events',
-    'event_links',
-    'events_fts',
-    'deleted_sessions',
-    'inbox_items',
-    'inbox_item_source_events',
-    'inbox_operator_actions'
+    'session_scratchlist'
 ] as const
 
 export class Store {
@@ -62,9 +50,8 @@ export class Store {
     readonly messages: MessageStore
     readonly users: UserStore
     readonly push: PushStore
+    readonly fcm: FcmStore
     readonly scratchlist: ScratchlistStore
-    readonly events: EventStore
-    readonly inbox: InboxStore
 
     /**
      * Filesystem path of the underlying SQLite database, or ':memory:' for
@@ -115,9 +102,8 @@ export class Store {
         this.messages = new MessageStore(this.db)
         this.users = new UserStore(this.db)
         this.push = new PushStore(this.db)
+        this.fcm = new FcmStore(this.db)
         this.scratchlist = new ScratchlistStore(this.db)
-        this.events = new EventStore(this.db)
-        this.inbox = new InboxStore(this.db)
     }
 
     close(): void {
@@ -150,6 +136,7 @@ export class Store {
             7: () => this.migrateFromV7ToV8(),
             8: () => this.migrateFromV8ToV9(),
             9: () => this.migrateFromV9ToV10(),
+            10: () => this.migrateFromV10ToV11(),
             11: () => this.migrateFromV11ToV12(),
         })
 
@@ -170,13 +157,11 @@ export class Store {
                 // a partially-built legacy DB may not have yet.
                 this.createSchema()
                 this.setUserVersion(SCHEMA_VERSION)
-                this.finishSchemaInit()
                 return
             }
 
             this.createSchema()
             this.setUserVersion(SCHEMA_VERSION)
-            this.finishSchemaInit()
             return
         }
 
@@ -188,7 +173,6 @@ export class Store {
                 step()
             }
             this.setUserVersion(SCHEMA_VERSION)
-            this.finishSchemaInit()
             return
         }
 
@@ -196,14 +180,6 @@ export class Store {
             throw this.buildSchemaMismatchError(currentVersion)
         }
 
-        this.finishSchemaInit()
-    }
-
-    /** Idempotent Overseer self-heal + loud missing-table check on every boot path. */
-    private finishSchemaInit(): void {
-        ensureOverseerEventsSchema(this.db)
-        ensureDeletedSessionsSchema(this.db)
-        ensureOverseerInboxSchema(this.db)
         this.assertRequiredTablesPresent()
     }
 
@@ -484,6 +460,23 @@ export class Store {
         if (!columns.has('service_tier')) {
             this.db.exec('ALTER TABLE sessions ADD COLUMN service_tier TEXT')
         }
+    }
+
+    private migrateFromV10ToV11(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS fcm_devices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                namespace TEXT NOT NULL,
+                token TEXT NOT NULL,
+                platform TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                UNIQUE(namespace, device_id, platform)
+            );
+            CREATE INDEX IF NOT EXISTS idx_fcm_devices_namespace ON fcm_devices(namespace);
+            CREATE INDEX IF NOT EXISTS idx_fcm_devices_token ON fcm_devices(token);
+        `)
     }
 
     /**
