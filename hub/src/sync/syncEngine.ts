@@ -10,7 +10,7 @@
 import { isKnownFlavor, type LocalResumeTarget, type ResumableSession } from '@hapi/protocol'
 import type { CursorMigrateOutcome, CursorMigrateToAcpRequest, SlashCommandsResponse } from '@hapi/protocol/apiTypes'
 import type { AgentFlavor, CodexCollaborationMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
-import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
+import { extractAssistantPlainText, unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
 import type { Server } from 'socket.io'
 import type { Store, CancelQueuedMessageResult } from '../store'
 import type { HapiSessionExportResult } from '@hapi/protocol/sessionExport'
