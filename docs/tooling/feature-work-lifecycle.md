@@ -25,32 +25,32 @@ This doc is the **single map**. Detailed rules stay in linked files — do not f
 
 ```mermaid
 flowchart TD
-    OP([Operator: next feature request]) --> ORCH[Orchestrator session]
-    ORCH --> S01[§1 Code search in repo]
-    S01 --> S02[§2 Upstream search tiann/hapi]
-    S02 --> S03[§3 Playback → operator confirms]
-    S03 --> S04{§4 Issue or spike?}
-    S04 -->|issue| ISSUE[gh issue on tiann/hapi]
-    S04 -->|spike| WT[§5 hapi-worktree-create]
+    OP(["Operator: next feature request"]) --> ORCH["Orchestrator session"]
+    ORCH --> S01["Step 1: code search in repo"]
+    S01 --> S02["Step 2: upstream search tiann hapi"]
+    S02 --> S03["Step 3: playback, operator confirms"]
+    S03 --> S04{"Step 4: issue or spike?"}
+    S04 -->|issue| ISSUE["gh issue on tiann hapi"]
+    S04 -->|spike| WT["Step 5: hapi-worktree-create"]
     ISSUE --> WT
-    WT --> TOPO{§5 Demo topology}
-    TOPO -->|default| PEER[Peer stack :3100–3199<br/>hapi-peer-stack up]
-    TOPO -->|operator asks| SOUP[Soup layer on :3006]
-    TOPO -->|rare| CLEAN[Clean hub upstream/main only<br/>new port + HAPI_HOME]
-    PEER --> IMPL[Feature peer implements in worktree<br/>commits on feature branch]
+    WT --> TOPO{"Step 5: demo topology"}
+    TOPO -->|default| PEER["Peer stack ports 3100-3199<br/>hapi-peer-stack up"]
+    TOPO -->|operator asks| SOUP["Soup layer on port 3006"]
+    TOPO -->|rare| CLEAN["Clean hub upstream main only<br/>new port and HAPI_HOME"]
+    PEER --> IMPL["Feature peer in worktree<br/>commits on feature branch"]
     SOUP --> IMPL
     CLEAN --> IMPL
-    IMPL --> GATES[§6 Gates: typecheck test cold-review Playwright proof]
+    IMPL --> GATES["Step 6: typecheck, test, cold review, Playwright"]
     GATES -->|fail| IMPL
-    GATES -->|pass| INLINE[§6.4 Inline proof in HAPI chat<br/>display_image / display_video / hapi-display-image.mjs]
-    INLINE --> HAND[Handoff: what to click + tier 4b/4c rationale]
-    HAND --> DOG[§7 Operator dogfood on demo URL]
+    GATES -->|pass| INLINE["Step 6.4: inline proof in HAPI chat<br/>display_image or display_video"]
+    INLINE --> HAND["Handoff: what to click, tier 4b or 4c"]
+    HAND --> DOG["Step 7: operator dogfood"]
     DOG -->|no| IMPL
-    DOG -->|yes| PR[§8 gh pr create vs upstream/main]
-    PR --> SOUP2{Land on daily soup?}
-    SOUP2 -->|yes| MANIFEST[Add/update manifest layer]
-    MANIFEST --> SOUPTREE[Soup dogfood tree — see below]
-    SOUP2 -->|merged upstream| DROP[Drop manifest layer after sync]
+    DOG -->|yes| PR["Step 8: gh pr create vs upstream main"]
+    PR --> SOUP2{"Land on daily soup?"}
+    SOUP2 -->|yes| MANIFEST["Add or update manifest layer"]
+    MANIFEST --> SOUPTREE["Soup dogfood tree below"]
+    SOUP2 -->|merged upstream| DROP["Drop manifest layer after sync"]
 ```
 
 **Canonical playbooks**
@@ -67,34 +67,34 @@ Same chart as [`driver-soup.md` § Soup dogfood decision tree](../tooling/driver
 
 ```mermaid
 flowchart TD
-    START([Feature ready in worktree]) --> MANIFEST{In driver-manifest.yaml?}
-    MANIFEST -->|no| ADD[Add layer + note in operator doc]
+    START(["Feature ready in worktree"]) --> MANIFEST{"In driver-manifest.yaml?"}
+    MANIFEST -->|no| ADD["Add layer plus operator note"]
     ADD --> COLLIDE
-    MANIFEST -->|yes| COLLIDE{SCHEMA bump collides with lower layer?}
-    COLLIDE -->|yes| RENUMBER[Cut soup-only renumber branch<br/>push to origin]
+    MANIFEST -->|yes| COLLIDE{"SCHEMA bump collides with lower layer?"}
+    COLLIDE -->|yes| RENUMBER["Cut soup-only renumber branch<br/>push to origin"]
     COLLIDE -->|no| PRECHECK
-    RENUMBER --> PRECHECK[hapi-driver-status --quiet]
-    PRECHECK -->|exit 75| WAIT[Stop — stack busy]
-    PRECHECK -->|exit 0| MEM{build_web_preflight<br/>swap + MemAvailable OK?}
-    MEM -->|no| MEMFIX[Operator: drain agents / swapoff-swapon<br/>see recovery briefing]
+    RENUMBER --> PRECHECK["hapi-driver-status --quiet"]
+    PRECHECK -->|exit 75| WAIT["Stop: stack busy"]
+    PRECHECK -->|exit 0| MEM{"build_web_preflight OK?<br/>swap and MemAvailable"}
+    MEM -->|no| MEMFIX["Drain agents or swapoff-swapon<br/>see recovery briefing"]
     MEMFIX --> PRECHECK
-    MEM -->|yes| REBUILD[hapi-driver-rebuild --build-web --verify<br/>from ~/coding/hapi mirror]
-    REBUILD -->|fail| FIX[Fix on soup branches — never hand-edit driver/]
+    MEM -->|yes| REBUILD["hapi-driver-rebuild build-web verify<br/>from coding hapi mirror"]
+    REBUILD -->|fail| FIX["Fix on soup branches<br/>never hand-edit driver tree"]
     FIX --> REBUILD
-    REBUILD -->|pass| VITE[Atomic vite swap → web/dist]
-    VITE --> VERIFY[hapi-verify-web-dist<br/>563 t() keys in bundle]
-    VERIFY -->|fail| ROLLBACK[Auto rollback dist.prev]
+    REBUILD -->|pass| VITE["Atomic vite swap to web dist"]
+    VITE --> VERIFY["hapi-verify-web-dist<br/>563 locale keys in bundle"]
+    VERIFY -->|fail| ROLLBACK["Auto rollback dist.prev"]
     ROLLBACK --> FIX
-    VERIFY -->|pass| WHAT{What changed?}
-    WHAT -->|web only| WEBDONE[Hard-reload :3006]
-    WHAT -->|hub/cli/shared| RESTART[hapi-restart-hub]
-    RESTART --> DB{user_version matches SCHEMA?}
-    DB -->|no| DEBUG[Hub journal + store ladder]
-    DB -->|yes| PROOF{Operator exercises feature on :3006?}
+    VERIFY -->|pass| WHAT{"What changed?"}
+    WHAT -->|web only| WEBDONE["Hard-reload port 3006"]
+    WHAT -->|hub cli shared| RESTART["hapi-restart-hub"]
+    RESTART --> DB{"user_version matches SCHEMA?"}
+    DB -->|no| DEBUG["Hub journal and store ladder"]
+    DB -->|yes| PROOF{"Operator exercises feature on 3006?"}
     WEBDONE --> PROOF
-    PROOF -->|no| IMPL2[Finish UX in worktree → rebuild]
+    PROOF -->|no| IMPL2["Finish UX in worktree, rebuild"]
     IMPL2 --> PRECHECK
-    PROOF -->|yes| DONE([Done on soup])
+    PROOF -->|yes| DONE(["Done on soup"])
 ```
 
 ---
