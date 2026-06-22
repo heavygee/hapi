@@ -130,7 +130,6 @@ export class Store {
             7: () => this.migrateFromV7ToV8(),
             8: () => this.migrateFromV8ToV9(),
             9: () => this.migrateFromV9ToV10(),
-            10: () => this.migrateFromV10ToV11(),
             11: () => this.migrateFromV11ToV12(),
         })
 
@@ -457,25 +456,15 @@ export class Store {
     }
 
     /**
-     * tiann/hapi#893 (scratchlist v2): introduce the per-session
-     * `session_scratchlist` typed table. Operator-decided schema choice
-     * over an opaque metadata blob - the eventual overseer-context use
-     * case wants `(sessionId, createdAt)` queryability without parsing
-     * JSON.
+     * Soup-only (driver-manifest): scratchlist v2.2 lands at v11→v12 because
+     * feat/companion-fcm-push-api (manifest layer 1) owns v10→v11 (fcm_devices).
+     * Upstream feat/scratchlist-attachments-v22 keeps v10→v11 scratchlist text
+     * + v11→v12 attachments — do NOT submit this renumber upstream.
      *
-     * Idempotent via `CREATE TABLE IF NOT EXISTS` + `CREATE INDEX IF NOT
-     * EXISTS`. Cascade-delete from `sessions(id)` handles delete-session
-     * cleanup. No data backfill: pre-v11 hubs never had this data; the
-     * web client's first-run migration (`hapi.scratchlist.v2.migrated.*`
-     * flag) pushes any existing `localStorage` entries up via the REST
-     * endpoint.
-     *
-     * Rollback: `DROP TABLE session_scratchlist; PRAGMA user_version = 10;`
-     * - the table is independent, so the drop is safe and loses only the
-     * v2 hub-side entries (web client retains its localStorage offline
-     * cache).
+     * tiann/hapi#921: session_scratchlist with attachments JSON column.
+     * Bytes live on hub filesystem under HAPI_HOME/scratchlist-attachments/.
      */
-    private migrateFromV10ToV11(): void {
+    private migrateFromV11ToV12(): void {
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS session_scratchlist (
                 session_id TEXT NOT NULL,
@@ -483,26 +472,13 @@ export class Store {
                 text TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
+                attachments TEXT DEFAULT NULL,
                 PRIMARY KEY (session_id, entry_id),
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS idx_session_scratchlist_session_created
                 ON session_scratchlist(session_id, created_at DESC);
         `)
-    }
-
-    /**
-     * tiann/hapi#921 (scratchlist v2.2): attachment metadata JSON column.
-     * Bytes live on hub filesystem under HAPI_HOME/scratchlist-attachments/.
-     *
-     * Rollback: `ALTER TABLE session_scratchlist DROP COLUMN attachments` is
-     * unsupported on older SQLite; rebuild DB or leave column unused.
-     */
-    private migrateFromV11ToV12(): void {
-        const columns = this.db.prepare('PRAGMA table_info(session_scratchlist)').all() as Array<{ name: string }>
-        if (!columns.some((col) => col.name === 'attachments')) {
-            this.db.exec(`ALTER TABLE session_scratchlist ADD COLUMN attachments TEXT DEFAULT NULL`)
-        }
     }
 
     private getSessionColumnNames(): Set<string> {
