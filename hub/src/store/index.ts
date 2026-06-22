@@ -503,6 +503,11 @@ export class Store {
             CREATE INDEX IF NOT EXISTS idx_session_scratchlist_session_created
                 ON session_scratchlist(session_id, created_at DESC);
         `)
+        const columns = this.db.prepare('PRAGMA table_info(session_scratchlist)').all() as Array<{ name: string }>
+        const names = new Set(columns.map((row) => row.name))
+        if (names.size > 0 && !names.has('attachments')) {
+            this.db.exec('ALTER TABLE session_scratchlist ADD COLUMN attachments TEXT DEFAULT NULL')
+        }
     }
 
     private getSessionColumnNames(): Set<string> {
