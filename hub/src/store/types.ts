@@ -64,6 +64,16 @@ export type StoredPushSubscription = {
     createdAt: number
 }
 
+export type StoredFcmDevice = {
+    id: number
+    namespace: string
+    token: string
+    platform: 'phone' | 'wear'
+    deviceId: string
+    createdAt: number
+    updatedAt: number
+}
+
 export type StoredScratchlistEntry = {
     sessionId: string
     entryId: string

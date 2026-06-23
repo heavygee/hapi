@@ -10,7 +10,8 @@
 import { isKnownFlavor, type LocalResumeTarget, type ResumableSession } from '@hapi/protocol'
 import type { CursorMigrateOutcome, CursorMigrateToAcpRequest, SlashCommandsResponse } from '@hapi/protocol/apiTypes'
 import type { AgentFlavor, CodexCollaborationMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
-import { extractAssistantPlainText, unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
+import { unwrapRoleWrappedRecordEnvelope, extractAssistantPlainText } from '@hapi/protocol/messages'
+import { AGENT_NOTIFY_CONTRACT_INLINE_PREFIX } from '@hapi/protocol'
 import type { Server } from 'socket.io'
 import type { Store, CancelQueuedMessageResult } from '../store'
 import type { HapiSessionExportResult } from '@hapi/protocol/sessionExport'
@@ -30,6 +31,7 @@ import {
     type RpcGeneratedImageResponse,
     type RpcListDirectoryResponse,
     type RpcListCodexModelsResponse,
+    type RpcListCodexSessionsResponse,
     type RpcListCursorModelsResponse,
     type RpcListOpencodeModelsResponse,
     type RpcListOpencodeReasoningEffortOptionsResponse,
@@ -40,6 +42,11 @@ import {
     type RpcUploadFileResponse
 } from './rpcGateway'
 import { SessionCache } from './sessionCache'
+import { OverseerEventRecorder, shouldInjectNotifyContract, toSessionSnapshot } from './overseerEventRecorder'
+import { OverseerEntity } from './overseerEntity'
+import type { ListSystemEventsOptions, StoredSystemEvent } from '../store'
+import type { InboxOperatorAction } from '@hapi/protocol'
+import type { ListInboxItemsOptions, StoredInboxItem } from '../store/inboxItems'
 
 export type { Session, SyncEvent } from '@hapi/protocol/types'
 export type { Machine } from './machineCache'
@@ -51,6 +58,7 @@ export type {
     RpcGeneratedImageResponse,
     RpcListDirectoryResponse,
     RpcListCodexModelsResponse,
+    RpcListCodexSessionsResponse,
     RpcListCursorModelsResponse,
     RpcListOpencodeModelsResponse,
     RpcListOpencodeReasoningEffortOptionsResponse,
@@ -133,6 +141,8 @@ export class SyncEngine {
     private readonly machineCache: MachineCache
     private readonly messageService: MessageService
     private readonly rpcGateway: RpcGateway
+    private readonly overseerEvents: OverseerEventRecorder
+    private readonly overseer: OverseerEntity
     private inactivityTimer: NodeJS.Timeout | null = null
     /** Sessions that emitted `session-ready` (Cursor ACP load/newSession complete). */
     private readonly sessionReadyIds = new Set<string>()
@@ -153,6 +163,14 @@ export class SyncEngine {
             (sessionId, updatedAt) => this.recordSessionActivity(sessionId, updatedAt)
         )
         this.rpcGateway = new RpcGateway(io, rpcRegistry)
+        this.overseerEvents = new OverseerEventRecorder(store.events, store.inbox)
+        this.overseer = new OverseerEntity({
+            events: store.events,
+            inbox: store.inbox,
+            messages: store.messages,
+            getSession: (sessionId) => this.getSession(sessionId),
+            getSessions: () => this.getSessions()
+        })
         this.reloadAll()
         this.inactivityTimer = setInterval(() => this.expireInactive(), 5_000)
     }
@@ -270,19 +288,66 @@ export class SyncEngine {
 
     handleRealtimeEvent(event: SyncEvent): void {
         if (event.type === 'session-updated' && event.sessionId) {
-            // Snapshot agent session IDs before refresh — safe because JS is single-threaded
-            // and refreshSession replaces the Map entry with a new object.
+            // Closes the second half of #884: when a CLI handler emits a
+            // structured patch (todos / teamState / metadata / agentState),
+            // apply it in place and forward the patch as-is. This skips both
+            // the DB re-read AND the full-Session SSE broadcast that the
+            // legacy no-data path went through. Web clients hit
+            // getSessionPatch's truthy path and patch the cache instead of
+            // falling through to the per-session REST invalidation that drove
+            // the refetch storm.
+            //
+            // `applySessionPatch` MUTATES the cached Session in place (it
+            // reassigns `session.metadata = patch.metadata.value`), so we
+            // MUST snapshot the metadata reference BEFORE calling it.
+            // Reading `before?.metadata` after the mutation would see the
+            // new value and `hasSameAgentSessionIds` would always return
+            // true — breaking the dedup-on-metadata-id-change trigger that
+            // the legacy `refreshSession` path got for free (refresh
+            // REPLACES the cache entry, leaving the old object reference
+            // intact for the caller). Use the snapshot for BOTH branches
+            // so the comparison contract is identical.
             const before = this.sessionCache.getSession(event.sessionId)
+            const beforeMetadata = before?.metadata ?? null
+            const patchApplied = event.data
+                ? this.sessionCache.applySessionPatch(event.sessionId, event.data, event.namespace)
+                : false
+
+            if (patchApplied) {
+                this.eventPublisher.emit(event)
+                const after = this.sessionCache.getSession(event.sessionId)
+                if (after?.metadata && !this.hasSameAgentSessionIds(beforeMetadata, after.metadata)) {
+                    if (!this.canRunCursorDedup(after)) {
+                        return
+                    }
+                    void this.sessionCache.deduplicateByAgentSessionId(event.sessionId).catch(() => {
+                        // best-effort: dedup failure is harmless, web-side safety net hides remaining duplicates
+                    })
+                }
+                return
+            }
+
+            // No-data event (or data we can't apply directly, e.g. full
+            // Session payload from a different emitter): fall back to the
+            // legacy refresh-from-DB-and-broadcast path.
             this.sessionCache.refreshSession(event.sessionId)
             const after = this.sessionCache.getSession(event.sessionId)
-            if (after?.metadata && !this.hasSameAgentSessionIds(before?.metadata ?? null, after.metadata)) {
+            if (after) {
+                this.overseerEvents.onSessionUpdated(
+                    after,
+                    this.store.sessions.getSession(after.id)?.tag ?? null
+                )
+            }
+            if (after?.metadata && !this.hasSameAgentSessionIds(beforeMetadata, after.metadata)) {
                 if (!this.canRunCursorDedup(after)) {
+                    this.eventPublisher.emit(event)
                     return
                 }
                 void this.sessionCache.deduplicateByAgentSessionId(event.sessionId).catch(() => {
                     // best-effort: dedup failure is harmless, web-side safety net hides remaining duplicates
                 })
             }
+            this.eventPublisher.emit(event)
             return
         }
 
@@ -295,9 +360,57 @@ export class SyncEngine {
             if (!this.getSession(event.sessionId)) {
                 this.sessionCache.refreshSession(event.sessionId)
             }
+            const session = this.getSession(event.sessionId)
+            if (session && event.message) {
+                const storedSession = this.store.sessions.getSession(event.sessionId)
+                this.overseerEvents.onAgentMessage(
+                    toSessionSnapshot(session, storedSession?.tag ?? null),
+                    event.message.id,
+                    event.message.content,
+                    event.message.createdAt
+                )
+            }
         }
 
         this.eventPublisher.emit(event)
+    }
+
+    getOverseer(): OverseerEntity {
+        return this.overseer
+    }
+
+    getSystemEvents(options: ListSystemEventsOptions = {}): StoredSystemEvent[] {
+        return this.overseerEvents.list(options)
+    }
+
+    getSystemEventCount(): number {
+        return this.overseerEvents.count()
+    }
+
+    getInboxItems(options: ListInboxItemsOptions = {}): StoredInboxItem[] {
+        return this.store.inbox.list(options)
+    }
+
+    getInboxItemCount(): number {
+        return this.store.inbox.count()
+    }
+
+    recordInboxOperatorAction(
+        inboxItemId: number,
+        action: InboxOperatorAction,
+        feedback: string | null = null,
+        snoozedUntil: number | null = null
+    ): StoredInboxItem | null {
+        return this.store.inbox.recordOperatorAction(inboxItemId, action, feedback, snoozedUntil)
+    }
+
+    private getLastAgentPlainText(sessionId: string): string | null {
+        const messages = this.store.messages.getMessages(sessionId, 80)
+        for (let i = messages.length - 1; i >= 0; i -= 1) {
+            const text = extractAssistantPlainText(messages[i].content)
+            if (text) return text
+        }
+        return null
     }
 
     handleSessionAlive(payload: {
@@ -332,6 +445,16 @@ export class SyncEngine {
         const shouldRetryDedup = !isCursorAcp || this.sessionReadyIds.has(payload.sid)
 
         this.sessionCache.handleSessionEnd(payload)
+        const session = this.getSession(payload.sid)
+        if (session) {
+            this.overseerEvents.onSessionEnd(
+                session,
+                this.store.sessions.getSession(session.id)?.tag ?? null,
+                payload.time,
+                payload.reason,
+                () => this.getLastAgentPlainText(session.id)
+            )
+        }
         this.eventPublisher.emit({
             type: 'session-ended',
             sessionId: payload.sid,
@@ -378,10 +501,6 @@ export class SyncEngine {
 
     countScratchlistEntries(sessionId: string): number {
         return this.store.scratchlist.count(sessionId)
-    }
-
-    sumScratchlistAttachmentBytes(sessionId: string): number {
-        return this.store.scratchlist.sumAttachmentBytes(sessionId)
     }
 
     /**
@@ -499,6 +618,10 @@ export class SyncEngine {
         return removed
     }
 
+    sumScratchlistAttachmentBytes(sessionId: string): number {
+        return this.store.scratchlist.sumAttachmentBytes(sessionId)
+    }
+
     async uploadScratchlistAttachment(
         sessionId: string,
         namespace: string,
@@ -553,7 +676,7 @@ export class SyncEngine {
         return { buffer: read.buffer, mimeType: 'application/octet-stream', filename: 'attachment' }
     }
 
-    handleMachineAlive(payload: { machineId: string; time: number }): void {
+        handleMachineAlive(payload: { machineId: string; time: number }): void {
         this.machineCache.handleMachineAlive(payload)
     }
 
@@ -569,6 +692,7 @@ export class SyncEngine {
             this.triggerDedupIfNeeded(session.id)
         }
         this.machineCache.expireInactive()
+        this.overseerEvents.checkStaleSessions(this.sessionCache.getSessions())
         // Piggybacked on the inactivity tick; not a logical part of expireInactive
         // but shares its 5s cadence (avoids a second timer).
         this.messageService.releaseMatureScheduledMessages(Date.now())
@@ -612,7 +736,16 @@ export class SyncEngine {
             scheduledAt?: number | null
         }
     ): Promise<void> {
-        await this.messageService.sendMessage(sessionId, payload)
+        const session = this.getSession(sessionId)
+        const flavor = session?.metadata?.flavor ?? 'claude'
+        const text = payload.text && shouldInjectNotifyContract(flavor)
+            ? `${AGENT_NOTIFY_CONTRACT_INLINE_PREFIX}${payload.text}`
+            : payload.text
+
+        await this.messageService.sendMessage(sessionId, {
+            ...payload,
+            text
+        })
         this.sessionCache.markMessageQueued(sessionId)
         this.sessionCache.recordSessionActivity(sessionId, Date.now())
     }
@@ -917,6 +1050,7 @@ export class SyncEngine {
         sessionType?: 'simple' | 'worktree',
         worktreeName?: string,
         resumeSessionId?: string,
+        importHistory?: boolean,
         effort?: string,
         permissionMode?: PermissionMode,
         serviceTier?: string
@@ -931,6 +1065,7 @@ export class SyncEngine {
             sessionType,
             worktreeName,
             resumeSessionId,
+            importHistory,
             effort,
             permissionMode,
             serviceTier
@@ -1386,6 +1521,7 @@ export class SyncEngine {
             undefined,
             undefined,
             resumeToken,
+            false,
             session.effort ?? undefined,
             preferredPermissionMode,
             session.serviceTier ?? undefined
@@ -1786,6 +1922,13 @@ export class SyncEngine {
 
     async listCodexModelsForMachine(machineId: string): Promise<RpcListCodexModelsResponse> {
         return await this.rpcGateway.listCodexModelsForMachine(machineId)
+    }
+
+    async listCodexSessionsForMachine(
+        machineId: string,
+        options?: { includeOld?: boolean; olderThanDays?: number; limit?: number; cursor?: string }
+    ): Promise<RpcListCodexSessionsResponse> {
+        return await this.rpcGateway.listCodexSessionsForMachine(machineId, options)
     }
 
     async listCursorModelsForSession(sessionId: string): Promise<RpcListCursorModelsResponse> {
