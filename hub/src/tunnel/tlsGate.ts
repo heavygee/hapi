@@ -58,7 +58,12 @@ function hostMatchesCertificate(host: string, cert: PeerCertificate): boolean {
         return altNames.some(name => name.type === 'DNS' && dnsNameMatchesHost(host, name.value))
     }
 
-    const commonName = cert.subject?.CN
+    const commonNameRaw = cert.subject?.CN
+    if (!commonNameRaw) {
+        return false
+    }
+
+    const commonName = Array.isArray(commonNameRaw) ? commonNameRaw[0] : commonNameRaw
     if (!commonName) {
         return false
     }
