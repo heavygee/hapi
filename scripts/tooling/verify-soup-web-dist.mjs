@@ -40,6 +40,8 @@ const STANDARD_TOP_DIRS = new Set([
     'chat',
     'realtime',
     'vendor-stubs',
+    'test',
+    'utils',
 ])
 
 /** Core routes present before operator soup layers. */
@@ -280,6 +282,9 @@ function keySatisfied(distBlob, key, value) {
     return false
 }
 
+export { collectSoupMarkersFromSource, featureTopLevelDirs, STANDARD_TOP_DIRS }
+
+function runVerify() {
 const webSrc = join(driver, 'web/src')
 const enPath = join(webSrc, 'lib/locales/en.ts')
 const distDir = join(driver, 'web/dist')
@@ -337,7 +342,7 @@ if (missing.length === 0) {
             /* ignore meta parse / git */
         }
     } else if (STRICT) {
-        console.error('verify-soup-web-dist: note: missing .hapi-build-meta.json (run hapi-driver-build-web to stamp)')
+        missing.push('missing .hapi-build-meta.json (run hapi-driver-build-web to stamp)')
     }
 }
 
@@ -360,3 +365,8 @@ console.error('Dist is stale vs merged driver web/src. Fix: hapi-driver-build-we
 console.error('Never cp feat/worktree web/dist into driver — that rolls back soup layers.')
 console.error('Emergency rollback: hapi-driver-rollback-web')
 process.exit(1)
+}
+
+if (import.meta.main) {
+    runVerify()
+}
