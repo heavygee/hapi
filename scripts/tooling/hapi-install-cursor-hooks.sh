@@ -16,15 +16,25 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HOOKS_JSON="${REPO_ROOT}/.cursor/hooks.json"
 PRODUCT_GUARD="${REPO_ROOT}/scripts/tooling/hapi-product-code-guard.sh"
 SYSTEMCTL_GUARD="${REPO_ROOT}/scripts/tooling/hapi-systemctl-guard.sh"
+MUTATION_GUARD="${REPO_ROOT}/scripts/tooling/hapi-production-mutation-guard.sh"
+SOUP_DOGFOOD_RULE="${REPO_ROOT}/scripts/tooling/cursor-rules/hapi-driver-soup-dogfood.mdc"
+USER_RULES="${HOME}/.cursor/rules"
 
-for s in "$PRODUCT_GUARD" "$SYSTEMCTL_GUARD"; do
+for s in "$PRODUCT_GUARD" "$SYSTEMCTL_GUARD" "$MUTATION_GUARD"; do
     if [ ! -x "$s" ]; then
         echo "ERROR: ${s} missing or not executable" >&2
         exit 1
     fi
 done
 
+if [ ! -f "$SOUP_DOGFOOD_RULE" ]; then
+    echo "ERROR: ${SOUP_DOGFOOD_RULE} missing" >&2
+    exit 1
+fi
+
 mkdir -p "${REPO_ROOT}/.cursor"
+mkdir -p "$USER_RULES"
+cp "$SOUP_DOGFOOD_RULE" "$USER_RULES/hapi-driver-soup-dogfood.mdc"
 
 cat > "$HOOKS_JSON" <<'JSON'
 {
@@ -38,6 +48,10 @@ cat > "$HOOKS_JSON" <<'JSON'
       {
         "command": "./scripts/tooling/hapi-systemctl-guard.sh",
         "matcher": "Shell"
+      },
+      {
+        "command": "./scripts/tooling/hapi-production-mutation-guard.sh",
+        "matcher": "Shell"
       }
     ]
   }
@@ -46,11 +60,14 @@ JSON
 
 echo "Wrote ${HOOKS_JSON}"
 echo "Hooks installed:"
-echo "  hapi-product-code-guard.sh  -> blocks edits to cli/, hub/, web/, shared/ outside ~/coding/hapi/worktrees/"
-echo "  hapi-systemctl-guard.sh     -> blocks 'sudo systemctl <destructive-verb> hapi-{hub,runner,runner-watchdog}.service'"
+echo "  hapi-product-code-guard.sh       -> blocks edits to cli/, hub/, web/, shared/ outside ~/coding/hapi/worktrees/"
+echo "  hapi-systemctl-guard.sh          -> blocks 'sudo systemctl <destructive-verb> hapi-{hub,runner,runner-watchdog}.service'"
+echo "  hapi-production-mutation-guard.sh -> blocks feat-dist swap, driver hand-merge, raw driver/web builds, full rebuild"
+echo "  hapi-driver-soup-dogfood.mdc       -> copied to ${USER_RULES}/ (alwaysApply policy; hooks alone do not load this)"
 echo
 echo "Bypasses when needed (operator-approved):"
 echo "  HAPI_OPERATOR_PRODUCT_EDIT_OVERRIDE=1   (product-code edits)"
 echo "  HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1      (systemctl on hapi units)"
+echo "  HAPI_OPERATOR_PRODUCTION_MUTATION_OVERRIDE=1 (dist swap / driver hand-merge — TTY only)"
 echo
 echo "Restart Cursor (or reload) to pick up the hooks."
