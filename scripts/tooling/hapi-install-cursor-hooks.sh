@@ -34,7 +34,8 @@ fi
 
 mkdir -p "${REPO_ROOT}/.cursor"
 mkdir -p "$USER_RULES"
-cp "$SOUP_DOGFOOD_RULE" "$USER_RULES/hapi-driver-soup-dogfood.mdc"
+RULE_LINK="${USER_RULES}/hapi-driver-soup-dogfood.mdc"
+ln -sf "$SOUP_DOGFOOD_RULE" "$RULE_LINK"
 
 cat > "$HOOKS_JSON" <<'JSON'
 {
@@ -63,7 +64,7 @@ echo "Hooks installed:"
 echo "  hapi-product-code-guard.sh       -> blocks edits to cli/, hub/, web/, shared/ outside ~/coding/hapi/worktrees/"
 echo "  hapi-systemctl-guard.sh          -> blocks 'sudo systemctl <destructive-verb> hapi-{hub,runner,runner-watchdog}.service'"
 echo "  hapi-production-mutation-guard.sh -> blocks feat-dist swap, driver hand-merge, raw driver/web builds, full rebuild"
-echo "  hapi-driver-soup-dogfood.mdc       -> copied to ${USER_RULES}/ (alwaysApply policy; hooks alone do not load this)"
+echo "  hapi-driver-soup-dogfood.mdc       -> symlink ${RULE_LINK} → canonical rule (alwaysApply; re-run installer after rule edits)"
 echo
 echo "Bypasses when needed (operator-approved):"
 echo "  HAPI_OPERATOR_PRODUCT_EDIT_OVERRIDE=1   (product-code edits)"
