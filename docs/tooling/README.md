@@ -40,7 +40,9 @@ Feature agents should **read the relevant doc below at session start**; meta bot
 | [pr-review-loop.md](./pr-review-loop.md) | Pre-PR verification + cold review; pre-push open-PR gate; post-push PR comment poll |
 | [pr-reply.md](./pr-reply.md) | `hapi-pr-reply` — atomic reply + `resolveReviewThread` for PR review comments. Mandatory for bot/reviewer thread responses (never `gh pr comment` for that) |
 | [cold-pr-review-rubric.md](./cold-pr-review-rubric.md) | Open-PR cold review bar (match upstream HAPI Bot severity) |
-| `scripts/tooling/hapi-pr-emoji-batch.sh` | Classify upstream PRs → ✅/🔁/⚠️ (parallel gh; `--table` for humans) |
+| `scripts/tooling/hapi-pr-create.sh` | Upstream PR gate (leak scan, fork-stage, defaults `--repo tiann/hapi`) |
+| `scripts/tooling/hapi-pr-create-fork.sh` | **Fork PR gate** — defaults `--repo heavygee/hapi`; use for tooling/docs (never bare `gh pr create`) |
+| `scripts/tooling/install-gh-wrapper.sh` | Install `~/.local/bin/gh` wrapper — blocks fork-only diffs targeting `tiann/hapi` (#971 class) |
 | `scripts/tooling/hapi-pr-session-emoji.sh` | Meta PR watcher sweep: rename HAPI session titles from batch classify (`--sweep`) |
 | `scripts/tooling/hapi-remote-agent-budget.sh` | Pre-flight before bulk remote agent spawns (count + mem/swap gates) |
 
@@ -81,7 +83,7 @@ Enforce for **all** agents (IDE, Claude Code, Cursor CLI/HAPI):
 |-----------|---------------------------|
 | `~/coding/AGENTS.local.md` rules | Yes (if agent reads them) |
 | `~/.local/bin/git` wrapper on `git push origin` (open PR) | Yes (stderr STOP reminder; non-blocking) |
-| `~/.local/bin/gh` wrapper on `gh pr create` | Yes (stderr checklist) |
+| `~/.local/bin/gh` wrapper on `gh pr create` | Yes (stderr checklist + **blocks fork-only → tiann/hapi**) |
 | Claude `PreToolUse` on `gh pr create` + `git push origin*` | Claude only |
 | Claude `PostToolUse` post-push poll | Claude only |
 | Cursor IDE `beforeShellExecution` / `postToolUse` | IDE yes; headless `agent` **often no** (probe 2026-05-26) |
