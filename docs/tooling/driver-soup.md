@@ -64,7 +64,7 @@ Cursor **`hapi-production-mutation-guard.sh`** (install via `scripts/tooling/hap
 
 If rebuild or verify fails: **STOP** — do not workaround. Report to operator.
 
-Rule file for agents: `scripts/tooling/cursor-rules/hapi-driver-soup-dogfood.mdc` (copy to `~/.cursor/rules/` or install hooks).
+Rule file for agents: canonical source `scripts/tooling/cursor-rules/hapi-driver-soup-dogfood.mdc`. **`hapi-install-cursor-hooks.sh` copies it to `~/.cursor/rules/`** (soft alwaysApply guidance). Shell hooks wire the mutation guard only — two layers, not redundant.
 
 **Operator scripts** (`scripts/tooling/hapi-pr-session-emoji.sh`, `hapi-pr-emoji-batch.sh`, etc.) belong on **fork `main` in `~/coding/hapi`**, not in the driver tree. Rebuild reads tooling from the primary mirror (`HAPI_PRIMARY`, default `~/coding/hapi`). Uncommitted scripts vanish on sync/reset — **commit them to fork main**.
 
