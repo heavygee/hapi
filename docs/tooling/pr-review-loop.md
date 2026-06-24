@@ -30,6 +30,13 @@ Two skills exist to counter this:
 
 Both must be run and findings addressed before a PR is filed.
 
+**Target repo (fork vs upstream):** In the HAPI mirror clone, `gh repo view` defaults to **`tiann/hapi`**. Bare `gh pr create` therefore opens upstream PRs — wrong for `docs/tooling/`, `scripts/tooling/`, etc. Use:
+
+- **Fork:** `hapi-pr-create-fork --title ... --body-file ...` (or `gh pr create --repo heavygee/hapi ...`)
+- **Upstream product:** `hapi-pr-create --title ... --body-file ...`
+
+The `~/.local/bin/gh` wrapper (install: `scripts/tooling/install-gh-wrapper.sh`) **refuses** `gh pr create` → `tiann/hapi` when the branch diff includes fork-only paths or the branch is `tooling/*`, `docs/*`, etc. Postmortem: accidental `tiann/hapi#971` (2026-06-24).
+
 ### Claude Code enforcement: PreToolUse hook
 
 In `~/.claude/settings.json`, a PreToolUse hook fires when `gh pr create` is about

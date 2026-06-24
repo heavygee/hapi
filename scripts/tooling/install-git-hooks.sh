@@ -8,7 +8,8 @@ HOOKS="$ROOT/scripts/tooling/git-hooks"
 chmod +x "$HOOKS"/pre-commit "$HOOKS"/commit-msg "$HOOKS"/pre-push "$HOOKS"/post-merge 2>/dev/null || true
 chmod +x "$ROOT/scripts/tooling/check-operator-leaks.sh" "$ROOT/scripts/tooling/gh-public-body-check.sh" 2>/dev/null || true
 chmod +x "$ROOT/scripts/tooling/check-stash-advisory.sh" 2>/dev/null || true
-chmod +x "$ROOT/scripts/tooling/hapi-branch-audit.sh" "$ROOT/scripts/tooling/hapi-pr-create.sh" 2>/dev/null || true
+chmod +x "$ROOT/scripts/tooling/hapi-branch-audit.sh" "$ROOT/scripts/tooling/hapi-pr-create.sh" "$ROOT/scripts/tooling/hapi-pr-create-fork.sh" 2>/dev/null || true
+chmod +x "$ROOT/scripts/tooling/install-gh-wrapper.sh" "$ROOT/scripts/tooling/gh-wrapper.sh" 2>/dev/null || true
 git -C "$ROOT" config core.hooksPath "$HOOKS"
 echo "Installed git hooksPath → $HOOKS"
 echo "Hooks: pre-commit, commit-msg, pre-push, post-merge (fork-private paths, secrets, branch hygiene)"
