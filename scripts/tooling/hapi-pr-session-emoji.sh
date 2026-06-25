@@ -124,26 +124,57 @@ trim_ws() {
     printf '%s' "$s"
 }
 
+strip_leading_emojis() {
+    local s="$1"
+    while true; do
+        case "$s" in
+            ✅*) s="${s#✅}" ;;
+            🔁*) s="${s#🔁}" ;;
+            ⚠️*) s="${s#⚠️}" ;;
+            📝*) s="${s#📝}" ;;
+            🔧*) s="${s#🔧}" ;;
+            *) break ;;
+        esac
+        s="$(trim_ws "$s")"
+    done
+    printf '%s' "$s"
+}
+
+normalize_title_base() {
+    local s="$1"
+    s="$(trim_ws "$s")"
+    while [[ "$s" == *"  "* ]]; do
+        s="${s//  / }"
+    done
+    printf '%s' "$s"
+}
+
 title_base_from() {
     local name="$1" pr="$2" base marker
-    for marker in "PR #${pr}:" "pr#${pr}:" "PR #${pr} " "pr#${pr} " "Peer #${pr}:" "peer #${pr}:"; do
+    name="$(strip_leading_emojis "$name")"
+    for marker in "PR #${pr}:" "pr#${pr}:" "PR #${pr} " "pr#${pr} " \
+        "PR: ${pr}:" "PR: ${pr} " "PR:${pr}:" "PR:${pr} " \
+        "Peer #${pr}:" "peer #${pr}:"; do
         if [[ "$name" == *"$marker"* ]]; then
             base="${name##*"$marker"}"
-            base="$(trim_ws "$base")"
-            [[ "$base" == [Pp]eer[[:space:]#]*#"${pr}"*:* ]] && base="${base#*:}" && base="$(trim_ws "$base")"
+            base="$(normalize_title_base "$(trim_ws "$base")")"
+            [[ "$base" == [Pp]eer[[:space:]#]*#"${pr}"*:* ]] && base="${base#*:}" && base="$(normalize_title_base "$(trim_ws "$base")")"
             printf '%s' "$base"
             return
         fi
     done
-    trim_ws "$name"
+    normalize_title_base "$(trim_ws "$name")"
 }
 
 title_base_multi_from() {
     local name="$1" p1="$2" p2="$3" base marker
-    for marker in "PR #${p1}/#${p2}:" "pr#${p1}/${p2}:" "PR #${p1}/#${p2} " "pr#${p1}/${p2} "; do
+    name="$(strip_leading_emojis "$name")"
+    for marker in "PR #${p1}/#${p2}:" "pr#${p1}/${p2}:" "PR #${p1}/#${p2} " "pr#${p1}/${p2} " \
+        "PR #${p1} #${p2}:" "pr#${p1} #${p2}:" \
+        "PR #${p1}: #${p2}:" "pr#${p1}: #${p2}:"; do
         if [[ "$name" == *"$marker"* ]]; then
             base="${name##*"$marker"}"
-            trim_ws "$base"
+            normalize_title_base "$(trim_ws "$base")"
             return
         fi
     done
@@ -153,13 +184,19 @@ title_base_multi_from() {
 extract_pr_numbers() {
     local name="$1"
     local re_multi re_peer
-    re_multi='[Pp][Rr][#: ]*#?([0-9]{3,4})/([0-9]{3,4})'
+    re_multi='[Pp][Rr][[:space:]]*#([0-9]{3,4})/#([0-9]{3,4})'
     re_peer='[Pp]eer[[:space:]#:]*#?([0-9]{3,4})'
     if [[ "$name" =~ [Pp][Rr][[:space:]]*#?([0-9]{3,4}):[[:space:]]*#?([0-9]{3,4}) ]]; then
         echo "${BASH_REMATCH[1]}"; echo "${BASH_REMATCH[2]}"; return
     fi
+    if [[ "$name" =~ [Pp][Rr][[:space:]]*#?([0-9]{3,4})[[:space:]]+#?([0-9]{3,4}): ]]; then
+        echo "${BASH_REMATCH[1]}"; echo "${BASH_REMATCH[2]}"; return
+    fi
     if [[ "$name" =~ $re_multi ]]; then
         echo "${BASH_REMATCH[1]}"; echo "${BASH_REMATCH[2]}"; return
+    fi
+    if [[ "$name" =~ [Pp][Rr]:[[:space:]]*#?([0-9]{3,4}) ]]; then
+        echo "${BASH_REMATCH[1]}"; return
     fi
     local first
     first="$(printf '%s' "$name" | grep -oiE '[Pp][Rr][[:space:]]*#?[0-9]{3,4}' | head -1 | grep -oE '[0-9]{3,4}' || true)"
