@@ -6,6 +6,8 @@
 **Goal:** **Coexist with upstream HAPI** - extend, do not replace. Ship additive modules and a **voice-first modality** (local OpenAI-compatible speech stack) while keeping the tree **PR-able** against `tiann/hapi` at all times.  
 **License note:** Upstream HAPI is **AGPL-3**. Any modified hub exposed on a network must comply with AGPL source-offer requirements (see [why-hapi.md](../guide/why-hapi.md) and root `LICENSE`).
 
+**Homelab integration doc (operator):** Pre-Overseer fleet co-working, local speech stack, multi-surface voice — [`~/coding/server-setup/docs/design/local-voice-agent-pre-overseer.md`](../../server-setup/docs/design/local-voice-agent-pre-overseer.md). **Overseer** (later fleet layer) is documented separately in [`2026-06-03-overseer-framing.md`](2026-06-03-overseer-framing.md); do not conflate with this plan's near-term scope.
+
 ---
 
 ## 1. Executive summary
