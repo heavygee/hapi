@@ -51,19 +51,32 @@ const sessionsRes = await fetch(`${HAPI_HOST}/api/sessions?limit=500`, {
 })
 const sessionsBody = await sessionsRes.json()
 const sessions = sessionsBody.sessions ?? sessionsBody
-const session = sessions.find((s) => s.id.startsWith(sessionArg))
-if (!session) {
+const listed = sessions.find((s) => s.id.startsWith(sessionArg))
+if (!listed) {
     console.error(`no session for prefix ${sessionArg}`)
     process.exit(4)
 }
 
-const mcpUrl = session.metadata?.hapiMcpUrl
+// List endpoint omits hapiMcpUrl; fetch full session for MCP bridge URL.
+let mcpUrl = listed.metadata?.hapiMcpUrl
+if (!mcpUrl) {
+    const detailRes = await fetch(`${HAPI_HOST}/api/sessions/${listed.id}`, {
+        headers: { Authorization: `Bearer ${jwt}` },
+    })
+    if (!detailRes.ok) {
+        console.error('session detail fetch failed', detailRes.status)
+        process.exit(4)
+    }
+    const detailBody = await detailRes.json()
+    const detail = detailBody.session ?? detailBody
+    mcpUrl = detail.metadata?.hapiMcpUrl
+}
 if (!mcpUrl) {
     console.error('session has no hapiMcpUrl metadata (restart session CLI after MCP fix lands)')
     process.exit(5)
 }
 
-console.error(`hapi-display-image: session=${session.id} mcp=${mcpUrl}`)
+console.error(`hapi-display-image: session=${listed.id} mcp=${mcpUrl}`)
 
 const client = new Client({ name: 'hapi-display-image', version: '1.0.0' }, { capabilities: {} })
 const transport = new StreamableHTTPClientTransport(new URL(mcpUrl))
