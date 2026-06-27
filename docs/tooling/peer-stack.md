@@ -2,6 +2,8 @@
 
 Agent-safe isolated stack for feature peers. Does **not** touch production `:3006` or `hapi-active`.
 
+**Canonical home:** `~/coding/hapi` mirror `main` only. Do not duplicate this doc under nested worktrees; link here.
+
 **Where this fits in the overall flow:** [feature-work-lifecycle.md § Three demo topologies](./feature-work-lifecycle.md#three-demo-topologies-operator-picks-at-5) — this file is commands and evidence mechanics only.
 
 ## Spike notes (Task 1, 2026-06-20)

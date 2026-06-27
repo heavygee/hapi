@@ -119,13 +119,11 @@ git diff mirror/pre-tidy-20260622 origin/feat/hapi-peer-stack -- scripts/tooling
 test ! -f scripts/tooling/hapi-peer-stack.sh && echo "not on mirror disk — use branch"
 ```
 
-**Disposition:** `MIGRATED` — backup tooling slice discardable; canonical home is `feat/hapi-peer-stack` until merged via PR.
+**Disposition:** `MIGRATED` — canonical home is mirror **`main`** (2026-06-27: dev scripts + Playwright peer mode landed on `main`; spore briefings deleted).
 
-**Responsible peer:** Feature peer for peer-stack (spawn from plan § "Dedicated agent handoff"). Transcript not indexed under `hapi-peer-stack` string — use plan + branch.
+**Peer sign-off (2026-06-22):** **`MIGRATED`**. Backup tooling slice byte-identical to `origin/feat/hapi-peer-stack` on core paths.
 
-**Spawn briefing:** [`peer-briefings/2026-06-22-salvage-closure-peer-stack-tooling.md`](./peer-briefings/2026-06-22-salvage-closure-peer-stack-tooling.md)
-
-**Peer sign-off (2026-06-22):** Session peer-stack salvage review — **`MIGRATED`**. Backup tooling slice byte-identical to `origin/feat/hapi-peer-stack` on all nine paths; no cherry-pick from backup needed for peer-stack core. Split recommendation: merge `peer-stack*` only in peer-stack PR; emoji/budget/DB-prep are orthogonal (see emoji closure briefing).
+**Peer sign-off (2026-06-27):** **`CLOSED`**. Cherry-picked missing dev-flow scripts onto `main`; consolidated docs (one SSOT: `docs/tooling/peer-stack.md`); removed `peer-briefings/2026-06-20-peer-hapi-peer-stack-changeback-inline-evidence.md` and `peer-briefings/2026-06-22-salvage-closure-peer-stack-tooling.md`.
 
 **Emoji sub-slice:** Meta PR watcher closure — backup **`MIGRATED`**; fork `main` had **`SALVAGE` gap** (docs reference scripts missing on `main`). **Done:** branch `tooling/pr-emoji-sweep` @ `e7eaccb0` restores scripts from backup tip (no doc conflicts). PR to `origin/main` when operator-ready.
 

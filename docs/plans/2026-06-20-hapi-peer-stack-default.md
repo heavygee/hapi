@@ -1,6 +1,11 @@
 # HAPI peer stack (isolated hub + web + runner) — implementation plan
 
-> **For dedicated agent:** REQUIRED — read this entire file, then `docs/operator/AGENTS.md`, then implement task-by-task. Do not stack-switch `:3006`.
+> **Canonical docs (mirror `main` only — do not copy into nested worktrees):**
+> - **Operational SSOT:** [`docs/tooling/peer-stack.md`](../tooling/peer-stack.md) — commands, evidence tiers, inline handoff
+> - **Intake sequence:** [`docs/tooling/new-feature-intake.md`](../tooling/new-feature-intake.md) §5–§6
+> - **This file:** implementation history + acceptance checklist (not a second briefing)
+
+> **For dedicated agent:** Read SSOT + intake first; use this plan for task checklist only. Do not stack-switch `:3006`.
 
 **Goal:** Every feature peer can spin up a **fully isolated** HAPI stack from their worktree (hub + built web + runner), run Playwright against the **real session UI**, capture PNG/GIF/MP4 handoff evidence, and tear down — **without touching** the live daily driver on `:3006`.
 
@@ -404,7 +409,7 @@ Replay **tiann/hapi#959** (branch `fix/scratchlist-exit-after-queue` or worktree
 
 - **Date:** 2026-06-20T17:46Z (operator machine, Europe/London)
 - **Worktree:** `~/coding/hapi/worktrees/scratchlist-exit-after-send` (branch `fix/scratchlist-exit-after-queue-send`, #959 fix)
-- **Tooling worktree:** `~/coding/hapi/worktrees/peer-stack` @ `feat/hapi-peer-stack`
+- **Tooling branch:** `feat/hapi-peer-stack` (historical); **canonical runtime:** mirror `main` @ `scripts/tooling/hapi-peer-stack.sh`
 - **Commands:**
 
 ```bash
