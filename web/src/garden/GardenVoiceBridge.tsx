@@ -16,6 +16,7 @@ import {
 import { filterGardenSessions } from '@/garden/utils/sessionVisuals'
 import { applyPersonaOverride } from '@/garden/utils/voicePersona'
 import { fetchVoiceBackend } from '@/api/voice'
+import { resolveSelectedVoiceBackend } from '@/lib/voicePickerPreferences'
 import type { VoiceBackendType } from '@hapi/protocol/voice'
 import type { DecryptedMessage } from '@/types/api'
 
@@ -38,7 +39,7 @@ export function GardenVoiceBridge() {
         fetchVoiceBackend(api)
             .then((resp) => {
                 if (!cancelled) {
-                    setBackend(resp.backend)
+                    setBackend(resolveSelectedVoiceBackend(resp.backends, resp.backend))
                 }
             })
             .catch(() => {

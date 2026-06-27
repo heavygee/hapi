@@ -6,6 +6,7 @@ import { useSessions } from '@/hooks/queries/useSessions'
 import { useGardenRuntime } from '@/garden/context/GardenRuntimeContext'
 import { filterGardenSessions, sessionLabel } from '@/garden/utils/sessionVisuals'
 import { fetchVoiceBackend } from '@/api/voice'
+import { resolveSelectedVoiceBackend } from '@/lib/voicePickerPreferences'
 import { voicePersonaForSession } from '@/garden/utils/voicePersona'
 import type { VoiceBackendType } from '@hapi/protocol/voice'
 
@@ -39,7 +40,7 @@ export function GardenVoiceHud() {
         fetchVoiceBackend(api)
             .then((resp) => {
                 if (!cancelled) {
-                    setBackend(resp.backend)
+                    setBackend(resolveSelectedVoiceBackend(resp.backends, resp.backend))
                 }
             })
             .catch(() => {

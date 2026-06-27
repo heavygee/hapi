@@ -11,7 +11,6 @@ import { formatReopenError } from '@/lib/reopenError'
 import { getSessionModelLabel } from '@/lib/sessionModelLabel'
 import { useTranslation } from '@/lib/use-translation'
 import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
-import { GardenXrEntryChip } from '@/garden/components/GardenXrEntryChip'
 
 function getSessionTitle(session: Session): string {
     if (session.metadata?.name) {
@@ -173,8 +172,6 @@ export function SessionHeader(props: {
                             <polyline points="15 18 9 12 15 6" />
                         </svg>
                     </button>
-
-                    <GardenXrEntryChip />
 
                     {/* Session info - two lines: title and path */}
                     <div className="min-w-0 flex-1">
