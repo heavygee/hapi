@@ -1,8 +1,10 @@
 # Peer briefing: scratchlist image / attachment support (#921)
 
+> **Historical spawn brief (2026-06-20).** Living plan: [`scratchlist-attachments-v22-921.md`](./scratchlist-attachments-v22-921.md). Canonical worktree: `~/coding/hapi/worktrees/scratchlist-attachments-v22` (`feat/scratchlist-attachments-v22`). Spike wt/branch superseded.
+
 **Spawned:** 2026-06-20  
-**Worktree:** `~/coding/hapi/worktrees/scratchlist-attachments`  
-**Branch:** `spike/scratchlist-attachments-921` (off `upstream/main`)
+**Worktree (original):** `~/coding/hapi/worktrees/scratchlist-attachments`  
+**Branch (original):** `spike/scratchlist-attachments-921` (off `upstream/main`)
 
 ---
 
