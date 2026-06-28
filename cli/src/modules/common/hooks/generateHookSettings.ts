@@ -3,6 +3,10 @@ import { writeFileSync, mkdirSync, unlinkSync, existsSync } from 'node:fs';
 import { configuration } from '@/configuration';
 import { logger } from '@/ui/logger';
 import { getHappyCliCommand } from '@/utils/spawnHappyCLI';
+import {
+    hapiClaudePreToolUseGuardCommand,
+    resolveHapiToolingRoot
+} from '@/modules/common/hooks/resolveHapiToolingRoot';
 
 type HookCommandConfig = {
     matcher: string;
@@ -18,6 +22,7 @@ type HookSettings = {
     };
     hooks: {
         SessionStart: HookCommandConfig[];
+        PreToolUse?: HookCommandConfig[];
     };
 };
 
@@ -25,6 +30,8 @@ export type HookSettingsOptions = {
     filenamePrefix: string;
     logLabel: string;
     hooksEnabled?: boolean;
+    /** When set and cwd resolves to hapi, inject project-scoped PreToolUse guards. */
+    workingDirectory?: string;
 };
 
 function shellQuote(value: string): string {
@@ -43,7 +50,10 @@ function shellJoin(parts: string[]): string {
     return parts.map(shellQuote).join(' ');
 }
 
-function buildHookSettings(command: string, hooksEnabled?: boolean): HookSettings {
+function buildHookSettings(
+    sessionStartCommand: string,
+    options: Pick<HookSettingsOptions, 'hooksEnabled' | 'workingDirectory'>
+): HookSettings {
     const hooks: HookSettings['hooks'] = {
         SessionStart: [
             {
@@ -51,17 +61,38 @@ function buildHookSettings(command: string, hooksEnabled?: boolean): HookSetting
                 hooks: [
                     {
                         type: 'command',
-                        command
+                        command: sessionStartCommand
                     }
                 ]
             }
         ]
     };
 
+    const hapiRoot = options.workingDirectory
+        ? resolveHapiToolingRoot(options.workingDirectory)
+        : null;
+    if (hapiRoot) {
+        const guardCommand = hapiClaudePreToolUseGuardCommand(hapiRoot);
+        if (existsSync(guardCommand)) {
+            hooks.PreToolUse = [
+                {
+                    matcher: 'Bash',
+                    hooks: [
+                        {
+                            type: 'command',
+                            command: guardCommand
+                        }
+                    ]
+                }
+            ];
+            logger.debug(`[generateHookSettings] HAPI PreToolUse guard: ${guardCommand}`);
+        }
+    }
+
     const settings: HookSettings = { hooks };
-    if (hooksEnabled !== undefined) {
+    if (options.hooksEnabled !== undefined) {
         settings.hooksConfig = {
-            enabled: hooksEnabled
+            enabled: options.hooksEnabled
         };
     }
 
@@ -88,7 +119,7 @@ export function generateHookSettingsFile(
     ]);
     const hookCommand = shellJoin([command, ...args]);
 
-    const settings = buildHookSettings(hookCommand, options.hooksEnabled);
+    const settings = buildHookSettings(hookCommand, options);
 
     writeFileSync(filepath, JSON.stringify(settings, null, 4));
     logger.debug(`[${options.logLabel}] Created hook settings file: ${filepath}`);
