@@ -166,6 +166,11 @@ Manifest format, atomic swap mechanics, DB jiu-jitsu: [`driver-soup.md`](./drive
 
 **Ship After Fix (fork):** when your branch is already in the manifest and you pushed **`web/` only**, `hapi-driver-rebuild --build-web` is part of done — not "wait for operator."
 
+**Not done (common agent lies):**
+
+- `hapi-driver-status` / rebuild exit 0 / verify stamp alone — without **`hapi-verify-web-dist` OK** and **`driverHead` in `web/dist/.hapi-build-meta.json` == `git -C driver rev-parse HEAD`**
+- `HAPI_BUILD_MAX_SWAP_USED_PCT=100` (or similar) to force vite under swap thrash — report **blocked**; operator runs swap recovery
+
 ---
 
 ## Worktrees, branches, commits — who touches what
@@ -281,6 +286,8 @@ Peers **must** assess tier before capture ([`peer-stack.md` § Evidence modality
 - `sudo systemctl restart/stop hapi-hub.service` (use `hapi-restart-hub`)
 - `nohup bun run src/index.ts` from worktree on `:3006` / shared `~/.hapi/hapi.db`
 - Declare done at verify stamp without `hapi-verify-web-dist` + operator `:3006` proof
+- Treat `hapi-driver-status` or manifest merge complete as web shipped
+- `HAPI_BUILD_MAX_SWAP_USED_PCT` / `HAPI_BUILD_MIN_AVAIL_MEM_KIB` overrides on driver web builds (report blocked)
 
 ---
 

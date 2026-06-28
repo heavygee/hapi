@@ -71,6 +71,7 @@ Blocked classes include:
   - raw bun/vite build in driver/web (use hapi-driver-build-web)
   - git merge/cherry-pick/reset on driver/integration (#962 hand-merge)
   - hapi-driver-rebuild without --build-web (manifest merge — meta/operator only)
+  - HAPI_BUILD_MAX_SWAP_USED_PCT / HAPI_BUILD_MIN_AVAIL_MEM_KIB overrides on driver web builds (swap thrash bypass — report blocked; operator recovery: swapoff/swapon)
 
 Allowed for feature peers on driver soup:
   - hapi-driver-build-web [--skip-verify]  (builds from driver/web source)

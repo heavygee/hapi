@@ -46,6 +46,7 @@ expect_deny 'hapi-driver-rebuild --verify' 'full manifest rebuild'
 expect_deny 'hapi-driver-rebuild' 'full rebuild bare'
 
 # Allowed peer paths
+expect_deny 'HAPI_BUILD_MAX_SWAP_USED_PCT=100 hapi-driver-build-web' 'swap preflight bypass'
 expect_allow 'hapi-driver-build-web' 'build-web tool'
 expect_allow 'hapi-driver-rebuild --build-web --verify' 'build-web rebuild'
 expect_allow 'hapi-verify-web-dist' 'verify only'
