@@ -131,10 +131,11 @@ export function buildMermaidRenderIssueHint(issues: MermaidIssue[]): string {
     const noun = issues.length === 1 ? 'block' : 'blocks'
     return (
         `<render-issue>\n` +
-        `A mermaid ${noun} in your previous response could not be rendered — ` +
-        `the diagram type was not recognised. The user saw it as raw text.\n\n` +
+        `A mermaid ${noun} in your previous response failed to render — ` +
+        `the diagram type was not recognised. The user sees an error placeholder, not a diagram.\n\n` +
         `${blocks}\n\n` +
-        `If the diagram was intended, please re-emit it with corrected syntax.\n` +
+        `You MUST re-emit the corrected diagram now. Do not explain, apologise, or comment — ` +
+        `just output the fixed mermaid block with a valid diagram type. This is required.\n` +
         `</render-issue>`
     )
 }
