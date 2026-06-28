@@ -5,6 +5,21 @@ build_web_preflight() {
     local max_swap_pct="${HAPI_BUILD_MAX_SWAP_USED_PCT:-85}"
     local min_avail_kib="${HAPI_BUILD_MIN_AVAIL_MEM_KIB:-2097152}" # 2 GiB
 
+    # Runtime env bypass (2026-06-28 mermaid session): agents export then run build in a second command.
+    if [[ "${HAPI_OPERATOR_BUILD_PREFLIGHT_OVERRIDE:-}" != "1" ]]; then
+        if [[ "${HAPI_AGENT_CONTEXT:-}" == "1" ]] || [[ ! -t 1 ]]; then
+            if [[ -n "${HAPI_BUILD_MAX_SWAP_USED_PCT:-}" && "${HAPI_BUILD_MAX_SWAP_USED_PCT}" -gt 85 ]]; then
+                echo "ERROR: HAPI_BUILD_MAX_SWAP_USED_PCT=${HAPI_BUILD_MAX_SWAP_USED_PCT} refused from agent shell." >&2
+                echo "       Report blocked. Operator: swapoff/swapon or drain sessions, then rebuild." >&2
+                return 1
+            fi
+            if [[ -n "${HAPI_BUILD_MIN_AVAIL_MEM_KIB:-}" && "${HAPI_BUILD_MIN_AVAIL_MEM_KIB}" -lt 2097152 ]]; then
+                echo "ERROR: HAPI_BUILD_MIN_AVAIL_MEM_KIB=${HAPI_BUILD_MIN_AVAIL_MEM_KIB} refused from agent shell." >&2
+                return 1
+            fi
+        fi
+    fi
+
     if [[ -w /proc/sys/vm/drop_caches ]] || sudo -n true 2>/dev/null; then
         sync
         if [[ -w /proc/sys/vm/drop_caches ]]; then

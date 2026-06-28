@@ -35,6 +35,7 @@ CLAUDE_BASH='{"tool_name":"Bash","tool_input":{"command":"hapi-driver-rebuild --
 CLAUDE_BUILD_WEB='{"tool_name":"Bash","tool_input":{"command":"hapi-driver-rebuild --build-web --verify"}}'
 
 expect_deny 'merge-only rebuild' "$CLAUDE_BASH"
+expect_deny 'swap bypass build' '{"tool_name":"Bash","tool_input":{"command":"HAPI_BUILD_MAX_SWAP_USED_PCT=100 hapi-driver-build-web"}}'
 expect_allow 'build-web rebuild' "$CLAUDE_BUILD_WEB"
 
 echo "hapi-claude-pretooluse-guard.test.sh: all patterns OK"

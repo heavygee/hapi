@@ -49,6 +49,9 @@ hapi-driver-rebuild --build-web [--verify]
 
 Cursor **`hapi-production-mutation-guard.sh`** (install via `scripts/tooling/hapi-install-cursor-hooks.sh`) **denies** agent shell:
 
+**Claude (hapi repo only, not global):** `.claude/settings.json` and HAPI-spawned `--settings` inject **`hapi-claude-pretooluse-guard.sh`** as `PreToolUse` on Bash — same block list via the shared guard scripts.
+
+
 - `cp`/`rsync`/`mv` from `worktrees/*/web/dist` into `driver/web/dist`
 - raw `bun run build` / `vite build` under `driver/web`
 - `git merge|cherry-pick|reset` on `~/coding/hapi/driver`

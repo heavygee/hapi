@@ -71,6 +71,21 @@ _hapi_driver_integration_hand_edit_match() {
     return 1
 }
 
+_hapi_build_preflight_bypass_match() {
+    local c="$1"
+    local lc
+    lc=$(printf '%s' "$c" | tr '[:upper:]' '[:lower:]')
+
+    # 2026-06-28: agent set HAPI_BUILD_MAX_SWAP_USED_PCT=100 to force vite under swap thrash.
+    if ! printf '%s' "$lc" | grep -qE 'hapi_build_max_swap_used_pct|hapi_build_min_avail_mem_kib'; then
+        return 1
+    fi
+    if printf '%s' "$lc" | grep -qE 'hapi-driver-build-web|hapi-driver-rebuild|build_web_atomic|driver/web.*vite build|dist\.next'; then
+        return 0
+    fi
+    return 1
+}
+
 _hapi_production_mutation_match() {
     local c="$1"
     local lc
@@ -80,6 +95,9 @@ _hapi_production_mutation_match() {
         return 0
     fi
     if _hapi_driver_integration_hand_edit_match "$c"; then
+        return 0
+    fi
+    if _hapi_build_preflight_bypass_match "$c"; then
         return 0
     fi
 
