@@ -69,16 +69,18 @@ describe('MermaidDiagram', () => {
         expect(MARKDOWN_COMPONENTS_BY_LANGUAGE.mermaid.SyntaxHighlighter).toBe(MermaidDiagram)
     })
 
-    it('falls back to source and suppresses Mermaid parse-error side effects for invalid syntax', async () => {
+    it('shows error placeholder (not raw source) when parse returns false', async () => {
         document.documentElement.dataset.theme = 'dark'
         mermaidMocks.parseMock.mockResolvedValueOnce(false)
 
         renderMermaid('graph TD\nA --')
 
         await waitFor(() => {
-            const fallback = document.querySelector('.aui-mermaid-fallback')
-            expect(fallback).toBeTruthy()
-            expect(fallback?.textContent).toBe('graph TD\nA --')
+            const placeholder = document.querySelector('.aui-mermaid-render-error')
+            expect(placeholder).toBeTruthy()
+            expect(placeholder?.getAttribute('data-rendered')).toBe('false')
+            // raw markup must NOT be exposed to the user
+            expect(placeholder?.textContent).not.toContain('graph TD')
         })
 
         expect(mermaidMocks.parseMock).toHaveBeenCalledWith('graph TD\nA --', { suppressErrors: true })
@@ -86,16 +88,17 @@ describe('MermaidDiagram', () => {
         expect(mermaidMocks.setParseErrorHandlerMock).toHaveBeenCalled()
     })
 
-    it('falls back to source and asks Mermaid not to inject its own error SVG when render throws', async () => {
+    it('shows error placeholder (not raw source) and suppresses Mermaid error SVG when render throws', async () => {
         mermaidMocks.renderMock.mockRejectedValueOnce(new Error('render failed'))
         const code = 'gantt\ndateFormat YYYY-MM-DD\nsection A\nTask :a, 2024-01-01'
 
         renderMermaid(code)
 
         await waitFor(() => {
-            const fallback = document.querySelector('.aui-mermaid-fallback')
-            expect(fallback).toBeTruthy()
-            expect(fallback?.textContent).toBe(code)
+            const placeholder = document.querySelector('.aui-mermaid-render-error')
+            expect(placeholder).toBeTruthy()
+            expect(placeholder?.getAttribute('data-rendered')).toBe('false')
+            expect(placeholder?.textContent).not.toContain('gantt')
         })
 
         expect(mermaidMocks.renderMock).toHaveBeenCalled()

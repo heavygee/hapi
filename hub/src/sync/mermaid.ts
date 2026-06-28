@@ -8,6 +8,7 @@ const KNOWN_DIAGRAM_TYPES = new Set([
     'graph',
     'sequencediagram',
     'classdiagram',
+    'classdiagram-v2',
     'statediagram',
     'statediagram-v2',
     'erdiagram',

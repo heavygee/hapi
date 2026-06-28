@@ -95,8 +95,7 @@ function MermaidRenderError({ className }: { className?: string }) {
                         Diagram rendering failed
                     </p>
                     <p className="text-xs leading-relaxed text-[var(--app-fg)]/60">
-                        The agent used an unrecognised diagram type. It has been notified and
-                        will provide a corrected version below.
+                        The diagram could not be rendered. A corrected version may follow below.
                     </p>
                 </div>
             </div>
