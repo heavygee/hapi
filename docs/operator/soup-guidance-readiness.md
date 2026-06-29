@@ -2,7 +2,7 @@
 
 **Status:** internal operator reference (fork-only). **Not** upstream HAPI canon.  
 **Audience:** operator, peer agents, anyone deciding what to copy from this fork.  
-**Last updated:** 2026-06-20 (after stack-lock collision, promotion-contract work, earlyoom / verify-debt incidents).
+**Last updated:** 2026-06-27 (HAPI hub/runner OOMScoreAdjust=-1000 via server-setup earlyoom drop-ins).
 
 ---
 
@@ -91,7 +91,7 @@ Treat the following as a **readiness checklist**. Until most items are green for
 | # | Criterion | Today |
 |---|-----------|-------|
 | C1 | Host memory headroom under normal fleet load (swap not pegged 24/7) | **Red** — recurring pressure |
-| C2 | earlyoom / OOM policy documented and verified not to prefer-kill agent fleet | Fixed 2026-06-18; needs monitoring |
+| C2 | earlyoom / OOM policy: hub + runner protected (`OOMScoreAdjust=-1000`); agent fleet still killable | Fixed 2026-06-27; needs monitoring |
 | C3 | Or: **tier-2 integration** — soup rebuilds against non-live hub port / second machine | **Not implemented** |
 
 ### D. Documentation (what we publish)

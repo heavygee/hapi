@@ -29,7 +29,7 @@ Policy source: `scripts/tooling/lib/fork-path-policy.sh` (resolved from **`HAPI_
 
 ### Never tracked
 
-- **`localdocs/`**, **`web/public/xr-poc/`**, **`AGENTS.local.md`**
+- **`localdocs/`**, **`web/public/xr-poc/`**, **`AGENTS.local.md`**, **`.specstory/`** (SpecStory CLI history; global `~/.config/git/ignore` too)
 
 ### Upstream + `origin` PR-bound branches (`feat/*`, `fix/*`, `soup/*`)
 

@@ -11,7 +11,7 @@ set -euo pipefail
 fork_path_never_tracked() {
     local path="$1"
     case "$path" in
-        localdocs/*|web/public/xr-poc/*|AGENTS.local.md|*/AGENTS.local.md)
+        localdocs/*|web/public/xr-poc/*|AGENTS.local.md|*/AGENTS.local.md|.specstory|.specstory/*)
             return 0
             ;;
     esac
@@ -170,7 +170,7 @@ Local-first (commit with HAPI_ALLOW_OPERATOR_COMMIT=1; pre-push blocks origin):
   localdocs/
 
 Never tracked:
-  AGENTS.local.md, localdocs/, web/public/xr-poc/
+  AGENTS.local.md, localdocs/, web/public/xr-poc/, .specstory/
 
 Upstream + origin feat/fix/soup branches:
   no docs/operator/, no docs/plans/, no .cursor/rules/operator*
