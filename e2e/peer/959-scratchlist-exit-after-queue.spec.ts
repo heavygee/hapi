@@ -1,6 +1,6 @@
 /*
  * Peer-stack e2e for tiann/hapi#959 — real SessionChat UI on isolated hub.
- * Requires localdocs/peer-stack.env (from hapi-peer-stack up).
+ * Fork main only — run via scripts/dev/run-e2e-on-peer-stack.mjs --worktree <product worktree>.
  */
 
 import { mkdirSync } from 'node:fs'
@@ -10,8 +10,9 @@ import { test, expect, type Page } from '@playwright/test'
 const hubUrl = (process.env.HAPI_PEER_WEB_URL ?? process.env.HAPI_PEER_HUB_URL ?? '').replace(/\/$/, '')
 const sessionId = process.env.HAPI_PEER_SESSION_ID ?? ''
 const accessToken = process.env.HAPI_PEER_CLI_TOKEN ?? process.env.HAPI_PEER_ACCESS_TOKEN ?? ''
+const artifactRoot = process.env.HAPI_PEER_WORKTREE ?? process.cwd()
 
-const SCREENSHOT_PATH = resolve('localdocs/playwright-runs/959-peer-stack.png')
+const SCREENSHOT_PATH = resolve(artifactRoot, 'localdocs/playwright-runs/959-peer-stack.png')
 
 function requirePeerEnv(): void {
     if (!hubUrl || !sessionId || !accessToken) {

@@ -23,20 +23,59 @@ Agent-safe isolated stack for feature peers. Does **not** touch production `:300
 - **`--no-runner` is not the default.** Most web handoff flows (Send to queue, composer) need an active session; runner is still useful for machine registration even when no live agent is spawned.
 - Hub-served web: run hub from `$WORKTREE/hub` after `bun run build:web`; static root resolves to `$WORKTREE/web/dist` via `findWebappDistDir()` (`../web/dist` from hub cwd). No `HAPI_WEB_DIST_DIR` env needed in v1.
 
+## Upstream PR worktree + fork tooling (read this)
+
+Upstream PR branches are **`upstream/main...HEAD`** in `~/coding/hapi/worktrees/<name>`. Peer-stack **orchestration scripts are fork-only** — they live on mirror **`~/coding/hapi` `main`**, not in the upstream worktree, and **must not** be committed into the upstream PR.
+
+**Do not** copy `playwright.config.ts` or fork scripts into the worktree. Use this split:
+
+- **Product code (web/hub/cli/shared):** feature worktree @ `upstream/main`
+- **`hapi-peer-stack`, `run-e2e-on-peer-stack.mjs`, peer `playwright.config.ts`:** mirror `~/coding/hapi` `main` only (or `~/.local/bin/hapi-peer-stack`)
+- **Docs (this file, intake §6):** mirror `~/coding/hapi/docs/tooling/` — link, do not duplicate
+- **Peer e2e specs:** mirror `~/coding/hapi/e2e/peer/<issue>-<slug>.spec.ts` — **fork main only**, never in upstream PR branches
+- **Proof artifacts:** product worktree `localdocs/playwright-runs/` (gitignored; `HAPI_PEER_WORKTREE` points Playwright output there)
+- **`localdocs/peer-stack.env`:** written into the **product worktree** by `hapi-peer-stack up --worktree`
+
+**Canonical Playwright command** (always from mirror):
+
+```bash
+cd ~/coding/hapi
+node scripts/dev/run-e2e-on-peer-stack.mjs \
+  --worktree ~/coding/hapi/worktrees/<name> \
+  --name <feature> \
+  e2e/peer/<issue>-<slug>.spec.ts
+```
+
+That runs `hapi-peer-stack up` against the worktree, loads `localdocs/peer-stack.env` from the worktree, runs Playwright with mirror config (`HAPI_PEER_WEB_URL`), then tears down unless `--keep`.
+
+**Prerequisites on the machine:** `~/.local/bin/hapi-peer-stack` (or mirror script on PATH), `bun`, system Chrome (`PLAYWRIGHT_CHROME_PATH=/usr/bin/google-chrome` on Linux). `hapi-peer-stack doctor` from any cwd.
+
+**Wrong (bootstrap pain — #980 had to guess):** assume `bun run test:e2e:peer` works inside an upstream-only worktree; copy `playwright.config.ts` from mirror by hand.
+
+---
+
 ## Usage
 
 ```bash
-# From a feature worktree (canonical layout)
+# 1) Product work happens in the feature worktree (upstream/main)
+# 2) Peer stack targets that worktree — CLI from PATH or mirror
+
 hapi-peer-stack up --name scratchlist-959 \
   --worktree ~/coding/hapi/worktrees/scratchlist-exit-after-send
 
-# Playwright on real session UI
-bun run test:e2e:peer e2e/scratchlist-exit-after-queue-peer.spec.ts
+# 3) Playwright — from mirror (see § Upstream PR worktree above)
+cd ~/coding/hapi
+node scripts/dev/run-e2e-on-peer-stack.mjs \
+  --worktree ~/coding/hapi/worktrees/scratchlist-exit-after-send \
+  --name scratchlist-959 \
+  e2e/peer/959-scratchlist-exit-after-queue.spec.ts
 
 hapi-peer-stack status --name scratchlist-959
 hapi-peer-stack doctor
 hapi-peer-stack down --name scratchlist-959
 ```
+
+**Fork-only / mirror `main` work:** `bun run test:e2e:peer e2e/peer/...` from `~/coding/hapi` (all peer specs live under `e2e/peer/`).
 
 Env file written to `localdocs/peer-stack.env` (gitignored). Registry: `~/.hapi-peer/registry.json`.
 

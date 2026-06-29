@@ -134,8 +134,10 @@ Upstream PR branches stay **`upstream/main...HEAD`** for review. Soup manifest m
 
 ```bash
 hapi-peer-stack up --name <feature> --worktree ~/coding/hapi/worktrees/<name>
-# Playwright reads localdocs/peer-stack.env
-bun run test:e2e:peer e2e/<feature>-peer.spec.ts
+# Playwright: from mirror — see [peer-stack.md § Upstream PR worktree](./peer-stack.md#upstream-pr-worktree--fork-tooling-read-this)
+cd ~/coding/hapi && node scripts/dev/run-e2e-on-peer-stack.mjs \
+  --worktree ~/coding/hapi/worktrees/<name> --name <feature> \
+  e2e/peer/<issue>-<slug>.spec.ts
 hapi-peer-stack down --name <feature>
 ```
 
@@ -170,9 +172,11 @@ Run smoke with real assertions on the **peer stack** (`hapi-peer-stack up`). Fix
 # Peer stack (default) — real SessionChat on isolated hub
 hapi-peer-stack up --name my-feature --worktree ~/coding/hapi/worktrees/my-feature
 export PLAYWRIGHT_CHROME_PATH=/usr/bin/google-chrome   # Linux: prefer system Chrome
-bun run test:e2e:peer e2e/my-feature-peer.spec.ts
-# or: node scripts/dev/scratchlist-exit-after-queue-handoff.mjs
-# Evidence: localdocs/playwright-runs/*.png and/or *.mp4 (gitignored staging)
+# From mirror (upstream worktrees lack fork scripts) — peer-stack.md § Upstream PR worktree
+cd ~/coding/hapi && node scripts/dev/run-e2e-on-peer-stack.mjs \
+  --worktree ~/coding/hapi/worktrees/my-feature --name my-feature \
+  ~/coding/hapi/worktrees/my-feature/e2e/my-feature-peer.spec.ts
+# Evidence: localdocs/playwright-runs/*.png and/or *.mp4 (gitignored staging, in worktree)
 # HAPI inline: absolute-path media via hapi-display-image.mjs → session with hapiMcpUrl (e.g. Cursor #956). See peer-stack.md § Inline evidence.
 hapi-peer-stack down --name my-feature
 ```

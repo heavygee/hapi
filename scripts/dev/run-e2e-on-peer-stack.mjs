@@ -4,7 +4,7 @@
  *
  * Usage:
  *   node scripts/dev/run-e2e-on-peer-stack.mjs [playwright-args...]
- *   node scripts/dev/run-e2e-on-peer-stack.mjs --keep e2e/scratchlist-exit-after-queue-peer.spec.ts
+ *   node scripts/dev/run-e2e-on-peer-stack.mjs --keep e2e/peer/959-scratchlist-exit-after-queue.spec.ts
  *   node scripts/dev/run-e2e-on-peer-stack.mjs --worktree PATH --name NAME ...
  */
 import { spawnSync } from 'node:child_process'
@@ -74,6 +74,7 @@ if (!process.env.HAPI_PEER_WEB_URL) {
 }
 
 process.env.HAPI_PEER_RECORD_VIDEO = process.env.HAPI_PEER_RECORD_VIDEO ?? '1'
+process.env.HAPI_PEER_WORKTREE = worktree
 
 try {
     run('bunx', ['playwright', 'test', ...playwrightArgs], { env: process.env })
