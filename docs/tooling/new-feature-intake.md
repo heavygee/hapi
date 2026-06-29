@@ -69,7 +69,7 @@ Confusion is common: **`hapi-active` → `~/coding/hapi/driver` is the running h
 | **Operator local (gitignored)** | `~/coding/AGENTS.local.md`, optional `AGENTS.local.md` in repo | Machine voice, pre-PR checklist, worktree discipline. Never upstream. |
 | **Global persona** | `~/coding/SOUL.md` | User-facing tone (never cite in PRs). |
 | **Upstream-style root `AGENTS.md`** | Only on **`upstream/main`** / `tiann/hapi` | Not used on fork `main` (fork deletes or stubs it). Do not treat upstream root copy as fork canon. |
-| **`cli/AGENTS.md`** | Package scope | Extra rules when the agent's focus is `cli/` only. |
+| **`cli/AGENTS.md` / `hub/AGENTS.md`** | Stub only (tracked) | Points to fork canon + [`docs/guide/client-auth.md`](../guide/client-auth.md). **Do not paste** `~/coding/AGENTS.md` here. |
 | **Daily driver tree** | `~/coding/hapi/driver` | **Runtime** after manifest rebuild — not the default instruction root |
 
 **Where to edit code**
