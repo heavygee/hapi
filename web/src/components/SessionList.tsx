@@ -673,7 +673,7 @@ function SessionDateRangePicker(props: {
     )
 }
 
-function SessionListSearch(props: {
+export function SessionListSearch(props: {
     value: string
     onChange: (value: string) => void
     customStart: string
