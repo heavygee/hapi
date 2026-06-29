@@ -73,6 +73,8 @@ See `src/web/routes/` for all endpoints.
 
 ### Authentication (`src/web/routes/auth.ts`)
 
+JWT lifetime is **4 hours**; clients must refresh using the long-lived access credential. Full contract (web, companion, CLI, Telegram): [`docs/guide/client-auth.md`](../docs/guide/client-auth.md).
+
 - `POST /api/auth` - Get JWT token (Telegram initData or `CLI_API_TOKEN[:namespace]`).
 - `POST /api/bind` - Bind a Telegram account using initData + `CLI_API_TOKEN:<namespace>`.
 

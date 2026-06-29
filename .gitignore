@@ -42,9 +42,7 @@ execplan/
 # SpecStory terminal agent history (local-only; also in ~/.config/git/ignore globally)
 .specstory/
 
-# Agent instruction droppings — global ~/coding/AGENTS.md + docs/operator/AGENTS.md apply; peer briefs → docs/plans/peer-briefings/
-cli/AGENTS.md
-hub/AGENTS.md
+# Package AGENTS stubs are tracked (cli/AGENTS.md, hub/AGENTS.md) — do not gitignore; agents must not overwrite them.
 
 # Generated npm bundle output (local)
 cli/npm/main/
