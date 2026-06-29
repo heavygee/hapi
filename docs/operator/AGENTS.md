@@ -367,7 +367,7 @@ When the operator asks for **new product behavior**, follow [`docs/tooling/new-f
 
 **Instruction roots:** agents read **this file** and tooling docs from the **`~/coding/hapi` workspace**, plus `~/coding/AGENTS.local.md`. The **daily driver** (`~/coding/hapi/driver`) is what **`hapi-active` runs** — not where IDE rules come from unless that tree is the opened workspace.
 
-**Do not create `cli/AGENTS.md` or `hub/AGENTS.md`.** Machine-global `~/coding/AGENTS.md` is already injected by Cursor; fork canon is this file. Peer handoffs belong in `docs/plans/peer-briefings/`, not package-local AGENTS paths.
+**Do not overwrite `cli/AGENTS.md` or `hub/AGENTS.md`.** Those paths are **tracked stubs** pointing here and to `docs/guide/client-auth.md`. Machine-global `~/coding/AGENTS.md` is already injected by Cursor; fork canon is this file. Peer handoffs belong in `docs/plans/peer-briefings/`, not pasted into package AGENTS files.
 
 **Canonical worktree layout (2026-06-01 onward):** see [`.cursor/rules/worktree-layout.mdc`](../../.cursor/rules/worktree-layout.mdc) and [`docs/plans/2026-06-01-hapi-folders-reorganization.md`](../plans/2026-06-01-hapi-folders-reorganization.md). Summary: `~/coding/hapi/{driver,upstream,worktrees/<name>}` — never create new worktrees at `~/coding/hapi-<name>/` or `~/coding/hapi-worktrees/<name>/` (those are pre-reorg legacy locations being drained).
 
