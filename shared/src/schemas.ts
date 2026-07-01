@@ -84,6 +84,8 @@ export const MetadataSchema = z.object({
         rawSnippet: z.string(),
         atTs: z.number(),
         priorAssistantClaimsDone: z.boolean(),
+        lastUserMessage: z.string().optional(),
+        bridgedForAtTs: z.number().optional(),
         retriedAndFailed: z.boolean().optional(),
         acknowledgedAt: z.number().optional()
     }).optional()

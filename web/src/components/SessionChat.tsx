@@ -43,6 +43,7 @@ import { useTranslation } from '@/lib/use-translation'
 import { SessionHeader } from '@/components/SessionHeader'
 import { CursorMigrationBanner } from '@/components/CursorMigrationBanner'
 import { ModelErrorBanner, hasActiveModelError } from '@/components/ModelErrorBanner'
+import { readAutoBridgeTransientModelErrors } from '@/lib/modelErrorBridgePrefs'
 import { TeamPanel } from '@/components/TeamPanel'
 import { usePlatform } from '@/hooks/usePlatform'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
@@ -780,6 +781,34 @@ function SessionChatInner(props: SessionChatProps) {
         props.onRefresh()
     }, [props.api, props.session.id, props.session.metadata?.lastModelError?.atTs, props.onRefresh])
 
+    const [isBridgingModelError, setIsBridgingModelError] = useState(false)
+
+    const handleBridgeModelError = useCallback(async () => {
+        if (isBridgingModelError) {
+            return
+        }
+        setIsBridgingModelError(true)
+        try {
+            const result = await props.api.bridgeModelError(props.session.id)
+            if (!result.ok) {
+                console.warn('[SessionChat] model error bridge refused:', result.reason)
+            }
+            props.onRefresh()
+        } catch (error) {
+            console.warn('[SessionChat] model error bridge failed:', error)
+        } finally {
+            setIsBridgingModelError(false)
+        }
+    }, [props.api, props.session.id, props.onRefresh, isBridgingModelError])
+
+    useEffect(() => {
+        if (agentFlavor !== 'cursor' || !props.session.active) {
+            return
+        }
+        const enabled = readAutoBridgeTransientModelErrors()
+        void props.api.setModelErrorAutoBridge(props.session.id, enabled).catch(() => {})
+    }, [agentFlavor, props.api, props.session.active, props.session.id])
+
     // Voice assistant integration
     const voice = useVoiceOptional()
     const [voiceBackendReady, setVoiceBackendReady] = useState(false)
@@ -1242,6 +1271,8 @@ function SessionChatInner(props: SessionChatProps) {
             <ModelErrorBanner
                 metadata={props.session.metadata}
                 onDismiss={handleAcknowledgeModelError}
+                onBridge={agentFlavor === 'cursor' ? handleBridgeModelError : undefined}
+                isBridging={isBridgingModelError}
             />
 
             {props.session.teamState && (

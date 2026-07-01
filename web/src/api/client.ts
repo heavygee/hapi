@@ -480,6 +480,23 @@ export class ApiClient {
         })
     }
 
+    async bridgeModelError(sessionId: string): Promise<{ ok: boolean; reason?: string }> {
+        return await this.request<{ ok: boolean; reason?: string }>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/model-error/bridge`,
+            {
+                method: 'POST',
+                body: JSON.stringify({})
+            }
+        )
+    }
+
+    async setModelErrorAutoBridge(sessionId: string, enabled: boolean): Promise<void> {
+        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/model-error/auto-bridge-setting`, {
+            method: 'POST',
+            body: JSON.stringify({ enabled })
+        })
+    }
+
     async reopenSession(sessionId: string): Promise<ReopenSessionResponse> {
         return await this.request<ReopenSessionResponse>(
             `/api/sessions/${encodeURIComponent(sessionId)}/reopen`,

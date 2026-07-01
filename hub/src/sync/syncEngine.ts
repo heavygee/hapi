@@ -850,6 +850,38 @@ export class SyncEngine {
         await this.sessionCache.acknowledgeModelError(sessionId, atTs)
     }
 
+    async bridgeModelError(sessionId: string): Promise<{ ok: boolean; reason?: string }> {
+        const session = this.sessionCache.getSession(sessionId)
+        if (!session?.active) {
+            throw new Error('Session is not active')
+        }
+
+        const err = session.metadata?.lastModelError
+        if (!err) {
+            throw new Error('No model error to bridge')
+        }
+        if (!err.transient) {
+            throw new Error('Model error is not transient')
+        }
+        if (err.bridgedForAtTs === err.atTs) {
+            throw new Error('Model error was already bridged')
+        }
+        if (err.retriedAndFailed) {
+            throw new Error('Bridge already failed for this error')
+        }
+
+        return await this.rpcGateway.bridgeModelError(sessionId, {
+            atTs: err.atTs,
+            kind: err.kind,
+            rawSnippet: err.rawSnippet,
+            lastUserMessage: err.lastUserMessage,
+            priorAssistantClaimsDone: err.priorAssistantClaimsDone,
+            transient: err.transient,
+            bridgedForAtTs: err.bridgedForAtTs,
+            retriedAndFailed: err.retriedAndFailed
+        })
+    }
+
     async deleteSession(sessionId: string): Promise<void> {
         await this.sessionCache.deleteSession(sessionId)
     }
@@ -863,6 +895,7 @@ export class SyncEngine {
             effort?: string | null
             serviceTier?: string | null
             collaborationMode?: CodexCollaborationMode
+            autoBridgeTransientModelErrors?: boolean
         }
     ): Promise<void> {
         const session = this.sessionCache.getSession(sessionId)

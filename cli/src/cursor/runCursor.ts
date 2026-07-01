@@ -16,6 +16,7 @@ import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
 import { getInvokedCwd } from '@/utils/invokedCwd';
 import { enqueueCursorUserMessage } from './cursorUserMessageQueue';
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
+import { setAutoBridgeTransientModelErrors } from './cursorModelErrorBridgePrefs';
 
 const formatFailureReason = (message: string): string => {
     const maxLength = 200;
@@ -121,6 +122,7 @@ export async function runCursor(opts: {
             permissionMode?: unknown;
             model?: unknown;
             modelReasoningEffort?: unknown;
+            autoBridgeTransientModelErrors?: unknown;
         };
         const applied: {
             permissionMode?: PermissionMode;
@@ -129,6 +131,10 @@ export async function runCursor(opts: {
 
         if (config.modelReasoningEffort !== undefined) {
             throw new Error('Invalid model reasoning effort');
+        }
+
+        if (config.autoBridgeTransientModelErrors !== undefined) {
+            setAutoBridgeTransientModelErrors(config.autoBridgeTransientModelErrors === true);
         }
 
         const nextPermissionMode = config.permissionMode !== undefined
