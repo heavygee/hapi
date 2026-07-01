@@ -71,7 +71,7 @@ Treat the following as a **readiness checklist**. Until most items are green for
 
 | # | Criterion | Today |
 |---|-----------|-------|
-| A1 | **Single soup rebuild owner** (role + session ID documented; peers only edit manifest) | Partial — policy in [AGENTS.md](./AGENTS.md); collisions still occurred |
+| A1 | **Single soup rebuild owner** (feature peer promotes after operator soup approval; one flock at a time) | Partial — policy in lifecycle + driver-soup; peers still hand off incorrectly |
 | A2 | **Triage vs integration separation** — meta/triage sessions never `rebuild` / `restart-hub` | Broken once (2026-06-20) |
 | A3 | **Promotion is routine** — `rebuild --verify` → stamp → **`hapi-restart-hub`** on driver soup (or operator `use-driver` only for stack path swing) without `HAPI_PROMOTE_UNVERIFIED` | Blocked on verify debt |
 | A4 | **Incident postmortems** captured in this doc or `driver-soup.md` when policy changes | Ad hoc |

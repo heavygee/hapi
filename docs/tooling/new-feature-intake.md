@@ -257,6 +257,8 @@ Only after (1)-(4): send operator **links**, **what to click**, **declared tier 
 
 Operator validates in browser. Iterate in the worktree; re-run gates after each round. **Do not** open upstream PR until explicit approval.
 
+**Soup promotion on `:3006` (after peer-stack proof + operator says yes):** the **feature peer** owns the rest — edit `~/.config/hapi/driver-manifest.yaml`, then `hapi-driver-rebuild --build-web --verify`, `hapi-verify-web-dist`, and `hapi-restart-hub` if hub/cli/shared changed. See [feature-work-lifecycle.md § Soup promotion](./feature-work-lifecycle.md#soup-promotion-peer-owned-after-operator-approval). **Do not** ask the operator to add manifest layers.
+
 ### 8 — Upstream PR (after approval)
 
 1. `/verification-before-completion` with command output

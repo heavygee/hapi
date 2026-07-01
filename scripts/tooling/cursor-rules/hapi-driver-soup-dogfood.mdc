@@ -16,11 +16,12 @@ When dogfooding on `:3006` (driver/integration + manifest layers):
 - `cp`/`rsync`/`mv` any `worktrees/*/web/dist` into `driver/web/dist` (#921 — rolls back 100+ soup layers to a feat-only bundle)
 - `cd driver/web && bun run build` or raw `vite build` (bypasses atomic swap, preflight, verify rollback)
 - `git merge` / `git cherry-pick` / `git reset` inside `~/coding/hapi/driver` (#962 — hand-merge half-soups the tree)
-- `hapi-driver-rebuild` without `--build-web` (manifest merge — tooling/meta session or operator only)
+- `hapi-driver-rebuild` without `--build-web` (manifest merge without dist — agent guard refuses)
 
-**ONLY**
+**ONLY (soup promotion after operator approves dogfood on :3006)**
+- Edit `~/.config/hapi/driver-manifest.yaml` (add your feature branch layer)
+- `hapi-driver-rebuild --build-web [--verify]` when driver should include your layer
 - `hapi-driver-build-web` (builds from `driver/web` source on current driver HEAD)
-- `hapi-driver-rebuild --build-web [--verify]` when driver already contains your layer
 - `hapi-verify-web-dist` to audit (no build)
 
 If rebuild fails: **STOP**. Report blocked to operator. Do not workaround.

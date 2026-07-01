@@ -105,7 +105,7 @@ The rebuild script instead:
 The window where `web/dist/` is absent shrinks to the gap between two `rename(2)` calls — well below TCP retry granularity. Live sessions on :3006 are unaffected; nobody has to coordinate a refresh.
 
 6. runs **`verify-soup-web-dist.mjs`** — auto-rollback to `dist.prev` on fail
-7. **Memory preflight** — refuses vite when swap >85% (see [feature-work-lifecycle.md § Soup build](./feature-work-lifecycle.md#soup-build-system-vs-web))
+7. **Memory preflight** — RAM-first gate: refuses when `MemAvailable` <2 GiB, or when swap >85% **and** `MemAvailable` <4 GiB; sticky high swap with ≥4 GiB free warns and proceeds (see [feature-work-lifecycle.md § Soup build](./feature-work-lifecycle.md#soup-build-system-vs-web))
 
 **Web-only fix to live `:3006` while sessions are working:**
 
@@ -225,7 +225,7 @@ hapi-driver-rebuild --build-web --verify
 # HAPI_DRIVER_WAIT_BUSY_SECS=600 hapi-driver-rebuild --build-web --verify
 ```
 
-**Soup rebuild owner (policy):** one agent/session owns manifest + rebuild at a time. Peers add layers to the manifest and hand off to the **tooling/meta** session (`8c6b5a7d`) or operator — do not each run `hapi-driver-rebuild` in parallel hoping flock saves you.
+**Soup rebuild owner (policy):** one agent/session owns manifest + rebuild at a time (`hapi-driver-status` flock). **After operator approves soup dogfood**, the **feature peer** edits `~/.config/hapi/driver-manifest.yaml` and runs `hapi-driver-rebuild --build-web --verify` — do not ping operator/orchestrator to add the layer. Meta session (`8c6b5a7d`) is for **manifest-only** cron rebuilds and stack hygiene, not routine feature promotion. Do not run rebuilds in parallel hoping flock saves you.
 
 
 **Stale state** (process died without releasing): `hapi-driver-status` prints `STALE pid=N (dead)` and the exact `rm` to clear the lock. The status file self-heals on the next successful run.

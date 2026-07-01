@@ -86,7 +86,7 @@ flowchart TD
     COLLIDE -->|no| PRECHECK
     RENUMBER --> PRECHECK["hapi-driver-status --quiet"]
     PRECHECK -->|exit 75| WAIT["Stop: stack busy"]
-    PRECHECK -->|exit 0| MEM{"build_web_preflight OK?<br/>swap and MemAvailable"}
+    PRECHECK -->|exit 0| MEM{"build_web_preflight OK?<br/>MemAvailable + swap pressure"}
     MEM -->|no| MEMFIX["Drain agents or swapoff-swapon<br/>see recovery briefing"]
     MEMFIX --> PRECHECK
     MEM -->|yes| REBUILD["hapi-driver-rebuild build-web verify<br/>from coding hapi mirror"]
@@ -262,7 +262,12 @@ Peers **must** assess tier before capture ([`peer-stack.md` § Evidence modality
 - Atomic swap via `dist.next` → `dist` (live never empty mid-build)
 - Post-swap: `verify-soup-web-dist.mjs` — fail rolls back to `dist.prev`
 - Audit anytime: `hapi-verify-web-dist`
-- Memory preflight: refuses build when swap >85% or MemAvailable <2GiB
+- Memory preflight (`build_web_preflight.sh`, wired into `build_web_atomic`):
+  - **Refuses** when `MemAvailable` < **2 GiB** (`HAPI_BUILD_MIN_AVAIL_MEM_KIB`, default 2097152)
+  - **Refuses** when swap > **85%** *and* `MemAvailable` < **4 GiB** — active memory pressure (`HAPI_BUILD_SWAP_PRESSURE_AVAIL_KIB`, default 4194304)
+  - **Warns and proceeds** when swap >85% but `MemAvailable` ≥ 4 GiB (sticky swap from an earlier spike; RAM headroom is fine)
+  - Agent shells cannot lower thresholds via env overrides — report **blocked**; operator runs recovery
+  - Optional: `sync; echo 1 > /proc/sys/vm/drop_caches` before the check (skipped when `HAPI_BUILD_PREFLIGHT_SKIP_DROP_CACHES=1`)
 
 **Do not** run raw `bun run build` in `driver/web/` for production dogfood — bypasses atomic swap and preflight (recovery build 2026-06-22 was emergency only).
 
@@ -273,15 +278,17 @@ Peers **must** assess tier before capture ([`peer-stack.md` § Evidence modality
 **Allowed**
 
 - Edit product code in `~/coding/hapi/worktrees/<name>/`
+- **`~/.config/hapi/driver-manifest.yaml`** — add/update your feature layer **after operator approves soup dogfood** (peer-stack proof first)
 - `hapi-peer-stack up|down|status|doctor`
-- `hapi-driver-status --quiet` → `hapi-driver-rebuild --build-web [--verify]`
+- `hapi-driver-status --quiet` → **`hapi-driver-rebuild --build-web [--verify]`** (manifest merge **and** atomic `web/dist` — the supported soup promotion path)
 - `hapi-driver-build-web`, `hapi-verify-web-dist`
 - **`hapi-restart-hub`** when hub/cli changed and already on driver soup
 - `hapi-driver-rollback-web` (web emergency)
 
 **Forbidden**
 
-- Hand-edit `~/coding/hapi/driver/`
+- Hand-edit `~/coding/hapi/driver/` (no `git merge` / cherry-pick / commit in driver — manifest + rebuild only)
+- **`hapi-driver-rebuild` without `--build-web`** (manifest-only merge — stale `web/dist`; agent guard refuses)
 - `hapi-use-worktree`, `hapi-use-driver`, `hapi-driver-rebuild --activate`
 - `sudo systemctl restart/stop hapi-hub.service` (use `hapi-restart-hub`)
 - `nohup bun run src/index.ts` from worktree on `:3006` / shared `~/.hapi/hapi.db`
@@ -297,15 +304,45 @@ Peers **must** assess tier before capture ([`peer-stack.md` § Evidence modality
 2. **Peer** gets explicit handoff (completed vs owned steps).
 3. **Worktree** appears under `~/coding/hapi/worktrees/<name>`.
 4. **Default demo** is peer stack — you see PNG/MP4 **inline in HAPI chat** before touching `:3006`.
-5. **If soup requested:** manifest layer → one rebuild owner → verify-web-dist → restart if needed → you hard-reload and click.
+5. **If soup requested:** after peer-stack proof + **operator approval**, **peer** adds manifest layer → `hapi-driver-rebuild --build-web --verify` → verify-web-dist → restart if needed → operator hard-reloads and clicks.
 6. **After your approval:** upstream PR; soup layer stays until merged upstream or dropped from manifest.
+
+---
+
+## Soup promotion (peer-owned after operator approval)
+
+**Default feature flow:** peer stack proof on `:3100+` → operator approves soup dogfood on `:3006` → **feature peer** promotes (not the operator, not a separate orchestrator step unless stack is busy).
+
+**Peer sequence (from mirror `~/coding/hapi`):**
+
+```bash
+# 1. Edit ~/.config/hapi/driver-manifest.yaml — add branch: feat/your-feature
+# 2. One rebuild owner at a time (hapi-driver-status --quiet; exit 75 = wait)
+hapi-driver-rebuild --build-web --verify
+hapi-verify-web-dist
+# 3. Hub/cli/shared touched? (not web-only)
+hapi-restart-hub
+# 4. Operator hard-reloads :3006 and exercises the feature
+```
+
+**What "do it RIGHT" means (guards, not disempowerment):**
+
+| Wrong | Right |
+|-------|-------|
+| `hapi-driver-rebuild` (no `--build-web`) | `hapi-driver-rebuild --build-web --verify` |
+| `git merge` inside `~/coding/hapi/driver` | Edit manifest; let rebuild merge layers |
+| `cp worktrees/*/web/dist` into driver | Atomic swap via rebuild/build-web |
+| `hapi-use-driver` / `hapi-use-worktree` | Already on driver soup — use `hapi-restart-hub` |
+| Declare done at verify stamp alone | `hapi-verify-web-dist` exit 0 + operator `:3006` proof |
+
+**Operator role:** approve soup promotion and click-test on `:3006` — **not** hand-edit the manifest for every feature.
 
 **Friction mode — kill criteria**
 
 - Peer stops at "tests pass" with no inline PNG/MP4 → reject handoff (§6.4d).
 - Peer stops at verify stamp with verify-web-dist failing → dist still stale (2026-06-22 class bug).
 - Peer runs `hapi-use-driver` without operator TTY → session massacre; use `hapi-restart-hub` instead when already on driver.
-- Vite fails at ~5s → check `free -h` swap before blaming manifest.
+- Vite fails at ~5s → `free -h`: if swap high **and** `MemAvailable` low, run recovery; sticky swap alone (high swap, ≥4 GiB available) should not block rebuild after 2026-06-19 preflight fix.
 
 ---
 
