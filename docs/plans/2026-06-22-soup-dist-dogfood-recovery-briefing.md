@@ -18,7 +18,7 @@ Two failure modes stacked:
 2. `bun run build` in `~/coding/hapi/driver/web` — fresh `web/dist` @ `index-B1HDpnQy.js`.
 3. `hapi-verify-web-dist` — **563/563** `t()` keys OK (copy reference + scratchlist attachments + rest).
 4. Wrote `web/dist/.hapi-build-meta.json` (`driverHead=969a7db5`).
-5. Tooling: `build-web-preflight.sh` (swap + MemAvailable gate) wired into `build_web_atomic`; `verify-soup-web-dist.mjs` runs after every atomic swap with auto-rollback.
+5. Tooling: `build-web-preflight.sh` wired into `build_web_atomic`; `verify-soup-web-dist.mjs` runs after every atomic swap with auto-rollback. **2026-06-19 update:** preflight is RAM-first — blocks on `MemAvailable` <2 GiB, or swap >85% **with** `MemAvailable` <4 GiB; sticky swap alone no longer refuses when ≥4 GiB RAM is free.
 
 ## Peer agent contract (mandatory)
 
@@ -60,10 +60,11 @@ hapi-restart-hub                    # when hub/cli/shared changed; patient drain
 ## If vite build fails again
 
 ```bash
-free -h                                    # swap near 100%?
+free -h                                    # MemAvailable <2GiB, or swap high AND avail <4GiB?
 hapi-remote-agent-budget.sh                # agent/swap budget
-sync; sudo swapoff -a && sudo swapon -a   # operator TTY; ~3min
+sync; sudo swapoff -a && sudo swapon -a   # operator TTY when active pressure; ~3min
 hapi-driver-build-web                      # atomic swap + verify + auto-rollback
+# Sticky swap (high swap, MemAvailable >=4GiB): preflight warns and proceeds — no swapoff required
 ```
 
 Kill criterion: `hapi-verify-web-dist` exit 1 after you claimed web done → dist still stale; do not ask operator to test.
