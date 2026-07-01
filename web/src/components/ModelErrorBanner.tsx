@@ -9,10 +9,22 @@ export type ModelErrorHolder = {
         rawSnippet: string
         atTs: number
         priorAssistantClaimsDone: boolean
+        bridgedForAtTs?: number
         retriedAndFailed?: boolean
         acknowledgedAt?: number
     }
     [key: string]: unknown
+}
+
+export function canShowModelErrorBridge(metadata: ModelErrorHolder | null | undefined): boolean {
+    const err = metadata?.lastModelError
+    if (!err || err.acknowledgedAt) {
+        return false
+    }
+    if (!err.transient || err.retriedAndFailed) {
+        return false
+    }
+    return err.bridgedForAtTs !== err.atTs
 }
 
 export function hasActiveModelError(metadata: ModelErrorHolder | null | undefined): boolean {
@@ -22,10 +34,14 @@ export function hasActiveModelError(metadata: ModelErrorHolder | null | undefine
 
 export function ModelErrorBanner({
     metadata,
-    onDismiss
+    onDismiss,
+    onBridge,
+    isBridging = false
 }: {
     metadata: ModelErrorHolder | null | undefined
     onDismiss: () => void
+    onBridge?: () => void
+    isBridging?: boolean
 }) {
     const { t } = useTranslation()
     const [showRaw, setShowRaw] = useState(false)
@@ -44,6 +60,8 @@ export function ModelErrorBanner({
     const bodyText = err.priorAssistantClaimsDone
         ? t('session.modelError.banner.claimedDone')
         : t('session.modelError.banner.midExecution')
+
+    const showBridge = canShowModelErrorBridge(metadata) && onBridge
 
     return (
         <div className="px-3 pt-3" data-testid="model-error-banner">
@@ -74,6 +92,18 @@ export function ModelErrorBanner({
                     </div>
                 </div>
                 <div className="flex items-center gap-2 pl-6">
+                    {showBridge ? (
+                        <button
+                            type="button"
+                            onClick={onBridge}
+                            disabled={isBridging}
+                            className="rounded px-2 py-0.5 text-xs font-medium border border-amber-500/50 text-amber-700 hover:bg-amber-500/10 disabled:opacity-50 dark:text-amber-300 transition-colors"
+                        >
+                            {isBridging
+                                ? t('session.modelError.banner.bridging')
+                                : t('session.modelError.banner.bridgeRetry')}
+                        </button>
+                    ) : null}
                     <button
                         type="button"
                         onClick={onDismiss}

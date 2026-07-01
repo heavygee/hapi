@@ -144,6 +144,11 @@ export default {
   'session.modelError.banner.midExecution': 'The last agent turn failed mid-execution.',
   'session.modelError.banner.dismiss': 'Dismiss',
   'session.modelError.banner.viewRaw': 'View raw error',
+  'session.modelError.banner.bridgeRetry': 'Bridge & retry',
+  'session.modelError.banner.bridging': 'Bridging…',
+  'session.modelError.banner.bridgeFailed': 'Bridge failed — try again or dismiss.',
+  'settings.chat.autoBridgeTransientModelErrors': 'Automatically bridge transient model errors',
+  'settings.chat.autoBridgeTransientModelErrors.description': 'When enabled, Cursor sessions re-send your last message once after a recoverable model error.',
 
   // Session inactive
   'session.inactive.autoResume': 'This session is inactive. Send a message to resume.',

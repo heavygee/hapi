@@ -144,6 +144,11 @@ export default {
   'session.modelError.banner.midExecution': '上一轮代理在执行过程中失败。',
   'session.modelError.banner.dismiss': '忽略',
   'session.modelError.banner.viewRaw': '查看原始错误',
+  'session.modelError.banner.bridgeRetry': '桥接并重试',
+  'session.modelError.banner.bridging': '桥接中…',
+  'session.modelError.banner.bridgeFailed': '桥接失败 — 请重试或忽略。',
+  'settings.chat.autoBridgeTransientModelErrors': '自动桥接暂时性模型错误',
+  'settings.chat.autoBridgeTransientModelErrors.description': '启用后，Cursor 会话在可恢复的模型错误后会自动重发上一条用户消息一次。',
 
   // Session inactive
   'session.inactive.autoResume': '此会话已停止。发送消息即可恢复。',

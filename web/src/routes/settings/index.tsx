@@ -20,6 +20,7 @@ import { getComposerEnterBehaviorOptions, useComposerEnterBehavior, type Compose
 import { getTerminalToolDisplayModeOptions, useTerminalToolDisplayMode, type TerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 import { getSessionListStatusModeOptions, useSessionListStatusMode, type SessionListStatusMode } from '@/hooks/useSessionListStatusMode'
 import { useShowActiveSessionsOnly } from '@/hooks/useShowActiveSessionsOnly'
+import { useAutoBridgeTransientModelErrors } from '@/hooks/useAutoBridgeTransientModelErrors'
 import {
     MAX_SESSION_PREVIEW_LIMIT,
     MIN_SESSION_PREVIEW_LIMIT,
@@ -407,6 +408,8 @@ export default function SettingsPage() {
         setUserMessageBackground,
     } = useChatSurfaceColors()
     const { appearance, setAppearance } = useAppearance()
+    const { enabled: autoBridgeTransientModelErrors, setEnabled: setAutoBridgeTransientModelErrors } =
+        useAutoBridgeTransientModelErrors()
 
     // Voice language state - read from localStorage
     const [voiceLanguage, setVoiceLanguage] = useState<string | null>(() => {
@@ -1086,6 +1089,50 @@ export default function SettingsPage() {
                             onCustomChange={(value) => setUserMessageBackground(toCustomChatSurfaceColorPreference(value))}
                             t={t}
                         />
+                        <div className="border-t border-[var(--app-divider)] px-3 py-3">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    const next = !autoBridgeTransientModelErrors
+                                    setAutoBridgeTransientModelErrors(next)
+                                    void api.getSessions().then((response) => {
+                                        const activeCursor = (response.sessions ?? []).filter(
+                                            (s) => s.active && s.metadata?.flavor === 'cursor'
+                                        )
+                                        return Promise.all(
+                                            activeCursor.map((s) =>
+                                                api.setModelErrorAutoBridge(s.id, next).catch(() => {})
+                                            )
+                                        )
+                                    })
+                                }}
+                                className="flex w-full items-start justify-between gap-3 text-left"
+                                aria-pressed={autoBridgeTransientModelErrors}
+                            >
+                                <span>
+                                    <span className="block text-sm text-[var(--app-fg)]">
+                                        {t('settings.chat.autoBridgeTransientModelErrors')}
+                                    </span>
+                                    <span className="mt-0.5 block text-xs text-[var(--app-hint)]">
+                                        {t('settings.chat.autoBridgeTransientModelErrors.description')}
+                                    </span>
+                                </span>
+                                <span
+                                    className={`mt-0.5 inline-flex h-5 w-9 shrink-0 rounded-full border transition-colors ${
+                                        autoBridgeTransientModelErrors
+                                            ? 'border-[var(--app-link)] bg-[var(--app-link)]'
+                                            : 'border-[var(--app-border)] bg-[var(--app-subtle-bg)]'
+                                    }`}
+                                    aria-hidden="true"
+                                >
+                                    <span
+                                        className={`m-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
+                                            autoBridgeTransientModelErrors ? 'translate-x-4' : 'translate-x-0'
+                                        }`}
+                                    />
+                                </span>
+                            </button>
+                        </div>
                     </div>
 
                     {/* Voice Assistant section */}
