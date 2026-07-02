@@ -851,9 +851,10 @@ export class SyncEngine {
     }
 
     async bridgeModelError(sessionId: string): Promise<{ ok: boolean; reason?: string }> {
-        const session = this.sessionCache.getSession(sessionId)
-        if (!session?.active) {
-            throw new Error('Session is not active')
+        const session = this.sessionCache.refreshSession(sessionId)
+            ?? this.sessionCache.getSession(sessionId)
+        if (!session) {
+            throw new Error('Session not found')
         }
 
         const err = session.metadata?.lastModelError
@@ -870,7 +871,7 @@ export class SyncEngine {
             throw new Error('Bridge already failed for this error')
         }
 
-        return await this.rpcGateway.bridgeModelError(sessionId, {
+        const result = await this.rpcGateway.bridgeModelError(sessionId, {
             atTs: err.atTs,
             kind: err.kind,
             rawSnippet: err.rawSnippet,
@@ -880,6 +881,12 @@ export class SyncEngine {
             bridgedForAtTs: err.bridgedForAtTs,
             retriedAndFailed: err.retriedAndFailed
         })
+
+        if (result.ok) {
+            await this.sessionCache.markModelErrorBridged(sessionId, err.atTs)
+        }
+
+        return result
     }
 
     async deleteSession(sessionId: string): Promise<void> {

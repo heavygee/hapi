@@ -36,12 +36,14 @@ export function ModelErrorBanner({
     metadata,
     onDismiss,
     onBridge,
-    isBridging = false
+    isBridging = false,
+    bridgeErrorReason = null
 }: {
     metadata: ModelErrorHolder | null | undefined
     onDismiss: () => void
     onBridge?: () => void
     isBridging?: boolean
+    bridgeErrorReason?: string | null
 }) {
     const { t } = useTranslation()
     const [showRaw, setShowRaw] = useState(false)
@@ -103,6 +105,11 @@ export function ModelErrorBanner({
                                 ? t('session.modelError.banner.bridging')
                                 : t('session.modelError.banner.bridgeRetry')}
                         </button>
+                    ) : null}
+                    {bridgeErrorReason ? (
+                        <span className="text-xs text-amber-700 dark:text-amber-300">
+                            {t('session.modelError.banner.bridgeFailed')}
+                        </span>
                     ) : null}
                     <button
                         type="button"
