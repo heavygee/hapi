@@ -64,7 +64,7 @@ describe('classifyCursorAgentMessage', () => {
         const result = classifyCursorAgentMessage('Error: T: [some_new_error] weird thing happened')
         expect(result).not.toBeNull()
         expect(result?.kind).toBe('unknown_t_prefix')
-        expect(result?.transient).toBe(false)
+        expect(result?.transient).toBe(true)
     })
 
     it('preserves raw text', () => {
@@ -141,8 +141,8 @@ describe('classifyCursorAgentMessage', () => {
         const realWireFormat = '\n\nError: T: WritableIterable is closed'
         const result = classifyCursorAgentMessage(realWireFormat)
         expect(result).not.toBeNull()
-        expect(result?.kind).toBe('unknown_t_prefix')
-        expect(result?.transient).toBe(false)
+        expect(result?.kind).toBe('transport_closed')
+        expect(result?.transient).toBe(true)
         // Raw text preserved as-is (leading newlines included) so the
         // banner can show the operator exactly what arrived.
         expect(result?.raw).toBe(realWireFormat)
@@ -225,7 +225,8 @@ describe('classifyCursorAgentMessage', () => {
         expect(classifyCursorAgentMessage(prefix + 'Error: T: [deadline_exceeded]')?.kind).toBe('deadline_exceeded')
         expect(classifyCursorAgentMessage(prefix + 'Error: T: [unavailable] Service down')?.kind).toBe('unavailable')
         expect(classifyCursorAgentMessage(prefix + 'Error: T: Connection stalled')?.kind).toBe('connection_stalled')
-        expect(classifyCursorAgentMessage(prefix + 'Error: T: WritableIterable is closed')?.kind).toBe('unknown_t_prefix')
+        expect(classifyCursorAgentMessage(prefix + 'Error: T: WritableIterable is closed')?.kind).toBe('transport_closed')
+        expect(classifyCursorAgentMessage('\n\nError: RetriableError: WritableIterable is closed')?.kind).toBe('transport_closed')
         expect(classifyCursorAgentMessage(prefix + 'Gemini prompt failed: token count exceeds 1M')?.kind).toBe('context_window')
         expect(classifyCursorAgentMessage(prefix + 'Gemini prompt failed: exhausted your capacity')?.kind).toBe('capacity_exhausted')
     })

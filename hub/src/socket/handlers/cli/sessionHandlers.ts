@@ -8,6 +8,7 @@ import type { SyncEvent } from '../../../sync/syncEngine'
 import { extractTodoWriteTodosFromMessageContent } from '../../../sync/todos'
 import { extractTeamStateFromMessageContent, applyTeamStateDelta } from '../../../sync/teams'
 import { extractBackgroundTaskDelta } from '../../../sync/backgroundTasks'
+import { tryPromoteCursorInlineModelErrorFromMessage } from '../../../sync/cursorInlineModelErrorBackstop'
 import { shouldRecordSessionActivity } from '../../../sync/sessionActivity'
 import type { CliSocketWithData } from '../../socketTypes'
 import type { SessionEndReason } from '@hapi/protocol'
@@ -115,6 +116,17 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
         const msg = store.messages.addMessage(sid, content, localId)
         if (shouldRecordSessionActivity(content)) {
             onSessionActivity?.(sid, msg.createdAt)
+        }
+
+        if (tryPromoteCursorInlineModelErrorFromMessage({
+            store,
+            sessionId: sid,
+            session,
+            content,
+            atTs: msg.createdAt,
+            messageSeq: msg.seq
+        })) {
+            onWebappEvent?.({ type: 'session-updated', sessionId: sid })
         }
 
         const todos = extractTodoWriteTodosFromMessageContent(content)
