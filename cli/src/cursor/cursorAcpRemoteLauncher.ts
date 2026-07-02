@@ -530,15 +530,26 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
 
         this.session.client.updateMetadata((metadata) => {
             const current = metadata.lastModelError;
-            if (!current || current.atTs !== bridgedAtTs) {
-                return metadata;
-            }
-            return {
-                ...metadata,
-                lastModelError: {
+            const nextError = current?.atTs === bridgedAtTs
+                ? {
                     ...current,
                     bridgedForAtTs: bridgedAtTs
                 }
+                : {
+                    kind: metadataError.kind,
+                    transient: metadataError.transient,
+                    rawSnippet: metadataError.rawSnippet,
+                    atTs: metadataError.atTs,
+                    priorAssistantClaimsDone: metadataError.priorAssistantClaimsDone,
+                    ...(metadataError.lastUserMessage
+                        ? { lastUserMessage: metadataError.lastUserMessage }
+                        : {}),
+                    bridgedForAtTs: bridgedAtTs
+                };
+
+            return {
+                ...metadata,
+                lastModelError: nextError
             };
         });
 

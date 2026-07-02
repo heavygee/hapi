@@ -694,19 +694,23 @@ function SessionChatInner(props: SessionChatProps) {
     }, [props.api, props.session.id, props.onRefresh])
 
     const [isBridgingModelError, setIsBridgingModelError] = useState(false)
+    const [bridgeModelErrorReason, setBridgeModelErrorReason] = useState<string | null>(null)
 
     const handleBridgeModelError = useCallback(async () => {
         if (isBridgingModelError) {
             return
         }
         setIsBridgingModelError(true)
+        setBridgeModelErrorReason(null)
         try {
             const result = await props.api.bridgeModelError(props.session.id)
             if (!result.ok) {
-                console.warn('[SessionChat] model error bridge refused:', result.reason)
+                setBridgeModelErrorReason(result.reason ?? 'not_bridgeable')
             }
             props.onRefresh()
         } catch (error) {
+            const message = error instanceof Error ? error.message : 'bridge_failed'
+            setBridgeModelErrorReason(message)
             console.warn('[SessionChat] model error bridge failed:', error)
         } finally {
             setIsBridgingModelError(false)
@@ -1162,6 +1166,7 @@ function SessionChatInner(props: SessionChatProps) {
                 onDismiss={handleAcknowledgeModelError}
                 onBridge={agentFlavor === 'cursor' ? handleBridgeModelError : undefined}
                 isBridging={isBridgingModelError}
+                bridgeErrorReason={bridgeModelErrorReason}
             />
 
             {props.session.teamState && (

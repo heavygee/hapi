@@ -628,6 +628,48 @@ export class SessionCache {
         throw new Error('Session was modified concurrently. Please try again.')
     }
 
+    async markModelErrorBridged(sessionId: string, atTs: number): Promise<void> {
+        const session = this.sessions.get(sessionId) ?? this.refreshSession(sessionId)
+        if (!session) {
+            throw new Error('Session not found')
+        }
+
+        const currentMetadata = session.metadata ?? { path: '', host: '' }
+        const currentError = currentMetadata.lastModelError
+        if (!currentError || currentError.atTs !== atTs) {
+            return
+        }
+        if (currentError.bridgedForAtTs === atTs) {
+            return
+        }
+
+        const newMetadata = {
+            ...currentMetadata,
+            lastModelError: {
+                ...currentError,
+                bridgedForAtTs: atTs
+            }
+        }
+
+        const result = this.store.sessions.updateSessionMetadata(
+            sessionId,
+            newMetadata,
+            session.metadataVersion,
+            session.namespace,
+            { touchUpdatedAt: false }
+        )
+
+        if (result.result === 'error') {
+            throw new Error('Failed to update session metadata')
+        }
+
+        if (result.result === 'version-mismatch') {
+            throw new Error('Session was modified concurrently. Please try again.')
+        }
+
+        this.refreshSession(sessionId)
+    }
+
     async acknowledgeModelError(sessionId: string): Promise<void> {
         const session = this.sessions.get(sessionId)
         if (!session) {
