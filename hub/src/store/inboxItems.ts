@@ -52,6 +52,9 @@ export type ListInboxItemsOptions = {
     limit?: number
     activeOnly?: boolean
     sessionId?: string | null
+    /** Explicit status allow-list (overrides activeOnly when set). */
+    statuses?: string[] | null
+    category?: string | null
 }
 
 type InboxItemRow = {
@@ -169,12 +172,20 @@ export function listInboxItems(db: Database, options: ListInboxItemsOptions = {}
     const clauses: string[] = []
     const params: Array<string | number> = []
 
-    if (options.activeOnly) {
+    if (options.statuses && options.statuses.length > 0) {
+        const placeholders = options.statuses.map(() => '?').join(', ')
+        clauses.push(`status IN (${placeholders})`)
+        params.push(...options.statuses)
+    } else if (options.activeOnly) {
         clauses.push("status IN ('new', 'surfaced', 'deferred', 'snoozed')")
     }
     if (options.sessionId) {
         clauses.push('related_session_id = ?')
         params.push(options.sessionId)
+    }
+    if (options.category) {
+        clauses.push('category = ?')
+        params.push(options.category)
     }
 
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''
