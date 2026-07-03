@@ -9,6 +9,10 @@ import { FcmStore } from './fcmStore'
 import { ScratchlistStore } from './scratchlistStore'
 import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
+import { EventStore } from './eventStore'
+import { InboxStore } from './inboxStore'
+import { ensureOverseerEventsSchema, ensureDeletedSessionsSchema } from './events'
+import { ensureOverseerInboxSchema } from './inboxItems'
 
 export type {
     StoredMachine,
@@ -28,6 +32,10 @@ export { FcmStore } from './fcmStore'
 export { ScratchlistStore } from './scratchlistStore'
 export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
+export { EventStore } from './eventStore'
+export { InboxStore } from './inboxStore'
+export type { InsertSystemEventInput, ListSystemEventsOptions, StoredSystemEvent } from './eventStore'
+export type { ListInboxItemsOptions, StoredInboxItem } from './inboxStore'
 
 const SCHEMA_VERSION: number = 12
 const REQUIRED_TABLES = [
@@ -37,7 +45,14 @@ const REQUIRED_TABLES = [
     'users',
     'push_subscriptions',
     'fcm_devices',
-    'session_scratchlist'
+    'session_scratchlist',
+    'events',
+    'event_links',
+    'events_fts',
+    'deleted_sessions',
+    'inbox_items',
+    'inbox_item_source_events',
+    'inbox_operator_actions'
 ] as const
 
 export class Store {
@@ -52,6 +67,8 @@ export class Store {
     readonly push: PushStore
     readonly fcm: FcmStore
     readonly scratchlist: ScratchlistStore
+    readonly events: EventStore
+    readonly inbox: InboxStore
 
     /**
      * Filesystem path of the underlying SQLite database, or ':memory:' for
@@ -104,6 +121,8 @@ export class Store {
         this.push = new PushStore(this.db)
         this.fcm = new FcmStore(this.db)
         this.scratchlist = new ScratchlistStore(this.db)
+        this.events = new EventStore(this.db)
+        this.inbox = new InboxStore(this.db)
     }
 
     close(): void {
@@ -157,11 +176,13 @@ export class Store {
                 // a partially-built legacy DB may not have yet.
                 this.createSchema()
                 this.setUserVersion(SCHEMA_VERSION)
+                this.finishSchemaInit()
                 return
             }
 
             this.createSchema()
             this.setUserVersion(SCHEMA_VERSION)
+            this.finishSchemaInit()
             return
         }
 
@@ -173,6 +194,7 @@ export class Store {
                 step()
             }
             this.setUserVersion(SCHEMA_VERSION)
+            this.finishSchemaInit()
             return
         }
 
@@ -180,6 +202,14 @@ export class Store {
             throw this.buildSchemaMismatchError(currentVersion)
         }
 
+        this.finishSchemaInit()
+    }
+
+    /** Idempotent Overseer self-heal + loud missing-table check on every boot path. */
+    private finishSchemaInit(): void {
+        ensureOverseerEventsSchema(this.db)
+        ensureDeletedSessionsSchema(this.db)
+        ensureOverseerInboxSchema(this.db)
         this.assertRequiredTablesPresent()
     }
 
@@ -266,6 +296,19 @@ export class Store {
                 UNIQUE(namespace, endpoint)
             );
             CREATE INDEX IF NOT EXISTS idx_push_subscriptions_namespace ON push_subscriptions(namespace);
+
+            CREATE TABLE IF NOT EXISTS fcm_devices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                namespace TEXT NOT NULL,
+                token TEXT NOT NULL,
+                platform TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                UNIQUE(namespace, device_id, platform)
+            );
+            CREATE INDEX IF NOT EXISTS idx_fcm_devices_namespace ON fcm_devices(namespace);
+            CREATE INDEX IF NOT EXISTS idx_fcm_devices_token ON fcm_devices(token);
 
             CREATE TABLE IF NOT EXISTS session_scratchlist (
                 session_id TEXT NOT NULL,
@@ -480,13 +523,8 @@ export class Store {
     }
 
     /**
-     * Soup-only (driver-manifest): scratchlist v2.2 lands at v11→v12 because
-     * feat/companion-fcm-push-api (manifest layer 1) owns v10→v11 (fcm_devices).
-     * Upstream feat/scratchlist-attachments-v22 keeps v10→v11 scratchlist text
-     * + v11→v12 attachments — do NOT submit this renumber upstream.
-     *
-     * tiann/hapi#921: session_scratchlist with attachments JSON column.
-     * Bytes live on hub filesystem under HAPI_HOME/scratchlist-attachments/.
+     * Soup integration: scratchlist v2.2 at v11→v12 (FCM owns v10→v11).
+     * tiann/hapi#921 — session_scratchlist with attachments JSON column.
      */
     private migrateFromV11ToV12(): void {
         this.db.exec(`

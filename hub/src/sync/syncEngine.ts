@@ -11,6 +11,7 @@ import { isKnownFlavor, type LocalResumeTarget, type ResumableSession } from '@h
 import type { CursorMigrateOutcome, CursorMigrateToAcpRequest, SlashCommandsResponse } from '@hapi/protocol/apiTypes'
 import type { AgentFlavor, CodexCollaborationMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
 import { extractAssistantPlainText, unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
+import { AGENT_NOTIFY_CONTRACT_INLINE_PREFIX } from '@hapi/protocol'
 import type { Server } from 'socket.io'
 import type { Store, CancelQueuedMessageResult } from '../store'
 import type { HapiSessionExportResult } from '@hapi/protocol/sessionExport'
@@ -41,6 +42,10 @@ import {
     type RpcUploadFileResponse
 } from './rpcGateway'
 import { SessionCache } from './sessionCache'
+import { OverseerEventRecorder, shouldInjectNotifyContract, toSessionSnapshot } from './overseerEventRecorder'
+import type { ListSystemEventsOptions, StoredSystemEvent } from '../store'
+import type { InboxOperatorAction } from '@hapi/protocol'
+import type { ListInboxItemsOptions, StoredInboxItem } from '../store/inboxItems'
 
 export type { Session, SyncEvent } from '@hapi/protocol/types'
 export type { Machine } from './machineCache'
@@ -135,6 +140,7 @@ export class SyncEngine {
     private readonly machineCache: MachineCache
     private readonly messageService: MessageService
     private readonly rpcGateway: RpcGateway
+    private readonly overseerEvents: OverseerEventRecorder
     private inactivityTimer: NodeJS.Timeout | null = null
     /** Sessions that emitted `session-ready` (Cursor ACP load/newSession complete). */
     private readonly sessionReadyIds = new Set<string>()
@@ -155,6 +161,7 @@ export class SyncEngine {
             (sessionId, updatedAt) => this.recordSessionActivity(sessionId, updatedAt)
         )
         this.rpcGateway = new RpcGateway(io, rpcRegistry)
+        this.overseerEvents = new OverseerEventRecorder(store.events, store.inbox)
         this.reloadAll()
         this.inactivityTimer = setInterval(() => this.expireInactive(), 5_000)
     }
@@ -316,14 +323,22 @@ export class SyncEngine {
             // legacy refresh-from-DB-and-broadcast path.
             this.sessionCache.refreshSession(event.sessionId)
             const after = this.sessionCache.getSession(event.sessionId)
+            if (after) {
+                this.overseerEvents.onSessionUpdated(
+                    after,
+                    this.store.sessions.getSession(after.id)?.tag ?? null
+                )
+            }
             if (after?.metadata && !this.hasSameAgentSessionIds(beforeMetadata, after.metadata)) {
                 if (!this.canRunCursorDedup(after)) {
+                    this.eventPublisher.emit(event)
                     return
                 }
                 void this.sessionCache.deduplicateByAgentSessionId(event.sessionId).catch(() => {
                     // best-effort: dedup failure is harmless, web-side safety net hides remaining duplicates
                 })
             }
+            this.eventPublisher.emit(event)
             return
         }
 
@@ -336,9 +351,53 @@ export class SyncEngine {
             if (!this.getSession(event.sessionId)) {
                 this.sessionCache.refreshSession(event.sessionId)
             }
+            const session = this.getSession(event.sessionId)
+            if (session && event.message) {
+                const storedSession = this.store.sessions.getSession(event.sessionId)
+                this.overseerEvents.onAgentMessage(
+                    toSessionSnapshot(session, storedSession?.tag ?? null),
+                    event.message.id,
+                    event.message.content,
+                    event.message.createdAt
+                )
+            }
         }
 
         this.eventPublisher.emit(event)
+    }
+
+    getSystemEvents(options: ListSystemEventsOptions = {}): StoredSystemEvent[] {
+        return this.overseerEvents.list(options)
+    }
+
+    getSystemEventCount(): number {
+        return this.overseerEvents.count()
+    }
+
+    getInboxItems(options: ListInboxItemsOptions = {}): StoredInboxItem[] {
+        return this.store.inbox.list(options)
+    }
+
+    getInboxItemCount(): number {
+        return this.store.inbox.count()
+    }
+
+    recordInboxOperatorAction(
+        inboxItemId: number,
+        action: InboxOperatorAction,
+        feedback: string | null = null,
+        snoozedUntil: number | null = null
+    ): StoredInboxItem | null {
+        return this.store.inbox.recordOperatorAction(inboxItemId, action, feedback, snoozedUntil)
+    }
+
+    private getLastAgentPlainText(sessionId: string): string | null {
+        const messages = this.store.messages.getMessages(sessionId, 80)
+        for (let i = messages.length - 1; i >= 0; i -= 1) {
+            const text = extractAssistantPlainText(messages[i].content)
+            if (text) return text
+        }
+        return null
     }
 
     handleSessionAlive(payload: {
@@ -373,6 +432,16 @@ export class SyncEngine {
         const shouldRetryDedup = !isCursorAcp || this.sessionReadyIds.has(payload.sid)
 
         this.sessionCache.handleSessionEnd(payload)
+        const session = this.getSession(payload.sid)
+        if (session) {
+            this.overseerEvents.onSessionEnd(
+                session,
+                this.store.sessions.getSession(session.id)?.tag ?? null,
+                payload.time,
+                payload.reason,
+                () => this.getLastAgentPlainText(session.id)
+            )
+        }
         this.eventPublisher.emit({
             type: 'session-ended',
             sessionId: payload.sid,
@@ -425,6 +494,13 @@ export class SyncEngine {
         return this.store.scratchlist.sumAttachmentBytes(sessionId)
     }
 
+    /**
+     * Read a single entry by id. The route layer uses this to short-
+     * circuit duplicate POSTs (migration retry) BEFORE running the
+     * server-side cap check; otherwise an idempotent retry against a
+     * session that has hit `SCRATCHLIST_MAX_ENTRIES` would 409 when it
+     * should 200 with the existing row.
+     */
     getScratchlistEntry(
         sessionId: string,
         entryId: string
@@ -446,6 +522,18 @@ export class SyncEngine {
         }
     }
 
+    /**
+     * Insert a scratchlist entry. Returns the canonical row on success
+     * (so the route layer can serialise it without a follow-up read).
+     * Emits a `session-updated` SSE patch carrying `scratchlistUpdatedAt`
+     * so other clients viewing the same session refetch.
+     *
+     * `outcome: 'duplicate'` covers the migration path's idempotency:
+     * the web client may retry pushing a localStorage entry after a
+     * partial failure; the second attempt should be a no-op rather than
+     * a hard error. Route layer maps duplicate → 200/conflict per its
+     * own contract; this layer just reports it.
+     */
     createScratchlistEntry(
         sessionId: string,
         text: string,
@@ -591,6 +679,7 @@ export class SyncEngine {
             this.triggerDedupIfNeeded(session.id)
         }
         this.machineCache.expireInactive()
+        this.overseerEvents.checkStaleSessions(this.sessionCache.getSessions())
         // Piggybacked on the inactivity tick; not a logical part of expireInactive
         // but shares its 5s cadence (avoids a second timer).
         this.messageService.releaseMatureScheduledMessages(Date.now())
@@ -634,7 +723,16 @@ export class SyncEngine {
             scheduledAt?: number | null
         }
     ): Promise<void> {
-        await this.messageService.sendMessage(sessionId, payload)
+        const session = this.getSession(sessionId)
+        const flavor = session?.metadata?.flavor ?? 'claude'
+        const text = payload.text && shouldInjectNotifyContract(flavor)
+            ? `${AGENT_NOTIFY_CONTRACT_INLINE_PREFIX}${payload.text}`
+            : payload.text
+
+        await this.messageService.sendMessage(sessionId, {
+            ...payload,
+            text
+        })
         this.sessionCache.markMessageQueued(sessionId)
         this.sessionCache.recordSessionActivity(sessionId, Date.now())
     }
