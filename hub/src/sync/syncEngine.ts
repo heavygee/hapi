@@ -1221,6 +1221,12 @@ export class SyncEngine {
         const preferredPermissionMode = opts?.permissionMode
             ?? session.permissionMode
             ?? session.metadata?.preferredPermissionMode
+        // tiann/hapi#991 — Cursor ACP resume reuses the original HAPI row via
+        // existingSessionId so the hub does not depend on session-ready over a
+        // remote socket before merge (tailnet drops caused 60s resume_failed).
+        const existingSessionId = flavor === 'cursor' && metadata.cursorSessionProtocol === 'acp'
+            ? access.sessionId
+            : undefined
         const spawnResult = await this.rpcGateway.spawnSession(
             targetMachine.id,
             directory,
@@ -1233,7 +1239,8 @@ export class SyncEngine {
             resumeToken,
             session.effort ?? undefined,
             preferredPermissionMode,
-            session.serviceTier ?? undefined
+            session.serviceTier ?? undefined,
+            existingSessionId
         )
 
         if (spawnResult.type !== 'success') {
