@@ -4,7 +4,6 @@ import {
     useId,
     useRef,
     useState,
-    type ComponentPropsWithoutRef,
     type Ref,
     type SyntheticEvent,
 } from 'react'
@@ -153,21 +152,6 @@ export function normalizeMermaidSvgForStandaloneDisplay(svg: string): string {
     return result
 }
 
-function MermaidFallback(props: ComponentPropsWithoutRef<'pre'> & { code: string }) {
-    const { code, className, ...rest } = props
-    return (
-        <pre
-            {...rest}
-            className={cn(
-                'aui-mermaid-fallback m-0 overflow-x-auto rounded-b-xl bg-[var(--app-code-bg)] p-4 text-sm text-[var(--app-fg)]',
-                className
-            )}
-        >
-            <code>{code}</code>
-        </pre>
-    )
-}
-
 function MermaidSvgContent(props: { svg: string; className?: string; hostRef?: Ref<HTMLDivElement> }) {
     return (
         <div
@@ -205,12 +189,6 @@ export function resolveMermaidLightboxFitSize(
 
 /**
  * Shadow root isolates duplicate mermaid ids from the inline diagram in the page.
- *
- * Mermaid emits `width="100%"` on every diagram. Inside a shadow root whose host
- * has no explicit size, that collapses to zero in Chromium for most diagram types
- * (only ones that ship pixel attrs - e.g. `journey` - happen to render). Strip
- * the relative size and bake explicit pixels from the viewBox before injecting,
- * and give the host an inline-block layout so it sizes to the SVG.
  */
 function MermaidLightboxSvg(props: { svg: string }) {
     const hostRef = useRef<HTMLDivElement>(null)
@@ -237,11 +215,52 @@ function readMermaidE2eCaseId(code: string): string | undefined {
     return code.match(/<!--\s*mermaid-e2e:([\w-]+)\s*-->/i)?.[1]
 }
 
+function MermaidRenderError({ className }: { className?: string }) {
+    return (
+        <div
+            data-mermaid-diagram
+            data-rendered="false"
+            className={cn(
+                'aui-mermaid-render-error flex min-h-[160px] items-center justify-center rounded-b-xl bg-[var(--app-code-bg)] px-6 py-8',
+                className
+            )}
+        >
+            <div className="flex max-w-sm flex-col items-center gap-4 text-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-400">
+                    <svg
+                        className="h-6 w-6"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                    >
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                        <line x1="12" y1="9" x2="12" y2="13" />
+                        <line x1="12" y1="17" x2="12.01" y2="17" />
+                    </svg>
+                </div>
+                <div className="space-y-1.5">
+                    <p className="text-sm font-semibold text-[var(--app-fg)]">
+                        Diagram rendering failed
+                    </p>
+                    <p className="text-xs leading-relaxed text-[var(--app-fg)]/60">
+                        The diagram could not be rendered. A corrected version may follow below.
+                    </p>
+                </div>
+            </div>
+        </div>
+    )
+}
+
+type RenderState = 'pending' | 'error' | 'success'
+
 export function MermaidDiagram(props: SyntaxHighlighterProps) {
     const { t } = useTranslation()
     const e2eCaseId = readMermaidE2eCaseId(props.code)
     const [theme, setTheme] = useState<'light' | 'dark'>(() => resolveTheme())
-    const [renderError, setRenderError] = useState(false)
+    const [state, setState] = useState<RenderState>('pending')
     const [svg, setSvg] = useState<string | null>(null)
     const [lightboxOpen, setLightboxOpen] = useState(false)
     const [lightboxFitSize, setLightboxFitSize] = useState<{ width: number; height: number } | null>(null)
@@ -281,22 +300,22 @@ export function MermaidDiagram(props: SyntaxHighlighterProps) {
 
     useEffect(() => {
         let cancelled = false
+        setState('pending')
+        setSvg(null)
 
         const render = async () => {
             try {
                 const nextSvg = await renderMermaidSvg(props.code, `mermaid-${id}`, theme)
                 if (cancelled) return
                 if (!nextSvg) {
-                    setSvg(null)
-                    setRenderError(true)
+                    setState('error')
                     return
                 }
                 setSvg(nextSvg)
-                setRenderError(false)
+                setState('success')
             } catch {
                 if (cancelled) return
-                setSvg(null)
-                setRenderError(true)
+                setState('error')
             }
         }
 
@@ -309,41 +328,51 @@ export function MermaidDiagram(props: SyntaxHighlighterProps) {
 
     const lightboxLayoutSize = lightboxFitSize ?? (svg ? getMermaidSvgLayoutSize(svg) : null)
 
-    if (renderError || !svg) {
-        return <MermaidFallback code={props.code} data-mermaid-diagram data-rendered="false" />
+    if (state === 'error') {
+        return <MermaidRenderError />
+    }
+
+    if (state === 'success' && svg) {
+        return (
+            <>
+                <button
+                    type="button"
+                    aria-label={openLabel}
+                    title={openLabel}
+                    onPointerDown={stopEvent}
+                    onMouseDown={stopEvent}
+                    onTouchStart={stopEvent}
+                    onClick={openLightbox}
+                    className="aui-mermaid-diagram w-full cursor-zoom-in overflow-x-auto rounded-b-xl bg-[var(--app-code-bg)] px-4 py-3 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                    data-mermaid-diagram
+                    data-rendered="true"
+                    data-mermaid-e2e-case={e2eCaseId}
+                    data-mermaid-source={encodeURIComponent(props.code)}
+                >
+                    <MermaidSvgContent svg={svg} hostRef={inlineHostRef} />
+                </button>
+
+                <ZoomableLightbox
+                    open={lightboxOpen}
+                    onClose={() => setLightboxOpen(false)}
+                    title={viewerLabel}
+                    ariaLabel={viewerLabel}
+                    fitContentKey={lightboxOpen ? svg : null}
+                    fitContentSize={lightboxLayoutSize}
+                >
+                    <div className="rounded-lg bg-[var(--app-code-bg)] px-3 py-3">
+                        <MermaidLightboxSvg svg={svg} />
+                    </div>
+                </ZoomableLightbox>
+            </>
+        )
     }
 
     return (
-        <>
-            <button
-                type="button"
-                aria-label={openLabel}
-                title={openLabel}
-                onPointerDown={stopEvent}
-                onMouseDown={stopEvent}
-                onTouchStart={stopEvent}
-                onClick={openLightbox}
-                className="aui-mermaid-diagram w-full cursor-zoom-in overflow-x-auto rounded-b-xl bg-[var(--app-code-bg)] px-4 py-3 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                data-mermaid-diagram
-                data-rendered="true"
-                data-mermaid-e2e-case={e2eCaseId}
-                data-mermaid-source={encodeURIComponent(props.code)}
-            >
-                <MermaidSvgContent svg={svg} hostRef={inlineHostRef} />
-            </button>
-
-            <ZoomableLightbox
-                open={lightboxOpen}
-                onClose={() => setLightboxOpen(false)}
-                title={viewerLabel}
-                ariaLabel={viewerLabel}
-                fitContentKey={lightboxOpen ? svg : null}
-                fitContentSize={lightboxLayoutSize}
-            >
-                <div className="rounded-lg bg-[var(--app-code-bg)] px-3 py-3">
-                    <MermaidLightboxSvg svg={svg} />
-                </div>
-            </ZoomableLightbox>
-        </>
+        <div
+            data-mermaid-diagram
+            data-rendered="pending"
+            className="min-h-[160px] animate-pulse rounded-b-xl bg-[var(--app-code-bg)] opacity-40"
+        />
     )
 }
