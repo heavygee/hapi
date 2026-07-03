@@ -640,6 +640,7 @@ describe('session model', () => {
                 _sessionType?: string,
                 _worktreeName?: string,
                 _resumeSessionId?: string,
+                _importHistory?: boolean,
                 effort?: string
             ) => {
                 capturedModel = model
@@ -1014,6 +1015,7 @@ describe('session model', () => {
                 _sessionType?: string,
                 _worktreeName?: string,
                 _resumeSessionId?: string,
+                _importHistory?: boolean,
                 _effort?: string,
                 permissionMode?: string
             ) => {
@@ -1100,6 +1102,7 @@ describe('session model', () => {
                 _sessionType?: string,
                 _worktreeName?: string,
                 _resumeSessionId?: string,
+                _importHistory?: boolean,
                 _effort?: string,
                 permissionMode?: string
             ) => {
@@ -1180,6 +1183,7 @@ describe('session model', () => {
                 _sessionType?: string,
                 _worktreeName?: string,
                 _resumeSessionId?: string,
+                _importHistory?: boolean,
                 _effort?: string,
                 _permissionMode?: string,
                 _serviceTier?: string,
@@ -1312,6 +1316,7 @@ describe('session model', () => {
                 _sessionType?: string,
                 _worktreeName?: string,
                 _resumeSessionId?: string,
+                _importHistory?: boolean,
                 _effort?: string,
                 _permissionMode?: string,
                 _serviceTier?: string,

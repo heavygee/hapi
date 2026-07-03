@@ -31,7 +31,6 @@ export const RPC_METHODS = {
     ListOpencodeModels: 'listOpencodeModels',
     ListOpencodeModelsForCwd: 'listOpencodeModelsForCwd',
     ListOpencodeReasoningEffortOptions: 'listOpencodeReasoningEffortOptions',
-    ListPiModels: 'listPiModels',
     BridgeModelError: 'bridge-model-error'
 } as const
 
