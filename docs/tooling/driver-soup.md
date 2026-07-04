@@ -248,6 +248,29 @@ git cherry-pick 64583aa7   # sendModelError only; resolve fcm imports if needed
 
 Do **not** fix this ad hoc in `~/coding/hapi/driver` during rebuild — fix the **branch tip**, then rebuild.
 
+### Layer collisions (shared hot files)
+
+Some files are merged by **every** layer that touches them; **last layer wins** per hunk — there is no automatic union.
+
+| Hot file | Typical collision |
+|---|---|
+| `hub/src/sync/rpcGateway.ts` | Later layer re-merges for cursor/model work; drops RPC methods an **earlier** layer added |
+| `hub/src/sync/syncEngine.ts` | May keep calls via a union repair layer (`fix/soup-sync-engine-collision`) while `rpcGateway` lost the method |
+| `hub/src/web/routes/machines.ts` | REST route dropped while `syncEngine` + web client still reference it |
+| `web/src/components/MarkdownRenderer.tsx` | Standalone markdown cast fixes overwritten |
+
+**Symptom:** `hapi-driver-rebuild --verify` red on homelab/guest even though feature branches typecheck clean in isolation.
+
+**Fix pattern (2026-07-04):** add a **thin collision-repair layer** on top of the manifest — do not hand-edit `~/coding/hapi/driver`:
+
+- `fix/soup-codex-sessions-rpc-collision` — restore `listCodexSessionsForMachine` + route
+- `fix/soup-markdown-standalone-cast` — restore react-markdown component casts
+- `fix/soup-sync-engine-collision` — overseer + scratchlist union on `syncEngine`
+
+**Prevention:** `hapi-driver-rebuild --verify` runs `hapi-soup-hotfiles-check.mjs` (syncEngine calls ⊆ rpcGateway methods). When adding a layer that edits hot files, comment in the manifest which symbols must survive lower layers.
+
+**Guest migration (oos-linux):** promote soup by syncing **manifest** homelab → guest, then `hapi-driver-rebuild --build-web --verify` **on guest** — do not `sync-oos-hapi-driver.sh` homelab→guest after a guest-only rebuild (overwrites composed soup).
+
 **Bypass** (testing only): `HAPI_SKIP_DRIVER_LOCK=1`. Skips both flock and status writes; collisions corrupt the driver tree.
 
 **Why no hub API route?** The hub may be down *during* a switch — exactly when status is most wanted. File-backed status is readable when the hub is dead.
