@@ -114,6 +114,18 @@ describe('buildCliArgs', () => {
         expect(args[0]).toBe('pi')
     })
 
+    it('passes --existing-session-id for cursor resume when sessionId is set', () => {
+        const args = buildCliArgs('cursor', {
+            directory: '/tmp',
+            resumeSessionId: 'cursor-csid-1',
+            sessionId: 'hapi-session-991',
+        })
+        expect(args).toContain('--existing-session-id')
+        expect(args).toContain('hapi-session-991')
+        expect(args).toContain('--resume')
+        expect(args).toContain('cursor-csid-1')
+    })
+
     it('still passes --resume for claude when resumeSessionId is provided', () => {
         // Guard against accidentally swallowing claude's --resume when
         // the pi branch was added.

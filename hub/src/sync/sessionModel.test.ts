@@ -1102,6 +1102,7 @@ describe('session model', () => {
                 _sessionType?: string,
                 _worktreeName?: string,
                 _resumeSessionId?: string,
+                _importHistory?: boolean,
                 _effort?: string,
                 permissionMode?: string
             ) => {
@@ -1130,7 +1131,7 @@ describe('session model', () => {
         }
     })
 
-    it('defers mergeSessions for cursor reopen until session-ready (load failure leaves old row)', async () => {
+    it('cursor ACP resume passes existingSessionId and reuses row without session-ready wait (#991)', async () => {
         const store = new Store(':memory:')
         const engine = new SyncEngine(
             store,
@@ -1162,21 +1163,8 @@ describe('session model', () => {
             engine.handleMachineAlive({ machineId: 'machine-1', time: Date.now() })
             engine.handleSessionEnd({ sid: oldSession.id, time: Date.now() })
 
-            const spawnedSession = engine.getOrCreateSession(
-                'cursor-reopen-spawned',
-                {
-                    path: '/tmp/project',
-                    host: 'localhost',
-                    machineId: 'machine-1',
-                    flavor: 'cursor',
-                    cursorSessionId: 'cursor-csid-load-fail',
-                    cursorSessionProtocol: 'acp'
-                },
-                null,
-                'default'
-            )
-            const spawnedSessionId = spawnedSession.id
-
+            let capturedExistingSessionId: string | undefined
+            let waitForSessionReadyCalls = 0
             let mergeCalls = 0
             const sessionCache = (engine as any).sessionCache
             const mergeSessions = sessionCache.mergeSessions.bind(sessionCache)
@@ -1185,20 +1173,37 @@ describe('session model', () => {
                 return mergeSessions(oldSessionId, newSessionId, namespace)
             }
 
-            ;(engine as any).rpcGateway.spawnSession = async () => {
-                engine.handleSessionAlive({ sid: spawnedSessionId, time: Date.now() })
-                return { type: 'success', sessionId: spawnedSessionId }
+            ;(engine as any).rpcGateway.spawnSession = async (
+                _machineId: string,
+                _directory: string,
+                _agent: string,
+                _model?: string,
+                _modelReasoningEffort?: string,
+                _yolo?: boolean,
+                _sessionType?: string,
+                _worktreeName?: string,
+                _resumeSessionId?: string,
+                _importHistory?: boolean,
+                _effort?: string,
+                _permissionMode?: string,
+                _serviceTier?: string,
+                existingSessionId?: string
+            ) => {
+                capturedExistingSessionId = existingSessionId
+                engine.handleSessionAlive({ sid: oldSession.id, time: Date.now() })
+                return { type: 'success', sessionId: oldSession.id }
             }
             ;(engine as any).waitForSessionActive = async () => true
-            ;(engine as any).waitForSessionReady = async () => 'ended'
+            ;(engine as any).waitForSessionReady = async () => {
+                waitForSessionReadyCalls += 1
+                return 'timeout'
+            }
 
             const result = await engine.resumeSession(oldSession.id, 'default')
 
-            expect(result).toEqual({
-                type: 'error',
-                message: 'Session ended before Cursor ACP load completed',
-                code: 'resume_failed'
-            })
+            expect(result).toEqual({ type: 'success', sessionId: oldSession.id })
+            expect(capturedExistingSessionId).toBe(oldSession.id)
+            expect(waitForSessionReadyCalls).toBe(0)
             expect(mergeCalls).toBe(0)
             expect(store.sessions.getSession(oldSession.id)).not.toBeNull()
         } finally {
@@ -1261,7 +1266,7 @@ describe('session model', () => {
         }
     })
 
-    it('mergeSessions runs for cursor reopen after session-ready', async () => {
+    it('cursor ACP resume succeeds on same row without merge (#991)', async () => {
         const store = new Store(':memory:')
         const engine = new SyncEngine(
             store,
@@ -1293,21 +1298,6 @@ describe('session model', () => {
             engine.handleMachineAlive({ machineId: 'machine-1', time: Date.now() })
             engine.handleSessionEnd({ sid: oldSession.id, time: Date.now() })
 
-            const spawnedSession = engine.getOrCreateSession(
-                'cursor-reopen-spawned-ready',
-                {
-                    path: '/tmp/project',
-                    host: 'localhost',
-                    machineId: 'machine-1',
-                    flavor: 'cursor',
-                    cursorSessionId: 'cursor-csid-load-ok',
-                    cursorSessionProtocol: 'acp'
-                },
-                null,
-                'default'
-            )
-            const spawnedSessionId = spawnedSession.id
-
             let mergeCalls = 0
             const sessionCache = (engine as any).sessionCache
             const mergeSessions = sessionCache.mergeSessions.bind(sessionCache)
@@ -1316,18 +1306,33 @@ describe('session model', () => {
                 return mergeSessions(oldSessionId, newSessionId, namespace)
             }
 
-            ;(engine as any).rpcGateway.spawnSession = async () => {
-                engine.handleSessionAlive({ sid: spawnedSessionId, time: Date.now() })
-                engine.handleSessionReady({ sid: spawnedSessionId, time: Date.now() })
-                return { type: 'success', sessionId: spawnedSessionId }
+            ;(engine as any).rpcGateway.spawnSession = async (
+                _machineId: string,
+                _directory: string,
+                _agent: string,
+                _model?: string,
+                _modelReasoningEffort?: string,
+                _yolo?: boolean,
+                _sessionType?: string,
+                _worktreeName?: string,
+                _resumeSessionId?: string,
+                _importHistory?: boolean,
+                _effort?: string,
+                _permissionMode?: string,
+                _serviceTier?: string,
+                existingSessionId?: string
+            ) => {
+                expect(existingSessionId).toBe(oldSession.id)
+                engine.handleSessionAlive({ sid: oldSession.id, time: Date.now() })
+                return { type: 'success', sessionId: oldSession.id }
             }
             ;(engine as any).waitForSessionActive = async () => true
 
             const result = await engine.resumeSession(oldSession.id, 'default')
 
-            expect(result).toEqual({ type: 'success', sessionId: spawnedSessionId })
-            expect(mergeCalls).toBe(1)
-            expect(store.sessions.getSession(oldSession.id)).toBeNull()
+            expect(result).toEqual({ type: 'success', sessionId: oldSession.id })
+            expect(mergeCalls).toBe(0)
+            expect(store.sessions.getSession(oldSession.id)).not.toBeNull()
         } finally {
             engine.stop()
         }

@@ -18,6 +18,7 @@ export const cursorCommand: CommandDefinition = {
                 cursorArgs?: string[]
                 permissionMode?: CursorPermissionMode
                 resumeSessionId?: string
+                existingSessionId?: string
                 model?: string
             } = {}
             const unknownArgs: string[] = []
@@ -69,6 +70,12 @@ export const cursorCommand: CommandDefinition = {
                     } else {
                         unknownArgs.push(arg)
                     }
+                } else if (arg === '--existing-session-id') {
+                    const hapiSessionId = commandArgs[++i]
+                    if (!hapiSessionId || hapiSessionId.startsWith('-')) {
+                        throw new Error('Missing --existing-session-id value')
+                    }
+                    options.existingSessionId = hapiSessionId
                 } else if (arg === '--continue') {
                     unknownArgs.push(arg)
                 } else if (arg === '--hapi-starting-mode') {
