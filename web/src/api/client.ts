@@ -707,6 +707,122 @@ export class ApiClient {
         })
     }
 
+    /*
+     * Scratchlist v2 (tiann/hapi#893).
+     *
+     * The hub is the durable store; localStorage is demoted to an
+     * offline cache. Mutations return the canonical entry so optimistic
+     * updates can reconcile with the hub-stamped `updatedAt`.
+     */
+
+    async getScratchlist(sessionId: string): Promise<{
+        entries: Array<{
+            entryId: string
+            text: string
+            createdAt: number
+            updatedAt: number
+            attachments: import('@hapi/protocol').ScratchlistAttachmentMetadata[]
+        }>
+    }> {
+        return await this.request(
+            `/api/sessions/${encodeURIComponent(sessionId)}/scratchlist`
+        )
+    }
+
+    async uploadScratchlistAttachment(
+        sessionId: string,
+        filename: string,
+        content: string,
+        mimeType: string
+    ): Promise<{
+        success: boolean
+        attachment?: import('@hapi/protocol').ScratchlistAttachmentMetadata
+        error?: string
+        code?: string
+    }> {
+        return await this.request(
+            `/api/sessions/${encodeURIComponent(sessionId)}/scratchlist/upload`,
+            {
+                method: 'POST',
+                body: JSON.stringify({ filename, content, mimeType })
+            }
+        )
+    }
+
+    async fetchScratchlistAttachmentBlob(sessionId: string, attachmentId: string): Promise<Blob> {
+        const headers = new Headers()
+        const liveToken = this.getToken ? this.getToken() : null
+        const authToken = liveToken ?? this.token
+        if (authToken) {
+            headers.set('authorization', `Bearer ${authToken}`)
+        }
+        const response = await fetch(
+            this.buildUrl(
+                `/api/sessions/${encodeURIComponent(sessionId)}/scratchlist/attachments/${encodeURIComponent(attachmentId)}`
+            ),
+            { headers }
+        )
+        if (!response.ok) {
+            throw new ApiError(`Failed to fetch scratchlist attachment (${response.status})`, response.status)
+        }
+        return await response.blob()
+    }
+
+    async createScratchlistEntry(
+        sessionId: string,
+        body: {
+            text: string
+            entryId?: string
+            createdAt?: number
+            attachments?: import('@hapi/protocol').ScratchlistAttachmentMetadata[]
+        }
+    ): Promise<{
+        entry: {
+            entryId: string
+            text: string
+            createdAt: number
+            updatedAt: number
+            attachments: import('@hapi/protocol').ScratchlistAttachmentMetadata[]
+        }
+    }> {
+        return await this.request(
+            `/api/sessions/${encodeURIComponent(sessionId)}/scratchlist`,
+            {
+                method: 'POST',
+                body: JSON.stringify(body)
+            }
+        )
+    }
+
+    async updateScratchlistEntry(
+        sessionId: string,
+        entryId: string,
+        text: string
+    ): Promise<{
+        entry: {
+            entryId: string
+            text: string
+            createdAt: number
+            updatedAt: number
+            attachments: import('@hapi/protocol').ScratchlistAttachmentMetadata[]
+        }
+    }> {
+        return await this.request(
+            `/api/sessions/${encodeURIComponent(sessionId)}/scratchlist/${encodeURIComponent(entryId)}`,
+            {
+                method: 'PUT',
+                body: JSON.stringify({ text })
+            }
+        )
+    }
+
+    async deleteScratchlistEntry(sessionId: string, entryId: string): Promise<void> {
+        await this.request(
+            `/api/sessions/${encodeURIComponent(sessionId)}/scratchlist/${encodeURIComponent(entryId)}`,
+            { method: 'DELETE' }
+        )
+    }
+
     async fetchVoiceToken(options?: { customAgentId?: string; customApiKey?: string; voiceId?: string }): Promise<{
         allowed: boolean
         token?: string
