@@ -255,6 +255,8 @@ export function SessionHeader(props: {
             <SessionActionMenu
                 isOpen={menuOpen}
                 onClose={() => setMenuOpen(false)}
+                sessionId={session.id}
+                sessionTitle={title}
                 sessionActive={session.active}
                 onRename={() => setRenameOpen(true)}
                 onExport={() => setExportOpen(true)}
