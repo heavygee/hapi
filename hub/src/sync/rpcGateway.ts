@@ -61,6 +61,22 @@ export type RpcOpencodeModel = OpencodeModelSummary
 export type RpcListOpencodeModelsResponse = OpencodeModelsResponse
 export type RpcListOpencodeReasoningEffortOptionsResponse = OpencodeReasoningEffortResponse
 
+export type RpcCodexSession = {
+    id: string
+    title: string
+    updatedAt: number
+    path: string | null
+    model: string | null
+    isOld: boolean
+}
+
+export type RpcListCodexSessionsResponse = {
+    success: boolean
+    sessions?: RpcCodexSession[]
+    nextCursor?: string | null
+    error?: string
+}
+
 export class RpcGateway {
     constructor(
         private readonly io: Server,
@@ -301,6 +317,13 @@ export class RpcGateway {
 
     async listCodexModelsForMachine(machineId: string): Promise<RpcListCodexModelsResponse> {
         return await this.machineRpc(machineId, RPC_METHODS.ListCodexModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListCodexModelsResponse
+    }
+
+    async listCodexSessionsForMachine(
+        machineId: string,
+        options?: { includeOld?: boolean; olderThanDays?: number; limit?: number; cursor?: string }
+    ): Promise<RpcListCodexSessionsResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.ListCodexSessions, options ?? {}) as RpcListCodexSessionsResponse
     }
 
     async listCursorModelsForSession(sessionId: string): Promise<RpcListCursorModelsResponse> {
