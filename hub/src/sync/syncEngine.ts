@@ -503,10 +503,6 @@ export class SyncEngine {
         return this.store.scratchlist.count(sessionId)
     }
 
-    sumScratchlistAttachmentBytes(sessionId: string): number {
-        return this.store.scratchlist.sumAttachmentBytes(sessionId)
-    }
-
     /**
      * Read a single entry by id. The route layer uses this to short-
      * circuit duplicate POSTs (migration retry) BEFORE running the
@@ -620,6 +616,10 @@ export class SyncEngine {
             this.sessionCache.emitScratchlistChanged(sessionId, Date.now())
         }
         return removed
+    }
+
+    sumScratchlistAttachmentBytes(sessionId: string): number {
+        return this.store.scratchlist.sumAttachmentBytes(sessionId)
     }
 
     async uploadScratchlistAttachment(
