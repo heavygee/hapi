@@ -41,6 +41,17 @@ export type SessionSummaryMetadata = {
     lifecycleState?: string
     /** Loopback MCP URL when session CLI happy server is running (#956). */
     hapiMcpUrl?: string
+    lastModelError?: {
+        kind: string
+        transient: boolean
+        rawSnippet: string
+        atTs: number
+        priorAssistantClaimsDone: boolean
+        lastUserMessage?: string
+        bridgedForAtTs?: number
+        retriedAndFailed?: boolean
+        acknowledgedAt?: number
+    }
 }
 
 export type SessionSummary = {
@@ -156,7 +167,8 @@ export function toSessionSummaryMetadata(metadata: Metadata | null | undefined):
             ?? metadata.kimiSessionId
             ?? undefined,
         lifecycleState: metadata.lifecycleState,
-        hapiMcpUrl: metadata.hapiMcpUrl ?? undefined
+        hapiMcpUrl: metadata.hapiMcpUrl ?? undefined,
+        lastModelError: metadata.lastModelError
     }
 }
 
