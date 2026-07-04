@@ -31,7 +31,9 @@ export const RPC_METHODS = {
     ListPiModels: 'listPiModels',
     ListOpencodeModels: 'listOpencodeModels',
     ListOpencodeModelsForCwd: 'listOpencodeModelsForCwd',
-    ListOpencodeReasoningEffortOptions: 'listOpencodeReasoningEffortOptions'
+    ListOpencodeReasoningEffortOptions: 'listOpencodeReasoningEffortOptions',
+    ListPiModels: 'listPiModels',
+    BridgeModelError: 'bridge-model-error'
 } as const
 
 export type RpcMethod = typeof RPC_METHODS[keyof typeof RPC_METHODS]
