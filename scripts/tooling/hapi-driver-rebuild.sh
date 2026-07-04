@@ -218,8 +218,17 @@ fi
 if [[ "$VERIFY" -eq 1 ]]; then
     echo "Running typecheck..."
     (cd "$DRIVER" && "$BUN" typecheck)
+    HOTFILES="$PRIMARY/scripts/tooling/hapi-soup-hotfiles-check.mjs"
+    if [[ -f "$HOTFILES" ]]; then
+        echo "Checking soup hot-file consistency (syncEngine vs rpcGateway)..."
+        "$BUN" run "$HOTFILES" "$DRIVER"
+    fi
     echo "Running tests..."
     (cd "$DRIVER" && "$BUN" run test)
+    STAMP="${HAPI_DRIVER_VERIFY_STAMP:-$HOME/.config/hapi/driver-verify-stamp}"
+    mkdir -p "$(dirname "$STAMP")"
+    git -C "$DRIVER" rev-parse HEAD >"$STAMP"
+    echo "Verify stamp: $STAMP ($(cat "$STAMP" | head -c 12)…)"
 fi
 
 echo ""
