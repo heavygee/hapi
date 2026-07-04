@@ -59,7 +59,7 @@ function hostMatchesCertificate(host: string, cert: PeerCertificate): boolean {
     }
 
     const commonName = cert.subject?.CN
-    if (!commonName) {
+    if (!commonName || typeof commonName !== 'string') {
         return false
     }
 
