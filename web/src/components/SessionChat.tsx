@@ -293,8 +293,12 @@ export function ScratchlistDrawerHost(props: {
                 entry.attachments
             )
         }
-        return await props.onSend(entry.text, attachments)
-    }, [props.api, props.onSend, props.sessionId])
+        const accepted = await props.onSend(entry.text, attachments)
+        if (accepted) {
+            props.onExitScratchlistMode()
+        }
+        return accepted
+    }, [props.api, props.onSend, props.onExitScratchlistMode, props.sessionId])
     return (
         <ScratchlistDrawer
             entries={props.entries}
