@@ -1,0 +1,10 @@
+{
+    "name": "approval-escalation",
+    "description": "Worker requests approval for a destructive action. Expected: surfaced as APPROVAL category at the highest coarse priority tier (lowest base_priority number).",
+    "sessions": [
+        { "key": "s", "tag": "peer-z", "flavor": "claude", "name": "peer-z" }
+    ],
+    "events": [
+        { "sid": 1, "ts": 1700000000000, "sessionKey": "s", "sourceKind": "system", "eventType": "approval_requested", "attentionCandidate": 1, "operatorActionRequired": 1, "riskDetected": 1, "summary": "Permission requested: Shell rm -rf node_modules", "payload": { "requestId": "req-1", "tool": "Shell" } }
+    ]
+}
