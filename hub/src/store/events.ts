@@ -59,6 +59,19 @@ export type ListSystemEventsOptions = {
     eventType?: string | null
 }
 
+/** Extended read-only filter set for the Overseer `query_events` tool. */
+export type QueryEventsOptions = ListSystemEventsOptions & {
+    /** Match denormalized `payload_json.session.project` (#22). */
+    project?: string | null
+    sourceKind?: string | null
+    /** Inclusive lower bound on severity (1-5). */
+    severityMin?: number | null
+    /** Inclusive lower bound on `ts` (ms epoch). */
+    sinceTs?: number | null
+    /** Inclusive upper bound on `ts` (ms epoch). */
+    untilTs?: number | null
+}
+
 type SystemEventRow = {
     id: number
     ts: number
@@ -212,6 +225,61 @@ export function listSystemEvents(db: Database, options: ListSystemEventsOptions 
     if (options.eventType) {
         clauses.push('event_type = ?')
         params.push(options.eventType)
+    }
+    if (options.beforeId) {
+        clauses.push('id < ?')
+        params.push(options.beforeId)
+    }
+
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''
+    const rows = db.prepare(
+        `SELECT * FROM events ${where} ORDER BY id DESC LIMIT ?`
+    ).all(...params, limit) as SystemEventRow[]
+
+    return rows.map(mapRow)
+}
+
+/**
+ * Read-only extended event query for the Overseer. Additive over
+ * {@link listSystemEvents}; the existing route/promotion paths are untouched.
+ */
+export function queryEvents(db: Database, options: QueryEventsOptions = {}): StoredSystemEvent[] {
+    const limit = Math.min(Math.max(options.limit ?? 50, 1), 200)
+    const clauses: string[] = []
+    const params: Array<string | number> = []
+
+    if (options.sessionId) {
+        clauses.push('related_session_id = ?')
+        params.push(options.sessionId)
+    }
+    if (options.attentionCandidate !== undefined && options.attentionCandidate !== null) {
+        clauses.push('attention_candidate = ?')
+        params.push(options.attentionCandidate)
+    }
+    if (options.eventType) {
+        clauses.push('event_type = ?')
+        params.push(options.eventType)
+    }
+    if (options.sourceKind) {
+        clauses.push('source_kind = ?')
+        params.push(options.sourceKind)
+    }
+    if (options.severityMin !== undefined && options.severityMin !== null) {
+        clauses.push('severity >= ?')
+        params.push(options.severityMin)
+    }
+    if (options.sinceTs !== undefined && options.sinceTs !== null) {
+        clauses.push('ts >= ?')
+        params.push(options.sinceTs)
+    }
+    if (options.untilTs !== undefined && options.untilTs !== null) {
+        clauses.push('ts <= ?')
+        params.push(options.untilTs)
+    }
+    if (options.project) {
+        // Denormalized session.project lives in payload_json (#22).
+        clauses.push("json_extract(payload_json, '$.session.project') = ?")
+        params.push(options.project)
     }
     if (options.beforeId) {
         clauses.push('id < ?')
