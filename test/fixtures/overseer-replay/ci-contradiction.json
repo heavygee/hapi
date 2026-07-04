@@ -1,0 +1,11 @@
+{
+    "name": "ci-contradiction",
+    "description": "CI reports failure while the worker self-reports a test pass / completion on the same session. Expected: the harness surfaces the contradiction and resolves neither side.",
+    "sessions": [
+        { "key": "s", "tag": "peer-ci", "flavor": "claude", "name": "peer-ci" }
+    ],
+    "events": [
+        { "sid": 1, "ts": 1700000000000, "sessionKey": "s", "sourceKind": "channel", "sourceRef": "github-actions", "eventType": "failed", "attentionCandidate": 1, "operatorActionRequired": 1, "summary": "CI: test job failed (3 tests red)" },
+        { "sid": 2, "ts": 1700000060000, "sessionKey": "s", "sourceKind": "worker", "eventType": "completed", "attentionCandidate": 1, "operatorActionRequired": 1, "summary": "All tests pass locally, done" }
+    ]
+}

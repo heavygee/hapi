@@ -1,0 +1,41 @@
+{
+    "name": "routine-progress-flood",
+    "description": "30 routine progress events across 3 sessions. Expected: surface nothing (no attention candidates promoted).",
+    "sessions": [
+        { "key": "w1", "tag": "peer-1", "flavor": "claude", "name": "peer-1" },
+        { "key": "w2", "tag": "peer-2", "flavor": "codex", "name": "peer-2" },
+        { "key": "w3", "tag": "peer-3", "flavor": "cursor", "name": "peer-3" }
+    ],
+    "events": [
+        { "sid": 1, "ts": 1700000000000, "sessionKey": "w1", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "ran tests" },
+        { "sid": 2, "ts": 1700000010000, "sessionKey": "w2", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "edited file" },
+        { "sid": 3, "ts": 1700000020000, "sessionKey": "w3", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "read docs" },
+        { "sid": 4, "ts": 1700000030000, "sessionKey": "w1", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "ran tests" },
+        { "sid": 5, "ts": 1700000040000, "sessionKey": "w2", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "edited file" },
+        { "sid": 6, "ts": 1700000050000, "sessionKey": "w3", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "read docs" },
+        { "sid": 7, "ts": 1700000060000, "sessionKey": "w1", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "ran tests" },
+        { "sid": 8, "ts": 1700000070000, "sessionKey": "w2", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "edited file" },
+        { "sid": 9, "ts": 1700000080000, "sessionKey": "w3", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "read docs" },
+        { "sid": 10, "ts": 1700000090000, "sessionKey": "w1", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "ran tests" },
+        { "sid": 11, "ts": 1700000100000, "sessionKey": "w2", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "edited file" },
+        { "sid": 12, "ts": 1700000110000, "sessionKey": "w3", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "read docs" },
+        { "sid": 13, "ts": 1700000120000, "sessionKey": "w1", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "ran tests" },
+        { "sid": 14, "ts": 1700000130000, "sessionKey": "w2", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "edited file" },
+        { "sid": 15, "ts": 1700000140000, "sessionKey": "w3", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "read docs" },
+        { "sid": 16, "ts": 1700000150000, "sessionKey": "w1", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "ran tests" },
+        { "sid": 17, "ts": 1700000160000, "sessionKey": "w2", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "edited file" },
+        { "sid": 18, "ts": 1700000170000, "sessionKey": "w3", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "read docs" },
+        { "sid": 19, "ts": 1700000180000, "sessionKey": "w1", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "ran tests" },
+        { "sid": 20, "ts": 1700000190000, "sessionKey": "w2", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "edited file" },
+        { "sid": 21, "ts": 1700000200000, "sessionKey": "w3", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "read docs" },
+        { "sid": 22, "ts": 1700000210000, "sessionKey": "w1", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "ran tests" },
+        { "sid": 23, "ts": 1700000220000, "sessionKey": "w2", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "edited file" },
+        { "sid": 24, "ts": 1700000230000, "sessionKey": "w3", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "read docs" },
+        { "sid": 25, "ts": 1700000240000, "sessionKey": "w1", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "ran tests" },
+        { "sid": 26, "ts": 1700000250000, "sessionKey": "w2", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "edited file" },
+        { "sid": 27, "ts": 1700000260000, "sessionKey": "w3", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "read docs" },
+        { "sid": 28, "ts": 1700000270000, "sessionKey": "w1", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "ran tests" },
+        { "sid": 29, "ts": 1700000280000, "sessionKey": "w2", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "edited file" },
+        { "sid": 30, "ts": 1700000290000, "sessionKey": "w3", "sourceKind": "worker", "eventType": "progress", "attentionCandidate": 0, "summary": "read docs" }
+    ]
+}

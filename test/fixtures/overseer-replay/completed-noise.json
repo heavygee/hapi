@@ -1,0 +1,10 @@
+{
+    "name": "completed-noise",
+    "description": "Worker completes with operator_action_required=false and risk_detected=false. Expected: falls out of the attention queue (no inbox item) but the event remains recorded and queryable.",
+    "sessions": [
+        { "key": "s", "tag": "peer-done", "flavor": "codex", "name": "peer-done" }
+    ],
+    "events": [
+        { "sid": 1, "ts": 1700000000000, "sessionKey": "s", "sourceKind": "worker", "eventType": "completed", "attentionCandidate": 0, "operatorActionRequired": 0, "riskDetected": 0, "summary": "Routine task finished, nothing to review" }
+    ]
+}

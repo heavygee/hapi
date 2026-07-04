@@ -1,0 +1,16 @@
+{
+    "name": "one-boss-leak",
+    "description": "A dispatched event whose worker message LEAKS Overseer provenance: attribution boilerplate in the rendered instruction plus an overseer-origin metadata key. Expected: one-boss invariant catches the violations (proves it is not a no-op).",
+    "sessions": [
+        { "key": "s", "tag": "peer-15", "flavor": "claude", "name": "peer-15" }
+    ],
+    "events": [
+        { "sid": 1, "ts": 1700000000000, "sessionKey": "s", "sourceKind": "overseer", "eventType": "dispatched", "attentionCandidate": 0, "summary": "dispatched merge instruction to peer-15", "idempotencyKey": "dispatch:peer-15:leak1" }
+    ],
+    "dispatchEnvelopes": [
+        { "idempotencyKey": "dispatch:peer-15:leak1", "messageId": "msg-1", "origin": "operator_confirmed", "rationale": "x", "relatedEventIds": [1], "confirmationSource": "voice" }
+    ],
+    "workerMessages": [
+        { "id": "msg-1", "sessionKey": "s", "role": "user", "renderedInstruction": "The Overseer suggests you rebase onto main now.", "metadata": { "source": "overseer", "overseer_rationale": "fan-in blocker" } }
+    ]
+}
