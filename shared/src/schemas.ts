@@ -134,7 +134,18 @@ export const MetadataSchema = z.object({
     // the provider so web can resolve the exact model when two providers
     // share a modelId.
     piSelectedModel: z.object({ provider: z.string(), modelId: z.string() }).nullable().optional(),
-    codexUsage: CodexUsageSchema.optional()
+    codexUsage: CodexUsageSchema.optional(),
+    lastModelError: z.object({
+        kind: z.string(),
+        transient: z.boolean(),
+        rawSnippet: z.string(),
+        atTs: z.number(),
+        priorAssistantClaimsDone: z.boolean(),
+        lastUserMessage: z.string().optional(),
+        bridgedForAtTs: z.number().optional(),
+        retriedAndFailed: z.boolean().optional(),
+        acknowledgedAt: z.number().optional()
+    }).optional()
 })
 
 export type Metadata = z.infer<typeof MetadataSchema>
