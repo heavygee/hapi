@@ -41,7 +41,9 @@ Since Phase P, **soup foundry + production dogfood hub** live on the **oos-linux
 
 ## Daily driver (soup)
 
-**Manifest:** `~/.config/hapi/driver-manifest.yaml` (operator-local; example in repo)
+**Manifest:** `config/driver-manifest.yaml` in the fork (tracked). Rebuild reads it via `hapi-manifest-path.sh`; legacy override: `~/.config/hapi/driver-manifest.yaml` or `HAPI_DRIVER_MANIFEST`.
+
+**Composed soup tree:** `~/coding/hapi/driver` on branch `driver/integration` — output of rebuild, not a substitute for the manifest when adding layers.
 
 ```yaml
 base: upstream/main
@@ -58,7 +60,7 @@ Layers merge **in order** onto `driver/integration` inside `~/coding/hapi/driver
 **`~/coding/hapi/driver` is read-only between rebuilds.** The only supported way to change it is:
 
 ```bash
-# 1. Edit ~/.config/hapi/driver-manifest.yaml (add/remove layers)
+# 1. Edit config/driver-manifest.yaml (add/remove layers) — commit + push before guest pull
 # 2. Rebuild — resets to base + merges manifest (destroys local edits)
 hapi-driver-status --quiet
 hapi-driver-rebuild --build-web [--verify]

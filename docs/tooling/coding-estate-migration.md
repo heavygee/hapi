@@ -12,8 +12,8 @@ Orchestration scripts live in **`~/coding/lockhouse-janus`** (SSH, ZFS, tailnet)
 
 | Asset | Mechanism | Never |
 |---|---|---|
-| **Git repos** (`hapi`, worktrees, feature branches) | `git push` / `git pull` / clone on target | rsync over committed trees |
-| **Operator config** (manifest, machine ids, hub env) | rsync or copy — **gitignored** | commit secrets to git |
+| **Git repos + soup manifest** | `git push` / `git pull` on target | rsync over committed trees |
+| **Operator secrets** (hub env tokens, machine-specific settings) | rsync or copy — **gitignored** | commit secrets to git |
 | **Hub DB** (`/var/lib/hapi/hapi.db` on oos-linux) | `migrate-oos-hapi-state.sh`, live backup scripts | hand-copy while hub writes |
 | **ACP session stores** (per runner `~/.cursor/acp-sessions`) | `backup-hapi-cursor-continuity.sh` + `repair-hapi-cursor-continuity.sh` | assume hub holds ACP |
 | **Runner systemd / Windows autostart** | Tier C in `backup-hapi-estate.sh` | duplicate `machineId` across hosts |
@@ -57,7 +57,7 @@ Bulk mirror sync (legacy Phase P): `sync-oos-linux-coding-estate.sh --apply` —
 | Tailnet `svc:hapi` on guest only | `cutover-oos-hapi-tailscale.sh` |
 | Migration complete gate | `verify-oos-migration-complete.sh` |
 
-Deep docs: `lockhouse-janus/docs/phase-p-oos-dev-estate.md`, `docs/hapi-estate-backup.md`.
+Deep docs: `lockhouse-janus/docs/phase-p-oos-dev-estate.md`, `docs/hapi-estate-backup.md`, `docs/oos-linux-network-incident.md` (guest networkd — agent runbook without guest SSH).
 
 ---
 

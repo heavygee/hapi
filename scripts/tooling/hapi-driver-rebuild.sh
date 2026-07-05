@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Rebuild ~/coding/hapi/driver from ~/.config/hapi/driver-manifest.yaml
+# Rebuild ~/coding/hapi/driver from config/driver-manifest.yaml (tracked in fork)
 #
 # ~/coding/hapi/driver is READ-ONLY between rebuilds — this script is the only
 # supported way to change it. Hand-edits and cp-from-other-worktrees are forbidden.
@@ -18,7 +18,10 @@ set -euo pipefail
 
 PRIMARY="${HAPI_PRIMARY:-$HOME/coding/hapi}"
 DRIVER="${HAPI_DRIVER:-$HOME/coding/hapi/driver}"
-MANIFEST="${HAPI_DRIVER_MANIFEST:-$HOME/.config/hapi/driver-manifest.yaml}"
+LIB_DIR="$(dirname "$(readlink -f "$0")")/lib"
+# shellcheck source=lib/hapi-manifest-path.sh
+source "$LIB_DIR/hapi-manifest-path.sh"
+MANIFEST="$(hapi_manifest_path "$PRIMARY")"
 PARSE="$PRIMARY/scripts/tooling/parse-driver-manifest.mjs"
 DRIVER_BRANCH="${HAPI_DRIVER_BRANCH:-driver/integration}"
 BUN="${BUN:-$HOME/.bun/bin/bun}"
@@ -60,7 +63,8 @@ driver_rebuild_agent_guard "$BUILD_WEB" || exit 1
 
 if [[ ! -f "$MANIFEST" ]]; then
     echo "ERROR: manifest not found: $MANIFEST" >&2
-    echo "Copy example: mkdir -p ~/.config/hapi && cp $PRIMARY/docs/tooling/driver-manifest.example.yaml $MANIFEST" >&2
+    echo "Canonical path: $PRIMARY/config/driver-manifest.yaml (git pull origin main)" >&2
+    echo "Legacy override: ~/.config/hapi/driver-manifest.yaml or HAPI_DRIVER_MANIFEST=" >&2
     exit 1
 fi
 

@@ -1,0 +1,385 @@
+# Daily driver manifest - operator-local copy lives at ~/.config/hapi/driver-manifest.yaml
+# Rebuild: hapi-driver-rebuild [--build-web] [--verify] [--activate]
+#
+# Layer order matters. Each layer merges into driver/integration on top of base.
+# Top layer = last entry in this list.
+#
+# Drop layers when merged to upstream/main (rebuild warns if primary main is behind upstream).
+#
+# DB schema:
+#   The hub's SQLite store has FORWARD step-migrations only (v1 -> v2 -> ... -> N).
+#   Layers that bump SCHEMA_VERSION (e.g. feat/companion-fcm-push-api v9 -> v10)
+#   auto-migrate the live DB forward at hub startup. Going BACKWARDS (e.g. pure
+#   upstream/main) requires hapi-driver-db-prep.sh (auto-invoked by hapi-use-worktree)
+#   which knows the known reverse SQL (v10 -> v9 = drop fcm_devices + indexes).
+#   Always backs up ~/.hapi/hapi.db before any change.
+#
+# 2026-06-12 manifest sweep:
+#   * 1 layer dropped: feat/web-terminal-autofocus -> PR #876 MERGED 2026-06-11.
+#   * Base advances to upstream/main @ 93d00414 (post v0.20.2 release: includes
+#     #876 terminal-autofocus, #877 migrator path-priority fix, #879 Claude
+#     'auto' permission mode).
+#   * Soup goes 6 layers -> 5.
+#
+# 2026-06-11 manifest sweep:
+#   * 3 layers dropped - all merged upstream 2026-06-10:
+#       fix/runner-systemd-self-restart-resilience  -> PR #814 MERGED
+#       spike/cursor-legacy-to-acp-migrator         -> PR #844 MERGED (upstream absorbed our fork spike)
+#       fix/cursor-acp-legacy-fallback              -> DROP: the one unique commit (ACP→legacy
+#           fallback in cursorRemoteLauncher.ts) is now redundant. PR #844 adds
+#           maybeAutoMigrateLegacyCursorSession() which migrates legacy sessions to ACP
+#           before the ACP launcher is even invoked, so the fallback never triggers.
+#           Rest of branch (tooling/docs) already on main.
+#   * Soup goes 8 layers -> 5.
+#
+# 2026-06-08 manifest sweep (post upstream sync to v0.20.1 / 1f92a31b):
+#   * 9 layers MERGED upstream in the last ~24h - dropped en masse:
+#       fix/voice-flavor-labels-680                    -> PR #815 MERGED
+#       feat/scratchlist-v1.1-composer-drawer          -> PR #798 MERGED
+#       fix/markdown-single-dollar-katex               -> PR #805 MERGED
+#       fix/cursor-wrapper-requeue-on-transient-exit   -> PR #823 MERGED (Peer A)
+#       fix/preserve-cursor-session-id-on-crash        -> PR #825 MERGED (Peer C)
+#       feat/hub-session-reopen-endpoint               -> PR #826 MERGED (Peer B)
+#       swear01/fix/cursor-model-picker-831-832        -> PR #835 MERGED (swear01)
+#       swear01/fix/cursor-session-sidebar-dedup-833   -> PR #836 MERGED (swear01)
+#       swear01/fix/cursor-resume-pregister-metadata-834 -> PR #837 MERGED (swear01)
+#   * Soup goes 14 layers -> 5.
+#
+# 2026-06-06 manifest sweep (post upstream-sync df2351a):
+#   * voice-selection-all-backends MERGED upstream as #742/#743 (a812a51) - removed.
+
+# 2026-06-17 manifest note (pre-rebuild):
+#   * Base advances to upstream/main @ c311afdd (post v0.20.2: #904 Codex fast mode,
+#     #886 bind imported Codex sessions to matching machine). No soup layers merged
+#     upstream since last rebuild - all 25 layers retained.
+#   * #942 layer switched pr:942 -> branch:feat/claude-session-import because PR head
+#     lives on dzshzx/hapi (rebuild pr: resolver only fetches origin/). Refresh that
+#     branch from dzshzx before each rebuild. #945 stays directly after #942.
+
+# 2026-06-18 manifest sweep (post upstream @ 02a0aa67):
+#   * 10 layers dropped - merged upstream 2026-06-17..18:
+#       feat/gfm-table-repair-only                 -> #902
+#       feat/cursor-detect-inline-model-errors     -> #871
+#       feat/session-list-rich-tooltips              -> #941
+#       feat/cursor-picker-ios-nested                -> absorbed on upstream/main
+#       feat/pwa-share-target                        -> #933
+#       feat/pwa-update-prompt                       -> #946
+#       fix/runner-systemd-killmode-process          -> #928
+#       fix/web-inactive-send-error                  -> #922
+#       fix/mcp-stateful-http-transport              -> #944
+#       spike/issue-917-idle-exit-test               -> #948
+#   * Soup 25 -> 15 layers. Base @ upstream/main 02a0aa67.
+
+# 2026-06-19 manifest sweep (post upstream @ 2ab3b398):
+#   * 2 layers dropped - merged upstream 2026-06-19:
+#       fix/hub-restart-cleanup-bundle             -> #923 (hub-restart cascade bundle)
+#       feat/session-view-toggles                    -> #952 (session header files/outline toggles)
+#   * Soup 20 -> 18 layers. Base @ upstream/main 2ab3b398.
+#   * 2026-06-20: dropped fix/soup-codex-sse-metadata-collision — branch was a
+#     driver/integration merge-tip (not a single-file fix); useSSE fixup now
+#     lives on fix/soup-typecheck-followups. Soup 18 -> 17 layers.
+
+base: upstream/main
+
+layers:
+  # Native Android/Wear companion: FCM device registry + optional hub push channel.
+  # NOTE: bumps SQLite SCHEMA_VERSION 10 -> 11 (adds fcm_devices table + 2 indexes).
+  # Forward-migration is automatic at hub boot (stepMigrations[10]).
+  # Reverse (removing this layer) requires hapi-driver-db-prep.sh - auto-handled.
+  # PR #803 (tiann/hapi) - open.
+  - branch: feat/companion-fcm-push-api
+
+  # #737 - mermaid diagram click-to-zoom lightbox in chat (PR #741).
+  # Merges cleanly against upstream/main.
+  - branch: feat/mermaid-lightbox-737
+
+  # #829 - mermaid parse-failure feedback: hub detects unrecognised mermaid
+  # diagram types and emits a synthetic <render-issue> user message back to
+  # the agent so it can self-correct. Hub+cli only, no SCHEMA bump.
+  - branch: feat/mermaid-parse-failure-feedback
+
+  # Codex usage indicator (tiann/hapi#847, upstream PR open).
+  # Ring + popover showing context-window %, 5h/weekly rate-limit usage, token breakdown.
+  # Driven by token_count events -> session.metadata.codexUsage + SSE patches.
+  # Also: Codex session list/resume in NewSession (CodexSessionSelector).
+  # No SCHEMA_VERSION bump. Authorship: Ethan Wang (dsus4wang).
+  # Umbrella: tiann/hapi#846 (cross-flavor budget gauges - this is the Codex seed).
+  - branch: feat/codex-usage-indicator-rebased
+
+  # Bridge: FCM sendModelError for wrist push on model errors (#878).
+  # MUST be exactly one commit on top of feat/companion-fcm-push-api tip —
+  # do NOT re-merge old FCM/push files (NativeFallbackProbe 5-arg constructor
+  # was removed in 8f870516; stale merge-tips poison every soup rebuild).
+  # Refresh: git -C worktrees/cursor-model-error-fcm-bridge reset --hard feat/companion-fcm-push-api && cherry-pick 64583aa7
+  - branch: soup/cursor-model-error-fcm-bridge
+
+  # Refetch-storm fix part B (follow-up to #885; closes tiann/hapi#884 second
+  # half). Hub previously emitted no-data session-updated SSE events for the
+  # four CLI emit-sites (TodoWrite landed, teamState update, update-metadata
+  # RPC, update-state RPC). Web fell through getSessionPatch's "no data"
+  # branch and per-session REST-invalidated, which on a 130-session install
+  # becomes an O(N) refetch storm any time one session changed. This layer:
+  #   - extends SessionPatchSchema (shared/) with todos/teamState/
+  #     metadata{version,value}/agentState{version,value}
+  #   - changes the four emit-sites to carry structured payload data so the
+  #     web getSessionPatch parser hits its truthy branch and patches the
+  #     React Query cache in place (no REST refetch)
+  #   - adds SessionCache.applySessionPatch + SyncEngine fast-path so the hub
+  #     mirrors the patch into its in-memory cache without a DB re-read
+  #     (cache-coherency for NotificationHub, sidebar, etc.)
+  #   - includes a dedup-by-reference fix: applySessionPatch MUTATES the
+  #     cached Session in place; snapshot metadata before the call so the
+  #     dedup-on-agent-session-id-change trigger still fires on the fast path.
+  # No SCHEMA_VERSION bump. Pre-PR; gates green (429 hub tests pass).
+  - branch: feat/sse-patch-extend-session-state
+
+  # Cursor flat-mode model picker: 'Default' radio was empty even when the
+  # session was actively running ACP default[] (heavygee/hapi#46, PR #47).
+  # Root cause: SessionChat only forwarded selectedModelBase in dual mode;
+  # flat mode (current state since HAPI doesn't declare parameterizedModelPicker)
+  # fell back to model === option.value, and session.model is null after the
+  # launcher pins default[], so null === 'auto' failed on every row.
+  # Fix drops the mode === 'dual' gate in two places in SessionChat.tsx.
+  # Web-only diff, no SCHEMA_VERSION bump, no behavior change for dual mode.
+  # Topmost layer for cheap rollback via atomic web swap.
+  # 2026-06-15: previous QUEUED note resolved by swapping
+  # feat/mermaid-table-patch-loop -> feat/gfm-table-repair-only (slim cherry-pick
+  # of just the GFM table commit, no mermaid-diagram.tsx touch).
+  - branch: fix/cursor-flat-picker-default-highlight
+
+  # Scratchlist v2.2 (#921) - hub-stored attachments + v2 hub-sync foundation.
+  # Soup-only layer soup/scratchlist-attachments-v22-v12 (renumber v11→v12;
+  # FCM layer 1 owns v10→v11). NOT feat/scratchlist-attachments-v22 directly.
+  # Worktree: ~/coding/hapi/worktrees/scratchlist-attachments-v22
+  - branch: soup/scratchlist-attachments-v22-v12
+
+  # Soup-only type-narrowing followups. 2026-06-16 spawn (backup-agent
+  # during full-soup-restore after a botched reset-and-merge round). Two
+  # one-liner narrowings in `hub/src/tunnel/tlsGate.ts` (PeerCertificate.CN
+  # is string | string[]) and `hub/src/web/routes/guards.ts` (Hono
+  # c.req.param is string | undefined). upstream/main typechecks clean
+  # WITHOUT these fixes, but the layered manifest soup resolves a
+  # different transitive @types/node (or peer dep) that surfaces the
+  # wider types. Not appropriate upstream as-is - paves over a soup-only
+  # type drift; belongs here until the underlying lockfile drift is
+  # diagnosed. Both fixes are also correct standalone hardening
+  # (typeof guard rejects multi-CN certs; explicit 400 for missing
+  # path param instead of confusing 404 cascade).
+  # Soup typecheck followups — THIN layer only (4 commits on layer-7 tip).
+  # Was a stale driver/integration merge-tip; never re-merge full FCM/push stack.
+  # Refresh: reset to driver-after-L7, cherry-pick b804c6da..600227c0 only.
+  - branch: fix/soup-typecheck-followups
+
+  # #915 architectural fix Tier B - issue tiann/hapi#929. 2026-06-16 spawn
+  # (same backup-agent). Soup-only iteration; upstream PR HELD until
+  # tiann/hapi#928 lands. Single-file change in cli/src/runner/run.ts:
+  # at the late-webhook orphan handler, instead of unconditionally
+  # SIGKILL'ing webhooks for unknown runner-spawned PIDs, check process
+  # liveness. Dead PID -> no-op (the timeout handler already tree-killed
+  # it - existing behavior, unchanged). Alive PID -> adopt: build a
+  # TrackedSession entry without childProcess and store in
+  # pidToTrackedSession so subsequent webhooks update normally and
+  # stopSession (line 659) falls into the no-childProcess branch and
+  # uses killProcess(pid). Adopted-orphans are the post-restart survivors
+  # that KillMode=process (Tier A) lets live across runner restarts -
+  # without this layer the new runner kills them anyway on first webhook.
+  # No SCHEMA_VERSION bump. Drop this layer + remove the upstream-PR-hold
+  # once #928 merges.
+  - branch: feat/tier-b-reattach-orphan-runner-children
+
+  # XR Garden — spatial agent orbs at /garden (operator fork-only, NOT upstream).
+  # 2026-06-16: first-class soup layer. Source branch feat/garden-route in
+  # ~/coding/hapi/worktrees/garden-route (canonical worktree).
+  #
+  # Web-only: R3F/WebXR lazy route, voice bridge (VoiceBackendSession),
+  # gaze dwell focus, sticky attention, per-orb voice persona, engine HUD.
+  # Merges last (topmost) for cheap rollback via hapi-driver-rollback-web.
+  #
+  # Share target (/share) is on upstream/main (#933). Garden merges atop it.
+  # on non-driver/* and non-garden/* refs — this layer never goes upstream.
+  #
+  # Operator dogfood: http://<hub>/garden → Enter VR (Quest browser).
+  # Drop when a plugin system or upstream home exists.
+  - branch: feat/garden-route
+
+  # Claude session import foundation (tiann/hapi#942, head dzshzx/hapi).
+  # Refresh before rebuild: git fetch https://github.com/dzshzx/hapi.git
+  #   feat/claude-session-import:feat/claude-session-import
+  # Cursor import (#945 feat/agent-session-import-picker) stacks on this - MUST stay
+  # immediately above that layer.
+  - branch: feat/claude-session-import
+
+  # Cursor flavor for multi-agent session import (tiann/hapi#732, PR #945).
+  # Hub /api/cursor/* + web AgentSessionImportDialog codex|cursor tabs.
+  # Blocked on #942 upstream; branch is 3 commits on top of feat/claude-session-import.
+  - branch: feat/agent-session-import-picker
+
+  # Session list/header context menu: Copy reference for cross-session citation.
+  # tiann/hapi#950. Web-only; topmost for cheap rollback via atomic web swap.
+  # Worktree: ~/coding/hapi/worktrees/session-copy-link @ feat/session-copy-link
+  - branch: feat/session-copy-link
+
+  # DROPPED 2026-06-19: fix/soup-garden-react-import was a driver/integration
+  # merge-tip branch (not a single-file fix). Layer 17 merge reintroduced stale
+  # push-channel tests and blocked rebuild. feat/garden-route @ 6baf0e39 already
+  # imports lazy/Suspense; driver post-L16 has the fix — layer obsolete.
+
+  # Wave 1 #22 + Wave 2 #23 - overseer events substrate + inbox, STACKED (the inbox
+  # branch is rebased onto and CONTAINS the events branch — one layer brings both).
+  # AGENT_NOTIFY_SUMMARY → SQLite events + deleted_sessions tombstone + dumb-v1 inbox.
+  # SCHEMA NOTE RESOLVED 2026-06-20: additive tables are init-gated (CREATE TABLE IF NOT
+  # EXISTS at store init, registered in SOUP_V11_TABLES) and no longer OWN a SCHEMA_VERSION,
+  # so the prior v11 collision with soup/scratchlist-v2-v11 is gone — no v12 renumber needed.
+  # To roll back inbox but keep events, repoint this layer to feat/overseer-events-substrate.
+  # 2026-06-21: repointed forward to fix/overseer-inbox-stale-noise — that branch is
+  # feat/overseer-inbox-substrate + a hub-only 1-liner making the hub-inferred `stale`
+  # silence sweep captured-only (attention_candidate 0) instead of auto-promoting one
+  # inbox item per idle session ("narrating log file" flood). The inbox tip stack is
+  # now events(#22) ← inbox(#23) ← stale-noise fix. Belongs upstream in #22's sweep;
+  # rebase the whole overseer stack onto upstream/main (drops garden) before PR. To roll
+  # back the stale fix only, repoint this layer back to feat/overseer-inbox-substrate.
+  - branch: fix/overseer-inbox-stale-noise
+
+  # Step 2.75 (PR #55) - overseer replay harness v0 + CI gate + one-boss invariant
+  # stub. Stacked on fix/overseer-inbox-stale-noise. Adds hub/src/overseer/* (new
+  # files: replayHarness, oneBossInvariant), test/fixtures/overseer-replay/* (12
+  # golden §6 scenarios incl. stale-captured-only), .github/workflows/overseer-replay.yml.
+  # Pure test/CI substrate - no runtime wiring, no schema. 19/19 tests green
+  # (verified 2026-06-21). To roll back, drop this layer; stale-noise tip unaffected.
+  - branch: feat/overseer-replay-harness
+
+  # Step 3 (PR #56) - read-only Overseer entity + 7 query tools + voice route
+  # (descriptor scaffold, no stt-tts dep). Stacked on fix/overseer-inbox-stale-noise.
+  # Adds hub/src/sync/overseerEntity*, hub/src/web/routes/overseer*, shared/src/
+  # overseerEntity*; modifies store/{events,inboxItems,eventStore}, syncEngine,
+  # web/server, shared/index. INFORM-ONLY - no dispatch/confirm/mutation (Step 4 owns
+  # dispatch). 24/24 tests green (verified 2026-06-21). New files vs #55, no file
+  # overlap - merges clean. To roll back, drop this layer.
+  - branch: feat/overseer-readonly-entity
+
+  # Soup band-aid (2026-06-22): the multi-layer merge auto-merged web/src/api/client.ts
+  # but semantically DROPPED the overseer client block (fetchSystemEvents,
+  # fetchInboxItems, recordInboxOperatorAction) - both the overseer-inbox layer and
+  # soup/scratchlist-attachments-v22-v12 append methods at end of the ApiClient class,
+  # and the 3-way kept scratchlist's tail. Symptom: live Attention-inbox debug panel
+  # threw "e.fetchInboxItems is not a function" + showed 0 items. This layer (based off
+  # the scratchlist soup tip) re-adds the three methods after the voice-token methods so
+  # they survive. Server endpoints already souped/live. MUST sit after the overseer +
+  # scratchlist layers. Drop once the soup process resolves the client.ts merge durably.
+  - branch: fix/soup-inbox-client-methods
+
+  # Soup band-aid (2026-06-22): syncEngine + store union for overseer/scratchlist
+  # collision. Full events/inbox/entity substrate + scratchlist v2.2 attachment
+  # methods merged into one thin layer (308bf0d1). MUST sit after inbox-client-methods.
+  # Watch rerere on rebuild — may double scratchlist blocks; forget + re-resolve if so.
+  - branch: fix/soup-sync-engine-collision
+
+  # #954 - markdown Source | Preview toggle in session file pane.
+  # 2026-06-19 peer 483284c8. Web-only: .md/.mdx get Source|Preview tabs
+  # (default preview, localStorage persistence). MarkdownRenderer standalone
+  # mode for file pane outside assistant-ui thread. Playwright:
+  # localdocs/playwright-runs/954-file-md-preview.png. Topmost for cheap
+  # rollback. Drop when upstream PR merges.
+  - branch: feat/file-markdown-preview
+
+  # #956 - cross-flavor inline image display (MCP display_image + ACP blocks).
+  # 2026-06-19 peer 4971055d. CLI-only: shared prompt for Cursor/Gemini/Kimi/
+  # Codex/Claude/OpenCode, buildHapiMcpBridge auto-approve display_image,
+  # AcpMessageHandler image block → generated-image. Requires hapi-use-driver
+  # (hub+runner restart). Drop when upstream PR merges.
+  - branch: feat/cross-flavor-inline-images
+
+  # #959 - exit scratchlist mode after successful promote-to-queue send.
+  # 2026-06-20 peer de4d3c5d. Web-only: handlePromoteToQueue calls
+  # onExitScratchlistMode when onSend returns true. Playwright:
+  # e2e/scratchlist-exit-after-queue.spec.ts. Hard-reload for dogfood.
+  # Drop when upstream PR merges.
+  - branch: fix/scratchlist-exit-after-queue-send
+
+  # DROPPED 2026-07-03: fix/soup-markdown-renderer-types (stale merge-tip; gemini
+  # modify/delete after upstream #953). Commits live on feat/file-markdown-preview,
+  # feat/cursor-detect-inline-model-errors, soup/scratchlist-attachments-v22-v12.
+
+  # Skip runner version-handoff integration test when handoff is disabled (systemd/settings).
+  # 2026-06-21: wires settings.runnerDisableVersionHandoff + it.skipIf so
+  # hapi-driver-rebuild --verify exits 0 on dogfood boxes without manual promotion stamp.
+  # Branch: fix/runner-handoff-test-skip. Drop when upstream merges.
+  - branch: fix/runner-handoff-test-skip
+
+  # CLI spawn: HAPI_AGENT_CONTEXT=1 + project-scoped Claude PreToolUse soup guard.
+  # Fork #72 (merged main); topmost for cheap rollback. Hub+runner restart after rebuild.
+  - branch: fix/runner-agent-context
+
+  # #980 - searchable session picker on Android Web Share Target (/share).
+  # 2026-06-29 peer. Web-only: SessionListSearch on share picker; inactive
+  # sessions reachable via sessionMatchesQuery. Builds on upstream #933.
+  # Worktree: ~/coding/hapi/worktrees/share-target-session-search
+  # Playwright: localdocs/playwright-runs/share-target-session-search.png
+  # Topmost for cheap rollback via hapi-driver-rollback-web. Drop when upstream PR merges.
+  - branch: feat/share-target-session-search
+
+  # #878 - full inline model error detect (CLI classifier + ACP hooks + hub
+  # notify + web banner). Upstream #871 merged WEB WARNING STYLING ONLY — this
+  # layer restores CLI/hub path + RetriableError prefix (@ 17394805).
+  # Bridge leg ships separately on feat/cursor-model-error-bridge (peer 902b7f8a).
+  # Upstream PR pending; dogfood here first. Topmost for cheap rollback.
+  - branch: feat/cursor-detect-inline-model-errors
+
+  # #878 leg 3 - transient model error bridge (one prompt per atTs).
+  # Manual [Bridge & retry], opt-in auto-bridge, retriedAndFailed gating.
+  # Stacks on detect layer above. Worktree: model-error-bridge @ 5cbd290d.
+  # Drop when upstream PR merges.
+  - branch: feat/cursor-model-error-bridge
+
+  # tiann/hapi#991 - Cursor ACP remote resume: reuse original HAPI row via
+  # existingSessionId instead of spawn-then-merge + session-ready wait (tailnet
+  # socket loss caused 60s resume_failed). Hub+cli only; hapi-restart-hub after rebuild.
+  # Worktree: ~/coding/hapi/worktrees/cursor-acp-remote-resume
+  - branch: fix/cursor-acp-remote-resume-ready
+
+# Merged upstream (do not re-add):
+#   feat/web-terminal-autofocus                      -> #876 (2026-06-11)
+#   feat/web-terminal-exit-nav                       -> #857 (2026-06-10)
+#   fix/runner-systemd-self-restart-resilience       -> #814 (2026-06-10)
+#   spike/cursor-legacy-to-acp-migrator              -> #844 (2026-06-10, as "invisible sync-on-open migrator")
+#   fix/cursor-acp-legacy-fallback                   -> dropped 2026-06-11 (redundant: #844 migrates before ACP launcher runs)
+#   feat/cursor-summarize-738                        -> #747 (2026-05-31)
+#   feat/voice-selection-all-backends                -> #742/#743 (a812a51, 2026-06-06)
+#   fix/composer-retain-text-on-error                -> folded into #798 (PR #773 closed)
+#   --- 2026-06-08 batch ---
+#   fix/voice-flavor-labels-680                      -> #815
+#   feat/scratchlist-v1.1-composer-drawer            -> #798
+#   fix/markdown-single-dollar-katex                 -> #805
+#   fix/cursor-wrapper-requeue-on-transient-exit     -> #823 (Peer A)
+#   fix/preserve-cursor-session-id-on-crash          -> #825 (Peer C)
+#   feat/hub-session-reopen-endpoint                 -> #826 (Peer B)
+#   swear01/fix/cursor-model-picker-831-832          -> #835
+#   swear01/fix/cursor-session-sidebar-dedup-833     -> #836
+#   swear01/fix/cursor-resume-pregister-metadata-834 -> #837
+#   --- 2026-06-18 batch ---
+#   feat/gfm-table-repair-only                       -> #902
+#   feat/cursor-detect-inline-model-errors           -> #871 (WEB-UI WARNING STYLING ONLY;
+#       the HUB model-error notification path - modelErrorCopy.ts + ModelErrorNotification -
+#       did NOT go upstream. It lives in the fix/soup-markdown-renderer-types layer above.
+#       Do NOT treat #871 as having absorbed the whole feature.)
+#   feat/session-list-rich-tooltips                  -> #941
+#   soup/session-list-relative-time-dedup            -> dropped 2026-06-18 (#941 in base; fixup obsolete)
+#   feat/cursor-picker-ios-nested                    -> upstream/main
+#   feat/pwa-share-target                            -> #933
+#   feat/pwa-update-prompt                           -> #946
+#   fix/runner-systemd-killmode-process              -> #928
+#   fix/web-inactive-send-error                      -> #922
+#   feat/machine-health-display                      -> #962 (2026-07-01 manifest sweep)
+#   fix/mcp-stateful-http-transport                  -> #944
+#   spike/issue-917-idle-exit-test                   -> #948
+#   --- 2026-06-19 batch ---
+#   fix/hub-restart-cleanup-bundle                   -> #923
+#   feat/session-view-toggles                        -> #952
+#   fix/soup-codex-sse-metadata-collision            -> dropped 2026-06-20 (merge-tip; fix on fix/soup-typecheck-followups)
+
+
+  - branch: fix/sse-summary-metadata-unwrap
+
+  - branch: fix/soup-codex-sessions-rpc-collision
+
+  - branch: fix/soup-markdown-standalone-cast

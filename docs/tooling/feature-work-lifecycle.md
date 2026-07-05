@@ -34,7 +34,7 @@
 | `hapi-active` | `~/coding/hapi/driver` → `driver/integration` |
 | Hub DB | `/var/lib/hapi/hapi.db` — check `PRAGMA user_version` before stack swings |
 | systemd | `hapi-hub-oos.service`, `hapi-runner-oos.service` |
-| Manifest | `~/.config/hapi/driver-manifest.yaml` (operator-local; not in git) |
+| Manifest | `config/driver-manifest.yaml` on fork `main` (git pull on foundry hosts) |
 | Verify | `hapi-verify-web-dist` + `~/.hapi/driver-promotion.json` (typecheck/tests stamp; does not prove dist shipped) |
 
 Refresh this table after major soup promotions. Stale commit hashes belong in git tags / promotion JSON, not here.

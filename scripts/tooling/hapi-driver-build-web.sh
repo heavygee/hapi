@@ -11,7 +11,10 @@ set -euo pipefail
 
 PRIMARY="${HAPI_PRIMARY:-$HOME/coding/hapi}"
 DRIVER="${HAPI_DRIVER:-$HOME/coding/hapi/driver}"
-MANIFEST="${HAPI_DRIVER_MANIFEST:-$HOME/.config/hapi/driver-manifest.yaml}"
+LIB_DIR="$(dirname "$(readlink -f "$0")")/lib"
+# shellcheck source=lib/hapi-manifest-path.sh
+source "$LIB_DIR/hapi-manifest-path.sh"
+MANIFEST="$(hapi_manifest_path "${HAPI_PRIMARY:-$HOME/coding/hapi}")"
 BUN="${BUN:-$HOME/.bun/bin/bun}"
 SKIP_VERIFY=0
 
