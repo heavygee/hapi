@@ -49,7 +49,7 @@ cd ~/coding/lockhouse-janus
 ./scripts/bootstrap-oos-linux-hapi-guards.sh
 ```
 
-That script only calls `install-hapi-operator-lock.sh --with-sudo` on the guest after syncing this fork's `scripts/tooling/`.
+That script rsyncs **gitignored config only** (manifest); fork code arrives via **`git pull origin main`** on the guest.
 
 ## Related docs
 
