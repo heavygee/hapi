@@ -2,7 +2,9 @@
 
 > **Workflow (mermaid, done criteria, agent permissions):** [`feature-work-lifecycle.md`](./feature-work-lifecycle.md) **only.** This file is manifest mechanics, DB jiu-jitsu, locks, and atomic swap — not a second copy of the flow.
 
-> **New host?** Run [`install-hapi-operator-lock.sh`](../../scripts/tooling/install-hapi-operator-lock.sh) once (see [`operator-lock.md`](./operator-lock.md)). On oos-linux, lockhouse [`bootstrap-oos-linux-hapi-guards.sh`](../../../../lockhouse-janus/scripts/bootstrap-oos-linux-hapi-guards.sh) rsyncs tooling and runs that installer.
+> **New host?** Run [`install-hapi-operator-lock.sh`](../../scripts/tooling/install-hapi-operator-lock.sh) once (see [`operator-lock.md`](./operator-lock.md)). On oos-linux, lockhouse [`bootstrap-oos-linux-hapi-guards.sh`](../../../../lockhouse-janus/scripts/bootstrap-oos-linux-hapi-guards.sh) runs **`git pull`** on the guest mirror + rsyncs gitignored config, then installs guards.
+
+**Moving work between hosts:** [`coding-estate-migration.md`](./coding-estate-migration.md).
 
 Three git layers on this machine:
 

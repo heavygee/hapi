@@ -13,6 +13,7 @@
 | Intake step execution | [`new-feature-intake.md`](./new-feature-intake.md) — §0 handoff + steps 1–8 how-to only |
 | Manifest, DB jiu-jitsu, `stack.lock`, atomic swap mechanics | [`driver-soup.md`](./driver-soup.md) (includes oos-linux host matrix) |
 | Operator lock install (guards, wrappers, hooks) | [`operator-lock.md`](./operator-lock.md) |
+| Move coding subtrees / ACP / hub paths between hosts | [`coding-estate-migration.md`](./coding-estate-migration.md) |
 | Git push policy (GitHub-safe vs local-first paths) | [`commit-hooks.md`](./commit-hooks.md) |
 | Pre-tidy backup / salvage closure | [`salvage-closure.md`](./salvage-closure.md), [`mirror-main-layout.md`](./mirror-main-layout.md) |
 | Peer stack / Playwright evidence | [`peer-stack.md`](./peer-stack.md) |

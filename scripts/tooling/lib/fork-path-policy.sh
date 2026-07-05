@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Tiered fork path policy — sourced by git hooks (pre-commit, pre-push).
 #
-# Goal: max safe files on public heavygee/hapi; keep docs/plans/ local-first;
-# never leak fork canon to upstream.
+# Goal: max safe files on public heavygee/hapi; never leak fork canon to upstream.
+# docs/plans/ pushes to origin (heavygee/hapi) — upstream PRs still exclude fork paths.
 #
 # See docs/tooling/commit-hooks.md
 set -euo pipefail
@@ -27,11 +27,7 @@ fork_pre_commit_path_ok() {
     fi
 
     case "$path" in
-        docs/plans/*)
-            [[ "${HAPI_ALLOW_OPERATOR_COMMIT:-}" == "1" ]]
-            return
-            ;;
-        docs/operator/*|docs/tooling/*|.cursor/rules/*)
+        docs/operator/*|docs/tooling/*|docs/plans/*|.cursor/rules/*)
             return 0
             ;;
     esac
@@ -45,12 +41,6 @@ fork_pre_commit_block_reason() {
         echo "never-tracked path: $path"
         return 0
     fi
-    case "$path" in
-        docs/plans/*)
-            echo "docs/plans/ is local-first (override: HAPI_ALLOW_OPERATOR_COMMIT=1; will not push to origin)"
-            return 0
-            ;;
-    esac
     echo "blocked path: $path"
 }
 
@@ -93,12 +83,6 @@ fork_pre_push_origin_ok() {
     local branch="$1"
     local path="$2"
 
-    case "$path" in
-        docs/plans/*)
-            return 1
-            ;;
-    esac
-
     case "$branch" in
         main|driver/*|garden/*|tooling/*|docs/*)
             return 0
@@ -132,13 +116,6 @@ fork_pre_push_block_reason() {
         return 0
     fi
 
-    case "$path" in
-        docs/plans/*)
-            echo "docs/plans/ does not push to origin (local-first; use mirror or override HAPI_SKIP_COMMIT_HOOKS=1 to force)"
-            return 0
-            ;;
-    esac
-
     case "$remote" in
         upstream)
             echo "fork-private on upstream: $path"
@@ -162,11 +139,11 @@ fork_policy_github_safe_paths() {
 GitHub-safe on origin/main (push allowed):
   docs/tooling/
   docs/operator/
+  docs/plans/
   .cursor/rules/
   CLAUDE.md, scripts/tooling/ (when product-safe)
 
-Local-first (commit with HAPI_ALLOW_OPERATOR_COMMIT=1; pre-push blocks origin):
-  docs/plans/
+Local-only (never push — not in git):
   localdocs/
 
 Never tracked:
