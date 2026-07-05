@@ -67,7 +67,7 @@ the `gh pr create` command executes, forcing a pause and checklist confirmation.
 | `beforeShellExecution` | `~/.cursor/hooks/pr-before-shell-gates.sh` | On `gh pr create`: pre-PR checklist via `agent_message`. On `git push origin <branch>` with open PR: cold-review STOP via `agent_message`. |
 | `postToolUse` (matcher: `Shell`, timeout: 360s) | `~/.cursor/hooks/pr-post-push-check.sh` | After push: 5 min bot poll + unresolved threads + next-push reminder via `additional_context` |
 
-Shared logic: `~/.local/bin/pr-open-push-lib.sh` (branch/PR lookup, cold-review message), `~/.local/bin/pr-post-push-check-core.sh` (post-push poll).
+Shared logic: `~/.local/bin/pr-open-push-lib.sh` and `~/.local/bin/pr-post-push-check-core.sh` — installed by [`install-hapi-operator-lock.sh`](../../scripts/tooling/install-hapi-operator-lock.sh) (see [`operator-lock.md`](./operator-lock.md)). Source of truth in fork: `scripts/tooling/lib/pr-open-push-lib.sh`, `scripts/tooling/pr-post-push-check-core.sh`.
 
 Policy: `~/coding/AGENTS.local.md` (all agents). Wrappers: `~/.local/bin/gh` (pre-PR create), `~/.local/bin/git` (open-PR push stderr reminder).
 

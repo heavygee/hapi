@@ -38,6 +38,8 @@ Fresh server checklist: clone fork → bun → `install-hapi-operator-lock.sh --
 
 Guest hub units (`hapi-hub-oos`, `hapi-runner-oos`) are included in systemctl/sudoers guards alongside homelab unit names.
 
+**Stack scripts** (`hapi-restart-hub`, `hapi-use-worktree`, `hapi-driver-db-prep`, `hub-port-guard`) auto-detect guest vs homelab unit names and DB path via `lib/hapi-systemd-units.sh`.
+
 ## Deploy to oos-linux from homelab
 
 Lockhouse orchestration (rsync tooling + remote install):

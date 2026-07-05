@@ -42,6 +42,12 @@
 
 set -euo pipefail
 
+TOOLING_LIB="$(dirname "$(readlink -f "$0")")/lib"
+# shellcheck source=lib/hapi-systemd-units.sh
+source "$TOOLING_LIB/hapi-systemd-units.sh"
+HAPI_HUB_UNIT="$(hapi_systemd_hub_unit)"
+HAPI_RUNNER_UNIT="$(hapi_systemd_runner_unit)"
+
 IMPATIENT=0
 RUNNER=1
 INCLUDE_SELF=0
@@ -87,7 +93,7 @@ Did you actually mean one of these?
                                                     finish, up to
                                                     10 min)
 
-  sudo systemctl restart --dry-run hapi-hub.service  verify the wrapper
+  sudo systemctl restart --dry-run ${HAPI_HUB_UNIT}  verify the wrapper
                                                     chain without
                                                     actually restarting
 
@@ -187,7 +193,7 @@ else
     echo "  HUB RESTART — patient drain, then restart"
 fi
 echo "  Stack:    $(readlink -f "$HOME/coding/hapi/active" 2>/dev/null || echo unknown)"
-echo "  Services: hapi-hub.service$([[ "$RUNNER" -eq 1 ]] && echo ' + hapi-runner.service')"
+echo "  Services: ${HAPI_HUB_UNIT}$([[ "$RUNNER" -eq 1 ]] && echo " + ${HAPI_RUNNER_UNIT}")"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 patient_drain
@@ -200,12 +206,12 @@ patient_drain
 # set the env.
 if [[ "$RUNNER" -eq 1 ]]; then
     echo "Restarting hapi-hub + hapi-runner ..."
-    sudo HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1 systemctl restart hapi-hub.service hapi-runner.service
+    sudo HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1 systemctl restart "$HAPI_HUB_UNIT" "$HAPI_RUNNER_UNIT"
 else
     echo "Restarting hapi-hub ..."
-    sudo HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1 systemctl restart hapi-hub.service
+    sudo HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1 systemctl restart "$HAPI_HUB_UNIT"
 fi
 
 echo ""
-echo "  hub:    $(systemctl is-active hapi-hub.service)"
-[[ "$RUNNER" -eq 1 ]] && echo "  runner: $(systemctl is-active hapi-runner.service)"
+echo "  hub:    $(systemctl is-active "$HAPI_HUB_UNIT")"
+[[ "$RUNNER" -eq 1 ]] && echo "  runner: $(systemctl is-active "$HAPI_RUNNER_UNIT")"

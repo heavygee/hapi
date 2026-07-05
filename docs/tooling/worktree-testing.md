@@ -2,6 +2,8 @@
 
 **Workflow (when to peer-stack vs soup vs stack swing):** [`feature-work-lifecycle.md`](./feature-work-lifecycle.md) **only.** This file explains `hapi-active`, systemd paths, and script install locations.
 
+> **Host names:** On oos-linux (primary soup host), units are `hapi-hub-oos.service` / `hapi-runner-oos.service` and hub DB is `/var/lib/hapi/hapi.db`. Stack scripts auto-detect; examples below use homelab unit names for illustration. See [`driver-soup.md` § Primary dev host](./driver-soup.md#primary-dev-host-oos-linux).
+
 ## Problem
 
 A running systemd service needs a stable directory to execute from. If you do feature

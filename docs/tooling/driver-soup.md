@@ -2,6 +2,8 @@
 
 > **Workflow (mermaid, done criteria, agent permissions):** [`feature-work-lifecycle.md`](./feature-work-lifecycle.md) **only.** This file is manifest mechanics, DB jiu-jitsu, locks, and atomic swap — not a second copy of the flow.
 
+> **New host?** Run [`install-hapi-operator-lock.sh`](../../scripts/tooling/install-hapi-operator-lock.sh) once (see [`operator-lock.md`](./operator-lock.md)). On oos-linux, lockhouse [`bootstrap-oos-linux-hapi-guards.sh`](../../../../lockhouse-janus/scripts/bootstrap-oos-linux-hapi-guards.sh) rsyncs tooling and runs that installer.
+
 Three git layers on this machine:
 
 ```
@@ -14,6 +16,24 @@ Three git layers on this machine:
 Legacy paths (`~/coding/hapi-driver`, `~/coding/hapi-<name>`) may still exist — **new work** uses `~/coding/hapi/worktrees/<name>` only.
 
 `hapi-active` → the **active HAPI tree**. Hub + runner systemd units run from this path (`hub/` + `cli/`).
+
+---
+
+## Primary dev host (oos-linux)
+
+Since Phase P, **soup foundry + production dogfood hub** live on the **oos-linux guest**. Homelab is a **tailnet runner only** — it does not rebuild soup or own `:3006`.
+
+| | **oos-linux (primary)** | **homelab mirror** |
+|---|---|---|
+| Soup rebuild | yes — `~/coding/hapi/driver` | no (runner connects to tailnet hub) |
+| Dogfood URL | `http://127.0.0.1:3006` + tailnet hostname in hub env | N/A |
+| Hub DB | `/var/lib/hapi/hapi.db` | N/A |
+| systemd units | `hapi-hub-oos.service`, `hapi-runner-oos.service` | `hapi-runner.service` (remote hub) |
+| Operator lock | `install-hapi-operator-lock.sh --with-sudo` | same if editing soup on the mirror |
+
+**Auto-detect:** `hapi-restart-hub`, `hapi-use-worktree`, `hapi-driver-db-prep`, and `hub-port-guard` resolve unit names and DB path via `lib/hapi-systemd-units.sh`. Override with `HAPI_HUB_UNIT`, `HAPI_RUNNER_UNIT`, `HAPI_HUB_DB` / `HAPI_DB_PATH`.
+
+**Agent rule:** follow workflow in [`feature-work-lifecycle.md`](./feature-work-lifecycle.md); run soup commands **on oos-linux** (SSH or Cursor workspace on the guest). Do not assume homelab is the soup host.
 
 ---
 
@@ -47,7 +67,7 @@ hapi-driver-rebuild --build-web [--verify]
 
 ### Mechanical guards (2026-06-24 — #921 + #962 incidents)
 
-Cursor **`hapi-production-mutation-guard.sh`** (install via `scripts/tooling/hapi-install-cursor-hooks.sh`) **denies** agent shell:
+Full install path: [`operator-lock.md`](./operator-lock.md) (`install-hapi-operator-lock.sh`). Cursor **`hapi-production-mutation-guard.sh`** (installed by that script) **denies** agent shell:
 
 **Claude (hapi repo only, not global):** `.claude/settings.json` and HAPI-spawned `--settings` inject **`hapi-claude-pretooluse-guard.sh`** as `PreToolUse` on Bash — same block list via the shared guard scripts.
 
@@ -269,7 +289,7 @@ Some files are merged by **every** layer that touches them; **last layer wins** 
 
 **Prevention:** `hapi-driver-rebuild --verify` runs `hapi-soup-hotfiles-check.mjs` (syncEngine calls ⊆ rpcGateway methods). When adding a layer that edits hot files, comment in the manifest which symbols must survive lower layers.
 
-**Guest migration (oos-linux):** promote soup by syncing **manifest** homelab → guest, then `hapi-driver-rebuild --build-web --verify` **on guest** — do not `sync-oos-hapi-driver.sh` homelab→guest after a guest-only rebuild (overwrites composed soup).
+**Guest migration (oos-linux):** oos-linux is now the **canonical soup host**. Promote layers by editing manifest on the guest, then `hapi-driver-rebuild --build-web --verify` **on oos-linux** — do not `sync-oos-hapi-driver.sh` homelab→guest after a guest-only rebuild (overwrites composed soup). Homelab manifest is legacy reference only.
 
 **Bypass** (testing only): `HAPI_SKIP_DRIVER_LOCK=1`. Skips both flock and status writes; collisions corrupt the driver tree.
 
@@ -282,8 +302,8 @@ Some files are merged by **every** layer that touches them; **last layer wins** 
 **Never do this:**
 
 ```bash
-sudo systemctl restart hapi-hub.service           # kills mid-turn agents
-sudo systemctl restart hapi-hub.service hapi-runner.service
+sudo systemctl restart hapi-hub.service           # kills mid-turn agents (wrong unit on oos-linux too)
+sudo systemctl restart hapi-hub-oos.service       # same — use the wrapper
 ```
 
 **Always do this:**
@@ -311,10 +331,10 @@ If the timeout fires, both wrappers log which sessions were still WORKING before
 
 ### DB schema jiu-jitsu (auto-handled, 2026-06-01)
 
-The hub's SQLite store has **forward step-migrations only** (v1 -> v2 -> ... -> N). When the manifest changes the effective SCHEMA_VERSION, the live DB at `~/.hapi/hapi.db` must match the target tree before hub boot:
+The hub's SQLite store has **forward step-migrations only** (v1 -> v2 -> ... -> N). When the manifest changes the effective SCHEMA_VERSION, the live DB (auto: `/var/lib/hapi/hapi.db` on oos-linux, else `~/.hapi/hapi.db`) must match the target tree before hub boot:
 
 - **Adding a schema-bumping layer (e.g. `feat/android-wear-companion` v9 -> v10):** automatic. Hub boots, `stepMigrations[N]` runs, DB ratchets forward. Nothing to do.
-- **Removing one (rolling back to upstream/main; v10 -> v9):** the hub code has no down-migrations. `hapi-driver-db-prep.sh` auto-invokes from `hapi-use-worktree`, backs up the DB (timestamped `~/.hapi/hapi.db.bak.pre-activate-<UTC>`), and applies known reverse SQL.
+- **Removing one (rolling back to upstream/main; v10 -> v9):** the hub code has no down-migrations. `hapi-driver-db-prep.sh` auto-invokes from `hapi-use-worktree`, backs up the DB (timestamped `<db>.bak.pre-activate-<UTC>`), and applies known reverse SQL.
 
 **Known reverse transitions** (extend `apply_downgrade_step()` in `scripts/tooling/hapi-driver-db-prep.sh` when a new bump lands):
 

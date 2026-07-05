@@ -42,6 +42,11 @@
 
 set -euo pipefail
 
+TOOLING_LIB="$(dirname "$(readlink -f "$0")")/lib"
+# shellcheck source=lib/hapi-systemd-units.sh
+source "$TOOLING_LIB/hapi-systemd-units.sh"
+HAPI_HUB_UNIT="$(hapi_systemd_hub_unit)"
+
 DRY_RUN=0
 TARGET=""
 
@@ -60,7 +65,7 @@ done
 TARGET="$(realpath "$TARGET")"
 
 PRIMARY="${HAPI_PRIMARY:-$HOME/coding/hapi}"
-DB_PATH="${HAPI_DB_PATH:-$HOME/.hapi/hapi.db}"
+DB_PATH="${HAPI_DB_PATH:-$(hapi_systemd_hub_db_path)}"
 
 [[ -f "$DB_PATH" ]] || { echo "ERROR: DB not found at $DB_PATH" >&2; exit 1; }
 [[ -f "$TARGET/hub/src/store/index.ts" ]] || {
@@ -103,9 +108,9 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
     exit 0
 fi
 
-if systemctl is-active --quiet hapi-hub.service; then
-    echo "ERROR: hapi-hub.service is active. Stop it first:" >&2
-    echo "         sudo systemctl stop hapi-hub.service" >&2
+if systemctl is-active --quiet "$HAPI_HUB_UNIT"; then
+    echo "ERROR: ${HAPI_HUB_UNIT} is active. Stop it first:" >&2
+    echo "         sudo systemctl stop ${HAPI_HUB_UNIT}" >&2
     exit 1
 fi
 

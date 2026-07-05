@@ -12,6 +12,13 @@
 
 set -euo pipefail
 
+TOOLING_LIB="$(dirname "$(readlink -f "$0")")/lib"
+# shellcheck source=lib/hapi-systemd-units.sh
+source "$TOOLING_LIB/hapi-systemd-units.sh"
+HAPI_HUB_UNIT="$(hapi_systemd_hub_unit)"
+HAPI_RUNNER_UNIT="$(hapi_systemd_runner_unit)"
+HAPI_DEFAULT_DB="$(hapi_systemd_hub_db_path)"
+
 IMPATIENT=0
 WORKTREE=""
 
@@ -186,7 +193,7 @@ preflight_schema_check() {
     local script_dir db_prep db live target
     script_dir="$(dirname "$(readlink -f "$0")")"
     db_prep="$script_dir/hapi-driver-db-prep.sh"
-    db="${HAPI_DB_PATH:-$HOME/.hapi/hapi.db}"
+    db="${HAPI_DB_PATH:-$HAPI_DEFAULT_DB}"
 
     [[ -f "$WORKTREE/hub/src/store/index.ts" ]] || {
         echo "WARN: pre-flight: $WORKTREE/hub/src/store/index.ts missing; skipping schema check" >&2
@@ -340,25 +347,25 @@ DB_PREP="$(dirname "$(readlink -f "$0")")/hapi-driver-db-prep.sh"
 if [[ "${HAPI_SKIP_DB_PREP:-}" != "1" && -x "$DB_PREP" ]]; then
     echo ""
     echo "Stopping hub to prep DB ..."
-    sudo HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1 systemctl stop hapi-hub.service || true
+    sudo HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1 systemctl stop "$HAPI_HUB_UNIT" || true
     if ! "$DB_PREP" "$WORKTREE"; then
         echo "ERROR: DB prep failed; refusing to restart hub on incompatible schema" >&2
         echo "       Live DB and backup are untouched if downgrade aborted." >&2
-        echo "       Restart hub manually after resolving: sudo HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1 systemctl start hapi-hub.service" >&2
+        echo "       Restart hub manually after resolving: sudo HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1 systemctl start ${HAPI_HUB_UNIT}" >&2
         exit 1
     fi
     echo ""
     echo "Starting hub + restarting runner ..."
-    sudo systemctl start hapi-hub.service
-    sudo HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1 systemctl restart hapi-runner.service
+    sudo systemctl start "$HAPI_HUB_UNIT"
+    sudo HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1 systemctl restart "$HAPI_RUNNER_UNIT"
 else
     if [[ "${HAPI_SKIP_DB_PREP:-}" == "1" ]]; then
         echo "WARN: HAPI_SKIP_DB_PREP=1 -- skipping DB schema check + backup" >&2
     else
         echo "WARN: hapi-driver-db-prep.sh not found at $DB_PREP -- skipping" >&2
     fi
-    echo "Restarting hapi-hub.service + hapi-runner.service ..."
-    sudo HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1 systemctl restart hapi-hub.service hapi-runner.service
+    echo "Restarting ${HAPI_HUB_UNIT} + ${HAPI_RUNNER_UNIT} ..."
+    sudo HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1 systemctl restart "$HAPI_HUB_UNIT" "$HAPI_RUNNER_UNIT"
 fi
 
 # Post-swap self-verification. Hub may take a few seconds to bind 3006 and
@@ -379,15 +386,15 @@ verify_active_stack() {
 
     # 1) hub systemd is active and listening on 3006.
     while (( elapsed < timeout )); do
-        if systemctl is-active --quiet hapi-hub.service \
+        if systemctl is-active --quiet "$HAPI_HUB_UNIT" \
            && ss -lnt 'sport = :3006' 2>/dev/null | grep -q LISTEN; then
             break
         fi
         sleep "$step"
         elapsed=$((elapsed + step))
     done
-    if ! systemctl is-active --quiet hapi-hub.service; then
-        echo "  FAIL: hapi-hub.service not active after ${timeout}s" >&2
+    if ! systemctl is-active --quiet "$HAPI_HUB_UNIT"; then
+        echo "  FAIL: ${HAPI_HUB_UNIT} not active after ${timeout}s" >&2
         return 1
     fi
     if ! ss -lnt 'sport = :3006' 2>/dev/null | grep -q LISTEN; then
@@ -419,8 +426,8 @@ verify_active_stack() {
     fi
 
     # 3) runner systemd is active.
-    if ! systemctl is-active --quiet hapi-runner.service; then
-        echo "  FAIL: hapi-runner.service not active" >&2
+    if ! systemctl is-active --quiet "$HAPI_RUNNER_UNIT"; then
+        echo "  FAIL: ${HAPI_RUNNER_UNIT} not active" >&2
         return 1
     fi
     echo "  runner: active"
@@ -468,12 +475,12 @@ revert_active_stack() {
     ln -sfn "$prev" "$ACTIVE_LINK"
     if [[ -x "$DB_PREP" ]]; then
         echo "  re-running db-prep against $prev (in case the failed target downgraded the DB)"
-        sudo HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1 systemctl stop hapi-hub.service || true
+        sudo HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1 systemctl stop "$HAPI_HUB_UNIT" || true
         "$DB_PREP" "$prev" || echo "  (db-prep on revert returned non-zero; carrying on)"
     fi
-    sudo HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1 systemctl restart hapi-hub.service hapi-runner.service
+    sudo HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1 systemctl restart "$HAPI_HUB_UNIT" "$HAPI_RUNNER_UNIT"
     sleep 4
-    echo "  revert: hub=$(systemctl is-active hapi-hub.service)  runner=$(systemctl is-active hapi-runner.service)"
+    echo "  revert: hub=$(systemctl is-active "$HAPI_HUB_UNIT")  runner=$(systemctl is-active "$HAPI_RUNNER_UNIT")"
 }
 
 if ! verify_active_stack; then
@@ -486,9 +493,9 @@ fi
 echo ""
 echo "Active stack:"
 echo "  hapi-active → $(readlink -f "$ACTIVE_LINK")"
-echo "  hub:    $(systemctl is-active hapi-hub.service)"
-echo "  runner: $(systemctl is-active hapi-runner.service)"
-systemctl show hapi-runner.service -p ExecStart --value | sed 's/^/  runner ExecStart: /'
+echo "  hub:    $(systemctl is-active "$HAPI_HUB_UNIT")"
+echo "  runner: $(systemctl is-active "$HAPI_RUNNER_UNIT")"
+systemctl show "$HAPI_RUNNER_UNIT" -p ExecStart --value | sed 's/^/  runner ExecStart: /'
 
 if [[ "$WORKTREE" == "$(realpath "$DRIVER")" ]]; then
     echo "Daily driver active."

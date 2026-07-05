@@ -11,7 +11,8 @@
 |-------|------------------------------------------------|
 | **Workflow** (this file) | Master + soup mermaid, topologies, permissions, ship/done |
 | Intake step execution | [`new-feature-intake.md`](./new-feature-intake.md) — §0 handoff + steps 1–8 how-to only |
-| Manifest, DB jiu-jitsu, `stack.lock`, atomic swap mechanics | [`driver-soup.md`](./driver-soup.md) |
+| Manifest, DB jiu-jitsu, `stack.lock`, atomic swap mechanics | [`driver-soup.md`](./driver-soup.md) (includes oos-linux host matrix) |
+| Operator lock install (guards, wrappers, hooks) | [`operator-lock.md`](./operator-lock.md) |
 | Git push policy (GitHub-safe vs local-first paths) | [`commit-hooks.md`](./commit-hooks.md) |
 | Pre-tidy backup / salvage closure | [`salvage-closure.md`](./salvage-closure.md), [`mirror-main-layout.md`](./mirror-main-layout.md) |
 | Peer stack / Playwright evidence | [`peer-stack.md`](./peer-stack.md) |
@@ -22,17 +23,22 @@
 
 ---
 
-## Live stack snapshot (2026-06-22)
+## Live stack snapshot
 
-- **Production dogfood URL:** `http://127.0.0.1:3006` (tailnet hostname in `~/.hapi/hub.env` — not for upstream issues)
-- **`hapi-active`:** `~/coding/hapi/driver` → branch `driver/integration` @ **`969a7db5`**
-- **Hub DB:** `~/.hapi/hapi.db` — **`PRAGMA user_version = 12`**
-- **Web bundle:** `driver/web/dist/assets/index-B1HDpnQy.js` — **`hapi-verify-web-dist` OK** (563/563 `t()` keys)
-- **Build meta:** `driver/web/dist/.hapi-build-meta.json` (`driverHead` matches driver HEAD)
-- **Manifest:** `~/.config/hapi/driver-manifest.yaml` (operator-local; not in git)
-- **Verify stamp:** `~/.hapi/driver-promotion.json` — proves typecheck+tests on driver HEAD; **does not** prove `web/dist` shipped (always run `hapi-verify-web-dist`)
+**Primary host:** oos-linux guest (`~/coding/hapi` mirror + driver soup). Homelab = tailnet runner only.
 
-**Recent pain (documented):** swap-full host killed vite ~5s into build; recovery = swap reset + full build + verify. See `local fork briefing under docs/plans/ (not pushed to GitHub)`.
+| Field | oos-linux (canonical) |
+|---|---|
+| Dogfood URL | `http://127.0.0.1:3006` (tailnet hostname in hub env — not for upstream issues) |
+| `hapi-active` | `~/coding/hapi/driver` → `driver/integration` |
+| Hub DB | `/var/lib/hapi/hapi.db` — check `PRAGMA user_version` before stack swings |
+| systemd | `hapi-hub-oos.service`, `hapi-runner-oos.service` |
+| Manifest | `~/.config/hapi/driver-manifest.yaml` (operator-local; not in git) |
+| Verify | `hapi-verify-web-dist` + `~/.hapi/driver-promotion.json` (typecheck/tests stamp; does not prove dist shipped) |
+
+Refresh this table after major soup promotions. Stale commit hashes belong in git tags / promotion JSON, not here.
+
+**Recent pain (documented):** swap-full host killed vite ~5s into build; recovery = swap reset + full build + verify. See local fork briefing under `docs/plans/` (not pushed to GitHub).
 
 ---
 
@@ -144,7 +150,7 @@ hapi-driver-status --quiet
 hapi-driver-rebuild --build-web --verify
 hapi-verify-web-dist
 hapi-restart-hub                    # hub/cli/shared only
-sqlite3 ~/.hapi/hapi.db 'PRAGMA user_version;'   # if schema bumped
+sqlite3 "$(hapi_systemd_hub_db_path 2>/dev/null || echo ~/.hapi/hapi.db)" 'PRAGMA user_version;'   # if schema bumped
 # hard-reload browser
 ```
 
@@ -290,8 +296,8 @@ Peers **must** assess tier before capture ([`peer-stack.md` § Evidence modality
 - Hand-edit `~/coding/hapi/driver/` (no `git merge` / cherry-pick / commit in driver — manifest + rebuild only)
 - **`hapi-driver-rebuild` without `--build-web`** (manifest-only merge — stale `web/dist`; agent guard refuses)
 - `hapi-use-worktree`, `hapi-use-driver`, `hapi-driver-rebuild --activate`
-- `sudo systemctl restart/stop hapi-hub.service` (use `hapi-restart-hub`)
-- `nohup bun run src/index.ts` from worktree on `:3006` / shared `~/.hapi/hapi.db`
+- Raw `sudo systemctl restart/stop` on hub/runner units (use `hapi-restart-hub` / `hapi-use-worktree` — they resolve `hapi-hub-oos` vs `hapi-hub`)
+- `nohup bun run src/index.ts` from worktree on `:3006` / shared hub DB
 - Declare done at verify stamp without `hapi-verify-web-dist` + operator `:3006` proof
 - Treat `hapi-driver-status` or manifest merge complete as web shipped
 - `HAPI_BUILD_MAX_SWAP_USED_PCT` / `HAPI_BUILD_MIN_AVAIL_MEM_KIB` overrides on driver web builds (report blocked)

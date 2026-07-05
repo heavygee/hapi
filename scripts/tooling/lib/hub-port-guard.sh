@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # hub-port-guard.sh — refuse production promotion while a rogue hub owns :3006.
 #
-# Production contract: only hapi-hub.service (systemd) may bind HAPI_LISTEN_PORT
-# (default 3006) against ~/.hapi/hapi.db. Feature peers sometimes `nohup bun run
+# Production contract: only the resolved hub systemd unit may bind HAPI_LISTEN_PORT
+# (default 3006) against the live hub DB. Feature peers sometimes `nohup bun run
 # src/index.ts` from a worktree hub for dogfood; if that process survives the turn,
 # systemd crash-loops on EADDRINUSE and the operator sees a soup regression that
 # is actually a port hijack.
@@ -10,8 +10,16 @@
 # Used by hapi-watch-activate-driver (pre/post activation) and
 # hapi-use-worktree verify_active_stack.
 
+_tooling_lib="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+if [[ -f "$_tooling_lib/hapi-systemd-units.sh" ]]; then
+    # shellcheck source=lib/hapi-systemd-units.sh
+    source "$_tooling_lib/hapi-systemd-units.sh"
+    HUB_PORT_GUARD_UNIT="${HUB_PORT_GUARD_UNIT:-$(hapi_systemd_hub_unit)}"
+else
+    HUB_PORT_GUARD_UNIT="${HUB_PORT_GUARD_UNIT:-hapi-hub.service}"
+fi
+
 HUB_PORT_GUARD_PORT="${HUB_PORT_GUARD_PORT:-3006}"
-HUB_PORT_GUARD_UNIT="${HUB_PORT_GUARD_UNIT:-hapi-hub.service}"
 
 hub_port_guard_listener_pid() {
     local port="$1"
