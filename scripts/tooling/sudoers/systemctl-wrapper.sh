@@ -182,7 +182,7 @@ PROTECTED_HIT=""
 for unit in "${UNITS[@]+"${UNITS[@]}"}"; do
     bare="${unit%.service}"
     case "$bare" in
-        hapi-hub|hapi-runner|hapi-runner-watchdog)
+        hapi-hub|hapi-runner|hapi-runner-watchdog|hapi-hub-oos|hapi-runner-oos)
             PROTECTED_HIT="$unit"
             break
             ;;

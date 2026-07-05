@@ -80,7 +80,7 @@ fi
 
 SUDO_SYSTEMCTL_RE='(^|[[:space:]])sudo([[:space:]]|$).*systemctl'
 DESTRUCTIVE_VERB_RE='(^|[[:space:]])(stop|restart|kill|disable|mask|reload-or-restart|reset-failed)([[:space:]]|$)'
-HAPI_UNIT_RE='hapi-(hub|runner|runner-watchdog)(\.service)?($|[[:space:]\";'"'"'])'
+HAPI_UNIT_RE='hapi-(hub|runner|runner-watchdog)(-oos)?(\.service)?($|[[:space:]\";'"'"'])'
 
 if printf '%s' "$CMD" | grep -qiE "$SUDO_SYSTEMCTL_RE" \
    && printf '%s' "$CMD" | grep -qiE "$DESTRUCTIVE_VERB_RE" \

@@ -35,6 +35,7 @@ Feature agents should **read the relevant doc below at session start**; meta bot
 | [git-stash-policy.md](./git-stash-policy.md) | **Multi-agent repo** - do not stash other agents' work; commit instead |
 | [worktree-testing.md](./worktree-testing.md) | `hapi-active` symlink, `hapi-use-worktree`, service swing |
 | [driver-soup.md](./driver-soup.md) | Daily driver manifest, merge-train PR worktrees, garden vs soup |
+| [operator-lock.md](./operator-lock.md) | **Portable install** — `install-hapi-operator-lock.sh` (all guards) |
 | [watch-activate-driver.md](./watch-activate-driver.md) | `hapi-watch-activate-driver` - external-only watch; ouroboros guard + excludes |
 | `~/coding/server-setup/config/logrotate/hapi-logs` | **Machine:** rotate `~/.hapi/logs/*.log` (CLI/runner/agent nohup hubs). Prod hub → `journalctl -u hapi-hub`. Install: `sudo cp …/hapi-logs /etc/logrotate.d/hapi-logs` |
 | [pr-review-loop.md](./pr-review-loop.md) | Pre-PR verification + cold review; pre-push open-PR gate; post-push PR comment poll |
@@ -42,6 +43,8 @@ Feature agents should **read the relevant doc below at session start**; meta bot
 | [cold-pr-review-rubric.md](./cold-pr-review-rubric.md) | Open-PR cold review bar (match upstream HAPI Bot severity) |
 | `scripts/tooling/hapi-pr-create.sh` | Upstream PR gate (leak scan, fork-stage, defaults `--repo tiann/hapi`) |
 | `scripts/tooling/hapi-pr-create-fork.sh` | **Fork PR gate** — defaults `--repo heavygee/hapi`; use for tooling/docs (never bare `gh pr create`) |
+| `scripts/tooling/install-hapi-operator-lock.sh` | **One-shot operator lock** — all guards + local bin (see [operator-lock.md](./operator-lock.md)) |
+| `scripts/tooling/verify-hapi-operator-lock.sh` | Verify lock install (`--with-sudo` on hub hosts) |
 | `scripts/tooling/install-gh-wrapper.sh` | Install `~/.local/bin/gh` wrapper — blocks fork-only diffs targeting `tiann/hapi` (#971 class) |
 | `scripts/tooling/hapi-pr-session-emoji.sh` | Meta PR watcher sweep: rename HAPI session titles from batch classify (`--sweep`) |
 | `scripts/tooling/hapi-remote-agent-budget.sh` | Pre-flight before bulk remote agent spawns (count + mem/swap gates) |
