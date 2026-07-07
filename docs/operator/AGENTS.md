@@ -161,6 +161,19 @@ See prior skeleton in git history or integration plan §16.9 - Summary / Problem
 
 ---
 
+## Cursor sessions: markdown tables (2026-07-01)
+
+**Tables are allowed.** The 2026-06 `alwaysApply` ban in `.cursor/rules/cursor-markdown-table-discipline.mdc` was **removed** on 2026-07-01 (`94226fd7e`) after HAPI gained pre-parse GFM table repair (`web/src/lib/remark-repair-tables.ts`, #902).
+
+- **Do not** tell operators or peer agents that Cursor forbids markdown tables — obsolete.
+- **Do** match separator column count to header when emitting tables (best practice; repair handles common off-by-one).
+- **Git docs** may use tables freely (`docs/operator/`, lockhouse `docs/strategy/`, etc.).
+- **If an agent still cites the ban:** Cursor may have cached the deleted rule by path — the rule file was **re-added on main with superseding text** (same filename, new policy). Reload Cursor or start a fresh session after pulling `main`.
+
+Historical investigation: `docs/plans/peer-handoff-agent-table-markdown-serialization.md`.
+
+---
+
 ## Voice mode states (gardening)
 
 `idle_warm|cold`, `align_intent`, `await_confirm`, `executing_async` (silence), `reporting`, `blocked`, `report_refresh`. Ack only after hub queues. Optional `AGENT_NOTIFY_SUMMARY` - parse when present; `~/coding/agent-notify/ACTUALSPEC.md`.

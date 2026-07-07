@@ -66,7 +66,7 @@
 Post in **this session's HAPI chat** (not only Cursor):
 
 - **Recommendation** (1 paragraph)
-- **Option table** (prose bullets OK — no markdown tables if posting to Cursor)
+- **Option comparison** (prose bullets or markdown tables OK — tables allowed in Cursor since 2026-07-01; see `hapi/.cursor/rules/cursor-markdown-table-discipline.mdc`)
 - **Schema/API sketch** (JSON + SQL column names if v2)
 - **Limits & retention** policy proposal
 - **Scope split:** what ships with #893 vs follow-up PR

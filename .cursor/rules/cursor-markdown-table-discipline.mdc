@@ -1,0 +1,27 @@
+---
+description: Cursor markdown tables — ban lifted 2026-07-01; HAPI auto-repairs GFM
+alwaysApply: true
+---
+
+# Cursor markdown tables (current policy)
+
+**Supersedes the 2026-06 "no tables" ban.** That rule was removed on 2026-07-01 (commit `94226fd7e`) because HAPI now auto-repairs malformed GFM tables before render (`web/src/lib/remark-repair-tables.ts`, PR #902).
+
+## Current rule
+
+- **Markdown tables are allowed** in Cursor agent chat output and in git-tracked docs.
+- **Do not** tell operators or other agents that Cursor sessions forbid tables — that guidance is obsolete.
+- When you emit a table, **match separator width to header width** (N header columns → N `---` cells in the separator row). This is still worth doing; repair fixes off-by-one, not every corruption mode.
+- For simple 2–3 field comparisons, bulleted lists with **bold labels** remain fine — preference, not a ban.
+
+## Historical context (why agents still cite the old ban)
+
+- **2026-06:** `cursor-markdown-table-discipline.mdc` banned tables in Cursor sessions because HAPI rendered broken separator rows as prose.
+- **2026-06:** `remark-repair-tables` landed to pad separator rows pre-parse.
+- **2026-07-01:** Ban removed as unnecessary; agents were avoiding tables in docs and chat without benefit.
+- **Stale injection:** Cursor may cache `alwaysApply` rule **content by path** even after the file is deleted from disk. Re-adding this file with updated text is the intended fix — same path, new policy.
+
+## Scope
+
+- **Cursor sessions** in this estate (including lockhouse, hapi, server-setup workspaces that load `~/coding/hapi/.cursor/rules/`).
+- Other agent flavors (Claude, Codex in HAPI) are not governed by this file.

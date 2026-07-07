@@ -1,5 +1,7 @@
 # Peer handoff: agent markdown table corruption investigation
 
+**Resolution (2026-07-07):** HAPI ships `web/src/lib/remark-repair-tables.ts` (#902) — pre-parse GFM separator padding. The Cursor `alwaysApply` **no-tables ban** was removed 2026-07-01 (`94226fd7e`). Agents continued citing the ban because Cursor cached the deleted rule **by path**; fix: re-add `.cursor/rules/cursor-markdown-table-discipline.mdc` on hapi `main` with superseding "tables allowed" policy. See `docs/operator/AGENTS.md` § Cursor sessions: markdown tables.
+
 **Session name:** Peer: agent table markdown / message serialization
 **Worktree:** `~/coding/hapi` (main mirror — read + trace only; no feature code)
 **Flavor:** cursor, yolo, simple session
