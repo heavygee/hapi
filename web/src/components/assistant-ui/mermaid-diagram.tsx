@@ -1,5 +1,5 @@
 import type { SyntaxHighlighterProps } from '@assistant-ui/react-markdown'
-import { useEffect, useId, useState, type ComponentPropsWithoutRef } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { cn } from '@/lib/utils'
 
 let initializedTheme: 'light' | 'dark' | null = null
@@ -64,22 +64,50 @@ async function ensureMermaid(theme: 'light' | 'dark') {
     return mermaid
 }
 
-function MermaidFallback(props: ComponentPropsWithoutRef<'pre'> & { code: string }) {
+function MermaidRenderError({ className }: { className?: string }) {
     return (
-        <pre
+        <div
+            data-mermaid-diagram
+            data-rendered="false"
             className={cn(
-                'aui-mermaid-fallback m-0 overflow-x-auto rounded-b-xl bg-[var(--app-code-bg)] p-4 text-sm text-[var(--app-fg)]',
-                props.className
+                'aui-mermaid-render-error flex min-h-[160px] items-center justify-center rounded-b-xl bg-[var(--app-code-bg)] px-6 py-8',
+                className
             )}
         >
-            <code>{props.code}</code>
-        </pre>
+            <div className="flex max-w-sm flex-col items-center gap-4 text-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-400">
+                    <svg
+                        className="h-6 w-6"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                    >
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                        <line x1="12" y1="9" x2="12" y2="13" />
+                        <line x1="12" y1="17" x2="12.01" y2="17" />
+                    </svg>
+                </div>
+                <div className="space-y-1.5">
+                    <p className="text-sm font-semibold text-[var(--app-fg)]">
+                        Diagram rendering failed
+                    </p>
+                    <p className="text-xs leading-relaxed text-[var(--app-fg)]/60">
+                        The diagram could not be rendered. A corrected version may follow below.
+                    </p>
+                </div>
+            </div>
+        </div>
     )
 }
 
+type RenderState = 'pending' | 'error' | 'success'
+
 export function MermaidDiagram(props: SyntaxHighlighterProps) {
     const [theme, setTheme] = useState<'light' | 'dark'>(() => resolveTheme())
-    const [renderError, setRenderError] = useState(false)
+    const [state, setState] = useState<RenderState>('pending')
     const [svg, setSvg] = useState<string | null>(null)
     const id = useId().replace(/:/g, '-')
 
@@ -101,6 +129,8 @@ export function MermaidDiagram(props: SyntaxHighlighterProps) {
 
     useEffect(() => {
         let cancelled = false
+        setState('pending')
+        setSvg(null)
 
         const render = async () => {
             try {
@@ -108,19 +138,17 @@ export function MermaidDiagram(props: SyntaxHighlighterProps) {
                 const isValid = await mermaid.parse(props.code, { suppressErrors: true })
                 if (cancelled) return
                 if (!isValid) {
-                    setSvg(null)
-                    setRenderError(true)
+                    setState('error')
                     return
                 }
 
                 const result = await mermaid.render(`mermaid-${id}`, props.code)
                 if (cancelled) return
                 setSvg(result.svg)
-                setRenderError(false)
+                setState('success')
             } catch {
                 if (cancelled) return
-                setSvg(null)
-                setRenderError(true)
+                setState('error')
             }
         }
 
@@ -131,20 +159,31 @@ export function MermaidDiagram(props: SyntaxHighlighterProps) {
         }
     }, [id, props.code, theme])
 
-    if (renderError || !svg) {
-        return <MermaidFallback code={props.code} data-mermaid-diagram data-rendered="false" />
+    if (state === 'error') {
+        return <MermaidRenderError />
     }
 
+    if (state === 'success' && svg) {
+        return (
+            <div
+                data-mermaid-diagram
+                data-rendered="true"
+                className="aui-mermaid-diagram overflow-x-auto rounded-b-xl bg-[var(--app-code-bg)] px-4 py-3"
+            >
+                <div
+                    className="min-w-fit [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full"
+                    dangerouslySetInnerHTML={{ __html: svg }}
+                />
+            </div>
+        )
+    }
+
+    // pending: render a silent skeleton matching the diagram area height
     return (
         <div
             data-mermaid-diagram
-            data-rendered="true"
-            className="aui-mermaid-diagram overflow-x-auto rounded-b-xl bg-[var(--app-code-bg)] px-4 py-3"
-        >
-            <div
-                className="min-w-fit [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full"
-                dangerouslySetInnerHTML={{ __html: svg }}
-            />
-        </div>
+            data-rendered="pending"
+            className="min-h-[160px] animate-pulse rounded-b-xl bg-[var(--app-code-bg)] opacity-40"
+        />
     )
 }
