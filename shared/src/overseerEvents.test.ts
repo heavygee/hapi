@@ -2,13 +2,18 @@ import { describe, expect, test } from 'bun:test'
 import {
     AGENT_NOTIFY_CONTRACT_INLINE_PREFIX,
     buildOverseerSessionIdentity,
+    buildUrlArtifactRefs,
+    defaultAttentionCandidate,
     deriveAttentionCandidate,
     deriveSessionDisplayName,
     deriveSessionProject,
+    extractHttpUrls,
     mapNotifyStatusToEventType,
     buildEventSummaryFromNotify,
     detectEmptyHapiEventsSentinel,
     mergeEventPayloadWithSession,
+    normalizeUrlIdempotencyKey,
+    OVERSEER_EVENT_TYPES,
     HAPI_EVENTS_BEGIN,
     HAPI_EVENTS_END
 } from './overseerEvents'
@@ -77,5 +82,34 @@ describe('overseerEvents mapping', () => {
 
     test('deriveSessionProject uses path basename', () => {
         expect(deriveSessionProject({ path: '/coding/hapi' })).toBe('hapi')
+    })
+
+    test('extractHttpUrls strips trailing punctuation and dedupes', () => {
+        const urls = extractHttpUrls(
+            'see https://github.com/tiann/hapi/pull/22. also https://example.com/docs and https://example.com/docs'
+        )
+        expect(urls).toEqual([
+            'https://github.com/tiann/hapi/pull/22',
+            'https://example.com/docs'
+        ])
+    })
+
+    test('buildUrlArtifactRefs uses kind url', () => {
+        const refs = buildUrlArtifactRefs(['https://example.com'], 'inferred', 1000)
+        expect(refs).toEqual([{
+            kind: 'url',
+            url: 'https://example.com',
+            source: 'inferred',
+            created_at: 1000
+        }])
+    })
+
+    test('OVERSEER_EVENT_TYPES includes link_seen', () => {
+        expect(OVERSEER_EVENT_TYPES).toContain('link_seen')
+        expect(defaultAttentionCandidate('link_seen')).toBe(0)
+    })
+
+    test('normalizeUrlIdempotencyKey drops hash and lowercases host', () => {
+        expect(normalizeUrlIdempotencyKey('https://Example.COM/path/#frag')).toBe('https://example.com/path')
     })
 })
