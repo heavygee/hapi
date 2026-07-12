@@ -518,13 +518,13 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         });
 
         if (!bridgedFailure && failure.transient && getAutoBridgeTransientModelErrors()) {
-            this.tryEnqueueModelErrorBridge();
+            this.tryEnqueueModelErrorBridge('auto');
         }
     }
 
     private async handleBridgeModelErrorRpc(payload: unknown): Promise<{ ok: boolean; reason?: string }> {
         if (!payload || typeof payload !== 'object') {
-            return this.tryEnqueueModelErrorBridge();
+            return this.tryEnqueueModelErrorBridge('manual');
         }
 
         const record = payload as Record<string, unknown>;
@@ -557,10 +557,10 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             };
         }
 
-        return this.tryEnqueueModelErrorBridge();
+        return this.tryEnqueueModelErrorBridge('manual');
     }
 
-    private tryEnqueueModelErrorBridge(): { ok: boolean; reason?: string } {
+    private tryEnqueueModelErrorBridge(source: 'auto' | 'manual'): { ok: boolean; reason?: string } {
         const metadataError = this.lastRecordedModelError;
 
         if (!metadataError) {
@@ -634,7 +634,15 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         };
 
         this.session.queue.pushIsolated(prompt, mode);
-        logger.debug(`[cursor-acp] modelError bridge enqueued for atTs=${bridgedAtTs}`);
+        // Chat-visible recovery marker only. Not an AGENT_NOTIFY_SUMMARY — overseer/inbox
+        // must not treat successful bridges as attention candidates.
+        this.session.sendSessionEvent({
+            type: 'modelErrorBridged',
+            kind: metadataError.kind,
+            auto: source === 'auto',
+            atTs: bridgedAtTs
+        });
+        logger.debug(`[cursor-acp] modelError bridge enqueued for atTs=${bridgedAtTs} source=${source}`);
 
         return { ok: true };
     }

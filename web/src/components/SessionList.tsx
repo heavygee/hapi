@@ -9,7 +9,7 @@ import { SessionExportDialog } from '@/components/SessionExportDialog'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { CopyIcon, CheckIcon, ScheduleIcon } from '@/components/icons'
-import { hasActiveModelError } from '@/components/ModelErrorBanner'
+import { hasRecoveredModelError, hasUrgentModelError } from '@/components/ModelErrorBanner'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
 import { DEFAULT_SESSION_PREVIEW_LIMIT, useSessionPreviewLimit } from '@/hooks/useSessionPreviewLimit'
@@ -849,7 +849,8 @@ function SessionItem(props: {
         [s, selected, showDetailedStatus]
     )
     const attentionLabel = attention ? getAttentionLabel(attention, t) : null
-    const modelErrorActive = hasActiveModelError(s.metadata)
+    const modelErrorUrgent = hasUrgentModelError(s.metadata)
+    const modelErrorRecovered = hasRecoveredModelError(s.metadata)
     const scheduledLabel = s.futureScheduledMessageCount > 1
         ? t('session.item.scheduledMessages', { count: s.futureScheduledMessageCount })
         : t('session.item.scheduledMessage')
@@ -876,7 +877,7 @@ function SessionItem(props: {
                         </div>
                         {s.active && s.thinking ? (
                             <LoaderIcon className="h-3.5 w-3.5 shrink-0 text-[var(--app-hint)] animate-spin-slow" />
-                        ) : modelErrorActive ? (
+                        ) : modelErrorUrgent ? (
                             <span
                                 className="relative inline-flex h-2 w-2 shrink-0"
                                 title="Model error — click to view"
@@ -885,6 +886,12 @@ function SessionItem(props: {
                                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-500 opacity-75" />
                                 <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" />
                             </span>
+                        ) : modelErrorRecovered ? (
+                            <span
+                                className="relative inline-flex h-2 w-2 shrink-0 rounded-full bg-emerald-500"
+                                title="Recovered after model error — click to view"
+                                aria-label="Recovered after model error"
+                            />
                         ) : attention ? (
                             <SessionAttentionIndicator
                                 attention={attention}

@@ -124,6 +124,16 @@ export class NotificationHub {
         if (typeof lastModelError.acknowledgedAt === 'number') {
             return
         }
+        // Recoverable transient errors (and successful bridges) stay in-session
+        // only: banner + chat event. Push/Telegram/overseer-adjacent channels
+        // fire only for non-transient failures or a bridge that retried and failed.
+        const bridged = lastModelError.bridgedForAtTs === lastModelError.atTs
+        if (lastModelError.transient && !lastModelError.retriedAndFailed) {
+            return
+        }
+        if (bridged && !lastModelError.retriedAndFailed) {
+            return
+        }
         const lastNotifiedAt = this.lastModelErrorNotifiedAt.get(session.id) ?? 0
         if (lastModelError.atTs <= lastNotifiedAt) {
             return
