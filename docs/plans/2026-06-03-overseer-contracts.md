@@ -222,6 +222,7 @@ Proposed enum for `event_type`:
 | `convo_turn` | Operator-Overseer conversation segment | false (memory-bearing; substrate for replay, not inbox) |
 | `decided` | Operator made a decision in convo | false (memory-bearing; durable audit, not re-surfaced) |
 | `dispatched` | Edict sent to a worker | false (memory-bearing; audit of the dispatch itself, not an inbox item) |
+| `link_seen` | Hub observed an http(s) URL in session message text | false (memory-bearing; `artifact_refs` `kind:url`; Session Log Links stream) |
 
 **`completed` enrichment.** A `completed` event is NOT automatically low-attention. The same `event_type = completed` can mean any of:
 - "Done, nothing needed, FYI"
