@@ -204,12 +204,26 @@ patient_drain
 # wrapper at /usr/local/sbin/systemctl trusts the call. Bare-sudo agent
 # invocations that skip this script still get blocked because they never
 # set the env.
+#
+# Bound sudo+systemctl: a hung restart previously left switch.state=running
+# for ~50k seconds (dead pid, flock held until process death). Default 120s.
+SUDO_RESTART_TIMEOUT="${HAPI_SYSTEMCTL_RESTART_TIMEOUT:-120}"
+_restart_units() {
+    local units=("$@")
+    echo "Restarting ${units[*]} (timeout ${SUDO_RESTART_TIMEOUT}s) ..."
+    if ! timeout --foreground "$SUDO_RESTART_TIMEOUT" \
+        sudo HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1 systemctl restart "${units[@]}"; then
+        local rc=$?
+        echo "ERROR: systemctl restart timed out or failed (exit=$rc) after ${SUDO_RESTART_TIMEOUT}s" >&2
+        echo "       units: ${units[*]}" >&2
+        echo "       Inspect: systemctl status ${units[*]}; journalctl -u ${units[0]} -n 50" >&2
+        return "$rc"
+    fi
+}
 if [[ "$RUNNER" -eq 1 ]]; then
-    echo "Restarting hapi-hub + hapi-runner ..."
-    sudo HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1 systemctl restart "$HAPI_HUB_UNIT" "$HAPI_RUNNER_UNIT"
+    _restart_units "$HAPI_HUB_UNIT" "$HAPI_RUNNER_UNIT"
 else
-    echo "Restarting hapi-hub ..."
-    sudo HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1 systemctl restart "$HAPI_HUB_UNIT"
+    _restart_units "$HAPI_HUB_UNIT"
 fi
 
 echo ""

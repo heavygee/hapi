@@ -126,19 +126,63 @@ EOF
     mv "$tmp" "$HAPI_STATUS_FILE"
 }
 
+# driver_stack_autoclear_stale [rebuild|switch|all]
+# If status says op is running but the recorded pid is dead (and no process
+# holds the flock), reset status to idle and remove the orphan lock file.
+# Returns 0 if anything was cleared, 1 if nothing looked stale.
+# Documented in docs/tooling/watch-activate-driver.md (2026-06-20 postmortem).
+driver_stack_autoclear_stale() {
+    local scope="${1:-all}" op cleared=1
+    local ops=()
+    case "$scope" in
+        rebuild|switch) ops=("$scope") ;;
+        all) ops=(rebuild switch) ;;
+        *) echo "driver_stack_autoclear_stale: unknown scope '$scope'" >&2; return 2 ;;
+    esac
+    [[ -f "$HAPI_STATUS_FILE" ]] || return 1
+    command -v jq >/dev/null 2>&1 || return 1
+
+    for op in "${ops[@]}"; do
+        local state pid lockfile
+        state="$(jq -r ".${op}.state // \"idle\"" "$HAPI_STATUS_FILE" 2>/dev/null || echo idle)"
+        pid="$(jq -r ".${op}.pid // \"null\"" "$HAPI_STATUS_FILE" 2>/dev/null || echo null)"
+        lockfile="$HAPI_LOCK_DIR/${op}.lock"
+        [[ "$state" == "running" ]] || continue
+        if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+            continue
+        fi
+        # Pid dead or missing while state=running. Refuse to clear if someone
+        # still holds the flock (rare race: status lied, lock is real).
+        if [[ -e "$lockfile" ]] && command -v fuser >/dev/null 2>&1; then
+            if fuser "$lockfile" >/dev/null 2>&1; then
+                echo "WARN: hapi-$op status looks stale (pid=$pid) but lock is held; not clearing" >&2
+                continue
+            fi
+        fi
+        echo "healed: hapi-$op stale status (pid=${pid} dead) -> idle" >&2
+        driver_status_end "$op" 130 "note=autoclear-stale-dead-pid"
+        rm -f "$lockfile"
+        cleared=0
+    done
+    return "$cleared"
+}
+
 # driver_status_acquire <rebuild|switch>
 # Hard-fails (exits caller with code 75 EX_TEMPFAIL) if the lock is held.
 # We use exit 75 rather than 1 so callers/CI can distinguish "busy" from
-# "real failure".
+# "real failure". Dead-pid stale locks are auto-cleared once and retried.
 driver_status_acquire() {
-    local op="$1" fd lockfile other_pid other_started other_who
+    local op="$1" fd lockfile other_pid other_started other_who attempt
     case "$op" in
         rebuild) fd=$_HAPI_LOCK_FD_REBUILD; lockfile="$HAPI_LOCK_DIR/rebuild.lock" ;;
         switch)  fd=$_HAPI_LOCK_FD_SWITCH;  lockfile="$HAPI_LOCK_DIR/switch.lock" ;;
         *) echo "driver_status_acquire: unknown op '$op'" >&2; exit 2 ;;
     esac
-    eval "exec $fd>\"$lockfile\""
-    if ! flock -n "$fd"; then
+    for attempt in 1 2; do
+        eval "exec $fd>\"$lockfile\""
+        if flock -n "$fd"; then
+            return 0
+        fi
         echo "ERROR: hapi-$op already in progress. Inspect: hapi-driver-status" >&2
         if [[ -f "$HAPI_STATUS_FILE" ]] && command -v jq >/dev/null 2>&1; then
             other_pid="$(jq -r ".${op}.pid // \"?\"" "$HAPI_STATUS_FILE")"
@@ -146,12 +190,19 @@ driver_status_acquire() {
             other_who="$(jq -r ".${op}.started_by // \"?\"" "$HAPI_STATUS_FILE")"
             echo "       pid=$other_pid  started_at=$other_started  by=$other_who" >&2
             if [[ "$other_pid" =~ ^[0-9]+$ ]] && ! kill -0 "$other_pid" 2>/dev/null; then
-                echo "       NOTE: pid $other_pid is dead -- prior run crashed without releasing status." >&2
-                echo "       Remove stale lock: rm $lockfile  (status will self-heal on next run)" >&2
+                if (( attempt == 1 )); then
+                    echo "       pid $other_pid is dead -- auto-clearing stale lock and retrying once" >&2
+                    eval "exec $fd>&-"
+                    driver_stack_autoclear_stale "$op" || true
+                    continue
+                fi
+                echo "       NOTE: pid $other_pid is still dead after heal attempt." >&2
+                echo "       Remove stale lock: rm $lockfile" >&2
             fi
         fi
         exit 75
-    fi
+    done
+    exit 75
 }
 
 # driver_status_begin <op> [args...]
@@ -271,8 +322,14 @@ driver_stack_wait_idle() {
                 elapsed=$((elapsed + poll))
                 ;;
             2)
-                echo "ERROR: driver stack status stale (dead pid). Inspect: hapi-driver-status" >&2
-                return 2
+                echo "driver_stack_wait_idle: stale dead-pid status; auto-clearing..." >&2
+                driver_status_init
+                if driver_stack_autoclear_stale all; then
+                    : # cleared something — re-poll immediately
+                else
+                    echo "ERROR: driver stack status still stale after heal. Inspect: hapi-driver-status" >&2
+                    return 2
+                fi
                 ;;
             *)
                 echo "WARN: hapi-driver-status --quiet returned $rc; proceeding" >&2

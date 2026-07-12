@@ -12,6 +12,7 @@
 #   hapi-driver-status              # human-readable summary
 #   hapi-driver-status --json       # raw JSON for scripts
 #   hapi-driver-status --quiet      # exit code only: 0 idle, 75 busy, 2 stale
+#   hapi-driver-status --heal       # clear dead-pid running status, then print
 #   hapi-driver-status --watch      # poll every 2s (Ctrl-C to stop)
 #
 # Exit codes
@@ -27,11 +28,20 @@ MODE=human
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --json) MODE=json; shift ;;
-        --quiet|-q) MODE=quiet; shift ;;
-        --watch|-w) MODE=watch; shift ;;
-        -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
-        *) echo "Unknown flag: $1" >&2; exit 2 ;;
+    --json) MODE=json; shift ;;
+    --quiet|-q) MODE=quiet; shift ;;
+    --watch|-w) MODE=watch; shift ;;
+    --heal)
+        # Clear dead-pid running status + orphan locks, then print human summary.
+        # shellcheck source=lib/driver-status.sh
+        source "$(dirname "$(readlink -f "$0")")/lib/driver-status.sh"
+        driver_status_init
+        driver_stack_autoclear_stale all || true
+        MODE=human
+        shift
+        ;;
+    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
+    *) echo "Unknown flag: $1" >&2; exit 2 ;;
     esac
 done
 
