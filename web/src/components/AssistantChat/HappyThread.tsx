@@ -13,6 +13,7 @@ import { Spinner } from '@/components/Spinner'
 import { useTerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 import { useTranslation } from '@/lib/use-translation'
 import { CloseIcon } from '@/components/icons'
+import { SessionLogPanel } from '@/components/AssistantChat/SessionLogPanel'
 
 type ScrollAnchor = {
     id: string
@@ -263,6 +264,8 @@ export function HappyThread(props: {
     outlineItems: readonly ConversationOutlineItem[]
     onOutlineOpenChange: (open: boolean) => void
     onOutlineItemClick?: (item: ConversationOutlineItem) => void
+    sessionLogOpen?: boolean
+    onSessionLogOpenChange?: (open: boolean) => void
 }) {
     const { t } = useTranslation()
     const { terminalToolDisplayMode } = useTerminalToolDisplayMode()
@@ -768,6 +771,22 @@ export function HappyThread(props: {
                             }}
                             onSelect={handleOutlineSelect}
                             onClose={() => props.onOutlineOpenChange(false)}
+                        />
+                    </>
+                ) : null}
+                {props.sessionLogOpen ? (
+                    <>
+                        <button
+                            type="button"
+                            className="absolute inset-0 z-20 bg-black/20"
+                            aria-label={t('session.log.close')}
+                            onClick={() => props.onSessionLogOpenChange?.(false)}
+                        />
+                        <SessionLogPanel
+                            api={props.api}
+                            sessionId={props.sessionId}
+                            title={props.outlineTitle}
+                            onClose={() => props.onSessionLogOpenChange?.(false)}
                         />
                     </>
                 ) : null}

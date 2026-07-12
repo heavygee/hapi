@@ -13,6 +13,7 @@ export type SystemEventRow = {
     relatedSessionId: string | null
     payloadJson: string | null
     severity: number | null
+    artifactRefs?: string | null
 }
 
 type SystemEventsResponse = {

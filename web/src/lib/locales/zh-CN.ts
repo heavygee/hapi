@@ -212,6 +212,17 @@ export default {
   'session.outline.loadOlder': '加载更早',
   'session.outline.empty': '已加载消息中暂无大纲项',
   'session.outline.kind.user': '用户',
+  'session.log.open': '会话日志',
+  'session.log.close': '关闭会话日志',
+  'session.log.title': '会话日志',
+  'session.log.refresh': '刷新日志',
+  'session.log.filters': '日志筛选',
+  'session.log.filter.all': '全部',
+  'session.log.filter.links': '链接',
+  'session.log.empty': '此会话尚无持久事件',
+  'session.log.emptyLinks': '此会话尚未 scoop 到链接',
+  'session.log.loadOlder': '加载更早',
+  'session.log.provenance': '来源',
 
   // Session actions
   'session.action.rename': '重命名',
