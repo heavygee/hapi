@@ -154,4 +154,69 @@ describe('OverseerEventRecorder', () => {
         expect(payload.session.flavor).toBe('codex')
         expect(payload.session.id).toBe(stored.id)
     })
+
+    it('scoops http(s) URLs into link_seen with artifact_refs kind:url', () => {
+        const store = new Store(':memory:')
+        const recorder = new OverseerEventRecorder(store.events)
+        const session = store.sessions.getOrCreateSession('links', { flavor: 'codex', path: '/tmp', host: 'local' }, null, 'default')
+
+        const content = {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'message',
+                    message: [
+                        'See https://github.com/tiann/hapi/pull/22 and https://example.com/docs.',
+                        '',
+                        'AGENT_NOTIFY_SUMMARY {"version":1,"status":"done","action":"","summary":"Linked"}'
+                    ].join('\n')
+                }
+            }
+        }
+
+        const notify = recorder.onAgentMessage(
+            toSessionSnapshot(makeSession(session.id, 'codex'), session.tag),
+            'msg-links',
+            content,
+            Date.now()
+        )
+        expect(notify?.eventType).toBe('completed')
+
+        const links = store.events.list({ eventType: 'link_seen', sessionId: session.id })
+        expect(links).toHaveLength(2)
+        expect(links.every((row) => row.attentionCandidate === 0)).toBe(true)
+        expect(links.every((row) => row.relatedSessionId === session.id)).toBe(true)
+
+        const refs = links.map((row) => JSON.parse(row.artifactRefs!) as Array<{ kind: string; url: string }>)
+        const urls = refs.flatMap((arr) => arr.map((item) => item.url)).sort()
+        expect(urls).toEqual([
+            'https://example.com/docs',
+            'https://github.com/tiann/hapi/pull/22'
+        ])
+        expect(refs.every((arr) => arr.every((item) => item.kind === 'url'))).toBe(true)
+
+        const payload = JSON.parse(links[0]!.payloadJson!) as { session: { id: string }; url: string }
+        expect(payload.session.id).toBe(session.id)
+    })
+
+    it('idempotently scoops the same URL from the same message once', () => {
+        const store = new Store(':memory:')
+        const recorder = new OverseerEventRecorder(store.events)
+        const session = store.sessions.getOrCreateSession('dedupe', { flavor: 'claude', path: '/tmp', host: 'local' }, null, 'default')
+        const content = {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'message',
+                    message: 'https://example.com/a https://example.com/a'
+                }
+            }
+        }
+        const snapshot = toSessionSnapshot(makeSession(session.id, 'claude'), session.tag)
+        recorder.onAgentMessage(snapshot, 'msg-dup', content, Date.now())
+        recorder.onAgentMessage(snapshot, 'msg-dup', content, Date.now())
+        expect(store.events.list({ eventType: 'link_seen' })).toHaveLength(1)
+    })
 })

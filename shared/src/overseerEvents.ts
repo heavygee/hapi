@@ -26,6 +26,46 @@ export const HAPI_EVENTS_END = '<!--HAPI_EVENTS_END-->'
 
 export const OVERSEER_STALE_SILENCE_MS = 30 * 60 * 1000
 
+/** Cap URLs scooped from a single message (avoids tool-dump explosions). */
+export const OVERSEER_LINK_SCOOP_MAX_URLS = 20
+
+/**
+ * Worker / hub-observed event_type taxonomy (contracts §1).
+ * `link_seen` is hub-observed memory-bearing; captured-only by default.
+ */
+export const OVERSEER_EVENT_TYPES = [
+    'progress',
+    'tool_call',
+    'tool_result',
+    'commit_pushed',
+    'pr_opened',
+    'needs_decision',
+    'needs_review',
+    'blocked',
+    'risk_detected',
+    'approval_requested',
+    'failed',
+    'completed',
+    'heartbeat',
+    'stale',
+    'validation_error',
+    'convo_turn',
+    'decided',
+    'dispatched',
+    'link_seen'
+] as const
+
+export type OverseerEventType = typeof OVERSEER_EVENT_TYPES[number]
+
+export type OverseerArtifactRef = {
+    kind: string
+    url?: string
+    title?: string
+    ref?: string
+    source?: string
+    created_at?: number
+}
+
 /** Denormalized session identity written into every overseer event payload. */
 export type OverseerSessionIdentity = {
     id: string
@@ -33,6 +73,68 @@ export type OverseerSessionIdentity = {
     name: string | null
     project: string | null
     flavor: string
+}
+
+const HTTP_URL_RE = /https?:\/\/[^\s<>\[\](){}'"`]+/gi
+const TRAILING_URL_PUNCT_RE = /[.,;:!?)]+$/
+
+/**
+ * Extract http(s) URLs from free text. Strips common trailing punctuation.
+ * Dedupes while preserving first-seen order. Caps at OVERSEER_LINK_SCOOP_MAX_URLS.
+ */
+export function extractHttpUrls(text: string, max: number = OVERSEER_LINK_SCOOP_MAX_URLS): string[] {
+    if (!text) return []
+    const seen = new Set<string>()
+    const urls: string[] = []
+    HTTP_URL_RE.lastIndex = 0
+    let match: RegExpExecArray | null
+    while ((match = HTTP_URL_RE.exec(text)) !== null) {
+        const url = match[0].replace(TRAILING_URL_PUNCT_RE, '')
+        if (!url || seen.has(url)) continue
+        seen.add(url)
+        urls.push(url)
+        if (urls.length >= max) break
+    }
+    return urls
+}
+
+/** Stable idempotency fragment for a scooped URL (case-insensitive host/path). */
+export function normalizeUrlIdempotencyKey(url: string): string {
+    try {
+        const parsed = new URL(url)
+        parsed.hash = ''
+        const host = parsed.hostname.toLowerCase()
+        const path = parsed.pathname.replace(/\/+$/, '') || ''
+        const search = parsed.search
+        return `${parsed.protocol}//${host}${path}${search}`
+    } catch {
+        return url.trim().toLowerCase()
+    }
+}
+
+export function buildUrlArtifactRefs(
+    urls: string[],
+    source: string = 'inferred',
+    createdAt: number = Date.now()
+): OverseerArtifactRef[] {
+    return urls.map((url) => ({
+        kind: 'url',
+        url,
+        source,
+        created_at: createdAt
+    }))
+}
+
+export function buildLinkSeenSummary(url: string): string {
+    try {
+        const parsed = new URL(url)
+        const path = parsed.pathname === '/' ? '' : parsed.pathname
+        const display = `${parsed.hostname}${path}`
+        return display.length > 120 ? `Link seen: ${display.slice(0, 117)}...` : `Link seen: ${display}`
+    } catch {
+        const trimmed = url.length > 120 ? `${url.slice(0, 117)}...` : url
+        return `Link seen: ${trimmed}`
+    }
 }
 
 export function deriveSessionDisplayName(
@@ -144,8 +246,37 @@ export function deriveSeverity(eventType: string): number {
             return 3
         case 'completed':
             return 2
+        case 'link_seen':
+            return 1
         default:
             return 1
+    }
+}
+
+/** Default attention_candidate for known taxonomy types (safer default: false). */
+export function defaultAttentionCandidate(eventType: string): 0 | 1 {
+    switch (eventType) {
+        case 'commit_pushed':
+        case 'pr_opened':
+        case 'needs_decision':
+        case 'needs_review':
+        case 'blocked':
+        case 'risk_detected':
+        case 'approval_requested':
+        case 'failed':
+            return 1
+        case 'link_seen':
+        case 'progress':
+        case 'tool_call':
+        case 'tool_result':
+        case 'heartbeat':
+        case 'convo_turn':
+        case 'decided':
+        case 'dispatched':
+        case 'stale':
+        case 'validation_error':
+        default:
+            return 0
     }
 }
 
