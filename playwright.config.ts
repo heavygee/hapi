@@ -4,7 +4,7 @@ import {
     shouldRecordAnnotatedVideo,
 } from './scripts/dev/playwright-annotated-video.mjs'
 
-const FIXTURE_PORT = 5179
+const FIXTURE_PORT = Number(process.env.PLAYWRIGHT_WEB_PORT ?? 5179)
 const FIXTURE_BASE_URL = `http://localhost:${FIXTURE_PORT}`
 
 const peerWebUrl = process.env.HAPI_PEER_WEB_URL?.replace(/\/$/, '')

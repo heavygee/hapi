@@ -22,6 +22,11 @@ import {
     type ListOpencodeModelsForCwdRequest,
     type ListOpencodeModelsForCwdResponse
 } from '../modules/common/opencodeModels'
+import {
+    listGrokModelsForCwd,
+    type ListGrokModelsForCwdRequest,
+    type ListGrokModelsForCwdResponse
+} from '../modules/common/grokModels'
 import type { SpawnSessionOptions, SpawnSessionResult } from '../modules/common/rpcTypes'
 import { applyVersionedAck } from './versionedUpdate'
 import { buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
@@ -41,6 +46,14 @@ interface ListMachineDirectoryRequest {
     path: string
 }
 
+export function normalizeWindowsDriveRoot(path: string): string {
+    return /^[A-Za-z]:$/.test(path) ? `${path}\\` : path
+}
+
+function canonicalRealpathSync(path: string): string {
+    return normalizeWindowsDriveRoot(realpathSync.native(path))
+}
+
 function normalizeWorkspaceRoots(paths?: string[]): string[] | undefined {
     if (!paths?.length) {
         return undefined
@@ -48,9 +61,9 @@ function normalizeWorkspaceRoots(paths?: string[]): string[] | undefined {
 
     const normalized = Array.from(new Set(paths.map((path) => {
         try {
-            return realpathSync(path)
+            return canonicalRealpathSync(path)
         } catch {
-            return resolvePath(path)
+            return normalizeWindowsDriveRoot(resolvePath(path))
         }
     })))
 
@@ -208,6 +221,21 @@ export class ApiMachineClient {
                 return await listOpencodeModelsForCwd(resolvedCwd)
             }
         )
+
+        this.rpcHandlerManager.registerHandler<ListGrokModelsForCwdRequest, ListGrokModelsForCwdResponse>(
+            RPC_METHODS.ListGrokModelsForCwd,
+            async (params) => {
+                const rawCwd = typeof params?.cwd === 'string' ? params.cwd.trim() : ''
+                if (!rawCwd) return { success: false, error: 'cwd is required' }
+
+                const resolvedCwd = await this.resolveForWorkspaceCheck(rawCwd)
+                if (!this.isWithinWorkspaceRoots(resolvedCwd)) {
+                    return { success: false, error: 'Path is outside workspace roots' }
+                }
+
+                return await listGrokModelsForCwd(resolvedCwd)
+            }
+        )
     }
 
     private isWithinWorkspaceRoots(absolutePath: string): boolean {
@@ -232,7 +260,7 @@ export class ApiMachineClient {
     private async resolveForWorkspaceCheck(path: string): Promise<string> {
         const absolute = resolvePath(path)
         try {
-            return await realpath(absolute)
+            return normalizeWindowsDriveRoot(await realpath(absolute))
         } catch {
             const missing: string[] = []
             let cursor = absolute
@@ -240,12 +268,12 @@ export class ApiMachineClient {
                 missing.unshift(basename(cursor))
                 cursor = dirname(cursor)
                 try {
-                    return join(await realpath(cursor), ...missing)
+                    return join(normalizeWindowsDriveRoot(await realpath(cursor)), ...missing)
                 } catch {
                     // keep walking to the nearest existing parent
                 }
             }
-            return absolute
+            return normalizeWindowsDriveRoot(absolute)
         }
     }
 

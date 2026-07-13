@@ -75,9 +75,19 @@ export class SessionCache {
         namespace: string,
         model?: string,
         effort?: string,
-        modelReasoningEffort?: string
+        modelReasoningEffort?: string,
+        requestedId?: string
     ): Session {
-        const stored = this.store.sessions.getOrCreateSession(tag, metadata, agentState, namespace, model, effort, modelReasoningEffort)
+        const stored = this.store.sessions.getOrCreateSession(
+            tag,
+            metadata,
+            agentState,
+            namespace,
+            model,
+            effort,
+            modelReasoningEffort,
+            requestedId
+        )
         return this.refreshSession(stored.id) ?? (() => { throw new Error('Failed to load session') })()
     }
 
@@ -140,7 +150,13 @@ export class SessionCache {
             createdAt: stored.createdAt,
             updatedAt: stored.updatedAt,
             active: existing?.active ?? stored.active,
-            activeAt: existing?.activeAt ?? (stored.activeAt ?? stored.createdAt),
+            // Legacy / idle rows may still have active_at NULL in SQLite.
+            // Public Session.activeAt is always a number for CLI Zod parse.
+            activeAt: existing?.activeAt
+                ?? stored.activeAt
+                ?? stored.updatedAt
+                ?? stored.createdAt
+                ?? 0,
             metadata,
             metadataVersion: stored.metadataVersion,
             agentState,
@@ -1082,11 +1098,12 @@ export class SessionCache {
 
     private extractAgentSessionId(
         metadata: NonNullable<Session['metadata']>
-    ): { field: 'codexSessionId' | 'claudeSessionId' | 'geminiSessionId' | 'opencodeSessionId' | 'cursorSessionId' | 'piSessionId'; value: string } | null {
+    ): { field: 'codexSessionId' | 'claudeSessionId' | 'geminiSessionId' | 'opencodeSessionId' | 'grokSessionId' | 'cursorSessionId' | 'piSessionId'; value: string } | null {
         if (metadata.codexSessionId) return { field: 'codexSessionId', value: metadata.codexSessionId }
         if (metadata.claudeSessionId) return { field: 'claudeSessionId', value: metadata.claudeSessionId }
         if (metadata.geminiSessionId) return { field: 'geminiSessionId', value: metadata.geminiSessionId }
         if (metadata.opencodeSessionId) return { field: 'opencodeSessionId', value: metadata.opencodeSessionId }
+        if (metadata.grokSessionId) return { field: 'grokSessionId', value: metadata.grokSessionId }
         if (metadata.cursorSessionId) return { field: 'cursorSessionId', value: metadata.cursorSessionId }
         if (metadata.piSessionId) return { field: 'piSessionId', value: metadata.piSessionId }
         return null
