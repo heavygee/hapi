@@ -948,6 +948,8 @@ export class SessionCache {
         }
 
         if (options.deleteOldSession) {
+            this.store.events.repointSession(oldSessionId, newSessionId)
+            this.store.inbox.repointSession(oldSessionId, newSessionId)
             const deleted = this.store.sessions.deleteSession(oldSessionId, namespace)
             if (!deleted) {
                 throw new Error('Failed to delete old session during merge')

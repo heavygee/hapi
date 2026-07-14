@@ -72,6 +72,30 @@ function OutlineIcon(props: { className?: string }) {
     )
 }
 
+
+/** Scroll/log glyph — distinct from Outline's TOC list. */
+function SessionLogIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <path d="M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z" />
+            <path d="M10 7h4" />
+            <path d="M10 11h4" />
+            <path d="M10 15h2" />
+        </svg>
+    )
+}
+
 function headerToggleClass(active: boolean): string {
     return `flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
         active
@@ -104,6 +128,8 @@ export function SessionHeader(props: {
     filesActive?: boolean
     onToggleOutline?: () => void
     outlineActive?: boolean
+    onToggleSessionLog?: () => void
+    sessionLogActive?: boolean
     api: ApiClient | null
     onSessionDeleted?: () => void
     onSessionReopened?: (newSessionId: string) => void
@@ -245,6 +271,19 @@ export function SessionHeader(props: {
                             aria-pressed={props.outlineActive ?? false}
                         >
                             <OutlineIcon />
+                        </button>
+                    ) : null}
+
+                    {props.onToggleSessionLog ? (
+                        <button
+                            type="button"
+                            onClick={props.onToggleSessionLog}
+                            className={headerToggleClass(props.sessionLogActive ?? false)}
+                            title={props.sessionLogActive ? t('session.log.close') : t('session.log.open')}
+                            aria-label={props.sessionLogActive ? t('session.log.close') : t('session.log.open')}
+                            aria-pressed={props.sessionLogActive ?? false}
+                        >
+                            <SessionLogIcon />
                         </button>
                     ) : null}
 
