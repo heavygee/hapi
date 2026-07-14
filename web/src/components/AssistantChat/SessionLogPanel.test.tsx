@@ -73,24 +73,21 @@ describe('SessionLogPanel', () => {
         cleanup()
     })
 
-    it('lists durable session events from the system-events API', async () => {
+    it('lists durable session events excluding link_seen and stale from All', async () => {
         const { fetchSystemEvents } = renderPanel()
 
         await waitFor(() => {
             expect(screen.getByText('Working on Session Log')).toBeInTheDocument()
         })
-        expect(screen.getByText('Link seen: https://example.com/pr/1')).toBeInTheDocument()
+        expect(screen.queryByText('Link seen: https://example.com/pr/1')).not.toBeInTheDocument()
+        expect(screen.queryByRole('link', { name: 'https://example.com/pr/1' })).not.toBeInTheDocument()
         expect(fetchSystemEvents).toHaveBeenCalledWith(expect.objectContaining({
             sessionId: 'sess-1',
             limit: 100
         }))
-        expect(screen.getByRole('link', { name: 'https://example.com/pr/1' })).toHaveAttribute(
-            'href',
-            'https://example.com/pr/1'
-        )
     })
 
-    it('filters to link_seen via the Links tab', async () => {
+    it('filters to link_seen via the Links tab (only place URLs appear)', async () => {
         const fetchSystemEvents = vi.fn(async (params: { eventType?: string }) => {
             if (params.eventType === 'link_seen') {
                 return { total: 1, events: [sampleEvents[0]] }
@@ -116,6 +113,38 @@ describe('SessionLogPanel', () => {
             expect(screen.queryByText('Working on Session Log')).not.toBeInTheDocument()
         })
         expect(screen.getByText('Link seen: https://example.com/pr/1')).toBeInTheDocument()
+        expect(screen.getByRole('link', { name: 'https://example.com/pr/1' })).toHaveAttribute(
+            'href',
+            'https://example.com/pr/1'
+        )
+    })
+
+    it('hides historical stale rows from the All tab', async () => {
+        renderPanel({}, async () => ({
+            total: 2,
+            events: [
+                {
+                    id: 3,
+                    ts: 1_700_000_000_300,
+                    sourceKind: 'system',
+                    sourceRef: 'sess-1',
+                    eventType: 'stale',
+                    attentionCandidate: 0,
+                    summary: 'No agent output for 30 minutes',
+                    artifactRefs: null,
+                    provenance: 'hub-inferred from session silence threshold',
+                    relatedSessionId: 'sess-1',
+                    payloadJson: null,
+                    severity: 3
+                },
+                sampleEvents[1]
+            ]
+        }))
+
+        await waitFor(() => {
+            expect(screen.getByText('Working on Session Log')).toBeInTheDocument()
+        })
+        expect(screen.queryByText('No agent output for 30 minutes')).not.toBeInTheDocument()
     })
 
     it('renders empty state when no events exist', async () => {

@@ -12,7 +12,6 @@ import {
     mapNotifyStatusToEventType,
     mergeEventPayloadWithSession,
     normalizeUrlIdempotencyKey,
-    OVERSEER_STALE_SILENCE_MS,
     isObject,
     type NotifySummary,
     type OverseerSessionIdentity
@@ -141,7 +140,6 @@ function buildTags(notify: NotifySummary | null, flavor: string): string | null 
 
 export class OverseerEventRecorder {
     private readonly lastAgentMessageAt = new Map<string, number>()
-    private readonly emittedStaleSessions = new Set<string>()
     private readonly knownPermissionRequestIds = new Map<string, Set<string>>()
 
     constructor(
@@ -162,7 +160,6 @@ export class OverseerEventRecorder {
 
         if (isAgentMessageContent(content)) {
             this.lastAgentMessageAt.set(session.id, ts)
-            this.emittedStaleSessions.delete(session.id)
 
             const agentBody = unwrapRoleWrappedRecordEnvelope(content)
             const agentContent = agentBody?.role === 'agent' ? agentBody.content : content
@@ -241,7 +238,6 @@ export class OverseerEventRecorder {
         reason: string | undefined,
         getLastAgentPlainText: () => string | null
     ): StoredSystemEvent | null {
-        this.emittedStaleSessions.delete(session.id)
         this.knownPermissionRequestIds.delete(session.id)
 
         if (reason !== 'completed') {
@@ -270,52 +266,19 @@ export class OverseerEventRecorder {
         })
     }
 
-    checkStaleSessions(activeSessions: Session[], now: number = Date.now()): StoredSystemEvent[] {
-        const emitted: StoredSystemEvent[] = []
-        for (const session of activeSessions) {
-            if (!session.active) continue
-            if (this.emittedStaleSessions.has(session.id)) continue
-
-            const requests = session.agentState?.requests
-            if (requests && Object.keys(requests).length > 0) {
-                continue
-            }
-
-            const lastAt = this.lastAgentMessageAt.get(session.id) ?? session.activeAt ?? session.updatedAt
-            if (now - lastAt < OVERSEER_STALE_SILENCE_MS) {
-                continue
-            }
-
-            const snapshot = toSessionSnapshot(session)
-            const event = this.insertSystemEvent(snapshot, {
-                ts: now,
-                sourceKind: 'system',
-                sourceRef: session.id,
-                eventType: 'stale',
-                // Captured-only: hub-inferred silence is ambient awareness, not an
-                // operator-action signal (operatorActionRequired stays 0). Auto-promoting
-                // it floods the inbox with one item per idle session ("narrating log file"
-                // failure mode); the framing doc mandates under-surface > over-surface.
-                // The event is still recorded so the Overseer/replay can synthesize a
-                // coalesced view ("N sessions idle") when it judges it worth attention.
-                // A worker that EXPLICITLY self-reports `stalled` keeps attention_candidate=1
-                // via deriveAttentionCandidate; only this inferred sweep is captured-only.
-                attentionCandidate: 0,
-                operatorActionRequired: 0,
-                summary: `No agent output for ${Math.round((now - lastAt) / 60_000)} minutes`,
-                relatedSessionId: session.id,
-                provenance: 'hub-inferred from session silence threshold',
-                idempotencyKey: `session:${session.id}:stale:${Math.floor(lastAt / OVERSEER_STALE_SILENCE_MS)}`,
-                payloadFields: { lastAgentMessageAt: lastAt, thresholdMs: OVERSEER_STALE_SILENCE_MS },
-                severity: deriveSeverity('stale'),
-                tags: buildTags(null, snapshot.flavor)
-            })
-            if (event) {
-                this.emittedStaleSessions.add(session.id)
-                emitted.push(event)
-            }
-        }
-        return emitted
+    /**
+     * Hub silence sweep — deliberately does **not** persist `stale` rows.
+     *
+     * Idle silence is ambient state derivable from last-activity timestamps
+     * (`get_worker_health` / list-active). Writing one durable event per idle
+     * session filled Session Logs with "No agent output for 30 minutes" noise
+     * and wasted storage. Worker self-reported `stalled` (via AGENT_NOTIFY_SUMMARY)
+     * still becomes a normal attention-qualified event through the notify path.
+     *
+     * Kept as a SyncEngine tick hook for API stability; returns [].
+     */
+    checkStaleSessions(_activeSessions: Session[], _now: number = Date.now()): StoredSystemEvent[] {
+        return []
     }
 
     seedLastAgentMessageAt(sessionId: string, ts: number): void {

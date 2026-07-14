@@ -10,6 +10,9 @@ import type { SystemEventRow } from '@/types/systemEvents'
 
 export type SessionLogFilter = 'all' | 'links'
 
+/** All tab is progress/memory — not the Links carveout, and not ambient silence rows. */
+const ALL_TAB_EXCLUDED_EVENT_TYPES = new Set(['link_seen', 'stale'])
+
 function formatEventTime(ts: number): string {
     try {
         return new Date(ts).toLocaleString()
@@ -41,7 +44,7 @@ function SessionLogEventRow(props: { event: SystemEventRow }) {
                 <span className="text-[11px] text-[var(--app-hint)]">{formatEventTime(props.event.ts)}</span>
             </div>
             <p className="mt-1 text-sm leading-snug text-[var(--app-fg)]">{props.event.summary}</p>
-            {url ? (
+            {url && props.event.eventType === 'link_seen' ? (
                 <a
                     href={url}
                     target="_blank"
@@ -84,10 +87,15 @@ export function SessionLogPanel(props: {
     )
 
     const events = useMemo(() => {
-        if (older.length === 0) return page
-        const seen = new Set(page.map((event) => event.id))
-        return [...page, ...older.filter((event) => !seen.has(event.id))]
-    }, [page, older])
+        const merged = older.length === 0
+            ? page
+            : (() => {
+                const seen = new Set(page.map((event) => event.id))
+                return [...page, ...older.filter((event) => !seen.has(event.id))]
+            })()
+        if (filter === 'links') return merged
+        return merged.filter((event) => !ALL_TAB_EXCLUDED_EVENT_TYPES.has(event.eventType))
+    }, [page, older, filter])
 
     const handleFilterChange = useCallback((next: SessionLogFilter) => {
         setFilter(next)
