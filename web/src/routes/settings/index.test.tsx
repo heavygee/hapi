@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { I18nProvider } from '@/lib/i18n-context'
 import SettingsHubPage from './index'
 import SettingsGeneralPage from './general'
@@ -121,6 +121,22 @@ vi.mock('@/components/settings/VoiceAdvancedControls', () => ({
     VoiceDiagnosticsControls: () => <div>Diagnostics controls</div>,
 }))
 
+vi.mock('@/lib/app-context', () => ({
+    useAppContext: () => ({ baseUrl: 'http://127.0.0.1:3006', api: null }),
+}))
+
+vi.mock('@/components/settings/CompanionPairing', () => ({
+    CompanionPairing: () => <div>Companion pairing</div>,
+}))
+
+vi.mock('@/components/settings/EventsDebugControls', () => ({
+    EventsDebugControls: () => <div>Overseer events (debug)</div>,
+}))
+
+vi.mock('@/components/settings/InboxDebugControls', () => ({
+    InboxDebugControls: () => <div>Overseer inbox (debug)</div>,
+}))
+
 vi.mock('./useVoiceSettings', () => ({
     useVoiceSettings: () => ({
         configuredBackends: ['elevenlabs'],
@@ -147,6 +163,10 @@ describe('responsive settings pages', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         localStorage.clear()
+    })
+
+    afterEach(() => {
+        cleanup()
     })
 
     it('renders the mobile hub categories with current summaries', () => {
@@ -190,6 +210,9 @@ describe('responsive settings pages', () => {
         expect(screen.getByText(String(__APP_VERSION__))).toBeInTheDocument()
         expect(screen.getByText('Protocol Version')).toBeInTheDocument()
         expect(screen.getByRole('link', { name: 'hapi.run' })).toHaveAttribute('rel', 'noopener noreferrer')
+        expect(screen.getByText('Overseer events (debug)')).toBeInTheDocument()
+        expect(screen.getByText('Overseer inbox (debug)')).toBeInTheDocument()
+        expect(screen.getByText('Companion pairing')).toBeInTheDocument()
     })
 
     it('links common voice settings to full-page voices and advanced pages', () => {
