@@ -22,6 +22,10 @@
 #
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+# shellcheck source=lib/hapi-feature-peer-reminders.sh
+source "$SCRIPT_DIR/lib/hapi-feature-peer-reminders.sh"
+
 PRIMARY="${HAPI_PRIMARY:-$HOME/coding/hapi}"
 BUN="${BUN:-$HOME/.bun/bin/bun}"
 BASE="${HAPI_WORKTREE_BASE:-upstream/main}"
@@ -123,3 +127,5 @@ echo "  cd $PATH_DIR"
 echo "  git branch --show-current   # confirm before commit/PR"
 echo ""
 echo "Test on live hub (restarts service): hapi-use-worktree $PATH_DIR"
+
+hapi_print_feature_peer_reminders "worktree $PATH_DIR ($BRANCH)"

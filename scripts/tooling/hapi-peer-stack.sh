@@ -14,6 +14,8 @@ SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$SCRIPT_DIR/lib/peer-stack-ports.sh"
 # shellcheck source=lib/peer-stack-registry.sh
 source "$SCRIPT_DIR/lib/peer-stack-registry.sh"
+# shellcheck source=lib/hapi-feature-peer-reminders.sh
+source "$SCRIPT_DIR/lib/hapi-feature-peer-reminders.sh"
 
 BUN="${BUN:-$HOME/.bun/bin/bun}"
 PEER_STACK_TTL_HOURS="${HAPI_PEER_STACK_TTL_HOURS:-4}"
@@ -214,7 +216,7 @@ EOF
     if [[ -n "$runner_pid" ]]; then
         echo "            $peer_home/runner.log"
     fi
-    echo ""
+    hapi_print_feature_peer_reminders "peer-stack '$name' @ $web_url (session ${session_id:-none})"
     jq -n \
         --arg name "$name" \
         --arg hubUrl "$web_url" \

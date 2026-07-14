@@ -21,6 +21,8 @@ DRIVER="${HAPI_DRIVER:-$HOME/coding/hapi/driver}"
 LIB_DIR="$(dirname "$(readlink -f "$0")")/lib"
 # shellcheck source=lib/hapi-manifest-path.sh
 source "$LIB_DIR/hapi-manifest-path.sh"
+# shellcheck source=lib/hapi-feature-peer-reminders.sh
+source "$LIB_DIR/hapi-feature-peer-reminders.sh"
 MANIFEST="$(hapi_manifest_path "$PRIMARY")"
 PARSE="$PRIMARY/scripts/tooling/parse-driver-manifest.mjs"
 DRIVER_BRANCH="${HAPI_DRIVER_BRANCH:-driver/integration}"
@@ -239,6 +241,7 @@ echo ""
 echo "Driver rebuild complete: $DRIVER @ $(git -C "$DRIVER" rev-parse --short HEAD)"
 echo "Manifest: $MANIFEST"
 echo "Active hub: $(readlink -f "$HOME/coding/hapi/active" 2>/dev/null || echo '(no symlink)')"
+hapi_print_feature_peer_reminders "driver rebuild @ $(git -C "$DRIVER" rev-parse --short HEAD) (web/dist — hard-reload dogfood)"
 
 if [[ "$ACTIVATE" -eq 1 ]]; then
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

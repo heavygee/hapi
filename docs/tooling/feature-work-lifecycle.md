@@ -241,6 +241,8 @@ Peers **must** assess tier before capture ([`peer-stack.md` § Evidence modality
 - MCP: `display_image`, `display_video` (when bridge present)
 - CLI fallback: `hapi-display-image.mjs` (auto-routes video MIME to display_video when available)
 
+**CLI bring-up (agent-agnostic):** on success, `hapi-worktree-create`, `hapi-peer-stack up`, and `hapi-driver-rebuild` print a short §6.4 checklist to stderr (`scripts/tooling/lib/hapi-feature-peer-reminders.sh`). Mute with `HAPI_SKIP_FEATURE_PEER_REMINDERS=1`.
+
 ---
 
 ## Commits and PRs — order of operations
