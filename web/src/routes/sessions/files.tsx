@@ -343,6 +343,14 @@ export default function FilesPage() {
         })
     }, [navigate, sessionId])
 
+    const handleToggleSessionLog = useCallback(() => {
+        navigate({
+            to: '/sessions/$sessionId',
+            params: { sessionId },
+            search: { log: true },
+        })
+    }, [navigate, sessionId])
+
     if (!session) {
         return (
             <div className="flex flex-1 items-center justify-center p-4">
@@ -360,6 +368,8 @@ export default function FilesPage() {
                 filesActive={true}
                 onToggleOutline={handleToggleOutline}
                 outlineActive={false}
+                onToggleSessionLog={handleToggleSessionLog}
+                sessionLogActive={false}
                 api={api}
                 onSessionDeleted={goBack}
                 onSessionReopened={(newSessionId) => {

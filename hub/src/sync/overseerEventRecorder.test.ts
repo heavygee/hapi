@@ -98,7 +98,7 @@ describe('OverseerEventRecorder', () => {
         expect(event?.attentionCandidate).toBe(0)
     })
 
-    it('records hub-inferred stale silence as captured-only (not inbox-promoted)', () => {
+    it('does not persist hub-inferred stale silence (derive live; no Session Log noise)', () => {
         const store = new Store(':memory:')
         const recorder = new OverseerEventRecorder(store.events, store.inbox)
         const session = store.sessions.getOrCreateSession('idle', { flavor: 'claude', path: '/tmp', host: 'local' }, null, 'default')
@@ -113,12 +113,8 @@ describe('OverseerEventRecorder', () => {
 
         const emitted = recorder.checkStaleSessions([live], now)
 
-        expect(emitted).toHaveLength(1)
-        expect(emitted[0]?.eventType).toBe('stale')
-        expect(emitted[0]?.attentionCandidate).toBe(0)
-        expect(store.events.count()).toBe(1)
-        // captured-only: the silence event is recorded for the Overseer/replay to query,
-        // but it must NOT flood the operator inbox (one item per idle session).
+        expect(emitted).toHaveLength(0)
+        expect(store.events.count()).toBe(0)
         expect(store.inbox.count()).toBe(0)
     })
 
@@ -225,5 +221,70 @@ describe('OverseerEventRecorder', () => {
         const itemAfter = store.inbox.getById(itemBefore!.id)
         expect(itemAfter?.title).toBe('meta HAPI triage')
         expect(itemAfter?.relatedSessionId).toBeNull()
+    })
+
+    it('scoops http(s) URLs into link_seen with artifact_refs kind:url', () => {
+        const store = new Store(':memory:')
+        const recorder = new OverseerEventRecorder(store.events, store.inbox)
+        const session = store.sessions.getOrCreateSession('links', { flavor: 'codex', path: '/tmp', host: 'local' }, null, 'default')
+
+        const content = {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'message',
+                    message: [
+                        'See https://github.com/tiann/hapi/pull/22 and https://example.com/docs.',
+                        '',
+                        'AGENT_NOTIFY_SUMMARY {"version":1,"status":"done","action":"","summary":"Linked"}'
+                    ].join('\n')
+                }
+            }
+        }
+
+        const notify = recorder.onAgentMessage(
+            toSessionSnapshot(makeSession(session.id, 'codex'), session.tag),
+            'msg-links',
+            content,
+            Date.now()
+        )
+        expect(notify?.eventType).toBe('completed')
+
+        const links = store.events.list({ eventType: 'link_seen', sessionId: session.id })
+        expect(links).toHaveLength(2)
+        expect(links.every((row) => row.attentionCandidate === 0)).toBe(true)
+        expect(links.every((row) => row.relatedSessionId === session.id)).toBe(true)
+
+        const refs = links.map((row) => JSON.parse(row.artifactRefs!) as Array<{ kind: string; url: string }>)
+        const urls = refs.flatMap((arr) => arr.map((item) => item.url)).sort()
+        expect(urls).toEqual([
+            'https://example.com/docs',
+            'https://github.com/tiann/hapi/pull/22'
+        ])
+        expect(refs.every((arr) => arr.every((item) => item.kind === 'url'))).toBe(true)
+
+        const payload = JSON.parse(links[0]!.payloadJson!) as { session: { id: string }; url: string }
+        expect(payload.session.id).toBe(session.id)
+    })
+
+    it('idempotently scoops the same URL from the same message once', () => {
+        const store = new Store(':memory:')
+        const recorder = new OverseerEventRecorder(store.events, store.inbox)
+        const session = store.sessions.getOrCreateSession('dedupe', { flavor: 'claude', path: '/tmp', host: 'local' }, null, 'default')
+        const content = {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'message',
+                    message: 'https://example.com/a https://example.com/a'
+                }
+            }
+        }
+        const snapshot = toSessionSnapshot(makeSession(session.id, 'claude'), session.tag)
+        recorder.onAgentMessage(snapshot, 'msg-dup', content, Date.now())
+        recorder.onAgentMessage(snapshot, 'msg-dup', content, Date.now())
+        expect(store.events.list({ eventType: 'link_seen' })).toHaveLength(1)
     })
 })

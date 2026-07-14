@@ -47,7 +47,15 @@ import type { Machine, CodexDuplicateSessionGroup, CodexLocalSessionSummary, Cla
 import FilesPage from '@/routes/sessions/files'
 import FilePage from '@/routes/sessions/file'
 import TerminalPage from '@/routes/sessions/terminal'
-import SettingsPage from '@/routes/settings'
+import SettingsLayout from '@/routes/settings/layout'
+import SettingsHubPage from '@/routes/settings'
+import SettingsGeneralPage from '@/routes/settings/general'
+import SettingsDisplayPage from '@/routes/settings/display'
+import SettingsChatPage from '@/routes/settings/chat'
+import SettingsVoicePage from '@/routes/settings/voice'
+import SettingsVoiceVoicesPage from '@/routes/settings/voice-voices'
+import SettingsVoiceAdvancedPage from '@/routes/settings/voice-advanced'
+import SettingsAboutPage from '@/routes/settings/about'
 import SharePage from '@/routes/share'
 import { setSharePendingTransfer } from '@/lib/sharePendingState'
 import { deleteShareTransfer } from '@/lib/shareTransfer'
@@ -766,7 +774,7 @@ function SessionPage() {
     const queryClient = useQueryClient()
     const { addToast } = useToast()
     const { sessionId } = useParams({ from: '/sessions/$sessionId' })
-    const { outline } = useSearch({ from: '/sessions/$sessionId' })
+    const { outline, log } = useSearch({ from: '/sessions/$sessionId' })
     const {
         session,
         error: sessionError,
@@ -1024,6 +1032,14 @@ function SessionPage() {
         })
     }, [navigate, sessionId])
 
+    const handleInitialSessionLogConsumed = useCallback(() => {
+        navigate({
+            to: '/sessions/$sessionId',
+            params: { sessionId },
+            replace: true,
+        })
+    }, [navigate, sessionId])
+
     if (!session) {
         if (sessionError) {
             return (
@@ -1082,6 +1098,8 @@ function SessionPage() {
             onClearSendError={clearSendError}
             initialOutlineOpen={outline}
             onInitialOutlineConsumed={handleInitialOutlineConsumed}
+            initialSessionLogOpen={log}
+            onInitialSessionLogConsumed={handleInitialSessionLogConsumed}
         />
     )
 }
@@ -1267,9 +1285,13 @@ const sessionsIndexRoute = createRoute({
 const sessionDetailRoute = createRoute({
     getParentRoute: () => sessionsRoute,
     path: '$sessionId',
-    validateSearch: (search: Record<string, unknown>): { outline?: boolean } => {
+    validateSearch: (search: Record<string, unknown>): { outline?: boolean; log?: boolean } => {
         const outline = search.outline === true || search.outline === 'true'
-        return outline ? { outline: true } : {}
+        const log = search.log === true || search.log === 'true'
+        const result: { outline?: boolean; log?: boolean } = {}
+        if (outline) result.outline = true
+        if (log) result.log = true
+        return result
     },
     component: SessionDetailRoute,
 })
@@ -1376,7 +1398,55 @@ const browseRoute = createRoute({
 const settingsRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/settings',
-    component: SettingsPage,
+    component: SettingsLayout,
+})
+
+const settingsIndexRoute = createRoute({
+    getParentRoute: () => settingsRoute,
+    path: '/',
+    component: SettingsHubPage,
+})
+
+const settingsGeneralRoute = createRoute({
+    getParentRoute: () => settingsRoute,
+    path: 'general',
+    component: SettingsGeneralPage,
+})
+
+const settingsDisplayRoute = createRoute({
+    getParentRoute: () => settingsRoute,
+    path: 'display',
+    component: SettingsDisplayPage,
+})
+
+const settingsChatRoute = createRoute({
+    getParentRoute: () => settingsRoute,
+    path: 'chat',
+    component: SettingsChatPage,
+})
+
+const settingsVoiceRoute = createRoute({
+    getParentRoute: () => settingsRoute,
+    path: 'voice',
+    component: SettingsVoicePage,
+})
+
+const settingsVoiceVoicesRoute = createRoute({
+    getParentRoute: () => settingsRoute,
+    path: 'voice/voices',
+    component: SettingsVoiceVoicesPage,
+})
+
+const settingsVoiceAdvancedRoute = createRoute({
+    getParentRoute: () => settingsRoute,
+    path: 'voice/advanced',
+    component: SettingsVoiceAdvancedPage,
+})
+
+const settingsAboutRoute = createRoute({
+    getParentRoute: () => settingsRoute,
+    path: 'about',
+    component: SettingsAboutPage,
 })
 
 // Web Share Target landing route. Service worker (`web/src/sw.ts`)
@@ -1424,7 +1494,16 @@ export const routeTree = rootRoute.addChildren([
         ]),
     ]),
     browseRoute,
-    settingsRoute,
+    settingsRoute.addChildren([
+        settingsIndexRoute,
+        settingsGeneralRoute,
+        settingsDisplayRoute,
+        settingsChatRoute,
+        settingsVoiceRoute,
+        settingsVoiceVoicesRoute,
+        settingsVoiceAdvancedRoute,
+        settingsAboutRoute,
+    ]),
     shareRoute,
     gardenRoute,
 ])

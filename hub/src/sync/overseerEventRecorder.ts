@@ -1,14 +1,17 @@
 import {
     buildEventSummaryFromNotify,
+    buildLinkSeenSummary,
     buildOverseerSessionIdentity,
+    buildUrlArtifactRefs,
     deriveAttentionCandidate,
     deriveOperatorActionRequired,
     deriveSeverity,
     detectEmptyHapiEventsSentinel,
     detectMalformedNotifySummaryLine,
+    extractHttpUrls,
     mapNotifyStatusToEventType,
     mergeEventPayloadWithSession,
-    OVERSEER_STALE_SILENCE_MS,
+    normalizeUrlIdempotencyKey,
     isObject,
     type NotifySummary,
     type OverseerSessionIdentity
@@ -26,6 +29,60 @@ export type SessionSnapshot = OverseerSessionIdentity
 
 function asRecord(value: unknown): Record<string, unknown> | null {
     return isObject(value) ? value as Record<string, unknown> : null
+}
+
+function extractTextBlocks(value: unknown): string | null {
+    if (typeof value === 'string' && value.trim().length > 0) {
+        return value
+    }
+    if (Array.isArray(value)) {
+        const parts: string[] = []
+        for (const block of value) {
+            const record = asRecord(block)
+            if (record?.type === 'text' && typeof record.text === 'string') {
+                parts.push(record.text)
+            } else if (typeof block === 'string') {
+                parts.push(block)
+            }
+        }
+        const joined = parts.join('\n').trim()
+        return joined.length > 0 ? joined : null
+    }
+    const record = asRecord(value)
+    if (record?.type === 'text' && typeof record.text === 'string') {
+        return record.text
+    }
+    return null
+}
+
+/** Best-effort plain text for URL scoop (agent + user message shapes). */
+export function extractTextForLinkScoop(content: unknown): string | null {
+    const envelope = unwrapRoleWrappedRecordEnvelope(content)
+    const body = envelope?.content ?? content
+
+    const assistant = extractAssistantPlainText(body)
+    if (assistant) return assistant
+
+    const direct = extractTextBlocks(body)
+    if (direct) return direct
+
+    const record = asRecord(body)
+    if (record?.type === 'output') {
+        const data = asRecord(record.data)
+        const message = asRecord(data?.message)
+        if (message) {
+            const fromMessage = extractTextBlocks(message.content)
+            if (fromMessage) return fromMessage
+        }
+    }
+    if (record?.type === 'codex') {
+        const data = asRecord(record.data)
+        if (typeof data?.message === 'string' && data.message.length > 0) {
+            return data.message
+        }
+    }
+
+    return null
 }
 
 function buildPayload(
@@ -83,7 +140,6 @@ function buildTags(notify: NotifySummary | null, flavor: string): string | null 
 
 export class OverseerEventRecorder {
     private readonly lastAgentMessageAt = new Map<string, number>()
-    private readonly emittedStaleSessions = new Set<string>()
     private readonly knownPermissionRequestIds = new Map<string, Set<string>>()
 
     constructor(
@@ -100,74 +156,75 @@ export class OverseerEventRecorder {
     }
 
     onAgentMessage(session: SessionSnapshot, messageId: string, content: unknown, ts: number): StoredSystemEvent | null {
-        if (!isAgentMessageContent(content)) {
-            return null
-        }
+        let primary: StoredSystemEvent | null = null
 
-        this.lastAgentMessageAt.set(session.id, ts)
-        this.emittedStaleSessions.delete(session.id)
+        if (isAgentMessageContent(content)) {
+            this.lastAgentMessageAt.set(session.id, ts)
 
-        const agentBody = unwrapRoleWrappedRecordEnvelope(content)
-        const agentContent = agentBody?.role === 'agent' ? agentBody.content : content
+            const agentBody = unwrapRoleWrappedRecordEnvelope(content)
+            const agentContent = agentBody?.role === 'agent' ? agentBody.content : content
 
-        const plainText = extractAssistantPlainText(agentContent)
-        if (plainText) {
-            if (detectEmptyHapiEventsSentinel(plainText)) {
-                return this.insertSystemEvent(session, {
-                    ts,
-                    sourceKind: 'system',
-                    eventType: 'validation_error',
-                    attentionCandidate: 0,
-                    summary: 'Malformed HAPI_EVENTS sentinel block (empty body)',
-                    relatedSessionId: session.id,
-                    provenance: 'hub-inferred from empty HAPI_EVENTS sentinel pair',
-                    idempotencyKey: `session:${session.id}:message:${messageId}:validation_error:empty_hapi_events`,
-                    payloadFields: { messageId, plainTextPreview: plainText.slice(0, 500) },
-                    severity: 1
-                })
+            const plainText = extractAssistantPlainText(agentContent)
+            if (plainText) {
+                if (detectEmptyHapiEventsSentinel(plainText)) {
+                    primary = this.insertSystemEvent(session, {
+                        ts,
+                        sourceKind: 'system',
+                        eventType: 'validation_error',
+                        attentionCandidate: 0,
+                        summary: 'Malformed HAPI_EVENTS sentinel block (empty body)',
+                        relatedSessionId: session.id,
+                        provenance: 'hub-inferred from empty HAPI_EVENTS sentinel pair',
+                        idempotencyKey: `session:${session.id}:message:${messageId}:validation_error:empty_hapi_events`,
+                        payloadFields: { messageId, plainTextPreview: plainText.slice(0, 500) },
+                        severity: 1
+                    })
+                } else if (detectMalformedNotifySummaryLine(plainText)) {
+                    primary = this.insertSystemEvent(session, {
+                        ts,
+                        sourceKind: 'system',
+                        eventType: 'validation_error',
+                        attentionCandidate: 0,
+                        summary: 'Malformed AGENT_NOTIFY_SUMMARY line on last turn',
+                        relatedSessionId: session.id,
+                        provenance: 'hub-inferred from malformed AGENT_NOTIFY_SUMMARY JSON',
+                        idempotencyKey: `session:${session.id}:message:${messageId}:validation_error:malformed_notify`,
+                        payloadFields: { messageId },
+                        severity: 1
+                    })
+                } else {
+                    const notify = extractNotifySummary(plainText)
+                    if (notify) {
+                        primary = this.recordNotifySummary(session, messageId, notify, ts)
+                    }
+                }
             }
 
-            if (detectMalformedNotifySummaryLine(plainText)) {
-                return this.insertSystemEvent(session, {
-                    ts,
-                    sourceKind: 'system',
-                    eventType: 'validation_error',
-                    attentionCandidate: 0,
-                    summary: 'Malformed AGENT_NOTIFY_SUMMARY line on last turn',
-                    relatedSessionId: session.id,
-                    provenance: 'hub-inferred from malformed AGENT_NOTIFY_SUMMARY JSON',
-                    idempotencyKey: `session:${session.id}:message:${messageId}:validation_error:malformed_notify`,
-                    payloadFields: { messageId },
-                    severity: 1
-                })
-            }
-
-            const notify = extractNotifySummary(plainText)
-            if (notify) {
-                return this.recordNotifySummary(session, messageId, notify, ts)
+            if (!primary) {
+                const toolFailure = extractToolFailureSummary(agentContent)
+                if (toolFailure) {
+                    primary = this.insertSystemEvent(session, {
+                        ts,
+                        sourceKind: 'system',
+                        sourceRef: session.id,
+                        eventType: 'failed',
+                        attentionCandidate: 1,
+                        operatorActionRequired: 1,
+                        summary: toolFailure,
+                        relatedSessionId: session.id,
+                        provenance: 'hub-inferred from tool-call-result exit code',
+                        idempotencyKey: `session:${session.id}:message:${messageId}:tool_failed`,
+                        payloadFields: { messageId },
+                        severity: deriveSeverity('failed'),
+                        tags: buildTags(null, session.flavor)
+                    })
+                }
             }
         }
 
-        const toolFailure = extractToolFailureSummary(agentContent)
-        if (toolFailure) {
-            return this.insertSystemEvent(session, {
-                ts,
-                sourceKind: 'system',
-                sourceRef: session.id,
-                eventType: 'failed',
-                attentionCandidate: 1,
-                operatorActionRequired: 1,
-                summary: toolFailure,
-                relatedSessionId: session.id,
-                provenance: 'hub-inferred from tool-call-result exit code',
-                idempotencyKey: `session:${session.id}:message:${messageId}:tool_failed`,
-                payloadFields: { messageId },
-                severity: deriveSeverity('failed'),
-                tags: buildTags(null, session.flavor)
-            })
-        }
-
-        return null
+        // Always scoop URLs from any ingestible message text (agent or user).
+        this.scoopLinksFromContent(session, messageId, content, ts)
+        return primary
     }
 
     onSessionUpdated(session: Session, tag?: string | null): void {
@@ -181,7 +238,6 @@ export class OverseerEventRecorder {
         reason: string | undefined,
         getLastAgentPlainText: () => string | null
     ): StoredSystemEvent | null {
-        this.emittedStaleSessions.delete(session.id)
         this.knownPermissionRequestIds.delete(session.id)
 
         if (reason !== 'completed') {
@@ -210,56 +266,59 @@ export class OverseerEventRecorder {
         })
     }
 
-    checkStaleSessions(activeSessions: Session[], now: number = Date.now()): StoredSystemEvent[] {
-        const emitted: StoredSystemEvent[] = []
-        for (const session of activeSessions) {
-            if (!session.active) continue
-            if (this.emittedStaleSessions.has(session.id)) continue
-
-            const requests = session.agentState?.requests
-            if (requests && Object.keys(requests).length > 0) {
-                continue
-            }
-
-            const lastAt = this.lastAgentMessageAt.get(session.id) ?? session.activeAt ?? session.updatedAt
-            if (now - lastAt < OVERSEER_STALE_SILENCE_MS) {
-                continue
-            }
-
-            const snapshot = toSessionSnapshot(session)
-            const event = this.insertSystemEvent(snapshot, {
-                ts: now,
-                sourceKind: 'system',
-                sourceRef: session.id,
-                eventType: 'stale',
-                // Captured-only: hub-inferred silence is ambient awareness, not an
-                // operator-action signal (operatorActionRequired stays 0). Auto-promoting
-                // it floods the inbox with one item per idle session ("narrating log file"
-                // failure mode); the framing doc mandates under-surface > over-surface.
-                // The event is still recorded so the Overseer/replay can synthesize a
-                // coalesced view ("N sessions idle") when it judges it worth attention.
-                // A worker that EXPLICITLY self-reports `stalled` keeps attention_candidate=1
-                // via deriveAttentionCandidate; only this inferred sweep is captured-only.
-                attentionCandidate: 0,
-                operatorActionRequired: 0,
-                summary: `No agent output for ${Math.round((now - lastAt) / 60_000)} minutes`,
-                relatedSessionId: session.id,
-                provenance: 'hub-inferred from session silence threshold',
-                idempotencyKey: `session:${session.id}:stale:${Math.floor(lastAt / OVERSEER_STALE_SILENCE_MS)}`,
-                payloadFields: { lastAgentMessageAt: lastAt, thresholdMs: OVERSEER_STALE_SILENCE_MS },
-                severity: deriveSeverity('stale'),
-                tags: buildTags(null, snapshot.flavor)
-            })
-            if (event) {
-                this.emittedStaleSessions.add(session.id)
-                emitted.push(event)
-            }
-        }
-        return emitted
+    /**
+     * Hub silence sweep — deliberately does **not** persist `stale` rows.
+     *
+     * Idle silence is ambient state derivable from last-activity timestamps
+     * (`get_worker_health` / list-active). Writing one durable event per idle
+     * session filled Session Logs with "No agent output for 30 minutes" noise
+     * and wasted storage. Worker self-reported `stalled` (via AGENT_NOTIFY_SUMMARY)
+     * still becomes a normal attention-qualified event through the notify path.
+     *
+     * Kept as a SyncEngine tick hook for API stability; returns [].
+     */
+    checkStaleSessions(_activeSessions: Session[], _now: number = Date.now()): StoredSystemEvent[] {
+        return []
     }
 
     seedLastAgentMessageAt(sessionId: string, ts: number): void {
         this.lastAgentMessageAt.set(sessionId, ts)
+    }
+
+    private scoopLinksFromContent(
+        session: SessionSnapshot,
+        messageId: string,
+        content: unknown,
+        ts: number
+    ): StoredSystemEvent[] {
+        const text = extractTextForLinkScoop(content)
+        if (!text) return []
+
+        const urls = extractHttpUrls(text)
+        if (urls.length === 0) return []
+
+        const emitted: StoredSystemEvent[] = []
+        for (const url of urls) {
+            const urlKey = normalizeUrlIdempotencyKey(url)
+            const event = this.insertSystemEvent(session, {
+                ts,
+                sourceKind: 'system',
+                sourceRef: session.id,
+                eventType: 'link_seen',
+                attentionCandidate: 0,
+                operatorActionRequired: 0,
+                summary: buildLinkSeenSummary(url),
+                relatedSessionId: session.id,
+                provenance: 'hub-inferred from message URL scoop',
+                idempotencyKey: `session:${session.id}:message:${messageId}:link:${urlKey}`,
+                payloadFields: { messageId, url },
+                artifactRefs: JSON.stringify(buildUrlArtifactRefs([url], 'inferred', ts)),
+                severity: deriveSeverity('link_seen'),
+                tags: buildTags(null, session.flavor)
+            })
+            if (event) emitted.push(event)
+        }
+        return emitted
     }
 
     private recordNotifySummary(
