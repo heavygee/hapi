@@ -42,8 +42,11 @@ export function EventsDebugControls() {
         setError(null)
         try {
             const data = await api.fetchSystemEvents({ limit: 80 }) as SystemEventsResponse
-            setTotal(data.total)
-            setEvents(data.events)
+            // Hub-inferred silence is no longer written; hide historical `stale`
+            // rows from this operator-facing debug feed (same rule as Session Log All).
+            const visible = data.events.filter((event) => event.eventType !== 'stale')
+            setTotal(visible.length)
+            setEvents(visible)
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to load events')
         } finally {
