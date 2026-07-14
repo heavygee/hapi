@@ -1,0 +1,50 @@
+name: Overseer replay gate
+
+# Dedicated CI gate (build sequence Step 2.75 / prioritization §6): the replay
+# harness + one-boss invariant (ADR-001) run on every PR that touches Overseer
+# logic, inbox scoring, the event taxonomy, or the worker-emission contract.
+# A failure here blocks merge — it is the single mechanical guard against
+# salience regressions and one-boss attribution leaks.
+
+on:
+    push:
+        paths:
+            - 'hub/src/overseer/**'
+            - 'hub/src/store/events.ts'
+            - 'hub/src/store/eventStore.ts'
+            - 'hub/src/store/inboxItems.ts'
+            - 'hub/src/store/inboxStore.ts'
+            - 'hub/src/sync/overseerEventRecorder.ts'
+            - 'shared/src/overseerEvents.ts'
+            - 'shared/src/overseerInbox.ts'
+            - 'test/fixtures/overseer-replay/**'
+            - '.github/workflows/overseer-replay.yml'
+    pull_request:
+        paths:
+            - 'hub/src/overseer/**'
+            - 'hub/src/store/events.ts'
+            - 'hub/src/store/eventStore.ts'
+            - 'hub/src/store/inboxItems.ts'
+            - 'hub/src/store/inboxStore.ts'
+            - 'hub/src/sync/overseerEventRecorder.ts'
+            - 'shared/src/overseerEvents.ts'
+            - 'shared/src/overseerInbox.ts'
+            - 'test/fixtures/overseer-replay/**'
+            - '.github/workflows/overseer-replay.yml'
+
+jobs:
+    overseer-replay:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: oven-sh/setup-bun@v2
+              with:
+                  bun-version: 1.3.14
+            - run: bun install
+            # Whole-repo typecheck (tsc compiles each package as one program)
+            # lives in test.yml; this gate runs the Overseer test surface so it
+            # stays green/red on Overseer correctness specifically.
+            - name: Overseer taxonomy + inbox scoring tests (shared)
+              run: cd shared && bun test src/overseerEvents.test.ts src/overseerInbox.test.ts
+            - name: Replay harness + one-boss invariant (hub)
+              run: cd hub && bun test src/overseer src/store/inboxItems.test.ts src/sync/overseerEventRecorder.test.ts src/sync/overseerEventRecorder.injection.test.ts
