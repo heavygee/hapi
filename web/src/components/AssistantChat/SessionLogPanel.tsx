@@ -5,6 +5,7 @@ import { CloseIcon } from '@/components/icons'
 import { Spinner } from '@/components/Spinner'
 import { Button } from '@/components/ui/button'
 import { useSessionSystemEvents } from '@/hooks/queries/useSessionSystemEvents'
+import { formatAbsoluteDateTime, formatRelativeTime } from '@/lib/relative-time'
 import { useTranslation } from '@/lib/use-translation'
 import type { SystemEventRow } from '@/types/systemEvents'
 
@@ -12,14 +13,6 @@ export type SessionLogFilter = 'all' | 'links'
 
 /** All tab is progress/memory — not the Links carveout, and not ambient silence rows. */
 const ALL_TAB_EXCLUDED_EVENT_TYPES = new Set(['link_seen', 'stale'])
-
-function formatEventTime(ts: number): string {
-    try {
-        return new Date(ts).toLocaleString()
-    } catch {
-        return String(ts)
-    }
-}
 
 function primaryUrl(event: SystemEventRow): string | null {
     const refs = parseArtifactRefs(event.artifactRefs)
@@ -31,35 +24,53 @@ function primaryUrl(event: SystemEventRow): string | null {
     return null
 }
 
-function SessionLogEventRow(props: { event: SystemEventRow }) {
+/** Compact display for a URL — host + path, no scheme, truncated. */
+export function compactUrlLabel(url: string, maxLen = 64): string {
+    try {
+        const parsed = new URL(url)
+        const path = parsed.pathname === '/' ? '' : parsed.pathname
+        const label = `${parsed.host}${path}${parsed.search}`
+        return label.length > maxLen ? `${label.slice(0, maxLen - 1)}…` : label
+    } catch {
+        return url.length > maxLen ? `${url.slice(0, maxLen - 1)}…` : url
+    }
+}
+
+function SessionLogEventRow(props: { event: SystemEventRow; filter: SessionLogFilter }) {
     const { t } = useTranslation()
     const url = primaryUrl(props.event)
+    const isLink = props.event.eventType === 'link_seen' && url
+    const relative = formatRelativeTime(props.event.ts, t) ?? ''
+    const absolute = formatAbsoluteDateTime(props.event.ts) ?? undefined
 
     return (
-        <li className="rounded-md px-2 py-2 text-left">
-            <div className="flex flex-wrap items-center gap-1.5">
-                <span className="rounded bg-[var(--app-subtle-bg)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--app-hint)]">
-                    {props.event.eventType}
+        <li className="rounded-md px-2 py-1.5 text-left">
+            <div className="flex min-w-0 items-baseline gap-2">
+                {props.filter === 'all' ? (
+                    <span className="shrink-0 rounded bg-[var(--app-subtle-bg)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--app-hint)]">
+                        {props.event.eventType}
+                    </span>
+                ) : null}
+                <span
+                    className="ml-auto shrink-0 text-[11px] text-[var(--app-hint)]"
+                    title={absolute}
+                >
+                    {relative}
                 </span>
-                <span className="text-[11px] text-[var(--app-hint)]">{formatEventTime(props.event.ts)}</span>
             </div>
-            <p className="mt-1 text-sm leading-snug text-[var(--app-fg)]">{props.event.summary}</p>
-            {url && props.event.eventType === 'link_seen' ? (
+            {isLink ? (
                 <a
                     href={url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="mt-1 block truncate text-xs text-[var(--app-link)] hover:underline"
+                    className="mt-0.5 block truncate text-sm leading-snug text-[var(--app-link)] hover:underline"
                     title={url}
                 >
-                    {url}
+                    {compactUrlLabel(url)}
                 </a>
-            ) : null}
-            {props.event.provenance ? (
-                <p className="mt-0.5 text-[11px] text-[var(--app-hint)]">
-                    {t('session.log.provenance')}: {props.event.provenance}
-                </p>
-            ) : null}
+            ) : (
+                <p className="mt-0.5 text-sm leading-snug text-[var(--app-fg)]">{props.event.summary}</p>
+            )}
         </li>
     )
 }
@@ -213,9 +224,9 @@ export function SessionLogPanel(props: {
                         {filter === 'links' ? t('session.log.emptyLinks') : t('session.log.empty')}
                     </div>
                 ) : (
-                    <ul className="space-y-1">
+                    <ul className="space-y-0.5">
                         {events.map((event) => (
-                            <SessionLogEventRow key={event.id} event={event} />
+                            <SessionLogEventRow key={event.id} event={event} filter={filter} />
                         ))}
                     </ul>
                 )}

@@ -3,19 +3,21 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ComponentProps } from 'react'
 import { I18nProvider } from '@/lib/i18n-context'
-import { SessionLogPanel } from '@/components/AssistantChat/SessionLogPanel'
+import { compactUrlLabel, SessionLogPanel } from '@/components/AssistantChat/SessionLogPanel'
 import type { ApiClient } from '@/api/client'
 import type { SystemEventRow } from '@/types/systemEvents'
+
+const NOW = Date.now()
 
 const sampleEvents: SystemEventRow[] = [
     {
         id: 2,
-        ts: 1_700_000_000_200,
+        ts: NOW - 5 * 60_000,
         sourceKind: 'system',
         sourceRef: 'sess-1',
         eventType: 'link_seen',
         attentionCandidate: 0,
-        summary: 'Link seen: https://example.com/pr/1',
+        summary: 'Link seen: example.com/pr/1',
         artifactRefs: JSON.stringify([{ kind: 'url', url: 'https://example.com/pr/1' }]),
         provenance: 'hub-inferred from message URL scoop',
         relatedSessionId: 'sess-1',
@@ -24,14 +26,14 @@ const sampleEvents: SystemEventRow[] = [
     },
     {
         id: 1,
-        ts: 1_700_000_000_100,
+        ts: NOW - 2 * 60_000,
         sourceKind: 'worker',
         sourceRef: 'sess-1',
         eventType: 'progress',
         attentionCandidate: 0,
         summary: 'Working on Session Log',
         artifactRefs: null,
-        provenance: null,
+        provenance: 'AGENT_NOTIFY_SUMMARY',
         relatedSessionId: 'sess-1',
         payloadJson: null,
         severity: 1
@@ -68,26 +70,31 @@ function renderPanel(
     return { ...view, fetchSystemEvents, api }
 }
 
+describe('compactUrlLabel', () => {
+    it('drops scheme and truncates long paths', () => {
+        expect(compactUrlLabel('https://example.com/pr/1')).toBe('example.com/pr/1')
+        expect(compactUrlLabel(`https://github.com/tiann/hapi/pull/${'9'.repeat(80)}`, 40)).toMatch(/…$/)
+    })
+})
+
 describe('SessionLogPanel', () => {
     afterEach(() => {
         cleanup()
     })
 
-    it('lists durable session events excluding link_seen and stale from All', async () => {
-        const { fetchSystemEvents } = renderPanel()
+    it('lists All rows with relative time, no provenance clutter', async () => {
+        renderPanel()
 
         await waitFor(() => {
             expect(screen.getByText('Working on Session Log')).toBeInTheDocument()
         })
-        expect(screen.queryByText('Link seen: https://example.com/pr/1')).not.toBeInTheDocument()
-        expect(screen.queryByRole('link', { name: 'https://example.com/pr/1' })).not.toBeInTheDocument()
-        expect(fetchSystemEvents).toHaveBeenCalledWith(expect.objectContaining({
-            sessionId: 'sess-1',
-            limit: 100
-        }))
+        expect(screen.getByText('2m ago')).toBeInTheDocument()
+        expect(screen.queryByText(/Source:/)).not.toBeInTheDocument()
+        expect(screen.queryByText('AGENT_NOTIFY_SUMMARY')).not.toBeInTheDocument()
+        expect(screen.queryByText(/Link seen:/)).not.toBeInTheDocument()
     })
 
-    it('filters to link_seen via the Links tab (only place URLs appear)', async () => {
+    it('Links tab shows one clickable compact label (not summary + URL)', async () => {
         const fetchSystemEvents = vi.fn(async (params: { eventType?: string }) => {
             if (params.eventType === 'link_seen') {
                 return { total: 1, events: [sampleEvents[0]] }
@@ -104,19 +111,15 @@ describe('SessionLogPanel', () => {
         fireEvent.click(within(filters).getByText('Links'))
 
         await waitFor(() => {
-            expect(fetchSystemEvents).toHaveBeenCalledWith(expect.objectContaining({
-                sessionId: 'sess-1',
-                eventType: 'link_seen'
-            }))
+            expect(screen.getByRole('link', { name: 'example.com/pr/1' })).toHaveAttribute(
+                'href',
+                'https://example.com/pr/1'
+            )
         })
-        await waitFor(() => {
-            expect(screen.queryByText('Working on Session Log')).not.toBeInTheDocument()
-        })
-        expect(screen.getByText('Link seen: https://example.com/pr/1')).toBeInTheDocument()
-        expect(screen.getByRole('link', { name: 'https://example.com/pr/1' })).toHaveAttribute(
-            'href',
-            'https://example.com/pr/1'
-        )
+        expect(screen.queryByText(/Link seen:/)).not.toBeInTheDocument()
+        expect(screen.queryByText('LINK_SEEN', { exact: false })).not.toBeInTheDocument()
+        expect(screen.queryByText(/hub-inferred/)).not.toBeInTheDocument()
+        expect(screen.getByText('5m ago')).toBeInTheDocument()
     })
 
     it('hides historical stale rows from the All tab', async () => {
@@ -125,7 +128,7 @@ describe('SessionLogPanel', () => {
             events: [
                 {
                     id: 3,
-                    ts: 1_700_000_000_300,
+                    ts: NOW - 30_000,
                     sourceKind: 'system',
                     sourceRef: 'sess-1',
                     eventType: 'stale',
