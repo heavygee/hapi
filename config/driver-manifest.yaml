@@ -79,6 +79,13 @@
 #     driver/integration merge-tip (not a single-file fix); useSSE fixup now
 #     lives on fix/soup-typecheck-followups. Soup 18 -> 17 layers.
 
+# 2026-07-14 manifest sweep (post upstream @ 87f5c78ab / #1031):
+#   * feat/mermaid-lightbox-737 -> #741 MERGED 2026-07-11 (branch ref gone; hard-fail)
+#   * feat/file-markdown-preview -> #957 MERGED 2026-07-11 (product files identical)
+#   * Soup 31 -> 29 layers. Base advances via rebuild to include #1031.
+#   * Keep fix/soup-markdown-standalone-cast (NonNullable pre/code casts still
+#     needed for soup typecheck; not in upstream #957 tip).
+
 base: upstream/main
 
 layers:
@@ -89,9 +96,8 @@ layers:
   # PR #803 (tiann/hapi) - open.
   - branch: feat/companion-fcm-push-api
 
-  # #737 - mermaid diagram click-to-zoom lightbox in chat (PR #741).
-  # Merges cleanly against upstream/main.
-  - branch: feat/mermaid-lightbox-737
+  # DROPPED 2026-07-14: feat/mermaid-lightbox-737 MERGED UPSTREAM as PR #741
+  # (65e1708, 2026-07-11). Branch ref deleted; work is on upstream/main.
 
   # #829 - mermaid parse-failure feedback: hub detects unrecognised mermaid
   # diagram types and emits a synthetic <render-issue> user message back to
@@ -274,13 +280,8 @@ layers:
   # Watch rerere on rebuild — may double scratchlist blocks; forget + re-resolve if so.
   - branch: fix/soup-sync-engine-collision
 
-  # #954 - markdown Source | Preview toggle in session file pane.
-  # 2026-06-19 peer 483284c8. Web-only: .md/.mdx get Source|Preview tabs
-  # (default preview, localStorage persistence). MarkdownRenderer standalone
-  # mode for file pane outside assistant-ui thread. Playwright:
-  # localdocs/playwright-runs/954-file-md-preview.png. Topmost for cheap
-  # rollback. Drop when upstream PR merges.
-  - branch: feat/file-markdown-preview
+  # DROPPED 2026-07-14: feat/file-markdown-preview MERGED UPSTREAM as PR #957
+  # (a82dd490, 2026-07-11). Product files identical to upstream/main.
 
   # #956 - cross-flavor inline image display (MCP display_image + ACP blocks).
   # 2026-06-19 peer 4971055d. CLI-only: shared prompt for Cursor/Gemini/Kimi/
@@ -376,6 +377,9 @@ layers:
 #   fix/hub-restart-cleanup-bundle                   -> #923
 #   feat/session-view-toggles                        -> #952
 #   fix/soup-codex-sse-metadata-collision            -> dropped 2026-06-20 (merge-tip; fix on fix/soup-typecheck-followups)
+#   --- 2026-07-14 batch ---
+#   feat/mermaid-lightbox-737                        -> #741
+#   feat/file-markdown-preview                       -> #957
 
 
   - branch: fix/sse-summary-metadata-unwrap
