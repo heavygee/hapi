@@ -6,8 +6,8 @@ This is a fork-local Claude Code guide for `heavygee/hapi`. Claude Code reads th
 
 | File | Purpose |
 |------|---------|
-| [`docs/operator/AGENTS.md`](docs/operator/AGENTS.md) | **Canonical fork guide** — HAPI baseline + fork intent + upstream PR discipline + voice/XR pointers. Supersedes root `AGENTS.md` for any fork-specific behavior. |
-| [`docs/tooling/feature-work-lifecycle.md`](docs/tooling/feature-work-lifecycle.md) | **Sole workflow doc** — read first for any local dev flow |
+| [`docs/operator/AGENTS.md`](docs/operator/AGENTS.md) | **Canonical fork guide** — HAPI baseline + fork intent + upstream PR discipline. **Open its "High-signal index"** before dogfood/handoff (inline media, soup, intake). Supersedes root `AGENTS.md` for fork-specific behavior. |
+| [`docs/tooling/feature-work-lifecycle.md`](docs/tooling/feature-work-lifecycle.md) | **Sole workflow doc** — read first for any local dev flow; § Proof tiers = `display_image` / `display_video` / `hapi-display-image.mjs` |
 | [`docs/tooling/new-feature-intake.md`](docs/tooling/new-feature-intake.md) | New product behavior — discovery, peer spawn handoff (`§0` block), soup vs clean demo, gates before operator test. |
 | [`docs/tooling/pr-review-loop.md`](docs/tooling/pr-review-loop.md) | Pre-PR gate, pre-push cold review, post-push monitor. Explains `cold-review-clean` semantics and fork-vs-upstream bot drift. |
 

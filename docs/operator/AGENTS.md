@@ -6,6 +6,18 @@ Work style: telegraph; noun-phrases ok; drop grammar;
 
 Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-work-lifecycle.md)** (sole workflow doc) → this file (fork identity, upstream PR) → root `README.md` → package READMEs.
 
+**Why progressive (not one mega-AGENTS):** keep always-loaded context small; put procedure in deep docs. Tradeoff: agents that only skim this file miss step-level gates. Fix = **high-signal pointers below** (one-liners + deep link), not copying whole lifecycle here. Root `AGENTS.md` stays upstream-verbatim (Codex Cloud RAG); fork-private surface is **this file** + Cursor/Claude overlays.
+
+### High-signal index — open these before “done / dogfood / handoff”
+
+| When | Do | Detail |
+|------|----|--------|
+| Any local feature / soup / peer work | Read lifecycle first | [`feature-work-lifecycle.md`](../tooling/feature-work-lifecycle.md) (sole workflow) |
+| Proof / screenshots / clips for operator | **Inline into HAPI chat** — do not only paste paths | Lifecycle [§ Proof tiers](../tooling/feature-work-lifecycle.md#proof-tiers-images-and-video) — MCP `display_image` / `display_video`, or `bun scripts/tooling/hapi-display-image.mjs <session-prefix> <abs-path> [title]` |
+| New behavior intake / peer spawn | Follow intake §0 handoff | [`new-feature-intake.md`](../tooling/new-feature-intake.md) |
+| Touch `:3006` soup | `hapi-driver-status --quiet` first; no stack-switch from agent shell | Lifecycle § Agent permission matrix; [`driver-soup.md`](../tooling/driver-soup.md) |
+| About to claim gates / PR ready | Mechanical verify before assertion | Lifecycle §6 + [`pr-review-loop.md`](../tooling/pr-review-loop.md) |
+
 ---
 
 ## Meta: what this fork is
@@ -72,7 +84,8 @@ ElevenLabs ConvAI today: handoff OK, readback weak, payment, no mode machine. Ta
 
 | Doc | Purpose |
 |-----|---------|
-| **`docs/operator/AGENTS.md`** | This file (fork agent canon) |
+| **`docs/operator/AGENTS.md`** | This file (fork agent canon + high-signal index) |
+| [`docs/tooling/feature-work-lifecycle.md`](../tooling/feature-work-lifecycle.md) | **Sole workflow** — soup/peer/clean, agent permissions, **§ Proof tiers** (`display_image` / video) |
 | [`docs/tooling/new-feature-intake.md`](../tooling/new-feature-intake.md) | **New behavior requests** — discovery, spawn handoff, soup vs clean, gates before operator test |
 | `docs/tooling/driver-soup.md` | Daily driver manifest, `hapi-active`, worktrees, **coordination (`hapi-driver-status`) and DB jiu-jitsu** |
 | `docs/plans/*` | Integration plans, PR A-F; peer agent: `2026-05-30-peer-agent-offering.md` |
