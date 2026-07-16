@@ -40,6 +40,7 @@ import { deleteShareTransfer, getShareTransfer } from '@/lib/shareTransfer'
 import { getDraft } from '@/lib/composer-drafts'
 import { useTranslation } from '@/lib/use-translation'
 import { SessionHeader } from '@/components/SessionHeader'
+import { SessionFlowPanel } from '@/components/SessionFlowPanel'
 import { CursorMigrationBanner } from '@/components/CursorMigrationBanner'
 import { TeamPanel } from '@/components/TeamPanel'
 import { usePlatform } from '@/hooks/usePlatform'
@@ -465,6 +466,7 @@ function SessionChatInner(props: SessionChatProps) {
     const visibleGroupsRef = useRef<ToolGroupBlock[]>([])
     const [forceScrollToken, setForceScrollToken] = useState(0)
     const [outlineOpen, setOutlineOpen] = useState(props.initialOutlineOpen ?? false)
+    const [flowOpen, setFlowOpen] = useState(false)
     useEffect(() => {
         if (!props.initialOutlineOpen) {
             return
@@ -875,6 +877,7 @@ function SessionChatInner(props: SessionChatProps) {
         blocksByIdRef.current.clear()
         visibleGroupsRef.current = []
         setOutlineOpen(false)
+        setFlowOpen(false)
     }, [props.session.id])
 
     // Exclude user messages that haven't been invoked yet — those appear in the
@@ -1131,6 +1134,10 @@ function SessionChatInner(props: SessionChatProps) {
         setOutlineOpen((open) => !open)
     }, [])
 
+    const handleToggleFlow = useCallback(() => {
+        setFlowOpen((open) => !open)
+    }, [])
+
     const handleViewTerminal = useCallback(() => {
         navigate({
             to: '/sessions/$sessionId/terminal',
@@ -1222,6 +1229,8 @@ function SessionChatInner(props: SessionChatProps) {
                 filesActive={false}
                 onToggleOutline={handleToggleOutline}
                 outlineActive={outlineOpen}
+                onToggleFlow={handleToggleFlow}
+                flowActive={flowOpen}
                 api={props.api}
                 canReopen={inactiveCanResume}
                 reopenDisabledReason={props.reopenDisabledReason}
@@ -1248,6 +1257,12 @@ function SessionChatInner(props: SessionChatProps) {
                             ? t('session.inactive.autoResume')
                             : t('session.inactive.cannotResume')}
                     </div>
+                </div>
+            ) : null}
+
+            {flowOpen ? (
+                <div className="overflow-y-auto pt-3">
+                    <SessionFlowPanel blocks={reconciled.blocks} metadata={props.session.metadata ?? null} />
                 </div>
             ) : null}
 

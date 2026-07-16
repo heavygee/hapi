@@ -153,6 +153,16 @@ export default {
   'session.outline.loadOlder': 'Load earlier',
   'session.outline.empty': 'No outline items in loaded messages',
   'session.outline.kind.user': 'User',
+  'session.flow.open': 'Session flow',
+  'session.flow.close': 'Close flow',
+  'session.flow.title': 'Flow',
+  'session.flow.files': 'Files touched',
+  'session.flow.filesEmpty': 'No file activity in loaded messages',
+  'session.flow.reads': '{n} read',
+  'session.flow.writes': '{n} write',
+  'session.flow.graph': 'Execution flow',
+  'session.flow.graphEmpty': 'No tool activity in loaded messages',
+  'session.flow.subagentSteps': '{n} steps',
 
   // Session actions
   'session.action.rename': 'Rename',
