@@ -1,0 +1,41 @@
+From a4f4f0126fc578bf238f41c0df9cf7564ad9ca05 Mon Sep 17 00:00:00 2001
+From: Debian <heavygee@oos-linux.in.lockhouse>
+Date: Tue, 14 Jul 2026 14:38:31 +0000
+Subject: [PATCH] fix(soup): export RpcListCodexSessionsResponse for restored
+ RPC
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ hub/src/sync/rpcGateway.ts | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/hub/src/sync/rpcGateway.ts b/hub/src/sync/rpcGateway.ts
+index 2dfadc417..d80a92a45 100644
+--- a/hub/src/sync/rpcGateway.ts
++++ b/hub/src/sync/rpcGateway.ts
+@@ -57,6 +57,22 @@ export type RpcListDirectoryResponse = ListDirectoryResponse
+ export type RpcPathExistsResponse = PathExistsResponse
+ export type RpcCodexModel = CodexModelSummary
+ export type RpcListCodexModelsResponse = CodexModelsResponse
++
++export type RpcCodexSession = {
++    id: string
++    title: string
++    updatedAt: number
++    path: string | null
++    model: string | null
++    isOld: boolean
++}
++
++export type RpcListCodexSessionsResponse = {
++    success: boolean
++    sessions?: RpcCodexSession[]
++    nextCursor?: string | null
++    error?: string
++}
+ export type RpcCursorModel = CursorModelSummary
+ export type RpcListCursorModelsResponse = CursorModelsResponse
+ export type RpcOpencodeModel = OpencodeModelSummary
+-- 
+2.39.5
+

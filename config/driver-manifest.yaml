@@ -89,6 +89,13 @@
 base: upstream/main
 
 layers:
+
+# 2026-07-14 soup rematerialize unblock (meta):
+#   Six fat tips carried stale FCM-owned paths; after FCM tip moved,
+#   rematerialize died on docs/api/native-companion-contract.md AA at
+#   overseer-inbox layer. Repointed to soup/*-nofcm tips that sync those
+#   paths to feat/companion-fcm-push-api. Durable fix: peers rebase
+#   overseer/PR branches onto upstream/main (thin tips) and drop soup/*-nofcm.
   # Native Android/Wear companion: FCM device registry + optional hub push channel.
   # NOTE: bumps SQLite SCHEMA_VERSION 10 -> 11 (adds fcm_devices table + 2 indexes).
   # Forward-migration is automatic at hub boot (stepMigrations[10]).
@@ -225,6 +232,29 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/session-copy-link @ feat/session-copy-link
   - branch: feat/session-copy-link
 
+  # 2026-07-14 thin rematerialize (meta): collapsed fat soup/overseer-*-nofcm
+  # tips into Step3 umbrella + thin replay. Peers ACKed (#22/#23 stand down;
+  # replay @ 96c8e7bf4). See docs/plans/peer-briefings/2026-07-14-overseer-thin-tip-receipts.md
+  # Overseer umbrella (thin): events(#22)+inbox(#23)+readonly entity Step3 + Session Log.
+  # Tip 4cb90c23f on upstream/main, ahead=1, zero FCM paths. Replaces fat
+  # fix/overseer-inbox-stale-noise + feat/overseer-readonly-entity soup tips.
+  - branch: feat/overseer-readonly-entity
+
+  # 2026-07-16: invisible AGENT_NOTIFY_SUMMARY contract (PR #81). Thin tip on
+  # feat/overseer-readonly-entity @ 4cb90c23f (d8e20c7b7, +5 files). Shared
+  # collapseRepeats/matchNotifySummaryLine + stripAgentContract; web strip at
+  # assistant-runtime. Raw stays in store for overseer. Needs hard-reload +
+  # hapi-restart-hub (shared). Drop when upstream. Worktree:
+  # ~/coding/hapi/worktrees/overseer-contract-invisible
+  - branch: feat/overseer-contract-invisible
+
+  # Overseer replay harness (thin): harness+CI+fixtures only. Tip 96c8e7bf4,
+  # ahead=1, zero FCM. Stack after umbrella; no substrate in this tip.
+  - branch: feat/overseer-replay-harness
+  # DROPPED 2026-07-14: fix/soup-inbox-client-methods + fix/soup-sync-engine-collision
+  # obsolete once feat/overseer-readonly-entity thin tip + FCM/scratchlist layers union via rerere.
+
+
   # DROPPED 2026-06-19: fix/soup-garden-react-import was a driver/integration
   # merge-tip branch (not a single-file fix). Layer 17 merge reintroduced stale
   # push-channel tests and blocked rebuild. feat/garden-route @ 6baf0e39 already
@@ -244,7 +274,6 @@ layers:
   # now events(#22) ← inbox(#23) ← stale-noise fix. Belongs upstream in #22's sweep;
   # rebase the whole overseer stack onto upstream/main (drops garden) before PR. To roll
   # back the stale fix only, repoint this layer back to feat/overseer-inbox-substrate.
-  - branch: fix/overseer-inbox-stale-noise
 
   # Step 2.75 (PR #55) - overseer replay harness v0 + CI gate + one-boss invariant
   # stub. Stacked on fix/overseer-inbox-stale-noise. Adds hub/src/overseer/* (new
@@ -252,7 +281,6 @@ layers:
   # golden §6 scenarios incl. stale-captured-only), .github/workflows/overseer-replay.yml.
   # Pure test/CI substrate - no runtime wiring, no schema. 19/19 tests green
   # (verified 2026-06-21). To roll back, drop this layer; stale-noise tip unaffected.
-  - branch: feat/overseer-replay-harness
 
   # Step 3 (PR #56) - read-only Overseer entity + 7 query tools + voice route
   # (descriptor scaffold, no stt-tts dep). Stacked on fix/overseer-inbox-stale-noise.
@@ -261,7 +289,6 @@ layers:
   # web/server, shared/index. INFORM-ONLY - no dispatch/confirm/mutation (Step 4 owns
   # dispatch). 24/24 tests green (verified 2026-06-21). New files vs #55, no file
   # overlap - merges clean. To roll back, drop this layer.
-  - branch: feat/overseer-readonly-entity
 
   # Soup band-aid (2026-06-22): the multi-layer merge auto-merged web/src/api/client.ts
   # but semantically DROPPED the overseer client block (fetchSystemEvents,
@@ -272,13 +299,11 @@ layers:
   # the scratchlist soup tip) re-adds the three methods after the voice-token methods so
   # they survive. Server endpoints already souped/live. MUST sit after the overseer +
   # scratchlist layers. Drop once the soup process resolves the client.ts merge durably.
-  - branch: fix/soup-inbox-client-methods
 
   # Soup band-aid (2026-06-22): syncEngine + store union for overseer/scratchlist
   # collision. Full events/inbox/entity substrate + scratchlist v2.2 attachment
   # methods merged into one thin layer (308bf0d1). MUST sit after inbox-client-methods.
   # Watch rerere on rebuild — may double scratchlist blocks; forget + re-resolve if so.
-  - branch: fix/soup-sync-engine-collision
 
   # DROPPED 2026-07-14: feat/file-markdown-preview MERGED UPSTREAM as PR #957
   # (a82dd490, 2026-07-11). Product files identical to upstream/main.
@@ -337,6 +362,9 @@ layers:
   # socket loss caused 60s resume_failed). Hub+cli only; hapi-restart-hub after rebuild.
   # Worktree: ~/coding/hapi/worktrees/cursor-acp-remote-resume
   - branch: fix/cursor-acp-remote-resume-ready
+  # DROPPED 2026-07-14: soup thin/nofcm sse+codex-rpc+markdown-cast — sse already upstream;
+  #   codex-rpc + markdown-cast applied as post-merge soup-heals if verify needs them.
+  # DROPPED 2026-07-14: sse-summary-unwrap — already on upstream/main (toSummaryMetadata gone).
 
 # Merged upstream (do not re-add):
 #   feat/web-terminal-autofocus                      -> #876 (2026-06-11)
@@ -382,8 +410,35 @@ layers:
 #   feat/file-markdown-preview                       -> #957
 
 
-  - branch: fix/sse-summary-metadata-unwrap
 
-  - branch: fix/soup-codex-sessions-rpc-collision
 
-  - branch: fix/soup-markdown-standalone-cast
+
+  # tiann/hapi#1043 - relative age labels through ~1y (weeks/months/almost 1y);
+  # calendar date only after a full year. Web-only. Thin kebab re-export for
+  # Session Log / SessionList soup callers of `@/lib/relative-time`.
+  # Worktree: ~/coding/hapi/worktrees/relative-time-year @ feat/relative-time-upto-year
+  # Topmost for cheap rollback. Drop when upstream PR merges.
+  - branch: feat/relative-time-upto-year
+
+  # tiann/hapi#1044 (fork #79, fork PR heavygee/hapi#80) - Cursor plan-mode
+  # approval relayed to the agent as "User cancelled". Cursor ACP blocking
+  # extension methods (cursor/ask_question, cursor/create_plan) need the
+  # JSON-RPC result nested as { outcome: { outcome: "accepted" } }; the adapter
+  # returned it flat, so Cursor read response.outcome.outcome as undefined and
+  # cancelled. CLI-only single-file fix (cursorExtensionAdapter.ts). Dogfood a
+  # Cursor plan-mode CreatePlan approval on :3006 before the upstream PR.
+  # Worktree: ~/coding/hapi/worktrees/cursor-plan-approve @ 779dcf8d4.
+  # Requires hub+runner restart (hapi-restart-hub) after rebuild. Drop when
+  # upstream PR merges.
+  - branch: fix/cursor-create-plan-outcome-envelope
+
+  # heavygee/hapi#82 - Session flow view: a read-only "Flow" toggle in the
+  # session header opening two panels (files touched + execution-flow graph),
+  # derived entirely from the existing ChatBlock tree (no new capture). Shared
+  # file-touch classifier lifted to @hapi/protocol (reused later by overseer
+  # file-contention + XR garden). Web-only change - no hub/cli restart needed,
+  # atomic dist swap + hard-reload dogfoods it. Inspired by Agent Flow
+  # (patoles/agent-flow, Apache-2.0; clean-room, no fork). Worktree:
+  # ~/coding/hapi/worktrees/trace-graph @ feat/trace-graph. Drop when the
+  # upstream PR merges.
+  - branch: feat/trace-graph

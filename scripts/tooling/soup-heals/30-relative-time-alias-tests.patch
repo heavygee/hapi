@@ -1,0 +1,106 @@
+From a88f08c3bf518743f8afef331cd802b6648132f2 Mon Sep 17 00:00:00 2001
+From: Debian <heavygee@oos-linux.in.lockhouse>
+Date: Tue, 14 Jul 2026 13:50:09 +0000
+Subject: [PATCH] fix(soup): align relative-time alias tests with up-to-year
+ buckets
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ web/src/lib/relative-time.test.ts | 51 ++++++++++++++++++-------------
+ 1 file changed, 30 insertions(+), 21 deletions(-)
+
+diff --git a/web/src/lib/relative-time.test.ts b/web/src/lib/relative-time.test.ts
+index a2a4c06e4..1c5e39db1 100644
+--- a/web/src/lib/relative-time.test.ts
++++ b/web/src/lib/relative-time.test.ts
+@@ -1,5 +1,7 @@
+ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+-import { formatAbsoluteDateTime, formatRelativeTime, type TFunc } from './relative-time'
++import { formatAbsoluteDateTime, formatRelativeTime } from './relative-time'
++
++type TFunc = (key: string, params?: Record<string, string | number>) => string
+ 
+ const t: TFunc = (key, params) => {
+     if (!params) return key
+@@ -10,8 +12,11 @@ const t: TFunc = (key, params) => {
+     return s
+ }
+ 
++const keyed: TFunc = (key, params) => `${key}:${params?.n ?? ''}`
++
+ describe('formatRelativeTime', () => {
+-    const NOW = new Date('2026-06-13T17:00:00Z').getTime()
++    const NOW = new Date('2026-07-14T12:00:00Z').getTime()
++    const DAY = 24 * 60 * 60_000
+ 
+     beforeEach(() => {
+         vi.useFakeTimers()
+@@ -24,34 +29,38 @@ describe('formatRelativeTime', () => {
+ 
+     it('returns just-now bucket for sub-minute deltas', () => {
+         expect(formatRelativeTime(NOW - 30_000, t)).toBe('session.time.justNow')
+-        expect(formatRelativeTime(NOW - 59_000, t)).toBe('session.time.justNow')
+     })
+ 
+     it('returns minutes bucket for sub-hour deltas', () => {
+-        expect(formatRelativeTime(NOW - 5 * 60_000, t)).toBe('session.time.minutesAgo')
+-            // params expansion is exercised via the tag substitution below.
+-        expect(formatRelativeTime(NOW - 5 * 60_000, ((key, params) => {
+-            return `${key}:${params?.n ?? ''}`
+-        }) as TFunc)).toBe('session.time.minutesAgo:5')
++        expect(formatRelativeTime(NOW - 5 * 60_000, keyed)).toBe('session.time.minutesAgo:5')
+     })
+ 
+     it('returns hours bucket for sub-day deltas', () => {
+-        expect(formatRelativeTime(NOW - 3 * 60 * 60_000, ((key, params) => {
+-            return `${key}:${params?.n ?? ''}`
+-        }) as TFunc)).toBe('session.time.hoursAgo:3')
++        expect(formatRelativeTime(NOW - 3 * 60 * 60_000, keyed)).toBe('session.time.hoursAgo:3')
++    })
++
++    it('returns days bucket through 13 days', () => {
++        expect(formatRelativeTime(NOW - 4 * DAY, keyed)).toBe('session.time.daysAgo:4')
++        expect(formatRelativeTime(NOW - 13 * DAY, keyed)).toBe('session.time.daysAgo:13')
++    })
++
++    it('returns weeks bucket between 2 weeks and under 2 months', () => {
++        expect(formatRelativeTime(NOW - 15 * DAY, keyed)).toBe('session.time.weeksAgo:2')
++        expect(formatRelativeTime(NOW - 45 * DAY, keyed)).toBe('session.time.weeksAgo:6')
++    })
++
++    it('returns months bucket from ~2 months until almost a year', () => {
++        expect(formatRelativeTime(NOW - 70 * DAY, keyed)).toBe('session.time.monthsAgo:2')
++        expect(formatRelativeTime(NOW - 300 * DAY, keyed)).toBe('session.time.monthsAgo:10')
+     })
+ 
+-    it('returns days bucket for sub-week deltas', () => {
+-        expect(formatRelativeTime(NOW - 4 * 24 * 60 * 60_000, ((key, params) => {
+-            return `${key}:${params?.n ?? ''}`
+-        }) as TFunc)).toBe('session.time.daysAgo:4')
++    it('returns almost-one-year for the final stretch under 365 days', () => {
++        expect(formatRelativeTime(NOW - 340 * DAY, t)).toBe('session.time.almostOneYearAgo')
++        expect(formatRelativeTime(NOW - 364 * DAY, t)).toBe('session.time.almostOneYearAgo')
+     })
+ 
+-    it('falls back to a locale date string for >= 1 week', () => {
+-        const tenDaysAgo = NOW - 10 * 24 * 60 * 60_000
+-        const out = formatRelativeTime(tenDaysAgo, t)
+-        // Locale shape varies by environment - just assert it is NOT one
+-        // of the relative-bucket keys, which is what we care about.
++    it('falls back to a locale date string for >= 1 year', () => {
++        const out = formatRelativeTime(NOW - 400 * DAY, t)
+         expect(out).not.toMatch(/session\.time\./)
+         expect(out).not.toBeNull()
+     })
+@@ -69,7 +78,7 @@ describe('formatRelativeTime', () => {
+ 
+ describe('formatAbsoluteDateTime', () => {
+     it('returns a non-null string for finite ms timestamps', () => {
+-        const out = formatAbsoluteDateTime(new Date('2026-06-13T17:00:00Z').getTime())
++        const out = formatAbsoluteDateTime(new Date('2026-07-14T12:00:00Z').getTime())
+         expect(out).not.toBeNull()
+         expect(typeof out).toBe('string')
+     })
+-- 
+2.39.5
+

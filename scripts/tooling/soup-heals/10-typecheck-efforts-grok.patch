@@ -1,0 +1,58 @@
+From 5ca6544713037b22587e842cebfd42398a649025 Mon Sep 17 00:00:00 2001
+From: Debian <heavygee@oos-linux.in.lockhouse>
+Date: Tue, 14 Jul 2026 09:35:22 +0000
+Subject: [PATCH] fix(soup): typecheck after #1012 dynamic efforts + grok
+ images
+
+REASONING_EFFORTS was removed upstream; use parseReasoningEffortValue on
+imported Codex history. Handle generated_image in Grok display switch so
+the ACP message union stays exhaustive.
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ cli/src/codex/runCodex.ts          | 14 ++++++++------
+ cli/src/grok/grokRemoteLauncher.ts |  3 +++
+ 2 files changed, 11 insertions(+), 6 deletions(-)
+
+diff --git a/cli/src/codex/runCodex.ts b/cli/src/codex/runCodex.ts
+index a4f988a60..e4dc5a28d 100644
+--- a/cli/src/codex/runCodex.ts
++++ b/cli/src/codex/runCodex.ts
+@@ -113,12 +113,14 @@ export async function runCodex(opts: {
+             if (!opts.model && importedHistory.model) {
+                 currentModel = importedHistory.model;
+             }
+-            if (
+-                !opts.modelReasoningEffort
+-                && importedHistory.modelReasoningEffort
+-                && REASONING_EFFORTS.has(importedHistory.modelReasoningEffort as ReasoningEffort)
+-            ) {
+-                currentModelReasoningEffort = importedHistory.modelReasoningEffort as ReasoningEffort;
++            if (!opts.modelReasoningEffort && importedHistory.modelReasoningEffort) {
++                try {
++                    currentModelReasoningEffort = parseReasoningEffortValue(
++                        importedHistory.modelReasoningEffort,
++                    );
++                } catch {
++                    // Ignore invalid persisted effort; keep launcher default.
++                }
+             }
+         } catch (error) {
+             logger.debug('[codex] Failed to import Codex session history:', error);
+diff --git a/cli/src/grok/grokRemoteLauncher.ts b/cli/src/grok/grokRemoteLauncher.ts
+index f13226767..80537a07a 100644
+--- a/cli/src/grok/grokRemoteLauncher.ts
++++ b/cli/src/grok/grokRemoteLauncher.ts
+@@ -313,6 +313,9 @@ class GrokRemoteLauncher extends RemoteLauncherBase {
+             case 'error':
+                 this.messageBuffer.addMessage(message.message, 'status')
+                 break
++            case 'generated_image':
++                this.messageBuffer.addMessage(`Generated image: ${message.fileName}`, 'assistant')
++                break
+             case 'turn_complete':
+                 this.messageBuffer.addMessage('Turn complete', 'status')
+                 break
+-- 
+2.39.5
+

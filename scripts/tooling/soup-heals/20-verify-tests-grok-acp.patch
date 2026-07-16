@@ -1,0 +1,75 @@
+From 5379986e1a39e3fc876b861e1e057def996f1c2c Mon Sep 17 00:00:00 2001
+From: Debian <heavygee@oos-linux.in.lockhouse>
+Date: Tue, 14 Jul 2026 09:37:40 +0000
+Subject: [PATCH] fix(soup): unblock verify tests after Grok + ACP merge drift
+
+Align machines spawn mock arity with importHistory, stub Session.getModel
+for Claude retry tests, and await ACP sessionUpdateQueue before asserting
+title forwards.
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ cli/src/agent/backends/acp/AcpSdkBackend.test.ts  | 5 ++++-
+ cli/src/claude/claudeRemoteLauncher.retry.test.ts | 3 ++-
+ hub/src/web/routes/machines.test.ts               | 1 +
+ 3 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/cli/src/agent/backends/acp/AcpSdkBackend.test.ts b/cli/src/agent/backends/acp/AcpSdkBackend.test.ts
+index cccbeb700..a17c5a921 100644
+--- a/cli/src/agent/backends/acp/AcpSdkBackend.test.ts
++++ b/cli/src/agent/backends/acp/AcpSdkBackend.test.ts
+@@ -828,7 +828,7 @@ describe('AcpSdkBackend', () => {
+         expect(realtimeUsage.map((m) => m.contextTokens)).toEqual([1_000, 2_500]);
+     });
+ 
+-    it('forwards title changes from session_info_update', () => {
++    it('forwards title changes from session_info_update', async () => {
+         const backend = new AcpSdkBackend({ command: 'agent' });
+         const updates: Array<{ title?: string | null }> = [];
+         backend.setSessionInfoUpdateListener((update) => updates.push(update));
+@@ -836,6 +836,7 @@ describe('AcpSdkBackend', () => {
+         const backendInternal = backend as unknown as {
+             activeSessionId: string | null;
+             handleSessionUpdate: (params: unknown) => void;
++            sessionUpdateQueue: Promise<void>;
+         };
+         backendInternal.activeSessionId = 'session-1';
+ 
+@@ -868,6 +869,8 @@ describe('AcpSdkBackend', () => {
+             }
+         });
+ 
++        await backendInternal.sessionUpdateQueue;
++
+         expect(updates).toEqual([
+             { title: 'Native ACP title' },
+             { title: null }
+diff --git a/cli/src/claude/claudeRemoteLauncher.retry.test.ts b/cli/src/claude/claudeRemoteLauncher.retry.test.ts
+index 29c340fa0..5b77d534b 100644
+--- a/cli/src/claude/claudeRemoteLauncher.retry.test.ts
++++ b/cli/src/claude/claudeRemoteLauncher.retry.test.ts
+@@ -95,7 +95,8 @@ function createSessionStub() {
+         removeSessionFoundCallback: () => {},
+         consumeOneTimeFlags: () => {},
+         onSessionFound: () => {},
+-        clearSessionId: () => {}
++        clearSessionId: () => {},
++        getModel: () => undefined
+     };
+     return { session, events };
+ }
+diff --git a/hub/src/web/routes/machines.test.ts b/hub/src/web/routes/machines.test.ts
+index 84899fb25..247065537 100644
+--- a/hub/src/web/routes/machines.test.ts
++++ b/hub/src/web/routes/machines.test.ts
+@@ -42,6 +42,7 @@ describe('machines routes', () => {
+                 _sessionType?: string,
+                 _worktreeName?: string,
+                 _resumeSessionId?: string,
++                _importHistory?: boolean,
+                 _effort?: string,
+                 permissionMode?: string
+             ) => {
+-- 
+2.39.5
+

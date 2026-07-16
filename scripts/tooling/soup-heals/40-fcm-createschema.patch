@@ -1,0 +1,44 @@
+From bff35b09d45a879299c31cd59059ca798979327c Mon Sep 17 00:00:00 2001
+From: Debian <heavygee@oos-linux.in.lockhouse>
+Date: Tue, 14 Jul 2026 15:00:54 +0000
+Subject: [PATCH] fix(soup): restore fcm_devices in createSchema after
+ overseer/FCM union
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Fresh DBs jumped to schema v12 without running V10→V11, so REQUIRED_TABLES
+asserted fcm_devices that createSchema never built (hub boot + CLI tests fail).
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ hub/src/store/index.ts | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/hub/src/store/index.ts b/hub/src/store/index.ts
+index edc7b8b49..c8cc05fa3 100644
+--- a/hub/src/store/index.ts
++++ b/hub/src/store/index.ts
+@@ -296,6 +296,19 @@ export class Store {
+             );
+             CREATE INDEX IF NOT EXISTS idx_push_subscriptions_namespace ON push_subscriptions(namespace);
+ 
++            CREATE TABLE IF NOT EXISTS fcm_devices (
++                id INTEGER PRIMARY KEY AUTOINCREMENT,
++                namespace TEXT NOT NULL,
++                token TEXT NOT NULL,
++                platform TEXT NOT NULL,
++                device_id TEXT NOT NULL,
++                created_at INTEGER NOT NULL,
++                updated_at INTEGER NOT NULL,
++                UNIQUE(namespace, device_id, platform)
++            );
++            CREATE INDEX IF NOT EXISTS idx_fcm_devices_namespace ON fcm_devices(namespace);
++            CREATE INDEX IF NOT EXISTS idx_fcm_devices_token ON fcm_devices(token);
++
+             CREATE TABLE IF NOT EXISTS session_scratchlist (
+                 session_id TEXT NOT NULL,
+                 entry_id TEXT NOT NULL,
+-- 
+2.39.5
+

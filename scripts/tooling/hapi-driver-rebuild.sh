@@ -190,6 +190,60 @@ done
 
 echo "Driver HEAD: $(git -C "$DRIVER" log -1 --oneline)"
 
+# Post-merge heal: garden + share-target layers can leave a duplicate /share route
+# that breaks vite ("shareRoute has already been declared"). Thin soup layers cannot
+# reliably carry this delete across rematerializes (tip would be fat). Heal in-tree.
+ROUTER="$DRIVER/web/src/router.tsx"
+if [[ -f "$ROUTER" ]]; then
+    share_decls="$(grep -c '^const shareRoute = createRoute' "$ROUTER" || true)"
+    if [[ "${share_decls:-0}" -gt 1 ]]; then
+        echo "Post-merge heal: deduping $share_decls shareRoute declarations in web/src/router.tsx ..."
+        python3 - "$ROUTER" <<'PY'
+import re, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+text = path.read_text()
+pattern = re.compile(r"\nconst shareRoute = createRoute\(\{.*?\n\}\)\n", re.S)
+matches = list(pattern.finditer(text))
+if len(matches) < 2:
+    raise SystemExit(0)
+second = matches[1]
+path.write_text(text[: second.start()] + text[second.end() :])
+print(f"  removed duplicate shareRoute block ({len(matches)} -> {len(matches) - 1})")
+PY
+        git -C "$DRIVER" add web/src/router.tsx
+        git -C "$DRIVER" commit --no-edit --no-verify -q -m "fix(soup): dedupe shareRoute after garden/share layer merge"
+        echo "Driver HEAD: $(git -C "$DRIVER" log -1 --oneline)"
+    fi
+fi
+
+# Post-merge heal patches (tip fixes that rematerialize cannot express as thin layers).
+# Ordered files under scripts/tooling/soup-heals/*.patch — apply with 3-way; skip if empty.
+HEAL_DIR="$PRIMARY/scripts/tooling/soup-heals"
+if [[ -d "$HEAL_DIR" ]]; then
+    shopt -s nullglob
+    heal_patches=("$HEAL_DIR"/*.patch)
+    shopt -u nullglob
+    if [[ ${#heal_patches[@]} -gt 0 ]]; then
+        echo "Post-merge heal: applying ${#heal_patches[@]} patch(es) from soup-heals/ ..."
+        for patch in "${heal_patches[@]}"; do
+            if git -C "$DRIVER" apply --check -3 "$patch" 2>/dev/null; then
+                git -C "$DRIVER" apply -3 "$patch"
+                git -C "$DRIVER" add -A
+                if git -C "$DRIVER" diff --cached --quiet; then
+                    echo "  applied $(basename "$patch") (no tree change)"
+                else
+                    git -C "$DRIVER" commit --no-edit --no-verify -q -m "fix(soup): apply heal $(basename "$patch")"
+                    echo "  applied $(basename "$patch")"
+                fi
+            else
+                echo "  skip $(basename "$patch") (already applied or does not apply cleanly)"
+            fi
+        done
+        echo "Driver HEAD: $(git -C "$DRIVER" log -1 --oneline)"
+    fi
+fi
+
 VERIFY_SCRIPT="$PRIMARY/scripts/tooling/verify-soup-web-dist.mjs"
 
 if [[ "$BUILD_WEB" -eq 1 ]] || [[ ! -f "$DRIVER/web/dist/index.html" ]]; then
