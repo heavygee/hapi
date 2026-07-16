@@ -117,7 +117,7 @@ export function extractAssistantPlainText(content: unknown): string | null {
     return null
 }
 
-const NOTIFY_SUMMARY_PREFIX = 'AGENT_NOTIFY_SUMMARY '
+export const NOTIFY_SUMMARY_TOKEN = 'AGENT_NOTIFY_SUMMARY'
 
 export type NotifySummary = {
     version?: number
@@ -129,19 +129,56 @@ export type NotifySummary = {
 }
 
 /**
+ * Collapse every run of a repeated character down to a single instance
+ * (`"SUMMARY"` -> `"SUMARY"`, `"aaa-bb"` -> `"a-b"`).
+ *
+ * This is the corruption-normalizer for the notify contract. Observed in
+ * the wild (354k stored messages): Cursor drops one of a doubled letter in
+ * roughly 1 of 7 turns, mangling `AGENT_NOTIFY_SUMMARY` -> `AGENT_NOTIFY_SUMARY`
+ * (Claude/Codex: 0 occurrences). Matching on the collapse-normalized form
+ * makes the correct and dup-dropped tokens compare equal, so a corrupted
+ * line is still detected (and therefore both stripped from the human view
+ * and parsed into an inbox event) instead of double-failing.
+ */
+export function collapseRepeats(value: string): string {
+    return value.replace(/(.)\1+/g, '$1')
+}
+
+const NOTIFY_SUMMARY_TOKEN_NORM = collapseRepeats(NOTIFY_SUMMARY_TOKEN)
+
+/**
+ * If `line` is a notify-summary line, return the raw JSON substring `{...}`;
+ * otherwise `null`. `line` is expected to already be the last non-empty line
+ * of a message (callers enforce the end-anchor).
+ *
+ * Corruption-tolerant: the leading token is matched by collapse-normalized
+ * equality (see `collapseRepeats`), so Cursor's `SUMMARY`->`SUMARY` dup-drop
+ * still matches. The JSON must start with `{` and end with `}`; a token that
+ * is embedded in prose (`"see the AGENT_NOTIFY_SUMMARY {..}"`) fails because
+ * its collapse-normalized prefix will not equal the bare token.
+ */
+export function matchNotifySummaryLine(line: string): string | null {
+    const trimmed = line.trim()
+    const braceIdx = trimmed.indexOf('{')
+    if (braceIdx <= 0) return null
+    const token = trimmed.slice(0, braceIdx).trim()
+    if (!token || collapseRepeats(token) !== NOTIFY_SUMMARY_TOKEN_NORM) return null
+    const jsonPart = trimmed.slice(braceIdx).trim()
+    if (!jsonPart.startsWith('{') || !jsonPart.endsWith('}')) return null
+    return jsonPart
+}
+
+/**
  * Look for an `AGENT_NOTIFY_SUMMARY {...json...}` line as the **last
  * non-empty line** of an agent's plain-text message.
  *
- * Strict end-anchor: anything below the JSON line (even whitespace) is
- * fine, but if the agent wrote prose AFTER the line we treat it as
- * non-compliant and return null. This also makes false positives from
+ * Strict end-anchor: trailing whitespace-only lines are fine, but prose
+ * AFTER the JSON line is treated as non-compliant. This also makes a
  * `AGENT_NOTIFY_SUMMARY` quoted inside an earlier paragraph harmless,
  * because such a quote is never the last line.
  *
- * Returns the parsed object on success, `null` on any deviation. The
- * shape is intentionally loose - we only trust `summary`, `action`, and
- * `status` for notification rendering, but the full object is forwarded
- * onto the meta-event bus when Phase 2 lands.
+ * The token match is corruption-tolerant (see `matchNotifySummaryLine`).
+ * Returns the parsed object on success, `null` on any deviation.
  */
 export function extractNotifySummary(text: unknown): NotifySummary | null {
     if (typeof text !== 'string' || text.length === 0) return null
@@ -151,11 +188,8 @@ export function extractNotifySummary(text: unknown): NotifySummary | null {
     while (lastIdx >= 0 && lines[lastIdx].trim() === '') lastIdx -= 1
     if (lastIdx < 0) return null
 
-    const lastLine = lines[lastIdx].trim()
-    if (!lastLine.startsWith(NOTIFY_SUMMARY_PREFIX)) return null
-
-    const jsonPart = lastLine.slice(NOTIFY_SUMMARY_PREFIX.length).trim()
-    if (!jsonPart.startsWith('{') || !jsonPart.endsWith('}')) return null
+    const jsonPart = matchNotifySummaryLine(lines[lastIdx])
+    if (!jsonPart) return null
 
     try {
         const parsed: unknown = JSON.parse(jsonPart)

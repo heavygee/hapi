@@ -1,4 +1,5 @@
 import type { NotifySummary } from './messages'
+import { matchNotifySummaryLine } from './messages'
 
 export const NOTIFY_SUMMARY_STATUSES = [
     'done',
@@ -20,6 +21,41 @@ export const AGENT_NOTIFY_CONTRACT_INLINE_PREFIX = [
     '---',
     ''
 ].join('\n')
+
+/**
+ * Strip the machine-only notify contract from text destined for HUMAN eyes.
+ *
+ * The `AGENT_NOTIFY_SUMMARY` contract rides fully in-band so it works across
+ * every agent flavor, but it must never reach the human render. Two removals:
+ *   1. The trailing `AGENT_NOTIFY_SUMMARY {...}` line (collapse-normalized, so
+ *      Cursor's corrupted `SUMARY` variant strips too) plus any blank lines it
+ *      leaves behind.
+ *   2. A leading inline-contract prefix block - only present on historical
+ *      operator messages stored before input-side decoupling (the hub now
+ *      injects the prefix into the agent-bound copy only, never the stored one).
+ *
+ * Overseer event capture and notification builders MUST read the raw text, not
+ * this - stripping is render-only so the machine signal survives in the store.
+ */
+export function stripAgentContract(text: string): string {
+    if (typeof text !== 'string' || text.length === 0) return text
+    let out = text
+
+    if (out.startsWith(AGENT_NOTIFY_CONTRACT_INLINE_PREFIX)) {
+        out = out.slice(AGENT_NOTIFY_CONTRACT_INLINE_PREFIX.length)
+    }
+
+    const lines = out.split('\n')
+    let lastIdx = lines.length - 1
+    while (lastIdx >= 0 && lines[lastIdx].trim() === '') lastIdx -= 1
+    if (lastIdx >= 0 && matchNotifySummaryLine(lines[lastIdx])) {
+        const kept = lines.slice(0, lastIdx)
+        while (kept.length > 0 && kept[kept.length - 1].trim() === '') kept.pop()
+        out = kept.join('\n')
+    }
+
+    return out
+}
 
 export const HAPI_EVENTS_BEGIN = '<!--HAPI_EVENTS_BEGIN-->'
 export const HAPI_EVENTS_END = '<!--HAPI_EVENTS_END-->'
