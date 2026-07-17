@@ -144,12 +144,18 @@ const PATTERNS: Pattern[] = [
         kind: 'capacity_exhausted',
         transient: false
     },
+    {
+        test: (t) => /^[ \t]*Error: T: WritableIterable/im.test(t)
+            || /^[ \t]*Error: RetriableError: WritableIterable/im.test(t),
+        kind: 'transport_closed',
+        transient: true
+    },
     // catch-all for unknown `Error: T:` / `Error: RetriableError:` prefixes — placed last
     {
         test: (t) => /^[ \t]*Error: T:/im.test(t)
             || /^[ \t]*Error: RetriableError:/im.test(t),
         kind: 'unknown_t_prefix',
-        transient: false
+        transient: true
     }
 ]
 
