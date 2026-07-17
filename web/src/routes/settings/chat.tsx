@@ -1,4 +1,3 @@
-import { api } from '@/api/client'
 import { useTranslation } from '@/lib/use-translation'
 import { getComposerEnterBehaviorOptions, useComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
 import { getTerminalToolDisplayModeOptions, useTerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
