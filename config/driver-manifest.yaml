@@ -123,6 +123,7 @@ layers:
   # MUST be exactly one commit on top of feat/companion-fcm-push-api tip —
   # do NOT re-merge old FCM/push files (NativeFallbackProbe 5-arg constructor
   # was removed in 8f870516; stale merge-tips poison every soup rebuild).
+  # Tip 2026-07-17: e2d5a294c (1 commit on FCM @ 0d30a21c0; fat bak backup/cursor-model-error-fcm-bridge-fat).
   # Refresh: git -C worktrees/cursor-model-error-fcm-bridge reset --hard feat/companion-fcm-push-api && cherry-pick 64583aa7
   - branch: soup/cursor-model-error-fcm-bridge
 
@@ -353,8 +354,10 @@ layers:
 
   # #878 leg 3 - transient model error bridge (one prompt per atTs).
   # Manual [Bridge & retry], opt-in auto-bridge, retriedAndFailed gating.
-  # Stacks on detect layer above. Worktree: model-error-bridge @ 5cbd290d.
-  # Drop when upstream PR merges.
+  # Thin-rebased 2026-07-17 onto detect @ da14312d0 → tip 77c7c3e8c (4 commits;
+  # detect IS ancestor). Fat bak: backup/cursor-model-error-bridge-fat @ 1be4e117c.
+  # Keep: 82cd98ee5, 01ceebb91, 9eeab666a (+332c722c2 folded), 1be4e117c.
+  # Worktree: model-error-bridge. Drop when upstream PR merges.
   - branch: feat/cursor-model-error-bridge
 
   # tiann/hapi#991 - Cursor ACP remote resume: reuse original HAPI row via
