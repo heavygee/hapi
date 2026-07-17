@@ -363,6 +363,9 @@ layers:
   # tiann/hapi#991 - Cursor ACP remote resume: reuse original HAPI row via
   # existingSessionId instead of spawn-then-merge + session-ready wait (tailnet
   # socket loss caused 60s resume_failed). Hub+cli only; hapi-restart-hub after rebuild.
+  # Thin-rebased 2026-07-17 onto bridge @ 77c7c3e8c → tip 2d4477e4e (1 commit; soup-compat folded/dropped — importHistory already in soup;
+  # fat bak backup/cursor-acp-remote-resume-fat @ b4a855656). Was poisoned by
+  # fat model-error-bridge ancestry (17 commits / ModelError hotfiles).
   # Worktree: ~/coding/hapi/worktrees/cursor-acp-remote-resume
   - branch: fix/cursor-acp-remote-resume-ready
   # DROPPED 2026-07-14: soup thin/nofcm sse+codex-rpc+markdown-cast — sse already upstream;
