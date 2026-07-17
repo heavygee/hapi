@@ -354,7 +354,7 @@ layers:
 
   # #878 leg 3 - transient model error bridge (one prompt per atTs).
   # Manual [Bridge & retry], opt-in auto-bridge, retriedAndFailed gating.
-  # Thin-rebased 2026-07-17 onto detect @ da14312d0 → tip 84b89197b (7 commits;
+  # Thin-rebased 2026-07-17 onto detect @ da14312d0 → tip f9831beac (8 commits;
   # detect IS ancestor). Fat bak: backup/cursor-model-error-bridge-fat @ 1be4e117c.
   # Keep: 82cd98ee5, 01ceebb91, 9eeab666a (+332c722c2 folded), 1be4e117c.
   # Worktree: model-error-bridge. Drop when upstream PR merges.
