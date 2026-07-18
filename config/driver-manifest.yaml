@@ -449,3 +449,21 @@ layers:
   # ~/coding/hapi/worktrees/trace-graph @ feat/trace-graph. Drop when the
   # upstream PR merges.
   - branch: feat/trace-graph
+
+  # tiann/hapi#1085 / upstream PR #1087 - Cursor `agent acp --worktree` prints
+  # plain-text `Using worktree: …` on stdout before JSON-RPC; AcpStdioTransport
+  # treated parse failure as fatal and killed the session before cursorSessionId.
+  # Fail-soft ignore non-JSON ACP stdout. CLI-only. Dogfood: New Session →
+  # Cursor → sessionType worktree on a machine whose runner loads soup cli
+  # (oos-linux after hapi-restart-hub). Worktree:
+  # ~/coding/hapi/worktrees/cursor-worktree-acp-banner @
+  # fix/cursor-worktree-acp-stdout-banner. Drop when upstream PR merges.
+  - branch: fix/cursor-worktree-acp-stdout-banner
+
+  # tiann/hapi#1084 / upstream PR #1086 (draft until operator dogfood) - Hub
+  # governs runner capabilities so Cursor reopen soft-fails on version skew
+  # instead of resume_failed. Hub+cli+shared+web (RunnerVersionSkewBanner).
+  # Requires hapi-restart-hub after rebuild. Worktree:
+  # ~/coding/hapi/worktrees/hub-runner-version-skew @
+  # fix/hub-runner-version-governance. Drop when upstream PR merges.
+  - branch: fix/hub-runner-version-governance

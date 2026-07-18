@@ -17,10 +17,11 @@ HOOKS_JSON="${REPO_ROOT}/.cursor/hooks.json"
 PRODUCT_GUARD="${REPO_ROOT}/scripts/tooling/hapi-product-code-guard.sh"
 SYSTEMCTL_GUARD="${REPO_ROOT}/scripts/tooling/hapi-systemctl-guard.sh"
 MUTATION_GUARD="${REPO_ROOT}/scripts/tooling/hapi-production-mutation-guard.sh"
+MIRROR_HYGIENE_GUARD="${REPO_ROOT}/scripts/tooling/hapi-mirror-hygiene-guard.sh"
 SOUP_DOGFOOD_RULE="${REPO_ROOT}/scripts/tooling/cursor-rules/hapi-driver-soup-dogfood.mdc"
 USER_RULES="${HOME}/.cursor/rules"
 
-for s in "$PRODUCT_GUARD" "$SYSTEMCTL_GUARD" "$MUTATION_GUARD"; do
+for s in "$PRODUCT_GUARD" "$SYSTEMCTL_GUARD" "$MUTATION_GUARD" "$MIRROR_HYGIENE_GUARD"; do
     if [ ! -x "$s" ]; then
         echo "ERROR: ${s} missing or not executable" >&2
         exit 1
@@ -47,6 +48,10 @@ cat > "$HOOKS_JSON" <<'JSON'
         "matcher": "Write|Edit|StrReplace|MultiEdit|EditNotebook"
       },
       {
+        "command": "./scripts/tooling/hapi-mirror-hygiene-guard.sh",
+        "matcher": "Write|Edit|StrReplace|MultiEdit|EditNotebook|Shell"
+      },
+      {
         "command": "./scripts/tooling/hapi-systemctl-guard.sh",
         "matcher": "Shell"
       },
@@ -62,12 +67,14 @@ JSON
 echo "Wrote ${HOOKS_JSON}"
 echo "Hooks installed:"
 echo "  hapi-product-code-guard.sh       -> blocks edits to cli/, hub/, web/, shared/ outside ~/coding/hapi/worktrees/"
+echo "  hapi-mirror-hygiene-guard.sh     -> blocks bun install / lockfile+e2e writes on primary mirror (soup utensils)"
 echo "  hapi-systemctl-guard.sh          -> blocks 'sudo systemctl <destructive-verb> hapi-{hub,runner,runner-watchdog}.service'"
 echo "  hapi-production-mutation-guard.sh -> blocks feat-dist swap, driver hand-merge, raw driver/web builds, full rebuild"
 echo "  hapi-driver-soup-dogfood.mdc       -> symlink ${RULE_LINK} → canonical rule (alwaysApply; re-run installer after rule edits)"
 echo
 echo "Bypasses when needed (operator-approved):"
 echo "  HAPI_OPERATOR_PRODUCT_EDIT_OVERRIDE=1   (product-code edits)"
+echo "  HAPI_OPERATOR_MIRROR_HYGIENE_OVERRIDE=1 (mirror install/e2e — TTY only)"
 echo "  HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1      (systemctl on hapi units)"
 echo "  HAPI_OPERATOR_PRODUCTION_MUTATION_OVERRIDE=1 (dist swap / driver hand-merge — TTY only)"
 echo

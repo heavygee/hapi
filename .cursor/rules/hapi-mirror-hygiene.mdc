@@ -1,0 +1,37 @@
+---
+description: Keep primary mirror porcelain-clean — soup utensils must stay remake-ready
+alwaysApply: true
+---
+
+# Mirror utensil hygiene (operator-local)
+
+**`~/coding/hapi` (primary mirror) must stay clean enough for any agent to sync + rematerialize soup.**
+
+Dirty `package.json` / lockfiles / untracked `e2e/` on the mirror block `hapi-sync-fork-main` and `hapi-driver-rebuild` for everyone. That is a kitchen-skunk failure, not a private WIP choice.
+
+## NEVER on the mirror
+
+- `bun install` / `npm install` / `pnpm` / `yarn` / `bun add` at `~/coding/hapi`
+- Write `e2e/**`, `package.json`, or lockfiles on the mirror for feature / peer e2e work
+
+## ALWAYS use a worktree instead
+
+```bash
+cd ~/coding/hapi/worktrees/<your-feature>
+bun install          # OK here
+# write e2e specs here
+```
+
+## Mechanical guard
+
+`scripts/tooling/hapi-mirror-hygiene-guard.sh` (Cursor + Claude PreToolUse) denies the NEVER list. Install/refresh: `scripts/tooling/hapi-install-cursor-hooks.sh`.
+
+Bypass (operator TTY only): `HAPI_OPERATOR_MIRROR_HYGIENE_OVERRIDE=1`
+
+## Allowed on mirror (not blocked by this guard)
+
+- `docs/operator/`, `docs/plans/`, `docs/tooling/`, `scripts/tooling/`
+- `config/driver-manifest.yaml` (intentional soup layer WIP — commit or coordinate; do not leave forever)
+- Product code is already blocked by `hapi-product-code-guard` outside worktrees
+
+See `docs/tooling/driver-soup.md#mirror-utensil-hygiene`.

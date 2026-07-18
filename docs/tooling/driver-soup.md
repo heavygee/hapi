@@ -19,6 +19,19 @@ Legacy paths (`~/coding/hapi-driver`, `~/coding/hapi-<name>`) may still exist �
 
 `hapi-active` → the **active HAPI tree**. Hub + runner systemd units run from this path (`hub/` + `cli/`).
 
+### Mirror utensil hygiene
+
+The primary mirror must stay **remake-ready**: `hapi-sync-fork-main` and `hapi-driver-rebuild` refuse a dirty working tree. Any agent that leaves uncommitted `package.json` / lockfiles / `e2e/` WIP on the mirror skunks the kitchen for everyone.
+
+| Never on `~/coding/hapi` (mirror) | Do this instead |
+|---|---|
+| `bun install` / `npm install` / `bun add` | `cd worktrees/<feature> && bun install` |
+| Write feature / peer `e2e/**` on mirror | Write under `worktrees/<feature>/e2e/` |
+
+**Mechanical guard:** `scripts/tooling/hapi-mirror-hygiene-guard.sh` (Cursor + Claude PreToolUse). Refresh hooks: `scripts/tooling/hapi-install-cursor-hooks.sh`. Bypass (operator TTY only): `HAPI_OPERATOR_MIRROR_HYGIENE_OVERRIDE=1`.
+
+Intentional exception: uncommitted `config/driver-manifest.yaml` layer WIP during soup promotion — coordinate and commit promptly; do not pile unrelated mirror dirt on top.
+
 ---
 
 ## Primary dev host (oos-linux)
