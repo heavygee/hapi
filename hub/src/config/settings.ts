@@ -22,6 +22,9 @@ export interface Settings {
     corsOrigins?: string[]
     /** Per-hub relay auth key issued by the relay server (/issue) */
     relayAuthKey?: string
+
+    /** Opt-in: hub stop-runner when skewed + newer CLI on disk. */
+    autoUpgradeRunners?: boolean
 }
 
 export function getSettingsFile(dataDir: string): string {
