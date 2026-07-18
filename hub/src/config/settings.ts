@@ -34,6 +34,9 @@ export interface Settings {
      * Env vars still win when set at process start (ops override).
      */
     providerCredentials?: Partial<Record<string, string>>
+
+    /** Opt-in: hub stop-runner when skewed + newer CLI on disk. */
+    autoUpgradeRunners?: boolean
 }
 
 export function getSettingsFile(dataDir: string): string {
