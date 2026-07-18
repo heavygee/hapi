@@ -8,6 +8,10 @@
  */
 
 import { isKnownFlavor, type LocalResumeTarget, type ResumableSession, type SessionEndReason } from '@hapi/protocol'
+import {
+    cliBinaryUpdatedOnDisk,
+    isMachineCapabilitySkewed,
+} from '@hapi/protocol/runnerCapabilities'
 import type { CursorChatStoreStatus, CursorMigrateOutcome, CursorMigrateToAcpRequest, MessageDeliveryMode, MessagesResponse, QueuedStateResponse, SlashCommandsResponse } from '@hapi/protocol/apiTypes'
 import type { AgentFlavor, CodexCollaborationMode, CopilotAgentMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
 import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
@@ -185,6 +189,9 @@ export class SyncEngine {
     private readonly opencodeClearTails = new Map<string, Promise<ClearOpencodeSessionResult>>()
     /** Serialize fork/rewind per session so concurrent native rollbacks cannot stack. */
     private readonly historyActionsInFlight = new Set<string>()
+    /** Rate-limit hub-initiated stop-runner ensure attempts (machineId → last attempt ms). */
+    private readonly runnerEnsureAttemptAt = new Map<string, number>()
+    private static readonly RUNNER_ENSURE_COOLDOWN_MS = 5 * 60_000
 
     constructor(
         private readonly store: Store,
@@ -445,6 +452,7 @@ export class SyncEngine {
 
         if (event.type === 'machine-updated' && event.machineId) {
             this.machineCache.refreshMachine(event.machineId)
+            void this.maybeEnsureRunnerGeneration(event.machineId)
             return
         }
 
@@ -830,6 +838,41 @@ async uploadScratchlistAttachment(
 
     handleMachineAlive(payload: { machineId: string; time: number; health?: unknown }): void {
         this.machineCache.handleMachineAlive(payload)
+        void this.maybeEnsureRunnerGeneration(payload.machineId)
+    }
+
+    /**
+     * When a connected runner is missing required capabilities but a newer CLI
+     * binary is already on disk, ask it to stop so systemd/handoff loads the
+     * new generation. If the binary is not updated, the web skew banner stays.
+     */
+    private async maybeEnsureRunnerGeneration(machineId: string): Promise<void> {
+        const machine = this.machineCache.getMachine(machineId)
+        if (!machine?.active || !machine.metadata) {
+            return
+        }
+        if (!isMachineCapabilitySkewed(machine.metadata.capabilities)) {
+            return
+        }
+        if (!cliBinaryUpdatedOnDisk(machine.metadata)) {
+            return
+        }
+        const lastAttempt = this.runnerEnsureAttemptAt.get(machineId) ?? 0
+        if (Date.now() - lastAttempt < SyncEngine.RUNNER_ENSURE_COOLDOWN_MS) {
+            return
+        }
+        this.runnerEnsureAttemptAt.set(machineId, Date.now())
+        try {
+            console.warn('[runner-ensure] Stopping skewed runner so a newer on-disk CLI can load', {
+                machineId,
+                host: machine.metadata.host,
+                version: machine.metadata.happyCliVersion,
+            })
+            await this.rpcGateway.stopRunner(machineId)
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            console.warn('[runner-ensure] stop-runner failed', { machineId, message })
+        }
     }
 
     private expireInactive(): void {
@@ -2743,11 +2786,15 @@ async uploadScratchlistAttachment(
                     }
                 }
             } catch (error) {
-                return {
-                    type: 'error',
-                    message: error instanceof Error ? error.message : 'Failed to inspect Cursor chat store',
-                    code: 'resume_failed'
-                }
+                // Soft-fail on probe skew / missing handler (#1084): definitive
+                // onDisk:false still blocks above; probe errors must not be
+                // reported as missing chat data.
+                const message = error instanceof Error ? error.message : 'Failed to inspect Cursor chat store'
+                console.warn('[resume] Cursor chat-store probe failed; proceeding with reopen attempt', {
+                    sessionId: access.sessionId,
+                    machineId: targetMachine.id,
+                    message
+                })
             }
         }
 
