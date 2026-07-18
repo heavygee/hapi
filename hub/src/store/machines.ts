@@ -1,4 +1,8 @@
 import type { Database } from 'bun:sqlite'
+import {
+    machineRegistrationNeedsRefresh,
+    mergeMachineRegistrationMetadata,
+} from '@hapi/protocol/machineRegistration'
 
 import type { StoredMachine, VersionedUpdateResult } from './types'
 import { safeJsonParse } from './json'
@@ -64,6 +68,30 @@ export function getOrCreateMachine(
         if (stored.namespace !== namespace) {
             throw new Error('Machine namespace mismatch')
         }
+        // Re-registering runners used to keep stale hub metadata forever
+        // (version/capabilities from the first connect). Refresh identity when
+        // the client sends newer registration fields.
+        if (machineRegistrationNeedsRefresh(stored.metadata, metadata)) {
+            const merged = mergeMachineRegistrationMetadata(stored.metadata, metadata)
+            const result = updateMachineMetadata(
+                db,
+                id,
+                merged,
+                stored.metadataVersion,
+                namespace,
+            )
+            if (result.result === 'success') {
+                const refreshed = getMachine(db, id)
+                if (refreshed) {
+                    return refreshed
+                }
+            }
+            // Version conflict or race: fall through to current row; connect
+            // path can still push identity via machine-update-metadata.
+            return getMachine(db, id) ?? stored
+        }
+        // Upstream general merge: fill missing machine-owned fields (e.g. arch)
+        // that are not covered by the identity refresh predicate above.
         const merged = mergeMachineMetadata(stored.metadata, metadata)
         if (merged !== undefined) {
             db.prepare(`
@@ -85,6 +113,7 @@ export function getOrCreateMachine(
             return row
         }
         return stored
+
     }
 
     const now = Date.now()
