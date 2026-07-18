@@ -326,6 +326,10 @@ hapi runner start --workspace-root ~/projects --workspace-root ~/work
 
 For running the hub and runner as persistent background services (pm2, launchd, systemd), see [Deployment](./deployment.md).
 
+### Multi-machine hubs
+
+You can run **one hub** and **runners on many machines** (each machine installs its own CLI). When you upgrade the hub, upgrade the HAPI CLI on every machine that parents sessions, then restart that machine's runner (`systemctl --user restart hapi-runner` or `hapi runner start`). Until a runner reports the capabilities the hub requires, the web UI shows a persistent **Runner out of date** banner with the host name and upgrade steps — do not ignore it (Cursor reopen and similar features depend on matching generations).
+
 ## Security notes
 
 - Keep tokens secret and rotate if needed
