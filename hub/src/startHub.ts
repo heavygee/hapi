@@ -199,7 +199,12 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         onMessagesConsumed: (sessionId) => syncEngine?.clearQueuedThinkingGrace(sessionId)
     })
 
-    syncEngine = new SyncEngine(store, socketServer.io, socketServer.rpcRegistry, sseManager)
+    syncEngine = new SyncEngine(store, socketServer.io, socketServer.rpcRegistry, sseManager, {
+        autoUpgradeRunners: config.autoUpgradeRunners,
+    })
+    if (config.autoUpgradeRunners) {
+        console.log('[Hub] autoUpgradeRunners enabled (opt-in): will stop-runner when skewed + newer CLI on disk')
+    }
     // Accountable principal for A2A work-graph notify ingest (P3).
     syncEngine.setHubOwnerUserId(await getOrCreateOwnerId())
 
