@@ -626,6 +626,13 @@ export class ApiClient {
         return await this.request<SqliteStorageUsageResponse>('/api/storage/sqlite')
     }
 
+    async restartMachineRunner(machineId: string): Promise<{ message: string }> {
+        return await this.request<{ message: string }>(
+            `/api/machines/${encodeURIComponent(machineId)}/restart-runner`,
+            { method: 'POST', body: '{}' }
+        )
+    }
+
     async listMachineDirectory(
         machineId: string,
         path: string
