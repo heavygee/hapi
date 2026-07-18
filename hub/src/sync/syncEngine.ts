@@ -162,11 +162,6 @@ function extractClaudeUserMessageTextFromAgentOutput(content: unknown): string |
     return extractUserMessageText(message.content)
 }
 
-export type SyncEngineOptions = {
-    /** Opt-in auto stop-runner when skewed runner has newer CLI on disk. Default false. */
-    autoUpgradeRunners?: boolean
-}
-
 export class SyncEngine {
     private readonly eventPublisher: EventPublisher
     private readonly sessionCache: SessionCache
@@ -192,19 +187,13 @@ export class SyncEngine {
     private readonly opencodeClearTails = new Map<string, Promise<ClearOpencodeSessionResult>>()
     /** Serialize fork/rewind per session so concurrent native rollbacks cannot stack. */
     private readonly historyActionsInFlight = new Set<string>()
-    /** Rate-limit hub-initiated stop-runner ensure attempts (machineId → last attempt ms). */
-    private readonly runnerEnsureAttemptAt = new Map<string, number>()
-    private static readonly RUNNER_ENSURE_COOLDOWN_MS = 5 * 60_000
-    private readonly autoUpgradeRunners: boolean
 
     constructor(
         private readonly store: Store,
         private readonly io: Server,
         rpcRegistry: RpcRegistry,
         sseManager: SSEManager,
-        options?: SyncEngineOptions
     ) {
-        this.autoUpgradeRunners = options?.autoUpgradeRunners === true
         this.eventPublisher = new EventPublisher(sseManager, (event) => this.resolveNamespace(event))
         this.sessionCache = new SessionCache(store, this.eventPublisher)
         this.machineCache = new MachineCache(store, this.eventPublisher)
@@ -458,7 +447,6 @@ export class SyncEngine {
 
         if (event.type === 'machine-updated' && event.machineId) {
             this.machineCache.refreshMachine(event.machineId)
-            void this.maybeEnsureRunnerGeneration(event.machineId)
             return
         }
 
@@ -745,7 +733,7 @@ export class SyncEngine {
         }
     }
 
-async uploadScratchlistAttachment(
+    async uploadScratchlistAttachment(
         sessionId: string,
         namespace: string,
         filename: string,
@@ -844,50 +832,12 @@ async uploadScratchlistAttachment(
 
     handleMachineAlive(payload: { machineId: string; time: number; health?: unknown }): void {
         this.machineCache.handleMachineAlive(payload)
-        void this.maybeEnsureRunnerGeneration(payload.machineId)
     }
 
     /**
-     * When opt-in auto-upgrade is enabled and a connected runner is missing
-     * required capabilities but a newer CLI binary is already on disk, ask it
-     * to stop so systemd/handoff loads the new generation. Otherwise the web
-     * skew banner stays until the operator upgrades/restarts manually.
-     */
-    private async maybeEnsureRunnerGeneration(machineId: string): Promise<void> {
-        if (!this.autoUpgradeRunners) {
-            return
-        }
-        const machine = this.machineCache.getMachine(machineId)
-        if (!machine?.active || !machine.metadata) {
-            return
-        }
-        if (!isMachineCapabilitySkewed(machine.metadata.capabilities)) {
-            return
-        }
-        if (!cliBinaryUpdatedOnDisk(machine.metadata)) {
-            return
-        }
-        const lastAttempt = this.runnerEnsureAttemptAt.get(machineId) ?? 0
-        if (Date.now() - lastAttempt < SyncEngine.RUNNER_ENSURE_COOLDOWN_MS) {
-            return
-        }
-        this.runnerEnsureAttemptAt.set(machineId, Date.now())
-        try {
-            console.warn('[runner-ensure] Stopping skewed runner so a newer on-disk CLI can load', {
-                machineId,
-                host: machine.metadata.host,
-                version: machine.metadata.happyCliVersion,
-            })
-            await this.rpcGateway.stopRunner(machineId)
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error)
-            console.warn('[runner-ensure] stop-runner failed', { machineId, message })
-        }
-    }
-
-    /**
-     * Operator-initiated restart (banner Restart button). Always attempts
-     * stop-runner for an online machine — does not require autoUpgradeRunners.
+     * Manual stop-runner (banner Restart). Normally unnecessary: runners already
+     * self-restart on CLI mtime drift via version handoff. Use when handoff is
+     * disabled (HAPI_DISABLE_VERSION_HANDOFF=1) or stuck.
      */
     async restartMachineRunner(machineId: string, namespace: string): Promise<
         | { type: 'success'; message: string }
