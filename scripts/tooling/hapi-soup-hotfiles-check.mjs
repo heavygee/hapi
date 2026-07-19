@@ -30,11 +30,18 @@ if (missing.length > 0) {
     process.exit(1)
 }
 
+// Upstream 0.23.1 (#1088) wires listCodexSessionsForMachine through
+// hub/src/web/routes/codexDesktop.ts (listCodexSessionsViaMachine), not the
+// older fork-only GET /machines/:id/codex-sessions route. Accept either.
 if (syncEngine.includes('listCodexSessionsForMachine')) {
     const machines = read('hub/src/web/routes/machines.ts')
-    if (!machines.includes('/codex-sessions')) {
+    const codexDesktop = read('hub/src/web/routes/codexDesktop.ts')
+    const hasMachinesRoute = machines.includes('/codex-sessions')
+    const hasDesktopWire = codexDesktop.includes('listCodexSessionsViaMachine')
+        || codexDesktop.includes('listCodexSessionsForMachine')
+    if (!hasMachinesRoute && !hasDesktopWire) {
         console.error('hapi-soup-hotfiles-check: FAIL')
-        console.error('  syncEngine.listCodexSessionsForMachine but machines.ts missing GET /codex-sessions')
+        console.error('  syncEngine.listCodexSessionsForMachine but neither machines.ts GET /codex-sessions nor codexDesktop listCodexSessionsViaMachine present')
         process.exit(1)
     }
 }
