@@ -1,0 +1,69 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: meta <heavygee@oos-linux.in.lockhouse>
+Date: Sun, 19 Jul 2026 12:00:00 +0000
+Subject: [PATCH] fix(soup): reconcile spawnSession signature after parking the
+ codex/claude import cluster (0.23.1 base bump)
+
+Parking feat/codex-usage-indicator-rebased + feat/claude-session-import +
+feat/agent-session-import-picker (see config/driver-manifest.yaml) removed the
+codex import feature, but three call-sites/tests were left inconsistent by the
+parked layers vs the surviving cursor-acp-resume layer (#991) on the 0.23.1 base:
+
+  1. rpcGateway.spawnSession kept an orphan `importHistory?: boolean` param
+     (nothing forwards it; the main SyncEngine.spawnSession wrapper does not
+     pass it, so `effort` misaligned into the boolean slot).
+  2. The Cursor ACP resume path (SyncEngine) still passed `false` in the
+     importHistory position (14 args vs 13) — it meant "don't import" anyway.
+  3. The 0.23.1 Codex-sync SessionActionMenu test renders <SessionActionMenu>
+     inline without sessionId/sessionTitle, which the session-copy-link layer
+     made required props.
+
+Restore/rework these when the import cluster is re-added after its owner rebase.
+Verified: bun run typecheck (cli+web+hub) clean with this heal applied.
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ hub/src/sync/rpcGateway.ts                      | 1 -
+ hub/src/sync/syncEngine.ts                      | 1 -
+ web/src/components/SessionActionMenu.test.tsx   | 2 ++
+ 3 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/hub/src/sync/rpcGateway.ts b/hub/src/sync/rpcGateway.ts
+index dc4f3c7af..68d1117b1 100644
+--- a/hub/src/sync/rpcGateway.ts
++++ b/hub/src/sync/rpcGateway.ts
+@@ -172,7 +172,6 @@ export class RpcGateway {
+         sessionType?: 'simple' | 'worktree',
+         worktreeName?: string,
+         resumeSessionId?: string,
+-        importHistory?: boolean,
+         effort?: string,
+         permissionMode?: PermissionMode,
+         serviceTier?: string,
+diff --git a/hub/src/sync/syncEngine.ts b/hub/src/sync/syncEngine.ts
+index 2d144c64f..95c43fdf0 100644
+--- a/hub/src/sync/syncEngine.ts
++++ b/hub/src/sync/syncEngine.ts
+@@ -1812,7 +1812,6 @@ export class SyncEngine {
+             undefined,
+             undefined,
+             resumeToken,
+-            false,
+             session.effort ?? undefined,
+             preferredPermissionMode,
+             session.serviceTier ?? undefined,
+diff --git a/web/src/components/SessionActionMenu.test.tsx b/web/src/components/SessionActionMenu.test.tsx
+index 444ec72be..e1a52c8bb 100644
+--- a/web/src/components/SessionActionMenu.test.tsx
++++ b/web/src/components/SessionActionMenu.test.tsx
+@@ -125,6 +125,8 @@ describe('SessionActionMenu - Codex sync action', () => {
+                 <SessionActionMenu
+                     isOpen={true}
+                     onClose={vi.fn()}
++                    sessionId="sess-123"
++                    sessionTitle="Test session"
+                     sessionActive={false}
+                     onRename={vi.fn()}
+                     onExport={vi.fn()}
+-- 
+2.39.5

@@ -1,37 +1,27 @@
 From 4f231ad0312412024c05d431d2fc98fe2466c269 Mon Sep 17 00:00:00 2001
 From: Debian <heavygee@oos-linux.in.lockhouse>
 Date: Tue, 14 Jul 2026 14:38:17 +0000
-Subject: [PATCH] fix(soup): post-rematerialize typecheck heals (SSE unwrap,
- Codex sessions RPC, markdown cast)
+Subject: [PATCH] fix(soup): post-rematerialize typecheck heal (markdown cast)
 
 Thin overseer rematerialize dropped late fat soup-fix layers; restore the
 verify-critical pieces as tip commits (same intent as former layers/heals).
 
+NOTE (2026-07-19, meta): the rpcGateway.ts hunk (listCodexSessionsForMachine
+/ RpcListCodexSessionsResponse) was removed because the codex/claude import
+cluster is temporarily PARKED off the soup for the 0.23.1 base bump — see
+config/driver-manifest.yaml. Its RPC surface + consumers left with the cluster,
+so the heal is no longer verify-critical. Restore when the cluster is re-added.
+Companion heal 51-codex-rpc-list-export.patch is parked (.parked) for the same
+reason. The useSSE.ts toSummaryMetadata-removal hunk was also dropped: upstream
+0.23.1 reworked SSE summary metadata handling, so that hunk no longer applies
+cleanly and is not needed on the new base (verified by typecheck).
+
 Co-authored-by: Cursor <cursoragent@cursor.com>
 ---
- hub/src/sync/rpcGateway.ts              |  7 +++++++
  web/src/components/MarkdownRenderer.tsx |  4 ++--
  web/src/hooks/useSSE.ts                 | 22 ----------------------
- 3 files changed, 9 insertions(+), 24 deletions(-)
+ 2 files changed, 2 insertions(+), 24 deletions(-)
 
-diff --git a/hub/src/sync/rpcGateway.ts b/hub/src/sync/rpcGateway.ts
-index 2dfb61c57..2dfadc417 100644
---- a/hub/src/sync/rpcGateway.ts
-+++ b/hub/src/sync/rpcGateway.ts
-@@ -307,6 +307,13 @@ export class RpcGateway {
-         return await this.machineRpc(machineId, RPC_METHODS.ListCodexModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListCodexModelsResponse
-     }
- 
-+    async listCodexSessionsForMachine(
-+        machineId: string,
-+        options?: { includeOld?: boolean; olderThanDays?: number; limit?: number; cursor?: string }
-+    ): Promise<RpcListCodexSessionsResponse> {
-+        return await this.machineRpc(machineId, RPC_METHODS.ListCodexSessions, options ?? {}) as RpcListCodexSessionsResponse
-+    }
-+
-     async listCursorModelsForSession(sessionId: string): Promise<RpcListCursorModelsResponse> {
-         return await this.sessionRpc(sessionId, RPC_METHODS.ListCursorModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListCursorModelsResponse
-     }
 diff --git a/web/src/components/MarkdownRenderer.tsx b/web/src/components/MarkdownRenderer.tsx
 index e66122cd6..111307fef 100644
 --- a/web/src/components/MarkdownRenderer.tsx
@@ -47,53 +37,5 @@ index e66122cd6..111307fef 100644
      }), [componentsRest])
  
      return (
-diff --git a/web/src/hooks/useSSE.ts b/web/src/hooks/useSSE.ts
-index 98d15ecde..e407e1755 100644
---- a/web/src/hooks/useSSE.ts
-+++ b/web/src/hooks/useSSE.ts
-@@ -17,7 +17,6 @@ import type {
-     SessionPatch,
-     SessionResponse,
-     SessionSummary,
--    SessionSummaryMetadata,
-     SessionsResponse,
-     SyncEvent
- } from '@/types/api'
-@@ -354,24 +353,6 @@ export function useSSE(options: {
-             })
-         }
- 
--        const toSummaryMetadata = (metadata: NonNullable<SessionPatch['metadata']> | null): SessionSummaryMetadata | null =>
--            metadata ? {
--                name: metadata.name,
--                path: metadata.path,
--                machineId: metadata.machineId ?? undefined,
--                summary: metadata.summary ? { text: metadata.summary.text } : undefined,
--                flavor: metadata.flavor ?? null,
--                worktree: metadata.worktree,
--                agentSessionId: metadata.codexSessionId
--                    ?? metadata.claudeSessionId
--                    ?? metadata.geminiSessionId
--                    ?? metadata.opencodeSessionId
--                    ?? metadata.cursorSessionId
--                    ?? metadata.kimiSessionId
--                    ?? undefined,
--                lifecycleState: metadata.lifecycleState
--            } : null
--
-         const patchSessionSummary = (sessionId: string, patch: SessionPatch): boolean => {
-             let patched = false
-             queryClient.setQueryData<SessionsResponse | undefined>(queryKeys.sessions, (previous) => {
-@@ -392,9 +373,6 @@ export function useSSE(options: {
- 
-                 const nextSummary: SessionSummary = {
-                     ...current,
--                    metadata: Object.prototype.hasOwnProperty.call(patch, 'metadata')
--                        ? toSummaryMetadata(patch.metadata ?? null)
--                        : current.metadata,
-                     active: patch.active ?? current.active,
-                     thinking: patch.thinking ?? current.thinking,
-                     activeAt: patch.activeAt ?? current.activeAt,
 -- 
 2.39.5
-

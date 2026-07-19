@@ -117,7 +117,19 @@ layers:
   # Also: Codex session list/resume in NewSession (CodexSessionSelector).
   # No SCHEMA_VERSION bump. Authorship: Ethan Wang (dsus4wang).
   # Umbrella: tiann/hapi#846 (cross-flavor budget gauges - this is the Codex seed).
-  - branch: feat/codex-usage-indicator-rebased
+  #
+  # TEMPORARILY DROPPED 2026-07-19 (meta): upstream 0.23.1 shipped #1088
+  # (codex import/resume from runners) which add/add-collides with and
+  # supersedes this layer's bundled codex-sessions-RPC (codexSessions.ts,
+  # ListCodexSessions, CodexSessionSelector, ArchiveCodexSession). The
+  # "codex-usage" branch interleaves usage-gauge commits with session-resume
+  # commits, so it cannot be cherry-picked thin mechanically. Follow-up owned
+  # by the codex-usage layer owner: re-thin to BUDGET-ONLY (agentBudget,
+  # codexUsage, AgentBudgetIndicator, codexBudgetAdapter) rebased on 0.23.1,
+  # adopting upstream #1088 for session listing. Budget core has no refs to
+  # the sessions surface, so it separates cleanly. No other soup layer depends
+  # on this layer's exports (verified). Re-enable once a thin branch exists.
+  # - branch: feat/codex-usage-indicator-rebased  # DROPPED pending budget-only re-thin
 
   # Bridge: FCM sendModelError for wrist push on model errors (#878).
   # MUST be exactly one commit on top of feat/companion-fcm-push-api tip —
@@ -221,12 +233,27 @@ layers:
   #   feat/claude-session-import:feat/claude-session-import
   # Cursor import (#945 feat/agent-session-import-picker) stacks on this - MUST stay
   # immediately above that layer.
-  - branch: feat/claude-session-import
+  #
+  # TEMPORARILY DROPPED 2026-07-19 (meta): upstream 0.23.1 shipped #1088 (native
+  # Codex import/resume from runners) which reworked the *inline* CodexSessionSyncDialog
+  # + hub codexDesktop routes. This layer refactored that SAME dialog into a shared
+  # <SessionImportPicker> (SessionImportPicker.tsx) — competing reworks of one surface
+  # (add/add on CodexSessionSyncDialog.tsx, codexDesktop.ts/.test.ts). Not a mechanical
+  # merge. FOLLOW-UP (owner, tiann/hapi#942 dzshzx): rebase onto 0.23.1 — adopt upstream's
+  # native Codex dialog, re-add Claude import (upstream does NOT provide this) + re-extract
+  # the shared picker on top. Cluster-parked WITH feat/agent-session-import-picker below
+  # (that stacks on this) and feat/codex-usage-indicator-rebased above. No branch edited by
+  # meta; only manifest-parked pending owner rebase.
+  # - branch: feat/claude-session-import  # DROPPED pending owner rebase vs 0.23.1 #1088
 
   # Cursor flavor for multi-agent session import (tiann/hapi#732, PR #945).
   # Hub /api/cursor/* + web AgentSessionImportDialog codex|cursor tabs.
   # Blocked on #942 upstream; branch is 3 commits on top of feat/claude-session-import.
-  - branch: feat/agent-session-import-picker
+  #
+  # TEMPORARILY DROPPED 2026-07-19 (meta): stacks on feat/claude-session-import (parked
+  # above) and shares the SessionImportPicker / codexDesktop surface reworked by 0.23.1
+  # #1088. Re-enable together with feat/claude-session-import after the owner rebase.
+  # - branch: feat/agent-session-import-picker  # DROPPED (stacks on parked #942)
 
   # Session list/header context menu: Copy reference for cross-session citation.
   # tiann/hapi#950. Web-only; topmost for cheap rollback via atomic web swap.
