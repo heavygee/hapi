@@ -494,3 +494,12 @@ layers:
   # ~/coding/hapi/worktrees/hub-runner-version-skew @
   # fix/hub-runner-version-governance. Drop when upstream PR merges.
   - branch: fix/hub-runner-version-governance
+
+  # tiann/hapi#1095 / upstream PR #1096 - stop prepending skill_lookup $name
+  # instruction onto Cursor/Kimi/generic ACP user turns (prompt-injection FP).
+  # Discovery stays on MCP tool description + OpenCode/Grok system prompts.
+  # Do NOT re-land Cursor mcp overlay (#956/#958). CLI-only; needs
+  # hapi-restart-hub after rebuild. Worktree:
+  # ~/coding/hapi/worktrees/skill-lookup-no-user-prepend @ e5002057d.
+  # Drop when upstream PR merges.
+  - branch: fix/skill-lookup-no-user-prepend
