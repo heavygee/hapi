@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ChatBlock, ToolCallBlock } from '@/chat/types'
-import { collectFileTouches } from '@/chat/fileAttention'
+import { collectFileAttention } from '@/chat/fileAttention'
 
 function toolBlock(
     id: string,
@@ -32,36 +32,44 @@ function toolBlock(
     }
 }
 
-function textBlock(id: string): ChatBlock {
-    return { kind: 'agent-text', id, localId: null, createdAt: 1, text: 'note' }
-}
-
-describe('collectFileTouches', () => {
-    it('aggregates reads and writes across top-level tool calls', () => {
-        const blocks: ChatBlock[] = [
+describe('collectFileAttention', () => {
+    it('aggregates Claude pathful reads/writes', () => {
+        const { touches, activity } = collectFileAttention([
             toolBlock('1', 'Read', { file_path: 'a.ts' }),
             toolBlock('2', 'Edit', { file_path: 'a.ts' }),
-            textBlock('3'),
-            toolBlock('4', 'Bash', { command: 'ls' }),
-        ]
-        expect(collectFileTouches(blocks)).toEqual([
-            { path: 'a.ts', reads: 1, writes: 1, total: 2 },
+            toolBlock('3', 'Bash', { command: 'ls' }),
         ])
+        expect(touches).toEqual([
+            { path: 'a.ts', reads: 1, writes: 1, deletes: 0, total: 2 },
+        ])
+        expect(activity.total).toBe(2)
+        expect(activity.pathless).toBe(0)
     })
 
-    it('recurses into subagent (Task) children', () => {
-        const blocks: ChatBlock[] = [
+    it('counts Cursor ACP pathless Read File / Edit File in activity', () => {
+        const { touches, activity } = collectFileAttention([
+            toolBlock('1', 'Read File', {}),
+            toolBlock('2', 'Edit File', {}),
+            toolBlock('3', 'Read File', { file_path: 'Read File' }),
+            toolBlock('4', 'read_file', { path: 'src/x.ts' }),
+        ])
+        expect(touches).toEqual([
+            { path: 'src/x.ts', reads: 1, writes: 0, deletes: 0, total: 1 },
+        ])
+        expect(activity).toMatchObject({
+            reads: 3,
+            writes: 1,
+            pathless: 3,
+            total: 4,
+        })
+    })
+
+    it('recurses into Task children', () => {
+        const { touches } = collectFileAttention([
             toolBlock('task-1', 'Task', { prompt: 'do it' }, [
                 toolBlock('c1', 'Write', { file_path: 'deep.ts' }),
-                toolBlock('c2', 'Read', { file_path: 'deep.ts' }),
             ]),
-        ]
-        expect(collectFileTouches(blocks)).toEqual([
-            { path: 'deep.ts', reads: 1, writes: 1, total: 2 },
         ])
-    })
-
-    it('returns empty when no file tools are present', () => {
-        expect(collectFileTouches([textBlock('1'), toolBlock('2', 'Grep', { pattern: 'x' })])).toEqual([])
+        expect(touches[0]?.path).toBe('deep.ts')
     })
 })

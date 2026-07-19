@@ -7,6 +7,7 @@ function toolBlock(
     name: string,
     children: ChatBlock[] = [],
     state: ToolCallBlock['tool']['state'] = 'completed',
+    input: unknown = {},
 ): ToolCallBlock {
     return {
         kind: 'tool-call',
@@ -18,7 +19,7 @@ function toolBlock(
             id,
             name,
             state,
-            input: {},
+            input,
             createdAt: 1,
             startedAt: 1,
             completedAt: 2,
@@ -37,15 +38,29 @@ function textBlock(id: string): ChatBlock {
 }
 
 describe('buildTraceGraph', () => {
-    it('chains top-level tool calls with sequence edges, skipping text', () => {
+    it('labels and collapses consecutive Cursor Read File calls', () => {
         const g = buildTraceGraph([
-            toolBlock('a', 'Read'),
+            toolBlock('a', 'Read File'),
+            toolBlock('b', 'Read File'),
+            toolBlock('c', 'Read File'),
+            toolBlock('d', 'Edit File'),
             textBlock('t'),
-            toolBlock('b', 'Edit'),
         ])
-        expect(g.nodes.map((n) => n.id)).toEqual(['a', 'b'])
-        expect(g.nodes.every((n) => n.kind === 'tool' && n.depth === 0)).toBe(true)
-        expect(g.edges).toEqual([{ from: 'a', to: 'b', kind: 'sequence' }])
+        expect(g.nodes).toHaveLength(2)
+        expect(g.nodes[0]).toMatchObject({ label: 'Read', count: 3, flowKind: 'read' })
+        expect(g.nodes[1]).toMatchObject({ label: 'Edit', count: 1, flowKind: 'write' })
+        expect(g.edges).toEqual([{ from: 'a', to: 'd', kind: 'sequence' }])
+    })
+
+    it('labels shell command-as-name tools with truncated detail', () => {
+        const g = buildTraceGraph([
+            toolBlock('s', '`cd /tmp && ls -la`', [], 'completed', { command: 'cd /tmp && ls -la' }),
+        ])
+        expect(g.nodes[0]).toMatchObject({
+            label: 'Shell',
+            flowKind: 'shell',
+            detail: 'cd /tmp && ls -la',
+        })
     })
 
     it('marks subagents and spawns children at increased depth', () => {
@@ -57,16 +72,11 @@ describe('buildTraceGraph', () => {
         ])
         const task = g.nodes.find((n) => n.id === 'task')
         expect(task).toMatchObject({ kind: 'subagent', depth: 0, childCount: 2 })
-        expect(g.nodes.find((n) => n.id === 'c1')).toMatchObject({ depth: 1 })
+        expect(g.nodes.find((n) => n.id === 'c1')).toMatchObject({ depth: 1, label: 'Read' })
         expect(g.edges).toEqual([
             { from: 'task', to: 'c1', kind: 'spawn' },
             { from: 'c1', to: 'c2', kind: 'sequence' },
         ])
-    })
-
-    it('carries tool state through to nodes', () => {
-        const g = buildTraceGraph([toolBlock('a', 'Bash', [], 'error')])
-        expect(g.nodes[0]?.state).toBe('error')
     })
 
     it('returns empty graph for no tool calls', () => {

@@ -1,15 +1,19 @@
-import { FileTouchAccumulator, type FileTouch } from '@hapi/protocol'
+import { FileTouchAccumulator, type FileActivity, type FileTouch } from '@hapi/protocol'
 import type { ChatBlock } from '@/chat/types'
 
-export type { FileTouch }
+export type { FileTouch, FileActivity }
+
+export type FileAttention = {
+    touches: FileTouch[]
+    activity: FileActivity
+}
 
 /**
  * Walks the normalized ChatBlock tree (including subagent children) and returns
- * the files this session touched, ranked by activity. The classification of
- * "what is a file touch" lives in @hapi/protocol so the hub and future XR
- * surfaces derive the same aggregates from their own traversals.
+ * path-ranked file touches plus an activity summary (including Cursor ACP
+ * pathless Read File / Edit File counts).
  */
-export function collectFileTouches(blocks: ChatBlock[]): FileTouch[] {
+export function collectFileAttention(blocks: ChatBlock[]): FileAttention {
     const acc = new FileTouchAccumulator()
     const walk = (bs: ChatBlock[]) => {
         for (const b of bs) {
@@ -19,5 +23,10 @@ export function collectFileTouches(blocks: ChatBlock[]): FileTouch[] {
         }
     }
     walk(blocks)
-    return acc.result()
+    return { touches: acc.result(), activity: acc.activitySummary() }
+}
+
+/** @deprecated Prefer collectFileAttention — kept for call-site compatibility. */
+export function collectFileTouches(blocks: ChatBlock[]): FileTouch[] {
+    return collectFileAttention(blocks).touches
 }
