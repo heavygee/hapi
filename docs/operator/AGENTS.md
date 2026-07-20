@@ -17,6 +17,7 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 | New behavior intake / peer spawn | Follow intake §0 handoff | [`new-feature-intake.md`](../tooling/new-feature-intake.md) |
 | Touch `:3006` soup | `hapi-driver-status --quiet` first; no stack-switch from agent shell | Lifecycle § Agent permission matrix; [`driver-soup.md`](../tooling/driver-soup.md) |
 | About to claim gates / PR ready | Mechanical verify before assertion | Lifecycle §6 + [`pr-review-loop.md`](../tooling/pr-review-loop.md) |
+| Upstream PR “babysit / merge-ready” | **Prepare only — never merge on `tiann/hapi`** | § Upstream relationship — only @tiann merges upstream `main` |
 
 ---
 
@@ -41,6 +42,8 @@ upstream  →  https://github.com/tiann/hapi.git
 origin    →  https://github.com/heavygee/hapi.git
 ```
 
+**Do not merge on `tiann/hapi`.** By convention (and historically always) only **@tiann** merges to upstream `main`. Write access on the upstream repo does **not** authorize `gh pr merge`, squash/rebase merge, or any other merge of PRs (ours or others'). **Babysit / “to merge” / merge-ready means prepare only** — green CI, rebase, triage threads, ping maintainer — then stop. Incident: #1096 (2026-07-20) was the first-ever heavygee-performed upstream merge; do not repeat.
+
 **Fork `main` mirror:** after upstream activity run `hapi-sync-fork-main` (in `scripts/tooling/`) and `git push origin main`. Primary checkout `~/coding/hapi` must contain **upstream product code + fork docs** — not docs-only drift. `hapi-driver-rebuild` refuses if `main` is behind `upstream/main`.
 
 - Extend upstream; PR-sized slices; default path unchanged when new code off
@@ -49,7 +52,7 @@ origin    →  https://github.com/heavygee/hapi.git
 
 ### Upstream collaborator status (heavygee on tiann/hapi)
 
-`heavygee` has **`write`** permission on `tiann/hapi` (verify: `gh api repos/tiann/hapi/collaborators/heavygee/permission`). This is unusual for what is otherwise documented as a fork relationship and post-dates the fork canon. **Status: awaiting explicit guidance from @tiann on the intended scope of this access.**
+`heavygee` has **`write`** permission on `tiann/hapi` (verify: `gh api repos/tiann/hapi/collaborators/heavygee/permission`). This is unusual for what is otherwise documented as a fork relationship and post-dates the fork canon. **Status: awaiting explicit guidance from @tiann on the intended scope of this access.** Write ≠ merge authority.
 
 Until @tiann signals otherwise, default to **fork-contributor discipline** (PRs from `upstream/main`-based branches via `hapi-pr-create`, comments and reviews welcome on others' PRs, no direct writes to upstream branches or other people's work).
 
@@ -61,7 +64,7 @@ Until @tiann signals otherwise, default to **fork-contributor discipline** (PRs 
 **What we explicitly do NOT do absent guidance:**
 
 - Direct push to `tiann/hapi:main` or any other upstream branch (use the normal PR flow)
-- Merging PRs (ours or others')
+- **Merging PRs on `tiann/hapi`** (ours or others') — including `gh pr merge`, GitHub UI merge, auto-merge enablement. Prepare for merge; @tiann merges.
 - Force-pushing to others' PR branches
 - Closing issues or PRs we don't own
 - Editing PR titles / bodies / descriptions on others' PRs

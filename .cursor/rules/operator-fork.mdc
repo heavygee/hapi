@@ -9,6 +9,8 @@ This repo is a **fork** of `tiann/hapi`. Root **`AGENTS.md` is byte-identical to
 
 **Read `docs/operator/AGENTS.md`** - single canonical guide (HAPI baseline + fork intent + upstream PR discipline).
 
+**NEVER merge on `tiann/hapi`.** Only @tiann merges upstream `main`. Write collaborator access does not authorize `gh pr merge` / squash / rebase / auto-merge. Babysit = prepare for merge (CI, rebase, threads), then stop. See `docs/operator/AGENTS.md` § Upstream relationship. Incident: #1096 was the first accidental heavygee upstream merge (2026-07-20).
+
 - **Master workflow (sole source):** [`docs/tooling/feature-work-lifecycle.md`](../../docs/tooling/feature-work-lifecycle.md)
 - **New functionality requests:** [`docs/tooling/new-feature-intake.md`](../../docs/tooling/new-feature-intake.md) — §0 handoff only; workflow is lifecycle
 - **Workspace** = `~/coding/hapi` (mirror). **`~/coding/hapi/driver`** = runtime on `:3006` via `hapi-active` — not the default instruction root.
