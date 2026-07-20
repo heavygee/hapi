@@ -12,10 +12,12 @@ import { getInputStringAny } from './utils'
  * Traversal is deliberately NOT part of this module: each consumer supplies its
  * own walk and feeds (toolName, input) pairs into a FileTouchAccumulator.
  *
- * Cursor ACP note (live hub data, 2026-07): most "Read File" / "Edit File"
- * tool-calls arrive with empty `input` — the path is not persisted. Path-ranked
- * heatmaps therefore under-count on Cursor sessions; `FileActivityAccumulator`
- * still counts those calls by kind so the session flow view has a useful signal.
+ * Cursor ACP note (live hub data, 2026-07): many "Read File" / "Edit File"
+ * tool-calls arrive with empty `input` (`rawInput: {}`). Edit paths usually
+ * appear on the tool result (`output.path`); the CLI backfills those onto the
+ * tool_call, and Flow also harvests `tool.result` so historical sessions still
+ * populate the heatmap. Read File often has no path on the wire unless ACP
+ * `locations` is present — those stay in `pathless` activity counts.
  */
 
 export type FileAccessKind = 'read' | 'write' | 'delete'
@@ -175,7 +177,7 @@ export class FileTouchAccumulator {
         total: 0,
     }
 
-    add(toolName: string, input: unknown): void {
+    add(toolName: string, input: unknown, result?: unknown): void {
         const kind = classifyFileTool(toolName)
         if (!kind) return
         this.activity.total++
@@ -183,7 +185,11 @@ export class FileTouchAccumulator {
         else if (kind === 'delete') this.activity.deletes++
         else this.activity.reads++
 
-        const path = extractToolFilePath(toolName, input)
+        let path = extractToolFilePath(toolName, input)
+        // Cursor Edit File: path often only on the result payload.
+        if (!path && result !== undefined && result !== null) {
+            path = extractToolFilePath(toolName, result)
+        }
         if (!path) {
             this.activity.pathless++
             return

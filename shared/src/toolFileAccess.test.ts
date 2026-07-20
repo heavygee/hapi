@@ -84,4 +84,13 @@ describe('FileTouchAccumulator', () => {
             total: 4,
         })
     })
+
+    test('harvests path from result when input is empty (Cursor Edit File)', () => {
+        const acc = new FileTouchAccumulator()
+        acc.add('Edit File', {}, { path: '/tmp/x.md', oldText: '', newText: 'hi' })
+        expect(acc.result()).toEqual([
+            { path: '/tmp/x.md', reads: 0, writes: 1, deletes: 0, total: 1 },
+        ])
+        expect(acc.activitySummary().pathless).toBe(0)
+    })
 })

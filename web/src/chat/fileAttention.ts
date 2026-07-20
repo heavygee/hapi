@@ -18,7 +18,7 @@ export function collectFileAttention(blocks: ChatBlock[]): FileAttention {
     const walk = (bs: ChatBlock[]) => {
         for (const b of bs) {
             if (b.kind !== 'tool-call') continue
-            acc.add(b.tool.name, b.tool.input)
+            acc.add(b.tool.name, b.tool.input, b.tool.result)
             if (b.children.length) walk(b.children)
         }
     }

@@ -7,6 +7,7 @@ function toolBlock(
     name: string,
     input: unknown = {},
     children: ChatBlock[] = [],
+    result: unknown = null,
 ): ToolCallBlock {
     return {
         kind: 'tool-call',
@@ -25,7 +26,7 @@ function toolBlock(
             execStartedAt: null,
             execCompletedAt: null,
             description: null,
-            result: null,
+            result,
             permission: undefined,
         },
         children,
@@ -61,6 +62,28 @@ describe('collectFileAttention', () => {
             writes: 1,
             pathless: 3,
             total: 4,
+        })
+    })
+
+    it('harvests Edit File path from tool.result when input is empty', () => {
+        const { touches, activity } = collectFileAttention([
+            toolBlock(
+                '1',
+                'Edit File',
+                {},
+                [],
+                { path: '/home/x/docs/plan.md', oldText: 'a', newText: 'b' },
+            ),
+            toolBlock('2', 'Read File', {}, [], { content: 'file body' }),
+        ])
+        expect(touches).toEqual([
+            { path: '/home/x/docs/plan.md', reads: 0, writes: 1, deletes: 0, total: 1 },
+        ])
+        expect(activity).toMatchObject({
+            reads: 1,
+            writes: 1,
+            pathless: 1,
+            total: 2,
         })
     })
 
