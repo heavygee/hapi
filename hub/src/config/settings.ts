@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import type { FleetUpgradePolicy } from '@hapi/protocol/upgradeChannel'
 
 export interface Settings {
     machineId?: string
@@ -22,6 +23,8 @@ export interface Settings {
     corsOrigins?: string[]
     /** Per-hub relay auth key issued by the relay server (/issue) */
     relayAuthKey?: string
+    // Operator fleet-upgrade policy (no alert / alert / auto-upgrade)
+    fleetUpgradePolicy?: FleetUpgradePolicy
 }
 
 export function getSettingsFile(dataDir: string): string {
