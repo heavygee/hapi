@@ -379,23 +379,15 @@ layers:
   # Upstream PR pending; dogfood here first. Topmost for cheap rollback.
   - branch: feat/cursor-detect-inline-model-errors
 
-  # #878 leg 3 - transient model error bridge (one prompt per atTs).
-  # Manual [Bridge & retry], opt-in auto-bridge, retriedAndFailed gating.
-  # Thin-rebased 2026-07-17 onto detect @ da14312d0 → tip f9831beac (8 commits;
-  # detect IS ancestor). Fat bak: backup/cursor-model-error-bridge-fat @ 1be4e117c.
-  # Keep: 82cd98ee5, 01ceebb91, 9eeab666a (+332c722c2 folded), 1be4e117c.
-  # Worktree: model-error-bridge. Drop when upstream PR merges.
-  - branch: feat/cursor-model-error-bridge
+  # TEMPORARILY DROPPED 2026-07-21 (meta shepherd): after upstream @ af962fc61
+  # (#1096), rematerialize hits 19 unmerged files / no rerere postimages on
+  # feat/cursor-model-error-bridge (layer after detect). Parked with #991 resume
+  # (stacks on bridge tip) so #1119/#1117/#1120 can dogfood. Owner: re-thin
+  # bridge onto detect@soup tip + retrain rr-cache; then un-park resume.
+  # - branch: feat/cursor-model-error-bridge  # PARKED 2026-07-21
 
-  # tiann/hapi#991 - Cursor ACP remote resume: reuse original HAPI row via
-  # existingSessionId instead of spawn-then-merge + session-ready wait (tailnet
-  # socket loss caused 60s resume_failed). Hub+cli only; hapi-restart-hub after rebuild.
-  # Thin-rebased 2026-07-17 onto bridge @ 77c7c3e8c → tip d70a143d1 (2 commits;
-  # soup-compat dropped — importHistory already lower in soup; rerere trained for
-  # spawn payload). Fat bak backup/cursor-acp-remote-resume-fat @ b4a855656.
-  # Was poisoned by fat model-error-bridge ancestry (17 commits / ModelError hotfiles).
-  # Worktree: ~/coding/hapi/worktrees/cursor-acp-remote-resume
-  - branch: fix/cursor-acp-remote-resume-ready
+  # TEMPORARILY DROPPED 2026-07-21 (meta): stacks on parked model-error-bridge.
+  # - branch: fix/cursor-acp-remote-resume-ready  # PARKED 2026-07-21 (stacks on bridge)
   # DROPPED 2026-07-14: soup thin/nofcm sse+codex-rpc+markdown-cast — sse already upstream;
   #   codex-rpc + markdown-cast applied as post-merge soup-heals if verify needs them.
   # DROPPED 2026-07-14: sse-summary-unwrap — already on upstream/main (toSummaryMetadata gone).
