@@ -99,7 +99,7 @@ describe('buildTraceGraph', () => {
 
     it('skips blank Task: Subagent task placeholders without title', () => {
         const g = buildTraceGraph([
-            toolBlock('ph', 'Task: Subagent task', [], 'in_progress', { _toolName: 'task' }),
+            toolBlock('ph', 'Task: Subagent task', [], 'running', { _toolName: 'task' }),
             toolBlock('ct', 'CursorTask', [], 'completed', {
                 title: 'Investigate Mermaid render issue',
                 durationMs: 93507,

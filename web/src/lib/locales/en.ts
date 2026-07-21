@@ -167,9 +167,11 @@ export default {
   'session.flow.filesPathlessPartial': 'Plus {n} file tools without paths (not shown below)',
   'session.flow.reads': '{n} read',
   'session.flow.writes': '{n} write',
-  'session.flow.graph': 'Execution flow',
+  'session.flow.graph': 'Execution graph',
   'session.flow.graphEmpty': 'No tool activity in loaded messages',
-  'session.flow.graphTruncated': 'Showing recent steps — {n} earlier collapsed rows hidden',
+  'session.flow.graphTruncated': 'Graph shows recent steps — {n} earlier nodes omitted',
+  'session.flow.graphHint': 'Scroll to zoom · drag to pan · click a node',
+  'session.flow.graphFit': 'Fit',
   'session.flow.subagentSteps': '{n} steps',
   'session.flow.subagentOpaque': 'nested tools not in this session',
 

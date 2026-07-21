@@ -2,32 +2,16 @@ import { useMemo } from 'react'
 import type { ChatBlock } from '@/chat/types'
 import type { SessionMetadataSummary } from '@/types/api'
 import { collectFileAttention } from '@/chat/fileAttention'
-import { buildTraceGraph, selectTraceNodesForDisplay, type TraceNode } from '@/chat/traceGraph'
+import { buildTraceGraph, selectTraceNodesForDisplay } from '@/chat/traceGraph'
+import { SessionFlowGraph } from '@/components/SessionFlowGraph'
 import { resolveDisplayPath } from '@/utils/path'
 import { useTranslation } from '@/lib/use-translation'
 
 /**
- * Read-only "flow" view of a session's execution, derived from the ChatBlock
- * tree. Cursor ACP sessions usually lack file paths on Read File / Edit File
- * tool-calls — so we lead with activity-by-kind counts, show a path heatmap
- * when paths exist, and collapse consecutive same-kind steps in the flow list.
- *
- * Cursor subagents (`CursorTask`) are labeled by title; their nested tool
- * stream is usually absent from the parent session.
+ * Session "flow" dogfood surface: file-attention summary + interactive SVG
+ * execution graph (pan / zoom / select). The list view was not useful;
+ * this is the Agent Flow–inspired visual we needed to falsify.
  */
-
-function stateDotClass(state: TraceNode['state']): string {
-    switch (state) {
-        case 'error':
-            return 'bg-red-500'
-        case 'running':
-            return 'bg-amber-500'
-        case 'pending':
-            return 'bg-[var(--app-hint)]'
-        default:
-            return 'bg-emerald-500'
-    }
-}
 
 function activityLine(
     activity: { reads: number; writes: number; deletes: number; total: number },
@@ -62,7 +46,6 @@ export function SessionFlowPanel(props: {
     return (
         <div className="mx-auto w-full max-w-content px-3 pb-3">
             <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] p-3">
-                {/* Activity summary — always useful on Cursor sessions */}
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">
                     {t('session.flow.activity')}
                 </div>
@@ -80,18 +63,17 @@ export function SessionFlowPanel(props: {
                     )}
                 </div>
 
-                {/* Files touched (path heatmap when available) */}
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">
                     {t('session.flow.files')}
                 </div>
                 {touches.length === 0 ? (
-                    <div className="text-sm text-[var(--app-hint)]">
+                    <div className="mb-4 text-sm text-[var(--app-hint)]">
                         {hasPathlessFileActivity
                             ? t('session.flow.filesPathless', { n: activity.pathless })
                             : t('session.flow.filesEmpty')}
                     </div>
                 ) : (
-                    <>
+                    <div className="mb-4">
                         {hasMixedPathless ? (
                             <div className="mb-2 text-xs text-[var(--app-hint)]">
                                 {t('session.flow.filesPathlessPartial', { n: activity.pathless })}
@@ -126,71 +108,18 @@ export function SessionFlowPanel(props: {
                                 )
                             })}
                         </ul>
-                    </>
+                    </div>
                 )}
 
-                {/* Execution flow */}
-                <div className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">
                     {t('session.flow.graph')}
                 </div>
-                {graph.nodes.length === 0 ? (
-                    <div className="text-sm text-[var(--app-hint)]">{t('session.flow.graphEmpty')}</div>
-                ) : (
-                    <>
-                        {display.hiddenCount > 0 ? (
-                            <div className="mb-2 text-xs text-[var(--app-hint)]">
-                                {t('session.flow.graphTruncated', { n: display.hiddenCount })}
-                            </div>
-                        ) : null}
-                        <ul className="flex flex-col gap-0.5">
-                            {display.visible.map((node) => (
-                                <li
-                                    key={node.id}
-                                    className="flex items-center gap-2 text-sm"
-                                    style={{ paddingLeft: `${node.depth * 16}px` }}
-                                >
-                                    {node.depth > 0 ? (
-                                        <span className="select-none text-[var(--app-hint)]" aria-hidden="true">
-                                            └
-                                        </span>
-                                    ) : null}
-                                    <span
-                                        className={`h-2 w-2 shrink-0 rounded-full ${stateDotClass(node.state)}`}
-                                        aria-hidden="true"
-                                    />
-                                    <span
-                                        className={
-                                            node.kind === 'subagent'
-                                                ? 'min-w-0 truncate text-xs font-semibold'
-                                                : 'text-xs font-medium'
-                                        }
-                                        title={node.kind === 'subagent' ? node.label : undefined}
-                                    >
-                                        {node.label}
-                                        {node.count > 1 ? (
-                                            <span className="text-[var(--app-hint)]"> ×{node.count}</span>
-                                        ) : null}
-                                    </span>
-                                    {node.detail ? (
-                                        <span className="min-w-0 truncate font-mono text-xs text-[var(--app-hint)]" title={node.detail}>
-                                            {node.detail}
-                                        </span>
-                                    ) : null}
-                                    {node.kind === 'subagent' && node.childCount > 0 ? (
-                                        <span className="shrink-0 text-xs text-[var(--app-hint)]">
-                                            {t('session.flow.subagentSteps', { n: node.childCount })}
-                                        </span>
-                                    ) : null}
-                                    {node.kind === 'subagent' && node.childCount === 0 ? (
-                                        <span className="shrink-0 text-xs text-[var(--app-hint)]">
-                                            {t('session.flow.subagentOpaque')}
-                                        </span>
-                                    ) : null}
-                                </li>
-                            ))}
-                        </ul>
-                    </>
-                )}
+                {display.hiddenCount > 0 ? (
+                    <div className="mb-2 text-xs text-[var(--app-hint)]">
+                        {t('session.flow.graphTruncated', { n: display.hiddenCount })}
+                    </div>
+                ) : null}
+                <SessionFlowGraph graph={graph} nodes={display.visible} />
             </div>
         </div>
     )
