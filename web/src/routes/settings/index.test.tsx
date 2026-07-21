@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { I18nProvider } from '@/lib/i18n-context'
 import SettingsHubPage from './index'
 import SettingsGeneralPage from './general'
+import SettingsRunnerManagementPage from './runner-management'
 import SettingsDisplayPage from './display'
 import SettingsChatPage from './chat'
 import SettingsAboutPage from './about'
@@ -11,6 +12,7 @@ import SettingsVoiceVoicesPage from './voice-voices'
 import SettingsVoiceAdvancedPage from './voice-advanced'
 
 const { context, navigate, setAppearance, setColorTheme, setFontScale, setTerminalFontSize, setComposerEnterBehavior, setCodexExplorationCollapsed, setVoice } = vi.hoisted(() => ({
+const { context, navigate, setAppearance, setColorTheme, setFontScale, setTerminalFontSize, setComposerEnterBehavior, setVoice, setFleetPolicy } = vi.hoisted(() => ({
     context: { token: '' },
     navigate: vi.fn(),
     setAppearance: vi.fn(),
@@ -20,6 +22,7 @@ const { context, navigate, setAppearance, setColorTheme, setFontScale, setTermin
     setComposerEnterBehavior: vi.fn(),
     setCodexExplorationCollapsed: vi.fn(),
     setVoice: vi.fn(),
+    setFleetPolicy: vi.fn(),
 }))
 
 vi.mock('@/hooks/useColorTheme', () => ({
@@ -45,7 +48,7 @@ vi.mock('@/lib/app-context', () => ({
 
 vi.mock('@/hooks/queries/useUpgradeInfo', () => ({
     useUpgradeInfo: () => ({ info: null, isLoading: false }),
-    useSetFleetUpgradePolicy: () => ({ mutate: vi.fn() }),
+    useSetFleetUpgradePolicy: () => ({ mutate: setFleetPolicy }),
 }))
 
 vi.mock('@/hooks/useTheme', () => ({
@@ -245,6 +248,22 @@ describe('responsive settings pages', () => {
         expect(screen.getByText('Companion pairing')).toBeInTheDocument()
         fireEvent.click(screen.getByRole('radio', { name: '简体中文' }))
         expect(localStorage.getItem('hapi-lang')).toBe('zh-CN')
+    })
+
+    it('buries runner management behind a link row on General (not a front-and-center switch)', () => {
+        renderPage(<SettingsGeneralPage />)
+        // The 3-pole switch must NOT be present on the General page itself.
+        expect(screen.queryByRole('radio', { name: /Auto-upgrade/ })).not.toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: /Runner management/ }))
+        expect(navigate).toHaveBeenCalledWith({ to: '/settings/general/runners' })
+    })
+
+    it('renders the 3-pole policy switch on the runner management sub-page', () => {
+        renderPage(<SettingsRunnerManagementPage />)
+        expect(screen.getByRole('radio', { name: /^No alert/ })).toBeInTheDocument()
+        expect(screen.getByRole('radio', { name: /^Alert/ })).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('radio', { name: /^Auto-upgrade/ }))
+        expect(setFleetPolicy).toHaveBeenCalledWith('auto')
     })
 
     it('renders compact display controls without dropdown popovers', () => {
