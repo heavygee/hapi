@@ -142,7 +142,7 @@ render_working() {
         echo "working   WORKING=$count  (a restart will yank these unless you wait or use hapi-restart-hub)"
         local color="" reset=""
         [[ -t 1 ]] && { color="\033[33m"; reset="\033[0m"; }
-        printf '          %busage: hapi-restart-hub  (patient by default, 10min timeout)%b\n' "$color" "$reset"
+        printf '          %busage: hapi-restart-hub  (patient by default; waits until WORKING=0)%b\n' "$color" "$reset"
     fi
 }
 

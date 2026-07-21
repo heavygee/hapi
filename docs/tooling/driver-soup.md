@@ -314,7 +314,9 @@ Some files are merged by **every** layer that touches them; **last layer wins** 
 
 ### Patient restarts (don't yank live agents)
 
-`hapi-use-worktree` and `hapi-restart-hub` are **patient by default**: they poll `hapi-sessions-health.sh` for `WORKING` sessions and wait (default 30s poll, 10min timeout) before tearing the hub down. The timeout is a safety valve — a stuck agent that never finishes WORKING shouldn't deadlock the whole stack — but normal turns will complete and the restart proceeds cleanly.
+`hapi-use-worktree` and `hapi-restart-hub` are **patient by default**: they poll `hapi-sessions-health.sh` for `WORKING` sessions and wait until effective WORKING reaches 0 before tearing the hub down. **Default is no auto-timeout** (`HAPI_PATIENT_TIMEOUT=0`). A positive timeout **fails closed** (exit 75, no restart/switch) — it does **not** yank. Only `--impatient` (TTY-gated) proceeds with WORKING>0.
+
+See [`docs/plans/2026-07-20-patient-drain-v2-restart-queued.md`](../plans/2026-07-20-patient-drain-v2-restart-queued.md) for restart-queued / no-new-turns (Phase 1+) and WORKING-probe fixes.
 
 **Never do this:**
 
@@ -335,14 +337,12 @@ hapi-use-worktree <path>      # stack switch, patient
 
 | Env / flag | Default | Effect |
 |-----------|---------|--------|
-| `--impatient` | off | Skip drain. Restart now. Use when the hub is hung. |
-| `HAPI_IMPATIENT=1` | off | Same, via env. For non-interactive watchdogs. |
-| `HAPI_PATIENT_TIMEOUT=<sec>` | 600 | Max drain wait before proceeding with WORKING>0. `0` = wait forever (deadlock risk). |
+| `--impatient` | off | Skip drain. Restart now. Use when the hub is hung. TTY-gated for agents. |
+| `HAPI_IMPATIENT=1` | off | Same, via env. For non-interactive watchdogs (needs `HAPI_IMPATIENT_BATCH=1` without TTY). |
+| `HAPI_PATIENT_TIMEOUT=<sec>` | **0** (wait forever) | If >0, fail closed on expiry — **do not** restart with WORKING>0. |
 | `HAPI_PATIENT_INTERVAL=<sec>` | 30 | Poll cadence. |
 
-If the timeout fires, both wrappers log which sessions were still WORKING before proceeding — that's the signal an operator wants to see, not a silent yank.
-
-**Known gap:** the underlying `hapi-sessions-health.sh --json` returns `id: null, tag: null` for WORKING entries (only the count is right). The drain still works (it acts on count), and `hapi-driver-status` shows the count, but identifying *who* is still working requires a separate read against the hub. Filed as a follow-up.
+If WORKING never clears, the problem is sticky/false WORKING or new turns keeping the fleet busy — fix the probe or land restart-queued (plan above), do not reintroduce timeout-yank.
 
 ---
 

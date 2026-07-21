@@ -3,8 +3,9 @@
 # Swings hapi-active and restarts hub + runner together from that tree.
 #
 # Patient by default: waits for WORKING sessions to finish (poll every 30s)
-# before tearing the hub down. Times out after HAPI_PATIENT_TIMEOUT seconds
-# (default 600 = 10 min) and logs who's still WORKING before proceeding.
+# before tearing the hub down. Default: wait forever (HAPI_PATIENT_TIMEOUT=0).
+# A positive timeout fails closed (no switch) — never auto-yanks. Only
+# --impatient yanks mid-turn. See docs/plans/2026-07-20-patient-drain-v2-restart-queued.md.
 #
 # Bypass:
 #   --impatient            yank the hub immediately, kill live sessions
@@ -79,7 +80,7 @@ ACTIVE_LINK="${HAPI_ACTIVE_LINK:-$HOME/coding/hapi/active}"
 HUB_ENV="${HAPI_HUB_ENV:-$HOME/.hapi/hub.env}"
 BUN="${BUN:-$HOME/.bun/bin/bun}"
 DRIVER="${HAPI_DRIVER:-$HOME/coding/hapi/driver}"
-PATIENT_TIMEOUT="${HAPI_PATIENT_TIMEOUT:-600}"
+PATIENT_TIMEOUT="${HAPI_PATIENT_TIMEOUT:-0}"
 PATIENT_INTERVAL="${HAPI_PATIENT_INTERVAL:-30}"
 SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 HEALTH_SCRIPT="${HAPI_SESSIONS_HEALTH:-$SCRIPT_DIR/../hapi-sessions-health.sh}"
@@ -253,10 +254,9 @@ if ! preflight_schema_check; then
     exit 1
 fi
 
-# Patient drain: poll WORKING session count and wait until it reaches 0 (or
-# we hit the timeout). The drain happens AFTER lock acquire (below) but
-# BEFORE the systemctl stop, so a second patient caller is held by flock at
-# the gate rather than draining in parallel.
+# Patient drain: poll WORKING session count and wait until it reaches 0.
+# Default timeout 0 = wait forever. Positive timeout fails closed (no switch).
+# Only --impatient proceeds with WORKING>0.
 patient_drain() {
     [[ "$IMPATIENT" -eq 1 ]] && { echo "patient: skipped (--impatient)"; return 0; }
     if [[ ! -x "$HEALTH_SCRIPT" ]]; then
@@ -266,17 +266,26 @@ patient_drain() {
     local working start now elapsed
     working="$("$HEALTH_SCRIPT" --json 2>/dev/null | jq -r '[.sessions[]? | select(.status == "WORKING")] | length' 2>/dev/null || echo 0)"
     [[ "$working" -eq 0 ]] && { echo "patient: WORKING=0, no drain needed"; return 0; }
-    echo "patient: WORKING=$working sessions in flight; waiting up to ${PATIENT_TIMEOUT}s (poll ${PATIENT_INTERVAL}s)"
-    echo "patient: bypass next time with --impatient or HAPI_IMPATIENT=1"
+    if [[ "$PATIENT_TIMEOUT" -eq 0 ]]; then
+        echo "patient: WORKING=$working sessions in flight; waiting until idle (no auto-timeout; poll ${PATIENT_INTERVAL}s)"
+    else
+        echo "patient: WORKING=$working sessions in flight; waiting up to ${PATIENT_TIMEOUT}s then FAIL CLOSED (poll ${PATIENT_INTERVAL}s)"
+    fi
+    echo "patient: yank only with --impatient / HAPI_IMPATIENT=1 (TTY-gated)"
     start=$SECONDS
     while [[ "$working" -gt 0 ]]; do
         elapsed=$((SECONDS - start))
         if [[ "$PATIENT_TIMEOUT" -gt 0 && "$elapsed" -ge "$PATIENT_TIMEOUT" ]]; then
-            echo "patient: TIMEOUT after ${elapsed}s with WORKING=$working -- proceeding anyway" >&2
+            echo "patient: TIMEOUT after ${elapsed}s with WORKING=$working -- refusing switch (fail closed)" >&2
+            echo "patient: fix sticky WORKING, wait longer (HAPI_PATIENT_TIMEOUT=0), or --impatient from a TTY" >&2
             "$HEALTH_SCRIPT" --json 2>/dev/null | jq -r '.sessions[]? | select(.status == "WORKING") | "  still WORKING: id=\(.id // "?") tag=\(.tag // "?")"' >&2 || true
-            return 0
+            return 75
         fi
-        echo "  $(date '+%H:%M:%S')  WORKING=$working  elapsed=${elapsed}s  budget=${PATIENT_TIMEOUT}s"
+        if [[ "$PATIENT_TIMEOUT" -eq 0 ]]; then
+            echo "  $(date '+%H:%M:%S')  WORKING=$working  elapsed=${elapsed}s  (wait forever)"
+        else
+            echo "  $(date '+%H:%M:%S')  WORKING=$working  elapsed=${elapsed}s  budget=${PATIENT_TIMEOUT}s"
+        fi
         sleep "$PATIENT_INTERVAL"
         working="$("$HEALTH_SCRIPT" --json 2>/dev/null | jq -r '[.sessions[]? | select(.status == "WORKING")] | length' 2>/dev/null || echo 0)"
     done

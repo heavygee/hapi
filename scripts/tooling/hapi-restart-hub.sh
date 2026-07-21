@@ -10,8 +10,9 @@
 # Why this exists
 #   Raw `sudo systemctl restart hapi-hub.service` yanks the hub
 #   regardless of who's mid-turn. That has been the dominant interruption
-#   pattern. This wrapper polls WORKING sessions, waits up to
-#   HAPI_PATIENT_TIMEOUT seconds (default 600s = 10 min), then restarts.
+#   pattern. This wrapper polls WORKING sessions and waits until they are
+#   idle (default: no auto-timeout). Only --impatient yanks mid-turn.
+#   See docs/plans/2026-07-20-patient-drain-v2-restart-queued.md.
 #
 # Self-exempt (auto)
 #   When invoked from inside a Cursor agent session (CURSOR_AGENT=1), the
@@ -88,10 +89,8 @@ Did you actually mean one of these?
 
   hapi-restart-hub                                  patient drain
                                                     (default; waits
-                                                    for in-flight
-                                                    sessions to
-                                                    finish, up to
-                                                    10 min)
+                                                    until WORKING=0;
+                                                    no auto-yank)
 
   sudo systemctl restart --dry-run ${HAPI_HUB_UNIT}  verify the wrapper
                                                     chain without
@@ -127,7 +126,9 @@ if [[ "$INCLUDE_SELF" -ne 1 ]] && [[ "${CURSOR_AGENT:-}" == "1" || "${CURSOR_INV
 fi
 
 PRIMARY="${HAPI_PRIMARY:-$HOME/coding/hapi}"
-PATIENT_TIMEOUT="${HAPI_PATIENT_TIMEOUT:-600}"
+# 0 = wait forever for WORKING==0 (default). Positive = fail closed on expiry
+# (do NOT restart). Only --impatient proceeds with WORKING>0.
+PATIENT_TIMEOUT="${HAPI_PATIENT_TIMEOUT:-0}"
 PATIENT_INTERVAL="${HAPI_PATIENT_INTERVAL:-30}"
 HEALTH_SCRIPT="${HAPI_SESSIONS_HEALTH:-$PRIMARY/scripts/hapi-sessions-health.sh}"
 
@@ -168,17 +169,26 @@ patient_drain() {
         echo "patient: WORKING raw=$raw effective=$working"
     fi
     [[ "$working" -eq 0 ]] && { echo "patient: effective WORKING=0, no drain needed"; return 0; }
-    echo "patient: WORKING=$working other session(s) in flight; waiting up to ${PATIENT_TIMEOUT}s (poll ${PATIENT_INTERVAL}s)"
-    echo "patient: bypass with --impatient or HAPI_IMPATIENT=1"
+    if [[ "$PATIENT_TIMEOUT" -eq 0 ]]; then
+        echo "patient: WORKING=$working other session(s) in flight; waiting until idle (no auto-timeout; poll ${PATIENT_INTERVAL}s)"
+    else
+        echo "patient: WORKING=$working other session(s) in flight; waiting up to ${PATIENT_TIMEOUT}s then FAIL CLOSED (poll ${PATIENT_INTERVAL}s)"
+    fi
+    echo "patient: yank only with --impatient / HAPI_IMPATIENT=1 (TTY-gated)"
     start=$SECONDS
     while [[ "$working" -gt 0 ]]; do
         elapsed=$((SECONDS - start))
         if [[ "$PATIENT_TIMEOUT" -gt 0 && "$elapsed" -ge "$PATIENT_TIMEOUT" ]]; then
-            echo "patient: TIMEOUT after ${elapsed}s with WORKING=$working -- proceeding anyway" >&2
+            echo "patient: TIMEOUT after ${elapsed}s with WORKING=$working -- refusing restart (fail closed)" >&2
+            echo "patient: fix sticky WORKING, wait longer (HAPI_PATIENT_TIMEOUT=0), or --impatient from a TTY" >&2
             "$HEALTH_SCRIPT" --json 2>/dev/null | jq -r '.sessions[]? | select(.status == "WORKING") | "  still WORKING: id=\(.id // "?") tag=\(.tag // "?")"' >&2 || true
-            return 0
+            return 75
         fi
-        echo "  $(date '+%H:%M:%S')  WORKING=$working  elapsed=${elapsed}s  budget=${PATIENT_TIMEOUT}s"
+        if [[ "$PATIENT_TIMEOUT" -eq 0 ]]; then
+            echo "  $(date '+%H:%M:%S')  WORKING=$working  elapsed=${elapsed}s  (wait forever)"
+        else
+            echo "  $(date '+%H:%M:%S')  WORKING=$working  elapsed=${elapsed}s  budget=${PATIENT_TIMEOUT}s"
+        fi
         sleep "$PATIENT_INTERVAL"
         raw="$("$HEALTH_SCRIPT" --json 2>/dev/null | jq -r '[.sessions[]? | select(.status == "WORKING")] | length' 2>/dev/null || echo 0)"
         working="$(adjust_for_self "$raw")"
