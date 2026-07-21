@@ -3,6 +3,7 @@ import { chmod, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promi
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { withSettingsFileLock } from '@hapi/protocol/settingsFileLock'
+import type { FleetUpgradePolicy } from '@hapi/protocol/upgradeChannel'
 
 export interface Settings {
     machineId?: string
@@ -34,6 +35,8 @@ export interface Settings {
      * Env vars still win when set at process start (ops override).
      */
     providerCredentials?: Partial<Record<string, string>>
+    // Operator fleet-upgrade policy (no alert / alert / auto-upgrade)
+    fleetUpgradePolicy?: FleetUpgradePolicy
 }
 
 export function getSettingsFile(dataDir: string): string {
