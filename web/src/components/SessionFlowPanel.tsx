@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import type { ChatBlock } from '@/chat/types'
 import type { SessionMetadataSummary } from '@/types/api'
 import { collectFileAttention } from '@/chat/fileAttention'
-import { buildTraceGraph, type TraceNode } from '@/chat/traceGraph'
+import { buildTraceGraph, selectTraceNodesForDisplay, type TraceNode } from '@/chat/traceGraph'
 import { resolveDisplayPath } from '@/utils/path'
 import { useTranslation } from '@/lib/use-translation'
 
@@ -11,6 +11,9 @@ import { useTranslation } from '@/lib/use-translation'
  * tree. Cursor ACP sessions usually lack file paths on Read File / Edit File
  * tool-calls — so we lead with activity-by-kind counts, show a path heatmap
  * when paths exist, and collapse consecutive same-kind steps in the flow list.
+ *
+ * Cursor subagents (`CursorTask`) are labeled by title; their nested tool
+ * stream is usually absent from the parent session.
  */
 
 function stateDotClass(state: TraceNode['state']): string {
@@ -45,6 +48,11 @@ export function SessionFlowPanel(props: {
     const { t } = useTranslation()
     const attention = useMemo(() => collectFileAttention(props.blocks), [props.blocks])
     const graph = useMemo(() => buildTraceGraph(props.blocks), [props.blocks])
+    const display = useMemo(() => selectTraceNodesForDisplay(graph.nodes), [graph.nodes])
+    const subagentCount = useMemo(
+        () => graph.nodes.filter((n) => n.kind === 'subagent').length,
+        [graph.nodes],
+    )
 
     const { touches, activity } = attention
     const maxTotal = touches.length > 0 ? touches[0].total : 0
@@ -59,8 +67,14 @@ export function SessionFlowPanel(props: {
                     {t('session.flow.activity')}
                 </div>
                 <div className="mb-4 text-sm">
-                    {activity.total > 0 ? (
-                        <span>{activityLine(activity, t)}</span>
+                    {activity.total > 0 || subagentCount > 0 ? (
+                        <span>
+                            {activity.total > 0 ? activityLine(activity, t) : null}
+                            {activity.total > 0 && subagentCount > 0 ? ' · ' : null}
+                            {subagentCount > 0
+                                ? t('session.flow.activitySubagents', { n: subagentCount })
+                                : null}
+                        </span>
                     ) : (
                         <span className="text-[var(--app-hint)]">{t('session.flow.filesEmpty')}</span>
                     )}
@@ -85,7 +99,7 @@ export function SessionFlowPanel(props: {
                         ) : null}
                         <ul className="flex flex-col gap-1">
                             {touches.map((touch) => {
-                                const display = resolveDisplayPath(touch.path, props.metadata)
+                                const displayPath = resolveDisplayPath(touch.path, props.metadata)
                                 const pct = maxTotal > 0 ? Math.round((touch.total / maxTotal) * 100) : 0
                                 return (
                                     <li key={touch.path} className="flex items-center gap-2 text-sm">
@@ -96,7 +110,7 @@ export function SessionFlowPanel(props: {
                                                 aria-hidden="true"
                                             />
                                             <span className="relative block truncate px-2 py-1 font-mono text-xs" title={touch.path}>
-                                                {display}
+                                                {displayPath}
                                             </span>
                                         </div>
                                         <span className="shrink-0 font-mono text-xs text-[var(--app-hint)]">
@@ -122,47 +136,60 @@ export function SessionFlowPanel(props: {
                 {graph.nodes.length === 0 ? (
                     <div className="text-sm text-[var(--app-hint)]">{t('session.flow.graphEmpty')}</div>
                 ) : (
-                    <ul className="flex flex-col gap-0.5">
-                        {graph.nodes.map((node) => (
-                            <li
-                                key={node.id}
-                                className="flex items-center gap-2 text-sm"
-                                style={{ paddingLeft: `${node.depth * 16}px` }}
-                            >
-                                {node.depth > 0 ? (
-                                    <span className="select-none text-[var(--app-hint)]" aria-hidden="true">
-                                        └
-                                    </span>
-                                ) : null}
-                                <span
-                                    className={`h-2 w-2 shrink-0 rounded-full ${stateDotClass(node.state)}`}
-                                    aria-hidden="true"
-                                />
-                                <span
-                                    className={
-                                        node.kind === 'subagent'
-                                            ? 'text-xs font-semibold'
-                                            : 'text-xs font-medium'
-                                    }
+                    <>
+                        {display.hiddenCount > 0 ? (
+                            <div className="mb-2 text-xs text-[var(--app-hint)]">
+                                {t('session.flow.graphTruncated', { n: display.hiddenCount })}
+                            </div>
+                        ) : null}
+                        <ul className="flex flex-col gap-0.5">
+                            {display.visible.map((node) => (
+                                <li
+                                    key={node.id}
+                                    className="flex items-center gap-2 text-sm"
+                                    style={{ paddingLeft: `${node.depth * 16}px` }}
                                 >
-                                    {node.label}
-                                    {node.count > 1 ? (
-                                        <span className="text-[var(--app-hint)]"> ×{node.count}</span>
+                                    {node.depth > 0 ? (
+                                        <span className="select-none text-[var(--app-hint)]" aria-hidden="true">
+                                            └
+                                        </span>
                                     ) : null}
-                                </span>
-                                {node.detail ? (
-                                    <span className="min-w-0 truncate font-mono text-xs text-[var(--app-hint)]" title={node.detail}>
-                                        {node.detail}
+                                    <span
+                                        className={`h-2 w-2 shrink-0 rounded-full ${stateDotClass(node.state)}`}
+                                        aria-hidden="true"
+                                    />
+                                    <span
+                                        className={
+                                            node.kind === 'subagent'
+                                                ? 'min-w-0 truncate text-xs font-semibold'
+                                                : 'text-xs font-medium'
+                                        }
+                                        title={node.kind === 'subagent' ? node.label : undefined}
+                                    >
+                                        {node.label}
+                                        {node.count > 1 ? (
+                                            <span className="text-[var(--app-hint)]"> ×{node.count}</span>
+                                        ) : null}
                                     </span>
-                                ) : null}
-                                {node.kind === 'subagent' && node.childCount > 0 ? (
-                                    <span className="text-xs text-[var(--app-hint)]">
-                                        {t('session.flow.subagentSteps', { n: node.childCount })}
-                                    </span>
-                                ) : null}
-                            </li>
-                        ))}
-                    </ul>
+                                    {node.detail ? (
+                                        <span className="min-w-0 truncate font-mono text-xs text-[var(--app-hint)]" title={node.detail}>
+                                            {node.detail}
+                                        </span>
+                                    ) : null}
+                                    {node.kind === 'subagent' && node.childCount > 0 ? (
+                                        <span className="shrink-0 text-xs text-[var(--app-hint)]">
+                                            {t('session.flow.subagentSteps', { n: node.childCount })}
+                                        </span>
+                                    ) : null}
+                                    {node.kind === 'subagent' && node.childCount === 0 ? (
+                                        <span className="shrink-0 text-xs text-[var(--app-hint)]">
+                                            {t('session.flow.subagentOpaque')}
+                                        </span>
+                                    ) : null}
+                                </li>
+                            ))}
+                        </ul>
+                    </>
                 )}
             </div>
         </div>

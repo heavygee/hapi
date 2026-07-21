@@ -160,6 +160,7 @@ export default {
   'session.flow.activityReads': '{n} read',
   'session.flow.activityWrites': '{n} edit',
   'session.flow.activityDeletes': '{n} delete',
+  'session.flow.activitySubagents': '{n} subagent',
   'session.flow.files': 'Files touched',
   'session.flow.filesEmpty': 'No file activity in loaded messages',
   'session.flow.filesPathless': '{n} file tools ran, but this agent flavor did not include paths in tool input — heatmap unavailable',
@@ -168,7 +169,9 @@ export default {
   'session.flow.writes': '{n} write',
   'session.flow.graph': 'Execution flow',
   'session.flow.graphEmpty': 'No tool activity in loaded messages',
+  'session.flow.graphTruncated': 'Showing recent steps — {n} earlier collapsed rows hidden',
   'session.flow.subagentSteps': '{n} steps',
+  'session.flow.subagentOpaque': 'nested tools not in this session',
 
   // Session actions
   'session.action.rename': 'Rename',
