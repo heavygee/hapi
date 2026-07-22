@@ -30,6 +30,7 @@ Feature agents should **read the relevant doc below at session start**; meta bot
 | [../operator/feature-work-lifecycle.md](../operator/feature-work-lifecycle.md) | Stub pointer for agents reading `docs/operator/` |
 | [new-feature-intake.md](./new-feature-intake.md) | **Operator requests new behavior** — discovery, playback, peer stack / soup / clean demo, gates before dogfood, PR after approval |
 | [peer-stack.md](./peer-stack.md) | **Isolated peer hub** — `hapi-peer-stack up` for Playwright on real session UI without `:3006` |
+| [dogfood-shot.md](./dogfood-shot.md) | **Oneshoot §6.4 proof** — `hapi-dogfood-shot` (auth + screenshot + `display_image`); do not hand-roll Playwright for SessionChat |
 | `scripts/tooling/hapi-sync-fork-main.sh` | Keep `~/coding/hapi` `main` = upstream + fork docs |
 | [commit-hooks.md](./commit-hooks.md) | `install-git-hooks.sh` — secrets + operator path gates |
 | [git-stash-policy.md](./git-stash-policy.md) | **Multi-agent repo** - do not stash other agents' work; commit instead |

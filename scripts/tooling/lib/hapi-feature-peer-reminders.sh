@@ -20,10 +20,15 @@ hapi_print_feature_peer_reminders() {
         echo "  Context: $context" >&2
     fi
     cat >&2 <<'EOF'
-  • Visible UI change: capture PNG (MP4 if the story is interaction).
+  • Visible UI change: PNG proof (MP4 if interaction story).
+  • Proof oneshot (capture OR re-display existing e2e PNG — not a test runner):
+      hapi-dogfood-shot
+      hapi-dogfood-shot --from localdocs/playwright-runs/<spec>.png --title '…'
+      # docs/tooling/dogfood-shot.md
   • Inline into this HAPI chat (not Cursor Read paths):
       display_image / display_video
-      or: bun scripts/tooling/hapi-display-image.mjs <session-prefix> <abs-path>
+      or: bun scripts/tooling/hapi-display-image.mjs self <abs-path>
+  • Same PNG → upstream PR via GitHub UI upload (never git-add binaries).
   • Paths-only / "screenshot on disk" alone = incomplete handoff.
   Detail: docs/tooling/feature-work-lifecycle.md#proof-tiers-images-and-video
 EOF

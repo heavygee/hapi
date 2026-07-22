@@ -238,6 +238,7 @@ Peers **must** assess tier before capture ([`peer-stack.md` § Evidence modality
 
 **Tool names in HAPI agent sessions**
 
+- **Oneshoot proof helper (preferred for SessionChat / re-displaying e2e PNGs):** `hapi-dogfood-shot` — reliable auth + screenshot *or* `--from existing.png`, then `display_image`, plus `--pr-checklist` for upstream PR attach. **Not a test runner.** See [`dogfood-shot.md`](./dogfood-shot.md). Do **not** hand-roll Playwright auth against `:3006` just to get a chat PNG.
 - MCP: `display_image`, `display_video` (when bridge present)
 - CLI fallback: `hapi-display-image.mjs` (auto-routes video MIME to display_video when available)
 

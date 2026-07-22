@@ -104,10 +104,12 @@ Every feature peer **assesses the task at handoff time** (before peer-stack capt
 
 Capture paths (always under gitignored `localdocs/playwright-runs/`):
 
-- PNG — Playwright screenshot or handoff script `--screenshot`.
+- PNG — **`hapi-dogfood-shot`** (preferred oneshot for SessionChat / file viewer on `:3006` or peer; see [`dogfood-shot.md`](./dogfood-shot.md)) or a feature Playwright spec / handoff `--screenshot`.
 - MP4 — Playwright `recordVideo` → `scripts/dev/peer-stack-trim-video.sh`.
 
 Post the chosen artifact(s) **inline in HAPI web** (below) before operator dogfood. After upstream PR opens, attach the **same files to the GitHub PR** (description or comment upload) — **not** `git add`. GitHub hosts the bytes; the repo stays lean.
+
+**Do not** invent hub auth / `networkidle` / virtualized-scroll Playwright from scratch for a static chat shot — that scavenger hunt is exactly what `hapi-dogfood-shot` exists to end.
 
 ## Inline evidence (PNG / motion)
 
