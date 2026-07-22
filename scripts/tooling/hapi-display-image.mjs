@@ -1,29 +1,31 @@
 #!/usr/bin/env bun
 /**
- * Post a local image inline to a HAPI session via the session CLI's display_image MCP tool.
+ * Post a local image or video inline to a HAPI session via display_image / display_video MCP.
  *
  * Uses session.metadata.hapiMcpUrl (published at MCP server start) so we hit the MCP
  * endpoint, not the session hook server on another loopback port in the same process.
  *
  * Usage:
  *   # one-shot from inside an agent session (self-targets the current session):
- *   bun scripts/tooling/hapi-display-image.mjs <image-path> [title]
+ *   bun scripts/tooling/hapi-display-image.mjs <media-path> [title]
  *   # explicit self:
- *   bun scripts/tooling/hapi-display-image.mjs self <image-path> [title]
+ *   bun scripts/tooling/hapi-display-image.mjs self <media-path> [title]
  *   # explicit other session:
- *   bun scripts/tooling/hapi-display-image.mjs <session-id-prefix> <image-path> [title]
+ *   bun scripts/tooling/hapi-display-image.mjs <session-id-prefix> <media-path> [title]
  *
- * Self-resolution matches session.metadata.agentSessionId against
- * $HAPI_AGENT_SESSION_ID (or $CURSOR_CONVERSATION_ID for Cursor-flavor agents),
- * both of which are present in the agent's shell env - no session id hunting.
+ * Self-resolution preference (tiann/hapi#1119):
+ *   1. $HAPI_SESSION_ID → GET /api/sessions/:id directly (no list)
+ *   2. explicit prefix / full uuid (list only when needed)
+ *
+ * Auth: scripts/tooling/lib/hapi-hub-auth.mjs (HAPI_HOME / live-hub / oos soup aware).
  */
 
 import { readFileSync, lstatSync } from 'node:fs'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { fetchWebJwt, loadCliApiToken } from './lib/hapi-hub-auth.mjs'
 
-const HAPI_HOST = process.env.HAPI_HOST ?? 'http://localhost:3006'
-const SETTINGS = process.env.HAPI_SETTINGS ?? `${process.env.HOME}/.hapi/settings.json`
+const HAPI_HOST = (process.env.HAPI_HOST ?? process.env.HAPI_HUB_URL ?? 'http://127.0.0.1:3006').replace(/\/$/, '')
 
 const SELF_TOKENS = new Set(['self', '@self', '@me', 'current', '-'])
 
@@ -35,10 +37,22 @@ function isFile(p) {
     }
 }
 
+function detectMediaTool(path) {
+    const head = readFileSync(path).subarray(0, 16)
+    if (head.length >= 12 && head.subarray(4, 8).toString('ascii') === 'ftyp') {
+        const brand = head.subarray(8, 12).toString('ascii')
+        return brand === 'avif' || brand === 'avis' ? 'display_image' : 'display_video'
+    }
+    if (head.length >= 4 && head[0] === 0x1a && head[1] === 0x45 && head[2] === 0xdf && head[3] === 0xa3) {
+        return 'display_video'
+    }
+    return 'display_image'
+}
+
 // Arg shapes (backward compatible):
-//   <image> [title]                    → self-target current session
-//   <self-token> <image> [title]       → self-target, explicit
-//   <session-id-prefix> <image> [title]→ explicit session (original behavior)
+//   <media> [title]                     → self-target current session
+//   <self-token> <media> [title]        → self-target, explicit
+//   <session-id-prefix> <media> [title] → explicit session
 const args = process.argv.slice(2)
 let sessionArg
 let imagePath
@@ -54,7 +68,8 @@ if (args.length > 0 && isFile(args[0]) && !SELF_TOKENS.has(args[0])) {
 }
 
 if (!imagePath) {
-    console.error('usage: hapi-display-image.mjs [<session-id-prefix>|self] <image-path> [title]')
+    console.error('usage: hapi-display-image.mjs [<session-id-prefix>|self] <media-path> [title]')
+    console.error('  or: HAPI_SESSION_ID=<uuid> hapi-display-image.mjs <media-path> [title]')
     process.exit(2)
 }
 
@@ -63,78 +78,84 @@ if (!isFile(imagePath)) {
     process.exit(2)
 }
 
-const token = process.env.CLI_API_TOKEN ?? JSON.parse(readFileSync(SETTINGS, 'utf8')).cliApiToken
-if (!token) {
-    console.error('missing CLI_API_TOKEN env and no cliApiToken in settings')
-    process.exit(2)
-}
-const authRes = await fetch(`${HAPI_HOST}/api/auth`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ accessToken: token }),
-})
-if (!authRes.ok) {
-    console.error('auth failed', authRes.status)
+let jwt
+try {
+    const { token, source } = loadCliApiToken(HAPI_HOST)
+    jwt = await fetchWebJwt(HAPI_HOST, token)
+    console.error(`hapi-display-image: auth via ${source}`)
+} catch (error) {
+    console.error(error instanceof Error ? error.message : String(error))
     process.exit(3)
 }
-const { token: jwt } = await authRes.json()
+const authHeaders = { Authorization: `Bearer ${jwt}` }
 
-const sessionsRes = await fetch(`${HAPI_HOST}/api/sessions?limit=500`, {
-    headers: { Authorization: `Bearer ${jwt}` },
-})
-const sessionsBody = await sessionsRes.json()
-const sessions = sessionsBody.sessions ?? sessionsBody
+async function fetchSessionDetail(sessionId) {
+    const detailRes = await fetch(`${HAPI_HOST}/api/sessions/${encodeURIComponent(sessionId)}`, {
+        headers: authHeaders,
+    })
+    if (!detailRes.ok) {
+        return null
+    }
+    const detailBody = await detailRes.json()
+    return detailBody.session ?? detailBody
+}
 
-let listed
-if (!sessionArg || SELF_TOKENS.has(sessionArg)) {
-    // Self-target: resolve the current agent's session from env, no id hunting.
-    const agentSessionId = process.env.HAPI_AGENT_SESSION_ID ?? process.env.CURSOR_CONVERSATION_ID
-    if (!agentSessionId) {
+async function listSessions() {
+    const sessionsRes = await fetch(`${HAPI_HOST}/api/sessions?limit=500`, {
+        headers: authHeaders,
+    })
+    const sessionsBody = await sessionsRes.json()
+    return sessionsBody.sessions ?? sessionsBody
+}
+
+let session
+const wantsSelf = !sessionArg || SELF_TOKENS.has(sessionArg)
+const hapiSessionId = process.env.HAPI_SESSION_ID?.trim()
+
+if (wantsSelf) {
+    if (!hapiSessionId) {
         console.error(
-            'cannot self-resolve session: no $HAPI_AGENT_SESSION_ID or $CURSOR_CONVERSATION_ID in env. '
-            + 'Pass an explicit <session-id-prefix>.',
+            'cannot self-resolve session: $HAPI_SESSION_ID is not set. '
+            + 'Pass an explicit <session-id-prefix>, or run inside a HAPI-wrapped agent session.',
         )
         process.exit(4)
     }
-    listed = sessions.find((s) => s.metadata?.agentSessionId === agentSessionId)
-    if (!listed) {
-        console.error(`no session with metadata.agentSessionId=${agentSessionId}`)
+    // Preferred path (#1119): direct GET, no /api/sessions list.
+    session = await fetchSessionDetail(hapiSessionId)
+    if (!session) {
+        console.error(`GET /api/sessions/${hapiSessionId} failed (HAPI_SESSION_ID set but hub has no such row)`)
         process.exit(4)
     }
 } else {
-    listed = sessions.find((s) => s.id.startsWith(sessionArg))
-    if (!listed) {
-        console.error(`no session for prefix ${sessionArg}`)
-        process.exit(4)
+    const looksFull = /^[0-9a-f-]{36}$/i.test(sessionArg)
+    if (looksFull) {
+        session = await fetchSessionDetail(sessionArg)
+    }
+    if (!session) {
+        const sessions = await listSessions()
+        const listed = sessions.find((s) => typeof s.id === 'string' && s.id.startsWith(sessionArg))
+        if (!listed) {
+            console.error(`no session for prefix ${sessionArg}`)
+            process.exit(4)
+        }
+        session = await fetchSessionDetail(listed.id) ?? listed
     }
 }
 
-// List endpoint omits hapiMcpUrl; fetch full session for MCP bridge URL.
-let mcpUrl = listed.metadata?.hapiMcpUrl
+const mcpUrl = session.metadata?.hapiMcpUrl
 if (!mcpUrl) {
-    const detailRes = await fetch(`${HAPI_HOST}/api/sessions/${listed.id}`, {
-        headers: { Authorization: `Bearer ${jwt}` },
-    })
-    if (!detailRes.ok) {
-        console.error('session detail fetch failed', detailRes.status)
-        process.exit(4)
-    }
-    const detailBody = await detailRes.json()
-    const detail = detailBody.session ?? detailBody
-    mcpUrl = detail.metadata?.hapiMcpUrl
-}
-if (!mcpUrl) {
-    console.error('session has no hapiMcpUrl metadata (restart session CLI after MCP fix lands)')
+    console.error('session has no hapiMcpUrl metadata (restart session CLI after MCP server start)')
     process.exit(5)
 }
 
-console.error(`hapi-display-image: session=${listed.id} mcp=${mcpUrl}`)
+console.error(`hapi-display-image: session=${session.id} mcp=${mcpUrl}`)
 
+const mediaTool = detectMediaTool(imagePath)
 const client = new Client({ name: 'hapi-display-image', version: '1.0.0' }, { capabilities: {} })
 const transport = new StreamableHTTPClientTransport(new URL(mcpUrl))
 await client.connect(transport)
 const result = await client.callTool({
-    name: 'display_image',
+    name: mediaTool,
     arguments: { path: imagePath, title: title ?? undefined },
 })
 await client.close()
