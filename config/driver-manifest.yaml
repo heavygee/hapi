@@ -387,14 +387,16 @@ layers:
   # Drop when upstream PR merges.
   - branch: feat/cursor-model-error-bridge
 
-  # tiann/hapi#991 - Cursor ACP remote resume: reuse original HAPI row via
-  # existingSessionId. Hub already passes access.sessionId (#1088); gap was
-  # CLI Codex-only --existing-session-id (Cursor ignored it). Re-thinned
-  # 2026-07-22 onto bridge tip 782a4a450 → tip e0e909d9c (+1 commit).
-  # Hub+cli; hapi-restart-hub after rebuild. Worktree:
-  # ~/coding/hapi/worktrees/cursor-acp-remote-resume. Keep heal 54 alongside.
+  # tiann/hapi#991 / upstream PR #1128 - Cursor ACP remote resume: reuse
+  # original HAPI row via existingSessionId. Hub already passes
+  # access.sessionId (#1088); gap was CLI Codex-only --existing-session-id.
+  # Dogfood PASS 2026-07-22: POST /reopen archived ACP → 200/0.49s same row.
+  # Dual tip: PR thin tip eddcff611 on upstream/main (origin branch for #1128);
+  # soup tip e0e909d9c stays on bridge 782a4a450 (same patch-id). Rematerialize
+  # MUST use the soup tip — thin tip is NOT bridge-ancestor. Heal 54 kept
+  # (no-op). Worktree: ~/coding/hapi/worktrees/cursor-acp-remote-resume.
   # Drop when upstream PR merges.
-  - branch: fix/cursor-acp-remote-resume-ready
+  - branch: soup/cursor-acp-remote-resume-ready
   # DROPPED 2026-07-14: soup thin/nofcm sse+codex-rpc+markdown-cast — sse already upstream;
   #   codex-rpc + markdown-cast applied as post-merge soup-heals if verify needs them.
   # DROPPED 2026-07-14: sse-summary-unwrap — already on upstream/main (toSummaryMetadata gone).
