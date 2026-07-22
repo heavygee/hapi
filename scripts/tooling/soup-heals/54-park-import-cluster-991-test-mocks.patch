@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: meta <heavygee@oos-linux.in.lockhouse>
+Date: Sun, 19 Jul 2026 13:25:00 +0000
+Subject: [PATCH] fix(soup): drop orphan importHistory from #991 spawnSession
+ mocks
+
+Companion to heal 53 (parked import cluster signature). The #991 Cursor ACP
+resume tests still mocked spawnSession with an `_importHistory?: boolean`
+slot, so after heal 53 removed that param from the real signature the mock
+captured `existingSessionId` as undefined and the two tests failed verify.
+
+Verified: those two sessionModel tests pass with this heal applied.
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ hub/src/sync/sessionModel.test.ts | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/hub/src/sync/sessionModel.test.ts b/hub/src/sync/sessionModel.test.ts
+index babb1e16c..db621e3a3 100644
+--- a/hub/src/sync/sessionModel.test.ts
++++ b/hub/src/sync/sessionModel.test.ts
+@@ -1292,7 +1292,6 @@ describe('session model', () => {
+                 _sessionType?: string,
+                 _worktreeName?: string,
+                 _resumeSessionId?: string,
+-                _importHistory?: boolean,
+                 _effort?: string,
+                 _permissionMode?: string,
+                 _serviceTier?: string,
+@@ -1426,7 +1425,6 @@ describe('session model', () => {
+                 _sessionType?: string,
+                 _worktreeName?: string,
+                 _resumeSessionId?: string,
+-                _importHistory?: boolean,
+                 _effort?: string,
+                 _permissionMode?: string,
+                 _serviceTier?: string,
+-- 
+2.39.5

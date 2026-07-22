@@ -379,15 +379,22 @@ layers:
   # Upstream PR pending; dogfood here first. Topmost for cheap rollback.
   - branch: feat/cursor-detect-inline-model-errors
 
-  # TEMPORARILY DROPPED 2026-07-21 (meta shepherd): after upstream @ af962fc61
-  # (#1096), rematerialize hits 19 unmerged files / no rerere postimages on
-  # feat/cursor-model-error-bridge (layer after detect). Parked with #991 resume
-  # (stacks on bridge tip) so #1119/#1117/#1120 can dogfood. Owner: re-thin
-  # bridge onto detect@soup tip + retrain rr-cache; then un-park resume.
-  # - branch: feat/cursor-model-error-bridge  # PARKED 2026-07-21
+  # #878 leg 3 - transient model error bridge (one prompt per atTs).
+  # Manual [Bridge & retry], opt-in auto-bridge, retriedAndFailed gating.
+  # Re-thinned 2026-07-22 onto detect@soup after #1096 base drift → tip
+  # 782a4a450 (was parked 2026-07-21; rr-cache retrained on rematerialize).
+  # Fat bak: backup/cursor-model-error-bridge-fat. Worktree: model-error-bridge.
+  # Drop when upstream PR merges.
+  - branch: feat/cursor-model-error-bridge
 
-  # TEMPORARILY DROPPED 2026-07-21 (meta): stacks on parked model-error-bridge.
-  # - branch: fix/cursor-acp-remote-resume-ready  # PARKED 2026-07-21 (stacks on bridge)
+  # tiann/hapi#991 - Cursor ACP remote resume: reuse original HAPI row via
+  # existingSessionId. Hub already passes access.sessionId (#1088); gap was
+  # CLI Codex-only --existing-session-id (Cursor ignored it). Re-thinned
+  # 2026-07-22 onto bridge tip 782a4a450 → tip e0e909d9c (+1 commit).
+  # Hub+cli; hapi-restart-hub after rebuild. Worktree:
+  # ~/coding/hapi/worktrees/cursor-acp-remote-resume. Keep heal 54 alongside.
+  # Drop when upstream PR merges.
+  - branch: fix/cursor-acp-remote-resume-ready
   # DROPPED 2026-07-14: soup thin/nofcm sse+codex-rpc+markdown-cast — sse already upstream;
   #   codex-rpc + markdown-cast applied as post-merge soup-heals if verify needs them.
   # DROPPED 2026-07-14: sse-summary-unwrap — already on upstream/main (toSummaryMetadata gone).
