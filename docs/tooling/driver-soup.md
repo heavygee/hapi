@@ -230,8 +230,28 @@ Pre-push hook blocks `web/src/garden/**` on upstream-PR-bound refs — Garden is
 | `hapi-restart-hub [--impatient] [--no-runner]` | **Agent OK:** patient restart hub (+ runner) on current stack — no symlink move |
 | `hapi-driver-db-prep <target>` | Backup DB + auto-downgrade schema to match `<target>`'s SCHEMA_VERSION; called automatically by `hapi-use-worktree` |
 | `hapi-driver-status [--json\|--quiet\|--watch]` | Read coordination state — is a rebuild/switch in flight, when did the last one finish, how many WORKING sessions right now |
-| `hapi-runner-from-active` | systemd helper — runner CLI from `hapi-active/cli` |
+| `hapi-runner-from-active` | systemd helper — runner CLI from `hapi-active/cli` (**soup / rebuild-only**; ignores Upgrade binaries) |
 | `hapi-sessions-health.sh` | Session monitor |
+
+### Soup hosts vs fleet Upgrade
+
+**Ops call (2026-07-22, meta):** soup-entrypoint hosts are **rebuild-only**. Do **not** expect hub UI Upgrade to move their advertised CLI version.
+
+| Host type | How version moves | Upgrade button |
+|-----------|-------------------|----------------|
+| Binary runners (Windows, stock Linux `~/.hapi/bin/hapi`) | Hub artifact / self-upgrade | Works (after PE `.exe` chicken-egg is past) |
+| Soup hosts (`ExecStart=…/hapi-runner-from-active`) | `hapi-driver-rebuild` onto new `upstream/main`, then `hapi-restart-hub` | **No-op** for skew — systemd keeps the soup entrypoint |
+
+**Why not "prefer `~/.hapi/bin/hapi` when newer" (option A):** that silently swaps soup → vanilla binary and drops every manifest layer. Kill criterion: operator thinks they're dogfooding soup, machine is on stock.
+
+**Why not soup-promotion-on-Upgrade (option C):** third entrypoint story; remote boxes lack the soup tree; fights `hapi-active`.
+
+**Estate defaults for soup runners:**
+- `hapi-runner-from-active` exports `HAPI_DISABLE_VERSION_HANDOFF=1` by default (override only if you know why).
+- Rematerialize when hub `targetVersion` advances; do not click Upgrade on proxmox/oos-linux soup units to "catch up."
+- Per-machine product opt-outs remain available: `HAPI_UPGRADE_CHANNEL=off`, `versionHandoffDisabled`.
+
+**Windows chicken-egg (ops playbook):** old self-upgrade wrote `hapi-VERSION` without `.exe`. Promote once: `copy hapi-VERSION → hapi-VERSION.exe → hapi.exe`, then `schtasks /Run /TN "HAPI Runner"`. Or SCP `/var/lib/hapi/upgrade-artifacts/hapi-*-win32-x64` → `%USERPROFILE%\.hapi\bin\hapi.exe`. Future Upgrades from a fixed binary should self-heal.
 
 Sources: `scripts/tooling/` in repo; installed to `~/.local/bin/`.
 

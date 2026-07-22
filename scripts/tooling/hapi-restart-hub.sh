@@ -138,11 +138,16 @@ source "$SCRIPT_DIR/lib/driver-status.sh"
 
 if [[ "${HAPI_SKIP_DRIVER_LOCK:-}" != "1" ]]; then
     driver_status_init
+    # Interrupted patient drains / kill -9 leave switch.state=running with a dead
+    # pid. Heal before acquire so the next restart is not blocked on STALE.
+    driver_stack_autoclear_stale switch >/dev/null 2>&1 || true
     driver_status_acquire switch
     ACTIVE_NOW="$(readlink -f "$HOME/coding/hapi/active" 2>/dev/null || echo unknown)"
     driver_status_begin switch "$ACTIVE_NOW"
     driver_status_set switch "from=$ACTIVE_NOW" "to=$ACTIVE_NOW"
+    # Always mark idle on exit (including SIGINT/SIGTERM from agent interrupt).
     trap 'driver_status_end switch "$?"' EXIT
+    trap 'driver_status_end switch 130; exit 130' INT TERM
 fi
 
 # Subtract 1 from $1 when SELF_EXEMPT is set, but never go below 0.
@@ -166,7 +171,14 @@ patient_drain() {
     working="$(adjust_for_self "$raw")"
     if [[ "$SELF_EXEMPT" -eq 1 ]]; then
         echo "patient: caller appears to be a Cursor agent (CURSOR_AGENT=$CURSOR_AGENT); subtracting 1 from WORKING count to avoid self-deadlock. Override: --patient-include-self / HAPI_RESTART_INCLUDE_SELF=1"
-        echo "patient: WORKING raw=$raw effective=$working"
+        echo "patient: WORKING raw=$raw effective=$working (effective = others in flight after self-exempt)"
+    fi
+    if [[ "$working" -gt 0 ]]; then
+        echo "patient: other WORKING session(s):"
+        "$HEALTH_SCRIPT" --json 2>/dev/null | jq -r '.sessions[]? | select(.status == "WORKING") | "  \(.sid8 // .sid // "?")\t\(.project // .path // "?")\t\(.note // "")"' 2>/dev/null || true
+        if [[ "$SELF_EXEMPT" -eq 1 ]]; then
+            echo "patient: (one of the above may be this meta session — already subtracted from effective)"
+        fi
     fi
     [[ "$working" -eq 0 ]] && { echo "patient: effective WORKING=0, no drain needed"; return 0; }
     if [[ "$PATIENT_TIMEOUT" -eq 0 ]]; then
@@ -181,13 +193,13 @@ patient_drain() {
         if [[ "$PATIENT_TIMEOUT" -gt 0 && "$elapsed" -ge "$PATIENT_TIMEOUT" ]]; then
             echo "patient: TIMEOUT after ${elapsed}s with WORKING=$working -- refusing restart (fail closed)" >&2
             echo "patient: fix sticky WORKING, wait longer (HAPI_PATIENT_TIMEOUT=0), or --impatient from a TTY" >&2
-            "$HEALTH_SCRIPT" --json 2>/dev/null | jq -r '.sessions[]? | select(.status == "WORKING") | "  still WORKING: id=\(.id // "?") tag=\(.tag // "?")"' >&2 || true
+            "$HEALTH_SCRIPT" --json 2>/dev/null | jq -r '.sessions[]? | select(.status == "WORKING") | "  still WORKING: \(.sid8 // .sid // "?") \(.project // .path // "?")"' >&2 || true
             return 75
         fi
         if [[ "$PATIENT_TIMEOUT" -eq 0 ]]; then
-            echo "  $(date '+%H:%M:%S')  WORKING=$working  elapsed=${elapsed}s  (wait forever)"
+            echo "  $(date '+%H:%M:%S')  effective WORKING=$working  elapsed=${elapsed}s  (wait forever)"
         else
-            echo "  $(date '+%H:%M:%S')  WORKING=$working  elapsed=${elapsed}s  budget=${PATIENT_TIMEOUT}s"
+            echo "  $(date '+%H:%M:%S')  effective WORKING=$working  elapsed=${elapsed}s  budget=${PATIENT_TIMEOUT}s"
         fi
         sleep "$PATIENT_INTERVAL"
         raw="$("$HEALTH_SCRIPT" --json 2>/dev/null | jq -r '[.sessions[]? | select(.status == "WORKING")] | length' 2>/dev/null || echo 0)"

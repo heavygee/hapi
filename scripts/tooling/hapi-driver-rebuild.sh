@@ -96,6 +96,20 @@ elif git -C "$PRIMARY" show-ref --verify --quiet refs/heads/main; then
     fi
 fi
 
+# Atomic web swap leaves web/dist.prev (and sometimes dist.next). Those are
+# generated artifacts — never soup source. Auto-clean so a prior --build-web
+# does not abort the next rematerialize on "dirty driver".
+if [[ -d "$DRIVER/web" ]]; then
+    for gen in dist.prev dist.next; do
+        if [[ -e "$DRIVER/web/$gen" ]]; then
+            echo "Pre-clean: removing generated web/$gen from prior atomic swap"
+            git -C "$DRIVER" checkout -- "web/$gen" 2>/dev/null || true
+            git -C "$DRIVER" clean -fdq -- "web/$gen" 2>/dev/null || true
+            rm -rf "$DRIVER/web/$gen"
+        fi
+    done
+fi
+
 if [[ -d "$DRIVER" ]] && [[ -n "$(git -C "$DRIVER" status --porcelain)" ]]; then
     echo "WARNING: $DRIVER has local changes — rebuild will reset the tree (stash or commit them elsewhere first)." >&2
     echo "         Only manifest-driven rebuilds belong on the driver tree. See docs/tooling/driver-soup.md" >&2
