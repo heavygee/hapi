@@ -239,7 +239,7 @@ The script resolves `hapiMcpUrl` via `GET /api/sessions/:id` (the list endpoint 
 **Dual delivery when 4c applies:**
 
 1. **HAPI handoff chat** — `display_image` or `hapi-display-image.mjs` for PNG **and** interaction clip in the same turn
-2. **Upstream PR (§8)** — embed the same files via GitHub drag-and-drop upload (`user-attachments/assets/…` URL)
+2. **Upstream PR (§8)** — embed the same files via `hapi-dogfood-shot --pr …` (release assets) or GitHub drag-and-drop (`user-attachments/assets/…`)
 
 ```bash
 # Example: trim Playwright webm to a PR-friendly mp4 (~8× speed, 1024px wide, no audio)
@@ -264,7 +264,7 @@ Operator validates in browser. Iterate in the worktree; re-run gates after each 
 1. `/verification-before-completion` with command output
 2. `/requesting-code-review` on `git diff upstream/main...HEAD`
 3. `gh pr create` against `tiann/hapi` `main` — link issue (`Fixes #NNN`)
-4. **Visual evidence on GitHub (not in git)** — same tier as §6.4; upload to PR description/comment (`user-attachments/assets/…`). **Do not** commit binaries to the branch. Link the HAPI session URL from operator dogfood inline post.
+4. **Visual evidence on GitHub (not in git)** — same tier as §6.4; attach without committing binaries. Prefer `hapi-dogfood-shot --from <asset> --pr <upstream-or-fork>#N` ([`dogfood-shot.md` § PR attach](./dogfood-shot.md#pr-attach-recommended-path)). Exact `user-attachments/assets/…` still = GitHub UI drag-drop. Link the HAPI session URL from operator dogfood inline post.
    - **UI changed (§6.4b):** embed the handoff PNG
    - **Interaction tier (§6.4c):** embed the same GIF or short MP4 used in the HAPI handoff chat — reviewers should not need to run soup to see a toggle toggle
 5. Post-push: [pr-review-loop.md](./pr-review-loop.md)

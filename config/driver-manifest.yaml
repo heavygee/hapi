@@ -524,3 +524,13 @@ layers:
   # ~/coding/hapi/worktrees/file-path-autolink-ergonomics @ a78f33a6a
   # (branch fix/file-path-autolink-ergonomics). Drop when upstream PR merges.
   - branch: fix/file-path-autolink-ergonomics
+
+  # tiann/hapi#1129 CRITICAL + #947 nested UX — Cursor model picker empty on
+  # bare ACP ids (live agent returns composer-2.5 etc with no brackets; catalog
+  # filter dropped everything → Default-only). Also in-place variant drill-down.
+  # Touches shared/cli/web picker path; needs hub/cli restart after rebuild so
+  # enrichment + probe gates load. Worktree:
+  # ~/coding/hapi/worktrees/cursor-picker-ios-nested @ feat/cursor-picker-ios-nested
+  # (90dc261b9). Drop when upstream PR #947 merges. Topmost for dogfood so it
+  # wins over fix/cursor-flat-picker-default-highlight on overlapping files.
+  - branch: feat/cursor-picker-ios-nested

@@ -17,12 +17,14 @@
  *   hapi-dogfood-shot --goto-file web/src/lib/foo.ts --title "file viewer"
  *   hapi-dogfood-shot --expect-link "/file?" --title "autolink"
  *   hapi-dogfood-shot --from proof.png --pr-checklist
+ *   hapi-dogfood-shot --from proof.png --pr heavygee/hapi#76
  *   hapi-dogfood-shot --no-display
  *
  * Defaults: hub $HAPI_HUB_URL|$HAPI_HOST|http://127.0.0.1:3006
  *           session $HAPI_SESSION_ID (required for capture / display self)
  *
  * Auth: lib/hapi-hub-auth.mjs (live hub HAPI_HOME — not ~/.hapi alone).
+ * PR attach: lib/hapi-pr-attach-proof.mjs (Releases API — not user-attachments).
  * See: docs/tooling/dogfood-shot.md
  */
 import { mkdirSync, writeFileSync, existsSync, copyFileSync } from 'node:fs'
@@ -31,6 +33,7 @@ import { createRequire } from 'node:module'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { resolveHubAuth } from './lib/hapi-hub-auth.mjs'
+import { attachProofToPr, parsePrSpec } from './lib/hapi-pr-attach-proof.mjs'
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url))
 const MIRROR = resolve(SCRIPT_DIR, '../..')
@@ -50,6 +53,12 @@ function parseArgs(argv) {
         fullPage: false,
         scrollPasses: 40,
         prChecklist: false,
+        pr: '',
+        repo: '',
+        assetRepo: '',
+        prDryRun: false,
+        prNoComment: false,
+        prBody: '',
         help: false,
     }
     for (let i = 2; i < argv.length; i++) {
@@ -68,6 +77,12 @@ function parseArgs(argv) {
         else if (a === '--full-page') out.fullPage = true
         else if (a === '--scroll-passes') out.scrollPasses = Number(argv[++i] ?? 40)
         else if (a === '--pr-checklist') out.prChecklist = true
+        else if (a === '--pr') out.pr = argv[++i] ?? ''
+        else if (a === '--repo') out.repo = argv[++i] ?? ''
+        else if (a === '--asset-repo') out.assetRepo = argv[++i] ?? ''
+        else if (a === '--pr-dry-run') out.prDryRun = true
+        else if (a === '--pr-no-comment') out.prNoComment = true
+        else if (a === '--pr-body') out.prBody = argv[++i] ?? ''
         else {
             console.error(`unknown arg: ${a}`)
             out.help = true
@@ -91,12 +106,20 @@ function usage() {
   --click SELECTOR       after capture: force-click, then re-screenshot
   --goto-file RELPATH    capture session file viewer for RELPATH
   --no-display           skip hapi-display-image.mjs (disk only)
-  --pr-checklist         print upstream-PR attach blurb for the PNG path(s)
+  --pr-checklist         print manual drag-drop blurb (legacy; prefer --pr)
+  --pr SPEC              attach proof to PR via Releases API (owner/repo#N or N)
+  --repo OWNER/REPO      required when --pr is a bare number
+  --asset-repo OWNER/REPO  host release here (default: PR repo). Use fork when
+                         commenting on upstream without release rights.
+  --pr-dry-run           resolve --pr + print plan; no upload/comment
+  --pr-no-comment        upload release asset only; print URL (no PR comment)
+  --pr-body TEXT         optional PR comment preamble (markdown)
   --full-page            fullPage screenshot
   --scroll-passes N      virtualized-list scroll iterations (default 40)
 
   From a Playwright spec (after you already asserted + wrote SCREENSHOT_PATH):
       hapi-dogfood-shot --from "$SCREENSHOT_PATH" --title "peer #NNN proof"
+      hapi-dogfood-shot --from "$SCREENSHOT_PATH" --pr heavygee/hapi#76
 `)
 }
 
@@ -129,13 +152,42 @@ function encodeBase64Path(value) {
 function printPrChecklist(paths) {
     console.error('')
     console.error('── Upstream PR attach checklist ──')
-    console.error('  Do NOT git-add these binaries. Upload via GitHub PR UI (comment / description).')
+    console.error('  Do NOT git-add these binaries.')
+    console.error('  Preferred (PAT / zero-click): hapi-dogfood-shot --from <png> --pr owner/repo#N')
+    console.error('    → prerelease asset URL (not user-attachments; see dogfood-shot.md).')
+    console.error('  Manual (exact user-attachments/assets/…): drag-drop in GitHub PR UI.')
     for (const p of paths) {
         console.error(`  • ${p}`)
     }
-    console.error('  After upload, GitHub hosts at user-attachments/assets/… — paste that URL in the PR body.')
     console.error('  Same files already inlined in HAPI chat via display_image (if --no-display was not set).')
     console.error('')
+}
+
+function runPrAttach(args, outPath) {
+    if (!args.pr) return null
+    const parsed = parsePrSpec(args.pr, args.repo)
+    const result = attachProofToPr({
+        filePath: outPath,
+        prRepo: parsed.nameWithOwner,
+        assetRepo: args.assetRepo || parsed.nameWithOwner,
+        prNumber: parsed.number,
+        title: args.title || basename(outPath),
+        body: args.prBody || undefined,
+        dryRun: args.prDryRun,
+        postComment: !args.prNoComment,
+    })
+    if (result.dryRun) {
+        console.error('hapi-dogfood-shot: --pr-dry-run plan')
+        console.error(`  strategy=${result.strategy} pr=${result.prRepo}#${result.prNumber}`)
+        console.error(`  asset-repo=${result.assetRepo} tag=${result.tag} asset=${result.assetName}`)
+        console.error(`  file=${result.filePath}`)
+        return result
+    }
+    console.error(`hapi-dogfood-shot: PR attach OK strategy=${result.strategy}`)
+    console.error(`  url=${result.url}`)
+    if (result.commentUrl) console.error(`  comment=${result.commentUrl}`)
+    console.log(result.url)
+    return result
 }
 
 async function displayImage(auth, sessionId, outPath, title) {
@@ -176,6 +228,12 @@ async function main() {
         }
         console.log(outPath)
         if (args.prChecklist) printPrChecklist([outPath])
+        try {
+            runPrAttach(args, outPath)
+        } catch (err) {
+            console.error(`hapi-dogfood-shot: PR attach failed: ${err?.message || err}`)
+            process.exit(1)
+        }
 
         if (!args.display) return
 
@@ -305,6 +363,12 @@ async function main() {
 
     console.log(outPath)
     if (args.prChecklist) printPrChecklist([outPath])
+    try {
+        runPrAttach(args, outPath)
+    } catch (err) {
+        console.error(`hapi-dogfood-shot: capture OK but PR attach failed: ${err?.message || err}`)
+        process.exit(1)
+    }
 
     if (args.display) {
         const status = await displayImage(auth, args.session, outPath, args.title || `dogfood shot ${args.session.slice(0, 8)}`)

@@ -234,11 +234,11 @@ Peers **must** assess tier before capture ([`peer-stack.md` § Evidence modality
 - **§6.4b PNG** — static existence (label, layout, copy, icon). Always for visible UI change.
 - **§6.4c MP4/GIF** — interaction story (toggle, send, drawer, async feedback). 3–10s, annotated screencast preferred.
 - **§6.4d Inline** — post into **HAPI web session chat** (not Cursor composer paths). Session needs `metadata.hapiMcpUrl` (ACP + MCP bridge, e.g. Cursor #956).
-- **§8 PR** — upload same assets to GitHub PR description (`user-attachments/assets/…`); never commit binaries to branch.
+- **§8 PR** — attach the same assets to the GitHub PR **without** committing binaries. Preferred: estate **`pr-attach-proof ./shot.png --pr owner/repo#N`** (or `hapi-dogfood-shot --from … --pr …`). Exact `user-attachments/assets/…` still needs manual PR UI drag-drop (no public API; [cli/cli#13256](https://github.com/cli/cli/issues/13256)). See [`dogfood-shot.md` § PR attach](./dogfood-shot.md#pr-attach-recommended-path) and `github-operations` skill.
 
 **Tool names in HAPI agent sessions**
 
-- **Oneshoot proof helper (preferred for SessionChat / re-displaying e2e PNGs):** `hapi-dogfood-shot` — reliable auth + screenshot *or* `--from existing.png`, then `display_image`, plus `--pr-checklist` for upstream PR attach. **Not a test runner.** See [`dogfood-shot.md`](./dogfood-shot.md). Do **not** hand-roll Playwright auth against `:3006` just to get a chat PNG.
+- **Oneshoot proof helper (preferred for SessionChat / re-displaying e2e PNGs):** `hapi-dogfood-shot` — reliable auth + screenshot *or* `--from existing.png`, then `display_image`, plus `--pr` for GitHub attach (or `--pr-checklist` for manual UI). **Not a test runner.** See [`dogfood-shot.md`](./dogfood-shot.md). Do **not** hand-roll Playwright auth against `:3006` just to get a chat PNG.
 - MCP: `display_image`, `display_video` (when bridge present)
 - CLI fallback: `hapi-display-image.mjs` (auto-routes video MIME to display_video when available)
 
