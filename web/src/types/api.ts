@@ -344,8 +344,14 @@ export type CursorImportRowOutcome =
         durationMs: number
     }
 
+export type CursorImportSelection = {
+    uuid: string
+    workspacePath?: string | null
+}
+
 export type CursorImportRequest = {
-    uuids: string[]
+    selections?: CursorImportSelection[]
+    uuids?: string[]
     workspacePath?: string | null
 }
 
