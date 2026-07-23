@@ -19,12 +19,14 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 | Touch `:3006` soup | `hapi-driver-status --quiet` first; no stack-switch from agent shell | Lifecycle § Agent permission matrix; [`driver-soup.md`](../tooling/driver-soup.md) |
 | About to claim gates / PR ready | Mechanical verify before assertion | Lifecycle §6 + [`pr-review-loop.md`](../tooling/pr-review-loop.md) |
 | Upstream PR “babysit / merge-ready” | **Prepare only — never merge on `tiann/hapi`** | § Upstream relationship — only @tiann merges upstream `main` |
+| Local Pi coding agent (5090 / oos-linux) | New Session → **Pi**; backend `oos-llm` VIP | [`pi-local-coding-agent.md`](./pi-local-coding-agent.md) |
+| Agent mangles `tiann`/`oos-linux`/MagicDNS doubles | Free-recall / tokenization hazard - not HAPI pipe | [`2026-07-22-doubled-character-free-recall.md`](../plans/2026-07-22-doubled-character-free-recall.md) |
 
 ---
 
 ## Meta: what this fork is
 
-**HAPI is an agent-corralling platform** - local-first remote control for CLI coding agents (Claude Code, Codex, Cursor Agent, Gemini, OpenCode). Extension of upstream **[tiann/hapi](https://github.com/tiann/hapi)** (AGPL-3).
+**HAPI is an agent-corralling platform** - local-first remote control for CLI coding agents (Claude Code, Codex, Cursor Agent, Gemini, OpenCode, Pi). Extension of upstream **[tiann/hapi](https://github.com/tiann/hapi)** (AGPL-3).
 
 | Layer | Role |
 |-------|------|

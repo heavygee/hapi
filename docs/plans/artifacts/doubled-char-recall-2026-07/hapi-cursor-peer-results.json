@@ -1,0 +1,122 @@
+[
+  {
+    "model": "auto",
+    "probe": "tailnet",
+    "verdict": "NO_TARGET",
+    "sessionId": "6ea738ff-bad0-4d44-808c-0298521cf7f7"
+  },
+  {
+    "model": "auto",
+    "probe": "issue",
+    "verdict": "NO_TARGET",
+    "sessionId": "6ea738ff-bad0-4d44-808c-0298521cf7f7"
+  },
+  {
+    "model": "auto",
+    "probe": "host",
+    "verdict": "NO_TARGET",
+    "sessionId": "6ea738ff-bad0-4d44-808c-0298521cf7f7"
+  },
+  {
+    "model": "auto",
+    "probe": "prose",
+    "verdict": "NO_TARGET",
+    "sessionId": "6ea738ff-bad0-4d44-808c-0298521cf7f7"
+  },
+  {
+    "model": "composer-2.5",
+    "probe": "tailnet",
+    "verdict": "PASS",
+    "sessionId": "ed865057-428b-497c-b357-d1136a7e20ed"
+  },
+  {
+    "model": "composer-2.5",
+    "probe": "issue",
+    "verdict": "NO_TARGET",
+    "sessionId": "ed865057-428b-497c-b357-d1136a7e20ed"
+  },
+  {
+    "model": "composer-2.5",
+    "probe": "host",
+    "verdict": "NO_TARGET",
+    "sessionId": "ed865057-428b-497c-b357-d1136a7e20ed"
+  },
+  {
+    "model": "composer-2.5",
+    "probe": "prose",
+    "verdict": "NO_TARGET",
+    "sessionId": "ed865057-428b-497c-b357-d1136a7e20ed"
+  },
+  {
+    "model": "composer-2.5-fast",
+    "probe": "tailnet",
+    "verdict": "PASS",
+    "sessionId": "caf2724a-31a2-419d-9334-52618017d6f9"
+  },
+  {
+    "model": "composer-2.5-fast",
+    "probe": "issue",
+    "verdict": "NO_TARGET",
+    "sessionId": "caf2724a-31a2-419d-9334-52618017d6f9"
+  },
+  {
+    "model": "composer-2.5-fast",
+    "probe": "host",
+    "verdict": "NO_TARGET",
+    "sessionId": "caf2724a-31a2-419d-9334-52618017d6f9"
+  },
+  {
+    "model": "composer-2.5-fast",
+    "probe": "prose",
+    "verdict": "NO_TARGET",
+    "sessionId": "caf2724a-31a2-419d-9334-52618017d6f9"
+  },
+  {
+    "model": "claude-opus-4-8-medium",
+    "probe": "tailnet",
+    "verdict": "OTHER-tail(hapi.tail[REDACTED]ee.ts.net)",
+    "sessionId": "5592d8fa-3f46-4aa2-a950-e6cf144c7398"
+  },
+  {
+    "model": "claude-opus-4-8-medium",
+    "probe": "issue",
+    "verdict": "PASS",
+    "sessionId": "5592d8fa-3f46-4aa2-a950-e6cf144c7398"
+  },
+  {
+    "model": "claude-opus-4-8-medium",
+    "probe": "host",
+    "verdict": "NO_TARGET",
+    "sessionId": "5592d8fa-3f46-4aa2-a950-e6cf144c7398"
+  },
+  {
+    "model": "claude-opus-4-8-medium",
+    "probe": "prose",
+    "verdict": "OTHER-tail(hapi.tail[REDACTED]ee.ts.net)",
+    "sessionId": "5592d8fa-3f46-4aa2-a950-e6cf144c7398"
+  },
+  {
+    "model": "gpt-5.3-codex-low",
+    "probe": "tailnet",
+    "verdict": "NO_TARGET",
+    "sessionId": "ba648559-be0a-44bf-a5a5-c497d7d92938"
+  },
+  {
+    "model": "gpt-5.3-codex-low",
+    "probe": "issue",
+    "verdict": "PASS",
+    "sessionId": "ba648559-be0a-44bf-a5a5-c497d7d92938"
+  },
+  {
+    "model": "gpt-5.3-codex-low",
+    "probe": "host",
+    "verdict": "FAIL-drop-o",
+    "sessionId": "ba648559-be0a-44bf-a5a5-c497d7d92938"
+  },
+  {
+    "model": "gpt-5.3-codex-low",
+    "probe": "prose",
+    "verdict": "FAIL-drop-4",
+    "sessionId": "ba648559-be0a-44bf-a5a5-c497d7d92938"
+  }
+]
