@@ -157,6 +157,30 @@ export function composerParkSnapshotUnchanged(
         )
 }
 
+/**
+ * Prefer session `selectedModelVariant` only when it is still among the rows
+ * currently shown. After a multi-variant base switch, session state can lag
+ * while `cursorDrillDownDefaultVariant` already points at the new base's
+ * default — stale variants must not win highlight.
+ */
+export function resolveVisibleModelEffortSelectedValue(args: {
+    options: ReadonlyArray<{ value: string }> | null | undefined
+    selectedModelVariant?: string | null
+    cursorDrillDownDefaultVariant?: string | null
+    model?: string | null
+}): string | null | undefined {
+    const {
+        options,
+        selectedModelVariant,
+        cursorDrillDownDefaultVariant,
+        model
+    } = args
+    const selectedVisibleVariant = options?.some((option) => option.value === selectedModelVariant)
+        ? selectedModelVariant
+        : null
+    return selectedVisibleVariant ?? cursorDrillDownDefaultVariant ?? model
+}
+
 export function ModelEffortSettingsSection(props: {
     agentFlavor?: string | null
     options: Array<{ value: string; label: string }>
@@ -1597,7 +1621,12 @@ export function HappyComposer(props: {
                             <ModelEffortSettingsSection
                                 agentFlavor={agentFlavor}
                                 options={[...(visibleModelEffortOptions ?? [])]}
-                                selectedValue={selectedModelVariant ?? cursorDrillDownDefaultVariant ?? model}
+                                selectedValue={resolveVisibleModelEffortSelectedValue({
+                                    options: visibleModelEffortOptions,
+                                    selectedModelVariant,
+                                    cursorDrillDownDefaultVariant,
+                                    model
+                                })}
                                 controlsDisabled={controlsDisabled}
                                 onChange={handleModelEffortChange}
                                 title={cursorVariantDrillDownActive && cursorDrillDownBase
