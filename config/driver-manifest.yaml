@@ -520,6 +520,10 @@ layers:
   # PR #1145 (Mermaid parse/render failure reason in fallback). On
   # upstream/main; next rebuild picks it up from base.
 
+  # DROPPED 2026-07-24: fix/file-path-autolink-ergonomics MERGED UPSTREAM as
+  # PR #1142 (Peer #1120 — markdown links, inline code, .mmd + standalone
+  # rewrite gate). On upstream/main; next rebuild picks it up from base.
+
   # tiann/hapi#1129 CRITICAL + #947 nested UX — Cursor model picker empty on
   # bare ACP ids (live agent returns composer-2.5 etc with no brackets; catalog
   # filter dropped everything → Default-only). Also in-place variant drill-down.
