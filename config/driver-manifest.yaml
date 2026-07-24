@@ -519,10 +519,11 @@ layers:
 
   # tiann/hapi#1120 - file-path autolink ergonomics: markdown links, inline
   # code spans, and .mmd (plus tightened extension allowlist) in chat.
-  # Web-only (remark-file-path-links.ts + test). Atomic dist swap + hard-reload
-  # dogfoods; no hub/cli restart. Worktree:
-  # ~/coding/hapi/worktrees/file-path-autolink-ergonomics @ a78f33a6a
-  # (branch fix/file-path-autolink-ergonomics). Drop when upstream PR merges.
+  # Web-only (remark-file-path-links.ts + markdown-text/MarkdownRenderer wiring).
+  # Atomic dist swap + hard-reload dogfoods; no hub/cli restart. Worktree:
+  # ~/coding/hapi/worktrees/file-path-autolink-ergonomics @ 8493a7354
+  # (branch fix/file-path-autolink-ergonomics; PR tiann/hapi#1142, standalone
+  # gate added post-review). Drop when upstream PR merges.
   - branch: fix/file-path-autolink-ergonomics
 
   # tiann/hapi#1129 CRITICAL + #947 nested UX — Cursor model picker empty on

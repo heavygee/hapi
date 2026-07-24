@@ -251,6 +251,8 @@ Pre-push hook blocks `web/src/garden/**` on upstream-PR-bound refs — Garden is
 - Rematerialize when hub `targetVersion` advances; do not click Upgrade on proxmox/oos-linux soup units to "catch up."
 - Per-machine product opt-outs remain available: `HAPI_UPGRADE_CHANNEL=off`, `versionHandoffDisabled`.
 
+**Temporary binary bridge (proxmox pattern):** when local `driver/cli` is too stale to advertise required caps, a systemd drop-in (`30-soup-artifact.conf`) may point `ExecStart` at `~/.hapi/bin/hapi-<semver>` instead of `hapi-runner-from-active`. That keeps `versionHandoffDisabled: true` (intentional) while advertising a tip binary. **It is not soup parity** with oos (no manifest layers). Keep the drop-in version current with hub `targetVersion`; remove it once proxmox driver soup is rematerialized and `hapi-runner-from-active` is healthy again. Incident 2026-07-23: drop-in stuck on `hapi-soup` **0.23.1** while oos ran soup **0.23.3** - Pi RPC on proxmox wedged; bumping the drop-in to `hapi-0.23.3` + hub `restart-runner` restored tool traffic.
+
 **Windows chicken-egg (ops playbook):** old self-upgrade wrote `hapi-VERSION` without `.exe`. Promote once: `copy hapi-VERSION → hapi-VERSION.exe → hapi.exe`, then `schtasks /Run /TN "HAPI Runner"`. Or SCP `/var/lib/hapi/upgrade-artifacts/hapi-*-win32-x64` → `%USERPROFILE%\.hapi\bin\hapi.exe`. Future Upgrades from a fixed binary should self-heal.
 
 Sources: `scripts/tooling/` in repo; installed to `~/.local/bin/`.

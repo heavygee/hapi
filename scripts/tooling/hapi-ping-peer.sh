@@ -120,6 +120,28 @@ if [[ "$ACTIVE" != "true" ]]; then
     echo "hapi-ping-peer: session active"
 fi
 
+# step 4b: Pi ready-race — active can precede piSessionId (tiann/hapi#1143).
+# Instant /messages before get_state settles wedges (Prompt accepted / agent_start / silence).
+FLAVOR=$(hapi_get "/api/sessions/$SID" 2>/dev/null | jq -r '.session.metadata.flavor // empty')
+if [[ "$FLAVOR" == "pi" ]]; then
+    echo "hapi-ping-peer: flavor=pi — waiting up to ${WAIT_FOR_ACTIVE}s for metadata.piSessionId (ready gate)..."
+    end=$(( $(date +%s) + WAIT_FOR_ACTIVE ))
+    PI_READY=false
+    while [[ $(date +%s) -lt $end ]]; do
+        PI_SID=$(hapi_get "/api/sessions/$SID" 2>/dev/null | jq -r '.session.metadata.piSessionId // empty')
+        if [[ -n "$PI_SID" ]]; then
+            PI_READY=true
+            echo "hapi-ping-peer: piSessionId=$PI_SID"
+            break
+        fi
+        sleep 1
+    done
+    if [[ "$PI_READY" != "true" ]]; then
+        err "piSessionId never appeared within ${WAIT_FOR_ACTIVE}s; refusing to send (would likely wedge — see #1143)"
+        exit 4
+    fi
+fi
+
 # step 5: send message
 echo "hapi-ping-peer: sending message (${#MESSAGE} chars)..."
 SEND=$(hapi_post "/api/sessions/$SID/messages" "$(jq -cn --arg t "$MESSAGE" '{text:$t}')")
