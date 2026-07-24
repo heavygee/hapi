@@ -10,6 +10,12 @@ const shareAction = shareTargetPathnameFromBase(base)
 const hubTarget = process.env.VITE_HUB_PROXY || 'http://127.0.0.1:3006'
 const appVersion = readAppVersion()
 
+const iwerStub = resolve(__dirname, 'src/vendor-stubs/iwer-stub.ts')
+const stubIwer = process.env.NODE_ENV === 'production'
+const iwerAliases = stubIwer
+    ? { '@iwer/sem': iwerStub, '@iwer/devui': iwerStub, iwer: iwerStub }
+    : {}
+
 function readAppVersion(): string {
     const buildInfoPath = resolve(__dirname, '../shared/src/buildInfo.ts')
     const buildInfo = readFileSync(buildInfoPath, 'utf8')
@@ -41,6 +47,13 @@ function getVendorChunkName(id: string): string | undefined {
 
     if (id.includes('/node_modules/@elevenlabs/react/')) {
         return 'vendor-voice'
+    }
+
+    if (
+        id.includes('/node_modules/three/')
+        || id.includes('/node_modules/@react-three/')
+    ) {
+        return 'vendor-three'
     }
 
     return undefined
@@ -147,7 +160,8 @@ export default defineConfig({
     base,
     resolve: {
         alias: {
-            '@': resolve(__dirname, 'src')
+            '@': resolve(__dirname, 'src'),
+            ...iwerAliases,
         }
     },
     build: {

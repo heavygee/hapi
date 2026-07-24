@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { registerVoiceSession, resetRealtimeSessionState } from './RealtimeSession'
 import { registerSessionStore } from './realtimeClientTools'
+import { resetVoiceAudioLevels, setVoiceAudioLevels, rmsFromPcm16Base64, smoothLevel } from './voiceAudioLevels'
 import { fetchGeminiToken } from '@/api/voice'
 import { GeminiAudioRecorder } from './gemini/audioRecorder'
 import { GeminiAudioPlayer } from './gemini/audioPlayer'
@@ -35,6 +36,8 @@ interface GeminiLiveState {
     wsBaseUrl: string | null
     modelSpeaking: boolean
     micMuted: boolean
+    inputLevel: number
+    outputLevel: number
 }
 
 const state: GeminiLiveState = {
@@ -46,7 +49,9 @@ const state: GeminiLiveState = {
     apiKey: null,
     wsBaseUrl: null,
     modelSpeaking: false,
-    micMuted: false
+    micMuted: false,
+    inputLevel: 0,
+    outputLevel: 0
 }
 
 function cleanup() {
@@ -70,6 +75,9 @@ function cleanup() {
     }
     // Always reset modelSpeaking so a restart doesn't begin with audio capture silenced
     state.modelSpeaking = false
+    state.inputLevel = 0
+    state.outputLevel = 0
+    resetVoiceAudioLevels()
 }
 
 class GeminiLiveVoiceSessionImpl implements VoiceSession {
@@ -205,7 +213,7 @@ class GeminiLiveVoiceSessionImpl implements VoiceSession {
                         config.streamContextChunks ?? []
                     )
 
-                    const proactive = isVoiceProactiveSummaryEnabled()
+                    const proactive = config.proactiveSummary ?? isVoiceProactiveSummaryEnabled()
                     if (proactive) {
                         if (config.initialContext?.trim()) {
                             sendClientContent(`[Context] ${config.initialContext}`, false)
@@ -240,10 +248,19 @@ class GeminiLiveVoiceSessionImpl implements VoiceSession {
                         if (!state.modelSpeaking) {
                             state.modelSpeaking = true
                             state.recorder?.setMuted(true)
+                            setVoiceAudioLevels({ connected: true, isSpeaking: true, input: 0 })
                         }
                         for (const part of serverContent.modelTurn.parts) {
                             if (part.inlineData?.data) {
                                 state.player?.enqueue(part.inlineData.data)
+                                const rms = rmsFromPcm16Base64(part.inlineData.data)
+                                state.outputLevel = smoothLevel(state.outputLevel, rms, 0.5)
+                                setVoiceAudioLevels({
+                                    connected: true,
+                                    isSpeaking: true,
+                                    input: 0,
+                                    output: state.outputLevel,
+                                })
                             }
                             if (part.text) {
                                 console.log('[GeminiLive] Text:', part.text)

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
     Navigate,
@@ -60,6 +60,7 @@ import SettingsAboutPage from '@/routes/settings/about'
 import SharePage from '@/routes/share'
 import { setSharePendingTransfer } from '@/lib/sharePendingState'
 import { deleteShareTransfer } from '@/lib/shareTransfer'
+import { GardenXrEntryChip } from '@/garden/components/GardenXrEntryChip'
 
 
 function BackIcon(props: { className?: string }) {
@@ -550,11 +551,14 @@ function SessionsPage() {
                 style={{ '--sidebar-w': `${sidebar.width}px` } as React.CSSProperties}
             >
                 <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
-                    <div className="mx-auto w-full max-w-content flex items-center justify-between px-3 py-2">
-                        <div className="text-xs text-[var(--app-hint)]">
-                            {t('sessions.count', { n: sessions.length, m: projectCount })}
+                    <div className="mx-auto w-full max-w-content flex items-center justify-between gap-2 px-3 py-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                            <div className="shrink-0 text-xs text-[var(--app-hint)]">
+                                {t('sessions.count', { n: sessions.length, m: projectCount })}
+                            </div>
+                            <GardenXrEntryChip />
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex shrink-0 items-center gap-2">
                             <button
                                 type="button"
                                 onClick={() => void openCodexImportDialog()}
@@ -1430,6 +1434,20 @@ const shareRoute = createRoute({
     component: SharePage,
 })
 
+const GardenPageLazy = lazy(() =>
+    import('@/garden/GardenPage').then(m => ({ default: m.GardenPage }))
+)
+
+const gardenRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/garden',
+    component: () => (
+        <Suspense fallback={null}>
+            <GardenPageLazy />
+        </Suspense>
+    ),
+})
+
 export const routeTree = rootRoute.addChildren([
     indexRoute,
     sessionsRoute.addChildren([
@@ -1453,6 +1471,7 @@ export const routeTree = rootRoute.addChildren([
         settingsAboutRoute,
     ]),
     shareRoute,
+    gardenRoute,
 ])
 
 type RouterHistory = Parameters<typeof createRouter>[0]['history']
