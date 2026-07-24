@@ -276,6 +276,19 @@ layers:
   # ~/coding/hapi/worktrees/overseer-contract-invisible
   - branch: feat/overseer-contract-invisible
 
+  # 2026-07-24: overseer Half-B summary emission, STACKED on contract-invisible.
+  # fork-only (PR #86/#87, DO NOT upstream). emit = CLI: Cursor emits
+  # AGENT_NOTIFY_SUMMARY via a transient .cursor rule overlay (cursorNotifyRuleOverlay
+  # + cursorAcpRemoteLauncher, +4 files @ 9ef024260). CLI change → needs
+  # hapi-restart-hub to take effect (runner rebuild). Worktree: overseer-summary-emit.
+  - branch: feat/overseer-summary-emit
+
+  # fallback = hub-only: synthesize a per-turn overseer event when no summary line
+  # emitted (overseerEventRecorder +3 files @ db755c723). Stacked on summary-emit.
+  # KILL-CRITERION: watch overseer inbox after restart — if fallback fires on turns
+  # that DID emit a summary (event spam), gate/back-out (topmost = cheap rollback).
+  - branch: feat/overseer-summary-fallback
+
   # Overseer replay harness (thin): harness+CI+fixtures only. Tip 96c8e7bf4,
   # ahead=1, zero FCM. Stack after umbrella; no substrate in this tip.
   - branch: feat/overseer-replay-harness
