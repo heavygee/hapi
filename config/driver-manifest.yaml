@@ -512,26 +512,13 @@ layers:
   # fix/hub-runner-version-governance. Drop when upstream PR merges.
   - branch: fix/hub-runner-version-governance
 
-  # tiann/hapi#1119 - export HAPI_SESSION_ID into the wrapped agent/CLI child
-  # env at session bootstrap so agents can self-target their own hub session
-  # over REST / shell helpers without listing /api/sessions. Single seam in
-  # cli/src/agent/sessionFactory.ts (exportHapiSessionEnv); covers all flavors
-  # (runner-spawned + local) via process.env inheritance. CLI-only, no SCHEMA
-  # bump, no web change (hapi-restart-hub after rebuild to pick up new CLI).
-  # Worktree: ~/coding/hapi/worktrees/hapi-session-id-env. Pre-PR: pushed to
-  # origin, held for operator dogfood. Drop when upstream PR merges.
-  - branch: feat/hapi-session-id-env
+  # DROPPED 2026-07-24: feat/hapi-session-id-env MERGED UPSTREAM as PR #1121
+  # (HAPI_SESSION_ID env export + display-image self-target). Work is on
+  # upstream/main (tip wave incl. Release 0.23.4).
 
-  # tiann/hapi#1117 - mermaid render failures fall back to raw source SILENTLY
-  # (no reason). renderMermaidSvg now returns a discriminated { svg | error };
-  # MermaidFallback surfaces the concrete parse/render reason + data-mermaid-error
-  # attr. Web-only (mermaid-diagram.tsx + test) - atomic dist swap + hard-reload
-  # dogfoods it, no hub/cli restart needed. Investigation (27-block corpus +
-  # mmdc 11.16 cross-check) found NO false-negative: every block HAPI rejects,
-  # mmdc rejects too. So this is the confirmed Part-A diagnostics fix, not a
-  # parity fix. Worktree: ~/coding/hapi/worktrees/mermaid-render-diagnostics @
-  # feat/mermaid-render-diagnostics. Drop when upstream PR merges.
-  - branch: feat/mermaid-render-diagnostics
+  # DROPPED 2026-07-24: feat/mermaid-render-diagnostics MERGED UPSTREAM as
+  # PR #1145 (Mermaid parse/render failure reason in fallback). On
+  # upstream/main; next rebuild picks it up from base.
 
   # tiann/hapi#1129 CRITICAL + #947 nested UX — Cursor model picker empty on
   # bare ACP ids (live agent returns composer-2.5 etc with no brackets; catalog
