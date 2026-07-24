@@ -24,8 +24,14 @@ import {
 import type { Session } from '@hapi/protocol/types'
 import type { EventStore, InsertSystemEventInput, StoredSystemEvent } from '../store'
 import type { InboxStore } from '../store/inboxStore'
+import type { OverseerLlmFallbackClient } from './overseerLlmFallback'
 
 export type SessionSnapshot = OverseerSessionIdentity
+
+export type OverseerEventRecorderOptions = {
+    /** Opt-in OpenAI-compatible synthesizer (issue #90). Default: unset / off. */
+    llmFallback?: OverseerLlmFallbackClient | null
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
     return isObject(value) ? value as Record<string, unknown> : null
@@ -155,11 +161,15 @@ function buildTags(notify: NotifySummary | null, flavor: string): string | null 
 export class OverseerEventRecorder {
     private readonly lastAgentMessageAt = new Map<string, number>()
     private readonly knownPermissionRequestIds = new Map<string, Set<string>>()
+    private readonly llmFallback: OverseerLlmFallbackClient | null
 
     constructor(
         private readonly events: EventStore,
-        private readonly inbox?: InboxStore
-    ) {}
+        private readonly inbox?: InboxStore,
+        options?: OverseerEventRecorderOptions
+    ) {
+        this.llmFallback = options?.llmFallback ?? null
+    }
 
     list(options: Parameters<EventStore['list']>[0] = {}): StoredSystemEvent[] {
         return this.events.list(options)
@@ -169,7 +179,7 @@ export class OverseerEventRecorder {
         return this.events.count()
     }
 
-    onAgentMessage(session: SessionSnapshot, messageId: string, content: unknown, ts: number): StoredSystemEvent | null {
+    async onAgentMessage(session: SessionSnapshot, messageId: string, content: unknown, ts: number): Promise<StoredSystemEvent | null> {
         let primary: StoredSystemEvent | null = null
 
         if (isAgentMessageContent(content)) {
@@ -236,13 +246,12 @@ export class OverseerEventRecorder {
             }
 
             // Deterministic backstop: an agent produced visible text but no
-            // AGENT_NOTIFY_SUMMARY (rule compliance can never be 100%). Synthesize
-            // a minimal, session-log-only capture so the overseer never has a
-            // fully blind agent turn. No LLM; attention stays 0 so the inbox is
-            // untouched. Marked hub-synthesized so it is never mistaken for a
-            // real self-report.
+            // AGENT_NOTIFY_SUMMARY (rule compliance can never be 100%). Prefer
+            // opt-in hub LLM synthesis when configured; otherwise (or on LLM
+            // failure) fall through to first-line heuristic. Attention stays 0
+            // so Session Log only — never inbox / voice.
             if (!primary && plainText) {
-                primary = this.synthesizeTurnFallback(session, messageId, plainText, ts)
+                primary = await this.synthesizeTurnFallback(session, messageId, plainText, ts)
             }
         }
 
@@ -346,20 +355,53 @@ export class OverseerEventRecorder {
     }
 
     /**
-     * Minimal per-turn fallback event when no AGENT_NOTIFY_SUMMARY was emitted.
+     * Per-turn fallback when no AGENT_NOTIFY_SUMMARY was emitted.
      *
-     * Summary is the first non-empty line of the assistant text (deterministic,
-     * no LLM). Status defaults to `progress` via the empty-status mapping, and
-     * attention stays 0, so these land in the Session Log only — never the
-     * attention inbox. This is the safety net under the Cursor rule overlay:
-     * even a dropped summary line yields a captured turn.
+     * 1. Opt-in LLM (issue #90): full turn text → AGENT_NOTIFY_SUMMARY parse.
+     *    Provenance `hub-llm-fallback`; attn forced to 0 (Session Log only).
+     * 2. Heuristic: first non-empty line, eventType `progress`, attn 0.
+     *
+     * LLM failures / empty / non-compliant output fall through to (2).
      */
-    private synthesizeTurnFallback(
+    private async synthesizeTurnFallback(
         session: SessionSnapshot,
         messageId: string,
         plainText: string,
         ts: number
-    ): StoredSystemEvent | null {
+    ): Promise<StoredSystemEvent | null> {
+        if (this.llmFallback) {
+            try {
+                const notify = await this.llmFallback.synthesizeNotifySummary(plainText)
+                if (notify) {
+                    const eventType = mapNotifyStatusToEventType(notify.status)
+                    return this.insertSystemEvent(session, {
+                        ts,
+                        sourceKind: 'system',
+                        sourceRef: session.id,
+                        eventType,
+                        attentionCandidate: 0,
+                        operatorActionRequired: 0,
+                        summary: buildEventSummaryFromNotify(notify),
+                        relatedSessionId: session.id,
+                        provenance: 'hub-llm-fallback (no AGENT_NOTIFY_SUMMARY from primary agent)',
+                        idempotencyKey: `session:${session.id}:message:${messageId}:turn_fallback`,
+                        payloadFields: {
+                            messageId,
+                            synthesized: true,
+                            synthesis: 'llm-fallback',
+                            notify_summary: notify,
+                            suggested_action: notify.action ?? null,
+                        },
+                        notifyProject: notify.project ?? null,
+                        severity: deriveSeverity(eventType),
+                        tags: buildTags(notify, session.flavor),
+                    })
+                }
+            } catch {
+                // Fall through to heuristic — never let LLM errors blind a turn.
+            }
+        }
+
         const summary = firstNonEmptyLine(plainText)
         if (!summary) return null
 
@@ -375,7 +417,7 @@ export class OverseerEventRecorder {
             relatedSessionId: session.id,
             provenance: 'hub-synthesized from assistant text (no AGENT_NOTIFY_SUMMARY)',
             idempotencyKey: `session:${session.id}:message:${messageId}:turn_fallback`,
-            payloadFields: { messageId, synthesized: true },
+            payloadFields: { messageId, synthesized: true, synthesis: 'heuristic' },
             severity: deriveSeverity(eventType),
             tags: buildTags(null, session.flavor)
         })

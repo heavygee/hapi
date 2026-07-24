@@ -34,12 +34,12 @@ function agentText(message: string) {
 }
 
 describe('OverseerEventRecorder turn fallback', () => {
-    it('synthesizes a session-log-only progress event when no summary line', () => {
+    it('synthesizes a session-log-only progress event when no summary line', async () => {
         const store = new Store(':memory:')
         const recorder = new OverseerEventRecorder(store.events, store.inbox)
         const session = store.sessions.getOrCreateSession('cur', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
 
-        const event = recorder.onAgentMessage(
+        const event = await recorder.onAgentMessage(
             toSessionSnapshot(makeSession(session.id, 'cursor'), session.tag),
             'msg-fb',
             agentText('Refactored the parser and added tests.\n\nMore detail here.'),
@@ -53,20 +53,21 @@ describe('OverseerEventRecorder turn fallback', () => {
         expect(event?.summary).toBe('Refactored the parser and added tests.')
         expect(event?.provenance).toContain('hub-synthesized')
 
-        const payload = JSON.parse(event!.payloadJson!) as { synthesized?: boolean }
+        const payload = JSON.parse(event!.payloadJson!) as { synthesized?: boolean; synthesis?: string }
         expect(payload.synthesized).toBe(true)
+        expect(payload.synthesis).toBe('heuristic')
 
         // Session log gets it; the attention inbox stays empty.
         expect(store.events.count()).toBe(1)
         expect(store.inbox.count()).toBe(0)
     })
 
-    it('does not synthesize when a real AGENT_NOTIFY_SUMMARY is present', () => {
+    it('does not synthesize when a real AGENT_NOTIFY_SUMMARY is present', async () => {
         const store = new Store(':memory:')
         const recorder = new OverseerEventRecorder(store.events, store.inbox)
         const session = store.sessions.getOrCreateSession('cur2', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
 
-        const event = recorder.onAgentMessage(
+        const event = await recorder.onAgentMessage(
             toSessionSnapshot(makeSession(session.id, 'cursor'), session.tag),
             'msg-real',
             agentText('All done.\nAGENT_NOTIFY_SUMMARY {"version":1,"status":"done","action":"Review PR","summary":"Shipped"}'),
@@ -78,12 +79,12 @@ describe('OverseerEventRecorder turn fallback', () => {
         expect(store.events.count()).toBe(1)
     })
 
-    it('does not synthesize when the summary line is malformed (validation_error wins)', () => {
+    it('does not synthesize when the summary line is malformed (validation_error wins)', async () => {
         const store = new Store(':memory:')
         const recorder = new OverseerEventRecorder(store.events, store.inbox)
         const session = store.sessions.getOrCreateSession('cur3', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
 
-        const event = recorder.onAgentMessage(
+        const event = await recorder.onAgentMessage(
             toSessionSnapshot(makeSession(session.id, 'cursor'), session.tag),
             'msg-bad',
             agentText('Working.\nAGENT_NOTIFY_SUMMARY {not valid json'),
@@ -94,25 +95,25 @@ describe('OverseerEventRecorder turn fallback', () => {
         expect(store.events.list({ eventType: 'progress' })).toHaveLength(0)
     })
 
-    it('is idempotent for a redelivered message id', () => {
+    it('is idempotent for a redelivered message id', async () => {
         const store = new Store(':memory:')
         const recorder = new OverseerEventRecorder(store.events, store.inbox)
         const session = store.sessions.getOrCreateSession('cur4', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
         const snapshot = toSessionSnapshot(makeSession(session.id, 'cursor'), session.tag)
 
-        recorder.onAgentMessage(snapshot, 'msg-dup', agentText('Progress update.'), Date.now())
-        recorder.onAgentMessage(snapshot, 'msg-dup', agentText('Progress update.'), Date.now())
+        await recorder.onAgentMessage(snapshot, 'msg-dup', agentText('Progress update.'), Date.now())
+        await recorder.onAgentMessage(snapshot, 'msg-dup', agentText('Progress update.'), Date.now())
 
         expect(store.events.list({ eventType: 'progress' })).toHaveLength(1)
     })
 
-    it('caps a long first line with an ellipsis', () => {
+    it('caps a long first line with an ellipsis', async () => {
         const store = new Store(':memory:')
         const recorder = new OverseerEventRecorder(store.events, store.inbox)
         const session = store.sessions.getOrCreateSession('cur5', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
 
         const longLine = 'x'.repeat(500)
-        const event = recorder.onAgentMessage(
+        const event = await recorder.onAgentMessage(
             toSessionSnapshot(makeSession(session.id, 'cursor'), session.tag),
             'msg-long',
             agentText(longLine),
@@ -123,13 +124,13 @@ describe('OverseerEventRecorder turn fallback', () => {
         expect(event?.summary?.endsWith('\u2026')).toBe(true)
     })
 
-    it('ignores user messages', () => {
+    it('ignores user messages', async () => {
         const store = new Store(':memory:')
         const recorder = new OverseerEventRecorder(store.events, store.inbox)
         const session = store.sessions.getOrCreateSession('cur6', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
 
         const userContent = { role: 'user', content: { type: 'text', text: 'do the thing' } }
-        const event = recorder.onAgentMessage(
+        const event = await recorder.onAgentMessage(
             toSessionSnapshot(makeSession(session.id, 'cursor'), session.tag),
             'msg-user',
             userContent,
