@@ -1,14 +1,16 @@
 # Overseer summary emission (Half B) — 2026-07-24
 
-Status: both pieces implemented + tested (awaiting operator `hapi-restart-hub` + soup)
+Status: Pieces 1–2 live on soup; Piece 3 (non-Cursor systemPrompt + debug dates) in flight
 Owner: feat/overseer-summary-emit (peer of 🔁overseer prep)
 Scope: FORK-ONLY. Never upstream. The whole overseer feature is fork-private.
 
 - Piece 1 — `feat/overseer-summary-emit` (fork PR #86): CLI Cursor rule overlay.
-  11 overlay tests + 19 launcher tests green; typecheck clean.
-- Piece 2 — `feat/overseer-summary-fallback` (stacked on Piece 1): hub per-turn
-  backstop in `overseerEventRecorder`. 6 fallback tests + full hub suite (524)
-  green; typecheck clean.
+- Piece 2 — `feat/overseer-summary-fallback` (PR #87): hub deterministic backstop.
+- Piece 3 — `feat/overseer-summary-flavors-and-dates`: Claude/Codex/Grok/OpenCode
+  get the same contract via systemPrompt / developer_instructions / one-shot
+  first-turn instructions (`HAPI_SESSION_SUMMARY_CONTRACT=0` to opt out). Debug
+  events/inbox timestamps use standard "x ago" + absolute tooltip.
+
 
 ## Why this exists (the real WHY — keep it here, not in product code)
 
@@ -120,11 +122,56 @@ ordinary, useful project config, never as surveillance:
 
 ## Scope / non-goals
 
-- Focus Cursor (the 95% gap).
-- kimi + generic ACP share the same removed-prepend gap — **optional follow-up**,
-  not in scope now.
-- codex/grok/opencode have clean `systemPrompt.ts` and may already emit via their
-  own channels — optional later.
+- Cursor: transient `.mdc` overlay (Piece 1).
+- Claude / Codex / Grok / OpenCode: systemPrompt / developer_instructions /
+  one-shot first-turn instruction (Piece 3). Opt-out via
+  `HAPI_SESSION_SUMMARY_CONTRACT=0`.
+- kimi + generic ACP / pi: still optional follow-up (no clean systemPrompt yet).
+- Better LLM / oneshot-agent fallback: designed below, **not implemented in v1**.
+
+## Better fallback (opt-in, not yet built)
+
+v1 fallback is first-non-empty-line heuristics. A *better* fallback needs an LLM
+and is a real cost tax - so it must be **opt-in**, clearly labeled, and rare
+(only when the primary agent omitted the contract).
+
+### Option A — raw OpenAI-compatible completions call
+
+Hub (or a tiny side worker) POSTs the last assistant turn text to an operator-
+configured base URL (`/v1/chat/completions` or `/v1/responses`) with a fixed
+prompt: "emit exactly one AGENT_NOTIFY_SUMMARY JSON line." Local (Ollama /
+vLLM / local-speech gateway) or remote (OpenAI) - same wire format.
+
+- Pros: cheap to wire, no session surface, easy to bill/attribute as
+  `provenance: hub-llm-fallback`.
+- Cons: large turns = large prompt tokens; operator must provision a key/URL;
+  Chat Completions remains widely compatible for local gateways, Responses is
+  preferred for new OpenAI-native work - support both behind one adapter.
+
+### Option B — out-of-band oneshot agent
+
+Spawn a short-lived non-HAPI (or disposable HAPI) agent with a fixed prompt:
+retrieve last turn text for session X and emit a compliant summary line. Mark
+the resulting event `provenance: oneshot-agent-fallback` and surface that label
+in Session Log / inbox so the operator never wonders "wtf usage is this."
+
+- Pros: can use whatever model/provider the operator already trusts; can do
+  multi-step retrieval if needed.
+- Cons: heavier; looks like a phantom session if not carefully labeled; higher
+  cost variance; more moving parts.
+
+### Shared requirements (either option)
+
+- **Default off.** Explicit settings toggle + config (URL/key for A; spawn
+  recipe for B).
+- **Transparency:** event payload must say this was synthesized *because* the
+  primary turn lacked a contract - never pretend the primary agent said it.
+- **Budget caps:** max input chars, max calls/hour, skip if turn text is empty.
+- **Kill-criterion:** if opt-in users report surprise usage, the toggle and
+  provenance labels failed - fix UX before expanding defaults.
+
+Prefer **Option A** as the first better-fallback ship: smaller blast radius,
+easier to reason about cost, no phantom sessions.
 
 ## Known edge cases / follow-ups
 
@@ -134,8 +181,11 @@ ordinary, useful project config, never as surveillance:
 - **Cursor native `--worktree`:** the backend spawn cwd is `session.path`; if a
   future cursor-native worktree changes the effective workspace root, revisit
   where the rule is written. Noted, not handled in v1.
-- **Rule compliance ceiling:** even with `alwaysApply`, the model may drop the
-  line. That is exactly why Piece 2 exists.
+- **Rule compliance ceiling:** even with `alwaysApply` / systemPrompt, the model
+  may drop the line. That is exactly why Piece 2 exists.
+- **Grok / OpenCode remote:** contract rides the existing one-shot
+  `instructionsSent` first-turn inject (same channel as title instructions) -
+  not every user turn (avoids the #1095/#1096 prepend anti-pattern).
 
 ## Soup / coordination
 

@@ -6,14 +6,17 @@
  */
 
 import { trimIdent } from '@/utils/trimIdent';
+import { withSessionSummaryInstruction } from '@/modules/common/sessionSummaryInstruction';
 
 /**
  * Title instruction for OpenCode to call the hapi MCP tool.
+ * Also carries the session-status summary contract (local instructions file +
+ * one-shot remote first-turn inject via instructionsSent).
  */
-export const TITLE_INSTRUCTION = trimIdent(`
+export const TITLE_INSTRUCTION = withSessionSummaryInstruction(trimIdent(`
     Use the title tool sparingly. For a new chat, call the tool "hapi_change_title" once after the user's initial request is clear, and set a concise task title. Do not rename the chat for routine progress, substeps, implementation details, or a slightly better wording. Rename only when the user's primary objective changes substantially and the existing title would be misleading.
     When you create or find a local image file that the user should see, call the tool "hapi_display_image" with the image path so HAPI can show it inline.
-`);
+`));
 
 /**
  * The system prompt to inject for OpenCode sessions.
