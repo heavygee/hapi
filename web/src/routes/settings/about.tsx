@@ -1,5 +1,6 @@
 import { PROTOCOL_VERSION } from '@hapi/protocol'
 import { useTranslation } from '@/lib/use-translation'
+import { AgentContractDebugControls } from '@/components/settings/AgentContractDebugControls'
 import { EventsDebugControls } from '@/components/settings/EventsDebugControls'
 import { InboxDebugControls } from '@/components/settings/InboxDebugControls'
 import { SettingsPageContent, SettingsRow, SettingsSection } from '@/components/settings/SettingsPrimitives'
@@ -16,6 +17,7 @@ export default function SettingsAboutPage() {
                 <SettingsRow label={t('settings.about.protocolVersion')} trailing={<span className="text-[var(--app-hint)]">{PROTOCOL_VERSION}</span>} />
             </SettingsSection>
             <SettingsSection>
+                <AgentContractDebugControls />
                 <EventsDebugControls />
                 <InboxDebugControls />
             </SettingsSection>

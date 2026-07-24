@@ -139,4 +139,50 @@ describe('OverseerEventRecorder turn fallback', () => {
         expect(event).toBeNull()
         expect(store.events.list({ eventType: 'progress' })).toHaveLength(0)
     })
+
+    it('defers synth while thinking; flushes once when thinking clears', () => {
+        const store = new Store(':memory:')
+        const recorder = new OverseerEventRecorder(store.events, store.inbox)
+        const live = store.sessions.getOrCreateSession('cur7', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
+        const snapshot = toSessionSnapshot(makeSession(live.id, 'cursor'), live.tag)
+
+        // Mid-turn ACP text flushes (tool boundaries) — must NOT synth yet.
+        expect(recorder.onAgentMessage(snapshot, 'msg-mid-1', agentText('Pulling the last hour of events.'), Date.now(), { thinking: true })).toBeNull()
+        expect(recorder.onAgentMessage(snapshot, 'msg-mid-2', agentText('Found something important.'), Date.now(), { thinking: true })).toBeNull()
+        expect(store.events.count()).toBe(0)
+
+        // End of turn: thinking true → false.
+        recorder.onSessionUpdated(makeSession(live.id, 'cursor', { thinking: true }), live.tag)
+        recorder.onSessionUpdated(makeSession(live.id, 'cursor', { thinking: false }), live.tag)
+
+        const events = store.events.list({ eventType: 'progress' })
+        expect(events).toHaveLength(1)
+        expect(events[0]?.summary).toBe('Found something important.')
+        expect(events[0]?.provenance).toContain('hub-synthesized')
+        const payload = JSON.parse(events[0]!.payloadJson!) as { messageId?: string }
+        expect(payload.messageId).toBe('msg-mid-2')
+    })
+
+    it('does not flush deferred synth when a real notify arrives mid-turn', () => {
+        const store = new Store(':memory:')
+        const recorder = new OverseerEventRecorder(store.events, store.inbox)
+        const live = store.sessions.getOrCreateSession('cur8', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
+        const snapshot = toSessionSnapshot(makeSession(live.id, 'cursor'), live.tag)
+
+        recorder.onAgentMessage(snapshot, 'msg-mid', agentText('Working on it.'), Date.now(), { thinking: true })
+        const emit = recorder.onAgentMessage(
+            snapshot,
+            'msg-final',
+            agentText('Done.\nAGENT_NOTIFY_SUMMARY {"version":1,"status":"done","action":"Review","summary":"Shipped"}'),
+            Date.now(),
+            { thinking: true }
+        )
+        expect(emit?.provenance).toBe('AGENT_NOTIFY_SUMMARY')
+
+        recorder.onSessionUpdated(makeSession(live.id, 'cursor', { thinking: true }), live.tag)
+        recorder.onSessionUpdated(makeSession(live.id, 'cursor', { thinking: false }), live.tag)
+
+        expect(store.events.list({ eventType: 'progress' })).toHaveLength(0)
+        expect(store.events.count()).toBe(1)
+    })
 })

@@ -152,9 +152,30 @@ function buildTags(notify: NotifySummary | null, flavor: string): string | null 
     return parts.length > 0 ? parts.join(' ') : null
 }
 
+type PendingTurnFallback = {
+    messageId: string
+    plainText: string
+    ts: number
+}
+
+export type OnAgentMessageOptions = {
+    /**
+     * When true, the agent turn is still in flight (session.thinking). Defer
+     * hub-synthesized fallback until thinking clears so ACP mid-turn text
+     * flushes do not each become a Session Log row. When false/undefined,
+     * synthesize immediately (idle delivery / tests / flavors that never set
+     * thinking).
+     */
+    thinking?: boolean
+}
+
 export class OverseerEventRecorder {
     private readonly lastAgentMessageAt = new Map<string, number>()
     private readonly knownPermissionRequestIds = new Map<string, Set<string>>()
+    /** Latest no-notify assistant text awaiting end-of-turn flush. */
+    private readonly pendingTurnFallback = new Map<string, PendingTurnFallback>()
+    /** Last observed session.thinking, for true→false edge detection. */
+    private readonly sessionThinking = new Map<string, boolean>()
 
     constructor(
         private readonly events: EventStore,
@@ -169,7 +190,13 @@ export class OverseerEventRecorder {
         return this.events.count()
     }
 
-    onAgentMessage(session: SessionSnapshot, messageId: string, content: unknown, ts: number): StoredSystemEvent | null {
+    onAgentMessage(
+        session: SessionSnapshot,
+        messageId: string,
+        content: unknown,
+        ts: number,
+        opts: OnAgentMessageOptions = {}
+    ): StoredSystemEvent | null {
         let primary: StoredSystemEvent | null = null
 
         if (isAgentMessageContent(content)) {
@@ -181,6 +208,7 @@ export class OverseerEventRecorder {
             const plainText = extractAssistantPlainText(agentContent)
             if (plainText) {
                 if (detectEmptyHapiEventsSentinel(plainText)) {
+                    this.pendingTurnFallback.delete(session.id)
                     primary = this.insertSystemEvent(session, {
                         ts,
                         sourceKind: 'system',
@@ -194,6 +222,7 @@ export class OverseerEventRecorder {
                         severity: 1
                     })
                 } else if (detectMalformedNotifySummaryLine(plainText)) {
+                    this.pendingTurnFallback.delete(session.id)
                     primary = this.insertSystemEvent(session, {
                         ts,
                         sourceKind: 'system',
@@ -209,6 +238,8 @@ export class OverseerEventRecorder {
                 } else {
                     const notify = extractNotifySummary(plainText)
                     if (notify) {
+                        // Real end-of-turn self-report — drop any deferred synth.
+                        this.pendingTurnFallback.delete(session.id)
                         primary = this.recordNotifySummary(session, messageId, notify, ts)
                     }
                 }
@@ -235,14 +266,18 @@ export class OverseerEventRecorder {
                 }
             }
 
-            // Deterministic backstop: an agent produced visible text but no
-            // AGENT_NOTIFY_SUMMARY (rule compliance can never be 100%). Synthesize
-            // a minimal, session-log-only capture so the overseer never has a
-            // fully blind agent turn. No LLM; attention stays 0 so the inbox is
-            // untouched. Marked hub-synthesized so it is never mistaken for a
-            // real self-report.
+            // Deterministic backstop: only at end of turn. ACP (Cursor/Claude)
+            // flushes narrative text at tool boundaries as separate message
+            // rows — synthesizing on every message-received flooded Session
+            // Log with mid-turn crumbs. While thinking, stash the latest
+            // no-notify text and flush when thinking clears.
             if (!primary && plainText) {
-                primary = this.synthesizeTurnFallback(session, messageId, plainText, ts)
+                if (opts.thinking) {
+                    this.pendingTurnFallback.set(session.id, { messageId, plainText, ts })
+                } else {
+                    this.pendingTurnFallback.delete(session.id)
+                    primary = this.synthesizeTurnFallback(session, messageId, plainText, ts)
+                }
             }
         }
 
@@ -252,7 +287,12 @@ export class OverseerEventRecorder {
     }
 
     onSessionUpdated(session: Session, tag?: string | null): void {
+        const prevThinking = this.sessionThinking.get(session.id) ?? false
+        this.sessionThinking.set(session.id, session.thinking)
         this.syncPermissionRequests(session, tag ?? null)
+        if (prevThinking && !session.thinking) {
+            this.flushPendingTurnFallback(toSessionSnapshot(session, tag ?? null))
+        }
     }
 
     onSessionEnd(
@@ -263,14 +303,17 @@ export class OverseerEventRecorder {
         getLastAgentPlainText: () => string | null
     ): StoredSystemEvent | null {
         this.knownPermissionRequestIds.delete(session.id)
+        this.sessionThinking.delete(session.id)
+        // Session teardown is an end-of-turn boundary — flush any deferred synth.
+        const flushed = this.flushPendingTurnFallback(toSessionSnapshot(session, tag))
 
         if (reason !== 'completed') {
-            return null
+            return flushed
         }
 
         const lastText = getLastAgentPlainText()
         if (lastText && extractNotifySummary(lastText)) {
-            return null
+            return flushed
         }
 
         const snapshot = toSessionSnapshot(session, tag)
@@ -287,7 +330,22 @@ export class OverseerEventRecorder {
             payloadFields: { reason },
             severity: deriveSeverity('completed'),
             tags: buildTags(null, snapshot.flavor)
-        })
+        }) ?? flushed
+    }
+
+    /**
+     * Emit deferred hub-synthesized fallback for the latest no-notify assistant
+     * text of this session (end-of-turn). No-op when a real notify already
+     * cleared the pending slot.
+     */
+    flushPendingTurnFallback(session: SessionSnapshot): StoredSystemEvent | null {
+        const pending = this.pendingTurnFallback.get(session.id)
+        if (!pending) return null
+        this.pendingTurnFallback.delete(session.id)
+        if (extractNotifySummary(pending.plainText)) {
+            return null
+        }
+        return this.synthesizeTurnFallback(session, pending.messageId, pending.plainText, pending.ts)
     }
 
     /**
@@ -346,13 +404,14 @@ export class OverseerEventRecorder {
     }
 
     /**
-     * Minimal per-turn fallback event when no AGENT_NOTIFY_SUMMARY was emitted.
+     * Minimal end-of-turn fallback event when no AGENT_NOTIFY_SUMMARY was emitted.
      *
      * Summary is the first non-empty line of the assistant text (deterministic,
      * no LLM). Status defaults to `progress` via the empty-status mapping, and
      * attention stays 0, so these land in the Session Log only — never the
-     * attention inbox. This is the safety net under the Cursor rule overlay:
-     * even a dropped summary line yields a captured turn.
+     * attention inbox. Callers must invoke this only at turn boundaries
+     * (thinking cleared / idle message / session end), never on every ACP
+     * mid-turn text flush.
      */
     private synthesizeTurnFallback(
         session: SessionSnapshot,

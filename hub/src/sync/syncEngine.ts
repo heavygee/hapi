@@ -328,7 +328,8 @@ export class SyncEngine {
                     toSessionSnapshot(session, storedSession?.tag ?? null),
                     event.message.id,
                     event.message.content,
-                    event.message.createdAt
+                    event.message.createdAt,
+                    { thinking: session.thinking }
                 )
             }
         }
