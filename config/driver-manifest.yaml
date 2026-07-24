@@ -381,18 +381,14 @@ layers:
 
   # #878 leg 3 - transient model error bridge (one prompt per atTs).
   # Manual [Bridge & retry], opt-in auto-bridge, retriedAndFailed gating.
-  # Re-thinned 2026-07-22 onto detect@soup after #1096 base drift → tip
-  # 782a4a450 (was parked 2026-07-21; rr-cache retrained on rematerialize).
+  # Tip 2026-07-24: 782a4a450 (9 commits on detect@0f5b978cd).
+  # Reconciled: 2026-07-22 re-thin tip existed but branch HEAD was still at
+  # f9831beac (pre-rethin / oos-linux); reset+force-pushed branch to 782a4a450.
   # Fat bak: backup/cursor-model-error-bridge-fat. Worktree: model-error-bridge.
+  # Un-parked 2026-07-24 after branch tip reconciled (was PARKED same day when
+  # rematerialize hit 19-file conflict from stale f9831beac tip).
   # Drop when upstream PR merges.
-  #
-  # PARKED 2026-07-24 (meta/shepherd): base drift (upstream dd42263aa + fresh
-  # layer 1-19 stack) reshaped this leg's 19-file conflict against layer 19
-  # (detect); rerere had postimages for only 3/19. Not #1120's blocker (that
-  # was layer 7 fix/soup-typecheck-followups, now rerere-trained + green).
-  # Parked to unblock the full soup incl. #1120. OWNER ACTION: re-thin
-  # feat/cursor-model-error-bridge onto current soup detect tip, then un-park.
-  # - branch: feat/cursor-model-error-bridge
+  - branch: feat/cursor-model-error-bridge
 
   # tiann/hapi#991 / upstream PR #1128 - Cursor ACP remote resume: reuse
   # original HAPI row via existingSessionId. Hub already passes
