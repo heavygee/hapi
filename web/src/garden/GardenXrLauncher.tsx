@@ -3,6 +3,7 @@ import { GardenXrLauncherProvider, useGardenXrLauncher } from '@/garden/context/
 
 const GardenXrOverlayLazy = lazy(() => import('@/garden/GardenXrOverlay'))
 
+/** Convenience wrap — prefer Provider + OverlayHost in App for soup-friendly merges. */
 export function GardenXrLauncher(props: { children: ReactNode }) {
     return (
         <GardenXrLauncherProvider>
@@ -13,7 +14,7 @@ export function GardenXrLauncher(props: { children: ReactNode }) {
 }
 
 /** Lazy-loads the Garden overlay; entry buttons live in page headers (not over the composer). */
-function GardenXrOverlayHost() {
+export function GardenXrOverlayHost() {
     const { overlayOpen, closeOverlay } = useGardenXrLauncher()
 
     if (!overlayOpen) {
@@ -33,4 +34,4 @@ function GardenXrOverlayHost() {
     )
 }
 
-export { useGardenXrLauncher } from '@/garden/context/GardenXrLauncherContext'
+export { GardenXrLauncherProvider, useGardenXrLauncher } from '@/garden/context/GardenXrLauncherContext'

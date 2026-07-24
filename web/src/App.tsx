@@ -19,7 +19,7 @@ import { clearMessageWindow, fetchLatestMessages } from '@/lib/message-window-st
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useTranslation } from '@/lib/use-translation'
 import { VoiceProvider } from '@/lib/voice-context'
-import { GardenXrLauncher } from '@/garden/GardenXrLauncher'
+import { GardenXrLauncherProvider, GardenXrOverlayHost } from '@/garden/GardenXrLauncher'
 import { requireHubUrlForLogin } from '@/lib/runtime-config'
 import { getAppGlobalSseSubscription, getAppSessionSseSubscription } from '@/lib/appSseSubscriptions'
 import { reconcileQueuedStateAfterConnect } from '@/lib/queued-state-reconciliation'
@@ -448,24 +448,25 @@ function AppInner() {
     return (
         <AppContextProvider value={{ api, token, baseUrl }}>
             <VoiceProvider>
-                <GardenXrLauncher>
-                    <PwaUpdateBannerWithStatusOffset
-                        isSyncing={isSyncing}
-                        isReconnecting={sseDisconnected && !isSyncing}
-                    />
-                    <SyncingBanner isSyncing={isSyncing} />
-                    <ReconnectingBanner
-                        isReconnecting={sseDisconnected && !isSyncing}
-                        reason={sseDisconnectReason}
-                    />
-                    <VoiceErrorBanner />
-                    <OfflineBanner />
-                    <div className="h-full min-h-0 flex flex-col">
-                        <Outlet />
-                    </div>
-                    <ToastContainer />
-                    <InstallPrompt />
-                </GardenXrLauncher>
+                <GardenXrLauncherProvider>
+                <PwaUpdateBannerWithStatusOffset
+                    isSyncing={isSyncing}
+                    isReconnecting={sseDisconnected && !isSyncing}
+                />
+                <SyncingBanner isSyncing={isSyncing} />
+                <ReconnectingBanner
+                    isReconnecting={sseDisconnected && !isSyncing}
+                    reason={sseDisconnectReason}
+                />
+                <VoiceErrorBanner />
+                <OfflineBanner />
+                <div className="h-full min-h-0 flex flex-col">
+                    <Outlet />
+                </div>
+                <ToastContainer />
+                <InstallPrompt />
+                <GardenXrOverlayHost />
+                </GardenXrLauncherProvider>
             </VoiceProvider>
         </AppContextProvider>
     )
