@@ -385,7 +385,14 @@ layers:
   # 782a4a450 (was parked 2026-07-21; rr-cache retrained on rematerialize).
   # Fat bak: backup/cursor-model-error-bridge-fat. Worktree: model-error-bridge.
   # Drop when upstream PR merges.
-  - branch: feat/cursor-model-error-bridge
+  #
+  # PARKED 2026-07-24 (meta/shepherd): base drift (upstream dd42263aa + fresh
+  # layer 1-19 stack) reshaped this leg's 19-file conflict against layer 19
+  # (detect); rerere had postimages for only 3/19. Not #1120's blocker (that
+  # was layer 7 fix/soup-typecheck-followups, now rerere-trained + green).
+  # Parked to unblock the full soup incl. #1120. OWNER ACTION: re-thin
+  # feat/cursor-model-error-bridge onto current soup detect tip, then un-park.
+  # - branch: feat/cursor-model-error-bridge
 
   # tiann/hapi#991 / upstream PR #1128 - Cursor ACP remote resume: reuse
   # original HAPI row via existingSessionId. Hub already passes
