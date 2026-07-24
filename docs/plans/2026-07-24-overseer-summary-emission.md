@@ -131,11 +131,14 @@ ordinary, useful project config, never as surveillance:
   phase full-coverage.
 - Better LLM / oneshot-agent fallback: designed below, **not implemented in v1**.
 
-## Better fallback (opt-in, not yet built)
+## Better fallback (opt-in — tracked #90)
 
 v1 fallback is first-non-empty-line heuristics. A *better* fallback needs an LLM
 and is a real cost tax - so it must be **opt-in**, clearly labeled, and rare
 (only when the primary agent omitted the contract).
+
+**Issue:** [#90](https://github.com/heavygee/hapi/issues/90) — implement Option A (default off).
+**Remaining flavor coverage (separate):** [#89](https://github.com/heavygee/hapi/issues/89).
 
 ### Gate: rarity first, quality never second
 
