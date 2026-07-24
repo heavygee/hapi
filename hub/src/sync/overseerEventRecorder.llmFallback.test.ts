@@ -78,7 +78,7 @@ describe('OverseerEventRecorder LLM fallback', () => {
         expect(payload.notify_summary?.summary).toBe('LLM distilled summary of the whole turn')
     })
 
-    it('falls through to heuristic when LLM returns null', async () => {
+    it('records nothing when LLM returns null (no heuristic)', async () => {
         const store = new Store(':memory:')
         const llmFallback: OverseerLlmFallbackClient = {
             synthesizeNotifySummary: mock(async () => null),
@@ -93,9 +93,8 @@ describe('OverseerEventRecorder LLM fallback', () => {
             Date.now()
         )
 
-        expect(event?.summary).toBe('First line wins.')
-        expect(event?.provenance).toContain('hub-synthesized')
-        expect(event?.eventType).toBe('progress')
+        expect(event).toBeNull()
+        expect(store.events.count()).toBe(0)
     })
 
     it('does not call LLM when a real AGENT_NOTIFY_SUMMARY is present', async () => {
@@ -117,7 +116,7 @@ describe('OverseerEventRecorder LLM fallback', () => {
         expect(event?.provenance).toBe('AGENT_NOTIFY_SUMMARY')
     })
 
-    it('skips LLM when client is not configured (heuristic only)', async () => {
+    it('records nothing when LLM client is not configured', async () => {
         const store = new Store(':memory:')
         const recorder = new OverseerEventRecorder(store.events, store.inbox)
         const session = store.sessions.getOrCreateSession('llm4', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
@@ -125,15 +124,15 @@ describe('OverseerEventRecorder LLM fallback', () => {
         const event = await recorder.onAgentMessage(
             toSessionSnapshot(makeSession(session.id, 'cursor'), session.tag),
             'msg-off',
-            agentText('Heuristic path.'),
+            agentText('No synth path.'),
             Date.now()
         )
 
-        expect(event?.provenance).toContain('hub-synthesized')
-        expect(event?.summary).toBe('Heuristic path.')
+        expect(event).toBeNull()
+        expect(store.events.count()).toBe(0)
     })
 
-    it('falls through to heuristic when LLM throws', async () => {
+    it('records nothing when LLM throws (no heuristic)', async () => {
         const store = new Store(':memory:')
         const llmFallback: OverseerLlmFallbackClient = {
             synthesizeNotifySummary: mock(async () => {
@@ -146,11 +145,11 @@ describe('OverseerEventRecorder LLM fallback', () => {
         const event = await recorder.onAgentMessage(
             toSessionSnapshot(makeSession(session.id, 'cursor'), session.tag),
             'msg-throw',
-            agentText('Recovered via heuristic.'),
+            agentText('Should stay quiet.'),
             Date.now()
         )
 
-        expect(event?.summary).toBe('Recovered via heuristic.')
-        expect(event?.provenance).toContain('hub-synthesized')
+        expect(event).toBeNull()
+        expect(store.events.count()).toBe(0)
     })
 })

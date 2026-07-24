@@ -16,11 +16,19 @@ Scope: FORK-ONLY. Never upstream. The whole overseer feature is fork-private.
 
 The overseer/inbox/session-log is fed by `AGENT_NOTIFY_SUMMARY` lines that agents
 emit as the last line of every turn. PR #81 (`feat/overseer-contract-invisible`)
-shipped **Half A — invisibility**: `stripAgentContract()` hides the trailing
-`AGENT_NOTIFY_SUMMARY {...}` line from the human render/copy, and
-`extractNotifySummary()` / `collapseRepeats()` parse it corruption-tolerantly
-(recovers Cursor's `SUMMARY`->`SUMARY` dup-drop). The raw text survives in the
-store so the overseer can read it.
+**Half A strip is now optional in the web UI.** Settings → About → "Show
+AGENT_NOTIFY line" (`hapi-show-agent-contract` localStorage) leaves the trailing
+line visible in session chat so the operator can verify emission without
+digging in SQLite. Default remains strip-on. Raw store is never mutated.
+
+**No hub first-line text synth.** Piece 2's `hub-synthesized from assistant text`
+path is removed. ACP mid-turn text flushes are not Session Log events. Primary
+signal is agent `AGENT_NOTIFY_SUMMARY` only; opt-in LLM fallback (#90) remains
+a separate layer (default off). Tool-call timelines belong in session-flow
+experiments, not overseer Session Log.
+
+
+
 
 **Half A is useless for Cursor because nothing emits the line.** The hub
 deliberately does not inject the contract for Cursor
