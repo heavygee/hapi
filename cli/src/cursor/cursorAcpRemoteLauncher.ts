@@ -1,4 +1,5 @@
 import React from 'react';
+import { basename } from 'node:path';
 import { logger } from '@/ui/logger';
 import { buildHapiMcpBridge } from '@/codex/utils/buildHapiMcpBridge';
 import { convertAgentMessage } from '@/agent/messageConverter';
@@ -30,6 +31,10 @@ import { cursorPassThroughStatusMessage, parseCursorSpecialCommand } from './cur
 import { buildCursorModelsSeedPayload, seedCursorModelsCache } from '@/modules/common/cursorModels';
 import { readSharedCursorModelsCache } from '@/modules/common/cursorModelsSharedCache';
 import type { AcpSdkBackend } from '@/agent/backends/acp';
+import {
+    installCursorNotifyRuleOverlay,
+    type CursorNotifyRuleOverlay
+} from './utils/cursorNotifyRuleOverlay';
 
 class CursorAcpRemoteLauncher extends RemoteLauncherBase {
     private readonly session: CursorSession;
@@ -37,6 +42,8 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
     private permissionAdapter: PermissionAdapter | null = null;
     private extensionAdapter: CursorExtensionAdapter | null = null;
     private happyServer: { stop: () => void } | null = null;
+    /** Transient workspace `.cursor/rules` overlay for session status summaries. */
+    private notifyRuleOverlay: CursorNotifyRuleOverlay | null = null;
     private abortController = new AbortController();
     private displayPermissionMode: PermissionMode | null = null;
     private currentBackendModel: string | null = null;
@@ -70,6 +77,14 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
 
         const { server: happyServer, mcpServers } = await buildHapiMcpBridge(session.client);
         this.happyServer = happyServer;
+
+        // Install the workspace session-summary rule before the backend spawns
+        // cursor-agent, so the `.cursor/rules` file is on disk when it reads
+        // workspace rules. Restored/removed in cleanup().
+        this.notifyRuleOverlay = installCursorNotifyRuleOverlay({
+            cwd: session.path,
+            project: basename(session.path) || null
+        });
 
         const autoReview = isCursorAutoReviewMode(session.getPermissionMode() as PermissionMode);
         this.spawnedWithAutoReview = autoReview;
@@ -293,6 +308,11 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         if (this.happyServer) {
             this.happyServer.stop();
             this.happyServer = null;
+        }
+
+        if (this.notifyRuleOverlay) {
+            this.notifyRuleOverlay.cleanup();
+            this.notifyRuleOverlay = null;
         }
 
         setCursorAcpModelsSnapshot(null);
