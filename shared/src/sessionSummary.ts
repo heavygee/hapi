@@ -37,6 +37,8 @@ export type SessionSummaryMetadata = {
     flavor?: string | null
     worktree?: WorktreeMetadata
     agentSessionId?: string
+    /** Native Claude transcript id when flavor is claude (not the flattened agentSessionId). */
+    claudeSessionId?: string
     lifecycleState?: string
 }
 
@@ -124,6 +126,7 @@ export function toSessionSummary(session: Session): SessionSummary {
             ?? session.metadata.cursorSessionId
             ?? session.metadata.kimiSessionId
             ?? undefined,
+        claudeSessionId: session.metadata.claudeSessionId ?? undefined,
         lifecycleState: session.metadata.lifecycleState
     } : null
 
