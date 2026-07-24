@@ -258,7 +258,9 @@ layers:
   # Session list/header context menu: Copy reference for cross-session citation.
   # tiann/hapi#950. Web-only; topmost for cheap rollback via atomic web swap.
   # Worktree: ~/coding/hapi/worktrees/session-copy-link @ feat/session-copy-link
-  - branch: feat/session-copy-link
+  # DROPPED 2026-07-24 (v0.23.4 wave): merged upstream as #1144 (b7f1f4390
+  # "feat(web): copy session reference from context menu"). Feature now upstream.
+  # - branch: feat/session-copy-link
 
   # 2026-07-14 thin rematerialize (meta): collapsed fat soup/overseer-*-nofcm
   # tips into Step3 umbrella + thin replay. Peers ACKed (#22/#23 stand down;
@@ -411,8 +413,10 @@ layers:
   # soup tip e0e909d9c stays on bridge 782a4a450 (same patch-id). Rematerialize
   # MUST use the soup tip — thin tip is NOT bridge-ancestor. Heal 54 kept
   # (no-op). Worktree: ~/coding/hapi/worktrees/cursor-acp-remote-resume.
-  # Drop when upstream PR merges.
-  - branch: soup/cursor-acp-remote-resume-ready
+  # DROPPED 2026-07-24 (v0.23.4 wave): merged upstream as #1128 (40314237a
+  # "fix(cli,hub): wire Cursor --existing-session-id for ACP remote resume (#991)").
+  # Feature now upstream; per this layer's own "drop when upstream PR merges".
+  # - branch: soup/cursor-acp-remote-resume-ready
   # DROPPED 2026-07-14: soup thin/nofcm sse+codex-rpc+markdown-cast — sse already upstream;
   #   codex-rpc + markdown-cast applied as post-merge soup-heals if verify needs them.
   # DROPPED 2026-07-14: sse-summary-unwrap — already on upstream/main (toSummaryMetadata gone).
