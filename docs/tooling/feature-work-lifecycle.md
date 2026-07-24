@@ -72,7 +72,7 @@ flowchart TD
     PR --> SOUP2{"Land on daily soup?"}
     SOUP2 -->|yes| MANIFEST["Add or update manifest layer"]
     MANIFEST --> SOUPTREE["Soup dogfood tree below"]
-    SOUP2 -->|merged upstream| DROP["Drop manifest layer after sync"]
+    SOUP2 -->|merged upstream| DROP["After merge: peer drops layer + cleans wt/branch<br/>meta rematerializes once wave done"]
 ```
 
 Intake step numbers (handoff template, playback, gates): [`new-feature-intake.md`](./new-feature-intake.md) — **workflow lives here only**.
@@ -168,6 +168,8 @@ Manifest format, atomic swap mechanics, DB jiu-jitsu: [`driver-soup.md`](./drive
 | **Ready for operator** | Peer gates passed; links + inline proof delivered |
 | **Operator approved** | Explicit OK to open upstream PR |
 | **Shipped upstream** | PR merged on `tiann/hapi` |
+| **Post-merge cleanup done** | Session notified; peer dropped soup layer(s); worktree + branch gone (or audit-clean) |
+| **Soup rematerialized** | After **all** merged peers in the wave finished cleanup — one `hapi-sync-fork-main` + one `hapi-driver-rebuild --build-web --verify` |
 | **Done on soup (web-only)** | Manifest layer + rebuild/build-web + **`hapi-verify-web-dist` OK** + operator hard-reload |
 | **Done on soup (hub/cli)** | Rebuild `--verify` + verify-web-dist (if web touched) + **`hapi-restart-hub`** + operator proof on `:3006` |
 
@@ -177,6 +179,47 @@ Manifest format, atomic swap mechanics, DB jiu-jitsu: [`driver-soup.md`](./drive
 
 - `hapi-driver-status` / rebuild exit 0 / verify stamp alone — without **`hapi-verify-web-dist` OK** and **`driverHead` in `web/dist/.hapi-build-meta.json` == `git -C driver rev-parse HEAD`**
 - `HAPI_BUILD_MAX_SWAP_USED_PCT=100` (or similar) to force vite under swap thrash — report **blocked**; operator runs swap recovery
+
+---
+
+## After upstream merge (fleet cleanup — meta sweep MUST advise this)
+
+When a PR merges on `tiann/hapi`, do **not** stop at "congrats, archive." The estate still carries a soup layer and a worktree until someone removes them.
+
+### Sequence (accurate)
+
+```text
+1. Meta / emoji sweep notifies the responsible HAPI session (🔧 MERGED)
+2. That peer drops their layer(s) from ~/.config/hapi/driver-manifest.yaml
+3. That peer cleans worktree + local/remote branch
+4. When ALL merged peers in the wave report cleanup done → ONE rematerialize
+```
+
+| Step | Who | What |
+|------|-----|------|
+| **1. Notify** | Meta / orchestrator on sweep | Reopen named PR session if archived; post MERGED brief; rename title to `🔧PR #N MERGED: …`. Emoji batch action string encodes the checklist. |
+| **2. Drop soup layer(s)** | **Feature peer** (owner of the layer) | Edit `~/.config/hapi/driver-manifest.yaml`: remove the `- branch:` entry (leave a `# DROPPED YYYY-MM-DD: … MERGED as #N` comment). Do **not** hand-edit `~/coding/hapi/driver`. Do **not** each fire a full rebuild during a multi-PR merge wave. |
+| **3. Clean worktree + branch** | **Feature peer** | From mirror: `git worktree remove ~/coding/hapi/worktrees/<name>` (or `--force` if dirty junk only); delete local branch; `git push origin --delete <branch>` when the remote tip is fully in `upstream/main`. Confirm with `hapi-branch-audit --quiet` (expect no `MERGED` row for that branch). |
+| **4. Rematerialize soup** | Meta / orchestrator **or** operator — **once per wave** | After peers ack cleanup (or solo merge = wave of one): `hapi-sync-fork-main` + `git push origin main` → `hapi-driver-status --quiet` → `hapi-driver-rebuild --build-web --verify` → `hapi-verify-web-dist` → `hapi-restart-hub` if hub/cli changed. |
+
+### Why not "each peer rebuilds after drop"?
+
+Manifest edits during a merge wave must settle first. Parallel peer rebuilds thrash the flock, race mid-edit manifests, and rebuild N times for one tip. **Peers clean; one agent rematerializes.** Solo merge (one PR): same agent may do drop + rematerialize in one turn — "all" is trivially one.
+
+### Meta sweep checklist (when YOU see 🔧 / `merged: true`)
+
+Advise the peer session with all four beats — not just "stand down":
+
+1. Congrats + link to merged PR / tip SHA if known
+2. **Drop your soup layer(s)** now (paths/branch names if known from manifest)
+3. **Remove worktree + delete branch** (`hapi-branch-audit` until clean)
+4. Reply here when done — **do not** rematerialize yourself if other merges in this wave are still cleaning; meta will rebuild once the wave is clear
+
+If the peer has **no** soup layer (never promoted): skip step 2; still do worktree/branch cleanup.
+
+Hard rules unchanged: never merge on `tiann/hapi`; never `cp`/`rsync` into `driver/web/dist`; never stack-switch from agent shell.
+
+Manifest / rebuild mechanics: [`driver-soup.md`](./driver-soup.md) § When upstream moves.
 
 ---
 

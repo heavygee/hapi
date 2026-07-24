@@ -19,6 +19,7 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 | Touch `:3006` soup | `hapi-driver-status --quiet` first; no stack-switch from agent shell | Lifecycle § Agent permission matrix; [`driver-soup.md`](../tooling/driver-soup.md) |
 | About to claim gates / PR ready | Mechanical verify before assertion | Lifecycle §6 + [`pr-review-loop.md`](../tooling/pr-review-loop.md) |
 | Upstream PR “babysit / merge-ready” | **Prepare only — never merge on `tiann/hapi`** | § Upstream relationship — only @tiann merges upstream `main` |
+| Upstream PR **merged** (meta / emoji sweep) | Notify peer → drop soup layer → clean worktree/branch → rematerialize **once** after the wave | Lifecycle [§ After upstream merge](../tooling/feature-work-lifecycle.md#after-upstream-merge-fleet-cleanup--meta-sweep-must-advise-this) |
 | Local Pi coding agent (5090 / oos-linux) | New Session → **Pi**; backend `oos-llm` VIP | [`pi-local-coding-agent.md`](./pi-local-coding-agent.md) |
 | Agent mangles `tiann`/`oos-linux`/MagicDNS doubles | Free-recall / tokenization hazard - not HAPI pipe | [`2026-07-22-doubled-character-free-recall.md`](../plans/2026-07-22-doubled-character-free-recall.md) |
 

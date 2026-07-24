@@ -269,7 +269,7 @@ Operator validates in browser. Iterate in the worktree; re-run gates after each 
    - **Interaction tier (§6.4c):** embed the same GIF or short MP4 used in the HAPI handoff chat — reviewers should not need to run soup to see a toggle toggle
 5. Post-push: [pr-review-loop.md](./pr-review-loop.md)
 
-To land on daily soup after merge: drop layer from manifest if merged, or keep until upstream contains the commit; `hapi-driver-rebuild`.
+To land on daily soup after merge: owning peer **drops** the layer from the manifest and cleans the worktree/branch; meta rematerializes soup **once** the merge-wave cleanups are done — see [`feature-work-lifecycle.md` § After upstream merge](./feature-work-lifecycle.md#after-upstream-merge-fleet-cleanup--meta-sweep-must-advise-this).
 
 ---
 

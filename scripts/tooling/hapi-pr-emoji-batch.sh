@@ -98,7 +98,8 @@ classify_one() {
     if [[ "$(gh_t api "repos/${REPO}/pulls/${n}" --jq .merged 2>/dev/null || echo false)" == "true" ]]; then
         in_queue=false
         emoji="🔧"
-        action="merged to ${REPO} main — archive session or spare for follow-on work"
+        # Keep in sync with docs/tooling/feature-work-lifecycle.md § After upstream merge
+        action="MERGED — notify peer: (1) drop soup layer(s) (2) remove worktree+branch (3) ack; meta rematerializes soup once wave cleanup done"
         jq -n \
             --arg emoji "$emoji" --argjson exists true --argjson inQueue false --argjson open false \
             --argjson prePr false --argjson merged true \

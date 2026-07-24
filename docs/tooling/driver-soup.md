@@ -162,12 +162,18 @@ hapi-driver-rollback-web          # promotes web/dist.prev back to live
 
 ### When upstream moves
 
+**Fleet order** (who does what): see [`feature-work-lifecycle.md` § After upstream merge](./feature-work-lifecycle.md#after-upstream-merge-fleet-cleanup--meta-sweep-must-advise-this) — notify peer → peer drops layer + cleans worktree/branch → **one** rematerialize after the wave.
+
+Mechanical rebuild steps (after layers are dropped and fork `main` is synced):
+
 1. **Sync fork mirror:** `hapi-sync-fork-main` then `git push origin main`
-2. Edit manifest — drop layers merged to `upstream/main`
+2. Edit manifest — drop layers merged to `upstream/main` (prefer the owning peer did this already; meta verifies none remain)
 3. `hapi-driver-rebuild --build-web --verify`
 4. `hapi-restart-hub` when hub/cli changed; hard-reload when web changed
 5. Garden smoke: `curl -sf http://127.0.0.1:3006/health` + quick web/VR check
 6. Log drift in `~/coding/hapi-garden/GARDEN_LOGBOOK.md` if API changed
+
+Do **not** leave merged feature branches as live soup layers — they bitrot against `upstream/main` and break rebuild when the remote tip is deleted.
 
 ### Keeping fork `main` truthful
 
