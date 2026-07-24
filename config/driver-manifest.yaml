@@ -226,7 +226,16 @@ layers:
   #
   # Operator dogfood: http://<hub>/garden → Enter VR (Quest browser).
   # Drop when a plugin system or upstream home exists.
-  - branch: feat/garden-route
+  #
+  # PARKED 2026-07-24 (meta/shepherd, v0.23.4 wave): branch is STALE — merge-base
+  # with upstream is 2026-06-11 (93d004148), ~128 commits behind. v0.23.4's
+  # settings-pages refactor + web changes collide structurally with garden's
+  # router/settings integration (router.tsx, SessionList, HoverTooltip,
+  # relativeTime). This is owner re-thin debt, not a mechanical merge — analogous
+  # to the model-error-bridge park. OWNER ACTION: re-thin feat/garden-route onto
+  # current upstream/main (rebase the web/src/garden/* feature atop the settings
+  # refactor), then un-park. Optional dogfood layer; not blocking the overseer wave.
+  # - branch: feat/garden-route
 
   # Claude session import foundation (tiann/hapi#942, head dzshzx/hapi).
   # Refresh before rebuild: git fetch https://github.com/dzshzx/hapi.git
@@ -403,7 +412,16 @@ layers:
   # Un-parked 2026-07-24 after branch tip reconciled (was PARKED same day when
   # rematerialize hit 19-file conflict from stale f9831beac tip).
   # Drop when upstream PR merges.
-  - branch: feat/cursor-model-error-bridge
+  #
+  # RE-PARKED 2026-07-24 (meta/shepherd, v0.23.4 wave): tip 782a4a450 was
+  # re-thinned onto the PRE-v0.23.4 detect base; the v0.23.4 bump drifted it
+  # again → 20-file reconflict, rerere has no postimages. This leg needs a
+  # re-thin on EVERY base drift (documented treadmill). OWNER ACTION: re-thin
+  # feat/cursor-model-error-bridge onto the CURRENT soup detect tip
+  # (feat/cursor-detect-inline-model-errors @ v0.23.4), then un-park. Detection
+  # (layer 19) + FCM bridge (layer 3) stay live; only the manual [Bridge & retry]
+  # / auto-bridge UX is parked.
+  # - branch: feat/cursor-model-error-bridge
 
   # tiann/hapi#991 / upstream PR #1128 - Cursor ACP remote resume: reuse
   # original HAPI row via existingSessionId. Hub already passes
