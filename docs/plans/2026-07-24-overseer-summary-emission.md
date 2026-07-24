@@ -21,11 +21,12 @@ AGENT_NOTIFY line" (`hapi-show-agent-contract` localStorage) leaves the trailing
 line visible in session chat so the operator can verify emission without
 digging in SQLite. Default remains strip-on. Raw store is never mutated.
 
-**Hub synth is end-of-turn only.** Piece 2 used to synthesize on every
-`message-received` with assistant text. ACP (Cursor/Claude) flushes narrative
-segments at tool boundaries as separate message rows, so Session Log filled with
-mid-turn crumbs. Synth now defers while `session.thinking` and flushes once when
-thinking clears (or immediately when thinking is already false).
+**No hub first-line text synth.** Piece 2's `hub-synthesized from assistant text`
+path is removed. ACP mid-turn text flushes are not Session Log events. Primary
+signal is agent `AGENT_NOTIFY_SUMMARY` only; opt-in LLM fallback (#90) remains
+a separate layer (default off). Tool-call timelines belong in session-flow
+experiments, not overseer Session Log.
+
 
 
 
