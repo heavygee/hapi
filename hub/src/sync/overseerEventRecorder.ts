@@ -130,6 +130,20 @@ function extractToolFailureSummary(content: unknown): string | null {
     return null
 }
 
+const TURN_FALLBACK_SUMMARY_MAX = 200
+
+/** First non-empty, trimmed line of text, capped for a one-line summary. */
+function firstNonEmptyLine(text: string): string | null {
+    for (const rawLine of text.split('\n')) {
+        const line = rawLine.trim()
+        if (line.length === 0) continue
+        return line.length > TURN_FALLBACK_SUMMARY_MAX
+            ? `${line.slice(0, TURN_FALLBACK_SUMMARY_MAX - 1)}\u2026`
+            : line
+    }
+    return null
+}
+
 function buildTags(notify: NotifySummary | null, flavor: string): string | null {
     const parts: string[] = []
     if (notify?.agent) parts.push(`agent:${notify.agent}`)
@@ -219,6 +233,16 @@ export class OverseerEventRecorder {
                         tags: buildTags(null, session.flavor)
                     })
                 }
+            }
+
+            // Deterministic backstop: an agent produced visible text but no
+            // AGENT_NOTIFY_SUMMARY (rule compliance can never be 100%). Synthesize
+            // a minimal, session-log-only capture so the overseer never has a
+            // fully blind agent turn. No LLM; attention stays 0 so the inbox is
+            // untouched. Marked hub-synthesized so it is never mistaken for a
+            // real self-report.
+            if (!primary && plainText) {
+                primary = this.synthesizeTurnFallback(session, messageId, plainText, ts)
             }
         }
 
@@ -319,6 +343,42 @@ export class OverseerEventRecorder {
             if (event) emitted.push(event)
         }
         return emitted
+    }
+
+    /**
+     * Minimal per-turn fallback event when no AGENT_NOTIFY_SUMMARY was emitted.
+     *
+     * Summary is the first non-empty line of the assistant text (deterministic,
+     * no LLM). Status defaults to `progress` via the empty-status mapping, and
+     * attention stays 0, so these land in the Session Log only — never the
+     * attention inbox. This is the safety net under the Cursor rule overlay:
+     * even a dropped summary line yields a captured turn.
+     */
+    private synthesizeTurnFallback(
+        session: SessionSnapshot,
+        messageId: string,
+        plainText: string,
+        ts: number
+    ): StoredSystemEvent | null {
+        const summary = firstNonEmptyLine(plainText)
+        if (!summary) return null
+
+        const eventType = mapNotifyStatusToEventType(undefined)
+        return this.insertSystemEvent(session, {
+            ts,
+            sourceKind: 'system',
+            sourceRef: session.id,
+            eventType,
+            attentionCandidate: 0,
+            operatorActionRequired: 0,
+            summary,
+            relatedSessionId: session.id,
+            provenance: 'hub-synthesized from assistant text (no AGENT_NOTIFY_SUMMARY)',
+            idempotencyKey: `session:${session.id}:message:${messageId}:turn_fallback`,
+            payloadFields: { messageId, synthesized: true },
+            severity: deriveSeverity(eventType),
+            tags: buildTags(null, session.flavor)
+        })
     }
 
     private recordNotifySummary(
