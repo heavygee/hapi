@@ -126,7 +126,9 @@ ordinary, useful project config, never as surveillance:
 - Claude / Codex / Grok / OpenCode: systemPrompt / developer_instructions /
   one-shot first-turn instruction (Piece 3). Opt-out via
   `HAPI_SESSION_SUMMARY_CONTRACT=0`.
-- kimi + generic ACP / pi: still optional follow-up (no clean systemPrompt yet).
+- kimi + generic ACP / pi: **tracked** — fork issue
+  [#89](https://github.com/heavygee/hapi/issues/89); required for next overseer
+  phase full-coverage.
 - Better LLM / oneshot-agent fallback: designed below, **not implemented in v1**.
 
 ## Better fallback (opt-in, not yet built)
@@ -135,18 +137,30 @@ v1 fallback is first-non-empty-line heuristics. A *better* fallback needs an LLM
 and is a real cost tax - so it must be **opt-in**, clearly labeled, and rare
 (only when the primary agent omitted the contract).
 
+### Gate: rarity first, quality never second
+
+Do **not** ship a better fallback until primary emission is good enough that
+fallback is a thin residue - target **well under 5% of turns** (5% is already
+generous). Measure emit vs hub-synthesized ratio fleet-wide after Piece 3 is
+live; only then enable LLM fallback.
+
+When it *does* run, it must be **at least as useful as a primary self-report**:
+feed the **full last-turn assistant content** (no input-char truncation that
+would make the summary worse than the agent would have written). Rarity is the
+cost control; accuracy is non-negotiable on the rare path.
+
 ### Option A — raw OpenAI-compatible completions call
 
-Hub (or a tiny side worker) POSTs the last assistant turn text to an operator-
-configured base URL (`/v1/chat/completions` or `/v1/responses`) with a fixed
-prompt: "emit exactly one AGENT_NOTIFY_SUMMARY JSON line." Local (Ollama /
-vLLM / local-speech gateway) or remote (OpenAI) - same wire format.
+Hub (or a tiny side worker) POSTs the full last assistant turn text to an
+operator-configured base URL (`/v1/chat/completions` or `/v1/responses`) with a
+fixed prompt: "emit exactly one AGENT_NOTIFY_SUMMARY JSON line." Local (Ollama /
+vLLM / gateway) or remote (OpenAI) - same wire format.
 
 - Pros: cheap to wire, no session surface, easy to bill/attribute as
   `provenance: hub-llm-fallback`.
-- Cons: large turns = large prompt tokens; operator must provision a key/URL;
-  Chat Completions remains widely compatible for local gateways, Responses is
-  preferred for new OpenAI-native work - support both behind one adapter.
+- Cons: large turns = large prompt tokens (accepted when rare); operator must
+  provision a key/URL; prefer Chat Completions for local-gateway compatibility,
+  Responses for OpenAI-native - support both behind one adapter.
 
 ### Option B — out-of-band oneshot agent
 
@@ -163,15 +177,19 @@ in Session Log / inbox so the operator never wonders "wtf usage is this."
 ### Shared requirements (either option)
 
 - **Default off.** Explicit settings toggle + config (URL/key for A; spawn
-  recipe for B).
+  recipe for B). Unlock only after rarity gate is met (or operator accepts the
+  measured miss rate).
+- **Full turn content.** No max-input-char chop that degrades quality below a
+  primary emit. Empty turns still skip.
 - **Transparency:** event payload must say this was synthesized *because* the
   primary turn lacked a contract - never pretend the primary agent said it.
-- **Budget caps:** max input chars, max calls/hour, skip if turn text is empty.
 - **Kill-criterion:** if opt-in users report surprise usage, the toggle and
-  provenance labels failed - fix UX before expanding defaults.
+  provenance labels failed - fix UX before expanding defaults. If fallback
+  summaries are worse than the heuristic first-line, do not ship.
 
 Prefer **Option A** as the first better-fallback ship: smaller blast radius,
 easier to reason about cost, no phantom sessions.
+
 
 ## Known edge cases / follow-ups
 
