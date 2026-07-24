@@ -268,7 +268,7 @@ function SessionsPage() {
         ?? selectedSession?.metadata?.path
         ?? null
     const currentClaudeSessionId = selectedSession?.metadata?.flavor === 'claude'
-        ? (selectedSession.metadata.agentSessionId ?? null)
+        ? (selectedSession.metadata.claudeSessionId ?? null)
         : null
     const isSessionsIndex = pathname === '/sessions' || pathname === '/sessions/'
     const sidebar = useSidebarResize()
