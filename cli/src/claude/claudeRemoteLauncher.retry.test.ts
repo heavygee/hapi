@@ -92,7 +92,7 @@ function createSessionStub() {
         consumeOneTimeFlags: () => {},
         onSessionFound: () => {},
         clearSessionId: () => {},
-        getModel: () => null
+        getModel: () => undefined
     };
     return { session, events };
 }
