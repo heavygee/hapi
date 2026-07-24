@@ -10,7 +10,9 @@
 
 ## 1. One-line verdict
 
-Agents (especially under free recall of hostnames, GitHub orgs, and MagicDNS URLs) intermittently **emit a string missing one character from an adjacent identical pair** (`nn`→`n`, `oo`→`o`, `44`→`4`). We ruled out HAPI mangling. Cursor support says the agent/CLI forwards model text verbatim and this is a known LLM tokenization/recall limit. That mechanism claim is **plausible and mostly consistent with our evidence** - but their reply is **operationally weak**, and we still lack a clean **outside-Cursor** control (native Claude Code / Codex CLI via HAPI) that would let us stop arguing about Cursor scaffolding.
+Agents (especially under free recall of hostnames, GitHub orgs, and MagicDNS URLs) intermittently **emit a string missing one character from an adjacent identical pair** (`nn`→`n`, `oo`→`o`, `44`→`4`). We ruled out HAPI mangling. Cursor support says the agent/CLI forwards model text verbatim and this is a known LLM tokenization/recall limit. That mechanism claim is **plausible and mostly consistent with our evidence** - but their reply is **operationally weak**.
+
+> **Update 2026-07-24 — the outside-Cursor control is now done, incl. the distance-recall regime.** Native HAPI `claude` (Opus 4.8) and `codex` (codex-cli 0.145.0), no Cursor: **0 doubled-char drops across ~127 emissions** (recall + copy + distance-recall). The distance-recall arm (seed a doubled-char string → distance → regenerate in prose from memory) uses a **fabricated shareable host** and gives a clean same-regime comparison to Cursor — native reproduced it faithfully 100/100. On the strings a model can recall (`tiann`) and on regenerating a held doubled-char host, native does **not** drop where Cursor-routed Claude/GPT did. Full results + filled §10 table: [`2026-07-22-doubled-character-free-recall-outside-cursor-results.md`](2026-07-22-doubled-character-free-recall-outside-cursor-results.md). **Cursor-facing shareable receipts** (verbatim transcripts + "where to look"): [`.../outside-cursor-20260724/cursor-doubled-char-receipts.md`](artifacts/doubled-char-recall-2026-07/outside-cursor-20260724/cursor-doubled-char-receipts.md). Chosen §10 row: *near-zero native drops ⇒ re-open with Cursor*.
 
 ---
 
@@ -124,8 +126,8 @@ Concrete transcript bites (redacted):
 | Explicit "print exactly X" fails | **Falsified** (usually passes) |
 | Only Cursor Auto/Composer do this | **Falsified** (Claude/GPT *through Cursor* also failed) |
 | Cursor agent/CLI post-processes text and deletes doubles | **Unsupported** by our tests; Cursor denies it; we never caught a transform layer |
-| Same failure exists on **native Claude Code / Codex CLI** (no Cursor) | **Unknown - next experiment** |
-| Failure rate is higher under Cursor scaffolding than native | **Unknown** |
+| Same failure exists on **native Claude Code / Codex CLI** (no Cursor) | **Not reproduced** (0/27 native drops; see outside-cursor results doc) |
+| Failure rate is higher under Cursor scaffolding than native | **Supported, qualified** - native 0 drops in every regime we could match; MagicDNS-recall regime not cleanly testable natively |
 
 ---
 
@@ -216,6 +218,8 @@ Same peer arc discovered this while babysitting detect/bridge. **Orthogonal** to
 
 **Out of scope for the peer:** changing Cursor; shipping HAPI warn UI (unless operator expands scope); force-pushing unrelated branches.
 
+> **RESULTS (2026-07-24):** experiment complete. Decision table filled in the sibling doc [`2026-07-22-doubled-character-free-recall-outside-cursor-results.md`](2026-07-22-doubled-character-free-recall-outside-cursor-results.md) §6. Outcome: **near-zero native drops, Cursor path drops** (qualified). Also note two method corrections the peer had to make: native agents *look up* answers (must forbid tools to force recall), and the original `issue` probe leaked the `tiann` spelling (a copy test, not recall).
+
 ---
 
 ## 11. References
@@ -232,3 +236,4 @@ Same peer arc discovered this while babysitting detect/bridge. **Orthogonal** to
 | Date | Note |
 |------|------|
 | 2026-07-22 | Initial write-up from detect-peer investigation + Cursor support reply; outside-Cursor peer spawned |
+| 2026-07-24 | Outside-Cursor control complete: native `claude`+`codex`, 0/27 doubled-char drops. Results + filled §10 table in sibling `...-outside-cursor-results.md`. §1/§5.3/§10 updated. |

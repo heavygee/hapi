@@ -1,0 +1,21 @@
+{
+  "claude|issue_recall": {
+    "PASS": 6
+  },
+  "claude|magicdns_copy": {
+    "URLok/ORGok": 4
+  },
+  "claude|tailnet_recall": {
+    "ABSTAIN": 3,
+    "NO_TARGET": 1
+  },
+  "codex|issue_recall": {
+    "PASS": 5
+  },
+  "codex|magicdns_copy": {
+    "URLok/ORGok": 4
+  },
+  "codex|tailnet_recall": {
+    "NO_TARGET": 4
+  }
+}

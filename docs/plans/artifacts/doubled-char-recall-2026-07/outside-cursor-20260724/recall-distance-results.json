@@ -1,0 +1,946 @@
+[
+  {
+    "flavor": "claude",
+    "i": 3,
+    "sessionId": "c989603c-fd44-48d5-be9d-2a2a1c5f0ca2",
+    "turns": {
+      "prose": {
+        "text": "**Onboarding note \u2014 HAPI quick start**\n\n- **Web UI (tailnet):** Open https://hapi.tail7733ee.ts.net in your browser while connected to the tailnet.\n- **Hub host:** The hub runs on **oos-linux**.\n- **Upstream project:** Lives at **github.com/tiann/hapi** \u2014 that's where upstream `main` and PRs live (our fork tracks it).\n- Make sure you're on the tailnet first, or the UI URL won't resolve.",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      },
+      "code": {
+        "text": "```bash\ncurl -sSf https://hapi.tail7733ee.ts.net\necho \"oos-linux\"\necho \"github.com/tiann/hapi\"\n```",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      }
+    },
+    "totals": {
+      "host": {
+        "ok": 2,
+        "drop": 0,
+        "other": 0
+      },
+      "org": {
+        "ok": 2,
+        "drop": 0
+      },
+      "hub": {
+        "ok": 2,
+        "drop": 0
+      }
+    },
+    "drops": 0
+  },
+  {
+    "flavor": "claude",
+    "i": 2,
+    "sessionId": "d6fbe9f9-7b9c-407d-a524-bfaf645dc23a",
+    "turns": {
+      "prose": {
+        "text": "# Onboarding Note\n\nWelcome aboard! A few essentials to get you connected:\n\n- **HAPI web UI (tailnet):** Open https://hapi.tail7733ee.ts.net in your browser \u2014 you'll need to be on the tailnet to reach it.\n- **Hub host:** The hub runs on **oos-linux**.\n- **Upstream project:** Lives at **github.com/tiann/hapi** \u2014 that's where upstream `main` is maintained (note: we never merge upstream ourselves; only @tiann does).\n\nPing the team if the tailnet URL doesn't resolve \u2014 it usually means your Tailscale connection needs a nudge.",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 2,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      },
+      "code": {
+        "text": "```bash\ncurl -sSf https://hapi.tail7733ee.ts.net\necho \"hub host: oos-linux\"\necho \"upstream repo: github.com/tiann/hapi\"\n```",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      }
+    },
+    "totals": {
+      "host": {
+        "ok": 2,
+        "drop": 0,
+        "other": 0
+      },
+      "org": {
+        "ok": 3,
+        "drop": 0
+      },
+      "hub": {
+        "ok": 2,
+        "drop": 0
+      }
+    },
+    "drops": 0
+  },
+  {
+    "flavor": "claude",
+    "i": 1,
+    "sessionId": "cf89aa53-0502-4e07-bee4-188034a7cc53",
+    "turns": {
+      "prose": {
+        "text": "**Onboarding note**\n\n- **HAPI web UI (over the tailnet):** open https://hapi.tail7733ee.ts.net in your browser \u2014 that's the full URL, no port needed.\n- **Hub host:** the hub runs on **oos-linux**.\n- **Upstream project:** lives at **github.com/tiann/hapi** \u2014 that's the upstream repo/org we track and prepare PRs against.\n- Note: we never merge on upstream ourselves; only the maintainer (@tiann) merges upstream `main`.\n\nWelcome aboard \u2014 ping the team if the tailnet URL doesn't resolve (you may need to be on the tailnet first).",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 2,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      },
+      "code": {
+        "text": "```bash\ncurl -sS https://hapi.tail7733ee.ts.net\necho \"hub host: oos-linux\"\necho \"upstream repo: https://github.com/tiann/hapi\"\n```",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      }
+    },
+    "totals": {
+      "host": {
+        "ok": 2,
+        "drop": 0,
+        "other": 0
+      },
+      "org": {
+        "ok": 3,
+        "drop": 0
+      },
+      "hub": {
+        "ok": 2,
+        "drop": 0
+      }
+    },
+    "drops": 0
+  },
+  {
+    "flavor": "claude",
+    "i": 4,
+    "sessionId": "d1e566df-9e5f-4794-8733-fd91e62665b4",
+    "turns": {
+      "prose": {
+        "text": "# HAPI Onboarding Note\n\n- **Open the HAPI web UI (over the tailnet):** https://hapi.tail7733ee.ts.net\n- **Hub host:** the hub runs on `oos-linux`.\n- **Upstream project:** lives at github.com/tiann/hapi.\n\nPing me if the tailnet URL doesn't resolve \u2014 you'll need to be on the tailnet first. Welcome aboard!",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      },
+      "code": {
+        "text": "```bash\ncurl -sSf https://hapi.tail7733ee.ts.net\necho \"hub host: oos-linux\"\necho \"upstream repo: github.com/tiann/hapi\"\n```",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      }
+    },
+    "totals": {
+      "host": {
+        "ok": 2,
+        "drop": 0,
+        "other": 0
+      },
+      "org": {
+        "ok": 2,
+        "drop": 0
+      },
+      "hub": {
+        "ok": 2,
+        "drop": 0
+      }
+    },
+    "drops": 0
+  },
+  {
+    "flavor": "claude",
+    "i": 5,
+    "sessionId": "1919a31e-35fb-437c-b7d6-57234862430d",
+    "turns": {
+      "prose": {
+        "text": "**Onboarding note \u2014 HAPI**\n\n- **Web UI (tailnet):** Open https://hapi.tail7733ee.ts.net in your browser while on the tailnet.\n- **Hub host:** The hub runs on `oos-linux`.\n- **Upstream project:** Lives at github.com/tiann/hapi \u2014 that's where upstream `main` and PRs go.\n- Note: only @tiann merges on the upstream repo; we prepare PRs but never merge there.",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 2,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      },
+      "code": {
+        "text": "```bash\ncurl -sS https://hapi.tail7733ee.ts.net\necho \"oos-linux\"\necho \"github.com/tiann/hapi\"\n```",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      }
+    },
+    "totals": {
+      "host": {
+        "ok": 2,
+        "drop": 0,
+        "other": 0
+      },
+      "org": {
+        "ok": 3,
+        "drop": 0
+      },
+      "hub": {
+        "ok": 2,
+        "drop": 0
+      }
+    },
+    "drops": 0
+  },
+  {
+    "flavor": "claude",
+    "i": 6,
+    "sessionId": "2da4071a-aaef-4d44-9a2a-ed6ed9a40f29",
+    "turns": {
+      "prose": {
+        "text": "**Onboarding note**\n\n- **HAPI web UI (tailnet):** Open https://hapi.tail7733ee.ts.net in your browser while connected to the tailnet \u2014 that's the front door to the web UI.\n- **Hub host:** The hub runs on **oos-linux**.\n- **Upstream project:** Lives at **github.com/tiann/hapi** \u2014 that's where upstream `main` and PRs go (only @tiann merges upstream).\n- Get on the tailnet first, then the UI URL and hub host above will be reachable.",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 2,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      },
+      "code": {
+        "text": "```bash\ncurl -sS https://hapi.tail7733ee.ts.net\necho \"oos-linux\"\necho \"github.com/tiann/hapi\"\n```",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      }
+    },
+    "totals": {
+      "host": {
+        "ok": 2,
+        "drop": 0,
+        "other": 0
+      },
+      "org": {
+        "ok": 3,
+        "drop": 0
+      },
+      "hub": {
+        "ok": 2,
+        "drop": 0
+      }
+    },
+    "drops": 0
+  },
+  {
+    "flavor": "claude",
+    "i": 7,
+    "sessionId": "c23393e7-0a59-46cc-a623-13f59e0c7a02",
+    "turns": {
+      "prose": {
+        "text": "**Onboarding note**\n\n- **HAPI web UI (over the tailnet):** open https://hapi.tail7733ee.ts.net in your browser \u2014 you'll need to be connected to the tailnet.\n- **Hub host:** the hub runs on **oos-linux**.\n- **Upstream project:** lives at **github.com/tiann/hapi** \u2014 that's the source-of-truth repo/org we track.\n\nWelcome aboard \u2014 ping me if the UI doesn't load and we'll check your tailnet connection first.",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      },
+      "code": {
+        "text": "```bash\ncurl -sSf https://hapi.tail7733ee.ts.net\necho \"hub host: oos-linux\"\necho \"upstream repo: github.com/tiann/hapi\"\n```",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      }
+    },
+    "totals": {
+      "host": {
+        "ok": 2,
+        "drop": 0,
+        "other": 0
+      },
+      "org": {
+        "ok": 2,
+        "drop": 0
+      },
+      "hub": {
+        "ok": 2,
+        "drop": 0
+      }
+    },
+    "drops": 0
+  },
+  {
+    "flavor": "claude",
+    "i": 8,
+    "sessionId": "a74b3437-c18f-48ae-8031-05de379bda4f",
+    "turns": {
+      "prose": {
+        "text": "# Onboarding Note\n\nWelcome aboard! A few essentials to get you started:\n\n- **HAPI web UI (tailnet):** Open https://hapi.tail7733ee.ts.net in your browser \u2014 you'll need to be on the tailnet to reach it.\n- **Hub host:** The hub runs on **oos-linux**.\n- **Upstream project:** Lives at **github.com/tiann/hapi** \u2014 that's where upstream `main` and PRs live.\n\nPing the team if the UI doesn't load; it usually means a tailnet connectivity issue.",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      },
+      "code": {
+        "text": "```bash\ncurl -sSf https://hapi.tail7733ee.ts.net\necho \"hub host: oos-linux\"\necho \"upstream repo: github.com/tiann/hapi\"\n```",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      }
+    },
+    "totals": {
+      "host": {
+        "ok": 2,
+        "drop": 0,
+        "other": 0
+      },
+      "org": {
+        "ok": 2,
+        "drop": 0
+      },
+      "hub": {
+        "ok": 2,
+        "drop": 0
+      }
+    },
+    "drops": 0
+  },
+  {
+    "flavor": "codex",
+    "i": 2,
+    "sessionId": "095e4d48-60d8-41f9-89ff-37c8267e413b",
+    "turns": {
+      "prose": {
+        "text": "Open the HAPI UI over the tailnet:\nhttps://hapi.tail7733ee.ts.net\nThe hub runs on host `oos-linux`.\nUpstream project:\nhttps://github.com/tiann/hapi",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      },
+      "code": {
+        "text": "curl https://hapi.tail7733ee.ts.net\necho oos-linux\necho https://github.com/tiann/hapi",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      }
+    },
+    "totals": {
+      "host": {
+        "ok": 2,
+        "drop": 0,
+        "other": 0
+      },
+      "org": {
+        "ok": 2,
+        "drop": 0
+      },
+      "hub": {
+        "ok": 2,
+        "drop": 0
+      }
+    },
+    "drops": 0
+  },
+  {
+    "flavor": "codex",
+    "i": 1,
+    "sessionId": "023ecd0b-daf3-4a2b-ba0b-bd5ad2ce2162",
+    "turns": {
+      "prose": {
+        "text": "Open the HAPI web UI over the tailnet:\nhttps://hapi.tail7733ee.ts.net\nThe hub runs on host `oos-linux`.\nUpstream project:\nhttps://github.com/tiann/hapi",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      },
+      "code": {
+        "text": "curl https://hapi.tail7733ee.ts.net\necho oos-linux\necho https://github.com/tiann/hapi",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      }
+    },
+    "totals": {
+      "host": {
+        "ok": 2,
+        "drop": 0,
+        "other": 0
+      },
+      "org": {
+        "ok": 2,
+        "drop": 0
+      },
+      "hub": {
+        "ok": 2,
+        "drop": 0
+      }
+    },
+    "drops": 0
+  },
+  {
+    "flavor": "codex",
+    "i": 4,
+    "sessionId": "a1af6b3f-14fc-4870-b29c-5e9f70ea7542",
+    "turns": {
+      "prose": {
+        "text": "Open the HAPI web UI over the tailnet:\nhttps://hapi.tail7733ee.ts.net\nThe hub runs on host `oos-linux`.\nUpstream project:\nhttps://github.com/tiann/hapi",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      },
+      "code": {
+        "text": "curl https://hapi.tail7733ee.ts.net\necho 'oos-linux'\necho 'https://github.com/tiann/hapi'",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      }
+    },
+    "totals": {
+      "host": {
+        "ok": 2,
+        "drop": 0,
+        "other": 0
+      },
+      "org": {
+        "ok": 2,
+        "drop": 0
+      },
+      "hub": {
+        "ok": 2,
+        "drop": 0
+      }
+    },
+    "drops": 0
+  },
+  {
+    "flavor": "codex",
+    "i": 3,
+    "sessionId": "9f3656ab-7d82-4c5b-9e91-0edef29fd62d",
+    "turns": {
+      "prose": {
+        "text": "Open the HAPI UI over the tailnet:\nhttps://hapi.tail7733ee.ts.net\nThe hub runs on host `oos-linux`.\nUpstream project:\nhttps://github.com/tiann/hapi",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      },
+      "code": {
+        "text": "curl https://hapi.tail7733ee.ts.net\necho oos-linux\necho https://github.com/tiann/hapi",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      }
+    },
+    "totals": {
+      "host": {
+        "ok": 2,
+        "drop": 0,
+        "other": 0
+      },
+      "org": {
+        "ok": 2,
+        "drop": 0
+      },
+      "hub": {
+        "ok": 2,
+        "drop": 0
+      }
+    },
+    "drops": 0
+  },
+  {
+    "flavor": "codex",
+    "i": 5,
+    "sessionId": "57eb18e7-0cfc-4c50-b954-18b11a83e12d",
+    "turns": {
+      "prose": {
+        "text": "Open the HAPI web UI over the tailnet:\nhttps://hapi.tail7733ee.ts.net\nThe hub runs on host `oos-linux`.\nUpstream project:\nhttps://github.com/tiann/hapi",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      },
+      "code": {
+        "text": "curl https://hapi.tail7733ee.ts.net\necho oos-linux\necho https://github.com/tiann/hapi",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      }
+    },
+    "totals": {
+      "host": {
+        "ok": 2,
+        "drop": 0,
+        "other": 0
+      },
+      "org": {
+        "ok": 2,
+        "drop": 0
+      },
+      "hub": {
+        "ok": 2,
+        "drop": 0
+      }
+    },
+    "drops": 0
+  },
+  {
+    "flavor": "codex",
+    "i": 6,
+    "sessionId": "7a0cc1a7-8402-4084-82f0-73429051c5dc",
+    "turns": {
+      "prose": {
+        "text": "Open the HAPI web UI over the tailnet:\nhttps://hapi.tail7733ee.ts.net\nThe hub runs on host `oos-linux`.\nUpstream project:\nhttps://github.com/tiann/hapi",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      },
+      "code": {
+        "text": "curl https://hapi.tail7733ee.ts.net\necho oos-linux\necho https://github.com/tiann/hapi",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      }
+    },
+    "totals": {
+      "host": {
+        "ok": 2,
+        "drop": 0,
+        "other": 0
+      },
+      "org": {
+        "ok": 2,
+        "drop": 0
+      },
+      "hub": {
+        "ok": 2,
+        "drop": 0
+      }
+    },
+    "drops": 0
+  },
+  {
+    "flavor": "codex",
+    "i": 7,
+    "sessionId": "acbcd736-b296-4753-9a4b-b130d5742267",
+    "turns": {
+      "prose": {
+        "text": "Open the HAPI web UI over the tailnet:\nhttps://hapi.tail7733ee.ts.net\nThe hub runs on host `oos-linux`.\nUpstream project:\nhttps://github.com/tiann/hapi",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      },
+      "code": {
+        "text": "curl https://hapi.tail7733ee.ts.net\necho oos-linux\necho github.com/tiann/hapi",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      }
+    },
+    "totals": {
+      "host": {
+        "ok": 2,
+        "drop": 0,
+        "other": 0
+      },
+      "org": {
+        "ok": 2,
+        "drop": 0
+      },
+      "hub": {
+        "ok": 2,
+        "drop": 0
+      }
+    },
+    "drops": 0
+  },
+  {
+    "flavor": "codex",
+    "i": 8,
+    "sessionId": "965504fd-d69c-4e69-bb58-95a41fc22b55",
+    "turns": {
+      "prose": {
+        "text": "Open the HAPI UI over the tailnet:\nhttps://hapi.tail7733ee.ts.net\nThe hub runs on host `oos-linux`.\nUpstream project:\nhttps://github.com/tiann/hapi",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      },
+      "code": {
+        "text": "curl https://hapi.tail7733ee.ts.net\necho 'oos-linux'\necho 'https://github.com/tiann/hapi'",
+        "counts": {
+          "host": {
+            "ok": 1,
+            "drop": 0,
+            "other": 0
+          },
+          "org": {
+            "ok": 1,
+            "drop": 0
+          },
+          "hub": {
+            "ok": 1,
+            "drop": 0
+          }
+        }
+      }
+    },
+    "totals": {
+      "host": {
+        "ok": 2,
+        "drop": 0,
+        "other": 0
+      },
+      "org": {
+        "ok": 2,
+        "drop": 0
+      },
+      "hub": {
+        "ok": 2,
+        "drop": 0
+      }
+    },
+    "drops": 0
+  }
+]
