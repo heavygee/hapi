@@ -394,9 +394,12 @@ async function verifyCursorStore(args: {
     try {
         mkdirSync(fakeAcpSessionDir, { recursive: true })
         copyFileSync(args.storeDbPath, join(fakeAcpSessionDir, 'store.db'))
+        // Sidecar cwd must match session/load + the post-import installed
+        // meta.json (resolved workspace). Using tmpRoot here would gate on a
+        // temp-only shape that resume never sees.
         writeFileSync(
             join(fakeAcpSessionDir, 'meta.json'),
-            JSON.stringify({ schemaVersion: 1, cwd: tmpRoot })
+            JSON.stringify({ schemaVersion: 1, cwd: args.cwd })
         )
         // Best-effort copy auth files so session/load has credentials to
         // resolve any prior `session/set_model` echo; session/load itself
