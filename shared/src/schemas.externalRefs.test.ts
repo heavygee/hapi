@@ -29,6 +29,21 @@ describe('ExternalRefSchema', () => {
         expect(ExternalRefSchema.safeParse({ ...validPr, number: -1 }).success).toBe(false)
     })
 
+    it('rejects URLs that do not match the declared GitHub PR identity', () => {
+        expect(ExternalRefSchema.safeParse({
+            ...validPr,
+            url: 'https://example.test/phish'
+        }).success).toBe(false)
+        expect(ExternalRefSchema.safeParse({
+            ...validPr,
+            url: 'https://github.com/other/repo/pull/1160'
+        }).success).toBe(false)
+        expect(ExternalRefSchema.safeParse({
+            ...validPr,
+            url: 'https://github.com/tiann/hapi/pull/999'
+        }).success).toBe(false)
+    })
+
     it('rejects unknown kinds', () => {
         expect(ExternalRefSchema.safeParse({ ...validPr, kind: 'gitlab_mr' }).success).toBe(false)
     })
