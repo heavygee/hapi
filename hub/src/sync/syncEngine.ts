@@ -49,7 +49,7 @@ import { OverseerEventRecorder, toSessionSnapshot } from './overseerEventRecorde
 import { OverseerEntity } from './overseerEntity'
 import { extractAssistantPlainText } from '@hapi/protocol/messages'
 import type { InboxOperatorAction } from '@hapi/protocol'
-import type { ListSystemEventsOptions, StoredSystemEvent } from '../store'
+import type { ListSystemEventsOptions, StoredSystemEvent, InsertSystemEventInput } from '../store'
 import type { ListInboxItemsOptions, StoredInboxItem } from '../store/inboxItems'
 
 export type { Session, SyncEvent } from '@hapi/protocol/types'
@@ -422,6 +422,28 @@ export class SyncEngine {
 
     getSystemEventCount(): number {
         return this.overseerEvents.count()
+    }
+
+    /**
+     * Channel ingest path for ContributionState / external producers.
+     * Uses store-level insertSystemEvent (idempotency dedupe). Does not mutate
+     * session metadata or mark GitHub notifications read.
+     */
+    insertChannelSystemEvent(input: InsertSystemEventInput): { event: StoredSystemEvent; deduped: boolean } | null {
+        if (input.sourceKind !== 'channel') {
+            throw new Error('insertChannelSystemEvent requires sourceKind channel')
+        }
+        if (input.idempotencyKey) {
+            const existing = this.store.events.getByIdempotencyKey(input.idempotencyKey)
+            if (existing) {
+                return { event: existing, deduped: true }
+            }
+        }
+        const event = this.store.events.insert(input)
+        if (!event) {
+            return null
+        }
+        return { event, deduped: false }
     }
 
     getInboxItems(options: ListInboxItemsOptions = {}): StoredInboxItem[] {
