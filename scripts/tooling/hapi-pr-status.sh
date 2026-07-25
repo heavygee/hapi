@@ -25,6 +25,11 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+# shellcheck source=lib/require-gh-version.sh
+source "$SCRIPT_DIR/lib/require-gh-version.sh"
+require_gh_version
+
 PR="${1:-}"
 if [[ -z "$PR" ]]; then
     echo "Usage: hapi-pr-status <PR_NUMBER> [--repo owner/repo]" >&2
@@ -53,24 +58,44 @@ echo "  PR #${PR} — ${REPO}"
 echo "  ══════════════════════════════════════"
 
 # ── 1. CI checks ────────────────────────────────────────────────────────────
+# Fail closed: never treat missing/empty check data as PASS (Debian gh 2.23
+# rejected --json; old code swallowed that and printed a green lie).
 echo ""
 echo "  1. CI checks"
-CHECKS_JSON=$(gh pr checks "$PR" --repo "$REPO" --json name,bucket 2>/dev/null || echo "[]")
-while IFS= read -r row; do
-    cname=$(echo "$row" | jq -r '.name')
-    bucket=$(echo "$row" | jq -r '.bucket')
-    case "$bucket" in
-        pass)                   echo "     ✓ $cname" ;;
-        skipping)               echo "     - $cname (skipped, not a failure)" ;;
-        pending|queued|in_progress)
-                                echo "     … $cname (running)"
-                                CHECKS_OK=false ;;
-        *)                      echo "     ✗ $cname ($bucket)"
-                                CHECKS_OK=false ;;
-    esac
-done < <(echo "$CHECKS_JSON" | jq -c '.[]')
-
-if $CHECKS_OK; then echo "     → PASS"; else echo "     → FAIL / PENDING"; PASS=1; fi
+CHECKS_ERR="$(mktemp)"
+CHECKS_JSON="$(gh pr checks "$PR" --repo "$REPO" --json name,bucket 2>"$CHECKS_ERR" || true)"
+if ! printf '%s' "$CHECKS_JSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    echo "     ✗ could not read checks (gh pr checks --json failed)"
+    sed 's/^/       /' "$CHECKS_ERR" >&2 || true
+    rm -f "$CHECKS_ERR"
+    echo "     → FAIL (no check data — refuse to invent PASS)"
+    CHECKS_OK=false
+    PASS=1
+else
+    rm -f "$CHECKS_ERR"
+    CHECK_COUNT="$(printf '%s' "$CHECKS_JSON" | jq 'length')"
+    if [[ "$CHECK_COUNT" -eq 0 ]]; then
+        echo "     ✗ zero checks returned"
+        echo "     → FAIL (empty rollup — refuse to invent PASS)"
+        CHECKS_OK=false
+        PASS=1
+    else
+        while IFS= read -r row; do
+            cname=$(echo "$row" | jq -r '.name')
+            bucket=$(echo "$row" | jq -r '.bucket')
+            case "$bucket" in
+                pass)                   echo "     ✓ $cname" ;;
+                skipping)               echo "     - $cname (skipped, not a failure)" ;;
+                pending|queued|in_progress)
+                                        echo "     … $cname (running)"
+                                        CHECKS_OK=false ;;
+                *)                      echo "     ✗ $cname ($bucket)"
+                                        CHECKS_OK=false ;;
+            esac
+        done < <(echo "$CHECKS_JSON" | jq -c '.[]')
+        if $CHECKS_OK; then echo "     → PASS"; else echo "     → FAIL / PENDING"; PASS=1; fi
+    fi
+fi
 
 # ── 2. Unresolved review threads ────────────────────────────────────────────
 echo ""

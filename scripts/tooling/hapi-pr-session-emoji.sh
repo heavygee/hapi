@@ -6,7 +6,7 @@
 #   🔁  work in progress — CI pending/running
 #   ⚠️  issues to address — failing CI, open threads, bot findings, or rebase needed
 #   📝  pre-PR — tracked number but no open PR on tiann/hapi yet (Peer #N incubating)
-#   🔧  merged — PR shipped to main; archive session or spare for follow-on work
+#   🔧  merged — PR shipped to main; idle cleanly (do not self-archive mid-turn); meta archives when idle or spare for follow-on
 #
 # Usage:
 #   hapi-pr-session-emoji.sh --sweep               # rename only (~1min for ~20 PRs)
@@ -113,131 +113,19 @@ hub_jwt() {
     echo "$jwt"
 }
 
-trim_ws() {
-    local s="$1"
-    s="${s#"${s%%[![:space:]]*}"}"
-    s="${s%"${s##*[![:space:]]}"}"
-    while [[ "$s" == $'\xEF\xB8\x8F'* ]]; do
-        s="${s#$'\xEF\xB8\x8F'}"
-        s="${s#"${s%%[![:space:]]*}"}"
-    done
-    printf '%s' "$s"
-}
-
-strip_leading_emojis() {
-    local s="$1"
-    while true; do
-        case "$s" in
-            ✅*) s="${s#✅}" ;;
-            🔁*) s="${s#🔁}" ;;
-            ⚠️*) s="${s#⚠️}" ;;
-            📝*) s="${s#📝}" ;;
-            🔧*) s="${s#🔧}" ;;
-            *) break ;;
-        esac
-        s="$(trim_ws "$s")"
-    done
-    printf '%s' "$s"
-}
-
-normalize_title_base() {
-    local s="$1"
-    s="$(trim_ws "$s")"
-    while [[ "$s" == *"  "* ]]; do
-        s="${s//  / }"
-    done
-    printf '%s' "$s"
-}
-
-title_base_from() {
-    local name="$1" pr="$2" base marker
-    name="$(strip_leading_emojis "$name")"
-    for marker in "PR #${pr}:" "pr#${pr}:" "PR #${pr} " "pr#${pr} " \
-        "PR: ${pr}:" "PR: ${pr} " "PR:${pr}:" "PR:${pr} " \
-        "Peer #${pr}:" "peer #${pr}:"; do
-        if [[ "$name" == *"$marker"* ]]; then
-            base="${name##*"$marker"}"
-            base="$(normalize_title_base "$(trim_ws "$base")")"
-            [[ "$base" == [Pp]eer[[:space:]#]*#"${pr}"*:* ]] && base="${base#*:}" && base="$(normalize_title_base "$(trim_ws "$base")")"
-            printf '%s' "$base"
-            return
-        fi
-    done
-    normalize_title_base "$(trim_ws "$name")"
-}
-
-title_base_multi_from() {
-    local name="$1" p1="$2" p2="$3" base marker
-    name="$(strip_leading_emojis "$name")"
-    for marker in "PR #${p1}/#${p2}:" "pr#${p1}/${p2}:" "PR #${p1}/#${p2} " "pr#${p1}/${p2} " \
-        "PR #${p1} #${p2}:" "pr#${p1} #${p2}:" \
-        "PR #${p1}: #${p2}:" "pr#${p1}: #${p2}:"; do
-        if [[ "$name" == *"$marker"* ]]; then
-            base="${name##*"$marker"}"
-            normalize_title_base "$(trim_ws "$base")"
-            return
-        fi
-    done
-    title_base_from "$name" "$p1"
-}
-
-extract_pr_numbers() {
-    local name="$1"
-    local re_multi re_peer
-    re_multi='[Pp][Rr][[:space:]]*#([0-9]{3,4})/#([0-9]{3,4})'
-    re_peer='[Pp]eer[[:space:]#:]*#?([0-9]{3,4})'
-    if [[ "$name" =~ [Pp][Rr][[:space:]]*#?([0-9]{3,4}):[[:space:]]*#?([0-9]{3,4}) ]]; then
-        echo "${BASH_REMATCH[1]}"; echo "${BASH_REMATCH[2]}"; return
-    fi
-    if [[ "$name" =~ [Pp][Rr][[:space:]]*#?([0-9]{3,4})[[:space:]]+#?([0-9]{3,4}): ]]; then
-        echo "${BASH_REMATCH[1]}"; echo "${BASH_REMATCH[2]}"; return
-    fi
-    if [[ "$name" =~ $re_multi ]]; then
-        echo "${BASH_REMATCH[1]}"; echo "${BASH_REMATCH[2]}"; return
-    fi
-    if [[ "$name" =~ [Pp][Rr]:[[:space:]]*#?([0-9]{3,4}) ]]; then
-        echo "${BASH_REMATCH[1]}"; return
-    fi
-    local first
-    first="$(printf '%s' "$name" | grep -oiE '[Pp][Rr][[:space:]]*#?[0-9]{3,4}' | head -1 | grep -oE '[0-9]{3,4}' || true)"
-    [[ -n "$first" ]] && { echo "$first"; return; }
-    if [[ "$name" =~ $re_peer ]]; then
-        echo "${BASH_REMATCH[1]}"; return
-    fi
-    printf '%s' "$name" | grep -oiE 'pr[#: ]*#?[0-9]{3,4}|#[0-9]{3,4}' \
-        | grep -oE '[0-9]{3,4}' | head -1
-}
-
-build_title() {
-    local emoji="$1" pr="$2" base="$3" pre_pr="${4:-0}"
-    base="$(title_base_from "$base" "$pr")"
-    [[ -n "$base" ]] || base="session"
-    if [[ "$pre_pr" == "1" ]]; then
-        echo "${emoji}Peer #${pr}: ${base}"
-    else
-        echo "${emoji}PR #${pr}: ${base}"
-    fi
-}
-
-emoji_rank() {
-    case "$1" in
-        ⚠️) echo 5 ;;
-        🔁) echo 4 ;;
-        ✅) echo 3 ;;
-        📝) echo 2 ;;
-        🔧) echo 1 ;;
-        *) echo 0 ;;
-    esac
-}
-
-worst_emoji() {
-    local a="$1" b="$2"
-    if [[ "$(emoji_rank "$a")" -ge "$(emoji_rank "$b")" ]]; then
-        echo "$a"
-    else
-        echo "$b"
-    fi
-}
+# Pure title/emoji helpers live in lib/pr-emoji-core.sh (single source of truth,
+# unit-tested). Thin delegators keep existing call sites working.
+# shellcheck source=lib/pr-emoji-core.sh
+source "$SCRIPT_DIR/lib/pr-emoji-core.sh"
+trim_ws() { pec_trim_ws "$@"; }
+strip_leading_emojis() { pec_strip_leading_emojis "$@"; }
+normalize_title_base() { pec_normalize_title_base "$@"; }
+title_base_from() { pec_title_base_from "$@"; }
+title_base_multi_from() { pec_title_base_multi_from "$@"; }
+extract_pr_numbers() { pec_extract_pr_numbers "$@"; }
+build_title() { pec_build_title "$@"; }
+emoji_rank() { pec_emoji_rank "$@"; }
+worst_emoji() { pec_worst_emoji "$@"; }
 
 hub_rename() {
     local sid="$1" name="$2" jwt="$3"
@@ -340,6 +228,11 @@ process_session_row() {
         echo "  PR #$pr -> $emoji"
     done
 
+    if [[ "$combined_emoji" == "?" ]]; then
+        echo "  [skip] GitHub data unavailable for #$(IFS=,; echo "${prs[*]}") — leaving title unchanged"
+        return 0
+    fi
+
     if [[ ${#prs[@]} -eq 1 ]]; then
         pre=0
         [[ "${BATCH_PREPR[${prs[0]}]:-false}" == "true" ]] && pre=1
@@ -362,7 +255,7 @@ process_session_row() {
         [[ "$combined_emoji" == "✅" ]] && state_desc="full green upstream"
         [[ "$combined_emoji" == "🔁" ]] && state_desc="CI/rebase in flight"
         [[ "$combined_emoji" == "📝" ]] && state_desc="pre-PR — not filed on upstream yet"
-        [[ "$combined_emoji" == "🔧" ]] && state_desc="merged — archive or spare for follow-on"
+        [[ "$combined_emoji" == "🔧" ]] && state_desc="merged — idle cleanly (no mid-turn self-archive); meta archives when idle or spare for follow-on"
         msg="Meta PR watcher sweep — session title is now **${combined_emoji}**.
 
 Tracked PR(s): $(IFS=,; echo "${prs[*]}")
@@ -373,7 +266,7 @@ Keep this emoji in your session title until disposition changes.
 - 🔁 = CI/rebase in flight
 - ⚠️ = fix threads, CI, or conflicts
 - 📝 = pre-PR / Peer incubating — not on upstream yet
-- 🔧 = merged — clean up or spare with rationale
+- 🔧 = merged — clean up, idle (no mid-turn self-archive); meta archives when idle or spare with rationale
 
 ${actions}
 

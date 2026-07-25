@@ -15,16 +15,26 @@ set -euo pipefail
 
 REPO="${HAPI_PR_REPO:-tiann/hapi}"
 TIMEOUT="${HAPI_GH_TIMEOUT_SECS:-15}"
+TIMEOUT_EXPLICIT=0
+[[ -n "${HAPI_GH_TIMEOUT_SECS:-}" ]] && TIMEOUT_EXPLICIT=1
 PARALLEL="${HAPI_PR_EMOJI_PARALLEL:-4}"
 TABLE=0
 PRS=()
 
 export GH_FORCE_TTY=0 GIT_TERMINAL_PROMPT=0 GH_PAGER=cat PAGER=cat
 
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+CORE_LIB="$SCRIPT_DIR/lib/pr-emoji-core.sh"
+# shellcheck source=lib/pr-emoji-core.sh
+source "$CORE_LIB"
+# shellcheck source=lib/require-gh-version.sh
+source "$SCRIPT_DIR/lib/require-gh-version.sh"
+require_gh_version
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --repo) REPO="$2"; shift 2 ;;
-        --timeout) TIMEOUT="$2"; shift 2 ;;
+        --timeout) TIMEOUT="$2"; TIMEOUT_EXPLICIT=1; shift 2 ;;
         --table) TABLE=1; shift ;;
         --help|-h) sed -n '2,14p' "$0"; exit 0 ;;
         [0-9]*) PRS+=("$1"); shift ;;
@@ -34,9 +44,11 @@ done
 
 [[ ${#PRS[@]} -gt 0 ]] || { echo "usage: hapi-pr-emoji-batch.sh [--table] PR..." >&2; exit 2; }
 
+# Agent/non-TTY shells: serialize gh (anti-hang). Only shorten the timeout when
+# the caller did NOT set one explicitly — an explicit --timeout must survive.
 if [[ "${HAPI_AGENT_CONTEXT:-}" == 1 || ! -t 1 ]]; then
     PARALLEL=1
-    TIMEOUT="${HAPI_GH_TIMEOUT_SECS:-10}"
+    [[ "$TIMEOUT_EXPLICIT" -eq 1 ]] || TIMEOUT=10
 fi
 WALL_LIMIT=$(( $(date +%s) + ${#PRS[@]} * TIMEOUT * 6 + 20 ))
 
@@ -67,79 +79,123 @@ fetch_latest_bot_body() {
     fi
 }
 
+# Emit the per-PR JSON blob. All signal bits are 0/1 strings; jq converts.
+_emit_pr_json() {
+    local out="$1" emoji="$2" action="$3" exists="$4" merged="$5" closed="$6" \
+        prepr="$7" data_unavail="$8" threads="$9" checks_ok="${10}" \
+        checks_pending="${11}" checks_seen="${12}" bot_clean="${13}" \
+        bot_major="${14}" merge_state="${15}"
+    local in_queue=true
+    [[ "$exists" == "1" && "$merged" == "0" && "$closed" == "0" && "$data_unavail" == "0" ]] || in_queue=false
+    b() { [[ "$1" == "1" ]] && echo true || echo false; }
+    jq -n \
+        --arg emoji "$emoji" --arg action "$action" --arg merge "$merge_state" \
+        --argjson exists "$(b "$exists")" --argjson merged "$(b "$merged")" \
+        --argjson closed "$(b "$closed")" --argjson prePr "$(b "$prepr")" \
+        --argjson dataUnavailable "$(b "$data_unavail")" \
+        --argjson inQueue "$in_queue" --argjson open "$in_queue" \
+        --argjson threads "$threads" \
+        --argjson checksOk "$(b "$checks_ok")" --argjson checksPending "$(b "$checks_pending")" \
+        --argjson checksSeen "$(b "$checks_seen")" \
+        --argjson botClean "$(b "$bot_clean")" --argjson botMajor "$(b "$bot_major")" \
+        '{emoji:$emoji,exists:$exists,inQueue:$inQueue,open:$inQueue,prePr:$prePr,merged:$merged,closed:$closed,dataUnavailable:$dataUnavailable,threads:$threads,checksOk:$checksOk,checksPending:$checksPending,checksSeen:$checksSeen,botClean:$botClean,botMajor:$botMajor,mergeState:$merge,action:$action}' \
+        >"$out"
+}
+
+# Derive CI signals. Requires gh >= HAPI_GH_MIN_VERSION (see require-gh-version.sh).
+#   Prints: "<checks_ok> <checks_pending> <checks_seen> <pr_review_ok>"
+# Uses `gh pr checks --json name,bucket` only — no human-table fallback (that
+# path lied when --json was unsupported).
+_gh_check_signals() {
+    local n="$1" json
+    local checks_ok=1 checks_pending=0 checks_seen=0 pr_review_ok=0
+    if json="$(gh_t pr checks "$n" --repo "$REPO" --json name,bucket 2>/dev/null)" \
+        && [[ "${json:0:1}" == "[" ]]; then
+        local row cname bucket
+        while IFS= read -r row; do
+            cname="$(echo "$row" | jq -r '.name')"
+            bucket="$(echo "$row" | jq -r '.bucket')"
+            [[ "$cname" == "test" || "$cname" == "pr-review" ]] || continue
+            checks_seen=1
+            case "$bucket" in
+                pass|skipping) [[ "$cname" == "pr-review" ]] && pr_review_ok=1 ;;
+                pending|queued|in_progress) checks_ok=0; checks_pending=1 ;;
+                *) checks_ok=0 ;;
+            esac
+        done < <(echo "$json" | jq -c '.[]' 2>/dev/null || true)
+        echo "$checks_ok $checks_pending $checks_seen $pr_review_ok"
+        return
+    fi
+    # No JSON → treat as data unavailable (caller maps to ? / 🔁), never invent green.
+    # Legacy human-table fallback removed 2026-07-25 (Debian 2.23 false PASS).
+    echo "0 0 0 0"
+}
+
 classify_one() {
     local n="$1"
     local out="$TMPDIR/$n.json"
-    local checks merge_state pr_state threads bot_body
-    local checks_ok=1 checks_pending=0 pr_review_ok=0 threads_n bot_clean=0 bot_major=0 merge_bad=0
-    local emoji action exists=false in_queue=false
+    local merge_state pr_state pr_json bot_body
+    local checks_ok=1 checks_pending=0 checks_seen=0 pr_review_ok=0 threads_n bot_clean=0 bot_major=0 bot_has_body=0 merge_bad=0
+    local exists=0 merged=0 closed=0 data_unavail=0
+    local decided emoji action
 
-    # REST is authoritative — `gh pr view -q .number` can exit 0 on missing PRs.
-    if ! gh_t api "repos/${REPO}/pulls/${n}" --jq .number >/dev/null 2>&1; then
-        emoji="📝"
-        action="pre-PR — no open PR #${n} on ${REPO} yet; file when ready"
-        jq -n \
-            --arg emoji "$emoji" --argjson exists false --argjson inQueue false --argjson open false \
-            --argjson prePr true --argjson merged false \
-            --argjson threads -1 \
-            --argjson checksOk false --argjson checksPending false \
-            --argjson botClean false --argjson botMajor false \
-            --arg merge "UNKNOWN" --arg action "$action" \
-            '{emoji:$emoji,exists:$exists,inQueue:$inQueue,open:$inQueue,prePr:$prePr,merged:$merged,threads:$threads,checksOk:$checksOk,checksPending:$checksPending,botClean:$botClean,botMajor:$botMajor,mergeState:$merge,action:$action}' \
-            >"$out"
+    # Single authoritative PR fetch. Distinguish a real 404 (pre-PR) from a
+    # transport failure (timeout / network) — the latter must NOT masquerade as
+    # pre-PR, or a flaky network would retitle live PRs to 📝. Guard the command
+    # substitution in an `if` so `set -e` does not kill us on the 404 exit.
+    local err_out rc=0
+    if err_out="$(gh_t api "repos/${REPO}/pulls/${n}" \
+        --jq '[.state, (.merged|tostring), (.mergeable_state // "unknown")] | @tsv' 2>&1)"; then
+        rc=0
+    else
+        rc=$?
+    fi
+    if [[ "$rc" -ne 0 ]]; then
+        if [[ "$rc" -eq 124 ]]; then
+            data_unavail=1
+        elif echo "$err_out" | grep -qiE 'not found|http 404'; then
+            exists=0   # genuine pre-PR
+        else
+            data_unavail=1  # connection/resolve/rate-limit → unknown, be conservative
+        fi
+        if [[ "$data_unavail" -eq 1 ]]; then
+            decided="$(pec_decide_emoji 0 0 0 0 0 0 0 0 0 0 0 1)"
+            _emit_pr_json "$out" "${decided%%$'\t'*}" "${decided#*$'\t'}" 0 0 0 0 1 -1 0 0 0 0 0 "UNAVAILABLE"
+            return
+        fi
+        decided="$(pec_decide_emoji 0 0 0 0 0 0 0 0 0 0 0 0)"
+        _emit_pr_json "$out" "${decided%%$'\t'*}" "${decided#*$'\t'}" 0 0 0 1 0 -1 0 0 0 0 0 "UNKNOWN"
         return
     fi
-    exists=true
 
-    pr_state="$(gh_t api "repos/${REPO}/pulls/${n}" --jq .state 2>/dev/null || echo OPEN)"
-    merge_state="$(gh_t api "repos/${REPO}/pulls/${n}" --jq .mergeable_state 2>/dev/null || echo UNKNOWN)"
-    if [[ "$merge_state" == "dirty" || "$merge_state" == "behind" ]]; then merge_bad=1; fi
+    exists=1
+    IFS=$'\t' read -r pr_state pr_json merge_state <<< "$err_out"
+    [[ "$pr_json" == "true" ]] && merged=1
+    [[ "$pr_state" == "closed" && "$merged" -eq 0 ]] && closed=1
+    [[ "$merge_state" == "dirty" || "$merge_state" == "behind" ]] && merge_bad=1
 
-    if [[ "$(gh_t api "repos/${REPO}/pulls/${n}" --jq .merged 2>/dev/null || echo false)" == "true" ]]; then
-        in_queue=false
-        emoji="🔧"
-        # Keep in sync with docs/tooling/feature-work-lifecycle.md § After upstream merge
-        action="MERGED — notify peer: (1) drop soup layer(s) (2) remove worktree+branch (3) ack; meta rematerializes soup once wave cleanup done"
-        jq -n \
-            --arg emoji "$emoji" --argjson exists true --argjson inQueue false --argjson open false \
-            --argjson prePr false --argjson merged true \
-            --argjson threads 0 \
-            --argjson checksOk true --argjson checksPending false \
-            --argjson botClean true --argjson botMajor false \
-            --arg merge "MERGED" --arg action "$action" \
-            '{emoji:$emoji,exists:$exists,inQueue:$inQueue,open:$inQueue,prePr:$prePr,merged:$merged,threads:$threads,checksOk:$checksOk,checksPending:$checksPending,botClean:$botClean,botMajor:$botMajor,mergeState:$merge,action:$action}' \
-            >"$out"
+    if [[ "$merged" -eq 1 ]]; then
+        decided="$(pec_decide_emoji 1 1 0 1 0 1 0 1 0 0 0 0)"
+        _emit_pr_json "$out" "${decided%%$'\t'*}" "${decided#*$'\t'}" 1 1 0 0 0 0 1 0 1 1 0 "MERGED"
         return
     fi
-    in_queue=true
+    if [[ "$closed" -eq 1 ]]; then
+        decided="$(pec_decide_emoji 1 0 1 0 0 0 0 0 0 0 0 0)"
+        _emit_pr_json "$out" "${decided%%$'\t'*}" "${decided#*$'\t'}" 1 0 1 0 0 -1 0 0 0 0 0 "$merge_state"
+        return
+    fi
 
-    checks="$(gh_t pr checks "$n" --repo "$REPO" --json name,bucket 2>/dev/null || echo '[]')"
-
-    while IFS= read -r row; do
-        local cname bucket
-        cname="$(echo "$row" | jq -r '.name')"
-        bucket="$(echo "$row" | jq -r '.bucket')"
-        [[ "$cname" == "test" || "$cname" == "pr-review" ]] || continue
-        case "$bucket" in
-            pass|skipping)
-                [[ "$cname" == "pr-review" ]] && pr_review_ok=1
-                ;;
-            pending|queued|in_progress) checks_ok=0; checks_pending=1 ;;
-            *) checks_ok=0 ;;
-        esac
-    done < <(echo "$checks" | jq -c '.[]' 2>/dev/null || true)
+    read -r checks_ok checks_pending checks_seen pr_review_ok < <(_gh_check_signals "$n")
 
     threads_n="$(gh_t api graphql -f query="
 query { repository(owner:\"${OWNER}\", name:\"${NAME}\") {
   pullRequest(number: ${n}) { reviewThreads(first: 50) { nodes { isResolved } } }
 }}" --jq 'if .data.repository.pullRequest == null then empty else [.data.repository.pullRequest.reviewThreads.nodes[]|select(.isResolved==false)]|length end' 2>/dev/null || true)"
-
     if [[ -z "$threads_n" || ! "$threads_n" =~ ^[0-9]+$ ]]; then
         threads_n=-1
     fi
 
     bot_body="$(fetch_latest_bot_body "$n")"
-
     if [[ "$bot_body" == "__CLEAN_LABEL__" ]]; then
         bot_clean=1
         bot_body=""
@@ -148,49 +204,23 @@ query { repository(owner:\"${OWNER}\", name:\"${NAME}\") {
     elif [[ "$pr_review_ok" -eq 1 ]]; then
         bot_clean=1
     fi
+    [[ -n "$bot_body" ]] && bot_has_body=1
     if echo "$bot_body" | grep -qiE '\[Major\]|\[MAJOR\]'; then
         bot_major=1
         [[ "$pr_review_ok" -eq 1 ]] && bot_clean=1 && bot_major=0
     fi
 
-    local parts=()
-    [[ "$merge_bad" -eq 1 ]] && parts+=("rebase (merge state dirty)")
-    if [[ "$checks_ok" -eq 0 && "$checks_pending" -eq 1 ]]; then parts+=("CI running")
-    elif [[ "$checks_ok" -eq 0 ]]; then parts+=("fix failing CI"); fi
-    [[ "$threads_n" -gt 0 ]] && parts+=("resolve ${threads_n} open thread(s)")
-    [[ "$threads_n" -lt 0 ]] && parts+=("thread count unavailable (retry)")
-    if [[ "$bot_clean" -eq 0 && "$bot_major" -eq 1 ]]; then parts+=("address bot [Major] findings")
-    elif [[ "$bot_clean" -eq 0 && -n "$bot_body" ]]; then parts+=("address latest bot review")
-    elif [[ "$bot_clean" -eq 0 ]]; then parts+=("push to trigger bot review"); fi
+    decided="$(pec_decide_emoji 1 0 0 "$checks_ok" "$checks_pending" "$checks_seen" \
+        "$threads_n" "$bot_clean" "$bot_major" "$bot_has_body" "$merge_bad" 0)"
+    emoji="${decided%%$'\t'*}"
+    action="${decided#*$'\t'}"
 
-    if [[ "$checks_ok" -eq 1 && "$threads_n" -eq 0 && "$bot_clean" -eq 1 && "$merge_bad" -eq 0 ]]; then
-        emoji="✅"
-        parts=("full green — wait on tiann")
-    elif [[ "$checks_pending" -eq 1 && "$threads_n" -eq 0 && "$bot_major" -eq 0 && "$merge_bad" -eq 0 ]]; then
-        emoji="🔁"
-    elif [[ "$checks_ok" -eq 1 && "$threads_n" -lt 0 && "$bot_clean" -eq 1 && "$merge_bad" -eq 0 ]]; then
-        emoji="🔁"
-        parts=("CI/bot green — thread count unavailable; retry sweep")
-    else
-        emoji="⚠️"
-    fi
-    action="$(IFS='; '; echo "${parts[*]}")"
-
-    jq -n \
-        --arg emoji "$emoji" --argjson exists "$exists" --argjson inQueue "$in_queue" --argjson open "$in_queue" \
-        --argjson prePr false --argjson merged false \
-        --argjson threads "$threads_n" \
-        --argjson checksOk "$([[ "$checks_ok" -eq 1 ]] && echo true || echo false)" \
-        --argjson checksPending "$([[ "$checks_pending" -eq 1 ]] && echo true || echo false)" \
-        --argjson botClean "$([[ "$bot_clean" -eq 1 ]] && echo true || echo false)" \
-        --argjson botMajor "$([[ "$bot_major" -eq 1 ]] && echo true || echo false)" \
-        --arg merge "$merge_state" --arg action "$action" \
-        '{emoji:$emoji,exists:$exists,inQueue:$inQueue,open:$inQueue,prePr:$prePr,merged:$merged,threads:$threads,checksOk:$checksOk,checksPending:$checksPending,botClean:$botClean,botMajor:$botMajor,mergeState:$merge,action:$action}' \
-        >"$out"
+    _emit_pr_json "$out" "$emoji" "$action" 1 0 0 0 0 "$threads_n" \
+        "$checks_ok" "$checks_pending" "$checks_seen" "$bot_clean" "$bot_major" "$merge_state"
 }
 
 export REPO OWNER NAME TIMEOUT TMPDIR WALL_LIMIT
-export -f classify_one gh_t fetch_latest_bot_body
+export -f classify_one gh_t fetch_latest_bot_body _emit_pr_json pec_decide_emoji _gh_check_signals
 
 echo "hapi-pr-emoji-batch: ${#PRS[@]} PR(s), parallel=${PARALLEL}, timeout=${TIMEOUT}s, wall=$(( WALL_LIMIT - $(date +%s) ))s" >&2
 t0=$(date +%s)
