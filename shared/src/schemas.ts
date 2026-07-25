@@ -42,6 +42,15 @@ export const GithubPrExternalRefSchema = z.object({
     number: z.number().int().positive(),
     url: z.string().url(),
     role: z.enum(['primary', 'secondary'])
+}).superRefine((ref, ctx) => {
+    const expectedUrl = `https://github.com/${ref.repo}/pull/${ref.number}`
+    if (ref.url !== expectedUrl) {
+        ctx.addIssue({
+            code: 'custom',
+            path: ['url'],
+            message: 'expected GitHub PR URL matching repo and number'
+        })
+    }
 })
 
 export type GithubPrExternalRef = z.infer<typeof GithubPrExternalRefSchema>
