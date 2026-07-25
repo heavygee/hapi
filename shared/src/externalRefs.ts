@@ -1,4 +1,4 @@
-import type { ExternalRef, GithubPrExternalRef } from './schemas'
+import type { ExternalRef, GithubPrExternalRef, GithubPrStatus } from './schemas'
 import { GithubRepoSlugSchema } from './schemas'
 
 /**
@@ -14,6 +14,43 @@ export function getPrimaryGithubPrRef(
         }
     }
     return null
+}
+
+/** Meta title-emoji contract → stable status enum on the ref (ADR D8). */
+export function githubPrStatusFromEmoji(emoji: string): GithubPrStatus {
+    switch (emoji) {
+        case '✅':
+            return 'clean'
+        case '🔁':
+            return 'pending'
+        case '⚠️':
+            return 'needs_work'
+        case '📝':
+            return 'pre_pr'
+        case '🔧':
+            return 'merged'
+        default:
+            return 'unknown'
+    }
+}
+
+export function githubPrStatusEmoji(status: GithubPrStatus | null | undefined): string {
+    switch (status) {
+        case 'clean':
+            return '✅'
+        case 'pending':
+            return '🔁'
+        case 'needs_work':
+            return '⚠️'
+        case 'pre_pr':
+            return '📝'
+        case 'merged':
+            return '🔧'
+        case 'unknown':
+            return '?'
+        default:
+            return ''
+    }
 }
 
 export function githubPrUrl(repo: string, number: number): string {
@@ -81,6 +118,9 @@ export function buildGithubPrExternalRef(input: {
     role?: 'primary' | 'secondary'
     source?: 'agent' | 'user' | 'inferred'
     linkedAt?: number
+    status?: GithubPrStatus
+    statusCheckedAt?: number
+    statusAction?: string
 }): GithubPrExternalRef {
     return {
         kind: 'github_pr',
@@ -89,6 +129,9 @@ export function buildGithubPrExternalRef(input: {
         url: githubPrUrl(input.repo, input.number),
         role: input.role ?? 'primary',
         ...(input.source ? { source: input.source } : {}),
-        ...(input.linkedAt ? { linkedAt: input.linkedAt } : {})
+        ...(input.linkedAt ? { linkedAt: input.linkedAt } : {}),
+        ...(input.status ? { status: input.status } : {}),
+        ...(input.statusCheckedAt ? { statusCheckedAt: input.statusCheckedAt } : {}),
+        ...(input.statusAction ? { statusAction: input.statusAction } : {})
     }
 }

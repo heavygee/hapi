@@ -6,6 +6,7 @@ export type {
     DecryptedMessage,
     ExternalRef,
     GithubPrExternalRef,
+    GithubPrStatus,
     Metadata,
     Machine,
     MachineHealth,

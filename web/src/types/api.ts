@@ -51,6 +51,7 @@ export type {
     CodexCollaborationMode,
     ExternalRef,
     GithubPrExternalRef,
+    GithubPrStatus,
     Metadata,
     PermissionMode,
     Machine,

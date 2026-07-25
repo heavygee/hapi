@@ -28,6 +28,26 @@ describe('ExternalRefSchema', () => {
         expect(parsed.success).toBe(true)
     })
 
+    it('accepts optional cached status fields (ADR D8)', () => {
+        const parsed = ExternalRefSchema.safeParse({
+            ...validPr,
+            status: 'clean',
+            statusCheckedAt: 1_700_000_000_000,
+            statusAction: 'full green — wait on tiann'
+        })
+        expect(parsed.success).toBe(true)
+        if (parsed.success) {
+            expect(parsed.data.status).toBe('clean')
+        }
+    })
+
+    it('rejects unknown status values', () => {
+        expect(ExternalRefSchema.safeParse({
+            ...validPr,
+            status: 'purple'
+        }).success).toBe(false)
+    })
+
     it('rejects invalid repo shape', () => {
         expect(ExternalRefSchema.safeParse({ ...validPr, repo: 'not-a-repo' }).success).toBe(false)
         expect(ExternalRefSchema.safeParse({ ...validPr, repo: '/hapi' }).success).toBe(false)

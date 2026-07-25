@@ -107,6 +107,7 @@ describe('startHappyServer skill_lookup', () => {
 
         expect(tools.tools.map((tool) => tool.name)).toEqual([
             'change_title',
+            'link_pr',
             'display_image',
             'ping_peer'
         ])
@@ -126,8 +127,8 @@ describe('startHappyServer skill_lookup', () => {
         await mcp.connect(new StreamableHTTPClientTransport(new URL(server.url)))
         const tools = await mcp.listTools()
 
-        expect(server.toolNames).toEqual(['display_image', 'ping_peer'])
-        expect(tools.tools.map((tool) => tool.name)).toEqual(['display_image', 'ping_peer'])
+        expect(server.toolNames).toEqual(['link_pr', 'display_image', 'ping_peer'])
+        expect(tools.tools.map((tool) => tool.name)).toEqual(['link_pr', 'display_image', 'ping_peer'])
     })
 
 })

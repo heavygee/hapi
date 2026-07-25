@@ -36,6 +36,20 @@ export const GithubRepoSlugSchema = z.string().regex(
  * v1: GitHub pull requests only. Do not parse session titles for this identity.
  * tiann/hapi#1160.
  */
+/**
+ * Cached Meta/classifier health for a linked GitHub PR (ADR D8).
+ * Absent = not yet classified; chip shows identity only.
+ */
+export const GithubPrStatusSchema = z.enum([
+    'clean',
+    'pending',
+    'needs_work',
+    'pre_pr',
+    'merged',
+    'unknown'
+])
+export type GithubPrStatus = z.infer<typeof GithubPrStatusSchema>
+
 export const GithubPrExternalRefSchema = z.object({
     kind: z.literal('github_pr'),
     repo: GithubRepoSlugSchema,
@@ -44,7 +58,11 @@ export const GithubPrExternalRefSchema = z.object({
     role: z.enum(['primary', 'secondary']),
     // Optional provenance. Absent source reads as trusted ('user') for pre-#1162 refs.
     source: z.enum(['agent', 'user', 'inferred']).optional(),
-    linkedAt: z.number().int().positive().optional()
+    linkedAt: z.number().int().positive().optional(),
+    // Optional cached classification (Meta / operator tooling). Not live GitHub.
+    status: GithubPrStatusSchema.optional(),
+    statusCheckedAt: z.number().int().positive().optional(),
+    statusAction: z.string().max(400).optional()
 }).superRefine((ref, ctx) => {
     const expectedUrl = `https://github.com/${ref.repo}/pull/${ref.number}`
     if (ref.url !== expectedUrl) {
