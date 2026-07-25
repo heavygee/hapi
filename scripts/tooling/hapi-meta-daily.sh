@@ -470,12 +470,15 @@ main() {
     # --- notifications (new human comms) ---
     local -a Q_NOTIF
     local nsince_up_new="$notif_since_up" nsince_fork_new="$notif_since_fork"
+    local MD_NOTIF_EMIT_FAIL_UP=0 MD_NOTIF_EMIT_FAIL_FORK=0
     while IFS=$'\t' read -r uAt typ reason title url; do
         [[ -z "$uAt" ]] && continue
         Q_NOTIF+=("$UPSTREAM_REPO  $typ/$reason  $title")
         [[ "$uAt" > "$nsince_up_new" ]] && nsince_up_new="$uAt"
         if [[ "$EMIT_EVENTS" -eq 1 ]]; then
-            _emit_notif_event "$jwt" "$UPSTREAM_REPO" "$title" "$url" "$typ" "$reason" "$uAt" || true
+            if ! _emit_notif_event "$jwt" "$UPSTREAM_REPO" "$title" "$url" "$typ" "$reason" "$uAt"; then
+                MD_NOTIF_EMIT_FAIL_UP=$((MD_NOTIF_EMIT_FAIL_UP + 1))
+            fi
         fi
     done < <(gh_notifications "$UPSTREAM_REPO" "$notif_since_up")
     while IFS=$'\t' read -r uAt typ reason title url; do
@@ -483,15 +486,31 @@ main() {
         Q_NOTIF+=("$FORK_REPO  $typ/$reason  $title")
         [[ "$uAt" > "$nsince_fork_new" ]] && nsince_fork_new="$uAt"
         if [[ "$EMIT_EVENTS" -eq 1 ]]; then
-            _emit_notif_event "$jwt" "$FORK_REPO" "$title" "$url" "$typ" "$reason" "$uAt" || true
+            if ! _emit_notif_event "$jwt" "$FORK_REPO" "$title" "$url" "$typ" "$reason" "$uAt"; then
+                MD_NOTIF_EMIT_FAIL_FORK=$((MD_NOTIF_EMIT_FAIL_FORK + 1))
+            fi
         fi
     done < <(gh_notifications "$FORK_REPO" "$notif_since_fork")
 
-    # advance cursor to now (ISO) so next run only sees newer
-    local now_iso; now_iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    # Advance GitHub notif cursor only when this run's notif emits succeeded
+    # (or --emit-events is off). A failed notif POST must leave the cursor so
+    # the next since= query still returns that notification.
+    local now_iso cursor_up cursor_fork
+    now_iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    cursor_up="$now_iso"
+    cursor_fork="$now_iso"
+    if [[ "$EMIT_EVENTS" -eq 1 && "$MD_NOTIF_EMIT_FAIL_UP" -gt 0 ]]; then
+        cursor_up="$notif_since_up"
+        vlog "notif_cursor[$UPSTREAM_REPO] frozen after emit failure (was since=$notif_since_up)"
+    fi
+    if [[ "$EMIT_EVENTS" -eq 1 && "$MD_NOTIF_EMIT_FAIL_FORK" -gt 0 ]]; then
+        cursor_fork="$notif_since_fork"
+        vlog "notif_cursor[$FORK_REPO] frozen after emit failure (was since=$notif_since_fork)"
+    fi
     new_state="$(printf '%s' "$new_state" | jq -c \
-        --arg r1 "$UPSTREAM_REPO" --arg r2 "$FORK_REPO" --arg t "$now_iso" \
-        '.notif_cursor[$r1]=$t | .notif_cursor[$r2]=$t | .last_run=$t')"
+        --arg r1 "$UPSTREAM_REPO" --arg r2 "$FORK_REPO" \
+        --arg cu "$cursor_up" --arg cf "$cursor_fork" --arg t "$now_iso" \
+        '.notif_cursor[$r1]=$cu | .notif_cursor[$r2]=$cf | .last_run=$t')"
 
     if [[ "$JSON_OUT" -eq 1 ]]; then
         local plan_json="[]"

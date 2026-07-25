@@ -26,9 +26,16 @@ if [[ "$args" == *"pr list"* && "$args" == *"merged"* ]]; then
     printf '300\tfix: shipped thing\t2026-07-24T02:52:06Z\n'; exit 0
 fi
 if [[ "$args" == *"notifications"* ]]; then
-    # one upstream comms item; fork repo → none
+    # one upstream comms item; fork repo → none. Honor since= (ISO compare).
     if [[ "$args" == *"tiann/hapi/notifications"* ]]; then
-        printf '2026-07-25T08:00:00Z\tPullRequest\tcomment\tRe: PR #100 please rebase\thttps://x\n'
+        notif_ts="2026-07-25T08:00:00Z"
+        since=""
+        if [[ "$args" =~ since=([^[:space:]\&\"\']+) ]]; then
+            since="${BASH_REMATCH[1]}"
+        fi
+        if [[ -z "$since" || "$notif_ts" > "$since" ]]; then
+            printf '%s\tPullRequest\tcomment\tRe: PR #100 please rebase\thttps://x\n' "$notif_ts"
+        fi
     fi
     exit 0
 fi
@@ -320,6 +327,91 @@ ev_retry="$(wc -l <"$WORK/events.log" 2>/dev/null || echo 0)"
 check "emit retry: healthy run POSTs pending events" "[[ \$ev_retry -ge 1 ]]"
 emitted2="$(jq -r '.sessions["aaaaaaaa-1111"].emitted_fp // empty' "$WORK/state.json")"
 check "emit retry: emitted_fp recorded after 2xx" "[[ -n \"\$emitted2\" ]]"
+
+# ============ 13. failed notif emit must NOT advance notif_cursor (since-aware) ============
+rm -f "$WORK/state.json" "$WORK/events.log" "$WORK/pings.log"
+# Fail only system-events (incl. notif emits); gh mock already honors since=
+cat >"$WORK/curl" <<EOF
+#!/usr/bin/env bash
+args="\$*"
+if [[ "\$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
+if [[ "\$args" == *"-X PATCH"* ]]; then echo '{"ok":true}'; exit 0; fi
+if [[ "\$args" == *"/api/system-events"* && "\$args" == *"-X POST"* ]]; then
+    body=""; prev=""
+    for a in "\$@"; do
+        if [[ "\$prev" == "-d" ]]; then body="\$a"; fi
+        prev="\$a"
+    done
+    echo "\$body" >> "$WORK/events.log"
+    echo '{"error":"notif boom"}'
+    exit 0
+fi
+if [[ "\$args" == *"/api/sessions?limit=500"* ]]; then
+cat <<'JSON'
+{"sessions":[
+ {"id":"aaaaaaaa-1111","active":true,"metadata":{"name":"PR #100: needs work"}},
+ {"id":"bbbbbbbb-2222","active":true,"metadata":{"name":"PR #200: green thing"}},
+ {"id":"cccccccc-3333","active":true,"metadata":{"name":"PR #300: merged thing"}},
+ {"id":"dddddddd-4444","active":false,"metadata":{"name":"PR #400: asleep warn"}}
+]}
+JSON
+exit 0
+fi
+echo '{}'; exit 0
+EOF
+chmod +x "$WORK/curl"
+
+set +e
+out="$(run --emit-events 2>&1)"
+rc=$?
+set -e
+check "notif cursor freeze: exit nonzero on emit fail" "[[ \$rc -ne 0 ]]"
+c_fail="$(jq -r '.notif_cursor["tiann/hapi"] // empty' "$WORK/state.json")"
+# Must remain at-or-before the notif timestamp so a since= query still returns it.
+check "notif cursor freeze: cursor not past failed notif" \
+    "[[ -n \"\$c_fail\" && ! \"\$c_fail\" > \"2026-07-25T08:00:00Z\" ]]"
+
+# Heal → next run must still see the notif (since-aware) and emit it once
+rm -f "$WORK/events.log"
+cat >"$WORK/curl" <<EOF
+#!/usr/bin/env bash
+args="\$*"
+if [[ "\$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
+if [[ "\$args" == *"-X PATCH"* ]]; then echo '{"ok":true}'; exit 0; fi
+if [[ "\$args" == *"/api/system-events"* && "\$args" == *"-X POST"* ]]; then
+    body=""; prev=""
+    for a in "\$@"; do
+        if [[ "\$prev" == "-d" ]]; then body="\$a"; fi
+        prev="\$a"
+    done
+    echo "\$body" >> "$WORK/events.log"
+    echo '{"event":{"id":77},"deduped":false}'; exit 0
+fi
+if [[ "\$args" == *"/api/sessions?limit=500"* ]]; then
+cat <<'JSON'
+{"sessions":[
+ {"id":"aaaaaaaa-1111","active":true,"metadata":{"name":"PR #100: needs work"}},
+ {"id":"bbbbbbbb-2222","active":true,"metadata":{"name":"PR #200: green thing"}},
+ {"id":"cccccccc-3333","active":true,"metadata":{"name":"PR #300: merged thing"}},
+ {"id":"dddddddd-4444","active":false,"metadata":{"name":"PR #400: asleep warn"}}
+]}
+JSON
+exit 0
+fi
+echo '{}'; exit 0
+EOF
+chmod +x "$WORK/curl"
+out="$(run --emit-events 2>&1)"
+check "notif cursor freeze: retry emits notif once" \
+    "grep -q 'GitHub PullRequest/comment: Re: PR #100 please rebase' '$WORK/events.log'"
+c_ok="$(jq -r '.notif_cursor["tiann/hapi"] // empty' "$WORK/state.json")"
+check "notif cursor freeze: cursor advances after successful notif emit" \
+    "[[ -n \"\$c_ok\" && \"\$c_ok\" > \"2026-07-25T08:00:00Z\" ]]"
+# Third run: since past notif → zero notif POSTs for that subject
+rm -f "$WORK/events.log"
+out="$(run --emit-events 2>&1)"
+check "notif cursor freeze: steady run does not re-fetch failed-then-emitted notif" \
+    "! grep -q 'GitHub PullRequest/comment: Re: PR #100 please rebase' '$WORK/events.log'"
 
 echo ""
 echo "hapi-meta-daily.test.sh: $PASS passed, $FAIL failed"
