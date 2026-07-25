@@ -139,6 +139,21 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         return c.json({ session: sessionResult.session })
     })
 
+    app.get('/sessions/:id/external-refs', (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const externalRefs = sessionResult.session.metadata?.externalRefs ?? []
+        return c.json({ externalRefs })
+    })
+
     app.get('/sessions/:id/cursor-chat-store', async (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)
         if (engine instanceof Response) {

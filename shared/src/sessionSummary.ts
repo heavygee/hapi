@@ -1,4 +1,4 @@
-import type { Session, WorktreeMetadata } from './schemas'
+import type { ExternalRef, Session, WorktreeMetadata } from './schemas'
 
 export type PendingRequestKind = 'permission' | 'input'
 
@@ -38,6 +38,8 @@ export type SessionSummaryMetadata = {
     worktree?: WorktreeMetadata
     agentSessionId?: string
     lifecycleState?: string
+    /** Structured contribution links (GitHub PRs, …). tiann/hapi#1160. */
+    externalRefs?: ExternalRef[]
 }
 
 export type SessionSummary = {
@@ -124,7 +126,8 @@ export function toSessionSummary(session: Session): SessionSummary {
             ?? session.metadata.cursorSessionId
             ?? session.metadata.kimiSessionId
             ?? undefined,
-        lifecycleState: session.metadata.lifecycleState
+        lifecycleState: session.metadata.lifecycleState,
+        externalRefs: session.metadata.externalRefs
     } : null
 
     const todoProgress = session.todos?.length ? {

@@ -160,6 +160,39 @@ function createApp(session: Session, opts?: {
 }
 
 describe('sessions routes', () => {
+    it('returns structured externalRefs for a session', async () => {
+        const externalRefs = [{
+            kind: 'github_pr' as const,
+            repo: 'tiann/hapi',
+            number: 1160,
+            url: 'https://github.com/tiann/hapi/pull/1160',
+            role: 'primary' as const
+        }]
+        const session = createSession({
+            metadata: {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'cursor',
+                externalRefs
+            }
+        })
+        const { app } = createApp(session)
+
+        const response = await app.request('/api/sessions/session-1/external-refs')
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ externalRefs })
+    })
+
+    it('returns an empty externalRefs array when metadata has none', async () => {
+        const { app } = createApp(createSession())
+
+        const response = await app.request('/api/sessions/session-1/external-refs')
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ externalRefs: [] })
+    })
+
     it('returns the machine-scoped Cursor chat store status', async () => {
         const session = createSession({
             active: false,

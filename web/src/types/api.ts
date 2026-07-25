@@ -49,6 +49,8 @@ export type {
     AgentState,
     AttachmentMetadata,
     CodexCollaborationMode,
+    ExternalRef,
+    GithubPrExternalRef,
     Metadata,
     PermissionMode,
     Machine,

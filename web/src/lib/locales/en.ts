@@ -130,6 +130,7 @@ export default {
   'session.item.model': 'model',
   'session.item.worktree': 'worktree',
   'session.item.pending': 'pending',
+  'session.item.prChip': 'PR {number}',
   'session.item.thinking': 'thinking',
   'session.item.permission': 'Permission required',
   'session.item.needsInput': 'Needs input',
