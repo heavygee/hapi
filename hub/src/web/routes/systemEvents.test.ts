@@ -195,4 +195,77 @@ describe('systemEvents routes', () => {
         }))
         expect(res.status).toBe(403)
     })
+
+    it('promotes attention=1 channel events with relatedSessionId into inbox', async () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('inbox-sess', { flavor: 'codex', path: '/tmp' }, null, 'default')
+        const app = createApp(createEngine(store))
+
+        const res = await postEvent(app, validChannelBody({
+            relatedSessionId: session.id,
+            eventType: 'progress',
+            summary: 'First enter ✅ — waiting on tiann',
+            attentionCandidate: 1,
+            idempotencyKey: 'contrib:tiann/hapi#999:fp-check'
+        }))
+        expect(res.status).toBe(201)
+
+        const items = store.inbox.list({ sessionId: session.id, activeOnly: true })
+        expect(items).toHaveLength(1)
+        expect(items[0]?.summary).toContain('waiting on tiann')
+        expect(items[0]?.sourceEventIds).toHaveLength(1)
+    })
+
+    it('does not re-promote inbox on deduped replay', async () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('dedupe-inbox', { flavor: 'codex', path: '/tmp' }, null, 'default')
+        const app = createApp(createEngine(store))
+        const body = validChannelBody({
+            relatedSessionId: session.id,
+            idempotencyKey: 'contrib:tiann/hapi#999:fp-replay'
+        })
+
+        expect((await postEvent(app, body)).status).toBe(201)
+        const before = store.inbox.list({ sessionId: session.id })
+        expect(before).toHaveLength(1)
+        const beforeUpdatedAt = before[0]!.updatedAt
+        const beforeSourceIds = [...before[0]!.sourceEventIds]
+
+        const replay = await postEvent(app, body)
+        expect(replay.status).toBe(200)
+        const replayJson = await replay.json() as { deduped: boolean }
+        expect(replayJson.deduped).toBe(true)
+
+        const after = store.inbox.list({ sessionId: session.id })
+        expect(after).toHaveLength(1)
+        expect(after[0]!.updatedAt).toBe(beforeUpdatedAt)
+        expect(after[0]!.sourceEventIds).toEqual(beforeSourceIds)
+    })
+
+    it('ADR-001: channel ingest never writes session transcript messages', async () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('adr-sess', { flavor: 'codex', path: '/tmp' }, null, 'default')
+        const app = createApp(createEngine(store))
+
+        expect((await postEvent(app, validChannelBody({
+            relatedSessionId: session.id,
+            idempotencyKey: 'contrib:tiann/hapi#999:fp-adr'
+        }))).status).toBe(201)
+
+        expect(store.messages.getMessages(session.id)).toHaveLength(0)
+        expect(store.events.list({ sourceKind: 'channel' })).toHaveLength(1)
+    })
+
+    it('does not promote orphan channel events without relatedSessionId', async () => {
+        const store = new Store(':memory:')
+        const app = createApp(createEngine(store))
+
+        expect((await postEvent(app, validChannelBody({
+            eventType: 'needs_decision',
+            summary: 'Orphan ⚠️ PR with no session',
+            idempotencyKey: 'contrib:tiann/hapi#999:fp-orphan-inbox'
+        }))).status).toBe(201)
+
+        expect(store.inbox.count()).toBe(0)
+    })
 })

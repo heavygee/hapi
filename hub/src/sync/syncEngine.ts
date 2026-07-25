@@ -427,7 +427,12 @@ export class SyncEngine {
     /**
      * Channel ingest path for ContributionState / external producers.
      * Uses store-level insertSystemEvent (idempotency dedupe). Does not mutate
-     * session metadata or mark GitHub notifications read.
+     * session metadata, mark GitHub notifications read, or write session
+     * transcript messages (ADR-001).
+     *
+     * Non-deduped attention=1 events with relatedSessionId are promoted into
+     * the operator inbox. Deduped replays return the prior row without
+     * re-promoting or mutating inbox.
      */
     insertChannelSystemEvent(input: InsertSystemEventInput): { event: StoredSystemEvent; deduped: boolean } | null {
         if (input.sourceKind !== 'channel') {
@@ -442,6 +447,9 @@ export class SyncEngine {
         const event = this.store.events.insert(input)
         if (!event) {
             return null
+        }
+        if (event.attentionCandidate === 1 && event.relatedSessionId) {
+            this.store.inbox.promoteAttentionEvent(event)
         }
         return { event, deduped: false }
     }
