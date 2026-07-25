@@ -268,4 +268,34 @@ describe('systemEvents routes', () => {
 
         expect(store.inbox.count()).toBe(0)
     })
+
+    it('accepts two same-eventType inserts with different fingerprints/dedupeKeys', async () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('fp-collide', { flavor: 'codex', path: '/tmp' }, null, 'default')
+        const app = createApp(createEngine(store))
+
+        const first = await postEvent(app, validChannelBody({
+            relatedSessionId: session.id,
+            eventType: 'blocked',
+            summary: 'CI fail take 1',
+            dedupeKey: 'contrib:tiann/hapi#999:blocked:fp-a',
+            idempotencyKey: 'contrib:tiann/hapi#999:fp-a'
+        }))
+        expect(first.status).toBe(201)
+
+        const second = await postEvent(app, validChannelBody({
+            relatedSessionId: session.id,
+            eventType: 'blocked',
+            summary: 'CI fail take 2 — new fingerprint',
+            dedupeKey: 'contrib:tiann/hapi#999:blocked:fp-b',
+            idempotencyKey: 'contrib:tiann/hapi#999:fp-b'
+        }))
+        expect(second.status).toBe(201)
+
+        expect(store.events.count()).toBe(2)
+        const items = store.inbox.list({ sessionId: session.id, activeOnly: true })
+        expect(items).toHaveLength(1)
+        expect(items[0]?.sourceEventIds).toHaveLength(2)
+        expect(items[0]?.summary).toContain('take 2')
+    })
 })

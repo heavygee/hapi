@@ -147,6 +147,7 @@ hub_rename() {  # <jwt> <sid> <title>
 }
 
 # hub_emit_event <jwt> <body-json> — POST channel SystemEvent; dry-run prints only.
+# Returns 0 on dry-run / success body with event.id; nonzero on transport or rejection.
 hub_emit_event() {
     local jwt="$1" body="$2"
     if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -161,11 +162,13 @@ hub_emit_event() {
         -d "$body" \
         "$HAPI_HOST/api/system-events")" || {
         err "emit-events POST failed (transport)"
-        return 0
+        return 1
     }
     if ! printf '%s' "$resp" | jq -e '.event.id' >/dev/null 2>&1; then
         err "emit-events POST rejected: $(printf '%s' "$resp" | jq -c '.' 2>/dev/null || echo "$resp")"
+        return 1
     fi
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -315,6 +318,7 @@ main() {
     local new_state="$state"
     local -a Q_WARN Q_MERGED Q_ORPHAN Q_INACTIVE Q_PINGED Q_RENAMED
     local -a PLAN_ROWS   # for --json
+    MD_EMIT_FAILURES=0
 
     local sid8
     for sid8 in "${!SESS_ID[@]}"; do
@@ -348,7 +352,7 @@ main() {
             Q_RENAMED+=("$sid8  $name  →  $new_title")
         fi
 
-        # ping policy
+        # ping policy (actuator cursor: emoji/fp/last_ping)
         local action_fp prev_emoji prev_fp prev_ping decision
         action_fp="$(pec_action_fingerprint "$combined" "$acts")"
         prev_emoji="$(md_prev "$state" "$sid" "emoji")"
@@ -373,11 +377,15 @@ main() {
                 fi
             fi
 
-            # Channel emit (wider than peer ping): every transition / fp change /
-            # reminder including first-enter ✅. Default OFF via --emit-events.
+            # Channel emit uses a separate emitted_* cursor so a failed POST
+            # remains retryable even when rename/ping state advances.
             if [[ "$EMIT_EVENTS" -eq 1 ]]; then
-                local emit_reason
-                emit_reason="$(pec_emit_reason "$combined" "$prev_emoji" "$action_fp" "$prev_fp" "$prev_ping" "$now" "$REMINDER_SECS" || true)"
+                local emit_reason prev_emitted_e prev_emitted_fp prev_emitted_at
+                prev_emitted_e="$(md_prev "$state" "$sid" "emitted_emoji")"
+                prev_emitted_fp="$(md_prev "$state" "$sid" "emitted_fp")"
+                prev_emitted_at="$(md_prev "$state" "$sid" "last_emitted")"
+                [[ -z "$prev_emitted_at" ]] && prev_emitted_at=0
+                emit_reason="$(pec_emit_reason "$combined" "$prev_emitted_e" "$action_fp" "$prev_emitted_fp" "$prev_emitted_at" "$now" "$REMINDER_SECS" || true)"
                 if [[ "$emit_reason" != "none" && -n "$emit_reason" ]]; then
                     local emit_date emit_pr emit_body
                     emit_date="$(date -u +%Y-%m-%d)"
@@ -391,16 +399,22 @@ main() {
                         --session-id "$sid" \
                         --reason "$emit_reason" \
                         --date "$emit_date")"
-                    hub_emit_event "$jwt" "$emit_body"
-                    vlog "emit-events $sid8 $combined reason=$emit_reason"
+                    if hub_emit_event "$jwt" "$emit_body"; then
+                        new_state="$(printf '%s' "$new_state" | jq -c \
+                            --arg s "$sid" --arg e "$combined" --arg f "$action_fp" --argjson le "$now" \
+                            '.sessions[$s] = ((.sessions[$s] // {}) + {emitted_emoji:$e, emitted_fp:$f, last_emitted:$le})')"
+                        vlog "emit-events $sid8 $combined reason=$emit_reason"
+                    else
+                        MD_EMIT_FAILURES=$((MD_EMIT_FAILURES + 1))
+                    fi
                 fi
             fi
 
-            # record state (only meaningful when saved; dry-run discards)
+            # Actuator state always advances independently of emit success.
             new_state="$(printf '%s' "$new_state" | jq -c \
                 --arg s "$sid" --arg e "$combined" --arg f "$action_fp" \
                 --argjson lp "${this_ping:-0}" --arg t "$new_title" \
-                '.sessions[$s] = {emoji:$e, fp:$f, last_ping:$lp, title:$t}')"
+                '.sessions[$s] = ((.sessions[$s] // {}) + {emoji:$e, fp:$f, last_ping:$lp, title:$t})')"
         fi
 
         # action queue rows
@@ -442,11 +456,14 @@ main() {
                     --session-id "" \
                     --reason "$orphan_reason" \
                     --date "$orphan_date")"
-                hub_emit_event "$jwt" "$orphan_body"
+                if hub_emit_event "$jwt" "$orphan_body"; then
+                    new_state="$(printf '%s' "$new_state" | jq -c \
+                        --arg p "$p" --arg e "$e" --arg f "$orphan_fp" \
+                        '.orphan_prs = ((.orphan_prs // {}) + {($p): {emoji:$e, fp:$f}})')"
+                else
+                    MD_EMIT_FAILURES=$((MD_EMIT_FAILURES + 1))
+                fi
             fi
-            new_state="$(printf '%s' "$new_state" | jq -c \
-                --arg p "$p" --arg e "$e" --arg f "$orphan_fp" \
-                '.orphan_prs = ((.orphan_prs // {}) + {($p): {emoji:$e, fp:$f}})')"
         fi
     done
 
@@ -458,7 +475,7 @@ main() {
         Q_NOTIF+=("$UPSTREAM_REPO  $typ/$reason  $title")
         [[ "$uAt" > "$nsince_up_new" ]] && nsince_up_new="$uAt"
         if [[ "$EMIT_EVENTS" -eq 1 ]]; then
-            _emit_notif_event "$jwt" "$UPSTREAM_REPO" "$title" "$url" "$typ" "$reason" "$uAt"
+            _emit_notif_event "$jwt" "$UPSTREAM_REPO" "$title" "$url" "$typ" "$reason" "$uAt" || true
         fi
     done < <(gh_notifications "$UPSTREAM_REPO" "$notif_since_up")
     while IFS=$'\t' read -r uAt typ reason title url; do
@@ -466,7 +483,7 @@ main() {
         Q_NOTIF+=("$FORK_REPO  $typ/$reason  $title")
         [[ "$uAt" > "$nsince_fork_new" ]] && nsince_fork_new="$uAt"
         if [[ "$EMIT_EVENTS" -eq 1 ]]; then
-            _emit_notif_event "$jwt" "$FORK_REPO" "$title" "$url" "$typ" "$reason" "$uAt"
+            _emit_notif_event "$jwt" "$FORK_REPO" "$title" "$url" "$typ" "$reason" "$uAt" || true
         fi
     done < <(gh_notifications "$FORK_REPO" "$notif_since_fork")
 
@@ -494,6 +511,12 @@ main() {
         echo ""
         echo "  [dry-run] state NOT written; no renames/pings performed"
     fi
+
+    if [[ "$EMIT_EVENTS" -eq 1 && "$MD_EMIT_FAILURES" -gt 0 ]]; then
+        err "emit-events: $MD_EMIT_FAILURES POST(s) failed — emit cursor not advanced for those; will retry next run"
+        return 1
+    fi
+    return 0
 }
 
 # _emit_notif_event <jwt> <repo> <title> <url> <type> <reason> <updatedAt>
@@ -530,7 +553,10 @@ _emit_notif_event() {
         --date "$date" \
         --notif \
         --url "${url:-https://github.com/${repo}/pull/${pr}}")"
-    hub_emit_event "$jwt" "$body"
+    hub_emit_event "$jwt" "$body" || {
+        MD_EMIT_FAILURES=$((MD_EMIT_FAILURES + 1))
+        return 1
+    }
     new_state="$(printf '%s' "$new_state" | jq -c --arg k "$seen_key" \
         '.notif_seen = ((.notif_seen // {}) + {($k): true})')"
 }
@@ -592,4 +618,5 @@ _print_queue() {
 # Only run main when executed, not when sourced by the test.
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     main "$@"
+    exit $?
 fi

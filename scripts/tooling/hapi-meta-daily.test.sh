@@ -198,7 +198,12 @@ check "dry+emit: prints channel body" "grep -q '\"sourceKind\": \"channel\"\\|\"
 # ============ 11. reminder emit keys include :reminder:YYYY-MM-DD ============
 rm -f "$WORK/state.json" "$WORK/events.log"
 out="$(run --emit-events 2>&1)"  # establish state
-tmp="$(jq -c '(.sessions["aaaaaaaa-1111"].last_ping) = 1' "$WORK/state.json")"
+tmp="$(jq -c '
+  .sessions["aaaaaaaa-1111"].last_ping = 1
+  | .sessions["aaaaaaaa-1111"].last_emitted = 1
+  | .sessions["aaaaaaaa-1111"].emitted_emoji = .sessions["aaaaaaaa-1111"].emoji
+  | .sessions["aaaaaaaa-1111"].emitted_fp = .sessions["aaaaaaaa-1111"].fp
+' "$WORK/state.json")"
 echo "$tmp" >"$WORK/state.json"
 rm -f "$WORK/events.log"
 # curl must capture POST body for key inspection
@@ -237,6 +242,84 @@ check "reminder emit: body has reminder suffix in idempotencyKey" \
     "grep -q ':reminder:' '$WORK/events.log'"
 check "reminder emit: dedupeKey also has reminder suffix" \
     "jq -e 'select(.dedupeKey|test(\":reminder:\"))' <'$WORK/events.log' >/dev/null"
+
+# ============ 12. POST 500 does not consume emit cursor; retry on next healthy run ============
+rm -f "$WORK/state.json" "$WORK/events.log" "$WORK/pings.log"
+# Fail all system-events POSTs
+cat >"$WORK/curl" <<EOF
+#!/usr/bin/env bash
+args="\$*"
+if [[ "\$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
+if [[ "\$args" == *"-X PATCH"* ]]; then echo '{"ok":true}'; exit 0; fi
+if [[ "\$args" == *"/api/system-events"* && "\$args" == *"-X POST"* ]]; then
+    echo "\$args" >> "$WORK/events.log"
+    echo '{"error":"boom"}'
+    # Prefer writing status via file the harness can see; curl mock returns body only.
+    # Real hub_emit_event must treat missing event.id / non-2xx as failure.
+    exit 0
+fi
+if [[ "\$args" == *"/api/sessions?limit=500"* ]]; then
+cat <<'JSON'
+{"sessions":[
+ {"id":"aaaaaaaa-1111","active":true,"metadata":{"name":"PR #100: needs work"}},
+ {"id":"bbbbbbbb-2222","active":true,"metadata":{"name":"PR #200: green thing"}},
+ {"id":"cccccccc-3333","active":true,"metadata":{"name":"PR #300: merged thing"}},
+ {"id":"dddddddd-4444","active":false,"metadata":{"name":"PR #400: asleep warn"}}
+]}
+JSON
+exit 0
+fi
+echo '{}'; exit 0
+EOF
+chmod +x "$WORK/curl"
+
+set +e
+out="$(run --emit-events 2>&1)"
+rc=$?
+set -e
+check "emit 500: script exits nonzero" "[[ \$rc -ne 0 ]]"
+check "emit 500: warn still pinged (actuator independent)" "grep -q '^aaaaaaaa' '$WORK/pings.log'"
+# Emit cursor must remain empty so retry is possible
+emitted="$(jq -r '.sessions["aaaaaaaa-1111"].emitted_fp // empty' "$WORK/state.json" 2>/dev/null || true)"
+check "emit 500: emitted_fp not consumed" "[[ -z \"\$emitted\" ]]"
+notif_seen_count="$(jq '(.notif_seen // {}) | length' "$WORK/state.json" 2>/dev/null || echo 0)"
+check "emit 500: notif_seen not consumed" "[[ \"\$notif_seen_count\" -eq 0 ]]"
+
+# Heal curl → next run emits once (at least for session transitions still pending)
+rm -f "$WORK/events.log"
+cat >"$WORK/curl" <<EOF
+#!/usr/bin/env bash
+args="\$*"
+if [[ "\$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
+if [[ "\$args" == *"-X PATCH"* ]]; then echo '{"ok":true}'; exit 0; fi
+if [[ "\$args" == *"/api/system-events"* && "\$args" == *"-X POST"* ]]; then
+    body=""; prev=""
+    for a in "\$@"; do
+        if [[ "\$prev" == "-d" ]]; then body="\$a"; fi
+        prev="\$a"
+    done
+    echo "\$body" >> "$WORK/events.log"
+    echo '{"event":{"id":42},"deduped":false}'; exit 0
+fi
+if [[ "\$args" == *"/api/sessions?limit=500"* ]]; then
+cat <<'JSON'
+{"sessions":[
+ {"id":"aaaaaaaa-1111","active":true,"metadata":{"name":"PR #100: needs work"}},
+ {"id":"bbbbbbbb-2222","active":true,"metadata":{"name":"PR #200: green thing"}},
+ {"id":"cccccccc-3333","active":true,"metadata":{"name":"PR #300: merged thing"}},
+ {"id":"dddddddd-4444","active":false,"metadata":{"name":"PR #400: asleep warn"}}
+]}
+JSON
+exit 0
+fi
+echo '{}'; exit 0
+EOF
+chmod +x "$WORK/curl"
+out="$(run --emit-events 2>&1)"
+ev_retry="$(wc -l <"$WORK/events.log" 2>/dev/null || echo 0)"
+check "emit retry: healthy run POSTs pending events" "[[ \$ev_retry -ge 1 ]]"
+emitted2="$(jq -r '.sessions["aaaaaaaa-1111"].emitted_fp // empty' "$WORK/state.json")"
+check "emit retry: emitted_fp recorded after 2xx" "[[ -n \"\$emitted2\" ]]"
 
 echo ""
 echo "hapi-meta-daily.test.sh: $PASS passed, $FAIL failed"

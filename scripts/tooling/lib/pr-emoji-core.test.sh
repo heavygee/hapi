@@ -143,9 +143,22 @@ eq "idempotency base key" \
 eq "idempotency reminder suffix" \
     "$(pec_contrib_idempotency_key "tiann/hapi" 999 "$FP_A" reminder 2026-07-25)" \
     "contrib:tiann/hapi#999:$FP_A:reminder:2026-07-25"
-eq "dedupe reminder suffix" \
-    "$(pec_contrib_dedupe_key "tiann/hapi" 999 blocked reminder 2026-07-25)" \
-    "contrib:tiann/hapi#999:blocked:reminder:2026-07-25"
+eq "dedupe includes fingerprint" \
+    "$(pec_contrib_dedupe_key "tiann/hapi" 999 blocked "$FP_A")" \
+    "contrib:tiann/hapi#999:blocked:$FP_A"
+eq "dedupe fingerprint change differs" \
+    "$(pec_contrib_dedupe_key "tiann/hapi" 999 blocked "$FP_B")" \
+    "contrib:tiann/hapi#999:blocked:$FP_B"
+[[ "$(pec_contrib_dedupe_key "tiann/hapi" 999 blocked "$FP_A")" != \
+   "$(pec_contrib_dedupe_key "tiann/hapi" 999 blocked "$FP_B")" ]] \
+    && PASS=$((PASS + 1)) \
+    || { echo "FAIL: dedupe keys must differ across fingerprints" >&2; FAIL=$((FAIL + 1)); }
+eq "dedupe reminder suffix keeps fingerprint" \
+    "$(pec_contrib_dedupe_key "tiann/hapi" 999 blocked "$FP_A" reminder 2026-07-25)" \
+    "contrib:tiann/hapi#999:blocked:$FP_A:reminder:2026-07-25"
+eq "dedupe same eventType progress differs by fp" \
+    "$(pec_contrib_dedupe_key "tiann/hapi" 999 progress "$FP_A")" \
+    "contrib:tiann/hapi#999:progress:$FP_A"
 
 body="$(pec_build_channel_event_body \
     --repo tiann/hapi --number 999 --emoji "✅" --action "full green — wait on tiann" \
@@ -157,6 +170,15 @@ eq "body relatedSessionId set" "$(jq -r '.relatedSessionId' <<<"$body")" "aaaaaa
 eq "body artifact repo namespaced" "$(jq -r '.artifactRefs[0].repo' <<<"$body")" "tiann/hapi"
 eq "body artifact number" "$(jq -r '.artifactRefs[0].number' <<<"$body")" "999"
 eq "body never bare-number-only identity" "$(jq -r '.artifactRefs[0].number' <<<"$body")" "999"
+eq "body dedupeKey embeds fingerprint" "$(jq -r '.dedupeKey' <<<"$body")" "contrib:tiann/hapi#999:progress:$FP_A"
+
+body_b="$(pec_build_channel_event_body \
+    --repo tiann/hapi --number 999 --emoji "✅" --action "still green" \
+    --fingerprint "$FP_B" --session-id "aaaaaaaa-1111" --reason fingerprint \
+    --date 2026-07-25)"
+[[ "$(jq -r '.dedupeKey' <<<"$body")" != "$(jq -r '.dedupeKey' <<<"$body_b")" ]] \
+    && PASS=$((PASS + 1)) \
+    || { echo "FAIL: body dedupeKeys must differ for fingerprint change" >&2; FAIL=$((FAIL + 1)); }
 
 echo ""
 echo "pr-emoji-core.test.sh: $PASS passed, $FAIL failed"

@@ -354,10 +354,12 @@ pec_contrib_idempotency_key() {
     printf '%s' "$key"
 }
 
-# pec_contrib_dedupe_key REPO NUMBER EVENT_TYPE [reminder DATE]
+# pec_contrib_dedupe_key REPO NUMBER EVENT_TYPE FINGERPRINT [reminder DATE]
+# Must be unique per insert identity — events.dedupe_key has a UNIQUE index.
+# Align with idempotency by embedding the fingerprint (and reminder date when nagging).
 pec_contrib_dedupe_key() {
-    local repo="$1" number="$2" event_type="$3" kind="${4:-}" date="${5:-}"
-    local key="contrib:${repo}#${number}:${event_type}"
+    local repo="$1" number="$2" event_type="$3" fp="$4" kind="${5:-}" date="${6:-}"
+    local key="contrib:${repo}#${number}:${event_type}:${fp}"
     if [[ "$kind" == "reminder" && -n "$date" ]]; then
         key="${key}:reminder:${date}"
     fi
@@ -419,7 +421,7 @@ pec_build_channel_event_body() {
 
     local idempo dedupe target control severity summary op_req=1
     idempo="$(pec_contrib_idempotency_key "$repo" "$number" "$fingerprint" "$rem_kind" "$rem_date")"
-    dedupe="$(pec_contrib_dedupe_key "$repo" "$number" "$event_type" "$rem_kind" "$rem_date")"
+    dedupe="$(pec_contrib_dedupe_key "$repo" "$number" "$event_type" "$fingerprint" "$rem_kind" "$rem_date")"
     IFS=$'\t' read -r target control <<<"$(pec_pr_target_for_repo "$repo")"
     severity="$(pec_severity_for_emoji "$emoji")"
     [[ "$emoji" == "✅" || "$emoji" == "🔁" || "$emoji" == "📝" ]] && op_req=0
