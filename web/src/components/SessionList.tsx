@@ -932,6 +932,10 @@ function SessionItem(props: {
                                     {t('session.item.pending')} {s.pendingRequestsCount}
                                 </span>
                             ) : null}
+                            {/* Chip left of time: time stays the stable trailing column (ADR D8). */}
+                            {githubPrAwarenessEnabled && primaryPrRef ? (
+                                <SessionPrChip refs={s.metadata?.externalRefs} />
+                            ) : null}
                             <span className="tabular-nums text-[var(--app-hint)]">
                                 {getSessionTimeLabel(s, t)}
                             </span>
@@ -948,11 +952,6 @@ function SessionItem(props: {
                         </div>
                     ) : null}
                 </button>
-                {githubPrAwarenessEnabled && primaryPrRef ? (
-                    <div className={`flex shrink-0 items-start pt-2.5 pr-2.5 ${!s.active ? 'opacity-50' : ''}`}>
-                        <SessionPrChip refs={s.metadata?.externalRefs} />
-                    </div>
-                ) : null}
             </div>
 
             <SessionActionMenu
