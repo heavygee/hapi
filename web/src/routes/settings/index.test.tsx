@@ -164,6 +164,23 @@ vi.mock('./useVoiceSettings', () => ({
     }),
 }))
 
+vi.mock('@/lib/app-context', () => ({
+    useAppContext: () => ({ api: {} }),
+}))
+
+vi.mock('@/hooks/queries/useFeatures', () => ({
+    useFeatures: () => ({
+        features: {
+            githubPrAwareness: { enabled: false, source: 'default' },
+        },
+        isLoading: false,
+    }),
+    usePatchFeatures: () => ({
+        setGithubPrAwareness: vi.fn(),
+        isPending: false,
+    }),
+}))
+
 function renderPage(page: React.ReactElement) {
     return render(<I18nProvider>{page}</I18nProvider>)
 }
