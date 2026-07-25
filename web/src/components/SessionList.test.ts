@@ -12,6 +12,8 @@ import {
     isSidebarEmptySessionStub,
     normalizeSearch,
     prepareSidebarSessions,
+    sessionListItemButtonClassName,
+    sessionListItemWrapperClassName,
     sessionMatchesQuery,
     sessionMatchesTimeRange,
     shouldShowSessionInSidebar
@@ -451,5 +453,14 @@ describe('expandSelectedSessionCollapseOverrides', () => {
         })
 
         expect(result.has('sessions::machine-1::/work/hapi')).toBe(false)
+    })
+})
+
+describe('session list row focus group classes', () => {
+    it('puts group/session-row on the focusable button, not the wrapper', () => {
+        expect(sessionListItemButtonClassName()).toContain('group/session-row')
+        expect(sessionListItemWrapperClassName(false)).not.toContain('group/session-row')
+        expect(sessionListItemWrapperClassName(true)).toContain('bg-[var(--app-secondary-bg)]')
+        expect(sessionListItemWrapperClassName(true)).not.toContain('group/session-row')
     })
 })
