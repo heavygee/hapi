@@ -30,14 +30,16 @@
 #   hapi-meta-daily.sh --reminder-hours 12  # sticky ⚠️/🔧 nag interval
 #   hapi-meta-daily.sh --verbose
 #
-# Run from the fork mirror (~/coding/hapi), NOT from driver/.
+# Prefers the fork mirror (~/coding/hapi); when souped into driver/ the
+# low-level batch/ping tools are resolved from $HAPI_PRIMARY (see below).
 #
 # Env / injection (for tests):
 #   HAPI_HOST, HAPI_SETTINGS, HAPI_PR_REPO (default tiann/hapi), HAPI_FORK_REPO
 #   HAPI_META_STATE   (default ${XDG_STATE_HOME:-~/.local/state}/hapi/meta-daily.json)
 #   HAPI_META_GH_BIN  (default gh)     HAPI_META_CURL_BIN (default curl)
-#   HAPI_META_BATCH_BIN (default ./hapi-pr-emoji-batch.sh)
-#   HAPI_META_PING_BIN  (default ./hapi-ping-peer.sh)
+#   HAPI_PRIMARY        (default ~/coding/hapi) — canonical tool fallback root
+#   HAPI_META_BATCH_BIN (explicit override; else same-dir, else $HAPI_PRIMARY)
+#   HAPI_META_PING_BIN  (explicit override; else same-dir, else $HAPI_PRIMARY)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -51,8 +53,12 @@ SETTINGS="${HAPI_SETTINGS:-$HOME/.hapi/settings.json}"
 STATE_FILE="${HAPI_META_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/hapi/meta-daily.json}"
 GH_BIN="${HAPI_META_GH_BIN:-gh}"
 CURL_BIN="${HAPI_META_CURL_BIN:-curl}"
-BATCH_BIN="${HAPI_META_BATCH_BIN:-$SCRIPT_DIR/hapi-pr-emoji-batch.sh}"
-PING_BIN="${HAPI_META_PING_BIN:-$SCRIPT_DIR/hapi-ping-peer.sh}"
+# Low-level tools live beside this script in the mirror, but soup/driver
+# packaging does not copy them. Resolve robustly: explicit env > same-dir >
+# canonical $HAPI_PRIMARY/scripts/tooling. See pec_resolve_tool.
+HAPI_PRIMARY="${HAPI_PRIMARY:-$HOME/coding/hapi}"
+BATCH_BIN="$(pec_resolve_tool "$SCRIPT_DIR" "$HAPI_PRIMARY" "${HAPI_META_BATCH_BIN:-}" hapi-pr-emoji-batch.sh)"
+PING_BIN="$(pec_resolve_tool "$SCRIPT_DIR" "$HAPI_PRIMARY" "${HAPI_META_PING_BIN:-}" hapi-ping-peer.sh)"
 
 export GH_FORCE_TTY=0 GIT_TERMINAL_PROMPT=0 GH_PAGER=cat PAGER=cat
 

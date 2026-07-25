@@ -344,26 +344,46 @@ pec_event_type_for_emoji() {
     esac
 }
 
-# pec_contrib_idempotency_key REPO NUMBER FINGERPRINT [reminder DATE]
+# pec_contrib_idempotency_key REPO NUMBER FINGERPRINT [KIND] [DATE] [SESSION]
+# Session-bound events append ":sess:<id>" so multiple sessions tracking the
+# same PR do not collide on the hub's UNIQUE idempotency/dedupe indexes.
+# Orphan/unbound events (empty SESSION) stay PR-scoped.
 pec_contrib_idempotency_key() {
-    local repo="$1" number="$2" fp="$3" kind="${4:-}" date="${5:-}"
+    local repo="$1" number="$2" fp="$3" kind="${4:-}" date="${5:-}" session="${6:-}"
     local key="contrib:${repo}#${number}:${fp}"
+    [[ -n "$session" ]] && key="${key}:sess:${session}"
     if [[ "$kind" == "reminder" && -n "$date" ]]; then
         key="${key}:reminder:${date}"
     fi
     printf '%s' "$key"
 }
 
-# pec_contrib_dedupe_key REPO NUMBER EVENT_TYPE FINGERPRINT [reminder DATE]
+# pec_contrib_dedupe_key REPO NUMBER EVENT_TYPE FINGERPRINT [KIND] [DATE] [SESSION]
 # Must be unique per insert identity — events.dedupe_key has a UNIQUE index.
-# Align with idempotency by embedding the fingerprint (and reminder date when nagging).
+# Align with idempotency by embedding the fingerprint (and the session when
+# bound, and the reminder date when nagging).
 pec_contrib_dedupe_key() {
-    local repo="$1" number="$2" event_type="$3" fp="$4" kind="${5:-}" date="${6:-}"
+    local repo="$1" number="$2" event_type="$3" fp="$4" kind="${5:-}" date="${6:-}" session="${7:-}"
     local key="contrib:${repo}#${number}:${event_type}:${fp}"
+    [[ -n "$session" ]] && key="${key}:sess:${session}"
     if [[ "$kind" == "reminder" && -n "$date" ]]; then
         key="${key}:reminder:${date}"
     fi
     printf '%s' "$key"
+}
+
+# pec_resolve_tool DIR PRIMARY INJECTED NAME
+# Resolve a sibling operator tool with a robust precedence:
+#   1. explicit injection (INJECTED non-empty) — highest priority
+#   2. same-dir (DIR/NAME) if it exists — normal mirror layout
+#   3. canonical PRIMARY/scripts/tooling/NAME — soup/driver packaging where the
+#      low-level batch/ping tools are not copied alongside meta-daily
+# Never probes the network; pure path arithmetic + existence check.
+pec_resolve_tool() {
+    local dir="$1" primary="$2" injected="$3" name="$4"
+    if [[ -n "$injected" ]]; then printf '%s' "$injected"; return 0; fi
+    if [[ -e "$dir/$name" ]]; then printf '%s' "$dir/$name"; return 0; fi
+    printf '%s' "$primary/scripts/tooling/$name"
 }
 
 pec_pr_target_for_repo() {
@@ -420,8 +440,8 @@ pec_build_channel_event_body() {
     fi
 
     local idempo dedupe target control severity summary op_req=1
-    idempo="$(pec_contrib_idempotency_key "$repo" "$number" "$fingerprint" "$rem_kind" "$rem_date")"
-    dedupe="$(pec_contrib_dedupe_key "$repo" "$number" "$event_type" "$fingerprint" "$rem_kind" "$rem_date")"
+    idempo="$(pec_contrib_idempotency_key "$repo" "$number" "$fingerprint" "$rem_kind" "$rem_date" "$session_id")"
+    dedupe="$(pec_contrib_dedupe_key "$repo" "$number" "$event_type" "$fingerprint" "$rem_kind" "$rem_date" "$session_id")"
     IFS=$'\t' read -r target control <<<"$(pec_pr_target_for_repo "$repo")"
     severity="$(pec_severity_for_emoji "$emoji")"
     [[ "$emoji" == "✅" || "$emoji" == "🔁" || "$emoji" == "📝" ]] && op_req=0

@@ -413,6 +413,59 @@ out="$(run --emit-events 2>&1)"
 check "notif cursor freeze: steady run does not re-fetch failed-then-emitted notif" \
     "[[ ! -f '$WORK/events.log' ]] || ! grep -q 'GitHub PullRequest/comment: Re: PR #100 please rebase' '$WORK/events.log'"
 
+# ============ 14. two sessions tracking one PR → two distinct-key POSTs ======
+# Meta live dry-run: PR #200 tracked by two sessions produced identical
+# idempotency/dedupe keys, so the hub deduped the second and only one inbox
+# item got the transition. Session-bound keys must carry a session component.
+rm -f "$WORK/state.json" "$WORK/events.log" "$WORK/pings.log"
+cat >"$WORK/curl" <<EOF
+#!/usr/bin/env bash
+args="\$*"
+if [[ "\$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
+if [[ "\$args" == *"-X PATCH"* ]]; then echo '{"ok":true}'; exit 0; fi
+if [[ "\$args" == *"/api/system-events"* && "\$args" == *"-X POST"* ]]; then
+    body=""; prev=""
+    for a in "\$@"; do
+        if [[ "\$prev" == "-d" ]]; then body="\$a"; fi
+        prev="\$a"
+    done
+    echo "\$body" >> "$WORK/events.log"
+    echo '{"event":{"id":200},"deduped":false}'; exit 0
+fi
+if [[ "\$args" == *"/api/sessions?limit=500"* ]]; then
+cat <<'JSON'
+{"sessions":[
+ {"id":"3c141438-aaaa","active":true,"metadata":{"name":"PR #200: green thing"}},
+ {"id":"136df8b7-bbbb","active":true,"metadata":{"name":"PR #200: green thing too"}}
+]}
+JSON
+exit 0
+fi
+echo '{}'; exit 0
+EOF
+chmod +x "$WORK/curl"
+
+# gh returns no open PRs / notifs for this scenario (keep it session-only)
+cat >"$WORK/gh" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+if [[ "$args" == *"pr list"* ]]; then exit 0; fi
+exit 0
+EOF
+chmod +x "$WORK/gh"
+
+out="$(run --emit-events 2>&1)"
+ev_lines="$(wc -l <"$WORK/events.log" 2>/dev/null || echo 0)"
+check "two-session: two POSTs (one per session)" "[[ \$ev_lines -eq 2 ]]"
+k1="$(jq -r '.idempotencyKey' <"$WORK/events.log" | sed -n 1p)"
+k2="$(jq -r '.idempotencyKey' <"$WORK/events.log" | sed -n 2p)"
+check "two-session: idempotencyKeys differ" "[[ \"\$k1\" != \"\$k2\" && -n \"\$k1\" && -n \"\$k2\" ]]"
+check "two-session: both keys carry :sess:" \
+    "jq -r '.idempotencyKey' <'$WORK/events.log' | grep -qc ':sess:' && [[ \$(jq -r '.idempotencyKey' <'$WORK/events.log' | grep -c ':sess:') -eq 2 ]]"
+d1="$(jq -r '.dedupeKey' <"$WORK/events.log" | sed -n 1p)"
+d2="$(jq -r '.dedupeKey' <"$WORK/events.log" | sed -n 2p)"
+check "two-session: dedupeKeys differ" "[[ \"\$d1\" != \"\$d2\" ]]"
+
 echo ""
 echo "hapi-meta-daily.test.sh: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]] || exit 1

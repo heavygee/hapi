@@ -160,6 +160,31 @@ eq "dedupe same eventType progress differs by fp" \
     "$(pec_contrib_dedupe_key "tiann/hapi" 999 progress "$FP_A")" \
     "contrib:tiann/hapi#999:progress:$FP_A"
 
+# --- session-scoped keys (two sessions tracking one PR must not collide) ----
+eq "idempotency session component appended" \
+    "$(pec_contrib_idempotency_key "tiann/hapi" 947 "$FP_A" "" "" "3c141438")" \
+    "contrib:tiann/hapi#947:$FP_A:sess:3c141438"
+eq "dedupe session component appended" \
+    "$(pec_contrib_dedupe_key "tiann/hapi" 947 progress "$FP_A" "" "" "3c141438")" \
+    "contrib:tiann/hapi#947:progress:$FP_A:sess:3c141438"
+[[ "$(pec_contrib_idempotency_key "tiann/hapi" 947 "$FP_A" "" "" "3c141438")" != \
+   "$(pec_contrib_idempotency_key "tiann/hapi" 947 "$FP_A" "" "" "136df8b7")" ]] \
+    && PASS=$((PASS + 1)) \
+    || { echo "FAIL: idempotency keys must differ across sessions" >&2; FAIL=$((FAIL + 1)); }
+[[ "$(pec_contrib_dedupe_key "tiann/hapi" 947 progress "$FP_A" "" "" "3c141438")" != \
+   "$(pec_contrib_dedupe_key "tiann/hapi" 947 progress "$FP_A" "" "" "136df8b7")" ]] \
+    && PASS=$((PASS + 1)) \
+    || { echo "FAIL: dedupe keys must differ across sessions" >&2; FAIL=$((FAIL + 1)); }
+eq "idempotency same session replay stable" \
+    "$(pec_contrib_idempotency_key "tiann/hapi" 947 "$FP_A" "" "" "3c141438")" \
+    "$(pec_contrib_idempotency_key "tiann/hapi" 947 "$FP_A" "" "" "3c141438")"
+eq "orphan (no session) stays PR-scoped" \
+    "$(pec_contrib_idempotency_key "tiann/hapi" 947 "$FP_A")" \
+    "contrib:tiann/hapi#947:$FP_A"
+eq "session + reminder both suffixed" \
+    "$(pec_contrib_idempotency_key "tiann/hapi" 947 "$FP_A" reminder 2026-07-25 "3c141438")" \
+    "contrib:tiann/hapi#947:$FP_A:sess:3c141438:reminder:2026-07-25"
+
 body="$(pec_build_channel_event_body \
     --repo tiann/hapi --number 999 --emoji "✅" --action "full green — wait on tiann" \
     --fingerprint "$FP_A" --session-id "aaaaaaaa-1111" --reason transition \
@@ -170,7 +195,34 @@ eq "body relatedSessionId set" "$(jq -r '.relatedSessionId' <<<"$body")" "aaaaaa
 eq "body artifact repo namespaced" "$(jq -r '.artifactRefs[0].repo' <<<"$body")" "tiann/hapi"
 eq "body artifact number" "$(jq -r '.artifactRefs[0].number' <<<"$body")" "999"
 eq "body never bare-number-only identity" "$(jq -r '.artifactRefs[0].number' <<<"$body")" "999"
-eq "body dedupeKey embeds fingerprint" "$(jq -r '.dedupeKey' <<<"$body")" "contrib:tiann/hapi#999:progress:$FP_A"
+eq "body dedupeKey embeds fingerprint + session" \
+    "$(jq -r '.dedupeKey' <<<"$body")" \
+    "contrib:tiann/hapi#999:progress:$FP_A:sess:aaaaaaaa-1111"
+eq "body idempotencyKey embeds session" \
+    "$(jq -r '.idempotencyKey' <<<"$body")" \
+    "contrib:tiann/hapi#999:$FP_A:sess:aaaaaaaa-1111"
+
+# Two sessions tracking the same PR + fingerprint → distinct body keys.
+body_s1="$(pec_build_channel_event_body \
+    --repo tiann/hapi --number 947 --emoji "✅" --action "green" \
+    --fingerprint "$FP_A" --session-id "3c141438" --reason transition --date 2026-07-25)"
+body_s2="$(pec_build_channel_event_body \
+    --repo tiann/hapi --number 947 --emoji "✅" --action "green" \
+    --fingerprint "$FP_A" --session-id "136df8b7" --reason transition --date 2026-07-25)"
+[[ "$(jq -r '.idempotencyKey' <<<"$body_s1")" != "$(jq -r '.idempotencyKey' <<<"$body_s2")" ]] \
+    && PASS=$((PASS + 1)) \
+    || { echo "FAIL: body idempotencyKeys must differ across sessions (same PR)" >&2; FAIL=$((FAIL + 1)); }
+[[ "$(jq -r '.dedupeKey' <<<"$body_s1")" != "$(jq -r '.dedupeKey' <<<"$body_s2")" ]] \
+    && PASS=$((PASS + 1)) \
+    || { echo "FAIL: body dedupeKeys must differ across sessions (same PR)" >&2; FAIL=$((FAIL + 1)); }
+
+# Orphan body (no session) keeps PR-scoped keys (no :sess:).
+body_orphan="$(pec_build_channel_event_body \
+    --repo tiann/hapi --number 947 --emoji "⚠️" --action "fix CI" \
+    --fingerprint "$FP_A" --session-id "" --reason transition --date 2026-07-25)"
+eq "orphan body idempotencyKey PR-scoped" \
+    "$(jq -r '.idempotencyKey' <<<"$body_orphan")" \
+    "contrib:tiann/hapi#947:$FP_A"
 
 body_b="$(pec_build_channel_event_body \
     --repo tiann/hapi --number 999 --emoji "✅" --action "still green" \
@@ -179,6 +231,25 @@ body_b="$(pec_build_channel_event_body \
 [[ "$(jq -r '.dedupeKey' <<<"$body")" != "$(jq -r '.dedupeKey' <<<"$body_b")" ]] \
     && PASS=$((PASS + 1)) \
     || { echo "FAIL: body dedupeKeys must differ for fingerprint change" >&2; FAIL=$((FAIL + 1)); }
+
+# --- dependency resolver (packaging boundary) -------------------------------
+RES_TMP="$(mktemp -d)"
+mkdir -p "$RES_TMP/samedir" "$RES_TMP/primary/scripts/tooling"
+# explicit injection wins
+eq "resolve: explicit injection highest priority" \
+    "$(pec_resolve_tool "$RES_TMP/samedir" "$RES_TMP/primary" "/opt/x/hapi-pr-emoji-batch.sh" hapi-pr-emoji-batch.sh)" \
+    "/opt/x/hapi-pr-emoji-batch.sh"
+# same-dir present → same-dir
+touch "$RES_TMP/samedir/hapi-pr-emoji-batch.sh"
+eq "resolve: same-dir present used" \
+    "$(pec_resolve_tool "$RES_TMP/samedir" "$RES_TMP/primary" "" hapi-pr-emoji-batch.sh)" \
+    "$RES_TMP/samedir/hapi-pr-emoji-batch.sh"
+# same-dir absent + canonical present → canonical
+touch "$RES_TMP/primary/scripts/tooling/hapi-ping-peer.sh"
+eq "resolve: same-dir absent falls back to canonical" \
+    "$(pec_resolve_tool "$RES_TMP/samedir" "$RES_TMP/primary" "" hapi-ping-peer.sh)" \
+    "$RES_TMP/primary/scripts/tooling/hapi-ping-peer.sh"
+rm -rf "$RES_TMP"
 
 echo ""
 echo "pr-emoji-core.test.sh: $PASS passed, $FAIL failed"
