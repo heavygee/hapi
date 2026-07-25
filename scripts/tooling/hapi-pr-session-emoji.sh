@@ -1,28 +1,19 @@
 #!/usr/bin/env bash
-# hapi-pr-session-emoji — map upstream PR hygiene to HAPI session title emojis + optional peer ping
+# hapi-pr-session-emoji — DEPRECATED (2026-07-25).
 #
-# Emoji contract (docs/operator/AGENTS.md § Meta PR watcher):
-#   ✅  full green — open upstream PR, CI pass, 0 threads, bot clean, mergeable
-#   🔁  work in progress — CI pending/running
-#   ⚠️  issues to address — failing CI, open threads, bot findings, or rebase needed
-#   📝  pre-PR — tracked number but no open PR on tiann/hapi yet (Peer #N incubating)
-#   🔧  merged — PR shipped to main; idle cleanly (do not self-archive mid-turn); meta archives when idle or spare for follow-on
+# Title-emoji rewrites are retired. PR health lives on the session chip via
+# metadata.externalRefs.status (ADR D8 / tiann/hapi#1163). Use:
 #
-# Usage:
-#   hapi-pr-session-emoji.sh --sweep               # rename only (~1min for ~20 PRs)
-#   hapi-pr-session-emoji.sh --sweep --ping        # rename + ping active sessions
-#   hapi-pr-session-emoji.sh --dry-run --sweep
-#   hapi-pr-session-emoji.sh --pr <N> --rename <session-prefix>
+#   ./scripts/tooling/hapi-meta-daily.sh
 #
-# Run from ~/coding/hapi (fork main mirror), NOT from hapi-driver:
-#   ./scripts/tooling/hapi-pr-session-emoji.sh --sweep
+# That classifies once, caches status onto chips, strips leading title emoji
+# for chipped sessions, state-gates pings, and prints the action queue.
 #
-# Scope: tiann/hapi upstream PRs only. Non-HAPI sessions (YAACC, other repos) are ignored.
-# Never pipe batch output to jq in agent shells — use hapi-pr-emoji-batch.sh --table.
+# Escape hatch (one release): HAPI_ALLOW_LEGACY_EMOJI_SWEEP=1 restores the old
+# fleet retitle path. Do not use this in cron.
 #
-# Env:
-#   HAPI_HOST, HAPI_SETTINGS, HAPI_PR_REPO, HAPI_GH_TIMEOUT_SECS (default 20)
-#   HAPI_PING_CONCURRENCY (default 8), HAPI_PING_INACTIVE=1
+# Historical emoji contract (docs/operator/AGENTS.md § Meta PR watcher):
+#   ✅ open green · 🔁 CI in flight · ⚠️ needs work · 📝 pre-PR · 🔧 merged · ? unknown
 set -euo pipefail
 
 SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
@@ -49,7 +40,7 @@ err() { echo "hapi-pr-session-emoji: $*" >&2; }
 die() { err "$*"; exit 2; }
 
 usage() {
-    sed -n '2,24p' "$0"
+    sed -n '2,20p' "$0"
     exit 2
 }
 
@@ -72,6 +63,20 @@ while [[ $# -gt 0 ]]; do
         *) die "unknown arg: $1 (try --help)" ;;
     esac
 done
+
+if [[ "${HAPI_ALLOW_LEGACY_EMOJI_SWEEP:-0}" != "1" ]]; then
+    cat >&2 <<'EOF'
+hapi-pr-session-emoji: DEPRECATED — title emoji rewrites are retired (ADR D8).
+
+  Use:  ./scripts/tooling/hapi-meta-daily.sh
+        ./scripts/tooling/hapi-meta-daily.sh --dry-run
+
+  Chip status cache + title emoji strip for chipped sessions live there.
+  Escape hatch (not for cron): HAPI_ALLOW_LEGACY_EMOJI_SWEEP=1
+EOF
+    exit 2
+fi
+err "WARNING: legacy title-emoji sweep enabled (HAPI_ALLOW_LEGACY_EMOJI_SWEEP=1)"
 
 batch_load() {
     local prs=("$@")

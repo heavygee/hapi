@@ -162,6 +162,6 @@ T1+T2 are the ones that unblock everything else and are worth landing together. 
 
 Meta's daily classify writes these onto existing refs (full `PUT external-refs`). Chip renders emoji + `#N` and tones by status. Browser never live-queries GitHub.
 
-**Transition:** title emoji remains as a temporary mirror until operators stop reading titles for green/red. Then Meta can stop rewriting titles for health.
+**Transition (complete 2026-07-25):** Meta no longer writes status emoji into titles. For sessions with a chip it **strips** a leading status emoji once (`PR #N: …` / `Peer #N: …` kept). `hapi-pr-session-emoji.sh` is deprecated (escape hatch: `HAPI_ALLOW_LEGACY_EMOJI_SWEEP=1`).
 
 **Not a second upstream PR.** Awareness + attach + chip status ship together in [tiann/hapi#1163](https://github.com/tiann/hapi/pull/1163).

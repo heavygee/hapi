@@ -5,7 +5,8 @@
 #   1. Discovers the union of: open heavygee PRs on tiann/hapi, recently-merged
 #      tracked PRs, and every PR-tagged HAPI session on the local hub.
 #   2. Classifies each PR ONCE (hapi-pr-emoji-batch.sh → pr-emoji-core).
-#   3. Renames stale session titles to the correct emoji.
+#   3. For sessions with a PR chip (externalRefs): strips leading status emoji
+#      from the title (chip owns health — ADR D8). Never writes emoji into titles.
 #   4. Pings a session ONLY when policy says it is actionable and not noise
 #      (transition, changed ⚠️/🔧 instruction, or a due reminder) — state-gated
 #      so a second run the same morning is a no-op.
@@ -22,9 +23,9 @@
 #   reply on GitHub · mark notifications read.
 #
 # Usage:
-#   hapi-meta-daily.sh                 # classify, rename, policy-ping, queue
+#   hapi-meta-daily.sh                 # classify, strip title emoji (chipped), ping, queue
 #   hapi-meta-daily.sh --dry-run       # decide + print, no hub/state writes
-#   hapi-meta-daily.sh --no-ping       # rename + queue, never ping
+#   hapi-meta-daily.sh --no-ping       # strip + queue, never ping
 #   hapi-meta-daily.sh --emit-events   # also POST channel SystemEvents (default OFF)
 #   hapi-meta-daily.sh --dry-run --emit-events  # print event bodies, zero HTTP writes
 #   hapi-meta-daily.sh --backfill-refs # plan session↔PR externalRefs (no writes)
@@ -553,26 +554,27 @@ main() {
         combined="$(md_combined_emoji "${emojis[@]}")"
         [[ -z "$combined" ]] && combined="?"
 
-        # desired title
-        local new_title
-        if [[ "$(printf '%s' "$prs" | wc -w)" -eq 1 ]]; then
-            [[ "${PR_PREPR[$first_pr]}" == "true" ]] && pre=1
-            new_title="$(pec_build_title "$combined" "$first_pr" "$name" "$pre")"
-        else
-            local p2; p2="$(printf '%s' "$prs" | awk '{print $2}')"
-            new_title="${combined}PR #${first_pr}/#${p2}: $(pec_title_base_multi_from "$name" "$first_pr" "$p2")"
-        fi
-
-        # rename (skip on "?")
-        if [[ "$(pec_should_rename "$new_title" "$name" "$combined")" == "yes" ]]; then
-            hub_rename "$jwt" "$sid" "$new_title"
-            Q_RENAMED+=("$sid8  $name  →  $new_title")
-        fi
-
         # Chip status cache on externalRefs (ADR D8). Skip "?" to preserve last good.
-        local refs_cur refs_next changed_status=0
+        local refs_cur refs_next changed_status=0 has_chip=0
         refs_cur="${SESS_REFS[$sid8]:-[]}"
         refs_next="$refs_cur"
+        if [[ -n "$refs_cur" && "$refs_cur" != "[]" && "$refs_cur" != "null" ]]; then
+            if printf '%s' "$refs_cur" | jq -e '[.[] | select(.kind == "github_pr")] | length > 0' >/dev/null 2>&1; then
+                has_chip=1
+            fi
+        fi
+
+        # Title policy (ADR D8 transition complete): chip owns health.
+        # Chipped sessions → strip leading status emoji once; never write emoji titles.
+        # Unchipped sessions → leave title alone (do not invent ✅/⚠️ prefixes).
+        local new_title="$name"
+        if [[ "$has_chip" -eq 1 ]]; then
+            new_title="$(pec_strip_leading_emojis "$name")"
+            if [[ "$new_title" != "$name" ]]; then
+                hub_rename "$jwt" "$sid" "$new_title"
+                Q_RENAMED+=("$sid8  $name  →  $new_title  [chip owns status]")
+            fi
+        fi
         if [[ "$refs_cur" != "[]" && "$refs_cur" != "null" && -n "$refs_cur" ]]; then
             local p emoji_p action_p patched
             for p in $prs; do

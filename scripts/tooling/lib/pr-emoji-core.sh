@@ -129,6 +129,8 @@ pec_title_base_multi_from() {
 }
 
 # Build a canonical single-PR title. pre_pr=1 → "📝Peer #N:", else "<emoji>PR #N:".
+# LEGACY: Meta no longer writes status emoji into titles (ADR D8 — chip owns health).
+# Kept for unit tests and the deprecated hapi-pr-session-emoji.sh escape hatch.
 pec_build_title() {
     local emoji="$1" pr="$2" base="$3" pre_pr="${4:-0}"
     base="$(pec_title_base_from "$base" "$pr")"

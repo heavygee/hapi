@@ -19,7 +19,7 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 | Touch `:3006` soup | `hapi-driver-status --quiet` first; no stack-switch from agent shell | Lifecycle § Agent permission matrix; [`driver-soup.md`](../tooling/driver-soup.md) |
 | About to claim gates / PR ready | Mechanical verify before assertion | Lifecycle §6 + [`pr-review-loop.md`](../tooling/pr-review-loop.md) |
 | Upstream PR “babysit / merge-ready” | **Prepare only — never merge on `tiann/hapi`** | § Upstream relationship — only @tiann merges upstream `main` |
-| **Daily PR sweep / "the dance"** | Run **`hapi-meta-daily.sh`** — one command: classify → retitle → policy-ping → action queue. Don't reinvent it each morning. | § Meta PR watcher (below) |
+| **Daily PR sweep / "the dance"** | Run **`hapi-meta-daily.sh`** — classify → chip status cache → strip title emoji (chipped) → policy-ping → action queue. Don't reinvent it each morning. | § Meta PR watcher (below) |
 | Upstream PR **merged** (meta / emoji sweep) | Notify peer → drop soup layer → clean worktree/branch → rematerialize **once** after the wave → archive when idle (peers: no mid-turn self-archive) | Lifecycle [§ After upstream merge](../tooling/feature-work-lifecycle.md#after-upstream-merge-fleet-cleanup--meta-sweep-must-advise-this) |
 | Local Pi coding agent (5090 / oos-linux) | New Session → **Pi**; backend `oos-llm` VIP | [`pi-local-coding-agent.md`](./pi-local-coding-agent.md) |
 | Agent mangles `tiann`/`oos-linux`/MagicDNS doubles | Free-recall / tokenization hazard - not HAPI pipe. **Outside-Cursor control done (2026-07-24): native claude+codex 0/27 drops** | [`2026-07-22-doubled-character-free-recall.md`](../plans/2026-07-22-doubled-character-free-recall.md) + [outside-cursor results](../plans/2026-07-22-doubled-character-free-recall-outside-cursor-results.md) |
@@ -89,9 +89,9 @@ If @tiann clarifies broader (or narrower) scope, revise this section.
 Requires **GitHub CLI ≥ 2.80** from the **official** apt repo (`cli.github.com`), not Debian bookworm's community `2.23` (missing `gh pr checks --json`; caused false PASS in `hapi-pr-status`). Install/upgrade: `bash scripts/tooling/install-gh-official.sh`. Tooling refuses to run below the floor (`lib/require-gh-version.sh`).
 
 ```bash
-hapi-meta-daily.sh              # classify → retitle → policy-ping → action queue
+hapi-meta-daily.sh              # classify → chip status → strip title emoji → ping → queue
 hapi-meta-daily.sh --dry-run    # decide + print only; no hub/state writes
-hapi-meta-daily.sh --no-ping    # rename + queue, never ping (safe re-run)
+hapi-meta-daily.sh --no-ping    # strip + queue, never ping (safe re-run)
 hapi-meta-daily.sh --backfill-refs [--apply]  # one-shot session↔PR externalRefs
 hapi-meta-daily.sh --json       # machine-readable plan (pure JSON on stdout)
 hapi-meta-daily.sh --pr 75      # force a single (e.g. low-numbered) upstream PR
@@ -101,21 +101,22 @@ What it does, idempotently:
 
 1. **Discovers** the union of open `heavygee` PRs on `tiann/hapi`, recently-merged tracked PRs (last 7d), and every PR-tagged HAPI session on the local hub (`:3006`).
 2. **Classifies each PR once** via `hapi-pr-emoji-batch.sh` → `lib/pr-emoji-core.sh`.
-3. **Retitles** stale session titles to the correct emoji.
-4. **Pings only when actionable** (see policy) — state-gated so a second run the same morning is a no-op.
-5. **Reads GitHub notifications** for both repos since a stored cursor (`all=true`, actionable reasons only: comment/mention/review_requested/state_change/…) and folds new human comms into the queue.
-6. Prints a sorted **action queue** (⚠️ / 🔧 wave / orphans / inactive / new comms) + the non-automated next steps.
+3. **Caches status on the chip** (`externalRefs.status` / `statusCheckedAt` / `statusAction`) for attached sessions.
+4. **Strips leading status emoji** from titles of chipped sessions (chip owns health — ADR D8). Does **not** write emoji into titles anymore.
+5. **Pings only when actionable** (see policy) — state-gated so a second run the same morning is a no-op.
+6. **Reads GitHub notifications** for both repos since a stored cursor (`all=true`, actionable reasons only: comment/mention/review_requested/state_change/…) and folds new human comms into the queue.
+7. Prints a sorted **action queue** (⚠️ / 🔧 wave / orphans / inactive / new comms) + the non-automated next steps.
 
-**Emoji contract** (session-title prefix; worst wins when a session tracks >1 PR):
+**Status contract** (chip + Meta queue; worst wins when a session tracks >1 PR):
 
-| Emoji | Meaning | Advice pinged |
-|-------|---------|---------------|
-| ✅ | open PR, CI green, 0 threads, bot clean, mergeable | wait on tiann |
-| 🔁 | CI/bot in flight, or thread/CI data momentarily unavailable | retry / push |
-| ⚠️ | needs work — failing CI, open threads, bot findings, rebase, or **closed-unmerged** | fix per action string |
-| 📝 | pre-PR — tracked number, no open PR upstream yet | file when ready |
-| 🔧 | merged | drop soup layer → clean worktree/branch → ack (peers: **no mid-turn self-archive**) |
-| `?` | GitHub data unavailable this run | **title left unchanged; never pinged** |
+| Emoji / status | Meaning | Advice pinged |
+|----------------|---------|---------------|
+| ✅ `clean` | open PR, CI green, 0 threads, bot clean, mergeable | wait on tiann |
+| 🔁 `pending` | CI/bot in flight, or thread/CI data momentarily unavailable | retry / push |
+| ⚠️ `needs_work` | failing CI, open threads, bot findings, rebase, or **closed-unmerged** | fix per action string |
+| 📝 `pre_pr` | tracked number, no open PR upstream yet | file when ready |
+| 🔧 `merged` | merged | drop soup layer → clean worktree/branch → ack (peers: **no mid-turn self-archive**) |
+| `?` `unknown` | GitHub data unavailable this run | **chip left at last good status; never pinged** |
 
 **Ping policy (why it isn't spam):** ping on an emoji **transition**; re-ping a sticky ⚠️/🔧 only when the action fingerprint changes or the reminder interval (`--reminder-hours`, default 24h) elapses; **never** re-ping an unchanged ✅/🔁/📝. State lives at `${XDG_STATE_HOME:-~/.local/state}/hapi/meta-daily.json`.
 
@@ -123,7 +124,7 @@ What it does, idempotently:
 
 **What it will NEVER do** (judgment/destructive — surfaced in the queue only): merge upstream PRs · sync/push fork `main` · edit the soup manifest · rebuild/restart the driver · delete branches/worktrees · archive sessions · reply on GitHub · mark notifications read. After a 🔧 wave is fully acked: `hapi-sync-fork-main && git push origin main`, then rematerialize soup **once**, then archive idle 🔧 sessions from outside.
 
-Lower-level primitives (still available for manual/targeted use): `hapi-pr-emoji-batch.sh` (pure classifier → JSON), `hapi-pr-session-emoji.sh` (fleet retitle / `--sweep`). Both now share `lib/pr-emoji-core.sh`; unit tests in `lib/pr-emoji-core.test.sh` + `hapi-meta-daily.test.sh`.
+Lower-level primitives: `hapi-pr-emoji-batch.sh` (pure classifier → JSON). `hapi-pr-session-emoji.sh` is **deprecated** (title-emoji rewrites retired; exits 2 unless `HAPI_ALLOW_LEGACY_EMOJI_SWEEP=1`). Shared engine: `lib/pr-emoji-core.sh`; unit tests in `lib/pr-emoji-core.test.sh` + `hapi-meta-daily.test.sh`.
 
 **Overseer relationship:** the CLI **actuates** (rename/ping), **surfaces** a queue, and can emit contribution-state transitions as channel SystemEvents with **`--emit-events`** (default off). Session-bound transitions promote into the operator inbox; peer pings remain independently gated. First chatty corpus dogfooded 2026-07-25; steady-state rerun emitted nothing. Principle: [`docs/plans/2026-07-25-contribution-state-as-overseer-sensor.md`](../plans/2026-07-25-contribution-state-as-overseer-sensor.md). Live ingest + dogfood receipt: [`docs/plans/2026-07-25-contrib-state-event-ingest-spec.md`](../plans/2026-07-25-contrib-state-event-ingest-spec.md). Ancestor framing: session [State indicators based on PR state](/sessions/fc561649-e783-4a56-be5e-3ca7511c1663).
 

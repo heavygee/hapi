@@ -524,6 +524,47 @@ check "backfill apply: PUT log exists" "[[ -f '$WORK/put-refs.log' ]]"
 puts="$(wc -l <"$WORK/put-refs.log")"
 check "backfill apply: two PUTs (#100 + #777)" "[[ \$puts -eq 2 ]]"
 
+# ============ 15. chipped sessions: strip title emoji; never write emoji titles ============
+rm -f "$WORK/state.json" "$WORK/renames.log"
+cat >"$WORK/curl" <<EOF
+#!/usr/bin/env bash
+args="\$*"
+if [[ "\$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
+if [[ "\$args" == *"-X PATCH"* ]]; then
+    echo "\$args" >> "$WORK/renames.log"
+    # body is -d next arg
+    prev=""
+    for a in "\$@"; do
+        if [[ "\$prev" == "-d" ]]; then echo "\$a" >> "$WORK/renames.log"; fi
+        prev="\$a"
+    done
+    echo '{"ok":true}'; exit 0
+fi
+if [[ "\$args" == *"-X PUT"* && "\$args" == *"/external-refs"* ]]; then
+    echo '{"ok":true,"externalRefs":[]}'; exit 0
+fi
+if [[ "\$args" == *"/api/sessions?limit=500"* ]]; then
+cat <<'JSON'
+{"sessions":[
+ {"id":"aaaaaaaa-1111","active":true,"metadata":{"name":"⚠️PR #100: needs work","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":100,"url":"https://github.com/tiann/hapi/pull/100","role":"primary","source":"inferred","linkedAt":1}]}},
+ {"id":"bbbbbbbb-2222","active":true,"metadata":{"name":"PR #200: green thing","externalRefs":[]}}
+]}
+JSON
+exit 0
+fi
+echo '{}'; exit 0
+EOF
+chmod +x "$WORK/curl"
+
+out="$(run --dry-run --no-ping 2>&1)"
+check "chip-strip dry: strips emoji from chipped #100" "grep -q 'aaaaaaaa' <<<\"\$out\" && grep -q 'chip owns status' <<<\"\$out\""
+check "chip-strip dry: target title has no leading emoji" "grep -qE '→[[:space:]]+PR #100: needs work' <<<\"\$out\""
+check "chip-strip dry: unchipped #200 not emoji-retitled" "! grep -q '✅PR #200' <<<\"\$out\""
+
+out="$(run --no-ping 2>&1)"
+check "chip-strip apply: PATCH fired for #100" "grep -q 'aaaaaaaa' '$WORK/renames.log'"
+check "chip-strip apply: body is emoji-free title" "grep -q 'PR #100: needs work' '$WORK/renames.log'"
+
 echo ""
 echo "hapi-meta-daily.test.sh: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]] || exit 1

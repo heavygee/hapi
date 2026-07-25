@@ -47,9 +47,9 @@ Feature agents should **read the relevant doc below at session start**; meta bot
 | `scripts/tooling/install-hapi-operator-lock.sh` | **One-shot operator lock** — all guards + local bin (see [operator-lock.md](./operator-lock.md)) |
 | `scripts/tooling/verify-hapi-operator-lock.sh` | Verify lock install (`--with-sudo` on hub hosts) |
 | `scripts/tooling/install-gh-wrapper.sh` | Install `~/.local/bin/gh` wrapper — blocks fork-only diffs targeting `tiann/hapi` (#971 class) |
-| `scripts/tooling/hapi-meta-daily.sh` | **Daily Meta PR watcher entrypoint** — discover → classify → retitle → policy-ping → action queue; optional chatty contribution-state events/inbox projection (`--emit-events`, default off; also `--dry-run`, `--no-ping`, `--json`) |
+| `scripts/tooling/hapi-meta-daily.sh` | **Daily Meta PR watcher entrypoint** — discover → classify → chip status cache → strip title emoji (chipped) → policy-ping → action queue; optional chatty contribution-state events (`--emit-events`, default off; also `--dry-run`, `--no-ping`, `--json`) |
 | `scripts/tooling/hapi-pr-emoji-batch.sh` | Pure PR classifier → per-PR JSON (`--table`); shared engine |
-| `scripts/tooling/hapi-pr-session-emoji.sh` | Lower-level fleet retitle from batch classify (`--sweep`) |
+| `scripts/tooling/hapi-pr-session-emoji.sh` | **Deprecated** — title-emoji fleet retitle retired (ADR D8); use `hapi-meta-daily.sh` |
 | `scripts/tooling/lib/pr-emoji-core.sh` | Pure classify/title/ping-policy fns (unit-tested: `*.test.sh`) |
 | `scripts/tooling/hapi-remote-agent-budget.sh` | Pre-flight before bulk remote agent spawns (count + mem/swap gates) |
 
@@ -63,7 +63,7 @@ cd ~/coding/hapi && ./scripts/tooling/hapi-meta-daily.sh --emit-events --no-ping
 
 **Scope:** `tiann/hapi` upstream PRs only. Non-HAPI sessions (YAACC, other repos) are excluded from sweeps.
 
-Emoji contract: **✅** open green · **🔁** CI in flight · **⚠️** fix/rebase/closed-unmerged · **📝** pre-PR (not filed yet) · **🔧** merged (drop soup layer, clean, ack) · **`?`** data unavailable (title untouched, never pinged). Ping policy is **state-gated** (ping on transition; sticky ⚠️/🔧 re-ping only on changed action or 24h reminder). Full detail: `docs/operator/AGENTS.md` § Meta PR watcher.
+Status lives on the **PR chip** (`externalRefs.status`), not the session title. Contract: **✅** open green · **🔁** CI in flight · **⚠️** fix/rebase/closed-unmerged · **📝** pre-PR · **🔧** merged · **`?`** data unavailable (last good chip status kept; never pinged). Meta strips leading title emoji for chipped sessions. Ping policy is **state-gated**. Full detail: `docs/operator/AGENTS.md` § Meta PR watcher.
 
 ---
 
