@@ -26,7 +26,7 @@ export const WorktreeMetadataSchema = z.object({
 export type WorktreeMetadata = z.infer<typeof WorktreeMetadataSchema>
 
 /** owner/name — GitHub-style repo slug (no leading slash, exactly one slash). */
-const GithubRepoSlugSchema = z.string().regex(
+export const GithubRepoSlugSchema = z.string().regex(
     /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/,
     'expected owner/name'
 )
@@ -41,7 +41,10 @@ export const GithubPrExternalRefSchema = z.object({
     repo: GithubRepoSlugSchema,
     number: z.number().int().positive(),
     url: z.string().url(),
-    role: z.enum(['primary', 'secondary'])
+    role: z.enum(['primary', 'secondary']),
+    // Optional provenance. Absent source reads as trusted ('user') for pre-#1162 refs.
+    source: z.enum(['agent', 'user', 'inferred']).optional(),
+    linkedAt: z.number().int().positive().optional()
 }).superRefine((ref, ctx) => {
     const expectedUrl = `https://github.com/${ref.repo}/pull/${ref.number}`
     if (ref.url !== expectedUrl) {

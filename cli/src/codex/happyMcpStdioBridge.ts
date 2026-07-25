@@ -17,7 +17,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { z } from 'zod';
 
-const DEFAULT_TOOL_NAMES = ['change_title', 'display_image', 'ping_peer'];
+const DEFAULT_TOOL_NAMES = ['change_title', 'link_pr', 'display_image', 'ping_peer'];
 
 function parseArgs(argv: string[]): { url: string | null; toolNames: Set<string> } {
   let url: string | null = null;
@@ -101,7 +101,37 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
       );
     }
 
+    const linkPrInputSchema: z.ZodTypeAny = z.object({
+      url: z.string().optional().describe('GitHub PR URL'),
+      repo: z.string().optional().describe('owner/repo'),
+      number: z.number().int().positive().optional().describe('PR number'),
+      role: z.enum(['primary', 'secondary']).optional(),
+    });
 
+    if (toolNames.has('link_pr')) {
+      server.registerTool<any, any>(
+        'link_pr',
+        {
+          description: 'Attach the current HAPI session to a GitHub pull request',
+          title: 'Link Pull Request',
+          inputSchema: linkPrInputSchema,
+        },
+        async (args: Record<string, unknown>) => {
+          try {
+            const client = await ensureHttpClient();
+            const response = await client.callTool({ name: 'link_pr', arguments: args });
+            return response as any;
+          } catch (error) {
+            return {
+              content: [
+                { type: 'text' as const, text: `Failed to link PR: ${error instanceof Error ? error.message : String(error)}` },
+              ],
+              isError: true,
+            };
+          }
+        }
+      );
+    }
 
     const displayImageInputSchema: z.ZodTypeAny = z.object({
       path: z.string().describe('Local filesystem path of the image to display to the user'),

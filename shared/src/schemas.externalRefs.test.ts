@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ExternalRefSchema, MetadataSchema } from './schemas'
-import { getPrimaryGithubPrRef } from './externalRefs'
+import { getPrimaryGithubPrRef, parseGithubPrInput, buildGithubPrExternalRef } from './externalRefs'
 
 describe('ExternalRefSchema', () => {
     const validPr = {
@@ -17,6 +17,15 @@ describe('ExternalRefSchema', () => {
         if (parsed.success) {
             expect(parsed.data).toEqual(validPr)
         }
+    })
+
+    it('accepts optional source and linkedAt provenance fields', () => {
+        const parsed = ExternalRefSchema.safeParse({
+            ...validPr,
+            source: 'agent',
+            linkedAt: 1_700_000_000_000
+        })
+        expect(parsed.success).toBe(true)
     })
 
     it('rejects invalid repo shape', () => {
@@ -107,5 +116,47 @@ describe('getPrimaryGithubPrRef', () => {
             url: 'https://github.com/a/b/pull/9',
             role: 'secondary'
         }])).toBeNull()
+    })
+})
+
+describe('parseGithubPrInput', () => {
+    it('parses owner/repo#N and canonical URLs', () => {
+        expect(parseGithubPrInput('tiann/hapi#1162')).toEqual({
+            ok: true,
+            repo: 'tiann/hapi',
+            number: 1162,
+            url: 'https://github.com/tiann/hapi/pull/1162'
+        })
+        expect(parseGithubPrInput('https://github.com/tiann/hapi/pull/1162')).toEqual({
+            ok: true,
+            repo: 'tiann/hapi',
+            number: 1162,
+            url: 'https://github.com/tiann/hapi/pull/1162'
+        })
+    })
+
+    it('rejects non-GitHub or malformed input', () => {
+        expect(parseGithubPrInput('').ok).toBe(false)
+        expect(parseGithubPrInput('https://gitlab.com/a/b/-/merge_requests/1').ok).toBe(false)
+        expect(parseGithubPrInput('not-a-ref').ok).toBe(false)
+    })
+})
+
+describe('buildGithubPrExternalRef', () => {
+    it('builds a canonical primary ref', () => {
+        expect(buildGithubPrExternalRef({
+            repo: 'tiann/hapi',
+            number: 1162,
+            source: 'agent',
+            linkedAt: 42
+        })).toEqual({
+            kind: 'github_pr',
+            repo: 'tiann/hapi',
+            number: 1162,
+            url: 'https://github.com/tiann/hapi/pull/1162',
+            role: 'primary',
+            source: 'agent',
+            linkedAt: 42
+        })
     })
 })

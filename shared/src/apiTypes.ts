@@ -3,6 +3,7 @@ import {
     AttachmentMetadataSchema,
     CodexCollaborationModeSchema,
     DecryptedMessageSchema,
+    ExternalRefSchema,
     MachineSchema,
     PermissionModeSchema,
     SessionSchema
@@ -321,6 +322,20 @@ export const ScratchlistEntryUpdateRequestSchema = z.object({
 )
 
 export type ScratchlistEntryUpdateRequest = z.infer<typeof ScratchlistEntryUpdateRequestSchema>
+
+export const SetExternalRefsRequestSchema = z.object({
+    externalRefs: z.array(ExternalRefSchema)
+})
+
+export type SetExternalRefsRequest = z.infer<typeof SetExternalRefsRequestSchema>
+
+export const FeaturesPatchRequestSchema = z.object({
+    githubPrAwareness: z.boolean().optional()
+}).refine((value) => value.githubPrAwareness !== undefined, {
+    message: 'at least one feature flag is required'
+})
+
+export type FeaturesPatchRequest = z.infer<typeof FeaturesPatchRequestSchema>
 
 /** Per-session legacy stream-json → ACP migrator request. See tiann/hapi#824. */
 export const CursorMigrateToAcpRequestSchema = z.object({

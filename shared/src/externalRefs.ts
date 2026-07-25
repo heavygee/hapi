@@ -1,4 +1,5 @@
 import type { ExternalRef, GithubPrExternalRef } from './schemas'
+import { GithubRepoSlugSchema } from './schemas'
 
 /**
  * Primary GitHub PR chip source. Title/emoji parsing is intentionally not used.
@@ -13,4 +14,81 @@ export function getPrimaryGithubPrRef(
         }
     }
     return null
+}
+
+export function githubPrUrl(repo: string, number: number): string {
+    return `https://github.com/${repo}/pull/${number}`
+}
+
+export type ParseGithubPrInputResult =
+    | { ok: true; repo: string; number: number; url: string }
+    | { ok: false; error: string }
+
+/**
+ * Accept a GitHub PR URL or `owner/repo#N` / `owner/repo#PR N` style input.
+ * Does not call the network; shape validation only.
+ */
+export function parseGithubPrInput(raw: string): ParseGithubPrInputResult {
+    const trimmed = raw.trim()
+    if (!trimmed) {
+        return { ok: false, error: 'empty input' }
+    }
+
+    const hashMatch = trimmed.match(/^([^/\s]+\/[^/\s]+)\s*#\s*(?:PR\s*)?(\d+)$/i)
+    if (hashMatch) {
+        const repo = hashMatch[1]
+        const number = Number(hashMatch[2])
+        const repoParsed = GithubRepoSlugSchema.safeParse(repo)
+        if (!repoParsed.success || !Number.isInteger(number) || number <= 0) {
+            return { ok: false, error: 'invalid owner/repo#N' }
+        }
+        return { ok: true, repo: repoParsed.data, number, url: githubPrUrl(repoParsed.data, number) }
+    }
+
+    let url: URL
+    try {
+        url = new URL(trimmed)
+    } catch {
+        return { ok: false, error: 'expected GitHub PR URL or owner/repo#N' }
+    }
+
+    if (url.protocol !== 'https:' || url.hostname !== 'github.com') {
+        return { ok: false, error: 'expected https://github.com/.../pull/N URL' }
+    }
+
+    const pathMatch = url.pathname.match(/^\/([^/]+\/[^/]+)\/pull\/(\d+)\/?$/)
+    if (!pathMatch) {
+        return { ok: false, error: 'expected https://github.com/owner/repo/pull/N URL' }
+    }
+
+    const repoParsed = GithubRepoSlugSchema.safeParse(pathMatch[1])
+    const number = Number(pathMatch[2])
+    if (!repoParsed.success || !Number.isInteger(number) || number <= 0) {
+        return { ok: false, error: 'invalid GitHub PR URL' }
+    }
+
+    return {
+        ok: true,
+        repo: repoParsed.data,
+        number,
+        url: githubPrUrl(repoParsed.data, number)
+    }
+}
+
+export function buildGithubPrExternalRef(input: {
+    repo: string
+    number: number
+    role?: 'primary' | 'secondary'
+    source?: 'agent' | 'user' | 'inferred'
+    linkedAt?: number
+}): GithubPrExternalRef {
+    return {
+        kind: 'github_pr',
+        repo: input.repo,
+        number: input.number,
+        url: githubPrUrl(input.repo, input.number),
+        role: input.role ?? 'primary',
+        ...(input.source ? { source: input.source } : {}),
+        ...(input.linkedAt ? { linkedAt: input.linkedAt } : {})
+    }
 }

@@ -21,6 +21,12 @@ const AUTO_APPROVE_TOOL_NAME_HINTS = [
     'change_title',
     'happy__change_title',
     'hapi_change_title',  // OpenCode MCP tool pattern
+    'link_pr',
+    'happy__link_pr',
+    'hapi_link_pr',
+    'hapi__link_pr',
+    'mcp__hapi__link_pr',
+    'mcp__happy__link_pr',
     'geminireasoning',
     'codexreasoning',
     'think',
@@ -36,7 +42,7 @@ const AUTO_APPROVE_EXACT_TOOL_NAMES = new Set([
 // session and inject a prompt into a peer, so permission modes must still gate
 // it (Codex PR #1195). Treat it as write-like in read-only so ACP titles such as
 // "Ping Peer Session" also require approval.
-const AUTO_APPROVE_TOOL_ID_HINTS = ['change_title', 'save_memory'];
+const AUTO_APPROVE_TOOL_ID_HINTS = ['change_title', 'link_pr', 'save_memory'];
 const SENSITIVE_TOOL_NAME_HINTS = ['ping_peer', 'ping peer'];
 const AUTO_APPROVE_WRITE_TOOL_HINTS = [
     'write',
