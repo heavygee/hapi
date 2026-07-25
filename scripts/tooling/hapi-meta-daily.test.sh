@@ -411,7 +411,7 @@ check "notif cursor freeze: cursor advances after successful notif emit" \
 rm -f "$WORK/events.log"
 out="$(run --emit-events 2>&1)"
 check "notif cursor freeze: steady run does not re-fetch failed-then-emitted notif" \
-    "! grep -q 'GitHub PullRequest/comment: Re: PR #100 please rebase' '$WORK/events.log'"
+    "[[ ! -f '$WORK/events.log' ]] || ! grep -q 'GitHub PullRequest/comment: Re: PR #100 please rebase' '$WORK/events.log'"
 
 echo ""
 echo "hapi-meta-daily.test.sh: $PASS passed, $FAIL failed"
