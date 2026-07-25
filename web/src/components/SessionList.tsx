@@ -29,6 +29,8 @@ import { getMachinePlatform, presentMachineHealth } from '@/lib/machineHealth'
 import { MachineFilterBar } from '@/components/MachineFilterBar'
 import { useSessionListMachineFilter } from '@/hooks/useSessionListMachineFilter'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
+import { SessionPrChip } from '@/components/SessionPrChip'
+import { getPrimaryGithubPrRef } from '@hapi/protocol'
 
 type SessionGroup = {
     key: string
@@ -838,6 +840,7 @@ function SessionItem(props: {
     const sessionName = getSessionTitle(s)
     const worktreeLabel = getWorktreeSessionLabel(s)
     const todoProgress = getTodoProgress(s)
+    const primaryPrRef = getPrimaryGithubPrRef(s.metadata?.externalRefs)
     const attention = useMemo(
         () => showDetailedStatus
             ? classifySessionAttention(s, {
@@ -858,76 +861,85 @@ function SessionItem(props: {
     )
     return (
         <>
-            <button
-                type="button"
-                {...longPressHandlers}
-                className={`session-list-item group/session-row flex w-full flex-col gap-1 py-2 pl-2.5 pr-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg ${selected ? 'bg-[var(--app-secondary-bg)]' : ''}`}
-                style={{ WebkitTouchCallout: 'none' }}
-                aria-current={selected ? 'page' : undefined}
-                aria-describedby={describedBy}
+            <div
+                className={`session-list-item group/session-row flex w-full items-stretch rounded-lg transition-colors ${selected ? 'bg-[var(--app-secondary-bg)]' : ''}`}
             >
-                <div className={`flex items-center justify-between gap-3 ${!s.active ? 'opacity-50' : ''}`}>
-                    <div className="flex items-center gap-2 min-w-0">
-                        <AgentFlavorIcon flavor={s.metadata?.flavor} className="h-4 w-4 shrink-0 -translate-y-px" />
-                        <div className={`truncate text-sm font-medium ${s.active ? 'text-[var(--app-fg)]' : 'text-[var(--app-hint)]'}`}>
-                            {sessionName}
-                        </div>
-                        {s.active && s.thinking ? (
-                            <LoaderIcon className="h-3.5 w-3.5 shrink-0 text-[var(--app-hint)] animate-spin-slow" />
-                        ) : attention ? (
-                            <SessionAttentionIndicator
-                                attention={attention}
-                                summary={s}
-                                label={attentionLabel ?? ''}
-                                tooltipId={attentionId!}
-                            />
-                        ) : null}
-                        {hasScheduleTooltip ? (
-                            <HoverTooltip
-                                id={scheduleId!}
-                                target={<ScheduleIcon className="h-3.5 w-3.5 text-[var(--app-hint)]" />}
-                                side="bottom"
-                                align="start"
-                                className="shrink-0"
-                                revealOnParentFocusClass={SESSION_ROW_TOOLTIP_FOCUS_CLASS}
-                            >
-                                <span className="block">
-                                    <span className="block font-medium">{scheduledLabel}</span>
-                                    <span className="mt-1 block text-[var(--app-hint)]">
-                                        {formatScheduledTooltipDetail(s, t)}
+                <button
+                    type="button"
+                    {...longPressHandlers}
+                    className="flex min-w-0 flex-1 flex-col gap-1 px-2.5 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg"
+                    style={{ WebkitTouchCallout: 'none' }}
+                    aria-current={selected ? 'page' : undefined}
+                    aria-describedby={describedBy}
+                >
+                    <div className={`flex items-center justify-between gap-3 ${!s.active ? 'opacity-50' : ''}`}>
+                        <div className="flex items-center gap-2 min-w-0">
+                            <AgentFlavorIcon flavor={s.metadata?.flavor} className="h-4 w-4 shrink-0 -translate-y-px" />
+                            <div className={`truncate text-sm font-medium ${s.active ? 'text-[var(--app-fg)]' : 'text-[var(--app-hint)]'}`}>
+                                {sessionName}
+                            </div>
+                            {s.active && s.thinking ? (
+                                <LoaderIcon className="h-3.5 w-3.5 shrink-0 text-[var(--app-hint)] animate-spin-slow" />
+                            ) : attention ? (
+                                <SessionAttentionIndicator
+                                    attention={attention}
+                                    summary={s}
+                                    label={attentionLabel ?? ''}
+                                    tooltipId={attentionId!}
+                                />
+                            ) : null}
+                            {hasScheduleTooltip ? (
+                                <HoverTooltip
+                                    id={scheduleId!}
+                                    target={<ScheduleIcon className="h-3.5 w-3.5 text-[var(--app-hint)]" />}
+                                    side="bottom"
+                                    align="start"
+                                    className="shrink-0"
+                                    revealOnParentFocusClass={SESSION_ROW_TOOLTIP_FOCUS_CLASS}
+                                >
+                                    <span className="block">
+                                        <span className="block font-medium">{scheduledLabel}</span>
+                                        <span className="mt-1 block text-[var(--app-hint)]">
+                                            {formatScheduledTooltipDetail(s, t)}
+                                        </span>
                                     </span>
+                                </HoverTooltip>
+                            ) : null}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0 text-xs">
+                            {todoProgress ? (
+                                <span className="flex items-center gap-1 text-[var(--app-hint)]">
+                                    <BulbIcon className="h-3 w-3" />
+                                    {todoProgress.completed}/{todoProgress.total}
                                 </span>
-                            </HoverTooltip>
-                        ) : null}
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0 text-xs">
-                        {todoProgress ? (
-                            <span className="flex items-center gap-1 text-[var(--app-hint)]">
-                                <BulbIcon className="h-3 w-3" />
-                                {todoProgress.completed}/{todoProgress.total}
+                            ) : null}
+                            {!attention && s.pendingRequestsCount > 0 ? (
+                                <span className="text-[var(--app-badge-warning-text)]">
+                                    {t('session.item.pending')} {s.pendingRequestsCount}
+                                </span>
+                            ) : null}
+                            <span className="tabular-nums text-[var(--app-hint)]">
+                                {getSessionTimeLabel(s, t)}
                             </span>
-                        ) : null}
-                        {!attention && s.pendingRequestsCount > 0 ? (
-                            <span className="text-[var(--app-badge-warning-text)]">
-                                {t('session.item.pending')} {s.pendingRequestsCount}
-                            </span>
-                        ) : null}
-                        <span className="tabular-nums text-[var(--app-hint)]">
-                            {getSessionTimeLabel(s, t)}
-                        </span>
+                        </div>
                     </div>
-                </div>
-                {showPath || worktreeLabel ? (
-                    <div
-                        className="truncate text-xs text-[var(--app-hint)]"
-                        title={worktreeLabel
-                            ? s.metadata?.worktree?.worktreePath ?? s.metadata?.path
-                            : undefined}
-                    >
-                        {worktreeLabel ?? s.metadata?.path ?? s.id}
+                    {showPath || worktreeLabel ? (
+                        <div
+                            className="truncate text-xs text-[var(--app-hint)]"
+                            title={worktreeLabel
+                                ? s.metadata?.worktree?.worktreePath ?? s.metadata?.path
+                                : undefined}
+                        >
+                            {worktreeLabel ?? s.metadata?.path ?? s.id}
+                        </div>
+                    ) : null}
+                </button>
+                {primaryPrRef ? (
+                    <div className={`flex shrink-0 items-start pt-2.5 pr-2.5 ${!s.active ? 'opacity-50' : ''}`}>
+                        <SessionPrChip refs={s.metadata?.externalRefs} />
                     </div>
                 ) : null}
-            </button>
+            </div>
 
             <SessionActionMenu
                 isOpen={menuOpen}

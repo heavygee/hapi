@@ -131,6 +131,7 @@ export default {
   'session.item.machine': '机器',
   'session.item.worktree': '工作树',
   'session.item.pending': '待处理',
+  'session.item.prChip': 'PR {number}',
   'session.item.thinking': '思考中',
   'session.item.permission': '需要权限',
   'session.item.needsInput': '需要输入',

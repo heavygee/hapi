@@ -25,6 +25,31 @@ export const WorktreeMetadataSchema = z.object({
 
 export type WorktreeMetadata = z.infer<typeof WorktreeMetadataSchema>
 
+/** owner/name — GitHub-style repo slug (no leading slash, exactly one slash). */
+const GithubRepoSlugSchema = z.string().regex(
+    /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/,
+    'expected owner/name'
+)
+
+/**
+ * Structured link from a HAPI session to an external contribution surface.
+ * v1: GitHub pull requests only. Do not parse session titles for this identity.
+ * tiann/hapi#1160.
+ */
+export const GithubPrExternalRefSchema = z.object({
+    kind: z.literal('github_pr'),
+    repo: GithubRepoSlugSchema,
+    number: z.number().int().positive(),
+    url: z.string().url(),
+    role: z.enum(['primary', 'secondary'])
+})
+
+export type GithubPrExternalRef = z.infer<typeof GithubPrExternalRefSchema>
+
+/** Expand with more kinds via discriminatedUnion when needed. */
+export const ExternalRefSchema = GithubPrExternalRefSchema
+export type ExternalRef = z.infer<typeof ExternalRefSchema>
+
 export const MetadataSchema = z.object({
     path: z.string(),
     host: z.string(),
@@ -77,7 +102,9 @@ export const MetadataSchema = z.object({
     // field stores only modelId (shared across all flavors); this preserves
     // the provider so web can resolve the exact model when two providers
     // share a modelId.
-    piSelectedModel: z.object({ provider: z.string(), modelId: z.string() }).nullable().optional()
+    piSelectedModel: z.object({ provider: z.string(), modelId: z.string() }).nullable().optional(),
+    // Structured session↔contribution links (e.g. GitHub PRs). tiann/hapi#1160.
+    externalRefs: z.array(ExternalRefSchema).optional()
 })
 
 export type Metadata = z.infer<typeof MetadataSchema>
