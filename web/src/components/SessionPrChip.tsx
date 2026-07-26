@@ -3,13 +3,47 @@ import { getPrimaryGithubPrRef, githubPrStatusEmoji } from '@hapi/protocol'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
 
+/** Chip cache older than this is treated as honesty-`?` (muted tone). */
+export const GITHUB_PR_CHIP_STALE_MS = 2 * 60 * 60 * 1000
+
 export type SessionPrChipProps = {
     refs: readonly ExternalRef[] | null | undefined
     className?: string
+    /** Injectable clock for tests (ms since epoch). */
+    nowMs?: number
 }
 
-export function formatGithubPrChipLabel(ref: GithubPrExternalRef): string {
-    const emoji = githubPrStatusEmoji(ref.status)
+export type GithubPrChipDisplay = {
+    /** Status used for emoji + tone (unknown when cache is stale). */
+    status: GithubPrStatus | undefined
+    stale: boolean
+}
+
+/**
+ * Resolve display status from cached `externalRefs` fields.
+ * Never live-queries GitHub — when `statusCheckedAt` is older than 2h, mute to `unknown` / `?`.
+ */
+export function resolveGithubPrChipDisplay(
+    ref: GithubPrExternalRef,
+    nowMs: number = Date.now(),
+    staleMs: number = GITHUB_PR_CHIP_STALE_MS
+): GithubPrChipDisplay {
+    if (!ref.status) return { status: undefined, stale: false }
+    if (
+        typeof ref.statusCheckedAt === 'number'
+        && nowMs - ref.statusCheckedAt > staleMs
+    ) {
+        return { status: 'unknown', stale: true }
+    }
+    return { status: ref.status, stale: false }
+}
+
+export function formatGithubPrChipLabel(
+    ref: GithubPrExternalRef,
+    nowMs?: number
+): string {
+    const { status } = resolveGithubPrChipDisplay(ref, nowMs ?? Date.now())
+    const emoji = githubPrStatusEmoji(status)
     return emoji ? `${emoji}#${ref.number}` : `#${ref.number}`
 }
 
@@ -32,24 +66,30 @@ function statusToneClass(status: GithubPrStatus | undefined): string {
     }
 }
 
-function chipTitle(ref: GithubPrExternalRef): string {
+function chipTitle(ref: GithubPrExternalRef, display: GithubPrChipDisplay): string {
     const identity = `${ref.repo}#${ref.number}`
-    if (!ref.status) return identity
+    if (!ref.status && !display.status) return identity
     const checked = ref.statusCheckedAt
         ? ` · checked ${new Date(ref.statusCheckedAt).toISOString()}`
         : ''
-    const action = ref.statusAction ? ` — ${ref.statusAction}` : ''
-    return `${identity} · ${ref.status}${checked}${action}`
+    const staleNote = display.stale ? ' · stale (>2h)' : ''
+    const shown = display.status ?? ref.status
+    const action = !display.stale && ref.statusAction ? ` — ${ref.statusAction}` : ''
+    return `${identity} · ${shown}${checked}${staleNote}${action}`
 }
 
 /**
  * Clickable primary GitHub PR chip for session list rows.
  * Identity + optional cached status from `externalRefs` (ADR D8) — never title text.
+ * Stale cache (>2h since statusCheckedAt) mutes tone and shows `?`.
  */
 export function SessionPrChip(props: SessionPrChipProps) {
     const { t } = useTranslation()
     const primary = getPrimaryGithubPrRef(props.refs)
     if (!primary) return null
+
+    const nowMs = props.nowMs ?? Date.now()
+    const display = resolveGithubPrChipDisplay(primary, nowMs)
 
     return (
         <a
@@ -57,13 +97,14 @@ export function SessionPrChip(props: SessionPrChipProps) {
             target="_blank"
             rel="noopener noreferrer"
             data-testid="session-pr-chip"
-            data-pr-status={primary.status ?? 'unset'}
-            title={chipTitle(primary)}
+            data-pr-status={display.status ?? 'unset'}
+            data-pr-stale={display.stale ? '1' : '0'}
+            title={chipTitle(primary, display)}
             aria-label={
-                primary.status
+                display.status
                     ? t('session.item.prChipWithStatus', {
                         number: primary.number,
-                        status: primary.status
+                        status: display.status
                     })
                     : t('session.item.prChip', { number: primary.number })
             }
@@ -74,11 +115,11 @@ export function SessionPrChip(props: SessionPrChipProps) {
                 'bg-[var(--app-subtle-bg)] px-1.5 py-0.5 text-[11px] font-medium tabular-nums',
                 'hover:opacity-90 focus-visible:outline-none',
                 'focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
-                statusToneClass(primary.status),
+                statusToneClass(display.status),
                 props.className
             )}
         >
-            {formatGithubPrChipLabel(primary)}
+            {formatGithubPrChipLabel(primary, nowMs)}
         </a>
     )
 }
