@@ -364,6 +364,36 @@ function normalizeAcpToolContent(content: unknown): string | object | null {
     return diffBlock ?? parts.join('');
 }
 
+/**
+ * Pull ACP/MCP image content blocks out of a tool_call content array so they
+ * can be registered as generated_image messages. Supports the standard
+ * ToolCallContent wrapper (`{ type: 'content', content: { type: 'image', ... } }`)
+ * and bare `{ type: 'image', ... }` blocks some agents emit.
+ *
+ * Does not read files — URI-only blocks are ignored by
+ * registerGeneratedImageFromAcpBlock (permission-gated display_* only).
+ */
+function extractAcpImageBlocksFromToolContent(content: unknown): Record<string, unknown>[] {
+    if (!Array.isArray(content)) {
+        return [];
+    }
+
+    const images: Record<string, unknown>[] = [];
+    for (const block of content) {
+        if (!isObject(block)) {
+            continue;
+        }
+        if (block.type === 'content' && isObject(block.content) && block.content.type === 'image') {
+            images.push(block.content);
+            continue;
+        }
+        if (block.type === 'image') {
+            images.push(block);
+        }
+    }
+    return images;
+}
+
 function normalizePlanEntries(entries: unknown): PlanItem[] {
     if (!Array.isArray(entries)) return [];
 
@@ -662,7 +692,7 @@ export class AcpMessageHandler {
             // across the tool_result boundary. Reasoning is separate and is
             // flushed above so tool results still appear after the thought
             // that led to them.
-            this.handleToolCallUpdate(update);
+            await this.handleToolCallUpdate(update);
             return;
         }
 
@@ -676,7 +706,10 @@ export class AcpMessageHandler {
         }
     }
 
-    private async emitGeneratedImageFromAcpContent(content: Record<string, unknown>): Promise<void> {
+    private async emitGeneratedImageFromAcpContent(
+        content: Record<string, unknown>,
+        source?: InlineMediaSource
+    ): Promise<void> {
         try {
             const image = await registerGeneratedImageFromAcpBlock(content);
             if (!image) {
@@ -687,7 +720,7 @@ export class AcpMessageHandler {
                 imageId: image.id,
                 fileName: image.fileName,
                 mimeType: image.mimeType,
-                source: this.buildAcpInlineMediaSource(),
+                source: source ?? this.buildAcpInlineMediaSource(),
             });
         } catch (error) {
             logger.debug(
@@ -701,6 +734,20 @@ export class AcpMessageHandler {
         const source: InlineMediaSource = { ingress: 'acp' };
         if (this.options?.flavor) {
             source.flavor = this.options.flavor;
+        }
+        return source;
+    }
+
+    private buildToolResultInlineMediaSource(toolCallId: string, toolName?: string | null): InlineMediaSource {
+        const source: InlineMediaSource = {
+            ingress: 'tool_result',
+            toolCallId,
+        };
+        if (this.options?.flavor) {
+            source.flavor = this.options.flavor;
+        }
+        if (toolName) {
+            source.toolName = toolName;
         }
         return source;
     }
@@ -748,7 +795,7 @@ export class AcpMessageHandler {
         });
     }
 
-    private handleToolCallUpdate(update: Record<string, unknown>): void {
+    private async handleToolCallUpdate(update: Record<string, unknown>): Promise<void> {
         const toolCallId = asString(update.toolCallId);
         if (!toolCallId) return;
 
@@ -853,6 +900,18 @@ export class AcpMessageHandler {
                 output,
                 status: status === 'failed' ? 'failed' : 'completed'
             });
+
+            // Inline image bytes in tool content → generated_image cards (web).
+            // Await registration so sessionUpdateQueue / turn_complete stay ordered.
+            // URI-only blocks are refused (same as agentMessageChunk ACP images).
+            const imageBlocks = extractAcpImageBlocksFromToolContent(update.content);
+            if (imageBlocks.length > 0) {
+                const toolName = this.toolCalls.get(toolCallId)?.name ?? existing?.name ?? null;
+                const source = this.buildToolResultInlineMediaSource(toolCallId, toolName);
+                for (const imageBlock of imageBlocks) {
+                    await this.emitGeneratedImageFromAcpContent(imageBlock, source);
+                }
+            }
         }
     }
 

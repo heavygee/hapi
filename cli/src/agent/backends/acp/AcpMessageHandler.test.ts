@@ -2429,4 +2429,176 @@ describe('AcpMessageHandler', () => {
         }
         clearGeneratedImages();
     });
+
+    describe('tool_result image content → generated_image', () => {
+        const pngHeader = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x00]);
+
+        it('emits generated_image from ACP tool_call_update content image blocks with tool_result provenance', async () => {
+            const messages: AgentMessage[] = [];
+            const handler = new AcpMessageHandler((message) => messages.push(message), { flavor: 'cursor' });
+
+            await handler.handleUpdate({
+                sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCall,
+                toolCallId: 'img-tool-1',
+                title: 'GenerateImage',
+                kind: 'other',
+                status: 'in_progress',
+                rawInput: { prompt: 'a cat' },
+            });
+            await handler.handleUpdate({
+                sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCallUpdate,
+                toolCallId: 'img-tool-1',
+                status: 'completed',
+                content: [
+                    {
+                        type: 'content',
+                        content: {
+                            type: 'image',
+                            mimeType: 'image/png',
+                            data: pngHeader.toString('base64'),
+                        },
+                    },
+                ],
+            });
+
+            await vi.waitFor(() => {
+                expect(messages.some((message) => message.type === 'generated_image')).toBe(true);
+            });
+
+            const result = getToolResult(messages, 'img-tool-1');
+            expect(result.status).toBe('completed');
+
+            const imageMessage = messages.find(
+                (message): message is Extract<AgentMessage, { type: 'generated_image' }> =>
+                    message.type === 'generated_image'
+            );
+            expect(imageMessage?.mimeType).toBe('image/png');
+            expect(imageMessage?.source).toEqual({
+                ingress: 'tool_result',
+                flavor: 'cursor',
+                toolCallId: 'img-tool-1',
+                toolName: 'GenerateImage',
+            });
+
+            const resultIndex = messages.findIndex(
+                (message) => message.type === 'tool_result' && message.id === 'img-tool-1'
+            );
+            const imageIndex = messages.findIndex((message) => message.type === 'generated_image');
+            expect(imageIndex).toBeGreaterThan(resultIndex);
+            clearGeneratedImages();
+        });
+
+        it('does not disk-read URI-only image blocks in tool_result content', async () => {
+            const messages: AgentMessage[] = [];
+            const handler = new AcpMessageHandler((message) => messages.push(message), { flavor: 'cursor' });
+            const uri = `file://${join('/tmp', `acp-tool-result-${Date.now()}.png`)}`;
+
+            await handler.handleUpdate({
+                sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCall,
+                toolCallId: 'uri-only-1',
+                title: 'screenshot',
+                status: 'in_progress',
+            });
+            await handler.handleUpdate({
+                sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCallUpdate,
+                toolCallId: 'uri-only-1',
+                status: 'completed',
+                content: [
+                    {
+                        type: 'content',
+                        content: {
+                            type: 'image',
+                            mimeType: 'image/png',
+                            uri,
+                        },
+                    },
+                ],
+            });
+
+            // Allow async registration path to settle
+            await Promise.resolve();
+            await Promise.resolve();
+
+            expect(messages.some((message) => message.type === 'generated_image')).toBe(false);
+            const result = getToolResult(messages, 'uri-only-1');
+            expect(result.status).toBe('completed');
+            clearGeneratedImages();
+        });
+
+        it('emits one generated_image per inline image block and keeps text tool_result output', async () => {
+            const messages: AgentMessage[] = [];
+            const handler = new AcpMessageHandler((message) => messages.push(message), { flavor: 'kimi' });
+
+            await handler.handleUpdate({
+                sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCall,
+                toolCallId: 'multi-img-1',
+                title: 'chart',
+                status: 'in_progress',
+            });
+            await handler.handleUpdate({
+                sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCallUpdate,
+                toolCallId: 'multi-img-1',
+                status: 'completed',
+                content: [
+                    {
+                        type: 'content',
+                        content: { type: 'text', text: 'chart ready' },
+                    },
+                    {
+                        type: 'content',
+                        content: {
+                            type: 'image',
+                            mimeType: 'image/png',
+                            data: pngHeader.toString('base64'),
+                        },
+                    },
+                    {
+                        type: 'content',
+                        content: {
+                            type: 'image',
+                            mimeType: 'image/png',
+                            data: pngHeader.toString('base64'),
+                        },
+                    },
+                ],
+            });
+
+            await vi.waitFor(() => {
+                expect(messages.filter((message) => message.type === 'generated_image')).toHaveLength(2);
+            });
+
+            const result = getToolResult(messages, 'multi-img-1');
+            expect(result.output).toEqual([
+                {
+                    type: 'content',
+                    content: { type: 'text', text: 'chart ready' },
+                },
+                {
+                    type: 'content',
+                    content: {
+                        type: 'image',
+                        mimeType: 'image/png',
+                        data: pngHeader.toString('base64'),
+                    },
+                },
+                {
+                    type: 'content',
+                    content: {
+                        type: 'image',
+                        mimeType: 'image/png',
+                        data: pngHeader.toString('base64'),
+                    },
+                },
+            ]);
+
+            const images = messages.filter(
+                (message): message is Extract<AgentMessage, { type: 'generated_image' }> =>
+                    message.type === 'generated_image'
+            );
+            expect(images.every((image) => image.source?.ingress === 'tool_result')).toBe(true);
+            expect(images.every((image) => image.source?.toolCallId === 'multi-img-1')).toBe(true);
+            expect(images.every((image) => image.source?.flavor === 'kimi')).toBe(true);
+            clearGeneratedImages();
+        });
+    });
 });
