@@ -106,6 +106,23 @@ describe('convertAgentMessage', () => {
             }
         });
     });
+
+    it('converts generated_image agent messages to wire generated-image', () => {
+        const converted = convertAgentMessage({
+            type: 'generated_image',
+            imageId: 'img-abc',
+            fileName: 'icon.png',
+            mimeType: 'image/png',
+        });
+        expect(converted).toMatchObject({
+            type: 'generated-image',
+            imageId: 'img-abc',
+            fileName: 'icon.png',
+            mimeType: 'image/png',
+        });
+        expect(converted && 'id' in converted ? converted.id : null).toEqual(expect.any(String));
+    });
+
     it('returns null instead of echoing an unrecognized message shape', () => {
         // Unreachable through the type system, but callers forward any non-null
         // result straight into the chat stream — so the runtime contract has to

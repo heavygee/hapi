@@ -1139,4 +1139,16 @@ describe('AcpSdkBackend', () => {
 
         expect(registered.get('cursor/ask_question')).toBe(handler);
     });
+
+    it('registerExtensionNotificationHandler stores handlers for no-id cursor methods', () => {
+        const backend = new AcpSdkBackend({ command: 'agent' });
+        const handler = vi.fn();
+        backend.registerExtensionNotificationHandler('cursor/generate_image', handler);
+
+        const handlers = (backend as unknown as {
+            extensionNotificationHandlers: Map<string, (params: unknown) => void>;
+        }).extensionNotificationHandlers;
+
+        expect(handlers.get('cursor/generate_image')).toBe(handler);
+    });
 });

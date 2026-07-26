@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { clearGeneratedImages, detectImageMimeType, getGeneratedImage, registerGeneratedImage } from './generatedImages'
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import {
+    clearGeneratedImages,
+    decodeGeneratedImageBase64,
+    detectImageMimeType,
+    getGeneratedImage,
+    MAX_GENERATED_IMAGE_BASE64_CHARS,
+    registerGeneratedImage,
+    registerGeneratedImageFromPath,
+} from './generatedImages'
 
 describe('generatedImages', () => {
     it('detects supported image MIME types from file bytes', () => {
@@ -65,6 +76,38 @@ describe('generatedImages', () => {
         expect(getGeneratedImage('image-1')).not.toBeNull()
         expect(getGeneratedImage('image-100')).not.toBeNull()
         clearGeneratedImages()
+    })
+
+    it('registerGeneratedImageFromPath snapshots a valid PNG from disk', async () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-gen-img-path-'))
+        try {
+            const path = join(dir, 'icon.png')
+            writeFileSync(path, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+            const image = await registerGeneratedImageFromPath({
+                id: 'from-path',
+                path,
+            })
+            expect(image?.mimeType).toBe('image/png')
+            expect(getGeneratedImage('from-path')?.mimeType).toBe('image/png')
+        } finally {
+            rmSync(dir, { recursive: true, force: true })
+            clearGeneratedImages()
+        }
+    })
+
+    it('registerGeneratedImageFromPath returns null for missing paths after retries', async () => {
+        const image = await registerGeneratedImageFromPath({
+            id: 'missing',
+            path: join(tmpdir(), 'hapi-definitely-missing-image.png'),
+            retries: 2,
+        })
+        expect(image).toBeNull()
+    })
+
+    it('decodeGeneratedImageBase64 rejects oversized payloads before allocating', () => {
+        const oversized = 'A'.repeat(MAX_GENERATED_IMAGE_BASE64_CHARS + 1)
+        expect(decodeGeneratedImageBase64(oversized)).toBeNull()
+        expect(decodeGeneratedImageBase64(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString('base64'))).not.toBeNull()
     })
 
 })

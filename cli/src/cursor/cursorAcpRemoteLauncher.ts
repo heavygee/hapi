@@ -115,7 +115,8 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         const extensionAdapter = new CursorExtensionAdapter(
             session.client,
             backend,
-            (message) => this.handleAgentMessage(message)
+            (message) => this.handleAgentMessage(message),
+            { workingDirectory: session.path },
         );
         this.extensionAdapter = extensionAdapter;
 
@@ -329,6 +330,9 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                 break;
             case 'error':
                 this.messageBuffer.addMessage(message.message, 'status');
+                break;
+            case 'generated_image':
+                this.messageBuffer.addMessage(`Generated image: ${message.fileName}`, 'assistant');
                 break;
             case 'turn_complete':
                 break;

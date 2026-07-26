@@ -1,4 +1,6 @@
 import { basename } from 'path'
+import { lstat, readFile } from 'node:fs/promises'
+import { logger } from '@/ui/logger'
 
 export type GeneratedImageMetadata = {
     id: string
@@ -8,12 +10,28 @@ export type GeneratedImageMetadata = {
     createdAt: number
 }
 
-const MAX_GENERATED_IMAGE_BYTES = 25 * 1024 * 1024
+export const MAX_GENERATED_IMAGE_BYTES = 25 * 1024 * 1024
+/** Approx max base64 chars for MAX_GENERATED_IMAGE_BYTES (+ padding slack). */
+export const MAX_GENERATED_IMAGE_BASE64_CHARS = Math.ceil(MAX_GENERATED_IMAGE_BYTES * 4 / 3) + 4
 const MAX_GENERATED_IMAGE_TOTAL_BYTES = 100 * 1024 * 1024
 const MAX_GENERATED_IMAGE_COUNT = 100
+const DEFAULT_PATH_REGISTER_RETRIES = 3
+const PATH_REGISTER_RETRY_DELAY_MS = 50
 
 const generatedImages = new Map<string, GeneratedImageMetadata>()
 let generatedImageBytes = 0
+
+/** Decode inline media base64 only after a cheap length gate (avoids huge Buffer allocations). */
+export function decodeGeneratedImageBase64(data: string): Buffer | null {
+    if (data.length > MAX_GENERATED_IMAGE_BASE64_CHARS) {
+        return null
+    }
+    const bytes = Buffer.from(data, 'base64')
+    if (bytes.byteLength > MAX_GENERATED_IMAGE_BYTES) {
+        return null
+    }
+    return bytes
+}
 
 export function detectImageMimeType(bytes: Uint8Array): string | null {
     if (bytes.length >= 8
@@ -104,4 +122,69 @@ export function getGeneratedImage(id: string): GeneratedImageMetadata | null {
 export function clearGeneratedImages(): void {
     generatedImages.clear()
     generatedImageBytes = 0
+}
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function isRetryablePathError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') return false
+    const code = 'code' in error ? String(error.code) : ''
+    return code === 'ENOENT' || code === 'EBUSY' || code === 'EAGAIN'
+}
+
+/**
+ * Read + validate + snapshot a local image path into the generated-image store.
+ * Retries briefly on ENOENT/EBUSY so writers that notify before flush completes can catch up.
+ * Returns null on failure (never throws); logs each attempt.
+ */
+export async function registerGeneratedImageFromPath(args: {
+    id: string
+    path: string
+    fileName?: string | null
+    retries?: number
+}): Promise<GeneratedImageMetadata | null> {
+    const attempts = Math.max(1, args.retries ?? DEFAULT_PATH_REGISTER_RETRIES)
+    let lastError: unknown
+
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        try {
+            const info = await lstat(args.path)
+            if (!info.isFile()) {
+                throw new Error('Path is not a regular file')
+            }
+            if (info.size > MAX_GENERATED_IMAGE_BYTES) {
+                throw new Error('Image is too large to display inline')
+            }
+            const bytes = await readFile(args.path)
+            const mimeType = detectImageMimeType(bytes)
+            if (!mimeType) {
+                throw new Error('Unsupported image content')
+            }
+            return registerGeneratedImage({
+                id: args.id,
+                path: args.path,
+                fileName: args.fileName,
+                mimeType,
+                bytes,
+            })
+        } catch (error) {
+            lastError = error
+            const message = error instanceof Error ? error.message : String(error)
+            const retryable = isRetryablePathError(error) && attempt < attempts
+            logger.debug(
+                `[generatedImages] registerFromPath attempt ${attempt}/${attempts} failed for ${args.path}: ${message}`
+                    + (retryable ? ' (retrying)' : ''),
+            )
+            if (!retryable) {
+                break
+            }
+            await sleep(PATH_REGISTER_RETRY_DELAY_MS * attempt)
+        }
+    }
+
+    const finalMessage = lastError instanceof Error ? lastError.message : String(lastError)
+    logger.warn(`[generatedImages] Failed to register image from path after ${attempts} attempt(s): ${args.path} (${finalMessage})`)
+    return null
 }

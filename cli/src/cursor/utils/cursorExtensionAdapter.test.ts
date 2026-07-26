@@ -1,14 +1,20 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { ApiSessionClient } from '@/api/apiSession';
 import type { AgentState } from '@/api/types';
 import type { AgentMessage } from '@/agent/types';
 import type { AcpSdkBackend } from '@/agent/backends/acp';
+import { clearGeneratedImages, getGeneratedImage } from '@/modules/common/generatedImages';
 import { CursorExtensionAdapter } from './cursorExtensionAdapter';
 
 type ExtensionHandler = (params: unknown, requestId: string | number | null) => Promise<unknown>;
+type NotificationHandler = (params: unknown) => void | Promise<void>;
 
-function createHarness() {
+function createHarness(options?: { workingDirectory?: string }) {
     const handlers = new Map<string, ExtensionHandler>();
+    const notificationHandlers = new Map<string, NotificationHandler>();
     let agentState: AgentState = { requests: {}, completedRequests: {} };
     const messages: AgentMessage[] = [];
 
@@ -21,24 +27,36 @@ function createHarness() {
     const backend = {
         registerExtensionRequestHandler(method: string, handler: ExtensionHandler) {
             handlers.set(method, handler);
+        },
+        registerExtensionNotificationHandler(method: string, handler: NotificationHandler) {
+            notificationHandlers.set(method, handler);
         }
     } as unknown as AcpSdkBackend;
 
     const adapter = new CursorExtensionAdapter(session, backend, (message) => {
         messages.push(message);
-    });
+    }, options);
 
     return {
         handlers,
+        notificationHandlers,
         adapter,
         getAgentState: () => agentState,
         getMessages: () => messages
     };
 }
 
+const PNG_HEADER = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
 describe('CursorExtensionAdapter', () => {
     beforeEach(() => {
         vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+        clearGeneratedImages();
+    });
+
+    afterEach(() => {
+        clearGeneratedImages();
+        vi.restoreAllMocks();
     });
 
     it('queues cursor/ask_question as CursorAskQuestion pending request', async () => {
@@ -151,6 +169,23 @@ describe('CursorExtensionAdapter', () => {
         ]);
     });
 
+    it('routes cursor/update_todos notifications without a JSON-RPC id', async () => {
+        const { notificationHandlers, getMessages } = createHarness();
+        const handler = notificationHandlers.get('cursor/update_todos');
+        expect(handler).toBeTypeOf('function');
+
+        await handler!({
+            todos: [{ content: 'From notification', status: 'pending' }]
+        });
+
+        expect(getMessages()).toEqual([
+            {
+                type: 'plan',
+                items: [{ content: 'From notification', priority: 'medium', status: 'pending' }]
+            }
+        ]);
+    });
+
     it('emits CursorTask tool call and result for cursor/task', async () => {
         const { handlers, getMessages } = createHarness();
         await handlers.get('cursor/task')!({
@@ -173,6 +208,28 @@ describe('CursorExtensionAdapter', () => {
         ]);
     });
 
+    it('routes cursor/task notifications without a JSON-RPC id', async () => {
+        const { notificationHandlers, getMessages } = createHarness();
+        await notificationHandlers.get('cursor/task')!({
+            toolCallId: 'task-notify',
+            title: 'Notify task'
+        });
+
+        expect(getMessages()).toEqual([
+            expect.objectContaining({
+                type: 'tool_call',
+                id: 'task-notify',
+                name: 'CursorTask',
+                status: 'completed'
+            }),
+            expect.objectContaining({
+                type: 'tool_result',
+                id: 'task-notify',
+                status: 'completed'
+            })
+        ]);
+    });
+
     it('keeps CursorTask running when status is in_progress', async () => {
         const { handlers, getMessages } = createHarness();
         await handlers.get('cursor/task')!({
@@ -189,6 +246,169 @@ describe('CursorExtensionAdapter', () => {
                 status: 'in_progress'
             })
         ]);
+    });
+
+    it('registers cursor/generate_image base64 imageData and returns structured outcome', async () => {
+        const { handlers, getMessages } = createHarness();
+        const result = await handlers.get('cursor/generate_image')!({
+            toolCallId: 'img-1',
+            description: 'App icon',
+            filePath: '/tmp/icon.png',
+            imageData: PNG_HEADER.toString('base64'),
+        }, 'req-1');
+
+        expect(result).toEqual({
+            outcome: 'generated',
+            filePath: '/tmp/icon.png',
+        });
+
+        const messages = getMessages();
+        expect(messages[0]).toMatchObject({
+            type: 'tool_call',
+            id: 'img-1',
+            name: 'CursorGenerateImage',
+            status: 'completed',
+        });
+        expect(messages[1]).toMatchObject({
+            type: 'generated_image',
+            fileName: 'icon.png',
+            mimeType: 'image/png',
+        });
+        expect(messages[2]).toMatchObject({
+            type: 'tool_result',
+            id: 'img-1',
+            status: 'completed',
+        });
+
+        const generated = messages[1];
+        expect(generated.type).toBe('generated_image');
+        if (generated.type === 'generated_image') {
+            expect(getGeneratedImage(generated.imageId)?.mimeType).toBe('image/png');
+        }
+    });
+
+    it('rejects oversized generate_image base64 before decoding', async () => {
+        const { handlers, getMessages } = createHarness();
+        const result = await handlers.get('cursor/generate_image')!({
+            toolCallId: 'img-huge',
+            description: 'Too big',
+            imageData: 'A'.repeat(40 * 1024 * 1024),
+        }, null);
+
+        expect(result).toMatchObject({ outcome: 'rejected' });
+        expect(getMessages().some((m) => m.type === 'generated_image')).toBe(false);
+    });
+
+    it('routes cursor/generate_image notifications with base64 imageData', async () => {
+        const { notificationHandlers, getMessages } = createHarness();
+        await notificationHandlers.get('cursor/generate_image')!({
+            toolCallId: 'img-notify',
+            description: 'Notify icon',
+            imageData: PNG_HEADER.toString('base64'),
+        });
+
+        expect(getMessages().some((m) => m.type === 'generated_image')).toBe(true);
+    });
+
+    it('permission-gates filePath-only generate_image before reading disk', async () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-cursor-gen-img-'));
+        try {
+            const filePath = join(dir, 'secret.png');
+            writeFileSync(filePath, PNG_HEADER);
+
+            const { handlers, adapter, getMessages, getAgentState } = createHarness({
+                workingDirectory: dir,
+            });
+            const pending = handlers.get('cursor/generate_image')!({
+                toolCallId: 'img-path',
+                description: 'Must prompt before disk read',
+                filePath,
+            }, null);
+
+            expect(getAgentState().requests).toMatchObject({
+                'img-path': { tool: 'CursorGenerateImage' },
+            });
+            expect(getMessages().some((m) => m.type === 'generated_image')).toBe(false);
+
+            await adapter.handlePermissionResponse({
+                id: 'img-path',
+                approved: true,
+                decision: 'approved',
+            });
+
+            await expect(pending).resolves.toEqual({
+                outcome: 'generated',
+                filePath,
+            });
+            expect(getMessages().some((m) => m.type === 'generated_image')).toBe(true);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    it('rejects filePath outside working directory without reading', async () => {
+        const allowed = mkdtempSync(join(tmpdir(), 'hapi-cursor-cwd-'));
+        const outside = mkdtempSync(join(tmpdir(), 'hapi-cursor-outside-'));
+        try {
+            const filePath = join(outside, 'leak.png');
+            writeFileSync(filePath, PNG_HEADER);
+
+            const { handlers, getMessages } = createHarness({ workingDirectory: allowed });
+            const result = await handlers.get('cursor/generate_image')!({
+                toolCallId: 'img-outside',
+                description: 'Outside cwd',
+                filePath,
+            }, null);
+
+            expect(result).toMatchObject({
+                outcome: 'rejected',
+                reason: expect.stringMatching(/working directory/i),
+            });
+            expect(getMessages().some((m) => m.type === 'generated_image')).toBe(false);
+        } finally {
+            rmSync(allowed, { recursive: true, force: true });
+            rmSync(outside, { recursive: true, force: true });
+        }
+    });
+
+    it('returns rejected when path-only generate_image is denied', async () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-cursor-deny-'));
+        try {
+            const filePath = join(dir, 'icon.png');
+            writeFileSync(filePath, PNG_HEADER);
+
+            const { handlers, adapter, getMessages } = createHarness({ workingDirectory: dir });
+            const pending = handlers.get('cursor/generate_image')!({
+                toolCallId: 'img-deny',
+                description: 'Denied path',
+                filePath,
+            }, null);
+
+            await adapter.handlePermissionResponse({
+                id: 'img-deny',
+                approved: false,
+                decision: 'denied',
+            });
+
+            await expect(pending).resolves.toEqual({
+                outcome: 'rejected',
+                reason: 'user denied',
+            });
+            expect(getMessages().some((m) => m.type === 'generated_image')).toBe(false);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    it('still emits tool_call/result when generate_image has no path or bytes', async () => {
+        const { handlers, getMessages } = createHarness();
+        const result = await handlers.get('cursor/generate_image')!({
+            toolCallId: 'img-3',
+            description: 'No media yet',
+        }, null);
+
+        expect(result).toMatchObject({ outcome: 'rejected' });
+        expect(getMessages().map((m) => m.type)).toEqual(['tool_call', 'tool_result']);
     });
 
     it('cancelAll resolves pending extension requests as cancelled', async () => {

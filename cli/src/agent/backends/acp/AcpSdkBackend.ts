@@ -63,6 +63,10 @@ export class AcpSdkBackend implements AgentBackend {
     private permissionHandler: ((request: PermissionRequest) => void) | null = null;
     private stderrErrorHandler: ((error: AcpStderrError) => void) | null = null;
     private readonly pendingPermissions = new Map<string, PendingPermission>();
+    private readonly extensionNotificationHandlers = new Map<
+        string,
+        (params: unknown) => void | Promise<void>
+    >();
     private readonly sessionModelsMetadata = new Map<string, AcpSessionModelsMetadata>();
     private readonly sessionConfigOptions = new Map<string, AcpConfigOptionDescriptor[]>();
     private readonly sessionInfoRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -138,6 +142,15 @@ export class AcpSdkBackend implements AgentBackend {
                 && 'auto_permission_mode_enabled' in params
             ) {
                 this.autoPermissionModeEnabled = params.auto_permission_mode_enabled === true;
+            } else {
+                const extensionHandler = this.extensionNotificationHandlers.get(method);
+                if (extensionHandler) {
+                    void Promise.resolve(extensionHandler(params)).catch((error) => {
+                        logger.debug(`[ACP] Extension notification handler failed: ${method}`, error);
+                    });
+                    return;
+                }
+                logger.debug(`[ACP] Ignoring unhandled notification: ${method}`);
             }
         });
 
@@ -245,6 +258,17 @@ export class AcpSdkBackend implements AgentBackend {
             throw new Error('ACP transport not initialized');
         }
         this.transport.registerRequestHandler(method, handler);
+    }
+
+    /**
+     * Cursor docs send update_todos / task / generate_image as JSON-RPC notifications
+     * (no id). Request handlers alone miss those; register notification handlers too.
+     */
+    registerExtensionNotificationHandler(
+        method: string,
+        handler: (params: unknown) => void | Promise<void>
+    ): void {
+        this.extensionNotificationHandlers.set(method, handler);
     }
 
     async setMode(sessionId: string, modeId: string): Promise<void> {

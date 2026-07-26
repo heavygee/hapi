@@ -5,6 +5,14 @@ import { logger } from '@/ui/logger';
 import { asString, isObject } from '@hapi/protocol';
 import type { AgentMessage, PlanItem } from '@/agent/types';
 import { randomUUID } from 'node:crypto';
+import { basename } from 'node:path';
+import {
+    detectImageMimeType,
+    decodeGeneratedImageBase64,
+    registerGeneratedImage,
+    registerGeneratedImageFromPath,
+} from '@/modules/common/generatedImages';
+import { validatePath } from '@/modules/common/pathSecurity';
 
 type PendingExtensionRequest = {
     tool: string;
@@ -21,14 +29,27 @@ type PermissionResponseMessage = {
 
 export type CursorExtensionMessageHandler = (message: AgentMessage) => void;
 
+export type CursorExtensionAdapterOptions = {
+    /** Session cwd; path-only generate_image must stay inside this tree. */
+    workingDirectory?: string;
+};
+
+type GenerateImageOutcome =
+    | { outcome: 'generated'; filePath: string; imageData?: string }
+    | { outcome: 'rejected'; reason?: string }
+    | { outcome: 'cancelled' };
+
 export class CursorExtensionAdapter {
     private readonly pending = new Map<string, PendingExtensionRequest>();
+    private readonly workingDirectory: string | undefined;
 
     constructor(
         private readonly session: ApiSessionClient,
         private readonly backend: AcpSdkBackend,
-        private readonly onMessage: CursorExtensionMessageHandler
+        private readonly onMessage: CursorExtensionMessageHandler,
+        options?: CursorExtensionAdapterOptions,
     ) {
+        this.workingDirectory = options?.workingDirectory;
         this.registerHandlers();
     }
 
@@ -49,19 +70,31 @@ export class CursorExtensionAdapter {
             return await this.handleBlockingRequest('CursorCreatePlan', params);
         });
 
+        // Docs: update_todos / task / generate_image are notifications (no JSON-RPC id).
+        // Cursor may still send them as requests; register both paths.
         this.backend.registerExtensionRequestHandler('cursor/update_todos', async (params) => {
             this.handleTodoUpdate(params);
             return {};
+        });
+        this.backend.registerExtensionNotificationHandler('cursor/update_todos', (params) => {
+            this.handleTodoUpdate(params);
         });
 
         this.backend.registerExtensionRequestHandler('cursor/task', async (params) => {
             this.handleTaskNotification(params);
             return {};
         });
+        this.backend.registerExtensionNotificationHandler('cursor/task', (params) => {
+            this.handleTaskNotification(params);
+        });
 
         this.backend.registerExtensionRequestHandler('cursor/generate_image', async (params) => {
-            this.handleGenerateImage(params);
-            return {};
+            return await this.handleGenerateImage(params);
+        });
+        this.backend.registerExtensionNotificationHandler('cursor/generate_image', (params) => {
+            void this.handleGenerateImage(params).catch((error) => {
+                logger.warn('[cursor-acp] cursor/generate_image notification failed', error);
+            });
         });
     }
 
@@ -182,22 +215,188 @@ export class CursorExtensionAdapter {
         }
     }
 
-    private handleGenerateImage(params: unknown): void {
-        if (!isObject(params)) return;
+    private async handleGenerateImage(params: unknown): Promise<GenerateImageOutcome> {
+        if (!isObject(params)) {
+            return { outcome: 'rejected', reason: 'invalid params' };
+        }
+
         const toolCallId = extractToolCallId(params) ?? `cursor-image-${randomUUID()}`;
+        const filePath = extractFilePath(params);
+        const imageData = extractImageData(params);
+
         this.onMessage({
             type: 'tool_call',
             id: toolCallId,
             name: 'CursorGenerateImage',
             input: params,
-            status: 'completed'
+            status: filePath && !imageData ? 'in_progress' : 'completed',
         });
+
+        // Inline bytes are safe without a disk read / permission prompt.
+        if (imageData) {
+            const image = registerCursorGeneratedImageFromBase64(params, filePath, imageData);
+            if (!image) {
+                this.onMessage({
+                    type: 'tool_call',
+                    id: toolCallId,
+                    name: 'CursorGenerateImage',
+                    input: params,
+                    status: 'failed',
+                });
+                this.onMessage({
+                    type: 'tool_result',
+                    id: toolCallId,
+                    output: { error: 'invalid image data' },
+                    status: 'failed',
+                });
+                return { outcome: 'rejected', reason: 'invalid image data' };
+            }
+            this.onMessage({
+                type: 'generated_image',
+                imageId: image.id,
+                fileName: image.fileName,
+                mimeType: image.mimeType,
+            });
+            this.onMessage({
+                type: 'tool_result',
+                id: toolCallId,
+                output: params,
+                status: 'completed',
+            });
+            return {
+                outcome: 'generated',
+                filePath: filePath ?? image.fileName,
+            };
+        }
+
+        if (filePath) {
+            if (this.workingDirectory) {
+                const pathCheck = validatePath(filePath, this.workingDirectory);
+                if (!pathCheck.valid) {
+                    const reason = pathCheck.error ?? 'path outside working directory';
+                    logger.warn(`[cursor-acp] generate_image path rejected: ${reason}`);
+                    this.onMessage({
+                        type: 'tool_call',
+                        id: toolCallId,
+                        name: 'CursorGenerateImage',
+                        input: params,
+                        status: 'failed',
+                    });
+                    this.onMessage({
+                        type: 'tool_result',
+                        id: toolCallId,
+                        output: { error: reason },
+                        status: 'failed',
+                    });
+                    return { outcome: 'rejected', reason };
+                }
+            }
+
+            // Mirror display_image approval_mode: 'prompt' — never auto-read disk.
+            const decision = await this.handleBlockingRequest('CursorGenerateImage', params);
+            if (!isObject(decision)) {
+                this.onMessage({
+                    type: 'tool_call',
+                    id: toolCallId,
+                    name: 'CursorGenerateImage',
+                    input: params,
+                    status: 'failed',
+                });
+                this.onMessage({
+                    type: 'tool_result',
+                    id: toolCallId,
+                    output: { error: 'invalid permission response' },
+                    status: 'failed',
+                });
+                return { outcome: 'rejected', reason: 'invalid permission response' };
+            }
+
+            const outcome = asString(decision.outcome);
+            if (outcome === 'cancelled') {
+                this.onMessage({
+                    type: 'tool_call',
+                    id: toolCallId,
+                    name: 'CursorGenerateImage',
+                    input: params,
+                    status: 'failed',
+                });
+                this.onMessage({
+                    type: 'tool_result',
+                    id: toolCallId,
+                    output: { error: 'cancelled' },
+                    status: 'failed',
+                });
+                return { outcome: 'cancelled' };
+            }
+            if (outcome !== 'accepted') {
+                this.onMessage({
+                    type: 'tool_call',
+                    id: toolCallId,
+                    name: 'CursorGenerateImage',
+                    input: params,
+                    status: 'failed',
+                });
+                this.onMessage({
+                    type: 'tool_result',
+                    id: toolCallId,
+                    output: { error: 'user denied' },
+                    status: 'failed',
+                });
+                return { outcome: 'rejected', reason: 'user denied' };
+            }
+
+            const image = await registerGeneratedImageFromPath({
+                id: randomUUID(),
+                path: filePath,
+                fileName: basename(filePath),
+            });
+            if (!image) {
+                this.onMessage({
+                    type: 'tool_call',
+                    id: toolCallId,
+                    name: 'CursorGenerateImage',
+                    input: params,
+                    status: 'failed',
+                });
+                this.onMessage({
+                    type: 'tool_result',
+                    id: toolCallId,
+                    output: { error: 'failed to read image' },
+                    status: 'failed',
+                });
+                return { outcome: 'rejected', reason: 'failed to read image' };
+            }
+
+            this.onMessage({
+                type: 'tool_call',
+                id: toolCallId,
+                name: 'CursorGenerateImage',
+                input: params,
+                status: 'completed',
+            });
+            this.onMessage({
+                type: 'generated_image',
+                imageId: image.id,
+                fileName: image.fileName,
+                mimeType: image.mimeType,
+            });
+            this.onMessage({
+                type: 'tool_result',
+                id: toolCallId,
+                output: params,
+                status: 'completed',
+            });
+            return { outcome: 'generated', filePath };
+        }
+
+        logger.debug('[cursor-acp] cursor/generate_image had no registrable image bytes/path', params);
         this.onMessage({
             type: 'tool_result',
             id: toolCallId,
             output: params,
-            status: 'completed'
+            status: 'completed',
         });
+        return { outcome: 'rejected', reason: 'no image data or file path' };
     }
 
     async cancelAll(reason: string): Promise<void> {
@@ -238,6 +437,48 @@ export class CursorExtensionAdapter {
 function extractToolCallId(params: unknown): string | null {
     if (!isObject(params)) return null;
     return asString(params.toolCallId);
+}
+
+function extractFilePath(params: Record<string, unknown>): string | null {
+    return asString(params.filePath)
+        ?? asString(params.file_path)
+        ?? asString(params.path)
+        ?? asString(params.imagePath)
+        ?? asString(params.image_path);
+}
+
+function extractImageData(params: Record<string, unknown>): string | null {
+    return asString(params.imageData)
+        ?? asString(params.image_data)
+        ?? asString(params.data);
+}
+
+function registerCursorGeneratedImageFromBase64(
+    params: Record<string, unknown>,
+    filePath: string | null,
+    imageData: string,
+) {
+    try {
+        const bytes = decodeGeneratedImageBase64(imageData);
+        if (!bytes) {
+            return null;
+        }
+        const mimeType = detectImageMimeType(bytes);
+        if (!mimeType) {
+            return null;
+        }
+        const path = filePath ?? `${randomUUID()}.bin`;
+        return registerGeneratedImage({
+            id: randomUUID(),
+            path,
+            fileName: basename(path),
+            mimeType,
+            bytes,
+        });
+    } catch (error) {
+        logger.debug('[cursor-acp] failed to register generate_image base64 payload', error);
+        return null;
+    }
 }
 
 function formatQuestionAnswers(
