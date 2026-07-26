@@ -1,0 +1,36 @@
+# Daytime Meta refresh — every 45 minutes 09:00–21:45 UTC (host local on oos).
+#
+# Explicit OnCalendar list: systemd calendar cross-products cannot express a
+# true 45-minute step from 09:00 without also firing :00/:45 every hour.
+#
+# Fork-local. Install: sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh
+
+[Unit]
+Description=HAPI Meta PR watcher timer (daytime chip/inbox refresh)
+Documentation=file:///home/heavygee/coding/hapi/docs/operator/AGENTS.md
+
+[Timer]
+OnCalendar=*-*-* 09:00:00
+OnCalendar=*-*-* 09:45:00
+OnCalendar=*-*-* 10:30:00
+OnCalendar=*-*-* 11:15:00
+OnCalendar=*-*-* 12:00:00
+OnCalendar=*-*-* 12:45:00
+OnCalendar=*-*-* 13:30:00
+OnCalendar=*-*-* 14:15:00
+OnCalendar=*-*-* 15:00:00
+OnCalendar=*-*-* 15:45:00
+OnCalendar=*-*-* 16:30:00
+OnCalendar=*-*-* 17:15:00
+OnCalendar=*-*-* 18:00:00
+OnCalendar=*-*-* 18:45:00
+OnCalendar=*-*-* 19:30:00
+OnCalendar=*-*-* 20:15:00
+OnCalendar=*-*-* 21:00:00
+OnCalendar=*-*-* 21:45:00
+AccuracySec=1min
+Persistent=false
+Unit=hapi-meta-daily-refresh.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,21 @@
+# Morning Meta — full run with pings (08:xx host local / UTC on oos-linux).
+#
+# Fork-local. Install: sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh
+#
+# Host TZ on oos-linux is Etc/UTC. OnCalendar uses the system timezone unless
+# prefixed (e.g. Europe/London *-*-* 08:00:00). Override via drop-in if needed.
+
+[Unit]
+Description=HAPI Meta PR watcher timer (morning full run)
+Documentation=file:///home/heavygee/coding/hapi/docs/operator/AGENTS.md
+
+[Timer]
+OnCalendar=*-*-* 08:00:00
+# Land somewhere in 08:xx without stampeding other morning jobs
+RandomizedDelaySec=15min
+AccuracySec=1min
+Persistent=true
+Unit=hapi-meta-daily.service
+
+[Install]
+WantedBy=timers.target

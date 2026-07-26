@@ -1,0 +1,34 @@
+# Morning Meta PR watcher — full classify + chip cache + policy pings.
+#
+# Fork-local (heavygee estate). NOT upstream. NOT Tier-1.
+# Install: sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh
+
+[Unit]
+Description=HAPI Meta PR watcher (morning full run — pings allowed)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/home/heavygee/.hapi/settings.json
+ConditionPathExists=/home/heavygee/coding/hapi/scripts/tooling/hapi-meta-daily.sh
+
+[Service]
+Type=oneshot
+User=heavygee
+Group=heavygee
+Nice=10
+# gh auth + PATH for ~/.local/bin wrappers
+Environment=HOME=/home/heavygee
+Environment=USER=heavygee
+Environment=PATH=/home/heavygee/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HAPI_HOST=http://127.0.0.1:3006
+Environment=HAPI_PRIMARY=/home/heavygee/coding/hapi
+Environment=HAPI_SETTINGS=/home/heavygee/.hapi/settings.json
+# Optional overrides: EnvironmentFile=-/home/heavygee/.hapi/meta-daily.env
+EnvironmentFile=-/home/heavygee/.hapi/meta-daily.env
+WorkingDirectory=/home/heavygee/coding/hapi
+ExecStartPre=/usr/bin/mkdir -p /home/heavygee/.local/state/hapi
+# Serialize against daytime refresh (and overlapping catch-up Persistent= runs)
+ExecStart=/usr/bin/flock -w 600 /home/heavygee/.local/state/hapi/meta-daily.lock \
+    /home/heavygee/coding/hapi/scripts/tooling/hapi-meta-daily.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hapi-meta-daily

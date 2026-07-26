@@ -52,7 +52,7 @@ So the manual path never depends on `gh`. That is the whole point of splitting t
 
 ### D3 — `metadata.externalRefs` is the sole attachment authority
 
-Title text is a **mirror**, never a source. Meta's emoji-in-title stays as the human-visible glance, and `pec_extract_pr_numbers` survives only as a *backfill suggester* (D6), never as the binding used for `related_session_id`.
+Title text is a **mirror**, never a source. The human-visible glance is the **PR chip** (`externalRefs` identity + optional `status` — D8). `pec_extract_pr_numbers` survives only as a *backfill suggester* (D6), never as the binding used for `related_session_id`. Do **not** encode CI/health in the session title.
 
 Identity is always the full `owner/repo#number`. #1161's `superRefine` already forces `url` to be exactly `https://github.com/{repo}/pull/{number}`, so a chip can't say `#1160` and link somewhere else.
 
@@ -152,7 +152,7 @@ T1+T2 are the ones that unblock everything else and are worth landing together. 
 
 ### D8 — Chip carries status; title stays the human workstream name — **IMPLEMENTED in #1163**
 
-**Problem.** Today Meta writes health into the **session title** (`✅PR #947: …`). The PR chip only showed identity (`#947`). That splits "what is this?" and "is it green?" across two surfaces.
+**Problem (pre-D8).** Meta wrote health into the **session title** (`✅PR #947: …`) while the PR chip only showed identity (`#947`). That split "what is this?" and "is it green?" across two surfaces.
 
 **Decision:** PR health is a chip concern. Optional fields on `GithubPrExternalRef`:
 
@@ -163,5 +163,7 @@ T1+T2 are the ones that unblock everything else and are worth landing together. 
 Meta's daily classify writes these onto existing refs (full `PUT external-refs`). Chip renders emoji + `#N` and tones by status. Browser never live-queries GitHub.
 
 **Transition (complete 2026-07-25):** Meta no longer writes status emoji into titles. For sessions with a chip it **strips** a leading status emoji once (`PR #N: …` / `Peer #N: …` kept). `hapi-pr-session-emoji.sh` is deprecated (escape hatch: `HAPI_ALLOW_LEGACY_EMOJI_SWEEP=1`).
+
+**Stale honesty (2026-07-26):** browser never live-queries GitHub. If `statusCheckedAt` is older than **2 hours**, the chip mutes tone and shows `?` (tooltip includes checked time + stale). Estate refresh: fork-local `hapi-meta-daily.timer` (morning pings) + `hapi-meta-daily-refresh.timer` (daytime `--no-ping --emit-events` every 45m) — see `install-hapi-meta-daily-timer.sh`.
 
 **Not a second upstream PR.** Awareness + attach + chip status ship together in [tiann/hapi#1163](https://github.com/tiann/hapi/pull/1163).

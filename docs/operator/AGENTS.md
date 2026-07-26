@@ -20,7 +20,8 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 | About to claim gates / PR ready | Mechanical verify before assertion | Lifecycle §6 + [`pr-review-loop.md`](../tooling/pr-review-loop.md) |
 | Upstream PR “babysit / merge-ready” | **Prepare only — never merge on `tiann/hapi`** | § Upstream relationship — only @tiann merges upstream `main` |
 | **Daily PR sweep / "the dance"** | Run **`hapi-meta-daily.sh`** — classify → chip status cache → strip title emoji (chipped) → policy-ping → action queue. Don't reinvent it each morning. | § Meta PR watcher (below) |
-| Upstream PR **merged** (meta / emoji sweep) | Notify peer → drop soup layer → clean worktree/branch → rematerialize **once** after the wave → archive when idle (peers: no mid-turn self-archive) | Lifecycle [§ After upstream merge](../tooling/feature-work-lifecycle.md#after-upstream-merge-fleet-cleanup--meta-sweep-must-advise-this) |
+| Upstream PR **merged** (Meta daily / chip `merged`) | Notify peer → drop soup layer → clean worktree/branch → rematerialize **once** after the wave → archive when idle (peers: no mid-turn self-archive; **no** `🔧` title rewrite) | Lifecycle [§ After upstream merge](../tooling/feature-work-lifecycle.md#after-upstream-merge-fleet-cleanup--meta-sweep-must-advise-this) |
+| Session title / PR health | Title = workstream only (`PR #N: …`); health on **chip** (`externalRefs.status`); attach via `hapi link-pr` / MCP `link_pr` | Lifecycle [§ Session titles and PR chips](../tooling/feature-work-lifecycle.md#session-titles-and-pr-chips-no-status-emoji) |
 | Local Pi coding agent (5090 / oos-linux) | New Session → **Pi**; backend `oos-llm` VIP | [`pi-local-coding-agent.md`](./pi-local-coding-agent.md) |
 | Agent mangles `tiann`/`oos-linux`/MagicDNS doubles | Free-recall / tokenization hazard - not HAPI pipe. **Outside-Cursor control done (2026-07-24): native claude+codex 0/27 drops** | [`2026-07-22-doubled-character-free-recall.md`](../plans/2026-07-22-doubled-character-free-recall.md) + [outside-cursor results](../plans/2026-07-22-doubled-character-free-recall-outside-cursor-results.md) |
 
@@ -92,18 +93,34 @@ Requires **GitHub CLI ≥ 2.80** from the **official** apt repo (`cli.github.com
 hapi-meta-daily.sh              # classify → chip status → strip title emoji → ping → queue
 hapi-meta-daily.sh --dry-run    # decide + print only; no hub/state writes
 hapi-meta-daily.sh --no-ping    # strip + queue, never ping (safe re-run)
+hapi-meta-daily.sh --no-ping --emit-events  # daytime refresh (chips + inbox; no peer pings)
 hapi-meta-daily.sh --backfill-refs [--apply]  # one-shot session↔PR externalRefs
 hapi-meta-daily.sh --json       # machine-readable plan (pure JSON on stdout)
 hapi-meta-daily.sh --pr 75      # force a single (e.g. low-numbered) upstream PR
 ```
+
+**Machine timers (oos-linux / this estate only — fork tooling, not Tier-1, not upstream):**
+
+```bash
+sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh
+# optional: --run-now   one quiet refresh after enable
+#          --disable   stop + disable both timers
+```
+
+| Timer | When (host TZ; oos = UTC) | Command |
+|-------|---------------------------|---------|
+| `hapi-meta-daily.timer` | 08:00 + up to 15m random delay | full Meta (pings allowed) |
+| `hapi-meta-daily-refresh.timer` | every 45m 09:00–21:45 | `--no-ping --emit-events` |
+
+Units live under `scripts/tooling/systemd/hapi-meta-daily*`. Optional env: `~/.hapi/meta-daily.env`. Chip UI never live-queries GitHub; if `statusCheckedAt` is older than **2h** the chip mutes to `?` (stale honesty). Logs: `journalctl -u hapi-meta-daily -u hapi-meta-daily-refresh`.
 
 What it does, idempotently:
 
 1. **Discovers** the union of open `heavygee` PRs on `tiann/hapi`, recently-merged tracked PRs (last 7d), and every PR-tagged HAPI session on the local hub (`:3006`).
 2. **Classifies each PR once** via `hapi-pr-emoji-batch.sh` → `lib/pr-emoji-core.sh`.
 3. **Caches status on the chip** (`externalRefs.status` / `statusCheckedAt` / `statusAction`) for attached sessions.
-4. **Strips leading status emoji** from titles of chipped sessions (chip owns health — ADR D8). Does **not** write emoji into titles anymore.
-5. **Pings only when actionable** (see policy) — state-gated so a second run the same morning is a no-op.
+4. **Strips leading status emoji** from titles of chipped sessions (chip owns health — ADR D8). Does **not** write emoji into titles anymore. **Agents must not put ✅/🔁/⚠️/📝/🔧 back into titles** after a strip or ping.
+5. **Pings only when actionable** (see policy) — state-gated so a second run the same morning is a no-op. Ping text tells peers the chip status changed; it does **not** ask them to keep emoji in the title.
 6. **Reads GitHub notifications** for both repos since a stored cursor (`all=true`, actionable reasons only: comment/mention/review_requested/state_change/…) and folds new human comms into the queue.
 7. Prints a sorted **action queue** (⚠️ / 🔧 wave / orphans / inactive / new comms) + the non-automated next steps.
 
@@ -126,7 +143,7 @@ What it does, idempotently:
 
 Lower-level primitives: `hapi-pr-emoji-batch.sh` (pure classifier → JSON). `hapi-pr-session-emoji.sh` is **deprecated** (title-emoji rewrites retired; exits 2 unless `HAPI_ALLOW_LEGACY_EMOJI_SWEEP=1`). Shared engine: `lib/pr-emoji-core.sh`; unit tests in `lib/pr-emoji-core.test.sh` + `hapi-meta-daily.test.sh`.
 
-**Overseer relationship:** the CLI **actuates** (rename/ping), **surfaces** a queue, and can emit contribution-state transitions as channel SystemEvents with **`--emit-events`** (default off). Session-bound transitions promote into the operator inbox; peer pings remain independently gated. First chatty corpus dogfooded 2026-07-25; steady-state rerun emitted nothing. Principle: [`docs/plans/2026-07-25-contribution-state-as-overseer-sensor.md`](../plans/2026-07-25-contribution-state-as-overseer-sensor.md). Live ingest + dogfood receipt: [`docs/plans/2026-07-25-contrib-state-event-ingest-spec.md`](../plans/2026-07-25-contrib-state-event-ingest-spec.md). Ancestor framing: session [State indicators based on PR state](/sessions/fc561649-e783-4a56-be5e-3ca7511c1663).
+**Overseer relationship:** the CLI **actuates** (chip status cache + strip leftover title emoji + policy-ping), **surfaces** a queue, and can emit contribution-state transitions as channel SystemEvents with **`--emit-events`** (default off). Session-bound transitions promote into the operator inbox; peer pings remain independently gated. First chatty corpus dogfooded 2026-07-25; steady-state rerun emitted nothing. Principle: [`docs/plans/2026-07-25-contribution-state-as-overseer-sensor.md`](../plans/2026-07-25-contribution-state-as-overseer-sensor.md). Live ingest + dogfood receipt: [`docs/plans/2026-07-25-contrib-state-event-ingest-spec.md`](../plans/2026-07-25-contrib-state-event-ingest-spec.md). Ancestor framing: session [State indicators based on PR state](/sessions/fc561649-e783-4a56-be5e-3ca7511c1663).
 
 ---
 

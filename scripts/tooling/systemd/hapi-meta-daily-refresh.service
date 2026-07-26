@@ -1,0 +1,30 @@
+# Daytime Meta refresh — chip cache + optional channel events; never ping peers.
+#
+# Fork-local. Install: sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh
+
+[Unit]
+Description=HAPI Meta PR watcher (daytime refresh — no peer pings)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/home/heavygee/.hapi/settings.json
+ConditionPathExists=/home/heavygee/coding/hapi/scripts/tooling/hapi-meta-daily.sh
+
+[Service]
+Type=oneshot
+User=heavygee
+Group=heavygee
+Nice=10
+Environment=HOME=/home/heavygee
+Environment=USER=heavygee
+Environment=PATH=/home/heavygee/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HAPI_HOST=http://127.0.0.1:3006
+Environment=HAPI_PRIMARY=/home/heavygee/coding/hapi
+Environment=HAPI_SETTINGS=/home/heavygee/.hapi/settings.json
+EnvironmentFile=-/home/heavygee/.hapi/meta-daily.env
+WorkingDirectory=/home/heavygee/coding/hapi
+ExecStartPre=/usr/bin/mkdir -p /home/heavygee/.local/state/hapi
+ExecStart=/usr/bin/flock -w 600 /home/heavygee/.local/state/hapi/meta-daily.lock \
+    /home/heavygee/coding/hapi/scripts/tooling/hapi-meta-daily.sh --no-ping --emit-events
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hapi-meta-daily-refresh

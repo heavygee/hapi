@@ -182,14 +182,29 @@ Manifest format, atomic swap mechanics, DB jiu-jitsu: [`driver-soup.md`](./drive
 
 ---
 
+## Session titles and PR chips (no status emoji)
+
+**PR health lives on the session chip** (`metadata.externalRefs.status`), not in the title. ADR D8 / tiann/hapi#1163.
+
+| Do | Don't |
+|----|-------|
+| Title = workstream name: `PR #1163: opt-in awareness` or `Peer #1085: worktree hang` | Prefix titles with `✅` `🔁` `⚠️` `📝` `🔧` (or `?`) for CI/health |
+| Attach with `hapi link-pr <url\|owner/repo#N>`, MCP `link_pr`, or the session **Link PR** dialog (requires Settings → GitHub PR awareness) | Rely on title scraping as the durable bind |
+| Read status from the chip / Meta action queue / `hapi-pr-status <N>` | Re-encode green/red into the title with `change_title` |
+| Let Meta strip leftover leading status emoji on chipped sessions | Run deprecated `hapi-pr-session-emoji.sh` (exits 2 unless escape hatch) |
+
+Daily classify + chip cache + pings: `./scripts/tooling/hapi-meta-daily.sh` (see [`docs/operator/AGENTS.md`](../operator/AGENTS.md) § Meta PR watcher). On this estate, systemd timers run morning full Meta + daytime quiet refresh; chip UI mutes to `?` when `statusCheckedAt` is older than 2h (cache honesty — no live GitHub from the browser).
+
+---
+
 ## After upstream merge (fleet cleanup — meta sweep MUST advise this)
 
-When a PR merges on `tiann/hapi`, do **not** stop at "congrats, archive." The estate still carries a soup layer and a worktree until someone removes them.
+When a PR merges on `tiann/hapi`, do **not** stop at "congrats, archive yourself." The estate still carries a soup layer and a worktree until someone removes them — and self-archive mid-turn leaves untidy tool UI.
 
 ### Sequence (accurate)
 
 ```text
-1. Meta / emoji sweep notifies the responsible HAPI session (🔧 MERGED)
+1. Meta daily notifies the responsible HAPI session (chip status → merged; ping)
 2. That peer drops their layer(s) from ~/.config/hapi/driver-manifest.yaml
 3. That peer cleans worktree + local/remote branch
 4. When ALL merged peers in the wave report cleanup done → ONE rematerialize
@@ -197,27 +212,44 @@ When a PR merges on `tiann/hapi`, do **not** stop at "congrats, archive." The es
 
 | Step | Who | What |
 |------|-----|------|
-| **1. Notify** | Meta / orchestrator on sweep | Reopen named PR session if archived; post MERGED brief; rename title to `🔧PR #N MERGED: …`. Emoji batch action string encodes the checklist. |
+| **1. Notify** | Meta / orchestrator on sweep | Reopen named PR session if archived; post MERGED brief (chip already shows `merged` / 🔧). Keep title as `PR #N: …` — **do not** rename to `🔧PR #N MERGED: …`. Classifier action string encodes the cleanup checklist. |
 | **2. Drop soup layer(s)** | **Feature peer** (owner of the layer) | Edit `~/.config/hapi/driver-manifest.yaml`: remove the `- branch:` entry (leave a `# DROPPED YYYY-MM-DD: … MERGED as #N` comment). Do **not** hand-edit `~/coding/hapi/driver`. Do **not** each fire a full rebuild during a multi-PR merge wave. |
 | **3. Clean worktree + branch** | **Feature peer** | From mirror: `git worktree remove ~/coding/hapi/worktrees/<name>` (or `--force` if dirty junk only); delete local branch; `git push origin --delete <branch>` when the remote tip is fully in `upstream/main`. Confirm with `hapi-branch-audit --quiet` (expect no `MERGED` row for that branch). |
 | **4. Rematerialize soup** | Meta / orchestrator **or** operator — **once per wave** | After peers ack cleanup (or solo merge = wave of one): `hapi-sync-fork-main` + `git push origin main` → `hapi-driver-status --quiet` → `hapi-driver-rebuild --build-web --verify` → `hapi-verify-web-dist` → `hapi-restart-hub` if hub/cli changed. |
+| **5. Archive / idle the peer session** | Prefer **meta** after peer acks idle; peer only if turn is already done | See **Stand down without self-immolation** below. |
+
+### Stand down without self-immolation
+
+**Do not `POST /api/sessions/<your-own-id>/archive` (or equivalent) from inside your own active turn.**
+
+Self-archive mid-turn yanks the runner while a tool call is still on the chat surface. The UI often leaves that block with a running duration spinner (e.g. `47.9s`) even after the curl returned — same class of failure as restarting the hub under live agents.
+
+Correct stand-down:
+
+1. Finish cleanup tools (manifest drop, worktree/branch delete) and reply to meta that steps 1–3 are done.
+2. **End the turn cleanly** — no further tool calls that mutate this session's lifecycle.
+3. Let the session go idle / inactive naturally (`thinking` / WORKING clear).
+4. **Meta** (or the operator) archives from **outside** when the session is idle. Peer may archive themselves only in a follow-up turn that does **nothing else** — no Shell/tool chrome after the archive call.
+
+Hard rule for meta briefs: say **"ack cleanup, then idle — do not self-archive mid-turn; meta will archive when idle"** — not bare "stand down / archive this session."
 
 ### Why not "each peer rebuilds after drop"?
 
 Manifest edits during a merge wave must settle first. Parallel peer rebuilds thrash the flock, race mid-edit manifests, and rebuild N times for one tip. **Peers clean; one agent rematerializes.** Solo merge (one PR): same agent may do drop + rematerialize in one turn — "all" is trivially one.
 
-### Meta sweep checklist (when YOU see 🔧 / `merged: true`)
+### Meta sweep checklist (when YOU see chip `merged` / 🔧 / `merged: true`)
 
-Advise the peer session with all four beats — not just "stand down":
+Advise the peer session with all five beats — not just "stand down":
 
-1. Congrats + link to merged PR / tip SHA if known
+1. Congrats + link to merged PR / tip SHA if known (chip already carries merged status — leave the title alone)
 2. **Drop your soup layer(s)** now (paths/branch names if known from manifest)
 3. **Remove worktree + delete branch** (`hapi-branch-audit` until clean)
 4. Reply here when done — **do not** rematerialize yourself if other merges in this wave are still cleaning; meta will rebuild once the wave is clear
+5. **Idle cleanly** — do **not** self-archive mid-turn (orphans tool-call UI). Meta archives after ack when the session is idle.
 
-If the peer has **no** soup layer (never promoted): skip step 2; still do worktree/branch cleanup.
+If the peer has **no** soup layer (never promoted): skip step 2; still do worktree/branch cleanup + idle rule.
 
-Hard rules unchanged: never merge on `tiann/hapi`; never `cp`/`rsync` into `driver/web/dist`; never stack-switch from agent shell.
+Hard rules unchanged: never merge on `tiann/hapi`; never `cp`/`rsync` into `driver/web/dist`; never stack-switch from agent shell; never self-archive mid-turn.
 
 Manifest / rebuild mechanics: [`driver-soup.md`](./driver-soup.md) § When upstream moves.
 
@@ -293,9 +325,9 @@ Peers **must** assess tier before capture ([`peer-stack.md` § Evidence modality
 
 1. **Implement** in worktree; conventional commits on feature branch
 2. **Push** feature branch to `heavygee/hapi` (or fork remote)
-3. **Peer gates** (§6) — all green before operator browser test
+3. **Peer gates** (§6) — all green before operator browser test (`hapi-pr-status <N>` once a PR exists)
 4. **Operator dogfood** (§7) — explicit approval
-5. **Upstream PR** (§8) — `gh pr create` → `tiann/hapi` `main`, `Fixes #NNN`, cold review, post-push monitor
+5. **Upstream PR** (§8) — `gh pr create` → `tiann/hapi` `main`, `Fixes #NNN`, cold review, post-push monitor. Then **attach** to this HAPI session (`hapi link-pr …` / MCP `link_pr` / Link PR dialog). Title stays `PR #N: <workstream>` with **no** status emoji; the chip shows health after Meta classify.
 6. **Soup promotion** (optional / parallel) — manifest layer + rebuild tree above — **after** branch is merge-ready, not instead of peer proof
 
 **Fork-only files never in upstream PR:** `docs/operator/`, `docs/plans/`, `CLAUDE.md`, `.cursor/`, operator tooling under `scripts/tooling/` unless upstreamable separately.
