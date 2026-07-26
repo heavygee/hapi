@@ -565,6 +565,45 @@ out="$(run --no-ping 2>&1)"
 check "chip-strip apply: PATCH fired for #100" "grep -q 'aaaaaaaa' '$WORK/renames.log'"
 check "chip-strip apply: body is emoji-free title" "grep -q 'PR #100: needs work' '$WORK/renames.log'"
 
+# ============ 16. --pr N: only that PR; no set -u crash on other chipped sessions ============
+rm -f "$WORK/state.json" "$WORK/renames.log" "$WORK/put-refs.log"
+cat >"$WORK/curl" <<EOF
+#!/usr/bin/env bash
+args="\$*"
+if [[ "\$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
+if [[ "\$args" == *"-X PATCH"* ]]; then
+    echo "\$args" >> "$WORK/renames.log"
+    prev=""
+    for a in "\$@"; do
+        if [[ "\$prev" == "-d" ]]; then echo "\$a" >> "$WORK/renames.log"; fi
+        prev="\$a"
+    done
+    echo '{"ok":true}'; exit 0
+fi
+if [[ "\$args" == *"-X PUT"* && "\$args" == *"/external-refs"* ]]; then
+    echo "\$args" >> "$WORK/put-refs.log"
+    echo '{"ok":true,"externalRefs":[]}'; exit 0
+fi
+if [[ "\$args" == *"/api/sessions?limit=500"* ]]; then
+cat <<'JSON'
+{"sessions":[
+ {"id":"aaaaaaaa-1111","active":true,"metadata":{"name":"⚠️PR #100: needs work","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":100,"url":"https://github.com/tiann/hapi/pull/100","role":"primary","source":"inferred","linkedAt":1}]}},
+ {"id":"bbbbbbbb-2222","active":true,"metadata":{"name":"PR #200: green thing","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":200,"url":"https://github.com/tiann/hapi/pull/200","role":"primary","source":"inferred","linkedAt":1}]}}
+]}
+JSON
+exit 0
+fi
+echo '{}'; exit 0
+EOF
+chmod +x "$WORK/curl"
+
+out="$(run --pr 100 --no-ping 2>&1)" || status=$?
+status=${status:-0}
+check "--pr: exits 0 (no set -u on other chipped sessions)" "[[ \$status -eq 0 ]]"
+check "--pr: classifies only #100" "grep -qE 'classifying 1 PR|NEEDS WORK' <<<\"\$out\""
+check "--pr: strips emoji on #100 session" "grep -q 'aaaaaaaa' <<<\"\$out\" && grep -q 'chip owns status' <<<\"\$out\""
+check "--pr: does not touch #200 title" "! grep -q 'bbbbbbbb' '$WORK/renames.log' 2>/dev/null"
+
 echo ""
 echo "hapi-meta-daily.test.sh: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]] || exit 1

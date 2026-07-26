@@ -544,11 +544,21 @@ main() {
         name="${SESS_NAME[$sid8]}"
         active="${SESS_ACTIVE[$sid8]}"
         prs="${SESS_PRS[$sid8]}"
+        # --pr N only classifies N; skip sessions that do not reference it.
+        # Without this, set -u dies on PR_EMOJI[$other] for every other chipped session.
+        if [[ -n "$PR_ONLY" ]]; then
+            local hit_pr=0
+            for p in $prs; do
+                [[ "$p" == "$PR_ONLY" ]] && hit_pr=1 && break
+            done
+            [[ "$hit_pr" -eq 1 ]] || continue
+        fi
         local emojis=() acts="" combined pre=0 first_pr=""
         for p in $prs; do
-            emojis+=("${PR_EMOJI[$p]}")
+            # Default "?" — same contract as chip status cache (preserve last good).
+            emojis+=("${PR_EMOJI[$p]:-?}")
             [[ -z "$first_pr" ]] && first_pr="$p"
-            local a="${PR_ACTION[$p]}"
+            local a="${PR_ACTION[$p]:-}"
             [[ -n "$a" ]] && acts+="#$p: $a"$'\n'
         done
         combined="$(md_combined_emoji "${emojis[@]}")"
@@ -831,13 +841,14 @@ _do_ping() {  # <sid8> <emoji> <prs> <acts>
         🔧) state_desc="MERGED — clean up, idle (no mid-turn self-archive)" ;;
         *) state_desc="see title" ;;
     esac
-    local msg="Meta daily — session is now **${emoji}** (${state_desc}).
+    local msg="Meta daily — PR status is now **${emoji}** (${state_desc}).
 
 Tracked PR(s): #$(echo "$prs" | tr ' ' ',')
 
 ${acts}
+Status lives on the **session PR chip** (\`externalRefs.status\`), not in the title. Do **not** put ✅/🔁/⚠️/📝/🔧 in your session title; leave the title as \`PR #N: …\` / \`Peer #N: …\`. If the chip is missing, run \`hapi link-pr <url>\` (or MCP \`link_pr\`) with awareness on.
 Legend: ✅ green/wait · 🔁 CI in flight · ⚠️ fix threads/CI/rebase · 📝 pre-PR · 🔧 merged (drop soup layer, clean worktree/branch, ack; no mid-turn self-archive).
-Canon: docs/operator/AGENTS.md § Meta PR watcher"
+Canon: docs/operator/AGENTS.md § Meta PR watcher + feature-work-lifecycle.md § Session titles and PR chips"
     if [[ "$DRY_RUN" -eq 1 ]]; then
         echo "    [dry-run] ping $sid8 ($emoji)" >&2
         return 0
