@@ -164,6 +164,6 @@ Meta's daily classify writes these onto existing refs (full `PUT external-refs`)
 
 **Transition (complete 2026-07-25):** Meta no longer writes status emoji into titles. For sessions with a chip it **strips** a leading status emoji once (`PR #N: …` / `Peer #N: …` kept). `hapi-pr-session-emoji.sh` is deprecated (escape hatch: `HAPI_ALLOW_LEGACY_EMOJI_SWEEP=1`).
 
-**Stale honesty (2026-07-26):** browser never live-queries GitHub. If `statusCheckedAt` is older than **2 hours**, the chip mutes tone and shows `?` (tooltip includes checked time + stale). Estate refresh: fork-local `hapi-meta-daily.timer` (morning pings) + `hapi-meta-daily-refresh.timer` (daytime `--no-ping --emit-events` every 45m) — see `install-hapi-meta-daily-timer.sh`.
+**Stale honesty (2026-07-26):** browser never live-queries GitHub. If `statusCheckedAt` is older than **2 hours**, the chip mutes tone and shows `?` (tooltip includes checked time + stale). Estate refresh: fork-local `hapi-meta-daily.timer` (morning pings) + `hapi-meta-daily-refresh.timer` (**every 45m 24/7** `--no-ping --emit-events`, odd-hours safe) — see `install-hapi-meta-daily-timer.sh`.
 
 **Not a second upstream PR.** Awareness + attach + chip status ship together in [tiann/hapi#1163](https://github.com/tiann/hapi/pull/1163).

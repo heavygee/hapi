@@ -193,7 +193,7 @@ Manifest format, atomic swap mechanics, DB jiu-jitsu: [`driver-soup.md`](./drive
 | Read status from the chip / Meta action queue / `hapi-pr-status <N>` | Re-encode green/red into the title with `change_title` |
 | Let Meta strip leftover leading status emoji on chipped sessions | Run deprecated `hapi-pr-session-emoji.sh` (exits 2 unless escape hatch) |
 
-Daily classify + chip cache + pings: `./scripts/tooling/hapi-meta-daily.sh` (see [`docs/operator/AGENTS.md`](../operator/AGENTS.md) § Meta PR watcher). On this estate, systemd timers run morning full Meta + daytime quiet refresh; chip UI mutes to `?` when `statusCheckedAt` is older than 2h (cache honesty — no live GitHub from the browser).
+Daily classify + chip cache + pings: `./scripts/tooling/hapi-meta-daily.sh` (see [`docs/operator/AGENTS.md`](../operator/AGENTS.md) § Meta PR watcher). On this estate, systemd timers run morning full Meta + quiet refresh every 45m **24/7** (odd-hours safe); chip UI mutes to `?` when `statusCheckedAt` is older than 2h (cache honesty — no live GitHub from the browser).
 
 ---
 

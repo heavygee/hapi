@@ -48,7 +48,7 @@ Feature agents should **read the relevant doc below at session start**; meta bot
 | `scripts/tooling/verify-hapi-operator-lock.sh` | Verify lock install (`--with-sudo` on hub hosts) |
 | `scripts/tooling/install-gh-wrapper.sh` | Install `~/.local/bin/gh` wrapper — blocks fork-only diffs targeting `tiann/hapi` (#971 class) |
 | `scripts/tooling/hapi-meta-daily.sh` | **Daily Meta PR watcher entrypoint** — discover → classify → chip status cache → strip title emoji (chipped) → policy-ping → action queue; optional chatty contribution-state events (`--emit-events`, default off; also `--dry-run`, `--no-ping`, `--json`) |
-| `scripts/tooling/install-hapi-meta-daily-timer.sh` | **Machine-local timers** (fork-only) — morning full Meta + daytime `--no-ping --emit-events` every 45m; units in `scripts/tooling/systemd/hapi-meta-daily*` |
+| `scripts/tooling/install-hapi-meta-daily-timer.sh` | **Machine-local timers** (fork-only) — morning full Meta + quiet `--no-ping --emit-events` every 45m **24/7**; units in `scripts/tooling/systemd/hapi-meta-daily*` |
 | `scripts/tooling/hapi-pr-emoji-batch.sh` | Pure PR classifier → per-PR JSON (`--table`); shared engine |
 | `scripts/tooling/hapi-pr-session-emoji.sh` | **Deprecated** — title-emoji fleet retitle retired (ADR D8); use `hapi-meta-daily.sh` |
 | `scripts/tooling/lib/pr-emoji-core.sh` | Pure classify/title/ping-policy fns (unit-tested: `*.test.sh`) |
@@ -60,7 +60,7 @@ Feature agents should **read the relevant doc below at session start**; meta bot
 cd ~/coding/hapi && ./scripts/tooling/hapi-meta-daily.sh          # the whole dance
 cd ~/coding/hapi && ./scripts/tooling/hapi-meta-daily.sh --dry-run # preview, no writes
 cd ~/coding/hapi && ./scripts/tooling/hapi-meta-daily.sh --emit-events --no-ping # train Overseer inbox without interrupting peers
-sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh        # oos timers (morning + daytime)
+sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh        # oos timers (morning pings + 24/7 quiet refresh)
 ```
 
 **Scope:** `tiann/hapi` upstream PRs only. Non-HAPI sessions (YAACC, other repos) are excluded from sweeps.

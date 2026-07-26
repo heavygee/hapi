@@ -93,7 +93,7 @@ Requires **GitHub CLI ≥ 2.80** from the **official** apt repo (`cli.github.com
 hapi-meta-daily.sh              # classify → chip status → strip title emoji → ping → queue
 hapi-meta-daily.sh --dry-run    # decide + print only; no hub/state writes
 hapi-meta-daily.sh --no-ping    # strip + queue, never ping (safe re-run)
-hapi-meta-daily.sh --no-ping --emit-events  # daytime refresh (chips + inbox; no peer pings)
+hapi-meta-daily.sh --no-ping --emit-events  # quiet refresh (chips + inbox; no peer pings)
 hapi-meta-daily.sh --backfill-refs [--apply]  # one-shot session↔PR externalRefs
 hapi-meta-daily.sh --json       # machine-readable plan (pure JSON on stdout)
 hapi-meta-daily.sh --pr 75      # force a single (e.g. low-numbered) upstream PR
@@ -110,9 +110,9 @@ sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh
 | Timer | When (host TZ; oos = UTC) | Command |
 |-------|---------------------------|---------|
 | `hapi-meta-daily.timer` | 08:00 + up to 15m random delay | full Meta (pings allowed) |
-| `hapi-meta-daily-refresh.timer` | every 45m 09:00–21:45 | `--no-ping --emit-events` |
+| `hapi-meta-daily-refresh.timer` | every **45m 24/7** (`OnBootSec=3min` + `OnUnitActiveSec=45min`) | `--no-ping --emit-events` |
 
-Units live under `scripts/tooling/systemd/hapi-meta-daily*`. Optional env: `~/.hapi/meta-daily.env`. Chip UI never live-queries GitHub; if `statusCheckedAt` is older than **2h** the chip mutes to `?` (stale honesty). Logs: `journalctl -u hapi-meta-daily -u hapi-meta-daily-refresh`.
+Quiet refresh is round-the-clock on purpose (odd hours) — max gap ~45m so chips stay under the **2h** `statusCheckedAt` mute. Morning timer is the only one that may ping peers. Units: `scripts/tooling/systemd/hapi-meta-daily*`. Optional env: `~/.hapi/meta-daily.env`. Chip UI never live-queries GitHub. Logs: `journalctl -u hapi-meta-daily -u hapi-meta-daily-refresh`.
 
 What it does, idempotently:
 

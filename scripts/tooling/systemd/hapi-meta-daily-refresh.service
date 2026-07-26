@@ -1,9 +1,9 @@
-# Daytime Meta refresh — chip cache + optional channel events; never ping peers.
+# Quiet Meta refresh (24/7) — chip cache + optional channel events; never ping peers.
 #
 # Fork-local. Install: sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh
 
 [Unit]
-Description=HAPI Meta PR watcher (daytime refresh — no peer pings)
+Description=HAPI Meta PR watcher (quiet refresh — no peer pings)
 After=network-online.target
 Wants=network-online.target
 ConditionPathExists=/home/heavygee/.hapi/settings.json

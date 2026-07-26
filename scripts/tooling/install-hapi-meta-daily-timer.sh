@@ -6,7 +6,9 @@
 #
 # Schedules (host timezone — oos-linux is Etc/UTC):
 #   hapi-meta-daily.timer         — 08:00 + RandomizedDelaySec=15min (pings OK)
-#   hapi-meta-daily-refresh.timer — every 45m 09:00–21:45 (--no-ping --emit-events)
+#   hapi-meta-daily-refresh.timer — every 45m 24/7 (--no-ping --emit-events)
+#                                   OnBootSec=3min then OnUnitActiveSec=45min
+#                                   so chips never hit the 2h stale mute (odd hours)
 #
 # Usage:
 #   sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh
@@ -84,7 +86,7 @@ systemctl list-timers 'hapi-meta-daily*' --all --no-pager
 echo
 echo "Manual run:"
 echo "  sudo systemctl start hapi-meta-daily.service            # morning (pings)"
-echo "  sudo systemctl start hapi-meta-daily-refresh.service    # daytime (quiet)"
+echo "  sudo systemctl start hapi-meta-daily-refresh.service    # quiet refresh (24/7)"
 echo "  journalctl -u hapi-meta-daily -u hapi-meta-daily-refresh -n 50 --no-pager"
 echo
 echo "Optional env overrides: /home/heavygee/.hapi/meta-daily.env"
@@ -92,7 +94,7 @@ echo "Disable: sudo bash $0 --disable"
 
 if [[ "$DO_RUN_NOW" -eq 1 ]]; then
     echo
-    echo "Starting one daytime refresh now..."
+    echo "Starting one quiet refresh now..."
     systemctl start hapi-meta-daily-refresh.service
     systemctl --no-pager --full status hapi-meta-daily-refresh.service | head -30 || true
 fi
