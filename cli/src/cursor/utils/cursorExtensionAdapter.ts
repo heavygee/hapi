@@ -9,7 +9,6 @@ import { basename } from 'node:path';
 import {
     detectImageMimeType,
     registerGeneratedImage,
-    registerGeneratedImageFromPath,
 } from '@/modules/common/generatedImages';
 import type { InlineMediaSource } from '@/modules/common/inlineMediaSource';
 
@@ -273,6 +272,9 @@ async function registerCursorGeneratedImage(params: Record<string, unknown>) {
         ?? asString(params.image_data)
         ?? asString(params.data);
 
+    // Only inline bytes are safe here. Path-only reads would bypass the
+    // permission-gated display_image / display_video MCP tools (same class as
+    // URI-only ACP image blocks). Path support needs an explicit approval flow.
     if (imageData) {
         try {
             const bytes = Buffer.from(imageData, 'base64');
@@ -295,10 +297,10 @@ async function registerCursorGeneratedImage(params: Record<string, unknown>) {
     }
 
     if (filePath) {
-        return registerGeneratedImageFromPath({
-            path: filePath,
-            fileName: basename(filePath),
-        });
+        logger.debug(
+            '[cursor-acp] ignoring cursor/generate_image filePath without inline bytes; use display_image/display_video MCP for local paths',
+            { filePath },
+        );
     }
 
     return null;

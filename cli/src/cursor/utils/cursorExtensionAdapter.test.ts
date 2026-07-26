@@ -195,49 +195,64 @@ describe('CursorExtensionAdapter', () => {
         ]);
     });
 
-    it('registers cursor/generate_image filePath and emits generated_image', async () => {
+    it('registers cursor/generate_image base64 imageData and emits generated_image', async () => {
+        clearGeneratedImages();
+        const pngHeader = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+        const { handlers, getMessages } = createHarness();
+        await handlers.get('cursor/generate_image')!({
+            toolCallId: 'img-1',
+            description: 'App icon',
+            filePath: '/tmp/icon.png',
+            imageData: pngHeader.toString('base64'),
+        }, null);
+
+        const messages = getMessages();
+        expect(messages[0]).toMatchObject({
+            type: 'tool_call',
+            id: 'img-1',
+            name: 'CursorGenerateImage',
+            status: 'completed',
+        });
+        expect(messages[1]).toMatchObject({
+            type: 'generated_image',
+            fileName: 'icon.png',
+            mimeType: 'image/png',
+            source: {
+                ingress: 'acp',
+                flavor: 'cursor',
+                toolCallId: 'img-1',
+                toolName: 'cursor/generate_image',
+            },
+        });
+        expect(messages[2]).toMatchObject({
+            type: 'tool_result',
+            id: 'img-1',
+            status: 'completed',
+        });
+
+        const generated = messages[1];
+        expect(generated.type).toBe('generated_image');
+        if (generated.type === 'generated_image') {
+            expect(getGeneratedImage(generated.imageId)?.mimeType).toBe('image/png');
+        }
+        clearGeneratedImages();
+    });
+
+    it('does not read filePath-only generate_image (permission bypass)', async () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-cursor-gen-img-'));
         try {
-            const filePath = join(dir, 'icon.png');
-            // Minimal PNG signature — detectImageMimeType only needs the 8-byte header.
+            const filePath = join(dir, 'secret.png');
             writeFileSync(filePath, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
 
             const { handlers, getMessages } = createHarness();
             await handlers.get('cursor/generate_image')!({
-                toolCallId: 'img-1',
-                description: 'App icon',
+                toolCallId: 'img-path',
+                description: 'Must not auto-read disk',
                 filePath,
             }, null);
 
-            const messages = getMessages();
-            expect(messages[0]).toMatchObject({
-                type: 'tool_call',
-                id: 'img-1',
-                name: 'CursorGenerateImage',
-                status: 'completed',
-            });
-            expect(messages[1]).toMatchObject({
-                type: 'generated_image',
-                fileName: 'icon.png',
-                mimeType: 'image/png',
-                source: {
-                    ingress: 'acp',
-                    flavor: 'cursor',
-                    toolCallId: 'img-1',
-                    toolName: 'cursor/generate_image',
-                },
-            });
-            expect(messages[2]).toMatchObject({
-                type: 'tool_result',
-                id: 'img-1',
-                status: 'completed',
-            });
-
-            const generated = messages[1];
-            expect(generated.type).toBe('generated_image');
-            if (generated.type === 'generated_image') {
-                expect(getGeneratedImage(generated.imageId)?.mimeType).toBe('image/png');
-            }
+            expect(getMessages().map((m) => m.type)).toEqual(['tool_call', 'tool_result']);
+            expect(getMessages().some((m) => m.type === 'generated_image')).toBe(false);
         } finally {
             rmSync(dir, { recursive: true, force: true });
             clearGeneratedImages();
