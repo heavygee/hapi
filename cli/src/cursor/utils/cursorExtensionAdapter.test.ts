@@ -1,8 +1,12 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { ApiSessionClient } from '@/api/apiSession';
 import type { AgentState } from '@/api/types';
 import type { AgentMessage } from '@/agent/types';
 import type { AcpSdkBackend } from '@/agent/backends/acp';
+import { clearGeneratedImages, getGeneratedImage } from '@/modules/common/generatedImages';
 import { CursorExtensionAdapter } from './cursorExtensionAdapter';
 
 type ExtensionHandler = (params: unknown, requestId: string | number | null) => Promise<unknown>;
@@ -189,6 +193,89 @@ describe('CursorExtensionAdapter', () => {
                 status: 'in_progress'
             })
         ]);
+    });
+
+    it('registers cursor/generate_image filePath and emits generated_image', async () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-cursor-gen-img-'));
+        try {
+            const filePath = join(dir, 'icon.png');
+            // Minimal PNG signature — detectImageMimeType only needs the 8-byte header.
+            writeFileSync(filePath, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+
+            const { handlers, getMessages } = createHarness();
+            await handlers.get('cursor/generate_image')!({
+                toolCallId: 'img-1',
+                description: 'App icon',
+                filePath,
+            }, null);
+
+            const messages = getMessages();
+            expect(messages[0]).toMatchObject({
+                type: 'tool_call',
+                id: 'img-1',
+                name: 'CursorGenerateImage',
+                status: 'completed',
+            });
+            expect(messages[1]).toMatchObject({
+                type: 'generated_image',
+                fileName: 'icon.png',
+                mimeType: 'image/png',
+                source: {
+                    ingress: 'acp',
+                    flavor: 'cursor',
+                    toolCallId: 'img-1',
+                    toolName: 'cursor/generate_image',
+                },
+            });
+            expect(messages[2]).toMatchObject({
+                type: 'tool_result',
+                id: 'img-1',
+                status: 'completed',
+            });
+
+            const generated = messages[1];
+            expect(generated.type).toBe('generated_image');
+            if (generated.type === 'generated_image') {
+                expect(getGeneratedImage(generated.imageId)?.mimeType).toBe('image/png');
+            }
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+            clearGeneratedImages();
+        }
+    });
+
+    it('registers cursor/generate_image base64 imageData when filePath is absent', async () => {
+        clearGeneratedImages();
+        const pngHeader = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+        const { handlers, getMessages } = createHarness();
+        await handlers.get('cursor/generate_image')!({
+            toolCallId: 'img-2',
+            description: 'Inline bytes',
+            imageData: pngHeader.toString('base64'),
+        }, null);
+
+        const generated = getMessages().find((m) => m.type === 'generated_image');
+        expect(generated).toMatchObject({
+            type: 'generated_image',
+            mimeType: 'image/png',
+            source: {
+                ingress: 'acp',
+                flavor: 'cursor',
+                toolCallId: 'img-2',
+                toolName: 'cursor/generate_image',
+            },
+        });
+        clearGeneratedImages();
+    });
+
+    it('still emits tool_call/result when generate_image has no path or bytes', async () => {
+        const { handlers, getMessages } = createHarness();
+        await handlers.get('cursor/generate_image')!({
+            toolCallId: 'img-3',
+            description: 'No media yet',
+        }, null);
+
+        expect(getMessages().map((m) => m.type)).toEqual(['tool_call', 'tool_result']);
     });
 
     it('cancelAll resolves pending extension requests as cancelled', async () => {
