@@ -7,6 +7,7 @@ import type { AgentMessage, PlanItem } from '@/agent/types';
 import { randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
 import {
+    decodeGeneratedImageBase64,
     detectImageMimeType,
     registerGeneratedImage,
 } from '@/modules/common/generatedImages';
@@ -277,7 +278,10 @@ async function registerCursorGeneratedImage(params: Record<string, unknown>) {
     // URI-only ACP image blocks). Path support needs an explicit approval flow.
     if (imageData) {
         try {
-            const bytes = Buffer.from(imageData, 'base64');
+            const bytes = decodeGeneratedImageBase64(imageData);
+            if (!bytes) {
+                return null;
+            }
             const mimeType = detectImageMimeType(bytes);
             if (!mimeType) {
                 return null;

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { clearGeneratedImages, detectImageMimeType, detectVideoMimeType, getGeneratedImage, registerGeneratedImage, registerGeneratedImageFromAcpBlock, registerGeneratedImageFromPath } from './generatedImages'
+import { clearGeneratedImages, decodeGeneratedImageBase64, detectImageMimeType, detectVideoMimeType, getGeneratedImage, MAX_GENERATED_IMAGE_BASE64_CHARS, registerGeneratedImage, registerGeneratedImageFromAcpBlock, registerGeneratedImageFromPath } from './generatedImages'
 
 describe('generatedImages', () => {
     it('detects supported image MIME types from file bytes', () => {
@@ -90,6 +90,16 @@ describe('generatedImages', () => {
         expect(image?.mimeType).toBe('image/png')
         expect(getGeneratedImage(image!.id)?.content.subarray(0, 8)).toEqual(pngHeader.subarray(0, 8))
         clearGeneratedImages()
+    })
+
+    it('rejects oversized base64 before allocating a decoded buffer', async () => {
+        const oversized = 'A'.repeat(MAX_GENERATED_IMAGE_BASE64_CHARS + 1)
+        expect(decodeGeneratedImageBase64(oversized)).toBeNull()
+        await expect(registerGeneratedImageFromAcpBlock({
+            type: 'image',
+            mimeType: 'image/png',
+            data: oversized,
+        })).resolves.toBeNull()
     })
 
     it('ignores URI-only ACP image blocks that would read local disk without a permission prompt', async () => {

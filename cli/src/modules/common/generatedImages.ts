@@ -13,8 +13,22 @@ export type GeneratedImageMetadata = {
 }
 
 export const MAX_GENERATED_IMAGE_BYTES = 25 * 1024 * 1024
+/** Reject base64 strings that cannot fit under MAX_GENERATED_IMAGE_BYTES once decoded (+ padding). */
+export const MAX_GENERATED_IMAGE_BASE64_CHARS = Math.ceil(MAX_GENERATED_IMAGE_BYTES * 4 / 3) + 4
 const MAX_GENERATED_IMAGE_TOTAL_BYTES = 100 * 1024 * 1024
 const MAX_GENERATED_IMAGE_COUNT = 100
+
+/** Decode inline media base64 only after a cheap length gate (avoids huge Buffer allocations). */
+export function decodeGeneratedImageBase64(data: string): Buffer | null {
+    if (data.length > MAX_GENERATED_IMAGE_BASE64_CHARS) {
+        return null
+    }
+    const bytes = Buffer.from(data, 'base64')
+    if (bytes.byteLength > MAX_GENERATED_IMAGE_BYTES) {
+        return null
+    }
+    return bytes
+}
 
 const generatedImages = new Map<string, GeneratedImageMetadata>()
 let generatedImageBytes = 0
@@ -222,8 +236,8 @@ export async function registerGeneratedImageFromAcpBlock(block: unknown): Promis
     const uri = asString(block.uri ?? block.url)
 
     if (data) {
-        const bytes = Buffer.from(data, 'base64')
-        if (bytes.byteLength > MAX_GENERATED_IMAGE_BYTES) {
+        const bytes = decodeGeneratedImageBase64(data)
+        if (!bytes) {
             return null
         }
         const sniffedMimeType = detectImageMimeType(bytes)
