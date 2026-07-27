@@ -6,7 +6,9 @@
 #      tracked PRs, and every PR-tagged HAPI session on the local hub.
 #   2. Classifies each PR ONCE (hapi-pr-emoji-batch.sh → pr-emoji-core).
 #   3. For sessions with a PR chip (externalRefs): strips leading status emoji
-#      from the title (chip owns health — ADR D8). Never writes emoji into titles.
+#      and "PR #N:" prefixes from the title (chip owns identity + health —
+#      ADR D8+). Never writes emoji or PR-number prefixes into titles.
+#      Keeps "Peer #N:" incubating titles (no issue chip yet).
 #   4. Pings a session ONLY when policy says it is actionable and not noise
 #      (transition, changed ⚠️/🔧 instruction, or a due reminder) — state-gated
 #      so a second run the same morning is a no-op.
@@ -592,15 +594,17 @@ main() {
             fi
         fi
 
-        # Title policy (ADR D8 transition complete): chip owns health.
-        # Chipped sessions → strip leading status emoji once; never write emoji titles.
-        # Unchipped sessions → leave title alone (do not invent ✅/⚠️ prefixes).
+        # Title policy (ADR D8+): chip owns PR identity + health.
+        # Chipped sessions → strip leading status emoji AND "PR #N:" prefixes once;
+        # never write emoji or PR-number prefixes into titles.
+        # Unchipped sessions → leave title alone (do not invent ✅/PR # prefixes).
+        # "Peer #N:" incubating titles are kept (no issue chip yet).
         local new_title="$name"
         if [[ "$has_chip" -eq 1 ]]; then
-            new_title="$(pec_strip_leading_emojis "$name")"
-            if [[ "$new_title" != "$name" ]]; then
+            new_title="$(pec_strip_pr_number_prefixes "$name")"
+            if [[ -n "$new_title" && "$new_title" != "$name" ]]; then
                 hub_rename "$jwt" "$sid" "$new_title"
-                Q_RENAMED+=("$sid8  $name  →  $new_title  [chip owns status]")
+                Q_RENAMED+=("$sid8  $name  →  $new_title  [chip owns identity]")
             fi
         fi
         if [[ "$refs_cur" != "[]" && "$refs_cur" != "null" && -n "$refs_cur" ]]; then

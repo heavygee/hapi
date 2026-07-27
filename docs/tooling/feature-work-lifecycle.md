@@ -182,18 +182,19 @@ Manifest format, atomic swap mechanics, DB jiu-jitsu: [`driver-soup.md`](./drive
 
 ---
 
-## Session titles and PR chips (no status emoji)
+## Session titles and PR chips
 
-**PR health lives on the session chip** (`metadata.externalRefs.status`), not in the title. ADR D8 / tiann/hapi#1163.
+**PR identity + health live on the session chip** (`metadata.externalRefs`), not in the title. ADR D8+ / tiann/hapi#1163.
 
 | Do | Don't |
 |----|-------|
-| Title = workstream name: `PR #1163: opt-in awareness` or `Peer #1085: worktree hang` | Prefix titles with `✅` `🔁` `⚠️` `📝` `🔧` (or `?`) for CI/health |
+| Title = workstream only once chipped: `opt-in awareness` | `PR #1163: opt-in awareness` (redundant with chip) |
+| Pre-PR incubating: `Peer #1085: worktree hang` until a PR exists to attach | Prefix titles with `✅` `🔁` `⚠️` `📝` `🔧` (or `?`) for CI/health |
 | Attach with `hapi link-pr <url\|owner/repo#N>`, MCP `link_pr`, or the session **Link PR** dialog (requires Settings → GitHub PR awareness) | Rely on title scraping as the durable bind |
 | Read status from the chip / Meta action queue / `hapi-pr-status <N>` | Re-encode green/red into the title with `change_title` **or** `PATCH /sessions/:id` `{name}` |
-| Let Meta strip leftover leading status emoji on chipped sessions | Run removed stub `hapi-pr-session-emoji.sh` then stop — it exits 2 and prints `hapi-meta-daily.sh [--pr N]`; run that; do **not** hand-roll title emoji |
+| Let Meta strip leftover leading status emoji **and** `PR #N:` from chipped titles | Run removed stub `hapi-pr-session-emoji.sh` then stop — it exits 2 and prints `hapi-meta-daily.sh [--pr N]`; run that; do **not** hand-roll title emoji |
 
-Daily classify + chip cache + pings: `./scripts/tooling/hapi-meta-daily.sh` (see [`docs/operator/AGENTS.md`](../operator/AGENTS.md) § Meta PR watcher). After rebase/CI flips on a babysat PR: `./scripts/tooling/hapi-meta-daily.sh --pr <N>`. On this estate, systemd timers run morning full Meta + quiet refresh every 45m **24/7** (odd-hours safe); chip UI mutes to `?` when `statusCheckedAt` is older than 2h (cache honesty — no live GitHub from the browser).
+Daily classify + chip cache + pings: `./scripts/tooling/hapi-meta-daily.sh` (see [`docs/operator/AGENTS.md`](../operator/AGENTS.md) § Meta PR watcher). After rebase/CI flips on a babysat PR: `./scripts/tooling/hapi-meta-daily.sh --pr <N>`. On this estate, systemd timers run morning full Meta + quiet refresh every 45m **24/7**; chip UI mutes to `?` when `statusCheckedAt` is older than 2h. Session-list **filters** by chip / attention state are fork follow-ups (not title search).
 
 ---
 
@@ -212,7 +213,7 @@ When a PR merges on `tiann/hapi`, do **not** stop at "congrats, archive yourself
 
 | Step | Who | What |
 |------|-----|------|
-| **1. Notify** | Meta / orchestrator on sweep | Reopen named PR session if archived; post MERGED brief (chip already shows `merged` / 🔧). Keep title as `PR #N: …` — **do not** rename to `🔧PR #N MERGED: …`. Classifier action string encodes the cleanup checklist. |
+| **1. Notify** | Meta / orchestrator on sweep | Reopen named PR session if archived; post MERGED brief (chip already shows `merged` / 🔧). Keep workstream title — **do not** rename to `🔧PR #N MERGED: …`. Classifier action string encodes the cleanup checklist. |
 | **2. Drop soup layer(s)** | **Feature peer** (owner of the layer) | Edit `~/.config/hapi/driver-manifest.yaml`: remove the `- branch:` entry (leave a `# DROPPED YYYY-MM-DD: … MERGED as #N` comment). Do **not** hand-edit `~/coding/hapi/driver`. Do **not** each fire a full rebuild during a multi-PR merge wave. |
 | **3. Clean worktree + branch** | **Feature peer** | From mirror: `git worktree remove ~/coding/hapi/worktrees/<name>` (or `--force` if dirty junk only); delete local branch; `git push origin --delete <branch>` when the remote tip is fully in `upstream/main`. Confirm with `hapi-branch-audit --quiet` (expect no `MERGED` row for that branch). |
 | **4. Rematerialize soup** | Meta / orchestrator **or** operator — **once per wave** | After peers ack cleanup (or solo merge = wave of one): `hapi-sync-fork-main` + `git push origin main` → `hapi-driver-status --quiet` → `hapi-driver-rebuild --build-web --verify` → `hapi-verify-web-dist` → `hapi-restart-hub` if hub/cli changed. |
@@ -327,7 +328,7 @@ Peers **must** assess tier before capture ([`peer-stack.md` § Evidence modality
 2. **Push** feature branch to `heavygee/hapi` (or fork remote)
 3. **Peer gates** (§6) — all green before operator browser test (`hapi-pr-status <N>` once a PR exists)
 4. **Operator dogfood** (§7) — explicit approval
-5. **Upstream PR** (§8) — `gh pr create` → `tiann/hapi` `main`, `Fixes #NNN`, cold review, post-push monitor. Then **attach** to this HAPI session (`hapi link-pr …` / MCP `link_pr` / Link PR dialog). Title stays `PR #N: <workstream>` with **no** status emoji; the chip shows health after Meta classify.
+5. **Upstream PR** (§8) — `gh pr create` → `tiann/hapi` `main`, `Fixes #NNN`, cold review, post-push monitor. Then **attach** to this HAPI session (`hapi link-pr …` / MCP `link_pr` / Link PR dialog). Title = workstream only (no `PR #N:` — chip shows identity + health after Meta classify).
 6. **Soup promotion** (optional / parallel) — manifest layer + rebuild tree above — **after** branch is merge-ready, not instead of peer proof
 
 **Fork-only files never in upstream PR:** `docs/operator/`, `docs/plans/`, `CLAUDE.md`, `.cursor/`, operator tooling under `scripts/tooling/` unless upstreamable separately.

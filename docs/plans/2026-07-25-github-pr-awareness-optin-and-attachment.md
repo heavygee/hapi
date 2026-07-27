@@ -164,8 +164,10 @@ T1+T2 are the ones that unblock everything else and are worth landing together. 
 
 Meta's daily classify writes these onto existing refs (full `PUT external-refs`). Chip renders emoji + `#N` and tones by status. Browser never live-queries GitHub.
 
-**Transition (complete 2026-07-25):** Meta no longer writes status emoji into titles. For sessions with a chip it **strips** a leading status emoji once (`PR #N: …` / `Peer #N: …` kept). `hapi-pr-session-emoji.sh` is a **removed stub** (exits 2 → run `hapi-meta-daily.sh`; escape hatch deleted 2026-07-27).
+**Transition (complete 2026-07-25):** Meta no longer writes status emoji into titles. For sessions with a chip it **strips** a leading status emoji once. `hapi-pr-session-emoji.sh` is a removed stub.
 
-**Stale honesty (2026-07-26):** browser never live-queries GitHub. If `statusCheckedAt` is older than **2 hours**, the chip mutes tone and shows `?` (tooltip includes checked time + stale). Estate refresh: fork-local `hapi-meta-daily.timer` (morning pings) + `hapi-meta-daily-refresh.timer` (**every 45m 24/7** `--no-ping --emit-events`, odd-hours safe) — see `install-hapi-meta-daily-timer.sh`.
+**Title identity (2026-07-27):** Meta also strips leading `PR #N:` / `PR #N/#M:` prefixes from chipped sessions — chip owns identity. Titles become workstream-only. `Peer #N:` incubating titles are kept (no issue chip yet). Agents must not re-add `PR #N:` after strip.
+
+**Stale honesty (2026-07-26):** browser never live-queries GitHub. If `statusCheckedAt` is older than **2 hours**, the chip mutes tone and shows `?`. Estate refresh: fork-local timers (morning pings + quiet refresh every 45m 24/7) — see `install-hapi-meta-daily-timer.sh`.
 
 **Not a second upstream PR.** Awareness + attach + chip status ship together in [tiann/hapi#1163](https://github.com/tiann/hapi/pull/1163).

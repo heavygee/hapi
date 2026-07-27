@@ -22,7 +22,7 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 | Upstream PR “babysit / merge-ready” | **Prepare only — never merge on `tiann/hapi`** | § Upstream relationship — only @tiann merges upstream `main` |
 | **Daily PR sweep / "the dance"** | Run **`hapi-meta-daily.sh`** — classify → chip status cache → strip title emoji (chipped) → policy-ping → action queue. Don't reinvent it each morning. | § Meta PR watcher (below) |
 | Upstream PR **merged** (Meta daily / chip `merged`) | Notify peer → drop soup layer → clean worktree/branch → rematerialize **once** after the wave → archive when idle (peers: no mid-turn self-archive; **no** `🔧` title rewrite) | Lifecycle [§ After upstream merge](../tooling/feature-work-lifecycle.md#after-upstream-merge-fleet-cleanup--meta-sweep-must-advise-this) |
-| Session title / PR health | Title = workstream only (`PR #N: …`); health on **chip** (`externalRefs.status`); attach via `hapi link-pr` / MCP `link_pr` | Lifecycle [§ Session titles and PR chips](../tooling/feature-work-lifecycle.md#session-titles-and-pr-chips-no-status-emoji) |
+| Session title / PR health | Title = workstream only (no `PR #N:` once chipped); identity+health on **chip**; attach via `hapi link-pr` / MCP `link_pr` | Lifecycle [§ Session titles and PR chips](../tooling/feature-work-lifecycle.md#session-titles-and-pr-chips) |
 | Local Pi coding agent (5090 / oos-linux) | New Session → **Pi**; backend `oos-llm` VIP | [`pi-local-coding-agent.md`](./pi-local-coding-agent.md) |
 | Agent mangles `tiann`/`oos-linux`/MagicDNS doubles | Free-recall / tokenization hazard - not HAPI pipe. **Outside-Cursor control done (2026-07-24): native claude+codex 0/27 drops** | [`2026-07-22-doubled-character-free-recall.md`](../plans/2026-07-22-doubled-character-free-recall.md) + [outside-cursor results](../plans/2026-07-22-doubled-character-free-recall-outside-cursor-results.md) |
 
@@ -91,7 +91,7 @@ If @tiann clarifies broader (or narrower) scope, revise this section.
 Requires **GitHub CLI ≥ 2.80** from the **official** apt repo (`cli.github.com`), not Debian bookworm's community `2.23` (missing `gh pr checks --json`; caused false PASS in `hapi-pr-status`). Install/upgrade: `bash scripts/tooling/install-gh-official.sh`. Tooling refuses to run below the floor (`lib/require-gh-version.sh`).
 
 ```bash
-hapi-meta-daily.sh              # classify → chip status → strip title emoji → ping → queue
+hapi-meta-daily.sh              # classify → chip status → strip emoji + PR #N: → ping → queue
 hapi-meta-daily.sh --dry-run    # decide + print only; no hub/state writes
 hapi-meta-daily.sh --no-ping    # strip + queue, never ping (safe re-run)
 hapi-meta-daily.sh --no-ping --emit-events  # quiet refresh (chips + inbox; no peer pings)
@@ -120,7 +120,7 @@ What it does, idempotently:
 1. **Discovers** the union of open `heavygee` PRs on `tiann/hapi`, recently-merged tracked PRs (last 7d), and every PR-tagged HAPI session on the local hub (`:3006`).
 2. **Classifies each PR once** via `hapi-pr-emoji-batch.sh` → `lib/pr-emoji-core.sh`.
 3. **Caches status on the chip** (`externalRefs.status` / `statusCheckedAt` / `statusAction`) for attached sessions.
-4. **Strips leading status emoji** from titles of chipped sessions (chip owns health — ADR D8). Does **not** write emoji into titles anymore. **Agents must not put ✅/🔁/⚠️/📝/🔧 back into titles** after a strip or ping.
+4. **Strips leading status emoji and `PR #N:` prefixes** from titles of chipped sessions (chip owns identity + health — ADR D8+). Keeps `Peer #N:` incubating titles. Does **not** write emoji or PR-number prefixes into titles. **Agents must not put ✅/🔁/⚠️/📝/🔧 or `PR #N:` back into titles** after a strip or ping.
 5. **Pings only when actionable** (see policy) — state-gated so a second run the same morning is a no-op. Ping text tells peers the chip status changed; it does **not** ask them to keep emoji in the title.
 6. **Reads GitHub notifications** for both repos since a stored cursor (`all=true`, actionable reasons only: comment/mention/review_requested/state_change/…) and folds new human comms into the queue.
 7. Prints a sorted **action queue** (⚠️ / 🔧 wave / orphans / inactive / new comms) + the non-automated next steps.

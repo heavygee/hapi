@@ -37,6 +37,15 @@ eq "strip ⚠️ with VS16 + space" "$(pec_strip_leading_emojis "⚠️ PR #941:
 eq "strip 🔧" "$(pec_strip_leading_emojis "🔧PR #7: bar")" "PR #7: bar"
 eq "no emoji unchanged" "$(pec_strip_leading_emojis "PR #941: foo")" "PR #941: foo"
 
+# ---- title: strip PR #N: once chip owns identity ----
+eq "strip PR #941:" "$(pec_strip_pr_number_prefixes "PR #941: android watch")" "android watch"
+eq "strip emoji then PR" "$(pec_strip_pr_number_prefixes "✅PR #941: android watch")" "android watch"
+eq "strip multi PR #941/#923:" "$(pec_strip_pr_number_prefixes "PR #941/#923: stacked")" "stacked"
+eq "strip pr#923:" "$(pec_strip_pr_number_prefixes "pr#923: thing")" "thing"
+eq "keep Peer #1100:" "$(pec_strip_pr_number_prefixes "Peer #1100: incubating")" "Peer #1100: incubating"
+eq "strip PR leave Peer suffix" "$(pec_strip_pr_number_prefixes "PR #1087: Peer #1085: banner")" "Peer #1085: banner"
+eq "workstream-only unchanged" "$(pec_strip_pr_number_prefixes "opt-in awareness")" "opt-in awareness"
+
 # ---- title: extract PR numbers ----
 eq "extract PR #941" "$(pec_extract_pr_numbers "✅PR #941: foo" | tr '\n' ',')" "941,"
 eq "extract pr#923" "$(pec_extract_pr_numbers "pr#923 thing" | tr '\n' ',')" "923,"

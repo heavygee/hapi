@@ -122,6 +122,33 @@ pec_extract_linked_pr_numbers() {
     [[ -n "$first" ]] && echo "$first"
 }
 
+# Strip leading "PR #N:" / "PR #N/#M:" markers from a title.
+# Chip owns PR identity (ADR D8+) — titles should be workstream-only once chipped.
+# Does NOT strip "Peer #N:" (issue/workstream incubating titles stay until issue chips exist).
+pec_strip_pr_number_prefixes() {
+    local s="$1" prev
+    s="$(pec_trim_ws "$(pec_strip_leading_emojis "$s")")"
+    while true; do
+        prev="$s"
+        if [[ "$s" =~ ^[Pp][Rr][[:space:]]*#[0-9]{3,4}/#[0-9]{3,4}:[[:space:]]*(.*)$ ]]; then
+            s="${BASH_REMATCH[1]}"
+        elif [[ "$s" =~ ^[Pp][Rr][[:space:]]*#[0-9]{3,4}:[[:space:]]*(.*)$ ]]; then
+            s="${BASH_REMATCH[1]}"
+        elif [[ "$s" =~ ^pr#[0-9]{3,4}:[[:space:]]*(.*)$ ]]; then
+            s="${BASH_REMATCH[1]}"
+        elif [[ "$s" =~ ^[Pp][Rr][[:space:]]*#[0-9]{3,4}[[:space:]]+(.*)$ ]]; then
+            s="${BASH_REMATCH[1]}"
+        elif [[ "$s" =~ ^[Pp][Rr]:[[:space:]]*#?[0-9]{3,4}[[:space:]]*:?[[:space:]]*(.*)$ ]]; then
+            s="${BASH_REMATCH[1]}"
+        else
+            break
+        fi
+        s="$(pec_trim_ws "$s")"
+        [[ "$s" == "$prev" || -z "$s" ]] && break
+    done
+    printf '%s' "$s"
+}
+
 # Strip emoji + "PR #N:" / "Peer #N:" marker from a title, returning the base label.
 pec_title_base_from() {
     local name="$1" pr="$2" base marker
