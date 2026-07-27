@@ -19,8 +19,8 @@ export default function SettingsRunnerManagementPage() {
     ]
 
     return (
-        <SettingsPageContent title={t('settings.runnerMgmt.title')} description={t('settings.runnerMgmt.body')}>
-            <SettingsSection>
+        <SettingsPageContent description={t('settings.runnerMgmt.body')}>
+            <SettingsSection title={t('settings.runnerMgmt.title')}>
                 <SettingsChoiceGroup
                     label={t('settings.runnerMgmt.policyLabel')}
                     value={policy}
