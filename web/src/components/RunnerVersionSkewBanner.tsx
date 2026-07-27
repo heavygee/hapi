@@ -47,12 +47,10 @@ export function listSkewedMachines(machines: Machine[], offer: HubUpgradeOffer |
     if (!offer) {
         return []
     }
+    // Include versionHandoffDisabled (soup/rebuild-only) hosts when they trail so
+    // Restart remains visible as the escape hatch. Upgrade is disabled per-row.
     return machines.filter((machine) => (
         machine.active
-        // Soup / rebuild-only hosts advertise versionHandoffDisabled — they are
-        // not fleet-Upgrade candidates (ops decision B, 2026-07-22). Showing
-        // Upgrade for them lies: systemd keeps running hapi-runner-from-active.
-        && machine.metadata?.versionHandoffDisabled !== true
         && machineTrailsUpgradeOffer(offer, machine.metadata?.happyCliVersion, machine.metadata?.capabilities)
     ))
 }
@@ -235,7 +233,10 @@ export function RunnerVersionSkewBanner({ topClassName }: { topClassName?: strin
                     const host = machineDisplayHost(machine)
                     const version = machine.metadata?.happyCliVersion
                     const newerOnDisk = cliBinaryUpdatedOnDisk(machine.metadata)
+                    const handoffDisabled = machine.metadata?.versionHandoffDisabled === true
                     const busy = busyId === machine.id
+                    const canUpgrade = !handoffDisabled
+                    const canRestart = handoffDisabled || newerOnDisk
                     return (
                         <li
                             key={machine.id}
@@ -247,26 +248,31 @@ export function RunnerVersionSkewBanner({ topClassName }: { topClassName?: strin
                                     <span className="font-medium">{host}</span>
                                     {version ? ` · CLI ${version}` : null}
                                     <span className="ml-1 text-amber-800 dark:text-amber-200">
-                                        {newerOnDisk
-                                            ? t('runner.skew.banner.binaryUpdatedHint')
-                                            : t('runner.skew.banner.upgradeCliFirst')}
+                                        {handoffDisabled
+                                            ? t('runner.skew.banner.handoffDisabledHint')
+                                            : newerOnDisk
+                                                ? t('runner.skew.banner.binaryUpdatedHint')
+                                                : t('runner.skew.banner.upgradeCliFirst')}
                                     </span>
                                 </div>
                                 <div className="flex shrink-0 gap-1">
                                     <button
                                         type="button"
                                         data-testid={`runner-version-skew-upgrade-${machine.id}`}
-                                        disabled={busy}
+                                        disabled={!canUpgrade || busy}
+                                        title={canUpgrade ? undefined : t('runner.skew.banner.upgradeNeedsHandoff')}
                                         onClick={() => void onUpgrade(machine)}
                                         className="rounded bg-amber-900 px-2 py-1 text-xs font-medium text-amber-50 disabled:opacity-50 dark:bg-amber-100 dark:text-amber-950"
                                     >
-                                        {busy ? t('runner.skew.banner.upgrading') : t('runner.skew.banner.upgrade')}
+                                        {busy && canUpgrade ? t('runner.skew.banner.upgrading') : t('runner.skew.banner.upgrade')}
                                     </button>
                                     <button
                                         type="button"
                                         data-testid={`runner-version-skew-restart-${machine.id}`}
-                                        disabled={!newerOnDisk || busy}
-                                        title={newerOnDisk ? undefined : t('runner.skew.banner.restartNeedsNewerBinary')}
+                                        disabled={!canRestart || busy}
+                                        title={canRestart
+                                            ? undefined
+                                            : t('runner.skew.banner.restartNeedsNewerBinary')}
                                         onClick={() => void onRestart(machine)}
                                         className="rounded border border-amber-700/50 px-2 py-1 text-xs font-medium text-amber-950 disabled:opacity-50 dark:border-amber-200/40 dark:text-amber-50"
                                     >
