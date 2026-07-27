@@ -28,14 +28,20 @@ export function getFleetUpgradePolicy(): FleetUpgradePolicy {
 
 /** Update the cache and persist to settings.json (best-effort atomic write). */
 export async function setFleetUpgradePolicy(policy: FleetUpgradePolicy): Promise<void> {
-    cachedPolicy = policy
     if (!dataDir) {
+        cachedPolicy = policy
         return
     }
     const file = getSettingsFile(dataDir)
-    const settings = (await readSettings(file)) ?? {}
+    const settings = await readSettings(file)
+    // readSettings returns null on parse errors to avoid clobbering a recoverable
+    // settings.json. Refuse the write rather than replacing the file with {}.
+    if (settings === null) {
+        throw new Error(`Cannot read ${file}; fix or remove it before updating fleet upgrade policy`)
+    }
     settings.fleetUpgradePolicy = policy
     await writeSettings(file, settings)
+    cachedPolicy = policy
 }
 
 /** Test-only reset so suites don't leak cached state across cases. */

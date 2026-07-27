@@ -29,11 +29,19 @@ export function createUpgradeRoutes(): Hono<WebAppEnv> {
     const policyBody = z.object({ policy: z.enum(FLEET_UPGRADE_POLICIES as unknown as [string, ...string[]]) })
 
     app.put('/upgrade/policy', async (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({ error: 'Fleet upgrade policy is only available in the default namespace' }, 403)
+        }
         const parsed = policyBody.safeParse(await c.req.json().catch(() => null))
         if (!parsed.success) {
             return c.json({ error: 'Invalid policy' }, 400)
         }
-        await setFleetUpgradePolicy(parsed.data.policy as (typeof FLEET_UPGRADE_POLICIES)[number])
+        try {
+            await setFleetUpgradePolicy(parsed.data.policy as (typeof FLEET_UPGRADE_POLICIES)[number])
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to update fleet upgrade policy'
+            return c.json({ error: message }, 500)
+        }
         return c.json({ policy: getFleetUpgradePolicy() })
     })
 

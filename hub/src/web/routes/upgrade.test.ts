@@ -12,8 +12,13 @@ import {
 
 const tmpDirs: string[] = []
 
-function makeApp() {
+function makeApp(namespace = 'default') {
     const app = new Hono<WebAppEnv>()
+    app.use('*', async (c, next) => {
+        c.set('namespace', namespace)
+        c.set('userId', 1)
+        await next()
+    })
     app.route('/api', createUpgradeRoutes())
     return app
 }
@@ -38,12 +43,12 @@ describe('upgrade routes', () => {
         expect(typeof body.offer.targetVersion).toBe('string')
     })
 
-    it('PUT /upgrade/policy updates a valid policy', async () => {
+    it('PUT /upgrade/policy updates a valid policy in the default namespace', async () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-upgrade-'))
         tmpDirs.push(dir)
         initFleetUpgradePolicy({ dataDir: dir, persisted: 'auto' })
 
-        const res = await makeApp().request('/api/upgrade/policy', {
+        const res = await makeApp('default').request('/api/upgrade/policy', {
             method: 'PUT',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ policy: 'silent' }),
@@ -53,6 +58,15 @@ describe('upgrade routes', () => {
 
         const after = await makeApp().request('/api/upgrade/offer')
         expect((await after.json() as { policy: string }).policy).toBe('silent')
+    })
+
+    it('PUT /upgrade/policy rejects non-default namespaces', async () => {
+        const res = await makeApp('tenant-a').request('/api/upgrade/policy', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ policy: 'silent' }),
+        })
+        expect(res.status).toBe(403)
     })
 
     it('PUT /upgrade/policy rejects an invalid policy', async () => {
