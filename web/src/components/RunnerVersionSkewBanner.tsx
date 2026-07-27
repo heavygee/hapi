@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { cliBinaryUpdatedOnDisk } from '@hapi/protocol/runnerCapabilities'
 import { DEFAULT_FLEET_UPGRADE_POLICY, machineTrailsUpgradeOffer, type HubUpgradeOffer } from '@hapi/protocol/upgradeChannel'
 import type { Machine } from '@/types/api'
@@ -8,6 +9,7 @@ import { useTranslation } from '@/lib/use-translation'
 import { useAppContext } from '@/lib/app-context'
 import { useOnlineStatus } from '@/hooks/useOnlineStatus'
 import { usePlatform } from '@/hooks/usePlatform'
+import { queryKeys } from '@/lib/query-keys'
 import {
     clearRunnerSkewTempDismiss,
     getRunnerSkewDismissUntil,
@@ -16,6 +18,24 @@ import {
     setRunnerSkewMinimized,
     tempDismissRunnerSkew,
 } from '@/lib/runnerSkewBannerState'
+
+type RunnerSelfUpgradeStatus = 'started' | 'already-current' | 'unsupported' | 'failed'
+
+function upgradeResponseStatus(response: unknown): RunnerSelfUpgradeStatus | null {
+    if (!response || typeof response !== 'object') {
+        return null
+    }
+    const status = (response as { status?: unknown }).status
+    if (
+        status === 'started'
+        || status === 'already-current'
+        || status === 'unsupported'
+        || status === 'failed'
+    ) {
+        return status
+    }
+    return null
+}
 
 export function machineDisplayHost(machine: Machine): string {
     return machine.metadata?.displayName
@@ -43,6 +63,7 @@ export function listSkewedMachines(machines: Machine[], offer: HubUpgradeOffer |
  */
 export function RunnerVersionSkewBanner({ topClassName }: { topClassName?: string } = {}) {
     const { api } = useAppContext()
+    const queryClient = useQueryClient()
     const { machines } = useMachines(api, true)
     const { info } = useUpgradeInfo(api, true)
     const { t } = useTranslation()
@@ -54,6 +75,7 @@ export function RunnerVersionSkewBanner({ topClassName }: { topClassName?: strin
     const [dismissed, setDismissed] = useState(() => isRunnerSkewTempDismissed())
     const [busyId, setBusyId] = useState<string | null>(null)
     const [actionError, setActionError] = useState<string | null>(null)
+    const [actionInfo, setActionInfo] = useState<string | null>(null)
 
     useEffect(() => {
         if (!dismissed) {
@@ -90,21 +112,40 @@ export function RunnerVersionSkewBanner({ topClassName }: { topClassName?: strin
         tempDismissRunnerSkew()
     }, [haptic])
 
+    const refreshFleetQueries = useCallback(async () => {
+        await Promise.all([
+            queryClient.invalidateQueries({ queryKey: queryKeys.machines }),
+            queryClient.invalidateQueries({ queryKey: queryKeys.upgradeInfo }),
+        ])
+    }, [queryClient])
+
     const onUpgrade = useCallback(async (machine: Machine) => {
         if (!api) {
             return
         }
         haptic.impact('medium')
         setActionError(null)
+        setActionInfo(null)
         setBusyId(machine.id)
         try {
-            await api.upgradeMachineRunner(machine.id)
+            const result = await api.upgradeMachineRunner(machine.id)
+            const status = upgradeResponseStatus(result.response)
+            // already-current is a successful RPC that installs nothing — surface it
+            // so "Upgrading…" → idle does not look like a silent failure (Teemo #1108).
+            if (status === 'already-current') {
+                setActionInfo(result.message || t('runner.skew.alreadyCurrent'))
+            } else if (status === 'started') {
+                setActionInfo(result.message || t('runner.skew.upgradeStarted'))
+            } else if (result.message) {
+                setActionInfo(result.message)
+            }
+            await refreshFleetQueries()
         } catch (error) {
             setActionError(error instanceof Error ? error.message : t('runner.skew.upgradeFailed'))
         } finally {
             setBusyId(null)
         }
-    }, [api, haptic, t])
+    }, [api, haptic, refreshFleetQueries, t])
 
     const onRestart = useCallback(async (machine: Machine) => {
         if (!api) {
@@ -112,15 +153,20 @@ export function RunnerVersionSkewBanner({ topClassName }: { topClassName?: strin
         }
         haptic.impact('medium')
         setActionError(null)
+        setActionInfo(null)
         setBusyId(machine.id)
         try {
-            await api.restartMachineRunner(machine.id)
+            const result = await api.restartMachineRunner(machine.id)
+            if (result.message) {
+                setActionInfo(result.message)
+            }
+            await refreshFleetQueries()
         } catch (error) {
             setActionError(error instanceof Error ? error.message : t('runner.skew.restartFailed'))
         } finally {
             setBusyId(null)
         }
-    }, [api, haptic, t])
+    }, [api, haptic, refreshFleetQueries, t])
 
     if (skewed.length === 0 || dismissed) {
         return null
@@ -236,6 +282,11 @@ export function RunnerVersionSkewBanner({ topClassName }: { topClassName?: strin
             {actionError ? (
                 <p className="mt-2 text-xs text-red-700 dark:text-red-300" data-testid="runner-version-skew-action-error">
                     {actionError}
+                </p>
+            ) : null}
+            {actionInfo && !actionError ? (
+                <p className="mt-2 text-xs text-amber-900 dark:text-amber-100" data-testid="runner-version-skew-action-info">
+                    {actionInfo}
                 </p>
             ) : null}
 
