@@ -1,0 +1,20 @@
+# Belt-and-braces watchdog for the HAPI runner (Tier-1 primary / soup host).
+#
+# Install via: scripts/tooling/install-hapi-primary-hub-tier1.sh
+# Enable:      sudo systemctl enable --now hapi-runner-watchdog.timer
+#
+# Script resolves hapi-runner vs hapi-runner-oos via lib/hapi-systemd-units.sh.
+
+[Unit]
+Description=HAPI runner liveness watchdog (restart service if machine drops off hub)
+After=network-online.target
+ConditionPathExists=/home/heavygee/.hapi/settings.json
+
+[Service]
+Type=oneshot
+User=heavygee
+Environment=HAPI_API_URL=http://127.0.0.1:3006
+EnvironmentFile=-/home/heavygee/.hapi/runner-watchdog.env
+ExecStart=/home/heavygee/coding/hapi/scripts/tooling/hapi-runner-watchdog.sh
+StandardOutput=journal
+StandardError=journal

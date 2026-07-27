@@ -82,6 +82,16 @@ SUDO_SYSTEMCTL_RE='(^|[[:space:]])sudo([[:space:]]|$).*systemctl'
 DESTRUCTIVE_VERB_RE='(^|[[:space:]])(stop|restart|kill|disable|mask|reload-or-restart|reset-failed)([[:space:]]|$)'
 HAPI_UNIT_RE='hapi-(hub|runner|runner-watchdog)(-oos)?(\.service)?($|[[:space:]\";'"'"'])'
 
+# Pure runner restart is allowed (watchdog + recovery). Matches systemctl-wrapper.
+if printf '%s' "$CMD" | grep -qiE "$SUDO_SYSTEMCTL_RE" \
+   && printf '%s' "$CMD" | grep -qiE '(^|[[:space:]])restart([[:space:]]|$)' \
+   && printf '%s' "$CMD" | grep -qiE 'hapi-runner(-oos)?(\.service)?' \
+   && ! printf '%s' "$CMD" | grep -qiE 'hapi-hub(-oos)?(\.service)?' \
+   && ! printf '%s' "$CMD" | grep -qiE 'hapi-runner-watchdog(\.service)?'; then
+    echo '{ "permission": "allow" }'
+    exit 0
+fi
+
 if printf '%s' "$CMD" | grep -qiE "$SUDO_SYSTEMCTL_RE" \
    && printf '%s' "$CMD" | grep -qiE "$DESTRUCTIVE_VERB_RE" \
    && printf '%s' "$CMD" | grep -qiE "$HAPI_UNIT_RE"; then

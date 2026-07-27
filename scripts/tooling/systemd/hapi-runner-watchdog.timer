@@ -1,0 +1,16 @@
+# Schedule for hapi-runner-watchdog.service (Tier-1).
+#
+# Install via: scripts/tooling/install-hapi-primary-hub-tier1.sh
+# Enable:      sudo systemctl enable --now hapi-runner-watchdog.timer
+
+[Unit]
+Description=HAPI runner liveness watchdog timer
+
+[Timer]
+OnBootSec=120
+OnUnitActiveSec=60
+AccuracySec=5
+Unit=hapi-runner-watchdog.service
+
+[Install]
+WantedBy=timers.target

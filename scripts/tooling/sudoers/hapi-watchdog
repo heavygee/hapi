@@ -1,0 +1,7 @@
+# Allow heavygee to restart the HAPI runner without a password.
+# Required by scripts/tooling/hapi-runner-watchdog.sh (Tier-1).
+# Hub restart stays denied via hapi-protect; only runner recovery is allowed.
+#
+# Install via: scripts/tooling/install-hapi-primary-hub-tier1.sh
+
+heavygee ALL=(root) NOPASSWD: /bin/systemctl restart hapi-runner.service, /bin/systemctl restart hapi-runner-oos.service, /usr/bin/systemctl restart hapi-runner.service, /usr/bin/systemctl restart hapi-runner-oos.service

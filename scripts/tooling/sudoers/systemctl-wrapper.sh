@@ -164,6 +164,8 @@ for arg in "$@"; do
 done
 
 # Destructive verbs we refuse for hapi-* units.
+# Exception: restart of the runner alone is ALLOWED (watchdog + recovery).
+# Hub restart/stop stays blocked — use hapi-restart-hub.
 case "$VERB" in
     stop|restart|kill|disable|mask|reload-or-restart|reset-failed|try-restart|reload-or-try-restart)
         DESTRUCTIVE=1
@@ -179,19 +181,33 @@ fi
 
 # Destructive verb. Check whether ANY of the units in argv are protected.
 PROTECTED_HIT=""
+RUNNER_ONLY_RESTART=1
+HAS_NON_RUNNER=0
+HAS_RUNNER=0
 for unit in "${UNITS[@]+"${UNITS[@]}"}"; do
     bare="${unit%.service}"
     case "$bare" in
-        hapi-hub|hapi-runner|hapi-runner-watchdog|hapi-hub-oos|hapi-runner-oos)
+        hapi-runner|hapi-runner-oos)
+            HAS_RUNNER=1
+            PROTECTED_HIT="${PROTECTED_HIT:-$unit}"
+            ;;
+        hapi-hub|hapi-runner-watchdog|hapi-hub-oos)
+            HAS_NON_RUNNER=1
             PROTECTED_HIT="$unit"
-            break
             ;;
     esac
 done
 
+# Pure runner restart is the supported recovery path (see operator-fork.mdc).
+if [ "$VERB" = "restart" ] && [ "$HAS_RUNNER" = "1" ] && [ "$HAS_NON_RUNNER" = "0" ]; then
+    exec "$REAL_SYSTEMCTL" "$@"
+fi
+
 if [ -z "$PROTECTED_HIT" ]; then
     exec "$REAL_SYSTEMCTL" "$@"
 fi
+# silence unused (kept for clarity if someone greps RUNNER_ONLY)
+: "${RUNNER_ONLY_RESTART}"
 
 # Destructive verb on a protected unit. Honor the operator override ONLY
 # if the caller has a controlling tty (operator at SSH/tmux/console).

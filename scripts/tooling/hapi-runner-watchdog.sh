@@ -140,21 +140,33 @@ if [[ -f "$STATE_FILE" ]] && command -v jq >/dev/null; then
     fi
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/hapi-systemd-units.sh
+source "$SCRIPT_DIR/lib/hapi-systemd-units.sh"
+RUNNER_UNIT="$(hapi_systemd_runner_unit)"
+
 if [[ "${HAPI_WATCHDOG_DRY_RUN:-}" == "1" ]]; then
-    log "DRY_RUN: would 'sudo systemctl restart hapi-runner.service'"
+    log "DRY_RUN: would 'sudo systemctl restart $RUNNER_UNIT'"
     exit 0
 fi
 
-log "restarting hapi-runner.service via systemctl"
-if systemctl restart hapi-runner.service 2>/dev/null; then
+log "restarting $RUNNER_UNIT via systemctl"
+# Prefer PATH systemctl (hits /usr/local/sbin wrapper which allows runner restart).
+if systemctl restart "$RUNNER_UNIT" 2>/dev/null; then
     log "restart OK"
     exit 0
 fi
 
-if sudo -n systemctl restart hapi-runner.service 2>/dev/null; then
+if sudo -n systemctl restart "$RUNNER_UNIT" 2>/dev/null; then
     log "restart OK (via sudo)"
     exit 0
 fi
 
-log "ERROR: could not restart hapi-runner.service (permission? check /etc/sudoers.d/hapi-watchdog)"
+# Absolute path bypasses the wrapper; still needs sudoers allow.
+if sudo -n /bin/systemctl restart "$RUNNER_UNIT" 2>/dev/null; then
+    log "restart OK (via sudo /bin/systemctl)"
+    exit 0
+fi
+
+log "ERROR: could not restart $RUNNER_UNIT (permission? check /etc/sudoers.d/hapi-watchdog)"
 exit 1

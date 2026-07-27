@@ -36,7 +36,6 @@ Cmnd_Alias HAPI_DESTROY = \
     /bin/systemctl stop hapi-runner-oos.service, \
     /bin/systemctl restart hapi-hub.service, \
     /bin/systemctl restart hapi-hub-oos.service, \
-    /bin/systemctl restart hapi-runner-oos.service, \
     /bin/systemctl kill hapi-hub.service, \
     /bin/systemctl kill hapi-runner.service, \
     /bin/systemctl kill hapi-hub-oos.service, \
@@ -51,7 +50,6 @@ Cmnd_Alias HAPI_DESTROY = \
     /usr/bin/systemctl stop hapi-runner-oos.service, \
     /usr/bin/systemctl restart hapi-hub.service, \
     /usr/bin/systemctl restart hapi-hub-oos.service, \
-    /usr/bin/systemctl restart hapi-runner-oos.service, \
     /usr/bin/systemctl kill hapi-hub.service, \
     /usr/bin/systemctl kill hapi-hub-oos.service, \
     /usr/bin/systemctl disable hapi-hub.service, \
