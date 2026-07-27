@@ -18,10 +18,12 @@ PRODUCT_GUARD="${REPO_ROOT}/scripts/tooling/hapi-product-code-guard.sh"
 SYSTEMCTL_GUARD="${REPO_ROOT}/scripts/tooling/hapi-systemctl-guard.sh"
 MUTATION_GUARD="${REPO_ROOT}/scripts/tooling/hapi-production-mutation-guard.sh"
 MIRROR_HYGIENE_GUARD="${REPO_ROOT}/scripts/tooling/hapi-mirror-hygiene-guard.sh"
+TOOLING_COMMIT_GUARD="${REPO_ROOT}/scripts/tooling/hapi-tooling-commit-guard.sh"
 SOUP_DOGFOOD_RULE="${REPO_ROOT}/scripts/tooling/cursor-rules/hapi-driver-soup-dogfood.mdc"
+TOOLING_COMMIT_RULE="${REPO_ROOT}/.cursor/rules/hapi-tooling-commit-hygiene.mdc"
 USER_RULES="${HOME}/.cursor/rules"
 
-for s in "$PRODUCT_GUARD" "$SYSTEMCTL_GUARD" "$MUTATION_GUARD" "$MIRROR_HYGIENE_GUARD"; do
+for s in "$PRODUCT_GUARD" "$SYSTEMCTL_GUARD" "$MUTATION_GUARD" "$MIRROR_HYGIENE_GUARD" "$TOOLING_COMMIT_GUARD"; do
     if [ ! -x "$s" ]; then
         echo "ERROR: ${s} missing or not executable" >&2
         exit 1
@@ -35,8 +37,10 @@ fi
 
 mkdir -p "${REPO_ROOT}/.cursor"
 mkdir -p "$USER_RULES"
-RULE_LINK="${USER_RULES}/hapi-driver-soup-dogfood.mdc"
-ln -sf "$SOUP_DOGFOOD_RULE" "$RULE_LINK"
+ln -sf "$SOUP_DOGFOOD_RULE" "${USER_RULES}/hapi-driver-soup-dogfood.mdc"
+if [ -f "$TOOLING_COMMIT_RULE" ]; then
+    ln -sf "$TOOLING_COMMIT_RULE" "${USER_RULES}/hapi-tooling-commit-hygiene.mdc"
+fi
 
 cat > "$HOOKS_JSON" <<'JSON'
 {
@@ -58,6 +62,27 @@ cat > "$HOOKS_JSON" <<'JSON'
       {
         "command": "./scripts/tooling/hapi-production-mutation-guard.sh",
         "matcher": "Shell"
+      },
+      {
+        "command": "./scripts/tooling/hapi-tooling-commit-guard.sh shell",
+        "matcher": "Shell"
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "./scripts/tooling/hapi-tooling-commit-guard.sh record",
+        "matcher": "Write|Edit|StrReplace|MultiEdit|EditNotebook|Shell"
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": "./scripts/tooling/hapi-tooling-commit-guard.sh record"
+      }
+    ],
+    "stop": [
+      {
+        "command": "./scripts/tooling/hapi-tooling-commit-guard.sh stop",
+        "loop_limit": 5
       }
     ]
   }
@@ -70,12 +95,15 @@ echo "  hapi-product-code-guard.sh       -> blocks edits to cli/, hub/, web/, sh
 echo "  hapi-mirror-hygiene-guard.sh     -> blocks bun install / lockfile+e2e writes on primary mirror (soup utensils)"
 echo "  hapi-systemctl-guard.sh          -> blocks 'sudo systemctl <destructive-verb> hapi-{hub,runner,runner-watchdog}.service'"
 echo "  hapi-production-mutation-guard.sh -> blocks feat-dist swap, driver hand-merge, raw driver/web builds, full rebuild"
-echo "  hapi-driver-soup-dogfood.mdc       -> symlink ${RULE_LINK} → canonical rule (alwaysApply; re-run installer after rule edits)"
+echo "  hapi-tooling-commit-guard.sh     -> mess-maker must commit docs/scripts/manifest/.cursor dirt (stop + sync gate)"
+echo "  hapi-driver-soup-dogfood.mdc       -> symlink → ${USER_RULES}/hapi-driver-soup-dogfood.mdc"
+echo "  hapi-tooling-commit-hygiene.mdc    -> symlink → ${USER_RULES}/hapi-tooling-commit-hygiene.mdc (if present)"
 echo
 echo "Bypasses when needed (operator-approved):"
 echo "  HAPI_OPERATOR_PRODUCT_EDIT_OVERRIDE=1   (product-code edits)"
 echo "  HAPI_OPERATOR_MIRROR_HYGIENE_OVERRIDE=1 (mirror install/e2e — TTY only)"
 echo "  HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1      (systemctl on hapi units)"
 echo "  HAPI_OPERATOR_PRODUCTION_MUTATION_OVERRIDE=1 (dist swap / driver hand-merge — TTY only)"
+echo "  HAPI_OPERATOR_TOOLING_DIRT_OVERRIDE=1  (mess-maker commit nag — TTY only)"
 echo
 echo "Restart Cursor (or reload) to pick up the hooks."

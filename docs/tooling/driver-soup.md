@@ -30,7 +30,15 @@ The primary mirror must stay **remake-ready**: `hapi-sync-fork-main` and `hapi-d
 
 **Mechanical guard:** `scripts/tooling/hapi-mirror-hygiene-guard.sh` (Cursor + Claude PreToolUse). Refresh hooks: `scripts/tooling/hapi-install-cursor-hooks.sh`. Bypass (operator TTY only): `HAPI_OPERATOR_MIRROR_HYGIENE_OVERRIDE=1`.
 
-Intentional exception: uncommitted `config/driver-manifest.yaml` layer WIP during soup promotion — coordinate and commit promptly; do not pile unrelated mirror dirt on top.
+Intentional exception: uncommitted `config/driver-manifest.yaml` layer WIP during soup promotion — **the mess-maker must still commit before turn end** (see below). Do not pile unrelated mirror dirt on top.
+
+### Mess-maker tooling commits (not the next agent)
+
+Operator utensils on the mirror (`docs/tooling|operator|plans`, `scripts/tooling`, `config/driver-manifest.yaml`, `.cursor/rules`) are **your** kitchen — nothing upstream forces porcelain. Leaving them uncommitted remake-blocks sync/rebuild for everyone.
+
+**Policy:** the session that dirties those paths commits them in the **same turn**. The next agent who only needs `hapi-sync-fork-main` / `hapi-driver-rebuild` must **not** inherit cleanup.
+
+**Mechanical:** `scripts/tooling/hapi-tooling-commit-guard.sh` (per-session ledger under `~/.hapi/tooling-dirt/`). Cursor: `stop` follow-up + Shell gate on sync/rebuild; Claude: Stop + PostToolUse via `hapi-claude-pretooluse-guard.sh` / settings. Rule: `.cursor/rules/hapi-tooling-commit-hygiene.mdc`. Refresh: `hapi-install-cursor-hooks.sh`. Bypass (operator TTY only): `HAPI_OPERATOR_TOOLING_DIRT_OVERRIDE=1`.
 
 ---
 
@@ -67,6 +75,19 @@ layers:
 ```
 
 Layers merge **in order** onto `driver/integration` inside `~/coding/hapi/driver`.
+
+### Trial-merge before you add a layer
+
+The soup is shared by the whole fleet, so a layer that conflicts costs everyone a broken rebuild. `git merge-tree` answers "would this merge cleanly?" without writing anything:
+
+```bash
+git merge-tree --write-tree --messages "$(git -C driver rev-parse HEAD)" <your-branch>
+# exit 0 = clean; exit 1 = prints each CONFLICT (content) path
+```
+
+Run it before editing `config/driver-manifest.yaml`. If it conflicts, do **not** add the layer and hope rerere saves you — rerere only replays resolutions it has already seen, and a brand-new branch has none. Either the owning peer writes a `scripts/tooling/soup-heals/*.patch`, or the branch stays out of the soup and gets dogfooded on its own peer stack (`hapi-peer-stack`).
+
+An upstream-aimed thin tip does not need to be in the soup at all. Souping is for dogfooding on `:3006`; a peer stack on its own port serves the same purpose without putting a 30-layer shared stack at risk.
 
 ### Read-only driver tree
 
@@ -108,7 +129,7 @@ Rule file for agents: canonical source `scripts/tooling/cursor-rules/hapi-driver
 
 **Build stamp:** In STRICT mode (default), missing `.hapi-build-meta.json` fails verify — run `hapi-driver-build-web` to stamp dist.
 
-**Operator scripts** (`scripts/tooling/hapi-pr-session-emoji.sh`, `hapi-pr-emoji-batch.sh`, etc.) belong on **fork `main` in `~/coding/hapi`**, not in the driver tree. Rebuild reads tooling from the primary mirror (`HAPI_PRIMARY`, default `~/coding/hapi`). Uncommitted scripts vanish on sync/reset — **commit them to fork main**.
+**Operator scripts** (`scripts/tooling/hapi-meta-daily.sh`, `hapi-pr-emoji-batch.sh`, deprecated `hapi-pr-session-emoji.sh`, etc.) belong on **fork `main` in `~/coding/hapi`**, not in the driver tree. Rebuild reads tooling from the primary mirror (`HAPI_PRIMARY`, default `~/coding/hapi`). Uncommitted scripts vanish on sync/reset — **commit them to fork main**. Daily PR classify + chip status: `hapi-meta-daily.sh` (see `docs/operator/AGENTS.md` § Meta PR watcher).
 
 **To put a PR worktree on `:3006` instead of soup:** operator runs `hapi-use-worktree ~/coding/hapi/worktrees/<name>` (not the usual daily-driver path).
 
@@ -257,7 +278,7 @@ Pre-push hook blocks `web/src/garden/**` on upstream-PR-bound refs — Garden is
 - Rematerialize when hub `targetVersion` advances; do not click Upgrade on proxmox/oos-linux soup units to "catch up."
 - Per-machine product opt-outs remain available: `HAPI_UPGRADE_CHANNEL=off`, `versionHandoffDisabled`.
 
-**Temporary binary bridge (proxmox pattern):** when local `driver/cli` is too stale to advertise required caps, a systemd drop-in (`30-soup-artifact.conf`) may point `ExecStart` at `~/.hapi/bin/hapi-<semver>` instead of `hapi-runner-from-active`. That keeps `versionHandoffDisabled: true` (intentional) while advertising a tip binary. **It is not soup parity** with oos (no manifest layers). Keep the drop-in version current with hub `targetVersion`; remove it once proxmox driver soup is rematerialized and `hapi-runner-from-active` is healthy again. Incident 2026-07-23: drop-in stuck on `hapi-soup` **0.23.1** while oos ran soup **0.23.3** - Pi RPC on proxmox wedged; bumping the drop-in to `hapi-0.23.3` + hub `restart-runner` restored tool traffic.
+**Temporary binary bridge (proxmox / secondary pattern — anti-primary):** when local `driver/cli` is too stale to advertise required caps, a systemd drop-in (`30-soup-artifact.conf`) may point `ExecStart` at `~/.hapi/bin/hapi-<semver>` instead of `hapi-runner-from-active`. That keeps `versionHandoffDisabled: true` (intentional) while advertising a tip binary. **It is not soup parity** with oos (no manifest layers). **Never install this on the primary soup host** — see § Anti-primary / footgun. Keep the drop-in version current with hub `targetVersion`; remove it once proxmox driver soup is rematerialized and `hapi-runner-from-active` is healthy again. Incident 2026-07-23: drop-in stuck on `hapi-soup` **0.23.1** while oos ran soup **0.23.3** - Pi RPC on proxmox wedged; bumping the drop-in to `hapi-0.23.3` + hub `restart-runner` restored tool traffic.
 
 **Windows chicken-egg (ops playbook):** old self-upgrade wrote `hapi-VERSION` without `.exe`. Promote once: `copy hapi-VERSION → hapi-VERSION.exe → hapi.exe`, then `schtasks /Run /TN "HAPI Runner"`. Or SCP `/var/lib/hapi/upgrade-artifacts/hapi-*-win32-x64` → `%USERPROFILE%\.hapi\bin\hapi.exe`. Future Upgrades from a fixed binary should self-heal.
 
@@ -343,6 +364,87 @@ Some files are merged by **every** layer that touches them; **last layer wins** 
 ### Patient restarts (don't yank live agents)
 
 `hapi-use-worktree` and `hapi-restart-hub` are **patient by default**: they poll `hapi-sessions-health.sh` for `WORKING` sessions and wait until effective WORKING reaches 0 before tearing the hub down. **Default is no auto-timeout** (`HAPI_PATIENT_TIMEOUT=0`). A positive timeout **fails closed** (exit 75, no restart/switch) — it does **not** yank. Only `--impatient` (TTY-gated) proceeds with WORKING>0.
+
+#### Watching a restart blocks the restart
+
+The drain self-exempts **only the caller** (one subtracted from the WORKING count). Any *other* session polling in a loop — a meta watcher tailing `driver-status.json`, a peer checking whether the hub pid flipped — stays `WORKING` for as long as its turn runs, and the patient drain waits on it. Two agents watching each other can hold a restart open indefinitely while both report "still blocked".
+
+If you are not the one running `hapi-restart-hub`:
+
+- **Park.** End your turn and wait to be pinged. Do not open a turn just to check state.
+- If you must observe, take one snapshot and end the turn — no `sleep`/poll loops.
+- Before escalating "the restart is stuck", read the WORKING list (`scripts/hapi-sessions-health.sh --json`) and check whether you are on it.
+
+Observed 2026-07-25: soup rebuild went green at `10:10:30Z` but the hub stayed 17h old because the meta watcher was polling for the pid flip and counted toward the drain it was waiting on.
+
+### Hub restart must not cascade-archive the fleet (KillMode)
+
+**What you saw** ("every session archived after hub reboot") is not destiny and not a missing restore bridge. It is systemd killing the runner **cgroup**.
+
+- Runner already spawns agents with `detached: true` and does **not** kill children on its own shutdown (`cli/src/runner/run.ts`).
+- `detached: true` escapes the TTY / session — **not** the systemd cgroup.
+- Default `KillMode=control-group` → `systemctl restart hapi-runner` SIGTERMs every agent in the unit → each agent archives itself (`User terminated`). Patient drain only waits for WORKING; **idle** sessions still die.
+- Upstream closed this as [tiann/hapi#915](https://github.com/tiann/hapi/issues/915) via docs `KillMode=process` (PR #928). Proxmox already had it; **oos-linux still had `KillMode=control-group` until 2026-07-24**.
+
+### Tier-1 primary-hub package (reinstall / new hub host)
+
+Proxmox accumulated months of hardening; oos cutover missed most of it. **Do not copy the whole proxmox stack** - cutover/artifact drop-ins are anti-primary. Install the Tier-1 package instead:
+
+```bash
+sudo bash scripts/tooling/install-hapi-primary-hub-tier1.sh
+# then (or --restart):
+hapi-restart-hub
+```
+
+| Piece | Effect |
+|-------|--------|
+| `10-resilience.conf` | `Restart=always`, burst limits, `KillMode=process`, `HAPI_DISABLE_VERSION_HANDOFF=1`, `ExecStartPre=runner stop` |
+| `90-oom-protect-hub.conf` | hub `OOMScoreAdjust=-1000` (earlyoom must not murder hub) |
+| `90-oom-protect-runner.conf` | runner explicit `0` (never -1000 - agents inherit) |
+| `hapi-runner-watchdog.{service,timer}` | 60s probe; restarts runner unit if machine drops off hub |
+| `hapi-watchdog` sudoers + protect/wrapper | NOPASSWD runner restart; hub stop/restart still blocked |
+
+Sources: `scripts/tooling/systemd/`, `scripts/tooling/sudoers/`. Unit names auto-detect (`hapi-*-oos` vs `hapi-*`).
+
+#### Anti-primary / footgun — do NOT port these to the active hub
+
+**Naming trap:** `cutover-oos*` means "oos is primary; **this host is demoted**." It is not a hardening package the primary is missing. After cutover drift, agents often re-pitch "copy everything proxmox has onto oos." That is wrong for the items below — they are **anti-primary by design**. Re-pitching them = failing the next review.
+
+| Proxmox-only item | Why it must stay off primary (oos) |
+|---|---|
+| `hapi-hub.service.d/cutover-oos.conf` (+ `cutover-oos-hub-only.conf`) | `ConditionPathExists=!/etc/hapi/homelab-hub-forbidden` + `Restart=no`. Purpose: refuse to run a **second** hub on the old host. On primary that is "please stay down if a sentinel appears" + disable crash restart — opposite of Tier-1 `Restart=always`. |
+| `/etc/hapi/homelab-hub-forbidden` | Empty sentinel that **blocks hub activation**. Correct on secondary; on primary it is a landmine (one accidental `touch` = no hub). |
+| Runner `cutover-oos.conf` (`HAPI_API_URL=https://hapi.tail9944ee.ts.net`) | Points a **secondary** runner at the remote primary. Oos already uses `http://127.0.0.1:3006`. Copying the remote URL onto the hub host is self-talk over Tailscale for no reason. |
+| `30-soup-artifact.conf` (`ExecStart=~/.hapi/bin/hapi-<semver>`) | Temporary **stock binary** bridge when secondary `driver/cli` is stale. **Not soup** (no manifest layers). Primary *is* the soup kitchen — this drop-in would drop every layer and recreate the 2026-07-23 version-skew / Pi RPC class of bug on the wrong host. Remove on secondary once `hapi-runner-from-active` + rematerialized soup is current. |
+
+**Falsification (before you "just port it"):**
+
+1. If cutover belonged on primary, starting `hapi-hub` on proxmox after deleting the sentinel would be fine. It is not — two hubs = split brain. The conf exists to make that **impossible**.
+2. If artifact belonged on primary, oos dogfood would deliberately run stock `~/.hapi/bin/hapi-*` instead of soup. It must not.
+
+**Not a Tier-1 gap either (already elsewhere):**
+
+- **Hub DB backups** — live oos DB is protected from **homelab** via `protect-oos-hapi-state.sh` (4x daily sqlite archive + ZFS snap). Proxmox `backup-hapi.timer` is Tier C (runner/secrets borg) post-migration — do not install that unit on oos as if the hub DB still lived under `~/.hapi`.
+- **earlyoom + jellyfin prefer lists** — host/estate memory policy, optional on oos separately; hub already has `OOMScoreAdjust=-1000`. Not cutover baggage.
+- **Primary-shaped follow-ups** (OK to discuss): `ExecStart` → `hapi-runner-from-active`; plain earlyoom on oos without media prefer lists.
+
+Canonical inventory + install path: [`coding-estate-migration.md`](./coding-estate-migration.md) § New primary hub host.
+
+**Kill-criterion after install + restart:** archived session count unchanged; live runner env has `HAPI_DISABLE_VERSION_HANDOFF=1`; hub `/proc/$pid/oom_score_adj` is `-1000`; `systemctl is-enabled hapi-runner-watchdog.timer`.
+
+**Local KillMode-only fix (superseded by Tier-1):** drop-in at `hapi-runner-oos.service.d/killmode-process.conf` - redundant once `10-resilience` is present.
+
+**What survives after the fix:**
+
+| Bounce | Expectation |
+|--------|-------------|
+| `hapi-restart-hub --no-runner` | Hub only. Runner + agents stay up; socket.io reconnects. Prefer this when only hub code changed. |
+| `hapi-restart-hub` (hub+runner) with `KillMode=process` | Runner PID dies; **agents stay**; new runner re-attaches (Tier B: `feat/tier-b-reattach-orphan-runner-children` in soup). |
+| `KillMode=control-group` (old oos) | Entire fleet archives. Bad. |
+
+**Not the primary fix:** a "reopen everything after restart" sweep. That papers over cgroup murder, doubles spawn cost, and races mid-turn. Keep reopen for true crashes / intentional archives (`POST /sessions/:id/reopen`). If you still want a recovery script for past cascade incidents, say so - cheap to add, but it is recovery, not architecture.
+
+**Friction / kill-criterion for claiming "restarts are safe":** after next intentional `hapi-restart-hub`, count of `lifecycleState=archived` must be unchanged (modulo deliberate archives). If the fleet archives again, KillMode did not stick or something else is in the cgroup path - stop and fix before more soup waves.
 
 See [`docs/plans/2026-07-20-patient-drain-v2-restart-queued.md`](../plans/2026-07-20-patient-drain-v2-restart-queued.md) for restart-queued / no-new-turns (Phase 1+) and WORKING-probe fixes.
 
