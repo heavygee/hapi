@@ -13,6 +13,7 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 | When | Do | Detail |
 |------|----|--------|
 | Any local feature / soup / peer work | Read lifecycle first | [`feature-work-lifecycle.md`](../tooling/feature-work-lifecycle.md) (sole workflow) |
+| Message another HAPI session | **One script** — never reinvent JWT+curl | `hapi-ping-peer <id-prefix> '…'` or `--message-file -` / path (`scripts/tooling/hapi-ping-peer.sh`) |
 | Proof / screenshots / clips for operator | **Inline into HAPI chat** — do not only paste paths | Lifecycle [§ Proof tiers](../tooling/feature-work-lifecycle.md#proof-tiers-images-and-video) — MCP `display_image` / `display_video`, or `bun scripts/tooling/hapi-display-image.mjs <session-prefix> <abs-path> [title]` |
 | Link operator to a file/doc in HAPI chat | Write path as **bare text** — no `[](...)`, no backticks | HAPI auto-links bare paths → in-app file viewer (`remarkFilePathLinks`). Only allowlisted extensions link; **wrap `.mmd`/exotic in a `.md`** so it's clickable + previewable. Tracking: [tiann/hapi#1120](https://github.com/tiann/hapi/issues/1120) |
 | New behavior intake / peer spawn | Follow intake §0 handoff | [`new-feature-intake.md`](../tooling/new-feature-intake.md) |
