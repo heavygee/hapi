@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'bun:test'
 import { Store } from './index'
 
+/** Non-null runnerState marks a runner registration (not terminal bootstrap). */
+const runnerAlive = { status: 'running' as const }
+
 describe('getOrCreateMachine registration refresh', () => {
-    it('updates stale version and capabilities on re-register', () => {
+    it('updates stale version and capabilities on runner re-register', () => {
         const store = new Store(':memory:')
         const first = store.machines.getOrCreateMachine(
             'teemo',
@@ -11,7 +14,7 @@ describe('getOrCreateMachine registration refresh', () => {
                 platform: 'linux',
                 happyCliVersion: '0.20.2',
             },
-            null,
+            runnerAlive,
             'default',
         )
         expect(first.metadataVersion).toBe(1)
@@ -26,7 +29,7 @@ describe('getOrCreateMachine registration refresh', () => {
                 capabilities: ['cursor-chat-store-status', 'stop-runner'],
                 displayName: undefined,
             },
-            null,
+            runnerAlive,
             'default',
         )
 
@@ -38,7 +41,7 @@ describe('getOrCreateMachine registration refresh', () => {
         })
     })
 
-    it('preserves displayName when re-register omits it', () => {
+    it('preserves displayName when runner re-register omits it', () => {
         const store = new Store(':memory:')
         store.machines.getOrCreateMachine(
             'proxmox',
@@ -48,7 +51,7 @@ describe('getOrCreateMachine registration refresh', () => {
                 happyCliVersion: '0.18.4',
                 displayName: 'Homelab',
             },
-            null,
+            runnerAlive,
             'default',
         )
 
@@ -60,7 +63,7 @@ describe('getOrCreateMachine registration refresh', () => {
                 happyCliVersion: '0.23.0',
                 capabilities: ['cursor-chat-store-status'],
             },
-            null,
+            runnerAlive,
             'default',
         )
 
@@ -71,7 +74,7 @@ describe('getOrCreateMachine registration refresh', () => {
         })
     })
 
-    it('is a no-op when registration metadata is unchanged', () => {
+    it('is a no-op when runner registration metadata is unchanged', () => {
         const store = new Store(':memory:')
         const metadata = {
             host: 'oos-linux',
@@ -79,8 +82,41 @@ describe('getOrCreateMachine registration refresh', () => {
             happyCliVersion: '0.23.0',
             capabilities: ['cursor-chat-store-status'],
         }
-        const first = store.machines.getOrCreateMachine('oos', metadata, null, 'default')
-        const second = store.machines.getOrCreateMachine('oos', metadata, null, 'default')
+        const first = store.machines.getOrCreateMachine('oos', metadata, runnerAlive, 'default')
+        const second = store.machines.getOrCreateMachine('oos', metadata, runnerAlive, 'default')
         expect(second.metadataVersion).toBe(first.metadataVersion)
+    })
+
+    it('does not let terminal bootstrap mask a stale live runner', () => {
+        const store = new Store(':memory:')
+        store.machines.getOrCreateMachine(
+            'shared-machine',
+            {
+                host: 'box',
+                platform: 'linux',
+                happyCliVersion: '0.20.2',
+                capabilities: ['cursor-chat-store-status'],
+            },
+            runnerAlive,
+            'default',
+        )
+
+        const afterTerminal = store.machines.getOrCreateMachine(
+            'shared-machine',
+            {
+                host: 'box',
+                platform: 'linux',
+                happyCliVersion: '0.23.4',
+                capabilities: ['cursor-chat-store-status', 'runner-self-upgrade', 'stop-runner'],
+            },
+            null,
+            'default',
+        )
+
+        expect(afterTerminal.metadata).toMatchObject({
+            happyCliVersion: '0.20.2',
+            capabilities: ['cursor-chat-store-status'],
+        })
+        expect(afterTerminal.metadataVersion).toBe(1)
     })
 })
