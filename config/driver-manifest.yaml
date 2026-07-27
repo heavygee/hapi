@@ -96,12 +96,11 @@ layers:
 #   overseer-inbox layer. Repointed to soup/*-nofcm tips that sync those
 #   paths to feat/companion-fcm-push-api. Durable fix: peers rebase
 #   overseer/PR branches onto upstream/main (thin tips) and drop soup/*-nofcm.
+  # DROPPED 2026-07-27: feat/companion-fcm-push-api MERGED UPSTREAM as PR #803
+  # (226b2d066, 2026-07-27). Companion pairing + FCM device registry on main.
   # Native Android/Wear companion: FCM device registry + optional hub push channel.
-  # NOTE: bumps SQLite SCHEMA_VERSION 10 -> 11 (adds fcm_devices table + 2 indexes).
-  # Forward-migration is automatic at hub boot (stepMigrations[10]).
-  # Reverse (removing this layer) requires hapi-driver-db-prep.sh - auto-handled.
-  # PR #803 (tiann/hapi) - open.
-  - branch: feat/companion-fcm-push-api
+  # NOTE: was SCHEMA_VERSION bump — now upstream. Reverse SQL still in db-prep if needed.
+  # - branch: feat/companion-fcm-push-api
 
   # DROPPED 2026-07-14: feat/mermaid-lightbox-737 MERGED UPSTREAM as PR #741
   # (65e1708, 2026-07-11). Branch ref deleted; work is on upstream/main.
@@ -132,7 +131,7 @@ layers:
   # - branch: feat/codex-usage-indicator-rebased  # DROPPED pending budget-only re-thin
 
   # Bridge: FCM sendModelError for wrist push on model errors (#878).
-  # MUST be exactly one commit on top of feat/companion-fcm-push-api tip —
+  # MUST be thin tip on upstream (or post-#803 base) — was on companion-fcm tip —
   # do NOT re-merge old FCM/push files (NativeFallbackProbe 5-arg constructor
   # was removed in 8f870516; stale merge-tips poison every soup rebuild).
   # Tip 2026-07-17: e2d5a294c (1 commit on FCM @ 0d30a21c0; fat bak backup/cursor-model-error-fcm-bridge-fat).
@@ -563,11 +562,11 @@ layers:
   # wins over fix/cursor-flat-picker-default-highlight on overlapping files.
   - branch: feat/cursor-picker-ios-nested
 
+  # PARKED 2026-07-27 (post-#803 sync rematerialize): soup-relative tip @ 5822e9cd6
+  # would re-storm vs new upstream base. Peer re-thin onto new driver tip, then un-park.
   # tiann/hapi#1160/#1161/#1162/#1163 — opt-in GitHub PR awareness + session↔PR
   # attach (externalRefs chip, Settings toggle, hapi link-pr, MCP link_pr).
-  # Thin tip on driver/integration @ 91a1871ae (5822e9cd6, 2026-07-27 re-thin
-  # after v0.24 park). Drop when #1161+#1163 land upstream.
   # Worktree: ~/coding/hapi/worktrees/github-pr-awareness-soup @
   # driver/github-pr-awareness. Enable Settings → General → GitHub PR awareness
   # (or HAPI_GITHUB_PR_AWARENESS=1). Meta: hapi-meta-daily --backfill-refs.
-  - branch: driver/github-pr-awareness
+  # - branch: driver/github-pr-awareness
