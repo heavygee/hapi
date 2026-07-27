@@ -234,32 +234,22 @@ layers:
   # (pre-push blocks garden/* on non-daily origin branches).
   - branch: feat/garden-route
 
-  # Claude session import foundation (tiann/hapi#942, head dzshzx/hapi).
-  # Refresh before rebuild: git fetch https://github.com/dzshzx/hapi.git
-  #   feat/claude-session-import:feat/claude-session-import
-  # Cursor import (#945 feat/agent-session-import-picker) stacks on this - MUST stay
-  # immediately above that layer.
-  #
-  # TEMPORARILY DROPPED 2026-07-19 (meta): upstream 0.23.1 shipped #1088 (native
-  # Codex import/resume from runners) which reworked the *inline* CodexSessionSyncDialog
-  # + hub codexDesktop routes. This layer refactored that SAME dialog into a shared
-  # <SessionImportPicker> (SessionImportPicker.tsx) — competing reworks of one surface
-  # (add/add on CodexSessionSyncDialog.tsx, codexDesktop.ts/.test.ts). Not a mechanical
-  # merge. FOLLOW-UP (owner, tiann/hapi#942 dzshzx): rebase onto 0.23.1 — adopt upstream's
-  # native Codex dialog, re-add Claude import (upstream does NOT provide this) + re-extract
-  # the shared picker on top. Cluster-parked WITH feat/agent-session-import-picker below
-  # (that stacks on this) and feat/codex-usage-indicator-rebased above. No branch edited by
-  # meta; only manifest-parked pending owner rebase.
-  # - branch: feat/claude-session-import  # DROPPED pending owner rebase vs 0.23.1 #1088
+  # Claude session import (tiann/hapi#942) — RETIRED for soup 2026-07-24.
+  # Product fully subsumed by feat/agent-session-import-picker (patch-id identity
+  # on Claude-resume tip commits; claudeDesktop + Claude tab live in #945 tip).
+  # Never soup this layer alongside picker (ancestry broken / conflict hell).
+  # Never soup raw dzshzx:feat/claude-session-import (CONFLICTING + trellis).
+  # Heavygee branch tip 2424b42a5 kept for optional Claude-only hygiene only.
+  # See brief § CLAUDE FINAL DISPOSITION.
+  # - branch: feat/claude-session-import  # RETIRED: subsumed by #945 soup layer
 
-  # Cursor flavor for multi-agent session import (tiann/hapi#732, PR #945).
-  # Hub /api/cursor/* + web AgentSessionImportDialog codex|cursor tabs.
-  # Blocked on #942 upstream; branch is 3 commits on top of feat/claude-session-import.
-  #
-  # TEMPORARILY DROPPED 2026-07-19 (meta): stacks on feat/claude-session-import (parked
-  # above) and shares the SessionImportPicker / codexDesktop surface reworked by 0.23.1
-  # #1088. Re-enable together with feat/claude-session-import after the owner rebase.
-  # - branch: feat/agent-session-import-picker  # DROPPED (stacks on parked #942)
+  # Multi-agent session import (#945) — SOLE soup layer (Claude+Codex+Cursor).
+  # Tip bacfd20b9+ ; agentImport.tooltip; includes #942 product surface.
+  # Hub+web+cli → --build-web + hapi-restart-hub.
+  # Brief: docs/plans/peer-briefings/2026-07-24-peer-942-945-import-picker-rebase.md
+  # Worktree: agent-import-picker. Drop when upstream #945 merges.
+  # Heals 52/53/54 parked while this cluster is souped.
+  - branch: feat/agent-session-import-picker
 
   # Session list/header context menu: Copy reference for cross-session citation.
   # tiann/hapi#950. Web-only; topmost for cheap rollback via atomic web swap.
@@ -297,11 +287,41 @@ layers:
   # that DID emit a summary (event spam), gate/back-out (topmost = cheap rollback).
   - branch: feat/overseer-summary-fallback
 
+  # 2026-07-24 Piece 3 (fork PR #88): session-summary systemPrompt wiring for
+  # Claude/Codex/Grok/OpenCode + debug events/inbox relative dates.
+  # Tip 62a556f87 on feat/overseer-summary-fallback (keeps SKILL_LOOKUP inside
+  # wrap — do not drop skill when editing these prompts). MUST sit immediately
+  # after fallback. CLI+web → rematerialize needs --build-web + hapi-restart-hub.
+  # NOT in this layer: kimi/pi/generic-ACP (#89 next phase).
+  - branch: feat/overseer-summary-flavors-and-dates
+
+  # 2026-07-24 #90 Option A (fork PR #91): opt-in OpenAI-compatible LLM summary
+  # fallback when AGENT_NOTIFY_SUMMARY missing. Default OFF
+  # (HAPI_OVERSEER_LLM_FALLBACK). chat-completions + responses adapters;
+  # full-turn text; attn=0 Session Log only; heuristic fallthrough.
+  # Tip d0a04da2d on feat/overseer-summary-flavors-and-dates. Hub(+cli skill
+  # restore for stacked typecheck) → hapi-restart-hub after rematerialize.
+  # Worktree: overseer-llm-fallback.
+  - branch: feat/overseer-llm-fallback
+
   # Overseer replay harness (thin): harness+CI+fixtures only. Tip 96c8e7bf4,
   # ahead=1, zero FCM. Stack after umbrella; no substrate in this tip.
   - branch: feat/overseer-replay-harness
   # DROPPED 2026-07-14: fix/soup-inbox-client-methods + fix/soup-sync-engine-collision
   # obsolete once feat/overseer-readonly-entity thin tip + FCM/scratchlist layers union via rerere.
+
+  # 2026-07-25 slices A+B: channel-only POST /api/system-events ingest +
+  # hapi-meta-daily --emit-events (default off), with chatty-first inbox
+  # promotion for contribution-state transitions. Tip 2e318cfec, merges
+  # feat/overseer-readonly-entity (substrate) so it must sit after that layer.
+  # sourceKind pinned to channel; fingerprinted idempotency/dedupe keys;
+  # failed POSTs preserve emit + GitHub notification cursors for retry.
+  # KILL-CRITERION (ADR-001): if a channel event ever surfaces as a system
+  # message in a WORKER transcript, drop this layer immediately — the whole
+  # point is that operator-facing channel state stays invisible to agents.
+  # Spec: docs/plans/2026-07-25-contrib-state-event-ingest-spec.md
+  # Worktree: ~/coding/hapi/worktrees/contrib-state-ingest
+  - branch: feat/contrib-state-channel-ingest
 
 
   # DROPPED 2026-06-19: fix/soup-garden-react-import was a driver/integration
@@ -364,12 +384,11 @@ layers:
   # (hub+runner restart). Drop when upstream PR merges.
   - branch: feat/cross-flavor-inline-images
 
-  # #959 - exit scratchlist mode after successful promote-to-queue send.
-  # 2026-06-20 peer de4d3c5d. Web-only: handlePromoteToQueue calls
-  # onExitScratchlistMode when onSend returns true. Playwright:
-  # e2e/scratchlist-exit-after-queue.spec.ts. Hard-reload for dogfood.
-  # Drop when upstream PR merges.
-  - branch: fix/scratchlist-exit-after-queue-send
+  # DROPPED 2026-07-27: fix/scratchlist-exit-after-queue-send MERGED as
+  # tiann/hapi#960 (squash 311e0cef5 "exit scratchlist mode after successful
+  # promote-to-queue send"). Peer cleaned branch+worktree; layer removed for
+  # next wave rematerialize. Was: #959 tracking / web-only handlePromoteToQueue.
+  # - branch: fix/scratchlist-exit-after-queue-send
 
   # DROPPED 2026-07-03: fix/soup-markdown-renderer-types (stale merge-tip; gemini
   # modify/delete after upstream #953). Commits live on feat/file-markdown-preview,
@@ -409,6 +428,14 @@ layers:
   # c6b57a7f1 / base 8eac26726 (9 commits). Owner proved throwaway merge onto
   # driver @48703cdea → 2 additive conflicts (rpcMethods + settings test mocks),
   # rerere trained; expect auto-resolve on rematerialize (not the old 20-file blast).
+  #
+  # RE-THINNED 2026-07-24 (owner, detect advanced 3 commits): new tip 231647558
+  # on detect f8b9b2c10 (9 bridge commits; f8b9b2c10 now ancestor). Detect new
+  # work preserved (7db291c64 prior-done / a43bcf5f4 rawSnippet / f8b9b2c10 carry-
+  # forward). Same 36-file scope. Proof merge vs real ctx (4645025b9, 1st parent
+  # of driver 351eca814) → 1 conflict only (settings/index.test.tsx), rerere
+  # auto-staged (keep both CompanionPairing + bridge app-context mock);
+  # rpcMethods.ts now clean. Manifest layer unchanged; rematerialize picks 231647558.
   - branch: feat/cursor-model-error-bridge
 
   # tiann/hapi#991 / upstream PR #1128 - Cursor ACP remote resume: reuse
@@ -481,17 +508,9 @@ layers:
   # Topmost for cheap rollback. Drop when upstream PR merges.
   - branch: feat/relative-time-upto-year
 
-  # tiann/hapi#1044 (fork #79, fork PR heavygee/hapi#80) - Cursor plan-mode
-  # approval relayed to the agent as "User cancelled". Cursor ACP blocking
-  # extension methods (cursor/ask_question, cursor/create_plan) need the
-  # JSON-RPC result nested as { outcome: { outcome: "accepted" } }; the adapter
-  # returned it flat, so Cursor read response.outcome.outcome as undefined and
-  # cancelled. CLI-only single-file fix (cursorExtensionAdapter.ts). Dogfood a
-  # Cursor plan-mode CreatePlan approval on :3006 before the upstream PR.
-  # Worktree: ~/coding/hapi/worktrees/cursor-plan-approve @ 779dcf8d4.
-  # Requires hub+runner restart (hapi-restart-hub) after rebuild. Drop when
-  # upstream PR merges.
-  - branch: fix/cursor-create-plan-outcome-envelope
+  # DROPPED 2026-07-27: fix/cursor-create-plan-outcome-envelope MERGED as tiann/hapi#1097
+  # (nested ACP CreatePlan outcome + plan→execute continue + enqueue mode sync).
+  # - branch: fix/cursor-create-plan-outcome-envelope
 
   # heavygee/hapi#82 - Session flow view: a read-only "Flow" toggle in the
   # session header opening two panels (files touched + execution-flow graph),
@@ -543,3 +562,12 @@ layers:
   # (90dc261b9). Drop when upstream PR #947 merges. Topmost for dogfood so it
   # wins over fix/cursor-flat-picker-default-highlight on overlapping files.
   - branch: feat/cursor-picker-ios-nested
+
+  # tiann/hapi#1160/#1161/#1162/#1163 — opt-in GitHub PR awareness + session↔PR
+  # attach (externalRefs chip, Settings toggle, hapi link-pr, MCP link_pr).
+  # Thin tip: single delta on post-feat/cursor-picker-ios-nested (88481771c),
+  # not a fat driver/integration HEAD. Drop when #1161+#1163 land upstream.
+  # Worktree: ~/coding/hapi/worktrees/github-pr-awareness-soup @
+  # driver/github-pr-awareness. Enable Settings → General → GitHub PR awareness
+  # (or HAPI_GITHUB_PR_AWARENESS=1). Meta: hapi-meta-daily --backfill-refs.
+  - branch: driver/github-pr-awareness
