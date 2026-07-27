@@ -20,6 +20,9 @@ Environment=PATH=/home/heavygee/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=HAPI_HOST=http://127.0.0.1:3006
 Environment=HAPI_PRIMARY=/home/heavygee/coding/hapi
 Environment=HAPI_SETTINGS=/home/heavygee/.hapi/settings.json
+Environment=NO_COLOR=1
+Environment=CLICOLOR=0
+Environment=HAPI_GH_TIMEOUT_SECS=30
 EnvironmentFile=-/home/heavygee/.hapi/meta-daily.env
 WorkingDirectory=/home/heavygee/coding/hapi
 ExecStartPre=/usr/bin/mkdir -p /home/heavygee/.local/state/hapi

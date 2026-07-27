@@ -21,6 +21,10 @@ PARALLEL="${HAPI_PR_EMOJI_PARALLEL:-4}"
 TABLE=0
 PRS=()
 
+# NO_COLOR: under systemd, `timeout --foreground` (historically) allocated a pty
+# so `gh … --json` emitted ANSI. First-char `[` checks then failed and every PR
+# became fake 🔁 "no CI checks visible". Never colorize machine-readable output.
+export NO_COLOR=1 CLICOLOR=0
 export GH_FORCE_TTY=0 GIT_TERMINAL_PROMPT=0 GH_PAGER=cat PAGER=cat
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -60,7 +64,9 @@ trap 'rm -rf "$TMPDIR"' EXIT
 
 gh_t() {
     (( $(date +%s) < WALL_LIMIT )) || { echo "hapi-pr-emoji-batch: wall-clock limit exceeded" >&2; return 124; }
-    timeout --foreground -k 3 "${TIMEOUT}s" gh "$@"
+    # Do not use timeout --foreground: it can attach a pty; gh then ANSI-colors
+    # --json and breaks _gh_check_signals (see NO_COLOR note above).
+    timeout -k 3 "${TIMEOUT}s" gh "$@"
 }
 
 fetch_latest_bot_body() {
@@ -109,8 +115,10 @@ _emit_pr_json() {
 _gh_check_signals() {
     local n="$1" json
     local checks_ok=1 checks_pending=0 checks_seen=0 pr_review_ok=0
-    if json="$(gh_t pr checks "$n" --repo "$REPO" --json name,bucket 2>/dev/null)" \
-        && [[ "${json:0:1}" == "[" ]]; then
+    json="$(gh_t pr checks "$n" --repo "$REPO" --json name,bucket 2>/dev/null || true)"
+    # Strip ANSI color (belt-and-suspenders if a pty sneaks back in).
+    json="$(printf '%s' "$json" | sed $'s/\033\\[[0-9;]*[a-zA-Z]//g')"
+    if printf '%s' "$json" | jq -e 'type == "array"' >/dev/null 2>&1; then
         local row cname bucket
         while IFS= read -r row; do
             cname="$(echo "$row" | jq -r '.name')"
@@ -122,7 +130,7 @@ _gh_check_signals() {
                 pending|queued|in_progress) checks_ok=0; checks_pending=1 ;;
                 *) checks_ok=0 ;;
             esac
-        done < <(echo "$json" | jq -c '.[]' 2>/dev/null || true)
+        done < <(printf '%s' "$json" | jq -c '.[]' 2>/dev/null || true)
         echo "$checks_ok $checks_pending $checks_seen $pr_review_ok"
         return
     fi

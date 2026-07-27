@@ -69,6 +69,7 @@ HAPI_PRIMARY="${HAPI_PRIMARY:-$HOME/coding/hapi}"
 BATCH_BIN="$(pec_resolve_tool "$SCRIPT_DIR" "$HAPI_PRIMARY" "${HAPI_META_BATCH_BIN:-}" hapi-pr-emoji-batch.sh)"
 PING_BIN="$(pec_resolve_tool "$SCRIPT_DIR" "$HAPI_PRIMARY" "${HAPI_META_PING_BIN:-}" hapi-ping-peer.sh)"
 
+export NO_COLOR=1 CLICOLOR=0
 export GH_FORCE_TTY=0 GIT_TERMINAL_PROMPT=0 GH_PAGER=cat PAGER=cat
 
 DRY_RUN=0
