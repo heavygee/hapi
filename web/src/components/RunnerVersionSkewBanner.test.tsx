@@ -25,8 +25,8 @@ const TEST_OFFER = {
 type UpgradeInfoMockResult = { info: { offer: typeof TEST_OFFER; policy: FleetUpgradePolicy }; isLoading: boolean }
 const useMachinesMock = vi.fn()
 const useUpgradeInfoMock = vi.fn((..._args: unknown[]): UpgradeInfoMockResult => ({ info: { offer: TEST_OFFER, policy: 'auto' }, isLoading: false }))
-const restartMachineRunnerMock = vi.fn(async () => ({ message: 'ok' }))
-const upgradeMachineRunnerMock = vi.fn(async () => ({ message: 'ok' }))
+const restartMachineRunnerMock = vi.fn(async (): Promise<{ message: string }> => ({ message: 'ok' }))
+const upgradeMachineRunnerMock = vi.fn(async (): Promise<{ message: string; response?: unknown }> => ({ message: 'ok' }))
 const useAppContextMock = vi.fn(() => ({
     api: {
         restartMachineRunner: restartMachineRunnerMock,
