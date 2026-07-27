@@ -235,8 +235,10 @@ export function RunnerVersionSkewBanner({ topClassName }: { topClassName?: strin
                     const newerOnDisk = cliBinaryUpdatedOnDisk(machine.metadata)
                     const handoffDisabled = machine.metadata?.versionHandoffDisabled === true
                     const busy = busyId === machine.id
+                    // Upgrade owns package+handoff relaunch. Restart is stop-only and is
+                    // only safe when an external supervisor (soup/systemd) will relaunch.
                     const canUpgrade = !handoffDisabled
-                    const canRestart = handoffDisabled || newerOnDisk
+                    const canRestart = handoffDisabled
                     return (
                         <li
                             key={machine.id}
@@ -272,7 +274,7 @@ export function RunnerVersionSkewBanner({ topClassName }: { topClassName?: strin
                                         disabled={!canRestart || busy}
                                         title={canRestart
                                             ? undefined
-                                            : t('runner.skew.banner.restartNeedsNewerBinary')}
+                                            : t('runner.skew.banner.restartNeedsSupervisor')}
                                         onClick={() => void onRestart(machine)}
                                         className="rounded border border-amber-700/50 px-2 py-1 text-xs font-medium text-amber-950 disabled:opacity-50 dark:border-amber-200/40 dark:text-amber-50"
                                     >

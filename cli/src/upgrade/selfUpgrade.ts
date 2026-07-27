@@ -13,7 +13,11 @@ import { CURRENT_MACHINE_CAPABILITIES } from '@hapi/protocol/runnerCapabilities'
 import packageJson from '../../package.json'
 import { logger } from '@/ui/logger'
 import { configuration } from '@/configuration'
-import { spawnHappyCLI } from '@/utils/spawnHappyCLI'
+import { waitForRunnerHandoff } from '@/runner/controlClient'
+import {
+    reacquireRunnerLockAfterFailedHandoff,
+    releaseRunnerLockForHandoff,
+} from '@/runner/handoffLock'
 import { readRunnerState } from '@/persistence'
 
 export type ApplyDecision =
@@ -209,7 +213,7 @@ async function installFromArtifact(
     return finalPath
 }
 
-async function scheduleRunnerRelaunch(cliExecutable?: string): Promise<void> {
+async function scheduleRunnerRelaunch(cliExecutable: string): Promise<void> {
     const state = await readRunnerState()
     const args = Array.isArray(state?.startedWithArgv) && state.startedWithArgv[0] === 'runner'
         ? state.startedWithArgv
@@ -218,38 +222,26 @@ async function scheduleRunnerRelaunch(cliExecutable?: string): Promise<void> {
         ...process.env,
         // Authorized handoff: child must not stopRunner() against this PID.
         HAPI_RUNNER_HANDOFF_FROM_PID: String(process.pid),
+        // Always pin the child to the freshly installed binary. Never fall back
+        // to spawnHappyCLI / process.execPath — compiled runners would relaunch
+        // the old generation and report a false "started".
+        HAPI_CLI_EXECUTABLE: cliExecutable,
     }
-    if (cliExecutable) {
-        env.HAPI_CLI_EXECUTABLE = cliExecutable
-    }
-    // spawnHappyCLI resolves HAPI_CLI_EXECUTABLE from process.env before merging
-    // options.env, and in compiled mode overwrites it with the old binary. When we
-    // have a freshly downloaded artifact path, spawn that path directly.
     // Windows npm shims are `.cmd`/`.bat` and need shell:true (CreateProcess cannot
     // exec them directly). Prefer hapi.exe via resolvePostNpmInstallExecutable when
     // present so we usually avoid this path.
-    const needsShell = Boolean(
-        cliExecutable
-        && process.platform === 'win32'
-        && /\.(cmd|bat)$/i.test(cliExecutable)
-    )
-    const child = cliExecutable
-        ? spawn(cliExecutable, args, {
-            detached: true,
-            stdio: 'ignore',
-            env,
-            shell: needsShell,
-            windowsHide: process.platform === 'win32',
-        })
-        : spawnHappyCLI(args, {
-            detached: true,
-            stdio: 'ignore',
-            env,
-        })
+    const needsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(cliExecutable)
+    const child = spawn(cliExecutable, args, {
+        detached: true,
+        stdio: 'ignore',
+        env,
+        shell: needsShell,
+        windowsHide: process.platform === 'win32',
+    })
     child.unref()
     // Do not process.exit here. ApiMachineClient delays requestShutdown by
-    // ~500ms so runner lock/state cleanup can run; a 250ms hard exit races that
-    // and skips cleanup. Caller invokes requestShutdown after this returns.
+    // ~500ms so runner lock/state cleanup can run; a hard exit races that and
+    // skips cleanup. Caller invokes requestShutdown after handoff confirms.
 }
 
 /**
@@ -294,9 +286,24 @@ export async function applyRunnerSelfUpgrade(options: {
             }
         }
 
-        // Spawn replacement first, then request graceful shutdown so cleanup
-        // runs. Only hard-exit when no shutdown hook was provided (direct calls).
+        // Spawn replacement, release the runner lock so the child can register,
+        // then wait for handoff before shutting down. Mirrors run.ts mtime handoff
+        // so a failed child does not leave the machine offline after a "started" RPC.
         await scheduleRunnerRelaunch(installedExecutable)
+        await releaseRunnerLockForHandoff()
+        const handoffOk = await waitForRunnerHandoff(process.pid, { timeoutMs: 30_000 })
+        if (!handoffOk) {
+            const reacquired = await reacquireRunnerLockAfterFailedHandoff()
+            logger.debug('[SELF-UPGRADE] Replacement did not register; leaving current runner up', {
+                reacquired,
+            })
+            return {
+                status: 'failed',
+                message: 'Replacement runner did not register; current runner left running',
+                channel: options.offer.channel,
+            }
+        }
+
         if (options.requestShutdown) {
             options.requestShutdown()
         } else {
