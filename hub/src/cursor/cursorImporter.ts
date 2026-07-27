@@ -709,6 +709,17 @@ export async function importCursorSession(options: {
         return failure('verify_timeout', verifyOut.message)
     }
 
+    // Re-check after the async verify window. ACP imports have no mkdir
+    // lock like legacy; two overlapping imports can both pass the preflight
+    // index and both create rows with the same cursorSessionId.
+    const alreadyAfterVerify = buildAlreadyImportedIndex(options.store, options.namespace).get(options.uuid)
+    if (alreadyAfterVerify) {
+        return failure(
+            'already_imported',
+            `cursor session ${options.uuid} is already imported as Hapi session ${alreadyAfterVerify}`
+        )
+    }
+
     // Verify passed. For legacy sessions, transplant store.db → ACP dir.
     // Mirrors the migrator's atomic-mkdir + 0o700 mode + 0o600 store.db
     // mode (see cursorLegacyMigrator.migrateOneWithLock) — these

@@ -337,6 +337,39 @@ describe('importCursorSession refusals', () => {
         expect(out.message).toContain(planted.id)
     })
 
+    it('re-checks already_imported after verify so overlapping ACP imports cannot both create rows', async () => {
+        const uuid = '11111111-2222-3333-4444-666666666667'
+        h.placeAcpStore(uuid, { name: 'race chat', cwd: '/workspace/race' })
+        h.placeFakeAgentBinary()
+
+        let plantedId = ''
+        const probe = makeMockProbe()
+        const originalLoad = probe.loadSession.bind(probe)
+        probe.loadSession = async () => {
+            const planted = h.store.sessions.getOrCreateSession('hapi-race-winner', {
+                path: '/workspace/race',
+                host: 'test-host',
+                flavor: 'cursor',
+                cursorSessionId: uuid
+            } as Record<string, unknown>, {}, 'default')
+            plantedId = planted.id
+            return originalLoad()
+        }
+
+        const out = await importCursorSession({
+            uuid,
+            store: h.store,
+            namespace: 'default',
+            home: h.home,
+            deps: makeDeps(h, probe)
+        })
+        expect(out.ok).toBe(false)
+        if (out.ok) return
+        expect(out.reason).toBe('already_imported')
+        expect(out.message).toContain(plantedId)
+        expect(h.store.sessions.getSessionsByNamespace('default')).toHaveLength(1)
+    })
+
     it('refuses ambiguous_legacy_store when the same uuid exists in 2+ drawers without workspacePath', async () => {
         const uuid = '11111111-2222-3333-4444-777777777777'
         h.placeLegacyStore(uuid, { workspaceHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', name: 'd1' })
