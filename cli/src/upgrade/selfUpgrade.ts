@@ -110,8 +110,9 @@ async function installFromNpm(offer: HubUpgradeOffer): Promise<string> {
 export function resolvePostNpmInstallExecutable(
     which: (command: string) => string | null = (command) => Bun.which(command),
 ): string | null {
+    // Prefer a real PE on Windows over the npm `.cmd` shim when both exist.
     const candidates = process.platform === 'win32'
-        ? ['hapi', 'hapi.cmd', 'hapi.exe']
+        ? ['hapi.exe', 'hapi', 'hapi.cmd']
         : ['hapi']
     for (const name of candidates) {
         const found = which(name)?.trim()
@@ -224,11 +225,21 @@ async function scheduleRunnerRelaunch(cliExecutable?: string): Promise<void> {
     // spawnHappyCLI resolves HAPI_CLI_EXECUTABLE from process.env before merging
     // options.env, and in compiled mode overwrites it with the old binary. When we
     // have a freshly downloaded artifact path, spawn that path directly.
+    // Windows npm shims are `.cmd`/`.bat` and need shell:true (CreateProcess cannot
+    // exec them directly). Prefer hapi.exe via resolvePostNpmInstallExecutable when
+    // present so we usually avoid this path.
+    const needsShell = Boolean(
+        cliExecutable
+        && process.platform === 'win32'
+        && /\.(cmd|bat)$/i.test(cliExecutable)
+    )
     const child = cliExecutable
         ? spawn(cliExecutable, args, {
             detached: true,
             stdio: 'ignore',
             env,
+            shell: needsShell,
+            windowsHide: process.platform === 'win32',
         })
         : spawnHappyCLI(args, {
             detached: true,
