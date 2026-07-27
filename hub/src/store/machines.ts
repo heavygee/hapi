@@ -86,6 +86,15 @@ export function getOrCreateMachine(
         if (stored.namespace !== namespace) {
             throw new Error('Machine namespace mismatch')
         }
+        // Identity refresh is runner-registration only. Terminal session
+        // bootstrap hits the same machine id with runnerState=null and current
+        // CLI metadata — refreshing there would mask a still-old live runner
+        // (banner/auto-upgrade disappear while the runner socket is stale).
+        const isRunnerRegistration = runnerState !== null && runnerState !== undefined
+        if (!isRunnerRegistration) {
+            return stored
+        }
+
         // Re-registering runners used to keep stale hub metadata forever
         // (version/capabilities from the first connect). Refresh identity when
         // the client sends newer registration fields.
@@ -108,7 +117,7 @@ export function getOrCreateMachine(
             // path can still push identity via machine-update-metadata.
             return getMachine(db, id) ?? stored
         }
-        // Upstream general merge: fill missing machine-owned fields (e.g. arch)
+        // General merge: fill missing machine-owned fields (e.g. arch)
         // that are not covered by the identity refresh predicate above.
         const merged = mergeMachineMetadata(stored.metadata, metadata)
         let current = stored
