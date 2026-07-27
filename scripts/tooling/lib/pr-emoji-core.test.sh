@@ -43,6 +43,12 @@ eq "extract pr#923" "$(pec_extract_pr_numbers "pr#923 thing" | tr '\n' ',')" "92
 eq "extract multi 941/923" "$(pec_extract_pr_numbers "PR #941/#923: foo" | tr '\n' ',')" "941,923,"
 eq "extract Peer #1100" "$(pec_extract_pr_numbers "📝Peer #1100: incubating" | tr '\n' ',')" "1100,"
 eq "extract PR: 941" "$(pec_extract_pr_numbers "PR: 941 stuff" | tr '\n' ',')" "941,"
+
+# Linked-PR extractor (chip backfill): Peer / bare # must not become PR chips
+eq "linked ignores Peer #1100" "$(pec_extract_linked_pr_numbers "📝Peer #1100: incubating" | tr '\n' ',')" ""
+eq "linked ignores bare #1085 in Peer title" "$(pec_extract_linked_pr_numbers "Peer #1085: Dogfood: #1085 hang" | tr '\n' ',')" ""
+eq "linked keeps PR #1087 when Peer also present" "$(pec_extract_linked_pr_numbers "PR #1087: Peer #1085: banner" | tr '\n' ',')" "1087,"
+eq "linked extract PR #941" "$(pec_extract_linked_pr_numbers "✅PR #941: foo" | tr '\n' ',')" "941,"
 # Scope protection: 1-2 digit internal workstream refs must NOT match (they would
 # cross-wire overseer sessions to unrelated upstream PRs). See fn header.
 eq "ignore two-digit #22 (overseer W1.6)" "$(pec_extract_pr_numbers "Peer: W1.6 provenance (#22)" | tr '\n' ',')" ""

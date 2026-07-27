@@ -471,18 +471,26 @@ rm -f "$WORK/state.json" "$WORK/put-refs.log"
 cat >"$WORK/gh" <<'EOF'
 #!/usr/bin/env bash
 args="$*"
+# Real gh prints 404 JSON on stdout and exits 1. Mimic that — a nonempty body
+# must NOT count as resolve success (issue #1085 / Peer-title chip bug).
+emit_404() {
+    echo '{"message":"Not Found","documentation_url":"https://docs.github.com/rest","status":"404"}'
+    exit 1
+}
 if [[ "$args" == *"repos/tiann/hapi/pulls/100"* ]]; then
-    echo '{"html_url":"https://github.com/tiann/hapi/pull/100"}'; exit 0
+    echo 'https://github.com/tiann/hapi/pull/100'; exit 0
 fi
 if [[ "$args" == *"repos/tiann/hapi/pulls/200"* ]]; then
-    echo '{"html_url":"https://github.com/tiann/hapi/pull/200"}'; exit 0
+    echo 'https://github.com/tiann/hapi/pull/200'; exit 0
 fi
 # 777 only on fork
-if [[ "$args" == *"repos/tiann/hapi/pulls/777"* ]]; then exit 1; fi
+if [[ "$args" == *"repos/tiann/hapi/pulls/777"* ]]; then emit_404; fi
 if [[ "$args" == *"repos/heavygee/hapi/pulls/777"* ]]; then
-    echo '{"html_url":"https://github.com/heavygee/hapi/pull/777"}'; exit 0
+    echo 'https://github.com/heavygee/hapi/pull/777'; exit 0
 fi
-exit 1
+# Issue-only number (Peer title trap)
+if [[ "$args" == *"pulls/1085"* ]]; then emit_404; fi
+emit_404
 EOF
 chmod +x "$WORK/gh"
 
@@ -502,7 +510,9 @@ cat <<'JSON'
  {"id":"aaaaaaaa-1111","active":true,"metadata":{"name":"PR #100: needs work","externalRefs":[]}},
  {"id":"bbbbbbbb-2222","active":true,"metadata":{"name":"PR #200: green thing","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":200,"url":"https://github.com/tiann/hapi/pull/200","role":"primary"}]}},
  {"id":"eeeeeeee-5555","active":true,"metadata":{"name":"PR #777: fork-only","externalRefs":[]}},
- {"id":"ffffffff-6666","active":true,"metadata":{"name":"PR #404: missing everywhere","externalRefs":[]}}
+ {"id":"ffffffff-6666","active":true,"metadata":{"name":"PR #404: missing everywhere","externalRefs":[]}},
+ {"id":"c076fffe-aaaa","active":true,"metadata":{"name":"Peer #1085: Dogfood: #1085 hang","externalRefs":[]}},
+ {"id":"deadbeef-bbbb","active":true,"metadata":{"name":"Issue mention only #921 in prose","externalRefs":[]}}
 ]}
 JSON
 exit 0
@@ -516,6 +526,8 @@ check "backfill dry: plans write #100" "grep -q 'aaaaaaaa' <<<\"\$out\" && grep 
 check "backfill dry: skips #200 already attached" "grep -qi 'already has' <<<\"\$out\" && grep -q 'bbbbbbbb' <<<\"\$out\""
 check "backfill dry: fork resolve #777" "grep -q 'heavygee/hapi#777' <<<\"\$out\""
 check "backfill dry: unresolved #404" "grep -q 'ffffffff' <<<\"\$out\" && grep -qi 'UNRESOLVED\\|not on' <<<\"\$out\""
+check "backfill dry: ignores Peer #1085 (issue)" "! grep -q '1085' <<<\"\$out\""
+check "backfill dry: ignores bare #921 mention" "! grep -q 'deadbeef\\|921' <<<\"\$out\""
 check "backfill dry: no PUT" "[[ ! -f '$WORK/put-refs.log' ]]"
 check "backfill dry: prints apply hint" "grep -q -- '--apply' <<<\"\$out\""
 

@@ -68,6 +68,10 @@ pec_normalize_title_base() {
 # would otherwise cross-wire to unrelated upstream tiann/hapi PRs of the same
 # number. Upstream PRs relevant to this fork are all 3-4 digits. For a rare
 # low-numbered upstream PR (#48, #75) use `--pr <N>` explicitly.
+#
+# NOTE: Peer #N and bare #N are workstream/issue markers. Meta still extracts
+# them here for classify/ping routing. Do NOT use this for chip backfill —
+# use pec_extract_linked_pr_numbers instead.
 pec_extract_pr_numbers() {
     local name="$1"
     local re_multi re_peer
@@ -93,6 +97,29 @@ pec_extract_pr_numbers() {
     fi
     printf '%s' "$name" | grep -oiE 'pr[#: ]*#?[0-9]{3,4}|#[0-9]{3,4}' \
         | grep -oE '[0-9]{3,4}' | head -1
+}
+
+# Explicit pull-request markers only (ADR D6 backfill / chip identity).
+# Ignores Peer #N (issue/workstream) and bare #N (issue mentions in titles).
+pec_extract_linked_pr_numbers() {
+    local name="$1"
+    local re_multi
+    re_multi='[Pp][Rr][[:space:]]*#([0-9]{3,4})/#([0-9]{3,4})'
+    if [[ "$name" =~ [Pp][Rr][[:space:]]*#?([0-9]{3,4}):[[:space:]]*#?([0-9]{3,4}) ]]; then
+        echo "${BASH_REMATCH[1]}"; echo "${BASH_REMATCH[2]}"; return
+    fi
+    if [[ "$name" =~ [Pp][Rr][[:space:]]*#?([0-9]{3,4})[[:space:]]+#?([0-9]{3,4}): ]]; then
+        echo "${BASH_REMATCH[1]}"; echo "${BASH_REMATCH[2]}"; return
+    fi
+    if [[ "$name" =~ $re_multi ]]; then
+        echo "${BASH_REMATCH[1]}"; echo "${BASH_REMATCH[2]}"; return
+    fi
+    if [[ "$name" =~ [Pp][Rr]:[[:space:]]*#?([0-9]{3,4}) ]]; then
+        echo "${BASH_REMATCH[1]}"; return
+    fi
+    local first
+    first="$(printf '%s' "$name" | grep -oiE '[Pp][Rr][[:space:]]*#?[0-9]{3,4}' | head -1 | grep -oE '[0-9]{3,4}' || true)"
+    [[ -n "$first" ]] && echo "$first"
 }
 
 # Strip emoji + "PR #N:" / "Peer #N:" marker from a title, returning the base label.

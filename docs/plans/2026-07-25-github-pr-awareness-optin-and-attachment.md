@@ -88,7 +88,9 @@ Ranked by trust:
 
 ### D6 — Meta backfill, once, then title scraping is demoted
 
-`hapi-meta-daily --backfill-refs` walks sessions whose titles carry `PR #N`, resolves the repo from the PR's actual home (fork vs upstream — never guessed from the number), and writes `role: primary, source: 'inferred'` only where the session has **no** existing ref. After that runs clean, `related_session_id` resolution in the contribution-state emitter reads `externalRefs` first and falls back to title scraping only for unbacked sessions, with a warning line in the action queue naming them. When the warning list hits zero for a week, delete the scraper.
+`hapi-meta-daily --backfill-refs` walks sessions whose titles carry **`PR #N`** (not `Peer #N`, not bare `#N`), resolves the repo from the PR's actual home via a successful `GET /repos/{owner}/{repo}/pulls/{n}` (HTTP 404 JSON on stdout is failure — never invent a pull URL), and writes `role: primary, source: 'inferred'` only where the session has **no** existing ref. After that runs clean, `related_session_id` resolution in the contribution-state emitter reads `externalRefs` first and falls back to title scraping only for unbacked sessions, with a warning line in the action queue naming them. When the warning list hits zero for a week, delete the scraper.
+
+**Kill criterion (2026-07-27):** if a `Peer #N` / issue-only title ever gets a `github_pr` chip again, the resolve exit-code gate or the linked-PR extractor regressed.
 
 ### D7 — Schema delta is additive (v1.1)
 

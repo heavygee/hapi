@@ -15,7 +15,10 @@
 #   6. Prints a sorted operator ACTION QUEUE (⚠️ / 🔧 wave / orphans / inactive /
 #      new comms) plus the non-automated next steps (sync, rematerialize).
 #   7. Optional one-shot: --backfill-refs writes metadata.externalRefs from
-#      title-scraped PR numbers (ADR D6 / F1). Dry by default; --apply writes.
+#      title-scraped **PR #N** markers only (ADR D6 / F1). Peer #N / bare #N
+#      are issue/workstream titles and must never become github_pr chips.
+#      Dry by default; --apply writes. Resolve requires a real pulls API hit
+#      (HTTP 404 JSON on stdout is NOT success).
 #
 # WHAT IT WILL NEVER DO (judgment / destructive / wave-scoped — surfaced only):
 #   merge upstream PRs · sync/push fork main · edit the soup manifest ·
@@ -229,11 +232,17 @@ md_refs_apply_status() {
 
 # md_resolve_pr_home <number> → "repo\turl" or empty if neither forge has it.
 # Prefer UPSTREAM_REPO, then FORK_REPO. Never guess repo from the number alone.
+#
+# CRITICAL: `gh api` on HTTP 404 still prints a JSON error body on stdout and
+# exits nonzero. Do NOT treat a nonempty stdout as success (`|| true` + -n
+# "$url" used to invent https://github.com/.../pull/N for pure issues).
 md_resolve_pr_home() {
-    local number="$1" repo url
+    local number="$1" repo url rc
     for repo in "$UPSTREAM_REPO" "$FORK_REPO"; do
-        url="$("$GH_BIN" api "repos/${repo}/pulls/${number}" --jq '.html_url // empty' 2>/dev/null || true)"
-        if [[ -n "$url" ]]; then
+        url=""
+        rc=0
+        url="$("$GH_BIN" api "repos/${repo}/pulls/${number}" --jq '.html_url // empty' 2>/dev/null)" || rc=$?
+        if [[ "$rc" -eq 0 && -n "$url" && "$url" == https://github.com/*/pull/* ]]; then
             # Canonical URL shape required by ExternalRefSchema superRefine.
             printf '%s\thttps://github.com/%s/pull/%s\n' "$repo" "$repo" "$number"
             return 0
@@ -265,7 +274,8 @@ md_backfill_refs() {
         [[ -z "$sid" ]] && continue
         [[ "$name" =~ [Yy][Aa][Aa][Cc][Cc] ]] && continue
 
-        first_pr="$(md_session_prs "$name" | awk '{print $1}')"
+        # Explicit PR #N only — Peer #N / bare #N are issues (ADR D6).
+        first_pr="$(md_session_linked_prs "$name" | awk '{print $1}')"
         [[ -z "$first_pr" ]] && continue
 
         if [[ -n "$PR_ONLY" && "$first_pr" != "$PR_ONLY" ]]; then
@@ -302,7 +312,7 @@ md_backfill_refs() {
         hub_put_external_refs "$jwt" "$sid" "$refs_json" || true
     done < <(printf '%s' "$sessions_json" | jq -r '
         .[]
-        | select((.metadata.name // "") | test("Peer #[0-9]{3,4}|PR #[0-9]{3,4}|pr#[0-9]{3,4}|#[0-9]{3,4}"; "i"))
+        | select((.metadata.name // "") | test("PR #[0-9]{3,4}|pr#[0-9]{3,4}|PR:[[:space:]]*#?[0-9]{3,4}"; "i"))
         | [
             .id,
             (.active // false),
@@ -407,9 +417,16 @@ gh_notifications() {
 # Pure planning helpers (unit-tested via source)
 # ---------------------------------------------------------------------------
 
-# md_session_prs <title> → space-joined PR numbers (dedup order preserved)
+# md_session_prs <title> → space-joined PR/Peer numbers (dedup order preserved)
+# Includes Peer #N for Meta classify/ping routing (workstream tracking).
 md_session_prs() {
     pec_extract_pr_numbers "$1" | awk '!seen[$0]++' | tr '\n' ' ' | sed 's/ *$//'
+}
+
+# md_session_linked_prs <title> → space-joined numbers from explicit PR # markers only.
+# For --backfill-refs / chip identity. Never Peer #N or bare #N (those are issues).
+md_session_linked_prs() {
+    pec_extract_linked_pr_numbers "$1" | awk '!seen[$0]++' | tr '\n' ' ' | sed 's/ *$//'
 }
 
 # md_combined_emoji <emoji1> [emoji2...] → worst
