@@ -13,6 +13,7 @@ This repo is a **fork** of `tiann/hapi`. Root **`AGENTS.md` is byte-identical to
 
 - **Master workflow (sole source):** [`docs/tooling/feature-work-lifecycle.md`](../../docs/tooling/feature-work-lifecycle.md)
 - **New functionality requests:** [`docs/tooling/new-feature-intake.md`](../../docs/tooling/new-feature-intake.md) — §0 handoff only; workflow is lifecycle
+- **Session titles:** workstream only (`PR #N: …` / `Peer #N: …`). **Never** encode CI/health with ✅🔁⚠️📝🔧 in the title (ADR D8) — that lives on the **PR chip** via `hapi-meta-daily.sh`. Do not run deprecated `hapi-pr-session-emoji.sh`, and do not hand-`PATCH` emoji after it refuses. See lifecycle [§ Session titles and PR chips](../../docs/tooling/feature-work-lifecycle.md#session-titles-and-pr-chips-no-status-emoji).
 - **Workspace** = `~/coding/hapi` (mirror). **`~/coding/hapi/driver`** = runtime on `:3006` via `hapi-active` — not the default instruction root.
 - **Driver soup mechanical guards:** `scripts/tooling/hapi-install-cursor-hooks.sh` (shell deny hooks + symlink `hapi-driver-soup-dogfood.mdc` into `~/.cursor/rules/`). Details: `docs/tooling/driver-soup.md`.
 

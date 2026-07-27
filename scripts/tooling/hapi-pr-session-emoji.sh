@@ -73,6 +73,10 @@ hapi-pr-session-emoji: DEPRECATED — title emoji rewrites are retired (ADR D8).
 
   Chip status cache + title emoji strip for chipped sessions live there.
   Escape hatch (not for cron): HAPI_ALLOW_LEGACY_EMOJI_SWEEP=1
+
+  Agents: do NOT work around this by PATCH/change_title with ✅🔁⚠️📝🔧.
+  Title = workstream only (`PR #N: …`). Health = session PR chip.
+  See docs/tooling/feature-work-lifecycle.md § Session titles and PR chips.
 EOF
     exit 2
 fi
@@ -261,12 +265,11 @@ process_session_row() {
         [[ "$combined_emoji" == "🔁" ]] && state_desc="CI/rebase in flight"
         [[ "$combined_emoji" == "📝" ]] && state_desc="pre-PR — not filed on upstream yet"
         [[ "$combined_emoji" == "🔧" ]] && state_desc="merged — idle cleanly (no mid-turn self-archive); meta archives when idle or spare for follow-on"
-        msg="Meta PR watcher sweep — session title is now **${combined_emoji}**.
+        msg="Meta PR watcher (LEGACY sweep) — PR status is **${combined_emoji}** (${state_desc}).
 
 Tracked PR(s): $(IFS=,; echo "${prs[*]}")
-State: **${combined_emoji}** (${state_desc})
 
-Keep this emoji in your session title until disposition changes.
+**Do not keep status emoji in the session title.** Chip owns health (\`externalRefs.status\`). Prefer \`hapi-meta-daily.sh\` (this script is deprecated).
 - ✅ = open PR green — wait on tiann
 - 🔁 = CI/rebase in flight
 - ⚠️ = fix threads, CI, or conflicts
@@ -275,7 +278,7 @@ Keep this emoji in your session title until disposition changes.
 
 ${actions}
 
-Canon: docs/operator/AGENTS.md § Meta PR watcher"
+Canon: docs/operator/AGENTS.md § Meta PR watcher + feature-work-lifecycle.md § Session titles and PR chips"
         PING_SIDS+=("$sid")
         PING_MSGS+=("$msg")
         PING_PREFIXES+=("$prefix")
