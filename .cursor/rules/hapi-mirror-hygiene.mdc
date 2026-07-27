@@ -31,7 +31,7 @@ Bypass (operator TTY only): `HAPI_OPERATOR_MIRROR_HYGIENE_OVERRIDE=1`
 ## Allowed on mirror (not blocked by this guard)
 
 - `docs/operator/`, `docs/plans/`, `docs/tooling/`, `scripts/tooling/`
-- `config/driver-manifest.yaml` (intentional soup layer WIP — commit or coordinate; do not leave forever)
+- `config/driver-manifest.yaml` (intentional soup layer WIP — **mess-maker must commit before turn end**; see `hapi-tooling-commit-hygiene.mdc`)
 - Product code is already blocked by `hapi-product-code-guard` outside worktrees
 
-See `docs/tooling/driver-soup.md#mirror-utensil-hygiene`.
+See `docs/tooling/driver-soup.md#mirror-utensil-hygiene` and mess-maker commits section.
