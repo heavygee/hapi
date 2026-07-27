@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { getSettingsFile, readSettings } from '../config/settings'
@@ -53,5 +53,16 @@ describe('fleetUpgradePolicy', () => {
         resetFleetUpgradePolicyForTests()
         initFleetUpgradePolicy({ dataDir, persisted: persisted?.fleetUpgradePolicy })
         expect(getFleetUpgradePolicy()).toBe('silent')
+    })
+
+    it('refuses to overwrite a malformed settings.json', async () => {
+        const dataDir = makeDataDir()
+        const file = getSettingsFile(dataDir)
+        writeFileSync(file, '{not-json')
+        initFleetUpgradePolicy({ dataDir, persisted: 'alert' })
+
+        await expect(setFleetUpgradePolicy('silent')).rejects.toThrow(/Cannot read/)
+        expect(getFleetUpgradePolicy()).toBe('alert')
+        expect(readFileSync(file, 'utf8')).toBe('{not-json')
     })
 })
