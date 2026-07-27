@@ -162,7 +162,7 @@ T1+T2 are the ones that unblock everything else and are worth landing together. 
 
 Meta's daily classify writes these onto existing refs (full `PUT external-refs`). Chip renders emoji + `#N` and tones by status. Browser never live-queries GitHub.
 
-**Transition (complete 2026-07-25):** Meta no longer writes status emoji into titles. For sessions with a chip it **strips** a leading status emoji once (`PR #N: …` / `Peer #N: …` kept). `hapi-pr-session-emoji.sh` is deprecated (escape hatch: `HAPI_ALLOW_LEGACY_EMOJI_SWEEP=1`).
+**Transition (complete 2026-07-25):** Meta no longer writes status emoji into titles. For sessions with a chip it **strips** a leading status emoji once (`PR #N: …` / `Peer #N: …` kept). `hapi-pr-session-emoji.sh` is a **removed stub** (exits 2 → run `hapi-meta-daily.sh`; escape hatch deleted 2026-07-27).
 
 **Stale honesty (2026-07-26):** browser never live-queries GitHub. If `statusCheckedAt` is older than **2 hours**, the chip mutes tone and shows `?` (tooltip includes checked time + stale). Estate refresh: fork-local `hapi-meta-daily.timer` (morning pings) + `hapi-meta-daily-refresh.timer` (**every 45m 24/7** `--no-ping --emit-events`, odd-hours safe) — see `install-hapi-meta-daily-timer.sh`.
 

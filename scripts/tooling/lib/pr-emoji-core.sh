@@ -5,8 +5,8 @@
 #
 # Sourced by:
 #   scripts/tooling/hapi-pr-emoji-batch.sh    (gh I/O → calls pec_decide_emoji)
-#   scripts/tooling/hapi-pr-session-emoji.sh  (hub I/O → titles + worst-emoji)
 #   scripts/tooling/hapi-meta-daily.sh         (orchestrator → ping policy + state)
+#   (hapi-pr-session-emoji.sh is a removed stub — no longer sources this)
 #
 # Emoji contract (see docs/operator/AGENTS.md § Meta PR watcher):
 #   ✅  open PR, CI green, 0 threads, bot clean, mergeable — wait on tiann
@@ -130,7 +130,7 @@ pec_title_base_multi_from() {
 
 # Build a canonical single-PR title. pre_pr=1 → "📝Peer #N:", else "<emoji>PR #N:".
 # LEGACY: Meta no longer writes status emoji into titles (ADR D8 — chip owns health).
-# Kept for unit tests and the deprecated hapi-pr-session-emoji.sh escape hatch.
+# Kept for unit tests (legacy title helpers; Meta no longer retitles with emoji).
 pec_build_title() {
     local emoji="$1" pr="$2" base="$3" pre_pr="${4:-0}"
     base="$(pec_title_base_from "$base" "$pr")"

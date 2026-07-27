@@ -129,7 +129,7 @@ Rule file for agents: canonical source `scripts/tooling/cursor-rules/hapi-driver
 
 **Build stamp:** In STRICT mode (default), missing `.hapi-build-meta.json` fails verify — run `hapi-driver-build-web` to stamp dist.
 
-**Operator scripts** (`scripts/tooling/hapi-meta-daily.sh`, `hapi-pr-emoji-batch.sh`, deprecated `hapi-pr-session-emoji.sh`, etc.) belong on **fork `main` in `~/coding/hapi`**, not in the driver tree. Rebuild reads tooling from the primary mirror (`HAPI_PRIMARY`, default `~/coding/hapi`). Uncommitted scripts vanish on sync/reset — **commit them to fork main**. Daily PR classify + chip status: `hapi-meta-daily.sh` (see `docs/operator/AGENTS.md` § Meta PR watcher).
+**Operator scripts** (`scripts/tooling/hapi-meta-daily.sh`, `hapi-pr-emoji-batch.sh`, stub `hapi-pr-session-emoji.sh`, etc.) belong on **fork `main` in `~/coding/hapi`**, not in the driver tree. Rebuild reads tooling from the primary mirror (`HAPI_PRIMARY`, default `~/coding/hapi`). Uncommitted scripts vanish on sync/reset — **commit them to fork main**. Daily PR classify + chip status: `hapi-meta-daily.sh` (see `docs/operator/AGENTS.md` § Meta PR watcher).
 
 **To put a PR worktree on `:3006` instead of soup:** operator runs `hapi-use-worktree ~/coding/hapi/worktrees/<name>` (not the usual daily-driver path).
 

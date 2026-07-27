@@ -191,9 +191,9 @@ Manifest format, atomic swap mechanics, DB jiu-jitsu: [`driver-soup.md`](./drive
 | Title = workstream name: `PR #1163: opt-in awareness` or `Peer #1085: worktree hang` | Prefix titles with `✅` `🔁` `⚠️` `📝` `🔧` (or `?`) for CI/health |
 | Attach with `hapi link-pr <url\|owner/repo#N>`, MCP `link_pr`, or the session **Link PR** dialog (requires Settings → GitHub PR awareness) | Rely on title scraping as the durable bind |
 | Read status from the chip / Meta action queue / `hapi-pr-status <N>` | Re-encode green/red into the title with `change_title` **or** `PATCH /sessions/:id` `{name}` |
-| Let Meta strip leftover leading status emoji on chipped sessions | Run deprecated `hapi-pr-session-emoji.sh` (exits 2 unless escape hatch) — **and do not hand-roll the same rename when it refuses** |
+| Let Meta strip leftover leading status emoji on chipped sessions | Run removed stub `hapi-pr-session-emoji.sh` then stop — it exits 2 and prints `hapi-meta-daily.sh [--pr N]`; run that; do **not** hand-roll title emoji |
 
-Daily classify + chip cache + pings: `./scripts/tooling/hapi-meta-daily.sh` (see [`docs/operator/AGENTS.md`](../operator/AGENTS.md) § Meta PR watcher). On this estate, systemd timers run morning full Meta + quiet refresh every 45m **24/7** (odd-hours safe); chip UI mutes to `?` when `statusCheckedAt` is older than 2h (cache honesty — no live GitHub from the browser).
+Daily classify + chip cache + pings: `./scripts/tooling/hapi-meta-daily.sh` (see [`docs/operator/AGENTS.md`](../operator/AGENTS.md) § Meta PR watcher). After rebase/CI flips on a babysat PR: `./scripts/tooling/hapi-meta-daily.sh --pr <N>`. On this estate, systemd timers run morning full Meta + quiet refresh every 45m **24/7** (odd-hours safe); chip UI mutes to `?` when `statusCheckedAt` is older than 2h (cache honesty — no live GitHub from the browser).
 
 ---
 
