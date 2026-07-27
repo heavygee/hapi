@@ -25,7 +25,7 @@ export function machineNeedsUpdateLabel(
     if (policy === 'silent' || !offer) {
         return false
     }
-    if (!machine.active || machine.metadata?.versionHandoffDisabled === true) {
+    if (!machine.active) {
         return false
     }
     return machineTrailsUpgradeOffer(
