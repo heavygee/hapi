@@ -563,11 +563,13 @@ layers:
   # wins over fix/cursor-flat-picker-default-highlight on overlapping files.
   - branch: feat/cursor-picker-ios-nested
 
+  # PARKED 2026-07-27 (meta rematerialize after upstream v0.24.0 sync):
+  # driver/github-pr-awareness conflicts in 29 files against new base — tip needs
+  # rebase onto post-sync soup / upstream/main before re-souping. Last green soup
+  # (482a6ef3a) also ended before this layer. Re-enable after thin tip lands.
   # tiann/hapi#1160/#1161/#1162/#1163 — opt-in GitHub PR awareness + session↔PR
   # attach (externalRefs chip, Settings toggle, hapi link-pr, MCP link_pr).
-  # Thin tip: single delta on post-feat/cursor-picker-ios-nested (88481771c),
-  # not a fat driver/integration HEAD. Drop when #1161+#1163 land upstream.
   # Worktree: ~/coding/hapi/worktrees/github-pr-awareness-soup @
   # driver/github-pr-awareness. Enable Settings → General → GitHub PR awareness
   # (or HAPI_GITHUB_PR_AWARENESS=1). Meta: hapi-meta-daily --backfill-refs.
-  - branch: driver/github-pr-awareness
+  # - branch: driver/github-pr-awareness
