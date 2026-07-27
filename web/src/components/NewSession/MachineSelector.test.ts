@@ -40,7 +40,7 @@ describe('machineNeedsUpdateLabel', () => {
         )).toBe(true)
     })
 
-    it('hides under silent policy and soup handoff opt-out', () => {
+    it('hides under silent policy; still labels soup handoff opt-out when skewed', () => {
         const behind = makeMachine({ metadata: { host: 'teemo', platform: 'win32', happyCliVersion: '0.23.0' } })
         expect(machineNeedsUpdateLabel(behind, OFFER, 'silent')).toBe(false)
         expect(machineNeedsUpdateLabel(
@@ -54,6 +54,6 @@ describe('machineNeedsUpdateLabel', () => {
             }),
             OFFER,
             'alert',
-        )).toBe(false)
+        )).toBe(true)
     })
 })

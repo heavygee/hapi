@@ -121,7 +121,7 @@ describe('listSkewedMachines', () => {
         ], null)).toEqual([])
     })
 
-    it('excludes versionHandoffDisabled machines (soup / rebuild-only)', () => {
+    it('includes versionHandoffDisabled machines so Restart stays visible', () => {
         const skewed = listSkewedMachines([
             makeMachine({
                 id: 'soup',
@@ -137,7 +137,7 @@ describe('listSkewedMachines', () => {
                 metadata: { host: 'teemo', platform: 'win32', happyCliVersion: '0.20.0' },
             }),
         ], TEST_OFFER)
-        expect(skewed.map((m) => m.id)).toEqual(['binary'])
+        expect(skewed.map((m) => m.id)).toEqual(['soup', 'binary'])
     })
 
     it('uses displayName when present', () => {
@@ -167,6 +167,29 @@ describe('RunnerVersionSkewBanner', () => {
     afterEach(() => {
         cleanup()
         vi.clearAllMocks()
+    })
+
+    it('disables Upgrade and enables Restart for handoff-disabled hosts', () => {
+        useMachinesMock.mockReturnValue({
+            machines: [
+                makeMachine({
+                    id: 'soup',
+                    metadata: {
+                        host: 'proxmox',
+                        platform: 'linux',
+                        happyCliVersion: '0.20.0',
+                        versionHandoffDisabled: true,
+                    },
+                }),
+            ],
+            isLoading: false,
+            error: null,
+        })
+
+        renderBanner()
+
+        expect(screen.getByTestId('runner-version-skew-upgrade-soup')).toBeDisabled()
+        expect(screen.getByTestId('runner-version-skew-restart-soup')).toBeEnabled()
     })
 
     it('renders a compact banner with minimize and snooze actions', () => {
