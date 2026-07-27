@@ -58,18 +58,3 @@ index 29c340fa0..5b77d534b 100644
      };
      return { session, events };
  }
-diff --git a/hub/src/web/routes/machines.test.ts b/hub/src/web/routes/machines.test.ts
-index 84899fb25..247065537 100644
---- a/hub/src/web/routes/machines.test.ts
-+++ b/hub/src/web/routes/machines.test.ts
-@@ -42,6 +42,7 @@ describe('machines routes', () => {
-                 _sessionType?: string,
-                 _worktreeName?: string,
-                 _resumeSessionId?: string,
-+                _importHistory?: boolean,
-                 _effort?: string,
-                 permissionMode?: string
-             ) => {
--- 
-2.39.5
-

@@ -1,0 +1,114 @@
+From e099f1d9aa3dc092b606edf5ccb3ca1a82d39987 Mon Sep 17 00:00:00 2001
+From: HeavyGee <133152184+heavygee@users.noreply.github.com>
+Date: Fri, 24 Jul 2026 16:42:47 +0000
+Subject: [PATCH] fix(soup): dedupe extractAssistantPlainText import; await
+ fallback tests
+
+Import-picker rematerialize left a duplicate messages import and a
+pre-async onAgentMessage assertion in the heuristic fallback tests.
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ .../overseerEventRecorder.fallback.test.ts    | 46 -------------------
+ hub/src/sync/syncEngine.ts                    |  1 -
+ 2 files changed, 47 deletions(-)
+
+diff --git a/hub/src/sync/overseerEventRecorder.fallback.test.ts b/hub/src/sync/overseerEventRecorder.fallback.test.ts
+index a86bdcc91..f315c68b5 100644
+--- a/hub/src/sync/overseerEventRecorder.fallback.test.ts
++++ b/hub/src/sync/overseerEventRecorder.fallback.test.ts
+@@ -140,50 +140,4 @@ describe('OverseerEventRecorder turn fallback', () => {
+         expect(event).toBeNull()
+         expect(store.events.list({ eventType: 'progress' })).toHaveLength(0)
+     })
+-
+-    it('defers synth while thinking; flushes once when thinking clears', () => {
+-        const store = new Store(':memory:')
+-        const recorder = new OverseerEventRecorder(store.events, store.inbox)
+-        const live = store.sessions.getOrCreateSession('cur7', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
+-        const snapshot = toSessionSnapshot(makeSession(live.id, 'cursor'), live.tag)
+-
+-        // Mid-turn ACP text flushes (tool boundaries) — must NOT synth yet.
+-        expect(recorder.onAgentMessage(snapshot, 'msg-mid-1', agentText('Pulling the last hour of events.'), Date.now(), { thinking: true })).toBeNull()
+-        expect(recorder.onAgentMessage(snapshot, 'msg-mid-2', agentText('Found something important.'), Date.now(), { thinking: true })).toBeNull()
+-        expect(store.events.count()).toBe(0)
+-
+-        // End of turn: thinking true → false.
+-        recorder.onSessionUpdated(makeSession(live.id, 'cursor', { thinking: true }), live.tag)
+-        recorder.onSessionUpdated(makeSession(live.id, 'cursor', { thinking: false }), live.tag)
+-
+-        const events = store.events.list({ eventType: 'progress' })
+-        expect(events).toHaveLength(1)
+-        expect(events[0]?.summary).toBe('Found something important.')
+-        expect(events[0]?.provenance).toContain('hub-synthesized')
+-        const payload = JSON.parse(events[0]!.payloadJson!) as { messageId?: string }
+-        expect(payload.messageId).toBe('msg-mid-2')
+-    })
+-
+-    it('does not flush deferred synth when a real notify arrives mid-turn', () => {
+-        const store = new Store(':memory:')
+-        const recorder = new OverseerEventRecorder(store.events, store.inbox)
+-        const live = store.sessions.getOrCreateSession('cur8', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
+-        const snapshot = toSessionSnapshot(makeSession(live.id, 'cursor'), live.tag)
+-
+-        recorder.onAgentMessage(snapshot, 'msg-mid', agentText('Working on it.'), Date.now(), { thinking: true })
+-        const emit = recorder.onAgentMessage(
+-            snapshot,
+-            'msg-final',
+-            agentText('Done.\nAGENT_NOTIFY_SUMMARY {"version":1,"status":"done","action":"Review","summary":"Shipped"}'),
+-            Date.now(),
+-            { thinking: true }
+-        )
+-        expect(emit?.provenance).toBe('AGENT_NOTIFY_SUMMARY')
+-
+-        recorder.onSessionUpdated(makeSession(live.id, 'cursor', { thinking: true }), live.tag)
+-        recorder.onSessionUpdated(makeSession(live.id, 'cursor', { thinking: false }), live.tag)
+-
+-        expect(store.events.list({ eventType: 'progress' })).toHaveLength(0)
+-        expect(store.events.count()).toBe(1)
+-    })
+ })
+diff --git a/hub/src/sync/syncEngine.ts b/hub/src/sync/syncEngine.ts
+index 163583b37..944c658ba 100644
+--- a/hub/src/sync/syncEngine.ts
++++ b/hub/src/sync/syncEngine.ts
+@@ -51,7 +51,6 @@ import { OverseerEventRecorder, toSessionSnapshot } from './overseerEventRecorde
+ import { createOverseerLlmFallbackClient } from './overseerLlmFallback'
+ import { loadOverseerLlmFallbackConfig } from './overseerLlmFallbackConfig'
+ import { OverseerEntity } from './overseerEntity'
+-import { extractAssistantPlainText } from '@hapi/protocol/messages'
+ import type { InboxOperatorAction } from '@hapi/protocol'
+ import type { ListSystemEventsOptions, StoredSystemEvent } from '../store'
+ import type { ListInboxItemsOptions, StoredInboxItem } from '../store/inboxItems'
+-- 
+2.39.5
+
+From aa3eeeabf2bda56b402d8626bf43f53832e9217f Mon Sep 17 00:00:00 2001
+From: HeavyGee <133152184+heavygee@users.noreply.github.com>
+Date: Fri, 24 Jul 2026 16:43:29 +0000
+Subject: [PATCH] fix(soup): drop stale importHistory mock param from machines
+ test
+
+Heal 20 added _importHistory while the import cluster was parked; with
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+#945 souped again that extra param shifts permissionMode off the mock.
+---
+ hub/src/web/routes/machines.test.ts | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/hub/src/web/routes/machines.test.ts b/hub/src/web/routes/machines.test.ts
+index 898373ef5..6c0308cca 100644
+--- a/hub/src/web/routes/machines.test.ts
++++ b/hub/src/web/routes/machines.test.ts
+@@ -42,7 +42,6 @@ describe('machines routes', () => {
+                 _sessionType?: string,
+                 _worktreeName?: string,
+                 _resumeSessionId?: string,
+-                _importHistory?: boolean,
+                 _effort?: string,
+                 permissionMode?: string
+             ) => {
+-- 
+2.39.5
+
