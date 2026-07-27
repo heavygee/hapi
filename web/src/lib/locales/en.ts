@@ -219,6 +219,7 @@ export default {
   'runner.skew.banner.restart': 'Restart only',
   'runner.skew.banner.restartUnavailable': 'Upgrade CLI first',
   'runner.skew.banner.restartNeedsNewerBinary': 'Restart only helps after a newer HAPI CLI is already installed. Prefer Upgrade to pull from the hub.',
+  'runner.skew.banner.restartNeedsSupervisor': 'Restart (stop) is only for rebuild-only / supervised hosts. Prefer Upgrade for a handoff relaunch.',
   'runner.skew.banner.restarting': 'Restarting…',
   'runner.skew.banner.binaryUpdatedHint': '(newer CLI on disk — restart can load it)',
   'runner.skew.banner.upgradeCliFirst': '(behind hub — Upgrade pulls matching CLI)',

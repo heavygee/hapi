@@ -915,8 +915,9 @@ export class SyncEngine {
     }
 
     /**
-     * Manual stop-runner (banner Restart). Escape hatch when version handoff
-     * is stuck or HAPI_DISABLE_VERSION_HANDOFF=1.
+     * Manual stop-runner (banner Restart). Escape hatch for soup/rebuild-only
+     * hosts (`versionHandoffDisabled`): an external supervisor relaunches.
+     * Unsupervised hosts must use Upgrade (handoff relaunch), not this path.
      */
     async restartMachineRunner(machineId: string, namespace: string): Promise<
         | { type: 'success'; message: string }
