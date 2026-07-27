@@ -80,19 +80,46 @@ async function runCommand(command: string, args: string[]): Promise<{ ok: boolea
     }
 }
 
-async function installFromNpm(offer: HubUpgradeOffer): Promise<void> {
+async function installFromNpm(offer: HubUpgradeOffer): Promise<string> {
     const pkg = `${offer.npmPackage}@${offer.targetVersion}`
     // Prefer bun global when available (matches many HAPI installs); fall back to npm.
     const bunTry = await runCommand('bun', ['add', '-g', pkg])
     if (bunTry.ok) {
         logger.debug('[SELF-UPGRADE] bun add -g succeeded', { pkg })
-        return
+    } else {
+        logger.debug('[SELF-UPGRADE] bun add -g failed, trying npm', { output: bunTry.output })
+        const npmTry = await runCommand('npm', ['install', '-g', pkg])
+        if (!npmTry.ok) {
+            throw new Error(`npm/bun install failed: ${npmTry.output || bunTry.output}`)
+        }
     }
-    logger.debug('[SELF-UPGRADE] bun add -g failed, trying npm', { output: bunTry.output })
-    const npmTry = await runCommand('npm', ['install', '-g', pkg])
-    if (!npmTry.ok) {
-        throw new Error(`npm/bun install failed: ${npmTry.output || bunTry.output}`)
+    const installed = resolvePostNpmInstallExecutable()
+    if (!installed) {
+        throw new Error(
+            'npm/bun install succeeded but no hapi binary found on PATH; cannot relaunch the new generation',
+        )
     }
+    return installed
+}
+
+/**
+ * After a global npm/bun install, prefer the PATH shim (or platform binary) over
+ * `process.execPath`. Compiled runners otherwise relaunch themselves via
+ * spawnHappyCLI and stay on the old generation.
+ */
+export function resolvePostNpmInstallExecutable(
+    which: (command: string) => string | null = (command) => Bun.which(command),
+): string | null {
+    const candidates = process.platform === 'win32'
+        ? ['hapi', 'hapi.cmd', 'hapi.exe']
+        : ['hapi']
+    for (const name of candidates) {
+        const found = which(name)?.trim()
+        if (found && existsSync(found)) {
+            return found
+        }
+    }
+    return null
 }
 
 async function sha256File(path: string): Promise<string> {
@@ -241,7 +268,7 @@ export async function applyRunnerSelfUpgrade(options: {
     try {
         let installedExecutable: string | undefined
         if (options.offer.channel === 'npm') {
-            await installFromNpm(options.offer)
+            installedExecutable = await installFromNpm(options.offer)
         } else if (options.offer.channel === 'hub-artifact') {
             installedExecutable = await installFromArtifact(
                 options.offer,
