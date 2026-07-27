@@ -40,4 +40,30 @@ describe('MachineCache live capabilities', () => {
         ])
         expect(CURRENT_MACHINE_CAPABILITIES).toContain(MACHINE_CAPABILITIES.CursorChatStoreStatus)
     })
+
+    it('refreshMachine return value includes live RPC overlay (cold-cache fallback)', () => {
+        const store = new Store(':memory:')
+        store.machines.getOrCreateMachine(
+            'cold',
+            {
+                host: 'cold',
+                platform: 'linux',
+                happyCliVersion: '0.20.0',
+            },
+            null,
+            'default',
+        )
+        const registry = new RpcRegistry()
+        const cache = new MachineCache(store, makePublisher(), registry)
+
+        registry.register(
+            { id: 'sock-1' } as never,
+            `cold:${MACHINE_CAPABILITIES.RunnerSelfUpgrade}`,
+        )
+
+        const refreshed = cache.refreshMachine('cold')
+        expect(refreshed?.metadata?.capabilities).toEqual([
+            MACHINE_CAPABILITIES.RunnerSelfUpgrade,
+        ])
+    })
 })

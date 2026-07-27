@@ -1,4 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test'
+import { MACHINE_CAPABILITIES } from '@hapi/protocol/runnerCapabilities'
 import { Store } from '../store'
 import { RpcRegistry } from '../socket/rpcRegistry'
 import { SyncEngine } from './syncEngine'
@@ -45,6 +46,69 @@ describe('SyncEngine fleet upgrade', () => {
             const result = await engine.upgradeMachineRunner('stale', 'default')
             expect(result.type).toBe('success')
             expect(runnerSelfUpgrade).toHaveBeenCalledWith('stale', offer)
+        } finally {
+            engine.stop()
+        }
+    })
+
+    it('upgradeMachineRunner cold-cache fallback honors live RPC capabilities', async () => {
+        const offer: HubUpgradeOffer = {
+            channel: 'npm',
+            targetVersion: '0.24.0',
+            targetCapabilities: ['cursor-chat-store-status'],
+            npmPackage: '@twsxtd/hapi',
+        }
+        const store = new Store(':memory:')
+        const registry = new RpcRegistry()
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            registry,
+            { broadcast() {} } as never,
+            { getUpgradeOffer: () => offer },
+        )
+
+        try {
+            const runnerSelfUpgrade = mock(async () => ({
+                status: 'started',
+                message: 'ok',
+                channel: 'npm',
+            }))
+            ;(engine as any).rpcGateway.runnerSelfUpgrade = runnerSelfUpgrade
+
+            // Persist without advertising runner-self-upgrade — only the live RPC
+            // registration proves the capability (npm CLIs historically omitted it).
+            engine.getOrCreateMachine(
+                'cold',
+                {
+                    host: 'teemo',
+                    platform: 'win32',
+                    arch: 'x64',
+                    happyCliVersion: '0.20.0',
+                },
+                { status: 'running', pid: 1, startedAt: Date.now() },
+                'default',
+            )
+            engine.handleMachineAlive({ machineId: 'cold', time: Date.now() })
+            registry.register(
+                { id: 'sock-cold' } as never,
+                `cold:${MACHINE_CAPABILITIES.RunnerSelfUpgrade}`,
+            )
+
+            // Force the getMachineByNamespace miss → refreshMachine fallback path.
+            // Persist active so the cold reload does not look offline (alive only
+            // mutates the in-memory row).
+            store.machines.updateMachineRunnerState(
+                'cold',
+                { status: 'running', pid: 1, startedAt: Date.now() },
+                1,
+                'default',
+            )
+            ;(engine as any).machineCache.machines.clear()
+
+            const result = await engine.upgradeMachineRunner('cold', 'default')
+            expect(result.type).toBe('success')
+            expect(runnerSelfUpgrade).toHaveBeenCalledWith('cold', offer)
         } finally {
             engine.stop()
         }

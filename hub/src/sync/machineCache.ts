@@ -196,8 +196,12 @@ export class MachineCache {
         }
 
         this.machines.set(machineId, machine)
-        this.publisher.emit({ type: 'machine-updated', machineId, data: this.withLiveCapabilities(machine) })
-        return machine
+        const withLive = this.withLiveCapabilities(machine)
+        this.publisher.emit({ type: 'machine-updated', machineId, data: withLive })
+        // Return the live overlay: callers that fall back to refreshMachine
+        // (cold cache on upgrade/restart) must see RPC-registered capabilities,
+        // not only persisted metadata.
+        return withLive
     }
 
     /** Overlay live RPC registrations onto advertised metadata capabilities for API/SSE consumers. */
