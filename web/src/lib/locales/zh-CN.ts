@@ -218,6 +218,7 @@ export default {
   'runner.skew.banner.restart': '仅重启',
   'runner.skew.banner.restartUnavailable': '请先升级 CLI',
   'runner.skew.banner.restartNeedsNewerBinary': '仅当该主机已安装更新的 HAPI CLI 时，重启才有意义。请优先使用 Upgrade 从 Hub 拉取。',
+  'runner.skew.banner.restartNeedsSupervisor': 'Restart（停止）仅适用于 soup/有进程监督的主机。普通主机请用 Upgrade 完成交接重启。',
   'runner.skew.banner.restarting': '正在重启…',
   'runner.skew.banner.binaryUpdatedHint': '（磁盘上已有更新 CLI — 重启可加载）',
   'runner.skew.banner.upgradeCliFirst': '（落后于 Hub — Upgrade 可拉取匹配 CLI）',
