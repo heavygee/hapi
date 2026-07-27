@@ -225,6 +225,8 @@ export default {
   'runner.skew.banner.handoffHint': 'Fleet upgrade: hub detects npm vs source install and upgrades remotes accordingly (npm registry or hub-built artifact). Upgrade never SSHs; the runner installs on itself. Set HAPI_UPGRADE_CHANNEL=off to disable.',
   'runner.skew.restartFailed': 'Failed to restart runner',
   'runner.skew.upgradeFailed': 'Failed to upgrade runner',
+  'runner.skew.alreadyCurrent': 'Runner reports it is already at the hub target',
+  'runner.skew.upgradeStarted': 'Upgrade started on the runner',
   'session.action.delete': 'Delete',
   'session.action.copy': 'Copy',
   'session.action.copyReference': 'Copy reference',
