@@ -242,10 +242,19 @@ describe('RunnerVersionSkewBanner', () => {
         expect(screen.queryByTestId('runner-version-skew-banner')).not.toBeInTheDocument()
     })
 
-    it('disables Restart when no newer CLI is on disk', () => {
+    it('disables Restart on unsupervised hosts (Upgrade owns handoff relaunch)', () => {
         useMachinesMock.mockReturnValue({
             machines: [
-                makeMachine({ id: 'old', metadata: { host: 'proxmox', platform: 'linux', happyCliVersion: '0.20.0' } }),
+                makeMachine({
+                    id: 'old',
+                    metadata: {
+                        host: 'proxmox',
+                        platform: 'linux',
+                        happyCliVersion: '0.20.0',
+                        startedCliMtimeMs: 100,
+                        installedCliMtimeMs: 200,
+                    },
+                }),
             ],
             isLoading: false,
             error: null,
@@ -255,6 +264,10 @@ describe('RunnerVersionSkewBanner', () => {
 
         const restart = screen.getByTestId('runner-version-skew-restart-old')
         expect(restart).toBeDisabled()
+        expect(restart).toHaveAttribute(
+            'title',
+            expect.stringMatching(/supervised|Upgrade/i),
+        )
         expect(screen.getByTestId('runner-version-skew-upgrade-old')).toBeEnabled()
     })
 
@@ -297,17 +310,16 @@ describe('RunnerVersionSkewBanner', () => {
         expect(screen.queryByTestId('runner-version-skew-action-error')).toBeNull()
     })
 
-    it('calls restartMachineRunner when Restart is clicked and newer CLI is on disk', async () => {
+    it('calls restartMachineRunner when Restart is clicked on a supervised host', async () => {
         useMachinesMock.mockReturnValue({
             machines: [
                 makeMachine({
-                    id: 'old',
+                    id: 'soup',
                     metadata: {
-                        host: 'proxmox',
+                        host: 'soup',
                         platform: 'linux',
                         happyCliVersion: '0.20.0',
-                        startedCliMtimeMs: 100,
-                        installedCliMtimeMs: 200,
+                        versionHandoffDisabled: true,
                     },
                 }),
             ],
@@ -317,9 +329,9 @@ describe('RunnerVersionSkewBanner', () => {
 
         renderBanner()
 
-        fireEvent.click(screen.getByTestId('runner-version-skew-restart-old'))
+        fireEvent.click(screen.getByTestId('runner-version-skew-restart-soup'))
         await waitFor(() => {
-            expect(restartMachineRunnerMock).toHaveBeenCalledWith('old')
+            expect(restartMachineRunnerMock).toHaveBeenCalledWith('soup')
         })
     })
 
