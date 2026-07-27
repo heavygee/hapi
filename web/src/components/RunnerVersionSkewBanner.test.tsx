@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CURRENT_MACHINE_CAPABILITIES } from '@hapi/protocol/runnerCapabilities'
 import type { FleetUpgradePolicy } from '@hapi/protocol/upgradeChannel'
@@ -77,6 +78,19 @@ function makeMachine(overrides: Partial<Machine> & { id: string }): Machine {
         runnerStateVersion: 0,
         ...rest,
     } as Machine
+}
+
+function renderBanner() {
+    const client = new QueryClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    return render(
+        <QueryClientProvider client={client}>
+            <I18nProvider>
+                <RunnerVersionSkewBanner />
+            </I18nProvider>
+        </QueryClientProvider>,
+    )
 }
 
 describe('listSkewedMachines', () => {
@@ -164,11 +178,7 @@ describe('RunnerVersionSkewBanner', () => {
             error: null,
         })
 
-        render(
-            <I18nProvider>
-                <RunnerVersionSkewBanner />
-            </I18nProvider>,
-        )
+        renderBanner()
 
         expect(screen.getByTestId('runner-version-skew-banner')).toHaveAttribute('data-state', 'expanded')
         expect(screen.getByText(/1 runner\(s\) out of date/)).toBeInTheDocument()
@@ -187,11 +197,7 @@ describe('RunnerVersionSkewBanner', () => {
             error: null,
         })
 
-        render(
-            <I18nProvider>
-                <RunnerVersionSkewBanner />
-            </I18nProvider>,
-        )
+        renderBanner()
 
         fireEvent.click(screen.getByTestId('runner-version-skew-minimize'))
         expect(screen.getByTestId('runner-version-skew-banner')).toHaveAttribute('data-state', 'minimized')
@@ -207,11 +213,7 @@ describe('RunnerVersionSkewBanner', () => {
             error: null,
         })
 
-        render(
-            <I18nProvider>
-                <RunnerVersionSkewBanner />
-            </I18nProvider>,
-        )
+        renderBanner()
 
         fireEvent.click(screen.getByTestId('runner-version-skew-dismiss'))
         expect(screen.queryByTestId('runner-version-skew-banner')).not.toBeInTheDocument()
@@ -226,11 +228,7 @@ describe('RunnerVersionSkewBanner', () => {
             error: null,
         })
 
-        render(
-            <I18nProvider>
-                <RunnerVersionSkewBanner />
-            </I18nProvider>,
-        )
+        renderBanner()
 
         const restart = screen.getByTestId('runner-version-skew-restart-old')
         expect(restart).toBeDisabled()
@@ -246,16 +244,34 @@ describe('RunnerVersionSkewBanner', () => {
             error: null,
         })
 
-        render(
-            <I18nProvider>
-                <RunnerVersionSkewBanner />
-            </I18nProvider>,
-        )
+        renderBanner()
 
         fireEvent.click(screen.getByTestId('runner-version-skew-upgrade-old'))
         await waitFor(() => {
             expect(upgradeMachineRunnerMock).toHaveBeenCalledWith('old')
         })
+    })
+
+    it('surfaces already-current instead of silent Upgrade flash', async () => {
+        upgradeMachineRunnerMock.mockResolvedValueOnce({
+            message: 'Already at 0.24.0',
+            response: { status: 'already-current', message: 'Already at 0.24.0', channel: 'hub-artifact' },
+        })
+        useMachinesMock.mockReturnValue({
+            machines: [
+                makeMachine({ id: 'Teemo', metadata: { host: 'Teemo', platform: 'win32', happyCliVersion: '0.20.0' } }),
+            ],
+            isLoading: false,
+            error: null,
+        })
+
+        renderBanner()
+
+        fireEvent.click(screen.getByTestId('runner-version-skew-upgrade-Teemo'))
+        await waitFor(() => {
+            expect(screen.getByTestId('runner-version-skew-action-info')).toHaveTextContent('Already at 0.24.0')
+        })
+        expect(screen.queryByTestId('runner-version-skew-action-error')).toBeNull()
     })
 
     it('calls restartMachineRunner when Restart is clicked and newer CLI is on disk', async () => {
@@ -276,11 +292,7 @@ describe('RunnerVersionSkewBanner', () => {
             error: null,
         })
 
-        render(
-            <I18nProvider>
-                <RunnerVersionSkewBanner />
-            </I18nProvider>,
-        )
+        renderBanner()
 
         fireEvent.click(screen.getByTestId('runner-version-skew-restart-old'))
         await waitFor(() => {
@@ -302,11 +314,7 @@ describe('RunnerVersionSkewBanner', () => {
             error: null,
         })
 
-        render(
-            <I18nProvider>
-                <RunnerVersionSkewBanner />
-            </I18nProvider>,
-        )
+        renderBanner()
 
         expect(() => fireEvent.click(screen.getByTestId('runner-version-skew-minimize'))).not.toThrow()
         expect(screen.getByTestId('runner-version-skew-banner')).toHaveAttribute('data-state', 'minimized')
@@ -322,11 +330,7 @@ describe('RunnerVersionSkewBanner', () => {
             error: null,
         })
 
-        render(
-            <I18nProvider>
-                <RunnerVersionSkewBanner />
-            </I18nProvider>,
-        )
+        renderBanner()
 
         await waitFor(() => {
             expect(screen.queryByTestId('runner-version-skew-banner')).not.toBeInTheDocument()
@@ -350,11 +354,7 @@ describe('RunnerVersionSkewBanner', () => {
             error: null,
         })
 
-        render(
-            <I18nProvider>
-                <RunnerVersionSkewBanner />
-            </I18nProvider>,
-        )
+        renderBanner()
 
         await waitFor(() => {
             expect(screen.queryByTestId('runner-version-skew-banner')).not.toBeInTheDocument()
