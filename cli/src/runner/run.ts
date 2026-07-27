@@ -20,6 +20,7 @@ import { withRetry } from '@/utils/time';
 import { isRetryableConnectionError } from '@/utils/errorUtils';
 
 import { cleanupRunnerState, getInstalledCliMtimeMs, isRunnerRunningCurrentlyInstalledHappyVersion, stopRunner, waitForRunnerHandoff } from './controlClient';
+import { createRunnerHandoffLockHooks, registerRunnerHandoffLockHooks } from './handoffLock';
 import { startRunnerControlServer } from './controlServer';
 import { createWorktree, removeWorktree, type WorktreeInfo } from './worktree';
 import { validateWorkspaceDirectory } from './validateWorkspaceDirectory';
@@ -252,7 +253,12 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
   // re-acquire it. After the null guard above, the initial handle is
   // non-null; the heartbeat path's failure branches either reassign to a
   // re-acquired handle or process.exit() before any subsequent release.
-  let runnerLockHandle = initialLockHandle;
+  let runnerLockHandle: typeof initialLockHandle | null = initialLockHandle;
+
+  registerRunnerHandoffLockHooks(createRunnerHandoffLockHooks(
+    () => runnerLockHandle,
+    (handle) => { runnerLockHandle = handle },
+  ));
 
   // At this point we should be safe to startup the runner:
   // 1. Not have a stale runner state
@@ -1332,7 +1338,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           // success) until it holds the lock, and the lock is ours until
           // we release.
           try {
-            await releaseRunnerLock(runnerLockHandle);
+            if (runnerLockHandle) {
+              await releaseRunnerLock(runnerLockHandle);
+              runnerLockHandle = null;
+            }
           } catch (error) {
             logger.debug('[RUNNER RUN] Failed to release lock for child handoff; continuing wait anyway', error);
           }
@@ -1430,7 +1439,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       apiMachine.shutdown();
       await stopControlServer();
       await cleanupRunnerState();
-      await releaseRunnerLock(runnerLockHandle);
+      registerRunnerHandoffLockHooks(null);
+      if (runnerLockHandle) {
+        await releaseRunnerLock(runnerLockHandle);
+        runnerLockHandle = null;
+      }
 
       logger.debug('[RUNNER RUN] Cleanup completed, exiting process');
       process.exit(0);
