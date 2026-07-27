@@ -33,7 +33,7 @@ ADR-001 was tested at worst case: `attentionCandidate:1, operatorActionRequired:
 
 Two findings that shape slice B:
 
-1. **Channel events do not promote to the operator inbox.** `/api/inbox-items` held 30 items and zero probes. Correct for ADR-001 (workers never see channel provenance) but means the operator surface is still emoji titles + meta-daily stdout.
+1. **Channel events do not promote to the operator inbox.** `/api/inbox-items` held 30 items and zero probes. Correct for ADR-001 (workers never see channel provenance) but means the operator surface is still **PR chips** + meta-daily stdout (title-emoji interim retired — ADR D8).
 2. **`dedupeKey` still needs the reminder suffix** (`:reminder:YYYY-MM-DD`) so the 24h re-ping of a stuck `⚠️`/`🔧` is not swallowed by the UNIQUE index.
 
 ## Slice B: landed and dogfooded (2026-07-25)
@@ -89,7 +89,9 @@ June 16 operator ask, paraphrased:
 
 > Sessions whose work has left the building and is waiting on someone else's hand still have a job. For HAPI there are two PRs in play — fork (`heavygee/hapi`, control:ours) and upstream (`tiann/hapi`, control:theirs). Upstream demands babysitting. Encoding that as `✅` in the session title is a manual hack because HAPI has nowhere else to put it.
 
-Peer synthesis that day (still correct):
+*(Historical. As of ADR D8 / #1163 the glance is the PR chip (`externalRefs.status`); do not re-encode status into titles.)*
+
+Peer synthesis that day (still correct on fork vs upstream babysit):
 
 - Artifacts, not titles, are the long-term primitive (`artifact_refs.kind = github_pr`).
 - External GitHub signals are a **channel**, not session metadata (contracts §10).
@@ -100,14 +102,14 @@ What happened between then and now:
 
 | Layer | Status 2026-07-25 |
 |-------|-------------------|
-| Title-emoji bridge (`✅⚠️🔁📝🔧`) | **Shipped as ops tooling** — `hapi-meta-daily` / `hapi-pr-session-emoji`. Exactly the interim the June session warned would rot if it stayed the only surface. |
+| Title-emoji bridge (`✅⚠️🔁📝🔧`) | **Retired as primary surface** — Meta caches status on the chip; `hapi-pr-session-emoji` deprecated. Title strip remains for leftover prefixes. |
 | Events substrate + `sourceKind: 'channel'` | **Live in soup** — schema, idempotency dedupe, `related_session_id`, query tools, replay harness. |
 | HTTP ingest for channel producers | **Missing** — `GET /api/system-events` only. |
 | Dual-target project registry | **Missing** — never written. |
 | Session-list badge UI (non-title) | **Missing** — still title prefixes. |
 | Overseer inbox consumer stack | **Open / unmerged** — fork PRs #54–#57, #81, #86–#91. |
 
-So: the sensor half of ContributionState is running as a morning CLI. The architecture half (emit into events, attach to session, feed Overseer) is the gap this spec closes. The June session's "don't put fork/upstream in titles forever" is the kill-criterion for *stopping* at emoji titles.
+So: the sensor half of ContributionState is running as a morning CLI (chip status + pings). The architecture half (emit into events, attach to session, feed Overseer) is the gap this spec closes. Kill-criterion for emoji titles is **met** for chipped sessions; do not reintroduce title status.
 
 ---
 
@@ -127,7 +129,7 @@ Observing and actuating stay separate sinks of the same classification. Overseer
 - Full project-registry UI / multi-project generality beyond HAPI's two remotes.
 - Webhooks (poll via meta-daily is enough; webhook later if rate limits bite — same call June 16 made).
 - Actuation upgrades (no auto-merge, no soup edits, no archive).
-- Replacing emoji titles yet — titles stay until a badge UI consumes the same events.
+- Replacing emoji titles — **done via PR chip** (ADR D8). Events should project into chips/inbox, never re-encode into titles.
 
 ---
 
@@ -208,7 +210,7 @@ Body (Zod; mirrors `InsertSystemEventInput`, channel-restricted):
 
 **Rollup (consumer rule, not emit):** prefer primary `pr_target`; if primary is open and `control:theirs` → attention class `babysitting` even when the fork PR is merged. Do not invent a second `eventType` for rollup.
 
-**Badge projection rule:** session-list badges project from latest channel event and/or session `external_refs` — **never by parsing emoji titles.** Titles are a rotting interim; parsing them recreates the `#22` cross-wire class of bugs.
+**Badge projection rule:** session-list badges project from latest channel event and/or session `external_refs` — **never by parsing emoji titles.** Chip owns health now; parsing titles recreates the `#22` cross-wire class of bugs.
 ### 3.2 Server behavior
 
 1. Auth + namespace as existing web routes.
@@ -216,7 +218,7 @@ Body (Zod; mirrors `InsertSystemEventInput`, channel-restricted):
 3. If `relatedSessionId` set: resolve session; 404 if missing; 403 if wrong namespace. Do **not** invent a session.
 4. Call `insertSystemEvent` — existing idempotency_key dedupe returns the prior row (200 with `{event, deduped: true}`).
 5. New insert → 201 `{event, deduped: false}`.
-6. Never marks GitHub notifications read. Never mutates session title/metadata (actuation stays in meta-daily's existing paths).
+6. Never marks GitHub notifications read. Never mutates session title for status (actuation stays in meta-daily: chip status + strip leftover emoji + ping).
 
 ### 3.3 Why not write SQLite from bash
 
@@ -367,7 +369,7 @@ When re-probing the messages endpoint, keep `limit` ≤ 200 — larger values si
 
 ## 8. Friction / kill-criteria
 
-- **If after a week of emit-on you still only look at emoji titles and never at events/inbox** → the sensor is writing to a sink nobody reads; pause D and ask whether Overseer query UX is the blocker, not the producer.
+- **If after a week of emit-on you still only look at chips/stdout and never at events/inbox** → the sensor is writing to a sink nobody reads; pause D and ask whether Overseer query UX is the blocker, not the producer.
 - **Unread swamp, not chatty swamp (operator 2026-07-25):** kill-criterion is inbox items with **no disposition after N days**, not raw volume. Chatty + disposed = healthy training corpus for progressive delegation. Chatty + ignored forever = swamp.
 - **If a second project needs dual-target and we hardcode HAPI forever** → then and only then extract project registry (E).
 - **If someone proposes writing events by opening the hub SQLite from bash** → refuse; that is the failure mode this route exists to prevent.

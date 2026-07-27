@@ -72,7 +72,7 @@ Post in **this session's HAPI chat** (not only Cursor):
 - **Scope split:** what ships with #893 vs follow-up PR
 - **Open questions** for operator
 
-Rename session emoji when/if you open an upstream PR (`hapi-pr-session-emoji.sh`).
+When/if you open an upstream PR: attach with `hapi link-pr` / MCP `link_pr` (title stays `PR #N: …` — no status emoji). Meta daily refreshes chip status (`hapi-meta-daily.sh`).
 
 ---
 

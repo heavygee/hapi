@@ -42,10 +42,12 @@ Copy and fill this block (do not spawn a peer with only "implement X"):
 - Read: [`feature-work-lifecycle.md`](./feature-work-lifecycle.md) (workflow) + this file (your steps)
 - Before operator browser test: pass §6 (typecheck, test, cold review, Playwright + visual evidence)
 - Report back to orchestrator with: demo URLs, **visual evidence inline in HAPI chat** (§6.4 — use `display_image` / `hapi-display-image.mjs`; PNG always for UI; GIF or short MP4 when interaction tier applies), test output, diff stat
+- **Session title:** workstream only — `PR #N: <slug>` or `Peer #<issue>: <slug>` — **no** status emoji (✅🔁⚠️📝🔧). After the upstream PR exists, attach with `hapi link-pr <url>` / MCP `link_pr` / Link PR dialog; health lives on the chip (lifecycle § Session titles and PR chips).
 
 ## Links
 - Issue: ...
 - Playback summary: ...
+- Upstream PR (when open): ... — attach to this session via link_pr
 ```
 
 One feature → one worktree → one peer. Do not share worktrees across agents.

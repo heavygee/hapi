@@ -15,7 +15,7 @@ What it does today:
 
 | Layer | Behavior |
 |-------|----------|
-| **Actuate (local fleet)** | Retitle HAPI sessions; policy-ping peers when emoji transitions / sticky ⚠️🔧 remind |
+| **Actuate (local fleet)** | Cache status on PR chips (`externalRefs`); strip leftover title emoji; policy-ping peers when status transitions / sticky ⚠️🔧 remind |
 | **Surface (operator)** | Print a sorted action queue + GitHub comms digest to stdout |
 | **Remember (local)** | Persist last-emoji / fingerprint / ping time / notif cursor under `~/.local/state/hapi/meta-daily.json` |
 | **Emit into Overseer substrate** | **None.** No row in `events`, no inbox candidate, no SystemEvent |

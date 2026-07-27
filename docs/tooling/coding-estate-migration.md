@@ -22,6 +22,36 @@ Orchestration scripts live in **`~/coding/lockhouse-janus`** (SSH, ZFS, tailnet)
 
 ---
 
+## New primary hub host (reinstall package)
+
+When standing up another **in-scope primary hub** (or re-hardening oos after cutover drift), do **not** rsync proxmox's full systemd tree. Homelab carries **anti-primary** drop-ins (cutover / forbidden / soup-artifact) that demote the *old* hub - copying them onto the active hub is a footgun, not hardening.
+
+**Tier-1 install (idempotent):**
+
+```bash
+sudo bash ~/coding/hapi/scripts/tooling/install-hapi-primary-hub-tier1.sh
+hapi-restart-hub   # or pass --restart to the installer
+```
+
+Covers: KillMode=process, Restart=always + burst limits, `HAPI_DISABLE_VERSION_HANDOFF=1`, hub OOMScore=-1000, runner OOMScore=0, runner liveness watchdog timer, sudoers/wrapper so watchdog can restart the runner without unlocking hub stop. Details + kill-criteria: [`driver-soup.md`](./driver-soup.md) § Tier-1 primary-hub package.
+
+### Never copy to primary (anti-primary / footgun)
+
+**Naming trap:** `cutover-oos*` = "oos is primary; **this host is demoted**." Not "oos needs the cutover package."
+
+| Item on proxmox | What it does | If copied to oos |
+|---|---|---|
+| `cutover-oos.conf` (hub) + `cutover-oos-hub-only.conf` | Gate hub on missing `/etc/hapi/homelab-hub-forbidden`; `Restart=no` | Primary refuses to start / won't crash-recover |
+| `/etc/hapi/homelab-hub-forbidden` | Sentinel that **disables** hub unit | Accidental `touch` = dark hub |
+| Runner `cutover-oos.conf` (`HAPI_API_URL=https://hapi…`) | Secondary runner → remote primary | Local runner hairpins over Tailscale; oos already uses `127.0.0.1:3006` |
+| `30-soup-artifact.conf` | `ExecStart` stock `~/.hapi/bin/hapi-<semver>` when secondary soup is stale | Drops every soup layer on the soup kitchen; version skew breaks RPC |
+
+**Do not re-pitch as gaps:** hub DB scheduled backup (already `protect-oos-hapi-state` 4x/day from homelab + ZFS); proxmox `backup-hapi.timer` is Tier C runner/secrets only. Full table + falsification tests: [`driver-soup.md`](./driver-soup.md) § Anti-primary / footgun.
+
+**OK to discuss for primary (not these drop-ins):** `hapi-runner-from-active` as ExecStart; optional earlyoom on oos (hub already OOMScore=-1000).
+
+---
+
 ## Targeted subdir move (operator pattern)
 
 Moving e.g. `~/coding/hapi/worktrees/my-feature` from homelab → oos-linux:

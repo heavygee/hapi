@@ -30,7 +30,9 @@ hapi_print_feature_peer_reminders() {
       or: bun scripts/tooling/hapi-display-image.mjs self <abs-path>
   • Same PNG → upstream PR via GitHub UI upload (never git-add binaries).
   • Paths-only / "screenshot on disk" alone = incomplete handoff.
+  • Session title = workstream only (PR #N: …) — no ✅🔁⚠️📝🔧; attach with hapi link-pr; health on chip.
   Detail: docs/tooling/feature-work-lifecycle.md#proof-tiers-images-and-video
+           (+ § Session titles and PR chips)
 EOF
     echo "" >&2
 }
