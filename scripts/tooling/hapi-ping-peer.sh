@@ -4,7 +4,14 @@
 # Usage:
 #   hapi-ping-peer <session-id-prefix> <message-text>
 #   hapi-ping-peer <session-id-prefix> --message-file <path>
+#   hapi-ping-peer <session-id-prefix> --message-file -   # read message from stdin
 #   hapi-ping-peer --list                # list known sessions (id, name, last-updated)
+#
+# DO NOT reinvent auth+curl for peer handoffs. This is the singular script call.
+# Long briefs: hapi-ping-peer 05d9f0f2 --message-file /tmp/brief.md
+#              hapi-ping-peer 05d9f0f2 --message-file - <<'EOF'
+#              ...handoff...
+#              EOF
 #
 # Resolves a session by ID prefix (8 chars OK). If session is inactive,
 # requests resume via the runner (POST /sessions/:id/resume), polls until
@@ -81,10 +88,14 @@ fi
 
 [[ -n "$SESSION_ARG" ]] || die "missing session id; usage: hapi-ping-peer <session-id> <message>"
 if [[ -n "$MESSAGE_FILE" ]]; then
-    [[ -f "$MESSAGE_FILE" ]] || die "message file not found: $MESSAGE_FILE"
-    MESSAGE=$(cat "$MESSAGE_FILE")
+    if [[ "$MESSAGE_FILE" == "-" ]]; then
+        MESSAGE=$(cat)
+    else
+        [[ -f "$MESSAGE_FILE" ]] || die "message file not found: $MESSAGE_FILE"
+        MESSAGE=$(cat "$MESSAGE_FILE")
+    fi
 fi
-[[ -n "$MESSAGE" ]] || die "missing message; provide as arg or --message-file"
+[[ -n "$MESSAGE" ]] || die "missing message; provide as arg, --message-file PATH, or --message-file -"
 
 # step 3: resolve session ID prefix
 SESSIONS=$(hapi_get "/api/sessions?limit=500")
