@@ -4,6 +4,7 @@ import type { ApiClient } from '@/api/client'
 import type { SessionMetadataSummary } from '@/types/api'
 import type { ConversationOutlineItem } from '@/chat/outline'
 import { getConversationMessageAnchorId } from '@/chat/outline'
+import { formatMessageTimestampTitle, formatOutlineTimestamp } from '@/chat/presentation'
 import { HappyChatProvider } from '@/components/AssistantChat/context'
 import { HappyAssistantMessage } from '@/components/AssistantChat/messages/AssistantMessage'
 import { HappyUserMessage } from '@/components/AssistantChat/messages/UserMessage'
@@ -13,6 +14,7 @@ import { Spinner } from '@/components/Spinner'
 import { useTerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 import { useTranslation } from '@/lib/use-translation'
 import { CloseIcon } from '@/components/icons'
+import { ShareTurnDialog } from '@/components/AssistantChat/ShareTurnDialog'
 
 type ScrollAnchor = {
     id: string
@@ -23,6 +25,57 @@ type PendingScrollRestore = {
     anchor: ScrollAnchor | null
     scrollTop: number
     scrollHeight: number
+}
+
+type ShareTurnState = {
+    id: number
+    snapshots: ShareTurnSnapshot[]
+    title: string
+    subtitle: string
+} | null
+
+type ShareTurnSnapshot = {
+    html: string
+    text: string
+    role?: 'user' | 'assistant'
+}
+
+function findNearestMessageElement(content: HTMLElement, clientY?: number): HTMLElement | null {
+    const messages = Array.from(content.querySelectorAll('.happy-thread-messages > [id]'))
+        .filter((element): element is HTMLElement => element instanceof HTMLElement)
+    if (messages.length === 0) return null
+    if (typeof clientY !== 'number' || !Number.isFinite(clientY)) {
+        return messages[messages.length - 1] ?? null
+    }
+
+    let best: HTMLElement | null = null
+    let bestDistance = Number.POSITIVE_INFINITY
+    for (const message of messages) {
+        const rect = message.getBoundingClientRect()
+        const distance = clientY < rect.top
+            ? rect.top - clientY
+            : clientY > rect.bottom
+                ? clientY - rect.bottom
+                : 0
+        if (distance < bestDistance) {
+            best = message
+            bestDistance = distance
+        }
+    }
+    return best
+}
+
+export function prependMissingUserSnapshot(
+    snapshots: ShareTurnSnapshot[],
+    fallbackSnapshot?: ShareTurnSnapshot
+): ShareTurnSnapshot[] {
+    const hasUser = snapshots.some((snapshot) =>
+        snapshot.role === 'user' || snapshot.html.includes('data-hapi-message-role="user"')
+    )
+    if (hasUser || fallbackSnapshot?.role !== 'user' || fallbackSnapshot.text.trim().length === 0) {
+        return snapshots
+    }
+    return [fallbackSnapshot, ...snapshots]
 }
 
 const MESSAGE_ANCHOR_SELECTOR = '.happy-thread-messages > [id]'
@@ -156,7 +209,7 @@ export function ConversationOutlinePanel(props: {
     onSelect: (item: ConversationOutlineItem) => void
     onClose: () => void
 }) {
-    const { t } = useTranslation()
+    const { t, locale } = useTranslation()
     const [searchQuery, setSearchQuery] = useState('')
     const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase()
     const filteredItems = useMemo(() => {
@@ -250,21 +303,26 @@ export function ConversationOutlinePanel(props: {
                 ) : (
                     <div className="space-y-1">
                         {filteredItems.map((item) => {
+                            const createdAt = new Date(item.createdAt)
                             return (
                                 <button
                                     key={item.id}
                                     type="button"
                                     onClick={() => props.onSelect(item)}
-                                    className="group flex w-full min-w-0 items-start gap-2 rounded-md px-2 py-2 text-left transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                    className="group block w-full min-w-0 rounded-md px-2 py-2 text-left transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                                 >
-                                    <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[var(--app-button)]" aria-hidden="true" />
-                                    <span className="min-w-0 flex-1">
-                                        <span className="block truncate text-[11px] font-medium uppercase text-[var(--app-hint)]">
-                                            {t('session.outline.kind.user')}
-                                        </span>
-                                        <span className="line-clamp-2 text-sm leading-snug text-[var(--app-fg)]">
-                                            {item.label}
-                                        </span>
+                                    <span className="flex min-w-0 items-center gap-2 text-[11px] font-medium tabular-nums text-[var(--app-hint)]">
+                                        <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--app-button)]" aria-hidden="true" />
+                                        <time
+                                            dateTime={createdAt.toISOString()}
+                                            title={formatMessageTimestampTitle(createdAt)}
+                                            className="truncate"
+                                        >
+                                            {formatOutlineTimestamp(createdAt, locale)}
+                                        </time>
+                                    </span>
+                                    <span className="mt-0.5 line-clamp-2 pl-4 text-sm leading-snug text-[var(--app-fg)]">
+                                        {item.label}
                                     </span>
                                 </button>
                             )
@@ -304,6 +362,8 @@ export function HappyThread(props: {
     const { terminalToolDisplayMode } = useTerminalToolDisplayMode()
     const viewportRef = useRef<HTMLDivElement | null>(null)
     const contentRef = useRef<HTMLDivElement | null>(null)
+    const [shareTurn, setShareTurn] = useState<ShareTurnState>(null)
+    const shareTurnIdRef = useRef(0)
     const topSentinelRef = useRef<HTMLDivElement | null>(null)
     const loadLockRef = useRef(false)
     const pendingScrollRef = useRef<PendingScrollRestore | null>(null)
@@ -476,6 +536,10 @@ export function HappyThread(props: {
         lastScrollTopRef.current = viewportRef.current?.scrollTop ?? 0
         atBottomRef.current = true
         onAtBottomChangeRef.current(true)
+        // Re-entry forces the thread to the bottom, so release anything the
+        // non-at-bottom cold load parked in pending — otherwise new messages
+        // stay invisible until the user manually scrolls to bottom.
+        onFlushPendingRef.current()
         forceScrollTokenRef.current = props.forceScrollToken
         pendingScrollRef.current = null
         loadLockRef.current = false
@@ -500,6 +564,7 @@ export function HappyThread(props: {
         autoScrollEnabledRef.current = true
         atBottomRef.current = true
         onAtBottomChangeRef.current(true)
+        onFlushPendingRef.current()
         scrollToBottomInstant()
 
         initialScrollDeadlineRef.current = Date.now() + INITIAL_SCROLL_SETTLE_MS
@@ -716,6 +781,72 @@ export function HappyThread(props: {
     }, [props.isLoadingMoreMessages, settlePendingLoad])
 
     const showSkeleton = props.isLoadingMessages && props.rawMessagesCount === 0 && props.pendingCount === 0
+    const handleShareTurn = useCallback((
+        messageTarget: HTMLElement | string | null,
+        clientY?: number,
+        fallbackSnapshot?: ShareTurnSnapshot
+    ) => {
+        const content = contentRef.current
+        if (!content) return
+
+        let target: HTMLElement | null = typeof messageTarget === 'string'
+            ? document.getElementById(messageTarget)
+            : messageTarget
+        if (!(target instanceof HTMLElement) || !content.contains(target)) {
+            target = findNearestMessageElement(content, clientY)
+        }
+        if (!(target instanceof HTMLElement) || !content.contains(target)) {
+            setShareTurn({
+                id: ++shareTurnIdRef.current,
+                snapshots: fallbackSnapshot ? [fallbackSnapshot] : [],
+                title: props.metadata?.summary?.text ?? props.metadata?.name ?? props.metadata?.path ?? props.sessionId.slice(0, 8),
+                subtitle: [props.metadata?.flavor, props.metadata?.host].filter(Boolean).join(' · ') || props.sessionId
+            })
+            return
+        }
+
+        let start: Element | null = target
+        while (start?.previousElementSibling && start.getAttribute('data-hapi-message-role') !== 'user') {
+            start = start.previousElementSibling
+        }
+        if (!start || start.getAttribute('data-hapi-message-role') !== 'user') {
+            start = target
+        }
+
+        const snapshots: ShareTurnSnapshot[] = []
+        let current: Element | null = start
+        while (current instanceof HTMLElement) {
+            if (current !== start && current.getAttribute('data-hapi-message-role') === 'user') {
+                break
+            }
+            const role = current.getAttribute('data-hapi-message-role')
+            if (role === 'user' || role === 'assistant') {
+                snapshots.push({
+                    html: current.outerHTML,
+                    text: (current.innerText || current.textContent || '').trim()
+                })
+            }
+            current = current.nextElementSibling
+        }
+
+        if (snapshots.length === 0 && target instanceof HTMLElement) {
+            snapshots.push({
+                html: target.outerHTML,
+                text: (target.innerText || target.textContent || '').trim()
+            })
+        }
+        if (snapshots.length === 0 && fallbackSnapshot) {
+            snapshots.push(fallbackSnapshot)
+        }
+        const completeSnapshots = prependMissingUserSnapshot(snapshots, fallbackSnapshot)
+
+        setShareTurn({
+            id: ++shareTurnIdRef.current,
+            snapshots: completeSnapshots,
+            title: props.metadata?.summary?.text ?? props.metadata?.name ?? props.metadata?.path ?? props.sessionId.slice(0, 8),
+            subtitle: [props.metadata?.flavor, props.metadata?.host].filter(Boolean).join(' · ') || props.sessionId
+        })
+    }, [props.metadata, props.sessionId])
 
     return (
         <HappyChatProvider value={{
@@ -726,6 +857,7 @@ export function HappyThread(props: {
             disabled: props.disabled,
             onRefresh: props.onRefresh,
             onRetryMessage: props.onRetryMessage,
+            onShareTurn: handleShareTurn,
             hasMoreMessages: props.hasMoreMessages,
             isLoadingMoreMessages: props.isLoadingMoreMessages,
             loadOlderMessagesPreservingScroll: loadOlderFromUserAction
@@ -814,6 +946,14 @@ export function HappyThread(props: {
                         />
                     </>
                 ) : null}
+                <ShareTurnDialog
+                    key={shareTurn?.id ?? 'closed'}
+                    isOpen={shareTurn !== null}
+                    title={shareTurn?.title ?? ''}
+                    subtitle={shareTurn?.subtitle ?? ''}
+                    sourceSnapshots={shareTurn?.snapshots ?? []}
+                    onClose={() => setShareTurn(null)}
+                />
             </ThreadPrimitive.Root>
         </HappyChatProvider>
     )
