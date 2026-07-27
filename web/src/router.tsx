@@ -27,6 +27,7 @@ import { isTelegramApp } from '@/hooks/useTelegram'
 import { useSidebarResize } from '@/hooks/useSidebarResize'
 import { useMessages } from '@/hooks/queries/useMessages'
 import { useMachines } from '@/hooks/queries/useMachines'
+import { useMachineLabels } from '@/hooks/useMachineLabels'
 import { useSession } from '@/hooks/queries/useSession'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
 import { useSessions } from '@/hooks/queries/useSessions'
@@ -44,7 +45,7 @@ import { inactiveSessionCanResume } from '@/lib/sessionResume'
 import { markSessionSeen } from '@/lib/sessionLastSeen'
 import { useSessionBrowserTitle } from '@/hooks/useSessionBrowserTitle'
 import { clearCodexImportedSession, markCodexSessionsImported } from '@/lib/codexImportedSessions'
-import type { Machine, CodexDuplicateSessionGroup, CodexLocalSessionSummary } from '@/types/api'
+import type { CodexDuplicateSessionGroup, CodexLocalSessionSummary } from '@/types/api'
 import FilesPage from '@/routes/sessions/files'
 import FilePage from '@/routes/sessions/file'
 import TerminalPage from '@/routes/sessions/terminal'
@@ -137,8 +138,8 @@ function RefreshIcon(props: { className?: string }) {
             strokeLinejoin="round"
             className={props.className}
         >
-            <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-            <path d="M21 3v6h-6" />
+            <path d="M21 12a9 9 0 1 1-2.64-6.36L21 8" />
+            <path d="M21 3v5h-5" />
         </svg>
     )
 }
@@ -180,12 +181,6 @@ function SettingsIcon(props: { className?: string }) {
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
         </svg>
     )
-}
-
-function getMachineTitle(machine: Machine): string {
-    if (machine.metadata?.displayName) return machine.metadata.displayName
-    if (machine.metadata?.host) return machine.metadata.host
-    return machine.id.slice(0, 8)
 }
 
 function SessionsPage() {
@@ -232,16 +227,7 @@ function SessionsPage() {
         })()
     }, [addToast, refetch, t])
 
-    const projectCount = useMemo(() => new Set(sessions.map(s =>
-        s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other'
-    )).size, [sessions])
-    const machineLabelsById = useMemo(() => {
-        const labels: Record<string, string> = {}
-        for (const machine of machines) {
-            labels[machine.id] = getMachineTitle(machine)
-        }
-        return labels
-    }, [machines])
+    const machineLabelsById = useMachineLabels(machines)
     const machinesById = useMemo(() => {
         const byId: Record<string, typeof machines[number]> = {}
         for (const machine of machines) {
@@ -550,10 +536,7 @@ function SessionsPage() {
                 style={{ '--sidebar-w': `${sidebar.width}px` } as React.CSSProperties}
             >
                 <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
-                    <div className="mx-auto w-full max-w-content flex items-center justify-between px-3 py-2">
-                        <div className="text-xs text-[var(--app-hint)]">
-                            {t('sessions.count', { n: sessions.length, m: projectCount })}
-                        </div>
+                    <div className="mx-auto w-full max-w-content flex items-center justify-end px-3 py-2">
                         <div className="flex items-center gap-2">
                             <button
                                 type="button"

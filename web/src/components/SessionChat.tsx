@@ -26,7 +26,7 @@ import {
     supportsCodexReasoningEffort
 } from '@/lib/codexModelCapabilities'
 import { HappyComposer, type ComposerSendError } from '@/components/AssistantChat/HappyComposer'
-import { codexModelAdvertisesFastTier } from '@/components/AssistantChat/codexFastMode'
+import { codexModelAdvertisesFastTier, getEffectiveCodexServiceTier } from '@/components/AssistantChat/codexFastMode'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { resolvePendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { HappyThread } from '@/components/AssistantChat/HappyThread'
@@ -336,10 +336,14 @@ export function ScratchlistDrawerHost(props: {
         // Promote-to-queue bypasses the scratchlist-mode wrapper by
         // calling props.onSend directly (the chat send), so the queue
         // entry lands in the conversation regardless of scratchlist
-        // mode. Mode itself stays on - the operator may still be
-        // capturing related notes.
-        return await props.onSend(text)
-    }, [props.onSend])
+        // mode. After a successful send, exit scratchlist mode so the
+        // operator can continue normal chat (issue #959).
+        const accepted = await props.onSend(text)
+        if (accepted) {
+            props.onExitScratchlistMode()
+        }
+        return accepted
+    }, [props.onSend, props.onExitScratchlistMode])
     return (
         <ScratchlistDrawer
             entries={props.entries}
@@ -540,9 +544,16 @@ function SessionChatInner(props: SessionChatProps) {
     const codexCollaborationModeSupported = agentFlavor === 'codex' && !controlledByUser
     const codexModelsState = useCodexModels({
         api: props.api,
-        sessionId: props.session.id,
+        machineId: props.session.metadata?.machineId ?? null,
         enabled: agentFlavor === 'codex' && props.session.active && !controlledByUser
     })
+    const effectiveCodexServiceTier = agentFlavor === 'codex'
+        ? getEffectiveCodexServiceTier(
+            props.session.serviceTier,
+            props.session.model,
+            codexModelsState.models
+        )
+        : undefined
     const codexModelOptions = useMemo(() => {
         if (agentFlavor !== 'codex') {
             return undefined
@@ -1199,6 +1210,7 @@ function SessionChatInner(props: SessionChatProps) {
         <div className="flex h-full min-h-0 flex-col">
             <SessionHeader
                 session={props.session}
+                serviceTier={effectiveCodexServiceTier}
                 onBack={props.onBack}
                 onToggleFiles={props.session.metadata?.path ? handleToggleFiles : undefined}
                 filesActive={false}
@@ -1431,7 +1443,7 @@ function SessionChatInner(props: SessionChatProps) {
                                     : undefined)
                                 : handleEffortChange
                         }
-                        serviceTier={agentFlavor === 'codex' ? props.session.serviceTier : undefined}
+                        serviceTier={effectiveCodexServiceTier}
                         onServiceTierChange={
                             agentFlavor === 'codex'
                                 && props.session.active

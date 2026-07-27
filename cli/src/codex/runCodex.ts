@@ -73,6 +73,7 @@ export async function runCodex(opts: {
         model: mode.model,
         modelReasoningEffort: mode.modelReasoningEffort,
         collaborationMode: mode.collaborationMode,
+        proactiveMultiAgent: mode.proactiveMultiAgent,
         serviceTier: mode.serviceTier
     }));
 
@@ -89,6 +90,7 @@ export async function runCodex(opts: {
     let currentModel = opts.model;
     let currentModelReasoningEffort: ReasoningEffort | undefined = opts.modelReasoningEffort;
     let currentCollaborationMode: EnhancedMode['collaborationMode'] = opts.collaborationMode ?? 'default';
+    let currentProactiveMultiAgent: boolean | undefined;
     // Service tier (Fast mode), stored representation: `'fast'` and
     // `'standard'` are explicit user choices, `undefined`/`null` mean untouched
     // (use the account default). Prefer the spawn-time override (set by the hub
@@ -137,6 +139,7 @@ export async function runCodex(opts: {
         modelReasoningEffort?: ReasoningEffort | null;
         collaborationMode?: EnhancedMode['collaborationMode'];
         serviceTier?: string | null;
+        proactiveMultiAgent?: boolean;
     } | undefined): void => {
         if (!updates) return;
         if (updates.permissionMode !== undefined) {
@@ -153,6 +156,9 @@ export async function runCodex(opts: {
         }
         if (updates.serviceTier !== undefined) {
             currentServiceTier = updates.serviceTier;
+        }
+        if (updates.proactiveMultiAgent !== undefined) {
+            currentProactiveMultiAgent = updates.proactiveMultiAgent;
         }
         applyCurrentConfigToSession();
     };
@@ -194,7 +200,8 @@ export async function runCodex(opts: {
                     collaborationMode: currentCollaborationMode,
                     model: currentModel,
                     modelReasoningEffort: currentModelReasoningEffort,
-                    serviceTier: currentServiceTier
+                    serviceTier: currentServiceTier,
+                    proactiveMultiAgent: currentProactiveMultiAgent
                 });
                 if (slash.kind === 'goal') {
                     if (slash.message) {
@@ -253,6 +260,7 @@ export async function runCodex(opts: {
                     model: currentModel,
                     modelReasoningEffort: currentModelReasoningEffort,
                     collaborationMode: currentCollaborationMode,
+                    proactiveMultiAgent: currentProactiveMultiAgent,
                     serviceTier: currentServiceTier
                 };
                 if (isolatedCommandText) {
@@ -267,6 +275,7 @@ export async function runCodex(opts: {
                     model: currentModel,
                     modelReasoningEffort: currentModelReasoningEffort,
                     collaborationMode: currentCollaborationMode,
+                    proactiveMultiAgent: currentProactiveMultiAgent,
                     serviceTier: currentServiceTier
                 };
                 messageQueue.push(formatMessageWithAttachments(message.content.text, message.content.attachments), enhancedMode, localId);
