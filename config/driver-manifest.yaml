@@ -562,11 +562,11 @@ layers:
   # wins over fix/cursor-flat-picker-default-highlight on overlapping files.
   - branch: feat/cursor-picker-ios-nested
 
-  # PARKED 2026-07-27 (post-#803 sync rematerialize): soup-relative tip @ 5822e9cd6
-  # would re-storm vs new upstream base. Peer re-thin onto new driver tip, then un-park.
   # tiann/hapi#1160/#1161/#1162/#1163 — opt-in GitHub PR awareness + session↔PR
   # attach (externalRefs chip, Settings toggle, hapi link-pr, MCP link_pr).
+  # Thin tip on driver/integration @ 5f270d725 (2de7d6f7c, 2026-07-27 re-thin
+  # post-#803 rematerialize). Drop when #1161+#1163 land upstream.
   # Worktree: ~/coding/hapi/worktrees/github-pr-awareness-soup @
   # driver/github-pr-awareness. Enable Settings → General → GitHub PR awareness
   # (or HAPI_GITHUB_PR_AWARENESS=1). Meta: hapi-meta-daily --backfill-refs.
-  # - branch: driver/github-pr-awareness
+  - branch: driver/github-pr-awareness
