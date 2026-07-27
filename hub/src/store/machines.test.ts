@@ -15,7 +15,11 @@ describe('machine metadata backfill', () => {
             'ns'
         )
 
-        expect(refreshed.metadata).toEqual({ host: 'MacBook Pro', platform: 'darwin' })
+        expect(refreshed.metadata).toEqual({
+            host: 'MacBook Pro',
+            platform: 'darwin',
+            capabilities: [],
+        })
         expect(refreshed.metadataVersion).toBe(created.metadataVersion + 1)
     })
 
@@ -25,7 +29,11 @@ describe('machine metadata backfill', () => {
 
         const refreshed = store.machines.getOrCreateMachine('machine-1', { host: 'new-host' }, null, 'ns')
 
-        expect(refreshed.metadata).toEqual({ displayName: 'Workstation', host: 'new-host' })
+        expect(refreshed.metadata).toEqual({
+            displayName: 'Workstation',
+            host: 'new-host',
+            capabilities: [],
+        })
     })
 
     it('does not write when the merge changes nothing', () => {
