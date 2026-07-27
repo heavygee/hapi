@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { shouldApplyUpgradeOffer } from './selfUpgrade'
+import { resolvePostNpmInstallExecutable, shouldApplyUpgradeOffer } from './selfUpgrade'
 import type { HubUpgradeOffer } from '@hapi/protocol/upgradeChannel'
 import { CURRENT_MACHINE_CAPABILITIES } from '@hapi/protocol/runnerCapabilities'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 const baseOffer = (overrides: Partial<HubUpgradeOffer> = {}): HubUpgradeOffer => ({
     channel: 'npm',
@@ -9,6 +12,20 @@ const baseOffer = (overrides: Partial<HubUpgradeOffer> = {}): HubUpgradeOffer =>
     targetCapabilities: ['cursor-chat-store-status'],
     npmPackage: '@twsxtd/hapi',
     ...overrides,
+})
+
+describe('resolvePostNpmInstallExecutable', () => {
+    it('returns the first PATH hit that exists on disk', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-npm-upgrade-'))
+        const shim = join(dir, 'hapi')
+        writeFileSync(shim, '#!/bin/sh\n')
+        expect(resolvePostNpmInstallExecutable((name) => (name === 'hapi' ? shim : null))).toBe(shim)
+    })
+
+    it('returns null when nothing on PATH exists', () => {
+        expect(resolvePostNpmInstallExecutable(() => '/tmp/definitely-missing-hapi-binary')).toBeNull()
+        expect(resolvePostNpmInstallExecutable(() => null)).toBeNull()
+    })
 })
 
 describe('shouldApplyUpgradeOffer', () => {
