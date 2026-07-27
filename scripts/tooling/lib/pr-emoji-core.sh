@@ -95,8 +95,12 @@ pec_extract_pr_numbers() {
     if [[ "$name" =~ $re_peer ]]; then
         echo "${BASH_REMATCH[1]}"; return
     fi
+    # No match is success (empty stdout). A bare `grep` exit 1 under
+    # `set -o pipefail` used to abort hapi-meta-daily mid-loop whenever a
+    # chipped session title lacked PR/Peer markers (e.g. "session external_refs
+    # + PR chip") — refresh died, statusCheckedAt went stale, chips showed `?`.
     printf '%s' "$name" | grep -oiE 'pr[#: ]*#?[0-9]{3,4}|#[0-9]{3,4}' \
-        | grep -oE '[0-9]{3,4}' | head -1
+        | grep -oE '[0-9]{3,4}' | head -1 || true
 }
 
 # Explicit pull-request markers only (ADR D6 backfill / chip identity).
@@ -120,6 +124,7 @@ pec_extract_linked_pr_numbers() {
     local first
     first="$(printf '%s' "$name" | grep -oiE '[Pp][Rr][[:space:]]*#?[0-9]{3,4}' | head -1 | grep -oE '[0-9]{3,4}' || true)"
     [[ -n "$first" ]] && echo "$first"
+    return 0
 }
 
 # Strip leading "PR #N:" / "PR #N/#M:" markers from a title.

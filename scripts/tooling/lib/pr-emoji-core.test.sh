@@ -58,6 +58,9 @@ eq "linked ignores Peer #1100" "$(pec_extract_linked_pr_numbers "📝Peer #1100:
 eq "linked ignores bare #1085 in Peer title" "$(pec_extract_linked_pr_numbers "Peer #1085: Dogfood: #1085 hang" | tr '\n' ',')" ""
 eq "linked keeps PR #1087 when Peer also present" "$(pec_extract_linked_pr_numbers "PR #1087: Peer #1085: banner" | tr '\n' ',')" "1087,"
 eq "linked extract PR #941" "$(pec_extract_linked_pr_numbers "✅PR #941: foo" | tr '\n' ',')" "941,"
+# No-match must exit 0 — pipefail in hapi-meta-daily aborts on grep/[[ status 1.
+eq "extract no-match exit 0" "$(set -euo pipefail; pec_extract_pr_numbers "session external_refs + PR chip"; echo OK)" "OK"
+eq "linked no-match exit 0" "$(set -euo pipefail; pec_extract_linked_pr_numbers "opt-in awareness"; echo OK)" "OK"
 # Scope protection: 1-2 digit internal workstream refs must NOT match (they would
 # cross-wire overseer sessions to unrelated upstream PRs). See fn header.
 eq "ignore two-digit #22 (overseer W1.6)" "$(pec_extract_pr_numbers "Peer: W1.6 provenance (#22)" | tr '\n' ',')" ""
