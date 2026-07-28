@@ -199,7 +199,10 @@ layers:
   # Soup typecheck followups — THIN layer only (4 commits on layer-7 tip).
   # Was a stale driver/integration merge-tip; never re-merge full FCM/push stack.
   # Refresh: reset to driver-after-L7, cherry-pick b804c6da..600227c0 only.
-  - branch: fix/soup-typecheck-followups
+  # PARKED 2026-07-28 (meta rematerialize): tip fat with scratchlist vs upstream #896
+  # (14-file storm). Intended thin delta was tlsGate+guards only — re-thin or drop
+  # if upstream/main typechecks clean in soup. Was: fix/soup-typecheck-followups.
+  # - branch: fix/soup-typecheck-followups
 
   # #915 architectural fix Tier B - issue tiann/hapi#929. 2026-06-16 spawn
   # (same backup-agent). Soup-only iteration; upstream PR HELD until
