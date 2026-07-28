@@ -28,13 +28,13 @@ describe('bunCompileTarget', () => {
         expect(bunCompileTarget('linux', 'x64')).toBe('bun-linux-x64-baseline')
         expect(bunCompileTarget('linux', 'arm64')).toBe('bun-linux-arm64')
         expect(bunCompileTarget('win32', 'x64')).toBe('bun-windows-x64')
-        expect(bunCompileTarget('win32', 'arm64')).toBe('bun-windows-arm64')
         expect(bunCompileTarget('darwin', 'arm64')).toBe('bun-darwin-arm64')
     })
 
     it('rejects unsupported platform/arch instead of inventing a Bun target', () => {
         expect(() => bunCompileTarget('freebsd', 'x64')).toThrow('Unsupported compile target')
         expect(() => bunCompileTarget('win32', 'ia32')).toThrow('Unsupported compile target')
+        expect(() => bunCompileTarget('win32', 'arm64')).toThrow('Unsupported compile target')
     })
 })
 
