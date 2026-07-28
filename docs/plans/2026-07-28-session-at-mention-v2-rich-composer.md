@@ -45,6 +45,8 @@ Wire format on send / drafts: `[title](/sessions/<id>)` mixed with prose.
 | Track | Issue |
 |-------|-------|
 | v1 plain-text `@` autocomplete | [#1213](https://github.com/tiann/hapi/issues/1213) |
-| v2 rich composer (this plan) | [#1216](https://github.com/tiann/hapi/issues/1216) |
+| v2 rich composer (this plan) | [#1215](https://github.com/tiann/hapi/issues/1215) |
 
-Branch: `feat/session-mention-rich-composer` (based on v1 tip). `#1215` was a duplicate filing and is closed.
+Branch: `feat/session-mention-rich-composer` (based on v1 tip). PR must use `Fixes #1215` (not #1213; not #1216).
+
+`#1216` was a parallel filing and is closed as a duplicate of `#1215`.
