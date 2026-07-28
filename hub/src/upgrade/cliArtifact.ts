@@ -94,8 +94,10 @@ export function bunCompileTarget(platform: string, arch: string): string {
     if (platform === 'linux' && arch === 'arm64') {
         return 'bun-linux-arm64'
     }
-    if (platform === 'win32' && (arch === 'x64' || arch === 'arm64')) {
-        return `bun-windows-${arch}`
+    if (platform === 'win32' && arch === 'x64') {
+        // HAPI only publishes/ships @twsxtd/hapi-win32-x64. Bun can compile
+        // bun-windows-arm64, but fleet-upgrade must match the supported binary matrix.
+        return 'bun-windows-x64'
     }
     if (platform === 'darwin' && (arch === 'x64' || arch === 'arm64')) {
         return `bun-darwin-${arch}`
