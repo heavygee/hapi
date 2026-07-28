@@ -217,6 +217,13 @@ query { repository(owner:\"${OWNER}\", name:\"${NAME}\") {
         bot_major=1
         [[ "$pr_review_ok" -eq 1 ]] && bot_clean=1 && bot_major=0
     fi
+    # Resolved threads + in-flight CI/pr-review: body-grep Majors from the
+    # previous review head are sticky noise — do not emit botMajor in the
+    # classify JSON (decide also ignores them for emoji). pec_decide_emoji
+    # is the source of truth; this keeps batch telemetry honest.
+    if [[ "$checks_pending" -eq 1 && "$threads_n" -eq 0 && "$bot_major" -eq 1 ]]; then
+        bot_major=0
+    fi
 
     decided="$(pec_decide_emoji 1 0 0 "$checks_ok" "$checks_pending" "$checks_seen" \
         "$threads_n" "$bot_clean" "$bot_major" "$bot_has_body" "$merge_bad" 0)"

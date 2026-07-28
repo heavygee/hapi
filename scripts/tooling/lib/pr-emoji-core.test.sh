@@ -89,6 +89,13 @@ eq "all green → ✅" "$(emoji_of "$r")" "✅"
 r="$(pec_decide_emoji 1 0 0 0 1 1 0 1 0 0 0 0)"
 eq "checks pending → 🔁" "$(emoji_of "$r")" "🔁"
 
+# Sticky body-grep [Major] after threads resolved, while new pr-review/CI still
+# pending, must not force ⚠️ (dogfood #1205 / session 20b195f3).
+r="$(pec_decide_emoji 1 0 0 0 1 1 0 0 1 1 0 0)"
+eq "pending CI + threads=0 + sticky bot_major → 🔁" "$(emoji_of "$r")" "🔁"
+[[ "$(action_of "$r")" == *"CI running"* ]] && PASS=$((PASS + 1)) \
+    || { echo "FAIL: pending+sticky-major action should mention CI running (got: $(action_of "$r"))" >&2; FAIL=$((FAIL + 1)); }
+
 r="$(pec_decide_emoji 1 0 0 1 0 1 2 1 0 0 0 0)"
 eq "2 threads → ⚠️" "$(emoji_of "$r")" "⚠️"
 eq "2 threads action" "$(action_of "$r")" "resolve 2 open thread(s)"
