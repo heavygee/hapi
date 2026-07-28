@@ -33,6 +33,9 @@ import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStat
 import { useSessions } from '@/hooks/queries/useSessions'
 import { useSlashCommands } from '@/hooks/queries/useSlashCommands'
 import { useSkills } from '@/hooks/queries/useSkills'
+import { getSessionTitle } from '@/lib/sessionTitle'
+import { buildSessionReferenceText, matchSessionsForMention } from '@/lib/sessionReference'
+import type { Suggestion } from '@/hooks/useActiveSuggestions'
 import { useSendMessage, type SendErrorInfo } from '@/hooks/mutations/useSendMessage'
 import type { ComposerSendError } from '@/components/AssistantChat/HappyComposer'
 import { ApiError } from '@/api/client'
@@ -951,28 +954,58 @@ function SessionPage() {
     const {
         getSuggestions: getSkillSuggestions,
     } = useSkills(api, sessionId)
+    // Same list as the sidebar — client-side @ session mention ranking (tiann/hapi#1213).
+    const { sessions: allSessions } = useSessions(api)
 
     const getAutocompleteSuggestions = useCallback(async (query: string) => {
         if (query.startsWith('@')) {
-            if (agentType !== 'codex' || !api || !sessionId) return []
             const search = query.slice(1)
-            const response = await api.searchSessionFiles(sessionId, search, 50)
-            if (!response.success || !response.files) return []
-            return response.files.map((file) => {
-                const mentionText = `@"${file.fullPath.replace(/(["\\])/g, '\\$1')}"`
+            const sessionHits = matchSessionsForMention(
+                allSessions.map((s) => ({
+                    id: s.id,
+                    title: getSessionTitle(s),
+                    active: s.active,
+                    updatedAt: s.updatedAt,
+                    lifecycleState: s.metadata?.lifecycleState ?? null,
+                })),
+                search,
+                { excludeId: sessionId, limit: 20 }
+            ).map((s) => {
+                const mentionText = buildSessionReferenceText(s.title, s.id)
+                const idPrefix = s.id.slice(0, 8)
                 return {
-                    key: mentionText,
+                    key: `session:${s.id}`,
                     text: mentionText,
-                    label: `@${file.fileName}`,
-                    description: file.filePath || file.fullPath
+                    label: `@${s.title || idPrefix}`,
+                    description: s.active
+                        ? `Session · ${idPrefix} · active`
+                        : `Session · ${idPrefix}`,
                 }
             })
+
+            const fileHits: Suggestion[] = []
+            if (agentType === 'codex' && api && sessionId) {
+                const response = await api.searchSessionFiles(sessionId, search, 50)
+                if (response.success && response.files) {
+                    for (const file of response.files) {
+                        const mentionText = `@"${file.fullPath.replace(/(["\\])/g, '\\$1')}"`
+                        fileHits.push({
+                            key: mentionText,
+                            text: mentionText,
+                            label: `@${file.fileName}`,
+                            description: file.filePath || file.fullPath,
+                        })
+                    }
+                }
+            }
+
+            return [...sessionHits, ...fileHits]
         }
         if (query.startsWith('$')) {
             return await getSkillSuggestions(query)
         }
         return await getSlashSuggestions(query)
-    }, [agentType, api, sessionId, getSkillSuggestions, getSlashSuggestions])
+    }, [agentType, api, sessionId, allSessions, getSkillSuggestions, getSlashSuggestions])
 
     const refreshSelectedSession = useCallback(() => {
         void refetchSession()
