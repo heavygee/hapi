@@ -18,7 +18,7 @@ import {
     reacquireRunnerLockAfterFailedHandoff,
     releaseRunnerLockForHandoff,
 } from '@/runner/handoffLock'
-import { readRunnerState } from '@/persistence'
+import { readRunnerState, writeRunnerState } from '@/persistence'
 
 export type ApplyDecision =
     | { apply: true; reason: 'upgrade' }
@@ -293,10 +293,37 @@ export async function applyRunnerSelfUpgrade(options: {
         await releaseRunnerLockForHandoff()
         const handoffOk = await waitForRunnerHandoff(process.pid, { timeoutMs: 30_000 })
         if (!handoffOk) {
+            // Mirror run.ts mtime handoff: never stay alive without the lock.
+            // Child may have written runner.state.json then died — reclaim PID.
             const reacquired = await reacquireRunnerLockAfterFailedHandoff()
-            logger.debug('[SELF-UPGRADE] Replacement did not register; leaving current runner up', {
-                reacquired,
-            })
+            if (!reacquired) {
+                logger.debug('[SELF-UPGRADE] Could not re-acquire runner lock after failed handoff; exiting cleanly')
+                if (options.requestShutdown) {
+                    options.requestShutdown()
+                } else {
+                    setTimeout(() => {
+                        process.exit(0)
+                    }, 250)
+                }
+                return {
+                    status: 'failed',
+                    message: 'Replacement did not register and runner lock could not be reacquired; exiting',
+                    channel: options.offer.channel,
+                }
+            }
+            try {
+                const state = await readRunnerState()
+                if (state && state.pid !== process.pid) {
+                    writeRunnerState({
+                        ...state,
+                        pid: process.pid,
+                        lastHeartbeat: new Date().toISOString(),
+                    })
+                }
+            } catch (error) {
+                logger.debug('[SELF-UPGRADE] Failed to reclaim runner.state.json after failed handoff', error)
+            }
+            logger.debug('[SELF-UPGRADE] Replacement did not register; current runner reclaimed lock and stays up')
             return {
                 status: 'failed',
                 message: 'Replacement runner did not register; current runner left running',
