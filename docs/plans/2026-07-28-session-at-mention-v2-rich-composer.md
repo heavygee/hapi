@@ -24,15 +24,16 @@ Attachment-style chips cannot express "this clause → session A, that clause �
 - Serialize on send to markdown session links (agents stay text-safe)
 - Feature-flag; keep textarea path until Enter/IME/drafts/send-error parity
 
-## Feature flag
+## Default path (not a user setting)
 
-Enable rich path (default off → v1 textarea):
+Rich segmented composer is **on by default** - same posture as v1 `@` autocomplete (no opt-in affordance). Temporary dual-path during spike was an engineering kill-switch, not a product setting.
 
-- `localStorage.setItem('hapi.composer.richMentions', '1')`
-- or URL `?richMentions=1`
-- or `VITE_RICH_COMPOSER_MENTIONS=true` at build time
+Emergency opt-out only (operators / regression):
 
-Wire format on send / drafts: `[title](/sessions/<id>)` mixed with prose.
+- `localStorage.setItem('hapi.composer.richMentions', '0')` or `?richMentions=0`
+- or build `VITE_RICH_COMPOSER_MENTIONS=false`
+
+Wire format on send / drafts: `[title](/sessions/<id>)` mixed with prose. Proof: peer-stack MP4 (chips + baseline composer behaviors), not a still.
 
 ## Out of scope for v2 kickoff
 
