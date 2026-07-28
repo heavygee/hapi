@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-    buildSessionMentionMarkdown,
     buildSessionReferencePath,
     buildSessionReferenceText,
-    composeMessageWithSessionMentions,
     matchSessionsForMention,
     parseSessionPathHref,
     type SessionMentionCandidate,
@@ -86,38 +84,6 @@ describe('matchSessionsForMention', () => {
         // Active first (by updatedAt), then inactive recent — archived omitted.
         expect(hits.map((s) => s.id)).toEqual(['ddd-meta', 'aaa-active', 'bbb-recent'])
         expect(hits.map((s) => s.id)).not.toContain('ccc-old')
-    })
-})
-
-describe('buildSessionMentionMarkdown', () => {
-    it('builds a titled markdown link to the session path', () => {
-        expect(buildSessionMentionMarkdown('Peer #921: scratchlist', 'abc-def')).toBe(
-            '[Peer #921: scratchlist](/sessions/abc-def)'
-        )
-    })
-
-    it('strips brackets from titles so markdown stays well-formed', () => {
-        expect(buildSessionMentionMarkdown('foo [bar]', 'abc-def')).toBe(
-            '[foo bar](/sessions/abc-def)'
-        )
-    })
-})
-
-describe('composeMessageWithSessionMentions', () => {
-    it('prepends mention lines and keeps the body', () => {
-        expect(
-            composeMessageWithSessionMentions('please look', [
-                { id: 'abc-def', title: 'tailscale' },
-            ])
-        ).toBe('[tailscale](/sessions/abc-def)\n\nplease look')
-    })
-
-    it('allows mention-only sends', () => {
-        expect(
-            composeMessageWithSessionMentions('  ', [
-                { id: 'abc-def', title: 'tailscale' },
-            ])
-        ).toBe('[tailscale](/sessions/abc-def)')
     })
 })
 

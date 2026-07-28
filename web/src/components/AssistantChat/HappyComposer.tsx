@@ -31,8 +31,6 @@ import { shouldShowComposerStatusBar, StatusBar } from '@/components/AssistantCh
 import { ComposerButtons } from '@/components/AssistantChat/ComposerButtons'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { AttachmentItem } from '@/components/AssistantChat/AttachmentItem'
-import { SessionMentionChip, type SessionMentionChipModel } from '@/components/SessionMentionChip'
-import { composeMessageWithSessionMentions } from '@/lib/sessionReference'
 import { useTranslation } from '@/lib/use-translation'
 import { getModelOptionsForFlavor, getNextModelForFlavor } from './modelOptions'
 import { getClaudeComposerEffortOptions } from './claudeEffortOptions'
@@ -287,6 +285,7 @@ export function HappyComposer(props: {
         const path = (attachment as { path?: string }).path
         return typeof path === 'string' && path.length > 0
     })
+    const canSend = (hasText || hasAttachments) && attachmentsReady && !controlsDisabled
 
     const [inputState, setInputState] = useState<TextInputState>({
         text: '',
@@ -305,10 +304,6 @@ export function HappyComposer(props: {
     const setPendingSchedule = isControlled ? onScheduleProp : setPendingScheduleLocal
 
     const textareaRef = useRef<HTMLTextAreaElement>(null)
-    /** @-picked sessions — chips above the textarea (like attachments); expanded on send. */
-    const [sessionMentions, setSessionMentions] = useState<SessionMentionChipModel[]>([])
-    const hasSessionMentions = sessionMentions.length > 0
-    const canSend = (hasText || hasAttachments || hasSessionMentions) && attachmentsReady && !controlsDisabled
     const prevControlledByUser = useRef(controlledByUser)
 
     const attachmentDrafts = attachments.flatMap((attachment) => {
@@ -406,53 +401,9 @@ export function HappyComposer(props: {
         }
     }, [platformHaptic])
 
-    const focusComposerAt = useCallback((cursorPosition: number) => {
-        setTimeout(() => {
-            const el = textareaRef.current
-            if (!el) return
-            el.setSelectionRange(cursorPosition, cursorPosition)
-            try {
-                el.focus({ preventScroll: true })
-            } catch {
-                el.focus()
-            }
-        }, 0)
-    }, [])
-
     const handleSuggestionSelect = useCallback((index: number) => {
         const suggestion = suggestions[index]
         if (!suggestion || !textareaRef.current) return
-
-        // Session @ pick → chip (not plain-text citation expansion).
-        if (suggestion.sessionMention) {
-            const mention = suggestion.sessionMention
-            setSessionMentions((prev) => (
-                prev.some((m) => m.id === mention.id)
-                    ? prev
-                    : [...prev, {
-                        id: mention.id,
-                        title: mention.title,
-                        active: mention.active,
-                        flavor: mention.flavor,
-                    }]
-            ))
-            const result = applySuggestion(
-                inputState.text,
-                inputState.selection,
-                '',
-                autocompletePrefixes,
-                false
-            )
-            api.composer().setText(result.text)
-            setInputState({
-                text: result.text,
-                selection: { start: result.cursorPosition, end: result.cursorPosition }
-            })
-            focusComposerAt(result.cursorPosition)
-            haptic('light')
-            return
-        }
-
         if (suggestion.text.startsWith('$')) {
             markSkillUsed(suggestion.text.slice(1))
         }
@@ -470,28 +421,20 @@ export function HappyComposer(props: {
             text: result.text,
             selection: { start: result.cursorPosition, end: result.cursorPosition }
         })
-        focusComposerAt(result.cursorPosition)
+
+        setTimeout(() => {
+            const el = textareaRef.current
+            if (!el) return
+            el.setSelectionRange(result.cursorPosition, result.cursorPosition)
+            try {
+                el.focus({ preventScroll: true })
+            } catch {
+                el.focus()
+            }
+        }, 0)
+
         haptic('light')
-    }, [api, suggestions, inputState, autocompletePrefixes, haptic, focusComposerAt])
-
-    const removeSessionMention = useCallback((sessionId: string) => {
-        setSessionMentions((prev) => prev.filter((m) => m.id !== sessionId))
-    }, [])
-
-    const sendComposer = useCallback(() => {
-        if (sessionMentions.length > 0) {
-            const combined = composeMessageWithSessionMentions(composerText, sessionMentions)
-            setSessionMentions([])
-            api.composer().setText(combined)
-            // setText is sync in assistant-ui; send on next microtask so the
-            // composer state includes the expanded mention markdown.
-            queueMicrotask(() => {
-                api.composer().send()
-            })
-            return
-        }
-        api.composer().send()
-    }, [api, composerText, sessionMentions])
+    }, [api, suggestions, inputState, autocompletePrefixes, haptic])
 
     const abortDisabled = controlsDisabled || isAborting || !threadIsRunning
     const switchDisabled = controlsDisabled || isSwitching || !controlledByUser
@@ -626,14 +569,14 @@ export function HappyComposer(props: {
             if (composerEnterBehavior === 'newline') {
                 if ((e.ctrlKey || e.metaKey) && !e.altKey && canSend) {
                     e.preventDefault()
-                    sendComposer()
+                    api.composer().send()
                     setShowContinueHint(false)
                 }
                 return
             }
             e.preventDefault()
             if (!e.ctrlKey && !e.altKey && !e.metaKey && canSend) {
-                sendComposer()
+                api.composer().send()
                 setShowContinueHint(false)
             }
             return
@@ -690,7 +633,7 @@ export function HappyComposer(props: {
         permissionMode,
         permissionModes,
         canSend,
-        sendComposer,
+        api,
         haptic,
         composerEnterBehavior
     ])
@@ -858,7 +801,7 @@ export function HappyComposer(props: {
     const voiceEnabled = Boolean(onVoiceToggle)
 
     const handleSend = useCallback(() => {
-        sendComposer()
+        api.composer().send()
         // SessionChat owns clearing the schedule — it clears only after awaiting
         // the send hook's accepted result, which covers both pre-mutation guards
         // and async inactive-session resume failure. Clearing here unconditionally
@@ -869,7 +812,7 @@ export function HappyComposer(props: {
         // the route-level state (`onSuccess`/`onError` in router.tsx) replaces
         // or clears it based on the actual mutation result, so the user keeps
         // the error context while the new attempt is in flight.
-    }, [sendComposer])
+    }, [api])
 
     // Pi: selected model info for UI labels and thinking level filtering
     const piModelLabel = agentFlavor === 'pi'
@@ -1379,21 +1322,6 @@ export function HappyComposer(props: {
                         {attachments.length > 0 ? (
                             <div className="flex flex-wrap gap-2 px-4 pt-3">
                                 <ComposerPrimitive.Attachments components={{ Attachment: AttachmentItem }} />
-                            </div>
-                        ) : null}
-
-                        {sessionMentions.length > 0 ? (
-                            <div
-                                className={`flex flex-wrap gap-2 px-4 ${attachments.length > 0 ? 'pt-2' : 'pt-3'}`}
-                                data-testid="composer-session-mentions"
-                            >
-                                {sessionMentions.map((mention) => (
-                                    <SessionMentionChip
-                                        key={mention.id}
-                                        mention={mention}
-                                        onRemove={() => removeSessionMention(mention.id)}
-                                    />
-                                ))}
                             </div>
                         ) : null}
 

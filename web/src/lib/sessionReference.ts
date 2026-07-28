@@ -18,28 +18,6 @@ export function buildSessionReferenceText(sessionTitle: string, sessionId: strin
     return `See HAPI session ${path} for context`
 }
 
-/**
- * Compact markdown citation used when sending composer session-mention chips.
- * Renders as a SessionMentionChip in chat (link text = title).
- */
-export function buildSessionMentionMarkdown(sessionTitle: string, sessionId: string): string {
-    const path = buildSessionReferencePath(sessionId)
-    const title = sanitizeSessionReferenceTitle(sessionTitle).replace(/[\[\]]/g, '')
-    const label = title || sessionId.slice(0, 8)
-    return `[${label}](${path})`
-}
-
-/** Prepend session-mention markdown lines to the composer body before send. */
-export function composeMessageWithSessionMentions(
-    body: string,
-    mentions: readonly { title: string; id: string }[]
-): string {
-    if (mentions.length === 0) return body
-    const lines = mentions.map((m) => buildSessionMentionMarkdown(m.title, m.id))
-    const trimmed = body.trim()
-    return trimmed ? `${lines.join('\n')}\n\n${trimmed}` : lines.join('\n')
-}
-
 /** Minimal session shape for @-mention ranking (avoids coupling to full SessionSummary). */
 export type SessionMentionCandidate = {
     id: string
