@@ -19,6 +19,7 @@ import {
     releaseRunnerLockForHandoff,
 } from '@/runner/handoffLock'
 import { readRunnerState, writeRunnerState } from '@/persistence'
+import { buildHubRequestHeaders } from '@/api/hubExtraHeaders'
 
 export type ApplyDecision =
     | { apply: true; reason: 'upgrade' }
@@ -152,9 +153,9 @@ async function installFromArtifact(
     url.searchParams.set('version', offer.targetVersion)
 
     const response = await fetch(url, {
-        headers: {
+        headers: buildHubRequestHeaders({
             Authorization: `Bearer ${authToken}`,
-        },
+        }),
     })
     if (!response.ok || !response.body) {
         throw new Error(`artifact download failed: HTTP ${response.status}`)
