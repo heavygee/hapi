@@ -220,6 +220,16 @@ export default function SharePage() {
     }, [sessionsSnapshot, sessions, sessionsLoading])
 
     const isSearching = searchQuery.trim().length > 0 || timeRange !== null
+    const sessionActivityDates = useMemo(() => {
+        if (!sessionsSnapshot) return new Set<string>()
+        return new Set(sessionsSnapshot.map((session) => {
+            const date = new Date(session.updatedAt)
+            const year = date.getFullYear()
+            const month = String(date.getMonth() + 1).padStart(2, '0')
+            const day = String(date.getDate()).padStart(2, '0')
+            return `${year}-${month}-${day}`
+        }))
+    }, [sessionsSnapshot])
     const pickerSessions = useMemo(() => {
         if (!sessionsSnapshot) return null
         return filterSharePickerSessions(
@@ -327,6 +337,7 @@ export default function SharePage() {
                             onChange={setSearchQuery}
                             customStart={customStart}
                             customEnd={customEnd}
+                            sessionActivityDates={sessionActivityDates}
                             onDateRangeChange={(start, end) => {
                                 setCustomStart(start)
                                 setCustomEnd(end)
