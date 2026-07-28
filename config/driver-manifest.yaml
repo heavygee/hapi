@@ -179,7 +179,10 @@ layers:
   # Soup-only layer soup/scratchlist-attachments-v22-v12 (renumber v11→v12;
   # FCM layer 1 owns v10→v11). NOT feat/scratchlist-attachments-v22 directly.
   # Worktree: ~/coding/hapi/worktrees/scratchlist-attachments-v22
-  - branch: soup/scratchlist-attachments-v22-v12
+  # PARKED 2026-07-28 (meta rematerialize): upstream #896 landed scratchlist v2 +
+  # schema; this soup tip storms 14 files vs new base. Peer 20b195f3 (#921) owns
+  # re-thin onto post-#896 tip, then un-park. Core scratchlist comes from upstream now.
+  # - branch: soup/scratchlist-attachments-v22-v12
 
   # Soup-only type-narrowing followups. 2026-06-16 spawn (backup-agent
   # during full-soup-restore after a botched reset-and-merge round). Two
