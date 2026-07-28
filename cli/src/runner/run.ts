@@ -1378,6 +1378,22 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
               return;
             }
             runnerLockHandle = reacquired;
+            // Child may have written state then died; reclaim ownership so the
+            // next heartbeat does not see a foreign dead PID as confusing noise.
+            try {
+              writeRunnerState({
+                ...fileState,
+                pid: process.pid,
+                httpPort: controlPort,
+                startedWithCliVersion: packageJson.version,
+                startedWithCliMtimeMs,
+                startedWithArgv,
+                startedWithVersionHandoffDisabled,
+                lastHeartbeat: new Date().toLocaleString(),
+              });
+            } catch (error) {
+              logger.debug('[RUNNER RUN] Failed to reclaim runner.state.json after failed handoff', error);
+            }
             deferHandoffRetry();
             return;
           }
@@ -1392,8 +1408,16 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       // Race condition is possible, but thats okay for the time being :D
       const runnerState = await readRunnerState();
       if (runnerState && runnerState.pid !== process.pid) {
-        logger.debug('[RUNNER RUN] Somehow a different runner was started without killing us. We should kill ourselves.')
-        requestShutdown('exception', 'A different runner was started without killing us. We should kill ourselves.')
+        // Only yield if the other PID is actually alive. During RPC/mtime handoff
+        // a child can write state then die; treating that as ownership transfer
+        // would suicide the parent and leave the machine offline.
+        if (isProcessAlive(runnerState.pid)) {
+          logger.debug('[RUNNER RUN] Somehow a different runner was started without killing us. We should kill ourselves.')
+          requestShutdown('exception', 'A different runner was started without killing us. We should kill ourselves.')
+          heartbeatRunning = false;
+          return;
+        }
+        logger.debug(`[RUNNER RUN] runner.state.json points at dead PID ${runnerState.pid}; reclaiming with heartbeat`)
       }
 
       // Heartbeat
