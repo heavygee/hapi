@@ -175,14 +175,13 @@ layers:
   # of just the GFM table commit, no mermaid-diagram.tsx touch).
   - branch: fix/cursor-flat-picker-default-highlight
 
-  # Scratchlist v2.2 (#921) - hub-stored attachments + v2 hub-sync foundation.
-  # Soup-only layer soup/scratchlist-attachments-v22-v12 (renumber v11→v12;
-  # FCM layer 1 owns v10→v11). NOT feat/scratchlist-attachments-v22 directly.
+  # Scratchlist v2.2 (#921) - hub-stored attachments only (core scratchlist from
+  # upstream #896). Soup-only layer soup/scratchlist-attachments-v22-v12
+  # (attachments V14→V15). NOT feat/scratchlist-attachments-v22 directly.
   # Worktree: ~/coding/hapi/worktrees/scratchlist-attachments-v22
-  # PARKED 2026-07-28 (meta rematerialize): upstream #896 landed scratchlist v2 +
-  # schema; this soup tip storms 14 files vs new base. Peer 20b195f3 (#921) owns
-  # re-thin onto post-#896 tip, then un-park. Core scratchlist comes from upstream now.
-  # - branch: soup/scratchlist-attachments-v22-v12
+  # 2026-07-28: re-thinned onto post-#896 driver tip (attachments-only delta);
+  # un-parked by owner after Meta parking for rematerialize.
+  - branch: soup/scratchlist-attachments-v22-v12
 
   # Soup-only type-narrowing followups. 2026-06-16 spawn (backup-agent
   # during full-soup-restore after a botched reset-and-merge round). Two
@@ -199,7 +198,8 @@ layers:
   # Soup typecheck followups — THIN layer only (4 commits on layer-7 tip).
   # Was a stale driver/integration merge-tip; never re-merge full FCM/push stack.
   # Refresh: reset to driver-after-L7, cherry-pick b804c6da..600227c0 only.
-  # PARKED 2026-07-28 (meta rematerialize): tip fat with scratchlist vs upstream #896
+  # PARKED 2026-07-28 — OWNER FIX REQUIRED (typecheck-followups peer). Meta must NOT
+  # leave parked to green rematerialize. Tip fat with scratchlist vs upstream #896
   # (14-file storm). Intended thin delta was tlsGate+guards only — re-thin or drop
   # if upstream/main typechecks clean in soup. Was: fix/soup-typecheck-followups.
   # - branch: fix/soup-typecheck-followups
@@ -432,22 +432,13 @@ layers:
   # Fat bak: backup/cursor-model-error-bridge-fat. Worktree: model-error-bridge.
   # Drop when upstream PR merges.
   #
-  # Un-parked 2026-07-24 (meta, post-v0.23.4 re-thin): tip 6584790d1 on detect
-  # c6b57a7f1 / base 8eac26726 (9 commits). Owner proved throwaway merge onto
-  # driver @48703cdea → 2 additive conflicts (rpcMethods + settings test mocks),
-  # rerere trained; expect auto-resolve on rematerialize (not the old 20-file blast).
-  #
-  # RE-THINNED 2026-07-24 (owner, detect advanced 3 commits): new tip 231647558
-  # on detect f8b9b2c10 (9 bridge commits; f8b9b2c10 now ancestor). Detect new
-  # work preserved (7db291c64 prior-done / a43bcf5f4 rawSnippet / f8b9b2c10 carry-
-  # forward). Same 36-file scope. Proof merge vs real ctx (4645025b9, 1st parent
-  # of driver 351eca814) → 1 conflict only (settings/index.test.tsx), rerere
-  # auto-staged (keep both CompanionPairing + bridge app-context mock);
-  # rpcMethods.ts now clean. Manifest layer unchanged; rematerialize picks 231647558.
-  # PARKED 2026-07-28 (meta rematerialize post-#1195): 20-file conflict storm vs new
-  # upstream tip (rerere preimages only). Detect layer stays. Re-thin bridge onto
-  # current detect tip, then un-park. Wrist sendModelError FCM tip still early in stack.
-  # - branch: feat/cursor-model-error-bridge
+  # RE-THINNED 2026-07-28 (owner): tip 08991a369 on detect c5108814b (9 bridge
+  # commits; detect is ancestor). Post-#1195/#896 detect rebase — fat tip bak
+  # backup/cursor-model-error-bridge-231647558. Proof merge onto driver
+  # @ac21e6614 → 3 additive conflicts (syncEngine both setSessionExternalRefs+
+  # bridgeModelError; shared index+rpcMethods via prior rerere); rerere trained.
+  # Do NOT park this layer to green rematerialize — re-thin in place instead.
+  - branch: feat/cursor-model-error-bridge
 
   # tiann/hapi#991 / upstream PR #1128 - Cursor ACP remote resume: reuse
   # original HAPI row via existingSessionId. Hub already passes
@@ -576,10 +567,10 @@ layers:
 
   # tiann/hapi#1160/#1161/#1162/#1163 — opt-in GitHub PR awareness + session↔PR
   # attach (externalRefs chip, Settings toggle, hapi link-pr, MCP link_pr).
-  # Tip 2026-07-28: c4eca5ed6 — re-thinned on driver/integration d3a007555 (post-#1195
+  # Tip 2026-07-28: 86a08f7d1 — re-thinned on driver/integration e59860ac3 (post-#896
   # rematerialize). Fat bak: backup/github-pr-awareness-fat-pre1195remake @ 518b1f50f.
   # Drop when #1161+#1163 land upstream. Enable Settings → General → GitHub PR awareness
   # (or HAPI_GITHUB_PR_AWARENESS=1). Meta: hapi-meta-daily --backfill-refs.
-  # PARKED 2026-07-28 (meta rematerialize for upstream #896 / 0.25.x): tip is
-  # soup-relative on pre-sync driver; re-thin onto new tip after remake, then un-park.
-  # - branch: driver/github-pr-awareness
+  # UNPARKED 2026-07-28 (meta): chips restored after accidental remake park — do NOT
+  # park this layer again to unblock rematerialize; re-thin in place instead.
+  - branch: driver/github-pr-awareness
