@@ -331,13 +331,12 @@ export async function applyRunnerSelfUpgrade(options: {
             }
         }
 
-        if (options.requestShutdown) {
-            options.requestShutdown()
-        } else {
-            setTimeout(() => {
-                process.exit(0)
-            }, 500)
-        }
+        // Handoff confirmed. Exit WITHOUT requestShutdown/cleanupRunnerState —
+        // those would delete the child's runner.state.json and lock. Matches the
+        // mtime handoff path in run.ts (process.exit after waitForRunnerHandoff).
+        setTimeout(() => {
+            process.exit(0)
+        }, 250)
 
         return {
             status: 'started',
