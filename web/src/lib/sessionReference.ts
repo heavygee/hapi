@@ -92,6 +92,14 @@ export function matchSessionsForMention(
 /** Match in-app session paths produced by buildSessionReferencePath (optional BASE_URL). */
 const SESSION_PATH_RE = /^(?:\.?\/)?(?:[\w.-]+\/)*sessions\/([^/?#]+)\/?$/
 
+/**
+ * Hub session ids are UUIDs (no dots). Reject dotted tails so source paths like
+ * `web/src/routes/sessions/chat.tsx` stay available for file-path autolinking.
+ */
+function isPlausibleSessionId(id: string): boolean {
+    return id.length > 0 && !id.includes('.')
+}
+
 /** Parse a session id from a relative `/sessions/<id>` (or BASE_URL-prefixed) href. */
 export function parseSessionPathHref(href: string): string | null {
     const trimmed = href.trim()
@@ -100,7 +108,7 @@ export function parseSessionPathHref(href: string): string | null {
     if (!match) return null
     try {
         const id = decodeURIComponent(match[1] ?? '')
-        return id.length > 0 ? id : null
+        return isPlausibleSessionId(id) ? id : null
     } catch {
         return null
     }

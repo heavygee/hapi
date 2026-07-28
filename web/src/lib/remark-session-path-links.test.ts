@@ -60,4 +60,12 @@ describe('remarkSessionPathLinks', () => {
         remarkSessionPathLinks()(tree)
         expect(collectLinks(tree)).toEqual([])
     })
+
+    it('does not steal source paths under a sessions/ directory', () => {
+        const tree = textTree(
+            'lives in web/src/routes/sessions/chat.tsx for this view'
+        )
+        remarkSessionPathLinks()(tree)
+        expect(collectLinks(tree)).toEqual([])
+    })
 })

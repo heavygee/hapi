@@ -97,4 +97,9 @@ describe('parseSessionPathHref', () => {
         expect(parseSessionPathHref('https://example.com/sessions/x')).toBeNull()
         expect(parseSessionPathHref('/settings/general')).toBeNull()
     })
+
+    it('rejects dotted tails that look like filenames', () => {
+        expect(parseSessionPathHref('/sessions/chat.tsx')).toBeNull()
+        expect(parseSessionPathHref('web/src/routes/sessions/chat.tsx')).toBeNull()
+    })
 })

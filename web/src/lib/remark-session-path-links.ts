@@ -2,8 +2,8 @@
  * Convert bare `/sessions/<id>` paths in markdown text into links so citations
  * from Copy reference / @-mention autocomplete are clickable in chat.
  *
- * Runs after GFM; before or after file-path links is fine — session paths do not
- * look like file paths (no extension).
+ * Id segment excludes `.` so paths like `routes/sessions/chat.tsx` remain for
+ * `remarkFilePathLinks` (plugin order: session links before file links).
  */
 
 import { parseSessionPathHref } from '@/lib/sessionReference'
@@ -16,9 +16,10 @@ type MarkdownNode = {
     children?: MarkdownNode[]
 }
 
-// Optional leading BASE_URL segment(s), then sessions/<id>
+// Optional leading BASE_URL segment(s), then sessions/<id> (no dots in id).
+// Do not treat `.` as a soft end when it starts a file extension (`.tsx`).
 const BARE_SESSION_PATH =
-    /(?:^|[\s(])((?:\.?\/)?(?:[\w.-]+\/)*sessions\/[A-Za-z0-9._~%-]+)(?=[\s).,;:!?]|$)/g
+    /(?:^|[\s(])((?:\.?\/)?(?:[\w.-]+\/)*sessions\/[A-Za-z0-9_~%-]+)(?=[\s),;:!?]|$(?!\.)|(?=\.(?:[\s),;:!?]|$)))/g
 
 function linkifyTextNode(node: MarkdownNode): MarkdownNode[] {
     const value = node.value ?? ''
