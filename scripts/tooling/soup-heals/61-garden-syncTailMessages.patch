@@ -1,0 +1,22 @@
+diff --git a/web/src/garden/utils/gardenVoiceContext.ts b/web/src/garden/utils/gardenVoiceContext.ts
+index 5f1609c1a..7f7ac148e 100644
+--- a/web/src/garden/utils/gardenVoiceContext.ts
++++ b/web/src/garden/utils/gardenVoiceContext.ts
+@@ -1,7 +1,6 @@
+ import type { ApiClient } from '@/api/client'
+ import type { DecryptedMessage, Session } from '@/types/api'
+-import { fetchLatestMessages } from '@/lib/message-window-store'
+-import { getMessageWindowState } from '@/lib/message-window-store'
++import { getMessageWindowState, syncTailMessages } from '@/lib/message-window-store'
+ import { registerVoiceHooksStore, voiceHooks } from '@/realtime/hooks/voiceHooks'
+ 
+ export type GardenVoicePrefetch = {
+@@ -20,7 +19,7 @@ export async function prefetchGardenVoiceContext(
+ ): Promise<GardenVoicePrefetch | null> {
+     const [response] = await Promise.all([
+         api.getSession(sessionId),
+-        fetchLatestMessages(api, sessionId),
++        syncTailMessages(api, sessionId),
+     ])
+     const messages = getMessageWindowState(sessionId).messages
+     return { session: response.session, messages }
