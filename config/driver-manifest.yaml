@@ -438,7 +438,10 @@ layers:
   # of driver 351eca814) → 1 conflict only (settings/index.test.tsx), rerere
   # auto-staged (keep both CompanionPairing + bridge app-context mock);
   # rpcMethods.ts now clean. Manifest layer unchanged; rematerialize picks 231647558.
-  - branch: feat/cursor-model-error-bridge
+  # PARKED 2026-07-28 (meta rematerialize post-#1195): 20-file conflict storm vs new
+  # upstream tip (rerere preimages only). Detect layer stays. Re-thin bridge onto
+  # current detect tip, then un-park. Wrist sendModelError FCM tip still early in stack.
+  # - branch: feat/cursor-model-error-bridge
 
   # tiann/hapi#991 / upstream PR #1128 - Cursor ACP remote resume: reuse
   # original HAPI row via existingSessionId. Hub already passes
