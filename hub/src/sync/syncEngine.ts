@@ -18,6 +18,13 @@ import type { HubUpgradeOffer, RunnerSelfUpgradeResponse } from '@hapi/protocol/
 import { MACHINE_CAPABILITIES } from '@hapi/protocol/runnerCapabilities'
 import { machineTrailsUpgradeOffer, type HubUpgradeOffer, type RunnerSelfUpgradeResponse } from '@hapi/protocol/upgradeChannel'
 import { DEFAULT_FLEET_UPGRADE_POLICY, machineTrailsUpgradeOffer, type FleetUpgradePolicy, type HubUpgradeOffer, type RunnerSelfUpgradeResponse } from '@hapi/protocol/upgradeChannel'
+import {
+    DEFAULT_FLEET_UPGRADE_POLICY,
+    machineTrailsUpgradeOffer,
+    type FleetUpgradePolicy,
+    type HubUpgradeOffer,
+    type RunnerSelfUpgradeResponse,
+} from '@hapi/protocol/upgradeChannel'
 import type { CursorChatStoreStatus, CursorMigrateOutcome, CursorMigrateToAcpRequest, MessagesResponse, QueuedStateResponse, SlashCommandsResponse } from '@hapi/protocol/apiTypes'
 import type { AgentFlavor, CodexCollaborationMode, CopilotAgentMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
 import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
