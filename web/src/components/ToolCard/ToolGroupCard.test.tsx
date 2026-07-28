@@ -179,7 +179,6 @@ describe('ToolGroupCard', () => {
         expect(screen.getByText('Run 1 · Read 1')).toBeInTheDocument()
         expect(screen.queryByText('2 actions')).not.toBeInTheDocument()
         expect(screen.getByText('src/a.ts')).toBeInTheDocument()
-        expect(screen.getByText('Terminal')).toBeInTheDocument()
         expect(screen.getByText('bun test')).toBeInTheDocument()
 
         const firstRowButton = within(view.container)
@@ -196,6 +195,8 @@ describe('ToolGroupCard', () => {
         expect(screen.getAllByText('src/a.ts')[0]).toBeInTheDocument()
         expect(within(dialog).getAllByText('Input').length).toBeGreaterThan(0)
         expect(within(dialog).getAllByText('Result').length).toBeGreaterThan(0)
+        expect(within(dialog).getByRole('heading').parentElement).toHaveClass('text-left')
+        expect(within(dialog).getByRole('button', { name: 'Close' })).toHaveClass('top-2')
     })
 
     it('shows structured Codex exploration actions by default without a generic action count', () => {
