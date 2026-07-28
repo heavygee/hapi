@@ -575,4 +575,6 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/github-pr-awareness-soup @
   # driver/github-pr-awareness. Enable Settings → General → GitHub PR awareness
   # (or HAPI_GITHUB_PR_AWARENESS=1). Meta: hapi-meta-daily --backfill-refs.
-  - branch: driver/github-pr-awareness
+  # PARKED 2026-07-28 (meta rematerialize post-#1195): soup-relative tip causes
+  # 51-file storm off fresh upstream/main. Re-thin onto new soup tip, then un-park+FF.
+  # - branch: driver/github-pr-awareness
