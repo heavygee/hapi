@@ -616,6 +616,55 @@ check "--pr: classifies only #100" "grep -qE 'classifying 1 PR|NEEDS WORK' <<<\"
 check "--pr: strips emoji on #100 session" "grep -q 'aaaaaaaa' <<<\"\$out\" && grep -q 'chip owns status' <<<\"\$out\""
 check "--pr: does not touch #200 title" "! grep -q 'bbbbbbbb' '$WORK/renames.log' 2>/dev/null"
 
+# ============ 17. Peer #issue title must not mask github_pr chip ============
+rm -f "$WORK/state.json" "$WORK/renames.log" "$WORK/put-refs.log"
+cat >"$WORK/gh" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+if [[ "$args" == *"pr list"* && "$args" == *"--state open"* ]]; then
+    printf '1087\n'; exit 0
+fi
+exit 0
+EOF
+chmod +x "$WORK/gh"
+cat >"$WORK/batch" <<'EOF'
+#!/usr/bin/env bash
+j='{}'
+for a in "$@"; do
+    case "$a" in
+        1085) j="$(echo "$j" | jq -c '. + {"1085":{emoji:"📝",action:"pre-PR — no open PR",prePr:true,merged:false}}')" ;;
+        1087) j="$(echo "$j" | jq -c '. + {"1087":{emoji:"✅",action:"full green — wait on tiann",prePr:false,merged:false}}')" ;;
+    esac
+done
+echo "$j"
+EOF
+chmod +x "$WORK/batch"
+cat >"$WORK/curl" <<EOF
+#!/usr/bin/env bash
+args="\$*"
+if [[ "\$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
+if [[ "\$args" == *"-X PATCH"* ]]; then echo '{"ok":true}'; exit 0; fi
+if [[ "\$args" == *"-X PUT"* && "\$args" == *"/external-refs"* ]]; then
+    echo "\$args" >> "$WORK/put-refs.log"
+    echo '{"ok":true,"externalRefs":[]}'; exit 0
+fi
+if [[ "\$args" == *"/api/sessions?limit=500"* ]]; then
+cat <<'JSON'
+{"sessions":[
+ {"id":"43c0f634-d09b-49e2-9e76-852015f87181","active":true,"metadata":{"name":"Peer #1085: Cursor worktree ACP stdout banner crash","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":1087,"url":"https://github.com/tiann/hapi/pull/1087","role":"primary","source":"agent","linkedAt":1}]}}
+]}
+JSON
+exit 0
+fi
+echo '{}'; exit 0
+EOF
+chmod +x "$WORK/curl"
+
+out="$(run --pr 1087 --no-ping 2>&1)"
+check "chip-over-peer: does not orphan #1087" "! grep -q 'NO HAPI session' <<<\"\$out\""
+check "chip-over-peer: updates chip for session" "grep -q '43c0f634' <<<\"\$out\" && grep -q 'CHIP STATUS' <<<\"\$out\""
+check "chip-over-peer: PUT status for #1087" "grep -q 'external-refs' '$WORK/put-refs.log'"
+
 echo ""
 echo "hapi-meta-daily.test.sh: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]] || exit 1

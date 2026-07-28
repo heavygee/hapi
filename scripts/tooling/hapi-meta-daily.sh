@@ -489,11 +489,18 @@ main() {
         [[ -z "$sid" ]] && continue
         [[ "$name" =~ [Yy][Aa][Aa][Cc][Cc] ]] && continue
         prs="$(md_session_prs "$name")"
-        if [[ -z "$prs" && -n "$refs_json" && "$refs_json" != "[]" && "$refs_json" != "null" ]]; then
-            prs="$(printf '%s' "$refs_json" | jq -r '
+        # Chip authority (ADR D3/D8): github_pr externalRefs own PR tracking when
+        # present. Title-only Peer #N must not mask a linked PR (e.g. Peer #1085
+        # + chip #1087 used to orphan the open PR because title prs were non-empty).
+        if [[ -n "$refs_json" && "$refs_json" != "[]" && "$refs_json" != "null" ]]; then
+            local ref_prs
+            ref_prs="$(printf '%s' "$refs_json" | jq -r '
                 [.[] | select(.kind == "github_pr") | .number]
                 | unique | map(tostring) | join(" ")
             ' 2>/dev/null || true)"
+            if [[ -n "$ref_prs" ]]; then
+                prs="$ref_prs"
+            fi
         fi
         [[ -z "$prs" ]] && continue
         sid8="${sid:0:8}"
