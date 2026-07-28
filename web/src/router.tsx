@@ -34,7 +34,7 @@ import { useSessions } from '@/hooks/queries/useSessions'
 import { useSlashCommands } from '@/hooks/queries/useSlashCommands'
 import { useSkills } from '@/hooks/queries/useSkills'
 import { getSessionTitle } from '@/lib/sessionTitle'
-import { buildSessionReferenceText, matchSessionsForMention } from '@/lib/sessionReference'
+import { matchSessionsForMention } from '@/lib/sessionReference'
 import type { Suggestion } from '@/hooks/useActiveSuggestions'
 import { useSendMessage, type SendErrorInfo } from '@/hooks/mutations/useSendMessage'
 import type { ComposerSendError } from '@/components/AssistantChat/HappyComposer'
@@ -971,15 +971,22 @@ function SessionPage() {
                 search,
                 { excludeId: sessionId, limit: 20 }
             ).map((s) => {
-                const mentionText = buildSessionReferenceText(s.title, s.id)
                 const idPrefix = s.id.slice(0, 8)
+                const full = allSessions.find((row) => row.id === s.id)
                 return {
                     key: `session:${s.id}`,
-                    text: mentionText,
+                    // Composer inserts a chip (sessionMention), not this text.
+                    text: '',
                     label: `@${s.title || idPrefix}`,
                     description: s.active
                         ? `Session · ${idPrefix} · active`
                         : `Session · ${idPrefix}`,
+                    sessionMention: {
+                        id: s.id,
+                        title: s.title || idPrefix,
+                        active: s.active,
+                        flavor: full?.metadata?.flavor ?? null,
+                    },
                 }
             })
 

@@ -7,6 +7,13 @@ export interface Suggestion {
     description?: string
     content?: string  // Expanded content for Codex user prompts
     source?: 'builtin' | 'user' | 'plugin' | 'project'
+    /** When set, composer commits a session chip instead of inserting `text`. */
+    sessionMention?: {
+        id: string
+        title: string
+        active?: boolean
+        flavor?: string | null
+    }
 }
 
 interface SuggestionOptions {

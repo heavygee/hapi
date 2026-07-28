@@ -1,7 +1,7 @@
 import '@assistant-ui/react-markdown/styles/dot.css'
 
-import type { ComponentPropsWithoutRef, MouseEvent } from 'react'
-import { useState, useCallback, useEffect, useMemo, createContext, useContext, type ReactNode } from 'react'
+import type { ComponentPropsWithoutRef, MouseEvent, ReactNode } from 'react'
+import { useState, useCallback, useEffect, useMemo, createContext, useContext } from 'react'
 import {
     MarkdownTextPrimitive,
     unstable_memoizeMarkdownComponents as memoizeMarkdownComponents,
@@ -28,6 +28,7 @@ import { useOptionalHappyChatContext } from '@/components/AssistantChat/context'
 import { decodeFilePathHref, remarkFilePathLinks } from '@/lib/remark-file-path-links'
 import { remarkSessionPathLinks } from '@/lib/remark-session-path-links'
 import { parseSessionPathHref } from '@/lib/sessionReference'
+import { SessionMentionChip } from '@/components/SessionMentionChip'
 import { UriConfirmDialog } from '@/components/UriConfirmDialog'
 
 import type { MarkdownTextPrimitiveProps } from '@assistant-ui/react-markdown'
@@ -509,13 +510,27 @@ function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & { filePath: strin
     )
 }
 
+function sessionTitleFromLinkChildren(children: ReactNode): string {
+    if (typeof children === 'string' || typeof children === 'number') {
+        return String(children)
+    }
+    if (Array.isArray(children)) {
+        return children.map(sessionTitleFromLinkChildren).join('')
+    }
+    return ''
+}
+
 function SessionPathAnchor(props: ComponentPropsWithoutRef<'a'> & { targetSessionId: string }) {
     const navigate = useNavigate()
-    const rel = props.target === '_blank' ? (props.rel ?? 'noreferrer') : props.rel
     const href = `/sessions/${encodeURIComponent(props.targetSessionId)}`
+    const fromChildren = sessionTitleFromLinkChildren(props.children).trim()
+    // Bare `/sessions/id` autolinks use the path as link text — show id prefix instead.
+    const title = fromChildren && !fromChildren.includes('/sessions/')
+        ? fromChildren
+        : props.targetSessionId.slice(0, 8)
 
-    const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
-        props.onClick?.(event)
+    const handleClick = (event: MouseEvent<HTMLElement>) => {
+        props.onClick?.(event as MouseEvent<HTMLAnchorElement>)
         if (event.defaultPrevented) return
         if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
 
@@ -527,12 +542,11 @@ function SessionPathAnchor(props: ComponentPropsWithoutRef<'a'> & { targetSessio
     }
 
     return (
-        <a
-            {...props}
+        <SessionMentionChip
+            mention={{ id: props.targetSessionId, title }}
             href={href}
-            rel={rel}
             onClick={handleClick}
-            className={cn('aui-md-a font-medium text-[var(--app-link)] underline decoration-[color:var(--app-link-muted)] underline-offset-3', props.className)}
+            className={props.className}
         />
     )
 }
