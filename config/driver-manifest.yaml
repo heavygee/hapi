@@ -570,11 +570,8 @@ layers:
 
   # tiann/hapi#1160/#1161/#1162/#1163 — opt-in GitHub PR awareness + session↔PR
   # attach (externalRefs chip, Settings toggle, hapi link-pr, MCP link_pr).
-  # Thin tip on driver/integration @ 5f270d725 (2de7d6f7c, 2026-07-27 re-thin
-  # post-#803 rematerialize). Drop when #1161+#1163 land upstream.
-  # Worktree: ~/coding/hapi/worktrees/github-pr-awareness-soup @
-  # driver/github-pr-awareness. Enable Settings → General → GitHub PR awareness
+  # Tip 2026-07-28: 9611aedd4 — re-thinned on driver/integration d3a007555 (post-#1195
+  # rematerialize). Fat bak: backup/github-pr-awareness-fat-pre1195remake @ 518b1f50f.
+  # Drop when #1161+#1163 land upstream. Enable Settings → General → GitHub PR awareness
   # (or HAPI_GITHUB_PR_AWARENESS=1). Meta: hapi-meta-daily --backfill-refs.
-  # PARKED 2026-07-28 (meta rematerialize post-#1195): soup-relative tip causes
-  # 51-file storm off fresh upstream/main. Re-thin onto new soup tip, then un-park+FF.
-  # - branch: driver/github-pr-awareness
+  - branch: driver/github-pr-awareness
