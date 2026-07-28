@@ -320,16 +320,17 @@ hapi-driver-rebuild --build-web --verify
 
 Some manifest layers are **integration merge-tips** (`soup/cursor-model-error-fcm-bridge`, old `fix/soup-codex-sse-metadata-collision`, etc.) — branches created by merging two features once, then left to rot while lower layers evolve.
 
-**Symptom:** every `hapi-driver-rebuild` fights the same file (`hub/src/push/pushNotificationChannel.test.ts`) — agents re-learn that "PushNotificationChannel now takes only four constructor arguments" because layer 1 (`feat/companion-fcm-push-api`) has the modern **per-dispatch `NotificationSendContext`** API (commit `8f870516`) while a higher merge-tip still carries the deleted **`NativeFallbackProbe` 5th constructor arg**.
+**Symptom (historical, pre-#803):** every `hapi-driver-rebuild` fought `hub/src/push/pushNotificationChannel.test.ts` — a fat FCM merge-tip still carried the deleted **`NativeFallbackProbe` 5th constructor arg** while lower FCM (`feat/companion-fcm-push-api`, now upstream #803) had the modern **per-dispatch `NotificationSendContext`** API (`8f870516`).
 
-**Rule:** a soup layer must be either a **single-feature branch** rebased onto upstream/main, or a **thin delta** (one cherry-pick) on top of the manifest layer it depends on — never a fat merge of an older copy of files a lower layer already owns.
+**Rule:** a soup layer must be either a **single-feature branch** rebased onto upstream/main, or a **thin delta** (one cherry-pick) on top of the base it depends on — never a fat merge of an older copy of files a lower layer (or upstream) already owns. Post-#803, `soup/cursor-model-error-fcm-bridge` is **sendModelError-only on `upstream/main`** (imports `modelErrorCopy` from later detect/`#878` layers).
 
 **FCM bridge refresh (when push tests conflict again):**
 
 ```bash
 cd ~/coding/hapi/worktrees/cursor-model-error-fcm-bridge
-git reset --hard feat/companion-fcm-push-api
-git cherry-pick 64583aa7   # sendModelError only; resolve fcm imports if needed
+git fetch upstream main
+git reset --hard upstream/main   # post-#803 FCM already on main
+git cherry-pick d1c4294a3        # sendModelError only (or e2d5a294c / historically 64583aa7)
 ```
 
 Do **not** fix this ad hoc in `~/coding/hapi/driver` during rebuild — fix the **branch tip**, then rebuild.

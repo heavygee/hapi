@@ -134,8 +134,11 @@ layers:
   # MUST be thin tip on upstream (or post-#803 base) — was on companion-fcm tip —
   # do NOT re-merge old FCM/push files (NativeFallbackProbe 5-arg constructor
   # was removed in 8f870516; stale merge-tips poison every soup rebuild).
-  # Tip 2026-07-17: e2d5a294c (1 commit on FCM @ 0d30a21c0; fat bak backup/cursor-model-error-fcm-bridge-fat).
-  # Refresh: git -C worktrees/cursor-model-error-fcm-bridge reset --hard feat/companion-fcm-push-api && cherry-pick 64583aa7
+  # Tip 2026-07-27: d1c4294a3 — sendModelError-only on upstream/main (post #803 FCM).
+  # Fat tip bak: backup/cursor-model-error-fcm-bridge-fat-pre803 (e2d5a294c on pre-squash FCM).
+  # Refresh: git -C worktrees/cursor-model-error-fcm-bridge reset --hard upstream/main && cherry-pick d1c4294a3
+  #   (or cherry-pick e2d5a294c / historically 64583aa7). Kill criterion: diff vs upstream/main -- hub/src/fcm
+  #   is only sendModelError (+test). Issue #878 still open; no upstream PR absorbed this yet.
   - branch: soup/cursor-model-error-fcm-bridge
 
   # Refetch-storm fix part B (follow-up to #885; closes tiann/hapi#884 second
