@@ -170,4 +170,6 @@ Meta's daily classify writes these onto existing refs (full `PUT external-refs`)
 
 **Stale honesty (2026-07-26):** browser never live-queries GitHub. If `statusCheckedAt` is older than **2 hours**, the chip mutes tone and shows `?`. Estate refresh: fork-local timers (morning pings + quiet refresh every 45m 24/7) — see `install-hapi-meta-daily-timer.sh`.
 
+**Re-link stickiness (2026-07-28):** `hapi link-pr` / MCP `link_pr` / Link PR dialog write identity-only refs (no `status*`). A naive full replace wiped Meta's cached health → chip showed bare `#N`. Hub `mergeSessionMetadata` now runs `preserveGithubPrStatusCache`: same `repo#N` keeps prior `status` / `statusCheckedAt` / `statusAction` unless the write sets `status` explicitly; `[]` and different PR still replace. Matches Meta's "skip writing `?`" last-good contract. Soup layer `driver/github-pr-awareness` (not #921).
+
 **Not a second upstream PR.** Awareness + attach + chip status ship together in [tiann/hapi#1163](https://github.com/tiann/hapi/pull/1163).
