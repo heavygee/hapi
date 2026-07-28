@@ -574,4 +574,6 @@ layers:
   # rematerialize). Fat bak: backup/github-pr-awareness-fat-pre1195remake @ 518b1f50f.
   # Drop when #1161+#1163 land upstream. Enable Settings → General → GitHub PR awareness
   # (or HAPI_GITHUB_PR_AWARENESS=1). Meta: hapi-meta-daily --backfill-refs.
-  - branch: driver/github-pr-awareness
+  # PARKED 2026-07-28 (meta rematerialize for upstream #896 / 0.25.x): tip is
+  # soup-relative on pre-sync driver; re-thin onto new tip after remake, then un-park.
+  # - branch: driver/github-pr-awareness
