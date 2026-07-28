@@ -1471,11 +1471,24 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
 
       apiMachine.shutdown();
       await stopControlServer();
-      await cleanupRunnerState();
+      // After a successful handoff the replacement owns runner.state.json / lock.
+      // Deleting them here would strand the child — same Major Codex flagged on
+      // self-upgrade requestShutdown. Only clean up when we still own the state.
+      const localState = await readRunnerState();
+      const replacementOwnsState = Boolean(
+        localState
+        && localState.pid !== process.pid
+        && isProcessAlive(localState.pid),
+      );
       registerRunnerHandoffLockHooks(null);
-      if (runnerLockHandle) {
-        await releaseRunnerLock(runnerLockHandle);
-        runnerLockHandle = null;
+      if (replacementOwnsState) {
+        logger.debug('[RUNNER RUN] Replacement owns runner.state.json; skipping state/lock cleanup');
+      } else {
+        await cleanupRunnerState();
+        if (runnerLockHandle) {
+          await releaseRunnerLock(runnerLockHandle);
+          runnerLockHandle = null;
+        }
       }
 
       logger.debug('[RUNNER RUN] Cleanup completed, exiting process');
