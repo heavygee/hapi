@@ -8,24 +8,46 @@ import {
     readUpgradeTarget,
     shouldDelegateToUpgradeTarget,
 } from '@/upgrade/upgradeTarget'
-import { spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 
 export async function runCli(): Promise<void> {
     ensureLoopbackProxyBypass()
 
     // Supervised hosts (systemd Restart=always) relaunch the old ExecStart after
     // a hub-artifact handoff. Re-exec into the durable upgrade target first.
+    // Spawn (not spawnSync) and forward SIGTERM/SIGINT so KillMode=process still
+    // stops the upgraded runner when systemd signals the wrapper PID.
     const upgradeTarget = readUpgradeTarget()
     if (upgradeTarget && shouldDelegateToUpgradeTarget(upgradeTarget)) {
         const args = getCliArgs()
-        const result = spawnSync(upgradeTarget.path, args, {
+        const child = spawn(upgradeTarget.path, args, {
             stdio: 'inherit',
             env: {
                 ...process.env,
                 HAPI_CLI_EXECUTABLE: upgradeTarget.path,
             },
+            shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(upgradeTarget.path),
         })
-        process.exit(result.status ?? 1)
+        const forward = (signal: NodeJS.Signals): void => {
+            try {
+                child.kill(signal)
+            } catch {
+                // child may already be gone
+            }
+        }
+        process.once('SIGTERM', forward)
+        process.once('SIGINT', forward)
+        const code = await new Promise<number>((resolve, reject) => {
+            child.once('error', reject)
+            child.once('exit', (status, signal) => {
+                if (signal) {
+                    resolve(1)
+                    return
+                }
+                resolve(status ?? 1)
+            })
+        })
+        process.exit(code)
     }
 
     const args = getCliArgs()
