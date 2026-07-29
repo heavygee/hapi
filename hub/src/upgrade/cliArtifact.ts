@@ -228,29 +228,12 @@ async function ensureTunwgBinary(
     monorepoRoot: string,
     platform: string,
     arch: string,
-    bunCommand: string,
 ): Promise<void> {
+    const { ensurePinnedTunwgForCompile } = await import('./tunwgPin')
+    await ensurePinnedTunwgForCompile(monorepoRoot, platform, arch)
     const path = tunwgBinaryPath(monorepoRoot, platform, arch)
-    if (existsSync(path)) {
-        return
-    }
-    const script = join(monorepoRoot, 'hub', 'scripts', 'download-tunwg.ts')
-    if (!existsSync(script)) {
-        throw new Error(`Missing tunwg binary (${path}) and download script ${script}`)
-    }
-    const proc = Bun.spawn([bunCommand, 'run', script], {
-        cwd: monorepoRoot,
-        stdout: 'pipe',
-        stderr: 'pipe',
-        env: process.env,
-    })
-    const [stdout, stderr, code] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-        proc.exited,
-    ])
-    if (code !== 0 || !existsSync(path)) {
-        throw new Error(`download:tunwg failed: ${stderr || stdout}`)
+    if (!existsSync(path)) {
+        throw new Error(`Pinned tunwg binary missing after download: ${path}`)
     }
 }
 
@@ -346,24 +329,24 @@ export async function ensureCliArtifact(options: {
     if (!monorepo) {
         throw new Error('No monorepo root found; cannot build hub-artifact')
     }
-    const sourceFingerprint = fingerprintArtifactInputs(monorepo)
-
-    const existing = readArtifactMeta(options.version, options.platform, options.arch, options.dataDir)
-    if (isArtifactCacheFresh(existing, sourceFingerprint)) {
-        return existing!
-    }
 
     return await withArtifactBuildLock(async () => {
-        // Re-check after waiting — another build may have finished.
-        const cached = readArtifactMeta(options.version, options.platform, options.arch, options.dataDir)
-        if (isArtifactCacheFresh(cached, sourceFingerprint)) {
-            return cached!
-        }
-
         // Resolve (and validate) the Bun target up front — throws for
         // unsupported platform/arch. Same-host used to be required; Bun now
         // cross-compiles win32/darwin/linux from any host.
         const target = bunCompileTarget(options.platform, options.arch)
+
+        const bun = options.bunCommand
+            ?? (process.execPath.includes('bun') ? process.execPath : 'bun')
+        // Download/verify pinned tunwg BEFORE fingerprinting so a clean tree
+        // does not cache a pre-download fingerprint and force a second compile.
+        await ensureTunwgBinary(monorepo, options.platform, options.arch)
+
+        const sourceFingerprint = fingerprintArtifactInputs(monorepo)
+        const cached = readArtifactMeta(options.version, options.platform, options.arch, options.dataDir)
+        if (isArtifactCacheFresh(cached, sourceFingerprint)) {
+            return cached!
+        }
 
         const cliRoot = join(monorepo, 'cli')
         const entry = join(cliRoot, 'src', 'bootstrap.ts')
@@ -376,10 +359,6 @@ export async function ensureCliArtifact(options: {
                 throw new Error(`Missing tool archive for compile: ${archive}`)
             }
         }
-
-        const bun = options.bunCommand
-            ?? (process.execPath.includes('bun') ? process.execPath : 'bun')
-        await ensureTunwgBinary(monorepo, options.platform, options.arch, bun)
 
         const dir = artifactsRoot(options.dataDir)
         mkdirSync(dir, { recursive: true })
