@@ -191,7 +191,8 @@ Mechanical rebuild steps (after layers are dropped and fork `main` is synced):
 2. Edit manifest — drop layers merged to `upstream/main` (prefer the owning peer did this already; meta verifies none remain)
 3. `hapi-driver-rebuild --build-web --verify`
 4. `hapi-restart-hub` when hub/cli changed; hard-reload when web changed
-5. Garden smoke: `curl -sf http://127.0.0.1:3006/health` + quick web/VR check
+5. **Dogfood smoke (mandatory after web remat):** `curl -sf http://127.0.0.1:3006/health` **and** load `/sessions` past the error boundary (Playwright or operator phone). Unit tests + `verify-soup-web-dist` are not enough if Meta resolved SessionList / composer unions in-driver.
+6. Garden / VR check when those layers matter
 6. Log drift in `~/coding/hapi-garden/GARDEN_LOGBOOK.md` if API changed
 
 Do **not** leave merged feature branches as live soup layers — they bitrot against `upstream/main` and break rebuild when the remote tip is deleted.
@@ -321,11 +322,21 @@ Commenting out someone else's `- branch:` so `hapi-driver-rebuild` goes green **
 
 | Who | Must |
 |---|---|
-| **Feature peer** (layer owner) | Keep tip thin on current `driver/integration` (or declared base). When rematerialize fails on *your* layer: re-thin / force-push / fix conflicts yourself, then un-park if you parked. |
-| **Meta / rematerialize agent** | **Do not** park peer layers to get a green rebuild. Fail closed: leave the layer active, ping the owning peer (`hapi-ping-peer`), report blocked. Allowed only if the operator **names the exact branch** to park. |
+| **Feature peer** (layer owner) | Keep tip **thin**: prefer `upstream/main` + your delta, or the **exact remat pre-layer SHA** Meta names after a failed remat. **Do not** thin onto `origin/driver/integration` (stale publish tip — remat rebuilds from `upstream/main` + layers each run, so hashes diverge). When rematerialize fails on *your* layer: re-thin / force-push / fix conflicts yourself, then un-park if you parked. |
+| **Meta / rematerialize agent** | **Do not** park peer layers to get a green rebuild. Fail closed: leave the layer active, ping the owning peer (`hapi-ping-peer`), report blocked. Allowed only if the operator **names the exact branch** to park. After a web-facing remat (esp. driver-side conflict unions): **smoke `/sessions` in a real browser** (or Playwright) before calling dogfood green — `bun test` + `verify-web-dist` alone missed `getTodoProgress is not defined` (2026-07-29). If the UI was broken, force a **new `index-*.js` content hash** and tell operators to hard-reload / clear Workbox if sticky. |
 | **Operator** | Explicit park instruction per branch — never "just make rematerialize green." |
 
 Parking your **own** layer briefly while you re-thin is fine. Parking a peer's layer is not.
+
+### Re-thin bases (2026-07-29 — awareness remat)
+
+Remat does **not** merge onto `origin/driver/integration`. It `reset --hard upstream/main`, then merges each manifest layer in order. A tip that `merge-tree`s clean vs yesterday’s published `driver/integration` can still explode (100+ files) against today’s intermediate.
+
+| Thin onto | When |
+|---|---|
+| `upstream/main` + feature-only delta | Default for soup/feature layers |
+| Exact SHA Meta pastes after a failed remat (e.g. `Merge … cursor-picker-ios-nested` tip just before your layer) | One-shot recovery — that SHA is **run-local**; next remat may mint a different hash with the same subject line |
+| `origin/driver/integration` | **Never** as the re-thin base (incident: Peer `b30cf5c0` / `driver/github-pr-awareness`) |
 
 ### Remat conflicts on `playwright.config.ts` — do not push fork tooling onto product tips (2026-07-28)
 

@@ -562,9 +562,9 @@ layers:
 
   # tiann/hapi#1160/#1161/#1162/#1163 — opt-in GitHub PR awareness + session↔PR
   # attach (externalRefs chip, Settings toggle, hapi link-pr, MCP link_pr).
-  # Tip 2026-07-28: b9b488ed0 — classify PR chip status on attach (link-pr / MCP /
-  # dialog); preserve sticky status on same-PR re-link. Fat bak:
-  # backup/github-pr-awareness-fat-pre1195remake @ 518b1f50f.
+  # Tip 2026-07-29: ac95f9f65 on soup (driver HEAD 9d506f30e). Remat stacked after
+  # cursor-picker as d0a3d6473 (not 12814cf6b — hashes differ across remat runs).
+  # Fat bak: backup/github-pr-awareness-b9b488ed0 (+ backup/github-pr-awareness-fat-pre1195remake).
   # Drop when #1161+#1163 land upstream. Enable Settings → General → GitHub PR awareness
   # (or HAPI_GITHUB_PR_AWARENESS=1). Meta: hapi-meta-daily --backfill-refs.
   # UNPARKED 2026-07-28 (meta): chips restored after accidental remake park — do NOT
