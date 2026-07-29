@@ -45,10 +45,6 @@ import type { SpawnSessionOptions, SpawnSessionResult } from '../modules/common/
 import { applyVersionedAck } from './versionedUpdate'
 import { archiveLocalCodexSession, listLocalCodexSessionSummaries, listLocalCodexSessionsWithMessagesByIds } from '../modules/common/codexSessions'
 import { listLocalClaudeSessionSummaries, listLocalClaudeSessionsWithMessagesByIds } from '../modules/common/claudeSessions'
-import {
-    listCursorImportableSessionsOnDisk,
-    prepareCursorImportOnDisk
-} from '../modules/common/cursorImportSessions'
 import { buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
 import { collectMachineHealth } from '@/utils/machineHealth'
 import { inspectCursorChatStore } from '@/cursor/cursorChatStoreStatus'
@@ -339,6 +335,9 @@ export class ApiMachineClient {
             async (params) => {
                 const parsed = ListCursorImportableSessionsRpcRequestSchema.safeParse(params)
                 if (!parsed.success) return { success: false, error: 'Invalid Cursor importable sessions request' }
+                // Dynamic import: cursorImportSessions pulls bun:sqlite, which Vitest/Node
+                // cannot resolve at module-graph time. Keep that off the apiMachine hot path.
+                const { listCursorImportableSessionsOnDisk } = await import('../modules/common/cursorImportSessions')
                 const allSessions = listCursorImportableSessionsOnDisk({
                     home: homedir(),
                     candidateWorkspacePaths: parsed.data.candidateWorkspacePaths,
@@ -383,6 +382,7 @@ export class ApiMachineClient {
                         }
                     }
                 }
+                const { prepareCursorImportOnDisk } = await import('../modules/common/cursorImportSessions')
                 return await prepareCursorImportOnDisk({
                     uuid: parsed.data.uuid.trim(),
                     workspacePath: parsed.data.workspacePath ?? null,
