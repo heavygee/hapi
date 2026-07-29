@@ -207,7 +207,7 @@ query { repository(owner:\"${OWNER}\", name:\"${NAME}\") {
     if [[ "$bot_body" == "__CLEAN_LABEL__" ]]; then
         bot_clean=1
         bot_body=""
-    elif echo "$bot_body" | grep -qiE 'No findings|No high-confidence|No issues found|No actionable|Didn.t find any|No new issues found|Findings.*None'; then
+    elif echo "$bot_body" | grep -qiE 'No findings|No high-confidence|No issues found|No actionable|Didn.t find any|No new issues found|\*\*Findings\*\*[[:space:]]*- None|- None\.'; then
         bot_clean=1
     elif [[ "$pr_review_ok" -eq 1 ]]; then
         bot_clean=1
