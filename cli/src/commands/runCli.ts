@@ -43,6 +43,9 @@ export async function runCli(): Promise<void> {
         ? readUpgradeTarget()
         : null
     if (upgradeTarget && shouldDelegateToUpgradeTarget(upgradeTarget)) {
+        // Unix: new process group so SIGTERM under KillMode=process reaches the
+        // npm shim AND its execFileSync grandchild runner, not just the shim PID.
+        const useProcessGroup = process.platform !== 'win32'
         const child = spawn(upgradeTarget.path, args, {
             stdio: 'inherit',
             env: {
@@ -50,10 +53,15 @@ export async function runCli(): Promise<void> {
                 HAPI_CLI_EXECUTABLE: upgradeTarget.path,
             },
             shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(upgradeTarget.path),
+            detached: useProcessGroup,
         })
         const forward = (signal: NodeJS.Signals): void => {
             try {
-                child.kill(signal)
+                if (useProcessGroup && child.pid) {
+                    process.kill(-child.pid, signal)
+                } else {
+                    child.kill(signal)
+                }
             } catch {
                 // child may already be gone
             }
