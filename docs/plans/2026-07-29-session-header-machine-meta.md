@@ -32,7 +32,7 @@
 
 **Step 2:** Re-run tests until green. Typecheck web package.
 
-### Task 3: Soup dogfood (fork)
+### Task 3: Soup dogfood (fork) — SKUNKED 2026-07-29
 
 **Files:**
 - Modify: `config/driver-manifest.yaml` (mirror)
@@ -42,12 +42,39 @@
 
 **Step 2:** Full `hapi-driver-rebuild --build-web --verify` **blocked** on
 `driver/github-pr-awareness` (14-file add/add vs post-`hapi-sync-fork-main`
-base). Rerere cleared earlier layers; awareness still needs a remat wave.
+base).
 
-**Step 3 (dogfood tip):** Reset driver to prior complete soup tip
-`34956f6f8`, merge `feat/session-header-machine-meta`, heal `sessions.count`
-locale, `hapi-driver-build-web` → verify OK at `d7e1dace4`. Hard-reload `:3006`.
+**Step 3 (FAILED tip merge):** Reset driver to prior soup tip `34956f6f8`,
+**merge entire** `feat/session-header-machine-meta` (newer `upstream/main`
+ancestry) into driver. That dragged unrelated upstream `SessionList` edits into
+a conflict with soup-local row helpers. Resolution residue left
+`getTodoProgress(s)` call site with the **function definition deleted** → Hub
+error boundary `getTodoProgress is not defined`. Same failure class as the
+earlier rich-composer remat.
 
-### Task 4: Upstream PR (after operator dogfood)
+- Tip merge: `abb1e4229` (skunk)
+- Locale heal tip: `d7e1dace4` (verify green, runtime broken)
+- **Do not rebuild soup** until tooling/meta lands a fail-closed rebuild guard.
+- **Meta owns restore** of driver soup.
 
-Open PR to `tiann/hapi` with `Fixes #1241`. Not before soup dogfood sign-off.
+**Feature-branch truth (still good):** `feat/session-header-machine-meta` @
+`e3eff74a3` only touches SessionHeader + locales + tests. Worktree
+`SessionList.tsx` still defines `getTodoProgress`. Keep that invariant.
+
+### Hard rules for next soup apply (after guard + restore)
+
+1. **Never merge the whole feature tip into driver** when ancestry is ahead of
+   soup base. That is how SessionList helpers die.
+2. **Apply SessionHeader (+ locale keys + header tests) only** — checkout those
+   paths from the feature branch, or cherry-pick a commit that touches nothing
+   else.
+3. **Never "resolve" SessionList merges by dropping local row helpers**
+   (`getTodoProgress`, attention/PR chips, LinkPrDialog wiring, etc.). If
+   SessionList conflicts, abort and re-apply without touching that file.
+4. No `hapi-driver-rebuild` / `hapi-driver-build-web` from this session until
+   meta's fail-closed guard exists and restore is done.
+
+### Task 4: Upstream PR (after clean dogfood)
+
+Open PR to `tiann/hapi` with `Fixes #1241`. Not before soup dogfood sign-off on
+a **non-skunked** tip.
