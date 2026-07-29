@@ -7,6 +7,7 @@ import {
     artifactInstallFileName,
     assertExecutableMatchesTargetVersion,
     pruneSupersededArtifacts,
+    pruneSupersededArtifactsAfterDurableMarker,
     resolvePostNpmInstallExecutable,
     shouldApplyUpgradeOffer,
     waitForChildSpawn,
@@ -261,6 +262,36 @@ describe('pruneSupersededArtifacts', () => {
             expect(existsSync(marker)).toBe(true)
             expect(existsSync(oldA)).toBe(false)
             expect(existsSync(oldB)).toBe(false)
+        } finally {
+            rmSync(dir, { recursive: true, force: true })
+        }
+    })
+
+    it('skips prune when durable marker write failed so the prior target survives', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-bin-prune-gate-'))
+        try {
+            const keep = join(dir, 'hapi-0.25.1-bbbbbbbbbbbbbbbb')
+            const prior = join(dir, 'hapi-0.25.1-aaaaaaaaaaaaaaaa')
+            writeFileSync(keep, 'new')
+            writeFileSync(prior, 'old-marker-target')
+
+            pruneSupersededArtifactsAfterDurableMarker({
+                markerError: new Error('ENOSPC'),
+                channel: 'hub-artifact',
+                keepPath: keep,
+                binDir: dir,
+            })
+            expect(existsSync(prior)).toBe(true)
+            expect(existsSync(keep)).toBe(true)
+
+            pruneSupersededArtifactsAfterDurableMarker({
+                markerError: null,
+                channel: 'hub-artifact',
+                keepPath: keep,
+                binDir: dir,
+            })
+            expect(existsSync(prior)).toBe(false)
+            expect(existsSync(keep)).toBe(true)
         } finally {
             rmSync(dir, { recursive: true, force: true })
         }
