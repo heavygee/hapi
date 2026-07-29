@@ -268,10 +268,17 @@ function requiredToolArchives(cliRoot: string, platform: string, arch: string): 
  * Write empty embedded-web manifest so bun --compile does not pull stale
  * hashed web/dist imports from a previous generate:embedded-web-assets run.
  * Restores the previous file in finally.
+ *
+ * On restore failure: keep the `.bak` so a Windows rename/copy glitch cannot
+ * destroy the only original copy and leave the empty stub in the live tree.
  */
 export function withStubEmbeddedAssets<T>(
     monorepoRoot: string,
     run: () => Promise<T>,
+    deps: {
+        /** Test seam: override how the backup is written back onto the manifest. */
+        restoreFromBackup?: (backupPath: string, manifestPath: string) => void
+    } = {},
 ): Promise<T> {
     const manifestPath = join(monorepoRoot, 'hub', 'src', 'web', 'embeddedAssets.generated.ts')
     // Unique backup per call so overlapping builds cannot clobber each other's restore.
@@ -283,21 +290,32 @@ export function withStubEmbeddedAssets<T>(
     writeFileSync(manifestPath, STUB_EMBEDDED_ASSETS, 'utf8')
 
     const restore = (): void => {
+        // No original → nothing to restore; treat as success so any stray bak is cleaned.
+        let restored = !hadOriginal
         try {
             if (hadOriginal && existsSync(backupPath)) {
-                renameSync(backupPath, manifestPath)
+                // copy (not rename) so a failed overwrite still leaves the backup intact.
+                const restoreFn = deps.restoreFromBackup
+                    ?? ((from: string, to: string) => {
+                        copyFileSync(from, to)
+                    })
+                restoreFn(backupPath, manifestPath)
+                restored = true
             } else if (!hadOriginal && existsSync(manifestPath)) {
                 unlinkSync(manifestPath)
+                restored = true
             }
         } catch {
-            // best-effort restore
+            // Leave backup on disk for the next build / operator recovery.
         }
-        try {
-            if (existsSync(backupPath)) {
-                unlinkSync(backupPath)
+        if (restored) {
+            try {
+                if (existsSync(backupPath)) {
+                    unlinkSync(backupPath)
+                }
+            } catch {
+                // ignore
             }
-        } catch {
-            // ignore
         }
     }
 
