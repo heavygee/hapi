@@ -1,4 +1,4 @@
-import { useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { Session } from '@/types/api'
 import type { ApiClient } from '@/api/client'
@@ -148,9 +148,18 @@ export function SessionHeader(props: {
         [session, machineLabelsById]
     )
     const lastActiveAt = session.activeAt || session.updatedAt || session.createdAt
+    // Relative labels cross minute/hour boundaries without new patches; tick
+    // once a minute so "just now" does not freeze forever on inactive sessions.
+    const [relativeTimeTick, setRelativeTimeTick] = useState(0)
+    useEffect(() => {
+        const timer = window.setInterval(() => {
+            setRelativeTimeTick((tick) => tick + 1)
+        }, 60_000)
+        return () => window.clearInterval(timer)
+    }, [])
     const ageLabel = useMemo(
         () => (lastActiveAt > 0 ? formatRelativeTime(lastActiveAt, t) : null),
-        [lastActiveAt, t]
+        [lastActiveAt, t, relativeTimeTick]
     )
     const ageAbsolute = lastActiveAt > 0 ? formatAbsoluteDateTime(lastActiveAt) : null
 

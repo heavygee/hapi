@@ -85,7 +85,9 @@ describe('isRenderIrrelevantSessionPatch', () => {
         serviceTier: null
     } as unknown as Session
 
-    it('treats a keep-alive that only moves activeAt as irrelevant', () => {
+    it('treats a keep-alive that only moves activeAt as render-relevant', () => {
+        // SessionHeader shows relative age from activeAt; dropping keep-alive
+        // updates freezes the header at the open-time stamp.
         expect(isRenderIrrelevantSessionPatch(session, {
             active: true,
             thinking: false,
@@ -94,7 +96,7 @@ describe('isRenderIrrelevantSessionPatch', () => {
             effort: null,
             permissionMode: 'default',
             serviceTier: null
-        })).toBe(true)
+        })).toBe(false)
     })
 
     it('reports a changed field as relevant even alongside a new activeAt', () => {

@@ -58,17 +58,15 @@ function sortSessionSummaries(left: SessionSummary, right: SessionSummary): numb
 /**
  * True when applying `patch` to `session` would change nothing that renders.
  *
- * Same reasoning as {@link isRenderIrrelevantPatch}, for the session-detail
- * cache: the keep-alive patch repeats every field it knows about, so compare
- * each one against the value already stored and ignore `activeAt`, which has
- * no reader.
+ * Keep-alive patches often re-send the same fields every ~10s. Compare each
+ * patch field against the cached session. SessionHeader reads `activeAt` for
+ * relative age, so an `activeAt`-only keep-alive is render-relevant here.
+ * The session-list summary path still uses {@link isRenderIrrelevantPatch},
+ * which ignores `activeAt` to avoid list thrash.
  */
 export function isRenderIrrelevantSessionPatch(session: Session, patch: SessionPatch): boolean {
     const current = session as unknown as Record<string, unknown>
     for (const [key, value] of Object.entries(patch)) {
-        if (key === 'activeAt') {
-            continue
-        }
         if (current[key] !== value) {
             return false
         }

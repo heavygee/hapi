@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Session } from '@/types/api'
 import { I18nProvider } from '@/lib/i18n-context'
@@ -93,5 +93,29 @@ describe('SessionHeader', () => {
 
         expect(screen.getByTestId('session-header-machine')).toHaveTextContent(/oos-linux/)
         expect(screen.getByTestId('session-header-age')).toHaveTextContent(/5m ago|5分钟前/)
+    })
+
+    it('advances relative age on the minute tick without a session prop change', () => {
+        vi.useFakeTimers()
+        const now = new Date('2026-07-29T16:00:00.000Z')
+        vi.setSystemTime(now)
+
+        try {
+            renderHeader(baseSession({
+                activeAt: now.getTime() - 30_000,
+                updatedAt: now.getTime() - 30_000,
+                metadata: { flavor: 'cursor', path: '/r', host: 'host.local' }
+            }))
+
+            expect(screen.getByTestId('session-header-age')).toHaveTextContent(/just now|刚刚/)
+
+            act(() => {
+                vi.advanceTimersByTime(60_000)
+            })
+
+            expect(screen.getByTestId('session-header-age')).toHaveTextContent(/1m ago|1分钟前/)
+        } finally {
+            vi.useRealTimers()
+        }
     })
 })
