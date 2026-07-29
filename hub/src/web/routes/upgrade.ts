@@ -3,7 +3,7 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { FLEET_UPGRADE_POLICIES } from '@hapi/protocol/upgradeChannel'
 import type { WebAppEnv } from '../middleware/auth'
-import { ensureCliArtifact, readArtifactMeta } from '../../upgrade/cliArtifact'
+import { ensureCliArtifact } from '../../upgrade/cliArtifact'
 import { defaultHubPackageRoot, resolveUpgradeOffer } from '../../upgrade/resolveUpgradeOffer'
 import { getFleetUpgradePolicy, setFleetUpgradePolicy } from '../../upgrade/fleetUpgradePolicy'
 import { getConfiguration } from '../../configuration'
@@ -104,16 +104,14 @@ export function createUpgradeCliRoutes(): Hono<CliEnv> {
         }
 
         try {
-            let meta = readArtifactMeta(targetVersion, platform, arch, config.dataDir)
-            if (!meta) {
-                meta = await ensureCliArtifact({
-                    version: targetVersion,
-                    platform,
-                    arch,
-                    dataDir: config.dataDir,
-                    hubPackageRoot: defaultHubPackageRoot(),
-                })
-            }
+            // ensureCliArtifact refuses same-version stale caches via sourceFingerprint.
+            const meta = await ensureCliArtifact({
+                version: targetVersion,
+                platform,
+                arch,
+                dataDir: config.dataDir,
+                hubPackageRoot: defaultHubPackageRoot(),
+            })
             if (!existsSync(meta.path)) {
                 return c.json({ error: 'Artifact missing on disk' }, 404)
             }
