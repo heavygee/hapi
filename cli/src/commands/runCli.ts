@@ -5,6 +5,7 @@ import { getCliArgs } from '@/utils/cliArgs'
 import { ensureLoopbackProxyBypass } from '@/utils/proxyEnv'
 import { resolveCommand } from './registry'
 import {
+    isRunnerStartCliArgs,
     readUpgradeTarget,
     shouldDelegateToUpgradeTarget,
 } from '@/upgrade/upgradeTarget'
@@ -13,13 +14,15 @@ import { spawn } from 'node:child_process'
 export async function runCli(): Promise<void> {
     ensureLoopbackProxyBypass()
 
-    // Supervised hosts (systemd Restart=always) relaunch the old ExecStart after
-    // a hub-artifact handoff. Re-exec into the durable upgrade target first.
+    const args = getCliArgs()
+
+    // Hub-artifact binaries are runner-only (empty embedded web). Only redirect
+    // systemd `runner start` / `start-sync` so `hapi hub` / doctor stay on the
+    // general-purpose entrypoint.
     // Spawn (not spawnSync) and forward SIGTERM/SIGINT so KillMode=process still
     // stops the upgraded runner when systemd signals the wrapper PID.
-    const upgradeTarget = readUpgradeTarget()
+    const upgradeTarget = isRunnerStartCliArgs(args) ? readUpgradeTarget() : null
     if (upgradeTarget && shouldDelegateToUpgradeTarget(upgradeTarget)) {
-        const args = getCliArgs()
         const child = spawn(upgradeTarget.path, args, {
             stdio: 'inherit',
             env: {
@@ -49,8 +52,6 @@ export async function runCli(): Promise<void> {
         })
         process.exit(code)
     }
-
-    const args = getCliArgs()
 
     if (args.includes('-v') || args.includes('--version')) {
         console.log(`hapi version: ${packageJson.version}`)
