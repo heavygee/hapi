@@ -117,7 +117,13 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     let notificationHub: NotificationHub | null = null
     let tunnelManager: TunnelManager | null = null
 
+    let cachedUpgradeOffer: { at: number; offer: ReturnType<typeof resolveUpgradeOffer> } | null = null
+    const UPGRADE_OFFER_TTL_MS = 30_000
     const resolveCurrentUpgradeOffer = () => {
+        const now = Date.now()
+        if (cachedUpgradeOffer && now - cachedUpgradeOffer.at < UPGRADE_OFFER_TTL_MS) {
+            return cachedUpgradeOffer.offer
+        }
         const offer = resolveUpgradeOffer({
             hubPackageRoot: defaultHubPackageRoot(),
             execPath: process.execPath,
@@ -129,7 +135,11 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
                 offer.targetGeneration = fingerprintArtifactInputs(monorepoRoot)
             }
         }
+        cachedUpgradeOffer = { at: now, offer }
         return offer
+    }
+    const rememberUpgradeOffer = (offer: ReturnType<typeof resolveUpgradeOffer>): void => {
+        cachedUpgradeOffer = { at: Date.now(), offer }
     }
     setConfiguredUpgradeTargetVersion(options.cliVersion)
     // Load configuration (async - loads from env/file with persistence)
@@ -233,10 +243,12 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
                 dataDir: config.dataDir,
                 hubPackageRoot: defaultHubPackageRoot(),
             })
-            return {
+            const prepared = {
                 ...offer,
-                // Prefer source fingerprint (cross-platform); fall back to binary sha.
-                targetGeneration: offer.targetGeneration || meta.sourceFingerprint || meta.sha256,
+                // Always advertise the fingerprint of the artifact that was
+                // actually built/cached — tunwg pin refresh can change inputs
+                // after the pre-build offer fingerprint.
+                targetGeneration: meta.sourceFingerprint,
                 artifact: {
                     url: '/cli/upgrade/cli-artifact',
                     sha256: meta.sha256,
@@ -245,6 +257,8 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
                     sizeBytes: meta.sizeBytes,
                 },
             }
+            rememberUpgradeOffer(prepared)
+            return prepared
         },
     })
     {

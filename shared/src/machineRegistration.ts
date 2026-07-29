@@ -23,7 +23,6 @@ const IDENTITY_KEYS = [
     'versionHandoffDisabled',
     'startedCliMtimeMs',
     'installedCliMtimeMs',
-    'cliArtifactGeneration',
 ] as const
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -76,6 +75,12 @@ export function machineRegistrationNeedsRefresh(existing: unknown, incoming: unk
     // Always compare capabilities: omitted on incoming means [] (no advertised
     // RPCs), so a downgrade that stops sending the field still refreshes.
     if (!capabilitiesEqual(current.capabilities, next.capabilities)) {
+        return true
+    }
+    // Same for artifact generation: omitted means the live runner is generation-
+    // unaware (or rolled back). Do not keep a stale stored generation that would
+    // suppress fleet skew / auto-upgrade.
+    if (next.cliArtifactGeneration !== current.cliArtifactGeneration) {
         return true
     }
     if (next.workspaceRoots !== undefined && !workspaceRootsEqual(current.workspaceRoots, next.workspaceRoots)) {

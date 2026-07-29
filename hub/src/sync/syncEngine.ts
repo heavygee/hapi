@@ -875,16 +875,16 @@ export class SyncEngine {
      * self-upgrade to the hub's generation (npm or hub-artifact).
      */
     private async maybeFleetUpgradeMachine(machineId: string): Promise<void> {
+        // Policy-first: default `alert` must not resolve (and fingerprint) the
+        // upgrade offer on every machine-alive heartbeat.
         if (!this.getUpgradeOffer) {
+            return
+        }
+        if (this.getFleetUpgradePolicy() !== 'auto') {
             return
         }
         const offer = this.getUpgradeOffer()
         if (offer.channel === 'off') {
-            return
-        }
-        // Only the 'auto' policy lets the hub self-initiate upgrades. 'alert'
-        // surfaces the banner but waits for a manual click; 'silent' does neither.
-        if (this.getFleetUpgradePolicy() !== 'auto') {
             return
         }
         const machine = this.machineCache.getMachine(machineId)
