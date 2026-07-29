@@ -3,6 +3,7 @@ import {
     copyFileSync,
     existsSync,
     mkdirSync,
+    readdirSync,
     readFileSync,
     renameSync,
     statSync,
@@ -10,7 +11,7 @@ import {
     writeFileSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { findMonorepoRoot, defaultHubPackageRoot } from './resolveUpgradeOffer'
 
 export type ArtifactMeta = {
@@ -20,6 +21,8 @@ export type ArtifactMeta = {
     path: string
     sha256: string
     sizeBytes: number
+    /** Hash of monorepo inputs that feed the compiled runner binary. */
+    sourceFingerprint: string
 }
 
 const STUB_EMBEDDED_ASSETS = [
@@ -75,6 +78,77 @@ export function readArtifactMeta(
 
 function writeMeta(meta: ArtifactMeta): void {
     writeFileSync(`${meta.path}.json`, JSON.stringify(meta, null, 2))
+}
+
+function listFilesRecursive(root: string): string[] {
+    const out: string[] = []
+    const walk = (dir: string): void => {
+        let entries
+        try {
+            entries = readdirSync(dir, { withFileTypes: true })
+        } catch {
+            return
+        }
+        for (const entry of entries) {
+            if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name === '.git') {
+                continue
+            }
+            const full = join(dir, entry.name)
+            if (entry.isDirectory()) {
+                walk(full)
+            } else if (entry.isFile()) {
+                out.push(full)
+            }
+        }
+    }
+    if (existsSync(root)) {
+        walk(root)
+    }
+    return out
+}
+
+/**
+ * Fingerprint the sources that feed hub-artifact compiles.
+ * Version alone is not enough: soup hubs often keep one package version across
+ * many commits; a cache keyed only by version would keep serving a stale binary.
+ */
+export function fingerprintArtifactInputs(monorepoRoot: string): string {
+    const hash = createHash('sha256')
+    const treeRoots = [
+        join(monorepoRoot, 'cli', 'src'),
+        join(monorepoRoot, 'shared', 'src'),
+    ]
+    const singles = [
+        join(monorepoRoot, 'cli', 'package.json'),
+        join(monorepoRoot, 'shared', 'package.json'),
+        join(monorepoRoot, 'package.json'),
+        join(monorepoRoot, 'bun.lock'),
+    ]
+    const files = [
+        ...treeRoots.flatMap(listFilesRecursive),
+        ...singles.filter((path) => existsSync(path)),
+    ]
+    for (const file of [...new Set(files)].sort()) {
+        hash.update(relative(monorepoRoot, file).split('\\').join('/'))
+        hash.update('\0')
+        hash.update(readFileSync(file))
+        hash.update('\0')
+    }
+    return hash.digest('hex')
+}
+
+export function isArtifactCacheFresh(
+    meta: ArtifactMeta | null,
+    sourceFingerprint: string,
+): boolean {
+    if (!meta || !existsSync(meta.path)) {
+        return false
+    }
+    // Pre-fingerprint metas (and empty fingerprints) are never reusable —
+    // same package version can hide newer source.
+    return typeof meta.sourceFingerprint === 'string'
+        && meta.sourceFingerprint.length > 0
+        && meta.sourceFingerprint === sourceFingerprint
 }
 
 function featureFlagFor(platform: string, arch: string): string {
@@ -252,28 +326,29 @@ export async function ensureCliArtifact(options: {
     hubPackageRoot?: string
     bunCommand?: string
 }): Promise<ArtifactMeta> {
+    const hubRoot = options.hubPackageRoot ?? defaultHubPackageRoot()
+    const monorepo = findMonorepoRoot(hubRoot)
+    if (!monorepo) {
+        throw new Error('No monorepo root found; cannot build hub-artifact')
+    }
+    const sourceFingerprint = fingerprintArtifactInputs(monorepo)
+
     const existing = readArtifactMeta(options.version, options.platform, options.arch, options.dataDir)
-    if (existing && existsSync(existing.path)) {
-        return existing
+    if (isArtifactCacheFresh(existing, sourceFingerprint)) {
+        return existing!
     }
 
     return await withArtifactBuildLock(async () => {
         // Re-check after waiting — another build may have finished.
         const cached = readArtifactMeta(options.version, options.platform, options.arch, options.dataDir)
-        if (cached && existsSync(cached.path)) {
-            return cached
+        if (isArtifactCacheFresh(cached, sourceFingerprint)) {
+            return cached!
         }
 
         // Resolve (and validate) the Bun target up front — throws for
         // unsupported platform/arch. Same-host used to be required; Bun now
         // cross-compiles win32/darwin/linux from any host.
         const target = bunCompileTarget(options.platform, options.arch)
-
-        const hubRoot = options.hubPackageRoot ?? defaultHubPackageRoot()
-        const monorepo = findMonorepoRoot(hubRoot)
-        if (!monorepo) {
-            throw new Error('No monorepo root found; cannot build hub-artifact')
-        }
 
         const cliRoot = join(monorepo, 'cli')
         const entry = join(cliRoot, 'src', 'bootstrap.ts')
@@ -334,6 +409,7 @@ export async function ensureCliArtifact(options: {
             path: outPath,
             sha256,
             sizeBytes: statSync(outPath).size,
+            sourceFingerprint,
         }
         writeMeta(meta)
         return meta

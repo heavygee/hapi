@@ -5,8 +5,11 @@ import { join } from 'node:path'
 import {
     artifactFileName,
     bunCompileTarget,
+    fingerprintArtifactInputs,
+    isArtifactCacheFresh,
     normalizeCompiledArtifactPath,
     withStubEmbeddedAssets,
+    type ArtifactMeta,
 } from './cliArtifact'
 
 describe('artifactFileName', () => {
@@ -105,6 +108,50 @@ describe('withStubEmbeddedAssets', () => {
             expect(readFileSync(manifest, 'utf8')).toBe(original)
         } finally {
             rmSync(root, { recursive: true, force: true })
+        }
+    })
+})
+
+describe('fingerprintArtifactInputs / isArtifactCacheFresh', () => {
+    it('changes when cli source changes at the same package version', () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-artifact-fp-'))
+        try {
+            mkdirSync(join(root, 'cli', 'src'), { recursive: true })
+            mkdirSync(join(root, 'shared', 'src'), { recursive: true })
+            writeFileSync(join(root, 'cli', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'shared', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'cli', 'src', 'bootstrap.ts'), 'export const x = 1\n')
+            writeFileSync(join(root, 'shared', 'src', 'index.ts'), 'export {}\n')
+
+            const before = fingerprintArtifactInputs(root)
+            writeFileSync(join(root, 'cli', 'src', 'bootstrap.ts'), 'export const x = 2\n')
+            const after = fingerprintArtifactInputs(root)
+            expect(before).not.toBe(after)
+            expect(before).toHaveLength(64)
+        } finally {
+            rmSync(root, { recursive: true, force: true })
+        }
+    })
+
+    it('treats legacy metas without sourceFingerprint as stale', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-artifact-legacy-'))
+        try {
+            const path = join(dir, 'hapi-0.25.1-linux-x64')
+            writeFileSync(path, 'bytes')
+            const legacy = {
+                version: '0.25.1',
+                platform: 'linux',
+                arch: 'x64',
+                path,
+                sha256: 'abc',
+                sizeBytes: 5,
+            } as ArtifactMeta
+            expect(isArtifactCacheFresh(legacy, 'deadbeef')).toBe(false)
+            expect(isArtifactCacheFresh({ ...legacy, sourceFingerprint: 'deadbeef' }, 'deadbeef')).toBe(true)
+            expect(isArtifactCacheFresh({ ...legacy, sourceFingerprint: 'deadbeef' }, 'cafebabe')).toBe(false)
+        } finally {
+            rmSync(dir, { recursive: true, force: true })
         }
     })
 })
