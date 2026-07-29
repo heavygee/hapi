@@ -66,6 +66,12 @@ export type HubUpgradeOffer = {
     targetVersion: string
     /** Capabilities the hub requires after upgrade. */
     targetCapabilities: readonly string[]
+    /**
+     * Build generation for hub-artifact (typically monorepo source fingerprint).
+     * Same package version with a new soup rebuild changes this so remotes
+     * still apply; omit/empty for npm or when unknown.
+     */
+    targetGeneration?: string
     npmPackage?: string
     artifact?: {
         /** Absolute or hub-relative URL path, e.g. /api/upgrade/cli-artifact?... */
@@ -78,14 +84,13 @@ export type HubUpgradeOffer = {
 }
 
 /**
- * True when a runner advertising `version`/`capabilities` is behind `offer`
- * and the hub should auto-nudge it to the hub's generation.
+ * True when a runner advertising `version`/`capabilities`/`generation` is behind
+ * `offer` and the hub should auto-nudge it to the hub's generation.
  *
- * Fires on EITHER pure semver drift (`version !== targetVersion`) OR a missing
- * target capability — the "set and forget" trigger, so runners track the hub
- * without an operator poking each one. Mirrors the CLI-side
- * `shouldApplyUpgradeOffer` apply decision from the hub's view of advertised
- * metadata.
+ * Fires on EITHER pure semver drift (`version !== targetVersion`), a missing
+ * target capability, OR hub-artifact generation drift (same semver, new soup
+ * rebuild). Mirrors the CLI-side `shouldApplyUpgradeOffer` apply decision from
+ * the hub's view of advertised metadata.
  *
  * Returns false when there's no meaningful target to chase: channel `off`, or
  * the hub could not resolve its own version (the `0.0.0` fallback). Never chase
@@ -95,6 +100,7 @@ export function machineTrailsUpgradeOffer(
     offer: HubUpgradeOffer,
     version: string | null | undefined,
     capabilities: readonly string[] | null | undefined,
+    generation?: string | null | undefined,
 ): boolean {
     if (offer.channel === 'off') {
         return false
@@ -107,7 +113,11 @@ export function machineTrailsUpgradeOffer(
     const versionDrift = typeof version === 'string'
         && version.length > 0
         && version !== offer.targetVersion
-    return missingCapability || versionDrift
+    const generationDrift = offer.channel === 'hub-artifact'
+        && typeof offer.targetGeneration === 'string'
+        && offer.targetGeneration.length > 0
+        && offer.targetGeneration !== (generation ?? '')
+    return missingCapability || versionDrift || generationDrift
 }
 
 /**

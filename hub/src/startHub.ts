@@ -19,8 +19,8 @@ import { TunnelManager } from './tunnel'
 import { refreshRejectedRelayAuthKey, resolveRelayAuthKey } from './tunnel/relayAuth'
 import { waitForTunnelTlsReady } from './tunnel/tlsGate'
 import { ServerChanChannel } from './serverchan/channel'
-import { defaultHubPackageRoot, resolveUpgradeOffer, setConfiguredUpgradeTargetVersion } from './upgrade/resolveUpgradeOffer'
-import { ensureCliArtifact } from './upgrade/cliArtifact'
+import { findMonorepoRoot, defaultHubPackageRoot, resolveUpgradeOffer, setConfiguredUpgradeTargetVersion } from './upgrade/resolveUpgradeOffer'
+import { ensureCliArtifact, fingerprintArtifactInputs } from './upgrade/cliArtifact'
 import { readSettings } from './config/settings'
 import { getFleetUpgradePolicy, initFleetUpgradePolicy } from './upgrade/fleetUpgradePolicy'
 import QRCode from 'qrcode'
@@ -117,11 +117,20 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     let notificationHub: NotificationHub | null = null
     let tunnelManager: TunnelManager | null = null
 
-    const resolveCurrentUpgradeOffer = () => resolveUpgradeOffer({
-        hubPackageRoot: defaultHubPackageRoot(),
-        execPath: process.execPath,
-        targetVersion: options.cliVersion,
-    })
+    const resolveCurrentUpgradeOffer = () => {
+        const offer = resolveUpgradeOffer({
+            hubPackageRoot: defaultHubPackageRoot(),
+            execPath: process.execPath,
+            targetVersion: options.cliVersion,
+        })
+        if (offer.channel === 'hub-artifact' && !offer.targetGeneration) {
+            const monorepoRoot = findMonorepoRoot(defaultHubPackageRoot())
+            if (monorepoRoot) {
+                offer.targetGeneration = fingerprintArtifactInputs(monorepoRoot)
+            }
+        }
+        return offer
+    }
     setConfiguredUpgradeTargetVersion(options.cliVersion)
     // Load configuration (async - loads from env/file with persistence)
     const relayApiDomain = process.env.HAPI_RELAY_API || 'relay.hapi.run'
@@ -226,6 +235,8 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
             })
             return {
                 ...offer,
+                // Prefer source fingerprint (cross-platform); fall back to binary sha.
+                targetGeneration: offer.targetGeneration || meta.sourceFingerprint || meta.sha256,
                 artifact: {
                     url: '/cli/upgrade/cli-artifact',
                     sha256: meta.sha256,
