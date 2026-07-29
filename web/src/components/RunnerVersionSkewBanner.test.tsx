@@ -154,6 +154,58 @@ describe('listSkewedMachines', () => {
         expect(skewed.map((m) => m.id)).toEqual(['soup', 'binary'])
     })
 
+    it('does not forever-trail handoff-disabled hosts on generation-only drift', () => {
+        const artifactOffer = {
+            channel: 'hub-artifact' as const,
+            targetVersion: '0.23.0',
+            targetCapabilities: [...CURRENT_MACHINE_CAPABILITIES],
+            targetGeneration: 'gen-soup',
+            artifact: {
+                url: '/cli/upgrade/cli-artifact',
+                sha256: 'abc',
+                platform: 'linux',
+                arch: 'x64',
+                sizeBytes: 1,
+            },
+        }
+        const skewed = listSkewedMachines([
+            makeMachine({
+                id: 'soup-current',
+                metadata: {
+                    host: 'proxmox',
+                    platform: 'linux',
+                    happyCliVersion: '0.23.0',
+                    capabilities: [...CURRENT_MACHINE_CAPABILITIES],
+                    versionHandoffDisabled: true,
+                    // no cliArtifactGeneration — soup hosts never write a marker
+                },
+            }),
+            makeMachine({
+                id: 'soup-mtime',
+                metadata: {
+                    host: 'proxmox',
+                    platform: 'linux',
+                    happyCliVersion: '0.23.0',
+                    capabilities: [...CURRENT_MACHINE_CAPABILITIES],
+                    versionHandoffDisabled: true,
+                    startedCliMtimeMs: 100,
+                    installedCliMtimeMs: 200,
+                },
+            }),
+            makeMachine({
+                id: 'binary-drift',
+                metadata: {
+                    host: 'teemo',
+                    platform: 'win32',
+                    happyCliVersion: '0.23.0',
+                    capabilities: [...CURRENT_MACHINE_CAPABILITIES],
+                    // missing generation — handoff-enabled must still trail
+                },
+            }),
+        ], artifactOffer)
+        expect(skewed.map((m) => m.id)).toEqual(['soup-mtime', 'binary-drift'])
+    })
+
     it('uses displayName when present', () => {
         expect(machineDisplayHost(makeMachine({
             id: 'm1',

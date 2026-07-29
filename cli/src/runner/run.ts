@@ -805,9 +805,9 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     // Connect and wait for Socket.IO auth + RPC registration before advertising
     // hubReadyAt. connect() alone returns before the async 'connect' event.
     await apiMachine.connectUntilReady();
+    fileState.hubReadyAt = Date.now();
     writeRunnerState({
       ...fileState,
-      hubReadyAt: Date.now(),
     });
     scheduleCursorModelsPrewarm();
 
@@ -1063,6 +1063,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           startedWithExtraHeadersHash: fileState.startedWithExtraHeadersHash,
           startedWithArgv,
           startedWithVersionHandoffDisabled,
+          hubReadyAt: fileState.hubReadyAt,
           lastHeartbeat: new Date().toLocaleString(),
           runnerLogPath: fileState.runnerLogPath
         };
