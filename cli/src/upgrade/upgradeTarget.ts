@@ -7,7 +7,7 @@
  * binary so the handoff survives supervisor restarts.
  */
 
-import { existsSync, readFileSync, realpathSync, writeFileSync, mkdirSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync, writeFileSync, mkdirSync, unlinkSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { configuration } from '@/configuration'
@@ -52,6 +52,18 @@ export function writeUpgradeTarget(target: Omit<UpgradeTarget, 'updatedAt'> & { 
         updatedAt: target.updatedAt ?? Date.now(),
     }
     writeFileSync(marker, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
+}
+
+/** Remove a durable target that can no longer be spawned (avoids Restart=always loops). */
+export function clearUpgradeTarget(): void {
+    const marker = upgradeTargetMarkerPath()
+    try {
+        if (existsSync(marker)) {
+            unlinkSync(marker)
+        }
+    } catch {
+        // best-effort
+    }
 }
 
 export function readUpgradeTarget(): UpgradeTarget | null {
