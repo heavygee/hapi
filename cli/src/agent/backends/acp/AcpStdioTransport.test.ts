@@ -8,7 +8,10 @@ const guard = vi.hoisted(() => ({
 const spawnState = vi.hoisted(() => ({
     exitHandlers: [] as Array<(code: number | null, signal: NodeJS.Signals | null) => void>,
     closeHandlers: [] as Array<(code: number | null, signal: NodeJS.Signals | null) => void>,
+    stdoutDataHandlers: [] as Array<(chunk: string) => void>,
+    stdinEnd: vi.fn(),
     stdinWrite: vi.fn<(chunk: string) => boolean>(() => true),
+    kill: vi.fn(),
     exitCode: null as number | null
 }));
 
@@ -17,10 +20,15 @@ vi.mock('./agentCliGuard', () => ({
     unregisterActiveAcpTransport: guard.unregister
 }));
 
+vi.mock('@/utils/process', () => ({
+    killProcessByChildProcess: vi.fn(async () => undefined)
+}));
+
 vi.mock('node:child_process', () => ({
     spawn: vi.fn(() => {
         spawnState.exitHandlers = [];
         spawnState.closeHandlers = [];
+        spawnState.stdoutDataHandlers = [];
         const handlers = new Map<string, Array<(...args: unknown[]) => void>>();
         const proc = {
             get exitCode() {
@@ -29,6 +37,9 @@ vi.mock('node:child_process', () => ({
             stdout: {
                 setEncoding: vi.fn(),
                 on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+                    if (event === 'data') {
+                        spawnState.stdoutDataHandlers.push(handler as (chunk: string) => void);
+                    }
                     handlers.set(`stdout:${event}`, [...(handlers.get(`stdout:${event}`) ?? []), handler]);
                 })
             },
@@ -39,7 +50,7 @@ vi.mock('node:child_process', () => ({
                 })
             },
             stdin: {
-                end: vi.fn(),
+                end: (...args: unknown[]) => spawnState.stdinEnd(...args),
                 write: (chunk: string) => spawnState.stdinWrite(chunk)
             },
             on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
@@ -51,13 +62,20 @@ vi.mock('node:child_process', () => ({
                 }
                 handlers.set(`proc:${event}`, [...(handlers.get(`proc:${event}`) ?? []), handler]);
             }),
-            kill: vi.fn()
+            kill: (...args: unknown[]) => spawnState.kill(...args)
         };
         return proc;
     })
 }));
 
 import { AcpStdioTransport } from './AcpStdioTransport';
+import { killProcessByChildProcess } from '@/utils/process';
+
+function emitStdout(chunk: string): void {
+    for (const handler of spawnState.stdoutDataHandlers) {
+        handler(chunk);
+    }
+}
 
 describe('AcpStdioTransport agent CLI guard', () => {
     afterEach(() => {
@@ -65,9 +83,13 @@ describe('AcpStdioTransport agent CLI guard', () => {
         guard.unregister.mockClear();
         spawnState.stdinWrite.mockReset();
         spawnState.stdinWrite.mockReturnValue(true);
+        spawnState.stdinEnd.mockClear();
+        spawnState.kill.mockClear();
+        vi.mocked(killProcessByChildProcess).mockClear();
         spawnState.exitCode = null;
         spawnState.exitHandlers = [];
         spawnState.closeHandlers = [];
+        spawnState.stdoutDataHandlers = [];
     });
 
     test('registers cross-process guard only for Cursor agent command', async () => {
@@ -88,13 +110,94 @@ describe('AcpStdioTransport agent CLI guard', () => {
     });
 });
 
+describe('AcpStdioTransport plain-text stdout', () => {
+    afterEach(() => {
+        spawnState.stdinWrite.mockReset();
+        spawnState.stdinWrite.mockReturnValue(true);
+        spawnState.stdinEnd.mockClear();
+        vi.mocked(killProcessByChildProcess).mockClear();
+        spawnState.exitCode = null;
+        spawnState.exitHandlers = [];
+        spawnState.closeHandlers = [];
+        spawnState.stdoutDataHandlers = [];
+    });
+
+    test('ignores Cursor worktree banner and keeps JSON-RPC session alive', async () => {
+        const transport = new AcpStdioTransport({ command: 'agent', args: ['acp'] });
+        const notifications: Array<{ method: string; params: unknown }> = [];
+        transport.onNotification((method, params) => {
+            notifications.push({ method, params });
+        });
+
+        const pending = transport.sendRequest('initialize', { protocolVersion: 1 });
+
+        emitStdout('Using worktree: /home/heavygee/.cursor/worktrees/driver/acp\n');
+        emitStdout(`${JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            result: { protocolVersion: 1 }
+        })}\n`);
+
+        await expect(pending).resolves.toEqual({ protocolVersion: 1 });
+        expect(spawnState.stdinEnd).not.toHaveBeenCalled();
+        expect(killProcessByChildProcess).not.toHaveBeenCalled();
+
+        emitStdout(`${JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'session/update',
+            params: { sessionUpdate: 'agent_message_chunk' }
+        })}\n`);
+        expect(notifications).toEqual([{
+            method: 'session/update',
+            params: { sessionUpdate: 'agent_message_chunk' }
+        }]);
+
+        await transport.close();
+    });
+
+    test('ignores non-object JSON lines without killing the session', async () => {
+        const transport = new AcpStdioTransport({ command: 'gemini' });
+        const pending = transport.sendRequest('initialize');
+
+        emitStdout('42\n');
+        emitStdout('"hello"\n');
+        emitStdout(`${JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            result: { ok: true }
+        })}\n`);
+
+        await expect(pending).resolves.toEqual({ ok: true });
+        expect(spawnState.stdinEnd).not.toHaveBeenCalled();
+        expect(killProcessByChildProcess).not.toHaveBeenCalled();
+        await transport.close();
+    });
+
+    test('treats unknown non-JSON stdout as a fatal protocol error', async () => {
+        const transport = new AcpStdioTransport({ command: 'agent', args: ['acp'] });
+        const pending = transport.sendRequest('initialize');
+
+        expect(spawnState.stdoutDataHandlers.length).toBeGreaterThan(0);
+        emitStdout('not-a-json-rpc-frame\n');
+        expect(spawnState.stdinEnd).toHaveBeenCalled();
+
+        await expect(pending).rejects.toThrow('Failed to parse JSON-RPC from ACP agent');
+        expect(killProcessByChildProcess).toHaveBeenCalled();
+        await expect(transport.sendRequest('session/new')).rejects.toThrow(
+            'Failed to parse JSON-RPC from ACP agent'
+        );
+    });
+});
+
 describe('AcpStdioTransport closed stdin writes', () => {
     afterEach(() => {
         spawnState.stdinWrite.mockReset();
         spawnState.stdinWrite.mockReturnValue(true);
+        spawnState.stdinEnd.mockClear();
         spawnState.exitCode = null;
         spawnState.exitHandlers = [];
         spawnState.closeHandlers = [];
+        spawnState.stdoutDataHandlers = [];
     });
 
     test('rejects new requests after process exit before close without writing stdin', async () => {
