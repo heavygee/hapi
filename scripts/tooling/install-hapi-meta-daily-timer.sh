@@ -5,10 +5,15 @@
 # NOT part of Tier-1. NOT upstreamable. Safe to re-run.
 #
 # Schedules (host timezone — oos-linux is Etc/UTC):
-#   hapi-meta-daily.timer         — 08:00 + RandomizedDelaySec=15min (pings OK)
+#   hapi-meta-daily.timer         — 07:30 / 15:00 / 20:00 + RandomizedDelaySec=3min
+#                                   (peer pings + wave-clear unlock)
 #   hapi-meta-daily-refresh.timer — every 45m 24/7 (--no-ping --emit-events)
 #                                   OnBootSec=3min then OnUnitActiveSec=45min
 #                                   so chips never hit the 2h stale mute (odd hours)
+#
+# Optional ~/.hapi/meta-daily.env:
+#   HAPI_META_TOOLING_SESSION_ID=<sid>   # wave-clear unlock ping target
+#   HAPI_META_WAVE_COLLECT_SECS=1800     # inbox collect fuse (default 30m)
 #
 # Usage:
 #   sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh
@@ -85,11 +90,12 @@ systemctl list-timers 'hapi-meta-daily*' --all --no-pager
 
 echo
 echo "Manual run:"
-echo "  sudo systemctl start hapi-meta-daily.service            # morning (pings)"
+echo "  sudo systemctl start hapi-meta-daily.service            # ping window (pings + wave unlock)"
 echo "  sudo systemctl start hapi-meta-daily-refresh.service    # quiet refresh (24/7)"
 echo "  journalctl -u hapi-meta-daily -u hapi-meta-daily-refresh -n 50 --no-pager"
 echo
 echo "Optional env overrides: /home/heavygee/.hapi/meta-daily.env"
+echo "  HAPI_META_TOOLING_SESSION_ID=…   # required for wave-clear unlock ping"
 echo "Disable: sudo bash $0 --disable"
 
 if [[ "$DO_RUN_NOW" -eq 1 ]]; then

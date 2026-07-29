@@ -16,7 +16,12 @@
 #      cursor and folds new human comms into the action queue. Never marks read.
 #   6. Prints a sorted operator ACTION QUEUE (⚠️ / 🔧 wave / orphans / inactive /
 #      new comms) plus the non-automated next steps (sync, rematerialize).
-#   7. Optional one-shot: --backfill-refs writes metadata.externalRefs from
+#   7. Wave-clear (gate A): for owned 🔧 sessions, detect soup-layer + worktree
+#      cleanup. Start a 30m collect fuse when members go clean; when the wave is
+#      clear, unlock-ping the Meta tooling session (ping windows only). Defers
+#      if hapi-driver-status --quiet reports busy (manual mid-window rebuilds).
+#      Orphans never block. Meta CLI still never runs hapi-driver-rebuild.
+#   8. Optional one-shot: --backfill-refs writes metadata.externalRefs from
 #      title-scraped **PR #N** markers only (ADR D6 / F1). Peer #N / bare #N
 #      are issue/workstream titles and must never become github_pr chips.
 #      Dry by default; --apply writes. Resolve requires a real pulls API hit
@@ -26,6 +31,7 @@
 #   merge upstream PRs · sync/push fork main · edit the soup manifest ·
 #   rebuild/restart the driver · delete branches/worktrees · archive sessions ·
 #   reply on GitHub · mark notifications read.
+#   (Unlock = ping Meta tooling session; that bot MAY rematerialize.)
 #
 # Usage:
 #   hapi-meta-daily.sh                 # classify, strip title emoji (chipped), ping, queue
@@ -51,14 +57,22 @@
 #   HAPI_PRIMARY        (default ~/coding/hapi) — canonical tool fallback root
 #   HAPI_META_BATCH_BIN (explicit override; else same-dir, else $HAPI_PRIMARY)
 #   HAPI_META_PING_BIN  (explicit override; else same-dir, else $HAPI_PRIMARY)
+#   HAPI_META_TOOLING_SESSION_ID — Meta tooling bot session (unlock ping target)
+#   HAPI_META_WAVE_COLLECT_SECS (default 1800) — inbox collect fuse
+#   HAPI_META_MANIFEST — manifest path override (tests)
+#   HAPI_META_DRIVER_STATUS_BIN — hapi-driver-status override (tests)
 # Install/upgrade gh: scripts/tooling/install-gh-official.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 # shellcheck source=lib/pr-emoji-core.sh
 source "$SCRIPT_DIR/lib/pr-emoji-core.sh"
+# shellcheck source=lib/meta-wave.sh
+source "$SCRIPT_DIR/lib/meta-wave.sh"
 # shellcheck source=lib/require-gh-version.sh
 source "$SCRIPT_DIR/lib/require-gh-version.sh"
+# shellcheck source=lib/hapi-manifest-path.sh
+source "$SCRIPT_DIR/lib/hapi-manifest-path.sh"
 
 UPSTREAM_REPO="${HAPI_PR_REPO:-tiann/hapi}"
 FORK_REPO="${HAPI_FORK_REPO:-heavygee/hapi}"
@@ -127,7 +141,7 @@ fi
 
 md_state_default() {
     jq -cn --arg up "$UPSTREAM_REPO" --arg fork "$FORK_REPO" \
-        '{schema:1,last_run:null,notif_cursor:{($up):null,($fork):null},sessions:{},orphan_prs:{},notif_seen:{}}'
+        '{schema:1,last_run:null,notif_cursor:{($up):null,($fork):null},sessions:{},orphan_prs:{},notif_seen:{},wave:{status:"idle",id:"w-empty",members:[],collect_started_at:null,collect_deadline_at:null}}'
 }
 
 md_load_state() {
@@ -479,13 +493,13 @@ main() {
     sessions_json="$(hub_sessions "$jwt")"
 
     # --- discovery: PR numbers from sessions + open + merged ---
-    declare -A SESS_ID SESS_ACTIVE SESS_NAME SESS_PRS SESS_REFS
+    declare -A SESS_ID SESS_ACTIVE SESS_NAME SESS_PRS SESS_REFS SESS_PATH
     declare -A PR_SESSIONS      # pr -> "sid8,sid8"
     declare -A ALL_PR           # pr -> 1
     declare -A MERGED_TITLE
 
-    local row sid sid8 active name prs refs_json
-    while IFS=$'\t' read -r sid active name refs_json; do
+    local row sid sid8 active name prs refs_json path
+    while IFS=$'\t' read -r sid active name refs_json path; do
         [[ -z "$sid" ]] && continue
         [[ "$name" =~ [Yy][Aa][Aa][Cc][Cc] ]] && continue
         prs="$(md_session_prs "$name")"
@@ -509,6 +523,7 @@ main() {
         SESS_NAME["$sid8"]="$name"
         SESS_PRS["$sid8"]="$prs"
         SESS_REFS["$sid8"]="${refs_json:-[]}"
+        SESS_PATH["$sid8"]="${path:-}"
         local p
         for p in $prs; do
             ALL_PR["$p"]=1
@@ -524,7 +539,8 @@ main() {
             .id,
             (.active // false),
             (.metadata.name // ""),
-            ((.metadata.externalRefs // []) | tostring)
+            ((.metadata.externalRefs // []) | tostring),
+            (.metadata.path // "")
           ]
         | @tsv')
 
@@ -746,6 +762,96 @@ main() {
         fi
     done
 
+    # --- wave-clear (gate A): owned 🔧 only; orphans never block ---
+    local -a Q_WAVE
+    local WAVE_UNLOCK=0 WAVE_DEFER="" WAVE_ID=""
+    local manifest_path manifest_text members_json wave_adv prev_wave
+    manifest_path="${HAPI_META_MANIFEST:-$(hapi_manifest_path "$HAPI_PRIMARY")}"
+    if [[ -f "$manifest_path" ]]; then
+        manifest_text="$(cat "$manifest_path")"
+    else
+        manifest_text=""
+        vlog "wave: manifest missing at $manifest_path — treating layers as clean"
+    fi
+    members_json='[]'
+    for sid8 in "${!SESS_ID[@]}"; do
+        prs="${SESS_PRS[$sid8]}"
+        local emojis_w=() combined_w
+        for p in $prs; do
+            emojis_w+=("${PR_EMOJI[$p]:-?}")
+        done
+        combined_w="$(md_combined_emoji "${emojis_w[@]}")"
+        [[ "$combined_w" == "🔧" ]] || continue
+        # One member row per PR on this session that is merged.
+        for p in $prs; do
+            [[ "${PR_EMOJI[$p]:-}" == "🔧" ]] || continue
+            local reason_w clean_json=false
+            if reason_w="$(mw_wave_member_clean "$manifest_text" "${SESS_PATH[$sid8]:-}" "$p")"; then
+                clean_json=true
+            else
+                Q_WAVE+=("#$p [$sid8] still dirty ($reason_w)")
+            fi
+            members_json="$(printf '%s' "$members_json" | jq -c \
+                --argjson pr "$p" \
+                --arg sid "${SESS_ID[$sid8]}" \
+                --argjson clean "$clean_json" \
+                --arg path "${SESS_PATH[$sid8]:-}" \
+                --arg reason "${reason_w:-clean}" \
+                '. + [{pr:$pr, sid:$sid, clean:$clean, path:$path, reason:$reason}]')"
+        done
+    done
+    prev_wave="$(printf '%s' "$state" | jq -c '.wave // {status:"idle"}')"
+    local busy_01=0
+    if mw_driver_stack_busy; then busy_01=1; fi
+    local collect_secs="${HAPI_META_WAVE_COLLECT_SECS:-1800}"
+    wave_adv="$(mw_advance_wave "$prev_wave" "$members_json" "$now" "$collect_secs" "$busy_01" "$DO_PING")"
+    new_state="$(printf '%s' "$new_state" | jq -c --argjson w "$(printf '%s' "$wave_adv" | jq -c '.wave')" '.wave = $w')"
+    WAVE_ID="$(printf '%s' "$wave_adv" | jq -r '.wave.id')"
+    WAVE_DEFER="$(printf '%s' "$wave_adv" | jq -r '.defer_reason // empty')"
+    local emit_collect emit_ready do_unlock
+    emit_collect="$(printf '%s' "$wave_adv" | jq -r '.emit_collect')"
+    emit_ready="$(printf '%s' "$wave_adv" | jq -r '.emit_ready')"
+    do_unlock="$(printf '%s' "$wave_adv" | jq -r '.unlock')"
+    local prs_csv tooling_sid
+    prs_csv="$(printf '%s' "$members_json" | jq -r '[.[].pr] | unique | sort | map(tostring) | join(",")')"
+    tooling_sid="${HAPI_META_TOOLING_SESSION_ID:-}"
+
+    if [[ "$EMIT_EVENTS" -eq 1 ]]; then
+        local wave_date wave_body wave_kind=""
+        wave_date="$(date -u +%Y-%m-%d)"
+        if [[ "$emit_collect" == "true" ]]; then wave_kind="collect"; fi
+        if [[ "$emit_ready" == "true" ]]; then wave_kind="ready"; fi
+        if [[ -n "$wave_kind" ]]; then
+            wave_body="$(mw_build_wave_event_body \
+                --repo "$UPSTREAM_REPO" \
+                --wave-id "$WAVE_ID" \
+                --prs-csv "$prs_csv" \
+                --kind "$wave_kind" \
+                --session-id "$tooling_sid" \
+                --date "$wave_date")"
+            if hub_emit_event "$jwt" "$wave_body"; then
+                vlog "emit-events wave $WAVE_ID kind=$wave_kind"
+            else
+                MD_EMIT_FAILURES=$((MD_EMIT_FAILURES + 1))
+            fi
+        fi
+    fi
+
+    if [[ "$do_unlock" == "true" ]]; then
+        if [[ -n "$tooling_sid" ]]; then
+            _do_wave_unlock_ping "$tooling_sid" "$WAVE_ID" "$prs_csv"
+            WAVE_UNLOCK=1
+            Q_WAVE+=("UNLOCK → Meta tooling $tooling_sid (wave $WAVE_ID PRs $prs_csv)")
+        else
+            WAVE_DEFER="no_tooling_session"
+            Q_WAVE+=("READY wave $WAVE_ID (PRs $prs_csv) — set HAPI_META_TOOLING_SESSION_ID to unlock-ping")
+            # Stay ready (not dispatched) so next ping window can unlock.
+            new_state="$(printf '%s' "$new_state" | jq -c '.wave.status = "ready"')"
+        fi
+    elif [[ -n "$WAVE_DEFER" && "$WAVE_DEFER" != "no_owned_merged" && "$WAVE_DEFER" != "already_dispatched" ]]; then
+        Q_WAVE+=("wave $WAVE_ID deferred: $WAVE_DEFER")
+    fi
+
     # --- notifications (new human comms) ---
     local -a Q_NOTIF
     local nsince_up_new="$notif_since_up" nsince_fork_new="$notif_since_fork"
@@ -859,6 +965,29 @@ _emit_notif_event() {
         '.notif_seen = ((.notif_seen // {}) + {($k): true})')"
 }
 
+# _do_wave_unlock_ping <session_id_or_prefix> <wave_id> <prs_csv> <busy_01>
+_do_wave_unlock_ping() {
+    local sid="$1" wid="$2" prs_csv="$3"
+    local msg="Meta daily — WAVE CLEAR unlock (${wid}).
+
+Owned merged PR(s) cleaned (gate A: soup layer gone + worktree gone): #${prs_csv//,/, #}
+
+You MAY rematerialize without waiting for further operator approval:
+1. \`hapi-driver-status --quiet\` (exit 0 idle; 75 = rebuild/switch already in progress — wait)
+2. \`hapi-sync-fork-main && git push origin main\` (if fork main behind upstream)
+3. \`hapi-driver-rebuild --build-web --verify\`
+4. \`hapi-verify-web-dist\` + \`hapi-restart-hub\` if hub/cli changed
+5. Archive idle 🔧 peer sessions from outside once soup is fresh
+
+Manual mid-window rebuilds are expected — if status is busy, wait and retry; do not force a second rebuild on top.
+Canon: docs/operator/AGENTS.md § Meta PR watcher + feature-work-lifecycle.md § After upstream merge"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        echo "    [dry-run] wave-unlock ping $sid ($wid)" >&2
+        return 0
+    fi
+    "$PING_BIN" "$sid" "$msg" >/dev/null 2>&1 || err "wave-unlock ping failed for $sid"
+}
+
 _do_ping() {  # <sid8> <emoji> <prs> <acts>
     local sid8="$1" emoji="$2" prs="$3" acts="$4"
     local state_desc
@@ -901,18 +1030,26 @@ _print_section() {  # <title> <array-name>
 _print_queue() {
     _print_section "⚠️  NEEDS WORK (yours to unblock / direct the peer):" "${Q_WARN[@]:-}"
     _print_section "🔧  MERGED — advise wave cleanup:" "${Q_MERGED[@]:-}"
-    _print_section "❓ ORPHANS (PR without a matching session):" "${Q_ORPHAN[@]:-}"
+    _print_section "🌊 WAVE CLEAR (gate A — owned only; orphans never block):" "${Q_WAVE[@]:-}"
+    _print_section "❓ ORPHANS (anomaly — do not block wave-clear):" "${Q_ORPHAN[@]:-}"
     _print_section "😴 INACTIVE (policy wanted a ping; session asleep):" "${Q_INACTIVE[@]:-}"
     _print_section "📨 NEW GITHUB COMMS since last run:" "${Q_NOTIF[@]:-}"
     _print_section "✅ RENAMED this run:" "${Q_RENAMED[@]:-}"
     _print_section "🏷️  CHIP STATUS updated (externalRefs cache):" "${Q_STATUS[@]:-}"
     _print_section "📣 PINGED this run:" "${Q_PINGED[@]:-}"
     echo ""
-    echo "NEXT STEPS (NOT automated — operator/meta judgment):"
+    echo "NEXT STEPS:"
     echo "  - Merges are @tiann's call. Never 'gh pr merge' on tiann/hapi."
-    echo "  - After a 🔧 wave is fully acked: hapi-sync-fork-main && git push origin main,"
-    echo "    then meta rematerializes soup ONCE (hapi-driver-rebuild --build-web --verify)."
+    echo "  - Wave-clear unlock pings Meta tooling (HAPI_META_TOOLING_SESSION_ID) on"
+    echo "    ping windows only; CLI never runs hapi-driver-rebuild itself."
+    echo "  - Manual soup rebuilds outside windows are fine — unlock defers while"
+    echo "    hapi-driver-status --quiet reports busy (exit 75)."
     echo "  - Archive idle 🔧 sessions from outside once soup is fresh."
+    if [[ "${WAVE_UNLOCK:-0}" -eq 1 ]]; then
+        echo "  - This run: WAVE UNLOCK dispatched (wave ${WAVE_ID:-?})."
+    elif [[ -n "${WAVE_DEFER:-}" ]]; then
+        echo "  - This run: wave defer=${WAVE_DEFER}."
+    fi
 }
 
 # Only run main when executed, not when sourced by the test.

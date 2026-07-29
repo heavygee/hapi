@@ -113,10 +113,10 @@ sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh
 
 | Timer | When (host TZ; oos = UTC) | Command |
 |-------|---------------------------|---------|
-| `hapi-meta-daily.timer` | 08:00 + up to 15m random delay | full Meta (pings allowed) |
+| `hapi-meta-daily.timer` | **07:30 / 15:00 / 20:00** (+ up to 3m random) | full Meta (peer pings + wave-clear unlock) |
 | `hapi-meta-daily-refresh.timer` | every **45m 24/7** (`OnBootSec=3min` + `OnUnitActiveSec=45min`) | `--no-ping --emit-events` |
 
-Quiet refresh is round-the-clock on purpose (odd hours) — max gap ~45m so chips stay under the **2h** `statusCheckedAt` mute. Morning timer is the only one that may ping peers. Units: `scripts/tooling/systemd/hapi-meta-daily*`. Optional env: `~/.hapi/meta-daily.env`. Chip UI never live-queries GitHub. Logs: `journalctl -u hapi-meta-daily -u hapi-meta-daily-refresh`.
+Quiet refresh is round-the-clock on purpose (odd hours) — max gap ~45m so chips stay under the **2h** `statusCheckedAt` mute. Only the three ping windows may ping peers or unlock Meta tooling for rematerialize. Units: `scripts/tooling/systemd/hapi-meta-daily*`. Optional env: `~/.hapi/meta-daily.env` (`HAPI_META_TOOLING_SESSION_ID`, `HAPI_META_WAVE_COLLECT_SECS`). Chip UI never live-queries GitHub. Logs: `journalctl -u hapi-meta-daily -u hapi-meta-daily-refresh`.
 
 What it does, idempotently:
 
@@ -126,7 +126,8 @@ What it does, idempotently:
 4. **Strips leading status emoji and `PR #N:` prefixes** from titles of chipped sessions (chip owns identity + health — ADR D8+). Keeps `Peer #N:` incubating titles. Does **not** write emoji or PR-number prefixes into titles. **Agents must not put ✅/🔁/⚠️/📝/🔧 or `PR #N:` back into titles** after a strip or ping.
 5. **Pings only when actionable** (see policy) — state-gated so a second run the same morning is a no-op. Ping text tells peers the chip status changed; it does **not** ask them to keep emoji in the title.
 6. **Reads GitHub notifications** for both repos since a stored cursor (`all=true`, actionable reasons only: comment/mention/review_requested/state_change/…) and folds new human comms into the queue.
-7. Prints a sorted **action queue** (⚠️ / 🔧 wave / orphans / inactive / new comms) + the non-automated next steps.
+7. **Wave-clear (gate A):** for owned 🔧 sessions only, detect soup-layer + worktree cleanup (`lib/meta-wave.sh`). Start a ~30m collect fuse when members go clean; when the wave is clear, unlock-ping Meta tooling (`HAPI_META_TOOLING_SESSION_ID`) on ping windows. Defers while `hapi-driver-status --quiet` is busy (exit 75) so mid-window manual rebuilds are respected. Orphans are anomalies and **never** block. Meta CLI still never runs `hapi-driver-rebuild` itself — the tooling bot may.
+8. Prints a sorted **action queue** (⚠️ / 🔧 / wave / orphans / inactive / new comms) + next steps.
 
 **Status contract** (chip + Meta queue; worst wins when a session tracks >1 PR):
 
@@ -143,9 +144,9 @@ What it does, idempotently:
 
 **Scope guard:** PR-number extraction requires **3-4 digits**. Peer/overseer sessions carrying internal workstream refs (`W1.6 provenance (#22)`) are intentionally *not* swept — those 1-2 digit numbers would cross-wire to unrelated upstream PRs. Use `--pr <N>` for a rare low-numbered upstream PR.
 
-**What it will NEVER do** (judgment/destructive — surfaced in the queue only): merge upstream PRs · sync/push fork `main` · edit the soup manifest · rebuild/restart the driver · delete branches/worktrees · archive sessions · reply on GitHub · mark notifications read. After a 🔧 wave is fully acked: `hapi-sync-fork-main && git push origin main`, then rematerialize soup **once**, then archive idle 🔧 sessions from outside.
+**What it will NEVER do** (judgment/destructive — CLI never executes these): merge upstream PRs · sync/push fork `main` · edit the soup manifest · rebuild/restart the driver · delete branches/worktrees · archive sessions · reply on GitHub · mark notifications read. Wave-clear **unlocks** the Meta tooling session to rematerialize once; that bot (and any agent following soup rules) **may** run `hapi-sync-fork-main` + `hapi-driver-rebuild --build-web --verify` without further operator approval — after `hapi-driver-status --quiet` is idle. Manual soup rebuilds outside the three ping windows are expected and fine; unlock waits if a rebuild is already in progress.
 
-Lower-level primitives: `hapi-pr-emoji-batch.sh` (pure classifier → JSON). `hapi-pr-session-emoji.sh` is a **removed stub** (exits 2; prints `hapi-meta-daily.sh [--pr N]` — no escape hatch). Shared engine: `lib/pr-emoji-core.sh`; unit tests in `lib/pr-emoji-core.test.sh` + `hapi-meta-daily.test.sh`.
+Lower-level primitives: `hapi-pr-emoji-batch.sh` (pure classifier → JSON). `hapi-pr-session-emoji.sh` is a **removed stub** (exits 2; prints `hapi-meta-daily.sh [--pr N]` — no escape hatch). Shared engine: `lib/pr-emoji-core.sh` + `lib/meta-wave.sh`; unit tests in `lib/pr-emoji-core.test.sh` + `lib/meta-wave.test.sh` + `hapi-meta-daily.test.sh`.
 
 **Overseer relationship:** the CLI **actuates** (chip status cache + strip leftover title emoji + policy-ping), **surfaces** a queue, and can emit contribution-state transitions as channel SystemEvents with **`--emit-events`** (default off). Session-bound transitions promote into the operator inbox; peer pings remain independently gated. First chatty corpus dogfooded 2026-07-25; steady-state rerun emitted nothing. Principle: [`docs/plans/2026-07-25-contribution-state-as-overseer-sensor.md`](../plans/2026-07-25-contribution-state-as-overseer-sensor.md). Live ingest + dogfood receipt: [`docs/plans/2026-07-25-contrib-state-event-ingest-spec.md`](../plans/2026-07-25-contrib-state-event-ingest-spec.md). Ancestor framing: session [State indicators based on PR state](/sessions/fc561649-e783-4a56-be5e-3ca7511c1663).
 

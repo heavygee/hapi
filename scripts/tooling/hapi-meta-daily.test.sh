@@ -93,6 +93,15 @@ chmod +x "$WORK/ping"
 
 echo '{"cliApiToken":"tok"}' >"$WORK/settings.json"
 
+# Idle driver-status mock (quiet exit 0) unless a test replaces it.
+cat >"$WORK/driver-status" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$WORK/driver-status"
+# Empty manifest → no active layers (wave members clean for worktree/path).
+: >"$WORK/manifest.yaml"
+
 run() {
     rm -f "$WORK/pings.log"
     HAPI_META_GH_BIN="$WORK/gh" \
@@ -100,6 +109,8 @@ run() {
     HAPI_META_BATCH_BIN="$WORK/batch" \
     HAPI_META_PING_BIN="$WORK/ping" \
     HAPI_META_STATE="$WORK/state.json" \
+    HAPI_META_MANIFEST="$WORK/manifest.yaml" \
+    HAPI_META_DRIVER_STATUS_BIN="$WORK/driver-status" \
     HAPI_SETTINGS="$WORK/settings.json" \
     HAPI_HOST="http://mock" \
     bash "$SCRIPT" "$@"
@@ -569,13 +580,13 @@ EOF
 chmod +x "$WORK/curl"
 
 out="$(run --dry-run --no-ping 2>&1)"
-check "chip-strip dry: strips emoji from chipped #100" "grep -q 'aaaaaaaa' <<<\"\$out\" && grep -q 'chip owns status' <<<\"\$out\""
-check "chip-strip dry: target title has no leading emoji" "grep -qE '→[[:space:]]+PR #100: needs work' <<<\"\$out\""
+check "chip-strip dry: strips emoji from chipped #100" "grep -q 'aaaaaaaa' <<<\"\$out\" && grep -q 'chip owns identity' <<<\"\$out\""
+check "chip-strip dry: chipped title drops PR #N: prefix" "grep -qE '→[[:space:]]+needs work' <<<\"\$out\""
 check "chip-strip dry: unchipped #200 not emoji-retitled" "! grep -q '✅PR #200' <<<\"\$out\""
 
 out="$(run --no-ping 2>&1)"
 check "chip-strip apply: PATCH fired for #100" "grep -q 'aaaaaaaa' '$WORK/renames.log'"
-check "chip-strip apply: body is emoji-free title" "grep -q 'PR #100: needs work' '$WORK/renames.log'"
+check "chip-strip apply: body is workstream title only" "grep -q 'needs work' '$WORK/renames.log'"
 
 # ============ 16. --pr N: only that PR; no set -u crash on other chipped sessions ============
 rm -f "$WORK/state.json" "$WORK/renames.log" "$WORK/put-refs.log"
@@ -613,7 +624,7 @@ out="$(run --pr 100 --no-ping 2>&1)" || status=$?
 status=${status:-0}
 check "--pr: exits 0 (no set -u on other chipped sessions)" "[[ \$status -eq 0 ]]"
 check "--pr: classifies only #100" "grep -qE 'classifying 1 PR|NEEDS WORK' <<<\"\$out\""
-check "--pr: strips emoji on #100 session" "grep -q 'aaaaaaaa' <<<\"\$out\" && grep -q 'chip owns status' <<<\"\$out\""
+check "--pr: strips emoji on #100 session" "grep -q 'aaaaaaaa' <<<\"\$out\" && grep -q 'chip owns identity' <<<\"\$out\""
 check "--pr: does not touch #200 title" "! grep -q 'bbbbbbbb' '$WORK/renames.log' 2>/dev/null"
 
 # ============ 17. Peer #issue title must not mask github_pr chip ============
@@ -664,6 +675,93 @@ out="$(run --pr 1087 --no-ping 2>&1)"
 check "chip-over-peer: does not orphan #1087" "! grep -q 'NO HAPI session' <<<\"\$out\""
 check "chip-over-peer: updates chip for session" "grep -q '43c0f634' <<<\"\$out\" && grep -q 'CHIP STATUS' <<<\"\$out\""
 check "chip-over-peer: PUT status for #1087" "grep -q 'external-refs' '$WORK/put-refs.log'"
+
+# ============ 18. wave-clear: --no-ping stays ready; ping window unlocks tooling ============
+rm -f "$WORK/state.json" "$WORK/pings.log"
+cat >"$WORK/gh" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+if [[ "$args" == *"pr list"* && "$args" == *"--state open"* ]]; then
+    exit 0
+fi
+if [[ "$args" == *"pr list"* && "$args" == *"merged"* ]]; then
+    printf '300\tfix: shipped thing\t2026-07-24T02:52:06Z\n'; exit 0
+fi
+exit 0
+EOF
+chmod +x "$WORK/gh"
+cat >"$WORK/batch" <<'EOF'
+#!/usr/bin/env bash
+j='{}'
+for a in "$@"; do
+    case "$a" in
+        300) j="$(echo "$j" | jq -c '. + {"300":{emoji:"🔧",action:"MERGED — clean up",prePr:false,merged:true}}')" ;;
+    esac
+done
+echo "$j"
+EOF
+chmod +x "$WORK/batch"
+cat >"$WORK/curl" <<EOF
+#!/usr/bin/env bash
+args="\$*"
+if [[ "\$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
+if [[ "\$args" == *"-X PATCH"* ]]; then echo '{"ok":true}'; exit 0; fi
+if [[ "\$args" == *"-X PUT"* && "\$args" == *"/external-refs"* ]]; then
+    echo '{"ok":true,"externalRefs":[]}'; exit 0
+fi
+if [[ "\$args" == *"/api/system-events"* && "\$args" == *"-X POST"* ]]; then
+    echo "\$args" >> "$WORK/events.log"
+    echo '{"event":{"id":1},"deduped":false}'; exit 0
+fi
+if [[ "\$args" == *"/api/sessions?limit=500"* ]]; then
+cat <<'JSON'
+{"sessions":[
+ {"id":"cccccccc-3333","active":true,"metadata":{"name":"merged cleanup done","path":"/tmp/not-a-worktree","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":300,"url":"https://github.com/tiann/hapi/pull/300","role":"primary","source":"agent","linkedAt":1}]}}
+]}
+JSON
+exit 0
+fi
+echo '{}'; exit 0
+EOF
+chmod +x "$WORK/curl"
+
+out="$(HAPI_META_TOOLING_SESSION_ID=meta-tooling-9999 run --no-ping --emit-events 2>&1)" || true
+pings_np="$(cat "$WORK/pings.log" 2>/dev/null || true)"
+check "wave no-ping: no unlock ping" "[[ -z \"\$pings_np\" ]]"
+check "wave no-ping: state ready or collecting" "jq -e '.wave.status == \"ready\" or .wave.status == \"collecting\"' '$WORK/state.json' >/dev/null"
+check "wave no-ping: defer awaiting_ping_window in queue" "grep -qE 'awaiting_ping_window|WAVE CLEAR' <<<\"\$out\""
+
+rm -f "$WORK/pings.log"
+out="$(HAPI_META_TOOLING_SESSION_ID=meta-tooling-9999 run --emit-events 2>&1)" || true
+pings_u="$(cat "$WORK/pings.log" 2>/dev/null || true)"
+check "wave ping: unlocks Meta tooling session" "grep -q '^meta-tool' <<<\"\$pings_u\""
+check "wave ping: state dispatched" "jq -e '.wave.status == \"dispatched\"' '$WORK/state.json' >/dev/null"
+
+# rebuild busy → no unlock (peer 🔧 policy ping may still fire; tooling must not)
+rm -f "$WORK/state.json" "$WORK/pings.log"
+cat >"$WORK/driver-status" <<'EOF'
+#!/usr/bin/env bash
+exit 75
+EOF
+chmod +x "$WORK/driver-status"
+out="$(HAPI_META_TOOLING_SESSION_ID=meta-tooling-9999 run 2>&1)" || true
+pings_b="$(cat "$WORK/pings.log" 2>/dev/null || true)"
+check "wave busy: no unlock ping to tooling" "! grep -q '^meta-tool' <<<\"\$pings_b\""
+check "wave busy: stay ready" "jq -e '.wave.status == \"ready\"' '$WORK/state.json' >/dev/null"
+check "wave busy: defer rebuild_busy" "grep -q 'rebuild_busy' <<<\"\$out\""
+
+# soft-fail without tooling session id
+rm -f "$WORK/state.json" "$WORK/pings.log"
+cat >"$WORK/driver-status" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$WORK/driver-status"
+out="$(run 2>&1)" || true
+pings_nt="$(cat "$WORK/pings.log" 2>/dev/null || true)"
+check "wave no-tooling-id: no unlock to tooling" "! grep -q '^meta-tool' <<<\"\$pings_nt\""
+check "wave no-tooling-id: stay ready" "jq -e '.wave.status == \"ready\"' '$WORK/state.json' >/dev/null"
+check "wave no-tooling-id: hints env var" "grep -q 'HAPI_META_TOOLING_SESSION_ID' <<<\"\$out\""
 
 echo ""
 echo "hapi-meta-daily.test.sh: $PASS passed, $FAIL failed"
