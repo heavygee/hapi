@@ -15,6 +15,12 @@ done
 fail() { echo "verify-hapi-operator-lock: FAIL — $*" >&2; exit 1; }
 
 command -v hapi-driver-rebuild >/dev/null || fail "hapi-driver-rebuild not on PATH (run install-hapi-local-bin.sh)"
+command -v hapi-ping-peer >/dev/null || fail "hapi-ping-peer not on PATH (run install-hapi-local-bin.sh)"
+# Soup-aware hapi must beat stale bun-global (missing ping-peer).
+[[ "$(command -v hapi)" == "$HOME/.local/bin/hapi" ]] \
+  || fail "hapi is not ~/.local/bin/hapi (got: $(command -v hapi)) — run install-hapi-local-bin.sh"
+hapi ping-peer --help >/dev/null 2>&1 \
+  || fail "hapi ping-peer --help failed (soup CLI / hapi-from-active broken)"
 test -x "$HOME/.local/bin/git" || fail "git wrapper missing"
 test -x "$HOME/.local/bin/gh" || fail "gh wrapper missing"
 test -f "$HOME/.local/bin/pr-open-push-lib.sh" || fail "pr-open-push-lib.sh missing"

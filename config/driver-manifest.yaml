@@ -175,13 +175,8 @@ layers:
   # of just the GFM table commit, no mermaid-diagram.tsx touch).
   - branch: fix/cursor-flat-picker-default-highlight
 
-  # Scratchlist v2.2 (#921) - hub-stored attachments only (core scratchlist from
-  # upstream #896). Soup-only layer soup/scratchlist-attachments-v22-v12
-  # (attachments V14→V15). NOT feat/scratchlist-attachments-v22 directly.
-  # Worktree: ~/coding/hapi/worktrees/scratchlist-attachments-v22
-  # 2026-07-28: re-thinned onto post-#896 driver tip (attachments-only delta);
-  # un-parked by owner after Meta parking for rematerialize.
-  - branch: soup/scratchlist-attachments-v22-v12
+  # DROPPED 2026-07-29: soup/scratchlist-attachments-v22-v12 MERGED as #1205
+  # (scratchlist v2.2 hub attachments / #921). Rematerialize once wave cleanup done.
 
   # Soup-only type-narrowing followups. 2026-06-16 spawn (backup-agent
   # during full-soup-restore after a botched reset-and-merge round). Two
@@ -567,10 +562,19 @@ layers:
 
   # tiann/hapi#1160/#1161/#1162/#1163 — opt-in GitHub PR awareness + session↔PR
   # attach (externalRefs chip, Settings toggle, hapi link-pr, MCP link_pr).
-  # Tip 2026-07-28: 86a08f7d1 — re-thinned on driver/integration e59860ac3 (post-#896
-  # rematerialize). Fat bak: backup/github-pr-awareness-fat-pre1195remake @ 518b1f50f.
+  # Tip 2026-07-28: b9b488ed0 — classify PR chip status on attach (link-pr / MCP /
+  # dialog); preserve sticky status on same-PR re-link. Fat bak:
+  # backup/github-pr-awareness-fat-pre1195remake @ 518b1f50f.
   # Drop when #1161+#1163 land upstream. Enable Settings → General → GitHub PR awareness
   # (or HAPI_GITHUB_PR_AWARENESS=1). Meta: hapi-meta-daily --backfill-refs.
   # UNPARKED 2026-07-28 (meta): chips restored after accidental remake park — do NOT
   # park this layer again to unblock rematerialize; re-thin in place instead.
   - branch: driver/github-pr-awareness
+
+  # DROPPED 2026-07-29: feat/session-at-mention-autocomplete MERGED as tiann/hapi#1217 (tip 0c8a34e1a / merge e32fe146c).
+
+  # tiann/hapi#1215 — feature-flagged rich composer with inline session @ tokens.
+  # Worktree: ~/coding/hapi/worktrees/session-mention-rich-composer
+  # Tip e191f101c — upstream-simple playwright + testIgnore only (reverted fork absorb). Soup dogfood still on remat b0cc07853.
+  # Kill-switch only: richMentions=0. Drop when #1215 merges.
+  - branch: feat/session-mention-rich-composer

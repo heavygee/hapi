@@ -7,7 +7,18 @@
 #   hapi-ping-peer <session-id-prefix> --message-file -   # read message from stdin
 #   hapi-ping-peer --list                # list known sessions (id, name, last-updated)
 #
-# DO NOT reinvent auth+curl for peer handoffs. This is the singular script call.
+# DO NOT reinvent auth+curl for peer handoffs. Prefer this name OR
+# `hapi ping-peer` (soup CLI via hapi-from-active). Same job.
+#
+# Do NOT:
+#   - use ~/.bun/bin/hapi when it is a stale npm global (often no ping-peer)
+#   - `cd …/driver/cli && bun run src/index.ts ping-peer` (ad-hoc; use PATH)
+#
+# When soup-aware `hapi` is on PATH (install-hapi-local-bin → hapi-from-active),
+# this script delegates to `hapi ping-peer` (shared TS module + MCP). Bash body
+# below is the fallback when soup CLI is unavailable.
+# Override: HAPI_PING_PEER_FORCE_BASH=1
+#
 # Long briefs: hapi-ping-peer 05d9f0f2 --message-file /tmp/brief.md
 #              hapi-ping-peer 05d9f0f2 --message-file - <<'EOF'
 #              ...handoff...
@@ -21,6 +32,7 @@
 #   HAPI_HOST       (default http://localhost:3006)
 #   HAPI_SETTINGS   (default ~/.hapi/settings.json - reads cliApiToken)
 #   HAPI_WAIT_ACTIVE_SECS (default 60)
+#   HAPI_PING_PEER_FORCE_BASH=1  skip soup CLI delegation
 #
 # Exit codes:
 #   0 = message delivered
@@ -28,6 +40,17 @@
 #   3 = resume failed (no_machine_online, access_denied, etc)
 #   4 = wait-for-active timed out OR send failed
 set -euo pipefail
+
+# Prefer soup CLI (hapi-from-active → ~/.local/bin/hapi) over this bash body.
+# Refuse ~/.bun/bin/hapi — that path is the stale npm global footgun.
+if [[ "${HAPI_PING_PEER_FORCE_BASH:-0}" != "1" ]]; then
+    _hapi_bin="$(command -v hapi 2>/dev/null || true)"
+    if [[ -n "$_hapi_bin" && "$_hapi_bin" != */.bun/bin/hapi ]]; then
+        if _help="$("$_hapi_bin" ping-peer --help 2>&1)" && [[ "$_help" == *'ping-peer'* ]]; then
+            exec "$_hapi_bin" ping-peer "$@"
+        fi
+    fi
+fi
 
 HAPI_HOST="${HAPI_HOST:-http://localhost:3006}"
 SETTINGS="${HAPI_SETTINGS:-$HOME/.hapi/settings.json}"

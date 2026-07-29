@@ -258,6 +258,8 @@ Pre-push hook blocks `web/src/garden/**` on upstream-PR-bound refs — Garden is
 | `hapi-driver-db-prep <target>` | Backup DB + auto-downgrade schema to match `<target>`'s SCHEMA_VERSION; called automatically by `hapi-use-worktree` |
 | `hapi-driver-status [--json\|--quiet\|--watch]` | Read coordination state — is a rebuild/switch in flight, when did the last one finish, how many WORKING sessions right now |
 | `hapi-runner-from-active` | systemd helper — runner CLI from `hapi-active/cli` (**soup / rebuild-only**; ignores Upgrade binaries) |
+| `hapi-from-active` → `~/.local/bin/hapi` | Interactive soup CLI on PATH (`hapi ping-peer`, etc.). Beats stale `~/.bun/bin/hapi` npm global. Install: `install-hapi-local-bin.sh` |
+| `hapi-ping-peer` | Peer nudge / handoff. Prefers soup `hapi ping-peer`; bash fallback if soup CLI missing. **Not** ad-hoc `bun run src/index.ts` |
 | `hapi-sessions-health.sh` | Session monitor |
 
 ### Soup hosts vs fleet Upgrade
@@ -313,6 +315,28 @@ hapi-driver-rebuild --build-web --verify
 
 **Soup rebuild owner (policy):** one agent/session owns manifest + rebuild at a time (`hapi-driver-status` flock). **After operator approves soup dogfood**, the **feature peer** edits `~/.config/hapi/driver-manifest.yaml` and runs `hapi-driver-rebuild --build-web --verify` — do not ping operator/orchestrator to add the layer. Meta session (`8c6b5a7d`) is for **manifest-only** cron rebuilds and stack hygiene, not routine feature promotion. Do not run rebuilds in parallel hoping flock saves you.
 
+### NEVER park a peer layer to unblock rematerialize (2026-07-28)
+
+Commenting out someone else's `- branch:` so `hapi-driver-rebuild` goes green **skunks the soup** — dogfood loses chips / attachments / bridges until someone remembers. Incident: meta parked `driver/github-pr-awareness` (and others) for upstream #896 remake → PR chips vanished on `:3006` again.
+
+| Who | Must |
+|---|---|
+| **Feature peer** (layer owner) | Keep tip thin on current `driver/integration` (or declared base). When rematerialize fails on *your* layer: re-thin / force-push / fix conflicts yourself, then un-park if you parked. |
+| **Meta / rematerialize agent** | **Do not** park peer layers to get a green rebuild. Fail closed: leave the layer active, ping the owning peer (`hapi-ping-peer`), report blocked. Allowed only if the operator **names the exact branch** to park. |
+| **Operator** | Explicit park instruction per branch — never "just make rematerialize green." |
+
+Parking your **own** layer briefly while you re-thin is fine. Parking a peer's layer is not.
+
+### Remat conflicts on `playwright.config.ts` — do not push fork tooling onto product tips (2026-07-28)
+
+Soup layers often carry fork peer-stack Playwright config (`HAPI_PEER_WEB_URL`, annotated-video, …). Upstream-bound product tips must stay simple (at most `testIgnore: ['**/peer/**']`). See [`peer-stack.md` § Upstream PR worktree](./peer-stack.md#upstream-pr-worktree--fork-tooling-read-this) and § Meta remat.
+
+| Remat conflict on | Meta must |
+|---|---|
+| `playwright.config.ts` | Keep **soup/fork** peer-stack file in driver; take only tip deltas that are product-relevant (`testIgnore`). Leave tip alone — **no** “absorb the playwright.config union” ping when the union includes `scripts/dev/*` fork imports. |
+| Product source (`web/` / `hub/` / …) | Still ask the owning peer to fix the **branch tip** (thin / rebase). |
+
+Incident: Meta asked Peer #1215 to absorb a rerere union → tip shipped annotated-video onto an upstreamable branch; reverted. Dogfood does not require product tips to own soup Playwright config.
 
 **Stale state** (process died without releasing): `hapi-driver-status` prints `STALE pid=N (dead)` and the exact `rm` to clear the lock. The status file self-heals on the next successful run.
 

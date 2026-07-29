@@ -52,6 +52,18 @@ That runs `hapi-peer-stack up` against the worktree, loads `localdocs/peer-stack
 
 **Wrong (bootstrap pain — #980 had to guess):** assume `bun run test:e2e:peer` works inside an upstream-only worktree; copy `playwright.config.ts` from mirror by hand.
 
+### Meta remat: `playwright.config.ts` conflicts (2026-07-28)
+
+Upstream-bound product tips must **not** absorb fork soup Playwright tooling. Incident: remat conflict → driver/rerere union (peer-stack + `testIgnore`) → Meta told Peer #1215 to “absorb the union” → tip `121619f9b` wrongly shipped `scripts/dev/playwright-annotated-video.mjs` + peer-stack config onto an upstreamable branch (reverted as `e191f101c`).
+
+| Surface | Owns |
+|---|---|
+| **Product tip** (`upstream/main` ancestry) | Optional `testIgnore: ['**/peer/**']` only — keep config upstream-simple |
+| **Soup / mirror `main`** | Peer-stack (`HAPI_PEER_WEB_URL`, timeouts, annotated-video import, conditional `webServer`) |
+| **Peer e2e video** | Dynamic import via `HAPI_MIRROR` / `run-e2e-on-peer-stack.mjs` from mirror — **no** helper file on the tip |
+
+**When remat conflicts on `playwright.config.ts`:** keep the **soup/fork** peer-stack file as the driver result; cherry-pick only product-relevant tip deltas (e.g. `testIgnore`). Resolve in driver/rerere. **Do not** ask the product peer to own the full soup config or commit `scripts/dev/*` fork imports.
+
 ---
 
 ## Usage

@@ -13,11 +13,12 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 | When | Do | Detail |
 |------|----|--------|
 | Any local feature / soup / peer work | Read lifecycle first | [`feature-work-lifecycle.md`](../tooling/feature-work-lifecycle.md) (sole workflow) |
-| Message another HAPI session | **One script** — never reinvent JWT+curl | `hapi-ping-peer <id-prefix> '…'` or `--message-file -` / path (`scripts/tooling/hapi-ping-peer.sh`) |
+| Message another HAPI session | **PATH tooling only** — never reinvent JWT+curl; never `cd driver/cli && bun run …` | `hapi-ping-peer …` **or** `hapi ping-peer …` (same job; soup `hapi` = `hapi-from-active`, not `~/.bun/bin/hapi`) |
 | Proof / screenshots / clips for operator | **Inline into HAPI chat** — do not only paste paths | Lifecycle [§ Proof tiers](../tooling/feature-work-lifecycle.md#proof-tiers-images-and-video) — MCP `display_image` / `display_video`, or `bun scripts/tooling/hapi-display-image.mjs <session-prefix> <abs-path> [title]` |
 | Link operator to a file/doc in HAPI chat | Write path as **bare text** — no `[](...)`, no backticks | HAPI auto-links bare paths → in-app file viewer (`remarkFilePathLinks`). Only allowlisted extensions link; **wrap `.mmd`/exotic in a `.md`** so it's clickable + previewable. Tracking: [tiann/hapi#1120](https://github.com/tiann/hapi/issues/1120) |
 | New behavior intake / peer spawn | Follow intake §0 handoff | [`new-feature-intake.md`](../tooling/new-feature-intake.md) |
-| Touch `:3006` soup | `hapi-driver-status --quiet` first; no stack-switch from agent shell | Lifecycle § Agent permission matrix; [`driver-soup.md`](../tooling/driver-soup.md) |
+| Touch `:3006` soup | `hapi-driver-status --quiet` first; no stack-switch from agent shell; **never park peer layers** to unblock rematerialize — ping the owner | Lifecycle § Agent permission matrix; [`driver-soup.md`](../tooling/driver-soup.md) § NEVER park |
+| Remat conflict on `playwright.config.ts` | Keep soup/fork peer-stack file; cherry-pick tip `testIgnore` only — **never** ask upstreamable tips to absorb annotated-video / fork Playwright | [`peer-stack.md`](../tooling/peer-stack.md#meta-remat-playwrightconfigts-conflicts-2026-07-28) |
 | About to claim gates / PR ready | Mechanical verify before assertion | Lifecycle §6 + [`pr-review-loop.md`](../tooling/pr-review-loop.md) |
 | Upstream PR “babysit / merge-ready” | **Prepare only — never merge on `tiann/hapi`** | § Upstream relationship — only @tiann merges upstream `main` |
 | **Daily PR sweep / "the dance"** | Run **`hapi-meta-daily.sh`** — classify → chip status cache → strip title emoji (chipped) → policy-ping → action queue. Don't reinvent it each morning. | § Meta PR watcher (below) |

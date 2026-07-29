@@ -14,6 +14,13 @@ for s in "$TOOLING"/hapi-*.sh "$TOOLING"/hapi-worktree-create.sh "$TOOLING"/hapi
   ln -sf "$s" "$BIN/$base"
 done
 
+# Soup-aware `hapi` must win over ~/.bun/bin/hapi (stale npm global, often
+# missing ping-peer). ~/.local/bin is earlier on PATH on this host.
+if [[ -f "$TOOLING/hapi-from-active.sh" ]]; then
+  ln -sf "$TOOLING/hapi-from-active.sh" "$BIN/hapi"
+  ln -sf "$TOOLING/hapi-from-active.sh" "$BIN/hapi-from-active"
+fi
+
 # Optional cross-repo helper when server-setup is present.
 if [[ -f "$HOME/coding/server-setup/scripts/hapi/hapi-sessions-health.sh" ]]; then
   ln -sf "$HOME/coding/server-setup/scripts/hapi/hapi-sessions-health.sh" "$BIN/hapi-sessions-health.sh"
