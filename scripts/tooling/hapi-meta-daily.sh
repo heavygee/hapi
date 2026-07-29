@@ -10,8 +10,8 @@
 #      ADR D8+). Never writes emoji or PR-number prefixes into titles.
 #      Keeps "Peer #N:" incubating titles (no issue chip yet).
 #   4. Pings a session ONLY when policy says it is actionable and not noise
-#      (transition, changed ⚠️/🔧 instruction, or a due reminder) — state-gated
-#      so a second run the same morning is a no-op.
+#      (ping windows: always rouse sticky ⚠️/🔧 incl. inactive resume;
+#      transition / fingerprint / reminder still apply off-window / for greens)
 #   5. Reads GitHub notifications for tiann/hapi + heavygee/hapi since a stored
 #      cursor and folds new human comms into the action queue. Never marks read.
 #   6. Prints a sorted operator ACTION QUEUE (⚠️ / 🔧 wave / orphans / inactive /
@@ -455,10 +455,10 @@ md_combined_emoji() {
     printf '%s' "$combined"
 }
 
-# md_plan_ping <new_emoji> <new_fp> <prev_emoji> <prev_fp> <prev_ping> <now> <reminder>
+# md_plan_ping <new_emoji> <new_fp> <prev_emoji> <prev_fp> <prev_ping> <now> <reminder> [window_rouse]
 #   → "yes"/"no" (wraps pec_should_ping; kept for test clarity)
 md_plan_ping() {
-    pec_should_ping "$1" "$3" "$2" "$4" "${5:-0}" "$6" "$7"
+    pec_should_ping "$1" "$3" "$2" "$4" "${5:-0}" "$6" "$7" "${8:-0}"
 }
 
 # ---------------------------------------------------------------------------
@@ -648,27 +648,39 @@ main() {
         fi
 
         # ping policy (actuator cursor: emoji/fp/last_ping)
-        local action_fp prev_emoji prev_fp prev_ping decision
+        # Ping windows (DO_PING=1): force-rouse sticky ⚠️/🔧 ("are you done yet?").
+        # Quiet --no-ping refresh: never pings; emit still uses non-window policy.
+        local action_fp prev_emoji prev_fp prev_ping decision window_rouse=0
+        [[ "$DO_PING" -eq 1 ]] && window_rouse=1
         action_fp="$(pec_action_fingerprint "$combined" "$acts")"
         prev_emoji="$(md_prev "$state" "$sid" "emoji")"
         prev_fp="$(md_prev "$state" "$sid" "fp")"
         prev_ping="$(md_prev "$state" "$sid" "last_ping")"
         [[ -z "$prev_ping" ]] && prev_ping=0
         # md_plan_ping/pec_should_ping return 1 for "no"; capture text, ignore rc.
-        decision="$(md_plan_ping "$combined" "$action_fp" "$prev_emoji" "$prev_fp" "$prev_ping" "$now" "$REMINDER_SECS" || true)"
+        decision="$(md_plan_ping "$combined" "$action_fp" "$prev_emoji" "$prev_fp" "$prev_ping" "$now" "$REMINDER_SECS" "$window_rouse" || true)"
 
         local this_ping="$prev_ping"
         if [[ "$combined" == "?" ]]; then
             : # unknown: leave everything, don't touch state emoji
         else
             if [[ "$decision" == "yes" && "$DO_PING" -eq 1 ]]; then
-                if [[ "$active" == "true" ]]; then
+                # A+C: always deliver for work states. hapi-ping-peer resumes
+                # inactive sessions — do not skip asleep ⚠️/🔧 (that was the
+                # last_ping=0 dead zone).
+                local ping_note=""
+                if [[ "$active" != "true" ]]; then
+                    ping_note=" [resume]"
+                    if [[ "$combined" != "⚠️" && "$combined" != "🔧" ]]; then
+                        # Non-work sticky (shouldn't happen often): keep old inactive list
+                        Q_INACTIVE+=("$sid8  $combined  #$(echo "$prs" | tr ' ' ',')  — inactive; run: hapi-ping-peer $sid8 \"…\"")
+                        ping_note="skip"
+                    fi
+                fi
+                if [[ "$ping_note" != "skip" ]]; then
                     _do_ping "$sid8" "$combined" "$prs" "$acts"
-                    Q_PINGED+=("$sid8  $combined  #$(echo "$prs" | tr ' ' ',')")
+                    Q_PINGED+=("$sid8  $combined  #$(echo "$prs" | tr ' ' ',')${ping_note}")
                     this_ping="$now"
-                elif [[ "$combined" == "⚠️" || "$combined" == "🔧" ]]; then
-                    # Only nag about asleep sessions that actually need action.
-                    Q_INACTIVE+=("$sid8  $combined  #$(echo "$prs" | tr ' ' ',')  — inactive; run: hapi-ping-peer $sid8 \"…\"")
                 fi
             fi
 
@@ -680,10 +692,15 @@ main() {
                 prev_emitted_fp="$(md_prev "$state" "$sid" "emitted_fp")"
                 prev_emitted_at="$(md_prev "$state" "$sid" "last_emitted")"
                 [[ -z "$prev_emitted_at" ]] && prev_emitted_at=0
-                emit_reason="$(pec_emit_reason "$combined" "$prev_emitted_e" "$action_fp" "$prev_emitted_fp" "$prev_emitted_at" "$now" "$REMINDER_SECS" || true)"
+                emit_reason="$(pec_emit_reason "$combined" "$prev_emitted_e" "$action_fp" "$prev_emitted_fp" "$prev_emitted_at" "$now" "$REMINDER_SECS" "$window_rouse" || true)"
                 if [[ "$emit_reason" != "none" && -n "$emit_reason" ]]; then
                     local emit_date emit_pr emit_body
-                    emit_date="$(date -u +%Y-%m-%d)"
+                    # Window emits key by London hour so 3 daily windows don't collide.
+                    if [[ "$emit_reason" == "window" ]]; then
+                        emit_date="$(TZ=Europe/London date +%Y-%m-%dT%H)"
+                    else
+                        emit_date="$(date -u +%Y-%m-%d)"
+                    fi
                     emit_pr="${first_pr}"
                     emit_body="$(pec_build_channel_event_body \
                         --repo "$UPSTREAM_REPO" \
@@ -990,16 +1007,16 @@ Canon: docs/operator/AGENTS.md § Meta PR watcher + feature-work-lifecycle.md §
 
 _do_ping() {  # <sid8> <emoji> <prs> <acts>
     local sid8="$1" emoji="$2" prs="$3" acts="$4"
-    local state_desc
+    local state_desc rouse=""
     case "$emoji" in
         ✅) state_desc="open PR green — wait on tiann" ;;
         🔁) state_desc="CI/rebase in flight" ;;
-        ⚠️) state_desc="needs work" ;;
+        ⚠️) state_desc="needs work"; rouse=$'\n\n**Meta ping window — are you done yet?** Resume work or reply with the blocker.' ;;
         📝) state_desc="pre-PR — not filed upstream yet" ;;
-        🔧) state_desc="MERGED — clean up, idle (no mid-turn self-archive)" ;;
+        🔧) state_desc="MERGED — clean up, idle (no mid-turn self-archive)"; rouse=$'\n\n**Meta ping window — are you done yet?** Drop soup layer + clean worktree/branch, then ack. Do not rematerialize mid-wave.' ;;
         *) state_desc="see title" ;;
     esac
-    local msg="Meta daily — PR status is now **${emoji}** (${state_desc}).
+    local msg="Meta daily — PR status is now **${emoji}** (${state_desc}).${rouse}
 
 Tracked PR(s): #$(echo "$prs" | tr ' ' ',')
 

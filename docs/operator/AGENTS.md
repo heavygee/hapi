@@ -141,7 +141,7 @@ What it does, idempotently:
 | 🔧 `merged` | merged | drop soup layer → clean worktree/branch → ack (peers: **no mid-turn self-archive**) |
 | `?` `unknown` | GitHub data unavailable this run | **chip left at last good status; never pinged** |
 
-**Ping policy (why it isn't spam):** ping on an emoji **transition**; re-ping a sticky ⚠️/🔧 only when the action fingerprint changes or the reminder interval (`--reminder-hours`, default 24h) elapses; **never** re-ping an unchanged ✅/🔁/📝. State lives at `${XDG_STATE_HOME:-~/.local/state}/hapi/meta-daily.json`.
+**Ping policy (why it isn't spam for greens, but is a rouse for work):** on **ping windows** (07:30 / 15:00 / 20:00 Europe/London — not the 45m quiet refresh), Meta **always** pings sticky ⚠️ / 🔧 sessions — "are you done yet?" — including **inactive** ones (`hapi-ping-peer` resumes them). ✅ / 🔁 / 📝 only ping on an emoji **transition** (first sight / state change), never on every window. Quiet `--no-ping` refresh never pings. `?` never pings. State lives at `${XDG_STATE_HOME:-~/.local/state}/hapi/meta-daily.json`.
 
 **Scope guard:** PR-number extraction requires **3-4 digits**. Peer/overseer sessions carrying internal workstream refs (`W1.6 provenance (#22)`) are intentionally *not* swept — those 1-2 digit numbers would cross-wire to unrelated upstream PRs. Use `--pr <N>` for a rare low-numbered upstream PR.
 

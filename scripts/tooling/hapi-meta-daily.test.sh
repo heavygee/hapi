@@ -123,7 +123,7 @@ check "dry-run: no state file written" "[[ ! -f '$WORK/state.json' ]]"
 check "dry-run: reports warn #100" "grep -q 'NEEDS WORK' <<<\"\$out\""
 check "dry-run: reports merged #300" "grep -q 'MERGED' <<<\"\$out\""
 check "dry-run: orphan #999 surfaced" "grep -q '#999' <<<\"\$out\""
-check "dry-run: inactive #400 surfaced" "grep -qi 'INACTIVE' <<<\"\$out\""
+check "dry-run: asleep #400 resume-ping planned" "grep -q 'dddddddd' <<<\"\$out\" && grep -qiE 'dry-run.*ping|PINGED' <<<\"\$out\""
 check "dry-run: new comms surfaced" "grep -q 'NEW GITHUB COMMS' <<<\"\$out\""
 
 # ============ 2. first real run: pings fire, state written ============
@@ -134,21 +134,23 @@ check "run1: state written" "[[ -f '$WORK/state.json' ]]"
 check "run1: pinged #100 warn (aaaaaaaa)" "grep -q '^aaaaaaaa' <<<\"\$pings\""
 check "run1: pinged #300 merged (cccccccc)" "grep -q '^cccccccc' <<<\"\$pings\""
 check "run1: ✅ #200 first-sight transition pings (bbbbbbbb)" "grep -q '^bbbbbbbb' <<<\"\$pings\""
-check "run1: #400 asleep NOT pinged" "! grep -q '^dddddddd' <<<\"\$pings\""
+check "run1: #400 asleep resume-pinged (C)" "grep -q '^dddddddd' <<<\"\$pings\""
 
-# ============ 3. second run same inputs: idempotent (no pings) ============
+# ============ 3. second run: window-rouse sticky ⚠️/🔧; ✅ stays quiet ============
 out="$(run 2>&1)"
-pings2="$(cat "$WORK/pings.log" 2>/dev/null || true)"
-check "run2: NO pings (state-gated dedupe)" "[[ -z \"\$pings2\" ]]"
+pings2="$(sort "$WORK/pings.log" 2>/dev/null || true)"
+check "run2: window-rouse re-pings ⚠️ #100" "grep -q '^aaaaaaaa' <<<\"\$pings2\""
+check "run2: window-rouse re-pings 🔧 #300" "grep -q '^cccccccc' <<<\"\$pings2\""
+check "run2: window-rouse re-pings asleep ⚠️ #400" "grep -q '^dddddddd' <<<\"\$pings2\""
+check "run2: ✅ #200 stays silent (not work-state)" "! grep -q '^bbbbbbbb' <<<\"\$pings2\""
 check "run2: still lists warn #100 in queue" "grep -q '#100' <<<\"\$out\""
 
-# ============ 4. reminder elapsed → sticky warn re-pings ============
-# rewind last_ping far into the past for the warn session, keep fp
+# ============ 4. sticky ✅ still silent even when reminder would fire for warn ============
 tmp="$(jq -c '(.sessions["aaaaaaaa-1111"].last_ping) = 1' "$WORK/state.json")"
 echo "$tmp" >"$WORK/state.json"
 out="$(run --reminder-hours 1 2>&1)"
 pings3="$(cat "$WORK/pings.log" 2>/dev/null || true)"
-check "run3: reminder elapsed → #100 re-pinged" "grep -q '^aaaaaaaa' <<<\"\$pings3\""
+check "run3: ⚠️ #100 still window-roused" "grep -q '^aaaaaaaa' <<<\"\$pings3\""
 check "run3: ✅ #200 still silent" "! grep -q '^bbbbbbbb' <<<\"\$pings3\""
 
 # ============ 5. --no-ping never pings ============
@@ -201,10 +203,17 @@ check "emit: ✅ #200 transition POSTed" "grep -q 'bbbbbbbb-2222' '$WORK/events.
 # capture bodies for inspection: rebuild curl to dump -d payload
 # (events.log currently has args; ensure attentionCandidate present in a dry body path)
 
-# ============ 9. second --emit-events run same state → zero POSTs ============
+# ============ 9. quiet --no-ping --emit-events second run → zero POSTs ============
+rm -f "$WORK/events.log"
+out="$(run --no-ping --emit-events 2>&1)"
+check "emit run2: zero POSTs (steady quiet)" "[[ ! -f '$WORK/events.log' ]]"
+
+# ============ 9b. ping-window --emit-events second run → window POSTs for ⚠️/🔧 ============
 rm -f "$WORK/events.log"
 out="$(run --emit-events 2>&1)"
-check "emit run2: zero POSTs (steady)" "[[ ! -f '$WORK/events.log' ]]"
+check "emit window: sticky work POSTs" "[[ -f '$WORK/events.log' ]]"
+check "emit window: payload uses window reason key" \
+    "grep -qE ':window:|\"emitReason\": \"window\"|\"emitReason\":\"window\"' '$WORK/events.log' || jq -e 'select(.payload.emitReason==\"window\" or (.idempotencyKey|test(\":window:\")))' <'$WORK/events.log' >/dev/null"
 
 # ============ 10. --dry-run --emit-events prints bodies, zero HTTP POSTs ============
 rm -f "$WORK/state.json" "$WORK/events.log"
@@ -255,7 +264,7 @@ fi
 echo '{}'; exit 0
 EOF
 chmod +x "$WORK/curl"
-out="$(run --emit-events --reminder-hours 1 2>&1)"
+out="$(run --no-ping --emit-events --reminder-hours 1 2>&1)"
 check "reminder emit: body has reminder suffix in idempotencyKey" \
     "grep -q ':reminder:' '$WORK/events.log'"
 check "reminder emit: dedupeKey also has reminder suffix" \

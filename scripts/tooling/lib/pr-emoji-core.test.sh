@@ -132,6 +132,9 @@ eq "fingerprint deterministic" "$FP_A" "$(pec_action_fingerprint "⚠️" "fix f
 
 eq "transition ✅→⚠️ pings" "$(pec_should_ping "⚠️" "✅" "$FP_A" "x" 100 200 86400)" "yes"
 eq "sticky ⚠️ same fp, no reminder → no" "$(pec_should_ping "⚠️" "⚠️" "$FP_A" "$FP_A" 200 300 86400)" "no"
+eq "sticky ⚠️ window rouse → yes" "$(pec_should_ping "⚠️" "⚠️" "$FP_A" "$FP_A" 200 300 86400 1)" "yes"
+eq "sticky 🔧 window rouse → yes" "$(pec_should_ping "🔧" "🔧" "$FP_A" "$FP_A" 200 300 86400 1)" "yes"
+eq "unchanged ✅ window rouse still no" "$(pec_should_ping "✅" "✅" "z" "z" 200 300 86400 1)" "no"
 eq "sticky ⚠️ changed fp → yes" "$(pec_should_ping "⚠️" "⚠️" "$FP_B" "$FP_A" 200 300 86400)" "yes"
 eq "sticky ⚠️ reminder elapsed → yes" "$(pec_should_ping "⚠️" "⚠️" "$FP_A" "$FP_A" 100 100000 86400)" "yes"
 eq "sticky 🔧 same fp, no reminder → no" "$(pec_should_ping "🔧" "🔧" "$FP_A" "$FP_A" 200 300 86400)" "no"
@@ -154,6 +157,8 @@ eq "emit reason: steady ✅ is none" \
     "$(pec_emit_reason "✅" "✅" "z" "z" 200 300 86400)" "none"
 eq "emit reason: sticky ⚠️ reminder" \
     "$(pec_emit_reason "⚠️" "⚠️" "$FP_A" "$FP_A" 100 100000 86400)" "reminder"
+eq "emit reason: sticky ⚠️ window" \
+    "$(pec_emit_reason "⚠️" "⚠️" "$FP_A" "$FP_A" 200 300 86400 1)" "window"
 eq "emit reason: sticky ⚠️ fp change" \
     "$(pec_emit_reason "⚠️" "⚠️" "$FP_B" "$FP_A" 200 300 86400)" "fingerprint"
 

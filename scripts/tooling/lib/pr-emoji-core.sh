@@ -353,20 +353,21 @@ pec_action_fingerprint() {
 }
 
 # Decide whether to ping a session, given its previous recorded state.
-#   pec_should_ping NEW_EMOJI PREV_EMOJI NEW_FP PREV_FP LAST_PING_EPOCH NOW_EPOCH REMINDER_SECS
+#   pec_should_ping NEW_EMOJI PREV_EMOJI NEW_FP PREV_FP LAST_PING_EPOCH NOW_EPOCH REMINDER_SECS [WINDOW_ROUSE]
 # Prints "yes" / "no" and returns 0/1 respectively.
 #
 # Rules:
 #   - "?" (unknown)                     → never ping
 #   - emoji changed vs recorded state   → ping (transition)
 #   - sticky ⚠️ or 🔧:
-#       - action fingerprint changed    → ping (new instruction)
-#       - reminder interval elapsed      → ping (nag)
-#       - otherwise                      → no
-#   - unchanged ✅ / 🔁 / 📝            → no
+#       - WINDOW_ROUSE=1 (Meta ping windows) → always yes ("are you done yet?")
+#       - action fingerprint changed         → ping (new instruction)
+#       - reminder interval elapsed          → ping (nag)
+#       - otherwise                          → no
+#   - unchanged ✅ / 🔁 / 📝            → no (even on ping windows)
 pec_should_ping() {
     local new_emoji="$1" prev_emoji="$2" new_fp="$3" prev_fp="$4" \
-        last_ping="${5:-0}" now="${6:-0}" reminder="${7:-86400}"
+        last_ping="${5:-0}" now="${6:-0}" reminder="${7:-86400}" window_rouse="${8:-0}"
 
     if [[ "$new_emoji" == "?" ]]; then
         echo "no"; return 1
@@ -375,6 +376,9 @@ pec_should_ping() {
         echo "yes"; return 0
     fi
     if [[ "$new_emoji" == "⚠️" || "$new_emoji" == "🔧" ]]; then
+        if [[ "$window_rouse" -eq 1 ]]; then
+            echo "yes"; return 0
+        fi
         if [[ "$new_fp" != "$prev_fp" ]]; then
             echo "yes"; return 0
         fi
@@ -402,12 +406,12 @@ pec_should_rename() {
 # Channel event emit helpers (ContributionState → POST /api/system-events)
 # ---------------------------------------------------------------------------
 
-# pec_emit_reason NEW_EMOJI PREV_EMOJI NEW_FP PREV_FP LAST_PING NOW REMINDER
-# → transition | fingerprint | reminder | none
-# Same triggers as pec_should_ping, but returns why (reminder needs key suffix).
+# pec_emit_reason NEW_EMOJI PREV_EMOJI NEW_FP PREV_FP LAST_PING NOW REMINDER [WINDOW_ROUSE]
+# → transition | fingerprint | reminder | window | none
+# Same triggers as pec_should_ping, but returns why (reminder/window need key suffix).
 pec_emit_reason() {
     local new_emoji="$1" prev_emoji="$2" new_fp="$3" prev_fp="$4" \
-        last_ping="${5:-0}" now="${6:-0}" reminder="${7:-86400}"
+        last_ping="${5:-0}" now="${6:-0}" reminder="${7:-86400}" window_rouse="${8:-0}"
 
     if [[ "$new_emoji" == "?" ]]; then
         echo "none"; return 1
@@ -416,6 +420,9 @@ pec_emit_reason() {
         echo "transition"; return 0
     fi
     if [[ "$new_emoji" == "⚠️" || "$new_emoji" == "🔧" ]]; then
+        if [[ "$window_rouse" -eq 1 ]]; then
+            echo "window"; return 0
+        fi
         if [[ "$new_fp" != "$prev_fp" ]]; then
             echo "fingerprint"; return 0
         fi
@@ -451,8 +458,8 @@ pec_contrib_idempotency_key() {
     local repo="$1" number="$2" fp="$3" kind="${4:-}" date="${5:-}" session="${6:-}"
     local key="contrib:${repo}#${number}:${fp}"
     [[ -n "$session" ]] && key="${key}:sess:${session}"
-    if [[ "$kind" == "reminder" && -n "$date" ]]; then
-        key="${key}:reminder:${date}"
+    if [[ ( "$kind" == "reminder" || "$kind" == "window" ) && -n "$date" ]]; then
+        key="${key}:${kind}:${date}"
     fi
     printf '%s' "$key"
 }
@@ -460,13 +467,13 @@ pec_contrib_idempotency_key() {
 # pec_contrib_dedupe_key REPO NUMBER EVENT_TYPE FINGERPRINT [KIND] [DATE] [SESSION]
 # Must be unique per insert identity — events.dedupe_key has a UNIQUE index.
 # Align with idempotency by embedding the fingerprint (and the session when
-# bound, and the reminder date when nagging).
+# bound, and the reminder/window date when nagging).
 pec_contrib_dedupe_key() {
     local repo="$1" number="$2" event_type="$3" fp="$4" kind="${5:-}" date="${6:-}" session="${7:-}"
     local key="contrib:${repo}#${number}:${event_type}:${fp}"
     [[ -n "$session" ]] && key="${key}:sess:${session}"
-    if [[ "$kind" == "reminder" && -n "$date" ]]; then
-        key="${key}:reminder:${date}"
+    if [[ ( "$kind" == "reminder" || "$kind" == "window" ) && -n "$date" ]]; then
+        key="${key}:${kind}:${date}"
     fi
     printf '%s' "$key"
 }
@@ -533,8 +540,8 @@ pec_build_channel_event_body() {
     if [[ "$notif" -eq 1 ]]; then
         event_type="needs_decision"
     fi
-    if [[ "$reason" == "reminder" ]]; then
-        rem_kind="reminder"
+    if [[ "$reason" == "reminder" || "$reason" == "window" ]]; then
+        rem_kind="$reason"
         rem_date="$date"
     fi
 
