@@ -20,6 +20,7 @@ import {
 } from '@/runner/handoffLock'
 import { readRunnerState, writeRunnerState } from '@/persistence'
 import { buildHubRequestHeaders } from '@/api/hubExtraHeaders'
+import { writeUpgradeTarget } from '@/upgrade/upgradeTarget'
 
 export type ApplyDecision =
     | { apply: true; reason: 'upgrade' }
@@ -213,7 +214,11 @@ async function installFromArtifact(
         // best-effort
     }
     try {
-        await Bun.write(join(dir, '.hapi-upgrade-target'), finalPath)
+        writeUpgradeTarget({
+            path: finalPath,
+            targetVersion: offer.targetVersion,
+            targetCapabilities: [...offer.targetCapabilities],
+        })
         if (isWin) {
             // No ln -sfn on Windows; copy so `hapi.exe` is a real PE the
             // scheduled task / start scripts can launch.
