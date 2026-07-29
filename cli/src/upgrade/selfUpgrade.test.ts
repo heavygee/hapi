@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolvePostNpmInstallExecutable, shouldApplyUpgradeOffer } from './selfUpgrade'
+import { artifactInstallFileName, resolvePostNpmInstallExecutable, shouldApplyUpgradeOffer } from './selfUpgrade'
 import type { HubUpgradeOffer } from '@hapi/protocol/upgradeChannel'
 import { CURRENT_MACHINE_CAPABILITIES } from '@hapi/protocol/runnerCapabilities'
 import { mkdtempSync, writeFileSync } from 'node:fs'
@@ -100,5 +100,17 @@ describe('shouldApplyUpgradeOffer', () => {
             apply: false,
             reason: 'unsupported',
         })
+    })
+})
+
+describe('artifactInstallFileName', () => {
+    it('embeds a sha prefix so same-version rebuilds use distinct paths', () => {
+        const oldSha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+        const newSha = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+        expect(artifactInstallFileName('0.25.1', oldSha, 'win32')).toBe('hapi-0.25.1-aaaaaaaaaaaaaaaa.exe')
+        expect(artifactInstallFileName('0.25.1', newSha, 'win32')).toBe('hapi-0.25.1-bbbbbbbbbbbbbbbb.exe')
+        expect(artifactInstallFileName('0.25.1', oldSha, 'linux')).toBe('hapi-0.25.1-aaaaaaaaaaaaaaaa')
+        expect(artifactInstallFileName('0.25.1', oldSha, 'win32'))
+            .not.toBe(artifactInstallFileName('0.25.1', newSha, 'win32'))
     })
 })

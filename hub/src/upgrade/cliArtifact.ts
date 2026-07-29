@@ -111,15 +111,22 @@ function listFilesRecursive(root: string): string[] {
  * Fingerprint the sources that feed hub-artifact compiles.
  * Version alone is not enough: soup hubs often keep one package version across
  * many commits; a cache keyed only by version would keep serving a stale binary.
+ *
+ * Scope matches what `bun build --compile cli/src/bootstrap.ts` actually pulls:
+ * CLI + shared + hub (command registry / startHub) + embedded tool assets.
  */
 export function fingerprintArtifactInputs(monorepoRoot: string): string {
     const hash = createHash('sha256')
     const treeRoots = [
         join(monorepoRoot, 'cli', 'src'),
+        join(monorepoRoot, 'hub', 'src'),
         join(monorepoRoot, 'shared', 'src'),
+        join(monorepoRoot, 'cli', 'tools'),
+        join(monorepoRoot, 'shared', 'tools'),
     ]
     const singles = [
         join(monorepoRoot, 'cli', 'package.json'),
+        join(monorepoRoot, 'hub', 'package.json'),
         join(monorepoRoot, 'shared', 'package.json'),
         join(monorepoRoot, 'package.json'),
         join(monorepoRoot, 'bun.lock'),
@@ -129,9 +136,17 @@ export function fingerprintArtifactInputs(monorepoRoot: string): string {
         ...singles.filter((path) => existsSync(path)),
     ]
     for (const file of [...new Set(files)].sort()) {
-        hash.update(relative(monorepoRoot, file).split('\\').join('/'))
+        const rel = relative(monorepoRoot, file).split('\\').join('/')
+        hash.update(rel)
         hash.update('\0')
-        hash.update(readFileSync(file))
+        const st = statSync(file)
+        // Tool archives/binaries are multi-MB; size+mtime catches replacements
+        // without re-reading them on every fleet-upgrade heartbeat.
+        if (rel.split('/').includes('tools')) {
+            hash.update(`stat:${st.size}:${Math.trunc(st.mtimeMs)}`)
+        } else {
+            hash.update(readFileSync(file))
+        }
         hash.update('\0')
     }
     return hash.digest('hex')
