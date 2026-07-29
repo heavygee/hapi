@@ -117,11 +117,14 @@ describe('fingerprintArtifactInputs / isArtifactCacheFresh', () => {
         const root = mkdtempSync(join(tmpdir(), 'hapi-artifact-fp-'))
         try {
             mkdirSync(join(root, 'cli', 'src'), { recursive: true })
+            mkdirSync(join(root, 'hub', 'src'), { recursive: true })
             mkdirSync(join(root, 'shared', 'src'), { recursive: true })
             writeFileSync(join(root, 'cli', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'hub', 'package.json'), JSON.stringify({ version: '0.25.1' }))
             writeFileSync(join(root, 'shared', 'package.json'), JSON.stringify({ version: '0.25.1' }))
             writeFileSync(join(root, 'package.json'), JSON.stringify({ version: '0.25.1' }))
             writeFileSync(join(root, 'cli', 'src', 'bootstrap.ts'), 'export const x = 1\n')
+            writeFileSync(join(root, 'hub', 'src', 'startHub.ts'), 'export {}\n')
             writeFileSync(join(root, 'shared', 'src', 'index.ts'), 'export {}\n')
 
             const before = fingerprintArtifactInputs(root)
@@ -129,6 +132,54 @@ describe('fingerprintArtifactInputs / isArtifactCacheFresh', () => {
             const after = fingerprintArtifactInputs(root)
             expect(before).not.toBe(after)
             expect(before).toHaveLength(64)
+        } finally {
+            rmSync(root, { recursive: true, force: true })
+        }
+    })
+
+    it('changes when hub source changes at the same package version', () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-artifact-hub-fp-'))
+        try {
+            mkdirSync(join(root, 'cli', 'src'), { recursive: true })
+            mkdirSync(join(root, 'hub', 'src'), { recursive: true })
+            mkdirSync(join(root, 'shared', 'src'), { recursive: true })
+            writeFileSync(join(root, 'cli', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'hub', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'shared', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'cli', 'src', 'bootstrap.ts'), 'export const x = 1\n')
+            writeFileSync(join(root, 'hub', 'src', 'startHub.ts'), 'export const hub = 1\n')
+            writeFileSync(join(root, 'shared', 'src', 'index.ts'), 'export {}\n')
+
+            const before = fingerprintArtifactInputs(root)
+            writeFileSync(join(root, 'hub', 'src', 'startHub.ts'), 'export const hub = 2\n')
+            expect(fingerprintArtifactInputs(root)).not.toBe(before)
+        } finally {
+            rmSync(root, { recursive: true, force: true })
+        }
+    })
+
+    it('changes when an embedded tool asset is replaced', () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-artifact-tool-fp-'))
+        try {
+            mkdirSync(join(root, 'cli', 'src'), { recursive: true })
+            mkdirSync(join(root, 'cli', 'tools', 'archives'), { recursive: true })
+            mkdirSync(join(root, 'hub', 'src'), { recursive: true })
+            mkdirSync(join(root, 'shared', 'src'), { recursive: true })
+            writeFileSync(join(root, 'cli', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'hub', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'shared', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'cli', 'src', 'bootstrap.ts'), 'export const x = 1\n')
+            writeFileSync(join(root, 'hub', 'src', 'startHub.ts'), 'export {}\n')
+            writeFileSync(join(root, 'shared', 'src', 'index.ts'), 'export {}\n')
+            const archive = join(root, 'cli', 'tools', 'archives', 'ripgrep-x64-linux.tar.gz')
+            writeFileSync(archive, 'old-bytes')
+
+            const before = fingerprintArtifactInputs(root)
+            // Touch size so the tools size+mtime feed changes.
+            writeFileSync(archive, 'new-bytes-longer')
+            expect(fingerprintArtifactInputs(root)).not.toBe(before)
         } finally {
             rmSync(root, { recursive: true, force: true })
         }
