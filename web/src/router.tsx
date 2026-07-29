@@ -33,6 +33,9 @@ import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStat
 import { useSessions } from '@/hooks/queries/useSessions'
 import { useSlashCommands } from '@/hooks/queries/useSlashCommands'
 import { useSkills } from '@/hooks/queries/useSkills'
+import { getSessionTitle } from '@/lib/sessionTitle'
+import { buildSessionReferenceText, matchSessionsForMention } from '@/lib/sessionReference'
+import type { Suggestion } from '@/hooks/useActiveSuggestions'
 import { useSendMessage, type SendErrorInfo } from '@/hooks/mutations/useSendMessage'
 import type { ComposerSendError } from '@/components/AssistantChat/HappyComposer'
 import { ApiError } from '@/api/client'
@@ -57,6 +60,7 @@ import SettingsChatPage from '@/routes/settings/chat'
 import SettingsVoicePage from '@/routes/settings/voice'
 import SettingsVoiceVoicesPage from '@/routes/settings/voice-voices'
 import SettingsVoiceAdvancedPage from '@/routes/settings/voice-advanced'
+import SettingsMachinesPage from '@/routes/settings/machines'
 import SettingsAboutPage from '@/routes/settings/about'
 import SharePage from '@/routes/share'
 import { setSharePendingTransfer } from '@/lib/sharePendingState'
@@ -951,28 +955,76 @@ function SessionPage() {
     const {
         getSuggestions: getSkillSuggestions,
     } = useSkills(api, sessionId)
+    // Same list + search matcher as sidebar / share picker (tiann/hapi#1213).
+    const { sessions: allSessions } = useSessions(api)
+    const { machines: mentionMachines } = useMachines(api, true)
+    const mentionMachineLabelsById = useMachineLabels(mentionMachines)
+    // Same fallbacks as share picker / SessionList search.
+    const resolveMentionMachineLabel = useCallback((machineId: string | null) => {
+        if (machineId && mentionMachineLabelsById[machineId]) {
+            return mentionMachineLabelsById[machineId]
+        }
+        if (machineId) {
+            return machineId.slice(0, 8)
+        }
+        return t('machine.unknown')
+    }, [mentionMachineLabelsById, t])
 
     const getAutocompleteSuggestions = useCallback(async (query: string) => {
         if (query.startsWith('@')) {
-            if (agentType !== 'codex' || !api || !sessionId) return []
             const search = query.slice(1)
-            const response = await api.searchSessionFiles(sessionId, search, 50)
-            if (!response.success || !response.files) return []
-            return response.files.map((file) => {
-                const mentionText = `@"${file.fullPath.replace(/(["\\])/g, '\\$1')}"`
+            // v1: plain-text expansion (same grammar as Copy reference).
+            // v2: segmented rich composer with inline session tokens (#1215).
+            // Match via sessionMatchesQuery (share/sidebar); label/insert via getSessionTitle.
+            const sessionHits = matchSessionsForMention(allSessions, search, {
+                excludeId: sessionId,
+                limit: 20,
+                resolveMachineLabel: resolveMentionMachineLabel,
+            }).map((s) => {
+                const title = getSessionTitle(s)
+                const mentionText = buildSessionReferenceText(title, s.id)
+                const idPrefix = s.id.slice(0, 8)
                 return {
-                    key: mentionText,
+                    key: `session:${s.id}`,
                     text: mentionText,
-                    label: `@${file.fileName}`,
-                    description: file.filePath || file.fullPath
+                    label: `@${title || idPrefix}`,
+                    description: s.active
+                        ? `Session · ${idPrefix} · active`
+                        : `Session · ${idPrefix}`,
                 }
             })
+
+            const fileHits: Suggestion[] = []
+            if (agentType === 'codex' && api && sessionId) {
+                const response = await api.searchSessionFiles(sessionId, search, 50)
+                if (response.success && response.files) {
+                    for (const file of response.files) {
+                        const mentionText = `@"${file.fullPath.replace(/(["\\])/g, '\\$1')}"`
+                        fileHits.push({
+                            key: mentionText,
+                            text: mentionText,
+                            label: `@${file.fileName}`,
+                            description: file.filePath || file.fullPath,
+                        })
+                    }
+                }
+            }
+
+            return [...sessionHits, ...fileHits]
         }
         if (query.startsWith('$')) {
             return await getSkillSuggestions(query)
         }
         return await getSlashSuggestions(query)
-    }, [agentType, api, sessionId, getSkillSuggestions, getSlashSuggestions])
+    }, [
+        agentType,
+        api,
+        sessionId,
+        allSessions,
+        resolveMentionMachineLabel,
+        getSkillSuggestions,
+        getSlashSuggestions,
+    ])
 
     const refreshSelectedSession = useCallback(() => {
         void refetchSession()
@@ -1386,6 +1438,12 @@ const settingsVoiceAdvancedRoute = createRoute({
     component: SettingsVoiceAdvancedPage,
 })
 
+const settingsMachinesRoute = createRoute({
+    getParentRoute: () => settingsRoute,
+    path: 'machines',
+    component: SettingsMachinesPage,
+})
+
 const settingsAboutRoute = createRoute({
     getParentRoute: () => settingsRoute,
     path: 'about',
@@ -1431,6 +1489,7 @@ export const routeTree = rootRoute.addChildren([
         settingsVoiceRoute,
         settingsVoiceVoicesRoute,
         settingsVoiceAdvancedRoute,
+        settingsMachinesRoute,
         settingsAboutRoute,
     ]),
     shareRoute,

@@ -198,16 +198,19 @@ export function formatSubagentModelLabel(model: string): string {
  * the same "seenModels" pattern `aggregateResponseGroups`
  * (web/src/lib/assistant-runtime.ts) already uses for top-level multi-turn
  * message metadata, reused here rather than inventing a new convention — then
- * formats each for display and joins them.
+ * formats each for display and joins them. When a backend does not expose
+ * child messages, an explicit per-invocation model is still authoritative.
+ * The caller/session model is deliberately never used as a fallback.
  */
-export function getSubagentModel(children: ChatBlock[]): string | null {
+export function getSubagentModel(children: ChatBlock[], explicitModel?: string | null): string | null {
     const seenModels: string[] = []
     for (const child of children) {
         if ('model' in child && child.model && !seenModels.includes(child.model)) {
             seenModels.push(child.model)
         }
     }
-    return seenModels.length > 0 ? seenModels.map(formatSubagentModelLabel).join(', ') : null
+    if (seenModels.length > 0) return seenModels.map(formatSubagentModelLabel).join(', ')
+    return explicitModel ? formatSubagentModelLabel(explicitModel) : null
 }
 
 function getTaskSummaryChildren(block: ToolCallBlock): { visible: ToolCallBlock[]; remaining: number } | null {
@@ -420,7 +423,9 @@ function ToolCardInner(props: ToolCardProps) {
     const toolTitle = presentation.title
     const subtitle = presentation.subtitle ?? props.block.tool.description
     const taskSummary = renderTaskSummary(props.block, props.metadata, t)
-    const subagentModel = isSubagentToolName(toolName) ? getSubagentModel(props.block.children) : null
+    const subagentModel = isSubagentToolName(toolName)
+        ? getSubagentModel(props.block.children, getInputStringAny(props.block.tool.input, ['model']))
+        : null
     const isCodexAgentCard = toolName === 'CodexAgent'
     const useCompactTerminalCard = shouldUseCompactTerminalToolCard(toolName, props.terminalToolDisplayMode)
     const showInline = shouldShowInlineToolCardBody(toolName, presentation.minimal, props.terminalToolDisplayMode)
