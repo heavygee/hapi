@@ -49,7 +49,7 @@ Feature agents should **read the relevant doc below at session start**; meta bot
 | `scripts/tooling/install-gh-wrapper.sh` | Install `~/.local/bin/gh` wrapper — blocks fork-only diffs targeting `tiann/hapi` (#971 class) |
 | `scripts/tooling/hapi-meta-daily.sh` | **Daily Meta PR watcher entrypoint** — discover → classify → chip status cache → strip title emoji (chipped) → policy-ping → wave-clear unlock → action queue; optional chatty contribution-state events (`--emit-events`, default off; also `--dry-run`, `--no-ping`, `--json`) |
 | `scripts/tooling/lib/meta-wave.sh` | **Wave-clear helpers (gate A)** — owned 🔧 only; layer+worktree clean; 30m collect; defer on `hapi-driver-status` busy |
-| `scripts/tooling/install-hapi-meta-daily-timer.sh` | **Machine-local timers** (fork-only) — ping windows 07:30 / 15:00 / 20:00 UTC + quiet `--no-ping --emit-events` every 45m **24/7**; units in `scripts/tooling/systemd/hapi-meta-daily*` |
+| `scripts/tooling/install-hapi-meta-daily-timer.sh` | **Machine-local timers** (fork-only) — ping windows 07:30 / 15:00 / 20:00 **Europe/London** + quiet `--no-ping --emit-events` every 45m **24/7**; units in `scripts/tooling/systemd/hapi-meta-daily*` |
 | `scripts/tooling/hapi-pr-emoji-batch.sh` | Pure PR classifier → per-PR JSON (`--table`); shared engine |
 | `scripts/tooling/hapi-pr-session-emoji.sh` | **Removed stub** — exits 2, prints successor `hapi-meta-daily.sh [--pr N]` (ADR D8; no escape hatch) |
 | `scripts/tooling/lib/pr-emoji-core.sh` | Pure classify/title/ping-policy fns (unit-tested: `*.test.sh`) |

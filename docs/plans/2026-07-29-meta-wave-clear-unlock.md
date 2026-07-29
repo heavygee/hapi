@@ -15,12 +15,12 @@ Orphans (merged PR, no HAPI session) are **anomalies**, not a gate. They never b
 
 Meta daily CLI still does **not** run `hapi-driver-rebuild` itself (keeps the classifier small and fail-closed). The **Meta tooling HAPI session** (and any agent following soup rules) **may** rematerialize without waiting for operator approval - same as current lifecycle. This work only **schedules and unlocks** that bot with a clear brief.
 
-## Schedules (oos UTC)
+## Schedules (Europe/London wall clock)
 
 | Unit | Cadence | Behavior |
 |------|---------|----------|
 | `hapi-meta-daily-refresh.timer` | every 45m 24/7 | classify + chip cache + `--emit-events`; **`--no-ping`** |
-| `hapi-meta-daily.timer` | **07:30, 15:00, 20:00** | full Meta **with pings** (replace single 08:00 + random delay) |
+| `hapi-meta-daily.timer` | **07:30, 15:00, 20:00 Europe/London** | full Meta **with pings** (BST summer / GMT winter; host may stay UTC) |
 
 Replace `scripts/tooling/systemd/hapi-meta-daily.timer` with three `OnCalendar=` lines; drop long `RandomizedDelaySec` (optional short 2–3m max). Reinstall via `install-hapi-meta-daily-timer.sh`. Document in `docs/operator/AGENTS.md`.
 
@@ -105,7 +105,7 @@ Does not itself invoke `hapi-driver-rebuild` / edit manifest / archive. Unlock n
 
 ## Implementation todos
 
-1. Change `hapi-meta-daily.timer` to 07:30 / 15:00 / 20:00 UTC; update installer + AGENTS
+1. Change `hapi-meta-daily.timer` to 07:30 / 15:00 / 20:00 Europe/London; update installer + AGENTS
 2. Add pure wave-clear helpers + unit tests
 3. Extend `meta-daily.json` wave collect/ready/dispatched + 30m fuse
 4. Emit inbox events on quiet+ping runs; unlock ping Meta tooling only on ping runs

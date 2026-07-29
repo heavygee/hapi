@@ -4,12 +4,15 @@
 # Install machine-local systemd timers for the Meta PR watcher (fork tooling).
 # NOT part of Tier-1. NOT upstreamable. Safe to re-run.
 #
-# Schedules (host timezone — oos-linux is Etc/UTC):
-#   hapi-meta-daily.timer         — 07:30 / 15:00 / 20:00 + RandomizedDelaySec=3min
+# Schedules:
+#   hapi-meta-daily.timer         — 07:30 / 15:00 / 20:00 Europe/London
+#                                   (BST summer / GMT winter; host may stay UTC)
+#                                   + RandomizedDelaySec=3min
 #                                   (peer pings + wave-clear unlock)
 #   hapi-meta-daily-refresh.timer — every 45m 24/7 (--no-ping --emit-events)
 #                                   OnBootSec=3min then OnUnitActiveSec=45min
 #                                   so chips never hit the 2h stale mute (odd hours)
+#                                   (monotonic — not wall-clock / not London)
 #
 # Optional ~/.hapi/meta-daily.env:
 #   HAPI_META_TOOLING_SESSION_ID=<sid>   # wave-clear unlock ping target
