@@ -119,9 +119,59 @@ function listFilesRecursive(root: string): string[] {
  * change mtime with identical bytes and must not flap `targetGeneration`.
  * Skip `hub/src/web/embeddedAssets.generated.ts` — compile stubs it out via
  * `withStubEmbeddedAssets`, so web-only regenerations must not force a fleet upgrade.
+ * Skip downloaded `shared/tools/tunwg/tunwg-*` caches — pin changes live in
+ * `hub/src/upgrade/tunwgPin.ts`; hashing platform caches flaps generation across
+ * a mixed-platform fleet.
  */
 export function fingerprintArtifactInputs(monorepoRoot: string): string {
     const hash = createHash('sha256')
+    for (const file of listArtifactInputFiles(monorepoRoot)) {
+        const rel = relative(monorepoRoot, file).split('\\').join('/')
+        hash.update(rel)
+        hash.update('\0')
+        hash.update(readFileSync(file))
+        hash.update('\0')
+    }
+    return hash.digest('hex')
+}
+
+/**
+ * Cheap signature (path + size + mtime) for deciding whether the content
+ * fingerprint needs recomputation. Used so the 30s offer/heartbeat path does
+ * not re-read ~95MB of tool archives on every TTL miss when nothing changed.
+ */
+export function fingerprintArtifactInputStats(monorepoRoot: string): string {
+    const hash = createHash('sha256')
+    for (const file of listArtifactInputFiles(monorepoRoot)) {
+        const rel = relative(monorepoRoot, file).split('\\').join('/')
+        const st = statSync(file)
+        hash.update(rel)
+        hash.update('\0')
+        hash.update(`stat:${st.size}:${Math.trunc(st.mtimeMs)}`)
+        hash.update('\0')
+    }
+    return hash.digest('hex')
+}
+
+let cachedContentFingerprint: { signature: string; value: string } | null = null
+
+/** Content fingerprint with a stats-signature gate for hot offer resolution. */
+export function resolveArtifactSourceFingerprint(monorepoRoot: string): string {
+    const signature = fingerprintArtifactInputStats(monorepoRoot)
+    if (cachedContentFingerprint && cachedContentFingerprint.signature === signature) {
+        return cachedContentFingerprint.value
+    }
+    const value = fingerprintArtifactInputs(monorepoRoot)
+    cachedContentFingerprint = { signature, value }
+    return value
+}
+
+/** Test helper — drop the in-process content-fingerprint cache. */
+export function __resetArtifactFingerprintCacheForTests(): void {
+    cachedContentFingerprint = null
+}
+
+function listArtifactInputFiles(monorepoRoot: string): string[] {
     const treeRoots = [
         join(monorepoRoot, 'cli', 'src'),
         join(monorepoRoot, 'hub', 'src'),
@@ -140,17 +190,17 @@ export function fingerprintArtifactInputs(monorepoRoot: string): string {
         ...treeRoots.flatMap(listFilesRecursive),
         ...singles.filter((path) => existsSync(path)),
     ]
-    for (const file of [...new Set(files)].sort()) {
+    return [...new Set(files)].sort().filter((file) => {
         const rel = relative(monorepoRoot, file).split('\\').join('/')
         if (rel === 'hub/src/web/embeddedAssets.generated.ts') {
-            continue
+            return false
         }
-        hash.update(rel)
-        hash.update('\0')
-        hash.update(readFileSync(file))
-        hash.update('\0')
-    }
-    return hash.digest('hex')
+        // Platform-specific downloaded tunwg binaries — pin is in hub source.
+        if (rel.startsWith('shared/tools/tunwg/tunwg-')) {
+            return false
+        }
+        return true
+    })
 }
 
 export function isArtifactCacheFresh(
@@ -376,7 +426,7 @@ export async function ensureCliArtifact(options: {
         // does not cache a pre-download fingerprint and force a second compile.
         await ensureTunwgBinary(monorepo, options.platform, options.arch)
 
-        const sourceFingerprint = fingerprintArtifactInputs(monorepo)
+        const sourceFingerprint = resolveArtifactSourceFingerprint(monorepo)
         const cached = readArtifactMeta(options.version, options.platform, options.arch, options.dataDir)
         if (isArtifactCacheFresh(cached, sourceFingerprint)) {
             return cached!
