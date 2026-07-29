@@ -57,24 +57,31 @@ earlier rich-composer remat.
 - **Do not rebuild soup** until tooling/meta lands a fail-closed rebuild guard.
 - **Meta owns restore** of driver soup.
 
-**Feature-branch truth (still good):** `feat/session-header-machine-meta` @
-`e3eff74a3` only touches SessionHeader + locales + tests. Worktree
-`SessionList.tsx` still defines `getTodoProgress`. Keep that invariant.
+**Feature-branch tip (re-thinned):** `feat/session-header-machine-meta` @
+`3f4667c3f` on `upstream/main` — SessionHeader meta + `sessionRowHelpers`
+import (no inline SessionList helper defs).
 
-### Hard rules for next soup apply (after guard + restore)
+### Hard rules for next soup apply
 
-1. **Never merge the whole feature tip into driver** when ancestry is ahead of
-   soup base. That is how SessionList helpers die.
-2. **Apply SessionHeader (+ locale keys + header tests) only** — checkout those
-   paths from the feature branch, or cherry-pick a commit that touches nothing
-   else.
-3. **Never "resolve" SessionList merges by dropping local row helpers**
-   (`getTodoProgress`, attention/PR chips, LinkPrDialog wiring, etc.). If
-   SessionList conflicts, abort and re-apply without touching that file.
-4. No `hapi-driver-rebuild` / `hapi-driver-build-web` from this session until
-   meta's fail-closed guard exists and restore is done.
+1. Prefer remat (`upstream/main` + thin tip). **Do not tip-merge** onto an old
+   soup SHA when ancestry diverged (three-way SessionList rewrite).
+2. Tip must bind hot calls via `@/lib/sessionRowHelpers` (or equivalent import).
+3. **Never "resolve" SessionList merges by dropping row helpers.**
+4. Rebuild fails closed via `verify-sessionlist-bindings.mjs` (meta).
+
+### Task 3b: Re-thin after P0 restore (2026-07-29)
+
+Kitchen restored at driver `6dfd82aba` + shared helpers + bindings gate.
+
+Pushed tip:
+
+- `e3eff74a3` — SessionHeader machine + last-active
+- `3f4667c3f` — SessionList imports from `sessionRowHelpers`
+
+Bindings verify OK on worktree. **No remat from this peer** until Meta runs a
+clean rematerialize / greenlights.
 
 ### Task 4: Upstream PR (after clean dogfood)
 
 Open PR to `tiann/hapi` with `Fixes #1241`. Not before soup dogfood sign-off on
-a **non-skunked** tip.
+a **non-skunked** remat tip.
