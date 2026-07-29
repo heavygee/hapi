@@ -45,6 +45,12 @@ if [[ ! -d "$DRIVER/web" ]]; then
     exit 1
 fi
 
+BINDINGS="$PRIMARY/scripts/tooling/verify-sessionlist-bindings.mjs"
+if [[ -f "$BINDINGS" ]]; then
+    echo "Checking SessionList helper bindings (fail-closed)..."
+    "$BUN" run "$BINDINGS" "$DRIVER"
+fi
+
 echo "Building web only (no manifest merge) on $(git -C "$DRIVER" log -1 --oneline)..."
 build_web_atomic "$DRIVER"
 

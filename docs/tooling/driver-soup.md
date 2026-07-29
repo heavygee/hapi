@@ -328,6 +328,22 @@ Commenting out someone else's `- branch:` so `hapi-driver-rebuild` goes green **
 
 Parking your **own** layer briefly while you re-thin is fine. Parking a peer's layer is not.
 
+### SessionList hot-conflict — unbound helpers (2026-07-29, twice)
+
+`SessionList.tsx` is a soup hot file. Remat / feature merges onto the soup tip have **twice** deleted local helpers (`getTodoProgress`, icons, attention imports) while leaving call sites — dogfood dies with a full-page `getTodoProgress is not defined` error boundary.
+
+| Incident | Cause |
+|---|---|
+| Morning | rich-composer + awareness SessionList union |
+| Afternoon | `feat/session-header-machine-meta` (#1241) merge onto soup tip |
+
+**Rules:**
+
+1. **Do not** “resolve” SessionList conflicts by deleting helper defs. Prefer `web/src/lib/sessionRowHelpers.ts` (shared `getTodoProgress` / `getSessionTimeLabel`) so a SessionList-only merge cannot remove the only binding.
+2. **Rebuild fails closed:** `verify-sessionlist-bindings.mjs` runs from `hapi-driver-build-web`, `verify-soup-web-dist`, and `hapi-soup-hotfiles-check` — unbound `getTodoProgress(` / `getAttentionLabel(` / `getSessionTimeLabel(` → rebuild exits non-zero before dogfood eats it.
+3. Soup-heal `scripts/tooling/soup-heals/62-sessionlist-row-helpers.patch` re-applies the shared module + imports if a layer drops them again.
+4. After any SessionList soup merge: smoke `/sessions` past the error boundary (not only unit tests).
+
 ### Re-thin bases (2026-07-29 — awareness remat)
 
 Remat does **not** merge onto `origin/driver/integration`. It `reset --hard upstream/main`, then merges each manifest layer in order. A tip that `merge-tree`s clean vs yesterday’s published `driver/integration` can still explode (100+ files) against today’s intermediate.

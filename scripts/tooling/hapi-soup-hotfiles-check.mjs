@@ -7,8 +7,9 @@
  *
  * Usage: bun run hapi-soup-hotfiles-check.mjs [driver-dir]
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { spawnSync } from 'node:child_process'
 
 const driver = process.argv[2] ?? process.env.HAPI_DRIVER ?? join(process.env.HOME, 'coding/hapi/driver')
 
@@ -47,3 +48,12 @@ if (syncEngine.includes('listCodexSessionsForMachine')) {
 }
 
 console.log(`hapi-soup-hotfiles-check: OK (${calls.length} rpcGateway call site(s) checked)`)
+
+const bindings = join(
+    process.env.HAPI_PRIMARY ?? join(process.env.HOME, 'coding/hapi'),
+    'scripts/tooling/verify-sessionlist-bindings.mjs',
+)
+if (existsSync(bindings)) {
+    const r = spawnSync('bun', ['run', bindings, driver], { stdio: 'inherit' })
+    if (r.status !== 0) process.exit(r.status ?? 1)
+}
