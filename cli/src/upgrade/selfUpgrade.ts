@@ -9,6 +9,7 @@ import type {
     HubUpgradeOffer,
     RunnerSelfUpgradeResponse,
 } from '@hapi/protocol/upgradeChannel'
+import { compareHapiVersions } from '@hapi/protocol/upgradeChannel'
 import { CURRENT_MACHINE_CAPABILITIES } from '@hapi/protocol/runnerCapabilities'
 import packageJson from '../../package.json'
 import { logger } from '@/ui/logger'
@@ -55,10 +56,17 @@ export function shouldApplyUpgradeOffer(
         && typeof offer.targetGeneration === 'string'
         && offer.targetGeneration.length > 0
         && offer.targetGeneration !== (localGeneration ?? '')
+    const versionRelation = compareHapiVersions(localVersion, offer.targetVersion)
+    // Never downgrade a newer runner to an older hub offer.
+    if (versionRelation !== null && versionRelation > 0) {
+        return { apply: false, reason: 'unsupported' }
+    }
+    const versionMatches = versionRelation === 0
+        || (versionRelation === null && localVersion === offer.targetVersion)
     // Fleet upgrade is capability-driven: same semver with missing target
     // capabilities (or a new hub-artifact generation) must still apply.
     if (
-        localVersion === offer.targetVersion
+        versionMatches
         && hasTargetCapabilities(offer, localCapabilities)
         && !generationDrift
     ) {

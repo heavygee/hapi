@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'bun:test'
-import { detectUpgradeChannel, machineTrailsUpgradeOffer, type HubUpgradeOffer } from './upgradeChannel'
+import { detectUpgradeChannel, machineTrailsUpgradeOffer, compareHapiVersions, type HubUpgradeOffer } from './upgradeChannel'
+
+describe('compareHapiVersions', () => {
+    it('orders major.minor.patch and returns null for junk', () => {
+        expect(compareHapiVersions('0.23.1', '0.24.0')).toBe(-1)
+        expect(compareHapiVersions('0.25.0', '0.24.0')).toBe(1)
+        expect(compareHapiVersions('0.24.0', '0.24.0')).toBe(0)
+        expect(compareHapiVersions('not-a-version', '0.24.0')).toBeNull()
+    })
+})
 
 describe('detectUpgradeChannel', () => {
     it('honors explicit override', () => {
@@ -74,6 +83,10 @@ describe('machineTrailsUpgradeOffer', () => {
 
     it('trails on pure semver drift even with all target capabilities', () => {
         expect(machineTrailsUpgradeOffer(offer, '0.23.1', ['cursor-chat-store-status', 'runner-self-upgrade'])).toBe(true)
+    })
+
+    it('does not trail when the runner is ahead of the hub offer', () => {
+        expect(machineTrailsUpgradeOffer(offer, '0.25.0', ['cursor-chat-store-status', 'runner-self-upgrade'])).toBe(false)
     })
 
     it('trails on a missing target capability even at the target version', () => {
