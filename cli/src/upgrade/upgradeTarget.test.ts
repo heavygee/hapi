@@ -59,6 +59,33 @@ describe('upgradeTarget', () => {
         expect(existsSync(`${upgradeTargetMarkerPath()}.${process.pid}.tmp`)).toBe(false)
     })
 
+    it('restores the previous marker when the Windows unlink+rename retry fails', () => {
+        const oldPath = join(home, 'hapi-old-gen')
+        const newPath = join(home, 'hapi-new-gen')
+        writeFileSync(oldPath, 'old')
+        writeFileSync(newPath, 'new')
+        writeUpgradeTarget({ path: oldPath, targetVersion: '0.1.0', targetGeneration: 'gen-old' })
+
+        let calls = 0
+        expect(() => writeUpgradeTarget(
+            { path: newPath, targetVersion: '0.2.0', targetGeneration: 'gen-new' },
+            {
+                platform: 'win32',
+                renameSync: () => {
+                    calls += 1
+                    throw Object.assign(new Error('EPERM: rename'), { code: 'EPERM' })
+                },
+            },
+        )).toThrow(/EPERM/)
+
+        expect(calls).toBe(2) // initial rename + post-unlink retry
+        expect(readUpgradeTarget()).toMatchObject({
+            path: oldPath,
+            targetVersion: '0.1.0',
+            targetGeneration: 'gen-old',
+        })
+    })
+
     it('reads legacy plain-path markers', () => {
         const path = join(home, 'hapi-legacy')
         writeFileSync(path, 'x')

@@ -18,7 +18,7 @@ import {
     reacquireRunnerLockAfterFailedHandoff,
     releaseRunnerLockForHandoff,
 } from '@/runner/handoffLock'
-import { readRunnerState, writeRunnerState } from '@/persistence'
+import { readRunnerState, writeRunnerState, type RunnerLocallyPersistedState } from '@/persistence'
 import { buildHubRequestHeaders } from '@/api/hubExtraHeaders'
 import { writeUpgradeTarget, readUpgradeTarget } from '@/upgrade/upgradeTarget'
 
@@ -453,6 +453,35 @@ export function __setRunnerSelfUpgradeInFlightForTests(value: boolean): void {
     runnerSelfUpgradeInFlight = value
 }
 
+/**
+ * After a failed handoff the child may have overwritten runner.state.json.
+ * Restore the parent's full snapshot (port, hubReadyAt, mtime, argv, …) so
+ * local control and version guards do not follow the dead child's values.
+ */
+export function mergeParentRunnerStateForReclaim(
+    parentState: RunnerLocallyPersistedState,
+    opts: { pid: number; lastHeartbeat: string },
+): RunnerLocallyPersistedState {
+    return {
+        ...parentState,
+        pid: opts.pid,
+        lastHeartbeat: opts.lastHeartbeat,
+    }
+}
+
+export function restoreParentRunnerStateAfterFailedHandoff(
+    parentState: RunnerLocallyPersistedState | null | undefined,
+    opts: { pid?: number; lastHeartbeat?: string } = {},
+): void {
+    if (!parentState) {
+        return
+    }
+    writeRunnerState(mergeParentRunnerStateForReclaim(parentState, {
+        pid: opts.pid ?? process.pid,
+        lastHeartbeat: opts.lastHeartbeat ?? new Date().toISOString(),
+    }))
+}
+
 async function applyRunnerSelfUpgradeUnlocked(options: {
     offer: HubUpgradeOffer
     downloadBaseUrl: string
@@ -499,6 +528,10 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
             }
         }
 
+        // Capture before spawn: the child may overwrite runner.state.json, and a
+        // failed handoff must restore THIS process's identity — not the child's.
+        const parentState = await readRunnerState()
+
         // Spawn replacement, release the runner lock so the child can register,
         // then wait for handoff before shutting down. Mirrors run.ts mtime handoff
         // so a failed child does not leave the machine offline after a "started" RPC.
@@ -527,14 +560,7 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
                 }
             }
             try {
-                const state = await readRunnerState()
-                if (state && state.pid !== process.pid) {
-                    writeRunnerState({
-                        ...state,
-                        pid: process.pid,
-                        lastHeartbeat: new Date().toISOString(),
-                    })
-                }
+                restoreParentRunnerStateAfterFailedHandoff(parentState)
             } catch (error) {
                 logger.debug('[SELF-UPGRADE] Failed to reclaim runner.state.json after failed handoff', error)
             }
