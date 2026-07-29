@@ -32,6 +32,7 @@ export function machineNeedsUpdateLabel(
         offer,
         machine.metadata?.happyCliVersion,
         machine.metadata?.capabilities,
+        machine.metadata?.cliArtifactGeneration,
     )
 }
 

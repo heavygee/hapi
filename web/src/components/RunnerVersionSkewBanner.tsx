@@ -51,7 +51,12 @@ export function listSkewedMachines(machines: Machine[], offer: HubUpgradeOffer |
     // Restart remains visible as the escape hatch. Upgrade is disabled per-row.
     return machines.filter((machine) => (
         machine.active
-        && machineTrailsUpgradeOffer(offer, machine.metadata?.happyCliVersion, machine.metadata?.capabilities)
+        && machineTrailsUpgradeOffer(
+            offer,
+            machine.metadata?.happyCliVersion,
+            machine.metadata?.capabilities,
+            machine.metadata?.cliArtifactGeneration,
+        )
     ))
 }
 

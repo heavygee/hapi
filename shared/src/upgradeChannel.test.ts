@@ -98,4 +98,32 @@ describe('machineTrailsUpgradeOffer', () => {
         expect(machineTrailsUpgradeOffer(offer, null, ['cursor-chat-store-status', 'runner-self-upgrade'])).toBe(false)
         expect(machineTrailsUpgradeOffer(offer, undefined, ['cursor-chat-store-status'])).toBe(true)
     })
+
+    it('trails on hub-artifact generation drift at the same version', () => {
+        const artifactOffer: HubUpgradeOffer = {
+            channel: 'hub-artifact',
+            targetVersion: '0.24.0',
+            targetCapabilities: ['cursor-chat-store-status', 'runner-self-upgrade'],
+            targetGeneration: 'gen-b',
+            artifact: {
+                url: '/cli/upgrade/cli-artifact',
+                sha256: 'abc',
+                platform: 'linux',
+                arch: 'x64',
+                sizeBytes: 1,
+            },
+        }
+        expect(machineTrailsUpgradeOffer(
+            artifactOffer,
+            '0.24.0',
+            ['cursor-chat-store-status', 'runner-self-upgrade'],
+            'gen-a',
+        )).toBe(true)
+        expect(machineTrailsUpgradeOffer(
+            artifactOffer,
+            '0.24.0',
+            ['cursor-chat-store-status', 'runner-self-upgrade'],
+            'gen-b',
+        )).toBe(false)
+    })
 })
