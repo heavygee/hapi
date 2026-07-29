@@ -308,14 +308,6 @@ export async function applyRunnerSelfUpgrade(options: {
             }
         }
 
-        // Persist durable marker for both npm and hub-artifact so a later
-        // supervisor restart does not re-delegate to a stale prior artifact.
-        writeUpgradeTarget({
-            path: installedExecutable,
-            targetVersion: options.offer.targetVersion,
-            targetCapabilities: [...options.offer.targetCapabilities],
-        })
-
         // Spawn replacement, release the runner lock so the child can register,
         // then wait for handoff before shutting down. Mirrors run.ts mtime handoff
         // so a failed child does not leave the machine offline after a "started" RPC.
@@ -325,6 +317,8 @@ export async function applyRunnerSelfUpgrade(options: {
         if (!handoffOk) {
             // Mirror run.ts mtime handoff: never stay alive without the lock.
             // Child may have written runner.state.json then died — reclaim PID.
+            // Do NOT rewrite the durable marker — a failed target must not become
+            // the next supervisor restart's entrypoint.
             const reacquired = await reacquireRunnerLockAfterFailedHandoff()
             if (!reacquired) {
                 logger.debug('[SELF-UPGRADE] Could not re-acquire runner lock after failed handoff; exiting cleanly')
@@ -360,6 +354,13 @@ export async function applyRunnerSelfUpgrade(options: {
                 channel: options.offer.channel,
             }
         }
+
+        // Handoff confirmed — only then make the target durable for supervisor restarts.
+        writeUpgradeTarget({
+            path: installedExecutable,
+            targetVersion: options.offer.targetVersion,
+            targetCapabilities: [...options.offer.targetCapabilities],
+        })
 
         // Handoff confirmed. Exit WITHOUT requestShutdown/cleanupRunnerState —
         // those would delete the child's runner.state.json and lock. Matches the
