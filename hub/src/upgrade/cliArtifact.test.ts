@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -121,6 +121,30 @@ describe('withStubEmbeddedAssets', () => {
             })).rejects.toThrow('compile boom')
 
             expect(readFileSync(manifest, 'utf8')).toBe(original)
+        } finally {
+            rmSync(root, { recursive: true, force: true })
+        }
+    })
+
+    it('keeps the backup when restore fails so the original is not destroyed', async () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-stub-assets-bak-'))
+        try {
+            const webDir = join(root, 'hub', 'src', 'web')
+            mkdirSync(webDir, { recursive: true })
+            const manifest = join(webDir, 'embeddedAssets.generated.ts')
+            const original = 'export const embeddedAssets = [{ path: "real.js" }];\n'
+            writeFileSync(manifest, original)
+
+            await withStubEmbeddedAssets(root, async () => 'ok', {
+                restoreFromBackup: () => {
+                    throw new Error('EPERM: restore failed')
+                },
+            })
+
+            expect(readFileSync(manifest, 'utf8')).toContain('intentionally contains no embedded assets')
+            const backups = readdirSync(webDir).filter((name) => name.includes('.bak'))
+            expect(backups).toHaveLength(1)
+            expect(readFileSync(join(webDir, backups[0]!), 'utf8')).toBe(original)
         } finally {
             rmSync(root, { recursive: true, force: true })
         }
