@@ -659,6 +659,39 @@ export class ApiMachineClient {
         })
     }
 
+    /**
+     * Create the socket and resolve only after the first successful `connect`
+     * event (after onSocketConnect / RPC registration). Used by upgrade/mtime
+     * handoff so hubReadyAt is not written for a half-connected child.
+     */
+    connectUntilReady(timeoutMs = 30_000): Promise<void> {
+        return new Promise((resolve, reject) => {
+            this.connect()
+            if (!this.socket) {
+                reject(new Error('Machine socket was not created'))
+                return
+            }
+            const timer = setTimeout(() => {
+                this.socket?.off('connect', onConnect)
+                this.socket?.off('connect_error', onError)
+                reject(new Error(`Machine socket connect timed out after ${timeoutMs}ms`))
+            }, timeoutMs)
+            const onConnect = (): void => {
+                clearTimeout(timer)
+                this.socket?.off('connect_error', onError)
+                resolve()
+            }
+            const onError = (error: Error): void => {
+                clearTimeout(timer)
+                this.socket?.off('connect', onConnect)
+                reject(error)
+            }
+            // Registered after connect()'s own handlers so onSocketConnect runs first.
+            this.socket.once('connect', onConnect)
+            this.socket.once('connect_error', onError)
+        })
+    }
+
     private startKeepAlive(): void {
         this.stopKeepAlive()
         const emitAlive = () => {
