@@ -305,8 +305,14 @@ export function withStubEmbeddedAssets<T>(
                 unlinkSync(manifestPath)
                 restored = true
             }
-        } catch {
-            // Leave backup on disk for the next build / operator recovery.
+        } catch (error) {
+            // Keep .bak; fail the build so we never hash/serve artifacts while the
+            // live tree still holds the empty stub (and so the stub is not treated
+            // as the next "original").
+            throw new Error(
+                `Failed to restore embedded asset manifest; backup kept at ${backupPath}`,
+                { cause: error },
+            )
         }
         if (restored) {
             try {
