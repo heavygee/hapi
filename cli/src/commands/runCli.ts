@@ -4,9 +4,29 @@ import { logger } from '@/ui/logger'
 import { getCliArgs } from '@/utils/cliArgs'
 import { ensureLoopbackProxyBypass } from '@/utils/proxyEnv'
 import { resolveCommand } from './registry'
+import {
+    readUpgradeTarget,
+    shouldDelegateToUpgradeTarget,
+} from '@/upgrade/upgradeTarget'
+import { spawnSync } from 'node:child_process'
 
 export async function runCli(): Promise<void> {
     ensureLoopbackProxyBypass()
+
+    // Supervised hosts (systemd Restart=always) relaunch the old ExecStart after
+    // a hub-artifact handoff. Re-exec into the durable upgrade target first.
+    const upgradeTarget = readUpgradeTarget()
+    if (upgradeTarget && shouldDelegateToUpgradeTarget(upgradeTarget)) {
+        const args = getCliArgs()
+        const result = spawnSync(upgradeTarget.path, args, {
+            stdio: 'inherit',
+            env: {
+                ...process.env,
+                HAPI_CLI_EXECUTABLE: upgradeTarget.path,
+            },
+        })
+        process.exit(result.status ?? 1)
+    }
 
     const args = getCliArgs()
 
