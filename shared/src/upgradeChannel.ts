@@ -83,6 +83,36 @@ export type HubUpgradeOffer = {
     }
 }
 
+/**
+ * Compare HAPI package versions as major.minor.patch.
+ * Returns -1 / 0 / 1, or null when either side is not a usable numeric semver.
+ */
+export function compareHapiVersions(left: string, right: string): number | null {
+    const parse = (raw: string): [number, number, number] | null => {
+        const cleaned = raw.trim().replace(/^v/i, '')
+        const core = cleaned.split(/[-+]/, 1)[0] ?? ''
+        const parts = core.split('.').map((part) => Number(part))
+        if (parts.length === 0 || parts.some((n) => !Number.isFinite(n))) {
+            return null
+        }
+        return [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0]
+    }
+    const a = parse(left)
+    const b = parse(right)
+    if (!a || !b) {
+        return null
+    }
+    for (let i = 0; i < 3; i++) {
+        if (a[i]! < b[i]!) {
+            return -1
+        }
+        if (a[i]! > b[i]!) {
+            return 1
+        }
+    }
+    return 0
+}
+
 export type MachineTrailsOptions = {
     /**
      * Soup / systemd hosts with `versionHandoffDisabled` never write an
@@ -121,15 +151,19 @@ export function machineTrailsUpgradeOffer(
     }
     const advertised = new Set(capabilities ?? [])
     const missingCapability = offer.targetCapabilities.some((cap) => !advertised.has(cap))
-    const versionDrift = typeof version === 'string'
+    // Only "behind" counts — a newer runner must not be force-downgraded.
+    const versionBehind = typeof version === 'string'
         && version.length > 0
-        && version !== offer.targetVersion
+        && (() => {
+            const relation = compareHapiVersions(version, offer.targetVersion)
+            return relation !== null && relation < 0
+        })()
     const generationDrift = !options?.ignoreGenerationDrift
         && offer.channel === 'hub-artifact'
         && typeof offer.targetGeneration === 'string'
         && offer.targetGeneration.length > 0
         && offer.targetGeneration !== (generation ?? '')
-    return missingCapability || versionDrift || generationDrift
+    return missingCapability || versionBehind || generationDrift
 }
 
 /**
