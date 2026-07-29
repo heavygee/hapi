@@ -1154,6 +1154,13 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
 
     // Connect to server
     apiMachine.connect();
+    // Signal hub readiness only after registration + RPC handlers + connect.
+    // Parent waitForRunnerHandoff requires hubReadyAt so a child that dies
+    // between the initial writeRunnerState and here cannot become durable.
+    writeRunnerState({
+      ...fileState,
+      hubReadyAt: Date.now(),
+    });
     scheduleCursorModelsPrewarm();
 
     // Visible startup banner. Use console.log so it always appears on stdout,
