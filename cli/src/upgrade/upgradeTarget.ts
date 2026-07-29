@@ -21,6 +21,11 @@ export type UpgradeTarget = {
     updatedAt: number
 }
 
+/** True for systemd / fleet handoff entrypoints only (not hub/doctor/agent). */
+export function isRunnerStartCliArgs(args: readonly string[]): boolean {
+    return args[0] === 'runner' && (args[1] === 'start' || args[1] === 'start-sync')
+}
+
 export function upgradeTargetMarkerPath(): string {
     const base = markerBaseDirOverride
         ?? configuration.happyHomeDir

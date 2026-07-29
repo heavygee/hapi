@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
     __setUpgradeTargetBaseDirForTests,
+    isRunnerStartCliArgs,
     readUpgradeTarget,
     shouldDelegateToUpgradeTarget,
     writeUpgradeTarget,
@@ -76,5 +77,16 @@ describe('upgradeTarget', () => {
                 process.env.HAPI_CLI_EXECUTABLE = previous
             }
         }
+    })
+})
+
+describe('isRunnerStartCliArgs', () => {
+    it('matches only runner start / start-sync (not hub or other commands)', () => {
+        expect(isRunnerStartCliArgs(['runner', 'start-sync'])).toBe(true)
+        expect(isRunnerStartCliArgs(['runner', 'start'])).toBe(true)
+        expect(isRunnerStartCliArgs(['runner', 'stop'])).toBe(false)
+        expect(isRunnerStartCliArgs(['hub'])).toBe(false)
+        expect(isRunnerStartCliArgs(['doctor'])).toBe(false)
+        expect(isRunnerStartCliArgs([])).toBe(false)
     })
 })
