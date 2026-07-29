@@ -66,8 +66,8 @@ export async function runCli(): Promise<void> {
                 // child may already be gone
             }
         }
-        process.once('SIGTERM', forward)
-        process.once('SIGINT', forward)
+        process.on('SIGTERM', forward)
+        process.on('SIGINT', forward)
         try {
             const code = await waitForDelegatedRunner(child)
             process.exit(code)

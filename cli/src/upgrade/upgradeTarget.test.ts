@@ -44,6 +44,21 @@ describe('upgradeTarget', () => {
         })
     })
 
+    it('atomically replaces an existing marker via temp+rename', () => {
+        const first = join(home, 'hapi-old')
+        const second = join(home, 'hapi-new')
+        writeFileSync(first, 'a')
+        writeFileSync(second, 'b')
+        writeUpgradeTarget({ path: first, targetVersion: '0.1.0' })
+        writeUpgradeTarget({ path: second, targetVersion: '0.2.0', targetGeneration: 'gen-2' })
+        expect(readUpgradeTarget()).toMatchObject({
+            path: second,
+            targetVersion: '0.2.0',
+            targetGeneration: 'gen-2',
+        })
+        expect(existsSync(`${upgradeTargetMarkerPath()}.${process.pid}.tmp`)).toBe(false)
+    })
+
     it('reads legacy plain-path markers', () => {
         const path = join(home, 'hapi-legacy')
         writeFileSync(path, 'x')

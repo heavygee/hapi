@@ -199,16 +199,25 @@ export function bunCompileTarget(platform: string, arch: string): string {
  * extension. Prefer an explicit `.exe` outfile, then normalize back to the
  * extensionless artifact path we serve (download bytes don't care about
  * the hub-side filename; Windows runners rename on install).
+ *
+ * Same-version rebuilds: always prefer a freshly compiled `.exe` over a
+ * stale extensionless `outPath` left from a previous build — otherwise the
+ * hub hashes OLD bytes under the NEW sourceFingerprint and silently ships
+ * the previous generation to Windows runners.
  */
 export function normalizeCompiledArtifactPath(outPath: string, platform: string): string {
     if (platform !== 'win32') {
         return outPath
     }
     const withExe = `${outPath}.exe`
-    if (existsSync(outPath)) {
-        return outPath
-    }
     if (existsSync(withExe)) {
+        try {
+            if (existsSync(outPath)) {
+                unlinkSync(outPath)
+            }
+        } catch {
+            // best-effort; rename may still replace on Unix-like FS layers
+        }
         renameSync(withExe, outPath)
         return outPath
     }
@@ -365,6 +374,19 @@ export async function ensureCliArtifact(options: {
         const outPath = join(dir, artifactFileName(options.version, options.platform, options.arch))
         // Explicit .exe so Bun doesn't surprise us with an auto-suffix we then miss.
         const compileOut = options.platform === 'win32' ? `${outPath}.exe` : outPath
+        // Drop stale win32 outputs before compile so a same-version rebuild cannot
+        // leave normalize choosing yesterday's extensionless bytes over a fresh .exe.
+        if (options.platform === 'win32') {
+            for (const stale of [outPath, compileOut]) {
+                try {
+                    if (existsSync(stale)) {
+                        unlinkSync(stale)
+                    }
+                } catch {
+                    // best-effort; normalize still prefers .exe when both exist
+                }
+            }
+        }
         const feature = featureFlagFor(options.platform, options.arch)
 
         await withStubEmbeddedAssets(monorepo, async () => {

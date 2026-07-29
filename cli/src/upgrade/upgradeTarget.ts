@@ -7,7 +7,7 @@
  * binary so the handoff survives supervisor restarts.
  */
 
-import { existsSync, readFileSync, realpathSync, writeFileSync, mkdirSync, unlinkSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync, writeFileSync, mkdirSync, unlinkSync, renameSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { configuration } from '@/configuration'
@@ -51,7 +51,26 @@ export function writeUpgradeTarget(target: Omit<UpgradeTarget, 'updatedAt'> & { 
         targetGeneration: target.targetGeneration,
         updatedAt: target.updatedAt ?? Date.now(),
     }
-    writeFileSync(marker, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
+    // Temp + rename so a crash mid-write cannot leave a half-parsed marker that
+    // would bounce Restart=always into a broken entrypoint.
+    const tmp = `${marker}.${process.pid}.tmp`
+    writeFileSync(tmp, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
+    try {
+        renameSync(tmp, marker)
+    } catch (error) {
+        // Windows often refuses rename-over-existing; unlink then retry.
+        if (process.platform === 'win32' && existsSync(marker)) {
+            unlinkSync(marker)
+            renameSync(tmp, marker)
+            return
+        }
+        try {
+            unlinkSync(tmp)
+        } catch {
+            // best-effort
+        }
+        throw error
+    }
 }
 
 /** Remove a durable target that can no longer be spawned (avoids Restart=always loops). */
