@@ -41,7 +41,13 @@ export function __setUpgradeTargetBaseDirForTests(dir: string | null): void {
     markerBaseDirOverride = dir
 }
 
-export function writeUpgradeTarget(target: Omit<UpgradeTarget, 'updatedAt'> & { updatedAt?: number }): void {
+export function writeUpgradeTarget(
+    target: Omit<UpgradeTarget, 'updatedAt'> & { updatedAt?: number },
+    deps: {
+        platform?: NodeJS.Platform
+        renameSync?: (from: string, to: string) => void
+    } = {},
+): void {
     const marker = upgradeTargetMarkerPath()
     mkdirSync(dirname(marker), { recursive: true })
     const payload: UpgradeTarget = {
@@ -54,15 +60,41 @@ export function writeUpgradeTarget(target: Omit<UpgradeTarget, 'updatedAt'> & { 
     // Temp + rename so a crash mid-write cannot leave a half-parsed marker that
     // would bounce Restart=always into a broken entrypoint.
     const tmp = `${marker}.${process.pid}.tmp`
+    const rename = deps.renameSync ?? renameSync
+    const platform = deps.platform ?? process.platform
     writeFileSync(tmp, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
     try {
-        renameSync(tmp, marker)
+        rename(tmp, marker)
     } catch (error) {
         // Windows often refuses rename-over-existing; unlink then retry.
-        if (process.platform === 'win32' && existsSync(marker)) {
+        // Preserve prior marker bytes so a failed retry does not strand Restart=always
+        // without a bootable durable target (and so prune-gating still has meaning).
+        if (platform === 'win32' && existsSync(marker)) {
+            let previous: Buffer | null = null
+            try {
+                previous = readFileSync(marker)
+            } catch {
+                previous = null
+            }
             unlinkSync(marker)
-            renameSync(tmp, marker)
-            return
+            try {
+                rename(tmp, marker)
+                return
+            } catch (replaceError) {
+                if (previous) {
+                    try {
+                        writeFileSync(marker, previous)
+                    } catch {
+                        // best-effort restore
+                    }
+                }
+                try {
+                    unlinkSync(tmp)
+                } catch {
+                    // best-effort
+                }
+                throw replaceError
+            }
         }
         try {
             unlinkSync(tmp)
