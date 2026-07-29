@@ -114,6 +114,11 @@ function listFilesRecursive(root: string): string[] {
  *
  * Scope matches what `bun build --compile cli/src/bootstrap.ts` actually pulls:
  * CLI + shared + hub (command registry / startHub) + embedded tool assets.
+ *
+ * Content-addressed (not size+mtime): clean checkouts and pinned-tool re-downloads
+ * change mtime with identical bytes and must not flap `targetGeneration`.
+ * Skip `hub/src/web/embeddedAssets.generated.ts` — compile stubs it out via
+ * `withStubEmbeddedAssets`, so web-only regenerations must not force a fleet upgrade.
  */
 export function fingerprintArtifactInputs(monorepoRoot: string): string {
     const hash = createHash('sha256')
@@ -137,16 +142,12 @@ export function fingerprintArtifactInputs(monorepoRoot: string): string {
     ]
     for (const file of [...new Set(files)].sort()) {
         const rel = relative(monorepoRoot, file).split('\\').join('/')
+        if (rel === 'hub/src/web/embeddedAssets.generated.ts') {
+            continue
+        }
         hash.update(rel)
         hash.update('\0')
-        const st = statSync(file)
-        // Tool archives/binaries are multi-MB; size+mtime catches replacements
-        // without re-reading them on every fleet-upgrade heartbeat.
-        if (rel.split('/').includes('tools')) {
-            hash.update(`stat:${st.size}:${Math.trunc(st.mtimeMs)}`)
-        } else {
-            hash.update(readFileSync(file))
-        }
+        hash.update(readFileSync(file))
         hash.update('\0')
     }
     return hash.digest('hex')
