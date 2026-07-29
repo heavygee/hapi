@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import {
     artifactFileName,
     bunCompileTarget,
+    fingerprintArtifactInputStats,
     fingerprintArtifactInputs,
     isArtifactCacheFresh,
     normalizeCompiledArtifactPath,
@@ -267,6 +268,37 @@ describe('fingerprintArtifactInputs / isArtifactCacheFresh', () => {
             const before = fingerprintArtifactInputs(root)
             writeFileSync(manifest, 'export const embeddedAssets = [{ path: "b.js" }];\n')
             expect(fingerprintArtifactInputs(root)).toBe(before)
+        } finally {
+            rmSync(root, { recursive: true, force: true })
+        }
+    })
+
+    it('ignores withStubEmbeddedAssets fleet-upgrade .bak files in hub/src/web', () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-artifact-bak-fp-'))
+        try {
+            mkdirSync(join(root, 'cli', 'src'), { recursive: true })
+            mkdirSync(join(root, 'hub', 'src', 'web'), { recursive: true })
+            mkdirSync(join(root, 'shared', 'src'), { recursive: true })
+            writeFileSync(join(root, 'cli', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'hub', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'shared', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'cli', 'src', 'bootstrap.ts'), 'export const x = 1\n')
+            writeFileSync(join(root, 'hub', 'src', 'startHub.ts'), 'export {}\n')
+            writeFileSync(join(root, 'shared', 'src', 'index.ts'), 'export {}\n')
+            writeFileSync(
+                join(root, 'hub', 'src', 'web', 'embeddedAssets.generated.ts'),
+                'export const embeddedAssets = [{ path: "a.js" }];\n',
+            )
+
+            const beforeContent = fingerprintArtifactInputs(root)
+            const beforeStats = fingerprintArtifactInputStats(root)
+            writeFileSync(
+                join(root, 'hub', 'src', 'web', 'embeddedAssets.generated.ts.fleet-upgrade.1.2.abc.bak'),
+                'export const embeddedAssets = [{ path: "stale.js" }];\n',
+            )
+            expect(fingerprintArtifactInputs(root)).toBe(beforeContent)
+            expect(fingerprintArtifactInputStats(root)).toBe(beforeStats)
         } finally {
             rmSync(root, { recursive: true, force: true })
         }

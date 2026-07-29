@@ -192,7 +192,10 @@ function listArtifactInputFiles(monorepoRoot: string): string[] {
     ]
     return [...new Set(files)].sort().filter((file) => {
         const rel = relative(monorepoRoot, file).split('\\').join('/')
-        if (rel === 'hub/src/web/embeddedAssets.generated.ts') {
+        if (
+            rel === 'hub/src/web/embeddedAssets.generated.ts'
+            || /^hub\/src\/web\/embeddedAssets\.generated\.ts\.fleet-upgrade\..+\.bak$/.test(rel)
+        ) {
             return false
         }
         // Platform-specific downloaded tunwg binaries — pin is in hub source.
