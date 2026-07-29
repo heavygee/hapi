@@ -6,7 +6,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 /** Immutable release — bump deliberately with matching digests. */
@@ -89,8 +89,13 @@ export async function ensurePinnedTunwgBinary(options: {
     }
     const destPath = join(options.toolsDir, pin.filename)
     if (existsSync(destPath)) {
-        assertTunwgDigest(destPath, pin.sha256)
-        return destPath
+        try {
+            assertTunwgDigest(destPath, pin.sha256)
+            return destPath
+        } catch {
+            // Gitignored cache can hold older release bytes; replace with the pin.
+            unlinkSync(destPath)
+        }
     }
     await downloadPinned(releaseDownloadUrl(pin.asset), destPath, pin.sha256)
     if (!options.platformKey.includes('win32')) {
