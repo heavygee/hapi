@@ -578,3 +578,9 @@ layers:
   # Tip e191f101c — upstream-simple playwright + testIgnore only (reverted fork absorb). Soup dogfood still on remat b0cc07853.
   # Kill-switch only: richMentions=0. Drop when #1215 merges.
   - branch: feat/session-mention-rich-composer
+
+  # tiann/hapi#1241 — session detail header shows machine label + relative
+  # last-active age (complements list machine filter chips). Web-only.
+  # Worktree: ~/coding/hapi/worktrees/session-header-machine
+  # @ feat/session-header-machine-meta. Drop when #1241 merges upstream.
+  - branch: feat/session-header-machine-meta
