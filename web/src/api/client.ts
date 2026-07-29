@@ -268,16 +268,23 @@ export class ApiClient {
         })
     }
 
-    async getClaudeSessions(): Promise<ClaudeLocalSessionsResponse> {
-        return await this.request<ClaudeLocalSessionsResponse>('/api/claude/sessions')
+    async getClaudeSessions(cwd?: string | null, machineId?: string | null): Promise<ClaudeLocalSessionsResponse> {
+        const params = new URLSearchParams()
+        if (cwd?.trim()) params.set('cwd', cwd.trim())
+        if (machineId?.trim()) params.set('machineId', machineId.trim())
+        const query = params.size ? `?${params.toString()}` : ''
+        return await this.request<ClaudeLocalSessionsResponse>(`/api/claude/sessions${query}`)
     }
 
     async getClaudeStatus(): Promise<ClaudeStatusResponse> {
         return await this.request<ClaudeStatusResponse>('/api/claude/status')
     }
 
-    async getCursorImportableSessions(): Promise<CursorImportableSessionsResponse> {
-        return await this.request<CursorImportableSessionsResponse>('/api/cursor/importable-sessions')
+    async getCursorImportableSessions(machineId?: string | null): Promise<CursorImportableSessionsResponse> {
+        const params = new URLSearchParams()
+        if (machineId?.trim()) params.set('machineId', machineId.trim())
+        const query = params.size ? `?${params.toString()}` : ''
+        return await this.request<CursorImportableSessionsResponse>(`/api/cursor/importable-sessions${query}`)
     }
 
     async importCursorSessions(payload: CursorImportRequest): Promise<CursorImportResponse> {

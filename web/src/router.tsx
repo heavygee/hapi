@@ -212,9 +212,11 @@ function SessionsPage() {
     const [codexImportWorkDirectoryOverride, setCodexImportWorkDirectoryOverride] = useState<string | null>(null)
     const [isSyncingClaudeSession, setIsSyncingClaudeSession] = useState(false)
     const [claudeSessions, setClaudeSessions] = useState<ClaudeLocalSessionSummary[]>([])
+    const [claudeImportMachineId, setClaudeImportMachineId] = useState<string | null>(null)
     const [isLoadingClaudeSessions, setIsLoadingClaudeSessions] = useState(false)
     const [importFlavor, setImportFlavor] = useState<AgentImportFlavor>('codex')
     const [cursorSessions, setCursorSessions] = useState<CursorImportableSessionSummary[]>([])
+    const [cursorImportMachineId, setCursorImportMachineId] = useState<string | null>(null)
     const [isLoadingCursorSessions, setIsLoadingCursorSessions] = useState(false)
     const [isImportingCursorSessions, setIsImportingCursorSessions] = useState(false)
     const [cursorLastOutcomes, setCursorLastOutcomes] = useState<CursorImportRowOutcome[] | null>(null)
@@ -423,16 +425,18 @@ function SessionsPage() {
         t
     ])
 
-    const loadCursorImportableSessions = useCallback(async () => {
+    const loadCursorImportableSessions = useCallback(async (machineId?: string | null) => {
         setIsLoadingCursorSessions(true)
         try {
-            const result = await api.getCursorImportableSessions()
+            const result = await api.getCursorImportableSessions(machineId)
             if (!result.success) {
                 throw new Error(result.error || t('cursorSync.failed.body'))
             }
             setCursorSessions(result.sessions)
+            setCursorImportMachineId(result.machineId ?? machineId ?? null)
         } catch (error) {
             setCursorSessions([])
+            setCursorImportMachineId(null)
             addToast({
                 title: t('cursorSync.failed.title'),
                 body: error instanceof Error ? error.message : t('cursorSync.failed.body'),
@@ -444,13 +448,18 @@ function SessionsPage() {
         }
     }, [addToast, api, t])
 
-    const loadClaudeImportableSessions = useCallback(async () => {
+    const loadClaudeImportableSessions = useCallback(async (workDirectory?: string | null, machineId?: string | null) => {
         setIsLoadingClaudeSessions(true)
         try {
-            const result = await api.getClaudeSessions()
+            const result = await api.getClaudeSessions(workDirectory, machineId)
+            if (!result.success) {
+                throw new Error(result.error || t('claudeSync.failed.body'))
+            }
             setClaudeSessions(result.sessions)
+            setClaudeImportMachineId(result.machineId ?? machineId ?? null)
         } catch (error) {
             setClaudeSessions([])
+            setClaudeImportMachineId(null)
             addToast({
                 title: t('claudeSync.failed.title'),
                 body: t('claudeSync.failed.bodyWithReason', {
@@ -471,7 +480,7 @@ function SessionsPage() {
         setIsSyncConfirmOpen(true)
         setCursorLastOutcomes(null)
         void loadCursorImportableSessions()
-        void loadClaudeImportableSessions()
+        void loadClaudeImportableSessions(workDirectory)
         setIsLoadingCodexSessions(true)
         try {
             const result = await api.getCodexSessions(workDirectory)
@@ -503,7 +512,10 @@ function SessionsPage() {
                 const session = cursorSessions.find((entry) => entry.id === uuid)
                 return { uuid, workspacePath: session?.workspacePath ?? null }
             })
-            const result = await api.importCursorSessions({ selections })
+            const result = await api.importCursorSessions({
+                selections,
+                machineId: cursorImportMachineId
+            })
             if (!result.success) {
                 throw new Error(result.error || t('cursorSync.failed.body'))
             }
@@ -527,7 +539,7 @@ function SessionsPage() {
                 })
             }
             await refetch()
-            void loadCursorImportableSessions()
+            void loadCursorImportableSessions(cursorImportMachineId)
         } catch (error) {
             addToast({
                 title: t('cursorSync.failed.title'),
@@ -541,6 +553,7 @@ function SessionsPage() {
     }, [
         addToast,
         api,
+        cursorImportMachineId,
         cursorSessions,
         isImportingCursorSessions,
         isLoadingCursorSessions,
@@ -647,8 +660,11 @@ function SessionsPage() {
 
         setIsSyncingClaudeSession(true)
         try {
-            // 中文注释：弹窗提交本地 Claude session ID；后端直接读取这些 transcript 并导入到 Hapi。
-            const result = await api.syncClaudeSession({ sessionIds })
+            const result = await api.syncClaudeSession({
+                sessionIds,
+                cwd: currentWorkDirectory,
+                machineId: claudeImportMachineId
+            })
             if (!result.success) {
                 throw new Error(result.error || t('claudeSync.failed.body'))
             }
@@ -659,7 +675,6 @@ function SessionsPage() {
                 sessionId: '',
                 url: ''
             })
-            // 中文注释：导入成功后先在浏览器侧记住这些 Claude session 的导入时间，供左侧会话列表显示特殊时间文案。
             markClaudeSessionsImported(sessionIds)
             setIsSyncConfirmOpen(false)
             await refetch()
@@ -675,7 +690,16 @@ function SessionsPage() {
         } finally {
             setIsSyncingClaudeSession(false)
         }
-    }, [addToast, api, isLoadingClaudeSessions, isSyncingClaudeSession, refetch, t])
+    }, [
+        addToast,
+        api,
+        claudeImportMachineId,
+        currentWorkDirectory,
+        isLoadingClaudeSessions,
+        isSyncingClaudeSession,
+        refetch,
+        t
+    ])
 
     return (
         <>

@@ -7,7 +7,7 @@ import { AGENT_MESSAGE_PAYLOAD_TYPE } from '@hapi/protocol'
 import { Store } from '../../store'
 import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
-import { createClaudeDesktopRoutes, importSelectedClaudeSessions, listLocalClaudeSessions } from './claudeDesktop'
+import { createClaudeDesktopRoutes, importSelectedClaudeSessions, listLocalClaudeSessions, parseClaudeTranscriptImportData } from './claudeDesktop'
 
 const originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR
 
@@ -91,6 +91,40 @@ function createSidecarOnlyTranscript(claudeHome: string, sessionId: string, enco
 }
 
 function createRoutesApp(namespace: string, store: Store): Hono<WebAppEnv> {
+    const machine = {
+        id: 'test-claude-machine',
+        metadata: {
+            host: 'test-host',
+            platform: 'linux',
+            happyCliVersion: '0.0.0-test',
+            homeDir: process.env.CLAUDE_CONFIG_DIR ?? '/tmp',
+            workspaceRoots: [process.env.CLAUDE_CONFIG_DIR ?? '/tmp']
+        },
+        metadataVersion: 1,
+        runnerState: null,
+        runnerStateVersion: 1
+    }
+    const engine = {
+        getOnlineMachinesByNamespace: (ns: string) => (ns === 'default' ? [machine] : []),
+        getMachine: (machineId: string) => (machineId === machine.id ? machine : undefined),
+        listClaudeSessionsForMachine: async (
+            _machineId: string,
+            _cwd?: string | null,
+            sessionIds?: string[]
+        ) => {
+            const sessions = listLocalClaudeSessions()
+            if (!sessionIds?.length) {
+                return { success: true as const, sessions }
+            }
+            const wanted = new Set(sessionIds)
+            const withMessages = sessions
+                .filter((session) => wanted.has(session.id))
+                .map((session) => parseClaudeTranscriptImportData(session))
+                .filter((transcript): transcript is NonNullable<typeof transcript> => Boolean(transcript))
+            return { success: true as const, sessions: withMessages }
+        }
+    } as unknown as SyncEngine
+
     const app = new Hono<WebAppEnv>()
     app.use('*', async (c, next) => {
         c.set('namespace', namespace)
@@ -98,7 +132,7 @@ function createRoutesApp(namespace: string, store: Store): Hono<WebAppEnv> {
     })
     app.route('/api', createClaudeDesktopRoutes({
         store,
-        getSyncEngine: () => null
+        getSyncEngine: () => engine
     }))
     return app
 }

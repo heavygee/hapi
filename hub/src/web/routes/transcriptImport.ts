@@ -93,6 +93,8 @@ export type ImportTargetSelection = {
 
 export type SyncSessionRequestParseResult = {
     sessionIds: string[]
+    cwd?: string | null
+    machineId?: string | null
     error?: string
 }
 
@@ -641,7 +643,8 @@ export function parseSyncSessionRequest(body: unknown): SyncSessionRequestParseR
         return { sessionIds: [] }
     }
 
-    const rawSessionIds = (body as { sessionIds?: unknown }).sessionIds
+    const bodyRecord = body as { sessionIds?: unknown; cwd?: unknown; machineId?: unknown }
+    const rawSessionIds = bodyRecord.sessionIds
     if (!Array.isArray(rawSessionIds)) {
         return { sessionIds: [], error: 'Invalid sessionIds' }
     }
@@ -657,8 +660,40 @@ export function parseSyncSessionRequest(body: unknown): SyncSessionRequestParseR
         }
     }
 
+    const cwd = typeof bodyRecord.cwd === 'string' && bodyRecord.cwd.trim()
+        ? bodyRecord.cwd.trim()
+        : null
+    const machineId = typeof bodyRecord.machineId === 'string' && bodyRecord.machineId.trim()
+        ? bodyRecord.machineId.trim()
+        : null
+
     // 中文注释：前端允许多选，这里按 thread 去重，避免重复导入同一条本地 transcript。
-    return { sessionIds: Array.from(new Set(sessionIds)) }
+    return {
+        sessionIds: Array.from(new Set(sessionIds)),
+        cwd,
+        machineId
+    }
+}
+
+/** Prefer an explicit online machineId; else unique cwd match; else sole online machine. */
+export function resolveRequestedImportMachineId(
+    cwd: string | null | undefined,
+    namespace: string,
+    engine: SyncEngine | null,
+    requestedMachineId?: string | null
+): string | null {
+    if (!engine) return null
+    const onlineMachines = engine.getOnlineMachinesByNamespace(namespace)
+    if (requestedMachineId) {
+        return onlineMachines.some((machine) => machine.id === requestedMachineId)
+            ? requestedMachineId
+            : null
+    }
+    if (cwd) {
+        const resolved = resolveImportMachineId(cwd, namespace, engine)
+        if (resolved) return resolved
+    }
+    return onlineMachines.length === 1 ? onlineMachines[0].id : null
 }
 
 function getDirectImportWorkspace(): string {
@@ -740,10 +775,11 @@ export function createImportSuccessResponse(
 export function importSingleSession(options: {
     adapter: ImporterAdapter
     sessionId: string
-    localSessionsById: Map<string, LocalSessionSummary>
+    localSessionsById: Map<string, LocalSessionSummary | TranscriptImportData>
     store: Store
     namespace: string
     getSyncEngine?: () => SyncEngine | null
+    resolvedMachineId?: string | null
 }): ScriptLaunchResponse {
     const { adapter } = options
     const flavorLabel = adapter.flavor === 'codex' ? 'Codex' : 'Claude'
@@ -755,7 +791,9 @@ export function importSingleSession(options: {
         }
     }
 
-    const transcript = adapter.parseTranscript(summary)
+    const transcript = 'messages' in summary && Array.isArray(summary.messages)
+        ? summary as TranscriptImportData
+        : adapter.parseTranscript(summary)
     if (!transcript) {
         return {
             ...createImportErrorResponse(adapter.flavor, [options.sessionId], `Failed to parse ${flavorLabel} transcript: ${summary.file}`),
@@ -790,7 +828,7 @@ export function importSingleSession(options: {
             adapter.flavor,
             adapter.sessionIdKey,
             asRecord(existingStored?.metadata),
-            resolveImportMachineId(transcript.cwd, options.namespace, engine)
+            options.resolvedMachineId ?? resolveImportMachineId(transcript.cwd, options.namespace, engine)
         )
 
         let sessionId = existingStored?.id ?? null
@@ -905,6 +943,8 @@ export async function importSelectedSessions(options: {
     store: Store
     namespace: string
     getSyncEngine?: () => SyncEngine | null
+    remoteSessions?: TranscriptImportData[]
+    resolvedMachineId?: string | null
 }): Promise<ScriptLaunchResponse> {
     const { adapter } = options
     const sessionIds = options.sessionIds
@@ -912,7 +952,11 @@ export async function importSelectedSessions(options: {
         return createImportErrorResponse(adapter.flavor, sessionIds, NO_SYNC_SESSION_SELECTED_ERROR)
     }
 
-    const localSessionsById = new Map(adapter.listLocalSessions().map((session) => [session.id, session]))
+    const localSessionsById = new Map<string, LocalSessionSummary | TranscriptImportData>(
+        options.remoteSessions?.length
+            ? options.remoteSessions.map((session) => [session.id, session])
+            : adapter.listLocalSessions().map((session) => [session.id, session])
+    )
     const results: ScriptLaunchResponse[] = []
     for (const sessionId of sessionIds) {
         const result = importSingleSession({
@@ -921,7 +965,8 @@ export async function importSelectedSessions(options: {
             localSessionsById,
             store: options.store,
             namespace: options.namespace,
-            getSyncEngine: options.getSyncEngine
+            getSyncEngine: options.getSyncEngine,
+            resolvedMachineId: options.resolvedMachineId
         })
         results.push(result)
 

@@ -314,6 +314,9 @@ export function AgentSessionImportDialog(props: {
                 ) : flavor === 'cursor' ? (
                     <>
                         <div className="mt-3 rounded-md border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2 text-[11px] text-[var(--app-hint)]">
+                            {t('agentImport.hubLocalScopeHint')}
+                        </div>
+                        <div className="mt-2 rounded-md border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2 text-[11px] text-[var(--app-hint)]">
                             {t('cursorSync.confirm.acpStrictHint')}
                         </div>
                         <SessionImportPicker
@@ -370,16 +373,21 @@ export function AgentSessionImportDialog(props: {
                         />
                     </>
                 ) : (
-                    <SessionImportPicker
-                        isOpen={isOpen}
-                        sessions={claudeImportSessions}
-                        currentSessionId={currentClaudeSessionId}
-                        selectedSessionIds={selectedClaudeIds}
-                        onSelectionChange={setSelectedClaudeIds}
-                        isPending={isPendingClaude}
-                        isLoading={isLoadingClaude}
-                        labels={CLAUDE_IMPORT_PICKER_LABELS}
-                    />
+                    <>
+                        <div className="mt-3 rounded-md border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2 text-[11px] text-[var(--app-hint)]">
+                            {t('agentImport.hubLocalScopeHint')}
+                        </div>
+                        <SessionImportPicker
+                            isOpen={isOpen}
+                            sessions={claudeImportSessions}
+                            currentSessionId={currentClaudeSessionId}
+                            selectedSessionIds={selectedClaudeIds}
+                            onSelectionChange={setSelectedClaudeIds}
+                            isPending={isPendingClaude}
+                            isLoading={isLoadingClaude}
+                            labels={CLAUDE_IMPORT_PICKER_LABELS}
+                        />
+                    </>
                 )}
 
                 <div className="mt-4 flex justify-end gap-2">

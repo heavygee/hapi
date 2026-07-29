@@ -41,6 +41,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { Store } from '../../store'
+import type { SyncEngine } from '../../sync/syncEngine'
+import type { Machine } from '@hapi/protocol/schemas'
 import type { WebAppEnv } from '../middleware/auth'
 import type { AcpRpcResponse } from '../../cursor/acpVerifyProbe'
 import { buildSyntheticLegacyStore } from '../../cursor/fixtures/buildSyntheticLegacyStore'
@@ -664,7 +666,109 @@ describe('importCursorSession happy paths', () => {
 
 /* ---------- route shape ---------- */
 
-function createRoutesApp(opts: { namespace: string; store: Store }): Hono<WebAppEnv> {
+function createTestMachine(home: string): Machine {
+    return {
+        id: 'test-machine',
+        namespace: 'default',
+        seq: 0,
+        createdAt: 0,
+        updatedAt: 0,
+        active: true,
+        activeAt: 0,
+        metadata: {
+            host: 'test-host',
+            platform: 'linux',
+            happyCliVersion: '0.0.0-test',
+            homeDir: home,
+            workspaceRoots: [home]
+        },
+        metadataVersion: 1,
+        runnerState: null,
+        runnerStateVersion: 1
+    }
+}
+
+function createImportSyncEngine(h: Harness): SyncEngine {
+    const machine = createTestMachine(h.home)
+    const engine = {
+        getOnlineMachinesByNamespace: (namespace: string) => (
+            namespace === 'default' ? [machine] : []
+        ),
+        getMachine: (machineId: string) => (machineId === machine.id ? machine : undefined),
+        listCursorImportableSessionsForMachine: async (
+            _machineId: string,
+            candidateWorkspacePaths?: string[],
+            limit?: number
+        ) => ({
+            success: true as const,
+            sessions: listImportableCursorSessions({
+                store: h.store,
+                namespace: 'default',
+                home: h.home,
+                candidateWorkspacePaths,
+                limit
+            }).map((session) => ({
+                ...session,
+                alreadyImportedHapiSessionId: null
+            }))
+        }),
+        prepareCursorImportForMachine: async (
+            _machineId: string,
+            uuid: string,
+            workspacePath?: string | null
+        ) => {
+            const scratch = new Store(':memory:')
+            try {
+                const outcome = await importCursorSession({
+                    uuid,
+                    workspacePath,
+                    store: scratch,
+                    namespace: 'default',
+                    home: h.home,
+                    deps: makeDeps(h)
+                })
+                if (!outcome.ok) {
+                    return {
+                        success: false as const,
+                        uuid: outcome.uuid,
+                        reason: outcome.reason,
+                        message: outcome.message,
+                        durationMs: outcome.durationMs
+                    }
+                }
+                const session = scratch.sessions.getSessionsByNamespace('default')[0]
+                const metadata = session.metadata as Record<string, unknown>
+                return {
+                    success: true as const,
+                    uuid: outcome.uuid,
+                    sourceFormat: outcome.sourceFormat,
+                    workspacePath: typeof metadata.path === 'string' && metadata.path.trim()
+                        ? metadata.path.trim()
+                        : (workspacePath ?? '/workspace/example'),
+                    title: typeof metadata.name === 'string' ? metadata.name : `cursor:${uuid.slice(0, 8)}`,
+                    hostName: typeof metadata.host === 'string' ? metadata.host : 'test-host',
+                    durationMs: outcome.durationMs
+                }
+            } finally {
+                scratch.close()
+            }
+        },
+        getOrCreateSession: (
+            tag: string,
+            metadata: unknown,
+            agentState: unknown,
+            namespace: string
+        ) => (
+            h.store.sessions.getOrCreateSession(tag, metadata, agentState, namespace) as unknown as ReturnType<SyncEngine['getOrCreateSession']>
+        ),
+        handleRealtimeEvent: () => {}
+    } as unknown as SyncEngine
+    return engine
+}
+
+function createRoutesApp(opts: { namespace: string; store: Store; harness?: Harness }): Hono<WebAppEnv> {
+    const harness = opts.harness
+    const engine = harness ? createImportSyncEngine(harness) : null
     const app = new Hono<WebAppEnv>()
     app.use('*', async (c, next) => {
         c.set('namespace', opts.namespace)
@@ -672,7 +776,7 @@ function createRoutesApp(opts: { namespace: string; store: Store }): Hono<WebApp
     })
     app.route('/api', createCursorImportRoutes({
         store: opts.store,
-        getSyncEngine: () => null
+        getSyncEngine: () => engine
     }))
     return app
 }
@@ -710,7 +814,7 @@ describe('Cursor import HTTP routes', () => {
     })
 
     it('GET /api/cursor/importable-sessions returns the discovery list', async () => {
-        const app = createRoutesApp({ namespace: 'default', store: h.store })
+        const app = createRoutesApp({ namespace: 'default', store: h.store, harness: h })
         h.placeAcpStore('77777777-7777-7777-7777-777777777777', { name: 'route test' })
         const res = await app.request('/api/cursor/importable-sessions')
         expect(res.status).toBe(200)
@@ -720,7 +824,7 @@ describe('Cursor import HTTP routes', () => {
     })
 
     it('POST /api/cursor/import rejects empty uuid arrays', async () => {
-        const app = createRoutesApp({ namespace: 'default', store: h.store })
+        const app = createRoutesApp({ namespace: 'default', store: h.store, harness: h })
         const res = await app.request('/api/cursor/import', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -730,7 +834,7 @@ describe('Cursor import HTTP routes', () => {
     })
 
     it('POST /api/cursor/import returns a per-row outcome for each requested uuid', async () => {
-        const app = createRoutesApp({ namespace: 'default', store: h.store })
+        const app = createRoutesApp({ namespace: 'default', store: h.store, harness: h })
         const res = await app.request('/api/cursor/import', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -746,7 +850,7 @@ describe('Cursor import HTTP routes', () => {
     })
 
     it('POST /api/cursor/import accepts selections with per-row workspacePath', async () => {
-        const app = createRoutesApp({ namespace: 'default', store: h.store })
+        const app = createRoutesApp({ namespace: 'default', store: h.store, harness: h })
         const res = await app.request('/api/cursor/import', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },

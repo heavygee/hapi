@@ -9,43 +9,43 @@
  * `_agentImport/types.ts`.
  *
  * Endpoints:
- *   GET  /api/cursor/importable-sessions  → list local cursor chats
+ *   GET  /api/cursor/importable-sessions  → list cursor chats via machine RPC
  *   POST /api/cursor/import { selections[] } | { uuids[], workspacePath? } → import N rows
  *
  * Prefer `selections` (uuid + discovered workspacePath per row) so legacy
  * drawers stay resumable. `uuids` + optional global `workspacePath` remains
  * for older clients / tests.
  *
- * The strict ACP-only refusal contract lives in `cursorImporter.ts`.
- * This module is namespace-gated to `default` (matching codex), proxies
- * the importer's structured outcomes back to the dialog, and writes a
- * lightweight audit log line per import.
+ * Discovery + on-disk prepare run on the selected online machine via RPC.
+ * Hub stamps already-imported flags and creates HAPI session rows after prepare.
  */
 
 import { Hono } from 'hono'
-import { appendFileSync, existsSync, mkdirSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { appendFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
 
 import type { Store } from '../../store'
 import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import {
-    importSelectedCursorSessions,
-    listImportableCursorSessions
+    buildAlreadyImportedIndex,
+    buildImportedSessionMetadata,
+    collectCandidateWorkspacePaths,
+    stampAlreadyImportedOnSessions
 } from '../../cursor/cursorImporter'
+import { resolveRequestedImportMachineId } from './transcriptImport'
 import type {
+    CursorImportRefusalReason,
     CursorImportResponse,
     CursorImportRowOutcome,
+    CursorImportableSessionSummary,
     CursorImportableSessionsResponse
 } from './_agentImport/types'
 
 const CURSOR_IMPORT_NAMESPACE_ERROR = 'Cursor session import is not available outside the default namespace'
 const NO_CURSOR_SESSION_SELECTED_ERROR = 'No cursor sessions selected for import'
-
-function getHome(): string {
-    return process.env.HAPI_CURSOR_HOME_OVERRIDE?.trim() || homedir()
-}
+const NO_ONLINE_MACHINE_ERROR = 'No online machine available for Cursor history import'
 
 function getLogRoot(): string {
     const configured = process.env.HAPI_CURSOR_LOG_ROOT?.trim()
@@ -65,6 +65,7 @@ function appendImportLog(message: string): void {
 
 interface CursorImportRequestParseResult {
     selections: Array<{ uuid: string; workspacePath: string | null }>
+    machineId?: string | null
     error?: string
 }
 
@@ -89,6 +90,10 @@ function parseImportRequest(body: unknown): CursorImportRequestParseResult {
     if (!globalPath.ok) {
         return { selections: [], error: 'Invalid workspacePath' }
     }
+
+    const machineId = typeof record.machineId === 'string' && record.machineId.trim()
+        ? record.machineId.trim()
+        : null
 
     if (Array.isArray(record.selections)) {
         const selections: Array<{ uuid: string; workspacePath: string | null }> = []
@@ -115,7 +120,7 @@ function parseImportRequest(body: unknown): CursorImportRequestParseResult {
                 workspacePath: rowPath.value ?? globalPath.value
             })
         }
-        return { selections }
+        return { selections, machineId }
     }
 
     const rawUuids = record.uuids
@@ -137,7 +142,111 @@ function parseImportRequest(body: unknown): CursorImportRequestParseResult {
         selections: uuids.map((uuid) => ({
             uuid,
             workspacePath: globalPath.value
-        }))
+        })),
+        machineId
+    }
+}
+
+async function listCursorImportableSessionsViaMachine(options: {
+    engine: SyncEngine | null
+    store: Store
+    namespace: string
+    machineId?: string | null
+}): Promise<{ sessions: CursorImportableSessionSummary[]; machineId?: string; error?: string }> {
+    const machineId = resolveRequestedImportMachineId(null, options.namespace, options.engine, options.machineId)
+    if (!machineId || !options.engine) {
+        return { sessions: [], error: NO_ONLINE_MACHINE_ERROR }
+    }
+    const candidateWorkspacePaths = collectCandidateWorkspacePaths(options.store, options.namespace)
+    const result = await options.engine.listCursorImportableSessionsForMachine(
+        machineId,
+        candidateWorkspacePaths
+    )
+    if (!result || typeof result !== 'object') {
+        return { sessions: [], machineId, error: 'Unexpected Cursor importable sessions RPC response' }
+    }
+    if (result.success !== true) {
+        return { sessions: [], machineId, error: result.error || 'Failed to list Cursor importable sessions' }
+    }
+    return {
+        sessions: stampAlreadyImportedOnSessions(result.sessions, options.store, options.namespace),
+        machineId
+    }
+}
+
+function resolveMachineHomeDir(engine: SyncEngine | null, machineId: string): string {
+    const machine = engine?.getMachine(machineId)
+    const recorded = machine?.metadata?.homeDir
+    return typeof recorded === 'string' && recorded.trim().length > 0 ? recorded.trim() : ''
+}
+
+async function importCursorSelectionViaMachine(options: {
+    engine: SyncEngine | null
+    store: Store
+    namespace: string
+    machineId: string
+    selection: { uuid: string; workspacePath: string | null }
+    getSyncEngine: () => SyncEngine | null
+}): Promise<CursorImportRowOutcome> {
+    const start = Date.now()
+    const failure = (reason: CursorImportRefusalReason, message: string): CursorImportRowOutcome => ({
+        ok: false,
+        uuid: options.selection.uuid,
+        reason,
+        message,
+        durationMs: Date.now() - start
+    })
+
+    const alreadyImported = buildAlreadyImportedIndex(options.store, options.namespace).get(options.selection.uuid)
+    if (alreadyImported) {
+        return failure('already_imported', `cursor session ${options.selection.uuid} is already imported as Hapi session ${alreadyImported}`)
+    }
+
+    if (!options.engine) {
+        return failure('internal_error', NO_ONLINE_MACHINE_ERROR)
+    }
+
+    const prepared = await options.engine.prepareCursorImportForMachine(
+        options.machineId,
+        options.selection.uuid,
+        options.selection.workspacePath
+    )
+    if (!prepared || typeof prepared !== 'object') {
+        return failure('internal_error', 'Unexpected Cursor import prepare RPC response')
+    }
+    if (prepared.success !== true) {
+        return {
+            ok: false,
+            uuid: prepared.uuid,
+            reason: prepared.reason as CursorImportRefusalReason,
+            message: prepared.message,
+            durationMs: prepared.durationMs
+        }
+    }
+
+    const homeDir = resolveMachineHomeDir(options.engine, options.machineId)
+    const metadata = buildImportedSessionMetadata({
+        uuid: prepared.uuid,
+        workspacePath: prepared.workspacePath,
+        title: prepared.title,
+        hostName: prepared.hostName,
+        homeDir,
+        machineId: options.machineId
+    })
+
+    try {
+        const engine = options.getSyncEngine()
+        const created = engine?.getOrCreateSession(randomUUID(), metadata, {}, options.namespace)
+            ?? options.store.sessions.getOrCreateSession(randomUUID(), metadata, {}, options.namespace)
+        return {
+            ok: true,
+            uuid: prepared.uuid,
+            hapiSessionId: created.id,
+            sourceFormat: prepared.sourceFormat,
+            durationMs: Date.now() - start
+        }
+    } catch (err) {
+        return failure('internal_error', `failed to create Hapi session row: ${err instanceof Error ? err.message : String(err)}`)
     }
 }
 
@@ -157,18 +266,28 @@ export function createCursorImportRoutes(options: {
         return next()
     })
 
-    app.get('/cursor/importable-sessions', (c) => {
-        const home = getHome()
-        const namespace = c.get('namespace')
-        const sessions = listImportableCursorSessions({
+    app.get('/cursor/importable-sessions', async (c) => {
+        const engine = options.getSyncEngine()
+        const machineId = c.req.query('machineId')?.trim() || null
+        const remote = await listCursorImportableSessionsViaMachine({
+            engine,
             store: options.store,
-            namespace,
-            home
+            namespace: c.get('namespace'),
+            machineId
         })
+        if (remote.error) {
+            return c.json({
+                success: false,
+                error: remote.error,
+                sessions: [],
+                ...(remote.machineId ? { machineId: remote.machineId } : {})
+            }, 503)
+        }
         return c.json({
             success: true,
-            sessions
-        } satisfies CursorImportableSessionsResponse)
+            sessions: remote.sessions,
+            ...(remote.machineId ? { machineId: remote.machineId } : {})
+        } satisfies CursorImportableSessionsResponse & { machineId?: string })
     })
 
     app.post('/cursor/import', async (c) => {
@@ -189,23 +308,45 @@ export function createCursorImportRoutes(options: {
             }, 400)
         }
 
-        const home = getHome()
-        const result = await importSelectedCursorSessions({
-            selections: parsed.selections,
-            store: options.store,
-            namespace: c.get('namespace'),
-            home,
-            getSyncEngine: options.getSyncEngine
-        })
+        const engine = options.getSyncEngine()
+        const namespace = c.get('namespace')
+        const fallbackWorkspacePath = parsed.selections.find((selection) => selection.workspacePath)?.workspacePath ?? null
+        const machineId = resolveRequestedImportMachineId(
+            fallbackWorkspacePath,
+            namespace,
+            engine,
+            parsed.machineId
+        )
+        if (!machineId) {
+            appendImportLog(`FAILED: ${NO_ONLINE_MACHINE_ERROR}`)
+            return c.json({
+                success: false,
+                error: NO_ONLINE_MACHINE_ERROR
+            }, 503)
+        }
+
+        const results: CursorImportRowOutcome[] = []
+        for (const selection of parsed.selections) {
+            const outcome = await importCursorSelectionViaMachine({
+                engine,
+                store: options.store,
+                namespace,
+                machineId,
+                selection,
+                getSyncEngine: options.getSyncEngine
+            })
+            results.push(outcome)
+        }
+        const importedCount = results.filter((row) => row.ok).length
 
         appendImportLog(
-            `imported=${result.importedCount}/${parsed.selections.length}; uuids=${parsed.selections.map((s) => s.uuid).join(',')}; outcomes=${result.results.map(rowToLog).join('|')}`
+            `imported=${importedCount}/${parsed.selections.length}; machineId=${machineId}; uuids=${parsed.selections.map((s) => s.uuid).join(',')}; outcomes=${results.map(rowToLog).join('|')}`
         )
 
         const response: CursorImportResponse = {
             success: true,
-            results: result.results,
-            importedCount: result.importedCount
+            results,
+            importedCount
         }
         return c.json(response)
     })
@@ -221,4 +362,8 @@ function rowToLog(row: CursorImportRowOutcome): string {
 }
 
 // Re-export for direct programmatic use from tests / future CLI subcommand.
-export { listImportableCursorSessions, importSelectedCursorSessions } from '../../cursor/cursorImporter'
+export {
+    listImportableCursorSessions,
+    importSelectedCursorSessions,
+    importCursorSession
+} from '../../cursor/cursorImporter'

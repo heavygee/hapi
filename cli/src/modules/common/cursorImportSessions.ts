@@ -1,41 +1,9 @@
 /**
- * Hub-side importer for cursor chats discovered on the local
- * `~/.cursor/{chats,acp-sessions}` filesystem.
- *
- * Companion module to the cursor flavor of the multi-agent import picker
- * (`hub/src/web/routes/cursorImport.ts`). The legacy → ACP transplant
- * primitive shipped upstream in `tiann/hapi#844`
- * (`hub/src/cursor/cursorLegacyMigrator.ts`), but that primitive operates on
- * an existing HAPI session row that already references the cursor uuid.
- * For the IMPORT flow there is no pre-existing HAPI row yet — and the
- * spec's strict refusal contract forbids creating one until the
- * verify-probe has passed. This module therefore reuses the verify-probe
- * + transplant pattern in standalone form, mirroring the per-chat code
- * path of `scripts/audit-cursor-acp-verify.ts` (which is committed at
- * branch HEAD and ran 391/391 = 100% pass on the maintainer's
- * real-world chat library before this code shipped).
- *
- * Refusal contract (strict ACP-only):
- *   - The cursor flavor is STRICTLY ACP-only. Verify must pass before
- *     any HAPI row is created. No fallback to stream-json, ever.
- *   - Refusal cases (mirrored in `CursorImportRefusalReason`):
- *       verify_load_failed, missing_on_disk_store, target_already_exists,
- *       already_imported, agent_binary_not_found, verify_timeout,
- *       corrupted_store, ambiguous_legacy_store, internal_error
- *   - On refusal: legacy `store.db` is untouched, no HAPI row is created,
- *     structured error returned to the caller.
- *
- * Discovery covers two on-disk shapes:
- *   - legacy: `~/.cursor/chats/<workspaceHash>/<uuid>/store.db`
- *   - acp:    `~/.cursor/acp-sessions/<uuid>/{store.db, meta.json}`
- *
- * Imports of `legacy` rows transplant to the ACP location via the same
- * cp + meta.json + verify dance the migrator uses. Imports of `acp` rows
- * are no-ops on disk — just a HAPI row pointing at the existing dir.
+ * Cursor session import discovery + prepare for machine RPC.
+ * Hub must not scan its own ~/.cursor; runner owns on-disk cursor state.
  */
-
 import { Database } from 'bun:sqlite'
-import { randomUUID, createHash } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import {
     chmodSync,
     copyFileSync,
@@ -48,53 +16,59 @@ import {
     statSync,
     writeFileSync
 } from 'node:fs'
-import { homedir, hostname, platform, tmpdir } from 'node:os'
+import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { AcpVerifyProbe, type AcpProbeOptions } from './acpVerifyProbe'
-import { listLegacyChatStoreCandidates, readLegacyMetaLastUsedModel, checkpointLegacySqliteStore } from './cursorLegacyMigrator'
-import type {
-    CursorImportableSessionSummary,
-    CursorImportRefusalReason,
-    CursorImportRowOutcome,
-    CursorImportSourceFormat
-} from '../web/routes/_agentImport/types'
-import type { Store } from '../store'
-import type { SyncEngine } from '../sync/syncEngine'
+import type { PrepareCursorImportRpcResponse } from '@hapi/protocol/apiTypes'
+import { AcpVerifyProbe, type AcpProbeOptions } from '@/cursor/acpVerifyProbe'
 
-// UUID-ish basename validation: same rule the migrator uses to refuse
-// path-traversal in `<wsh>/<cursorSessionId>/store.db`. Importer-facing
-// uuids must pass this gate too. See `cursorLegacyMigrator`
-// CURSOR_SESSION_ID_RE.
 const CURSOR_SESSION_ID_RE = /^[A-Za-z0-9_.-]+$/
-
 const AUTH_FILES = ['cli-config.json', 'agent-cli-state.json', 'acp-config.json']
 const DEFAULT_INIT_TIMEOUT_MS = 20_000
 const DEFAULT_LOAD_TIMEOUT_MS = 30_000
 const DEFAULT_REPLAY_DRAIN_MS = 1_500
 const DEFAULT_VERIFY_TIMEOUT_MS = 60_000
-
 const DEFAULT_LIST_LIMIT = 500
 
-export interface CursorImporterDeps {
-    /** Resolve the operator's HOME dir. Override in tests. */
+export type CursorImportSourceFormat = 'legacy' | 'acp'
+
+export type CursorImportRefusalReason =
+    | 'verify_load_failed'
+    | 'missing_on_disk_store'
+    | 'target_already_exists'
+    | 'already_imported'
+    | 'agent_binary_not_found'
+    | 'verify_timeout'
+    | 'corrupted_store'
+    | 'ambiguous_legacy_store'
+    | 'internal_error'
+
+export interface LegacyStoreCandidate {
+    workspaceHash: string
+    storeDbPath: string
+    sizeBytes: number
+    mtimeMs: number
+}
+
+export interface CursorImportableSessionSummary {
+    id: string
+    title: string
+    firstUserMessage?: string | null
+    workspacePath?: string | null
+    storeDbPath: string
+    sourceFormat: CursorImportSourceFormat
+    modifiedAt: number
+    sizeBytes: number
+    alreadyImportedHapiSessionId?: string | null
+}
+
+export interface CursorImportSessionsDeps {
     homeDir?: () => string
-    /** Recorded hostname (recorded into HAPI session metadata.host). */
     hostName?: () => string
-    /** Where to allocate the verify staging temp dir. Default: os.tmpdir(). */
     tmpDir?: () => string
-    /** Time source for telemetry. Default: Date.now. */
     now?: () => number
-    /**
-     * Spawn factory for the verify probe. Override in tests to inject a
-     * mock. The second arg is the operator's $HOME so the probe can
-     * resolve `agent` under `<home>/.local/bin` even on service-account
-     * hub deployments. Mirrors the migrator's `createProbe` factory.
-     */
     createProbe?: (env: NodeJS.ProcessEnv, agentLookupHome: string) => AcpVerifyProbe
-    /** Override the verify per-RPC + total timeouts. */
     verifyTimeoutMs?: number
-    /** Logger sink. Default: silent. */
     logger?: {
         debug: (msg: string, ctx?: unknown) => void
         info: (msg: string, ctx?: unknown) => void
@@ -103,16 +77,95 @@ export interface CursorImporterDeps {
     }
 }
 
-function noopLogger(): NonNullable<CursorImporterDeps['logger']> {
+function noopLogger(): NonNullable<CursorImportSessionsDeps['logger']> {
     return { debug() {}, info() {}, warn() {}, error() {} }
 }
 
+function decodeMetaValue(value: string): Record<string, unknown> | null {
+    if (value.startsWith('{')) {
+        try { return JSON.parse(value) as Record<string, unknown> } catch {}
+    }
+    if (/^[0-9a-fA-F]+$/.test(value) && value.length % 2 === 0) {
+        try {
+            const buf = Buffer.from(value, 'hex')
+            const text = buf.toString('utf8')
+            if (text.startsWith('{')) {
+                return JSON.parse(text) as Record<string, unknown>
+            }
+        } catch {}
+    }
+    return null
+}
+
+export function listLegacyChatStoreCandidates(cursorSessionId: string, home: string): LegacyStoreCandidate[] {
+    if (!CURSOR_SESSION_ID_RE.test(cursorSessionId) || cursorSessionId === '.' || cursorSessionId === '..') {
+        return []
+    }
+    const chatsRoot = join(home, '.cursor', 'chats')
+    if (!existsSync(chatsRoot)) return []
+    let entries: string[]
+    try {
+        entries = readdirSync(chatsRoot)
+    } catch {
+        return []
+    }
+    const candidates: LegacyStoreCandidate[] = []
+    for (const wsh of entries) {
+        const candidate = join(chatsRoot, wsh, cursorSessionId, 'store.db')
+        try {
+            const st = statSync(candidate)
+            if (st.isFile()) {
+                candidates.push({
+                    workspaceHash: wsh,
+                    storeDbPath: candidate,
+                    sizeBytes: st.size,
+                    mtimeMs: st.mtimeMs
+                })
+            }
+        } catch {
+            // not in this wsh; keep scanning
+        }
+    }
+    return candidates
+}
+
+export function readLegacyMetaLastUsedModel(storeDbPath: string): { name?: string; lastUsedModel?: string } | null {
+    let metaDb: Database | null = null
+    try {
+        metaDb = new Database(storeDbPath, { readonly: true })
+        const row = metaDb.prepare('SELECT cast(value as TEXT) as v FROM meta LIMIT 1').get() as { v?: string } | undefined
+        if (!row?.v) return null
+        const decoded = decodeMetaValue(row.v)
+        if (!decoded) return null
+        return {
+            name: typeof decoded.name === 'string' ? decoded.name : undefined,
+            lastUsedModel: typeof decoded.lastUsedModel === 'string' && decoded.lastUsedModel.trim().length > 0
+                ? decoded.lastUsedModel.trim()
+                : undefined
+        }
+    } catch {
+        return null
+    } finally {
+        try { metaDb?.close() } catch {}
+    }
+}
+
+export function checkpointLegacySqliteStore(storeDbPath: string): void {
+    const db = new Database(storeDbPath, { readwrite: true })
+    try {
+        const row = db.query('PRAGMA wal_checkpoint(TRUNCATE)').get() as { busy?: number; log?: number; checkpointed?: number } | undefined
+        if (row?.busy === 1) {
+            throw new Error('wal_checkpoint reported busy=1 - another connection has the legacy store open; refusing to copy partial WAL')
+        }
+        if (typeof row?.log === 'number' && row.log !== -1 && row.log !== row.checkpointed) {
+            throw new Error(`wal_checkpoint did not fully apply: log=${row.log}, checkpointed=${row.checkpointed}`)
+        }
+    } finally {
+        db.close()
+    }
+}
+
 function reverseLookupWorkspacePath(workspaceHash: string, candidatePaths: string[]): string | null {
-    // Cursor's drawer hash is `md5(workspacePath)`. We do not have a
-    // reverse map; the dialog accepts the operator-provided path on
-    // import for the canonical-drawer check. At discovery time we leave
-    // workspacePath null for legacy chats whose meta record does not
-    // carry one (older cursor-agent versions).
     for (const path of candidatePaths) {
         if (createHash('md5').update(path).digest('hex') === workspaceHash) {
             return path
@@ -148,6 +201,11 @@ function sanityCheckStore(storeDbPath: string): { ok: true } | { ok: false; mess
     }
 }
 
+function readMetaTitleSafe(storeDbPath: string): string | null {
+    const meta = readLegacyMetaLastUsedModel(storeDbPath)
+    return meta?.name?.trim() ? meta.name.trim() : null
+}
+
 function summarizeSession(args: {
     uuid: string
     storeDbPath: string
@@ -156,7 +214,6 @@ function summarizeSession(args: {
     title: string | null
     sizeBytes: number
     mtimeMs: number
-    alreadyImportedHapiSessionId: string | null
 }): CursorImportableSessionSummary {
     const fallbackTitle = args.title ?? `cursor:${args.uuid.slice(0, 8)}`
     return {
@@ -168,94 +225,20 @@ function summarizeSession(args: {
         sourceFormat: args.sourceFormat,
         modifiedAt: args.mtimeMs,
         sizeBytes: args.sizeBytes,
-        alreadyImportedHapiSessionId: args.alreadyImportedHapiSessionId
+        alreadyImportedHapiSessionId: null
     }
 }
 
-function readMetaTitleSafe(storeDbPath: string): string | null {
-    const meta = readLegacyMetaLastUsedModel(storeDbPath)
-    return meta?.name?.trim() ? meta.name.trim() : null
-}
-
-export function buildAlreadyImportedIndex(store: Store, namespace: string): Map<string, string> {
-    // Map cursorSessionId -> hapiSessionId for every existing cursor-flavored
-    // session row in this namespace. Used to flag rows the dialog should
-    // render as "already imported" (read-only chip).
-    const map = new Map<string, string>()
-    for (const session of store.sessions.getSessionsByNamespace(namespace)) {
-        const metadata = session.metadata as Record<string, unknown> | null
-        if (!metadata) continue
-        if (metadata.flavor !== 'cursor') continue
-        const csid = metadata.cursorSessionId
-        if (typeof csid === 'string' && csid.length > 0) {
-            map.set(csid, session.id)
-        }
-    }
-    return map
-}
-
-/**
- * Stamp hub-side already-imported flags onto machine RPC discovery rows.
- */
-export function stampAlreadyImportedOnSessions(
-    sessions: CursorImportableSessionSummary[],
-    store: Store,
-    namespace: string
-): CursorImportableSessionSummary[] {
-    const alreadyImportedById = buildAlreadyImportedIndex(store, namespace)
-    return sessions.map((session) => ({
-        ...session,
-        alreadyImportedHapiSessionId: alreadyImportedById.get(session.id) ?? null
-    }))
-}
-
-/**
- * Gather workspace paths already known to this namespace so legacy
- * `<md5(path)>` drawers can reverse-lookup a real cwd at discovery time.
- */
-export function collectCandidateWorkspacePaths(store: Store, namespace: string): string[] {
-    const paths = new Set<string>()
-    for (const session of store.sessions.getSessionsByNamespace(namespace)) {
-        const metadata = session.metadata as Record<string, unknown> | null
-        if (!metadata) continue
-        if (typeof metadata.path === 'string' && metadata.path.trim()) {
-            paths.add(metadata.path.trim())
-        }
-        const worktree = metadata.worktree
-        if (worktree && typeof worktree === 'object' && !Array.isArray(worktree)) {
-            const basePath = (worktree as Record<string, unknown>).basePath
-            if (typeof basePath === 'string' && basePath.trim()) {
-                paths.add(basePath.trim())
-            }
-        }
-    }
-    return Array.from(paths)
-}
-
-/**
- * Discover importable cursor sessions from both the legacy and ACP
- * on-disk locations. Returns a deduped, mtime-sorted list capped at
- * `limit` entries. ACP entries take precedence over legacy entries for
- * the same uuid (a successful prior migration should not surface the
- * legacy store as a separate import candidate).
- */
-export function listImportableCursorSessions(options: {
-    store: Store
-    namespace: string
+export function listCursorImportableSessionsOnDisk(options: {
     home: string
-    limit?: number
     candidateWorkspacePaths?: string[]
+    limit?: number
 }): CursorImportableSessionSummary[] {
     const home = options.home
     const limit = options.limit ?? DEFAULT_LIST_LIMIT
-    const alreadyImportedById = buildAlreadyImportedIndex(options.store, options.namespace)
-    const candidateWorkspacePaths = [
-        ...(options.candidateWorkspacePaths ?? []),
-        ...collectCandidateWorkspacePaths(options.store, options.namespace)
-    ]
+    const candidateWorkspacePaths = options.candidateWorkspacePaths ?? []
     const byUuid = new Map<string, CursorImportableSessionSummary>()
 
-    // ACP entries first.
     const acpRoot = join(home, '.cursor', 'acp-sessions')
     if (existsSync(acpRoot)) {
         let entries: string[] = []
@@ -286,13 +269,11 @@ export function listImportableCursorSessions(options: {
                 workspacePath,
                 title,
                 sizeBytes: stStore.size,
-                mtimeMs: stStore.mtimeMs,
-                alreadyImportedHapiSessionId: alreadyImportedById.get(uuid) ?? null
+                mtimeMs: stStore.mtimeMs
             }))
         }
     }
 
-    // Legacy entries — only when an ACP entry for the same uuid is absent.
     const chatsRoot = join(home, '.cursor', 'chats')
     if (existsSync(chatsRoot)) {
         let wshEntries: string[] = []
@@ -318,7 +299,7 @@ export function listImportableCursorSessions(options: {
             }
             for (const uuid of uuidEntries) {
                 if (!CURSOR_SESSION_ID_RE.test(uuid) || uuid === '.' || uuid === '..') continue
-                if (byUuid.has(uuid)) continue // ACP entry already covers this uuid
+                if (byUuid.has(uuid)) continue
                 const storeDbPath = join(wshDir, uuid, 'store.db')
                 let st
                 try {
@@ -336,51 +317,16 @@ export function listImportableCursorSessions(options: {
                     workspacePath,
                     title,
                     sizeBytes: st.size,
-                    mtimeMs: st.mtimeMs,
-                    alreadyImportedHapiSessionId: alreadyImportedById.get(uuid) ?? null
+                    mtimeMs: st.mtimeMs
                 }))
             }
         }
     }
 
-    // Import requires a resolvable workspace path (resume needs metadata.path).
-    // Hide pathless rows so the dialog never offers a guaranteed refusal.
     return Array.from(byUuid.values())
         .filter((session) => Boolean(session.workspacePath?.trim()))
         .sort((a, b) => b.modifiedAt - a.modifiedAt)
         .slice(0, limit)
-}
-
-export function buildImportedSessionMetadata(args: {
-    uuid: string
-    workspacePath: string | null
-    title: string
-    hostName: string
-    homeDir: string
-    machineId?: string | null
-}): Record<string, unknown> {
-    const now = Date.now()
-    return {
-        // MetadataSchema (shared/src/schemas.ts) requires path + host.
-        path: args.workspacePath ?? '',
-        host: args.hostName,
-        // Persist the Cursor owner home used for import/verify so resume
-        // preflight probes the same ~/.cursor (service-account / override).
-        homeDir: args.homeDir,
-        os: platform(),
-        name: args.title,
-        summary: { text: args.title, updatedAt: now },
-        flavor: 'cursor',
-        cursorSessionId: args.uuid,
-        // STRICT REFUSAL CONTRACT: any HAPI row created by this path is ACP
-        // from birth. Verify-probe must have passed before we reach this
-        // code; the cursorAcpRemoteLauncher (already shipped upstream) reads
-        // this protocol value to decide which backend to spawn on resume.
-        cursorSessionProtocol: 'acp',
-        lifecycleState: 'imported',
-        lifecycleStateSince: now,
-        ...(args.machineId ? { machineId: args.machineId } : {})
-    }
 }
 
 function rmtreeSafe(path: string): void {
@@ -391,18 +337,12 @@ function rmtreeSafe(path: string): void {
     }
 }
 
-/**
- * Verify a cursor `store.db` is loadable by `agent acp` in an isolated
- * `$HOME`. Mirrors the audit harness shape (scripts/audit-cursor-acp-verify.ts)
- * and the migrator's `verifyInTempHome`. Returns a structured outcome
- * — never throws unless the probe spawn fails in a non-recoverable way.
- */
 async function verifyCursorStore(args: {
     uuid: string
     storeDbPath: string
     cwd: string
     sourceHome: string
-    deps: CursorImporterDeps
+    deps: CursorImportSessionsDeps
 }): Promise<{ kind: 'ok' } | { kind: 'init_failed'; message: string } | { kind: 'load_failed'; message: string } | { kind: 'timeout'; message: string } | { kind: 'spawn_failed'; message: string }> {
     const tmpDir = args.deps.tmpDir ?? (() => tmpdir())
     const verifyTimeoutMs = args.deps.verifyTimeoutMs ?? DEFAULT_VERIFY_TIMEOUT_MS
@@ -411,16 +351,10 @@ async function verifyCursorStore(args: {
     try {
         mkdirSync(fakeAcpSessionDir, { recursive: true })
         copyFileSync(args.storeDbPath, join(fakeAcpSessionDir, 'store.db'))
-        // Sidecar cwd must match session/load + the post-import installed
-        // meta.json (resolved workspace). Using tmpRoot here would gate on a
-        // temp-only shape that resume never sees.
         writeFileSync(
             join(fakeAcpSessionDir, 'meta.json'),
             JSON.stringify({ schemaVersion: 1, cwd: args.cwd })
         )
-        // Best-effort copy auth files so session/load has credentials to
-        // resolve any prior `session/set_model` echo; session/load itself
-        // does not need auth, but stderr is quieter when present.
         const realCursor = join(args.sourceHome, '.cursor')
         const fakeCursor = join(tmpRoot, '.cursor')
         for (const f of AUTH_FILES) {
@@ -448,9 +382,9 @@ async function verifyCursorStore(args: {
             }
         }
 
-        const probeFactory = args.deps.createProbe ?? ((env: NodeJS.ProcessEnv, agentLookupHome: string): AcpVerifyProbe => {
+        const probeFactory = args.deps.createProbe ?? ((probeEnv: NodeJS.ProcessEnv, agentLookupHome: string): AcpVerifyProbe => {
             const opts: AcpProbeOptions = {
-                env,
+                env: probeEnv,
                 hapiHome: tmpRoot,
                 agentLookupHome,
                 timeoutMs: DEFAULT_INIT_TIMEOUT_MS
@@ -502,10 +436,6 @@ function findAgentBinary(home: string): string | null {
     for (const candidate of candidates) {
         if (existsSync(candidate)) return candidate
     }
-    // Fallback: PATH lookup is handled inside AcpVerifyProbe.start; we
-    // only refuse here if both common install dirs miss AND the PATH
-    // also lacks a hit. The probe's own ENOENT becomes spawn_failed and
-    // we translate that to agent_binary_not_found at the call site.
     const pathEnv = process.env.PATH ?? ''
     const dirs = pathEnv.split(process.platform === 'win32' ? ';' : ':')
     for (const dir of dirs) {
@@ -515,12 +445,6 @@ function findAgentBinary(home: string): string | null {
     }
     return null
 }
-
-/**
- * Import a single cursor session. Strict ACP-only refusal: any failure
- * before the HAPI row is written returns a structured outcome with no
- * mutation of disk state outside the per-verify temp dir.
- */
 
 type SqliteStoreFileFp = { exists: true; mtimeMs: number; size: number } | { exists: false }
 
@@ -580,24 +504,20 @@ function prepareLegacyStoreForImport(storeDbPath: string): { ok: true; fingerpri
     return { ok: true, fingerprint: fingerprintSqliteStoreFamily(storeDbPath) }
 }
 
-
-export async function importCursorSession(options: {
+export async function prepareCursorImportOnDisk(options: {
     uuid: string
     workspacePath?: string | null
-    store: Store
-    namespace: string
     home: string
-    getSyncEngine?: () => SyncEngine | null
-    deps?: CursorImporterDeps
-}): Promise<CursorImportRowOutcome> {
+    deps?: CursorImportSessionsDeps
+}): Promise<PrepareCursorImportRpcResponse> {
     const deps = options.deps ?? {}
     const now = deps.now ?? (() => Date.now())
     const hostNameFn = deps.hostName ?? (() => process.env.HAPI_HOSTNAME?.trim() || hostname())
     const log = deps.logger ?? noopLogger()
     const start = now()
 
-    const failure = (reason: CursorImportRefusalReason, message: string): CursorImportRowOutcome => ({
-        ok: false,
+    const failure = (reason: CursorImportRefusalReason, message: string): PrepareCursorImportRpcResponse => ({
+        success: false,
         uuid: options.uuid,
         reason,
         message,
@@ -608,16 +528,6 @@ export async function importCursorSession(options: {
         return failure('missing_on_disk_store', `cursor uuid '${options.uuid}' fails basename validation`)
     }
 
-    // Pre-flight: refuse if a HAPI row in this namespace already references this uuid.
-    const existing = buildAlreadyImportedIndex(options.store, options.namespace)
-    const alreadyHapi = existing.get(options.uuid)
-    if (alreadyHapi) {
-        return failure('already_imported', `cursor session ${options.uuid} is already imported as Hapi session ${alreadyHapi}`)
-    }
-
-    // Probe disk for source format. Prefer ACP over legacy when both exist
-    // (a prior successful migration removes the legacy source, but a
-    // --keep-source migration leaves both — treat the ACP entry as canonical).
     const acpSessionDir = join(options.home, '.cursor', 'acp-sessions', options.uuid)
     const acpStorePath = join(acpSessionDir, 'store.db')
     const acpMetaPath = join(acpSessionDir, 'meta.json')
@@ -656,36 +566,26 @@ export async function importCursorSession(options: {
     }
 
     if (!resolvedWorkspacePath?.trim()) {
-        // ACP meta.json may omit cwd; legacy drawers need an explicit path. Empty
-        // metadata.path makes resolveLocalResumeTarget return resume_unavailable.
         return failure(
             'ambiguous_legacy_store',
             `Cursor import (${sourceFormat}) requires workspacePath so the imported HAPI session can be resumed`
         )
     }
 
-    // Cheap sanity: store.db opens as SQLite + has at least one table.
-    // Avoids spending a verify spawn on a corrupted/truncated file.
     const sanity = sanityCheckStore(sourceStorePath)
     if (!sanity.ok) {
         return failure('corrupted_store', `cursor session ${options.uuid}: ${sanity.message}`)
     }
 
-    // For legacy: refuse if the ACP target dir already exists (race or partial prior import).
     if (sourceFormat === 'legacy' && existsSync(acpSessionDir)) {
         return failure('target_already_exists', `~/.cursor/acp-sessions/${options.uuid}/ already exists; refusing to overwrite`)
     }
 
-    // Pre-flight: refuse early if the `agent` binary is not findable. The
-    // probe would otherwise spawn_failed with ENOENT; this hint is
-    // cleaner for the operator's "fix your PATH" toast.
     if (!findAgentBinary(options.home)) {
         const pathHint = process.env.PATH ?? ''
         return failure('agent_binary_not_found', `\`agent\` binary not found under ${options.home}/.local/bin, ${options.home}/.npm-global/bin, or PATH (${pathHint.length > 0 ? pathHint : '<empty>'})`)
     }
 
-    // Legacy: flush WAL into store.db BEFORE verify so the probe and the
-    // later transplant see the same main-file snapshot (migrator parity).
     let legacyBaseline: ReturnType<typeof fingerprintSqliteStoreFamily> | null = null
     if (sourceFormat === 'legacy') {
         const prepared = prepareLegacyStoreForImport(sourceStorePath)
@@ -695,8 +595,6 @@ export async function importCursorSession(options: {
         legacyBaseline = prepared.fingerprint
     }
 
-    // Verify-probe against an isolated $HOME. STRICT REFUSAL CONTRACT:
-    // any non-ok outcome aborts before creating a HAPI row.
     const verifyCwd = resolvedWorkspacePath && resolvedWorkspacePath.length > 0
         ? resolvedWorkspacePath
         : options.home
@@ -708,9 +606,6 @@ export async function importCursorSession(options: {
         deps
     })
     if (verifyOut.kind === 'spawn_failed') {
-        // ENOENT here is the agent_binary_not_found case; non-ENOENT is
-        // internal_error because the binary existed in pre-flight but
-        // could not be spawned.
         if (/ENOENT|not found|could not be spawned/i.test(verifyOut.message)) {
             return failure('agent_binary_not_found', verifyOut.message)
         }
@@ -726,22 +621,6 @@ export async function importCursorSession(options: {
         return failure('verify_timeout', verifyOut.message)
     }
 
-    // Re-check after the async verify window. ACP imports have no mkdir
-    // lock like legacy; two overlapping imports can both pass the preflight
-    // index and both create rows with the same cursorSessionId.
-    const alreadyAfterVerify = buildAlreadyImportedIndex(options.store, options.namespace).get(options.uuid)
-    if (alreadyAfterVerify) {
-        return failure(
-            'already_imported',
-            `cursor session ${options.uuid} is already imported as Hapi session ${alreadyAfterVerify}`
-        )
-    }
-
-    // Verify passed. For legacy sessions, transplant store.db → ACP dir.
-    // Mirrors the migrator's atomic-mkdir + 0o700 mode + 0o600 store.db
-    // mode (see cursorLegacyMigrator.migrateOneWithLock) — these
-    // permissions matter on multi-user hosts where ~/.cursor is not
-    // owner-private.
     if (sourceFormat === 'legacy') {
         try {
             mkdirSync(join(options.home, '.cursor', 'acp-sessions'), { recursive: true })
@@ -782,87 +661,19 @@ export async function importCursorSession(options: {
             })
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err)
-            // Rollback our partial dir.
             rmtreeSafe(acpSessionDir)
             return failure('internal_error', `failed to place ACP session dir: ${msg}`)
         }
     }
 
-    // Create the HAPI session row. The strict-ACP contract is now satisfied
-    // (verify passed AND, for legacy, transplant succeeded), so this row
-    // is ACP from birth — no stream-json HAPI row was ever a possibility.
     const title = readMetaTitleSafe(join(acpSessionDir, 'store.db')) ?? readMetaTitleSafe(sourceStorePath) ?? `cursor:${options.uuid.slice(0, 8)}`
-    const metadata = buildImportedSessionMetadata({
+    return {
+        success: true,
         uuid: options.uuid,
+        sourceFormat,
         workspacePath: resolvedWorkspacePath,
         title,
         hostName: hostNameFn(),
-        homeDir: options.home
-    })
-    let hapiSessionId: string
-    try {
-        const engine = options.getSyncEngine?.() ?? null
-        const created = engine?.getOrCreateSession(randomUUID(), metadata, {}, options.namespace)
-            ?? options.store.sessions.getOrCreateSession(randomUUID(), metadata, {}, options.namespace)
-        hapiSessionId = created.id
-        log.info('[cursor-import] created Hapi session for cursor uuid', {
-            uuid: options.uuid,
-            hapiSessionId,
-            sourceFormat
-        })
-    } catch (err) {
-        // Roll back the transplant if we did one but the HAPI row write failed.
-        if (sourceFormat === 'legacy') {
-            rmtreeSafe(acpSessionDir)
-        }
-        return failure('internal_error', `failed to create Hapi session row: ${err instanceof Error ? err.message : String(err)}`)
-    }
-
-    return {
-        ok: true,
-        uuid: options.uuid,
-        hapiSessionId,
-        sourceFormat,
         durationMs: now() - start
     }
-}
-
-/**
- * Batch-import wrapper: each row's outcome is independent — one failing
- * does not abort the batch. Mirrors the codex importer's
- * `importSelectedCodexSessions` shape so the dialog can render per-row
- * results uniformly.
- */
-export async function importSelectedCursorSessions(options: {
-    uuids?: string[]
-    selections?: Array<{ uuid: string; workspacePath?: string | null }>
-    workspacePath?: string | null
-    store: Store
-    namespace: string
-    home: string
-    getSyncEngine?: () => SyncEngine | null
-    deps?: CursorImporterDeps
-}): Promise<{ results: CursorImportRowOutcome[]; importedCount: number }> {
-    const selections = options.selections?.length
-        ? options.selections
-        : (options.uuids ?? []).map((uuid) => ({
-            uuid,
-            workspacePath: options.workspacePath
-        }))
-
-    const results: CursorImportRowOutcome[] = []
-    for (const selection of selections) {
-        const outcome = await importCursorSession({
-            uuid: selection.uuid,
-            workspacePath: selection.workspacePath ?? options.workspacePath,
-            store: options.store,
-            namespace: options.namespace,
-            home: options.home,
-            getSyncEngine: options.getSyncEngine,
-            deps: options.deps
-        })
-        results.push(outcome)
-    }
-    const importedCount = results.filter((r) => r.ok).length
-    return { results, importedCount }
 }

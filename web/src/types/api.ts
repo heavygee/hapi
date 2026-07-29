@@ -281,11 +281,19 @@ export type ClaudeLocalSessionSummary = {
 export type ClaudeLocalSessionsResponse = {
     success: true
     sessions: ClaudeLocalSessionSummary[]
+    machineId?: string
+} | {
+    success: false
+    error: string
+    sessions: ClaudeLocalSessionSummary[]
+    machineId?: string
 }
 
 export type ClaudeImportSyncRequest = {
     // 中文注释：前端弹窗直接提交 Claude session ID，后端会按这些 transcript 直接导入到 Hapi。
     sessionIds: string[]
+    cwd?: string | null
+    machineId?: string | null
 }
 
 export type ClaudeStatusResponse = {
@@ -323,9 +331,12 @@ export type CursorImportableSessionSummary = {
 export type CursorImportableSessionsResponse = {
     success: true
     sessions: CursorImportableSessionSummary[]
+    machineId?: string
 } | {
     success: false
     error: string
+    sessions?: CursorImportableSessionSummary[]
+    machineId?: string
 }
 
 export type CursorImportRowOutcome =
@@ -353,6 +364,7 @@ export type CursorImportRequest = {
     selections?: CursorImportSelection[]
     uuids?: string[]
     workspacePath?: string | null
+    machineId?: string | null
 }
 
 export type CursorImportResponse = {

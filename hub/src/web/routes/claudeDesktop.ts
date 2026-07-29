@@ -23,6 +23,7 @@ import {
     importSelectedSessions,
     parseImportedTimestamp,
     parseSyncSessionRequest,
+    resolveRequestedImportMachineId,
     truncateText
 } from './transcriptImport'
 
@@ -34,6 +35,12 @@ type ClaudeStatusResponse = {
 type ClaudeLocalSessionsResponse = {
     success: true
     sessions: LocalSessionSummary[]
+    machineId?: string
+} | {
+    success: false
+    error: string
+    sessions: LocalSessionSummary[]
+    machineId?: string
 }
 
 const CLAUDE_SESSION_ID_KEY = 'claudeSessionId'
@@ -360,14 +367,54 @@ export async function importSelectedClaudeSessions(options: {
     store: Store
     namespace: string
     getSyncEngine?: () => SyncEngine | null
+    remoteSessions?: TranscriptImportData[]
+    resolvedMachineId?: string | null
 }): Promise<ScriptLaunchResponse> {
     return importSelectedSessions({
         adapter: claudeAdapter,
         sessionIds: options.claudeSessionIds,
         store: options.store,
         namespace: options.namespace,
-        getSyncEngine: options.getSyncEngine
+        getSyncEngine: options.getSyncEngine,
+        remoteSessions: options.remoteSessions,
+        resolvedMachineId: options.resolvedMachineId
     })
+}
+
+function asRemoteClaudeSessions(value: unknown, requireMessages: boolean): TranscriptImportData[] {
+    if (!Array.isArray(value)) return []
+    return value.filter((session): session is TranscriptImportData => {
+        const record = asRecord(session)
+        return typeof record?.id === 'string'
+            && typeof record.title === 'string'
+            && typeof record.file === 'string'
+            && typeof record.modifiedAt === 'number'
+            && (!requireMessages || Array.isArray(record.messages))
+    }) as TranscriptImportData[]
+}
+
+async function listClaudeSessionsViaMachine(options: {
+    engine: SyncEngine | null
+    namespace: string
+    cwd?: string | null
+    machineId?: string | null
+    sessionIds?: string[]
+}): Promise<{ sessions: TranscriptImportData[] | LocalSessionSummary[]; machineId?: string; error?: string }> {
+    const machineId = resolveRequestedImportMachineId(options.cwd, options.namespace, options.engine, options.machineId)
+    if (!machineId || !options.engine) {
+        return { sessions: [], error: 'No online machine available for Claude history import' }
+    }
+    const result = await options.engine.listClaudeSessionsForMachine(machineId, options.cwd, options.sessionIds)
+    if (!result || typeof result !== 'object') {
+        return { sessions: [], machineId, error: 'Unexpected Claude sessions RPC response' }
+    }
+    if (result.success !== true) {
+        return { sessions: [], machineId, error: result.error || 'Failed to list Claude sessions' }
+    }
+    return {
+        sessions: asRemoteClaudeSessions(result.sessions, Boolean(options.sessionIds?.length)),
+        machineId
+    }
 }
 
 export {
@@ -393,17 +440,40 @@ export function createClaudeDesktopRoutes(options: {
     })
 
     app.get('/claude/status', (c) => {
-        const available = getClaudeProjectRoots().some((root) => existsSync(root))
+        // Availability is runner-scoped (same as Codex #1088). Hub ~/.claude is not authoritative.
+        const engine = options.getSyncEngine()
+        const machineId = resolveRequestedImportMachineId(null, c.get('namespace'), engine, null)
         return c.json({
             success: true,
-            claudeProjectsAvailable: available
+            claudeProjectsAvailable: Boolean(machineId)
         } satisfies ClaudeStatusResponse)
     })
 
-    app.get('/claude/sessions', (c) => {
+    app.get('/claude/sessions', async (c) => {
+        const cwd = c.req.query('cwd')?.trim() || null
+        const machineId = c.req.query('machineId')?.trim() || null
+        // Hub may run remotely; Claude transcripts come from the selected online runner via machine RPC.
+        const remote = await listClaudeSessionsViaMachine({
+            engine: options.getSyncEngine(),
+            namespace: c.get('namespace'),
+            cwd,
+            machineId
+        })
+        if (remote.error) {
+            return c.json({
+                success: false,
+                error: remote.error,
+                sessions: [],
+                ...(remote.machineId ? { machineId: remote.machineId } : {})
+            } satisfies ClaudeLocalSessionsResponse, 503)
+        }
         return c.json({
             success: true,
-            sessions: listLocalClaudeSessions()
+            sessions: remote.sessions.map((session) => {
+                const { messages: _messages, ...summary } = session as TranscriptImportData & { messages?: unknown }
+                return summary
+            }),
+            ...(remote.machineId ? { machineId: remote.machineId } : {})
         } satisfies ClaudeLocalSessionsResponse)
     })
 
@@ -420,12 +490,29 @@ export function createClaudeDesktopRoutes(options: {
             })
         }
 
-        // 中文注释：直接读取本地 Claude transcript 写入 Hapi store，复用与 Codex 相同的落库/同步/去重引擎。
+        const remote = await listClaudeSessionsViaMachine({
+            engine: options.getSyncEngine(),
+            namespace: c.get('namespace'),
+            cwd: parsed.cwd,
+            machineId: parsed.machineId,
+            sessionIds: parsed.sessionIds
+        })
+        if (remote.error) {
+            const { workspace } = getDirectImportRouteContext()
+            return c.json({
+                success: false,
+                error: remote.error,
+                cwd: workspace
+            })
+        }
+
         const result = await importSelectedClaudeSessions({
             claudeSessionIds: parsed.sessionIds,
             store: options.store,
             namespace: c.get('namespace'),
-            getSyncEngine: options.getSyncEngine
+            getSyncEngine: options.getSyncEngine,
+            remoteSessions: remote.sessions as TranscriptImportData[],
+            resolvedMachineId: remote.machineId ?? null
         })
         return c.json(result)
     })
