@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -192,9 +192,57 @@ describe('fingerprintArtifactInputs / isArtifactCacheFresh', () => {
             writeFileSync(archive, 'old-bytes')
 
             const before = fingerprintArtifactInputs(root)
-            // Touch size so the tools size+mtime feed changes.
             writeFileSync(archive, 'new-bytes-longer')
             expect(fingerprintArtifactInputs(root)).not.toBe(before)
+        } finally {
+            rmSync(root, { recursive: true, force: true })
+        }
+    })
+
+    it('is unchanged by an mtime-only touch of identical tool bytes', () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-artifact-mtime-fp-'))
+        try {
+            mkdirSync(join(root, 'cli', 'src'), { recursive: true })
+            mkdirSync(join(root, 'cli', 'tools', 'archives'), { recursive: true })
+            mkdirSync(join(root, 'hub', 'src'), { recursive: true })
+            mkdirSync(join(root, 'shared', 'src'), { recursive: true })
+            writeFileSync(join(root, 'cli', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'hub', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'shared', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'cli', 'src', 'bootstrap.ts'), 'export const x = 1\n')
+            writeFileSync(join(root, 'hub', 'src', 'startHub.ts'), 'export {}\n')
+            writeFileSync(join(root, 'shared', 'src', 'index.ts'), 'export {}\n')
+            const archive = join(root, 'cli', 'tools', 'archives', 'ripgrep-x64-linux.tar.gz')
+            writeFileSync(archive, 'same-bytes')
+
+            const before = fingerprintArtifactInputs(root)
+            utimesSync(archive, new Date(2000, 0, 1), new Date(2000, 0, 1))
+            expect(fingerprintArtifactInputs(root)).toBe(before)
+        } finally {
+            rmSync(root, { recursive: true, force: true })
+        }
+    })
+
+    it('ignores hub embeddedAssets.generated.ts which compile stubs out', () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-artifact-stub-fp-'))
+        try {
+            mkdirSync(join(root, 'cli', 'src'), { recursive: true })
+            mkdirSync(join(root, 'hub', 'src', 'web'), { recursive: true })
+            mkdirSync(join(root, 'shared', 'src'), { recursive: true })
+            writeFileSync(join(root, 'cli', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'hub', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'shared', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'cli', 'src', 'bootstrap.ts'), 'export const x = 1\n')
+            writeFileSync(join(root, 'hub', 'src', 'startHub.ts'), 'export {}\n')
+            writeFileSync(join(root, 'shared', 'src', 'index.ts'), 'export {}\n')
+            const manifest = join(root, 'hub', 'src', 'web', 'embeddedAssets.generated.ts')
+            writeFileSync(manifest, 'export const embeddedAssets = [{ path: "a.js" }];\n')
+
+            const before = fingerprintArtifactInputs(root)
+            writeFileSync(manifest, 'export const embeddedAssets = [{ path: "b.js" }];\n')
+            expect(fingerprintArtifactInputs(root)).toBe(before)
         } finally {
             rmSync(root, { recursive: true, force: true })
         }
