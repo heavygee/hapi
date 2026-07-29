@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { cliBinaryUpdatedOnDisk } from '@hapi/protocol/runnerCapabilities'
+import { cliBinaryUpdatedOnDisk, MACHINE_CAPABILITIES } from '@hapi/protocol/runnerCapabilities'
 import { DEFAULT_FLEET_UPGRADE_POLICY, machineTrailsUpgradeOffer, type HubUpgradeOffer } from '@hapi/protocol/upgradeChannel'
 import type { Machine } from '@/types/api'
 import { useMachines } from '@/hooks/queries/useMachines'
@@ -234,11 +234,19 @@ export function RunnerVersionSkewBanner({ topClassName }: { topClassName?: strin
                     const version = machine.metadata?.happyCliVersion
                     const newerOnDisk = cliBinaryUpdatedOnDisk(machine.metadata)
                     const handoffDisabled = machine.metadata?.versionHandoffDisabled === true
+                    const supportsSelfUpgrade = (machine.metadata?.capabilities ?? [])
+                        .includes(MACHINE_CAPABILITIES.RunnerSelfUpgrade)
                     const busy = busyId === machine.id
                     // Upgrade owns package+handoff relaunch. Restart is stop-only and is
                     // only safe when an external supervisor (soup/systemd) will relaunch.
-                    const canUpgrade = !handoffDisabled
+                    // Legacy runners without RunnerSelfUpgrade cannot receive the RPC.
+                    const canUpgrade = !handoffDisabled && supportsSelfUpgrade
                     const canRestart = handoffDisabled
+                    const upgradeDisabledTitle = handoffDisabled
+                        ? t('runner.skew.banner.upgradeNeedsHandoff')
+                        : !supportsSelfUpgrade
+                            ? t('runner.skew.banner.upgradeNeedsManual')
+                            : undefined
                     return (
                         <li
                             key={machine.id}
@@ -252,9 +260,11 @@ export function RunnerVersionSkewBanner({ topClassName }: { topClassName?: strin
                                     <span className="ml-1 text-amber-800 dark:text-amber-200">
                                         {handoffDisabled
                                             ? t('runner.skew.banner.handoffDisabledHint')
-                                            : newerOnDisk
-                                                ? t('runner.skew.banner.binaryUpdatedHint')
-                                                : t('runner.skew.banner.upgradeCliFirst')}
+                                            : !supportsSelfUpgrade
+                                                ? t('runner.skew.banner.legacyRunnerHint')
+                                                : newerOnDisk
+                                                    ? t('runner.skew.banner.binaryUpdatedHint')
+                                                    : t('runner.skew.banner.upgradeCliFirst')}
                                     </span>
                                 </div>
                                 <div className="flex shrink-0 gap-1">
@@ -262,7 +272,7 @@ export function RunnerVersionSkewBanner({ topClassName }: { topClassName?: strin
                                         type="button"
                                         data-testid={`runner-version-skew-upgrade-${machine.id}`}
                                         disabled={!canUpgrade || busy}
-                                        title={canUpgrade ? undefined : t('runner.skew.banner.upgradeNeedsHandoff')}
+                                        title={canUpgrade ? undefined : upgradeDisabledTitle}
                                         onClick={() => void onUpgrade(machine)}
                                         className="rounded bg-amber-900 px-2 py-1 text-xs font-medium text-amber-50 disabled:opacity-50 dark:bg-amber-100 dark:text-amber-950"
                                     >
