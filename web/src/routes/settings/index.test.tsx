@@ -10,7 +10,8 @@ import SettingsVoicePage from './voice'
 import SettingsVoiceVoicesPage from './voice-voices'
 import SettingsVoiceAdvancedPage from './voice-advanced'
 
-const { navigate, setAppearance, setColorTheme, setFontScale, setTerminalFontSize, setComposerEnterBehavior, setVoice } = vi.hoisted(() => ({
+const { context, navigate, setAppearance, setColorTheme, setFontScale, setTerminalFontSize, setComposerEnterBehavior, setVoice } = vi.hoisted(() => ({
+    context: { token: '' },
     navigate: vi.fn(),
     setAppearance: vi.fn(),
     setColorTheme: vi.fn(),
@@ -130,6 +131,7 @@ vi.mock('@/lib/app-context', () => ({
     useAppContext: () => ({
         api: {},
         baseUrl: 'http://127.0.0.1:3006',
+        token: context.token,
     }),
 }))
 
@@ -170,6 +172,7 @@ describe('responsive settings pages', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         localStorage.clear()
+        context.token = `x.${btoa(JSON.stringify({ ns: 'default' }))}.x`
     })
 
     it('renders the mobile hub categories with current summaries', () => {
@@ -184,6 +187,12 @@ describe('responsive settings pages', () => {
         renderPage(<SettingsHubPage />)
         fireEvent.click(screen.getByRole('button', { name: /General/ }))
         expect(navigate).toHaveBeenCalledWith({ to: '/settings/general' })
+    })
+
+    it('hides Hub storage from tenant namespaces', () => {
+        context.token = `x.${btoa(JSON.stringify({ ns: 'tenant' }))}.x`
+        renderPage(<SettingsHubPage />)
+        expect(screen.queryByText('Hub database usage')).not.toBeInTheDocument()
     })
 
     it('changes the application language inline', () => {
