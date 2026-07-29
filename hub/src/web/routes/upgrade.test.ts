@@ -19,7 +19,7 @@ function makeApp(namespace = 'default') {
         c.set('userId', 1)
         await next()
     })
-    app.route('/api', createUpgradeRoutes())
+    app.route('/api', createUpgradeRoutes(() => null))
     return app
 }
 
