@@ -1,5 +1,13 @@
-import { describe, expect, it } from 'vitest'
-import { artifactInstallFileName, resolvePostNpmInstallExecutable, shouldApplyUpgradeOffer } from './selfUpgrade'
+import { afterEach, describe, expect, it } from 'vitest'
+import {
+    __resetRunnerSelfUpgradeGateForTests,
+    __setRunnerSelfUpgradeInFlightForTests,
+    applyRunnerSelfUpgrade,
+    artifactInstallFileName,
+    assertExecutableMatchesTargetVersion,
+    resolvePostNpmInstallExecutable,
+    shouldApplyUpgradeOffer,
+} from './selfUpgrade'
 import type { HubUpgradeOffer } from '@hapi/protocol/upgradeChannel'
 import { CURRENT_MACHINE_CAPABILITIES } from '@hapi/protocol/runnerCapabilities'
 import { mkdtempSync, writeFileSync } from 'node:fs'
@@ -99,6 +107,53 @@ describe('shouldApplyUpgradeOffer', () => {
         }), '0.18.4')).toEqual({
             apply: false,
             reason: 'unsupported',
+        })
+    })
+})
+
+describe('assertExecutableMatchesTargetVersion', () => {
+    it('accepts --version output that includes the target', async () => {
+        await expect(assertExecutableMatchesTargetVersion(
+            '/fake/hapi',
+            '0.24.0',
+            async () => ({ ok: true, output: 'hapi version: 0.24.0\n' }),
+        )).resolves.toBeUndefined()
+    })
+
+    it('rejects an older PATH hit after install', async () => {
+        await expect(assertExecutableMatchesTargetVersion(
+            '/old/hapi',
+            '0.24.0',
+            async () => ({ ok: true, output: 'hapi version: 0.20.0\n' }),
+        )).rejects.toThrow(/does not match target 0\.24\.0/)
+    })
+
+    it('rejects a failed version probe', async () => {
+        await expect(assertExecutableMatchesTargetVersion(
+            '/broken/hapi',
+            '0.24.0',
+            async () => ({ ok: false, output: 'ENOENT' }),
+        )).rejects.toThrow(/does not match target/)
+    })
+})
+
+describe('applyRunnerSelfUpgrade concurrency gate', () => {
+    afterEach(() => {
+        __resetRunnerSelfUpgradeGateForTests()
+    })
+
+    it('fails closed when another upgrade is already in flight', async () => {
+        __setRunnerSelfUpgradeInFlightForTests(true)
+        const result = await applyRunnerSelfUpgrade({
+            offer: baseOffer(),
+            downloadBaseUrl: 'http://localhost',
+            authToken: 't',
+            localVersion: '0.20.0',
+        })
+        expect(result).toEqual({
+            status: 'failed',
+            message: 'Runner upgrade already in progress',
+            channel: 'npm',
         })
     })
 })
