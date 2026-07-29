@@ -5,12 +5,27 @@ import { getCliArgs } from '@/utils/cliArgs'
 import { ensureLoopbackProxyBypass } from '@/utils/proxyEnv'
 import { resolveCommand } from './registry'
 import {
+    clearUpgradeTarget,
     isAuthorizedRunnerHandoff,
     isRunnerStartCliArgs,
     readUpgradeTarget,
     shouldDelegateToUpgradeTarget,
 } from '@/upgrade/upgradeTarget'
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
+
+/** Wait for delegated child exit; reject on spawn error so caller can clear the marker. */
+export function waitForDelegatedRunner(child: ChildProcess): Promise<number> {
+    return new Promise<number>((resolve, reject) => {
+        child.once('error', reject)
+        child.once('exit', (status, signal) => {
+            if (signal) {
+                resolve(1)
+                return
+            }
+            resolve(status ?? 1)
+        })
+    })
+}
 
 export async function runCli(): Promise<void> {
     ensureLoopbackProxyBypass()
@@ -45,17 +60,14 @@ export async function runCli(): Promise<void> {
         }
         process.once('SIGTERM', forward)
         process.once('SIGINT', forward)
-        const code = await new Promise<number>((resolve, reject) => {
-            child.once('error', reject)
-            child.once('exit', (status, signal) => {
-                if (signal) {
-                    resolve(1)
-                    return
-                }
-                resolve(status ?? 1)
-            })
-        })
-        process.exit(code)
+        try {
+            const code = await waitForDelegatedRunner(child)
+            process.exit(code)
+        } catch (error) {
+            clearUpgradeTarget()
+            logger.debug('[UPGRADE] Durable target failed to spawn; using current CLI', error)
+            // Fall through to the current CLI's normal command dispatch.
+        }
     }
 
     if (args.includes('-v') || args.includes('--version')) {

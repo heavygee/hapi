@@ -1,9 +1,10 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
     __setUpgradeTargetBaseDirForTests,
+    clearUpgradeTarget,
     isAuthorizedRunnerHandoff,
     isRunnerStartCliArgs,
     readUpgradeTarget,
@@ -78,6 +79,16 @@ describe('upgradeTarget', () => {
                 process.env.HAPI_CLI_EXECUTABLE = previous
             }
         }
+    })
+
+    it('clears a durable target marker so a broken path cannot restart-loop', () => {
+        const path = join(home, 'hapi-gone')
+        writeFileSync(path, 'x')
+        writeUpgradeTarget({ path, targetVersion: '0.25.1' })
+        expect(existsSync(upgradeTargetMarkerPath())).toBe(true)
+        clearUpgradeTarget()
+        expect(existsSync(upgradeTargetMarkerPath())).toBe(false)
+        expect(readUpgradeTarget()).toBeNull()
     })
 
     it('does not delegate during an authorized handoff even when a prior marker exists', () => {
