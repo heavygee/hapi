@@ -272,6 +272,30 @@ describe('fingerprintArtifactInputs / isArtifactCacheFresh', () => {
         }
     })
 
+    it('ignores downloaded tunwg platform caches under shared/tools', () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-artifact-tunwg-fp-'))
+        try {
+            mkdirSync(join(root, 'cli', 'src'), { recursive: true })
+            mkdirSync(join(root, 'hub', 'src'), { recursive: true })
+            mkdirSync(join(root, 'shared', 'src'), { recursive: true })
+            mkdirSync(join(root, 'shared', 'tools', 'tunwg'), { recursive: true })
+            writeFileSync(join(root, 'cli', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'hub', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'shared', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'cli', 'src', 'bootstrap.ts'), 'export const x = 1\n')
+            writeFileSync(join(root, 'hub', 'src', 'startHub.ts'), 'export {}\n')
+            writeFileSync(join(root, 'shared', 'src', 'index.ts'), 'export {}\n')
+            writeFileSync(join(root, 'shared', 'tools', 'tunwg', 'tunwg-linux-amd64'), 'linux-bytes')
+
+            const before = fingerprintArtifactInputs(root)
+            writeFileSync(join(root, 'shared', 'tools', 'tunwg', 'tunwg-windows-amd64.exe'), 'win-bytes')
+            expect(fingerprintArtifactInputs(root)).toBe(before)
+        } finally {
+            rmSync(root, { recursive: true, force: true })
+        }
+    })
+
     it('treats legacy metas without sourceFingerprint as stale', () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-artifact-legacy-'))
         try {

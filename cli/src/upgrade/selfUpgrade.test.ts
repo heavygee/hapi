@@ -147,6 +147,13 @@ describe('shouldApplyUpgradeOffer', () => {
         })
     })
 
+    it('refuses to downgrade when local version is ahead of the hub offer', () => {
+        expect(shouldApplyUpgradeOffer(baseOffer({ targetVersion: '0.23.0' }), '0.25.0')).toEqual({
+            apply: false,
+            reason: 'unsupported',
+        })
+    })
+
     it('rejects hub-artifact without sha when apply would need verify', () => {
         expect(shouldApplyUpgradeOffer(baseOffer({
             channel: 'hub-artifact',
