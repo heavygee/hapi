@@ -5,6 +5,7 @@ import { getCliArgs } from '@/utils/cliArgs'
 import { ensureLoopbackProxyBypass } from '@/utils/proxyEnv'
 import { resolveCommand } from './registry'
 import {
+    isAuthorizedRunnerHandoff,
     isRunnerStartCliArgs,
     readUpgradeTarget,
     shouldDelegateToUpgradeTarget,
@@ -21,7 +22,11 @@ export async function runCli(): Promise<void> {
     // general-purpose entrypoint.
     // Spawn (not spawnSync) and forward SIGTERM/SIGINT so KillMode=process still
     // stops the upgraded runner when systemd signals the wrapper PID.
-    const upgradeTarget = isRunnerStartCliArgs(args) ? readUpgradeTarget() : null
+    // During an authorized handoff the child is already the candidate binary —
+    // do not bounce it back to a previous durable marker target.
+    const upgradeTarget = !isAuthorizedRunnerHandoff() && isRunnerStartCliArgs(args)
+        ? readUpgradeTarget()
+        : null
     if (upgradeTarget && shouldDelegateToUpgradeTarget(upgradeTarget)) {
         const child = spawn(upgradeTarget.path, args, {
             stdio: 'inherit',

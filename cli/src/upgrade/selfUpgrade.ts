@@ -20,7 +20,7 @@ import {
 } from '@/runner/handoffLock'
 import { readRunnerState, writeRunnerState } from '@/persistence'
 import { buildHubRequestHeaders } from '@/api/hubExtraHeaders'
-import { writeUpgradeTarget } from '@/upgrade/upgradeTarget'
+import { writeUpgradeTarget, readUpgradeTarget } from '@/upgrade/upgradeTarget'
 
 export type ApplyDecision =
     | { apply: true; reason: 'upgrade' }
@@ -38,6 +38,7 @@ export function shouldApplyUpgradeOffer(
     offer: HubUpgradeOffer,
     localVersion: string,
     localCapabilities: readonly string[] = CURRENT_MACHINE_CAPABILITIES,
+    localGeneration?: string | null,
 ): ApplyDecision {
     if (offer.channel === 'off') {
         return { apply: false, reason: 'unsupported' }
@@ -50,11 +51,16 @@ export function shouldApplyUpgradeOffer(
     if (offer.channel === 'npm' && !offer.npmPackage) {
         return { apply: false, reason: 'unsupported' }
     }
+    const generationDrift = offer.channel === 'hub-artifact'
+        && typeof offer.targetGeneration === 'string'
+        && offer.targetGeneration.length > 0
+        && offer.targetGeneration !== (localGeneration ?? '')
     // Fleet upgrade is capability-driven: same semver with missing target
-    // capabilities must still apply (rebuild/relaunch), not report already-current.
+    // capabilities (or a new hub-artifact generation) must still apply.
     if (
         localVersion === offer.targetVersion
         && hasTargetCapabilities(offer, localCapabilities)
+        && !generationDrift
     ) {
         return { apply: false, reason: 'already-current' }
     }
@@ -341,6 +347,7 @@ export async function applyRunnerSelfUpgrade(options: {
     downloadBaseUrl: string
     authToken: string
     localVersion?: string
+    localGeneration?: string | null
     requestShutdown?: () => void
 }): Promise<RunnerSelfUpgradeResponse> {
     if (runnerSelfUpgradeInFlight) {
@@ -373,10 +380,19 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
     downloadBaseUrl: string
     authToken: string
     localVersion?: string
+    localGeneration?: string | null
     requestShutdown?: () => void
 }): Promise<RunnerSelfUpgradeResponse> {
     const localVersion = options.localVersion ?? packageJson.version
-    const decision = shouldApplyUpgradeOffer(options.offer, localVersion)
+    const localGeneration = options.localGeneration
+        ?? readUpgradeTarget()?.targetGeneration
+        ?? null
+    const decision = shouldApplyUpgradeOffer(
+        options.offer,
+        localVersion,
+        CURRENT_MACHINE_CAPABILITIES,
+        localGeneration,
+    )
     if (!decision.apply) {
         return {
             status: decision.reason === 'already-current' ? 'already-current' : 'unsupported',
@@ -457,6 +473,8 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
             path: installedExecutable,
             targetVersion: options.offer.targetVersion,
             targetCapabilities: [...options.offer.targetCapabilities],
+            targetGeneration: options.offer.targetGeneration
+                || (options.offer.channel === 'hub-artifact' ? options.offer.artifact?.sha256 : undefined),
         })
 
         // Handoff confirmed. Exit WITHOUT requestShutdown/cleanupRunnerState —

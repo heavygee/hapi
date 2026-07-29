@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
     __setUpgradeTargetBaseDirForTests,
+    isAuthorizedRunnerHandoff,
     isRunnerStartCliArgs,
     readUpgradeTarget,
     shouldDelegateToUpgradeTarget,
@@ -75,6 +76,39 @@ describe('upgradeTarget', () => {
                 delete process.env.HAPI_CLI_EXECUTABLE
             } else {
                 process.env.HAPI_CLI_EXECUTABLE = previous
+            }
+        }
+    })
+
+    it('does not delegate during an authorized handoff even when a prior marker exists', () => {
+        const previousExe = process.env.HAPI_CLI_EXECUTABLE
+        const previousPid = process.env.HAPI_RUNNER_HANDOFF_FROM_PID
+        const markerPath = join(home, 'hapi-old-gen')
+        const candidatePath = join(home, 'hapi-new-gen')
+        writeFileSync(markerPath, 'old')
+        writeFileSync(candidatePath, 'new')
+        writeUpgradeTarget({
+            path: markerPath,
+            targetVersion: '0.25.1',
+            targetGeneration: 'gen-a',
+        })
+        process.env.HAPI_CLI_EXECUTABLE = candidatePath
+        process.env.HAPI_RUNNER_HANDOFF_FROM_PID = '12345'
+        try {
+            expect(isAuthorizedRunnerHandoff()).toBe(true)
+            const target = readUpgradeTarget()
+            expect(target?.path).toBe(markerPath)
+            expect(shouldDelegateToUpgradeTarget(target!)).toBe(false)
+        } finally {
+            if (previousExe === undefined) {
+                delete process.env.HAPI_CLI_EXECUTABLE
+            } else {
+                process.env.HAPI_CLI_EXECUTABLE = previousExe
+            }
+            if (previousPid === undefined) {
+                delete process.env.HAPI_RUNNER_HANDOFF_FROM_PID
+            } else {
+                process.env.HAPI_RUNNER_HANDOFF_FROM_PID = previousPid
             }
         }
     })
