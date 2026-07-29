@@ -433,7 +433,7 @@ function SessionsPage() {
                 throw new Error(result.error || t('cursorSync.failed.body'))
             }
             setCursorSessions(result.sessions)
-            setCursorImportMachineId(result.machineId ?? machineId ?? null)
+            setCursorImportMachineId(machineId ?? null)
         } catch (error) {
             setCursorSessions([])
             setCursorImportMachineId(null)
@@ -456,7 +456,7 @@ function SessionsPage() {
                 throw new Error(result.error || t('claudeSync.failed.body'))
             }
             setClaudeSessions(result.sessions)
-            setClaudeImportMachineId(result.machineId ?? machineId ?? null)
+            setClaudeImportMachineId(machineId ?? null)
         } catch (error) {
             setClaudeSessions([])
             setClaudeImportMachineId(null)
@@ -510,11 +510,14 @@ function SessionsPage() {
         try {
             const selections = uuids.map((uuid) => {
                 const session = cursorSessions.find((entry) => entry.id === uuid)
-                return { uuid, workspacePath: session?.workspacePath ?? null }
+                return {
+                    uuid,
+                    workspacePath: session?.workspacePath ?? null,
+                    machineId: session?.machineId ?? cursorImportMachineId
+                }
             })
             const result = await api.importCursorSessions({
-                selections,
-                machineId: cursorImportMachineId
+                selections
             })
             if (!result.success) {
                 throw new Error(result.error || t('cursorSync.failed.body'))
@@ -564,7 +567,10 @@ function SessionsPage() {
 
     const handleArchiveCodexSession = useCallback(async (codexSession: import('@/types/api').CodexLocalSessionSummary) => {
         if (!api) return
-        const result = await api.archiveCodexSession(codexSession.id, codexImportMachineId)
+        const result = await api.archiveCodexSession(
+            codexSession.id,
+            codexSession.machineId ?? codexImportMachineId
+        )
         if (!result.success) {
             throw new Error(result.error)
         }
@@ -576,8 +582,8 @@ function SessionsPage() {
 
         setIsSyncingCodexSession(true)
         try {
-            // 中文注释：弹窗提交的是本地 Codex thread ID；后端会直接读取这些 transcript 并导入到 Hapi。
-            const result = await api.syncCodexSession({ sessionIds, cwd: currentWorkDirectory, machineId: codexImportMachineId })
+            // Estate-wide: omit machineId so hub fans out using per-row owners.
+            const result = await api.syncCodexSession({ sessionIds, cwd: currentWorkDirectory })
             if (!result.success) {
                 throw new Error(normalizeCodexScriptError(result.error, t('codexSync.failed.body')))
             }
@@ -662,8 +668,7 @@ function SessionsPage() {
         try {
             const result = await api.syncClaudeSession({
                 sessionIds,
-                cwd: currentWorkDirectory,
-                machineId: claudeImportMachineId
+                cwd: currentWorkDirectory
             })
             if (!result.success) {
                 throw new Error(result.error || t('claudeSync.failed.body'))
@@ -693,7 +698,6 @@ function SessionsPage() {
     }, [
         addToast,
         api,
-        claudeImportMachineId,
         currentWorkDirectory,
         isLoadingClaudeSessions,
         isSyncingClaudeSession,

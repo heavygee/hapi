@@ -696,6 +696,82 @@ export function resolveRequestedImportMachineId(
     return onlineMachines.length === 1 ? onlineMachines[0].id : null
 }
 
+/**
+ * Estate-wide import discovery: fan out to every online runner (or one
+ * explicit machineId for tests / rare API callers). The import button must
+ * not ask the user to pick a machine — machineId is stamped per row.
+ */
+export async function fanOutImportAcrossOnlineMachines<T>(options: {
+    engine: SyncEngine | null
+    namespace: string
+    requestedMachineId?: string | null
+    noOnlineError: string
+    run: (machineId: string) => Promise<T>
+}): Promise<{
+    results: Array<{ machineId: string; value: T }>
+    errors: Array<{ machineId: string; error: string }>
+    error?: string
+}> {
+    if (!options.engine) {
+        return { results: [], errors: [], error: options.noOnlineError }
+    }
+    const online = options.engine.getOnlineMachinesByNamespace(options.namespace)
+    const targets = options.requestedMachineId
+        ? online.filter((machine) => machine.id === options.requestedMachineId)
+        : online
+    if (targets.length === 0) {
+        return { results: [], errors: [], error: options.noOnlineError }
+    }
+
+    const settled = await Promise.all(targets.map(async (machine) => {
+        try {
+            return {
+                machineId: machine.id,
+                ok: true as const,
+                value: await options.run(machine.id)
+            }
+        } catch (error) {
+            return {
+                machineId: machine.id,
+                ok: false as const,
+                error: error instanceof Error ? error.message : String(error)
+            }
+        }
+    }))
+
+    const results: Array<{ machineId: string; value: T }> = []
+    const errors: Array<{ machineId: string; error: string }> = []
+    for (const entry of settled) {
+        if (entry.ok) {
+            results.push({ machineId: entry.machineId, value: entry.value })
+        } else {
+            errors.push({ machineId: entry.machineId, error: entry.error })
+        }
+    }
+    if (results.length === 0) {
+        return {
+            results: [],
+            errors,
+            error: errors[0]?.error ?? options.noOnlineError
+        }
+    }
+    return { results, errors }
+}
+
+/** Keep newest row when the same external id appears on multiple machines. */
+export function mergeImportSessionsById<T extends { id: string; modifiedAt: number }>(
+    rows: T[]
+): T[] {
+    const byId = new Map<string, T>()
+    for (const row of rows) {
+        const previous = byId.get(row.id)
+        if (!previous || previous.modifiedAt < row.modifiedAt) {
+            byId.set(row.id, row)
+        }
+    }
+    return Array.from(byId.values()).sort((a, b) => b.modifiedAt - a.modifiedAt)
+}
+
 function getDirectImportWorkspace(): string {
     const configured = process.env.HAPI_CODEX_WORKSPACE?.trim()
     return configured ? resolveLocalPath(expandHomePath(configured)) : process.cwd()

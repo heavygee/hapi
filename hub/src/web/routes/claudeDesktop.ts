@@ -23,7 +23,8 @@ import {
     importSelectedSessions,
     parseImportedTimestamp,
     parseSyncSessionRequest,
-    resolveRequestedImportMachineId,
+    fanOutImportAcrossOnlineMachines,
+    mergeImportSessionsById,
     truncateText
 } from './transcriptImport'
 
@@ -34,14 +35,14 @@ type ClaudeStatusResponse = {
 
 type ClaudeLocalSessionsResponse = {
     success: true
-    sessions: LocalSessionSummary[]
-    machineId?: string
+    sessions: Array<LocalSessionSummary & { machineId?: string }>
 } | {
     success: false
     error: string
-    sessions: LocalSessionSummary[]
-    machineId?: string
+    sessions: Array<LocalSessionSummary & { machineId?: string }>
 }
+
+const NO_ONLINE_MACHINE_FOR_CLAUDE = 'No online machine available for Claude history import'
 
 const CLAUDE_SESSION_ID_KEY = 'claudeSessionId'
 const CLAUDE_TRANSCRIPT_IMPORT_NAMESPACE_ERROR = 'Claude transcript import is not available outside the default namespace'
@@ -399,21 +400,39 @@ async function listClaudeSessionsViaMachine(options: {
     cwd?: string | null
     machineId?: string | null
     sessionIds?: string[]
-}): Promise<{ sessions: TranscriptImportData[] | LocalSessionSummary[]; machineId?: string; error?: string }> {
-    const machineId = resolveRequestedImportMachineId(options.cwd, options.namespace, options.engine, options.machineId)
-    if (!machineId || !options.engine) {
-        return { sessions: [], error: 'No online machine available for Claude history import' }
+}): Promise<{
+    sessions: Array<(TranscriptImportData | LocalSessionSummary) & { machineId: string }>
+    error?: string
+}> {
+    const fanOut = await fanOutImportAcrossOnlineMachines({
+        engine: options.engine,
+        namespace: options.namespace,
+        requestedMachineId: options.machineId,
+        noOnlineError: NO_ONLINE_MACHINE_FOR_CLAUDE,
+        run: async (machineId) => {
+            const result = await options.engine!.listClaudeSessionsForMachine(
+                machineId,
+                options.cwd,
+                options.sessionIds
+            )
+            if (!result || typeof result !== 'object') {
+                throw new Error('Unexpected Claude sessions RPC response')
+            }
+            if (result.success !== true) {
+                throw new Error(result.error || 'Failed to list Claude sessions')
+            }
+            return asRemoteClaudeSessions(result.sessions, Boolean(options.sessionIds?.length))
+        }
+    })
+    if (fanOut.error) {
+        return { sessions: [], error: fanOut.error }
     }
-    const result = await options.engine.listClaudeSessionsForMachine(machineId, options.cwd, options.sessionIds)
-    if (!result || typeof result !== 'object') {
-        return { sessions: [], machineId, error: 'Unexpected Claude sessions RPC response' }
-    }
-    if (result.success !== true) {
-        return { sessions: [], machineId, error: result.error || 'Failed to list Claude sessions' }
-    }
+
+    const stamped = fanOut.results.flatMap(({ machineId, value }) => (
+        value.map((session) => ({ ...session, machineId }))
+    ))
     return {
-        sessions: asRemoteClaudeSessions(result.sessions, Boolean(options.sessionIds?.length)),
-        machineId
+        sessions: mergeImportSessionsById(stamped)
     }
 }
 
@@ -442,17 +461,17 @@ export function createClaudeDesktopRoutes(options: {
     app.get('/claude/status', (c) => {
         // Availability is runner-scoped (same as Codex #1088). Hub ~/.claude is not authoritative.
         const engine = options.getSyncEngine()
-        const machineId = resolveRequestedImportMachineId(null, c.get('namespace'), engine, null)
+        const online = engine?.getOnlineMachinesByNamespace(c.get('namespace')) ?? []
         return c.json({
             success: true,
-            claudeProjectsAvailable: Boolean(machineId)
+            claudeProjectsAvailable: online.length > 0
         } satisfies ClaudeStatusResponse)
     })
 
     app.get('/claude/sessions', async (c) => {
         const cwd = c.req.query('cwd')?.trim() || null
         const machineId = c.req.query('machineId')?.trim() || null
-        // Hub may run remotely; Claude transcripts come from the selected online runner via machine RPC.
+        // Estate-wide: fan out to every online runner; stamp machineId per row.
         const remote = await listClaudeSessionsViaMachine({
             engine: options.getSyncEngine(),
             namespace: c.get('namespace'),
@@ -463,17 +482,15 @@ export function createClaudeDesktopRoutes(options: {
             return c.json({
                 success: false,
                 error: remote.error,
-                sessions: [],
-                ...(remote.machineId ? { machineId: remote.machineId } : {})
+                sessions: []
             } satisfies ClaudeLocalSessionsResponse, 503)
         }
         return c.json({
             success: true,
             sessions: remote.sessions.map((session) => {
-                const { messages: _messages, ...summary } = session as TranscriptImportData & { messages?: unknown }
+                const { messages: _messages, ...summary } = session as TranscriptImportData & { messages?: unknown; machineId: string }
                 return summary
-            }),
-            ...(remote.machineId ? { machineId: remote.machineId } : {})
+            })
         } satisfies ClaudeLocalSessionsResponse)
     })
 
@@ -506,15 +523,51 @@ export function createClaudeDesktopRoutes(options: {
             })
         }
 
-        const result = await importSelectedClaudeSessions({
-            claudeSessionIds: parsed.sessionIds,
-            store: options.store,
-            namespace: c.get('namespace'),
-            getSyncEngine: options.getSyncEngine,
-            remoteSessions: remote.sessions as TranscriptImportData[],
-            resolvedMachineId: remote.machineId ?? null
+        const byMachine = new Map<string, TranscriptImportData[]>()
+        for (const session of remote.sessions) {
+            const stamped = session as TranscriptImportData & { machineId: string }
+            const bucket = byMachine.get(stamped.machineId) ?? []
+            bucket.push(stamped)
+            byMachine.set(stamped.machineId, bucket)
+        }
+
+        const results = []
+        for (const [machineId, sessions] of byMachine) {
+            const result = await importSelectedClaudeSessions({
+                claudeSessionIds: sessions.map((session) => session.id),
+                store: options.store,
+                namespace: c.get('namespace'),
+                getSyncEngine: options.getSyncEngine,
+                remoteSessions: sessions,
+                resolvedMachineId: machineId
+            })
+            results.push(result)
+            if (!result.success) {
+                return c.json(result)
+            }
+        }
+
+        if (results.length === 0) {
+            return c.json(await importSelectedClaudeSessions({
+                claudeSessionIds: parsed.sessionIds,
+                store: options.store,
+                namespace: c.get('namespace'),
+                getSyncEngine: options.getSyncEngine,
+                remoteSessions: [],
+                resolvedMachineId: null
+            }))
+        }
+
+        const last = results[results.length - 1]
+        const syncedCount = results.reduce((sum, result) => (
+            sum + (result.success ? (result.syncedCount ?? 0) : 0)
+        ), 0)
+        return c.json({
+            ...last,
+            success: true,
+            syncedCount,
+            sessionIds: parsed.sessionIds
         })
-        return c.json(result)
     })
 
     return app

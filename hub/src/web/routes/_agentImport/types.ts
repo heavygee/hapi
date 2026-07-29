@@ -71,6 +71,8 @@ export interface CursorImportableSessionSummary {
      * read-only chips ("already imported") and refuses to re-import.
      */
     alreadyImportedHapiSessionId?: string | null
+    /** Owning online runner — stamped by estate-wide discovery; not a user-facing picker. */
+    machineId?: string | null
 }
 
 export interface CursorImportableSessionsResponse {

@@ -234,7 +234,7 @@ describe('AgentSessionImportDialog', () => {
 
     it('shows the loading state on the active flavor', () => {
         renderDialog({ flavor: 'cursor', isLoadingCursor: true })
-        expect(screen.getByText('Loading Cursor chats from runner…')).toBeInTheDocument()
+        expect(screen.getByText('Loading Cursor chats from online runners…')).toBeInTheDocument()
     })
 
     it('disables flavor switching while an import is in flight', () => {

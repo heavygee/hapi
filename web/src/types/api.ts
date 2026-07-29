@@ -189,6 +189,7 @@ export type CodexLocalSessionSummary = {
     source?: string | null
     threadSource?: string | null
     forkedFromId?: string | null
+    machineId?: string
 }
 
 export type CodexLocalSessionsResponse = {
@@ -276,17 +277,16 @@ export type ClaudeLocalSessionSummary = {
     modifiedAt: number
     originator?: string | null
     cliVersion?: string | null
+    machineId?: string
 }
 
 export type ClaudeLocalSessionsResponse = {
     success: true
     sessions: ClaudeLocalSessionSummary[]
-    machineId?: string
 } | {
     success: false
     error: string
     sessions: ClaudeLocalSessionSummary[]
-    machineId?: string
 }
 
 export type ClaudeImportSyncRequest = {
@@ -326,6 +326,7 @@ export type CursorImportableSessionSummary = {
     modifiedAt: number
     sizeBytes: number
     alreadyImportedHapiSessionId?: string | null
+    machineId?: string | null
 }
 
 export type CursorImportableSessionsResponse = {
@@ -358,6 +359,7 @@ export type CursorImportRowOutcome =
 export type CursorImportSelection = {
     uuid: string
     workspacePath?: string | null
+    machineId?: string | null
 }
 
 export type CursorImportRequest = {
