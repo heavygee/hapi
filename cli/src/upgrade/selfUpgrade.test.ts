@@ -6,6 +6,7 @@ import {
     applyRunnerSelfUpgrade,
     artifactInstallFileName,
     assertExecutableMatchesTargetVersion,
+    mergeParentRunnerStateForReclaim,
     pruneSupersededArtifacts,
     pruneSupersededArtifactsAfterDurableMarker,
     resolvePostNpmInstallExecutable,
@@ -295,5 +296,40 @@ describe('pruneSupersededArtifacts', () => {
         } finally {
             rmSync(dir, { recursive: true, force: true })
         }
+    })
+})
+
+describe('mergeParentRunnerStateForReclaim', () => {
+    it('keeps parent httpPort/mtime/hubReadyAt when the child polluted runner.state.json', () => {
+        const parent = {
+            pid: 100,
+            httpPort: 4111,
+            startTime: 'parent-start',
+            startedWithCliVersion: '0.25.1',
+            startedWithCliMtimeMs: 1_000,
+            startedWithArgv: ['runner', 'start-sync', '--workspace-root', '/parent'],
+            hubReadyAt: 55,
+        }
+        const childWrote = {
+            ...parent,
+            pid: 200,
+            httpPort: 4999,
+            startedWithCliMtimeMs: 9_999,
+            hubReadyAt: 1,
+            startedWithArgv: ['runner', 'start-sync'],
+        }
+        const restored = mergeParentRunnerStateForReclaim(parent, {
+            pid: 100,
+            lastHeartbeat: 'reclaimed',
+        })
+        expect(restored.httpPort).toBe(4111)
+        expect(restored.startedWithCliMtimeMs).toBe(1_000)
+        expect(restored.hubReadyAt).toBe(55)
+        expect(restored.startedWithArgv).toEqual(['runner', 'start-sync', '--workspace-root', '/parent'])
+        expect(restored.pid).toBe(100)
+        expect(restored.lastHeartbeat).toBe('reclaimed')
+        // Explicitly not the child's polluted values
+        expect(restored.httpPort).not.toBe(childWrote.httpPort)
+        expect(restored.startedWithCliMtimeMs).not.toBe(childWrote.startedWithCliMtimeMs)
     })
 })
