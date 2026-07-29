@@ -31,4 +31,3 @@ describe('schema migration v19 to v20', () => {
         migrated.close()
     })
 })
-
