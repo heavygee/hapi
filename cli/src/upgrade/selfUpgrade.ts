@@ -104,6 +104,7 @@ async function runCommand(command: string, args: string[]): Promise<{ ok: boolea
 async function installFromNpm(offer: HubUpgradeOffer): Promise<string> {
     const pkg = `${offer.npmPackage}@${offer.targetVersion}`
     // Prefer bun global when available (matches many HAPI installs); fall back to npm.
+    let manager: 'bun' | 'npm' = 'bun'
     const bunTry = await runCommand('bun', ['add', '-g', pkg])
     if (bunTry.ok) {
         logger.debug('[SELF-UPGRADE] bun add -g succeeded', { pkg })
@@ -113,14 +114,73 @@ async function installFromNpm(offer: HubUpgradeOffer): Promise<string> {
         if (!npmTry.ok) {
             throw new Error(`npm/bun install failed: ${npmTry.output || bunTry.output}`)
         }
+        manager = 'npm'
     }
-    const installed = resolvePostNpmInstallExecutable()
+    const installed = await resolveInstalledGlobalHapi(manager)
     if (!installed) {
         throw new Error(
             'npm/bun install succeeded but no hapi binary found on PATH; cannot relaunch the new generation',
         )
     }
+    await assertExecutableMatchesTargetVersion(installed, offer.targetVersion)
     return installed
+}
+
+/**
+ * Prefer the package manager's global bin (the install we just performed) over
+ * an older `hapi` earlier on PATH, then fall back to PATH resolution.
+ */
+async function resolveInstalledGlobalHapi(manager: 'bun' | 'npm'): Promise<string | null> {
+    const candidates = process.platform === 'win32'
+        ? ['hapi.exe', 'hapi', 'hapi.cmd']
+        : ['hapi']
+    if (manager === 'bun') {
+        const bin = await runCommand('bun', ['pm', 'bin', '-g'])
+        const dir = bin.ok ? bin.output.trim().split(/\r?\n/).filter(Boolean).at(-1)?.trim() : undefined
+        if (dir) {
+            for (const name of candidates) {
+                const path = join(dir, name)
+                if (existsSync(path)) {
+                    return path
+                }
+            }
+        }
+    } else {
+        // `npm bin -g` was removed in npm 9; resolve via prefix instead.
+        // Unix: {prefix}/bin; Windows: binaries land directly in {prefix}.
+        const prefix = await runCommand('npm', ['prefix', '-g'])
+        const prefixDir = prefix.ok
+            ? prefix.output.trim().split(/\r?\n/).filter(Boolean).at(-1)?.trim()
+            : undefined
+        if (prefixDir) {
+            const dir = process.platform === 'win32' ? prefixDir : join(prefixDir, 'bin')
+            for (const name of candidates) {
+                const path = join(dir, name)
+                if (existsSync(path)) {
+                    return path
+                }
+            }
+        }
+    }
+    return resolvePostNpmInstallExecutable()
+}
+
+/**
+ * Fail closed when PATH still resolves an older generation after install.
+ */
+export async function assertExecutableMatchesTargetVersion(
+    installed: string,
+    targetVersion: string,
+    run: (command: string, args: string[]) => Promise<{ ok: boolean; output: string }> = runCommand,
+): Promise<void> {
+    const probe = await run(installed, ['--version'])
+    const expected = `hapi version: ${targetVersion}`
+    if (!probe.ok || !probe.output.includes(expected)) {
+        throw new Error(
+            `Resolved hapi executable does not match target ${targetVersion}`
+            + (probe.output ? ` (got: ${probe.output.slice(0, 200)})` : ''),
+        )
+    }
 }
 
 /**
@@ -266,12 +326,49 @@ async function scheduleRunnerRelaunch(cliExecutable: string): Promise<void> {
     // skips cleanup. Caller invokes requestShutdown after handoff confirms.
 }
 
+let runnerSelfUpgradeInFlight = false
+
 /**
  * Apply a hub upgrade offer on this runner host.
  * `downloadBaseUrl` is the hub public/base URL for relative artifact paths.
  * `authToken` is the CLI API token for authenticated artifact download.
+ *
+ * Concurrent RPCs fail closed — overlapping installs/relaunches race on the
+ * runner lock and durable upgrade-target marker.
  */
 export async function applyRunnerSelfUpgrade(options: {
+    offer: HubUpgradeOffer
+    downloadBaseUrl: string
+    authToken: string
+    localVersion?: string
+    requestShutdown?: () => void
+}): Promise<RunnerSelfUpgradeResponse> {
+    if (runnerSelfUpgradeInFlight) {
+        return {
+            status: 'failed',
+            message: 'Runner upgrade already in progress',
+            channel: options.offer.channel,
+        }
+    }
+    runnerSelfUpgradeInFlight = true
+    try {
+        return await applyRunnerSelfUpgradeUnlocked(options)
+    } finally {
+        runnerSelfUpgradeInFlight = false
+    }
+}
+
+/** Test helper: reset the module-level upgrade gate between cases. */
+export function __resetRunnerSelfUpgradeGateForTests(): void {
+    runnerSelfUpgradeInFlight = false
+}
+
+/** Test helper: simulate an in-flight upgrade for concurrency tests. */
+export function __setRunnerSelfUpgradeInFlightForTests(value: boolean): void {
+    runnerSelfUpgradeInFlight = value
+}
+
+async function applyRunnerSelfUpgradeUnlocked(options: {
     offer: HubUpgradeOffer
     downloadBaseUrl: string
     authToken: string

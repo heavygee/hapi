@@ -210,6 +210,8 @@ export default {
   'runner.skew.banner.upgradeCliFirst': '（落后于 Hub — Upgrade 可拉取匹配 CLI）',
   'runner.skew.banner.handoffDisabledHint': '（仅重建 — 已禁用 Upgrade；请用 Restart）',
   'runner.skew.banner.upgradeNeedsHandoff': '该主机已退出版本交接（soup/仅重建）。请重建 soup 或清除 HAPI_DISABLE_VERSION_HANDOFF，或使用 Restart。',
+  'runner.skew.banner.upgradeNeedsManual': '该运行器过旧，无法从 Hub 自升级。请在该主机上手动安装更新的 HAPI CLI，然后重启运行器。',
+  'runner.skew.banner.legacyRunnerHint': '（旧版运行器 — 已禁用 Upgrade；请在主机上更新 CLI）',
   'runner.skew.banner.handoffHint': '集群升级：Hub 会识别 npm 或源码安装，并据此升级远端（npm 仓库或 Hub 构建的产物）。Upgrade 不经 SSH；由运行器自行安装。设置 HAPI_UPGRADE_CHANNEL=off 可关闭。',
   'runner.skew.restartFailed': '重启运行器失败',
   'runner.skew.upgradeFailed': '升级运行器失败',
