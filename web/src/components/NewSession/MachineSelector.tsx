@@ -1,4 +1,5 @@
 import type { Machine } from '@/types/api'
+import { cliBinaryUpdatedOnDisk } from '@hapi/protocol/runnerCapabilities'
 import {
     DEFAULT_FLEET_UPGRADE_POLICY,
     machineTrailsUpgradeOffer,
@@ -28,12 +29,17 @@ export function machineNeedsUpdateLabel(
     if (!machine.active) {
         return false
     }
-    return machineTrailsUpgradeOffer(
+    const handoffDisabled = machine.metadata?.versionHandoffDisabled === true
+    if (machineTrailsUpgradeOffer(
         offer,
         machine.metadata?.happyCliVersion,
         machine.metadata?.capabilities,
         machine.metadata?.cliArtifactGeneration,
-    )
+        { ignoreGenerationDrift: handoffDisabled },
+    )) {
+        return true
+    }
+    return handoffDisabled && cliBinaryUpdatedOnDisk(machine.metadata)
 }
 
 function getMachineOptionLabel(
