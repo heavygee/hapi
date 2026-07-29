@@ -124,6 +124,27 @@ eq "merge dirty → ⚠️" "$(emoji_of "$r")" "⚠️"
 r="$(pec_decide_emoji 0 0 0 0 0 0 0 0 0 0 0 1)"
 eq "data unavailable → ? (not 📝)" "$(emoji_of "$r")" "?"
 
+# Green path must NOT ignore bot_major when bot_clean is wrongly 1
+# (Questions "- None." used to set bot_clean while Findings had [Major]).
+r="$(pec_decide_emoji 1 0 0 1 0 1 0 1 1 1 0 0)"
+eq "checks green + bot_clean + bot_major → ⚠️ not ✅" "$(emoji_of "$r")" "⚠️"
+[[ "$(action_of "$r")" == *"[Major]"* ]] && PASS=$((PASS + 1)) \
+    || { echo "FAIL: green+major action should mention [Major] (got: $(action_of "$r"))" >&2; FAIL=$((FAIL + 1)); }
+
+# Open threads block green even when CI/bot look clean.
+r="$(pec_decide_emoji 1 0 0 1 0 1 2 1 0 0 0 0)"
+eq "checks green + 2 threads → ⚠️" "$(emoji_of "$r")" "⚠️"
+
+# Formal CHANGES_REQUESTED blocks green (optional 13th arg).
+r="$(pec_decide_emoji 1 0 0 1 0 1 0 1 0 0 0 0 1)"
+eq "checks green + CHANGES_REQUESTED → ⚠️" "$(emoji_of "$r")" "⚠️"
+[[ "$(action_of "$r")" == *"CHANGES_REQUESTED"* ]] && PASS=$((PASS + 1)) \
+    || { echo "FAIL: CHANGES_REQUESTED action missing (got: $(action_of "$r"))" >&2; FAIL=$((FAIL + 1)); }
+
+# CHANGES_REQUESTED is never sticky-suppressed while CI pending.
+r="$(pec_decide_emoji 1 0 0 0 1 1 0 0 0 1 0 0 1)"
+eq "pending CI + CHANGES_REQUESTED → ⚠️" "$(emoji_of "$r")" "⚠️"
+
 # ---- ping policy ----
 FP_A="$(pec_action_fingerprint "⚠️" "fix failing CI")"
 FP_B="$(pec_action_fingerprint "⚠️" "resolve 1 open thread(s)")"

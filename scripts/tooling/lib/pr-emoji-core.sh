@@ -266,16 +266,19 @@ pec_leading_emoji() {
 #
 # Usage:
 #   pec_decide_emoji EXISTS MERGED CLOSED CHECKS_OK CHECKS_PENDING CHECKS_SEEN \
-#                    THREADS_N BOT_CLEAN BOT_MAJOR BOT_HAS_BODY MERGE_BAD DATA_UNAVAILABLE
+#                    THREADS_N BOT_CLEAN BOT_MAJOR BOT_HAS_BODY MERGE_BAD DATA_UNAVAILABLE \
+#                    [REVIEW_CHANGES_REQUESTED]
 #   → prints "<emoji>\t<action>"
 #
 # THREADS_N: >=0 real count, -1 = unavailable this run.
+# REVIEW_CHANGES_REQUESTED: 1 when GraphQL reviewDecision == CHANGES_REQUESTED.
 # ---------------------------------------------------------------------------
 
 pec_decide_emoji() {
     local exists="$1" merged="$2" closed="$3" checks_ok="$4" checks_pending="$5" \
         checks_seen="$6" threads_n="$7" bot_clean="$8" bot_major="$9" \
-        bot_has_body="${10}" merge_bad="${11}" data_unavailable="${12}"
+        bot_has_body="${10}" merge_bad="${11}" data_unavailable="${12}" \
+        review_changes="${13:-0}"
 
     if [[ "$data_unavailable" == "1" ]]; then
         printf '%s\t%s' "?" "GitHub data unavailable this run — retry sweep (title unchanged)"
@@ -299,11 +302,13 @@ pec_decide_emoji() {
     # Body-grep [Major] is sticky until the new pr-review check completes.
     # While CI is still pending and open threads are cleared, treat that Major
     # as stale (not actionable) so we stay on 🔁 "receiving" rather than ⚠️.
+    # Formal CHANGES_REQUESTED is never treated as sticky noise.
     local bot_major_actionable="$bot_major"
-    if [[ "$checks_pending" == "1" && "$threads_n" == "0" ]]; then
+    if [[ "$checks_pending" == "1" && "$threads_n" == "0" && "$review_changes" != "1" ]]; then
         bot_major_actionable=0
     fi
     [[ "$merge_bad" == "1" ]] && parts+=("rebase (merge state dirty)")
+    [[ "$review_changes" == "1" ]] && parts+=("address CHANGES_REQUESTED review")
     if [[ "$checks_ok" == "0" && "$checks_pending" == "1" ]]; then
         parts+=("CI running")
     elif [[ "$checks_ok" == "0" ]]; then
@@ -314,26 +319,36 @@ pec_decide_emoji() {
     if [[ "$bot_clean" == "0" ]]; then
         if [[ "$bot_major_actionable" == "1" ]]; then
             parts+=("address bot [Major] findings")
-        elif [[ "$checks_pending" == "1" && "$threads_n" == "0" ]]; then
+        elif [[ "$checks_pending" == "1" && "$threads_n" == "0" && "$review_changes" != "1" ]]; then
             : # receiving — skip sticky body-grep bot nag until pr-review finishes
         elif [[ "$bot_has_body" == "1" ]]; then
             parts+=("address latest bot review")
-        else
+        elif [[ "$review_changes" != "1" ]]; then
             parts+=("push to trigger bot review")
         fi
+    elif [[ "$bot_major_actionable" == "1" ]]; then
+        # bot_clean lied (e.g. Questions "- None." matched a global clean regex)
+        # while [Major] findings remain — still surface the Major.
+        parts+=("address bot [Major] findings")
     fi
 
     local emoji action
-    if [[ "$checks_ok" == "1" && "$checks_seen" == "1" && "$threads_n" == "0" && "$bot_clean" == "1" && "$merge_bad" == "0" ]]; then
+    # Never ✅ while Majors / CHANGES_REQUESTED / open threads remain — even if
+    # a stale bot_clean bit is set. Operators read green as "healthy PR".
+    if [[ "$checks_ok" == "1" && "$checks_seen" == "1" && "$threads_n" == "0" \
+        && "$bot_clean" == "1" && "$bot_major_actionable" == "0" \
+        && "$merge_bad" == "0" && "$review_changes" == "0" ]]; then
         emoji="✅"; action="full green — wait on tiann"
-    elif [[ "$checks_seen" == "0" && "$merge_bad" == "0" && "$bot_major_actionable" == "0" ]]; then
+    elif [[ "$checks_seen" == "0" && "$merge_bad" == "0" && "$bot_major_actionable" == "0" && "$review_changes" == "0" ]]; then
         # No CI evidence yet: never call it green. Nudge instead of false ✅.
         emoji="🔁"; action="no CI checks visible yet — push/retry then re-sweep"
-    elif [[ "$checks_pending" == "1" && "$threads_n" == "0" && "$merge_bad" == "0" ]]; then
+    elif [[ "$checks_pending" == "1" && "$threads_n" == "0" && "$merge_bad" == "0" && "$review_changes" == "0" ]]; then
         # Prefer 🔁 while CI/pr-review is in flight and threads are clear —
         # sticky body-grep Majors must not force needs_work (see above).
         emoji="🔁"; action="$([[ ${#parts[@]} -gt 0 ]] && (IFS='; '; echo "${parts[*]}") || echo "CI in flight")"
-    elif [[ "$checks_ok" == "1" && "$checks_seen" == "1" && "$threads_n" -lt 0 && "$bot_clean" == "1" && "$merge_bad" == "0" ]] 2>/dev/null; then
+    elif [[ "$checks_ok" == "1" && "$checks_seen" == "1" && "$threads_n" -lt 0 \
+        && "$bot_clean" == "1" && "$bot_major_actionable" == "0" \
+        && "$merge_bad" == "0" && "$review_changes" == "0" ]] 2>/dev/null; then
         emoji="🔁"; action="CI/bot green — thread count unavailable; retry sweep"
     else
         emoji="⚠️"; action="$(IFS='; '; echo "${parts[*]}")"

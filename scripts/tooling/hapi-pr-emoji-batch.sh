@@ -139,11 +139,84 @@ _gh_check_signals() {
     echo "0 0 0 0"
 }
 
+# Count unresolved review threads (paginate; first:50 used to miss threads on
+# long-lived PRs like #1108 with 66+ threads). Also return reviewDecision.
+# Prints: "<unresolved_count>\t<review_decision_or_empty>"
+# unresolved_count is -1 on transport/parse failure.
+_fetch_review_signals() {
+    local n="$1"
+    local cursor="" page unresolved=0 decision="" has_next=true resp
+    while [[ "$has_next" == "true" ]]; do
+        if [[ -n "$cursor" ]]; then
+            resp="$(gh_t api graphql -f query="
+query(\$cursor: String) {
+  repository(owner:\"${OWNER}\", name:\"${NAME}\") {
+    pullRequest(number: ${n}) {
+      reviewDecision
+      reviewThreads(first: 100, after: \$cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { isResolved }
+      }
+    }
+  }
+}" -f cursor="$cursor" 2>/dev/null || true)"
+        else
+            resp="$(gh_t api graphql -f query="
+query {
+  repository(owner:\"${OWNER}\", name:\"${NAME}\") {
+    pullRequest(number: ${n}) {
+      reviewDecision
+      reviewThreads(first: 100) {
+        pageInfo { hasNextPage endCursor }
+        nodes { isResolved }
+      }
+    }
+  }
+}" 2>/dev/null || true)"
+        fi
+        if ! printf '%s' "$resp" | jq -e '.data.repository.pullRequest' >/dev/null 2>&1; then
+            printf '%s\t%s\n' "-1" ""
+            return
+        fi
+        decision="$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.reviewDecision // empty')"
+        unresolved=$(( unresolved + $(printf '%s' "$resp" | jq '[.data.repository.pullRequest.reviewThreads.nodes[]|select(.isResolved==false)]|length') ))
+        has_next="$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')"
+        cursor="$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor // empty')"
+        [[ "$has_next" == "true" && -n "$cursor" ]] || has_next=false
+    done
+    printf '%s\t%s\n' "$unresolved" "$decision"
+}
+
+# True when the latest bot body indicates a clean findings section.
+# Never match bare "- None." globally — Codex puts that under **Questions**
+# even when **Findings** still has [Major] (#1108 attach-time false ✅).
+_bot_body_findings_clean() {
+    local body="$1" findings stripped
+    if echo "$body" | grep -qiE \
+        'No findings|No high-confidence|No issues found|No actionable|Didn.t find any|No new issues found'; then
+        return 0
+    fi
+    findings="$(printf '%s' "$body" | awk '
+        BEGIN { p = 0 }
+        /^\*\*Findings\*\*/ { p = 1; next }
+        /^\*\*[A-Za-z]/ { if (p) exit }
+        p { print }
+    ')"
+    stripped="$(printf '%s' "$findings" | sed '/^[[:space:]]*$/d')"
+    [[ -z "$stripped" ]] && return 0
+    # Findings block must be only None / - None. lines (no other bullets).
+    if printf '%s\n' "$stripped" | grep -qvE '^[[:space:]]*(-[[:space:]]*)?None\.?[[:space:]]*$'; then
+        return 1
+    fi
+    return 0
+}
+
 classify_one() {
     local n="$1"
     local out="$TMPDIR/$n.json"
     local merge_state pr_state pr_json bot_body
     local checks_ok=1 checks_pending=0 checks_seen=0 pr_review_ok=0 threads_n bot_clean=0 bot_major=0 bot_has_body=0 merge_bad=0
+    local review_changes=0 review_decision=""
     local exists=0 merged=0 closed=0 data_unavail=0
     local decided emoji action
 
@@ -195,38 +268,41 @@ classify_one() {
 
     read -r checks_ok checks_pending checks_seen pr_review_ok < <(_gh_check_signals "$n")
 
-    threads_n="$(gh_t api graphql -f query="
-query { repository(owner:\"${OWNER}\", name:\"${NAME}\") {
-  pullRequest(number: ${n}) { reviewThreads(first: 50) { nodes { isResolved } } }
-}}" --jq 'if .data.repository.pullRequest == null then empty else [.data.repository.pullRequest.reviewThreads.nodes[]|select(.isResolved==false)]|length end' 2>/dev/null || true)"
-    if [[ -z "$threads_n" || ! "$threads_n" =~ ^[0-9]+$ ]]; then
+    IFS=$'\t' read -r threads_n review_decision < <(_fetch_review_signals "$n")
+    if [[ -z "$threads_n" || ! "$threads_n" =~ ^-?[0-9]+$ ]]; then
         threads_n=-1
     fi
+    [[ "$review_decision" == "CHANGES_REQUESTED" ]] && review_changes=1
 
     bot_body="$(fetch_latest_bot_body "$n")"
     if [[ "$bot_body" == "__CLEAN_LABEL__" ]]; then
         bot_clean=1
         bot_body=""
-    elif echo "$bot_body" | grep -qiE 'No findings|No high-confidence|No issues found|No actionable|Didn.t find any|No new issues found|\*\*Findings\*\*[[:space:]]*- None|- None\.'; then
-        bot_clean=1
-    elif [[ "$pr_review_ok" -eq 1 ]]; then
-        bot_clean=1
     fi
     [[ -n "$bot_body" ]] && bot_has_body=1
+
+    # Majors first — never let Questions "- None." or pr-review check SUCCESS
+    # invent bot_clean / clear bot_major (attach-time false ✅ on #1108).
     if echo "$bot_body" | grep -qiE '\[Major\]|\[MAJOR\]'; then
         bot_major=1
-        [[ "$pr_review_ok" -eq 1 ]] && bot_clean=1 && bot_major=0
+        bot_clean=0
+    elif [[ -n "$bot_body" ]] && _bot_body_findings_clean "$bot_body"; then
+        bot_clean=1
+    elif [[ "$pr_review_ok" -eq 1 && "$bot_has_body" -eq 0 ]]; then
+        # Check passed and no review body yet — treat as clean-enough for CI path.
+        bot_clean=1
     fi
+
     # Resolved threads + in-flight CI/pr-review: body-grep Majors from the
     # previous review head are sticky noise — do not emit botMajor in the
-    # classify JSON (decide also ignores them for emoji). pec_decide_emoji
-    # is the source of truth; this keeps batch telemetry honest.
-    if [[ "$checks_pending" -eq 1 && "$threads_n" -eq 0 && "$bot_major" -eq 1 ]]; then
+    # classify JSON (decide also ignores them for emoji). Keep Majors when
+    # GitHub formally requested changes.
+    if [[ "$checks_pending" -eq 1 && "$threads_n" -eq 0 && "$bot_major" -eq 1 && "$review_changes" -eq 0 ]]; then
         bot_major=0
     fi
 
     decided="$(pec_decide_emoji 1 0 0 "$checks_ok" "$checks_pending" "$checks_seen" \
-        "$threads_n" "$bot_clean" "$bot_major" "$bot_has_body" "$merge_bad" 0)"
+        "$threads_n" "$bot_clean" "$bot_major" "$bot_has_body" "$merge_bad" 0 "$review_changes")"
     emoji="${decided%%$'\t'*}"
     action="${decided#*$'\t'}"
 
@@ -235,7 +311,8 @@ query { repository(owner:\"${OWNER}\", name:\"${NAME}\") {
 }
 
 export REPO OWNER NAME TIMEOUT TMPDIR WALL_LIMIT
-export -f classify_one gh_t fetch_latest_bot_body _emit_pr_json pec_decide_emoji _gh_check_signals
+export -f classify_one gh_t fetch_latest_bot_body _emit_pr_json pec_decide_emoji \
+    _gh_check_signals _fetch_review_signals _bot_body_findings_clean
 
 echo "hapi-pr-emoji-batch: ${#PRS[@]} PR(s), parallel=${PARALLEL}, timeout=${TIMEOUT}s, wall=$(( WALL_LIMIT - $(date +%s) ))s" >&2
 t0=$(date +%s)
