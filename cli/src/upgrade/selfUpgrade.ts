@@ -64,6 +64,21 @@ function upgradeBinDir(): string {
     return join(configuration.happyHomeDir || join(homedir(), '.hapi'), 'bin')
 }
 
+/**
+ * Content-addressed install name so same-version soup rebuilds land beside
+ * (not on top of) a still-running binary. Critical on Windows where replacing
+ * a mapped .exe fails; also keeps Unix handoffs from racing the live path.
+ */
+export function artifactInstallFileName(
+    targetVersion: string,
+    sha256: string,
+    platform: NodeJS.Platform = process.platform,
+): string {
+    const id = sha256.slice(0, 16)
+    const base = `hapi-${targetVersion}-${id}`
+    return platform === 'win32' ? `${base}.exe` : base
+}
+
 async function runCommand(command: string, args: string[]): Promise<{ ok: boolean; output: string }> {
     try {
         const proc = Bun.spawn([command, ...args], {
@@ -165,8 +180,10 @@ async function installFromArtifact(
     mkdirSync(dir, { recursive: true })
     // Windows CreateProcess needs a .exe suffix; keep the versioned binary and
     // the "current" link name with .exe so relaunch + scheduled tasks work.
+    // Include a sha256 prefix so same-version rebuilds do not rename over the
+    // still-running executable (Windows cannot replace a mapped PE).
     const isWin = process.platform === 'win32'
-    const versionedName = isWin ? `hapi-${offer.targetVersion}.exe` : `hapi-${offer.targetVersion}`
+    const versionedName = artifactInstallFileName(offer.targetVersion, artifact.sha256, process.platform)
     const currentName = isWin ? 'hapi.exe' : 'hapi'
     const tmpPath = join(dir, `${versionedName}.download`)
     const finalPath = join(dir, versionedName)
@@ -183,7 +200,11 @@ async function installFromArtifact(
     if (!isWin) {
         chmodSync(tmpPath, 0o755)
     }
-    renameSync(tmpPath, finalPath)
+    if (existsSync(finalPath) && await sha256File(finalPath) === artifact.sha256) {
+        unlinkSync(tmpPath)
+    } else {
+        renameSync(tmpPath, finalPath)
+    }
     try {
         if (existsSync(linkPath)) {
             renameSync(linkPath, `${linkPath}.prev`)
