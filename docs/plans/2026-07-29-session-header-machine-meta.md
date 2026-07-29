@@ -38,9 +38,15 @@
 - Modify: `config/driver-manifest.yaml` (mirror)
 - Push feature branch to `origin`
 
-**Step 1:** Add manifest layer for `feat/session-header-machine-meta`.
+**Step 1:** Add manifest layer for `feat/session-header-machine-meta`. ✅
 
-**Step 2:** `hapi-driver-status --quiet` then `hapi-driver-rebuild --build-web --verify` from mirror; hard-reload `:3006`.
+**Step 2:** Full `hapi-driver-rebuild --build-web --verify` **blocked** on
+`driver/github-pr-awareness` (14-file add/add vs post-`hapi-sync-fork-main`
+base). Rerere cleared earlier layers; awareness still needs a remat wave.
+
+**Step 3 (dogfood tip):** Reset driver to prior complete soup tip
+`34956f6f8`, merge `feat/session-header-machine-meta`, heal `sessions.count`
+locale, `hapi-driver-build-web` → verify OK at `d7e1dace4`. Hard-reload `:3006`.
 
 ### Task 4: Upstream PR (after operator dogfood)
 
