@@ -802,11 +802,9 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       requestShutdown: () => requestShutdown('hapi-app')
     });
 
-    // Connect to server
-    apiMachine.connect();
-    // Signal hub readiness only after registration + RPC handlers + connect.
-    // Parent waitForRunnerHandoff requires hubReadyAt so a child that dies
-    // between the initial writeRunnerState and here cannot become durable.
+    // Connect and wait for Socket.IO auth + RPC registration before advertising
+    // hubReadyAt. connect() alone returns before the async 'connect' event.
+    await apiMachine.connectUntilReady();
     writeRunnerState({
       ...fileState,
       hubReadyAt: Date.now(),

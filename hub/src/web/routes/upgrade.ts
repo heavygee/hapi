@@ -3,31 +3,34 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { FLEET_UPGRADE_POLICIES } from '@hapi/protocol/upgradeChannel'
 import type { WebAppEnv } from '../middleware/auth'
-import { ensureCliArtifact, fingerprintArtifactInputs } from '../../upgrade/cliArtifact'
-import { defaultHubPackageRoot, findMonorepoRoot, resolveUpgradeOffer } from '../../upgrade/resolveUpgradeOffer'
+import { ensureCliArtifact } from '../../upgrade/cliArtifact'
+import { defaultHubPackageRoot, resolveUpgradeOffer } from '../../upgrade/resolveUpgradeOffer'
 import { getFleetUpgradePolicy, setFleetUpgradePolicy } from '../../upgrade/fleetUpgradePolicy'
 import { getConfiguration } from '../../configuration'
 import { constantTimeEquals } from '../../utils/crypto'
 import { parseAccessToken } from '../../utils/accessToken'
+import type { SyncEngine } from '../../sync/syncEngine'
 
 const bearerSchema = z.string().regex(/^Bearer\s+(.+)$/i)
 
 /**
  * Web (JWT) routes: upgrade offer for the UI.
  */
-export function createUpgradeRoutes(): Hono<WebAppEnv> {
+export function createUpgradeRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
     app.get('/upgrade/offer', (c) => {
-        const offer = resolveUpgradeOffer({
-            hubPackageRoot: defaultHubPackageRoot(),
-            execPath: process.execPath,
-        })
-        if (offer.channel === 'hub-artifact' && !offer.targetGeneration) {
-            const monorepoRoot = findMonorepoRoot(defaultHubPackageRoot())
-            if (monorepoRoot) {
-                offer.targetGeneration = fingerprintArtifactInputs(monorepoRoot)
-            }
+        const engine = getSyncEngine()
+        const offer = engine?.getHubUpgradeOffer()
+        if (!offer) {
+            // Fallback for early boot / tests without a SyncEngine — still
+            // resolves a channel/version without forcing a fingerprint walk
+            // when the engine cache is available.
+            const fallback = resolveUpgradeOffer({
+                hubPackageRoot: defaultHubPackageRoot(),
+                execPath: process.execPath,
+            })
+            return c.json({ offer: fallback, policy: getFleetUpgradePolicy() })
         }
         return c.json({ offer, policy: getFleetUpgradePolicy() })
     })

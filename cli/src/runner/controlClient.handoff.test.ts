@@ -23,6 +23,18 @@ describe('waitForRunnerHandoff', () => {
         expect(ok).toBe(false)
     })
 
+    it('times out when the child is alive but never reaches hub readiness (socket never connects)', async () => {
+        // Simulates connectUntilReady never resolving: PID claimed, process live,
+        // but hubReadyAt never written.
+        const ok = await waitForRunnerHandoff(42, {
+            timeoutMs: 60,
+            pollIntervalMs: 15,
+            readState: async () => baseState({ pid: 99 }),
+            isAlive: (pid) => pid === 99,
+        })
+        expect(ok).toBe(false)
+    })
+
     it('confirms handoff when the child has a new live PID with hubReadyAt', async () => {
         const ok = await waitForRunnerHandoff(100, {
             timeoutMs: 500,
