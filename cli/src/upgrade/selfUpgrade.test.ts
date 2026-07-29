@@ -94,6 +94,54 @@ describe('shouldApplyUpgradeOffer', () => {
         })
     })
 
+    it('applies hub-artifact when version/capabilities match but generation drifts', () => {
+        expect(shouldApplyUpgradeOffer(
+            baseOffer({
+                channel: 'hub-artifact',
+                targetVersion: '0.24.0',
+                targetCapabilities: [...CURRENT_MACHINE_CAPABILITIES],
+                targetGeneration: 'gen-b',
+                artifact: {
+                    url: '/api/upgrade/cli-artifact',
+                    sha256: 'abc',
+                    platform: 'linux',
+                    arch: 'x64',
+                    sizeBytes: 10,
+                },
+            }),
+            '0.24.0',
+            CURRENT_MACHINE_CAPABILITIES,
+            'gen-a',
+        )).toEqual({
+            apply: true,
+            reason: 'upgrade',
+        })
+    })
+
+    it('skips hub-artifact when generation already matches', () => {
+        expect(shouldApplyUpgradeOffer(
+            baseOffer({
+                channel: 'hub-artifact',
+                targetVersion: '0.24.0',
+                targetCapabilities: [...CURRENT_MACHINE_CAPABILITIES],
+                targetGeneration: 'gen-a',
+                artifact: {
+                    url: '/api/upgrade/cli-artifact',
+                    sha256: 'abc',
+                    platform: 'linux',
+                    arch: 'x64',
+                    sizeBytes: 10,
+                },
+            }),
+            '0.24.0',
+            CURRENT_MACHINE_CAPABILITIES,
+            'gen-a',
+        )).toEqual({
+            apply: false,
+            reason: 'already-current',
+        })
+    })
+
     it('rejects hub-artifact without sha when apply would need verify', () => {
         expect(shouldApplyUpgradeOffer(baseOffer({
             channel: 'hub-artifact',

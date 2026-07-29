@@ -3,8 +3,8 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { FLEET_UPGRADE_POLICIES } from '@hapi/protocol/upgradeChannel'
 import type { WebAppEnv } from '../middleware/auth'
-import { ensureCliArtifact } from '../../upgrade/cliArtifact'
-import { defaultHubPackageRoot, resolveUpgradeOffer } from '../../upgrade/resolveUpgradeOffer'
+import { ensureCliArtifact, fingerprintArtifactInputs } from '../../upgrade/cliArtifact'
+import { defaultHubPackageRoot, findMonorepoRoot, resolveUpgradeOffer } from '../../upgrade/resolveUpgradeOffer'
 import { getFleetUpgradePolicy, setFleetUpgradePolicy } from '../../upgrade/fleetUpgradePolicy'
 import { getConfiguration } from '../../configuration'
 import { constantTimeEquals } from '../../utils/crypto'
@@ -23,6 +23,12 @@ export function createUpgradeRoutes(): Hono<WebAppEnv> {
             hubPackageRoot: defaultHubPackageRoot(),
             execPath: process.execPath,
         })
+        if (offer.channel === 'hub-artifact' && !offer.targetGeneration) {
+            const monorepoRoot = findMonorepoRoot(defaultHubPackageRoot())
+            if (monorepoRoot) {
+                offer.targetGeneration = fingerprintArtifactInputs(monorepoRoot)
+            }
+        }
         return c.json({ offer, policy: getFleetUpgradePolicy() })
     })
 

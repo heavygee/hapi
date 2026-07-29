@@ -23,6 +23,7 @@ const IDENTITY_KEYS = [
     'versionHandoffDisabled',
     'startedCliMtimeMs',
     'installedCliMtimeMs',
+    'cliArtifactGeneration',
 ] as const
 
 function asRecord(value: unknown): Record<string, unknown> | null {

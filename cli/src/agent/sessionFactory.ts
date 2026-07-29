@@ -15,6 +15,7 @@ import { readWorktreeEnv } from '@/utils/worktreeEnv'
 import { CURRENT_MACHINE_CAPABILITIES } from '@hapi/protocol/runnerCapabilities'
 import { exportHapiSessionEnv } from '@/agent/hapiSessionEnv'
 import packageJson from '../../package.json'
+import { readUpgradeTarget } from '@/upgrade/upgradeTarget'
 
 export { HAPI_SESSION_ID_ENV, exportHapiSessionEnv } from '@/agent/hapiSessionEnv'
 
@@ -48,6 +49,7 @@ export function buildMachineMetadata(options?: {
 }): MachineMetadata {
     const installedCliMtimeMs = getInstalledCliMtimeMs()
     const startedCliMtimeMs = options?.startedCliMtimeMs ?? installedCliMtimeMs
+    const cliArtifactGeneration = readUpgradeTarget()?.targetGeneration
     return {
         host: process.env.HAPI_HOSTNAME || os.hostname(),
         platform: os.platform(),
@@ -61,6 +63,7 @@ export function buildMachineMetadata(options?: {
         versionHandoffDisabled: process.env.HAPI_DISABLE_VERSION_HANDOFF === '1',
         ...(typeof startedCliMtimeMs === 'number' ? { startedCliMtimeMs } : {}),
         ...(typeof installedCliMtimeMs === 'number' ? { installedCliMtimeMs } : {}),
+        ...(cliArtifactGeneration ? { cliArtifactGeneration } : {}),
     }
 }
 
