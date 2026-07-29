@@ -174,4 +174,6 @@ Meta's daily classify writes these onto existing refs (full `PUT external-refs`)
 
 **Fetch-on-attach (2026-07-28):** First attach / PR change must not leave a blank chip until Meta daily. `buildAttachedGithubPrRefs` runs Meta's `hapi-pr-emoji-batch` (via `classifyGithubPrChipStatus`) when there is no preserved status for that `repo#N`, then writes status fields before/with the attach. Wired into `hapi link-pr` + MCP `link_pr`. Hub `setSessionExternalRefs` also fire-and-forgets the same enrich for Link PR dialog / classify-miss paths. Soup layer `driver/github-pr-awareness`.
 
+**Remat re-thin (2026-07-29):** Never thin onto stale `origin/driver/integration` tip. Remat does `reset --hard upstream/main` then merges layers - use the **pre-layer SHA Meta reports** from a failed remat (or thin onto `upstream/main` awareness-only). Wave that landed awareness: tip `ac95f9f65` via merge `08fdb92cf`; actual pre-layer was `d0a3d6473` (commit message saying `12814cf6b` is stale wording). Next re-thin absorb: HappyThread keep `props.outlineTitle`; SessionList keep PR chips and do **not** drop `getTodoProgress` / attention / time-label helpers (heal pattern on driver tip `9d506f30e`).
+
 **Not a second upstream PR.** Awareness + attach + chip status ship together in [tiann/hapi#1163](https://github.com/tiann/hapi/pull/1163).
