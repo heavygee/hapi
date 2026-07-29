@@ -198,6 +198,7 @@ describe('SyncEngine fleet upgrade', () => {
         }
         const prepared: HubUpgradeOffer = {
             ...baseOffer,
+            targetGeneration: 'post-build-fingerprint',
             artifact: {
                 url: '/cli/upgrade/cli-artifact',
                 sha256: 'abc',
@@ -207,13 +208,21 @@ describe('SyncEngine fleet upgrade', () => {
             },
         }
         const store = new Store(':memory:')
-        const prepareArtifactOffer = mock(async () => prepared)
+        const prepareArtifactOffer = mock(async (offer: HubUpgradeOffer) => ({
+            ...offer,
+            // Simulates ensureCliArtifact changing the fingerprint vs pre-build offer.
+            targetGeneration: 'post-build-fingerprint',
+            artifact: prepared.artifact,
+        }))
         const engine = new SyncEngine(
             store,
             {} as never,
             new RpcRegistry(),
             { broadcast() {} } as never,
-            { getUpgradeOffer: () => baseOffer, prepareArtifactOffer },
+            {
+                getUpgradeOffer: () => ({ ...baseOffer, targetGeneration: 'pre-build-fingerprint' }),
+                prepareArtifactOffer,
+            },
         )
 
         try {
@@ -239,8 +248,11 @@ describe('SyncEngine fleet upgrade', () => {
             engine.handleMachineAlive({ machineId: 'mac', time: Date.now() })
             const result = await engine.upgradeMachineRunner('mac', 'default')
             expect(result.type).toBe('success')
-            expect(prepareArtifactOffer).toHaveBeenCalledWith(baseOffer, 'darwin', 'arm64')
-            expect(runnerSelfUpgrade).toHaveBeenCalledWith('mac', prepared)
+            expect(prepareArtifactOffer).toHaveBeenCalled()
+            expect(runnerSelfUpgrade).toHaveBeenCalledWith(
+                'mac',
+                expect.objectContaining({ targetGeneration: 'post-build-fingerprint' }),
+            )
         } finally {
             engine.stop()
         }
@@ -430,13 +442,14 @@ describe('SyncEngine fleet upgrade', () => {
             targetCapabilities: ['cursor-chat-store-status'],
             npmPackage: '@twsxtd/hapi',
         }
+        const getUpgradeOffer = mock(() => offer)
         const store = new Store(':memory:')
         const engine = new SyncEngine(
             store,
             {} as never,
             new RpcRegistry(),
             { broadcast() {} } as never,
-            { getUpgradeOffer: () => offer, getFleetUpgradePolicy: () => 'alert' },
+            { getUpgradeOffer, getFleetUpgradePolicy: () => 'alert' },
         )
 
         try {
@@ -463,11 +476,14 @@ describe('SyncEngine fleet upgrade', () => {
             await new Promise((resolve) => setTimeout(resolve, 10))
             // alert policy surfaces the banner but never self-initiates the RPC.
             expect(runnerSelfUpgrade).not.toHaveBeenCalled()
+            // And must not resolve the offer (fingerprint) on the heartbeat path.
+            expect(getUpgradeOffer).not.toHaveBeenCalled()
 
             // Manual upgrade still works under 'alert' (banner button path).
             const result = await engine.upgradeMachineRunner('behind', 'default')
             expect(result.type).toBe('success')
             expect(runnerSelfUpgrade).toHaveBeenCalledWith('behind', offer)
+            expect(getUpgradeOffer).toHaveBeenCalled()
         } finally {
             engine.stop()
         }
