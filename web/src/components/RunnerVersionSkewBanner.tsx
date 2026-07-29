@@ -47,17 +47,25 @@ export function listSkewedMachines(machines: Machine[], offer: HubUpgradeOffer |
     if (!offer) {
         return []
     }
-    // Include versionHandoffDisabled (soup/rebuild-only) hosts when they trail so
-    // Restart remains visible as the escape hatch. Upgrade is disabled per-row.
-    return machines.filter((machine) => (
-        machine.active
-        && machineTrailsUpgradeOffer(
+    // Include versionHandoffDisabled (soup/rebuild-only) hosts when they trail on
+    // version/capability or have a newer binary on disk so Restart stays visible.
+    // Ignore generation drift for those hosts — they never write a marker.
+    return machines.filter((machine) => {
+        if (!machine.active) {
+            return false
+        }
+        const handoffDisabled = machine.metadata?.versionHandoffDisabled === true
+        if (machineTrailsUpgradeOffer(
             offer,
             machine.metadata?.happyCliVersion,
             machine.metadata?.capabilities,
             machine.metadata?.cliArtifactGeneration,
-        )
-    ))
+            { ignoreGenerationDrift: handoffDisabled },
+        )) {
+            return true
+        }
+        return handoffDisabled && cliBinaryUpdatedOnDisk(machine.metadata)
+    })
 }
 
 /**
