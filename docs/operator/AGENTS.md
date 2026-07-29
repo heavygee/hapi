@@ -14,6 +14,7 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 |------|----|--------|
 | Any local feature / soup / peer work | Read lifecycle first | [`feature-work-lifecycle.md`](../tooling/feature-work-lifecycle.md) (sole workflow) |
 | Message another HAPI session | **PATH tooling only** — never reinvent JWT+curl; never `cd driver/cli && bun run …` | `hapi-ping-peer …` **or** `hapi ping-peer …` (same job; soup `hapi` = `hapi-from-active`, not `~/.bun/bin/hapi`) |
+| Read another HAPI session | Same — no JWT+curl | `hapi inspect-peer <id>` / MCP `inspect_peer` (read-only, no resume). Citations: `[title](/sessions/<id>)` → pass `<id>` |
 | Proof / screenshots / clips for operator | **Inline into HAPI chat** — do not only paste paths | Lifecycle [§ Proof tiers](../tooling/feature-work-lifecycle.md#proof-tiers-images-and-video) — MCP `display_image` / `display_video`, or `bun scripts/tooling/hapi-display-image.mjs <session-prefix> <abs-path> [title]` |
 | Link operator to a file/doc in HAPI chat | Write path as **bare text** — no `[](...)`, no backticks | HAPI auto-links bare paths → in-app file viewer (`remarkFilePathLinks`). Only allowlisted extensions link; **wrap `.mmd`/exotic in a `.md`** so it's clickable + previewable. Tracking: [tiann/hapi#1120](https://github.com/tiann/hapi/issues/1120) |
 | New behavior intake / peer spawn | Follow intake §0 handoff | [`new-feature-intake.md`](../tooling/new-feature-intake.md) |
@@ -111,12 +112,12 @@ sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh
 #          --disable   stop + disable both timers
 ```
 
-| Timer | When (host TZ; oos = UTC) | Command |
-|-------|---------------------------|---------|
-| `hapi-meta-daily.timer` | **07:30 / 15:00 / 20:00** (+ up to 3m random) | full Meta (peer pings + wave-clear unlock) |
+| Timer | When | Command |
+|-------|------|---------|
+| `hapi-meta-daily.timer` | **07:30 / 15:00 / 20:00 Europe/London** (+ up to 3m random; BST/GMT) | full Meta (peer pings + wave-clear unlock) |
 | `hapi-meta-daily-refresh.timer` | every **45m 24/7** (`OnBootSec=3min` + `OnUnitActiveSec=45min`) | `--no-ping --emit-events` |
 
-Quiet refresh is round-the-clock on purpose (odd hours) — max gap ~45m so chips stay under the **2h** `statusCheckedAt` mute. Only the three ping windows may ping peers or unlock Meta tooling for rematerialize. Units: `scripts/tooling/systemd/hapi-meta-daily*`. Optional env: `~/.hapi/meta-daily.env` (`HAPI_META_TOOLING_SESSION_ID`, `HAPI_META_WAVE_COLLECT_SECS`). Chip UI never live-queries GitHub. Logs: `journalctl -u hapi-meta-daily -u hapi-meta-daily-refresh`.
+Quiet refresh is round-the-clock on purpose (odd hours) — max gap ~45m so chips stay under the **2h** `statusCheckedAt` mute. Only the three London wall-clock ping windows may ping peers or unlock Meta tooling for rematerialize. Host TZ on oos may stay `Etc/UTC`; the timer unit prefixes `Europe/London` so "3pm" means operator-local, not UTC. Units: `scripts/tooling/systemd/hapi-meta-daily*`. Optional env: `~/.hapi/meta-daily.env` (`HAPI_META_TOOLING_SESSION_ID`, `HAPI_META_WAVE_COLLECT_SECS`). Chip UI never live-queries GitHub. Logs: `journalctl -u hapi-meta-daily -u hapi-meta-daily-refresh`.
 
 What it does, idempotently:
 
