@@ -249,6 +249,16 @@ async function importCursorSelectionViaMachine(options: {
         }
     }
 
+    // Re-check after prepare: verify/transplant can take tens of seconds; overlapping
+    // imports may both pass the preflight index and race into getOrCreateSession.
+    const alreadyAfterPrepare = buildAlreadyImportedIndex(options.store, options.namespace).get(options.selection.uuid)
+    if (alreadyAfterPrepare) {
+        return failure(
+            'already_imported',
+            `cursor session ${options.selection.uuid} is already imported as Hapi session ${alreadyAfterPrepare}`
+        )
+    }
+
     const homeDir = resolveMachineHomeDir(options.engine, options.machineId)
     const metadata = buildImportedSessionMetadata({
         uuid: prepared.uuid,
@@ -335,13 +345,14 @@ export function createCursorImportRoutes(options: {
         const namespace = c.get('namespace')
         const results: CursorImportRowOutcome[] = []
         for (const selection of parsed.selections) {
-            const machineId = selection.machineId
-                ?? resolveRequestedImportMachineId(
-                    selection.workspacePath,
-                    namespace,
-                    engine,
-                    parsed.machineId
-                )
+            // Always resolve through the online-machine gate — do not trust a
+            // stale per-row machineId from a discovery snapshot after a runner drop.
+            const machineId = resolveRequestedImportMachineId(
+                selection.workspacePath,
+                namespace,
+                engine,
+                selection.machineId ?? parsed.machineId
+            )
             if (!machineId) {
                 results.push({
                     ok: false,
@@ -352,15 +363,25 @@ export function createCursorImportRoutes(options: {
                 })
                 continue
             }
-            const outcome = await importCursorSelectionViaMachine({
-                engine,
-                store: options.store,
-                namespace,
-                machineId,
-                selection,
-                getSyncEngine: options.getSyncEngine
-            })
-            results.push(outcome)
+            try {
+                const outcome = await importCursorSelectionViaMachine({
+                    engine,
+                    store: options.store,
+                    namespace,
+                    machineId,
+                    selection,
+                    getSyncEngine: options.getSyncEngine
+                })
+                results.push(outcome)
+            } catch (error) {
+                results.push({
+                    ok: false,
+                    uuid: selection.uuid,
+                    reason: 'internal_error',
+                    message: error instanceof Error ? error.message : String(error),
+                    durationMs: 0
+                })
+            }
         }
         const importedCount = results.filter((row) => row.ok).length
 

@@ -849,27 +849,103 @@ describe('Cursor import HTTP routes', () => {
         expect(body.importedCount).toBe(0)
     })
 
-    it('POST /api/cursor/import accepts selections with per-row workspacePath', async () => {
-        const app = createRoutesApp({ namespace: 'default', store: h.store, harness: h })
+    it('POST /api/cursor/import re-checks already_imported after prepare', async () => {
+        const uuid = '88888888-8888-8888-8888-888888888888'
+        h.placeAcpStore(uuid, { name: 'race via route', cwd: '/workspace/race-route' })
+        h.placeFakeAgentBinary()
+
+        let plantedId = ''
+        const base = createImportSyncEngine(h)
+        const engine = {
+            ...base,
+            prepareCursorImportForMachine: async () => {
+                const planted = h.store.sessions.getOrCreateSession('hapi-race-via-route', {
+                    path: '/workspace/race-route',
+                    host: 'test-host',
+                    name: 'planted mid-prepare',
+                    flavor: 'cursor',
+                    cursorSessionId: uuid
+                } as Record<string, unknown>, {}, 'default')
+                plantedId = planted.id
+                return {
+                    success: true as const,
+                    uuid,
+                    sourceFormat: 'acp' as const,
+                    workspacePath: '/workspace/race-route',
+                    title: 'race via route',
+                    hostName: 'test-host',
+                    durationMs: 1
+                }
+            }
+        } as unknown as SyncEngine
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createCursorImportRoutes({
+            store: h.store,
+            getSyncEngine: () => engine
+        }))
+
         const res = await app.request('/api/cursor/import', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({
-                selections: [{ uuid: 'not-on-disk-uuid', workspacePath: '/workspace/from-ui' }]
-            })
+            body: JSON.stringify({ uuids: [uuid] })
         })
-        // Route accepts the selections shape; refusal is still per-row (no agent probe needed).
         expect(res.status).toBe(200)
         const body = await res.json() as {
             success: true
-            results: Array<{ ok: boolean; reason?: string; uuid: string }>
+            results: Array<{ ok: boolean; reason?: string; message?: string }>
             importedCount: number
         }
         expect(body.success).toBe(true)
         expect(body.importedCount).toBe(0)
         expect(body.results).toHaveLength(1)
         expect(body.results[0]?.ok).toBe(false)
-        expect(body.results[0]?.reason).toBe('missing_on_disk_store')
-        expect(body.results[0]?.uuid).toBe('not-on-disk-uuid')
+        expect(body.results[0]?.reason).toBe('already_imported')
+        expect(body.results[0]?.message).toContain(plantedId)
+        expect(h.store.sessions.getSessionsByNamespace('default')).toHaveLength(1)
+    })
+
+    it('POST /api/cursor/import keeps per-row outcomes when prepare RPC throws', async () => {
+        const uuid = '99999999-9999-9999-9999-999999999999'
+        h.placeAcpStore(uuid, { name: 'throw chat', cwd: '/workspace/throw' })
+        const base = createImportSyncEngine(h)
+        const engine = {
+            ...base,
+            prepareCursorImportForMachine: async () => {
+                throw new Error('handler-not-registered')
+            }
+        } as unknown as SyncEngine
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createCursorImportRoutes({
+            store: h.store,
+            getSyncEngine: () => engine
+        }))
+
+        const res = await app.request('/api/cursor/import', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ uuids: [uuid] })
+        })
+        expect(res.status).toBe(200)
+        const body = await res.json() as {
+            success: true
+            results: Array<{ ok: boolean; reason?: string; message?: string }>
+            importedCount: number
+        }
+        expect(body.success).toBe(true)
+        expect(body.importedCount).toBe(0)
+        expect(body.results).toHaveLength(1)
+        expect(body.results[0]?.ok).toBe(false)
+        expect(body.results[0]?.reason).toBe('internal_error')
+        expect(body.results[0]?.message).toContain('handler-not-registered')
     })
 })
