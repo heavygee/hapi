@@ -214,11 +214,6 @@ async function installFromArtifact(
         // best-effort
     }
     try {
-        writeUpgradeTarget({
-            path: finalPath,
-            targetVersion: offer.targetVersion,
-            targetCapabilities: [...offer.targetCapabilities],
-        })
         if (isWin) {
             // No ln -sfn on Windows; copy so `hapi.exe` is a real PE the
             // scheduled task / start scripts can launch.
@@ -312,6 +307,14 @@ export async function applyRunnerSelfUpgrade(options: {
                 channel: options.offer.channel,
             }
         }
+
+        // Persist durable marker for both npm and hub-artifact so a later
+        // supervisor restart does not re-delegate to a stale prior artifact.
+        writeUpgradeTarget({
+            path: installedExecutable,
+            targetVersion: options.offer.targetVersion,
+            targetCapabilities: [...options.offer.targetCapabilities],
+        })
 
         // Spawn replacement, release the runner lock so the child can register,
         // then wait for handoff before shutting down. Mirrors run.ts mtime handoff
