@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { chmodSync, copyFileSync, createWriteStream, existsSync, mkdirSync, renameSync, unlinkSync } from 'node:fs'
+import { chmodSync, copyFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, unlinkSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
@@ -84,6 +84,40 @@ export function artifactInstallFileName(
     const id = sha256.slice(0, 16)
     const base = `hapi-${targetVersion}-${id}`
     return platform === 'win32' ? `${base}.exe` : base
+}
+
+/** Content-addressed install names only — never `hapi` / `hapi.exe` / marker. */
+const VERSIONED_ARTIFACT_NAME_RE = /^hapi-.+-[0-9a-f]{16}(?:\.exe)?$/i
+
+/**
+ * Drop superseded hub-artifact binaries under ~/.hapi/bin after a durable
+ * upgrade. Same-version soup rebuilds would otherwise grow disk without bound.
+ * Best-effort: a mapped Windows PE may refuse unlink until the next cycle.
+ */
+export function pruneSupersededArtifacts(
+    keepPath: string,
+    binDir: string = upgradeBinDir(),
+): void {
+    let names: string[]
+    try {
+        names = readdirSync(binDir)
+    } catch {
+        return
+    }
+    for (const name of names) {
+        if (!VERSIONED_ARTIFACT_NAME_RE.test(name)) {
+            continue
+        }
+        const candidate = join(binDir, name)
+        if (candidate === keepPath) {
+            continue
+        }
+        try {
+            unlinkSync(candidate)
+        } catch {
+            // Mapped Windows binary or race; retry on the next upgrade.
+        }
+    }
 }
 
 async function runCommand(command: string, args: string[]): Promise<{ ok: boolean; output: string }> {
@@ -496,13 +530,24 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
         }
 
         // Handoff confirmed — only then make the target durable for supervisor restarts.
-        writeUpgradeTarget({
-            path: installedExecutable,
-            targetVersion: options.offer.targetVersion,
-            targetCapabilities: [...options.offer.targetCapabilities],
-            targetGeneration: options.offer.targetGeneration
-                || (options.offer.channel === 'hub-artifact' ? options.offer.artifact?.sha256 : undefined),
-        })
+        // Always retire this process even if the marker write fails: the child owns
+        // the lock. Leaving the old runner alive would mean two live machine sockets.
+        let markerError: Error | null = null
+        try {
+            writeUpgradeTarget({
+                path: installedExecutable,
+                targetVersion: options.offer.targetVersion,
+                targetCapabilities: [...options.offer.targetCapabilities],
+                targetGeneration: options.offer.targetGeneration
+                    || (options.offer.channel === 'hub-artifact' ? options.offer.artifact?.sha256 : undefined),
+            })
+        } catch (error) {
+            markerError = error instanceof Error ? error : new Error(String(error))
+            logger.debug('[SELF-UPGRADE] Durable target write failed after confirmed handoff', markerError)
+        }
+        if (options.offer.channel === 'hub-artifact' && installedExecutable) {
+            pruneSupersededArtifacts(installedExecutable)
+        }
 
         // Handoff confirmed. Exit WITHOUT requestShutdown/cleanupRunnerState —
         // those would delete the child's runner.state.json and lock. Matches the
@@ -510,6 +555,14 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
         setTimeout(() => {
             process.exit(0)
         }, 250)
+
+        if (markerError) {
+            return {
+                status: 'failed',
+                message: `Replacement is running, but the durable target could not be saved: ${markerError.message}`,
+                channel: options.offer.channel,
+            }
+        }
 
         return {
             status: 'started',

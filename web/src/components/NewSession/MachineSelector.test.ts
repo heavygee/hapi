@@ -56,4 +56,48 @@ describe('machineNeedsUpdateLabel', () => {
             'alert',
         )).toBe(true)
     })
+
+    it('does not label handoff-disabled hosts on generation-only drift', () => {
+        const artifactOffer: HubUpgradeOffer = {
+            channel: 'hub-artifact',
+            targetVersion: '0.24.0',
+            targetCapabilities: ['cursor-chat-store-status'],
+            targetGeneration: 'gen-b',
+            artifact: {
+                url: '/cli/upgrade/cli-artifact',
+                sha256: 'abc',
+                platform: 'linux',
+                arch: 'x64',
+                sizeBytes: 1,
+            },
+        }
+        expect(machineNeedsUpdateLabel(
+            makeMachine({
+                metadata: {
+                    host: 'proxmox',
+                    platform: 'linux',
+                    happyCliVersion: '0.24.0',
+                    capabilities: ['cursor-chat-store-status'],
+                    versionHandoffDisabled: true,
+                },
+            }),
+            artifactOffer,
+            'alert',
+        )).toBe(false)
+        expect(machineNeedsUpdateLabel(
+            makeMachine({
+                metadata: {
+                    host: 'proxmox',
+                    platform: 'linux',
+                    happyCliVersion: '0.24.0',
+                    capabilities: ['cursor-chat-store-status'],
+                    versionHandoffDisabled: true,
+                    startedCliMtimeMs: 1,
+                    installedCliMtimeMs: 2,
+                },
+            }),
+            artifactOffer,
+            'alert',
+        )).toBe(true)
+    })
 })

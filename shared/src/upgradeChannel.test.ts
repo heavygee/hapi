@@ -125,5 +125,17 @@ describe('machineTrailsUpgradeOffer', () => {
             ['cursor-chat-store-status', 'runner-self-upgrade'],
             'gen-b',
         )).toBe(false)
+        expect(machineTrailsUpgradeOffer(
+            artifactOffer,
+            '0.24.0',
+            ['cursor-chat-store-status', 'runner-self-upgrade'],
+            undefined,
+            { ignoreGenerationDrift: true },
+        )).toBe(false)
+        expect(machineTrailsUpgradeOffer(
+            artifactOffer,
+            '0.24.0',
+            ['cursor-chat-store-status', 'runner-self-upgrade'],
+        )).toBe(true)
     })
 })

@@ -55,6 +55,21 @@ describe('normalizeCompiledArtifactPath', () => {
         }
     })
 
+    it('prefers a fresh .exe over a stale extensionless outPath on same-version rebuild', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-artifact-stale-'))
+        try {
+            const outPath = join(dir, 'hapi-0.25.1-win32-x64')
+            writeFileSync(outPath, 'OLD-PE-bytes')
+            writeFileSync(`${outPath}.exe`, 'NEW-PE-bytes')
+            const produced = normalizeCompiledArtifactPath(outPath, 'win32')
+            expect(produced).toBe(outPath)
+            expect(readFileSync(produced, 'utf8')).toBe('NEW-PE-bytes')
+            expect(existsSync(`${outPath}.exe`)).toBe(false)
+        } finally {
+            rmSync(dir, { recursive: true, force: true })
+        }
+    })
+
     it('leaves non-Windows paths alone', () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-artifact-nix-'))
         try {

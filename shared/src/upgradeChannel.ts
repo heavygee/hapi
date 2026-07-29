@@ -83,6 +83,16 @@ export type HubUpgradeOffer = {
     }
 }
 
+export type MachineTrailsOptions = {
+    /**
+     * Soup / systemd hosts with `versionHandoffDisabled` never write an
+     * upgrade-target marker, so they never advertise `cliArtifactGeneration`.
+     * Treating that omission as generation drift makes the banner a permanent
+     * false positive. Callers should set this for handoff-disabled machines.
+     */
+    ignoreGenerationDrift?: boolean
+}
+
 /**
  * True when a runner advertising `version`/`capabilities`/`generation` is behind
  * `offer` and the hub should auto-nudge it to the hub's generation.
@@ -101,6 +111,7 @@ export function machineTrailsUpgradeOffer(
     version: string | null | undefined,
     capabilities: readonly string[] | null | undefined,
     generation?: string | null | undefined,
+    options?: MachineTrailsOptions,
 ): boolean {
     if (offer.channel === 'off') {
         return false
@@ -113,7 +124,8 @@ export function machineTrailsUpgradeOffer(
     const versionDrift = typeof version === 'string'
         && version.length > 0
         && version !== offer.targetVersion
-    const generationDrift = offer.channel === 'hub-artifact'
+    const generationDrift = !options?.ignoreGenerationDrift
+        && offer.channel === 'hub-artifact'
         && typeof offer.targetGeneration === 'string'
         && offer.targetGeneration.length > 0
         && offer.targetGeneration !== (generation ?? '')

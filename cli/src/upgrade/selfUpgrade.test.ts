@@ -6,13 +6,14 @@ import {
     applyRunnerSelfUpgrade,
     artifactInstallFileName,
     assertExecutableMatchesTargetVersion,
+    pruneSupersededArtifacts,
     resolvePostNpmInstallExecutable,
     shouldApplyUpgradeOffer,
     waitForChildSpawn,
 } from './selfUpgrade'
 import type { HubUpgradeOffer } from '@hapi/protocol/upgradeChannel'
 import { CURRENT_MACHINE_CAPABILITIES } from '@hapi/protocol/runnerCapabilities'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -235,5 +236,33 @@ describe('artifactInstallFileName', () => {
         expect(artifactInstallFileName('0.25.1', oldSha, 'linux')).toBe('hapi-0.25.1-aaaaaaaaaaaaaaaa')
         expect(artifactInstallFileName('0.25.1', oldSha, 'win32'))
             .not.toBe(artifactInstallFileName('0.25.1', newSha, 'win32'))
+    })
+})
+
+describe('pruneSupersededArtifacts', () => {
+    it('removes other versioned artifacts while keeping current link names', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-bin-prune-'))
+        try {
+            const keep = join(dir, 'hapi-0.25.1-bbbbbbbbbbbbbbbb')
+            const oldA = join(dir, 'hapi-0.25.1-aaaaaaaaaaaaaaaa')
+            const oldB = join(dir, 'hapi-0.24.0-cccccccccccccccc')
+            const current = join(dir, 'hapi')
+            const marker = join(dir, '.hapi-upgrade-target')
+            writeFileSync(keep, 'keep')
+            writeFileSync(oldA, 'old')
+            writeFileSync(oldB, 'old')
+            writeFileSync(current, 'link')
+            writeFileSync(marker, '{}')
+
+            pruneSupersededArtifacts(keep, dir)
+
+            expect(existsSync(keep)).toBe(true)
+            expect(existsSync(current)).toBe(true)
+            expect(existsSync(marker)).toBe(true)
+            expect(existsSync(oldA)).toBe(false)
+            expect(existsSync(oldB)).toBe(false)
+        } finally {
+            rmSync(dir, { recursive: true, force: true })
+        }
     })
 })
