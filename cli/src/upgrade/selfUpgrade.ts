@@ -120,6 +120,23 @@ export function pruneSupersededArtifacts(
     }
 }
 
+/**
+ * Prune only after the durable marker for `keepPath` has been written.
+ * If marker persistence failed, the previous marker may still point at an
+ * older versioned binary — deleting it would strand the next supervisor restart.
+ */
+export function pruneSupersededArtifactsAfterDurableMarker(opts: {
+    markerError: Error | null
+    channel: string
+    keepPath: string | undefined
+    binDir?: string
+}): void {
+    if (opts.markerError || opts.channel !== 'hub-artifact' || !opts.keepPath) {
+        return
+    }
+    pruneSupersededArtifacts(opts.keepPath, opts.binDir)
+}
+
 async function runCommand(command: string, args: string[]): Promise<{ ok: boolean; output: string }> {
     try {
         const proc = Bun.spawn([command, ...args], {
@@ -545,9 +562,15 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
             markerError = error instanceof Error ? error : new Error(String(error))
             logger.debug('[SELF-UPGRADE] Durable target write failed after confirmed handoff', markerError)
         }
-        if (options.offer.channel === 'hub-artifact' && installedExecutable) {
-            pruneSupersededArtifacts(installedExecutable)
-        }
+
+        // Only prune after the new marker is durable — otherwise a failed write
+        // would delete the previous content-addressed binary the old marker still
+        // points at, and the next supervisor restart could not recover.
+        pruneSupersededArtifactsAfterDurableMarker({
+            markerError,
+            channel: options.offer.channel,
+            keepPath: installedExecutable,
+        })
 
         // Handoff confirmed. Exit WITHOUT requestShutdown/cleanupRunnerState —
         // those would delete the child's runner.state.json and lock. Matches the
