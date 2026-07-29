@@ -80,6 +80,20 @@ function makeMachine(overrides: Partial<Machine> & { id: string }): Machine {
     } as Machine
 }
 
+function makeUpgradeableMachine(overrides: Partial<Machine> & { id: string }): Machine {
+    return makeMachine({
+        ...overrides,
+        metadata: {
+            host: 'proxmox',
+            platform: 'linux',
+            happyCliVersion: '0.20.0',
+            ...overrides.metadata,
+            capabilities: overrides.metadata?.capabilities
+                ?? [...CURRENT_MACHINE_CAPABILITIES],
+        },
+    })
+}
+
 function renderBanner() {
     const client = new QueryClient({
         defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -242,10 +256,27 @@ describe('RunnerVersionSkewBanner', () => {
         expect(screen.queryByTestId('runner-version-skew-banner')).not.toBeInTheDocument()
     })
 
+    it('disables Upgrade for legacy runners without RunnerSelfUpgrade', () => {
+        useMachinesMock.mockReturnValue({
+            machines: [
+                makeMachine({ id: 'old', metadata: { host: 'proxmox', platform: 'linux', happyCliVersion: '0.20.0' } }),
+            ],
+            isLoading: false,
+            error: null,
+        })
+
+        renderBanner()
+
+        const upgrade = screen.getByTestId('runner-version-skew-upgrade-old')
+        expect(upgrade).toBeDisabled()
+        expect(upgrade).toHaveAttribute('title', expect.stringMatching(/too old|self-upgrade|manual/i))
+        expect(screen.getByText(/legacy runner/i)).toBeInTheDocument()
+    })
+
     it('disables Restart on unsupervised hosts (Upgrade owns handoff relaunch)', () => {
         useMachinesMock.mockReturnValue({
             machines: [
-                makeMachine({
+                makeUpgradeableMachine({
                     id: 'old',
                     metadata: {
                         host: 'proxmox',
@@ -274,7 +305,7 @@ describe('RunnerVersionSkewBanner', () => {
     it('calls upgradeMachineRunner when Upgrade is clicked', async () => {
         useMachinesMock.mockReturnValue({
             machines: [
-                makeMachine({ id: 'old', metadata: { host: 'proxmox', platform: 'linux', happyCliVersion: '0.20.0' } }),
+                makeUpgradeableMachine({ id: 'old', metadata: { host: 'proxmox', platform: 'linux', happyCliVersion: '0.20.0' } }),
             ],
             isLoading: false,
             error: null,
@@ -295,7 +326,7 @@ describe('RunnerVersionSkewBanner', () => {
         })
         useMachinesMock.mockReturnValue({
             machines: [
-                makeMachine({ id: 'Teemo', metadata: { host: 'Teemo', platform: 'win32', happyCliVersion: '0.20.0' } }),
+                makeUpgradeableMachine({ id: 'Teemo', metadata: { host: 'Teemo', platform: 'win32', happyCliVersion: '0.20.0' } }),
             ],
             isLoading: false,
             error: null,
