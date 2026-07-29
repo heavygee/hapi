@@ -326,10 +326,37 @@ async function scheduleRunnerRelaunch(cliExecutable: string): Promise<void> {
         shell: needsShell,
         windowsHide: process.platform === 'win32',
     })
+    // Wait for OS spawn success/failure before releasing the runner lock.
+    // spawn() itself rarely throws; launch errors arrive on the 'error' event.
+    await waitForChildSpawn(child)
     child.unref()
     // Do not process.exit here. ApiMachineClient delays requestShutdown by
     // ~500ms so runner lock/state cleanup can run; a hard exit races that and
     // skips cleanup. Caller invokes requestShutdown after handoff confirms.
+}
+
+/** Minimal event surface shared by ChildProcess and test doubles. */
+type SpawnEventTarget = {
+    once(event: 'spawn', listener: () => void): unknown
+    once(event: 'error', listener: (error: Error) => void): unknown
+    off(event: 'spawn', listener: () => void): unknown
+    off(event: 'error', listener: (error: Error) => void): unknown
+}
+
+/** Exported for tests: resolve when child process has spawned, reject on error. */
+export function waitForChildSpawn(child: SpawnEventTarget): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const onSpawn = (): void => {
+            child.off('error', onError)
+            resolve()
+        }
+        const onError = (error: Error): void => {
+            child.off('spawn', onSpawn)
+            reject(error)
+        }
+        child.once('spawn', onSpawn)
+        child.once('error', onError)
+    })
 }
 
 let runnerSelfUpgradeInFlight = false

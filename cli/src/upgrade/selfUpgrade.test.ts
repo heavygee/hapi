@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
     __resetRunnerSelfUpgradeGateForTests,
@@ -7,6 +8,7 @@ import {
     assertExecutableMatchesTargetVersion,
     resolvePostNpmInstallExecutable,
     shouldApplyUpgradeOffer,
+    waitForChildSpawn,
 } from './selfUpgrade'
 import type { HubUpgradeOffer } from '@hapi/protocol/upgradeChannel'
 import { CURRENT_MACHINE_CAPABILITIES } from '@hapi/protocol/runnerCapabilities'
@@ -203,6 +205,24 @@ describe('applyRunnerSelfUpgrade concurrency gate', () => {
             message: 'Runner upgrade already in progress',
             channel: 'npm',
         })
+    })
+})
+
+describe('waitForChildSpawn', () => {
+    it('resolves when the child emits spawn', async () => {
+        const child = new EventEmitter()
+        const pending = waitForChildSpawn(child)
+        child.emit('spawn')
+        await expect(pending).resolves.toBeUndefined()
+    })
+
+    it('rejects when the child emits error asynchronously (before lock release)', async () => {
+        const child = new EventEmitter()
+        const pending = waitForChildSpawn(child)
+        queueMicrotask(() => {
+            child.emit('error', new Error('ENOENT'))
+        })
+        await expect(pending).rejects.toThrow(/ENOENT/)
     })
 })
 
