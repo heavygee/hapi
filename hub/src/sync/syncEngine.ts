@@ -899,7 +899,12 @@ export class SyncEngine {
         // Auto-fire on capability skew OR pure semver drift ("set and forget"):
         // a runner behind the hub's target version is nudged even when it's
         // missing no required capability. The 0.0.0/off guards live in the helper.
-        if (!machineTrailsUpgradeOffer(offer, machine.metadata.happyCliVersion, machine.metadata.capabilities)) {
+        if (!machineTrailsUpgradeOffer(
+            offer,
+            machine.metadata.happyCliVersion,
+            machine.metadata.capabilities,
+            machine.metadata.cliArtifactGeneration,
+        )) {
             return
         }
         const last = this.fleetUpgradeAttemptAt.get(machineId) ?? 0

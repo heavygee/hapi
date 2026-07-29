@@ -18,6 +18,8 @@ export type UpgradeTarget = {
     path: string
     targetVersion: string
     targetCapabilities?: string[]
+    /** Hub-artifact build generation (source fingerprint) last applied. */
+    targetGeneration?: string
     updatedAt: number
 }
 
@@ -46,6 +48,7 @@ export function writeUpgradeTarget(target: Omit<UpgradeTarget, 'updatedAt'> & { 
         path: target.path,
         targetVersion: target.targetVersion,
         targetCapabilities: target.targetCapabilities,
+        targetGeneration: target.targetGeneration,
         updatedAt: target.updatedAt ?? Date.now(),
     }
     writeFileSync(marker, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
@@ -79,6 +82,9 @@ export function readUpgradeTarget(): UpgradeTarget | null {
             targetCapabilities: Array.isArray(parsed.targetCapabilities)
                 ? parsed.targetCapabilities.filter((cap): cap is string => typeof cap === 'string')
                 : undefined,
+            targetGeneration: typeof parsed.targetGeneration === 'string'
+                ? parsed.targetGeneration
+                : undefined,
             updatedAt: typeof parsed.updatedAt === 'number' ? parsed.updatedAt : 0,
         }
     } catch {
@@ -95,11 +101,25 @@ function samePath(left: string, right: string): boolean {
 }
 
 /**
+ * True when this process is an authorized handoff child and must not re-exec
+ * into a previous durable upgrade-target (that would bounce B → A mid-handoff).
+ */
+export function isAuthorizedRunnerHandoff(
+    env: NodeJS.ProcessEnv = process.env,
+): boolean {
+    return Boolean(env.HAPI_RUNNER_HANDOFF_FROM_PID?.trim() && env.HAPI_CLI_EXECUTABLE?.trim())
+}
+
+/**
  * True when this process should re-exec into the upgrade-target binary.
  * Skip for plain source `bun run` unless HAPI_CLI_EXECUTABLE is already set —
  * developers should not be silently redirected into a compiled soup artifact.
+ * Also skip during an authorized handoff: the child is already the candidate.
  */
 export function shouldDelegateToUpgradeTarget(target: UpgradeTarget): boolean {
+    if (isAuthorizedRunnerHandoff()) {
+        return false
+    }
     if (!target.path || !existsSync(target.path)) {
         return false
     }

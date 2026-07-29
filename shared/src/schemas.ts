@@ -441,6 +441,11 @@ export const MachineMetadataSchema = z.object({
     startedCliMtimeMs: z.number().optional(),
     /** Current on-disk CLI binary/package mtime (may differ after upgrade). */
     installedCliMtimeMs: z.number().optional(),
+    /**
+     * Hub-artifact build generation this runner last applied (source fingerprint).
+     * Used to detect same-semver soup rebuilds that still need fleet upgrade.
+     */
+    cliArtifactGeneration: z.string().optional(),
 })
 
 export type MachineMetadata = z.infer<typeof MachineMetadataSchema>
