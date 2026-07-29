@@ -135,11 +135,11 @@ describe('withStubEmbeddedAssets', () => {
             const original = 'export const embeddedAssets = [{ path: "real.js" }];\n'
             writeFileSync(manifest, original)
 
-            await withStubEmbeddedAssets(root, async () => 'ok', {
+            await expect(withStubEmbeddedAssets(root, async () => 'ok', {
                 restoreFromBackup: () => {
                     throw new Error('EPERM: restore failed')
                 },
-            })
+            })).rejects.toThrow(/Failed to restore embedded asset manifest/)
 
             expect(readFileSync(manifest, 'utf8')).toContain('intentionally contains no embedded assets')
             const backups = readdirSync(webDir).filter((name) => name.includes('.bak'))
