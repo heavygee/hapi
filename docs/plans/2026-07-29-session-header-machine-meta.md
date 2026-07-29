@@ -81,7 +81,8 @@ Pushed tip:
 Bindings verify OK on worktree. **No remat from this peer** until Meta runs a
 clean rematerialize / greenlights.
 
-### Task 4: Upstream PR (after clean dogfood)
+### Task 4: Upstream PR
 
-Open PR to `tiann/hapi` with `Fixes #1241`. Not before soup dogfood sign-off on
-a **non-skunked** remat tip.
+Opened: https://github.com/tiann/hapi/pull/1244 (`Fixes #1241`)
+Fork stage: https://github.com/heavygee/hapi/pull/96 (`cold-review-clean`)
+Tip: `bfdbeb767` on `feat/session-header-machine-meta`
