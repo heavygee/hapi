@@ -128,6 +128,7 @@ export default {
   'session.item.path': 'path',
   'session.item.agent': 'agent',
   'session.item.model': 'model',
+  'session.item.machine': 'machine',
   'session.item.worktree': 'worktree',
   'session.item.pending': 'pending',
   'session.item.thinking': 'thinking',
