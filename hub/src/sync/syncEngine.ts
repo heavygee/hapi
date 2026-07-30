@@ -1185,6 +1185,10 @@ async uploadScratchlistAttachment(
         await this.sessionCache.renameSession(sessionId, name)
     }
 
+    async acknowledgeModelError(sessionId: string, atTs: number): Promise<void> {
+        await this.sessionCache.acknowledgeModelError(sessionId, atTs)
+    }
+
     async deleteSession(sessionId: string): Promise<void> {
         await this.sessionCache.deleteSession(sessionId)
     }

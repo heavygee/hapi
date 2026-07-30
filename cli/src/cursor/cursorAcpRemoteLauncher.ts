@@ -39,6 +39,13 @@ import {
     type CursorNotifyRuleOverlay
 } from './utils/cursorNotifyRuleOverlay';
 import { installCursorMcpOverlay, type CursorMcpOverlayHandle } from './utils/cursorMcpOverlay';
+import {
+    classifyAcpRpcRejection,
+    classifyCursorAgentMessage,
+    isCompletionClaim,
+    mapAcpStderrToFailure,
+    type CursorAgentStreamFailure
+} from './cursorAgentMessageClassifier';
 
 class CursorAcpRemoteLauncher extends RemoteLauncherBase {
     private readonly session: CursorSession;
@@ -60,6 +67,8 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
     /** Avoid re-queueing `/auto-review` on every mid-session mode sync. */
     private autoReviewSlashQueued = false;
     private cursorMcpOverlay: CursorMcpOverlayHandle | null = null;
+    private lastAssistantText: string | null = null;
+    private turnHasModelError = false;
 
     constructor(session: CursorSession) {
         super(process.env.DEBUG ? session.logPath : undefined);
@@ -134,6 +143,11 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                 session.sendAgentMessage(converted);
             }
             messageBuffer.addMessage(error.message, 'status');
+            // STRUCTURAL signal: route typed stderr error into the modelError
+            // pipeline so the banner + pulsing dot fire on the typed kind
+            // (rate_limited / quota_exhausted / auth_failed / model_not_found)
+            // without any text matching.
+            this.recordModelError(mapAcpStderrToFailure(error));
         });
 
         try {
@@ -256,6 +270,10 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         });
 
         const sendReady = () => {
+            if (this.turnHasModelError) {
+                // Don't clear the error state with a 'ready' — banner stays visible.
+                return;
+            }
             session.sendSessionEvent({ type: 'ready' });
         };
 
@@ -304,6 +322,8 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             }];
 
             session.onThinkingChange(true);
+            this.turnHasModelError = false;
+            this.lastAssistantText = null;
 
             try {
                 await backend.prompt(acpSessionId, promptContent, (message) => {
@@ -319,6 +339,16 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                     session.sendAgentMessage(converted);
                 }
                 messageBuffer.addMessage(message, 'status');
+                // STRUCTURAL signal: classify the RPC rejection. This catches
+                // transport_closed (WritableIterable / ACP closed), agent_crashed
+                // (process exit during prompt), rpc_timeout, and gRPC status
+                // strings that cursor-agent returned as JSON-RPC error.message
+                // (rather than stringifying as a text message). Returns null
+                // for user cancellations / aborts -- those are NOT model errors.
+                const failure = classifyAcpRpcRejection(error);
+                if (failure) {
+                    this.recordModelError(failure);
+                }
             } finally {
                 session.onThinkingChange(false);
                 await this.permissionAdapter?.cancelAll('Prompt finished');
@@ -405,6 +435,7 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         switch (message.type) {
             case 'text':
                 this.messageBuffer.addMessage(message.text, 'assistant');
+                this.handleTextMessageClassification(message.text);
                 break;
             case 'reasoning':
                 break;
@@ -430,6 +461,75 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             default:
                 break;
         }
+    }
+
+    private handleTextMessageClassification(text: string): void {
+        // FALLBACK PATH ONLY. If a structural signal (stderr / RPC) already
+        // classified this turn, do not re-classify the agent's text -- the
+        // text is often the agent's own stringified version of the same
+        // error we already caught structurally, and re-classifying produces
+        // duplicate banners. We still record lastAssistantText so the
+        // priorAssistantClaimsDone heuristic works for any subsequent
+        // structural signal in this turn.
+        if (this.turnHasModelError) {
+            this.lastAssistantText = text;
+            return;
+        }
+        const failure = classifyCursorAgentMessage(text);
+        if (failure) {
+            this.recordModelError(failure);
+        } else {
+            this.lastAssistantText = text;
+        }
+    }
+
+    /**
+     * Single source of truth for emitting modelError. All signal paths
+     * (RPC catch / stderr subscriber / text fallback) route through here.
+     * First signal wins: subsequent signals in the same turn are dropped
+     * to avoid banner-flapping when the agent emits both an RPC rejection
+     * AND a stringified text version of the same failure.
+     */
+    private recordModelError(failure: CursorAgentStreamFailure): void {
+        if (this.turnHasModelError) {
+            logger.debug(
+                `[cursor-acp] modelError already recorded for this turn, dropping ${failure.source}/${failure.kind}`
+            );
+            return;
+        }
+        this.turnHasModelError = true;
+
+        // Same-message case: Cursor often appends `Error: T: ...` onto the
+        // assistant block that already claimed "Done." — lastAssistantText is
+        // still null because we classify before storing. Check failure.raw too.
+        const priorAssistantClaimsDone = (this.lastAssistantText !== null
+            && isCompletionClaim(this.lastAssistantText))
+            || (failure.source === 'text' && isCompletionClaim(failure.raw));
+        const rawSnippet = failure.raw.slice(0, 400);
+        const atTs = Date.now();
+
+        logger.debug(
+            `[cursor-acp] modelError recorded source=${failure.source} kind=${failure.kind} transient=${failure.transient}`
+        );
+
+        this.session.client.updateMetadata((metadata) => ({
+            ...metadata,
+            lastModelError: {
+                kind: failure.kind,
+                transient: failure.transient,
+                rawSnippet,
+                atTs,
+                priorAssistantClaimsDone
+            }
+        }));
+
+        this.session.sendSessionEvent({
+            type: 'modelError',
+            kind: failure.kind,
+            transient: failure.transient,
+            rawSnippet,
+            priorAssistantClaimsDone
+        });
     }
 
     private installLiveSessionConfigSync(
