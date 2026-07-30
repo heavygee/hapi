@@ -144,11 +144,16 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ reply, toolTrace, model: config.model, brainOnline: true })
         } catch (error) {
             if (error instanceof BrainUnavailableError) {
+                // Reachable-but-failed (http 4xx/5xx, malformed body) is a converse
+                // bug, not an offline brain — do not mislabel it as GPU/VR downtime.
+                const reply = error.reachable
+                    ? 'I reached the Overseer brain but could not complete the tool conversation (request error). This is a converse-loop issue, not the brain being offline — please retry, and flag it if it persists.'
+                    : 'The Overseer brain is offline right now (the GPU may be in use for VR). Try again shortly — your events and inbox are still being captured.'
                 return c.json({
-                    reply: 'The Overseer brain is offline right now (the GPU may be in use for VR). Try again shortly — your events and inbox are still being captured.',
+                    reply,
                     toolTrace: [],
                     model: config.model,
-                    brainOnline: false
+                    brainOnline: error.reachable
                 })
             }
             throw error

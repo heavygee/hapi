@@ -73,10 +73,10 @@ export async function runOverseerConverse(params: {
 
     for (let iter = 0; iter < maxIterations; iter++) {
         const message = await callBrain({ config, messages: convo, tools, signal })
-        convo.push(message)
-
         const calls = message.tool_calls ?? []
+
         if (calls.length === 0) {
+            convo.push(message)
             if (toolTrace.length === 0 && !nudged) {
                 nudged = true
                 convo.push({
@@ -88,31 +88,36 @@ export async function runOverseerConverse(params: {
             return { reply: (message.content ?? '').trim(), toolTrace }
         }
 
+        // Execute the requested tools and feed the results back as a plain USER
+        // message rather than role:'tool'+tool_call_id follow-ups. llama.cpp chat
+        // templates 400 ("template"/"tool_call_id") on multi-round tool-role
+        // exchanges with real data; the flattened form keeps every turn on the
+        // user/assistant path that all templates render. We also drop the raw
+        // assistant tool-call message from history for the same reason.
+        const resultLines: string[] = []
         for (const call of calls) {
             const name = call.function?.name ?? ''
-            const args = parseToolArgs(call.function?.arguments ?? '')
-            let resultContent: string
+            const argsRaw = call.function?.arguments ?? ''
+            const args = parseToolArgs(argsRaw)
             if (!isOverseerToolName(name)) {
                 toolTrace.push({ tool: name as never, args, ok: false, error: 'unknown tool' })
-                resultContent = JSON.stringify({ error: `unknown tool: ${name}` })
-            } else {
-                try {
-                    const result = runOverseerTool(overseer, name, args)
-                    toolTrace.push({ tool: name, args, ok: true })
-                    resultContent = JSON.stringify(result ?? null)
-                } catch (error) {
-                    const msg = error instanceof Error ? error.message : String(error)
-                    toolTrace.push({ tool: name, args, ok: false, error: msg })
-                    resultContent = JSON.stringify({ error: msg })
-                }
+                resultLines.push(`${name || 'unknown'}(${argsRaw}) => ${JSON.stringify({ error: `unknown tool: ${name}` })}`)
+                continue
             }
-            convo.push({
-                role: 'tool',
-                content: resultContent,
-                tool_call_id: call.id ?? name,
-                name: name || undefined
-            })
+            try {
+                const result = runOverseerTool(overseer, name, args)
+                toolTrace.push({ tool: name, args, ok: true })
+                resultLines.push(`${name}(${argsRaw}) => ${JSON.stringify(result ?? null)}`)
+            } catch (error) {
+                const msg = error instanceof Error ? error.message : String(error)
+                toolTrace.push({ tool: name, args, ok: false, error: msg })
+                resultLines.push(`${name}(${argsRaw}) => ${JSON.stringify({ error: msg })}`)
+            }
         }
+        convo.push({
+            role: 'user',
+            content: `Results of the tool call(s) you requested:\n${resultLines.join('\n')}\n\nAnswer my question using only these results. Call another tool only if you still lack data.`
+        })
     }
 
     // Iteration cap hit while still calling tools — ask once more for a plain answer.

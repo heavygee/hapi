@@ -35,10 +35,28 @@ export type OverseerOpenAiToolLike = {
     function: { name: string; description: string; parameters: Record<string, unknown> }
 }
 
+/**
+ * `kind` distinguishes a brain that is genuinely unreachable (network/timeout —
+ * e.g. GPU pulled for VR) from one that answered with an error (http 4xx/5xx or
+ * a malformed body). Callers use this so a chat-template 400 is not mislabeled
+ * to the operator as "brain offline".
+ */
+export type BrainErrorKind = 'unreachable' | 'timeout' | 'http' | 'protocol'
+
 export class BrainUnavailableError extends Error {
-    constructor(message: string, readonly cause?: unknown) {
+    constructor(
+        message: string,
+        readonly kind: BrainErrorKind = 'unreachable',
+        readonly status?: number,
+        readonly cause?: unknown
+    ) {
         super(message)
         this.name = 'BrainUnavailableError'
+    }
+
+    /** True when the brain was reachable but the request itself failed. */
+    get reachable(): boolean {
+        return this.kind === 'http' || this.kind === 'protocol'
     }
 }
 
@@ -92,29 +110,28 @@ export async function callBrain(params: {
             signal: controller.signal
         })
     } catch (error) {
-        throw new BrainUnavailableError(
-            controller.signal.aborted ? 'Overseer brain timed out' : 'Overseer brain unreachable',
-            error
-        )
+        throw controller.signal.aborted
+            ? new BrainUnavailableError('Overseer brain timed out', 'timeout', undefined, error)
+            : new BrainUnavailableError('Overseer brain unreachable', 'unreachable', undefined, error)
     } finally {
         clearTimeout(timeout)
     }
 
     if (!res.ok) {
         const body = await res.text().catch(() => '')
-        throw new BrainUnavailableError(`Overseer brain returned ${res.status}: ${body.slice(0, 200)}`)
+        throw new BrainUnavailableError(`Overseer brain returned ${res.status}: ${body.slice(0, 300)}`, 'http', res.status)
     }
 
     let json: unknown
     try {
         json = await res.json()
     } catch (error) {
-        throw new BrainUnavailableError('Overseer brain returned invalid JSON', error)
+        throw new BrainUnavailableError('Overseer brain returned invalid JSON', 'protocol', undefined, error)
     }
 
     const message = (json as { choices?: Array<{ message?: OpenAiChatMessage }> })?.choices?.[0]?.message
     if (!message) {
-        throw new BrainUnavailableError('Overseer brain response missing a message')
+        throw new BrainUnavailableError('Overseer brain response missing a message', 'protocol')
     }
     return message
 }

@@ -135,12 +135,28 @@ describe('runOverseerConverse', () => {
         expect(reply).toBe('Hello — I can advise on your fleet.')
     })
 
-    it('surfaces brain unavailability', async () => {
+    it('surfaces brain unavailability (unreachable)', async () => {
         setFetch(vi.fn().mockRejectedValue(new Error('ECONNREFUSED')))
-        await expect(runOverseerConverse({
-            overseer: fakeOverseer,
-            config,
-            messages: [{ role: 'operator', content: 'hi' }]
-        })).rejects.toBeInstanceOf(BrainUnavailableError)
+        try {
+            await runOverseerConverse({ overseer: fakeOverseer, config, messages: [{ role: 'operator', content: 'hi' }] })
+            throw new Error('should have thrown')
+        } catch (e) {
+            expect(e).toBeInstanceOf(BrainUnavailableError)
+            expect((e as BrainUnavailableError).kind).toBe('unreachable')
+            expect((e as BrainUnavailableError).reachable).toBe(false)
+        }
+    })
+
+    it('classifies an http error as reachable (template 400 is not offline)', async () => {
+        setFetch(vi.fn().mockResolvedValue(new Response('error loading template: tool_call_id', { status: 400 })))
+        try {
+            await runOverseerConverse({ overseer: fakeOverseer, config, messages: [{ role: 'operator', content: 'hi' }] })
+            throw new Error('should have thrown')
+        } catch (e) {
+            expect(e).toBeInstanceOf(BrainUnavailableError)
+            expect((e as BrainUnavailableError).kind).toBe('http')
+            expect((e as BrainUnavailableError).status).toBe(400)
+            expect((e as BrainUnavailableError).reachable).toBe(true)
+        }
     })
 })
