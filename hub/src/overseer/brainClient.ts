@@ -107,6 +107,36 @@ export function resolveBrainConfig(
     return model ? { ...cfg, model } : cfg
 }
 
+const NON_CHAT_MODEL = /embedding|whisper|tts|dall-?e|moderation|audio|realtime|image|transcribe|-search|babbage|davinci-002|instruct/i
+
+/** Keep the chat-usable model ids (drop embeddings/audio/image/etc.), sorted. */
+export function filterChatModels(ids: string[]): string[] {
+    const chat = ids.filter((id) => !NON_CHAT_MODEL.test(id))
+    return (chat.length > 0 ? chat : ids).slice().sort()
+}
+
+/** List model ids a brain endpoint serves (OpenAI-compatible GET /models). */
+export async function listBrainModels(config: BrainConfig, timeoutMs = 12_000): Promise<string[]> {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), timeoutMs)
+    let res: Response
+    try {
+        res = await fetch(`${config.baseUrl}/models`, {
+            headers: config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {},
+            signal: controller.signal
+        })
+    } catch (error) {
+        throw new BrainUnavailableError('Brain model list unreachable', 'unreachable', undefined, error)
+    } finally {
+        clearTimeout(timeout)
+    }
+    if (!res.ok) throw new BrainUnavailableError(`Brain model list returned ${res.status}`, 'http', res.status)
+    const json = (await res.json().catch(() => null)) as { data?: Array<{ id?: unknown }> } | null
+    return (json?.data ?? [])
+        .map((m) => m?.id)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0)
+}
+
 /** List configured brain profiles for the UI (id/label/model only — no url/key). */
 export function listBrainProfiles(env: NodeJS.ProcessEnv = process.env): OverseerBrainProfileInfo[] {
     const out: OverseerBrainProfileInfo[] = []

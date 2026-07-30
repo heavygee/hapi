@@ -12,7 +12,7 @@ import type { WebAppEnv } from '../middleware/auth'
 import { requireSyncEngine } from './guards'
 import { isOverseerToolName, runOverseerTool } from '../../overseer/runOverseerTool'
 import { runOverseerConverse } from '../../overseer/converse'
-import { BrainUnavailableError, listBrainProfiles, resolveBrainConfig } from '../../overseer/brainClient'
+import { BrainUnavailableError, filterChatModels, listBrainModels, listBrainProfiles, resolveBrainConfig } from '../../overseer/brainClient'
 
 const convoTurnBodySchema = z.object({
     operatorText: z.string().max(8000).default(''),
@@ -68,6 +68,25 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
         const engine = requireSyncEngine(c, getSyncEngine)
         if (engine instanceof Response) return engine
         return c.json({ profiles: listBrainProfiles(process.env) })
+    })
+
+    // Live model list for a brain profile (proxies the endpoint's GET /models so
+    // the api key stays server-side). Powers the model dropdown in the debug UI.
+    app.get('/overseer/brains/:id/models', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) return engine
+        const id = c.req.param('id')
+        const config = resolveBrainConfig(process.env, { profile: id })
+        if (!config) {
+            return c.json({ profile: id, defaultModel: null, models: [], error: 'profile not configured' }, 404)
+        }
+        try {
+            const models = filterChatModels(await listBrainModels(config))
+            return c.json({ profile: id, defaultModel: config.model, models })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'failed to list models'
+            return c.json({ profile: id, defaultModel: config.model, models: [], error: message })
+        }
     })
 
     // Read-only tool dispatch. All tools are read-only; this endpoint never

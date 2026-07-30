@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { listBrainProfiles, resolveBrainConfig } from './brainClient'
+import { filterChatModels, listBrainProfiles, resolveBrainConfig } from './brainClient'
 
 const baseEnv = {
     OVERSEER_BRAIN_URL: 'http://local.test/v1/',
@@ -52,5 +52,28 @@ describe('listBrainProfiles', () => {
 
     it('is empty when no brain is configured', () => {
         expect(listBrainProfiles({} as NodeJS.ProcessEnv)).toEqual([])
+    })
+})
+
+describe('filterChatModels', () => {
+    it('drops non-chat models and sorts the rest', () => {
+        const filtered = filterChatModels([
+            'gpt-4o',
+            'text-embedding-3-small',
+            'gpt-4.1',
+            'whisper-1',
+            'dall-e-3',
+            'gpt-3.5-turbo-instruct',
+            'tts-1'
+        ])
+        expect(filtered).toEqual(['gpt-4.1', 'gpt-4o'])
+    })
+
+    it('keeps a single local model id like "main"', () => {
+        expect(filterChatModels(['main'])).toEqual(['main'])
+    })
+
+    it('falls back to the raw list when filtering removes everything', () => {
+        expect(filterChatModels(['text-embedding-3-large'])).toEqual(['text-embedding-3-large'])
     })
 })

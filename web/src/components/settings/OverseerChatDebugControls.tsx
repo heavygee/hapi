@@ -29,8 +29,11 @@ export function OverseerChatDebugControls() {
     const [error, setError] = useState<string | null>(null)
     const [model, setModel] = useState<string | null>(null)
     const [profiles, setProfiles] = useState<OverseerBrainProfileInfo[]>([])
-    const [selectedProfile, setSelectedProfile] = useState('')
-    const [modelOverride, setModelOverride] = useState('')
+    const [selectedProfile, setSelectedProfile] = useState('default')
+    const [models, setModels] = useState<string[]>([])
+    const [modelsLoading, setModelsLoading] = useState(false)
+    const [modelsError, setModelsError] = useState<string | null>(null)
+    const [selectedModel, setSelectedModel] = useState('')
     const scrollRef = useRef<HTMLDivElement>(null)
 
     useEffect(() => {
@@ -39,6 +42,27 @@ export function OverseerChatDebugControls() {
             .then((res) => setProfiles(res.profiles))
             .catch(() => { /* brains list is optional chrome */ })
     }, [open, api, profiles.length])
+
+    // Populate the model dropdown live from the selected profile's endpoint
+    // (server proxies GET /models so the api key never reaches the browser).
+    useEffect(() => {
+        if (!open || !api || !selectedProfile) return
+        let cancelled = false
+        setModelsLoading(true)
+        setModelsError(null)
+        setSelectedModel('')
+        void api.fetchOverseerBrainModels(selectedProfile)
+            .then((res) => {
+                if (cancelled) return
+                setModels(res.models)
+                if (res.error) setModelsError(res.error)
+            })
+            .catch((err) => { if (!cancelled) setModelsError(err instanceof Error ? err.message : 'model list failed') })
+            .finally(() => { if (!cancelled) setModelsLoading(false) })
+        return () => { cancelled = true }
+    }, [open, api, selectedProfile])
+
+    const profileDefaultModel = profiles.find((p) => p.id === selectedProfile)?.model ?? null
 
     const send = useCallback(async (text: string) => {
         const trimmed = text.trim()
@@ -52,8 +76,8 @@ export function OverseerChatDebugControls() {
         setLoading(true)
         try {
             const res = await api.overseerConverse(nextHistory, {
-                profile: selectedProfile || undefined,
-                model: modelOverride.trim() || undefined
+                profile: selectedProfile !== 'default' ? selectedProfile : undefined,
+                model: selectedModel || undefined
             }) as OverseerConverseResponse
             setModel(res.model)
             setTurns((prev) => [...prev, {
@@ -70,7 +94,7 @@ export function OverseerChatDebugControls() {
         } finally {
             setLoading(false)
         }
-    }, [api, loading, turns, selectedProfile, modelOverride])
+    }, [api, loading, turns, selectedProfile, selectedModel])
 
     return (
         <div className="border-t border-[var(--app-divider)]">
@@ -100,8 +124,8 @@ export function OverseerChatDebugControls() {
                                     className="rounded border border-[var(--app-border)] bg-[var(--app-bg)] px-1 py-0.5 text-[11px] text-[var(--app-fg)] disabled:opacity-50"
                                 >
                                     {profiles.map((p) => (
-                                        <option key={p.id} value={p.isDefault ? '' : p.id}>
-                                            {p.label} ({p.model})
+                                        <option key={p.id} value={p.id}>
+                                            {p.isDefault ? `Local (${p.model})` : p.label}
                                         </option>
                                     ))}
                                 </select>
@@ -109,16 +133,27 @@ export function OverseerChatDebugControls() {
                         ) : null}
                         <label className="flex items-center gap-1 text-[11px] text-[var(--app-hint)]">
                             Model
-                            <input
-                                type="text"
-                                value={modelOverride}
-                                onChange={(e) => setModelOverride(e.target.value)}
-                                placeholder="(default)"
-                                disabled={loading}
-                                className="w-32 rounded border border-[var(--app-border)] bg-[var(--app-bg)] px-1 py-0.5 text-[11px] text-[var(--app-fg)] disabled:opacity-50"
-                            />
+                            <select
+                                value={selectedModel}
+                                onChange={(e) => setSelectedModel(e.target.value)}
+                                disabled={loading || modelsLoading}
+                                className="max-w-[14rem] rounded border border-[var(--app-border)] bg-[var(--app-bg)] px-1 py-0.5 text-[11px] text-[var(--app-fg)] disabled:opacity-50"
+                            >
+                                <option value="">
+                                    {modelsLoading
+                                        ? 'loading…'
+                                        : `Default${profileDefaultModel ? ` (${profileDefaultModel})` : ''}`}
+                                </option>
+                                {models.map((m) => (
+                                    <option key={m} value={m}>{m}</option>
+                                ))}
+                            </select>
                         </label>
-                        <span className="text-[10px] text-[var(--app-hint)]">Override without an env change or hub restart.</span>
+                        {modelsError ? (
+                            <span className="text-[10px] text-amber-500">models: {modelsError}</span>
+                        ) : (
+                            <span className="text-[10px] text-[var(--app-hint)]">Per-request — no hub restart.</span>
+                        )}
                     </div>
 
                     <div ref={scrollRef} className="max-h-80 space-y-2 overflow-auto rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] p-2">
