@@ -63,8 +63,19 @@ export function assertTunwgDigest(path: string, expectedSha256: string): void {
     }
 }
 
-async function downloadPinned(url: string, destPath: string, expectedSha256: string): Promise<void> {
-    const response = await fetch(url, { redirect: 'follow' })
+/** Default download budget when callers do not share an end-to-end artifact deadline. */
+export const TUNWG_DOWNLOAD_TIMEOUT_MS = 9 * 60_000
+
+async function downloadPinned(
+    url: string,
+    destPath: string,
+    expectedSha256: string,
+    timeoutMs: number = TUNWG_DOWNLOAD_TIMEOUT_MS,
+): Promise<void> {
+    const response = await fetch(url, {
+        redirect: 'follow',
+        signal: AbortSignal.timeout(timeoutMs),
+    })
     if (!response.ok) {
         throw new Error(`Failed to download ${url}: ${response.status} ${response.statusText}`)
     }
@@ -82,6 +93,8 @@ async function downloadPinned(url: string, destPath: string, expectedSha256: str
 export async function ensurePinnedTunwgBinary(options: {
     toolsDir: string
     platformKey: keyof typeof TUNWG_PINS
+    /** Cap network work so callers holding artifactBuildLock can recover. */
+    timeoutMs?: number
 }): Promise<string> {
     const pin = TUNWG_PINS[options.platformKey]
     if (!pin) {
@@ -97,7 +110,12 @@ export async function ensurePinnedTunwgBinary(options: {
             unlinkSync(destPath)
         }
     }
-    await downloadPinned(releaseDownloadUrl(pin.asset), destPath, pin.sha256)
+    await downloadPinned(
+        releaseDownloadUrl(pin.asset),
+        destPath,
+        pin.sha256,
+        options.timeoutMs ?? TUNWG_DOWNLOAD_TIMEOUT_MS,
+    )
     if (!options.platformKey.includes('win32')) {
         chmodSync(destPath, 0o755)
     }
@@ -117,10 +135,12 @@ export async function ensurePinnedTunwgForCompile(
     monorepoRoot: string,
     platform: string,
     arch: string,
+    timeoutMs?: number,
 ): Promise<string> {
     const toolsDir = join(monorepoRoot, 'shared', 'tools', 'tunwg')
     return ensurePinnedTunwgBinary({
         toolsDir,
         platformKey: platformKeyFor(platform, arch),
+        timeoutMs,
     })
 }
