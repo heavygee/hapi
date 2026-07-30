@@ -9,6 +9,12 @@ import {
 } from './runnerCapabilities'
 
 describe('runnerCapabilities', () => {
+    it('advertises cli-artifact-generation so pre-generation runners still apply at same semver', () => {
+        expect(CURRENT_MACHINE_CAPABILITIES).toContain(MACHINE_CAPABILITIES.CliArtifactGeneration)
+        // Marker only — not an RPC the hub hard-requires for product features.
+        expect(REQUIRED_MACHINE_CAPABILITIES).not.toContain(MACHINE_CAPABILITIES.CliArtifactGeneration)
+    })
+
     it('requires cursor-chat-store-status so hub features cannot fail-closed without a registry entry', () => {
         expect(REQUIRED_MACHINE_CAPABILITIES).toContain(MACHINE_CAPABILITIES.CursorChatStoreStatus)
         expect(CURRENT_MACHINE_CAPABILITIES).toEqual(expect.arrayContaining([

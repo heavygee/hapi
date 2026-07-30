@@ -76,6 +76,35 @@ describe('shouldApplyUpgradeOffer', () => {
         })
     })
 
+    it('applies at same semver when pre-generation runner lacks cli-artifact-generation', () => {
+        // Chicken-egg: hub offers the marker cap; old binaries' CURRENT set omits it,
+        // so hasTargetCapabilities fails and they download instead of "Already at X".
+        expect(shouldApplyUpgradeOffer(
+            baseOffer({
+                channel: 'hub-artifact',
+                targetVersion: '0.25.1',
+                targetCapabilities: [...CURRENT_MACHINE_CAPABILITIES],
+                targetGeneration: 'gen-hub',
+                artifact: {
+                    url: '/api/upgrade/cli-artifact',
+                    sha256: 'abc',
+                    platform: 'linux',
+                    arch: 'x64',
+                    sizeBytes: 10,
+                },
+            }),
+            '0.25.1',
+            [
+                'cursor-chat-store-status',
+                'stop-runner',
+                'runner-self-upgrade',
+            ],
+        )).toEqual({
+            apply: true,
+            reason: 'upgrade',
+        })
+    })
+
     it('applies when behind on npm channel', () => {
         expect(shouldApplyUpgradeOffer(baseOffer(), '0.20.0')).toEqual({
             apply: true,
