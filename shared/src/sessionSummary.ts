@@ -41,6 +41,8 @@ export type SessionSummaryMetadata = {
     /** Native Claude transcript id when flavor is claude (not the flattened agentSessionId). */
     claudeSessionId?: string
     lifecycleState?: string
+    /** Loopback MCP URL when session CLI happy server is running (#956). */
+    hapiMcpUrl?: string
 }
 
 export type SessionSummary = {
@@ -159,7 +161,9 @@ export function toSessionSummaryMetadata(metadata: Metadata | null | undefined):
             ?? undefined,
         // Native Claude id kept distinct from flattened agentSessionId (import picker).
         claudeSessionId: metadata.claudeSessionId ?? undefined,
-        lifecycleState: metadata.lifecycleState
+        lifecycleState: metadata.lifecycleState,
+        // Loopback MCP URL when session CLI happy server is running (#956).
+        hapiMcpUrl: metadata.hapiMcpUrl ?? undefined
     }
 }
 

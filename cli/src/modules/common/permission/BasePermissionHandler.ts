@@ -30,7 +30,7 @@ const AUTO_APPROVE_EXACT_TOOL_NAMES = new Set([
     'skill_lookup',
     'hapi_skill_lookup',
     'happy__skill_lookup',
-    'mcp__hapi__skill_lookup'
+    'mcp__hapi__skill_lookup',
 ]);
 // ping_peer intentionally omitted from always-approve: it can resume another
 // session and inject a prompt into a peer, so permission modes must still gate
