@@ -1,4 +1,6 @@
 import { EventEmitter } from 'node:events'
+import { Readable, Writable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
     __resetRunnerSelfUpgradeGateForTests,
@@ -6,6 +8,7 @@ import {
     applyRunnerSelfUpgrade,
     artifactInstallFileName,
     assertExecutableMatchesTargetVersion,
+    createArtifactDownloadSizeGuard,
     mergeParentRunnerStateForReclaim,
     pruneSupersededArtifacts,
     pruneSupersededArtifactsAfterDurableMarker,
@@ -27,6 +30,17 @@ const baseOffer = (overrides: Partial<HubUpgradeOffer> = {}): HubUpgradeOffer =>
     ...overrides,
 })
 
+class WritableTestSink extends Writable {
+    constructor(private readonly chunks: Buffer[]) {
+        super()
+    }
+
+    override _write(chunk: any, _encoding: BufferEncoding, callback: (error?: Error | null) => void): void {
+        this.chunks.push(Buffer.from(chunk))
+        callback()
+    }
+}
+
 describe('resolvePostNpmInstallExecutable', () => {
     it('returns the first PATH hit that exists on disk', () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-npm-upgrade-'))
@@ -38,6 +52,32 @@ describe('resolvePostNpmInstallExecutable', () => {
     it('returns null when nothing on PATH exists', () => {
         expect(resolvePostNpmInstallExecutable(() => '/tmp/definitely-missing-hapi-binary')).toBeNull()
         expect(resolvePostNpmInstallExecutable(() => null)).toBeNull()
+    })
+})
+
+describe('createArtifactDownloadSizeGuard', () => {
+    it('aborts the stream once downloaded bytes exceed the advertised size', async () => {
+        const { guard, getDownloadedBytes } = createArtifactDownloadSizeGuard(8)
+        const chunks: Buffer[] = []
+        const sink = new WritableTestSink(chunks)
+        await expect(pipeline(
+            Readable.from([Buffer.alloc(5, 1), Buffer.alloc(5, 2)]),
+            guard,
+            sink,
+        )).rejects.toThrow(/exceeds advertised size/)
+        expect(getDownloadedBytes()).toBeGreaterThan(8)
+    })
+
+    it('passes through when the stream stays within the limit', async () => {
+        const { guard, getDownloadedBytes } = createArtifactDownloadSizeGuard(16)
+        const chunks: Buffer[] = []
+        await pipeline(
+            Readable.from([Buffer.alloc(4, 1), Buffer.alloc(4, 2)]),
+            guard,
+            new WritableTestSink(chunks),
+        )
+        expect(getDownloadedBytes()).toBe(8)
+        expect(Buffer.concat(chunks).length).toBe(8)
     })
 })
 

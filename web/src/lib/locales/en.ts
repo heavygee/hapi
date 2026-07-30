@@ -724,7 +724,7 @@ export default {
   'settings.runnerMgmt.policyAuto': 'Auto-upgrade',
   'settings.runnerMgmt.policyAutoHint': 'Upgrade runners for me',
   'settings.runnerMgmt.optOutLabel': 'Want a runner ahead of the hub?',
-  'settings.runnerMgmt.optOutBody': 'Auto-upgrade pulls runners back to match the hub, so a deliberately newer runner would be downgraded. To keep one ahead, choose No alert or Alert above (fleet-wide), or set HAPI_DISABLE_VERSION_HANDOFF=1 only on a soup/rebuild-only hub host (not ordinary fleet runners) and restart it. HAPI_UPGRADE_CHANNEL=off on the hub disables all upgrades regardless.',
+  'settings.runnerMgmt.optOutBody': 'Newer runners are left untouched; auto-upgrade only advances machines whose runners trail the hub. Use No alert or Alert for fleet-wide notifications. HAPI_DISABLE_VERSION_HANDOFF=1 is for soup/rebuild-only hub hosts (not ordinary fleet runners). HAPI_UPGRADE_CHANNEL=off on the hub disables all upgrades.',
   'settings.display.title': 'Display',
   'settings.display.description': 'Appearance, typography, and session list preferences.',
   'settings.display.typography': 'Typography',
