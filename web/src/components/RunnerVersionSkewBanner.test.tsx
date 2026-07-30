@@ -6,6 +6,7 @@ import type { FleetUpgradePolicy } from '@hapi/protocol/upgradeChannel'
 import type { Machine } from '@/types/api'
 import {
     RunnerVersionSkewBanner,
+    collectConfirmedAutoUpgradeToasts,
     listBannerSkewMachines,
     listSkewedMachines,
     machineCanAutoUpgrade,
@@ -113,6 +114,38 @@ function renderBanner() {
         </QueryClientProvider>,
     )
 }
+
+describe('collectConfirmedAutoUpgradeToasts', () => {
+    it('does not toast when a skewed auto-eligible runner merely goes offline', () => {
+        const offline = makeUpgradeableMachine({
+            id: 'win',
+            active: false,
+            metadata: { host: 'personal-win', platform: 'win32', happyCliVersion: '0.20.0' },
+        })
+        const result = collectConfirmedAutoUpgradeToasts({
+            previousAutoSkewIds: new Set(['win']),
+            machines: [offline],
+            offer: TEST_OFFER,
+        })
+        expect(result.toastHosts).toEqual([])
+        expect(result.nextAutoSkewIds.has('win')).toBe(true)
+
+        const caughtUp = makeUpgradeableMachine({
+            id: 'win',
+            metadata: {
+                host: 'personal-win',
+                platform: 'win32',
+                happyCliVersion: '0.23.0',
+                capabilities: [...CURRENT_MACHINE_CAPABILITIES],
+            },
+        })
+        expect(collectConfirmedAutoUpgradeToasts({
+            previousAutoSkewIds: new Set(['win']),
+            machines: [caughtUp],
+            offer: TEST_OFFER,
+        }).toastHosts).toEqual(['personal-win'])
+    })
+})
 
 describe('listBannerSkewMachines', () => {
     it('under auto, drops self-upgradeable hosts from the banner list', () => {
