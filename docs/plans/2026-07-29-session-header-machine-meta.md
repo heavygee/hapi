@@ -107,4 +107,4 @@ Dogfood: hard-reload if sticky Workbox; current asset `index-Cpc5HVzO.js`.
 - Fork stage: https://github.com/heavygee/hapi/pull/96 (`cold-review-clean`)
 - Tip: `2cc03a2c7` (empty retrigger) on `72ba9940c` (sub-minute `activeAt` skip) atop `4f3de28e1`
 - Threads: 0 unresolved (soup Blocker + heartbeat Major replied/resolved 2026-07-30)
-- `test` green; Codex `pr-review` flaking (`stream disconnected` ×3) — awaiting infra recovery for fresh bot verdict
+- `test` + `pr-review` green (Codex recovered 2026-07-30T14:06Z) — HAPI Bot: **Findings: None** on tip
