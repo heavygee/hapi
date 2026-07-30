@@ -26,11 +26,11 @@ import { getSseReconnectQueryKeys } from '@/lib/sse-reconnect-queries'
 import { LoginPrompt } from '@/components/LoginPrompt'
 import { InstallPrompt } from '@/components/InstallPrompt'
 import { OfflineBanner } from '@/components/OfflineBanner'
-import { PwaUpdateBanner, PwaUpdateBannerWithStatusOffset } from '@/components/PwaUpdateBanner'
+import { PwaUpdateBanner } from '@/components/PwaUpdateBanner'
 import { SyncingBanner } from '@/components/SyncingBanner'
 import { ReconnectingBanner } from '@/components/ReconnectingBanner'
 import { VoiceErrorBanner } from '@/components/VoiceErrorBanner'
-import { RunnerVersionSkewBanner } from '@/components/RunnerVersionSkewBanner'
+import { TopFleetBanners } from '@/components/TopFleetBanners'
 import { LoadingState } from '@/components/LoadingState'
 import { ToastContainer } from '@/components/ToastContainer'
 import { PwaUpdateProvider } from '@/lib/pwa-update-context'
@@ -446,7 +446,7 @@ function AppInner() {
     return (
         <AppContextProvider value={{ api, token, baseUrl }}>
             <VoiceProvider>
-                <PwaUpdateBannerWithStatusOffset
+                <TopFleetBanners
                     isSyncing={isSyncing}
                     isReconnecting={showReconnectingBanner}
                 />
@@ -460,7 +460,6 @@ function AppInner() {
                     isHubConnected={globalSubscriptionId !== null}
                     isReconnecting={showReconnectingBanner}
                 />
-                <RunnerVersionSkewBanner />
                 <div className="h-full min-h-0 flex flex-col">
                     <Outlet />
                 </div>
