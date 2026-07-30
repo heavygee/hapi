@@ -73,16 +73,20 @@ import (no inline SessionList helper defs).
 
 Kitchen restored at driver `6dfd82aba` + shared helpers + bindings gate.
 
-Pushed tip:
+### Soup remat gate (Meta 2026-07-30)
 
-- `e3eff74a3` — SessionHeader machine + last-active
-- `3f4667c3f` — SessionList imports from `sessionRowHelpers`
+Stay **off** active `~/.config/hapi/driver-manifest.yaml` until Meta remats.
 
-Bindings verify OK on worktree. **No remat from this peer** until Meta runs a
-clean rematerialize / greenlights.
+Checklist before asking Meta to add layer + remat:
+
+1. Tip re-thinned onto `upstream/main` (rebase) — **not** hand-merge onto soup tip. ✅ rebased 2026-07-30 onto `36eedc870` → tip `2ae049c97`
+2. SessionList imports from `web/src/lib/sessionRowHelpers.ts` — no unbound `getTodoProgress(`. ✅ bindings verify OK
+3. Clean vs remat intermediate (`merge-tree`); then ask Meta to add layer + remat.
+
+Mirror `config/driver-manifest.yaml` may still list the branch; do **not** copy into active config until Meta greenlights.
 
 ### Task 4: Upstream PR
 
 Opened: https://github.com/tiann/hapi/pull/1244 (`Fixes #1241`)
 Fork stage: https://github.com/heavygee/hapi/pull/96 (`cold-review-clean`)
-Tip: `bfdbeb767` on `feat/session-header-machine-meta`
+Tip (post-rebase): `2ae049c97` on `feat/session-header-machine-meta`
