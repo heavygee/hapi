@@ -238,7 +238,9 @@ async function resolveInstalledGlobalHapi(
     run: (command: string, args: string[]) => Promise<{ ok: boolean; output: string }> = runCommand,
 ): Promise<string | null> {
     const candidates = process.platform === 'win32'
-        ? ['hapi.exe', 'hapi', 'hapi.cmd']
+        // Prefer a real PE, then Windows shims. Never the bare POSIX `hapi`
+        // companion npm drops beside `hapi.cmd` — CreateProcess cannot run it.
+        ? ['hapi.exe', 'hapi.cmd', 'hapi.bat']
         : ['hapi']
     if (manager === 'bun') {
         const bin = await run('bun', ['pm', 'bin', '-g'])
@@ -322,10 +324,12 @@ export async function assertExecutableMatchesTargetVersion(
  */
 export function resolvePostNpmInstallExecutable(
     which: (command: string) => string | null = (command) => Bun.which(command),
+    platform: NodeJS.Platform = process.platform,
 ): string | null {
-    // Prefer a real PE on Windows over the npm `.cmd` shim when both exist.
-    const candidates = process.platform === 'win32'
-        ? ['hapi.exe', 'hapi', 'hapi.cmd']
+    // Prefer a real PE on Windows over npm shims. Never the bare POSIX `hapi`
+    // companion npm drops beside `hapi.cmd` — CreateProcess cannot run it.
+    const candidates = platform === 'win32'
+        ? ['hapi.exe', 'hapi.cmd', 'hapi.bat']
         : ['hapi']
     for (const name of candidates) {
         const found = which(name)?.trim()
