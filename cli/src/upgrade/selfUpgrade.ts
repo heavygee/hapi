@@ -399,6 +399,16 @@ export function artifactDownloadRequestHeaders(options: {
     })
 }
 
+/** Fail closed: never follow redirects that could carry hub headers off-origin. */
+export function assertArtifactDownloadAllowsBody(response: { status: number; ok: boolean; body: unknown }): void {
+    if (response.status >= 300 && response.status < 400) {
+        throw new Error('artifact redirects are not allowed')
+    }
+    if (!response.ok || !response.body) {
+        throw new Error(`artifact download failed: HTTP ${response.status}`)
+    }
+}
+
 async function installFromArtifact(
     offer: HubUpgradeOffer,
     downloadBaseUrl: string,
@@ -417,6 +427,7 @@ async function installFromArtifact(
     url.searchParams.set('version', offer.targetVersion)
 
     const response = await fetch(url, {
+        redirect: 'manual',
         signal: AbortSignal.timeout(UPGRADE_STEP_TIMEOUT_MS),
         headers: artifactDownloadRequestHeaders({
             artifactUrl: url,
@@ -424,9 +435,7 @@ async function installFromArtifact(
             authToken,
         }),
     })
-    if (!response.ok || !response.body) {
-        throw new Error(`artifact download failed: HTTP ${response.status}`)
-    }
+    assertArtifactDownloadAllowsBody(response)
 
     const dir = upgradeBinDir()
     mkdirSync(dir, { recursive: true })

@@ -13,8 +13,10 @@ import { I18nProvider } from '@/lib/i18n-context'
 import {
     clearRunnerSkewTempDismiss,
     resetRunnerSkewBannerMemoryForTests,
+    runnerSkewBannerScope,
     setRunnerSkewMinimized,
 } from '@/lib/runnerSkewBannerState'
+import { getTokenNamespace } from '@/lib/tokenNamespace'
 
 const TEST_OFFER = {
     channel: 'npm' as const,
@@ -223,8 +225,9 @@ describe('RunnerVersionSkewBanner', () => {
     beforeEach(() => {
         window.sessionStorage.clear()
         resetRunnerSkewBannerMemoryForTests()
-        setRunnerSkewMinimized(false)
-        clearRunnerSkewTempDismiss()
+        const scope = runnerSkewBannerScope('http://localhost', getTokenNamespace('t'))
+        setRunnerSkewMinimized(scope, false)
+        clearRunnerSkewTempDismiss(scope)
         restartMachineRunnerMock.mockClear()
         upgradeMachineRunnerMock.mockClear()
         useUpgradeInfoMock.mockReturnValue({ info: { offer: TEST_OFFER, policy: 'auto' }, isLoading: false })

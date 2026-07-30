@@ -10,6 +10,7 @@ import {
     assertExecutableMatchesTargetVersion,
     createArtifactDownloadSizeGuard,
     artifactDownloadRequestHeaders,
+    assertArtifactDownloadAllowsBody,
     createDeadlineRunner,
     isRunnerSelfUpgradeInFlight,
     mergeParentRunnerStateForReclaim,
@@ -122,6 +123,24 @@ describe('artifactDownloadRequestHeaders', () => {
             authToken: 'secret-token',
         })
         expect(headers).toEqual({})
+    })
+})
+
+describe('assertArtifactDownloadAllowsBody', () => {
+    it('rejects redirect responses so hub headers cannot follow off-origin', () => {
+        expect(() => assertArtifactDownloadAllowsBody({
+            status: 302,
+            ok: false,
+            body: null,
+        })).toThrow(/redirects are not allowed/)
+    })
+
+    it('accepts a successful body-bearing response', () => {
+        expect(() => assertArtifactDownloadAllowsBody({
+            status: 200,
+            ok: true,
+            body: {},
+        })).not.toThrow()
     })
 })
 
