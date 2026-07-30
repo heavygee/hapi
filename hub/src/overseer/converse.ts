@@ -15,6 +15,7 @@ import {
 } from '@hapi/protocol'
 import type { OverseerEntity } from '../sync/overseerEntity'
 import { isOverseerToolName, runOverseerTool } from './runOverseerTool'
+import { projectToolResultForBrain } from './toolProjection'
 import {
     callBrain,
     type BrainConfig,
@@ -123,7 +124,8 @@ export async function runOverseerConverse(params: {
             try {
                 const result = runOverseerTool(overseer, name, args)
                 toolTrace.push({ tool: name, args, ok: true })
-                resultLines.push(`${name}(${argsRaw}) => ${clampToolResult(JSON.stringify(result ?? null))}`)
+                const lean = projectToolResultForBrain(name, result)
+                resultLines.push(`${name}(${argsRaw}) => ${clampToolResult(JSON.stringify(lean ?? null))}`)
             } catch (error) {
                 const msg = error instanceof Error ? error.message : String(error)
                 toolTrace.push({ tool: name, args, ok: false, error: msg })
