@@ -559,6 +559,7 @@ export async function ensureCliArtifact(options: {
             sourceFingerprint,
         }
         writeMeta(meta)
+        retainArtifactOffer(meta.sha256)
         pruneRetainedArtifacts({
             dataDir: options.dataDir,
             version: options.version,
@@ -573,10 +574,35 @@ export async function ensureCliArtifact(options: {
 /** How many prior generations to keep per version/platform/arch (plus preserveSha256). */
 export const RETAINED_ARTIFACT_GENERATIONS = 3
 
+/** Keep digests downloadable for the fleet upgrade cooldown / download budget window. */
+export const ARTIFACT_OFFER_RETENTION_MS = 15 * 60_000
+
+const offeredUntilBySha = new Map<string, number>()
+
+/** Mark a digest as recently offered so prune will not delete it mid-download. */
+export function retainArtifactOffer(sha256: string, now: number = Date.now()): void {
+    const digest = sha256.trim().toLowerCase()
+    if (!/^[a-f0-9]{64}$/.test(digest)) {
+        return
+    }
+    offeredUntilBySha.set(digest, now + ARTIFACT_OFFER_RETENTION_MS)
+}
+
+/** Test helper: clear in-memory offer retention. */
+export function resetArtifactOfferRetentionForTests(): void {
+    offeredUntilBySha.clear()
+}
+
+function isArtifactOfferRetained(sha256: string, now: number = Date.now()): boolean {
+    const until = offeredUntilBySha.get(sha256.trim().toLowerCase())
+    return typeof until === 'number' && until > now
+}
+
 /**
  * Drop older content-addressed builds for the same version/platform/arch so
  * soup hubs do not accumulate unbounded Bun binaries. Always keeps
- * `preserveSha256` (the just-built or still-offered digest).
+ * `preserveSha256` (the just-built digest) and any digests still inside the
+ * recent-offer retention window.
  */
 export function pruneRetainedArtifacts(options: {
     dataDir?: string
@@ -585,8 +611,10 @@ export function pruneRetainedArtifacts(options: {
     arch: string
     preserveSha256: string
     keepGenerations?: number
+    now?: number
 }): string[] {
     const keep = options.keepGenerations ?? RETAINED_ARTIFACT_GENERATIONS
+    const now = options.now ?? Date.now()
     const dir = artifactsRoot(options.dataDir)
     if (!existsSync(dir)) {
         return []
@@ -625,22 +653,26 @@ export function pruneRetainedArtifacts(options: {
     }
 
     candidates.sort((a, b) => b.mtimeMs - a.mtimeMs)
-    const retained = new Set<string>()
     const removed: string[] = []
+    let keptForWindow = 0
     for (const candidate of candidates) {
         const sha = typeof candidate.meta.sha256 === 'string'
             ? candidate.meta.sha256.toLowerCase()
             : ''
-        const mustKeep = sha === preserve || retained.size < keep
-        if (mustKeep) {
-            retained.add(candidate.metaPath)
+        const offered = isArtifactOfferRetained(sha, now)
+        if (sha === preserve || offered) {
+            // Always keep just-built + recently offered digests; they do not
+            // consume the generation budget so in-flight downloads stay valid.
+            continue
+        }
+        if (keptForWindow < keep) {
+            keptForWindow += 1
             continue
         }
         try {
             if (typeof candidate.meta.path === 'string' && existsSync(candidate.meta.path)) {
                 unlinkSync(candidate.meta.path)
             }
-            // Windows may leave a .exe sibling from normalize.
             const exeSibling = `${candidate.meta.path}.exe`
             if (typeof candidate.meta.path === 'string' && existsSync(exeSibling)) {
                 unlinkSync(exeSibling)
