@@ -176,4 +176,6 @@ Meta's daily classify writes these onto existing refs (full `PUT external-refs`)
 
 **Remat re-thin (2026-07-29):** Never thin onto stale `origin/driver/integration` tip. Remat does `reset --hard upstream/main` then merges layers - use the **pre-layer SHA Meta reports** from a failed remat (or thin onto `upstream/main` awareness-only). Wave that landed awareness: tip `ac95f9f65` via merge `08fdb92cf`; actual pre-layer was `d0a3d6473` (commit message saying `12814cf6b` is stale wording). Next re-thin absorb: HappyThread keep `props.outlineTitle`; SessionList keep PR chips and do **not** drop `getTodoProgress` / attention / time-label helpers (heal pattern on driver tip `9d506f30e`).
 
+**Remat re-thin (2026-07-30):** Layer 27 failed on fat tip `ac95f9f65` vs pre-layer `ecde4178f` (41 unmerged). Re-thinned awareness-only onto that pre-layer → tip `d946021a9` (parent=`ecde4178f`, merge-tree clean). SessionList keeps inline helpers + chips (`sessionRowHelpers` not on that base yet).
+
 **Not a second upstream PR.** Awareness + attach + chip status ship together in [tiann/hapi#1163](https://github.com/tiann/hapi/pull/1163).
