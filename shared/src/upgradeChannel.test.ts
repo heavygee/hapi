@@ -151,4 +151,26 @@ describe('machineTrailsUpgradeOffer', () => {
             ['cursor-chat-store-status', 'runner-self-upgrade'],
         )).toBe(true)
     })
+
+    it('does not trail when the runner is newer even if generation differs', () => {
+        const artifactOffer: HubUpgradeOffer = {
+            channel: 'hub-artifact',
+            targetVersion: '0.25.0',
+            targetCapabilities: ['cursor-chat-store-status', 'runner-self-upgrade'],
+            targetGeneration: 'gen-hub',
+            artifact: {
+                url: '/cli/upgrade/cli-artifact',
+                sha256: 'abc',
+                platform: 'linux',
+                arch: 'x64',
+                sizeBytes: 1,
+            },
+        }
+        expect(machineTrailsUpgradeOffer(
+            artifactOffer,
+            '0.26.0',
+            ['cursor-chat-store-status', 'runner-self-upgrade'],
+            'gen-runner',
+        )).toBe(false)
+    })
 })

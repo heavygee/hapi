@@ -72,7 +72,14 @@ export function listSkewedMachines(machines: Machine[], offer: HubUpgradeOffer |
  * Compact, minimizable skew banner (#1084).
  * Primary action: fleet Upgrade (npm or hub-artifact). Restart is escape hatch.
  */
-export function RunnerVersionSkewBanner({ topClassName }: { topClassName?: string } = {}) {
+export function RunnerVersionSkewBanner({
+    topClassName,
+    stacked = false,
+}: {
+    topClassName?: string
+    /** When true, parent owns fixed positioning (share a vertical stack). */
+    stacked?: boolean
+} = {}) {
     const { api } = useAppContext()
     const queryClient = useQueryClient()
     const { machines } = useMachines(api, true)
@@ -185,13 +192,16 @@ export function RunnerVersionSkewBanner({ topClassName }: { topClassName?: strin
 
     const topClass = topClassName ?? (isOnline ? 'top-2' : 'top-10')
     const hosts = skewed.map(machineDisplayHost).join(', ')
+    const positionClass = stacked
+        ? 'relative w-full'
+        : `fixed left-4 right-4 z-40 ${topClass}`
 
     if (minimized) {
         return (
             <div
                 data-testid="runner-version-skew-banner"
                 data-state="minimized"
-                className={`fixed left-4 right-4 z-40 ${topClass}`}
+                className={positionClass}
             >
                 <button
                     type="button"
@@ -210,7 +220,7 @@ export function RunnerVersionSkewBanner({ topClassName }: { topClassName?: strin
             data-testid="runner-version-skew-banner"
             data-state="expanded"
             role="alert"
-            className={`fixed left-4 right-4 z-40 max-h-[40vh] overflow-y-auto rounded-lg border-2 border-amber-500 bg-amber-50 p-3 shadow-lg dark:bg-amber-950/90 ${topClass}`}
+            className={`${positionClass} max-h-[40vh] overflow-y-auto rounded-lg border-2 border-amber-500 bg-amber-50 p-3 shadow-lg dark:bg-amber-950/90`}
         >
             <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
