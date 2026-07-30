@@ -403,6 +403,12 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     }
                     // Initial replay can emit one token_count per historical turn.
                     // Keep only the latest snapshot, then record once after create returns.
+                    if (
+                        this.currentThreadId !== threadId
+                        || this.usageScannerThreadId !== threadId
+                    ) {
+                        continue;
+                    }
                     if (replayingHistory) {
                         latestReplayUsage = message;
                         continue;
@@ -416,7 +422,11 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             await scanner.cleanup();
             return;
         }
-        if (latestReplayUsage) {
+        if (
+            latestReplayUsage
+            && this.currentThreadId === threadId
+            && this.usageScannerThreadId === threadId
+        ) {
             this.session.recordCodexUsage(latestReplayUsage);
         }
         this.usageScanner = scanner;
