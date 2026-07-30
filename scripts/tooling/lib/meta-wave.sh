@@ -47,10 +47,12 @@ mw_manifest_pr_layer_active() {
     return 1
 }
 
-# Comment block mentions #N / PR #N / tiann/hapi#N (3–4 digit floor via caller).
+# Comment block mentions this PR as an owned/subject ref — not an incidental
+# compound like "Post-#1195/#896 detect rebase" on someone else's layer.
 _mw_block_mentions_pr() {
     local block="$1" pr="$2"
-    printf '%s' "$block" | grep -Eiq "(PR[[:space:]]*#|#|hapi#)${pr}\\b"
+    # PR #N / hapi#N / bare #N not immediately after digit, /, or hyphen
+    printf '%s' "$block" | grep -Eiq "(PR[[:space:]]*#|hapi#|(^|[^0-9/#-])#)${pr}\\b"
 }
 
 # Comment block already marks this PR as DROPPED (layer should be commented out).

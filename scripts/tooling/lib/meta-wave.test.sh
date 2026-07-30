@@ -49,6 +49,18 @@ if mw_manifest_pr_layer_active "$MANIFEST_ACTIVE" 945; then ok; else bad "945 ac
 if mw_manifest_pr_layer_active "$MANIFEST_ACTIVE" 1144; then bad "1144 DROPPED should be clean"; else ok; fi
 if mw_manifest_pr_layer_active "$MANIFEST_CLEAN" 896; then bad "896 dropped should be clean"; else ok; fi
 
+# Incidental compound "#1195/#896" on another layer must NOT attribute 896
+MANIFEST_INCIDENTAL=$(cat <<'EOF'
+base: upstream/main
+layers:
+  # Post-#1195/#896 detect rebase — history note only
+  - branch: feat/cursor-model-error-bridge
+EOF
+)
+if mw_manifest_pr_layer_active "$MANIFEST_INCIDENTAL" 896; then bad "incidental /#896 must not count"; else ok; fi
+if mw_manifest_pr_layer_active "$MANIFEST_INCIDENTAL" 1195; then bad "incidental Post-#1195 must not count"; else ok; fi
+
+
 # --- worktree presence ---
 WT="$(mktemp -d)"
 mkdir -p "$WT/worktrees/foo"
