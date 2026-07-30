@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import {
     ARTIFACT_BUILD_BUDGET_MS,
     artifactFileName,
+    artifactInputStatKey,
     bunCompileTarget,
     fingerprintArtifactInputStats,
     fingerprintArtifactInputs,
@@ -303,6 +304,53 @@ describe('fingerprintArtifactInputs / isArtifactCacheFresh', () => {
         } finally {
             rmSync(root, { recursive: true, force: true })
         }
+    })
+
+    it('invalidates the stats gate when same-size content is rewritten', async () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-artifact-stats-ns-'))
+        try {
+            mkdirSync(join(root, 'cli', 'src'), { recursive: true })
+            mkdirSync(join(root, 'hub', 'src'), { recursive: true })
+            mkdirSync(join(root, 'shared', 'src'), { recursive: true })
+            writeFileSync(join(root, 'cli', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'hub', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'shared', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            const bootstrap = join(root, 'cli', 'src', 'bootstrap.ts')
+            writeFileSync(bootstrap, 'export const x = 1\n')
+            writeFileSync(join(root, 'hub', 'src', 'startHub.ts'), 'export {}\n')
+            writeFileSync(join(root, 'shared', 'src', 'index.ts'), 'export {}\n')
+
+            const beforeStats = fingerprintArtifactInputStats(root)
+            const beforeContent = fingerprintArtifactInputs(root)
+            // Bun/ext4 can keep mtime sticky across back-to-back same-tick writes;
+            // wait so the rewrite gets a distinct timestamp.
+            await Bun.sleep(5)
+            writeFileSync(bootstrap, 'export const x = 2\n')
+            expect(fingerprintArtifactInputStats(root)).not.toBe(beforeStats)
+            expect(fingerprintArtifactInputs(root)).not.toBe(beforeContent)
+        } finally {
+            rmSync(root, { recursive: true, force: true })
+        }
+    })
+
+    it('distinguishes same-size writes that share truncated mtimeMs but differ in ns', () => {
+        const size = 19n
+        const mtimeMsFloorNs = 1_785_431_298_036_000_000n
+        const a = artifactInputStatKey({
+            size,
+            mtimeNs: mtimeMsFloorNs + 1n,
+            ctimeNs: mtimeMsFloorNs + 1n,
+        })
+        const b = artifactInputStatKey({
+            size,
+            mtimeNs: mtimeMsFloorNs + 999_000n,
+            ctimeNs: mtimeMsFloorNs + 1n,
+        })
+        // Both fall in the same truncated millisecond window.
+        expect((mtimeMsFloorNs + 1n) / 1_000_000n)
+            .toBe((mtimeMsFloorNs + 999_000n) / 1_000_000n)
+        expect(a).not.toBe(b)
     })
 
     it('ignores downloaded tunwg platform caches under shared/tools', () => {

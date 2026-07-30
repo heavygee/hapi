@@ -7,7 +7,7 @@
  * binary so the handoff survives supervisor restarts.
  */
 
-import { existsSync, readFileSync, realpathSync, writeFileSync, mkdirSync, unlinkSync, renameSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync, writeFileSync, mkdirSync, unlinkSync, renameSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { compareHapiVersions } from '@hapi/protocol/upgradeChannel'
@@ -177,17 +177,36 @@ export function isAuthorizedRunnerHandoff(
 
 /**
  * True when the durable marker trails a newer CLI already installed at the
- * entrypoint (e.g. npm/binary update after a prior hub-artifact upgrade).
+ * entrypoint (e.g. npm/binary update after a prior hub-artifact upgrade, or a
+ * same-semver soup remat that replaced the normal entrypoint bytes).
  */
 export function isUpgradeTargetStaleRelativeToCli(
     target: UpgradeTarget,
     currentVersion: string = packageJson.version,
+    deps: { currentPath?: string } = {},
 ): boolean {
     if (!target.targetVersion) {
         return false
     }
     const relation = compareHapiVersions(currentVersion, target.targetVersion)
-    return relation !== null && relation > 0
+    if (relation !== null && relation > 0) {
+        return true
+    }
+    // Same semver: soup remats / same-version installs can replace the
+    // entrypoint without bumping package.json. Prefer that newer binary over
+    // an older content-addressed marker.
+    if (relation === 0) {
+        try {
+            const currentPath = deps.currentPath ?? resolveHappyCliExecutable()
+            if (samePath(currentPath, target.path)) {
+                return false
+            }
+            return statSync(currentPath).mtimeMs > statSync(target.path).mtimeMs
+        } catch {
+            return false
+        }
+    }
+    return false
 }
 
 /**
