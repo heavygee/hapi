@@ -192,6 +192,10 @@ function listArtifactInputFiles(monorepoRoot: string): string[] {
         ) {
             return false
         }
+        // Colocated tests are not reachable from bootstrap compile inputs.
+        if (/(?:^|\/)(?:__tests__\/|.*\.(?:test|spec)\.[cm]?[jt]sx?$)/.test(rel)) {
+            return false
+        }
         // Platform-specific downloaded tunwg binaries — pin is in hub source.
         if (rel.startsWith('shared/tools/tunwg/tunwg-')) {
             return false
