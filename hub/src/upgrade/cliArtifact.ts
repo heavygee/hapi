@@ -45,14 +45,18 @@ export function artifactFileName(version: string, platform: string, arch: string
     return `hapi-${artifactToken('version', version)}-${artifactToken('platform', platform)}-${artifactToken('arch', arch)}`
 }
 
-export function readArtifactMeta(
+/** Content-addressed basename so generation A and B coexist on disk. */
+export function contentAddressedArtifactFileName(
     version: string,
     platform: string,
     arch: string,
-    dataDir?: string,
-): ArtifactMeta | null {
-    const dir = artifactsRoot(dataDir)
-    const path = join(dir, artifactFileName(version, platform, arch))
+    sourceFingerprint: string,
+): string {
+    const prefix = artifactToken('fingerprint', sourceFingerprint.slice(0, 16).toLowerCase())
+    return `${artifactFileName(version, platform, arch)}-${prefix}`
+}
+
+function readMetaAtPath(path: string): ArtifactMeta | null {
     const metaPath = `${path}.json`
     if (!existsSync(path) || !existsSync(metaPath)) {
         return null
@@ -62,6 +66,62 @@ export function readArtifactMeta(
     } catch {
         return null
     }
+}
+
+export function readArtifactMeta(
+    version: string,
+    platform: string,
+    arch: string,
+    dataDir?: string,
+    sourceFingerprint?: string,
+): ArtifactMeta | null {
+    const dir = artifactsRoot(dataDir)
+    if (sourceFingerprint) {
+        const addressed = join(dir, contentAddressedArtifactFileName(version, platform, arch, sourceFingerprint))
+        const meta = readMetaAtPath(addressed)
+        if (meta) {
+            return meta
+        }
+    }
+    // Legacy mutable path (pre content-addressed builds).
+    return readMetaAtPath(join(dir, artifactFileName(version, platform, arch)))
+}
+
+/** Look up a retained artifact by digest without rebuilding. */
+export function findArtifactMetaBySha256(sha256: string, dataDir?: string): ArtifactMeta | null {
+    const digest = sha256.trim().toLowerCase()
+    if (!/^[a-f0-9]{64}$/.test(digest)) {
+        return null
+    }
+    const dir = artifactsRoot(dataDir)
+    if (!existsSync(dir)) {
+        return null
+    }
+    let entries
+    try {
+        entries = readdirSync(dir)
+    } catch {
+        return null
+    }
+    for (const name of entries) {
+        if (!name.endsWith('.json')) {
+            continue
+        }
+        try {
+            const meta = JSON.parse(readFileSync(join(dir, name), 'utf8')) as ArtifactMeta
+            if (
+                typeof meta.sha256 === 'string'
+                && meta.sha256.toLowerCase() === digest
+                && typeof meta.path === 'string'
+                && existsSync(meta.path)
+            ) {
+                return meta
+            }
+        } catch {
+            // skip corrupt sidecar
+        }
+    }
+    return null
 }
 
 function writeMeta(meta: ArtifactMeta): void {
@@ -399,7 +459,13 @@ export async function ensureCliArtifact(options: {
         )
 
         const sourceFingerprint = resolveArtifactSourceFingerprint(monorepo)
-        const cached = readArtifactMeta(options.version, options.platform, options.arch, options.dataDir)
+        const cached = readArtifactMeta(
+            options.version,
+            options.platform,
+            options.arch,
+            options.dataDir,
+            sourceFingerprint,
+        )
         if (isArtifactCacheFresh(cached, sourceFingerprint)) {
             return cached!
         }
@@ -418,8 +484,17 @@ export async function ensureCliArtifact(options: {
 
         const dir = artifactsRoot(options.dataDir)
         mkdirSync(dir, { recursive: true })
-        const outPath = join(dir, artifactFileName(options.version, options.platform, options.arch))
-        // Explicit .exe so Bun doesn't surprise us with an auto-suffix we then miss.
+        // Fingerprint-suffixed path: keep prior generations so digest-pinned
+        // offer URLs remain downloadable after a soup remat rebuilds "current".
+        const outPath = join(
+            dir,
+            contentAddressedArtifactFileName(
+                options.version,
+                options.platform,
+                options.arch,
+                sourceFingerprint,
+            ),
+        )        // Explicit .exe so Bun doesn't surprise us with an auto-suffix we then miss.
         const compileOut = options.platform === 'win32' ? `${outPath}.exe` : outPath
         // Drop stale win32 outputs before compile so a same-version rebuild cannot
         // leave normalize choosing yesterday's extensionless bytes over a fresh .exe.
