@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
     formatGithubPrChipLabel,
+    formatGithubPrChipTitle,
     GITHUB_PR_CHIP_STALE_MS,
     resolveGithubPrChipDisplay
 } from './SessionPrChip'
@@ -14,6 +15,13 @@ const baseRef = (over: Partial<GithubPrExternalRef> = {}): GithubPrExternalRef =
     url: 'https://github.com/tiann/hapi/pull/1163',
     role: 'primary',
     ...over
+})
+
+const keyedT = (key: string, params?: Record<string, string | number>) =>
+    params && 'n' in params ? `${key}:${params.n}` : key
+
+afterEach(() => {
+    vi.useRealTimers()
 })
 
 describe('SessionPrChip helpers', () => {
@@ -70,5 +78,23 @@ describe('SessionPrChip helpers', () => {
         expect(githubPrStatusFromEmoji('✅')).toBe('clean')
         expect(githubPrStatusFromEmoji('⚠️')).toBe('needs_work')
         expect(githubPrStatusEmoji('merged')).toBe('🔧')
+    })
+
+    it('uses relative ago in chip title (tooltip already - no absolute nest)', () => {
+        vi.useFakeTimers()
+        const checkedAt = 1_700_000_000_000
+        // 90m: still fresh for chip tone (<2h), but past the hours bucket.
+        vi.setSystemTime(checkedAt + 90 * 60_000)
+        const ref = baseRef({
+            status: 'needs_work',
+            statusCheckedAt: checkedAt,
+            statusAction: 'rebase (merge state dirty)'
+        })
+        const display = resolveGithubPrChipDisplay(ref, Date.now())
+        const title = formatGithubPrChipTitle(ref, display, keyedT)
+        expect(title).toBe(
+            'tiann/hapi#1163 · needs_work · checked session.time.hoursAgo:1 — rebase (merge state dirty)'
+        )
+        expect(title).not.toMatch(/T\d{2}:\d{2}:\d{2}/)
     })
 })

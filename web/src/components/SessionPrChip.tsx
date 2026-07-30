@@ -1,7 +1,10 @@
 import type { ExternalRef, GithubPrExternalRef, GithubPrStatus } from '@/types/api'
 import { getPrimaryGithubPrRef, githubPrStatusEmoji } from '@hapi/protocol'
 import { cn } from '@/lib/utils'
+import { formatRelativeTime } from '@/lib/relativeTime'
 import { useTranslation } from '@/lib/use-translation'
+
+type TFunc = (key: string, params?: Record<string, string | number>) => string
 
 /** Chip cache older than this is treated as honesty-`?` (muted tone). */
 export const GITHUB_PR_CHIP_STALE_MS = 2 * 60 * 60 * 1000
@@ -66,12 +69,23 @@ function statusToneClass(status: GithubPrStatus | undefined): string {
     }
 }
 
-function chipTitle(ref: GithubPrExternalRef, display: GithubPrChipDisplay): string {
+/**
+ * Native `title` tooltip body for the PR chip.
+ *
+ * Exception to the usual "ago in UI + absolute in tooltip" rule: this string
+ * *is* the tooltip, so nest absolute datetime nowhere - use relative "ago".
+ */
+export function formatGithubPrChipTitle(
+    ref: GithubPrExternalRef,
+    display: GithubPrChipDisplay,
+    t: TFunc
+): string {
     const identity = `${ref.repo}#${ref.number}`
     if (!ref.status && !display.status) return identity
-    const checked = ref.statusCheckedAt
-        ? ` · checked ${new Date(ref.statusCheckedAt).toISOString()}`
-        : ''
+    const relative = typeof ref.statusCheckedAt === 'number'
+        ? formatRelativeTime(ref.statusCheckedAt, t)
+        : null
+    const checked = relative ? ` · checked ${relative}` : ''
     const staleNote = display.stale ? ' · stale (>2h)' : ''
     const shown = display.status ?? ref.status
     const action = !display.stale && ref.statusAction ? ` — ${ref.statusAction}` : ''
@@ -99,7 +113,7 @@ export function SessionPrChip(props: SessionPrChipProps) {
             data-testid="session-pr-chip"
             data-pr-status={display.status ?? 'unset'}
             data-pr-stale={display.stale ? '1' : '0'}
-            title={chipTitle(primary, display)}
+            title={formatGithubPrChipTitle(primary, display, t)}
             aria-label={
                 display.status
                     ? t('session.item.prChipWithStatus', {
