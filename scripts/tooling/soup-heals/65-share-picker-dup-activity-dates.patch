@@ -1,0 +1,21 @@
+diff --git a/web/src/routes/share/index.tsx b/web/src/routes/share/index.tsx
+index d1a41a6be..0ca065fd0 100644
+--- a/web/src/routes/share/index.tsx
++++ b/web/src/routes/share/index.tsx
+@@ -19,8 +19,6 @@ import { setSharePendingTransfer } from '@/lib/sharePendingState'
+ import { getSessionTitle } from '@/lib/sessionTitle'
+ import type { SessionSummary } from '@/types/api'
+ 
+-const SHARE_PICKER_ACTIVITY_DATES: ReadonlySet<string> = new Set()
+-
+ type LoadState =
+     | { state: 'loading' }
+     | { state: 'missing'; reason: 'not-found' | 'ingest-error' | 'no-id' }
+@@ -302,7 +300,6 @@ export default function SharePage() {
+                         <SessionListSearch
+                             value={searchQuery}
+                             onChange={setSearchQuery}
+-                            sessionActivityDates={SHARE_PICKER_ACTIVITY_DATES}
+                             customStart={customStart}
+                             customEnd={customEnd}
+                             sessionActivityDates={sessionActivityDates}

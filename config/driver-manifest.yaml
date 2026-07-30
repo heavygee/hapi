@@ -307,6 +307,18 @@ layers:
   # Worktree: overseer-llm-fallback.
   - branch: feat/overseer-llm-fallback
 
+  # 2026-07-30: overseer text-converse — modality-agnostic conversation core +
+  # Settings debug chat panel (Stage 0 read-only). Based on feat/overseer-readonly-entity
+  # (4cb90c23f); adds shared/overseerConverse, hub/src/overseer/{brainClient,converse,
+  # runOverseerTool}, POST /api/overseer/converse, web Settings "Talk to the Overseer
+  # (text · debug)" panel. NEEDS OVERSEER_BRAIN_URL + OVERSEER_BRAIN_MODEL in ~/.hapi/hub.env
+  # (oos-llm 27B: https://oos-llm.tail9944ee.ts.net/v1 model=main) + hapi-restart-hub.
+  # COLLISION WATCH: appends overseerConverse() to the ApiClient tail in web/src/api/client.ts
+  # (same tail as scratchlist/inbox methods) — may need rerere/band-aid. Also edits
+  # hub/src/web/routes/overseer.ts + web/src/routes/settings/about.tsx.
+  # Verified live end-to-end vs the 27B brain. Worktree: overseer-text-converse. Tip d67b9f56f.
+  - branch: feat/overseer-text-converse
+
   # Overseer replay harness (thin): harness+CI+fixtures only. Tip 96c8e7bf4,
   # ahead=1, zero FCM. Stack after umbrella; no substrate in this tip.
   - branch: feat/overseer-replay-harness
