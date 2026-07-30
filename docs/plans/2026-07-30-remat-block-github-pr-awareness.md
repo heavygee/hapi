@@ -1,13 +1,13 @@
-# Remat block (2026-07-30)
+# Remat block (2026-07-30) — CLEARED
 
-**Status:** awareness + rich-composer OK; blocked on session-header.
+**Status:** green. Live tip `0a497f569` · asset `index-Cpc5HVzO.js` · `/sessions` Playwright OK.
 
 | Layer | Tip | State |
 |-------|-----|--------|
-| 27 `driver/github-pr-awareness` | `d946021a9` | OK (rerere) |
-| 28 `feat/session-mention-rich-composer` | `091b1b651` | OK |
-| 29 `feat/session-header-machine-meta` | conflicts | **blocked** |
+| 27 awareness | `d946021a9` | OK |
+| 28 rich-composer | `091b1b651` | OK |
+| 29 session-header | `ba35a52c0` | OK |
 
-Pre-layer for header: `7ef4226a3cce0774dcda826eb5f73daa08387e88`  
-Live tip: `6dfd82aba` (atomic — unchanged)  
-Peer: `9c544e2d` re-pinged
+Post-merge soup fixes on tip: heal-62 SessionList imports, dedupe icons, share prop, settings QC, codex-models route + `listCodexModelsForSession`, park bad heal 58.
+
+Header peer: re-thin onto `upstream/main` for PR #1244 when ready.
