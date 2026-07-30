@@ -276,12 +276,13 @@ Pre-push hook blocks `web/src/garden/**` on upstream-PR-bound refs — Garden is
 
 **Why not soup-promotion-on-Upgrade (option C):** third entrypoint story; remote boxes lack the soup tree; fights `hapi-active`.
 
-**Estate defaults for soup runners:**
+**Estate defaults for soup runners (primary hub host only — e.g. oos-linux):**
 - `hapi-runner-from-active` exports `HAPI_DISABLE_VERSION_HANDOFF=1` by default (override only if you know why).
-- Rematerialize when hub `targetVersion` advances; do not click Upgrade on proxmox/oos-linux soup units to "catch up."
-- Per-machine product opt-outs remain available: `HAPI_UPGRADE_CHANNEL=off`, `versionHandoffDisabled`.
+- Rematerialize when hub `targetVersion` advances; do not click Upgrade on the **soup hub host** to "catch up."
+- Ordinary fleet machines (homelab/proxmox, Windows laptops, etc.) are **runners only** — they must **not** set `HAPI_DISABLE_VERSION_HANDOFF`. Fleet Upgrade / auto policy is the path.
+- Per-machine product opt-outs remain available: `HAPI_UPGRADE_CHANNEL=off`, `versionHandoffDisabled` (soup host).
 
-**Temporary binary bridge (proxmox / secondary pattern — anti-primary):** when local `driver/cli` is too stale to advertise required caps, a systemd drop-in (`30-soup-artifact.conf`) may point `ExecStart` at `~/.hapi/bin/hapi-<semver>` instead of `hapi-runner-from-active`. That keeps `versionHandoffDisabled: true` (intentional) while advertising a tip binary. **It is not soup parity** with oos (no manifest layers). **Never install this on the primary soup host** — see § Anti-primary / footgun. Keep the drop-in version current with hub `targetVersion`; remove it once proxmox driver soup is rematerialized and `hapi-runner-from-active` is healthy again. Incident 2026-07-23: drop-in stuck on `hapi-soup` **0.23.1** while oos ran soup **0.23.3** - Pi RPC on proxmox wedged; bumping the drop-in to `hapi-0.23.3` + hub `restart-runner` restored tool traffic.
+**Temporary binary bridge (historical secondary / demoted-hub pattern — anti-primary):** when a **demoted** host's local `driver/cli` is too stale to advertise required caps, a systemd drop-in (`30-soup-artifact.conf`) may point `ExecStart` at `~/.hapi/bin/hapi-<semver>` instead of `hapi-runner-from-active`. That keeps `versionHandoffDisabled: true` (intentional on a demoted soup unit) while advertising a tip binary. **It is not soup parity** with the primary (no manifest layers). **Never install this on the primary soup host** — see § Anti-primary / footgun. Keep the drop-in version current with hub `targetVersion`; remove it once that host is either rematerialized soup or converted to a normal fleet runner (`HAPI_DISABLE_VERSION_HANDOFF=0`, stock `~/.hapi/bin/hapi`). Homelab/proxmox post-cutover is a normal fleet runner — do not re-apply soup handoff-disable there. Incident 2026-07-23: drop-in stuck on `hapi-soup` **0.23.1** while oos ran soup **0.23.3** - Pi RPC wedged; bumping the drop-in to `hapi-0.23.3` + hub `restart-runner` restored tool traffic.
 
 **Windows chicken-egg (ops playbook):** old self-upgrade wrote `hapi-VERSION` without `.exe`. Promote once: `copy hapi-VERSION → hapi-VERSION.exe → hapi.exe`, then `schtasks /Run /TN "HAPI Runner"`. Or SCP `/var/lib/hapi/upgrade-artifacts/hapi-*-win32-x64` → `%USERPROFILE%\.hapi\bin\hapi.exe`. Future Upgrades from a fixed binary should self-heal.
 

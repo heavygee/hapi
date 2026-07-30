@@ -222,27 +222,37 @@ hub_put_external_refs() {
 
 # md_refs_apply_status <refs-json> <pr-number> <emoji> <action> <checkedAtMs>
 # Returns updated refs JSON on stdout. Exit 1 if no change / skip (? emoji) / empty.
-# Writes forge snapshot + estateCode (generic protocol); action text lives in estate display config.
+#
+# Dual-write while dogfood soup still stores legacy `status` (driver tip) and
+# upstream #1163 moves to forge + estateCode. Always set statusCheckedAt fresh.
+# Do NOT omit `status` — preserveGithubPrStatusCache treats missing status as
+# "identity-only re-link" and clobbers the incoming clock with the prior stamp
+# (2026-07-30 estate-wide ❓ stale cliff).
 md_refs_apply_status() {
     local refs_json="$1" pr="$2" emoji="$3" action="$4" at="$5"
-    local estate_code new_refs
+    local estate_code status new_refs
     [[ -z "$refs_json" || "$refs_json" == "[]" || "$refs_json" == "null" ]] && return 1
     [[ "$emoji" == "?" || -z "$emoji" ]] && return 1
     estate_code="$(pec_estate_code_from_emoji "$emoji")"
-    [[ -z "$estate_code" ]] && return 1
+    status="$(pec_status_from_emoji "$emoji")"
+    [[ -z "$estate_code" || -z "$status" || "$status" == "unknown" ]] && return 1
     new_refs="$(printf '%s' "$refs_json" | jq -c \
         --argjson number "$pr" \
         --arg estateCode "$estate_code" \
+        --arg status "$status" \
+        --arg action "$action" \
         --arg emoji "$emoji" \
         --argjson at "$at" '
         map(
             if .kind == "github_pr" and (.number | tonumber) == $number then
                 (
-                    del(.status, .statusAction)
+                    del(.statusAction)
                     + {
-                        estateCode: $estateCode,
-                        statusCheckedAt: $at
+                        status: $status,
+                        statusCheckedAt: $at,
+                        estateCode: $estateCode
                     }
+                    + (if ($action | length) > 0 then {statusAction: $action} else {} end)
                     + (if $emoji == "✅" then {openState:"open", checks:"pass", merge:"clean"}
                        elif $emoji == "🔁" then {openState:"open", checks:"pending"}
                        elif $emoji == "⚠️" then {openState:"open"}
