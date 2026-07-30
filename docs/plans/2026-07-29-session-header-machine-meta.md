@@ -101,10 +101,10 @@ Re-thinned onto `upstream/main` (`36eedc870`) for PR #1244:
 
 Dogfood: hard-reload if sticky Workbox; current asset `index-Cpc5HVzO.js`.
 
-### Task 4: Upstream PR
+### Task 4: Upstream PR — MERGED
 
-- Opened: https://github.com/tiann/hapi/pull/1244 (`Fixes #1241`)
-- Fork stage: https://github.com/heavygee/hapi/pull/96 (`cold-review-clean`)
-- Tip: `2cc03a2c7` (empty retrigger) on `72ba9940c` (sub-minute `activeAt` skip) atop `4f3de28e1`
-- Threads: 0 unresolved (soup Blocker + heartbeat Major replied/resolved 2026-07-30)
-- `test` + `pr-review` green (Codex recovered 2026-07-30T14:06Z) — HAPI Bot: **Findings: None** on tip
+- Merged: https://github.com/tiann/hapi/pull/1244 → `f8934d81e` (2026-07-30T15:18Z)
+- Fork stage closed: https://github.com/heavygee/hapi/pull/96
+- Soup layer dropped from mirror `config/driver-manifest.yaml` (was never on active `~/.config`)
+- Worktree removed; `origin/feat/session-header-machine-meta` deleted
+- **Do not rematerialize** — Meta remats once per wave after peers ack cleanup
