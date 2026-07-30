@@ -319,7 +319,7 @@ hapi-driver-rebuild --build-web --verify
 
 ### Remat escalation hold (2026-07-30)
 
-Happy-path remat is CLI-only and mostly deterministic (`hapi-driver-rebuild --build-web --verify`). When remat **fails** (merge conflict, post-promote verify/typecheck/test rollback), the stack is nondeterministic enough that **parallel “helpers” thrash the tip**. Fail closed:
+Happy-path remat is CLI-only and mostly deterministic (`hapi-driver-rebuild --build-web --verify`). When remat **fails** (layer merge conflict, **soup-heal apply conflict / router-dedupe heal error**, or post-promote verify/typecheck/test rollback), the stack is nondeterministic enough that **parallel “helpers” thrash the tip**. Fail closed:
 
 1. **Auto-set hold** on remat failure → `~/.hapi/remat-hold.json`
 2. **Block** `hapi-driver-rebuild`, `hapi-driver-build-web`, and `driver_remat_promote` for everyone except the escalate owner (exit **76**)
@@ -359,6 +359,7 @@ Config: `config/remat-escalate.yaml`. Token: `~/.config/hapi/remat-owner.token` 
 | Failure | Live `driver/integration` | Where to look |
 |---|---|---|
 | Merge conflict mid-stack | **Unchanged** (pre-remat SHA) | Remat worktree stays conflicted — resolve there, or `git merge --abort` |
+| Soup-heal apply conflict (`apply -3` base drift) / router-dedupe heal error | **Unchanged** (pre-remat SHA) | Remat worktree left for owner; the heal likely went redundant/obsolete against a layer — trim or drop it (`heal_fail` path) |
 | Post-promote typecheck / tests / dist verify | **Restored** to pre-remat SHA | Re-run after fixing the gate |
 
 Incident 2026-07-29 19:11Z: in-place `checkout -B driver/integration upstream/main` + layer loop `exit 1` left tip stuck after `feat/cursor-picker-ios-nested` — PR awareness + rich-composer vanished from source while stale dist still looked rich. That class must not recur.

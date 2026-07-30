@@ -227,6 +227,21 @@ done
 
 echo "Remat WIP HEAD: $(git -C "$REMAT" log -1 --oneline)"
 
+# Pre-promote heal failure: nothing is live yet, so leave the WIP for the owner
+# to inspect and set the fail-closed hold (mirrors the merge-conflict path). This
+# closes the gap where a heal that `--check` passes but `apply -3` conflicts (base
+# drift), or a router-dedupe/python heal that errors, would otherwise die under
+# `set -e` with no hold set, letting the next agent re-thrash the same broken soup.
+heal_fail() {
+    local reason="$1"
+    echo "ERROR: $reason" >&2
+    driver_remat_fail_leave_wip "$REMAT" "$WIP_BRANCH" "$DRIVER_BRANCH" "$PREV_TIP" "$reason"
+    driver_remat_hold_set \
+        "$reason" \
+        "$REMAT" "$PREV_TIP" "$WIP_BRANCH" ""
+    exit 1
+}
+
 # Post-merge heal: garden + share-target layers can leave a duplicate /share route
 # that breaks vite ("shareRoute has already been declared"). Thin soup layers cannot
 # reliably carry this delete across rematerializes (tip would be fat). Heal in-tree.
@@ -235,7 +250,7 @@ if [[ -f "$ROUTER" ]]; then
     share_decls="$(grep -c '^const shareRoute = createRoute' "$ROUTER" || true)"
     if [[ "${share_decls:-0}" -gt 1 ]]; then
         echo "Post-merge heal: deduping $share_decls shareRoute declarations in web/src/router.tsx ..."
-        python3 - "$ROUTER" <<'PY'
+        if ! python3 - "$ROUTER" <<'PY'
 import re, sys
 from pathlib import Path
 path = Path(sys.argv[1])
@@ -248,8 +263,12 @@ second = matches[1]
 path.write_text(text[: second.start()] + text[second.end() :])
 print(f"  removed duplicate shareRoute block ({len(matches)} -> {len(matches) - 1})")
 PY
+        then
+            heal_fail "shareRoute dedupe heal failed (web/src/router.tsx)"
+        fi
         git -C "$REMAT" add web/src/router.tsx
-        git -C "$REMAT" commit --no-edit --no-verify -q -m "fix(soup): dedupe shareRoute after garden/share layer merge"
+        git -C "$REMAT" commit --no-edit --no-verify -q -m "fix(soup): dedupe shareRoute after garden/share layer merge" \
+            || heal_fail "shareRoute dedupe commit failed"
         echo "Remat WIP HEAD: $(git -C "$REMAT" log -1 --oneline)"
     fi
 fi
@@ -265,7 +284,14 @@ if [[ -d "$HEAL_DIR" ]]; then
         echo "Post-merge heal: applying ${#heal_patches[@]} patch(es) from soup-heals/ ..."
         for patch in "${heal_patches[@]}"; do
             if git -C "$REMAT" apply --check -3 "$patch" 2>/dev/null; then
-                git -C "$REMAT" apply -3 "$patch"
+                # `apply -3` can still leave conflicts even when `--check` passed
+                # (3-way base drift). Trap that instead of dying bare under set -e.
+                if ! git -C "$REMAT" apply -3 "$patch"; then
+                    heal_fail "heal apply failed (3-way conflict): $(basename "$patch")"
+                fi
+                if git -C "$REMAT" grep -lE '^<<<<<<< |^>>>>>>> ' >/dev/null 2>&1; then
+                    heal_fail "heal left conflict markers: $(basename "$patch")"
+                fi
                 git -C "$REMAT" add -A
                 if git -C "$REMAT" diff --cached --quiet; then
                     echo "  applied $(basename "$patch") (no tree change)"
