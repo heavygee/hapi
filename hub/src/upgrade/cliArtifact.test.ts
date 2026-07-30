@@ -7,6 +7,8 @@ import {
     artifactFileName,
     artifactInputStatKey,
     bunCompileTarget,
+    contentAddressedArtifactFileName,
+    findArtifactMetaBySha256,
     fingerprintArtifactInputStats,
     fingerprintArtifactInputs,
     HAPI_RUNNER_ONLY_FEATURE,
@@ -36,6 +38,54 @@ describe('artifactFileName', () => {
         expect(() => artifactFileName('0.23.0', 'linux/../tmp', 'x64')).toThrow('Invalid artifact platform')
         expect(() => artifactFileName('0.23.0', 'linux', 'x64/../../tmp')).toThrow('Invalid artifact arch')
         expect(() => artifactFileName('0.23.0', 'linux', 'x64 with spaces')).toThrow('Invalid artifact arch')
+    })
+})
+
+describe('content-addressed artifact retention', () => {
+    it('gives generation A and B distinct paths', () => {
+        const a = contentAddressedArtifactFileName('0.25.1', 'linux', 'x64', 'aaaaaaaaaaaaaaaa' + '0'.repeat(48))
+        const b = contentAddressedArtifactFileName('0.25.1', 'linux', 'x64', 'bbbbbbbbbbbbbbbb' + '0'.repeat(48))
+        expect(a).toBe('hapi-0.25.1-linux-x64-aaaaaaaaaaaaaaaa')
+        expect(b).toBe('hapi-0.25.1-linux-x64-bbbbbbbbbbbbbbbb')
+        expect(a).not.toBe(b)
+    })
+
+    it('finds a retained digest after a newer generation is written beside it', () => {
+        const dataDir = mkdtempSync(join(tmpdir(), 'hapi-artifact-retain-'))
+        try {
+            const root = join(dataDir, 'upgrade-artifacts')
+            mkdirSync(root, { recursive: true })
+            const shaA = 'a'.repeat(64)
+            const shaB = 'b'.repeat(64)
+            const pathA = join(root, contentAddressedArtifactFileName('0.25.1', 'linux', 'x64', 'aaaaaaaaaaaaaaaa'))
+            const pathB = join(root, contentAddressedArtifactFileName('0.25.1', 'linux', 'x64', 'bbbbbbbbbbbbbbbb'))
+            writeFileSync(pathA, 'gen-a-bytes')
+            writeFileSync(pathB, 'gen-b-bytes')
+            writeFileSync(`${pathA}.json`, JSON.stringify({
+                version: '0.25.1',
+                platform: 'linux',
+                arch: 'x64',
+                path: pathA,
+                sha256: shaA,
+                sizeBytes: 11,
+                sourceFingerprint: 'aaaaaaaaaaaaaaaa',
+            }))
+            writeFileSync(`${pathB}.json`, JSON.stringify({
+                version: '0.25.1',
+                platform: 'linux',
+                arch: 'x64',
+                path: pathB,
+                sha256: shaB,
+                sizeBytes: 11,
+                sourceFingerprint: 'bbbbbbbbbbbbbbbb',
+            }))
+
+            expect(findArtifactMetaBySha256(shaA, dataDir)?.path).toBe(pathA)
+            expect(findArtifactMetaBySha256(shaB, dataDir)?.path).toBe(pathB)
+            expect(findArtifactMetaBySha256('c'.repeat(64), dataDir)).toBeNull()
+        } finally {
+            rmSync(dataDir, { recursive: true, force: true })
+        }
     })
 })
 
