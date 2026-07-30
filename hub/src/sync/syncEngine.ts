@@ -841,19 +841,33 @@ export class SyncEngine {
             return
         }
         this.fleetUpgradeAttemptAt.set(machineId, Date.now())
+        const host = machine.metadata.host ?? machine.metadata.displayName ?? machineId
         try {
             const result = await this.upgradeMachineRunner(machineId, machine.namespace)
             console.warn('[fleet-upgrade] auto attempt', {
                 machineId,
-                host: machine.metadata.host,
+                host,
                 channel: offer.channel,
                 result,
             })
+            if (result.type === 'error') {
+                this.eventPublisher.sendToast(
+                    machine.namespace,
+                    'Runner upgrade failed',
+                    `${host}: ${result.message}`,
+                )
+            }
         } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
             console.warn('[fleet-upgrade] auto attempt failed', {
                 machineId,
-                message: error instanceof Error ? error.message : String(error),
+                message,
             })
+            this.eventPublisher.sendToast(
+                machine.namespace,
+                'Runner upgrade failed',
+                `${host}: ${message}`,
+            )
         }
     }
 
