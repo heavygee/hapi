@@ -1,6 +1,6 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppContext } from '@/lib/app-context'
-import type { OverseerConverseMessage, OverseerConverseResponse, OverseerToolTraceEntry } from '@hapi/protocol'
+import type { OverseerBrainProfileInfo, OverseerConverseMessage, OverseerConverseResponse, OverseerToolTraceEntry } from '@hapi/protocol'
 
 type ChatTurn = {
     role: 'operator' | 'overseer'
@@ -28,7 +28,17 @@ export function OverseerChatDebugControls() {
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [model, setModel] = useState<string | null>(null)
+    const [profiles, setProfiles] = useState<OverseerBrainProfileInfo[]>([])
+    const [selectedProfile, setSelectedProfile] = useState('')
+    const [modelOverride, setModelOverride] = useState('')
     const scrollRef = useRef<HTMLDivElement>(null)
+
+    useEffect(() => {
+        if (!open || !api || profiles.length > 0) return
+        void api.fetchOverseerBrains()
+            .then((res) => setProfiles(res.profiles))
+            .catch(() => { /* brains list is optional chrome */ })
+    }, [open, api, profiles.length])
 
     const send = useCallback(async (text: string) => {
         const trimmed = text.trim()
@@ -41,7 +51,10 @@ export function OverseerChatDebugControls() {
         setTurns((prev) => [...prev, { role: 'operator', content: trimmed }])
         setLoading(true)
         try {
-            const res = await api.overseerConverse(nextHistory) as OverseerConverseResponse
+            const res = await api.overseerConverse(nextHistory, {
+                profile: selectedProfile || undefined,
+                model: modelOverride.trim() || undefined
+            }) as OverseerConverseResponse
             setModel(res.model)
             setTurns((prev) => [...prev, {
                 role: 'overseer',
@@ -57,7 +70,7 @@ export function OverseerChatDebugControls() {
         } finally {
             setLoading(false)
         }
-    }, [api, loading, turns])
+    }, [api, loading, turns, selectedProfile, modelOverride])
 
     return (
         <div className="border-t border-[var(--app-divider)]">
@@ -75,6 +88,38 @@ export function OverseerChatDebugControls() {
                     <p className="text-xs text-[var(--app-hint)]">
                         Read-only fleet chief-of-staff (Stage 0). Text transport over the same converse core voice will use. Answers are driven by a local LLM calling read-only overseer tools.
                     </p>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                        {profiles.length > 1 ? (
+                            <label className="flex items-center gap-1 text-[11px] text-[var(--app-hint)]">
+                                Brain
+                                <select
+                                    value={selectedProfile}
+                                    onChange={(e) => setSelectedProfile(e.target.value)}
+                                    disabled={loading}
+                                    className="rounded border border-[var(--app-border)] bg-[var(--app-bg)] px-1 py-0.5 text-[11px] text-[var(--app-fg)] disabled:opacity-50"
+                                >
+                                    {profiles.map((p) => (
+                                        <option key={p.id} value={p.isDefault ? '' : p.id}>
+                                            {p.label} ({p.model})
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
+                        ) : null}
+                        <label className="flex items-center gap-1 text-[11px] text-[var(--app-hint)]">
+                            Model
+                            <input
+                                type="text"
+                                value={modelOverride}
+                                onChange={(e) => setModelOverride(e.target.value)}
+                                placeholder="(default)"
+                                disabled={loading}
+                                className="w-32 rounded border border-[var(--app-border)] bg-[var(--app-bg)] px-1 py-0.5 text-[11px] text-[var(--app-fg)] disabled:opacity-50"
+                            />
+                        </label>
+                        <span className="text-[10px] text-[var(--app-hint)]">Override without an env change or hub restart.</span>
+                    </div>
 
                     <div ref={scrollRef} className="max-h-80 space-y-2 overflow-auto rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] p-2">
                         {turns.length === 0 ? (

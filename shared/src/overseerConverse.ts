@@ -40,6 +40,25 @@ export type OverseerConverseRequest = {
     messages: OverseerConverseMessage[]
     /** Optional session this conversation is threaded to (for convo_turn linkage). */
     relatedSessionId?: string | null
+    /**
+     * Per-request model override — swap the brain model without touching env or
+     * restarting (useful for A/B-ing a frontier model against the local one on a
+     * multi-model endpoint). Blank = the profile's configured model.
+     */
+    model?: string
+    /**
+     * Named brain profile to use for this request. Profiles are defined
+     * server-side (url + model + key stay off the browser). Blank = default.
+     */
+    profile?: string
+}
+
+/** Public info about a configured brain profile (no url/key exposed). */
+export type OverseerBrainProfileInfo = {
+    id: string
+    label: string
+    model: string
+    isDefault: boolean
 }
 
 export type OverseerConverseResponse = {

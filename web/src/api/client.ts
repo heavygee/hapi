@@ -821,15 +821,21 @@ export class ApiClient {
 
     async overseerConverse(
         messages: import('@hapi/protocol').OverseerConverseMessage[],
-        relatedSessionId?: string | null
+        opts: { relatedSessionId?: string | null; model?: string; profile?: string } = {}
     ): Promise<import('@hapi/protocol').OverseerConverseResponse> {
         return await this.request('/api/overseer/converse', {
             method: 'POST',
             body: JSON.stringify({
                 messages,
-                relatedSessionId: relatedSessionId ?? undefined
+                relatedSessionId: opts.relatedSessionId ?? undefined,
+                model: opts.model?.trim() || undefined,
+                profile: opts.profile || undefined
             })
         })
+    }
+
+    async fetchOverseerBrains(): Promise<{ profiles: import('@hapi/protocol').OverseerBrainProfileInfo[] }> {
+        return await this.request('/api/overseer/brains')
     }
 
 }

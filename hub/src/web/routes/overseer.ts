@@ -12,7 +12,7 @@ import type { WebAppEnv } from '../middleware/auth'
 import { requireSyncEngine } from './guards'
 import { isOverseerToolName, runOverseerTool } from '../../overseer/runOverseerTool'
 import { runOverseerConverse } from '../../overseer/converse'
-import { BrainUnavailableError, resolveBrainConfig } from '../../overseer/brainClient'
+import { BrainUnavailableError, listBrainProfiles, resolveBrainConfig } from '../../overseer/brainClient'
 
 const convoTurnBodySchema = z.object({
     operatorText: z.string().max(8000).default(''),
@@ -31,7 +31,9 @@ const converseBodySchema = z.object({
         role: z.enum(['operator', 'overseer']),
         content: z.string().max(8000)
     })).min(1).max(40),
-    relatedSessionId: z.string().min(1).optional()
+    relatedSessionId: z.string().min(1).optional(),
+    model: z.string().max(100).optional(),
+    profile: z.string().max(64).optional()
 })
 
 export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
@@ -58,6 +60,14 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
             backend: resolveHubVoiceBackend(process.env),
             backends: listConfiguredVoiceBackends(process.env)
         })
+    })
+
+    // Configured brain profiles for the converse UI (id/label/model only — no
+    // url or api key is exposed to the client).
+    app.get('/overseer/brains', (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) return engine
+        return c.json({ profiles: listBrainProfiles(process.env) })
     })
 
     // Read-only tool dispatch. All tools are read-only; this endpoint never
@@ -114,7 +124,10 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Last message must be from the operator' }, 400)
         }
 
-        const config = resolveBrainConfig(process.env)
+        const config = resolveBrainConfig(process.env, {
+            profile: parsed.data.profile,
+            model: parsed.data.model
+        })
         if (!config) {
             return c.json({
                 reply: 'The Overseer brain is not configured on this hub (set OVERSEER_BRAIN_URL). I can still show raw events and inbox items, but I cannot answer in conversation yet.',

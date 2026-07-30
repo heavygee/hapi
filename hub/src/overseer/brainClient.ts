@@ -60,16 +60,66 @@ export class BrainUnavailableError extends Error {
     }
 }
 
-/** Resolve brain config from env; returns null when no brain URL is configured. */
-export function resolveBrainConfig(env: NodeJS.ProcessEnv = process.env): BrainConfig | null {
-    const baseUrl = env.OVERSEER_BRAIN_URL?.trim()
+export type OverseerBrainProfileInfo = {
+    id: string
+    label: string
+    model: string
+    isDefault: boolean
+}
+
+function timeoutFromEnv(env: NodeJS.ProcessEnv): number {
+    return Number(env.OVERSEER_BRAIN_TIMEOUT_MS) > 0 ? Number(env.OVERSEER_BRAIN_TIMEOUT_MS) : 60_000
+}
+
+/** Read a brain config from a set of env keys with the given prefix. */
+function readProfile(env: NodeJS.ProcessEnv, prefix: string): BrainConfig | null {
+    const baseUrl = env[`${prefix}URL`]?.trim()
     if (!baseUrl) return null
     return {
         baseUrl: baseUrl.replace(/\/+$/, ''),
-        model: env.OVERSEER_BRAIN_MODEL?.trim() || 'main',
-        apiKey: env.OVERSEER_BRAIN_API_KEY?.trim() || undefined,
-        timeoutMs: Number(env.OVERSEER_BRAIN_TIMEOUT_MS) > 0 ? Number(env.OVERSEER_BRAIN_TIMEOUT_MS) : 60_000
+        model: env[`${prefix}MODEL`]?.trim() || 'main',
+        apiKey: env[`${prefix}API_KEY`]?.trim() || undefined,
+        timeoutMs: timeoutFromEnv(env)
     }
+}
+
+/**
+ * Resolve brain config from env, applying an optional profile + model override.
+ *
+ * Default profile: `OVERSEER_BRAIN_URL` / `_MODEL` / `_API_KEY`.
+ * Named profiles: `OVERSEER_BRAIN_PROFILE_<ID>_URL` / `_MODEL` / `_API_KEY`
+ * (so a frontier endpoint's key stays server-side, never in the browser).
+ *
+ * Returns null when the requested/default profile has no URL configured.
+ */
+export function resolveBrainConfig(
+    env: NodeJS.ProcessEnv = process.env,
+    opts: { profile?: string; model?: string } = {}
+): BrainConfig | null {
+    let cfg: BrainConfig | null = null
+    const profile = opts.profile?.trim()
+    if (profile && profile.toLowerCase() !== 'default') {
+        cfg = readProfile(env, `OVERSEER_BRAIN_PROFILE_${profile.toUpperCase()}_`)
+    }
+    if (!cfg) cfg = readProfile(env, 'OVERSEER_BRAIN_')
+    if (!cfg) return null
+    const model = opts.model?.trim()
+    return model ? { ...cfg, model } : cfg
+}
+
+/** List configured brain profiles for the UI (id/label/model only — no url/key). */
+export function listBrainProfiles(env: NodeJS.ProcessEnv = process.env): OverseerBrainProfileInfo[] {
+    const out: OverseerBrainProfileInfo[] = []
+    const def = readProfile(env, 'OVERSEER_BRAIN_')
+    if (def) out.push({ id: 'default', label: 'Default', model: def.model, isDefault: true })
+    for (const key of Object.keys(env)) {
+        const match = key.match(/^OVERSEER_BRAIN_PROFILE_(.+)_URL$/)
+        if (!match) continue
+        const id = match[1].toLowerCase()
+        const cfg = readProfile(env, `OVERSEER_BRAIN_PROFILE_${match[1]}_`)
+        if (cfg) out.push({ id, label: id, model: cfg.model, isDefault: false })
+    }
+    return out
 }
 
 /**
