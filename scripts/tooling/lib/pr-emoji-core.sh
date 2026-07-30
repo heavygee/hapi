@@ -223,8 +223,21 @@ pec_worst_emoji() {
     fi
 }
 
-# pec_status_from_emoji <emoji> → clean|pending|needs_work|pre_pr|merged|unknown
-# Stable enum stored on metadata.externalRefs[].status (ADR D8 / chip cache).
+# pec_estate_code_from_emoji <emoji> → babysit.* / peer.incubating (estate display keys)
+# Protocol no longer stores Meta status enums — chip terms come from pr-chip-display.json.
+pec_estate_code_from_emoji() {
+    case "$1" in
+        ✅) printf 'babysit.green' ;;
+        🔁) printf 'babysit.pending' ;;
+        ⚠️) printf 'babysit.needs_work' ;;
+        📝) printf 'peer.incubating' ;;
+        🔧) printf 'babysit.merged' ;;
+        *) printf '' ;;
+    esac
+}
+
+# pec_status_from_emoji — LEGACY alias for unit tests; prefer pec_estate_code_from_emoji.
+# Maps emoji → old enum names only for test compatibility (not written to hub).
 pec_status_from_emoji() {
     case "$1" in
         ✅) printf 'clean' ;;

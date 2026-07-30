@@ -1,12 +1,12 @@
 # ADR: GitHub PR awareness is opt-in; session↔PR attachment is explicit
 
-> **Status:** IN PROGRESS — upstream issue [tiann/hapi#1162](https://github.com/tiann/hapi/issues/1162); draft PR [tiann/hapi#1163](https://github.com/tiann/hapi/pull/1163). **Operator dogfood:** thin soup tip `driver/github-pr-awareness` (`88481771c`) on `:3006`; toggle on via settings file; Meta `--backfill-refs` for estate bootstrap. Events/inbox remain fork-local / future.
-> **Date:** 2026-07-25
+> **Status:** IN PROGRESS — upstream issue [tiann/hapi#1162](https://github.com/tiann/hapi/issues/1162); PR [tiann/hapi#1163](https://github.com/tiann/hapi/pull/1163) (single tip vs `main`; **#1161 closed as superseded** 2026-07-30). **Operator dogfood:** thin soup tip `driver/github-pr-awareness` on `:3006`; toggle on via settings file; Meta `--backfill-refs` for estate bootstrap. Events/inbox remain fork-local / future.
+> **Date:** 2026-07-25 (collapse note 2026-07-30)
 > **Audience:** whoever implements the toggle + link affordance; Meta PR watcher; Overseer peers
 > **Companions:**
 > - [`2026-07-25-contrib-state-event-ingest-spec.md`](./2026-07-25-contrib-state-event-ingest-spec.md) — the sensor that consumes these links (`related_session_id`)
 > - [`2026-07-25-contribution-state-as-overseer-sensor.md`](./2026-07-25-contribution-state-as-overseer-sensor.md) — observe-vs-actuate principle
-> - Upstream PR **tiann/hapi#1161** (`feat/session-external-refs`) — ships `metadata.externalRefs`, `GET /sessions/:id/external-refs`, and the session-list PR chip. This ADR is the write path and the gate on top of it.
+> - ~~Upstream PR **tiann/hapi#1161**~~ — foundation (`externalRefs` + GET + chip) folded into #1163; closed superseded (no stacked upstream merges).
 > - Upstream issue **tiann/hapi#1162** — opt-in + attach.
 
 ---
@@ -152,30 +152,34 @@ T1+T2 are the ones that unblock everything else and are worth landing together. 
 
 ## 7. Decision addendum — PR *state* belongs on the chip, not the title (2026-07-25)
 
-### D8 — Chip carries status; title stays the human workstream name — **IMPLEMENTED in #1163**
+### D8 — Chip carries forge snapshot; estate configs own the mood ring (2026-07-30)
 
-**Problem (pre-D8).** Meta wrote health into the **session title** (`✅PR #947: …`) while the PR chip only showed identity (`#947`). That split "what is this?" and "is it green?" across two surfaces.
+**Problem.** Shipping Meta babysit vocabulary (`clean`/`needs_work`/`pre_pr`, ✅🔁⚠️, "wait on tiann") as the protocol status enum made "linked PR status" mean "our cold-review disposition."
 
-**Decision:** PR health is a chip concern. Optional fields on `GithubPrExternalRef`:
+**Decision:** Protocol stores **GitHub-shaped facts only**:
 
-- `status`: `clean | pending | needs_work | pre_pr | merged | unknown`
-- `statusCheckedAt`: unix ms
-- `statusAction`: short classifier action string
+- `openState`: `open | closed | merged | draft`
+- `checks`: `pass | fail | pending | none | unknown`
+- `merge`: subset of GitHub `mergeStateStatus`
+- `statusCheckedAt`: honesty mute clock
+- `estateCode`: opaque string (max 64) — estate classifiers only
 
-Meta's daily classify writes these onto existing refs (full `PUT external-refs`). Chip renders emoji + `#N` and tones by status. Browser never live-queries GitHub.
+**Presentation** comes from `$HAPI_HOME/pr-chip-display.json` (optional), merged over `DEFAULT_PR_CHIP_DISPLAY` in `@hapi/protocol`. Hub serves the resolved profile on `GET /api/features` as `prChipDisplay`. Estate sample: `scripts/tooling/config/pr-chip-display.estate.json` (copy into HAPI_HOME on this machine).
 
-**Transition (complete 2026-07-25):** Meta no longer writes status emoji into titles. For sessions with a chip it **strips** a leading status emoji once. `hapi-pr-session-emoji.sh` is a removed stub.
+Resolution: `estateCode` match wins → else forge rule → else identity-only `#N`. Stale cache (> `staleMs`, default 2h) → `?`.
 
-**Title identity (2026-07-27):** Meta also strips leading `PR #N:` / `PR #N/#M:` prefixes from chipped sessions — chip owns identity. Titles become workstream-only. `Peer #N:` incubating titles are kept (no issue chip yet). Agents must not re-add `PR #N:` after strip.
+Upstream defaults have **no** Meta prose and **no** mood-ring emoji. This estate restores them via `estateCodes.babysit.*` / `peer.incubating`.
 
-**Stale honesty (2026-07-26):** browser never live-queries GitHub. If `statusCheckedAt` is older than **2 hours**, the chip mutes tone and shows `?`. Estate refresh: fork-local timers (morning pings + quiet refresh every 45m 24/7) — see `install-hapi-meta-daily-timer.sh`.
+**Removed from protocol:** `status: clean|pending|needs_work|pre_pr|…`, `statusAction`, `githubPrStatusEmoji` / `githubPrStatusFromEmoji`.
 
-**Re-link stickiness (2026-07-28):** `hapi link-pr` / MCP `link_pr` / Link PR dialog historically wrote identity-only refs (no `status*`). A naive full replace wiped Meta's cached health → chip showed bare `#N`. Hub `mergeSessionMetadata` runs `preserveGithubPrStatusCache`: same `repo#N` keeps prior `status` / `statusCheckedAt` / `statusAction` unless the write sets `status` explicitly; `[]` and different PR still replace. Matches Meta's "skip writing `?`" last-good contract.
+**Meta writers (fork):** emit forge snapshot + `estateCode`; do not invent protocol enums. Copy estate display JSON to HAPI_HOME so chips render the override terms.
 
-**Fetch-on-attach (2026-07-28):** First attach / PR change must not leave a blank chip until Meta daily. `buildAttachedGithubPrRefs` runs Meta's `hapi-pr-emoji-batch` (via `classifyGithubPrChipStatus`) when there is no preserved status for that `repo#N`, then writes status fields before/with the attach. Wired into `hapi link-pr` + MCP `link_pr`. Hub `setSessionExternalRefs` also fire-and-forgets the same enrich for Link PR dialog / classify-miss paths. Soup layer `driver/github-pr-awareness`.
+**Transition notes (still true):** title emoji / `PR #N:` stripping remains Meta/fork; browser never live-queries GitHub.
 
-**Remat re-thin (2026-07-29):** Never thin onto stale `origin/driver/integration` tip. Remat does `reset --hard upstream/main` then merges layers - use the **pre-layer SHA Meta reports** from a failed remat (or thin onto `upstream/main` awareness-only). Wave that landed awareness: tip `ac95f9f65` via merge `08fdb92cf`; actual pre-layer was `d0a3d6473` (commit message saying `12814cf6b` is stale wording). Next re-thin absorb: HappyThread keep `props.outlineTitle`; SessionList keep PR chips and do **not** drop `getTodoProgress` / attention / time-label helpers (heal pattern on driver tip `9d506f30e`).
+See also: [`2026-07-30-generic-pr-chip-underpinnings.md`](./2026-07-30-generic-pr-chip-underpinnings.md).
 
-**Remat re-thin (2026-07-30):** Layer 27 failed on fat tip `ac95f9f65` vs pre-layer `ecde4178f` (41 unmerged). Re-thinned awareness-only onto that pre-layer → tip `d946021a9` (parent=`ecde4178f`, merge-tree clean). SessionList keeps inline helpers + chips (`sessionRowHelpers` not on that base yet).
+---
 
-**Not a second upstream PR.** Awareness + attach + chip status ship together in [tiann/hapi#1163](https://github.com/tiann/hapi/pull/1163).
+### D8 (superseded text retained for archaeology)
+
+~~Chip carries status; title stays the human workstream name — IMPLEMENTED in #1163 with Meta status enum.~~ Replaced 2026-07-30 by forge + estate overlay above.

@@ -1,0 +1,33 @@
+{
+  "staleMs": 7200000,
+  "forge": {},
+  "estateCodes": {
+    "babysit.green": {
+      "emoji": "✅",
+      "tone": "ok",
+      "label": "clean",
+      "action": "full green — wait on tiann"
+    },
+    "babysit.pending": {
+      "emoji": "🔁",
+      "tone": "pending",
+      "label": "pending",
+      "action": "CI in flight"
+    },
+    "babysit.needs_work": {
+      "emoji": "⚠️",
+      "tone": "needs_work",
+      "label": "needs work"
+    },
+    "peer.incubating": {
+      "emoji": "📝",
+      "tone": "muted",
+      "label": "pre-PR"
+    },
+    "babysit.merged": {
+      "emoji": "🔧",
+      "tone": "merged",
+      "label": "merged"
+    }
+  }
+}
