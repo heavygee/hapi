@@ -316,6 +316,19 @@ hapi-driver-rebuild --build-web --verify
 
 **Soup rebuild owner (policy):** one agent/session owns manifest + rebuild at a time (`hapi-driver-status` flock). **After operator approves soup dogfood**, the **feature peer** edits `~/.config/hapi/driver-manifest.yaml` and runs `hapi-driver-rebuild --build-web --verify` — do not ping operator/orchestrator to add the layer. Meta session (`8c6b5a7d`) is for **manifest-only** cron rebuilds and stack hygiene, not routine feature promotion. Do not run rebuilds in parallel hoping flock saves you.
 
+### Atomic remat — failed rebuild must not move the live tip (2026-07-30)
+
+`hapi-driver-rebuild` rematerializes on **`driver/integration-wip`** in **`~/coding/hapi/worktrees/driver-remat`**, then promotes `driver/integration` only after layers + soup-heals succeed. **`web/dist` already had `dist.prev` rollback; the git tip now matches that contract.**
+
+| Failure | Live `driver/integration` | Where to look |
+|---|---|---|
+| Merge conflict mid-stack | **Unchanged** (pre-remat SHA) | Remat worktree stays conflicted — resolve there, or `git merge --abort` |
+| Post-promote typecheck / tests / dist verify | **Restored** to pre-remat SHA | Re-run after fixing the gate |
+
+Incident 2026-07-29 19:11Z: in-place `checkout -B driver/integration upstream/main` + layer loop `exit 1` left tip stuck after `feat/cursor-picker-ios-nested` — PR awareness + rich-composer vanished from source while stale dist still looked rich. That class must not recur.
+
+Override remat worktree: `HAPI_DRIVER_REMAT_WT=/path`.
+
 ### NEVER park a peer layer to unblock rematerialize (2026-07-28)
 
 Commenting out someone else's `- branch:` so `hapi-driver-rebuild` goes green **skunks the soup** — dogfood loses chips / attachments / bridges until someone remembers. Incident: meta parked `driver/github-pr-awareness` (and others) for upstream #896 remake → PR chips vanished on `:3006` again.
@@ -346,7 +359,7 @@ Parking your **own** layer briefly while you re-thin is fine. Parking a peer's l
 
 ### Re-thin bases (2026-07-29 — awareness remat)
 
-Remat does **not** merge onto `origin/driver/integration`. It `reset --hard upstream/main`, then merges each manifest layer in order. A tip that `merge-tree`s clean vs yesterday’s published `driver/integration` can still explode (100+ files) against today’s intermediate.
+Remat does **not** merge onto `origin/driver/integration`. It builds on **`driver/integration-wip`** in the remat worktree from `upstream/main` + layers, then promotes the live tip only on success. A tip that `merge-tree`s clean vs yesterday’s published `driver/integration` can still explode (100+ files) against today’s intermediate.
 
 | Thin onto | When |
 |---|---|

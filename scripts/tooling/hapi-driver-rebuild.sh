@@ -4,6 +4,12 @@
 # ~/coding/hapi/driver is READ-ONLY between rebuilds — this script is the only
 # supported way to change it. Hand-edits and cp-from-other-worktrees are forbidden.
 #
+# Atomic remat (2026-07-30): layers+heals merge on branch driver/integration-wip
+# in worktrees/driver-remat. Live driver/integration moves only after that succeeds.
+# Merge conflict → live tip unchanged; resolve in the remat worktree. Post-promote
+# verify/build failure → live tip restored to the pre-remat SHA (dist also rolls
+# back via dist.prev when applicable).
+#
 # Post-2026-06-01 folder reorg: driver lives at ~/coding/hapi/driver (worktree
 # under the canonical hapi/worktrees area), not ~/coding/hapi-driver. Override
 # with HAPI_DRIVER env if needed.
@@ -61,6 +67,8 @@ fi
 
 # shellcheck source=lib/driver-rebuild-agent-guard.sh
 source "$LIB_DIR/driver-rebuild-agent-guard.sh"
+# shellcheck source=lib/driver-remat-atomic.sh
+source "$LIB_DIR/driver-remat-atomic.sh"
 driver_rebuild_agent_guard "$BUILD_WEB" || exit 1
 
 if [[ ! -f "$MANIFEST" ]]; then
@@ -111,7 +119,7 @@ if [[ -d "$DRIVER/web" ]]; then
 fi
 
 if [[ -d "$DRIVER" ]] && [[ -n "$(git -C "$DRIVER" status --porcelain)" ]]; then
-    echo "WARNING: $DRIVER has local changes — rebuild will reset the tree (stash or commit them elsewhere first)." >&2
+    echo "WARNING: $DRIVER has local changes — remat promotes a clean tip over them on success." >&2
     echo "         Only manifest-driven rebuilds belong on the driver tree. See docs/tooling/driver-soup.md" >&2
 fi
 
@@ -144,8 +152,15 @@ if [[ -n "$upstream_tip" && "$base_ref" == "upstream/main" ]]; then
     echo "Base: upstream/main @ $(git -C "$PRIMARY" log -1 --oneline "$upstream_tip")"
 fi
 
-echo "Resetting $DRIVER to $base_ref ($layer_count layer(s))..."
-git -C "$DRIVER" checkout -B "$DRIVER_BRANCH" "$base_ref"
+# Atomic remat: merge layers on WIP in a side worktree; only move live tip on success.
+# Failed remat must leave driver/integration (= dogfood source) unchanged (2026-07-29).
+PREV_TIP="$(git -C "$DRIVER" rev-parse "$DRIVER_BRANCH" 2>/dev/null || git -C "$DRIVER" rev-parse HEAD)"
+WIP_BRANCH="$(driver_remat_wip_branch "$DRIVER_BRANCH")"
+PROMOTED=0
+
+echo "Atomic remat: live tip $DRIVER_BRANCH @ ${PREV_TIP:0:12} (unchanged until success)"
+echo "Preparing remat worktree for $WIP_BRANCH from $base_ref ($layer_count layer(s))..."
+REMAT="$(driver_remat_prepare "$PRIMARY" "$WIP_BRANCH" "$base_ref")"
 
 resolve_merge_ref() {
     local type="$1" ref="$2"
@@ -181,33 +196,33 @@ for i in $(seq 0 $((layer_count - 1))); do
     merge_ref="$(resolve_merge_ref "$type" "$ref")"
 
     echo "Layer $((i + 1))/$layer_count: merging $merge_ref ..."
-    if ! git -C "$DRIVER" merge --no-edit "$merge_ref"; then
+    if ! git -C "$REMAT" merge --no-edit "$merge_ref"; then
         # `git merge` exits 1 on any conflict, even when git rerere then
         # auto-resolves and stages everything. Detect that case: if no
         # unmerged paths remain (and no conflict markers leaked through),
         # commit the rerere-replay and continue. This is the whole point
         # of rerere-train.sh - the operator already taught git how to
         # resolve these collisions on a prior rebuild.
-        unmerged="$(git -C "$DRIVER" diff --name-only --diff-filter=U 2>/dev/null)"
-        markers="$(git -C "$DRIVER" grep -lE '^<<<<<<< |^>>>>>>> ' 2>/dev/null || true)"
+        unmerged="$(git -C "$REMAT" diff --name-only --diff-filter=U 2>/dev/null)"
+        markers="$(git -C "$REMAT" grep -lE '^<<<<<<< |^>>>>>>> ' 2>/dev/null || true)"
         if [[ -z "$unmerged" && -z "$markers" ]]; then
             echo "Layer $((i + 1))/$layer_count: conflicts auto-resolved by git rerere; committing replay"
-            git -C "$DRIVER" commit --no-edit --no-verify -q
+            git -C "$REMAT" commit --no-edit --no-verify -q
             continue
         fi
-        echo "ERROR: merge conflict merging $merge_ref into $DRIVER_BRANCH" >&2
+        echo "ERROR: merge conflict merging $merge_ref into $WIP_BRANCH" >&2
         echo "       unmerged: $(echo "$unmerged" | wc -l) file(s); markers: $(echo "$markers" | wc -l) file(s)" >&2
-        echo "Resolve in $DRIVER, commit, or fix manifest order." >&2
+        driver_remat_fail_leave_wip "$REMAT" "$WIP_BRANCH" "$DRIVER_BRANCH" "$PREV_TIP" "$merge_ref"
         exit 1
     fi
 done
 
-echo "Driver HEAD: $(git -C "$DRIVER" log -1 --oneline)"
+echo "Remat WIP HEAD: $(git -C "$REMAT" log -1 --oneline)"
 
 # Post-merge heal: garden + share-target layers can leave a duplicate /share route
 # that breaks vite ("shareRoute has already been declared"). Thin soup layers cannot
 # reliably carry this delete across rematerializes (tip would be fat). Heal in-tree.
-ROUTER="$DRIVER/web/src/router.tsx"
+ROUTER="$REMAT/web/src/router.tsx"
 if [[ -f "$ROUTER" ]]; then
     share_decls="$(grep -c '^const shareRoute = createRoute' "$ROUTER" || true)"
     if [[ "${share_decls:-0}" -gt 1 ]]; then
@@ -225,9 +240,9 @@ second = matches[1]
 path.write_text(text[: second.start()] + text[second.end() :])
 print(f"  removed duplicate shareRoute block ({len(matches)} -> {len(matches) - 1})")
 PY
-        git -C "$DRIVER" add web/src/router.tsx
-        git -C "$DRIVER" commit --no-edit --no-verify -q -m "fix(soup): dedupe shareRoute after garden/share layer merge"
-        echo "Driver HEAD: $(git -C "$DRIVER" log -1 --oneline)"
+        git -C "$REMAT" add web/src/router.tsx
+        git -C "$REMAT" commit --no-edit --no-verify -q -m "fix(soup): dedupe shareRoute after garden/share layer merge"
+        echo "Remat WIP HEAD: $(git -C "$REMAT" log -1 --oneline)"
     fi
 fi
 
@@ -241,30 +256,49 @@ if [[ -d "$HEAL_DIR" ]]; then
     if [[ ${#heal_patches[@]} -gt 0 ]]; then
         echo "Post-merge heal: applying ${#heal_patches[@]} patch(es) from soup-heals/ ..."
         for patch in "${heal_patches[@]}"; do
-            if git -C "$DRIVER" apply --check -3 "$patch" 2>/dev/null; then
-                git -C "$DRIVER" apply -3 "$patch"
-                git -C "$DRIVER" add -A
-                if git -C "$DRIVER" diff --cached --quiet; then
+            if git -C "$REMAT" apply --check -3 "$patch" 2>/dev/null; then
+                git -C "$REMAT" apply -3 "$patch"
+                git -C "$REMAT" add -A
+                if git -C "$REMAT" diff --cached --quiet; then
                     echo "  applied $(basename "$patch") (no tree change)"
                 else
-                    git -C "$DRIVER" commit --no-edit --no-verify -q -m "fix(soup): apply heal $(basename "$patch")"
+                    git -C "$REMAT" commit --no-edit --no-verify -q -m "fix(soup): apply heal $(basename "$patch")"
                     echo "  applied $(basename "$patch")"
                 fi
             else
                 echo "  skip $(basename "$patch") (already applied or does not apply cleanly)"
             fi
         done
-        echo "Driver HEAD: $(git -C "$DRIVER" log -1 --oneline)"
+        echo "Remat WIP HEAD: $(git -C "$REMAT" log -1 --oneline)"
     fi
 fi
 
+WIP_SHA="$(git -C "$REMAT" rev-parse HEAD)"
+echo "Promoting live tip $DRIVER_BRANCH → ${WIP_SHA:0:12} (layers+heals OK)..."
+driver_remat_promote "$DRIVER" "$DRIVER_BRANCH" "$WIP_SHA"
+PROMOTED=1
+echo "Driver HEAD: $(git -C "$DRIVER" log -1 --oneline)"
+
 VERIFY_SCRIPT="$PRIMARY/scripts/tooling/verify-soup-web-dist.mjs"
+
+# After promote: any hard failure restores live tip so dogfood source matches "no change on fail".
+remat_rollback_live_tip() {
+    local reason="${1:-post-promote failure}"
+    if [[ "${PROMOTED:-0}" -eq 1 && -n "${PREV_TIP:-}" ]]; then
+        echo "ERROR: $reason — rolling back live tip (atomic remat)" >&2
+        driver_remat_restore_tip "$DRIVER" "$DRIVER_BRANCH" "$PREV_TIP"
+        PROMOTED=0
+    fi
+}
 
 if [[ "$BUILD_WEB" -eq 1 ]] || [[ ! -f "$DRIVER/web/dist/index.html" ]]; then
     echo "Building web (atomic swap + stamp)..."
     # shellcheck source=lib/build-web-atomic.sh
     source "$LIB_DIR/build-web-atomic.sh"
-    build_web_atomic "$DRIVER"
+    if ! build_web_atomic "$DRIVER"; then
+        remat_rollback_live_tip "web build failed"
+        exit 1
+    fi
 
     if [[ -f "$VERIFY_SCRIPT" ]]; then
         echo "Verifying web/dist matches driver web/src..."
@@ -275,6 +309,7 @@ if [[ "$BUILD_WEB" -eq 1 ]] || [[ ! -f "$DRIVER/web/dist/index.html" ]]; then
                 mv "$DRIVER/web/dist.prev" "$DRIVER/web/dist"
                 echo "Rolled back to previous dist bundle." >&2
             fi
+            remat_rollback_live_tip "web/dist verify failed"
             exit 1
         fi
     fi
@@ -285,20 +320,30 @@ elif [[ -f "$VERIFY_SCRIPT" ]] && [[ -f "$DRIVER/web/dist/index.html" ]]; then
         echo "ERROR: driver/integration advanced but web/dist is stale (2026-06-28 class)." >&2
         echo "       Re-run: hapi-driver-rebuild --build-web --verify" >&2
         echo "       Or:     hapi-driver-build-web" >&2
+        remat_rollback_live_tip "stale web/dist after promote"
         exit 1
     fi
 fi
 
 if [[ "$VERIFY" -eq 1 ]]; then
     echo "Running typecheck..."
-    (cd "$DRIVER" && "$BUN" typecheck)
+    if ! (cd "$DRIVER" && "$BUN" typecheck); then
+        remat_rollback_live_tip "typecheck failed"
+        exit 1
+    fi
     HOTFILES="$PRIMARY/scripts/tooling/hapi-soup-hotfiles-check.mjs"
     if [[ -f "$HOTFILES" ]]; then
         echo "Checking soup hot-file consistency (syncEngine vs rpcGateway)..."
-        "$BUN" run "$HOTFILES" "$DRIVER"
+        if ! "$BUN" run "$HOTFILES" "$DRIVER"; then
+            remat_rollback_live_tip "soup hotfiles check failed"
+            exit 1
+        fi
     fi
     echo "Running tests..."
-    (cd "$DRIVER" && "$BUN" run test)
+    if ! (cd "$DRIVER" && "$BUN" run test); then
+        remat_rollback_live_tip "tests failed"
+        exit 1
+    fi
     STAMP="${HAPI_DRIVER_VERIFY_STAMP:-$HOME/.config/hapi/driver-verify-stamp}"
     mkdir -p "$(dirname "$STAMP")"
     git -C "$DRIVER" rev-parse HEAD >"$STAMP"
