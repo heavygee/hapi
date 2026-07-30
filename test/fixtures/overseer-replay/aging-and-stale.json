@@ -1,0 +1,21 @@
+{
+    "name": "aging-and-stale",
+    "description": "Baseline inbox items at a fixed reference epoch (now = 1700000000000). One 25h-old low-tier item plus a fresh review item, and a mostly-low priority distribution. Expected: countStaleItems flags the 25h item; aging makes the old item out-prioritize the fresh higher-tier one; distribution is mostly low.",
+    "sessions": [
+        { "key": "s1", "tag": "p1", "flavor": "claude", "name": "p1" },
+        { "key": "s2", "tag": "p2", "flavor": "codex", "name": "p2" }
+    ],
+    "events": [],
+    "inboxItems": [
+        { "status": "new", "basePriority": 50, "category": "FINALE", "title": "old completed needs review", "summary": "PR open 25h", "createdAt": 1699910000000, "sessionKey": "s1" },
+        { "status": "new", "basePriority": 40, "category": "REVIEW", "title": "fresh review", "summary": "just queued", "createdAt": 1699999700000, "sessionKey": "s2" },
+        { "status": "new", "basePriority": 10, "category": "APPROVAL", "title": "approval high", "summary": "approve push", "createdAt": 1699999800000, "sessionKey": "s1" },
+        { "status": "new", "basePriority": 30, "category": "QUESTION", "title": "decision medium", "summary": "which option", "createdAt": 1699999800000, "sessionKey": "s2" },
+        { "status": "new", "basePriority": 60, "category": "STALE", "title": "low 1", "summary": "low", "createdAt": 1699999800000, "sessionKey": "s1" },
+        { "status": "new", "basePriority": 60, "category": "STALE", "title": "low 2", "summary": "low", "createdAt": 1699999800000, "sessionKey": "s2" },
+        { "status": "new", "basePriority": 70, "category": "QUESTION", "title": "low 3", "summary": "low", "createdAt": 1699999800000, "sessionKey": "s1" },
+        { "status": "new", "basePriority": 70, "category": "QUESTION", "title": "low 4", "summary": "low", "createdAt": 1699999800000, "sessionKey": "s2" },
+        { "status": "new", "basePriority": 50, "category": "FINALE", "title": "low 5", "summary": "low", "createdAt": 1699999800000, "sessionKey": "s1" },
+        { "status": "new", "basePriority": 50, "category": "FINALE", "title": "low 6", "summary": "low", "createdAt": 1699999800000, "sessionKey": "s2" }
+    ]
+}

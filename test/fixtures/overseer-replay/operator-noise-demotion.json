@@ -1,0 +1,10 @@
+{
+    "name": "operator-noise-demotion",
+    "description": "An item the operator marks as noise. Expected: a dismiss operator-action moves the item out of the active queue (status obsoleted) and is recorded as a negative training label for future salience tuning.",
+    "sessions": [
+        { "key": "s", "tag": "peer-noise", "flavor": "codex", "name": "peer-noise" }
+    ],
+    "events": [
+        { "sid": 1, "ts": 1700000000000, "sessionKey": "s", "sourceKind": "worker", "eventType": "needs_review", "attentionCandidate": 1, "operatorActionRequired": 1, "summary": "linter warning batch (operator considers this noise)" }
+    ]
+}
