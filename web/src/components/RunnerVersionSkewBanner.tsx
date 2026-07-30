@@ -15,9 +15,11 @@ import {
     getRunnerSkewDismissUntil,
     isRunnerSkewMinimized,
     isRunnerSkewTempDismissed,
+    runnerSkewBannerScope,
     setRunnerSkewMinimized,
     tempDismissRunnerSkew,
 } from '@/lib/runnerSkewBannerState'
+import { getTokenNamespace } from '@/lib/tokenNamespace'
 
 type RunnerSelfUpgradeStatus = 'started' | 'already-current' | 'unsupported' | 'failed'
 
@@ -80,7 +82,7 @@ export function RunnerVersionSkewBanner({
     /** When true, parent owns fixed positioning (share a vertical stack). */
     stacked?: boolean
 } = {}) {
-    const { api } = useAppContext()
+    const { api, token, baseUrl } = useAppContext()
     const queryClient = useQueryClient()
     const { machines } = useMachines(api, true)
     const { info } = useUpgradeInfo(api, true)
@@ -89,46 +91,52 @@ export function RunnerVersionSkewBanner({
     const { haptic } = usePlatform()
     const policy = info?.policy ?? DEFAULT_FLEET_UPGRADE_POLICY
     const skewed = policy === 'silent' ? [] : listSkewedMachines(machines, info?.offer ?? null)
-    const [minimized, setMinimized] = useState(() => isRunnerSkewMinimized())
-    const [dismissed, setDismissed] = useState(() => isRunnerSkewTempDismissed())
+    const bannerScope = runnerSkewBannerScope(baseUrl, getTokenNamespace(token))
+    const [minimized, setMinimized] = useState(() => isRunnerSkewMinimized(bannerScope))
+    const [dismissed, setDismissed] = useState(() => isRunnerSkewTempDismissed(bannerScope))
     const [busyId, setBusyId] = useState<string | null>(null)
     const [actionError, setActionError] = useState<string | null>(null)
     const [actionInfo, setActionInfo] = useState<string | null>(null)
 
     useEffect(() => {
+        setMinimized(isRunnerSkewMinimized(bannerScope))
+        setDismissed(isRunnerSkewTempDismissed(bannerScope))
+    }, [bannerScope])
+
+    useEffect(() => {
         if (!dismissed) {
             return
         }
-        const remaining = Math.max(0, getRunnerSkewDismissUntil() - Date.now())
+        const remaining = Math.max(0, getRunnerSkewDismissUntil(bannerScope) - Date.now())
         if (remaining === 0) {
-            clearRunnerSkewTempDismiss()
+            clearRunnerSkewTempDismiss(bannerScope)
             setDismissed(false)
             return
         }
         const timer = window.setTimeout(() => {
-            clearRunnerSkewTempDismiss()
+            clearRunnerSkewTempDismiss(bannerScope)
             setDismissed(false)
         }, remaining)
         return () => window.clearTimeout(timer)
-    }, [dismissed])
+    }, [dismissed, bannerScope])
 
     const onMinimize = useCallback(() => {
         haptic.impact('light')
         setMinimized(true)
-        setRunnerSkewMinimized(true)
-    }, [haptic])
+        setRunnerSkewMinimized(bannerScope, true)
+    }, [haptic, bannerScope])
 
     const onExpand = useCallback(() => {
         haptic.impact('light')
         setMinimized(false)
-        setRunnerSkewMinimized(false)
-    }, [haptic])
+        setRunnerSkewMinimized(bannerScope, false)
+    }, [haptic, bannerScope])
 
     const onTempDismiss = useCallback(() => {
         haptic.impact('light')
         setDismissed(true)
-        tempDismissRunnerSkew()
-    }, [haptic])
+        tempDismissRunnerSkew(bannerScope)
+    }, [haptic, bannerScope])
 
     const refreshFleetQueries = useCallback(async () => {
         await Promise.all([
