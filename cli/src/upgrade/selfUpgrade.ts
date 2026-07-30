@@ -376,6 +376,29 @@ export function createArtifactDownloadSizeGuard(sizeBytes: number | undefined): 
     }
 }
 
+/**
+ * Hub auth + extra headers are only for same-origin hub artifact URLs.
+ * Absolute CDN/third-party artifact origins must not receive the runner token.
+ */
+export function artifactDownloadRequestHeaders(options: {
+    artifactUrl: URL
+    downloadBaseUrl: string
+    authToken: string
+}): Record<string, string> {
+    let hubOrigin: string
+    try {
+        hubOrigin = new URL(options.downloadBaseUrl).origin
+    } catch {
+        return {}
+    }
+    if (options.artifactUrl.origin !== hubOrigin) {
+        return {}
+    }
+    return buildHubRequestHeaders({
+        Authorization: `Bearer ${options.authToken}`,
+    })
+}
+
 async function installFromArtifact(
     offer: HubUpgradeOffer,
     downloadBaseUrl: string,
@@ -395,8 +418,10 @@ async function installFromArtifact(
 
     const response = await fetch(url, {
         signal: AbortSignal.timeout(UPGRADE_STEP_TIMEOUT_MS),
-        headers: buildHubRequestHeaders({
-            Authorization: `Bearer ${authToken}`,
+        headers: artifactDownloadRequestHeaders({
+            artifactUrl: url,
+            downloadBaseUrl,
+            authToken,
         }),
     })
     if (!response.ok || !response.body) {
