@@ -4,14 +4,15 @@ import {
     OVERSEER_TOOL_NAMES,
     buildOverseerIdentity,
     buildOverseerSystemPrompt,
-    overseerToolArgsSchemas,
-    type OverseerToolName
+    type OverseerConverseMessage
 } from '@hapi/protocol'
 import { listConfiguredVoiceBackends, resolveHubVoiceBackend } from '@hapi/protocol/voice'
 import type { SyncEngine } from '../../sync/syncEngine'
-import type { OverseerEntity } from '../../sync/overseerEntity'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireSyncEngine } from './guards'
+import { isOverseerToolName, runOverseerTool } from '../../overseer/runOverseerTool'
+import { runOverseerConverse } from '../../overseer/converse'
+import { BrainUnavailableError, resolveBrainConfig } from '../../overseer/brainClient'
 
 const convoTurnBodySchema = z.object({
     operatorText: z.string().max(8000).default(''),
@@ -25,40 +26,13 @@ const convoTurnBodySchema = z.object({
     ts: z.number().int().positive().optional()
 })
 
-function runTool(overseer: OverseerEntity, tool: OverseerToolName, args: unknown): unknown {
-    switch (tool) {
-        case 'query_events':
-            return { events: overseer.queryEvents(overseerToolArgsSchemas.query_events.parse(args)) }
-        case 'query_inbox':
-            return overseer.queryInbox(overseerToolArgsSchemas.query_inbox.parse(args))
-        case 'get_session_state': {
-            const parsed = overseerToolArgsSchemas.get_session_state.parse(args)
-            return { state: overseer.getSessionState(parsed.sessionId) }
-        }
-        case 'get_session_recent_output': {
-            const parsed = overseerToolArgsSchemas.get_session_recent_output.parse(args)
-            return { chunks: overseer.getSessionRecentOutput(parsed.sessionId, parsed.n ?? 10) }
-        }
-        case 'get_worker_health': {
-            const parsed = overseerToolArgsSchemas.get_worker_health.parse(args)
-            return { health: overseer.getWorkerHealth(parsed.sessionId) }
-        }
-        case 'explain_priority': {
-            const parsed = overseerToolArgsSchemas.explain_priority.parse(args)
-            return { explanation: overseer.explainPriority(parsed.itemId) }
-        }
-        case 'list_active_workers':
-            return { workers: overseer.listActiveWorkers(overseerToolArgsSchemas.list_active_workers.parse(args)) }
-        default: {
-            const exhaustive: never = tool
-            throw new Error(`Unknown overseer tool: ${String(exhaustive)}`)
-        }
-    }
-}
-
-function isToolName(value: string): value is OverseerToolName {
-    return (OVERSEER_TOOL_NAMES as readonly string[]).includes(value)
-}
+const converseBodySchema = z.object({
+    messages: z.array(z.object({
+        role: z.enum(['operator', 'overseer']),
+        content: z.string().max(8000)
+    })).min(1).max(40),
+    relatedSessionId: z.string().min(1).optional()
+})
 
 export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
@@ -93,7 +67,7 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
         if (engine instanceof Response) return engine
 
         const tool = c.req.param('tool')
-        if (!isToolName(tool)) {
+        if (!isOverseerToolName(tool)) {
             return c.json({ error: `Unknown overseer tool: ${tool}` }, 404)
         }
 
@@ -105,11 +79,77 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         try {
-            const result = runTool(engine.getOverseer(), tool, body ?? {})
+            const result = runOverseerTool(engine.getOverseer(), tool, body ?? {})
             return c.json({ tool, result })
         } catch (error) {
             if (error instanceof z.ZodError) {
                 return c.json({ error: 'Invalid tool arguments', issues: error.flatten() }, 400)
+            }
+            throw error
+        }
+    })
+
+    // Converse — the modality-agnostic conversation core. Runs the brain LLM
+    // with the read-only tools and returns a human-facing reply + tool trace.
+    // Text is the first transport (debug settings); voice/XR reuse this. When
+    // the brain is offline (GPU pulled for VR), returns brainOnline:false with a
+    // friendly message rather than an error.
+    app.post('/overseer/converse', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) return engine
+
+        let body: unknown
+        try {
+            body = await c.req.json()
+        } catch {
+            return c.json({ error: 'Invalid JSON body' }, 400)
+        }
+
+        const parsed = converseBodySchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body', issues: parsed.error.flatten() }, 400)
+        }
+        const messages = parsed.data.messages as OverseerConverseMessage[]
+        if (messages[messages.length - 1]?.role !== 'operator') {
+            return c.json({ error: 'Last message must be from the operator' }, 400)
+        }
+
+        const config = resolveBrainConfig(process.env)
+        if (!config) {
+            return c.json({
+                reply: 'The Overseer brain is not configured on this hub (set OVERSEER_BRAIN_URL). I can still show raw events and inbox items, but I cannot answer in conversation yet.',
+                toolTrace: [],
+                model: null,
+                brainOnline: false
+            })
+        }
+
+        try {
+            const { reply, toolTrace } = await runOverseerConverse({
+                overseer: engine.getOverseer(),
+                config,
+                messages
+            })
+
+            const lastOperator = [...messages].reverse().find((m) => m.role === 'operator')?.content ?? ''
+            engine.getOverseer().recordConvoTurn({
+                operatorText: lastOperator,
+                overseerText: reply,
+                relatedSessionId: parsed.data.relatedSessionId ?? null,
+                toolCalls: toolTrace
+                    .filter((t) => t.ok)
+                    .map((t) => ({ tool: t.tool, argsSummary: JSON.stringify(t.args).slice(0, 500) }))
+            })
+
+            return c.json({ reply, toolTrace, model: config.model, brainOnline: true })
+        } catch (error) {
+            if (error instanceof BrainUnavailableError) {
+                return c.json({
+                    reply: 'The Overseer brain is offline right now (the GPU may be in use for VR). Try again shortly — your events and inbox are still being captured.',
+                    toolTrace: [],
+                    model: config.model,
+                    brainOnline: false
+                })
             }
             throw error
         }

@@ -819,4 +819,17 @@ export class ApiClient {
         })
     }
 
+    async overseerConverse(
+        messages: import('@hapi/protocol').OverseerConverseMessage[],
+        relatedSessionId?: string | null
+    ): Promise<import('@hapi/protocol').OverseerConverseResponse> {
+        return await this.request('/api/overseer/converse', {
+            method: 'POST',
+            body: JSON.stringify({
+                messages,
+                relatedSessionId: relatedSessionId ?? undefined
+            })
+        })
+    }
+
 }
