@@ -130,6 +130,10 @@ describe('upgradeTarget', () => {
         writeFileSync(path, 'x')
         process.env.HAPI_CLI_EXECUTABLE = join(home, 'hapi-current-shim')
         writeFileSync(process.env.HAPI_CLI_EXECUTABLE, 'shim')
+        // Same-semver stale check compares mtimes. Age the shim so the marker
+        // is newer and same-version delegation stays deterministic on coarse FS.
+        const past = new Date(Date.now() - 60_000)
+        utimesSync(process.env.HAPI_CLI_EXECUTABLE, past, past)
         try {
             const target = {
                 path,
