@@ -489,6 +489,67 @@ describe('SyncEngine fleet upgrade', () => {
         }
     })
 
+    it('rejects already-current when the machine still trails generation', async () => {
+        const offer: HubUpgradeOffer = {
+            channel: 'hub-artifact',
+            targetVersion: '0.25.1',
+            targetGeneration: 'gen-hub',
+            targetCapabilities: ['cursor-chat-store-status', 'runner-self-upgrade', 'cli-artifact-generation'],
+            artifact: {
+                url: '/cli/upgrade/cli-artifact',
+                sha256: 'abc',
+                platform: 'linux',
+                arch: 'x64',
+                sizeBytes: 1,
+            },
+        }
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never,
+            {
+                getUpgradeOffer: () => offer,
+                prepareArtifactOffer: async (base) => base,
+            },
+        )
+
+        try {
+            const runnerSelfUpgrade = mock(async () => ({
+                status: 'already-current',
+                message: 'Already at 0.25.1',
+                channel: 'hub-artifact',
+            }))
+            ;(engine as any).rpcGateway.runnerSelfUpgrade = runnerSelfUpgrade
+
+            engine.getOrCreateMachine(
+                'stale-gen',
+                {
+                    host: 'homelab',
+                    platform: 'linux',
+                    arch: 'x64',
+                    happyCliVersion: '0.25.1',
+                    // Pre-generation runner: same semver, no fingerprint, no marker cap.
+                    capabilities: ['cursor-chat-store-status', 'runner-self-upgrade', 'stop-runner'],
+                },
+                null,
+                'default',
+            )
+            engine.handleMachineAlive({ machineId: 'stale-gen', time: Date.now() })
+
+            const result = await engine.upgradeMachineRunner('stale-gen', 'default')
+            expect(result.type).toBe('error')
+            if (result.type === 'error') {
+                expect(result.code).toBe('upgrade_failed')
+                expect(result.message).toMatch(/already-current but still trails/i)
+            }
+            expect(runnerSelfUpgrade).toHaveBeenCalled()
+        } finally {
+            engine.stop()
+        }
+    })
+
     it('refuses manual upgrade when runner advertised versionHandoffDisabled', async () => {
         const offer: HubUpgradeOffer = {
             channel: 'npm',

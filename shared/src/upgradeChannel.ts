@@ -176,6 +176,10 @@ export function machineTrailsUpgradeOffer(
  * kill (no upgrades at all); this policy governs whether the hub acts/alerts
  * when a channel IS available.
  *
+ * Vocabulary: a *machine* is a host record in the hub registry; its *runner*
+ * is the daemon (`hapi runner start`) that handles spawn + self-upgrade RPCs.
+ * Skew banners list machines whose runners trail the hub offer.
+ *
  * Default is `alert`, not `auto`: mutating someone's remote machines without
  * an explicit opt-in is too aggressive for the 99% single-machine case. A
  * dismissible banner is the safe default; multi-machine operators opt into
