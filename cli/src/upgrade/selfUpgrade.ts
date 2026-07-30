@@ -569,16 +569,14 @@ export async function applyRunnerSelfUpgrade(options: {
     }
     runnerSelfUpgradeInFlight = true
     try {
-        const result = await applyRunnerSelfUpgradeUnlocked(options)
+        const outcome = await applyRunnerSelfUpgradeUnlocked(options)
         // Keep the gate set when this process is about to exit after handoff —
         // clearing here would let the mtime heartbeat spawn a competing
         // replacement before process.exit runs.
-        const exitingSoon = result.status === 'started'
-            || (result.status === 'failed' && /exiting/i.test(result.message))
-        if (!exitingSoon) {
+        if (!outcome.exitScheduled) {
             runnerSelfUpgradeInFlight = false
         }
-        return result
+        return outcome.response
     } catch (error) {
         runnerSelfUpgradeInFlight = false
         throw error
@@ -624,6 +622,20 @@ export function restoreParentRunnerStateAfterFailedHandoff(
     }))
 }
 
+type UpgradeOutcome = {
+    response: RunnerSelfUpgradeResponse
+    /** True when this process already scheduled exit / shutdown after handoff. */
+    exitScheduled: boolean
+}
+
+function stayAlive(response: RunnerSelfUpgradeResponse): UpgradeOutcome {
+    return { response, exitScheduled: false }
+}
+
+function scheduleExit(response: RunnerSelfUpgradeResponse): UpgradeOutcome {
+    return { response, exitScheduled: true }
+}
+
 async function applyRunnerSelfUpgradeUnlocked(options: {
     offer: HubUpgradeOffer
     downloadBaseUrl: string
@@ -631,7 +643,7 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
     localVersion?: string
     localGeneration?: string | null
     requestShutdown?: () => void
-}): Promise<RunnerSelfUpgradeResponse> {
+}): Promise<UpgradeOutcome> {
     const localVersion = options.localVersion ?? packageJson.version
     const localGeneration = options.localGeneration
         ?? readUpgradeTarget()?.targetGeneration
@@ -643,13 +655,13 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
         localGeneration,
     )
     if (!decision.apply) {
-        return {
+        return stayAlive({
             status: decision.reason === 'already-current' ? 'already-current' : 'unsupported',
             message: decision.reason === 'already-current'
                 ? `Already at ${localVersion}`
                 : `Upgrade channel ${options.offer.channel} not applicable`,
             channel: options.offer.channel,
-        }
+        })
     }
 
     try {
@@ -663,11 +675,11 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
                 options.authToken,
             )
         } else {
-            return {
+            return stayAlive({
                 status: 'unsupported',
                 message: `Unknown channel ${options.offer.channel}`,
                 channel: options.offer.channel,
-            }
+            })
         }
 
         // Capture before spawn: the child may overwrite runner.state.json, and a
@@ -695,11 +707,11 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
                         process.exit(0)
                     }, 250)
                 }
-                return {
+                return scheduleExit({
                     status: 'failed',
                     message: 'Replacement did not register and runner lock could not be reacquired; exiting',
                     channel: options.offer.channel,
-                }
+                })
             }
             try {
                 restoreParentRunnerStateAfterFailedHandoff(parentState)
@@ -707,11 +719,11 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
                 logger.debug('[SELF-UPGRADE] Failed to reclaim runner.state.json after failed handoff', error)
             }
             logger.debug('[SELF-UPGRADE] Replacement did not register; current runner reclaimed lock and stays up')
-            return {
+            return stayAlive({
                 status: 'failed',
                 message: 'Replacement runner did not register; current runner left running',
                 channel: options.offer.channel,
-            }
+            })
         }
 
         // Handoff confirmed — only then make the target durable for supervisor restarts.
@@ -748,25 +760,25 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
         }, 250)
 
         if (markerError) {
-            return {
+            return scheduleExit({
                 status: 'failed',
                 message: `Replacement is running, but the durable target could not be saved: ${markerError.message}`,
                 channel: options.offer.channel,
-            }
+            })
         }
 
-        return {
+        return scheduleExit({
             status: 'started',
             message: `Upgrade to ${options.offer.targetVersion} via ${options.offer.channel} started`,
             channel: options.offer.channel,
-        }
+        })
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         logger.debug('[SELF-UPGRADE] failed', message)
-        return {
+        return stayAlive({
             status: 'failed',
             message,
             channel: options.offer.channel,
-        }
+        })
     }
 }
