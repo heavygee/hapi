@@ -14,6 +14,7 @@ import {
     pruneSupersededArtifactsAfterDurableMarker,
     resolvePostNpmInstallExecutable,
     shouldApplyUpgradeOffer,
+    UPGRADE_STEP_TIMEOUT_MS,
     waitForChildSpawn,
 } from './selfUpgrade'
 import type { HubUpgradeOffer } from '@hapi/protocol/upgradeChannel'
@@ -241,12 +242,25 @@ describe('shouldApplyUpgradeOffer', () => {
 })
 
 describe('assertExecutableMatchesTargetVersion', () => {
-    it('accepts --version output that includes the target', async () => {
+    it('accepts --version output that exactly matches the target', async () => {
         await expect(assertExecutableMatchesTargetVersion(
             '/fake/hapi',
             '0.24.0',
             async () => ({ ok: true, output: 'hapi version: 0.24.0\n' }),
         )).resolves.toBeUndefined()
+    })
+
+    it('rejects prefix/substring false positives (beta / trailing digit)', async () => {
+        await expect(assertExecutableMatchesTargetVersion(
+            '/fake/hapi',
+            '0.24.0',
+            async () => ({ ok: true, output: 'hapi version: 0.24.0-beta\n' }),
+        )).rejects.toThrow(/does not match target 0\.24\.0/)
+        await expect(assertExecutableMatchesTargetVersion(
+            '/fake/hapi',
+            '0.24.0',
+            async () => ({ ok: true, output: 'hapi version: 0.24.00\n' }),
+        )).rejects.toThrow(/does not match target 0\.24\.0/)
     })
 
     it('rejects an older PATH hit after install', async () => {
@@ -263,6 +277,13 @@ describe('assertExecutableMatchesTargetVersion', () => {
             '0.24.0',
             async () => ({ ok: false, output: 'ENOENT' }),
         )).rejects.toThrow(/does not match target/)
+    })
+})
+
+describe('UPGRADE_STEP_TIMEOUT_MS', () => {
+    it('stays under the hub upgrade RPC timeout (~10m)', () => {
+        expect(UPGRADE_STEP_TIMEOUT_MS).toBe(9 * 60_000)
+        expect(UPGRADE_STEP_TIMEOUT_MS).toBeLessThan(10 * 60_000)
     })
 })
 
