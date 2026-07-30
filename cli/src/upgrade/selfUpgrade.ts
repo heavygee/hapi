@@ -145,12 +145,17 @@ export function pruneSupersededArtifactsAfterDurableMarker(opts: {
     pruneSupersededArtifacts(opts.keepPath, opts.binDir)
 }
 
+/** Stay under the hub's ~10m upgrade RPC timeout so the in-flight gate can clear. */
+export const UPGRADE_STEP_TIMEOUT_MS = 9 * 60_000
+
 async function runCommand(command: string, args: string[]): Promise<{ ok: boolean; output: string }> {
     try {
         const proc = Bun.spawn([command, ...args], {
             stdout: 'pipe',
             stderr: 'pipe',
             env: process.env,
+            // Bun kills the child when the timeout elapses (default SIGTERM).
+            timeout: UPGRADE_STEP_TIMEOUT_MS,
         })
         const [stdout, stderr, exitCode] = await Promise.all([
             new Response(proc.stdout).text(),
@@ -158,6 +163,12 @@ async function runCommand(command: string, args: string[]): Promise<{ ok: boolea
             proc.exited,
         ])
         const output = `${stdout}\n${stderr}`.trim()
+        if (exitCode !== 0 && proc.signalCode) {
+            return {
+                ok: false,
+                output: output || `command timed out or killed (${proc.signalCode}) after ${UPGRADE_STEP_TIMEOUT_MS}ms`,
+            }
+        }
         return { ok: exitCode === 0, output }
     } catch (error) {
         // Missing binary (e.g. no `bun` on PATH) throws before exit codes — treat as
@@ -239,8 +250,12 @@ export async function assertExecutableMatchesTargetVersion(
     run: (command: string, args: string[]) => Promise<{ ok: boolean; output: string }> = runCommand,
 ): Promise<void> {
     const probe = await run(installed, ['--version'])
-    const expected = `hapi version: ${targetVersion}`
-    if (!probe.ok || !probe.output.includes(expected)) {
+    const actual = probe.output
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .find((line) => line.startsWith('hapi version: '))
+        ?.slice('hapi version: '.length)
+    if (!probe.ok || actual !== targetVersion) {
         throw new Error(
             `Resolved hapi executable does not match target ${targetVersion}`
             + (probe.output ? ` (got: ${probe.output.slice(0, 200)})` : ''),
@@ -323,6 +338,7 @@ async function installFromArtifact(
     url.searchParams.set('version', offer.targetVersion)
 
     const response = await fetch(url, {
+        signal: AbortSignal.timeout(UPGRADE_STEP_TIMEOUT_MS),
         headers: buildHubRequestHeaders({
             Authorization: `Bearer ${authToken}`,
         }),
