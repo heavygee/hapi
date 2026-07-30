@@ -135,6 +135,19 @@ vi.mock('@/lib/app-context', () => ({
     }),
 }))
 
+vi.mock('@/hooks/queries/useFeatures', () => ({
+    useFeatures: () => ({
+        features: {
+            githubPrAwareness: { enabled: false, source: 'default' },
+        },
+        isLoading: false,
+    }),
+    usePatchFeatures: () => ({
+        setGithubPrAwareness: vi.fn(),
+        isPending: false,
+    }),
+}))
+
 vi.mock('@/components/settings/CompanionPairing', () => ({
     CompanionPairing: () => <div>Companion pairing</div>,
 }))
@@ -161,23 +174,6 @@ vi.mock('./useVoiceSettings', () => ({
         voiceLanguages: [{ code: null, name: 'Auto-detect' }, { code: 'en', name: 'English' }],
         playingVoiceId: null,
         previewVoice: vi.fn(),
-    }),
-}))
-
-vi.mock('@/lib/app-context', () => ({
-    useAppContext: () => ({ api: {} }),
-}))
-
-vi.mock('@/hooks/queries/useFeatures', () => ({
-    useFeatures: () => ({
-        features: {
-            githubPrAwareness: { enabled: false, source: 'default' },
-        },
-        isLoading: false,
-    }),
-    usePatchFeatures: () => ({
-        setGithubPrAwareness: vi.fn(),
-        isPending: false,
     }),
 }))
 
