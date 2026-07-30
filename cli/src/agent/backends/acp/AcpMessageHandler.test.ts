@@ -500,9 +500,10 @@ describe('AcpMessageHandler', () => {
             (m): m is Extract<AgentMessage, { type: 'tool_call' }> => m.type === 'tool_call'
         );
         expect(calls).toHaveLength(2);
-        // Initial call: derived from generic title (placeholder)
-        expect(calls[0].input).toEqual({ command: 'Shell' });
-        // Updated call: re-derived from concrete title
+        // Initial call: generic display title is not a real command — leave null
+        // (same rule as Cursor "Read File"; avoids poisoning tool cards).
+        expect(calls[0].input).toBeNull();
+        // Updated call: re-derived from concrete "Shell: …" title
         expect(calls[1].input).toEqual({ command: 'free -h' });
     });
 
@@ -2506,5 +2507,88 @@ describe('AcpMessageHandler', () => {
             expect(messages[imageIndex].source).toEqual({ ingress: 'acp', flavor: 'cursor' });
         }
         clearGeneratedImages();
+    });
+
+    describe('Cursor ACP empty rawInput + path recovery', () => {
+        it('treats rawInput: {} as absent and uses locations for Read File', () => {
+            const messages: AgentMessage[] = [];
+            const handler = new AcpMessageHandler((message) => messages.push(message));
+
+            handler.handleUpdate({
+                sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCall,
+                toolCallId: 'cursor-read',
+                title: 'Read File',
+                kind: 'read',
+                rawInput: {},
+                locations: [{ path: '/home/x/src/a.ts' }],
+                status: 'in_progress'
+            });
+
+            const toolCall = messages.find(
+                (m): m is Extract<AgentMessage, { type: 'tool_call' }> => m.type === 'tool_call'
+            );
+            expect(toolCall!.input).toEqual({ file_path: '/home/x/src/a.ts' });
+        });
+
+        it('does not set file_path from display title "Read File"', () => {
+            const messages: AgentMessage[] = [];
+            const handler = new AcpMessageHandler((message) => messages.push(message));
+
+            handler.handleUpdate({
+                sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCall,
+                toolCallId: 'cursor-read-bare',
+                title: 'Read File',
+                kind: 'read',
+                rawInput: {},
+                status: 'in_progress'
+            });
+
+            const toolCall = messages.find(
+                (m): m is Extract<AgentMessage, { type: 'tool_call' }> => m.type === 'tool_call'
+            );
+            expect(toolCall!.input).toBeNull();
+        });
+
+        it('backfills Edit File path from rawOutput on completion', () => {
+            const messages: AgentMessage[] = [];
+            const handler = new AcpMessageHandler((message) => messages.push(message));
+
+            handler.handleUpdate({
+                sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCall,
+                toolCallId: 'cursor-edit',
+                title: 'Edit File',
+                kind: 'edit',
+                rawInput: {},
+                status: 'in_progress'
+            });
+
+            handler.handleUpdate({
+                sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCallUpdate,
+                toolCallId: 'cursor-edit',
+                title: 'Edit File',
+                kind: 'edit',
+                rawInput: {},
+                status: 'completed',
+                rawOutput: {
+                    path: '/home/x/docs/plan.md',
+                    oldText: 'a',
+                    newText: 'b'
+                }
+            });
+
+            const toolCalls = messages.filter(
+                (m): m is Extract<AgentMessage, { type: 'tool_call' }> =>
+                    m.type === 'tool_call' && m.id === 'cursor-edit'
+            );
+            const last = toolCalls[toolCalls.length - 1]!;
+            expect(last.input).toEqual({ file_path: '/home/x/docs/plan.md' });
+
+            const result = getToolResult(messages, 'cursor-edit');
+            expect(result.output).toEqual({
+                path: '/home/x/docs/plan.md',
+                oldText: 'a',
+                newText: 'b'
+            });
+        });
     });
 });
