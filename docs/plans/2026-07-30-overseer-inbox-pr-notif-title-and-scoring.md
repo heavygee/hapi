@@ -1,6 +1,10 @@
 # Plan: Overseer inbox — de-flood upstream PR notifications (title + scoring)
 
-> **Status:** implementing 2026-07-30
+> **Status:** IMPLEMENTED 2026-07-30 — fork PR [heavygee/hapi#99](https://github.com/heavygee/hapi/pull/99),
+> branch `feat/contrib-state-inbox-title-priority` (stacked on `feat/contrib-state-channel-ingest`).
+> Tests green (shared 10, hub inbox 10, route 2, recorder 8, pr-emoji-core 88); `bun run typecheck:hub` clean.
+> Simulated after over real 174-item inbox: bare-URL titles 25→0; PR items in top-12 triage 8/12→0/12.
+> Awaiting meta bot soup rematerialize for live converse before/after.
 > **Owner:** feature peer (spawned by 🔁overseer prep)
 > **Scope:** INGEST + SCORING layer only. NOT the converse layer (`feat/overseer-text-converse`, owned by 🔁overseer prep).
 > **Companion spec:** [`2026-07-25-contrib-state-event-ingest-spec.md`](./2026-07-25-contrib-state-event-ingest-spec.md)
@@ -58,6 +62,17 @@ Result: worker blocked/needs_decision/failed/review/completed/stale = 20/30/35/4
 
 ## Delivery
 - Branch `feat/contrib-state-inbox-title-priority` off `feat/contrib-state-channel-ingest` (fork-only overseer stack; NOT upstream).
-- Fork PR against `heavygee/hapi`.
-- Soup: repoint the `feat/contrib-state-channel-ingest` layer (or stack after it) to the new branch; hand rebuild to the meta bot session (do not self-activate).
+- Fork PR against `heavygee/hapi` → [#99](https://github.com/heavygee/hapi/pull/99).
+- Soup: repoint the `feat/contrib-state-channel-ingest` layer to `feat/contrib-state-inbox-title-priority`
+  (my branch already contains the base layer's tip 2e318cfec as ancestor), OR add a new layer immediately
+  after it. Then `hapi-driver-rebuild --build-web --verify` + `hapi-restart-hub`. Owner: meta bot session
+  (`05d9f0f2-9273-4137-933c-07459a1146a2`). This session does NOT stack-switch/activate.
 - Evidence: before/after `query_inbox` + Overseer converse "what needs my attention?".
+
+## Soup handoff note for the meta bot
+- `feat/contrib-state-channel-ingest` was published to origin (unchanged tip `2e318cfec`) so PR #99 could
+  stack cleanly; this did not alter the branch.
+- The backfill runs at hub store init (idempotent, title+priority only), so the existing 174-item wall is
+  repaired the moment the rebuilt hub restarts — no separate migration needed.
+- Pre-existing (not this PR) `web/HappyThread.tsx` `outlineTitle` typecheck error lives on the base layer;
+  it does not block the hub build but note it if `--verify` runs full web tsc.
