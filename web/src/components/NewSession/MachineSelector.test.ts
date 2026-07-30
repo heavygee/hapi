@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { HubUpgradeOffer } from '@hapi/protocol/upgradeChannel'
 import type { Machine } from '@/types/api'
-import { machineNeedsUpdateLabel } from './MachineSelector'
+import { machineNeedsUpdateLabel, getMachineOptionLabel } from './MachineSelector'
 
 const OFFER: HubUpgradeOffer = {
     channel: 'npm',
@@ -99,5 +99,16 @@ describe('machineNeedsUpdateLabel', () => {
             artifactOffer,
             'alert',
         )).toBe(true)
+    })
+})
+
+describe('getMachineOptionLabel', () => {
+    it('uses the localized update-required suffix instead of English literals', () => {
+        const behind = makeMachine({
+            metadata: { host: 'teemo', platform: 'win32', happyCliVersion: '0.23.0' },
+        })
+        expect(getMachineOptionLabel(behind, OFFER, 'alert', '需要更新')).toContain('需要更新')
+        expect(getMachineOptionLabel(behind, OFFER, 'alert', '需要更新')).not.toContain('UPDATE REQUIRED')
+        expect(getMachineOptionLabel(behind, OFFER, 'silent', '需要更新')).not.toContain('需要更新')
     })
 })
