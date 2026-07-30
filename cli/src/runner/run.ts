@@ -21,12 +21,7 @@ import { withRetry } from '@/utils/time';
 import { isRetryableConnectionError } from '@/utils/errorUtils';
 
 import { cleanupRunnerState, getInstalledCliMtimeMs, isRunnerRunningCurrentlyInstalledHappyVersion, stopRunner, waitForRunnerHandoff } from './controlClient';
-import {
-  createRunnerHandoffLockHooks,
-  FAILED_HANDOFF_LOCK_DELAY_INCREMENT_MS,
-  FAILED_HANDOFF_LOCK_MAX_ATTEMPTS,
-  registerRunnerHandoffLockHooks,
-} from './handoffLock';
+import { createRunnerHandoffLockHooks, registerRunnerHandoffLockHooks } from './handoffLock';
 import { startRunnerControlServer } from './controlServer';
 import { createWorktree, removeWorktree, type WorktreeInfo } from './worktree';
 import { validateWorkspaceDirectory } from './validateWorkspaceDirectory';
@@ -1374,10 +1369,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             // Re-acquire the lock with a long window (the child has likely
             // either succeeded and we're seeing a stale state, or it gave
             // up - in either case the lock should be available shortly).
-            const reacquired = await acquireRunnerLock(
-              FAILED_HANDOFF_LOCK_MAX_ATTEMPTS,
-              FAILED_HANDOFF_LOCK_DELAY_INCREMENT_MS,
-            );
+            const reacquired = await acquireRunnerLock(60, 500);
             if (!reacquired) {
               // Lock is held by someone else (third-party runner, or a
               // child that succeeded but state file hasn't reflected the
