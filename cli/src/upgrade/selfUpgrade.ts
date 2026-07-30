@@ -4,7 +4,7 @@ import { chmodSync, copyFileSync, createWriteStream, existsSync, mkdirSync, read
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
-import { Readable } from 'node:stream'
+import { Readable, Transform } from 'node:stream'
 import type {
     HubUpgradeOffer,
     RunnerSelfUpgradeResponse,
@@ -276,6 +276,35 @@ async function sha256File(path: string): Promise<string> {
     return hasher.digest('hex')
 }
 
+/**
+ * Stream transform that aborts once downloaded bytes exceed the offer's
+ * advertised `sizeBytes`. Prevents a malicious/malformed response from filling
+ * disk before the post-download SHA-256 check.
+ */
+export function createArtifactDownloadSizeGuard(sizeBytes: number | undefined): {
+    guard: Transform
+    getDownloadedBytes: () => number
+} {
+    let downloadedBytes = 0
+    const limit = typeof sizeBytes === 'number' && Number.isFinite(sizeBytes) && sizeBytes > 0
+        ? sizeBytes
+        : null
+    const guard = new Transform({
+        transform(chunk: Buffer, _encoding, callback) {
+            downloadedBytes += chunk.length
+            if (limit !== null && downloadedBytes > limit) {
+                callback(new Error(`artifact exceeds advertised size (${downloadedBytes} > ${limit})`))
+                return
+            }
+            callback(null, chunk)
+        },
+    })
+    return {
+        guard,
+        getDownloadedBytes: () => downloadedBytes,
+    }
+}
+
 async function installFromArtifact(
     offer: HubUpgradeOffer,
     downloadBaseUrl: string,
@@ -316,7 +345,29 @@ async function installFromArtifact(
     const linkPath = join(dir, currentName)
 
     const nodeStream = Readable.fromWeb(response.body as import('stream/web').ReadableStream)
-    await pipeline(nodeStream, createWriteStream(tmpPath))
+    const { guard: sizeGuard, getDownloadedBytes } = createArtifactDownloadSizeGuard(artifact.sizeBytes)
+    try {
+        await pipeline(nodeStream, sizeGuard, createWriteStream(tmpPath))
+        const downloadedBytes = getDownloadedBytes()
+        if (
+            typeof artifact.sizeBytes === 'number'
+            && artifact.sizeBytes > 0
+            && downloadedBytes !== artifact.sizeBytes
+        ) {
+            throw new Error(
+                `artifact size mismatch: got ${downloadedBytes}, expected ${artifact.sizeBytes}`,
+            )
+        }
+    } catch (error) {
+        try {
+            if (existsSync(tmpPath)) {
+                unlinkSync(tmpPath)
+            }
+        } catch {
+            // best-effort cleanup of partial download
+        }
+        throw error
+    }
 
     const digest = await sha256File(tmpPath)
     if (digest !== artifact.sha256) {

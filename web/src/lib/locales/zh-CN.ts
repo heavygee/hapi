@@ -774,7 +774,7 @@ export default {
   'settings.runnerMgmt.policyAuto': '自动升级',
   'settings.runnerMgmt.policyAutoHint': '自动帮我升级',
   'settings.runnerMgmt.optOutLabel': '想让某个运行器版本高于 Hub？',
-  'settings.runnerMgmt.optOutBody': '自动升级会把运行器拉回与 Hub 一致，因此刻意更新的运行器会被降级。若要保持更高版本，请在上方选择“不提醒”或“提醒”（影响整个集群），或仅在 soup/仅重建的 Hub 主机上设置 HAPI_DISABLE_VERSION_HANDOFF=1 并重启（普通舰队运行器不要设此标志）。在 Hub 上设置 HAPI_UPGRADE_CHANNEL=off 会完全禁用所有升级。',
+  'settings.runnerMgmt.optOutBody': '较新的运行器不会被降级；自动升级只会推进落后于 Hub 的运行器。可用“不提醒/提醒”控制集群通知。HAPI_DISABLE_VERSION_HANDOFF=1 仅用于 soup/仅重建的 Hub 主机（普通舰队运行器不要设）。在 Hub 上设置 HAPI_UPGRADE_CHANNEL=off 会禁用所有升级。',
   'settings.display.title': '显示',
   'settings.display.description': '外观、字体和会话列表偏好。',
   'settings.display.typography': '字体',
