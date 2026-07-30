@@ -73,20 +73,30 @@ import (no inline SessionList helper defs).
 
 Kitchen restored at driver `6dfd82aba` + shared helpers + bindings gate.
 
-### Soup remat gate (Meta 2026-07-30)
+### Soup remat gate (Meta 2026-07-30) — P0 re-thin done
 
-Stay **off** active `~/.config/hapi/driver-manifest.yaml` until Meta remats.
+Remat failed at layer 29/29 on SessionList + sessionRowHelpers add/add.
 
-Checklist before asking Meta to add layer + remat:
+Re-thinned onto exact remat intermediate:
+`7ef4226a3` (Merge feat/session-mention-rich-composer into driver/integration-wip)
 
-1. Tip re-thinned onto `upstream/main` (rebase) — **not** hand-merge onto soup tip. ✅ rebased 2026-07-30 onto `36eedc870` → tip `2ae049c97`
-2. SessionList imports from `web/src/lib/sessionRowHelpers.ts` — no unbound `getTodoProgress(`. ✅ bindings verify OK
-3. Clean vs remat intermediate (`merge-tree`); then ask Meta to add layer + remat.
+Tip: **`ba35a52c0`** (force-pushed)
 
-Mirror `config/driver-manifest.yaml` may still list the branch; do **not** copy into active config until Meta greenlights.
+- `77f2e8f09` — SessionHeader machine + last-active (union with soup LinkPr header)
+- `ba35a52c0` — activeAt detail keep-alive + 60s age tick
+
+No SessionList / sessionRowHelpers edits on tip (helpers already on base).
+`merge-tree` vs `7ef4226a3`: clean. Bindings verify OK.
+
+**Do not** hand-merge onto live soup. Meta remats on this ack.
+Force-pushed 2026-07-30: origin tip = `ba35a52c0c5c744d621cebb5048124965e9dfb7b`
+(garden pre-push override: `HAPI_SKIP_COMMIT_HOOKS=1` — remat base carries garden ancestry).
+
+After remat: re-thin back onto `upstream/main` for PR #1244 reviewable ancestry.
 
 ### Task 4: Upstream PR
 
-Opened: https://github.com/tiann/hapi/pull/1244 (`Fixes #1241`)
-Fork stage: https://github.com/heavygee/hapi/pull/96 (`cold-review-clean`)
-Tip (post-rebase): `2ae049c97` on `feat/session-header-machine-meta`
+- Opened: https://github.com/tiann/hapi/pull/1244 (`Fixes #1241`)
+- Fork stage: https://github.com/heavygee/hapi/pull/96 (`cold-review-clean`)
+- Remat tip (temporary): `ba35a52c0` on soup intermediate — **not** the reviewable PR tip
+- After remat succeeds: re-thin onto `upstream/main` and force-push product-only tip again

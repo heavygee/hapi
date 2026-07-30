@@ -1,12 +1,13 @@
 # Remat block (2026-07-30)
 
-**Status:** awareness cleared; waiting on rich-composer re-thin.
+**Status:** awareness + rich-composer OK; blocked on session-header.
 
-| Item | Value |
-|------|--------|
-| Awareness | `d946021a9` — thin OK onto `ecde4178f` |
-| Blocked layer | 28/29 `feat/session-mention-rich-composer` @ `42a2ec601` |
-| Pre-layer for rich-composer | `d946021a9abad36df89305bbfae3a4452ca436f9` |
-| Live tip | `6dfd82aba` (unchanged) |
+| Layer | Tip | State |
+|-------|-----|--------|
+| 27 `driver/github-pr-awareness` | `d946021a9` | OK (rerere) |
+| 28 `feat/session-mention-rich-composer` | `091b1b651` | OK |
+| 29 `feat/session-header-machine-meta` | conflicts | **blocked** |
 
-**Peers:** `b30cf5c0` done · `dcc8fd48` re-pinged · `9c544e2d` off soup
+Pre-layer for header: `7ef4226a3cce0774dcda826eb5f73daa08387e88`  
+Live tip: `6dfd82aba` (atomic — unchanged)  
+Peer: `9c544e2d` re-pinged
