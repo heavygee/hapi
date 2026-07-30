@@ -92,6 +92,7 @@ flowchart TD
     COLLIDE -->|no| PRECHECK
     RENUMBER --> PRECHECK["hapi-driver-status --quiet"]
     PRECHECK -->|exit 75| WAIT["Stop: stack busy"]
+    PRECHECK -->|exit 76| HOLD["Stop: remat hold — ping Meta"]
     PRECHECK -->|exit 0| MEM{"build_web_preflight OK?<br/>MemAvailable + swap pressure"}
     MEM -->|no| MEMFIX["Drain agents or swapoff-swapon<br/>see recovery briefing"]
     MEMFIX --> PRECHECK
@@ -406,7 +407,7 @@ Peers **must** assess tier before capture ([`peer-stack.md` § Evidence modality
 # 1. Edit ~/.config/hapi/driver-manifest.yaml — add branch: feat/your-feature
 #    (or driver/<name> union tip when thin upstream tip conflicts with soup)
 #    Commit config/driver-manifest.yaml on mirror the same turn (mess-maker rule).
-# 2. One rebuild owner at a time (hapi-driver-status --quiet; exit 75 = wait)
+# 2. One rebuild owner at a time (hapi-driver-status --quiet; exit 75 = wait; exit 76 = remat hold → Meta)
 hapi-driver-rebuild --build-web --verify
 hapi-verify-web-dist
 # 3. Hub/cli/shared touched? (not web-only)

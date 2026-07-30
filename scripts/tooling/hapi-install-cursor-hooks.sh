@@ -19,11 +19,12 @@ SYSTEMCTL_GUARD="${REPO_ROOT}/scripts/tooling/hapi-systemctl-guard.sh"
 MUTATION_GUARD="${REPO_ROOT}/scripts/tooling/hapi-production-mutation-guard.sh"
 MIRROR_HYGIENE_GUARD="${REPO_ROOT}/scripts/tooling/hapi-mirror-hygiene-guard.sh"
 TOOLING_COMMIT_GUARD="${REPO_ROOT}/scripts/tooling/hapi-tooling-commit-guard.sh"
+REMAT_HOLD_GUARD="${REPO_ROOT}/scripts/tooling/hapi-remat-hold-guard.sh"
 SOUP_DOGFOOD_RULE="${REPO_ROOT}/scripts/tooling/cursor-rules/hapi-driver-soup-dogfood.mdc"
 TOOLING_COMMIT_RULE="${REPO_ROOT}/.cursor/rules/hapi-tooling-commit-hygiene.mdc"
 USER_RULES="${HOME}/.cursor/rules"
 
-for s in "$PRODUCT_GUARD" "$SYSTEMCTL_GUARD" "$MUTATION_GUARD" "$MIRROR_HYGIENE_GUARD" "$TOOLING_COMMIT_GUARD"; do
+for s in "$PRODUCT_GUARD" "$SYSTEMCTL_GUARD" "$MUTATION_GUARD" "$MIRROR_HYGIENE_GUARD" "$TOOLING_COMMIT_GUARD" "$REMAT_HOLD_GUARD"; do
     if [ ! -x "$s" ]; then
         echo "ERROR: ${s} missing or not executable" >&2
         exit 1
@@ -57,6 +58,10 @@ cat > "$HOOKS_JSON" <<'JSON'
       },
       {
         "command": "./scripts/tooling/hapi-systemctl-guard.sh",
+        "matcher": "Shell"
+      },
+      {
+        "command": "./scripts/tooling/hapi-remat-hold-guard.sh",
         "matcher": "Shell"
       },
       {
@@ -94,6 +99,7 @@ echo "Hooks installed:"
 echo "  hapi-product-code-guard.sh       -> blocks edits to cli/, hub/, web/, shared/ outside ~/coding/hapi/worktrees/"
 echo "  hapi-mirror-hygiene-guard.sh     -> blocks bun install / lockfile+e2e writes on primary mirror (soup utensils)"
 echo "  hapi-systemctl-guard.sh          -> blocks 'sudo systemctl <destructive-verb> hapi-{hub,runner,runner-watchdog}.service'"
+echo "  hapi-remat-hold-guard.sh         -> blocks remat/build-web while remat escalation hold is active"
 echo "  hapi-production-mutation-guard.sh -> blocks feat-dist swap, driver hand-merge, raw driver/web builds, full rebuild"
 echo "  hapi-tooling-commit-guard.sh     -> mess-maker must commit docs/scripts/manifest/.cursor dirt (stop + sync gate)"
 echo "  hapi-driver-soup-dogfood.mdc       -> symlink → ${USER_RULES}/hapi-driver-soup-dogfood.mdc"
@@ -105,5 +111,7 @@ echo "  HAPI_OPERATOR_MIRROR_HYGIENE_OVERRIDE=1 (mirror install/e2e — TTY only
 echo "  HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1      (systemctl on hapi units)"
 echo "  HAPI_OPERATOR_PRODUCTION_MUTATION_OVERRIDE=1 (dist swap / driver hand-merge — TTY only)"
 echo "  HAPI_OPERATOR_TOOLING_DIRT_OVERRIDE=1  (mess-maker commit nag — TTY only)"
+echo "  HAPI_OPERATOR_REMAT_HOLD_CLEAR=1       (clear/bypass remat hold — TTY only)"
+echo "  HAPI_REMAT_OWNER=1                    (Meta remat owner while hold active)"
 echo
 echo "Restart Cursor (or reload) to pick up the hooks."

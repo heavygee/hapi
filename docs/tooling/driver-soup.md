@@ -300,14 +300,14 @@ Both scripts now take a single `flock` on `~/.hapi/locks/stack.lock` (shared wit
 
 ```bash
 hapi-driver-status            # human summary
-hapi-driver-status --quiet    # exit 0 idle, 75 busy, 2 stale-pid
+hapi-driver-status --quiet    # exit 0 idle, 75 busy, 76 remat-hold, 2 stale-pid
 ```
 
 `--quiet` is the right thing for an agent precheck:
 
 ```bash
 if ! hapi-driver-status --quiet; then
-    echo "driver stack busy or stale -- inspect with hapi-driver-status"
+    echo "driver stack busy, remat-hold, or stale -- inspect with hapi-driver-status"
     exit 1
 fi
 hapi-driver-rebuild --build-web --verify
@@ -315,11 +315,46 @@ hapi-driver-rebuild --build-web --verify
 # HAPI_DRIVER_WAIT_BUSY_SECS=600 hapi-driver-rebuild --build-web --verify
 ```
 
-**Soup rebuild owner (policy):** one agent/session owns manifest + rebuild at a time (`hapi-driver-status` flock). When the tip is ready for `:3006` dogfood, the **feature peer** edits `~/.config/hapi/driver-manifest.yaml` and runs `hapi-driver-rebuild --build-web --verify` — do not ping operator/orchestrator to add the layer, and do not wait for a separate "approve soup" gate. Meta session (`8c6b5a7d`) is for **manifest-only** cron rebuilds and stack hygiene, not routine feature promotion. Do not run rebuilds in parallel hoping flock saves you.
+**Soup rebuild owner (policy):** one agent/session owns manifest + rebuild at a time (`hapi-driver-status` flock). When the tip is ready for `:3006` dogfood, the **feature peer** edits `~/.config/hapi/driver-manifest.yaml` and runs `hapi-driver-rebuild --build-web --verify` — do not ping operator/orchestrator to add the layer, and do not wait for a separate "approve soup" gate. Meta session (`8c6b5a7d`) is for **manifest-only** cron rebuilds, stack hygiene, and **remat escalation**. Do not run rebuilds in parallel hoping flock saves you.
+
+### Remat escalation hold (2026-07-30)
+
+Happy-path remat is CLI-only and mostly deterministic (`hapi-driver-rebuild --build-web --verify`). When remat **fails** (merge conflict, post-promote verify/typecheck/test rollback), the stack is nondeterministic enough that **parallel “helpers” thrash the tip**. Fail closed:
+
+1. **Auto-set hold** on remat failure → `~/.hapi/remat-hold.json`
+2. **Block** `hapi-driver-rebuild`, `hapi-driver-build-web`, and `driver_remat_promote` for everyone except the escalate owner (exit **76**)
+3. **Cursor hook** `hapi-remat-hold-guard.sh` denies Shell remat/build-web while hold is active
+4. **Owner only** clears or continues remat
+
+| Who | What to do |
+|---|---|
+| Feature peer / other agent | Stop. `hapi-remat-hold status`. Ping Meta (`hapi-ping-peer 8c6b5a7d`). Do **not** retry remat or hand-promote. |
+| Meta remat owner (`config/remat-escalate.yaml`) | Token + identity (below). Success auto-clears hold. |
+| Operator (TTY) | `HAPI_OPERATOR_REMAT_HOLD_CLEAR=1 hapi-remat-hold clear` |
+
+**Owner proof (all three):**
+
+```bash
+# once per machine (Meta / operator):
+hapi-remat-hold init-owner
+
+export HAPI_REMAT_OWNER=1
+export HAPI_REMAT_OWNER_TOKEN="$(cat ~/.config/hapi/remat-owner.token)"
+export HAPI_AGENT_LABEL=meta-soup   # or session id matching owner_session_prefix
+hapi-driver-rebuild --build-web --verify
+```
+
+```bash
+hapi-remat-hold status          # human + exit 76 if held
+hapi-remat-hold check           # exit 0 / 76
+hapi-driver-status              # shows remat-hold block
+```
+
+Config: `config/remat-escalate.yaml`. Token: `~/.config/hapi/remat-owner.token` (not git). Label alone is not enough. Same-UID agents can still `cat` the token file — abuse is a kill-criterion. Enforcement: script exit 76 + Cursor/Claude PreToolUse hooks.
 
 ### Atomic remat — failed rebuild must not move the live tip (2026-07-30)
 
-`hapi-driver-rebuild` rematerializes on **`driver/integration-wip`** in **`~/coding/hapi/worktrees/driver-remat`**, then promotes `driver/integration` only after layers + soup-heals succeed. **`web/dist` already had `dist.prev` rollback; the git tip now matches that contract.**
+`hapi-driver-rebuild` rematerializes on **`driver/integration-wip`** in **`~/coding/hapi/worktrees/driver-remat`**, then promotes `driver/integration` only after layers + soup-heals succeed. **`web/dist` already had `dist.prev` rollback; the git tip now matches that contract.** On failure the escalation hold is set (see above) so peers cannot pile on.
 
 | Failure | Live `driver/integration` | Where to look |
 |---|---|---|

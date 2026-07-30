@@ -12,6 +12,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 MUTATION_GUARD="${ROOT}/scripts/tooling/hapi-production-mutation-guard.sh"
 SYSTEMCTL_GUARD="${ROOT}/scripts/tooling/hapi-systemctl-guard.sh"
+REMAT_HOLD_GUARD="${ROOT}/scripts/tooling/hapi-remat-hold-guard.sh"
 MIRROR_HYGIENE_GUARD="${ROOT}/scripts/tooling/hapi-mirror-hygiene-guard.sh"
 PRODUCT_GUARD="${ROOT}/scripts/tooling/hapi-product-code-guard.sh"
 TOOLING_COMMIT_GUARD="${ROOT}/scripts/tooling/hapi-tooling-commit-guard.sh"
@@ -55,6 +56,7 @@ case "$TOOL" in
     ""|Bash)
         _run_guard "$MUTATION_GUARD"
         _run_guard "$SYSTEMCTL_GUARD"
+        _run_guard "$REMAT_HOLD_GUARD"
         # Mess-maker sync/rebuild gate (shell mode)
         if [[ -x "$TOOLING_COMMIT_GUARD" ]]; then
             out="$(printf '%s' "$INPUT" | "$TOOLING_COMMIT_GUARD" shell 2>/dev/null || true)"

@@ -58,6 +58,11 @@ done
 LIB_DIR="$(dirname "$(readlink -f "$0")")/lib"
 # shellcheck source=lib/driver-status.sh
 source "$LIB_DIR/driver-status.sh"
+# shellcheck source=lib/driver-remat-hold.sh
+source "$LIB_DIR/driver-remat-hold.sh"
+# Escalation hold blocks remat for everyone except the designated owner.
+# Not skipped by HAPI_SKIP_DRIVER_LOCK (that only bypasses the flock).
+driver_remat_hold_require_clear_or_owner "hapi-driver-rebuild"
 if [[ "${HAPI_SKIP_DRIVER_LOCK:-}" != "1" ]]; then
     driver_status_init
     driver_status_acquire rebuild
@@ -213,6 +218,9 @@ for i in $(seq 0 $((layer_count - 1))); do
         echo "ERROR: merge conflict merging $merge_ref into $WIP_BRANCH" >&2
         echo "       unmerged: $(echo "$unmerged" | wc -l) file(s); markers: $(echo "$markers" | wc -l) file(s)" >&2
         driver_remat_fail_leave_wip "$REMAT" "$WIP_BRANCH" "$DRIVER_BRANCH" "$PREV_TIP" "$merge_ref"
+        driver_remat_hold_set \
+            "merge conflict on $merge_ref" \
+            "$REMAT" "$PREV_TIP" "$WIP_BRANCH" "$merge_ref"
         exit 1
     fi
 done
@@ -289,6 +297,9 @@ remat_rollback_live_tip() {
         driver_remat_restore_tip "$DRIVER" "$DRIVER_BRANCH" "$PREV_TIP"
         PROMOTED=0
     fi
+    driver_remat_hold_set \
+        "$reason" \
+        "${REMAT:-}" "${PREV_TIP:-}" "${WIP_BRANCH:-}" ""
 }
 
 if [[ "$BUILD_WEB" -eq 1 ]] || [[ ! -f "$DRIVER/web/dist/index.html" ]]; then
@@ -349,6 +360,9 @@ if [[ "$VERIFY" -eq 1 ]]; then
     git -C "$DRIVER" rev-parse HEAD >"$STAMP"
     echo "Verify stamp: $STAMP ($(cat "$STAMP" | head -c 12)…)"
 fi
+
+# Successful remat by escalate owner clears any prior hold.
+driver_remat_hold_clear_on_success
 
 echo ""
 echo "Driver rebuild complete: $DRIVER @ $(git -C "$DRIVER" rev-parse --short HEAD)"

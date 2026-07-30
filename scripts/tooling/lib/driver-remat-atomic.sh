@@ -50,6 +50,15 @@ driver_remat_promote() {
     local integration_branch="${2:?}"
     local wip_sha="${3:?}"
 
+    # Manual promote must honor escalation hold (same as hapi-driver-rebuild).
+    if declare -F driver_remat_hold_require_clear_or_owner >/dev/null 2>&1; then
+        driver_remat_hold_require_clear_or_owner "driver_remat_promote"
+    elif [[ -f "$(dirname "${BASH_SOURCE[0]}")/driver-remat-hold.sh" ]]; then
+        # shellcheck source=driver-remat-hold.sh
+        source "$(dirname "${BASH_SOURCE[0]}")/driver-remat-hold.sh"
+        driver_remat_hold_require_clear_or_owner "driver_remat_promote"
+    fi
+
     git -C "$driver" merge --abort >/dev/null 2>&1 || true
     git -C "$driver" checkout -f -B "$integration_branch" "$wip_sha"
     git -C "$driver" reset --hard "$wip_sha"
@@ -57,6 +66,7 @@ driver_remat_promote() {
 }
 
 # Restore live driver tip after a post-promote failure (verify/typecheck).
+# Restore is allowed under hold (owner or auto-rollback) — it moves tip backward.
 driver_remat_restore_tip() {
     local driver="${1:?}"
     local integration_branch="${2:?}"
@@ -82,5 +92,7 @@ driver_remat_fail_leave_wip() {
         echo "       conflict while merging $merge_ref" >&2
     fi
     echo "       Resolve in remat worktree: $remat_wt (branch $wip_branch)" >&2
-    echo "       Then re-run hapi-driver-rebuild, or: git -C $remat_wt merge --abort" >&2
+    echo "       ESCALATE to Meta remat owner — hold will block other remats." >&2
+    echo "       Owner re-run: HAPI_REMAT_OWNER=1 hapi-driver-rebuild --build-web --verify" >&2
+    echo "       Or abort WIP: git -C $remat_wt merge --abort && hapi-remat-hold clear" >&2
 }

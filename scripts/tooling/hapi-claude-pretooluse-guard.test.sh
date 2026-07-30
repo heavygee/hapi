@@ -38,4 +38,13 @@ expect_deny 'merge-only rebuild' "$CLAUDE_BASH"
 expect_deny 'swap bypass build' '{"tool_name":"Bash","tool_input":{"command":"HAPI_BUILD_MAX_SWAP_USED_PCT=100 hapi-driver-build-web"}}'
 expect_allow 'build-web rebuild' "$CLAUDE_BUILD_WEB"
 
+# Remat hold: Claude Bash must deny rebuild while hold active (no owner token).
+HOLD_TMP="$(mktemp)"
+trap 'rm -f "$HOLD_TMP"' EXIT
+echo '{"schema":1,"active":true,"reason":"claude-hold-test","owner_session_prefix":"8c6b5a7d"}' >"$HOLD_TMP"
+export HAPI_REMAT_HOLD_FILE="$HOLD_TMP"
+unset HAPI_REMAT_OWNER HAPI_REMAT_OWNER_TOKEN || true
+expect_deny 'remat hold blocks build-web' "$CLAUDE_BUILD_WEB"
+unset HAPI_REMAT_HOLD_FILE
+
 echo "hapi-claude-pretooluse-guard.test.sh: all patterns OK"

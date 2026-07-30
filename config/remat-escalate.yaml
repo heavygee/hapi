@@ -1,0 +1,15 @@
+# Remat escalation owner — when soup rematerialize fails, a hold is set and
+# only this owner (or a TTY operator) may remat / clear until the tip is fixed.
+#
+# See docs/tooling/driver-soup.md § Remat escalation hold.
+#
+# owner_session_prefix: HAPI session id prefix (first 8 hex chars ok)
+# owner_labels: HAPI_AGENT_LABEL values treated as owner when HAPI_REMAT_OWNER=1
+# ping_cmd: best-effort notify on hold set (empty = skip)
+
+owner_session_prefix: "8c6b5a7d"
+owner_labels:
+  - meta-soup
+  - meta-soup-stabilize
+  - tooling-meta
+ping_cmd: "hapi-ping-peer 8c6b5a7d"

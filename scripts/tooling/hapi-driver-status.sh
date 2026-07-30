@@ -11,13 +11,14 @@
 # Usage:
 #   hapi-driver-status              # human-readable summary
 #   hapi-driver-status --json       # raw JSON for scripts
-#   hapi-driver-status --quiet      # exit code only: 0 idle, 75 busy, 2 stale
+#   hapi-driver-status --quiet      # exit code only: 0 idle, 75 busy, 76 remat-hold, 2 stale
 #   hapi-driver-status --heal       # clear dead-pid running status, then print
 #   hapi-driver-status --watch      # poll every 2s (Ctrl-C to stop)
 #
 # Exit codes
-#   0   both rebuild + switch are idle
+#   0   both rebuild + switch are idle AND no remat escalation hold
 #   75  at least one operation is running (matches lib EX_TEMPFAIL convention)
+#   76  remat escalation hold active (soup mutations blocked except Meta owner)
 #   2   one or more pids look stale (process dead, status not reset)
 #   1   status file missing or unreadable
 
@@ -25,6 +26,9 @@ set -euo pipefail
 
 STATUS_FILE="${HAPI_STATUS_FILE:-$HOME/.hapi/driver-status.json}"
 MODE=human
+LIB_DIR="$(dirname "$(readlink -f "$0")")/lib"
+# shellcheck source=lib/driver-remat-hold.sh
+source "$LIB_DIR/driver-remat-hold.sh"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -166,8 +170,13 @@ render_human() {
     echo "          [$tag]  last swung $mtime ($(humanize_age "$mtime"))"
     echo ""
     render_working
+    echo ""
+    driver_remat_hold_status_text
 
-    # Aggregate exit code: 75 busy > 2 stale > 0 idle.
+    # Aggregate exit code: 76 hold > 75 busy > 2 stale > 0 idle.
+    if driver_remat_hold_active; then
+        return 76
+    fi
     (( rebuild_rc == 1 || switch_rc == 1 )) && return 75
     (( rebuild_rc == 2 || switch_rc == 2 )) && return 2
     return 0
