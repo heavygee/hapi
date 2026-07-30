@@ -10,9 +10,11 @@
 import { existsSync, readFileSync, realpathSync, writeFileSync, mkdirSync, unlinkSync, renameSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { compareHapiVersions } from '@hapi/protocol/upgradeChannel'
 import { configuration } from '@/configuration'
 import { isBunCompiled } from '@/projectPath'
 import { resolveHappyCliExecutable } from '@/utils/spawnHappyCLI'
+import packageJson from '../../package.json'
 
 export type UpgradeTarget = {
     path: string
@@ -174,16 +176,38 @@ export function isAuthorizedRunnerHandoff(
 }
 
 /**
+ * True when the durable marker trails a newer CLI already installed at the
+ * entrypoint (e.g. npm/binary update after a prior hub-artifact upgrade).
+ */
+export function isUpgradeTargetStaleRelativeToCli(
+    target: UpgradeTarget,
+    currentVersion: string = packageJson.version,
+): boolean {
+    if (!target.targetVersion) {
+        return false
+    }
+    const relation = compareHapiVersions(currentVersion, target.targetVersion)
+    return relation !== null && relation > 0
+}
+
+/**
  * True when this process should re-exec into the upgrade-target binary.
  * Skip for plain source `bun run` unless HAPI_CLI_EXECUTABLE is already set —
  * developers should not be silently redirected into a compiled soup artifact.
  * Also skip during an authorized handoff: the child is already the candidate.
+ * Also skip when the current CLI is newer than the marker (do not pin backwards).
  */
-export function shouldDelegateToUpgradeTarget(target: UpgradeTarget): boolean {
+export function shouldDelegateToUpgradeTarget(
+    target: UpgradeTarget,
+    deps: { currentVersion?: string } = {},
+): boolean {
     if (isAuthorizedRunnerHandoff()) {
         return false
     }
     if (!target.path || !existsSync(target.path)) {
+        return false
+    }
+    if (isUpgradeTargetStaleRelativeToCli(target, deps.currentVersion ?? packageJson.version)) {
         return false
     }
     if (!isBunCompiled() && !process.env.HAPI_CLI_EXECUTABLE?.trim()) {
