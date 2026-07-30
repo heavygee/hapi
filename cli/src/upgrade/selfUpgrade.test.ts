@@ -17,6 +17,7 @@ import {
     resolvePostNpmInstallExecutable,
     shouldApplyUpgradeOffer,
     UPGRADE_STEP_TIMEOUT_MS,
+    versionProbeCommand,
     waitForChildSpawn,
 } from './selfUpgrade'
 import type { HubUpgradeOffer } from '@hapi/protocol/upgradeChannel'
@@ -279,6 +280,42 @@ describe('assertExecutableMatchesTargetVersion', () => {
             '0.24.0',
             async () => ({ ok: false, output: 'ENOENT' }),
         )).rejects.toThrow(/does not match target/)
+    })
+
+    it('routes Windows .cmd shims through cmd.exe for the version probe', async () => {
+        const calls: Array<{ command: string; args: string[] }> = []
+        await assertExecutableMatchesTargetVersion(
+            'C:\\Users\\me\\AppData\\Roaming\\npm\\hapi.cmd',
+            '0.24.0',
+            async (command, args) => {
+                calls.push({ command, args })
+                return { ok: true, output: 'hapi version: 0.24.0\n' }
+            },
+            'win32',
+        )
+        expect(calls).toHaveLength(1)
+        expect(calls[0]!.command.toLowerCase()).toMatch(/cmd(\.exe)?$/)
+        expect(calls[0]!.args).toEqual([
+            '/d',
+            '/s',
+            '/c',
+            '"C:\\Users\\me\\AppData\\Roaming\\npm\\hapi.cmd" --version',
+        ])
+    })
+
+    it('probes non-shim executables directly', () => {
+        expect(versionProbeCommand('/usr/local/bin/hapi', 'linux')).toEqual({
+            command: '/usr/local/bin/hapi',
+            args: ['--version'],
+        })
+        expect(versionProbeCommand('C:\\hapi\\hapi.exe', 'win32')).toEqual({
+            command: 'C:\\hapi\\hapi.exe',
+            args: ['--version'],
+        })
+        expect(versionProbeCommand('C:\\npm\\hapi.cmd', 'win32', 'C:\\Windows\\System32\\cmd.exe')).toEqual({
+            command: 'C:\\Windows\\System32\\cmd.exe',
+            args: ['/d', '/s', '/c', '"C:\\npm\\hapi.cmd" --version'],
+        })
     })
 })
 

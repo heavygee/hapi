@@ -54,6 +54,38 @@ describe('resolveUpgradeOffer', () => {
         expect(offer.channel).toBe('off')
     })
 
+    it('preserves envChannel=off even for npm-installed hub executables', () => {
+        const offer = resolveUpgradeOffer({
+            hubPackageRoot: '/tmp/not-a-mono/hub',
+            monorepoRoot: null,
+            execPath: '/home/me/.bun/install/global/node_modules/@twsxtd/hapi/bin/hapi.cjs',
+            envChannel: 'off',
+            targetVersion: '0.23.0',
+        })
+        expect(offer.channel).toBe('off')
+        expect(offer.npmPackage).toBeUndefined()
+    })
+
+    it('preserves process.env HAPI_UPGRADE_CHANNEL=off when options.envChannel is omitted', () => {
+        const previous = process.env.HAPI_UPGRADE_CHANNEL
+        process.env.HAPI_UPGRADE_CHANNEL = 'off'
+        try {
+            const offer = resolveUpgradeOffer({
+                hubPackageRoot: '/tmp/not-a-mono/hub',
+                monorepoRoot: null,
+                execPath: '/home/me/.bun/install/global/node_modules/@twsxtd/hapi/bin/hapi.cjs',
+                targetVersion: '0.23.0',
+            })
+            expect(offer.channel).toBe('off')
+        } finally {
+            if (previous === undefined) {
+                delete process.env.HAPI_UPGRADE_CHANNEL
+            } else {
+                process.env.HAPI_UPGRADE_CHANNEL = previous
+            }
+        }
+    })
+
     it('reads npm package version from execPath when monorepo is absent', () => {
         const root = mkdtempSync(join(tmpdir(), 'hapi-npm-pkg-'))
         try {

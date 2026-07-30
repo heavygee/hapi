@@ -98,9 +98,13 @@ export function resolveUpgradeOffer(options: ResolveUpgradeOfferOptions): HubUpg
         : findMonorepoRoot(options.hubPackageRoot)
     const execPath = options.execPath ?? process.execPath
     const cliProjectPath = monorepoRoot ? join(monorepoRoot, 'cli') : options.hubPackageRoot
+    // Omit vs explicit null: undefined means "read process.env"; null means "no override".
+    const envChannel = options.envChannel === undefined
+        ? process.env.HAPI_UPGRADE_CHANNEL
+        : options.envChannel
 
     let channel: UpgradeChannel = detectUpgradeChannel({
-        envChannel: options.envChannel ?? process.env.HAPI_UPGRADE_CHANNEL,
+        envChannel,
         isCompiled: false,
         execPath,
         projectPath: cliProjectPath,
@@ -108,7 +112,8 @@ export function resolveUpgradeOffer(options: ResolveUpgradeOfferOptions): HubUpg
     })
 
     // Mixed estates: npm-packaged hub process wins over a sibling checkout on disk.
-    if (!options.envChannel && looksLikeNpmHapiPath(execPath)) {
+    // Only when no env override is active — otherwise HAPI_UPGRADE_CHANNEL=off is lost.
+    if (!envChannel?.trim() && looksLikeNpmHapiPath(execPath)) {
         channel = 'npm'
     }
 
