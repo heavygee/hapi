@@ -65,4 +65,25 @@ describe('fleetUpgradePolicy', () => {
         expect(getFleetUpgradePolicy()).toBe('alert')
         expect(readFileSync(file, 'utf8')).toBe('{not-json')
     })
+
+    it('serializes overlapping policy writes so the last request wins', async () => {
+        const dataDir = makeDataDir()
+        initFleetUpgradePolicy({ dataDir, persisted: 'alert' })
+        // Seed a settings file with an unrelated field that must survive RMW races.
+        const file = getSettingsFile(dataDir)
+        writeFileSync(file, `${JSON.stringify({ cliApiToken: 'keep-me', fleetUpgradePolicy: 'alert' }, null, 2)}\n`)
+
+        await Promise.all([
+            setFleetUpgradePolicy('silent'),
+            setFleetUpgradePolicy('auto'),
+            setFleetUpgradePolicy('alert'),
+            setFleetUpgradePolicy('silent'),
+        ])
+        expect(getFleetUpgradePolicy()).toBe('silent')
+        const persisted = await readSettings(file)
+        expect(persisted?.fleetUpgradePolicy).toBe('silent')
+        expect(persisted?.cliApiToken).toBe('keep-me')
+        // File must remain valid JSON (no half-written tmp clobber).
+        expect(() => JSON.parse(readFileSync(file, 'utf8'))).not.toThrow()
+    })
 })
