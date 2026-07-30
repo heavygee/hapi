@@ -263,6 +263,7 @@ export default {
   'runner.skew.upgradeFailed': 'Failed to upgrade runner',
   'runner.skew.alreadyCurrent': 'Runner reports it is already at the hub target',
   'runner.skew.upgradeStarted': 'Upgrade started on the runner',
+  'runner.skew.updateRequired': 'UPDATE REQUIRED',
   'session.action.delete': 'Delete',
   'session.action.copy': 'Copy',
   'session.action.copyReference': 'Copy reference',
