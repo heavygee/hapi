@@ -285,9 +285,10 @@ async function ensureTunwgBinary(
     monorepoRoot: string,
     platform: string,
     arch: string,
+    timeoutMs?: number,
 ): Promise<void> {
     const { ensurePinnedTunwgForCompile } = await import('./tunwgPin')
-    await ensurePinnedTunwgForCompile(monorepoRoot, platform, arch)
+    await ensurePinnedTunwgForCompile(monorepoRoot, platform, arch, timeoutMs)
     const path = tunwgBinaryPath(monorepoRoot, platform, arch)
     if (!existsSync(path)) {
         throw new Error(`Pinned tunwg binary missing after download: ${path}`)
@@ -316,6 +317,16 @@ function requiredToolArchives(cliRoot: string, platform: string, arch: string): 
  * compile outputs for the same platform/arch outfile.
  */
 let artifactBuildLock: Promise<void> = Promise.resolve()
+
+/**
+ * End-to-end wall-clock budget while holding `artifactBuildLock` (tunwg download
+ * + bun compile). Must release the lock before later Upgrade RPCs queue forever.
+ */
+export const ARTIFACT_BUILD_BUDGET_MS = 9 * 60_000
+
+function remainingArtifactBudgetMs(deadlineMs: number, nowMs = Date.now()): number {
+    return Math.max(1, deadlineMs - nowMs)
+}
 
 async function withArtifactBuildLock<T>(run: () => Promise<T>): Promise<T> {
     const previous = artifactBuildLock
@@ -351,6 +362,7 @@ export async function ensureCliArtifact(options: {
     }
 
     return await withArtifactBuildLock(async () => {
+        const deadlineMs = Date.now() + ARTIFACT_BUILD_BUDGET_MS
         // Resolve (and validate) the Bun target up front — throws for
         // unsupported platform/arch. Same-host used to be required; Bun now
         // cross-compiles win32/darwin/linux from any host.
@@ -360,7 +372,12 @@ export async function ensureCliArtifact(options: {
             ?? (process.execPath.includes('bun') ? process.execPath : 'bun')
         // Download/verify pinned tunwg BEFORE fingerprinting so a clean tree
         // does not cache a pre-download fingerprint and force a second compile.
-        await ensureTunwgBinary(monorepo, options.platform, options.arch)
+        await ensureTunwgBinary(
+            monorepo,
+            options.platform,
+            options.arch,
+            remainingArtifactBudgetMs(deadlineMs),
+        )
 
         const sourceFingerprint = resolveArtifactSourceFingerprint(monorepo)
         const cached = readArtifactMeta(options.version, options.platform, options.arch, options.dataDir)
@@ -418,6 +435,7 @@ export async function ensureCliArtifact(options: {
             stdout: 'pipe',
             stderr: 'pipe',
             env: process.env,
+            timeout: remainingArtifactBudgetMs(deadlineMs),
         })
         const [stdout, stderr, code] = await Promise.all([
             new Response(proc.stdout).text(),
@@ -426,7 +444,13 @@ export async function ensureCliArtifact(options: {
         ])
         const produced = normalizeCompiledArtifactPath(outPath, options.platform)
         if (code !== 0 || !existsSync(produced)) {
-            throw new Error(`bun compile failed: ${stderr || stdout}`)
+            const detail = stderr || stdout
+            if (proc.signalCode) {
+                throw new Error(
+                    `bun compile timed out or killed (${proc.signalCode}) after artifact budget: ${detail}`,
+                )
+            }
+            throw new Error(`bun compile failed: ${detail}`)
         }
 
         const buf = readFileSync(outPath)

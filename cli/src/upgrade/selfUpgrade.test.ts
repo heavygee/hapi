@@ -9,9 +9,11 @@ import {
     artifactInstallFileName,
     assertExecutableMatchesTargetVersion,
     createArtifactDownloadSizeGuard,
+    createDeadlineRunner,
     mergeParentRunnerStateForReclaim,
     pruneSupersededArtifacts,
     pruneSupersededArtifactsAfterDurableMarker,
+    remainingDeadlineMs,
     resolvePostNpmInstallExecutable,
     shouldApplyUpgradeOffer,
     UPGRADE_STEP_TIMEOUT_MS,
@@ -284,6 +286,33 @@ describe('UPGRADE_STEP_TIMEOUT_MS', () => {
     it('stays under the hub upgrade RPC timeout (~10m)', () => {
         expect(UPGRADE_STEP_TIMEOUT_MS).toBe(9 * 60_000)
         expect(UPGRADE_STEP_TIMEOUT_MS).toBeLessThan(10 * 60_000)
+    })
+})
+
+describe('remainingDeadlineMs / createDeadlineRunner', () => {
+    it('never returns below 1ms once the deadline has passed', () => {
+        expect(remainingDeadlineMs(1_000, 5_000)).toBe(1)
+        expect(remainingDeadlineMs(5_000, 5_000)).toBe(1)
+        expect(remainingDeadlineMs(10_000, 4_000)).toBe(6_000)
+    })
+
+    it('shrinks sequential timeouts so bun+npm cannot stack two full step budgets', async () => {
+        const timeouts: number[] = []
+        let now = 1_000
+        const run = async (_command: string, _args: string[], timeoutMs: number) => {
+            timeouts.push(timeoutMs)
+            now += 4 * 60_000
+            return { ok: false, output: 'stalled' }
+        }
+        const within = createDeadlineRunner(now + UPGRADE_STEP_TIMEOUT_MS, run, () => now)
+        await within('bun', ['add', '-g', 'pkg'])
+        await within('npm', ['install', '-g', 'pkg'])
+        expect(timeouts[0]).toBe(UPGRADE_STEP_TIMEOUT_MS)
+        expect(timeouts[1]).toBe(UPGRADE_STEP_TIMEOUT_MS - 4 * 60_000)
+        // Allocated timeouts can sum above the budget; wall-clock cannot — npm
+        // only gets whatever remains after bun burned time against the deadline.
+        expect(timeouts[1]!).toBeLessThan(timeouts[0]!)
+        expect(timeouts[1]!).toBeLessThan(10 * 60_000 - 4 * 60_000)
     })
 })
 
