@@ -42,12 +42,16 @@ vi.mock('@/hooks/useColorTheme', () => ({
 
 vi.mock('@tanstack/react-router', () => ({
     useNavigate: () => navigate,
+    Navigate: ({ to, replace }: { to: string; replace?: boolean }) => {
+        navigate({ to, replace: Boolean(replace) })
+        return null
+    },
 }))
 
 vi.mock('@hapi/protocol', () => ({ PROTOCOL_VERSION: 1 }))
 
 vi.mock('@/lib/app-context', () => ({
-    useAppContext: () => ({ api: null }),
+    useAppContext: () => ({ api: null, token: context.token }),
 }))
 
 vi.mock('@/hooks/queries/useUpgradeInfo', () => ({
@@ -270,12 +274,25 @@ describe('responsive settings pages', () => {
         expect(navigate).toHaveBeenCalledWith({ to: '/settings/general/runners' })
     })
 
+    it('hides runner management from tenant namespaces on General', () => {
+        context.token = `x.${btoa(JSON.stringify({ ns: 'tenant' }))}.x`
+        renderPage(<SettingsGeneralPage />)
+        expect(screen.queryByRole('button', { name: /Runner management/ })).not.toBeInTheDocument()
+    })
+
     it('renders the 3-pole policy switch on the runner management sub-page', () => {
         renderPage(<SettingsRunnerManagementPage />)
         expect(screen.getByRole('radio', { name: /^No alert/ })).toBeInTheDocument()
         expect(screen.getByRole('radio', { name: /^Alert/ })).toBeInTheDocument()
         fireEvent.click(screen.getByRole('radio', { name: /^Auto-upgrade/ }))
         expect(setFleetPolicy).toHaveBeenCalledWith('auto')
+    })
+
+    it('redirects tenant namespaces away from the runner management route', () => {
+        context.token = `x.${btoa(JSON.stringify({ ns: 'tenant' }))}.x`
+        renderPage(<SettingsRunnerManagementPage />)
+        expect(navigate).toHaveBeenCalledWith({ to: '/settings/general', replace: true })
+        expect(screen.queryByRole('radio', { name: /^Auto-upgrade/ })).not.toBeInTheDocument()
     })
 
     it('renders compact display controls without dropdown popovers', () => {
