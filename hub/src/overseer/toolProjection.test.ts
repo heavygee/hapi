@@ -44,8 +44,31 @@ describe('projectToolResultForBrain', () => {
         expect(lean.items.map((i) => i.id)).toEqual([1, 2, 3])
     })
 
-    it('passes other tools through untouched', () => {
-        const events = { events: [{ id: 1, summary: 'x' }] }
-        expect(projectToolResultForBrain('query_events', events)).toBe(events)
+    it('thins events to the essentials and drops the fat payload', () => {
+        const raw = {
+            events: [{
+                id: 5, ts: 111, eventType: 'blocked', sourceKind: 'worker', relatedSessionId: 'sess-a',
+                attentionCandidate: 1, summary: 'CI auth failing',
+                payloadJson: 'x'.repeat(500), idempotencyKey: 'k'.repeat(120), artifactRefs: ['a'.repeat(90)]
+            }]
+        }
+        const lean = projectToolResultForBrain('query_events', raw) as { total: number; events: unknown[] }
+        expect(lean.total).toBe(1)
+        expect(lean.events[0]).toEqual({ id: 5, ts: 111, type: 'blocked', source: 'worker', session: 'sess-a', attention: 1, what: 'CI auth failing' })
+        expect(JSON.stringify(lean)).not.toContain('payloadJson')
+        expect(JSON.stringify(lean)).not.toContain('idempotencyKey')
+    })
+
+    it('thins workers to id/name/project/state/age', () => {
+        const raw = { workers: [{ sessionId: 'sess-a', name: 'web refactor', project: 'hapi', flavor: 'cursor', observedState: 'stale', active: true, lastActivityAt: 999, ageMs: 60000 }] }
+        const lean = projectToolResultForBrain('list_active_workers', raw) as { total: number; workers: unknown[] }
+        expect(lean.total).toBe(1)
+        expect(lean.workers[0]).toEqual({ id: 'sess-a', name: 'web refactor', project: 'hapi', state: 'stale', ageMs: 60000 })
+        expect(JSON.stringify(lean)).not.toContain('flavor')
+    })
+
+    it('passes un-projected tools through untouched', () => {
+        const state = { state: { sessionId: 'x', observedState: 'idle' } }
+        expect(projectToolResultForBrain('get_session_state', state)).toBe(state)
     })
 })

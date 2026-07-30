@@ -35,7 +35,42 @@ function len(value: unknown): number | undefined {
     return Array.isArray(value) ? value.length : undefined
 }
 
+/**
+ * Event → the minimum for reasoning. Drops the fat (payloadJson, idempotencyKey,
+ * artifactRefs, provenance, dedupe/sink plumbing) that dominates the row.
+ */
+function projectEvent(event: unknown): Record<string, unknown> {
+    const o = isObj(event) ? event : {}
+    return {
+        id: o.id,
+        ts: o.ts,
+        type: o.eventType,
+        source: o.sourceKind,
+        session: o.relatedSessionId ?? o.sourceRef,
+        attention: o.attentionCandidate,
+        what: o.summary
+    }
+}
+
+/** Worker → id/name/project/state/age; drops flavor + raw timestamps. */
+function projectWorker(worker: unknown): Record<string, unknown> {
+    const o = isObj(worker) ? worker : {}
+    return {
+        id: o.sessionId,
+        name: o.name,
+        project: o.project,
+        state: o.observedState,
+        ageMs: o.ageMs
+    }
+}
+
 export function projectToolResultForBrain(tool: OverseerToolName, result: unknown): unknown {
+    if (tool === 'query_events' && isObj(result) && Array.isArray(result.events)) {
+        return { total: result.events.length, events: result.events.map(projectEvent) }
+    }
+    if (tool === 'list_active_workers' && isObj(result) && Array.isArray(result.workers)) {
+        return { total: result.workers.length, workers: result.workers.map(projectWorker) }
+    }
     if (tool === 'query_inbox' && isObj(result) && Array.isArray(result.items)) {
         // The raw result is {items, candidates, surfaced, held} — four arrays that
         // repeat the same rows (a big part of the ~75k-token bloat). We keep only
