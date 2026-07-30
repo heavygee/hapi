@@ -145,17 +145,42 @@ export function pruneSupersededArtifactsAfterDurableMarker(opts: {
     pruneSupersededArtifacts(opts.keepPath, opts.binDir)
 }
 
-/** Stay under the hub's ~10m upgrade RPC timeout so the in-flight gate can clear. */
+/**
+ * Wall-clock budget for the whole npm-channel install path (bun → npm fallback
+ * → resolve → version probe) and for each hub-artifact download. Must stay under
+ * the hub's ~10m RunnerSelfUpgrade RPC so `runnerSelfUpgradeInFlight` can clear.
+ */
 export const UPGRADE_STEP_TIMEOUT_MS = 9 * 60_000
 
-async function runCommand(command: string, args: string[]): Promise<{ ok: boolean; output: string }> {
+/** Remaining ms until a shared deadline; never returns 0 (Bun.spawn rejects it). */
+export function remainingDeadlineMs(deadlineMs: number, nowMs = Date.now()): number {
+    return Math.max(1, deadlineMs - nowMs)
+}
+
+/**
+ * Bind sequential subprocesses to one wall-clock deadline so bun+npm cannot
+ * stack two full step timeouts past the hub RPC.
+ */
+export function createDeadlineRunner(
+    deadlineMs: number,
+    run: (command: string, args: string[], timeoutMs: number) => Promise<{ ok: boolean; output: string }>,
+    now: () => number = Date.now,
+): (command: string, args: string[]) => Promise<{ ok: boolean; output: string }> {
+    return (command, args) => run(command, args, remainingDeadlineMs(deadlineMs, now()))
+}
+
+async function runCommand(
+    command: string,
+    args: string[],
+    timeoutMs: number = UPGRADE_STEP_TIMEOUT_MS,
+): Promise<{ ok: boolean; output: string }> {
     try {
         const proc = Bun.spawn([command, ...args], {
             stdout: 'pipe',
             stderr: 'pipe',
             env: process.env,
             // Bun kills the child when the timeout elapses (default SIGTERM).
-            timeout: UPGRADE_STEP_TIMEOUT_MS,
+            timeout: timeoutMs,
         })
         const [stdout, stderr, exitCode] = await Promise.all([
             new Response(proc.stdout).text(),
@@ -166,7 +191,7 @@ async function runCommand(command: string, args: string[]): Promise<{ ok: boolea
         if (exitCode !== 0 && proc.signalCode) {
             return {
                 ok: false,
-                output: output || `command timed out or killed (${proc.signalCode}) after ${UPGRADE_STEP_TIMEOUT_MS}ms`,
+                output: output || `command timed out or killed (${proc.signalCode}) after ${timeoutMs}ms`,
             }
         }
         return { ok: exitCode === 0, output }
@@ -179,26 +204,28 @@ async function runCommand(command: string, args: string[]): Promise<{ ok: boolea
 
 async function installFromNpm(offer: HubUpgradeOffer): Promise<string> {
     const pkg = `${offer.npmPackage}@${offer.targetVersion}`
+    // One budget for bun + npm fallback + resolve + probe — not per-step 9m.
+    const runWithinBudget = createDeadlineRunner(Date.now() + UPGRADE_STEP_TIMEOUT_MS, runCommand)
     // Prefer bun global when available (matches many HAPI installs); fall back to npm.
     let manager: 'bun' | 'npm' = 'bun'
-    const bunTry = await runCommand('bun', ['add', '-g', pkg])
+    const bunTry = await runWithinBudget('bun', ['add', '-g', pkg])
     if (bunTry.ok) {
         logger.debug('[SELF-UPGRADE] bun add -g succeeded', { pkg })
     } else {
         logger.debug('[SELF-UPGRADE] bun add -g failed, trying npm', { output: bunTry.output })
-        const npmTry = await runCommand('npm', ['install', '-g', pkg])
+        const npmTry = await runWithinBudget('npm', ['install', '-g', pkg])
         if (!npmTry.ok) {
             throw new Error(`npm/bun install failed: ${npmTry.output || bunTry.output}`)
         }
         manager = 'npm'
     }
-    const installed = await resolveInstalledGlobalHapi(manager)
+    const installed = await resolveInstalledGlobalHapi(manager, runWithinBudget)
     if (!installed) {
         throw new Error(
             'npm/bun install succeeded but no hapi binary found on PATH; cannot relaunch the new generation',
         )
     }
-    await assertExecutableMatchesTargetVersion(installed, offer.targetVersion)
+    await assertExecutableMatchesTargetVersion(installed, offer.targetVersion, runWithinBudget)
     return installed
 }
 
@@ -206,12 +233,15 @@ async function installFromNpm(offer: HubUpgradeOffer): Promise<string> {
  * Prefer the package manager's global bin (the install we just performed) over
  * an older `hapi` earlier on PATH, then fall back to PATH resolution.
  */
-async function resolveInstalledGlobalHapi(manager: 'bun' | 'npm'): Promise<string | null> {
+async function resolveInstalledGlobalHapi(
+    manager: 'bun' | 'npm',
+    run: (command: string, args: string[]) => Promise<{ ok: boolean; output: string }> = runCommand,
+): Promise<string | null> {
     const candidates = process.platform === 'win32'
         ? ['hapi.exe', 'hapi', 'hapi.cmd']
         : ['hapi']
     if (manager === 'bun') {
-        const bin = await runCommand('bun', ['pm', 'bin', '-g'])
+        const bin = await run('bun', ['pm', 'bin', '-g'])
         const dir = bin.ok ? bin.output.trim().split(/\r?\n/).filter(Boolean).at(-1)?.trim() : undefined
         if (dir) {
             for (const name of candidates) {
@@ -224,7 +254,7 @@ async function resolveInstalledGlobalHapi(manager: 'bun' | 'npm'): Promise<strin
     } else {
         // `npm bin -g` was removed in npm 9; resolve via prefix instead.
         // Unix: {prefix}/bin; Windows: binaries land directly in {prefix}.
-        const prefix = await runCommand('npm', ['prefix', '-g'])
+        const prefix = await run('npm', ['prefix', '-g'])
         const prefixDir = prefix.ok
             ? prefix.output.trim().split(/\r?\n/).filter(Boolean).at(-1)?.trim()
             : undefined
