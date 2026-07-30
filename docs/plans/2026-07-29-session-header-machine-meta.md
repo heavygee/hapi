@@ -89,14 +89,20 @@ No SessionList / sessionRowHelpers edits on tip (helpers already on base).
 `merge-tree` vs `7ef4226a3`: clean. Bindings verify OK.
 
 **Do not** hand-merge onto live soup. Meta remats on this ack.
-Force-pushed 2026-07-30: origin tip = `ba35a52c0c5c744d621cebb5048124965e9dfb7b`
-(garden pre-push override: `HAPI_SKIP_COMMIT_HOOKS=1` — remat base carries garden ancestry).
+Force-pushed remat tip 2026-07-30: `ba35a52c0` (on soup). Live tip after remat: `0a497f569`.
 
-After remat: re-thin back onto `upstream/main` for PR #1244 reviewable ancestry.
+### Post-remat re-thin (2026-07-30) — DONE
+
+Re-thinned onto `upstream/main` (`36eedc870`) for PR #1244:
+
+- tip: **`4f3de28e1`** (`1a088978d` feat + keep-alive/tick)
+- **6 files only** — SessionHeader / useSSE / locales
+- **Skipped** helpers extraction commits (soup already has `sessionRowHelpers`; re-adding would remat-conflict again)
+
+Dogfood: hard-reload if sticky Workbox; current asset `index-Cpc5HVzO.js`.
 
 ### Task 4: Upstream PR
 
 - Opened: https://github.com/tiann/hapi/pull/1244 (`Fixes #1241`)
 - Fork stage: https://github.com/heavygee/hapi/pull/96 (`cold-review-clean`)
-- Remat tip (temporary): `ba35a52c0` on soup intermediate — **not** the reviewable PR tip
-- After remat succeeds: re-thin onto `upstream/main` and force-push product-only tip again
+- Reviewable tip: `4f3de28e1` on `upstream/main`
