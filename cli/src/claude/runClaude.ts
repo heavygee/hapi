@@ -124,7 +124,8 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
 
     const hookSettingsPath = generateHookSettingsFile(hookServer.port, hookServer.token, {
         filenamePrefix: 'session-hook',
-        logLabel: 'generateHookSettings'
+        logLabel: 'generateHookSettings',
+        workingDirectory
     });
     logger.debug(`[START] Generated hook settings file: ${hookSettingsPath}`);
 

@@ -460,6 +460,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           stdio: ['ignore', 'pipe', 'pipe'],  // Capture stdout/stderr for debugging
           env: {
             ...process.env,
+            HAPI_AGENT_CONTEXT: '1',
             ...extraEnv
           }
         });
