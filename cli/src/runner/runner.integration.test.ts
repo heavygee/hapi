@@ -33,6 +33,7 @@ import { Metadata } from '@/api/types';
 import { spawnHappyCLI } from '@/utils/spawnHappyCLI';
 import { getLatestRunnerLog } from '@/ui/logger';
 import { isProcessAlive, isWindows, killProcess, killProcessByChildProcess } from '@/utils/process';
+import { isVersionHandoffDisabled } from '@/runner/versionHandoff';
 
 // Utility to wait for condition
 async function waitFor(
@@ -76,6 +77,11 @@ async function isServerHealthy(): Promise<boolean> {
     console.log('[TEST] Bot not reachable:', error);
     return false;
   }
+}
+
+const versionHandoffDisabled = await isVersionHandoffDisabled();
+if (versionHandoffDisabled) {
+  console.log('[TEST] Version handoff disabled on this host (env, settings, or live runner state) — skipping self-restart integration case');
 }
 
 describe.skipIf(!await isServerHealthy())('Runner Integration Tests', { timeout: 20_000 }, () => {
@@ -418,7 +424,7 @@ describe.skipIf(!await isServerHealthy())('Runner Integration Tests', { timeout:
    * - Using pkgroll alone: doesn't update compiled configuration.currentCliVersion
    * - Modifying package.json after runner starts: triggers immediate version check on startup
    */
-  it('[takes 1 minute to run] should detect version mismatch and kill old runner', { timeout: 100_000 }, async () => {
+  it.skipIf(versionHandoffDisabled)('[takes 1 minute to run] should detect version mismatch and kill old runner', { timeout: 100_000 }, async () => {
     // Read current package.json to get version
     const packagePath = path.join(process.cwd(), 'package.json');
     const packageJsonOriginalRawText = readFileSync(packagePath, 'utf8');

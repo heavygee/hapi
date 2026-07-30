@@ -13,6 +13,11 @@ import { isBunCompiled, projectPath } from '@/projectPath';
 import { isProcessAlive, isHapiRunnerProcess, killProcess } from '@/utils/process';
 import { configuration } from '@/configuration';
 import { hashRunnerCliApiToken, hashRunnerExtraHeaders, isRunnerStateCompatibleWithIdentity } from './runnerIdentity';
+import {
+  isVersionHandoffDisabledByEnv,
+  isVersionHandoffDisabledByRunnerState,
+  isVersionHandoffDisabledBySettings,
+} from './versionHandoff';
 
 export function getInstalledCliMtimeMs(): number | undefined {
   if (isBunCompiled()) {
@@ -196,10 +201,11 @@ export async function isRunnerRunningCurrentlyInstalledHappyVersion(): Promise<b
     // caller, OR the live env-var check with the persisted-at-start snapshot
     // in state.startedWithVersionHandoffDisabled.
     if (
-      process.env.HAPI_DISABLE_VERSION_HANDOFF === '1'
-      || state.startedWithVersionHandoffDisabled === true
+      isVersionHandoffDisabledByEnv()
+      || isVersionHandoffDisabledBySettings(settings)
+      || isVersionHandoffDisabledByRunnerState(state)
     ) {
-      logger.debug('[RUNNER CONTROL] Version handoff disabled (env or persisted state), skipping mtime/version drift check');
+      logger.debug('[RUNNER CONTROL] Version handoff disabled (env, settings, or persisted state), skipping mtime/version drift check');
     } else {
       const currentCliMtimeMs = getInstalledCliMtimeMs();
       if (typeof currentCliMtimeMs === 'number' && typeof state.startedWithCliMtimeMs === 'number') {
