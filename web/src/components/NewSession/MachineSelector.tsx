@@ -1,5 +1,5 @@
 import type { Machine } from '@/types/api'
-import { cliBinaryUpdatedOnDisk } from '@hapi/protocol/runnerCapabilities'
+import { cliBinaryUpdatedOnDisk, MACHINE_CAPABILITIES } from '@hapi/protocol/runnerCapabilities'
 import {
     DEFAULT_FLEET_UPGRADE_POLICY,
     machineTrailsUpgradeOffer,
@@ -30,16 +30,24 @@ export function machineNeedsUpdateLabel(
         return false
     }
     const handoffDisabled = machine.metadata?.versionHandoffDisabled === true
-    if (machineTrailsUpgradeOffer(
+    const trails = machineTrailsUpgradeOffer(
         offer,
         machine.metadata?.happyCliVersion,
         machine.metadata?.capabilities,
         machine.metadata?.cliArtifactGeneration,
         { ignoreGenerationDrift: handoffDisabled },
-    )) {
-        return true
+    ) || (handoffDisabled && cliBinaryUpdatedOnDisk(machine.metadata))
+    if (!trails) {
+        return false
     }
-    return handoffDisabled && cliBinaryUpdatedOnDisk(machine.metadata)
+    // Under auto, only label hosts that need operator action (hub cannot RPC).
+    if (policy === 'auto') {
+        if (handoffDisabled) {
+            return true
+        }
+        return !(machine.metadata?.capabilities ?? []).includes(MACHINE_CAPABILITIES.RunnerSelfUpgrade)
+    }
+    return true
 }
 
 export function getMachineOptionLabel(

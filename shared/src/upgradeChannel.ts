@@ -179,7 +179,8 @@ export function machineTrailsUpgradeOffer(
  * Operator-facing fleet-management policy (3-pole switch in Settings):
  * - silent: hub neither alerts nor auto-upgrades drifted runners
  * - alert: hub surfaces the skew banner; operator upgrades manually
- * - auto: hub auto-upgrades drifted runners AND surfaces the banner
+ * - auto: hub auto-upgrades drifted runners; banner only for hosts that
+ *   cannot auto-upgrade (legacy / handoff-disabled). Success is a toast.
  *
  * Orthogonal to {@link UpgradeChannel}: `HAPI_UPGRADE_CHANNEL=off` is a hard
  * kill (no upgrades at all); this policy governs whether the hub acts/alerts
