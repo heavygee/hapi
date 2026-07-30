@@ -2,6 +2,7 @@ import { PROTOCOL_VERSION } from '@hapi/protocol'
 import { useTranslation } from '@/lib/use-translation'
 import { EventsDebugControls } from '@/components/settings/EventsDebugControls'
 import { InboxDebugControls } from '@/components/settings/InboxDebugControls'
+import { OverseerChatDebugControls } from '@/components/settings/OverseerChatDebugControls'
 import { SettingsPageContent, SettingsRow, SettingsSection } from '@/components/settings/SettingsPrimitives'
 
 export default function SettingsAboutPage() {
@@ -18,6 +19,7 @@ export default function SettingsAboutPage() {
             <SettingsSection>
                 <EventsDebugControls />
                 <InboxDebugControls />
+                <OverseerChatDebugControls />
             </SettingsSection>
         </SettingsPageContent>
     )

@@ -819,4 +819,29 @@ export class ApiClient {
         })
     }
 
+    async overseerConverse(
+        messages: import('@hapi/protocol').OverseerConverseMessage[],
+        opts: { relatedSessionId?: string | null; model?: string; profile?: string } = {}
+    ): Promise<import('@hapi/protocol').OverseerConverseResponse> {
+        return await this.request('/api/overseer/converse', {
+            method: 'POST',
+            body: JSON.stringify({
+                messages,
+                relatedSessionId: opts.relatedSessionId ?? undefined,
+                model: opts.model?.trim() || undefined,
+                profile: opts.profile || undefined
+            })
+        })
+    }
+
+    async fetchOverseerBrains(): Promise<{ profiles: import('@hapi/protocol').OverseerBrainProfileInfo[] }> {
+        return await this.request('/api/overseer/brains')
+    }
+
+    async fetchOverseerBrainModels(
+        profileId: string
+    ): Promise<{ profile: string; defaultModel: string | null; models: string[]; error?: string }> {
+        return await this.request(`/api/overseer/brains/${encodeURIComponent(profileId)}/models`)
+    }
+
 }
