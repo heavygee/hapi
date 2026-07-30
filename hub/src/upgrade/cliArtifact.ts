@@ -174,6 +174,11 @@ function listArtifactInputFiles(monorepoRoot: string): string[] {
         join(monorepoRoot, 'shared', 'package.json'),
         join(monorepoRoot, 'package.json'),
         join(monorepoRoot, 'bun.lock'),
+        // Compile resolution (`@/*`) depends on these; config-only changes must
+        // invalidate the hub-artifact generation fingerprint.
+        join(monorepoRoot, 'cli', 'bunfig.toml'),
+        join(monorepoRoot, 'cli', 'tsconfig.json'),
+        join(monorepoRoot, 'tsconfig.base.json'),
     ]
     const files = [
         ...treeRoots.flatMap(listFilesRecursive),
