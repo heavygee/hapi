@@ -125,18 +125,28 @@ export function fingerprintArtifactInputs(monorepoRoot: string): string {
 }
 
 /**
- * Cheap signature (path + size + mtime) for deciding whether the content
+ * Cheap signature (path + size + mtime/ctime ns) for deciding whether the content
  * fingerprint needs recomputation. Used so the 30s offer/heartbeat path does
  * not re-read ~95MB of tool archives on every TTL miss when nothing changed.
  */
+export function artifactInputStatKey(st: {
+    size: bigint
+    mtimeNs: bigint
+    ctimeNs: bigint
+}): string {
+    // bigint + ns timestamps: ms-truncated mtime collapses distinct writes in
+    // the same wall-clock millisecond and would leave the content cache stale.
+    return `stat:${st.size}:${st.mtimeNs}:${st.ctimeNs}`
+}
+
 export function fingerprintArtifactInputStats(monorepoRoot: string): string {
     const hash = createHash('sha256')
     for (const file of listArtifactInputFiles(monorepoRoot)) {
         const rel = relative(monorepoRoot, file).split('\\').join('/')
-        const st = statSync(file)
+        const st = statSync(file, { bigint: true })
         hash.update(rel)
         hash.update('\0')
-        hash.update(`stat:${st.size}:${Math.trunc(st.mtimeMs)}`)
+        hash.update(artifactInputStatKey(st))
         hash.update('\0')
     }
     return hash.digest('hex')
