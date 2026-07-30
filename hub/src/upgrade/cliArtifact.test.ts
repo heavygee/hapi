@@ -14,6 +14,7 @@ import {
     HAPI_RUNNER_ONLY_FEATURE,
     isArtifactCacheFresh,
     normalizeCompiledArtifactPath,
+    pruneRetainedArtifacts,
     runnerArtifactCompileFeatures,
     type ArtifactMeta,
 } from './cliArtifact'
@@ -83,6 +84,55 @@ describe('content-addressed artifact retention', () => {
             expect(findArtifactMetaBySha256(shaA, dataDir)?.path).toBe(pathA)
             expect(findArtifactMetaBySha256(shaB, dataDir)?.path).toBe(pathB)
             expect(findArtifactMetaBySha256('c'.repeat(64), dataDir)).toBeNull()
+        } finally {
+            rmSync(dataDir, { recursive: true, force: true })
+        }
+    })
+
+    it('prunes older generations while preserving the offered digest', () => {
+        const dataDir = mkdtempSync(join(tmpdir(), 'hapi-artifact-prune-'))
+        try {
+            const root = join(dataDir, 'upgrade-artifacts')
+            mkdirSync(root, { recursive: true })
+            const paths: string[] = []
+            const shas: string[] = []
+            for (let i = 0; i < 5; i++) {
+                const fp = `${'f'.repeat(15)}${i}`
+                const sha = `${i}${ '0'.repeat(63)}`
+                const path = join(root, contentAddressedArtifactFileName('0.25.1', 'linux', 'x64', fp))
+                writeFileSync(path, `bytes-${i}`)
+                writeFileSync(`${path}.json`, JSON.stringify({
+                    version: '0.25.1',
+                    platform: 'linux',
+                    arch: 'x64',
+                    path,
+                    sha256: sha,
+                    sizeBytes: 7,
+                    sourceFingerprint: fp,
+                }))
+                // Ensure deterministic mtime ordering (older → newer).
+                const when = new Date(Date.now() - (5 - i) * 60_000)
+                utimesSync(path, when, when)
+                utimesSync(`${path}.json`, when, when)
+                paths.push(path)
+                shas.push(sha)
+            }
+
+            const removed = pruneRetainedArtifacts({
+                dataDir,
+                version: '0.25.1',
+                platform: 'linux',
+                arch: 'x64',
+                preserveSha256: shas[0]!, // oldest, still offered
+                keepGenerations: 3,
+            })
+            expect(removed.length).toBeGreaterThan(0)
+            expect(existsSync(paths[0]!)).toBe(true) // preserved digest
+            expect(existsSync(paths[4]!)).toBe(true) // newest kept in window
+            expect(findArtifactMetaBySha256(shas[0]!, dataDir)?.path).toBe(paths[0]!)
+            // Middle gens beyond the keep window should be gone (1 and/or 2).
+            const remaining = paths.filter((p) => existsSync(p)).length
+            expect(remaining).toBeLessThanOrEqual(4) // 3 window + preserved oldest
         } finally {
             rmSync(dataDir, { recursive: true, force: true })
         }

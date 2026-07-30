@@ -559,6 +559,97 @@ export async function ensureCliArtifact(options: {
             sourceFingerprint,
         }
         writeMeta(meta)
+        pruneRetainedArtifacts({
+            dataDir: options.dataDir,
+            version: options.version,
+            platform: options.platform,
+            arch: options.arch,
+            preserveSha256: meta.sha256,
+        })
         return meta
     })
+}
+
+/** How many prior generations to keep per version/platform/arch (plus preserveSha256). */
+export const RETAINED_ARTIFACT_GENERATIONS = 3
+
+/**
+ * Drop older content-addressed builds for the same version/platform/arch so
+ * soup hubs do not accumulate unbounded Bun binaries. Always keeps
+ * `preserveSha256` (the just-built or still-offered digest).
+ */
+export function pruneRetainedArtifacts(options: {
+    dataDir?: string
+    version: string
+    platform: string
+    arch: string
+    preserveSha256: string
+    keepGenerations?: number
+}): string[] {
+    const keep = options.keepGenerations ?? RETAINED_ARTIFACT_GENERATIONS
+    const dir = artifactsRoot(options.dataDir)
+    if (!existsSync(dir)) {
+        return []
+    }
+    const preserve = options.preserveSha256.trim().toLowerCase()
+    const prefix = `${artifactFileName(options.version, options.platform, options.arch)}-`
+    const legacyName = artifactFileName(options.version, options.platform, options.arch)
+    let entries: string[]
+    try {
+        entries = readdirSync(dir)
+    } catch {
+        return []
+    }
+
+    type Candidate = { metaPath: string; meta: ArtifactMeta; mtimeMs: number }
+    const candidates: Candidate[] = []
+    for (const name of entries) {
+        if (!name.endsWith('.json')) {
+            continue
+        }
+        const base = name.slice(0, -'.json'.length)
+        if (base !== legacyName && !base.startsWith(prefix)) {
+            continue
+        }
+        const metaPath = join(dir, name)
+        try {
+            const meta = JSON.parse(readFileSync(metaPath, 'utf8')) as ArtifactMeta
+            if (meta.version !== options.version || meta.platform !== options.platform || meta.arch !== options.arch) {
+                continue
+            }
+            const mtimeMs = statSync(metaPath).mtimeMs
+            candidates.push({ metaPath, meta, mtimeMs })
+        } catch {
+            // skip corrupt
+        }
+    }
+
+    candidates.sort((a, b) => b.mtimeMs - a.mtimeMs)
+    const retained = new Set<string>()
+    const removed: string[] = []
+    for (const candidate of candidates) {
+        const sha = typeof candidate.meta.sha256 === 'string'
+            ? candidate.meta.sha256.toLowerCase()
+            : ''
+        const mustKeep = sha === preserve || retained.size < keep
+        if (mustKeep) {
+            retained.add(candidate.metaPath)
+            continue
+        }
+        try {
+            if (typeof candidate.meta.path === 'string' && existsSync(candidate.meta.path)) {
+                unlinkSync(candidate.meta.path)
+            }
+            // Windows may leave a .exe sibling from normalize.
+            const exeSibling = `${candidate.meta.path}.exe`
+            if (typeof candidate.meta.path === 'string' && existsSync(exeSibling)) {
+                unlinkSync(exeSibling)
+            }
+            unlinkSync(candidate.metaPath)
+            removed.push(candidate.meta.path)
+        } catch {
+            // best-effort GC
+        }
+    }
+    return removed
 }
