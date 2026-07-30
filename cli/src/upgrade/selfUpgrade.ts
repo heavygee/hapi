@@ -272,14 +272,36 @@ async function resolveInstalledGlobalHapi(
 }
 
 /**
+ * Build the command used to probe an installed hapi binary's --version.
+ * Windows npm shims are `.cmd`/`.bat`; CreateProcess cannot run them directly,
+ * so route through cmd.exe the same way the relaunch path uses shell:true.
+ */
+export function versionProbeCommand(
+    installed: string,
+    platform: NodeJS.Platform = process.platform,
+    comSpec: string = process.env.ComSpec ?? 'cmd.exe',
+): { command: string; args: string[] } {
+    const isWindowsShim = platform === 'win32' && /\.(cmd|bat)$/i.test(installed)
+    if (isWindowsShim) {
+        return {
+            command: comSpec,
+            args: ['/d', '/s', '/c', `"${installed}" --version`],
+        }
+    }
+    return { command: installed, args: ['--version'] }
+}
+
+/**
  * Fail closed when PATH still resolves an older generation after install.
  */
 export async function assertExecutableMatchesTargetVersion(
     installed: string,
     targetVersion: string,
     run: (command: string, args: string[]) => Promise<{ ok: boolean; output: string }> = runCommand,
+    platform: NodeJS.Platform = process.platform,
 ): Promise<void> {
-    const probe = await run(installed, ['--version'])
+    const { command, args } = versionProbeCommand(installed, platform)
+    const probe = await run(command, args)
     const actual = probe.output
         .split(/\r?\n/)
         .map((line) => line.trim())
