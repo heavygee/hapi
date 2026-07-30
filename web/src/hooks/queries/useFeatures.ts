@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ApiClient } from '@/api/client'
+import type { PrChipDisplayProfile } from '@hapi/protocol'
 import { queryKeys } from '@/lib/query-keys'
 
 export type FeaturesResponse = {
@@ -7,6 +8,7 @@ export type FeaturesResponse = {
         enabled: boolean
         source: 'env' | 'file' | 'default'
     }
+    prChipDisplay: PrChipDisplayProfile
 }
 
 export function useFeatures(api: ApiClient | null): {

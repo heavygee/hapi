@@ -139,6 +139,11 @@ vi.mock('@/hooks/queries/useFeatures', () => ({
     useFeatures: () => ({
         features: {
             githubPrAwareness: { enabled: false, source: 'default' },
+            prChipDisplay: {
+                staleMs: 7_200_000,
+                forge: {},
+                estateCodes: {}
+            },
         },
         isLoading: false,
     }),

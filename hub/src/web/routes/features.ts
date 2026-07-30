@@ -1,6 +1,8 @@
 import { FeaturesPatchRequestSchema } from '@hapi/protocol'
+import type { PrChipDisplayProfile } from '@hapi/protocol'
 import { Hono } from 'hono'
 import { getConfiguration, type ConfigSource } from '../../configuration'
+import { loadPrChipDisplayProfile } from '../../config/prChipDisplay'
 import type { WebAppEnv } from '../middleware/auth'
 
 export type GithubPrAwarenessState = {
@@ -11,6 +13,7 @@ export type GithubPrAwarenessState = {
 export type FeaturesRouteDeps = {
     getGithubPrAwareness: () => GithubPrAwarenessState
     setGithubPrAwareness: (enabled: boolean) => Promise<void>
+    getPrChipDisplay: () => PrChipDisplayProfile
 }
 
 function defaultDeps(): FeaturesRouteDeps {
@@ -24,7 +27,8 @@ function defaultDeps(): FeaturesRouteDeps {
         },
         setGithubPrAwareness: async (enabled: boolean) => {
             await getConfiguration().setGithubPrAwareness(enabled)
-        }
+        },
+        getPrChipDisplay: () => loadPrChipDisplayProfile(getConfiguration().dataDir)
     }
 }
 
@@ -37,7 +41,8 @@ export function createFeaturesRoutes(deps: FeaturesRouteDeps = defaultDeps()): H
             githubPrAwareness: {
                 enabled: githubPrAwareness.enabled,
                 source: githubPrAwareness.source
-            }
+            },
+            prChipDisplay: deps.getPrChipDisplay()
         })
     })
 
@@ -72,7 +77,8 @@ export function createFeaturesRoutes(deps: FeaturesRouteDeps = defaultDeps()): H
             githubPrAwareness: {
                 enabled: next.enabled,
                 source: next.source
-            }
+            },
+            prChipDisplay: deps.getPrChipDisplay()
         })
     })
 

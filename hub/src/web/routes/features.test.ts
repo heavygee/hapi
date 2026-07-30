@@ -1,16 +1,20 @@
 import { describe, expect, it } from 'bun:test'
+import { DEFAULT_PR_CHIP_DISPLAY } from '@hapi/protocol'
 import { Hono } from 'hono'
 import type { WebAppEnv } from '../middleware/auth'
 import { createFeaturesRoutes, type FeaturesRouteDeps } from './features'
 
-function createApp(deps: FeaturesRouteDeps) {
+function createApp(deps: Partial<FeaturesRouteDeps> & Pick<FeaturesRouteDeps, 'getGithubPrAwareness' | 'setGithubPrAwareness'>) {
     const app = new Hono<WebAppEnv>()
-    app.route('/api', createFeaturesRoutes(deps))
+    app.route('/api', createFeaturesRoutes({
+        getPrChipDisplay: () => DEFAULT_PR_CHIP_DISPLAY,
+        ...deps
+    }))
     return app
 }
 
 describe('features routes', () => {
-    it('returns githubPrAwareness default off', async () => {
+    it('returns githubPrAwareness default off plus generic prChipDisplay', async () => {
         const app = createApp({
             getGithubPrAwareness: () => ({ enabled: false, source: 'default' }),
             setGithubPrAwareness: async () => {
@@ -21,7 +25,8 @@ describe('features routes', () => {
         const response = await app.request('/api/features')
         expect(response.status).toBe(200)
         expect(await response.json()).toEqual({
-            githubPrAwareness: { enabled: false, source: 'default' }
+            githubPrAwareness: { enabled: false, source: 'default' },
+            prChipDisplay: DEFAULT_PR_CHIP_DISPLAY
         })
     })
 
@@ -44,7 +49,8 @@ describe('features routes', () => {
 
         expect(response.status).toBe(200)
         expect(await response.json()).toEqual({
-            githubPrAwareness: { enabled: true, source: 'file' }
+            githubPrAwareness: { enabled: true, source: 'file' },
+            prChipDisplay: DEFAULT_PR_CHIP_DISPLAY
         })
         expect(enabled).toBe(true)
     })

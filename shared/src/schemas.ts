@@ -34,21 +34,34 @@ export const GithubRepoSlugSchema = z.string().regex(
 /**
  * Structured link from a HAPI session to an external contribution surface.
  * v1: GitHub pull requests only. Do not parse session titles for this identity.
- * tiann/hapi#1160.
+ * tiann/hapi#1160 / #1163.
+ *
+ * Optional forge snapshot fields are GitHub-shaped facts only. Babysit / Meta
+ * vocabulary lives in estate display config (`pr-chip-display.json`), not here.
  */
+
+/** PR open/closed/merged/draft as reported by GitHub (cached). */
+export const GithubPrOpenStateSchema = z.enum(['open', 'closed', 'merged', 'draft'])
+export type GithubPrOpenState = z.infer<typeof GithubPrOpenStateSchema>
+
+/** CI / status-check rollup (cached). */
+export const GithubPrChecksSchema = z.enum(['pass', 'fail', 'pending', 'none', 'unknown'])
+export type GithubPrChecks = z.infer<typeof GithubPrChecksSchema>
+
 /**
- * Cached Meta/classifier health for a linked GitHub PR (ADR D8).
- * Absent = not yet classified; chip shows identity only.
+ * Merge readiness subset of GitHub `mergeStateStatus` (cached).
+ * Not a babysit disposition — estate codes overlay presentation.
  */
-export const GithubPrStatusSchema = z.enum([
+export const GithubPrMergeSchema = z.enum([
     'clean',
-    'pending',
-    'needs_work',
-    'pre_pr',
-    'merged',
+    'conflicting',
+    'blocked',
+    'behind',
+    'unstable',
+    'draft',
     'unknown'
 ])
-export type GithubPrStatus = z.infer<typeof GithubPrStatusSchema>
+export type GithubPrMerge = z.infer<typeof GithubPrMergeSchema>
 
 export const GithubPrExternalRefSchema = z.object({
     kind: z.literal('github_pr'),
@@ -59,10 +72,13 @@ export const GithubPrExternalRefSchema = z.object({
     // Optional provenance. Absent source reads as trusted ('user') for pre-#1162 refs.
     source: z.enum(['agent', 'user', 'inferred']).optional(),
     linkedAt: z.number().int().positive().optional(),
-    // Optional cached classification (Meta / operator tooling). Not live GitHub.
-    status: GithubPrStatusSchema.optional(),
+    // Optional cached forge snapshot. Not live GitHub; browser never queries.
+    openState: GithubPrOpenStateSchema.optional(),
+    checks: GithubPrChecksSchema.optional(),
+    merge: GithubPrMergeSchema.optional(),
     statusCheckedAt: z.number().int().positive().optional(),
-    statusAction: z.string().max(400).optional()
+    // Opaque estate classifier code; only pr-chip-display estateCodes interpret it.
+    estateCode: z.string().min(1).max(64).optional()
 }).superRefine((ref, ctx) => {
     const expectedUrl = `https://github.com/${ref.repo}/pull/${ref.number}`
     if (ref.url !== expectedUrl) {

@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+    DEFAULT_PR_CHIP_DISPLAY,
     formatGithubPrChipLabel,
-    formatGithubPrChipTitle,
-    GITHUB_PR_CHIP_STALE_MS,
+    mergePrChipDisplayProfile,
     resolveGithubPrChipDisplay
-} from './SessionPrChip'
-import { getPrimaryGithubPrRef, githubPrStatusFromEmoji, githubPrStatusEmoji } from '@hapi/protocol'
+} from '@hapi/protocol'
+import { formatGithubPrChipTitle } from './SessionPrChip'
 import type { GithubPrExternalRef } from '@/types/api'
 
 const baseRef = (over: Partial<GithubPrExternalRef> = {}): GithubPrExternalRef => ({
@@ -25,75 +25,63 @@ afterEach(() => {
 })
 
 describe('SessionPrChip helpers', () => {
-    it('formats the chip label from the PR number only when status is absent', () => {
-        expect(formatGithubPrChipLabel(baseRef({ number: 1160, url: 'https://github.com/tiann/hapi/pull/1160' }))).toBe('#1160')
+    it('formats the chip label from the PR number only when snapshot is absent', () => {
+        const ref = baseRef()
+        const display = resolveGithubPrChipDisplay(ref, DEFAULT_PR_CHIP_DISPLAY)
+        expect(formatGithubPrChipLabel(ref, display)).toBe('#1163')
     })
 
-    it('prefixes the Meta status emoji when status is cached on the ref', () => {
-        const now = 1_700_000_000_000 + 60_000
-        expect(formatGithubPrChipLabel(baseRef({
-            status: 'needs_work',
-            statusCheckedAt: 1_700_000_000_000,
-            statusAction: 'fix failing CI'
-        }), now)).toBe('⚠️#1163')
-    })
-
-    it('mutes to ? when statusCheckedAt is older than 2h', () => {
-        const checkedAt = 1_700_000_000_000
-        const now = checkedAt + GITHUB_PR_CHIP_STALE_MS + 1
+    it('uses generic forge label without Meta action prose by default', () => {
         const ref = baseRef({
-            status: 'clean',
-            statusCheckedAt: checkedAt
+            checks: 'pass',
+            merge: 'clean',
+            statusCheckedAt: 1_700_000_000_000
         })
-        expect(resolveGithubPrChipDisplay(ref, now)).toEqual({
-            status: 'unknown',
-            stale: true
-        })
-        expect(formatGithubPrChipLabel(ref, now)).toBe('?#1163')
+        const display = resolveGithubPrChipDisplay(ref, DEFAULT_PR_CHIP_DISPLAY, 1_700_000_000_000)
+        expect(display.label).toBe('ready to merge')
+        expect(display.action).toBeUndefined()
+        expect(formatGithubPrChipLabel(ref, display)).toBe('#1163')
     })
 
-    it('keeps tone when cache is fresh', () => {
+    it('mutes to ? when statusCheckedAt is older than staleMs', () => {
         const checkedAt = 1_700_000_000_000
-        const now = checkedAt + GITHUB_PR_CHIP_STALE_MS - 1
-        expect(resolveGithubPrChipDisplay(baseRef({
-            status: 'pending',
+        const ref = baseRef({
+            checks: 'fail',
             statusCheckedAt: checkedAt
-        }), now)).toEqual({ status: 'pending', stale: false })
-    })
-
-    it('does not treat missing statusCheckedAt as stale', () => {
-        expect(resolveGithubPrChipDisplay(baseRef({ status: 'clean' }), Date.now())).toEqual({
-            status: 'clean',
-            stale: false
         })
+        const display = resolveGithubPrChipDisplay(
+            ref,
+            DEFAULT_PR_CHIP_DISPLAY,
+            checkedAt + DEFAULT_PR_CHIP_DISPLAY.staleMs + 1
+        )
+        expect(display.stale).toBe(true)
+        expect(formatGithubPrChipLabel(ref, display)).toBe('?#1163')
     })
 
-    it('does not infer a PR from title-like strings (structured refs only)', () => {
-        // Callers must pass metadata.externalRefs — never parse "PR #1160" titles.
-        expect(getPrimaryGithubPrRef(undefined)).toBeNull()
-        expect(getPrimaryGithubPrRef([])).toBeNull()
-    })
-
-    it('maps Meta emoji contract to stable status enums', () => {
-        expect(githubPrStatusFromEmoji('✅')).toBe('clean')
-        expect(githubPrStatusFromEmoji('⚠️')).toBe('needs_work')
-        expect(githubPrStatusEmoji('merged')).toBe('🔧')
-    })
-
-    it('uses relative ago in chip title (tooltip already - no absolute nest)', () => {
+    it('applies estate display overrides for emoji and action terms', () => {
+        const profile = mergePrChipDisplayProfile({
+            estateCodes: {
+                'babysit.needs_work': {
+                    emoji: '⚠️',
+                    tone: 'needs_work',
+                    label: 'needs work',
+                    action: 'rebase (merge state dirty)'
+                }
+            }
+        })
         vi.useFakeTimers()
         const checkedAt = 1_700_000_000_000
-        // 90m: still fresh for chip tone (<2h), but past the hours bucket.
         vi.setSystemTime(checkedAt + 90 * 60_000)
         const ref = baseRef({
-            status: 'needs_work',
+            merge: 'conflicting',
             statusCheckedAt: checkedAt,
-            statusAction: 'rebase (merge state dirty)'
+            estateCode: 'babysit.needs_work'
         })
-        const display = resolveGithubPrChipDisplay(ref, Date.now())
+        const display = resolveGithubPrChipDisplay(ref, profile, Date.now())
         const title = formatGithubPrChipTitle(ref, display, keyedT)
+        expect(formatGithubPrChipLabel(ref, display)).toBe('⚠️#1163')
         expect(title).toBe(
-            'tiann/hapi#1163 · needs_work · checked session.time.hoursAgo:1 — rebase (merge state dirty)'
+            'tiann/hapi#1163 · needs work · checked session.time.hoursAgo:1 — rebase (merge state dirty)'
         )
         expect(title).not.toMatch(/T\d{2}:\d{2}:\d{2}/)
     })

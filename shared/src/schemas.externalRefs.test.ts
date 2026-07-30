@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { ExternalRefSchema, MetadataSchema } from './schemas'
-import { getPrimaryGithubPrRef, parseGithubPrInput, buildGithubPrExternalRef } from './externalRefs'
+import {
+    buildGithubPrExternalRef,
+    formatGithubPrChipLabel,
+    getPrimaryGithubPrRef,
+    parseGithubPrInput,
+    resolveGithubPrChipDisplay
+} from './externalRefs'
+import { DEFAULT_PR_CHIP_DISPLAY, mergePrChipDisplayProfile } from './prChipDisplay'
 
 describe('ExternalRefSchema', () => {
     const validPr = {
@@ -28,23 +35,39 @@ describe('ExternalRefSchema', () => {
         expect(parsed.success).toBe(true)
     })
 
-    it('accepts optional cached status fields (ADR D8)', () => {
+    it('accepts forge snapshot + opaque estateCode (not Meta status enums)', () => {
         const parsed = ExternalRefSchema.safeParse({
             ...validPr,
-            status: 'clean',
+            openState: 'open',
+            checks: 'pass',
+            merge: 'clean',
             statusCheckedAt: 1_700_000_000_000,
-            statusAction: 'full green — wait on tiann'
+            estateCode: 'babysit.green'
         })
         expect(parsed.success).toBe(true)
         if (parsed.success) {
-            expect(parsed.data.status).toBe('clean')
+            expect(parsed.data.merge).toBe('clean')
+            expect(parsed.data.estateCode).toBe('babysit.green')
         }
     })
 
-    it('rejects unknown status values', () => {
+    it('strips legacy Meta status enum keys (unknown keys; not protocol fields)', () => {
+        const parsed = ExternalRefSchema.safeParse({
+            ...validPr,
+            status: 'needs_work',
+            statusAction: 'wait on tiann'
+        })
+        expect(parsed.success).toBe(true)
+        if (parsed.success) {
+            expect(parsed.data).toEqual(validPr)
+            expect('status' in parsed.data).toBe(false)
+        }
+    })
+
+    it('rejects unknown forge values', () => {
         expect(ExternalRefSchema.safeParse({
             ...validPr,
-            status: 'purple'
+            checks: 'purple'
         }).success).toBe(false)
     })
 
@@ -178,5 +201,51 @@ describe('buildGithubPrExternalRef', () => {
             source: 'agent',
             linkedAt: 42
         })
+    })
+})
+
+describe('pr chip display profile', () => {
+    const baseRef = buildGithubPrExternalRef({
+        repo: 'tiann/hapi',
+        number: 1163,
+        checks: 'pass',
+        merge: 'clean',
+        statusCheckedAt: 1_700_000_000_000
+    })
+
+    it('uses generic forge labels with no Meta prose by default', () => {
+        const display = resolveGithubPrChipDisplay(baseRef, DEFAULT_PR_CHIP_DISPLAY, 1_700_000_000_000)
+        expect(display.label).toBe('ready to merge')
+        expect(display.emoji).toBe('')
+        expect(display.action).toBeUndefined()
+        expect(formatGithubPrChipLabel(baseRef, display)).toBe('#1163')
+    })
+
+    it('lets estateCodes override emoji and action terms', () => {
+        const profile = mergePrChipDisplayProfile({
+            estateCodes: {
+                'babysit.green': {
+                    emoji: '✅',
+                    tone: 'ok',
+                    label: 'clean',
+                    action: 'full green — wait on tiann'
+                }
+            }
+        })
+        const ref = { ...baseRef, estateCode: 'babysit.green' }
+        const display = resolveGithubPrChipDisplay(ref, profile, 1_700_000_000_000)
+        expect(display.emoji).toBe('✅')
+        expect(display.action).toBe('full green — wait on tiann')
+        expect(formatGithubPrChipLabel(ref, display)).toBe('✅#1163')
+    })
+
+    it('mutes to ? when statusCheckedAt is older than staleMs', () => {
+        const display = resolveGithubPrChipDisplay(
+            baseRef,
+            DEFAULT_PR_CHIP_DISPLAY,
+            1_700_000_000_000 + DEFAULT_PR_CHIP_DISPLAY.staleMs + 1
+        )
+        expect(display.stale).toBe(true)
+        expect(formatGithubPrChipLabel(baseRef, display)).toBe('?#1163')
     })
 })

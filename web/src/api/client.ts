@@ -767,12 +767,14 @@ export class ApiClient {
 
     async getFeatures(): Promise<{
         githubPrAwareness: { enabled: boolean; source: 'env' | 'file' | 'default' }
+        prChipDisplay: import('@hapi/protocol').PrChipDisplayProfile
     }> {
         return await this.request('/api/features')
     }
 
     async patchFeatures(patch: { githubPrAwareness?: boolean }): Promise<{
         githubPrAwareness: { enabled: boolean; source: 'env' | 'file' | 'default' }
+        prChipDisplay: import('@hapi/protocol').PrChipDisplayProfile
     }> {
         return await this.request('/api/features', {
             method: 'PATCH',

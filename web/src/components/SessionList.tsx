@@ -799,6 +799,7 @@ function SessionItem(props: {
     const [deleteOpen, setDeleteOpen] = useState(false)
     const { features } = useFeatures(api)
     const githubPrAwarenessEnabled = Boolean(features?.githubPrAwareness.enabled)
+    const prChipDisplay = features?.prChipDisplay
     const {
         status: cursorChatStoreStatus,
         isApplicable: cursorChatStoreApplicable,
@@ -934,7 +935,10 @@ function SessionItem(props: {
                             ) : null}
                             {/* Chip left of time: time stays the stable trailing column (ADR D8). */}
                             {githubPrAwarenessEnabled && primaryPrRef ? (
-                                <SessionPrChip refs={s.metadata?.externalRefs} />
+                                <SessionPrChip
+                                    refs={s.metadata?.externalRefs}
+                                    displayProfile={prChipDisplay}
+                                />
                             ) : null}
                             <span className="tabular-nums text-[var(--app-hint)]">
                                 {getSessionTimeLabel(s, t)}
