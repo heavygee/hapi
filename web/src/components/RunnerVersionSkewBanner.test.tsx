@@ -6,10 +6,13 @@ import type { FleetUpgradePolicy } from '@hapi/protocol/upgradeChannel'
 import type { Machine } from '@/types/api'
 import {
     RunnerVersionSkewBanner,
+    listBannerSkewMachines,
     listSkewedMachines,
+    machineCanAutoUpgrade,
     machineDisplayHost,
 } from './RunnerVersionSkewBanner'
 import { I18nProvider } from '@/lib/i18n-context'
+import { ToastProvider } from '@/lib/toast-context'
 import {
     clearRunnerSkewTempDismiss,
     resetRunnerSkewBannerMemoryForTests,
@@ -26,7 +29,7 @@ const TEST_OFFER = {
 }
 type UpgradeInfoMockResult = { info: { offer: typeof TEST_OFFER; policy: FleetUpgradePolicy }; isLoading: boolean }
 const useMachinesMock = vi.fn()
-const useUpgradeInfoMock = vi.fn((..._args: unknown[]): UpgradeInfoMockResult => ({ info: { offer: TEST_OFFER, policy: 'auto' }, isLoading: false }))
+const useUpgradeInfoMock = vi.fn((..._args: unknown[]): UpgradeInfoMockResult => ({ info: { offer: TEST_OFFER, policy: 'alert' }, isLoading: false }))
 const restartMachineRunnerMock = vi.fn(async (): Promise<{ message: string }> => ({ message: 'ok' }))
 const upgradeMachineRunnerMock = vi.fn(async (): Promise<{ message: string; response?: unknown }> => ({ message: 'ok' }))
 const useAppContextMock = vi.fn(() => ({
@@ -103,11 +106,35 @@ function renderBanner() {
     return render(
         <QueryClientProvider client={client}>
             <I18nProvider>
-                <RunnerVersionSkewBanner />
+                <ToastProvider>
+                    <RunnerVersionSkewBanner />
+                </ToastProvider>
             </I18nProvider>
         </QueryClientProvider>,
     )
 }
+
+describe('listBannerSkewMachines', () => {
+    it('under auto, drops self-upgradeable hosts from the banner list', () => {
+        const upgradeable = makeUpgradeableMachine({
+            id: 'ok',
+            metadata: { host: 'homelab', platform: 'linux', happyCliVersion: '0.20.0' },
+        })
+        const legacy = makeMachine({
+            id: 'legacy',
+            metadata: {
+                host: 'old-box',
+                platform: 'linux',
+                happyCliVersion: '0.20.0',
+                capabilities: [],
+            },
+        })
+        expect(machineCanAutoUpgrade(upgradeable)).toBe(true)
+        expect(machineCanAutoUpgrade(legacy)).toBe(false)
+        expect(listBannerSkewMachines([upgradeable, legacy], TEST_OFFER, 'auto').map((m) => m.id)).toEqual(['legacy'])
+        expect(listBannerSkewMachines([upgradeable, legacy], TEST_OFFER, 'alert').map((m) => m.id)).toEqual(['ok', 'legacy'])
+    })
+})
 
 describe('listSkewedMachines', () => {
     it('flags online machines that trail the hub offer (version or capability drift)', () => {
@@ -230,7 +257,7 @@ describe('RunnerVersionSkewBanner', () => {
         clearRunnerSkewTempDismiss(scope)
         restartMachineRunnerMock.mockClear()
         upgradeMachineRunnerMock.mockClear()
-        useUpgradeInfoMock.mockReturnValue({ info: { offer: TEST_OFFER, policy: 'auto' }, isLoading: false })
+        useUpgradeInfoMock.mockReturnValue({ info: { offer: TEST_OFFER, policy: 'alert' }, isLoading: false })
     })
 
     afterEach(() => {
@@ -456,6 +483,60 @@ describe('RunnerVersionSkewBanner', () => {
         await waitFor(() => {
             expect(screen.queryByTestId('runner-version-skew-banner')).not.toBeInTheDocument()
         })
+    })
+
+    it('hides under auto when every skewed host can self-upgrade', async () => {
+        useUpgradeInfoMock.mockReturnValue({ info: { offer: TEST_OFFER, policy: 'auto' }, isLoading: false })
+        useMachinesMock.mockReturnValue({
+            machines: [
+                makeUpgradeableMachine({
+                    id: 'win',
+                    metadata: { host: 'personal-win', platform: 'win32', happyCliVersion: '0.20.0' },
+                }),
+                makeUpgradeableMachine({
+                    id: 'lab',
+                    metadata: { host: 'homelab', platform: 'linux', happyCliVersion: '0.20.0' },
+                }),
+            ],
+            isLoading: false,
+            error: null,
+        })
+
+        renderBanner()
+
+        await waitFor(() => {
+            expect(screen.queryByTestId('runner-version-skew-banner')).not.toBeInTheDocument()
+        })
+    })
+
+    it('under auto, only banners hosts that cannot self-upgrade', async () => {
+        useUpgradeInfoMock.mockReturnValue({ info: { offer: TEST_OFFER, policy: 'auto' }, isLoading: false })
+        useMachinesMock.mockReturnValue({
+            machines: [
+                makeUpgradeableMachine({
+                    id: 'ok',
+                    metadata: { host: 'homelab', platform: 'linux', happyCliVersion: '0.20.0' },
+                }),
+                makeMachine({
+                    id: 'legacy',
+                    metadata: {
+                        host: 'old-box',
+                        platform: 'linux',
+                        happyCliVersion: '0.20.0',
+                        capabilities: [],
+                    },
+                }),
+            ],
+            isLoading: false,
+            error: null,
+        })
+
+        renderBanner()
+
+        expect(screen.getByTestId('runner-version-skew-banner')).toBeInTheDocument()
+        expect(screen.getByText(/1 runner\(s\) need attention/)).toBeInTheDocument()
+        expect(screen.getByTestId('runner-version-skew-banner-legacy')).toBeInTheDocument()
+        expect(screen.queryByTestId('runner-version-skew-banner-ok')).not.toBeInTheDocument()
     })
 
     it('hides when all online machines advertise required capabilities', async () => {

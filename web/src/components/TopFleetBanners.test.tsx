@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { topFleetBannersOffsetClass, TopFleetBanners } from './TopFleetBanners'
 import { AppContextProvider } from '@/lib/app-context'
 import { I18nProvider } from '@/lib/i18n-context'
+import { ToastProvider } from '@/lib/toast-context'
 
 vi.mock('@/lib/pwa-update-context', () => ({
     usePwaUpdateContext: () => ({
@@ -68,9 +69,11 @@ describe('TopFleetBanners', () => {
         render(
             <QueryClientProvider client={queryClient}>
                 <I18nProvider>
-                    <AppContextProvider value={{ api: {} as never, token: 't', baseUrl: 'http://localhost' }}>
-                        <TopFleetBanners isSyncing={false} isReconnecting={false} />
-                    </AppContextProvider>
+                    <ToastProvider>
+                        <AppContextProvider value={{ api: {} as never, token: 't', baseUrl: 'http://localhost' }}>
+                            <TopFleetBanners isSyncing={false} isReconnecting={false} />
+                        </AppContextProvider>
+                    </ToastProvider>
                 </I18nProvider>
             </QueryClientProvider>,
         )

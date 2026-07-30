@@ -1,7 +1,12 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { cliBinaryUpdatedOnDisk, MACHINE_CAPABILITIES } from '@hapi/protocol/runnerCapabilities'
-import { DEFAULT_FLEET_UPGRADE_POLICY, machineTrailsUpgradeOffer, type HubUpgradeOffer } from '@hapi/protocol/upgradeChannel'
+import {
+    DEFAULT_FLEET_UPGRADE_POLICY,
+    machineTrailsUpgradeOffer,
+    type FleetUpgradePolicy,
+    type HubUpgradeOffer,
+} from '@hapi/protocol/upgradeChannel'
 import type { Machine } from '@/types/api'
 import { useMachines } from '@/hooks/queries/useMachines'
 import { useUpgradeInfo } from '@/hooks/queries/useUpgradeInfo'
@@ -9,6 +14,7 @@ import { useTranslation } from '@/lib/use-translation'
 import { useAppContext } from '@/lib/app-context'
 import { useOnlineStatus } from '@/hooks/useOnlineStatus'
 import { usePlatform } from '@/hooks/usePlatform'
+import { useToast } from '@/lib/toast-context'
 import { queryKeys } from '@/lib/query-keys'
 import {
     clearRunnerSkewTempDismiss,
@@ -45,6 +51,14 @@ export function machineDisplayHost(machine: Machine): string {
         ?? machine.id
 }
 
+/** True when the hub can auto-RPC self-upgrade for this machine. */
+export function machineCanAutoUpgrade(machine: Machine): boolean {
+    if (machine.metadata?.versionHandoffDisabled === true) {
+        return false
+    }
+    return (machine.metadata?.capabilities ?? []).includes(MACHINE_CAPABILITIES.RunnerSelfUpgrade)
+}
+
 export function listSkewedMachines(machines: Machine[], offer: HubUpgradeOffer | null): Machine[] {
     if (!offer) {
         return []
@@ -71,6 +85,26 @@ export function listSkewedMachines(machines: Machine[], offer: HubUpgradeOffer |
 }
 
 /**
+ * Machines the banner should list for the current fleet policy.
+ * Under `auto`, hide hosts the hub is already upgrading — only surface
+ * hosts that need operator action (legacy / handoff-disabled).
+ */
+export function listBannerSkewMachines(
+    machines: Machine[],
+    offer: HubUpgradeOffer | null,
+    policy: FleetUpgradePolicy,
+): Machine[] {
+    if (policy === 'silent') {
+        return []
+    }
+    const skewed = listSkewedMachines(machines, offer)
+    if (policy === 'auto') {
+        return skewed.filter((machine) => !machineCanAutoUpgrade(machine))
+    }
+    return skewed
+}
+
+/**
  * Compact, minimizable skew banner (#1084).
  * Primary action: fleet Upgrade (npm or hub-artifact). Restart is escape hatch.
  */
@@ -87,16 +121,55 @@ export function RunnerVersionSkewBanner({
     const { machines } = useMachines(api, true)
     const { info } = useUpgradeInfo(api, true)
     const { t } = useTranslation()
+    const { addToast } = useToast()
     const isOnline = useOnlineStatus()
     const { haptic } = usePlatform()
     const policy = info?.policy ?? DEFAULT_FLEET_UPGRADE_POLICY
-    const skewed = policy === 'silent' ? [] : listSkewedMachines(machines, info?.offer ?? null)
+    const offer = info?.offer ?? null
+    const skewed = listBannerSkewMachines(machines, offer, policy)
     const bannerScope = runnerSkewBannerScope(baseUrl, getTokenNamespace(token))
     const [minimized, setMinimized] = useState(() => isRunnerSkewMinimized(bannerScope))
     const [dismissed, setDismissed] = useState(() => isRunnerSkewTempDismissed(bannerScope))
     const [busyId, setBusyId] = useState<string | null>(null)
     const [actionError, setActionError] = useState<string | null>(null)
     const [actionInfo, setActionInfo] = useState<string | null>(null)
+    const autoSkewPrimedRef = useRef(false)
+    const prevAutoSkewIdsRef = useRef<Set<string>>(new Set())
+
+    // Under auto: toast when a previously skewed auto-eligible host catches up.
+    useEffect(() => {
+        if (policy !== 'auto' || !offer) {
+            autoSkewPrimedRef.current = false
+            prevAutoSkewIdsRef.current = new Set()
+            return
+        }
+        const autoSkewIds = new Set(
+            listSkewedMachines(machines, offer)
+                .filter((machine) => machineCanAutoUpgrade(machine))
+                .map((machine) => machine.id),
+        )
+        if (!autoSkewPrimedRef.current) {
+            autoSkewPrimedRef.current = true
+            prevAutoSkewIdsRef.current = autoSkewIds
+            return
+        }
+        for (const id of prevAutoSkewIdsRef.current) {
+            if (autoSkewIds.has(id)) {
+                continue
+            }
+            const machine = machines.find((entry) => entry.id === id)
+            if (!machine) {
+                continue
+            }
+            addToast({
+                title: t('toast.runnerUpgrade.success.title'),
+                body: t('toast.runnerUpgrade.success.body', { host: machineDisplayHost(machine) }),
+                sessionId: '',
+                url: '/',
+            })
+        }
+        prevAutoSkewIdsRef.current = autoSkewIds
+    }, [policy, offer, machines, addToast, t])
 
     useEffect(() => {
         setMinimized(isRunnerSkewMinimized(bannerScope))
@@ -233,10 +306,14 @@ export function RunnerVersionSkewBanner({
             <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-amber-950 dark:text-amber-50">
-                        {t('runner.skew.banner.summaryTitle', { count: skewed.length })}
+                        {policy === 'auto'
+                            ? t('runner.skew.banner.autoProblemTitle', { count: skewed.length })
+                            : t('runner.skew.banner.summaryTitle', { count: skewed.length })}
                     </p>
                     <p className="mt-1 text-xs leading-relaxed text-amber-900 dark:text-amber-100">
-                        {t('runner.skew.banner.summaryBody')}
+                        {policy === 'auto'
+                            ? t('runner.skew.banner.autoProblemBody')
+                            : t('runner.skew.banner.summaryBody')}
                     </p>
                 </div>
                 <div className="flex shrink-0 gap-1">
