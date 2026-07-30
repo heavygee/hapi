@@ -8,6 +8,7 @@ import {
     clearUpgradeTarget,
     isAuthorizedRunnerHandoff,
     isRunnerStartCliArgs,
+    isUpgradeTargetStaleRelativeToCli,
     readUpgradeTarget,
     shouldDelegateToUpgradeTarget,
 } from '@/upgrade/upgradeTarget'
@@ -42,7 +43,15 @@ export async function runCli(): Promise<void> {
     const upgradeTarget = !isAuthorizedRunnerHandoff() && isRunnerStartCliArgs(args)
         ? readUpgradeTarget()
         : null
-    if (upgradeTarget && shouldDelegateToUpgradeTarget(upgradeTarget)) {
+    // A later npm/binary install can leave an older hub-artifact marker behind.
+    // Clear it so Restart=always does not keep launching the stale generation.
+    if (upgradeTarget && isUpgradeTargetStaleRelativeToCli(upgradeTarget)) {
+        clearUpgradeTarget()
+        logger.debug('[UPGRADE] Cleared durable target older than current CLI', {
+            markerVersion: upgradeTarget.targetVersion,
+            currentVersion: packageJson.version,
+        })
+    } else if (upgradeTarget && shouldDelegateToUpgradeTarget(upgradeTarget)) {
         // Unix: new process group so SIGTERM under KillMode=process reaches the
         // npm shim AND its execFileSync grandchild runner, not just the shim PID.
         const useProcessGroup = process.platform !== 'win32'

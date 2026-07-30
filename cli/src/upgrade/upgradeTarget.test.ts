@@ -7,6 +7,7 @@ import {
     clearUpgradeTarget,
     isAuthorizedRunnerHandoff,
     isRunnerStartCliArgs,
+    isUpgradeTargetStaleRelativeToCli,
     readUpgradeTarget,
     shouldDelegateToUpgradeTarget,
     writeUpgradeTarget,
@@ -114,6 +115,31 @@ describe('upgradeTarget', () => {
                 targetVersion: '0.25.1',
                 updatedAt: Date.now(),
             })).toBe(false)
+        } finally {
+            if (previous === undefined) {
+                delete process.env.HAPI_CLI_EXECUTABLE
+            } else {
+                process.env.HAPI_CLI_EXECUTABLE = previous
+            }
+        }
+    })
+
+    it('does not delegate when the current CLI is newer than the durable marker', () => {
+        const previous = process.env.HAPI_CLI_EXECUTABLE
+        const path = join(home, 'hapi-0.25.1-old')
+        writeFileSync(path, 'x')
+        process.env.HAPI_CLI_EXECUTABLE = join(home, 'hapi-current-shim')
+        writeFileSync(process.env.HAPI_CLI_EXECUTABLE, 'shim')
+        try {
+            const target = {
+                path,
+                targetVersion: '0.25.1',
+                updatedAt: Date.now(),
+            }
+            expect(isUpgradeTargetStaleRelativeToCli(target, '0.26.0')).toBe(true)
+            expect(shouldDelegateToUpgradeTarget(target, { currentVersion: '0.26.0' })).toBe(false)
+            expect(shouldDelegateToUpgradeTarget(target, { currentVersion: '0.25.1' })).toBe(true)
+            expect(shouldDelegateToUpgradeTarget(target, { currentVersion: '0.24.0' })).toBe(true)
         } finally {
             if (previous === undefined) {
                 delete process.env.HAPI_CLI_EXECUTABLE
