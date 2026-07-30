@@ -539,6 +539,11 @@ export function waitForChildSpawn(child: SpawnEventTarget): Promise<void> {
 
 let runnerSelfUpgradeInFlight = false
 
+/** True while an RPC self-upgrade owns the install/handoff transition. */
+export function isRunnerSelfUpgradeInFlight(): boolean {
+    return runnerSelfUpgradeInFlight
+}
+
 /**
  * Apply a hub upgrade offer on this runner host.
  * `downloadBaseUrl` is the hub public/base URL for relative artifact paths.
@@ -564,9 +569,19 @@ export async function applyRunnerSelfUpgrade(options: {
     }
     runnerSelfUpgradeInFlight = true
     try {
-        return await applyRunnerSelfUpgradeUnlocked(options)
-    } finally {
+        const result = await applyRunnerSelfUpgradeUnlocked(options)
+        // Keep the gate set when this process is about to exit after handoff —
+        // clearing here would let the mtime heartbeat spawn a competing
+        // replacement before process.exit runs.
+        const exitingSoon = result.status === 'started'
+            || (result.status === 'failed' && /exiting/i.test(result.message))
+        if (!exitingSoon) {
+            runnerSelfUpgradeInFlight = false
+        }
+        return result
+    } catch (error) {
         runnerSelfUpgradeInFlight = false
+        throw error
     }
 }
 
