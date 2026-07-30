@@ -105,4 +105,6 @@ Dogfood: hard-reload if sticky Workbox; current asset `index-Cpc5HVzO.js`.
 
 - Opened: https://github.com/tiann/hapi/pull/1244 (`Fixes #1241`)
 - Fork stage: https://github.com/heavygee/hapi/pull/96 (`cold-review-clean`)
-- Reviewable tip: `4f3de28e1` on `upstream/main`
+- Tip: `2cc03a2c7` (empty retrigger) on `72ba9940c` (sub-minute `activeAt` skip) atop `4f3de28e1`
+- Threads: 0 unresolved (soup Blocker + heartbeat Major replied/resolved 2026-07-30)
+- `test` green; Codex `pr-review` flaking (`stream disconnected` ×3) — awaiting infra recovery for fresh bot verdict
