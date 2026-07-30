@@ -7,9 +7,10 @@ import {
     bunCompileTarget,
     fingerprintArtifactInputStats,
     fingerprintArtifactInputs,
+    HAPI_RUNNER_ONLY_FEATURE,
     isArtifactCacheFresh,
     normalizeCompiledArtifactPath,
-    withStubEmbeddedAssets,
+    runnerArtifactCompileFeatures,
     type ArtifactMeta,
 } from './cliArtifact'
 
@@ -83,72 +84,13 @@ describe('normalizeCompiledArtifactPath', () => {
     })
 })
 
-describe('withStubEmbeddedAssets', () => {
-    it('restores the previous embeddedAssets.generated.ts after the callback', async () => {
-        const root = mkdtempSync(join(tmpdir(), 'hapi-stub-assets-'))
-        try {
-            const webDir = join(root, 'hub', 'src', 'web')
-            mkdirSync(webDir, { recursive: true })
-            const manifest = join(webDir, 'embeddedAssets.generated.ts')
-            const original = 'export const embeddedAssets = [{ path: "stale.js" }];\n'
-            writeFileSync(manifest, original)
-
-            let sawStub = false
-            await withStubEmbeddedAssets(root, async () => {
-                const during = readFileSync(manifest, 'utf8')
-                expect(during).toContain('intentionally contains no embedded assets')
-                expect(during).not.toContain('stale.js')
-                sawStub = true
-            })
-
-            expect(sawStub).toBe(true)
-            expect(readFileSync(manifest, 'utf8')).toBe(original)
-        } finally {
-            rmSync(root, { recursive: true, force: true })
-        }
-    })
-
-    it('restores even when the callback throws', async () => {
-        const root = mkdtempSync(join(tmpdir(), 'hapi-stub-assets-err-'))
-        try {
-            const webDir = join(root, 'hub', 'src', 'web')
-            mkdirSync(webDir, { recursive: true })
-            const manifest = join(webDir, 'embeddedAssets.generated.ts')
-            const original = 'export const embeddedAssets = [{ path: "keep-me.js" }];\n'
-            writeFileSync(manifest, original)
-
-            await expect(withStubEmbeddedAssets(root, async () => {
-                throw new Error('compile boom')
-            })).rejects.toThrow('compile boom')
-
-            expect(readFileSync(manifest, 'utf8')).toBe(original)
-        } finally {
-            rmSync(root, { recursive: true, force: true })
-        }
-    })
-
-    it('keeps the backup when restore fails so the original is not destroyed', async () => {
-        const root = mkdtempSync(join(tmpdir(), 'hapi-stub-assets-bak-'))
-        try {
-            const webDir = join(root, 'hub', 'src', 'web')
-            mkdirSync(webDir, { recursive: true })
-            const manifest = join(webDir, 'embeddedAssets.generated.ts')
-            const original = 'export const embeddedAssets = [{ path: "real.js" }];\n'
-            writeFileSync(manifest, original)
-
-            await expect(withStubEmbeddedAssets(root, async () => 'ok', {
-                restoreFromBackup: () => {
-                    throw new Error('EPERM: restore failed')
-                },
-            })).rejects.toThrow(/Failed to restore embedded asset manifest/)
-
-            expect(readFileSync(manifest, 'utf8')).toContain('intentionally contains no embedded assets')
-            const backups = readdirSync(webDir).filter((name) => name.includes('.bak'))
-            expect(backups).toHaveLength(1)
-            expect(readFileSync(join(webDir, backups[0]!), 'utf8')).toBe(original)
-        } finally {
-            rmSync(root, { recursive: true, force: true })
-        }
+describe('runnerArtifactCompileFeatures', () => {
+    it('includes HAPI_RUNNER_ONLY so compile DCE skips embedded web assets without mutating the tree', () => {
+        expect(runnerArtifactCompileFeatures('linux', 'x64')).toEqual([
+            'HAPI_TARGET_LINUX_X64',
+            HAPI_RUNNER_ONLY_FEATURE,
+        ])
+        expect(runnerArtifactCompileFeatures('win32', 'x64')).toContain(HAPI_RUNNER_ONLY_FEATURE)
     })
 })
 
@@ -249,7 +191,7 @@ describe('fingerprintArtifactInputs / isArtifactCacheFresh', () => {
         }
     })
 
-    it('ignores hub embeddedAssets.generated.ts which compile stubs out', () => {
+    it('ignores hub embeddedAssets.generated.ts (runner compile DCE via HAPI_RUNNER_ONLY)', () => {
         const root = mkdtempSync(join(tmpdir(), 'hapi-artifact-stub-fp-'))
         try {
             mkdirSync(join(root, 'cli', 'src'), { recursive: true })
@@ -273,7 +215,7 @@ describe('fingerprintArtifactInputs / isArtifactCacheFresh', () => {
         }
     })
 
-    it('ignores withStubEmbeddedAssets fleet-upgrade .bak files in hub/src/web', () => {
+    it('ignores leftover fleet-upgrade .bak files in hub/src/web', () => {
         const root = mkdtempSync(join(tmpdir(), 'hapi-artifact-bak-fp-'))
         try {
             mkdirSync(join(root, 'cli', 'src'), { recursive: true })
