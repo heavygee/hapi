@@ -105,6 +105,46 @@ export function listBannerSkewMachines(
 }
 
 /**
+ * Confirm a previously auto-skewed host has actually caught up before toasting.
+ * Going offline (or disappearing) is not success — keep those IDs pending.
+ */
+export function collectConfirmedAutoUpgradeToasts(options: {
+    previousAutoSkewIds: ReadonlySet<string>
+    machines: Machine[]
+    offer: HubUpgradeOffer
+}): { toastHosts: string[]; nextAutoSkewIds: Set<string> } {
+    const nextAutoSkewIds = new Set(
+        listSkewedMachines(options.machines, options.offer)
+            .filter((machine) => machineCanAutoUpgrade(machine))
+            .map((machine) => machine.id),
+    )
+    const toastHosts: string[] = []
+    for (const id of options.previousAutoSkewIds) {
+        if (nextAutoSkewIds.has(id)) {
+            continue
+        }
+        const machine = options.machines.find((entry) => entry.id === id)
+        if (!machine) {
+            continue
+        }
+        if (!machine.active) {
+            // Temporary disconnect — do not claim upgrade success.
+            nextAutoSkewIds.add(id)
+            continue
+        }
+        if (listSkewedMachines([machine], options.offer).length > 0) {
+            continue
+        }
+        if (!machineCanAutoUpgrade(machine)) {
+            // Lost self-upgrade capability without catching up — not success.
+            continue
+        }
+        toastHosts.push(machineDisplayHost(machine))
+    }
+    return { toastHosts, nextAutoSkewIds }
+}
+
+/**
  * Compact, minimizable skew banner (#1084).
  * Primary action: fleet Upgrade (npm or hub-artifact). Restart is escape hatch.
  */
@@ -136,39 +176,37 @@ export function RunnerVersionSkewBanner({
     const autoSkewPrimedRef = useRef(false)
     const prevAutoSkewIdsRef = useRef<Set<string>>(new Set())
 
-    // Under auto: toast when a previously skewed auto-eligible host catches up.
+    // Under auto: toast only when a previously skewed auto-eligible host is
+    // still online and confirmed caught up (not merely offline / missing).
     useEffect(() => {
         if (policy !== 'auto' || !offer) {
             autoSkewPrimedRef.current = false
             prevAutoSkewIdsRef.current = new Set()
             return
         }
-        const autoSkewIds = new Set(
-            listSkewedMachines(machines, offer)
-                .filter((machine) => machineCanAutoUpgrade(machine))
-                .map((machine) => machine.id),
-        )
         if (!autoSkewPrimedRef.current) {
             autoSkewPrimedRef.current = true
-            prevAutoSkewIdsRef.current = autoSkewIds
+            prevAutoSkewIdsRef.current = new Set(
+                listSkewedMachines(machines, offer)
+                    .filter((machine) => machineCanAutoUpgrade(machine))
+                    .map((machine) => machine.id),
+            )
             return
         }
-        for (const id of prevAutoSkewIdsRef.current) {
-            if (autoSkewIds.has(id)) {
-                continue
-            }
-            const machine = machines.find((entry) => entry.id === id)
-            if (!machine) {
-                continue
-            }
+        const { toastHosts, nextAutoSkewIds } = collectConfirmedAutoUpgradeToasts({
+            previousAutoSkewIds: prevAutoSkewIdsRef.current,
+            machines,
+            offer,
+        })
+        for (const host of toastHosts) {
             addToast({
                 title: t('toast.runnerUpgrade.success.title'),
-                body: t('toast.runnerUpgrade.success.body', { host: machineDisplayHost(machine) }),
+                body: t('toast.runnerUpgrade.success.body', { host }),
                 sessionId: '',
                 url: '/',
             })
         }
-        prevAutoSkewIdsRef.current = autoSkewIds
+        prevAutoSkewIdsRef.current = nextAutoSkewIds
     }, [policy, offer, machines, addToast, t])
 
     useEffect(() => {
