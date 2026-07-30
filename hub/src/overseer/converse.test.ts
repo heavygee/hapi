@@ -96,6 +96,45 @@ describe('runOverseerConverse', () => {
         expect(toolTrace[0]).toMatchObject({ ok: false, error: 'unknown tool' })
     })
 
+    it('nudges once when the first answer skips tools, then grounds', async () => {
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(chatResponse({ role: 'assistant', content: 'The inbox is empty.' }))
+            .mockResolvedValueOnce(chatResponse({
+                role: 'assistant',
+                content: '',
+                tool_calls: [{ id: 'c1', type: 'function', function: { name: 'query_inbox', arguments: '{}' } }]
+            }))
+            .mockResolvedValueOnce(chatResponse({ role: 'assistant', content: 'One item needs your attention.' }))
+        setFetch(fetchMock)
+
+        const { reply, toolTrace } = await runOverseerConverse({
+            overseer: fakeOverseer,
+            config,
+            messages: [{ role: 'operator', content: 'what needs my attention?' }]
+        })
+
+        expect(fetchMock).toHaveBeenCalledTimes(3)
+        expect(toolTrace.map((t) => t.tool)).toEqual(['query_inbox'])
+        expect(reply).toContain('needs your attention')
+    })
+
+    it('accepts a genuine no-tool answer after one nudge', async () => {
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(chatResponse({ role: 'assistant', content: 'Hi.' }))
+            .mockResolvedValueOnce(chatResponse({ role: 'assistant', content: 'Hello — I can advise on your fleet.' }))
+        setFetch(fetchMock)
+
+        const { reply, toolTrace } = await runOverseerConverse({
+            overseer: fakeOverseer,
+            config,
+            messages: [{ role: 'operator', content: 'hi' }]
+        })
+
+        expect(fetchMock).toHaveBeenCalledTimes(2)
+        expect(toolTrace).toHaveLength(0)
+        expect(reply).toBe('Hello — I can advise on your fleet.')
+    })
+
     it('surfaces brain unavailability', async () => {
         setFetch(vi.fn().mockRejectedValue(new Error('ECONNREFUSED')))
         await expect(runOverseerConverse({
