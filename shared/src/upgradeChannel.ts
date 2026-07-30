@@ -149,15 +149,17 @@ export function machineTrailsUpgradeOffer(
     if (!offer.targetVersion || offer.targetVersion === '0.0.0') {
         return false
     }
+    // Only "behind" counts — a newer runner must not be force-downgraded,
+    // including via generationDrift or capability gaps against an older hub offer.
+    const versionRelation = typeof version === 'string' && version.length > 0
+        ? compareHapiVersions(version, offer.targetVersion)
+        : null
+    if (versionRelation !== null && versionRelation > 0) {
+        return false
+    }
     const advertised = new Set(capabilities ?? [])
     const missingCapability = offer.targetCapabilities.some((cap) => !advertised.has(cap))
-    // Only "behind" counts — a newer runner must not be force-downgraded.
-    const versionBehind = typeof version === 'string'
-        && version.length > 0
-        && (() => {
-            const relation = compareHapiVersions(version, offer.targetVersion)
-            return relation !== null && relation < 0
-        })()
+    const versionBehind = versionRelation !== null && versionRelation < 0
     const generationDrift = !options?.ignoreGenerationDrift
         && offer.channel === 'hub-artifact'
         && typeof offer.targetGeneration === 'string'
