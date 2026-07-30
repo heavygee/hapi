@@ -1,4 +1,4 @@
-import type { AgentState, Metadata, Session, TodoItem, WorktreeMetadata } from './schemas'
+import type { AgentState, ExternalRef, Metadata, Session, TodoItem, WorktreeMetadata } from './schemas'
 
 export type PendingRequestKind = 'permission' | 'input'
 
@@ -52,6 +52,8 @@ export type SessionSummaryMetadata = {
         retriedAndFailed?: boolean
         acknowledgedAt?: number
     }
+    /** Structured contribution links (GitHub PRs, …). tiann/hapi#1160. */
+    externalRefs?: ExternalRef[]
 }
 
 export type SessionSummary = {
@@ -173,7 +175,8 @@ export function toSessionSummaryMetadata(metadata: Metadata | null | undefined):
         lifecycleState: metadata.lifecycleState,
         // Loopback MCP URL when session CLI happy server is running (#956).
         hapiMcpUrl: metadata.hapiMcpUrl ?? undefined,
-        lastModelError: metadata.lastModelError
+        lastModelError: metadata.lastModelError,
+        externalRefs: metadata.externalRefs
     }
 }
 

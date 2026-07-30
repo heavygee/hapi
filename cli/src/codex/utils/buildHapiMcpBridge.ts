@@ -46,6 +46,7 @@ export interface HapiMcpBridge {
 export interface HapiMcpBridgeOptions {
     emitTitleSummary?: boolean;
     enableChangeTitle?: boolean;
+    enableLinkPr?: boolean;
     skillLookup?: {
         workingDirectory: string;
         flavor: string;
@@ -80,6 +81,7 @@ export async function buildHapiMcpBridge(
     const happyServer = await startHappyServer(client, {
         emitTitleSummary: options.emitTitleSummary,
         enableChangeTitle: options.enableChangeTitle,
+        enableLinkPr: options.enableLinkPr,
         skillLookup: options.skillLookup
     });
     const bridgeCommand = getHappyCliCommand([
@@ -99,6 +101,11 @@ export async function buildHapiMcpBridge(
     };
     if (options.enableChangeTitle !== false) {
         tools.change_title = {
+            approval_mode: 'approve'
+        };
+    }
+    if (options.enableLinkPr !== false) {
+        tools.link_pr = {
             approval_mode: 'approve'
         };
     }

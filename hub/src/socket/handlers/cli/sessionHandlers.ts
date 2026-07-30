@@ -14,6 +14,28 @@ import { extractFailingMermaidBlocks, buildMermaidRenderIssueHint } from '../../
 import type { CliSocketWithData } from '../../socketTypes'
 import type { SessionEndReason } from '@hapi/protocol'
 import type { AccessErrorReason, AccessResult } from './types'
+import { getConfiguration } from '../../../configuration'
+
+function stripExternalRefsWhenAwarenessDisabled(metadata: unknown): unknown {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+        return metadata
+    }
+    let awarenessEnabled = false
+    try {
+        awarenessEnabled = getConfiguration().githubPrAwareness
+    } catch {
+        awarenessEnabled = false
+    }
+    if (awarenessEnabled) {
+        return metadata
+    }
+    if (!('externalRefs' in metadata)) {
+        return metadata
+    }
+    const next = { ...(metadata as Record<string, unknown>) }
+    delete next.externalRefs
+    return next
+}
 
 type SessionAlivePayload = {
     sid: string
@@ -241,9 +263,11 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             return
         }
 
+        const gatedMetadata = stripExternalRefsWhenAwarenessDisabled(metadata)
+
         const result = store.sessions.updateSessionMetadata(
             sid,
-            metadata,
+            gatedMetadata,
             expectedVersion,
             sessionAccess.value.namespace
         )

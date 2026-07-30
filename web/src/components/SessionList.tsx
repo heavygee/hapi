@@ -7,6 +7,8 @@ import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { SessionExportDialog } from '@/components/SessionExportDialog'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
+import { LinkPrDialog } from '@/components/LinkPrDialog'
+import { SessionPrChip } from '@/components/SessionPrChip'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { CopyIcon, CheckIcon, ScheduleIcon } from '@/components/icons'
 import { hasRecoveredModelError, hasUrgentModelError } from '@/components/ModelErrorBanner'
@@ -32,6 +34,8 @@ import { getMachinePlatform, presentMachineHealth } from '@/lib/machineHealth'
 import { MachineFilterBar } from '@/components/MachineFilterBar'
 import { useSessionListMachineFilter } from '@/hooks/useSessionListMachineFilter'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
+import { useFeatures } from '@/hooks/queries/useFeatures'
+import { getPrimaryGithubPrRef } from '@hapi/protocol'
 
 type SessionGroup = {
     key: string
@@ -680,7 +684,7 @@ export function SessionListSearch(props: {
     const [datePickerOpen, setDatePickerOpen] = useState(false)
     const hasDateRange = Boolean(props.customStart && props.customEnd)
     return (
-        <div className="px-2 pb-1">
+        <div className="px-2 pb-2">
             <div className="relative min-w-0">
                 <div className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center text-[var(--app-hint)]">
                     <SearchIcon className="h-3.5 w-3.5" />
@@ -783,9 +787,12 @@ function SessionItem(props: {
     const [menuOpen, setMenuOpen] = useState(false)
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
     const [renameOpen, setRenameOpen] = useState(false)
+    const [linkPrOpen, setLinkPrOpen] = useState(false)
     const [exportOpen, setExportOpen] = useState(false)
     const [archiveOpen, setArchiveOpen] = useState(false)
     const [deleteOpen, setDeleteOpen] = useState(false)
+    const { features } = useFeatures(api)
+    const githubPrAwarenessEnabled = Boolean(features?.githubPrAwareness.enabled)
     const {
         status: cursorChatStoreStatus,
         isApplicable: cursorChatStoreApplicable,
@@ -811,7 +818,7 @@ function SessionItem(props: {
         ? t('session.action.reopenCursorUnverified')
         : undefined
 
-    const { archiveSession, reopenSession, renameSession, deleteSession, isPending } = useSessionActions(
+    const { archiveSession, reopenSession, renameSession, setExternalRefs, deleteSession, isPending } = useSessionActions(
         api,
         s.id,
         s.metadata?.flavor ?? null
@@ -850,6 +857,7 @@ function SessionItem(props: {
     const sessionName = getSessionTitle(s)
     const worktreeLabel = getWorktreeSessionLabel(s)
     const todoProgress = getTodoProgress(s)
+    const primaryPrRef = getPrimaryGithubPrRef(s.metadata?.externalRefs)
     const attention = useMemo(
         () => showDetailedStatus
             ? classifySessionAttention(s, {
@@ -941,6 +949,9 @@ function SessionItem(props: {
                                 {t('session.item.pending')} {s.pendingRequestsCount}
                             </span>
                         ) : null}
+                        {githubPrAwarenessEnabled && primaryPrRef ? (
+                            <SessionPrChip refs={s.metadata?.externalRefs} />
+                        ) : null}
                         <span className="tabular-nums text-[var(--app-hint)]">
                             {getSessionTimeLabel(s, t)}
                         </span>
@@ -965,6 +976,7 @@ function SessionItem(props: {
                 sessionTitle={sessionName}
                 sessionActive={s.active}
                 onRename={() => setRenameOpen(true)}
+                onLinkPr={githubPrAwarenessEnabled ? () => setLinkPrOpen(true) : undefined}
                 onExport={() => setExportOpen(true)}
                 onArchive={() => setArchiveOpen(true)}
                 onReopen={cursorReopenDisabledReason ? undefined : handleReopen}
@@ -987,15 +999,22 @@ function SessionItem(props: {
                 />
             ) : null}
 
-            {renameOpen ? (
-                <RenameSessionDialog
-                    isOpen={true}
-                    onClose={() => setRenameOpen(false)}
-                    currentName={sessionName}
-                    onRename={renameSession}
-                    isPending={isPending}
-                />
-            ) : null}
+            <RenameSessionDialog
+                isOpen={renameOpen}
+                onClose={() => setRenameOpen(false)}
+                currentName={sessionName}
+                onRename={renameSession}
+                isPending={isPending}
+            />
+
+            <LinkPrDialog
+                isOpen={linkPrOpen}
+                onClose={() => setLinkPrOpen(false)}
+                currentPrimaryLabel={primaryPrRef ? `${primaryPrRef.repo}#${primaryPrRef.number}` : null}
+                onLink={setExternalRefs}
+                onUnlink={primaryPrRef ? () => setExternalRefs([]) : undefined}
+                isPending={isPending}
+            />
 
             {exportOpen ? (
                 <SessionExportDialog
@@ -1006,33 +1025,29 @@ function SessionItem(props: {
                 />
             ) : null}
 
-            {archiveOpen ? (
-                <ConfirmDialog
-                    isOpen={true}
-                    onClose={() => setArchiveOpen(false)}
-                    title={t('dialog.archive.title')}
-                    description={t('dialog.archive.description', { name: sessionName })}
-                    confirmLabel={t('dialog.archive.confirm')}
-                    confirmingLabel={t('dialog.archive.confirming')}
-                    onConfirm={archiveSession}
-                    isPending={isPending}
-                    destructive
-                />
-            ) : null}
+            <ConfirmDialog
+                isOpen={archiveOpen}
+                onClose={() => setArchiveOpen(false)}
+                title={t('dialog.archive.title')}
+                description={t('dialog.archive.description', { name: sessionName })}
+                confirmLabel={t('dialog.archive.confirm')}
+                confirmingLabel={t('dialog.archive.confirming')}
+                onConfirm={archiveSession}
+                isPending={isPending}
+                destructive
+            />
 
-            {deleteOpen ? (
-                <ConfirmDialog
-                    isOpen={true}
-                    onClose={() => setDeleteOpen(false)}
-                    title={t('dialog.delete.title')}
-                    description={t('dialog.delete.description', { name: sessionName })}
-                    confirmLabel={t('dialog.delete.confirm')}
-                    confirmingLabel={t('dialog.delete.confirming')}
-                    onConfirm={deleteSession}
-                    isPending={isPending}
-                    destructive
-                />
-            ) : null}
+            <ConfirmDialog
+                isOpen={deleteOpen}
+                onClose={() => setDeleteOpen(false)}
+                title={t('dialog.delete.title')}
+                description={t('dialog.delete.description', { name: sessionName })}
+                confirmLabel={t('dialog.delete.confirm')}
+                confirmingLabel={t('dialog.delete.confirming')}
+                onConfirm={deleteSession}
+                isPending={isPending}
+                destructive
+            />
         </>
     )
 }
@@ -1317,7 +1332,7 @@ export function SessionList(props: {
             </div>
 
             <div className="app-scroll-y session-list-scrollbar-left min-h-0 flex-1">
-            <div className="mx-auto flex w-full max-w-content flex-col gap-1 pl-1.5 pr-2 pb-2">
+            <div className="mx-auto flex w-full max-w-content flex-col gap-1 pl-1.5 pr-2 pt-1 pb-2">
                 {groups.map((group) => {
                     const isCollapsed = isGroupCollapsed(group)
                     const visibleGroupSessions = getVisibleGroupSessions(group)
@@ -1333,7 +1348,7 @@ export function SessionList(props: {
                     return (
                         <div key={group.key}>
                             <div
-                                className="group/project sticky top-0 z-10 flex items-center gap-2 bg-[var(--app-bg)] py-1.5 pl-2 pr-2 text-left rounded-lg transition-colors hover:bg-[var(--app-secondary-bg)] cursor-pointer min-w-0 w-full select-none"
+                                className="group/project sticky top-0 z-10 flex items-center gap-2 bg-[var(--app-bg)] py-1.5 pl-2 pr-2 text-left rounded-lg transition-colors hover:bg-[var(--app-subtle-bg)] cursor-pointer min-w-0 w-full select-none"
                                 onClick={() => toggleGroup(group.key, isCollapsed)}
                                 title={group.directory}
                             >

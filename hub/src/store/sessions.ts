@@ -4,7 +4,8 @@ import { randomUUID } from 'node:crypto'
 import type { StoredSession, VersionedUpdateResult } from './types'
 import { safeJsonParse } from './json'
 import { updateVersionedField } from './versionedUpdates'
-import { buildOverseerSessionIdentity } from '@hapi/protocol'
+import { buildOverseerSessionIdentity, preserveGithubPrStatusCache } from '@hapi/protocol'
+import type { ExternalRef } from '@hapi/protocol'
 import type { Metadata } from '@hapi/protocol/types'
 import { detachSessionEvents, tombstoneDeletedSession } from './events'
 import { detachSessionInboxItems } from './inboxItems'
@@ -74,6 +75,8 @@ const SIMPLE_RESUME_TOKENS = [
 
 const ALERT_STATE_FIELDS = ['lastModelError'] as const
 
+const CONTRIBUTION_FIELDS = ['externalRefs'] as const
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -129,6 +132,27 @@ function preserveCursorProtocolPair(
     return merged
 }
 
+function preserveExternalRefsStatusCache(
+    prior: Record<string, unknown>,
+    next: Record<string, unknown>,
+    merged: Record<string, unknown> | null
+): Record<string, unknown> | null {
+    if (!Object.prototype.hasOwnProperty.call(next, 'externalRefs')) {
+        return merged
+    }
+    if (!Array.isArray(next.externalRefs) || !Array.isArray(prior.externalRefs)) {
+        return merged
+    }
+
+    const base = merged ?? { ...next }
+    const incoming = (base.externalRefs ?? next.externalRefs) as ExternalRef[]
+    base.externalRefs = preserveGithubPrStatusCache(
+        prior.externalRefs as ExternalRef[],
+        incoming
+    )
+    return base
+}
+
 export function mergeSessionMetadata(prior: unknown, next: unknown): unknown {
     if (!isPlainObject(prior) || !isPlainObject(next)) {
         return next
@@ -138,6 +162,8 @@ export function mergeSessionMetadata(prior: unknown, next: unknown): unknown {
     merged = carryForwardIfMissing(prior, next, merged, ROUTING_FIELDS)
     merged = carryForwardIfMissing(prior, next, merged, SIMPLE_RESUME_TOKENS)
     merged = carryForwardIfMissing(prior, next, merged, ALERT_STATE_FIELDS)
+    merged = carryForwardIfMissing(prior, next, merged, CONTRIBUTION_FIELDS)
+    merged = preserveExternalRefsStatusCache(prior, next, merged)
     merged = preserveCursorProtocolPair(prior, next, merged)
     return merged ?? next
 }

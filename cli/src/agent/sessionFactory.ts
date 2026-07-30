@@ -129,6 +129,8 @@ function pickExistingSessionMetadata(metadata: Metadata | null | undefined): Par
     if (metadata.piAvailableModels !== undefined) preserved.piAvailableModels = metadata.piAvailableModels
     // Preserve provider-qualified Pi model selection (disambiguates duplicate modelIds).
     if (metadata.piSelectedModel !== undefined) preserved.piSelectedModel = metadata.piSelectedModel
+    // Preserve structured PR links across resume/bootstrap rebuilds (tiann/hapi#1160).
+    if (metadata.externalRefs !== undefined) preserved.externalRefs = metadata.externalRefs
 
     return preserved
 }

@@ -723,6 +723,32 @@ export class ApiClient {
         })
     }
 
+
+    async getFeatures(): Promise<{
+        githubPrAwareness: { enabled: boolean; source: 'env' | 'file' | 'default' }
+    }> {
+        return await this.request('/api/features')
+    }
+
+    async patchFeatures(patch: { githubPrAwareness?: boolean }): Promise<{
+        githubPrAwareness: { enabled: boolean; source: 'env' | 'file' | 'default' }
+    }> {
+        return await this.request('/api/features', {
+            method: 'PATCH',
+            body: JSON.stringify(patch)
+        })
+    }
+
+    async setSessionExternalRefs(
+        sessionId: string,
+        externalRefs: import('@/types/api').ExternalRef[]
+    ): Promise<{ ok: true; externalRefs: import('@/types/api').ExternalRef[] }> {
+        return await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/external-refs`, {
+            method: 'PUT',
+            body: JSON.stringify({ externalRefs })
+        })
+    }
+
     async getSqliteStorageUsage(): Promise<SqliteStorageUsageResponse> {
         return await this.request<SqliteStorageUsageResponse>('/api/storage/sqlite')
     }

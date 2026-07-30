@@ -12,6 +12,8 @@ import {
     isSidebarEmptySessionStub,
     normalizeSearch,
     prepareSidebarSessions,
+    sessionListItemButtonClassName,
+    sessionListItemWrapperClassName,
     sessionMatchesQuery,
     sessionMatchesTimeRange,
     shouldShowSessionInSidebar
@@ -429,27 +431,40 @@ describe('getNextSessionVisibleCount', () => {
 })
 
 describe('expandSelectedSessionCollapseOverrides', () => {
-    it('expands the collapsed project group, but preserves session preview folding', () => {
+    it('expands collapsed project and machine, but preserves session preview folding', () => {
         const overrides = new Map<string, boolean>([
             ['machine-1::/work/hapi', true],
-            ['sessions::machine-1::/work/hapi', true]
+            ['sessions::machine-1::/work/hapi', true],
+            ['machine::machine-1', true]
         ])
 
         const result = expandSelectedSessionCollapseOverrides(overrides, {
-            key: 'machine-1::/work/hapi'
+            key: 'machine-1::/work/hapi',
+            machineId: 'machine-1'
         })
 
-        expect(result.get('machine-1::/work/hapi')).toBe(false)
+        expect(result.has('machine-1::/work/hapi')).toBe(false)
         expect(result.get('sessions::machine-1::/work/hapi')).toBe(true)
+        expect(result.has('machine::machine-1')).toBe(false)
     })
 
     it('leaves missing session preview override unset', () => {
         const overrides = new Map<string, boolean>()
 
         const result = expandSelectedSessionCollapseOverrides(overrides, {
-            key: 'machine-1::/work/hapi'
+            key: 'machine-1::/work/hapi',
+            machineId: 'machine-1'
         })
 
         expect(result.has('sessions::machine-1::/work/hapi')).toBe(false)
+    })
+})
+
+describe('session list row focus group classes', () => {
+    it('puts group/session-row on the focusable button, not the wrapper', () => {
+        expect(sessionListItemButtonClassName()).toContain('group/session-row')
+        expect(sessionListItemWrapperClassName(false)).not.toContain('group/session-row')
+        expect(sessionListItemWrapperClassName(true)).toContain('bg-[var(--app-secondary-bg)]')
+        expect(sessionListItemWrapperClassName(true)).not.toContain('group/session-row')
     })
 })
