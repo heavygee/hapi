@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { runOverseerConverse } from './converse'
+import { MAX_TOOL_RESULT_CHARS, clampToolResult, runOverseerConverse } from './converse'
 import { BrainUnavailableError, type BrainConfig } from './brainClient'
 import type { OverseerEntity } from '../sync/overseerEntity'
 
@@ -29,6 +29,22 @@ function chatResponse(message: unknown) {
 
 afterEach(() => {
     globalThis.fetch = originalFetch
+})
+
+describe('clampToolResult', () => {
+    it('passes small results through unchanged', () => {
+        const small = JSON.stringify({ items: [1, 2, 3] })
+        expect(clampToolResult(small)).toBe(small)
+    })
+
+    it('truncates an oversized result and appends a narrow-your-query note', () => {
+        const huge = JSON.stringify({ items: Array.from({ length: 5000 }, (_, i) => ({ id: i, title: 'x'.repeat(40) })) })
+        expect(huge.length).toBeGreaterThan(MAX_TOOL_RESULT_CHARS)
+        const clamped = clampToolResult(huge)
+        expect(clamped.length).toBeLessThan(huge.length)
+        expect(clamped.startsWith(huge.slice(0, 100))).toBe(true)
+        expect(clamped).toContain('truncated')
+    })
 })
 
 describe('runOverseerConverse', () => {

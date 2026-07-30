@@ -32,8 +32,24 @@ const GROUNDING_DIRECTIVE = [
     'workers, events, counts, health, or status must come from a tool call you make',
     'in THIS turn. Never state such a fact — including "nothing needs attention" or',
     '"the inbox is empty" — without having called the relevant tool first. When in',
-    'doubt, call a tool.'
+    'doubt, call a tool.',
+    '',
+    'Query narrowly. Ask for a SMALL limit (10-25) and use filters (status, project,',
+    'eventType, severity, time window); never dump the whole inbox or event stream.',
+    'For depth on one item, call explain_priority instead of widening the query.'
 ].join('\n')
+
+// A single tool result fed back to the brain is capped to this many characters
+// (~4k tokens). The 64k-ctx local brain would otherwise overflow on a full
+// query_inbox / query_events dump (~75k / ~60k tokens at limit=200). Truncation
+// keeps the head (results are priority-/recency-ordered) and tells the model to
+// narrow. Exported for the unit test.
+export const MAX_TOOL_RESULT_CHARS = 16_000
+
+export function clampToolResult(json: string): string {
+    if (json.length <= MAX_TOOL_RESULT_CHARS) return json
+    return `${json.slice(0, MAX_TOOL_RESULT_CHARS)}\n…[truncated: result too large for the context window. Re-query with a smaller limit or a tighter filter, or use explain_priority for a single item.]`
+}
 
 function parseToolArgs(raw: string): Record<string, unknown> {
     if (!raw || raw.trim().length === 0) return {}
@@ -107,7 +123,7 @@ export async function runOverseerConverse(params: {
             try {
                 const result = runOverseerTool(overseer, name, args)
                 toolTrace.push({ tool: name, args, ok: true })
-                resultLines.push(`${name}(${argsRaw}) => ${JSON.stringify(result ?? null)}`)
+                resultLines.push(`${name}(${argsRaw}) => ${clampToolResult(JSON.stringify(result ?? null))}`)
             } catch (error) {
                 const msg = error instanceof Error ? error.message : String(error)
                 toolTrace.push({ tool: name, args, ok: false, error: msg })
