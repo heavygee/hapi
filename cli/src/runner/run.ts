@@ -34,6 +34,7 @@ import { buildMachineMetadata } from '@/agent/sessionFactory';
 import { resolveWorkspaceRoots } from '@/utils/workspaceRoot';
 import { hashRunnerCliApiToken, hashRunnerExtraHeaders } from './runnerIdentity';
 import { scheduleCursorModelsPrewarm } from '@/modules/common/cursorModelsPrewarm';
+import { isRunnerSelfUpgradeInFlight } from '@/upgrade/selfUpgrade';
 
 /**
  * Deduplicates a preallocated HAPI-row spawn only while its child is alive.
@@ -1279,7 +1280,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         }
       } else {
         const installedCliMtimeMs = getInstalledCliMtimeMs();
-        if (typeof installedCliMtimeMs === 'number' &&
+        // RPC self-upgrade already owns install→handoff. Do not let the mtime
+        // tick spawn a second replacement while npm/hub-artifact install is
+        // changing the on-disk binary (or during the brief window before exit).
+        if (!isRunnerSelfUpgradeInFlight() &&
+            typeof installedCliMtimeMs === 'number' &&
             typeof startedWithCliMtimeMs === 'number' &&
             installedCliMtimeMs !== startedWithCliMtimeMs &&
             Date.now() >= nextHandoffAttemptAt) {
