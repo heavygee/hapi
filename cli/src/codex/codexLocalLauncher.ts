@@ -63,6 +63,8 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
     let scannerTranscriptPath: string | null = null;
     let scannerReplayedExistingHistory = false;
     let transcriptModel: string | null = null;
+    let replayingUsage = false;
+    let latestReplayUsage: unknown = null;
     let convertTranscriptEvent = createCodexEventConverter();
     const pendingPlansByTurnId = new Map<string, ProposedPlanMessage>();
     const pendingExecWrappers = new Map<string, PendingExecWrapper>();
@@ -213,22 +215,27 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
                 } else {
                     flushPendingExecWrapper(message.callId, message);
                 }
-            } else {
-                const scopedMessage = message.type !== 'token_count'
-                    ? message
-                    : context.replayedHistory
-                        ? { ...message, model: transcriptModel, hapiUsageScope: 'imported-history' }
-                        : primarySessionId
-                            ? {
-                                ...message,
-                                flavor: 'codex',
-                                model: transcriptModel,
-                                threadId: primarySessionId,
-                                thread_id: primarySessionId,
-                                hapiUsageScope: 'managed'
-                            }
-                            : { ...message, flavor: 'codex', model: transcriptModel };
+            } else if (message.type === 'token_count') {
+                if (replayingUsage) {
+                    latestReplayUsage = message;
+                } else {
+                    session.recordCodexUsage(message);
+                }
+                const scopedMessage = context.replayedHistory
+                    ? { ...message, model: transcriptModel, hapiUsageScope: 'imported-history' }
+                    : primarySessionId
+                        ? {
+                            ...message,
+                            flavor: 'codex',
+                            model: transcriptModel,
+                            threadId: primarySessionId,
+                            thread_id: primarySessionId,
+                            hapiUsageScope: 'managed'
+                        }
+                        : { ...message, flavor: 'codex', model: transcriptModel };
                 session.sendAgentMessage(scopedMessage);
+            } else {
+                session.sendAgentMessage(message);
             }
         }
     };
@@ -291,6 +298,8 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
             return;
         }
         const replayExistingHistory = session.shouldReplayTranscriptHistory();
+        replayingUsage = replayExistingHistory;
+        latestReplayUsage = null;
         const createdScanner = await createCodexSessionScanner({
             transcriptPath,
             // 中文注释：导入模式下允许 scanner 首次回放 transcript 全量内容，补齐 Codex 客户端里已有但 Hapi 还未看到的消息。
@@ -317,6 +326,10 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
                 dispatchTranscriptActions(convertTranscriptEvent(event), context);
             }
         });
+        replayingUsage = false;
+        if (latestReplayUsage) {
+            session.recordCodexUsage(latestReplayUsage);
+        }
         if (shuttingDown) {
             await drainAndCleanupScanner(createdScanner, replayExistingHistory);
             return;
