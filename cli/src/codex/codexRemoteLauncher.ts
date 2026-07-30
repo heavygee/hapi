@@ -256,6 +256,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
     private usageScanner: CodexSessionScanner | null = null;
     private usageScannerThreadId: string | null = null;
     private usageScannerSetup: Promise<void> | null = null;
+    private readonly liveUsageThreads = new Set<string>();
     private shuttingDown = false;
 
     constructor(session: CodexSession) {
@@ -407,6 +408,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     if (
                         this.currentThreadId !== threadId
                         || this.usageScannerThreadId !== threadId
+                        || this.liveUsageThreads.has(threadId)
                     ) {
                         continue;
                     }
@@ -423,7 +425,11 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             await scanner.cleanup();
             return;
         }
-        if (this.currentThreadId === threadId && this.usageScannerThreadId === threadId) {
+        if (
+            this.currentThreadId === threadId
+            && this.usageScannerThreadId === threadId
+            && !this.liveUsageThreads.has(threadId)
+        ) {
             for (const payload of orderedReplayUsagePayloads(replayUsage)) {
                 this.session.recordCodexUsage(payload);
             }
@@ -462,6 +468,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
 
     private async detachUsageScanner(): Promise<void> {
         this.usageScannerThreadId = null;
+        this.liveUsageThreads.clear();
         const setup = this.usageScannerSetup;
         this.usageScannerSetup = null;
         const scanner = this.usageScanner;
@@ -3406,6 +3413,9 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     return;
                 }
                 const threadId = eventThreadId ?? this.currentThreadId;
+                if (threadId) {
+                    this.liveUsageThreads.add(threadId);
+                }
                 session.recordCodexUsage(msg);
                 session.sendAgentMessage({
                     ...addCodexEventScope(msg, 'parent', threadId),
