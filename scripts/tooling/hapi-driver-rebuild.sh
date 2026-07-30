@@ -354,6 +354,21 @@ echo ""
 echo "Driver rebuild complete: $DRIVER @ $(git -C "$DRIVER" rev-parse --short HEAD)"
 echo "Manifest: $MANIFEST"
 echo "Active hub: $(readlink -f "$HOME/coding/hapi/active" 2>/dev/null || echo '(no symlink)')"
+
+# Hub process loads bun modules at start — remat updates driver/ on disk only.
+# If tip gained /api/features (PR awareness) but the live hub still 404s, dogfood
+# looks "chip-less" and a mid-stack hub without CONTRIBUTION_FIELDS can wipe refs.
+# Incident 2026-07-30: remat finished 02:29; hub not restarted until 08:51.
+if [[ -f "$DRIVER/hub/src/web/routes/features.ts" ]]; then
+    features_code="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 2 "http://127.0.0.1:3006/api/features" 2>/dev/null || echo 000)"
+    if [[ "$features_code" != "200" && "$features_code" != "401" && "$features_code" != "403" ]]; then
+        echo "" >&2
+        echo "WARNING: driver tip has hub features route but GET /api/features → HTTP ${features_code}." >&2
+        echo "         Live hub is skewed vs remat tip — run: hapi-restart-hub" >&2
+        echo "         (Do not declare dogfood green until features responds; 2026-07-30 class.)" >&2
+    fi
+fi
+
 hapi_print_feature_peer_reminders "driver rebuild @ $(git -C "$DRIVER" rev-parse --short HEAD) (web/dist — hard-reload dogfood)"
 
 if [[ "$ACTIVATE" -eq 1 ]]; then

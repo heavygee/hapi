@@ -329,6 +329,29 @@ Incident 2026-07-29 19:11Z: in-place `checkout -B driver/integration upstream/ma
 
 Override remat worktree: `HAPI_DRIVER_REMAT_WT=/path`.
 
+### externalRefs wipe — mid-stack hub + sparse metadata (2026-07-30)
+
+**Where they went:** nowhere recoverable — SQLite `sessions.metadata` was overwritten. The three active peer sessions lost `metadata.externalRefs` (PR chips). Overseer `link_seen` events still mentioned the PRs; that is not the chip source.
+
+**Why:**
+
+1. Failed remat (19:11Z) left live tip at `0c93f5d57` (after `cursor-picker-ios-nested`) — **before** `driver/github-pr-awareness`. That tip’s `mergeSessionMetadata` had `ALERT_STATE_FIELDS` but **no** `CONTRIBUTION_FIELDS` / `externalRefs` carry-forward.
+2. Hub was restarted onto that tip (**20:07** and again **00:50**) and kept that **in-memory** code.
+3. Remat later restored/promoted a good tip (**01:51→02:29**, `0a497f569`) on disk, but the hub process was **not** restarted until **08:51** — still serving the mid-stack merge.
+4. Active CLIs kept sending `update-metadata` (summaries, lifecycle, etc.) **without** `externalRefs`. On the mid-stack hub those writes **replaced** the JSON blob → PR links deleted. (`updated_at` can stay stale when a later re-link uses `touchUpdatedAt: false`.)
+
+**Already fixed / must not regress:**
+
+| Guard | Role |
+|---|---|
+| Atomic remat | Live tip never stays mid-stack on merge failure |
+| `CONTRIBUTION_FIELDS = ['externalRefs']` | Sparse omit preserves links once awareness is on the tip |
+| `verify-externalrefs-preserve.mjs` (via hotfiles check) | Tip with `externalRefs` in schemas **must** carry-forward; CLI `[]` guard present when strip gate exists |
+| Rebuild hub-skew warning | Tip has `features.ts` but `/api/features` not alive → print `hapi-restart-hub` |
+| Socket omit-empty `[]` | CLI `update-metadata` with `externalRefs: []` must not unlink (PUT `/external-refs` remains the clear path) |
+
+**Operator rule after any remat that touches `hub/`:** patient `hapi-restart-hub` before calling dogfood green (features + preserve code must match the tip). Hard-reload alone is not enough.
+
 ### NEVER park a peer layer to unblock rematerialize (2026-07-28)
 
 Commenting out someone else's `- branch:` so `hapi-driver-rebuild` goes green **skunks the soup** — dogfood loses chips / attachments / bridges until someone remembers. Incident: meta parked `driver/github-pr-awareness` (and others) for upstream #896 remake → PR chips vanished on `:3006` again.

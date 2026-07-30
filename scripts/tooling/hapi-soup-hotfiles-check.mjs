@@ -49,11 +49,15 @@ if (syncEngine.includes('listCodexSessionsForMachine')) {
 
 console.log(`hapi-soup-hotfiles-check: OK (${calls.length} rpcGateway call site(s) checked)`)
 
-const bindings = join(
-    process.env.HAPI_PRIMARY ?? join(process.env.HOME, 'coding/hapi'),
-    'scripts/tooling/verify-sessionlist-bindings.mjs',
-)
+const primary = process.env.HAPI_PRIMARY ?? join(process.env.HOME, 'coding/hapi')
+const bindings = join(primary, 'scripts/tooling/verify-sessionlist-bindings.mjs')
 if (existsSync(bindings)) {
     const r = spawnSync('bun', ['run', bindings, driver], { stdio: 'inherit' })
+    if (r.status !== 0) process.exit(r.status ?? 1)
+}
+
+const externalRefsPreserve = join(primary, 'scripts/tooling/verify-externalrefs-preserve.mjs')
+if (existsSync(externalRefsPreserve)) {
+    const r = spawnSync('bun', ['run', externalRefsPreserve, driver], { stdio: 'inherit' })
     if (r.status !== 0) process.exit(r.status ?? 1)
 }

@@ -1,0 +1,125 @@
+From 2373eac1a53672bac4199d23d4a7ffae9986451c Mon Sep 17 00:00:00 2001
+From: Gavin Cowie <gc@lockhouse.systems>
+Date: Thu, 30 Jul 2026 09:22:15 +0000
+Subject: [PATCH] heal
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ .../handlers/cli/sessionHandlers.test.ts      | 55 +++++++++++++++++++
+ .../socket/handlers/cli/sessionHandlers.ts    | 29 +++++++++-
+ 2 files changed, 83 insertions(+), 1 deletion(-)
+
+diff --git a/hub/src/socket/handlers/cli/sessionHandlers.test.ts b/hub/src/socket/handlers/cli/sessionHandlers.test.ts
+index a08e89f..d37830b 100644
+--- a/hub/src/socket/handlers/cli/sessionHandlers.test.ts
++++ b/hub/src/socket/handlers/cli/sessionHandlers.test.ts
+@@ -271,4 +271,59 @@ describe('cli session handlers', () => {
+         expect(broadcastBody.metadata.value.path).toBe('/tmp/project')
+         expect(broadcastBody.metadata.value.lifecycleState).toBe('archived')
+     })
++
++    it('update-metadata empty externalRefs [] does not wipe prior PR links', () => {
++        const store = new Store(':memory:')
++        const externalRefs = [{
++            kind: 'github_pr' as const,
++            repo: 'tiann/hapi',
++            number: 1163,
++            url: 'https://github.com/tiann/hapi/pull/1163',
++            role: 'primary' as const
++        }]
++        const session = store.sessions.getOrCreateSession(
++            'external-refs-cli-empty',
++            {
++                path: '/tmp/project',
++                host: 'example',
++                flavor: 'cursor',
++                externalRefs
++            },
++            null,
++            'default'
++        )
++        const socket = new FakeSocket()
++
++        registerSessionHandlers(socket as unknown as CliSocketWithData, {
++            store,
++            resolveSessionAccess: () => ({ ok: true, value: session as StoredSession }),
++            emitAccessError: () => {
++                throw new Error('unexpected access error')
++            }
++        })
++
++        let ackResponse: unknown
++        socket.trigger(
++            'update-metadata',
++            {
++                sid: session.id,
++                expectedVersion: session.metadataVersion,
++                metadata: {
++                    path: '/tmp/project',
++                    host: 'example',
++                    flavor: 'cursor',
++                    externalRefs: []
++                }
++            },
++            (response) => {
++                ackResponse = response
++            }
++        )
++
++        const ack = ackResponse as { result: string; metadata: Record<string, unknown> }
++        expect(ack.result).toBe('success')
++        expect(ack.metadata.externalRefs).toEqual(externalRefs)
++        const stored = store.sessions.getSession(session.id)
++        expect((stored?.metadata as Record<string, unknown> | null)?.externalRefs).toEqual(externalRefs)
++    })
+ })
+diff --git a/hub/src/socket/handlers/cli/sessionHandlers.ts b/hub/src/socket/handlers/cli/sessionHandlers.ts
+index 2a3b6b8..12984ac 100644
+--- a/hub/src/socket/handlers/cli/sessionHandlers.ts
++++ b/hub/src/socket/handlers/cli/sessionHandlers.ts
+@@ -16,6 +16,31 @@ import type { SessionEndReason } from '@hapi/protocol'
+ import type { AccessErrorReason, AccessResult } from './types'
+ import { getConfiguration } from '../../../configuration'
+ 
++/**
++ * CLI `update-metadata` often sends a local cache snapshot. Empty
++ * `externalRefs: []` on that path is almost never an intentional unlink
++ * (unlink is PUT /sessions/:id/external-refs → setSessionExternalRefs).
++ * Drop the key so mergeSessionMetadata carry-forward keeps prior links.
++ *
++ * Incident 2026-07-30: mid-stack hub without CONTRIBUTION_FIELDS + sparse
++ * writes wiped PR chips; empty-[] on this socket path is the same class.
++ */
++function omitEmptyExternalRefsOnCliMetadataWrite(metadata: unknown): unknown {
++    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
++        return metadata
++    }
++    if (!Object.prototype.hasOwnProperty.call(metadata, 'externalRefs')) {
++        return metadata
++    }
++    const refs = (metadata as Record<string, unknown>).externalRefs
++    if (!Array.isArray(refs) || refs.length > 0) {
++        return metadata
++    }
++    const next = { ...(metadata as Record<string, unknown>) }
++    delete next.externalRefs
++    return next
++}
++
+ function stripExternalRefsWhenAwarenessDisabled(metadata: unknown): unknown {
+     if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+         return metadata
+@@ -263,7 +288,9 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
+             return
+         }
+ 
+-        const gatedMetadata = stripExternalRefsWhenAwarenessDisabled(metadata)
++        const gatedMetadata = stripExternalRefsWhenAwarenessDisabled(
++            omitEmptyExternalRefsOnCliMetadataWrite(metadata)
++        )
+ 
+         const result = store.sessions.updateSessionMetadata(
+             sid,
+-- 
+2.39.5
+
