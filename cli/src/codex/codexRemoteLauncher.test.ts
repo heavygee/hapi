@@ -1137,7 +1137,8 @@ vi.mock('./utils/buildHapiMcpBridge', () => ({
 }));
 
 vi.mock('@/modules/common/codexSessions', () => ({
-    findCodexSessionFile: async (threadId: string) => harness.transcriptPathByThreadId.get(threadId) ?? `/tmp/${threadId}.jsonl`
+    findCodexSessionFile: (threadId: string) =>
+        harness.transcriptPathByThreadId.get(threadId) ?? `/tmp/${threadId}.jsonl`
 }));
 
 vi.mock('./utils/codexSessionScanner', () => ({
