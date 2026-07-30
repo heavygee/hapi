@@ -10,6 +10,7 @@ import {
     assertExecutableMatchesTargetVersion,
     createArtifactDownloadSizeGuard,
     createDeadlineRunner,
+    isRunnerSelfUpgradeInFlight,
     mergeParentRunnerStateForReclaim,
     pruneSupersededArtifacts,
     pruneSupersededArtifactsAfterDurableMarker,
@@ -360,6 +361,7 @@ describe('applyRunnerSelfUpgrade concurrency gate', () => {
 
     it('fails closed when another upgrade is already in flight', async () => {
         __setRunnerSelfUpgradeInFlightForTests(true)
+        expect(isRunnerSelfUpgradeInFlight()).toBe(true)
         const result = await applyRunnerSelfUpgrade({
             offer: baseOffer(),
             downloadBaseUrl: 'http://localhost',
@@ -371,6 +373,7 @@ describe('applyRunnerSelfUpgrade concurrency gate', () => {
             message: 'Runner upgrade already in progress',
             channel: 'npm',
         })
+        expect(isRunnerSelfUpgradeInFlight()).toBe(true)
     })
 })
 
