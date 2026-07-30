@@ -1,0 +1,158 @@
+diff --git a/hub/src/socket/handlers/cli/sessionHandlers.ts b/hub/src/socket/handlers/cli/sessionHandlers.ts
+index 12984accc..cf5cf917a 100644
+--- a/hub/src/socket/handlers/cli/sessionHandlers.ts
++++ b/hub/src/socket/handlers/cli/sessionHandlers.ts
+@@ -437,25 +437,37 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
+             return
+         }
+         const invokedAt = Date.now()
++        let sessionUpdatedAt: number
+         try {
+-            store.messages.markMessagesInvoked(data.sid, localIds, invokedAt)
+-            onSessionActivity?.(data.sid, invokedAt)
+-            // Only drop the queued-thinking grace when the CLI explicitly opts in
+-            // (synchronous handlers like slash commands that will never send
+-            // their own `thinking=true` keepalive). Normal queue drains still
+-            // need the grace so the spinner doesn't flicker between the queue
+-            // shift and `backend.prompt` start.
+-            if (data.clearQueuedThinkingGrace === true) {
+-                onMessagesConsumed?.(data.sid)
+-            }
+-            // Emit only after the DB write succeeds. Otherwise a transient SQLite
+-            // failure would broadcast an `invokedAt` that was never persisted —
+-            // live clients would hide the queued rows while a refresh / secondary
+-            // client would see them as queued again, diverging the state.
+-            onWebappEvent?.({ type: 'messages-consumed', sessionId: data.sid, localIds, invokedAt })
++            sessionUpdatedAt = store.recordMessagesConsumed(
++                data.sid,
++                localIds,
++                invokedAt,
++                sessionAccess.value.namespace
++            )
++        } catch (err) {
++            console.error('recordMessagesConsumed failed', err)
++            return
++        }
++
++        try {
++            onSessionActivity?.(data.sid, sessionUpdatedAt)
+         } catch (err) {
+-            console.error('markMessagesInvoked failed', err)
++            console.error('onSessionActivity failed', err)
++        }
++
++        // Only drop the queued-thinking grace when the CLI explicitly opts in
++        // (synchronous handlers like slash commands that will never send
++        // their own `thinking=true` keepalive). Normal queue drains still
++        // need the grace so the spinner doesn't flicker between the queue
++        // shift and `backend.prompt` start.
++        if (data.clearQueuedThinkingGrace === true) {
++            onMessagesConsumed?.(data.sid)
+         }
++        // Emit only after the DB transaction succeeds. This is an ACK-level
++        // batch contract, so preserve its original timestamp even when IDs are
++        // heterogeneous, replayed, or unknown.
++        onWebappEvent?.({ type: 'messages-consumed', sessionId: data.sid, localIds, invokedAt })
+     })
+ 
+     socket.on('session-end', (data: SessionEndPayload) => {
+diff --git a/hub/src/store/index.ts b/hub/src/store/index.ts
+index 5e578ed21..59d153fd8 100644
+--- a/hub/src/store/index.ts
++++ b/hub/src/store/index.ts
+@@ -125,6 +125,36 @@ export class Store {
+         this.inbox = new InboxStore(this.db)
+     }
+ 
++    /**
++     * Atomically records a CLI prompt-consumption acknowledgement and returns
++     * the persisted session activity timestamp. A duplicate or sibling-stamped
++     * acknowledgement leaves the session untouched while returning its existing
++     * timestamp for replay-safe in-memory cache synchronization.
++     */
++    recordMessagesConsumed(
++        sessionId: string,
++        localIds: string[],
++        invokedAt: number,
++        namespace: string
++    ): number {
++        return this.db.transaction(() => {
++            const changes = this.messages.markMessagesInvoked(sessionId, localIds, invokedAt)
++            if (changes > 0) {
++                this.sessions.touchSessionUpdatedAt(sessionId, invokedAt, namespace)
++            }
++
++            const session = this.sessions.getSessionByNamespace(sessionId, namespace)
++            if (!session) {
++                throw new Error('session not found after messages-consumed transition')
++            }
++            if (changes > 0 && session.updatedAt < invokedAt) {
++                throw new Error('session activity was not persisted after messages-consumed transition')
++            }
++
++            return session.updatedAt
++        })()
++    }
++
+     close(): void {
+         if (this.closed) return
+         this.db.close()
+diff --git a/hub/src/store/messages.test.ts b/hub/src/store/messages.test.ts
+index e034bb036..def07c636 100644
+--- a/hub/src/store/messages.test.ts
++++ b/hub/src/store/messages.test.ts
+@@ -176,6 +176,21 @@ describe('cancelQueuedMessage', () => {
+ })
+ 
+ 
++describe('recordMessagesConsumed', () => {
++    it('rolls back the invocation transition when the session namespace cannot be verified', () => {
++        const store = makeStore()
++        const session = makeSession(store, 'consumed-rollback-wrong-namespace')
++        store.messages.addMessage(session.id, { role: 'user', content: { type: 'text', text: 'hello' } }, 'local-rollback')
++        const originalUpdatedAt = store.sessions.getSession(session.id)?.updatedAt
++
++        expect(() => store.recordMessagesConsumed(session.id, ['local-rollback'], 2_000, 'other-namespace'))
++            .toThrow('session not found after messages-consumed transition')
++        expect(store.messages.getLocalMessageStates(session.id, ['local-rollback']))
++            .toEqual([{ localId: 'local-rollback', invokedAt: null }])
++        expect(store.sessions.getSession(session.id)?.updatedAt).toBe(originalUpdatedAt)
++    })
++})
++
+ describe('position pagination and structural epochs', () => {
+     it('returns rows strictly after a cursor and respects an inclusive snapshot head', () => {
+         const store = makeStore()
+diff --git a/hub/src/sync/syncEngine.ts b/hub/src/sync/syncEngine.ts
+index 5cb1690f1..4913aca21 100644
+--- a/hub/src/sync/syncEngine.ts
++++ b/hub/src/sync/syncEngine.ts
+@@ -1094,6 +1094,28 @@ export class SyncEngine {
+                     code: 'upgrade_failed',
+                 }
+             }
++            // Pre-generation runners (and any future gap) can reply already-current
++            // at the same semver while the hub still trails on targetGeneration /
++            // capabilities. That is not success — treating it as one stuck the
++            // banner in a forever "Already at X" loop.
++            if (
++                response?.status === 'already-current'
++                && machineTrailsUpgradeOffer(
++                    offer,
++                    machine.metadata?.happyCliVersion,
++                    machine.metadata?.capabilities,
++                    machine.metadata?.cliArtifactGeneration,
++                )
++            ) {
++                return {
++                    type: 'error',
++                    message:
++                        'Runner reported already-current but still trails the hub offer '
++                        + '(generation or capabilities). Install the hub CLI artifact once '
++                        + 'on that machine, or upgrade to a generation-aware runner.',
++                    code: 'upgrade_failed',
++                }
++            }
+             return {
+                 type: 'success',
+                 message: response?.message || 'Upgrade started',

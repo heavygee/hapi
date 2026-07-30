@@ -85,9 +85,9 @@ git merge-tree --write-tree --messages "$(git -C driver rev-parse HEAD)" <your-b
 # exit 0 = clean; exit 1 = prints each CONFLICT (content) path
 ```
 
-Run it before editing `config/driver-manifest.yaml`. If it conflicts, do **not** add the layer and hope rerere saves you — rerere only replays resolutions it has already seen, and a brand-new branch has none. Either the owning peer writes a `scripts/tooling/soup-heals/*.patch`, or the branch stays out of the soup and gets dogfooded on its own peer stack (`hapi-peer-stack`).
+Run it before editing `config/driver-manifest.yaml`. If it conflicts, do **not** add the layer and hope rerere saves you — rerere only replays resolutions it has already seen, and a brand-new branch has none. The owning peer writes a `scripts/tooling/soup-heals/*.patch` and/or a `driver/<feature>` union tip that merges clean, then promotes. **Do not** leave the feature out of soup "because peer stack worked" — `:3006` is where we dogfood, and the soup should carry every in-flight tip.
 
-An upstream-aimed thin tip does not need to be in the soup at all. Souping is for dogfooding on `:3006`; a peer stack on its own port serves the same purpose without putting a 30-layer shared stack at risk.
+Upstream-aimed thin tips stay based on `upstream/main` for the PR. Soup may need a separate `driver/<feature>` union when the thin tip conflicts with other layers — that is expected, not a reason to skip soup.
 
 ### Read-only driver tree
 
@@ -315,7 +315,7 @@ hapi-driver-rebuild --build-web --verify
 # HAPI_DRIVER_WAIT_BUSY_SECS=600 hapi-driver-rebuild --build-web --verify
 ```
 
-**Soup rebuild owner (policy):** one agent/session owns manifest + rebuild at a time (`hapi-driver-status` flock). **After operator approves soup dogfood**, the **feature peer** edits `~/.config/hapi/driver-manifest.yaml` and runs `hapi-driver-rebuild --build-web --verify` — do not ping operator/orchestrator to add the layer. Meta session (`8c6b5a7d`) is for **manifest-only** cron rebuilds and stack hygiene, not routine feature promotion. Do not run rebuilds in parallel hoping flock saves you.
+**Soup rebuild owner (policy):** one agent/session owns manifest + rebuild at a time (`hapi-driver-status` flock). When the tip is ready for `:3006` dogfood, the **feature peer** edits `~/.config/hapi/driver-manifest.yaml` and runs `hapi-driver-rebuild --build-web --verify` — do not ping operator/orchestrator to add the layer, and do not wait for a separate "approve soup" gate. Meta session (`8c6b5a7d`) is for **manifest-only** cron rebuilds and stack hygiene, not routine feature promotion. Do not run rebuilds in parallel hoping flock saves you.
 
 ### Atomic remat — failed rebuild must not move the live tip (2026-07-30)
 

@@ -1,6 +1,6 @@
 # Feature work lifecycle — single source of truth (heavygee/hapi fork)
 
-**Last updated:** 2026-06-22  
+**Last updated:** 2026-07-30  
 **Audience:** Operator, orchestrators, feature peers — anyone doing local dev on this fork.
 
 ## Doc ownership — read this first
@@ -55,25 +55,24 @@ flowchart TD
     S04 -->|issue| ISSUE["gh issue on tiann hapi"]
     S04 -->|spike| WT["Step 5: hapi-worktree-create"]
     ISSUE --> WT
-    WT --> TOPO{"Step 5: demo topology"}
-    TOPO -->|default| PEER["Peer stack ports 3100-3199<br/>hapi-peer-stack up"]
-    TOPO -->|operator asks| SOUP["Soup layer on port 3006"]
-    TOPO -->|rare| CLEAN["Clean hub upstream main only<br/>new port and HAPI_HOME"]
+    WT --> TOPO{"Step 5: proof + dogfood path"}
+    TOPO -->|always| PEER["Peer stack ports 3100-3199<br/>isolated Playwright / PNG-MP4"]
+    TOPO -->|always| SOUP["Soup layer on port 3006<br/>DEFAULT dogfood — promote always"]
+    TOPO -->|rare| CLEAN["Clean hub upstream main only<br/>parity review only"]
     PEER --> IMPL["Feature peer in worktree<br/>commits on feature branch"]
     SOUP --> IMPL
     CLEAN --> IMPL
     IMPL --> GATES["Step 6: typecheck, test, cold review, Playwright"]
     GATES -->|fail| IMPL
     GATES -->|pass| INLINE["Step 6.4: inline proof in HAPI chat<br/>display_image or display_video"]
-    INLINE --> HAND["Handoff: what to click, tier 4b or 4c"]
-    HAND --> DOG["Step 7: operator dogfood"]
+    INLINE --> PROMOTE["Peer promotes soup layer<br/>manifest + rebuild — do not wait for permission"]
+    PROMOTE --> DOG["Step 7: operator dogfood on :3006"]
     DOG -->|no| IMPL
     DOG -->|yes| PR["Step 8: gh pr create vs upstream main"]
-    PR --> SOUP2{"Land on daily soup?"}
-    SOUP2 -->|yes| MANIFEST["Add or update manifest layer"]
-    MANIFEST --> SOUPTREE["Soup dogfood tree below"]
-    SOUP2 -->|merged upstream| DROP["After merge: peer drops layer + cleans wt/branch<br/>meta rematerializes once wave done"]
+    PR --> DROP["After upstream merge: peer drops layer + cleans wt/branch<br/>meta rematerializes once wave done"]
 ```
+
+**Policy (2026-07-30):** Soup is where we dogfood. **Never** skip soup promotion because "peer stack was enough" or "upstream tip does not need soup." Peer stack proves isolated UI without yanking `:3006`; soup gets the same tip (heal/union if merge conflicts) so `:3006` stays the tastiest stack. Operator approval is for **click-testing / PR**, not for whether to add the layer.
 
 Intake step numbers (handoff template, playback, gates): [`new-feature-intake.md`](./new-feature-intake.md) — **workflow lives here only**.
 
@@ -276,20 +275,23 @@ hapi-worktree-create my-feature --branch feat/my-feature
 
 ---
 
-## Three demo topologies (operator picks at §5)
+## Proof path + soup dogfood (not mutually exclusive)
 
-### 1. Peer stack — **default** for feature peers
+Peer stack and soup are **both** required for normal feature work. They solve different problems.
+
+### 1. Peer stack — isolated Playwright / §6.4 evidence
 
 - **Ports:** hub `3100–3199`, separate `HAPI_HOME` under `~/.hapi-peer/`
 - **Safe for agents:** `hapi-peer-stack up|down|status|doctor` — **never** touches systemd or `:3006`
 - **Proof:** Playwright on real `/sessions/:id` UI; PNG and/or MP4 under `localdocs/playwright-runs/` (gitignored)
 - **Inline in HAPI chat:** `display_image` / `display_video` MCP, or `bun scripts/tooling/hapi-display-image.mjs <session-prefix> <absolute-path> [title]`
-- **Done for peer:** gates pass + inline media in operator-readable session — **not** soup rebuild
+- **Not a soup substitute:** peer proof does **not** mean skip manifest promotion
 
-### 2. Soup — daily driver on `:3006`
+### 2. Soup — daily driver on `:3006` (**always promote**)
 
-- **When:** operator wants feature in the **real** multi-layer stack, or after peer proof when promoting to production dogfood
-- **Agent-safe:** `hapi-driver-rebuild --build-web [--verify]`, `hapi-driver-build-web`, `hapi-verify-web-dist`, **`hapi-restart-hub`** (hub/cli changes)
+- **When:** tip is ready for operator dogfood (after or in parallel with peer-stack proof). **Default. Not optional.**
+- **Agent-owned:** edit `~/.config/hapi/driver-manifest.yaml` (and commit `config/driver-manifest.yaml` on mirror), then `hapi-driver-rebuild --build-web [--verify]`, `hapi-verify-web-dist`, **`hapi-restart-hub`** if hub/cli/shared changed
+- **Conflicts:** trial-merge first; write `scripts/tooling/soup-heals/*.patch` or a `driver/<feature>` union tip — **do not** leave the feature out of soup
 - **Agent-forbidden:** `hapi-use-driver`, `hapi-use-worktree`, `hapi-driver-rebuild --activate`, raw `sudo systemctl restart hapi-hub`
 - **Web-only layer:** atomic `web/dist` swap + hard-reload — no hub restart
 - **Hub/cli layer:** rebuild `--verify` + `hapi-restart-hub` + confirm `user_version`
@@ -298,8 +300,7 @@ hapi-worktree-create my-feature --branch feat/my-feature
 ### 3. Clean — upstream/main only (rare)
 
 - Separate Proxmox/LAN hub, new port, isolated DB
-- For upstream-parity review without fork soup layers
-- Operator gets tailnet + LAN URLs in handoff
+- For upstream-parity review without fork soup layers — **does not replace** putting the feature in soup for estate dogfood
 
 ---
 
@@ -364,7 +365,7 @@ Peers **must** assess tier before capture ([`peer-stack.md` § Evidence modality
 **Allowed**
 
 - Edit product code in `~/coding/hapi/worktrees/<name>/`
-- **`~/.config/hapi/driver-manifest.yaml`** — add/update your feature layer **after operator approves soup dogfood** (peer-stack proof first)
+- **`~/.config/hapi/driver-manifest.yaml`** — add/update your feature layer when the tip is ready for `:3006` dogfood (peer-stack proof does not replace this)
 - `hapi-peer-stack up|down|status|doctor`
 - `hapi-driver-status --quiet` → **`hapi-driver-rebuild --build-web [--verify]`** (manifest merge **and** atomic `web/dist` — the supported soup promotion path)
 - `hapi-driver-build-web`, `hapi-verify-web-dist`
@@ -389,20 +390,22 @@ Peers **must** assess tier before capture ([`peer-stack.md` § Evidence modality
 1. **Orchestrator** runs search + playback; you confirm scope.
 2. **Peer** gets explicit handoff (completed vs owned steps).
 3. **Worktree** appears under `~/coding/hapi/worktrees/<name>`.
-4. **Default demo** is peer stack — you see PNG/MP4 **inline in HAPI chat** before touching `:3006`.
-5. **If soup requested:** after peer-stack proof + **operator approval**, **peer** adds manifest layer → `hapi-driver-rebuild --build-web --verify` → verify-web-dist → restart if needed → operator hard-reloads and clicks.
-6. **After your approval:** upstream PR; soup layer stays until merged upstream or dropped from manifest.
+4. **Default proof** is peer stack — you see PNG/MP4 **inline in HAPI chat** without yanking `:3006`.
+5. **Always soup-promote** the same tip (heal/union if needed) → `hapi-driver-rebuild --build-web --verify` → verify-web-dist → restart if needed → operator hard-reloads and click-tests on `:3006`.
+6. **After operator dogfood approval:** upstream PR; soup layer stays until merged upstream or dropped from manifest.
 
 ---
 
-## Soup promotion (peer-owned after operator approval)
+## Soup promotion (peer-owned — default, not optional)
 
-**Default feature flow:** peer stack proof on `:3100+` → operator approves soup dogfood on `:3006` → **feature peer** promotes (not the operator, not a separate orchestrator step unless stack is busy).
+**Default feature flow:** peer stack proof on `:3100+` **and** soup layer on `:3006`. Peer promotes without waiting for "please put this in soup." Operator dogfood is the click-test on the promoted stack.
 
 **Peer sequence (from mirror `~/coding/hapi`):**
 
 ```bash
 # 1. Edit ~/.config/hapi/driver-manifest.yaml — add branch: feat/your-feature
+#    (or driver/<name> union tip when thin upstream tip conflicts with soup)
+#    Commit config/driver-manifest.yaml on mirror the same turn (mess-maker rule).
 # 2. One rebuild owner at a time (hapi-driver-status --quiet; exit 75 = wait)
 hapi-driver-rebuild --build-web --verify
 hapi-verify-web-dist
@@ -415,13 +418,15 @@ hapi-restart-hub
 
 | Wrong | Right |
 |-------|-------|
+| Skip soup because peer stack passed | Promote + rebuild so `:3006` has the tip |
 | `hapi-driver-rebuild` (no `--build-web`) | `hapi-driver-rebuild --build-web --verify` |
 | `git merge` inside `~/coding/hapi/driver` | Edit manifest; let rebuild merge layers |
 | `cp worktrees/*/web/dist` into driver | Atomic swap via rebuild/build-web |
 | `hapi-use-driver` / `hapi-use-worktree` | Already on driver soup — use `hapi-restart-hub` |
 | Declare done at verify stamp alone | `hapi-verify-web-dist` exit 0 + operator `:3006` proof |
+| Leave layer out on merge conflict | `soup-heals/*.patch` or `driver/<feature>` union tip |
 
-**Operator role:** approve soup promotion and click-test on `:3006` — **not** hand-edit the manifest for every feature.
+**Operator role:** click-test on `:3006` and approve upstream PR — **not** hand-edit the manifest for every feature, and **not** a gate that withholds soup promotion.
 
 **Friction mode — kill criteria**
 

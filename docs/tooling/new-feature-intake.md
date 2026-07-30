@@ -32,7 +32,7 @@ Copy and fill this block (do not spawn a peer with only "implement X"):
 - [ ] 2 Upstream search — DONE: <issue/PR links or "no match">
 - [ ] 3 Playback — DONE: operator confirmed on <date>
 - [ ] 4 Issue — <issue URL> OR spike-only (no issue yet)
-- [ ] 5 Demo topology — **peer stack** (default) | soup | clean — `localdocs/peer-stack.env` when peer stack
+- [ ] 5 Proof path — **peer stack** (Playwright) **+ soup promote** (default dogfood) | clean only if parity review — `localdocs/peer-stack.env` when peer stack
 
 ## Your assignment (feature peer)
 - Own steps: **<e.g. 5 implementation + 6 gates + iterate until 7 handoff>**
@@ -81,7 +81,7 @@ Confusion is common: **`hapi-active` → `~/coding/hapi/driver` is the running h
 | Upstream PR | `~/coding/hapi/worktrees/<name>`, branch from `upstream/main` |
 | Mirror / docs | `~/coding/hapi` (primary checkout) |
 | Soup on `:3006` | Manifest merge only — `hapi-driver-rebuild`, never hand-edit driver |
-| Try feature in browser | Peer stack first — then lifecycle § Soup dogfood if operator asked for soup |
+| Try feature in browser | Peer stack for §6 proof; **always** soup-promote for `:3006` dogfood — [lifecycle](./feature-work-lifecycle.md) |
 
 **Peer agents** spawned from an orchestrator inherit **files on disk** in the workspace (`~/coding/hapi`), not the orchestrator's chat memory. They only know completed intake steps if the handoff block above says so.
 
@@ -130,9 +130,9 @@ Operator chooses:
 
 Upstream PR branches stay **`upstream/main...HEAD`** for review. Soup manifest merge order is **local only** — see [driver-soup.md](./driver-soup.md).
 
-### 5 — Demo topology (operator choice)
+### 5 — Proof path + soup dogfood (not either/or)
 
-**Default:** peer stack. **Workflow for all three choices:** [feature-work-lifecycle.md § Three demo topologies](./feature-work-lifecycle.md#three-demo-topologies-operator-picks-at-5).
+**Default:** peer stack for isolated Playwright **and** soup promote for `:3006`. **Workflow:** [feature-work-lifecycle.md § Proof path + soup dogfood](./feature-work-lifecycle.md#proof-path--soup-dogfood-not-mutually-exclusive).
 
 ```bash
 hapi-peer-stack up --name <feature> --worktree ~/coding/hapi/worktrees/<name>
@@ -145,7 +145,7 @@ hapi-peer-stack down --name <feature>
 
 Registry: `~/.hapi-peer/registry.json`. Commands and evidence tiers: [peer-stack.md](./peer-stack.md).
 
-Ask explicitly if operator wants **soup** (`:3006`) or **clean instance** instead — then follow lifecycle (not restated here).
+**Soup is not optional.** After (or while) peer proof is ready, add the manifest layer and rebuild — do not ask whether the operator "wants soup." Clean upstream-only instances are rare parity reviews and still do not replace soup for estate dogfood.
 
 #### Clean instance handoff fields (when operator picks clean)
 
@@ -183,7 +183,7 @@ cd ~/coding/hapi && node scripts/dev/run-e2e-on-peer-stack.mjs \
 hapi-peer-stack down --name my-feature
 ```
 
-Legacy soup/clean handoff (operator-requested only — after peer-stack proof):
+Legacy clean-instance handoff (parity review only — still promote soup for estate dogfood):
 
 ```bash
 node scripts/dev/read-hapi-web.mjs \
@@ -259,7 +259,7 @@ Only after (1)-(4): send operator **links**, **what to click**, **declared tier 
 
 Operator validates in browser. Iterate in the worktree; re-run gates after each round. **Do not** open upstream PR until explicit approval.
 
-**Soup promotion on `:3006` (after peer-stack proof + operator says yes):** the **feature peer** owns the rest — edit `~/.config/hapi/driver-manifest.yaml`, then `hapi-driver-rebuild --build-web --verify`, `hapi-verify-web-dist`, and `hapi-restart-hub` if hub/cli/shared changed. See [feature-work-lifecycle.md § Soup promotion](./feature-work-lifecycle.md#soup-promotion-peer-owned-after-operator-approval). **Do not** ask the operator to add manifest layers.
+**Soup promotion on `:3006` (default — peer-owned):** the **feature peer** edits `~/.config/hapi/driver-manifest.yaml`, commits `config/driver-manifest.yaml` on mirror, then `hapi-driver-rebuild --build-web --verify`, `hapi-verify-web-dist`, and `hapi-restart-hub` if hub/cli/shared changed. See [feature-work-lifecycle.md § Soup promotion](./feature-work-lifecycle.md#soup-promotion-peer-owned--default-not-optional). **Do not** ask the operator to add manifest layers or grant permission to soup-promote.
 
 ### 8 — Upstream PR (after approval)
 

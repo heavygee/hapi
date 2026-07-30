@@ -1,0 +1,57 @@
+diff --git a/web/src/components/AssistantChat/HappyThread.tsx b/web/src/components/AssistantChat/HappyThread.tsx
+index d08361bbd..dfc3a0808 100644
+--- a/web/src/components/AssistantChat/HappyThread.tsx
++++ b/web/src/components/AssistantChat/HappyThread.tsx
+@@ -191,7 +191,9 @@ export function getHistoryCoverageRetryDelay(deadline: number, now: number): num
+ 
+ function NewMessagesIndicator(props: { count: number; onClick: () => void }) {
+     const { t } = useTranslation()
+-    if (props.count === 0) {
++    // Guard undefined/NaN as well as 0 — a missing count previously rendered
++    // the raw i18n template `{n} new message{s}` on every session.
++    if (!(props.count > 0)) {
+         return null
+     }
+ 
+diff --git a/web/src/components/SessionChat.tsx b/web/src/components/SessionChat.tsx
+index 54eb67cef..a358eabba 100644
+--- a/web/src/components/SessionChat.tsx
++++ b/web/src/components/SessionChat.tsx
+@@ -20,6 +20,7 @@ import { reduceChatBlocks } from '@/chat/reducer'
+ import { reconcileChatBlocks } from '@/chat/reconcile'
+ import { buildConversationOutline } from '@/chat/outline'
+ import { buildVisibleChatBlocks, isToolGroupBlock, type ToolGroupBlock } from '@/chat/toolGroups'
++import { useUnseenBlockCount } from '@/hooks/useUnseenBlockCount'
+ import { isQueuedForInvocation } from '@/lib/messages'
+ import { inactiveSessionCanResume } from '@/lib/sessionResume'
+ import {
+@@ -321,7 +322,7 @@ type SessionChatProps = {
+     isSyncingTail: boolean
+     isLoadingMoreMessages: boolean
+     isSending: boolean
+-    unseenCount: number
++    viewMode: 'tail' | 'history'
+     messagesVersion: number
+     historyVersion: number
+     onBack: () => void
+@@ -1007,6 +1008,11 @@ function SessionChatInner(props: SessionChatProps) {
+         visibleGroupsRef.current = visibleBlocks.filter(isToolGroupBlock)
+     }, [visibleBlocks])
+ 
++    // "N new messages" counts rendered blocks (#1255). Remat must keep this
++    // hook here — if unseenCount is only a prop and router omits it, the pill
++    // shows the raw locale template `{n} new message{s}`.
++    const unseenCount = useUnseenBlockCount(props.viewMode, visibleBlocks)
++
+     const outlineItems = useMemo(
+         () => buildConversationOutline(reconciled.blocks),
+         [reconciled.blocks]
+@@ -1375,7 +1381,7 @@ function SessionChatInner(props: SessionChatProps) {
+                         hasMoreMessages={props.hasMoreMessages}
+                         isLoadingMoreMessages={props.isLoadingMoreMessages}
+                         onLoadMore={props.onLoadMore}
+-                        unseenCount={props.unseenCount}
++                        unseenCount={unseenCount}
+                         rawMessagesCount={visibleMessages.length}
+                         normalizedMessagesCount={normalizedMessages.length}
+                         messagesVersion={props.messagesVersion}

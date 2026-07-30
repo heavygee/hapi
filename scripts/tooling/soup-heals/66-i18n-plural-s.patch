@@ -1,0 +1,53 @@
+diff --git a/web/src/lib/i18n-context.interpolate.test.ts b/web/src/lib/i18n-context.interpolate.test.ts
+new file mode 100644
+index 000000000..343bc1494
+--- /dev/null
++++ b/web/src/lib/i18n-context.interpolate.test.ts
+@@ -0,0 +1,17 @@
++import { describe, expect, it } from 'vitest'
++import { interpolate } from './i18n-context'
++
++describe('interpolate', () => {
++    it('fills n and derives plural s for new-message pill', () => {
++        expect(interpolate('{n} new message{s}', { n: 1 })).toBe('1 new message')
++        expect(interpolate('{n} new message{s}', { n: 3 })).toBe('3 new messages')
++    })
++
++    it('leaves unknown placeholders intact', () => {
++        expect(interpolate('hello {name}', { n: 1 })).toBe('hello {name}')
++    })
++
++    it('respects an explicit s override', () => {
++        expect(interpolate('{n} new message{s}', { n: 1, s: 's' })).toBe('1 new messages')
++    })
++})
+diff --git a/web/src/lib/i18n-context.tsx b/web/src/lib/i18n-context.tsx
+index 99979c566..e927b0b2f 100644
+--- a/web/src/lib/i18n-context.tsx
++++ b/web/src/lib/i18n-context.tsx
+@@ -15,10 +15,22 @@ export const I18nContext = createContext<I18nContextValue | null>(null)
+ 
+ const locales: Record<Locale, Translations> = { en, 'zh-CN': zhCN }
+ 
+-function interpolate(str: string, params?: Record<string, string | number>): string {
++/**
++ * Replace `{key}` placeholders. When `n` is present and `s` is not, derive the
++ * English plural suffix for locale strings like `{n} new message{s}`
++ * (HappyThread NewMessagesIndicator — otherwise the UI shows literal `{s}`).
++ */
++export function interpolate(str: string, params?: Record<string, string | number>): string {
+   if (!params) return str
+-  return str.replace(/\{(\w+)\}/g, (match, key) => {
+-    const value = params[key]
++  const resolved: Record<string, string | number> = { ...params }
++  if (resolved.s === undefined && resolved.n !== undefined) {
++    const n = typeof resolved.n === 'number' ? resolved.n : Number(resolved.n)
++    if (Number.isFinite(n)) {
++      resolved.s = n === 1 ? '' : 's'
++    }
++  }
++  return str.replace(/\{(\w+)\}/g, (match, key: string) => {
++    const value = resolved[key]
+     return value !== undefined ? String(value) : match
+   })
+ }
