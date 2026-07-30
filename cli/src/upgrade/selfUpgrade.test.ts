@@ -9,6 +9,7 @@ import {
     artifactInstallFileName,
     assertExecutableMatchesTargetVersion,
     createArtifactDownloadSizeGuard,
+    artifactDownloadRequestHeaders,
     createDeadlineRunner,
     isRunnerSelfUpgradeInFlight,
     mergeParentRunnerStateForReclaim,
@@ -101,6 +102,26 @@ describe('createArtifactDownloadSizeGuard', () => {
         )
         expect(getDownloadedBytes()).toBe(8)
         expect(Buffer.concat(chunks).length).toBe(8)
+    })
+})
+
+describe('artifactDownloadRequestHeaders', () => {
+    it('attaches hub Authorization when the artifact URL is same-origin with the hub', () => {
+        const headers = artifactDownloadRequestHeaders({
+            artifactUrl: new URL('http://hub.example:3006/api/upgrade/cli-artifact'),
+            downloadBaseUrl: 'http://hub.example:3006',
+            authToken: 'secret-token',
+        })
+        expect(headers.Authorization).toBe('Bearer secret-token')
+    })
+
+    it('omits hub credentials for absolute third-party artifact origins', () => {
+        const headers = artifactDownloadRequestHeaders({
+            artifactUrl: new URL('https://cdn.example/hapi-linux'),
+            downloadBaseUrl: 'http://hub.example:3006',
+            authToken: 'secret-token',
+        })
+        expect(headers).toEqual({})
     })
 })
 
