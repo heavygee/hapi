@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+    ARTIFACT_BUILD_BUDGET_MS,
     artifactFileName,
     bunCompileTarget,
     fingerprintArtifactInputStats,
@@ -13,6 +14,15 @@ import {
     runnerArtifactCompileFeatures,
     type ArtifactMeta,
 } from './cliArtifact'
+import { TUNWG_DOWNLOAD_TIMEOUT_MS } from './tunwgPin'
+
+describe('ARTIFACT_BUILD_BUDGET_MS', () => {
+    it('keeps tunwg download + bun compile under the hub upgrade RPC window', () => {
+        expect(ARTIFACT_BUILD_BUDGET_MS).toBe(9 * 60_000)
+        expect(ARTIFACT_BUILD_BUDGET_MS).toBeLessThan(10 * 60_000)
+        expect(TUNWG_DOWNLOAD_TIMEOUT_MS).toBe(ARTIFACT_BUILD_BUDGET_MS)
+    })
+})
 
 describe('artifactFileName', () => {
     it('accepts normal version/platform/arch tokens', () => {
