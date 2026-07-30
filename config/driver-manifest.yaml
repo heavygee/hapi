@@ -311,8 +311,9 @@ layers:
   # Settings debug chat panel (Stage 0 read-only). Based on feat/overseer-readonly-entity
   # (4cb90c23f); adds shared/overseerConverse, hub/src/overseer/{brainClient,converse,
   # runOverseerTool}, POST /api/overseer/converse, web Settings "Talk to the Overseer
-  # (text · debug)" panel. NEEDS OVERSEER_BRAIN_URL + OVERSEER_BRAIN_MODEL in ~/.hapi/hub.env
-  # (oos-llm 27B: https://oos-llm.tail9944ee.ts.net/v1 model=main) + hapi-restart-hub.
+  # (text · debug)" panel. NEEDS OVERSEER_BRAIN_URL + OVERSEER_BRAIN_MODEL in
+  # /var/lib/hapi/hub.env (the hapi-hub-oos.service EnvironmentFile; HAPI_HOME=/var/lib/hapi
+  # — NOT ~/.hapi/hub.env) + hapi-restart-hub. oos-llm 27B: https://oos-llm.tail9944ee.ts.net/v1 model=main.
   # COLLISION WATCH: appends overseerConverse() to the ApiClient tail in web/src/api/client.ts
   # (same tail as scratchlist/inbox methods) — may need rerere/band-aid. Also edits
   # hub/src/web/routes/overseer.ts + web/src/routes/settings/about.tsx.
