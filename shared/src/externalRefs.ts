@@ -142,8 +142,13 @@ export function buildGithubPrExternalRef(input: {
 /**
  * Identity writers (`link-pr` / MCP / Link PR dialog) send status-less refs.
  * Meta caches health on the same repo#N. On idempotent re-link, keep the
- * last-good status bundle unless the incoming write sets `status` explicitly
- * (ADR D8 stickiness — Meta also skips writing `?` for the same reason).
+ * last-good status / statusAction unless the incoming write sets `status`
+ * explicitly (ADR D8 stickiness — Meta also skips writing `?`).
+ *
+ * Always prefer an incoming `statusCheckedAt` when present — Meta refresh
+ * must be allowed to bump the honesty clock without re-stating status
+ * (2026-07-30: omitting status + preserving prior checkedAt caused estate-wide
+ * ❓ stale chips after the forge dual-write experiment).
  */
 export function preserveGithubPrStatusCache(
     existing: readonly ExternalRef[] | null | undefined,
@@ -171,8 +176,12 @@ export function preserveGithubPrStatusCache(
         return {
             ...ref,
             status: prior.status,
-            ...(prior.statusCheckedAt !== undefined ? { statusCheckedAt: prior.statusCheckedAt } : {}),
-            ...(prior.statusAction !== undefined ? { statusAction: prior.statusAction } : {})
+            statusCheckedAt: ref.statusCheckedAt ?? prior.statusCheckedAt,
+            ...(ref.statusAction !== undefined
+                ? { statusAction: ref.statusAction }
+                : prior.statusAction !== undefined
+                    ? { statusAction: prior.statusAction }
+                    : {})
         }
     })
 }

@@ -257,6 +257,35 @@ describe('preserveGithubPrStatusCache', () => {
         })]
         expect(preserveGithubPrStatusCache(existing, next)).toEqual(next)
     })
+
+    it('keeps prior status but prefers incoming statusCheckedAt (Meta refresh clock)', () => {
+        const existing = [buildGithubPrExternalRef({
+            repo: 'tiann/hapi',
+            number: 897,
+            status: 'clean',
+            statusCheckedAt: 200,
+            statusAction: 'full green — wait on tiann'
+        })]
+        const refresh = [buildGithubPrExternalRef({
+            repo: 'tiann/hapi',
+            number: 897,
+            source: 'inferred',
+            linkedAt: 100,
+            statusCheckedAt: 999
+        })]
+        expect(preserveGithubPrStatusCache(existing, refresh)).toEqual([{
+            kind: 'github_pr',
+            repo: 'tiann/hapi',
+            number: 897,
+            url: 'https://github.com/tiann/hapi/pull/897',
+            role: 'primary',
+            source: 'inferred',
+            linkedAt: 100,
+            status: 'clean',
+            statusCheckedAt: 999,
+            statusAction: 'full green — wait on tiann'
+        }])
+    })
 })
 
 describe('first-attach chip status helpers', () => {
