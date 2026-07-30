@@ -57,6 +57,33 @@ describe('machineNeedsUpdateLabel', () => {
         )).toBe(true)
     })
 
+    it('under auto, does not label self-upgradeable drift (hub handles it)', () => {
+        expect(machineNeedsUpdateLabel(
+            makeMachine({
+                metadata: {
+                    host: 'homelab',
+                    platform: 'linux',
+                    happyCliVersion: '0.23.0',
+                    capabilities: ['cursor-chat-store-status', 'runner-self-upgrade'],
+                },
+            }),
+            OFFER,
+            'auto',
+        )).toBe(false)
+        expect(machineNeedsUpdateLabel(
+            makeMachine({
+                metadata: {
+                    host: 'legacy',
+                    platform: 'linux',
+                    happyCliVersion: '0.23.0',
+                    capabilities: [],
+                },
+            }),
+            OFFER,
+            'auto',
+        )).toBe(true)
+    })
+
     it('does not label handoff-disabled hosts on generation-only drift', () => {
         const artifactOffer: HubUpgradeOffer = {
             channel: 'hub-artifact',
