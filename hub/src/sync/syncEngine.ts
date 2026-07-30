@@ -1055,6 +1055,28 @@ export class SyncEngine {
                     code: 'upgrade_failed',
                 }
             }
+            // Pre-generation runners (and any future gap) can reply already-current
+            // at the same semver while the hub still trails on targetGeneration /
+            // capabilities. That is not success — treating it as one stuck the
+            // banner in a forever "Already at X" loop.
+            if (
+                response?.status === 'already-current'
+                && machineTrailsUpgradeOffer(
+                    offer,
+                    machine.metadata?.happyCliVersion,
+                    machine.metadata?.capabilities,
+                    machine.metadata?.cliArtifactGeneration,
+                )
+            ) {
+                return {
+                    type: 'error',
+                    message:
+                        'Runner reported already-current but still trails the hub offer '
+                        + '(generation or capabilities). Install the hub CLI artifact once '
+                        + 'on that machine, or upgrade to a generation-aware runner.',
+                    code: 'upgrade_failed',
+                }
+            }
             return {
                 type: 'success',
                 message: response?.message || 'Upgrade started',
