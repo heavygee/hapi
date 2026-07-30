@@ -233,8 +233,18 @@ export default {
   'session.modelError.banner.subtitle.nonTransient': 'non-transient',
   'session.modelError.banner.claimedDone': 'The agent claimed completion before this error. The work is likely INCOMPLETE.',
   'session.modelError.banner.midExecution': 'The last agent turn failed mid-execution.',
+  'session.modelError.banner.recoveredTitle': 'RECOVERED \u2014 continued after {kind}',
+  'session.modelError.banner.recoveredBody': 'HAPI bridged the failure and re-sent your last message. Dismiss when you no longer need this notice.',
+  'session.modelError.banner.bridgeFailedTitle': 'BRIDGE FAILED \u2014 {kind}',
+  'session.modelError.banner.bridgeFailedBody': 'The automatic or manual bridge retry failed. Check the session or dismiss this notice.',
   'session.modelError.banner.dismiss': 'Dismiss',
   'session.modelError.banner.viewRaw': 'View raw error',
+  'session.modelError.banner.bridgeRetry': 'Bridge & retry',
+  'session.modelError.banner.bridging': 'Bridging…',
+  'session.modelError.banner.bridgeFailed': 'Bridge failed — try again or dismiss.',
+    'settings.chat.modelErrors': 'Model errors',
+  'settings.chat.autoBridgeTransientModelErrors': 'Automatically bridge transient model errors',
+  'settings.chat.autoBridgeTransientModelErrors.description': 'When enabled, Cursor sessions re-send your last message once after a recoverable model error.',
 
   // Session inactive
   'session.inactive.autoResume': 'This session is inactive. Send a message to resume.',

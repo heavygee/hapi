@@ -129,7 +129,10 @@ vi.mock('@/hooks/useChatSurfaceColors', () => ({
 
 vi.mock('@/lib/app-context', () => ({
     useAppContext: () => ({
-        api: {},
+        api: {
+            getSessions: vi.fn(async () => ({ sessions: [] })),
+            setModelErrorAutoBridge: vi.fn(async () => {}),
+        },
         baseUrl: 'http://127.0.0.1:3006',
         token: context.token,
     }),

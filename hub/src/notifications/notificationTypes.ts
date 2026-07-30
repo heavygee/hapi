@@ -8,15 +8,10 @@ export type TaskNotification = {
 }
 
 /**
- * Model error notification: fires when cursor-agent (or another flavor's
- * runtime) hits an internal model-side failure that HAPI detects either
- * structurally (typed AcpStderrError, RPC rejection, transport close) or
- * via the text-classifier fallback for stringified-into-prose errors.
- *
- * Higher urgency than ready/task: an operator who walks away from the
- * web UI MUST get a phone-side / wrist-side ping for this, otherwise the
- * "all done" green dot lies to them. Banner-only is opt-in (requires
- * looking); notification is push (regardless of attention).
+ * Model error notification: fires for non-transient model failures, or when a
+ * transient bridge retry persistently fails (`retriedAndFailed`). Successful
+ * auto/manual bridges stay in-session (banner + chat event) and must not ping
+ * push/Telegram or create overseer/inbox attention.
  */
 export type ModelErrorNotification = {
     kind: string                          // e.g. 'quota_exhausted', 'transport_closed'

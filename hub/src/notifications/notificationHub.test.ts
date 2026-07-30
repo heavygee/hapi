@@ -286,7 +286,7 @@ describe('NotificationHub', () => {
         hub.stop()
     })
 
-    it('dedupes model-error notifications across repeat session-updated events', async () => {
+    it('does not fire model-error for recoverable transient errors', async () => {
         const engine = new FakeSyncEngine()
         const channel = new StubChannel()
         const hub = new NotificationHub(engine as unknown as SyncEngine, [channel])
@@ -297,6 +297,88 @@ describe('NotificationHub', () => {
                     kind: 'transport_closed',
                     transient: true,
                     rawSnippet: 'WritableIterable is closed',
+                    atTs: 2000,
+                    priorAssistantClaimsDone: false
+                }
+            } as Session['metadata']
+        })
+
+        engine.setSession(session)
+        engine.emit({ type: 'session-updated', sessionId: session.id })
+        engine.emit({ type: 'session-updated', sessionId: session.id })
+        await sleep(5)
+
+        expect(channel.modelErrors).toHaveLength(0)
+
+        hub.stop()
+    })
+
+    it('does not fire model-error after a successful bridge of a transient error', async () => {
+        const engine = new FakeSyncEngine()
+        const channel = new StubChannel()
+        const hub = new NotificationHub(engine as unknown as SyncEngine, [channel])
+
+        const session = createSession({
+            metadata: {
+                lastModelError: {
+                    kind: 'transport_closed',
+                    transient: true,
+                    rawSnippet: 'WritableIterable is closed',
+                    atTs: 2000,
+                    priorAssistantClaimsDone: false,
+                    bridgedForAtTs: 2000
+                }
+            } as Session['metadata']
+        })
+
+        engine.setSession(session)
+        engine.emit({ type: 'session-updated', sessionId: session.id })
+        await sleep(5)
+
+        expect(channel.modelErrors).toHaveLength(0)
+
+        hub.stop()
+    })
+
+    it('fires model-error when a bridge retry persistently fails', async () => {
+        const engine = new FakeSyncEngine()
+        const channel = new StubChannel()
+        const hub = new NotificationHub(engine as unknown as SyncEngine, [channel])
+
+        const session = createSession({
+            metadata: {
+                lastModelError: {
+                    kind: 'transport_closed',
+                    transient: true,
+                    rawSnippet: 'WritableIterable is closed',
+                    atTs: 3000,
+                    priorAssistantClaimsDone: false,
+                    retriedAndFailed: true
+                }
+            } as Session['metadata']
+        })
+
+        engine.setSession(session)
+        engine.emit({ type: 'session-updated', sessionId: session.id })
+        await sleep(5)
+
+        expect(channel.modelErrors).toHaveLength(1)
+        expect(channel.modelErrors[0]?.notification.atTs).toBe(3000)
+
+        hub.stop()
+    })
+
+    it('dedupes model-error notifications across repeat session-updated events', async () => {
+        const engine = new FakeSyncEngine()
+        const channel = new StubChannel()
+        const hub = new NotificationHub(engine as unknown as SyncEngine, [channel])
+
+        const session = createSession({
+            metadata: {
+                lastModelError: {
+                    kind: 'quota_exhausted',
+                    transient: false,
+                    rawSnippet: 'Error: T: [resource_exhausted]',
                     atTs: 2000,
                     priorAssistantClaimsDone: false
                 }
@@ -338,8 +420,8 @@ describe('NotificationHub', () => {
         const secondSession = createSession({
             metadata: {
                 lastModelError: {
-                    kind: 'transport_closed',
-                    transient: true,
+                    kind: 'auth_failed',
+                    transient: false,
                     rawSnippet: 'second',
                     atTs: 2000,
                     priorAssistantClaimsDone: false
