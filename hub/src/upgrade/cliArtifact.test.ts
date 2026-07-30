@@ -154,6 +154,30 @@ describe('fingerprintArtifactInputs / isArtifactCacheFresh', () => {
         }
     })
 
+    it('ignores colocated *.test.ts changes that do not affect the compiled runner', () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-artifact-test-fp-'))
+        try {
+            mkdirSync(join(root, 'cli', 'src'), { recursive: true })
+            mkdirSync(join(root, 'hub', 'src'), { recursive: true })
+            mkdirSync(join(root, 'shared', 'src'), { recursive: true })
+            writeFileSync(join(root, 'cli', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'hub', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'shared', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'cli', 'src', 'bootstrap.ts'), 'export const x = 1\n')
+            writeFileSync(join(root, 'hub', 'src', 'startHub.ts'), 'export {}\n')
+            writeFileSync(join(root, 'shared', 'src', 'index.ts'), 'export {}\n')
+            writeFileSync(join(root, 'cli', 'src', 'bootstrap.test.ts'), 'export const t = 1\n')
+
+            const before = fingerprintArtifactInputs(root)
+            writeFileSync(join(root, 'cli', 'src', 'bootstrap.test.ts'), 'export const t = 2\n')
+            const after = fingerprintArtifactInputs(root)
+            expect(after).toBe(before)
+        } finally {
+            rmSync(root, { recursive: true, force: true })
+        }
+    })
+
     it('changes when hub source changes at the same package version', () => {
         const root = mkdtempSync(join(tmpdir(), 'hapi-artifact-hub-fp-'))
         try {
