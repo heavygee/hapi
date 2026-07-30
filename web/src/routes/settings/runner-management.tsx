@@ -1,16 +1,23 @@
+import { Navigate } from '@tanstack/react-router'
 import type { FleetUpgradePolicy } from '@hapi/protocol/upgradeChannel'
 import { DEFAULT_FLEET_UPGRADE_POLICY } from '@hapi/protocol/upgradeChannel'
 import { useTranslation } from '@/lib/use-translation'
 import { useAppContext } from '@/lib/app-context'
+import { isDefaultNamespaceToken } from '@/lib/tokenNamespace'
 import { useUpgradeInfo, useSetFleetUpgradePolicy } from '@/hooks/queries/useUpgradeInfo'
 import { SettingsChoiceGroup, SettingsPageContent, SettingsRow, SettingsSection } from '@/components/settings/SettingsPrimitives'
 
 export default function SettingsRunnerManagementPage() {
     const { t } = useTranslation()
-    const { api } = useAppContext()
+    const { api, token } = useAppContext()
     const { info } = useUpgradeInfo(api)
     const setPolicy = useSetFleetUpgradePolicy(api)
     const policy: FleetUpgradePolicy = info?.policy ?? DEFAULT_FLEET_UPGRADE_POLICY
+
+    // Hub-global: PUT /api/upgrade/policy is default-namespace only.
+    if (!isDefaultNamespaceToken(token)) {
+        return <Navigate to="/settings/general" replace />
+    }
 
     const policyOptions: ReadonlyArray<{ value: FleetUpgradePolicy; label: string; description?: string }> = [
         { value: 'silent', label: t('settings.runnerMgmt.policySilent'), description: t('settings.runnerMgmt.policySilentHint') },
