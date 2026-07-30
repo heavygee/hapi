@@ -22,14 +22,21 @@ export type DetectUpgradeChannelInput = {
 }
 
 function normalizeOverride(raw: string | null | undefined): UpgradeChannel | null {
-    if (!raw) {
+    if (raw == null) {
         return null
     }
     const value = raw.trim().toLowerCase()
+    if (!value) {
+        return null
+    }
     if (value === 'npm' || value === 'hub-artifact' || value === 'off') {
         return value
     }
-    return null
+    // Fail closed: a typo must not fall through to npm/hub-artifact and defeat
+    // an intended kill switch when fleet policy is `auto`.
+    throw new Error(
+        `Invalid HAPI_UPGRADE_CHANNEL="${raw.trim()}"; expected npm, hub-artifact, or off`,
+    )
 }
 
 function pathLooksLikeNpmPackage(path: string): boolean {

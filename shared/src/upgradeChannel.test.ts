@@ -29,6 +29,16 @@ describe('detectUpgradeChannel', () => {
         })).toBe('off')
     })
 
+    it('rejects invalid non-empty HAPI_UPGRADE_CHANNEL instead of enabling a default', () => {
+        expect(() => detectUpgradeChannel({
+            envChannel: 'of',
+            isCompiled: true,
+            execPath: '/usr/local/bin/hapi',
+            projectPath: '/tmp',
+            monorepoRootExists: false,
+        })).toThrow(/Invalid HAPI_UPGRADE_CHANNEL/)
+    })
+
     it('classifies npm global / node_modules installs as npm', () => {
         expect(detectUpgradeChannel({
             isCompiled: false,

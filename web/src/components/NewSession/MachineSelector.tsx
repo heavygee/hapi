@@ -42,10 +42,11 @@ export function machineNeedsUpdateLabel(
     return handoffDisabled && cliBinaryUpdatedOnDisk(machine.metadata)
 }
 
-function getMachineOptionLabel(
+export function getMachineOptionLabel(
     machine: Machine,
     offer: HubUpgradeOffer | null | undefined,
     policy: FleetUpgradePolicy,
+    updateRequiredLabel: string,
 ): string {
     const title = getMachineTitle(machine)
     const platform = machine.metadata?.platform ? ` (${machine.metadata.platform})` : ''
@@ -53,7 +54,7 @@ function getMachineOptionLabel(
         ? ` · CLI ${machine.metadata.happyCliVersion}`
         : ''
     const skew = machineNeedsUpdateLabel(machine, offer, policy)
-        ? ' · UPDATE REQUIRED'
+        ? ` · ${updateRequiredLabel}`
         : ''
     return `${title}${platform}${version}${skew}`
 }
@@ -90,7 +91,7 @@ export function MachineSelector(props: {
                 )}
                 {props.machines.map((m) => (
                     <option key={m.id} value={m.id}>
-                        {getMachineOptionLabel(m, offer, policy)}
+                        {getMachineOptionLabel(m, offer, policy, t('runner.skew.updateRequired'))}
                     </option>
                 ))}
             </SelectControl>
