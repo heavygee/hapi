@@ -464,6 +464,22 @@ Vitest; `*.test.ts` next to source; hub + cli tests; no web tests currently.
 
 ---
 
+## Inline media for the operator (HAPI sessions, estate-wide)
+
+**Scope:** every agent session **operating under HAPI** (hub-connected / HAPI MCP bridge), on **any estate machine** that runs this operator fork. Not a duty for non-HAPI IDE chats or agents outside HAPI.
+
+Whenever you **create, generate, edit, or regenerate** an image or video for the operator (icons, mockups, screenshots you produced, Comfy/Flux outputs, recordings, GIFs, etc.), you MUST **show it inline in the current HAPI chat** before claiming done — as a matter of course, not only for dogfood gates.
+
+**How (prefer first available):**
+
+1. MCP `display_image` / `display_video` with absolute filesystem `path` (+ optional `title`)
+2. Fallback: `bun scripts/tooling/hapi-display-image.mjs <session-id-or-prefix> <absolute-path> [title]` (from a HAPI checkout)
+
+**Applies to:** new assets and revisions you just made. If the artifact is the deliverable for the operator, display it — do not only leave a path in prose.  
+**Dogfood proof** (Playwright PNG/MP4) remains mandatory per [`feature-work-lifecycle.md`](../tooling/feature-work-lifecycle.md) §6.4; this section is the broader always-on rule for any operator-facing media.
+
+---
+
 ## New functionality intake
 
 When the operator asks for **new product behavior**, follow [`docs/tooling/new-feature-intake.md`](../tooling/new-feature-intake.md) end-to-end.

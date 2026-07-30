@@ -1,0 +1,13 @@
+---
+description: HAPI sessions — show created images/videos inline to the operator
+alwaysApply: true
+---
+
+# Inline media for the operator (HAPI)
+
+Whenever you **create, generate, edit, or regenerate** an image or video for the operator while this session is under HAPI, show it **inline in the current HAPI chat** before claiming done.
+
+MCP: `display_image` / `display_video` with absolute `path`.  
+Fallback: `bun scripts/tooling/hapi-display-image.mjs <session-prefix> <absolute-path> [title]`.
+
+Canon: [`docs/operator/AGENTS.md`](../../docs/operator/AGENTS.md) § Inline media for the operator (estate-wide for HAPI sessions).
