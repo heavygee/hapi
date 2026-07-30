@@ -19,6 +19,7 @@ import { createMessagesRoutes } from './routes/messages'
 import { createPermissionsRoutes } from './routes/permissions'
 import { createMachinesRoutes } from './routes/machines'
 import { createStorageRoutes } from './routes/storage'
+import { createUpgradeRoutes, createUpgradeCliRoutes } from './routes/upgrade'
 import { createGitRoutes } from './routes/git'
 import { createCliRoutes } from './routes/cli'
 import { createCodexDesktopRoutes } from './routes/codexDesktop'
@@ -237,13 +238,14 @@ function createWebApp(options: {
     const corsOriginOption = corsOrigins.includes('*') ? '*' : corsOrigins
     const corsMiddleware = cors({
         origin: corsOriginOption,
-        allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+        allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
         allowHeaders: ['authorization', 'content-type']
     })
     app.use('/api/*', corsMiddleware)
     app.use('/cli/*', corsMiddleware)
 
     app.route('/cli', createCliRoutes(options.getSyncEngine))
+    app.route('/cli', createUpgradeCliRoutes())
 
     app.route('/api', createAuthRoutes(options.jwtSecret, options.store))
     app.route('/api', createBindRoutes(options.jwtSecret, options.store))
@@ -255,6 +257,7 @@ function createWebApp(options: {
     app.route('/api', createPermissionsRoutes(options.getSyncEngine))
     app.route('/api', createMachinesRoutes(options.getSyncEngine))
     app.route('/api', createStorageRoutes(configuration.dbPath))
+    app.route('/api', createUpgradeRoutes(options.getSyncEngine))
     app.route('/api', createGitRoutes(options.getSyncEngine))
     // 中文注释：这里提供两类 Codex 辅助能力：扫描本地 transcript 以导入到 Hapi，以及按需重启 Codex Desktop 客户端。
     app.route('/api', createCodexDesktopRoutes({

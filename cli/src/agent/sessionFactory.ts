@@ -5,15 +5,17 @@ import { resolve } from 'node:path'
 import { ApiClient } from '@/api/api'
 import type { ApiSessionClient } from '@/api/apiSession'
 import type { AgentState, MachineMetadata, Metadata, Session } from '@/api/types'
-import { notifyRunnerSessionStarted } from '@/runner/controlClient'
+import { getInstalledCliMtimeMs, notifyRunnerSessionStarted } from '@/runner/controlClient'
 import { readSettings } from '@/persistence'
 import { configuration } from '@/configuration'
 import { logger } from '@/ui/logger'
 import { runtimePath } from '@/projectPath'
 import { getInvokedCwd } from '@/utils/invokedCwd'
 import { readWorktreeEnv } from '@/utils/worktreeEnv'
+import { CURRENT_MACHINE_CAPABILITIES } from '@hapi/protocol/runnerCapabilities'
 import { exportHapiSessionEnv } from '@/agent/hapiSessionEnv'
 import packageJson from '../../package.json'
+import { readUpgradeTarget } from '@/upgrade/upgradeTarget'
 
 export { HAPI_SESSION_ID_ENV, exportHapiSessionEnv } from '@/agent/hapiSessionEnv'
 
@@ -41,15 +43,27 @@ export type SessionBootstrapResult = {
     workingDirectory: string
 }
 
-export function buildMachineMetadata(options?: { workspaceRoots?: string[] }): MachineMetadata {
+export function buildMachineMetadata(options?: {
+    workspaceRoots?: string[]
+    startedCliMtimeMs?: number
+}): MachineMetadata {
+    const installedCliMtimeMs = getInstalledCliMtimeMs()
+    const startedCliMtimeMs = options?.startedCliMtimeMs ?? installedCliMtimeMs
+    const cliArtifactGeneration = readUpgradeTarget()?.targetGeneration
     return {
         host: process.env.HAPI_HOSTNAME || os.hostname(),
         platform: os.platform(),
+        arch: process.arch,
         happyCliVersion: packageJson.version,
         homeDir: os.homedir(),
         happyHomeDir: configuration.happyHomeDir,
         happyLibDir: runtimePath(),
-        workspaceRoots: options?.workspaceRoots
+        workspaceRoots: options?.workspaceRoots,
+        capabilities: [...CURRENT_MACHINE_CAPABILITIES],
+        versionHandoffDisabled: process.env.HAPI_DISABLE_VERSION_HANDOFF === '1',
+        ...(typeof startedCliMtimeMs === 'number' ? { startedCliMtimeMs } : {}),
+        ...(typeof installedCliMtimeMs === 'number' ? { installedCliMtimeMs } : {}),
+        ...(cliArtifactGeneration ? { cliArtifactGeneration } : {}),
     }
 }
 

@@ -41,7 +41,8 @@ export const RPC_METHODS = {
     ListGrokModels: 'listGrokModels',
     ListGrokReasoningEffortOptions: 'listGrokReasoningEffortOptions',
     ListOpencodeReasoningEffortOptions: 'listOpencodeReasoningEffortOptions',
-    BridgeModelError: 'bridge-model-error'
+    BridgeModelError: 'bridge-model-error',
+    RunnerSelfUpgrade: 'runner-self-upgrade',
 } as const
 
 export type RpcMethod = typeof RPC_METHODS[keyof typeof RPC_METHODS]
