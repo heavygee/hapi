@@ -9,6 +9,10 @@ import { FcmStore } from './fcmStore'
 import { ScratchlistStore } from './scratchlistStore'
 import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
+import { EventStore } from './eventStore'
+import { InboxStore } from './inboxStore'
+import { ensureOverseerEventsSchema, ensureDeletedSessionsSchema } from './events'
+import { ensureOverseerInboxSchema } from './inboxItems'
 
 export type {
     StoredMachine,
@@ -28,6 +32,10 @@ export { FcmStore } from './fcmStore'
 export { ScratchlistStore } from './scratchlistStore'
 export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
+export { EventStore } from './eventStore'
+export { InboxStore } from './inboxStore'
+export type { InsertSystemEventInput, ListSystemEventsOptions, StoredSystemEvent } from './eventStore'
+export type { ListInboxItemsOptions, StoredInboxItem } from './inboxStore'
 
 const SCHEMA_VERSION: number = 15
 const REQUIRED_TABLES = [
@@ -38,7 +46,13 @@ const REQUIRED_TABLES = [
     'users',
     'push_subscriptions',
     'fcm_devices',
-    'session_scratchlist'
+    'session_scratchlist',
+    'events',
+    'event_links',
+    'deleted_sessions',
+    'inbox_items',
+    'inbox_item_source_events',
+    'inbox_operator_actions',
 ] as const
 
 export class Store {
@@ -53,6 +67,8 @@ export class Store {
     readonly push: PushStore
     readonly fcm: FcmStore
     readonly scratchlist: ScratchlistStore
+    readonly events: EventStore
+    readonly inbox: InboxStore
 
     /**
      * Filesystem path of the underlying SQLite database, or ':memory:' for
@@ -105,6 +121,8 @@ export class Store {
         this.push = new PushStore(this.db)
         this.fcm = new FcmStore(this.db)
         this.scratchlist = new ScratchlistStore(this.db)
+        this.events = new EventStore(this.db)
+        this.inbox = new InboxStore(this.db)
     }
 
     close(): void {
@@ -161,11 +179,13 @@ export class Store {
                 // a partially-built legacy DB may not have yet.
                 this.createSchema()
                 this.setUserVersion(SCHEMA_VERSION)
+                this.finishSchemaInit()
                 return
             }
 
             this.createSchema()
             this.setUserVersion(SCHEMA_VERSION)
+            this.finishSchemaInit()
             return
         }
 
@@ -177,6 +197,7 @@ export class Store {
                 step()
             }
             this.setUserVersion(SCHEMA_VERSION)
+            this.finishSchemaInit()
             return
         }
 
@@ -184,6 +205,14 @@ export class Store {
             throw this.buildSchemaMismatchError(currentVersion)
         }
 
+        this.finishSchemaInit()
+    }
+
+    /** Idempotent Overseer self-heal + loud missing-table check on every boot path. */
+    private finishSchemaInit(): void {
+        ensureOverseerEventsSchema(this.db)
+        ensureDeletedSessionsSchema(this.db)
+        ensureOverseerInboxSchema(this.db)
         this.assertRequiredTablesPresent()
     }
 

@@ -28,4 +28,5 @@ export const queryKeys = {
     sessionGrokReasoningEffortOptions: (sessionId: string) => ['session-grok-reasoning-effort-options', sessionId] as const,
     skills: (sessionId: string) => ['skills', sessionId] as const,
     scratchlist: (sessionId: string) => ['scratchlist', sessionId] as const,
+    sessionSystemEvents: (sessionId: string, filter: string) => ['session-system-events', sessionId, filter] as const,
 }
