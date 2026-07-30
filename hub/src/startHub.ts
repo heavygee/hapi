@@ -249,7 +249,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
                 // after the pre-build offer fingerprint.
                 targetGeneration: meta.sourceFingerprint,
                 artifact: {
-                    url: '/cli/upgrade/cli-artifact',
+                    url: `/cli/upgrade/cli-artifact?sha256=${encodeURIComponent(meta.sha256)}`,
                     sha256: meta.sha256,
                     platform: meta.platform,
                     arch: meta.arch,

@@ -3,7 +3,7 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { FLEET_UPGRADE_POLICIES } from '@hapi/protocol/upgradeChannel'
 import type { WebAppEnv } from '../middleware/auth'
-import { ensureCliArtifact } from '../../upgrade/cliArtifact'
+import { ensureCliArtifact, findArtifactMetaBySha256 } from '../../upgrade/cliArtifact'
 import { defaultHubPackageRoot, resolveUpgradeOffer } from '../../upgrade/resolveUpgradeOffer'
 import { getFleetUpgradePolicy, setFleetUpgradePolicy } from '../../upgrade/fleetUpgradePolicy'
 import { getConfiguration } from '../../configuration'
@@ -113,7 +113,32 @@ export function createUpgradeCliRoutes(): Hono<CliEnv> {
         }
 
         try {
-            // ensureCliArtifact refuses same-version stale caches via sourceFingerprint.
+            const wantedSha = c.req.query('sha256')
+            if (wantedSha) {
+                // Digest-pinned offer: serve the retained bytes only. Do not
+                // rebuild — a newer generation would fail the runner's sha check.
+                const retained = findArtifactMetaBySha256(wantedSha, config.dataDir)
+                if (!retained || !existsSync(retained.path)) {
+                    return c.json({ error: 'Artifact not retained for digest' }, 404)
+                }
+                if (retained.version !== targetVersion) {
+                    return c.json({ error: 'Artifact digest does not match offer version' }, 400)
+                }
+                c.header('Content-Type', 'application/octet-stream')
+                c.header('Content-Disposition', `attachment; filename="hapi-${retained.version}"`)
+                c.header('X-Hapi-Artifact-Sha256', retained.sha256)
+                c.header('X-Hapi-Artifact-Version', retained.version)
+                return new Response(Bun.file(retained.path), {
+                    headers: {
+                        'Content-Type': 'application/octet-stream',
+                        'Content-Disposition': `attachment; filename="hapi-${retained.version}"`,
+                        'X-Hapi-Artifact-Sha256': retained.sha256,
+                        'X-Hapi-Artifact-Version': retained.version,
+                    },
+                })
+            }
+
+            // Unpinned: ensureCliArtifact refuses same-version stale caches via sourceFingerprint.
             const meta = await ensureCliArtifact({
                 version: targetVersion,
                 platform,
