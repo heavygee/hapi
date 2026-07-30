@@ -19,7 +19,7 @@ import { TunnelManager } from './tunnel'
 import { waitForTunnelTlsReady } from './tunnel/tlsGate'
 import { ServerChanChannel } from './serverchan/channel'
 import { findMonorepoRoot, defaultHubPackageRoot, resolveUpgradeOffer, setConfiguredUpgradeTargetVersion } from './upgrade/resolveUpgradeOffer'
-import { ensureCliArtifact, resolveArtifactSourceFingerprint } from './upgrade/cliArtifact'
+import { ensureCliArtifact, resolveArtifactSourceFingerprint, retainArtifactOffer } from './upgrade/cliArtifact'
 import { readSettings } from './config/settings'
 import { getFleetUpgradePolicy, initFleetUpgradePolicy } from './upgrade/fleetUpgradePolicy'
 import QRCode from 'qrcode'
@@ -242,6 +242,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
                 dataDir: config.dataDir,
                 hubPackageRoot: defaultHubPackageRoot(),
             })
+            retainArtifactOffer(meta.sha256)
             const prepared = {
                 ...offer,
                 // Always advertise the fingerprint of the artifact that was

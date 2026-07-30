@@ -15,6 +15,8 @@ import {
     isArtifactCacheFresh,
     normalizeCompiledArtifactPath,
     pruneRetainedArtifacts,
+    resetArtifactOfferRetentionForTests,
+    retainArtifactOffer,
     runnerArtifactCompileFeatures,
     type ArtifactMeta,
 } from './cliArtifact'
@@ -91,6 +93,7 @@ describe('content-addressed artifact retention', () => {
 
     it('prunes older generations while preserving the offered digest', () => {
         const dataDir = mkdtempSync(join(tmpdir(), 'hapi-artifact-prune-'))
+        resetArtifactOfferRetentionForTests()
         try {
             const root = join(dataDir, 'upgrade-artifacts')
             mkdirSync(root, { recursive: true })
@@ -98,7 +101,7 @@ describe('content-addressed artifact retention', () => {
             const shas: string[] = []
             for (let i = 0; i < 5; i++) {
                 const fp = `${'f'.repeat(15)}${i}`
-                const sha = `${i}${ '0'.repeat(63)}`
+                const sha = `${i}${'0'.repeat(63)}`
                 const path = join(root, contentAddressedArtifactFileName('0.25.1', 'linux', 'x64', fp))
                 writeFileSync(path, `bytes-${i}`)
                 writeFileSync(`${path}.json`, JSON.stringify({
@@ -110,7 +113,6 @@ describe('content-addressed artifact retention', () => {
                     sizeBytes: 7,
                     sourceFingerprint: fp,
                 }))
-                // Ensure deterministic mtime ordering (older → newer).
                 const when = new Date(Date.now() - (5 - i) * 60_000)
                 utimesSync(path, when, when)
                 utimesSync(`${path}.json`, when, when)
@@ -118,22 +120,76 @@ describe('content-addressed artifact retention', () => {
                 shas.push(sha)
             }
 
+            retainArtifactOffer(shas[0]!)
             const removed = pruneRetainedArtifacts({
                 dataDir,
                 version: '0.25.1',
                 platform: 'linux',
                 arch: 'x64',
-                preserveSha256: shas[0]!, // oldest, still offered
-                keepGenerations: 3,
+                preserveSha256: shas[4]!,
+                keepGenerations: 2,
             })
             expect(removed.length).toBeGreaterThan(0)
-            expect(existsSync(paths[0]!)).toBe(true) // preserved digest
-            expect(existsSync(paths[4]!)).toBe(true) // newest kept in window
+            expect(existsSync(paths[0]!)).toBe(true) // recently offered
+            expect(existsSync(paths[4]!)).toBe(true) // just built
+            expect(existsSync(paths[1]!)).toBe(false) // beyond window, not offered
             expect(findArtifactMetaBySha256(shas[0]!, dataDir)?.path).toBe(paths[0]!)
-            // Middle gens beyond the keep window should be gone (1 and/or 2).
-            const remaining = paths.filter((p) => existsSync(p)).length
-            expect(remaining).toBeLessThanOrEqual(4) // 3 window + preserved oldest
         } finally {
+            resetArtifactOfferRetentionForTests()
+            rmSync(dataDir, { recursive: true, force: true })
+        }
+    })
+
+    it('keeps a previously offered digest when later builds exceed the keep window', () => {
+        const dataDir = mkdtempSync(join(tmpdir(), 'hapi-artifact-offer-retain-'))
+        resetArtifactOfferRetentionForTests()
+        try {
+            const root = join(dataDir, 'upgrade-artifacts')
+            mkdirSync(root, { recursive: true })
+            const offeredSha = `a${'0'.repeat(63)}`
+            const offeredPath = join(root, contentAddressedArtifactFileName('0.25.1', 'linux', 'x64', 'aaaaaaaaaaaaaaaa'))
+            writeFileSync(offeredPath, 'offer-a')
+            writeFileSync(`${offeredPath}.json`, JSON.stringify({
+                version: '0.25.1',
+                platform: 'linux',
+                arch: 'x64',
+                path: offeredPath,
+                sha256: offeredSha,
+                sizeBytes: 7,
+                sourceFingerprint: 'aaaaaaaaaaaaaaaa',
+            }))
+            utimesSync(offeredPath, new Date(Date.now() - 60 * 60_000), new Date(Date.now() - 60 * 60_000))
+            utimesSync(`${offeredPath}.json`, new Date(Date.now() - 60 * 60_000), new Date(Date.now() - 60 * 60_000))
+            retainArtifactOffer(offeredSha)
+
+            for (let i = 0; i < 4; i++) {
+                const fp = `${'b'.repeat(15)}${i}`
+                const sha = `${i + 1}${'0'.repeat(63)}`
+                const path = join(root, contentAddressedArtifactFileName('0.25.1', 'linux', 'x64', fp))
+                writeFileSync(path, `bytes-${i}`)
+                writeFileSync(`${path}.json`, JSON.stringify({
+                    version: '0.25.1',
+                    platform: 'linux',
+                    arch: 'x64',
+                    path,
+                    sha256: sha,
+                    sizeBytes: 7,
+                    sourceFingerprint: fp,
+                }))
+            }
+
+            pruneRetainedArtifacts({
+                dataDir,
+                version: '0.25.1',
+                platform: 'linux',
+                arch: 'x64',
+                preserveSha256: `4${'0'.repeat(63)}`,
+                keepGenerations: 2,
+            })
+            expect(existsSync(offeredPath)).toBe(true)
+            expect(findArtifactMetaBySha256(offeredSha, dataDir)?.sha256).toBe(offeredSha)
+        } finally {
+            resetArtifactOfferRetentionForTests()
             rmSync(dataDir, { recursive: true, force: true })
         }
     })
