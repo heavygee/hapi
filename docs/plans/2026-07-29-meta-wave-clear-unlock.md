@@ -20,7 +20,7 @@ Meta daily CLI still does **not** run `hapi-driver-rebuild` itself (keeps the cl
 | Unit | Cadence | Behavior |
 |------|---------|----------|
 | `hapi-meta-daily-refresh.timer` | every 45m 24/7 | classify + chip cache + `--emit-events`; **`--no-ping`** |
-| `hapi-meta-daily.timer` | **07:30, 15:00, 20:00 Europe/London** | full Meta **with pings** (BST summer / GMT winter; host may stay UTC) |
+| `hapi-meta-daily.timer` | **hourly :00 Europe/London** | full Meta **with pings** (BST summer / GMT winter; host may stay UTC) |
 
 Replace `scripts/tooling/systemd/hapi-meta-daily.timer` with three `OnCalendar=` lines; drop long `RandomizedDelaySec` (optional short 2–3m max). Reinstall via `install-hapi-meta-daily-timer.sh`. Document in `docs/operator/AGENTS.md`.
 

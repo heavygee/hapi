@@ -114,10 +114,10 @@ sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh
 
 | Timer | When | Command |
 |-------|------|---------|
-| `hapi-meta-daily.timer` | **07:30 / 15:00 / 20:00 Europe/London** (+ up to 3m random; BST/GMT) | full Meta (peer pings + wave-clear unlock) |
+| `hapi-meta-daily.timer` | **hourly :00 Europe/London** (+ up to 2m random; BST/GMT) | full Meta (peer pings + wave-clear unlock) |
 | `hapi-meta-daily-refresh.timer` | every **45m 24/7** (`OnBootSec=3min` + `OnUnitActiveSec=45min`) | `--no-ping --emit-events` |
 
-Quiet refresh is round-the-clock on purpose (odd hours) — max gap ~45m so chips stay under the **2h** `statusCheckedAt` mute. Only the three London wall-clock ping windows may ping peers or unlock Meta tooling for rematerialize. Host TZ on oos may stay `Etc/UTC`; the timer unit prefixes `Europe/London` so "3pm" means operator-local, not UTC. Units: `scripts/tooling/systemd/hapi-meta-daily*`. Optional env: `~/.hapi/meta-daily.env` (`HAPI_META_TOOLING_SESSION_ID`, `HAPI_META_WAVE_COLLECT_SECS`). Chip UI never live-queries GitHub. Logs: `journalctl -u hapi-meta-daily -u hapi-meta-daily-refresh`.
+Quiet refresh is round-the-clock on purpose (odd hours) — max gap ~45m so chips stay under the **2h** `statusCheckedAt` mute. Only the hourly London wall-clock ping windows may ping peers or unlock Meta tooling for rematerialize. Host TZ on oos may stay `Etc/UTC`; the timer unit suffixes `Europe/London` so the hour is operator-local, not UTC. Units: `scripts/tooling/systemd/hapi-meta-daily*`. Optional env: `~/.hapi/meta-daily.env` (`HAPI_META_TOOLING_SESSION_ID`, `HAPI_META_WAVE_COLLECT_SECS`). Chip UI never live-queries GitHub. Logs: `journalctl -u hapi-meta-daily -u hapi-meta-daily-refresh`.
 
 What it does, idempotently:
 
@@ -141,11 +141,11 @@ What it does, idempotently:
 | 🔧 `merged` | merged | drop soup layer → clean worktree/branch → ack (peers: **no mid-turn self-archive**) |
 | `?` `unknown` | GitHub data unavailable this run | **chip left at last good status; never pinged** |
 
-**Ping policy (why it isn't spam for greens, but is a rouse for work):** on **ping windows** (07:30 / 15:00 / 20:00 Europe/London — not the 45m quiet refresh), Meta **always** pings sticky ⚠️ / 🔧 sessions — "are you done yet?" — including **inactive** ones (`hapi-ping-peer` resumes them). ✅ / 🔁 / 📝 only ping on an emoji **transition** (first sight / state change), never on every window. Quiet `--no-ping` refresh never pings. `?` never pings. State lives at `${XDG_STATE_HOME:-~/.local/state}/hapi/meta-daily.json`.
+**Ping policy (why it isn't spam for greens, but is a rouse for work):** on **hourly ping windows** (Europe/London :00 — not the 45m quiet refresh), Meta **always** pings sticky ⚠️ / 🔧 sessions — "are you done yet?" — including **inactive** ones (`hapi-ping-peer` resumes them). ✅ / 🔁 / 📝 only ping on an emoji **transition** (first sight / state change), never on every window. Quiet `--no-ping` refresh never pings. `?` never pings. State lives at `${XDG_STATE_HOME:-~/.local/state}/hapi/meta-daily.json`.
 
 **Scope guard:** PR-number extraction requires **3-4 digits**. Peer/overseer sessions carrying internal workstream refs (`W1.6 provenance (#22)`) are intentionally *not* swept — those 1-2 digit numbers would cross-wire to unrelated upstream PRs. Use `--pr <N>` for a rare low-numbered upstream PR.
 
-**What it will NEVER do** (judgment/destructive — CLI never executes these): merge upstream PRs · sync/push fork `main` · edit the soup manifest · rebuild/restart the driver · delete branches/worktrees · archive sessions · reply on GitHub · mark notifications read. Wave-clear **unlocks** the Meta tooling session to rematerialize once; that bot (and any agent following soup rules) **may** run `hapi-sync-fork-main` + `hapi-driver-rebuild --build-web --verify` without further operator approval — after `hapi-driver-status --quiet` is idle. Manual soup rebuilds outside the three ping windows are expected and fine; unlock waits if a rebuild is already in progress.
+**What it will NEVER do** (judgment/destructive — CLI never executes these): merge upstream PRs · sync/push fork `main` · edit the soup manifest · rebuild/restart the driver · delete branches/worktrees · archive sessions · reply on GitHub · mark notifications read. Wave-clear **unlocks** the Meta tooling session to rematerialize once; that bot (and any agent following soup rules) **may** run `hapi-sync-fork-main` + `hapi-driver-rebuild --build-web --verify` without further operator approval — after `hapi-driver-status --quiet` is idle. Manual soup rebuilds outside the hourly ping windows are expected and fine; unlock waits if a rebuild is already in progress.
 
 Lower-level primitives: `hapi-pr-emoji-batch.sh` (pure classifier → JSON). `hapi-pr-session-emoji.sh` is a **removed stub** (exits 2; prints `hapi-meta-daily.sh [--pr N]` — no escape hatch). Shared engine: `lib/pr-emoji-core.sh` + `lib/meta-wave.sh`; unit tests in `lib/pr-emoji-core.test.sh` + `lib/meta-wave.test.sh` + `hapi-meta-daily.test.sh`.
 

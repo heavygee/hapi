@@ -1,25 +1,23 @@
-# Meta PR watcher — full run with peer pings (three windows / day).
+# Meta PR watcher — full run with peer pings (hourly babysit).
 #
 # Fork-local. Install: sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh
 #
 # Wall-clock times are Europe/London (BST in summer, GMT in winter) — NOT host
 # TZ. oos-linux stays Etc/UTC; the OnCalendar timezone suffix is what makes
-# "15:00" mean 3pm operator-local. Syntax: `*-*-* HH:MM:SS Europe/London`
-# (prefix form is rejected by systemd-analyze on this host).
+# ":00" mean the top of the operator-local hour. Syntax:
+# `*-*-* *:00:00 Europe/London` (prefix form is rejected on this host).
 #
 # Quiet chip refresh stays on hapi-meta-daily-refresh.timer (45m, --no-ping).
 
 [Unit]
-Description=HAPI Meta PR watcher timer (ping windows 07:30 / 15:00 / 20:00 Europe/London)
+Description=HAPI Meta PR watcher timer (hourly ping windows Europe/London)
 Documentation=file:///home/heavygee/coding/hapi/docs/operator/AGENTS.md
 
 [Timer]
-OnCalendar=*-*-* 07:30:00 Europe/London
-OnCalendar=*-*-* 15:00:00 Europe/London
-OnCalendar=*-*-* 20:00:00 Europe/London
-# Small scatter so three windows do not stampede other jobs; keep short so
-# "07:30" stays morning-shaped (not the old 15min 08:xx smear).
-RandomizedDelaySec=3min
+OnCalendar=*-*-* *:00:00 Europe/London
+# Small scatter so the top-of-hour does not stampede other jobs; keep short
+# so "hourly" stays near :00 (not a 15min smear).
+RandomizedDelaySec=2min
 AccuracySec=1min
 Persistent=true
 Unit=hapi-meta-daily.service

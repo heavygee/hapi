@@ -49,7 +49,7 @@ Feature agents should **read the relevant doc below at session start**; meta bot
 | `scripts/tooling/install-gh-wrapper.sh` | Install `~/.local/bin/gh` wrapper — blocks fork-only diffs targeting `tiann/hapi` (#971 class) |
 | `scripts/tooling/hapi-meta-daily.sh` | **Daily Meta PR watcher entrypoint** — discover → classify → chip status cache → strip title emoji (chipped) → policy-ping → wave-clear unlock → action queue; optional chatty contribution-state events (`--emit-events`, default off; also `--dry-run`, `--no-ping`, `--json`) |
 | `scripts/tooling/lib/meta-wave.sh` | **Wave-clear helpers (gate A)** — owned 🔧 only; layer+worktree clean; 30m collect; defer on `hapi-driver-status` busy |
-| `scripts/tooling/install-hapi-meta-daily-timer.sh` | **Machine-local timers** (fork-only) — ping windows 07:30 / 15:00 / 20:00 **Europe/London** + quiet `--no-ping --emit-events` every 45m **24/7**; units in `scripts/tooling/systemd/hapi-meta-daily*` |
+| `scripts/tooling/install-hapi-meta-daily-timer.sh` | **Machine-local timers** (fork-only) — **hourly** ping windows **Europe/London** + quiet `--no-ping --emit-events` every 45m **24/7**; units in `scripts/tooling/systemd/hapi-meta-daily*` |
 | `scripts/tooling/hapi-pr-emoji-batch.sh` | Pure PR classifier → per-PR JSON (`--table`); shared engine |
 | `scripts/tooling/hapi-pr-session-emoji.sh` | **Removed stub** — exits 2, prints successor `hapi-meta-daily.sh [--pr N]` (ADR D8; no escape hatch) |
 | `scripts/tooling/lib/pr-emoji-core.sh` | Pure classify/title/ping-policy fns (unit-tested: `*.test.sh`) |
@@ -61,7 +61,7 @@ Feature agents should **read the relevant doc below at session start**; meta bot
 cd ~/coding/hapi && ./scripts/tooling/hapi-meta-daily.sh          # the whole dance
 cd ~/coding/hapi && ./scripts/tooling/hapi-meta-daily.sh --dry-run # preview, no writes
 cd ~/coding/hapi && ./scripts/tooling/hapi-meta-daily.sh --emit-events --no-ping # train Overseer inbox without interrupting peers
-sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh        # oos timers (3x daily pings + 24/7 quiet refresh)
+sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh        # oos timers (hourly pings + 24/7 quiet refresh)
 ```
 
 **Scope:** `tiann/hapi` upstream PRs only. Non-HAPI sessions (YAACC, other repos) are excluded from sweeps.

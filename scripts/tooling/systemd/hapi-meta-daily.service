@@ -4,7 +4,7 @@
 # Install: sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh
 
 [Unit]
-Description=HAPI Meta PR watcher (ping windows — pings + wave-clear unlock)
+Description=HAPI Meta PR watcher (hourly ping windows — pings + wave-clear unlock)
 After=network-online.target
 Wants=network-online.target
 ConditionPathExists=/home/heavygee/.hapi/settings.json

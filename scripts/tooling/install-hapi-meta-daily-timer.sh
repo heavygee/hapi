@@ -5,9 +5,9 @@
 # NOT part of Tier-1. NOT upstreamable. Safe to re-run.
 #
 # Schedules:
-#   hapi-meta-daily.timer         — 07:30 / 15:00 / 20:00 Europe/London
+#   hapi-meta-daily.timer         — hourly at :00 Europe/London
 #                                   (BST summer / GMT winter; host may stay UTC)
-#                                   + RandomizedDelaySec=3min
+#                                   + RandomizedDelaySec=2min
 #                                   (peer pings + wave-clear unlock)
 #   hapi-meta-daily-refresh.timer — every 45m 24/7 (--no-ping --emit-events)
 #                                   OnBootSec=3min then OnUnitActiveSec=45min
@@ -93,7 +93,7 @@ systemctl list-timers 'hapi-meta-daily*' --all --no-pager
 
 echo
 echo "Manual run:"
-echo "  sudo systemctl start hapi-meta-daily.service            # ping window (pings + wave unlock)"
+echo "  sudo systemctl start hapi-meta-daily.service            # hourly ping window (pings + wave unlock)"
 echo "  sudo systemctl start hapi-meta-daily-refresh.service    # quiet refresh (24/7)"
 echo "  journalctl -u hapi-meta-daily -u hapi-meta-daily-refresh -n 50 --no-pager"
 echo
