@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import {
     FAILED_HANDOFF_LOCK_DELAY_INCREMENT_MS,
     FAILED_HANDOFF_LOCK_MAX_ATTEMPTS,
