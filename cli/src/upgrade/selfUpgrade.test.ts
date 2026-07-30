@@ -58,6 +58,24 @@ describe('resolvePostNpmInstallExecutable', () => {
         expect(resolvePostNpmInstallExecutable(() => '/tmp/definitely-missing-hapi-binary')).toBeNull()
         expect(resolvePostNpmInstallExecutable(() => null)).toBeNull()
     })
+
+    it('prefers hapi.cmd over a bare POSIX hapi shim on Windows', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-win-npm-'))
+        try {
+            const bare = join(dir, 'hapi')
+            const cmd = join(dir, 'hapi.cmd')
+            writeFileSync(bare, '#!/bin/sh\n')
+            writeFileSync(cmd, '@echo off\n')
+            const found = resolvePostNpmInstallExecutable((name) => {
+                if (name === 'hapi') return bare
+                if (name === 'hapi.cmd') return cmd
+                return null
+            }, 'win32')
+            expect(found).toBe(cmd)
+        } finally {
+            rmSync(dir, { recursive: true, force: true })
+        }
+    })
 })
 
 describe('createArtifactDownloadSizeGuard', () => {

@@ -118,12 +118,37 @@ describe('fingerprintArtifactInputs / isArtifactCacheFresh', () => {
             writeFileSync(join(root, 'cli', 'src', 'bootstrap.ts'), 'export const x = 1\n')
             writeFileSync(join(root, 'hub', 'src', 'startHub.ts'), 'export {}\n')
             writeFileSync(join(root, 'shared', 'src', 'index.ts'), 'export {}\n')
+            writeFileSync(join(root, 'cli', 'bunfig.toml'), 'preload = []\n')
 
             const before = fingerprintArtifactInputs(root)
             writeFileSync(join(root, 'cli', 'src', 'bootstrap.ts'), 'export const x = 2\n')
             const after = fingerprintArtifactInputs(root)
             expect(before).not.toBe(after)
             expect(before).toHaveLength(64)
+        } finally {
+            rmSync(root, { recursive: true, force: true })
+        }
+    })
+
+    it('changes when cli bunfig.toml changes at the same package version', () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-artifact-bunfig-fp-'))
+        try {
+            mkdirSync(join(root, 'cli', 'src'), { recursive: true })
+            mkdirSync(join(root, 'hub', 'src'), { recursive: true })
+            mkdirSync(join(root, 'shared', 'src'), { recursive: true })
+            writeFileSync(join(root, 'cli', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'hub', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'shared', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'cli', 'src', 'bootstrap.ts'), 'export const x = 1\n')
+            writeFileSync(join(root, 'hub', 'src', 'startHub.ts'), 'export {}\n')
+            writeFileSync(join(root, 'shared', 'src', 'index.ts'), 'export {}\n')
+            writeFileSync(join(root, 'cli', 'bunfig.toml'), 'preload = []\n')
+
+            const before = fingerprintArtifactInputs(root)
+            writeFileSync(join(root, 'cli', 'bunfig.toml'), 'preload = ["./preload.ts"]\n')
+            const after = fingerprintArtifactInputs(root)
+            expect(before).not.toBe(after)
         } finally {
             rmSync(root, { recursive: true, force: true })
         }
