@@ -218,7 +218,7 @@ export function promoteAttentionEvent(
 
     const now = Date.now()
     const category = mapEventTypeToInboxCategory(event.eventType)
-    const basePriority = computeCoarseBasePriority(event.eventType)
+    const basePriority = computeCoarseBasePriority(event.eventType, event.sourceKind)
     const title = buildInboxTitleFromEvent(event.artifactRefs, event.payloadJson, event.summary)
     const suggestedAction = extractSuggestedAction(event.payloadJson)
     const existing = findActiveInboxItemForSession(db, event.relatedSessionId)
@@ -348,6 +348,57 @@ function extractSuggestedAction(payloadJson: string | null): string | null {
 }
 
 /**
+ * Idempotent backfill — re-derive `title` + `base_priority`/`priority` for
+ * existing inbox rows from their latest source event. Deterministic (pure
+ * functions of the event + artifact refs) and touches only title/priority
+ * (never status/resolution/feedback), so it is safe to run on every boot.
+ *
+ * Repairs rows promoted before the title-synthesis + channel-priority-band
+ * changes (bare-PR-URL titles at worker-band priority) without waiting for the
+ * next PR transition to re-promote them. A no-op once every row already matches.
+ */
+export function backfillInboxDerivedFields(db: Database): void {
+    const rows = db.prepare(
+        'SELECT id, title, base_priority, artifact_refs, summary, source_event_ids FROM inbox_items'
+    ).all() as Array<{
+        id: number
+        title: string
+        base_priority: number
+        artifact_refs: string | null
+        summary: string
+        source_event_ids: string | null
+    }>
+    if (rows.length === 0) return
+
+    const update = db.prepare(
+        'UPDATE inbox_items SET title = ?, base_priority = ?, priority = ? WHERE id = ?'
+    )
+    for (const row of rows) {
+        const eventIds = parseIdArray(row.source_event_ids)
+        const latestId = eventIds.length > 0 ? Math.max(...eventIds) : null
+        const latest = latestId !== null ? getSystemEventById(db, latestId) : null
+
+        // Only recompute the title when we have material to derive it from,
+        // so a row with a good session-name title and a since-deleted event
+        // is never regressed to its summary.
+        let nextTitle = row.title
+        if (latest || row.artifact_refs) {
+            nextTitle = buildInboxTitleFromEvent(
+                row.artifact_refs ?? latest?.artifactRefs ?? null,
+                latest?.payloadJson ?? null,
+                row.summary
+            )
+        }
+        const nextPriority = latest
+            ? computeCoarseBasePriority(latest.eventType, latest.sourceKind)
+            : row.base_priority
+
+        if (nextTitle === row.title && nextPriority === row.base_priority) continue
+        update.run(nextTitle, nextPriority, nextPriority, row.id)
+    }
+}
+
+/**
  * Idempotent Overseer inbox DDL — runs on every Store init, NOT gated on SCHEMA_VERSION.
  */
 export function ensureOverseerInboxSchema(db: Database): void {
@@ -399,6 +450,8 @@ export function ensureOverseerInboxSchema(db: Database): void {
         );
         CREATE INDEX IF NOT EXISTS idx_inbox_operator_actions_item ON inbox_operator_actions(inbox_item_id, created_at DESC);
     `)
+
+    backfillInboxDerivedFields(db)
 }
 
 export function dropOverseerInboxSchema(db: Database): void {

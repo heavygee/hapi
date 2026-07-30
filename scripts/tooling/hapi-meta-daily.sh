@@ -577,6 +577,7 @@ _emit_notif_event() {
         --reason transition \
         --date "$date" \
         --notif \
+        --title "$title" \
         --url "${url:-https://github.com/${repo}/pull/${pr}}")"
     hub_emit_event "$jwt" "$body" || {
         MD_EMIT_FAILURES=$((MD_EMIT_FAILURES + 1))
