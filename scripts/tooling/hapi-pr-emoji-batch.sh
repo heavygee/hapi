@@ -139,13 +139,15 @@ _gh_check_signals() {
     echo "0 0 0 0"
 }
 
-# Count unresolved review threads (paginate; first:50 used to miss threads on
-# long-lived PRs like #1108 with 66+ threads). Also return reviewDecision.
+# Count actionable unresolved review threads (paginate; first:50 used to miss
+# threads on long-lived PRs like #1108 with 66+ threads). Also return reviewDecision.
+# Chip count EXCLUDES outdated threads (#847: Findings:None + green CI + leftover
+# outdated unresolved bot Major must not force ⚠️).
 # Prints: "<unresolved_count>\t<review_decision_or_empty>"
 # unresolved_count is -1 on transport/parse failure.
 _fetch_review_signals() {
     local n="$1"
-    local cursor="" page unresolved=0 decision="" has_next=true resp
+    local cursor="" page unresolved=0 decision="" has_next=true resp page_n
     while [[ "$has_next" == "true" ]]; do
         if [[ -n "$cursor" ]]; then
             resp="$(gh_t api graphql -f query="
@@ -155,7 +157,7 @@ query(\$cursor: String) {
       reviewDecision
       reviewThreads(first: 100, after: \$cursor) {
         pageInfo { hasNextPage endCursor }
-        nodes { isResolved }
+        nodes { isResolved isOutdated }
       }
     }
   }
@@ -168,7 +170,7 @@ query {
       reviewDecision
       reviewThreads(first: 100) {
         pageInfo { hasNextPage endCursor }
-        nodes { isResolved }
+        nodes { isResolved isOutdated }
       }
     }
   }
@@ -179,7 +181,13 @@ query {
             return
         fi
         decision="$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.reviewDecision // empty')"
-        unresolved=$(( unresolved + $(printf '%s' "$resp" | jq '[.data.repository.pullRequest.reviewThreads.nodes[]|select(.isResolved==false)]|length') ))
+        page_n="$(printf '%s' "$resp" | jq -c '.data.repository.pullRequest.reviewThreads.nodes // []' \
+            | pec_count_chip_unresolved_threads)"
+        if [[ ! "$page_n" =~ ^[0-9]+$ ]]; then
+            printf '%s\t%s\n' "-1" ""
+            return
+        fi
+        unresolved=$(( unresolved + page_n ))
         has_next="$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')"
         cursor="$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor // empty')"
         [[ "$has_next" == "true" && -n "$cursor" ]] || has_next=false
@@ -312,7 +320,8 @@ classify_one() {
 
 export REPO OWNER NAME TIMEOUT TMPDIR WALL_LIMIT
 export -f classify_one gh_t fetch_latest_bot_body _emit_pr_json pec_decide_emoji \
-    _gh_check_signals _fetch_review_signals _bot_body_findings_clean
+    _gh_check_signals _fetch_review_signals _bot_body_findings_clean \
+    pec_count_chip_unresolved_threads
 
 echo "hapi-pr-emoji-batch: ${#PRS[@]} PR(s), parallel=${PARALLEL}, timeout=${TIMEOUT}s, wall=$(( WALL_LIMIT - $(date +%s) ))s" >&2
 t0=$(date +%s)

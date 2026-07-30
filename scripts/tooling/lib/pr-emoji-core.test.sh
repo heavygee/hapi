@@ -145,6 +145,18 @@ eq "checks green + CHANGES_REQUESTED → ⚠️" "$(emoji_of "$r")" "⚠️"
 r="$(pec_decide_emoji 1 0 0 0 1 1 0 0 0 1 0 0 1)"
 eq "pending CI + CHANGES_REQUESTED → ⚠️" "$(emoji_of "$r")" "⚠️"
 
+# ---- chip thread counting: exclude outdated (#847 false ⚠️) ----
+# Findings:None + CI green + 1 outdated unresolved bot Major → count 0 → ✅
+eq "outdated unresolved alone → 0" \
+    "$(pec_count_chip_unresolved_threads '[{"isResolved":false,"isOutdated":true}]')" "0"
+eq "current unresolved still counts" \
+    "$(pec_count_chip_unresolved_threads '[{"isResolved":false,"isOutdated":false},{"isResolved":false,"isOutdated":true}]')" "1"
+eq "resolved current ignored" \
+    "$(pec_count_chip_unresolved_threads '[{"isResolved":true,"isOutdated":false}]')" "0"
+# #847 end-to-end: after filtering, threads_n=0 + botClean + CI green → ✅
+r="$(pec_decide_emoji 1 0 0 1 0 1 0 1 0 0 0 0)"
+eq "#847 fixture: Findings:None + CI green + outdated-only threads → ✅" "$(emoji_of "$r")" "✅"
+
 # ---- ping policy ----
 FP_A="$(pec_action_fingerprint "⚠️" "fix failing CI")"
 FP_B="$(pec_action_fingerprint "⚠️" "resolve 1 open thread(s)")"

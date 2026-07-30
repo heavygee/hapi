@@ -134,12 +134,14 @@ What it does, idempotently:
 
 | Emoji / status | Meaning | Advice pinged |
 |----------------|---------|---------------|
-| ✅ `clean` | open PR, CI green, 0 threads, bot clean, mergeable | wait on tiann |
-| 🔁 `pending` | CI/bot in flight, or thread/CI data momentarily unavailable | retry / push |
-| ⚠️ `needs_work` | failing CI, open threads, bot findings, rebase, or **closed-unmerged** | fix per action string |
+| ✅ `clean` | open PR, CI green, 0 **current** unresolved threads, bot clean, mergeable | wait on tiann |
+| 🔁 `pending` | CI/bot in flight, or thread/CI data momentarily unavailable | wait / retry |
+| ⚠️ `needs_work` | failing CI, **current** open threads, bot findings, rebase, or **closed-unmerged** | fix per action string |
 | 📝 `pre_pr` | tracked number, no open PR upstream yet | file when ready |
 | 🔧 `merged` | merged | drop soup layer → clean worktree/branch → ack (peers: **no mid-turn self-archive**) |
 | `?` `unknown` | GitHub data unavailable this run | **chip left at last good status; never pinged** |
+
+Chip thread count excludes GraphQL `isOutdated` unresolved threads (#847: leftover bot Majors on old lines must not keep ⚠️ after Findings:None + green CI on tip).
 
 **Ping policy (why it isn't spam for greens, but is a rouse for work):** on **hourly ping windows** (Europe/London :00 — not the 45m quiet refresh), Meta **always** pings sticky ⚠️ / 🔧 sessions — "are you done yet?" — including **inactive** ones (`hapi-ping-peer` resumes them). ✅ / 🔁 / 📝 only ping on an emoji **transition** (first sight / state change), never on every window. Quiet `--no-ping` refresh never pings. `?` never pings. State lives at `${XDG_STATE_HOME:-~/.local/state}/hapi/meta-daily.json`.
 

@@ -11,7 +11,8 @@
 # Emoji contract (see docs/operator/AGENTS.md § Meta PR watcher):
 #   ✅  open PR, CI green, 0 threads, bot clean, mergeable — wait on tiann
 #   🔁  CI/bot in flight, or thread/CI data momentarily unavailable — retry
-#   ⚠️  needs work — failing CI, open threads, bot findings, rebase, or closed-unmerged
+#   ⚠️  needs work — failing CI, *current* open threads, bot findings, rebase, or closed-unmerged
+#                     (outdated unresolved threads do not count — #847 false ⚠️)
 #   📝  pre-PR — tracked number, no open PR on upstream yet
 #   🔧  merged — clean up soup/worktree, idle (no mid-turn self-archive)
 #   ?   UNKNOWN — GitHub data unavailable this run; caller MUST NOT rename/ping on this
@@ -249,6 +250,25 @@ pec_status_from_emoji() {
     esac
 }
 
+# pec_count_chip_unresolved_threads <json-array-of-thread-nodes>
+# Count threads that should block chip ✅: unresolved AND not outdated.
+# Outdated unresolved bot Majors left open after tip fixes (#847) must not
+# force ⚠️ when Findings:None + CI green on current head.
+# Stdin or $1: JSON array like [{"isResolved":false,"isOutdated":true}, ...]
+# Prints integer count on stdout.
+pec_count_chip_unresolved_threads() {
+    local json="${1:-}"
+    if [[ -z "$json" ]]; then
+        json="$(cat)"
+    fi
+    printf '%s' "$json" | jq '
+        if type != "array" then 0
+        else
+          [.[] | select((.isResolved == false) and (.isOutdated != true))] | length
+        end
+    '
+}
+
 # pec_emoji_from_status <status> → emoji
 pec_emoji_from_status() {
     case "$1" in
@@ -283,7 +303,7 @@ pec_leading_emoji() {
 #                    [REVIEW_CHANGES_REQUESTED]
 #   → prints "<emoji>\t<action>"
 #
-# THREADS_N: >=0 real count, -1 = unavailable this run.
+# THREADS_N: >=0 actionable unresolved count (caller excludes isOutdated — #847), -1 = unavailable.
 # REVIEW_CHANGES_REQUESTED: 1 when GraphQL reviewDecision == CHANGES_REQUESTED.
 # ---------------------------------------------------------------------------
 

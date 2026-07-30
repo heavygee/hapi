@@ -152,7 +152,14 @@ No PATCH for v1 (file + restart / hub reload is enough for estate). Optional lat
 - Upstream chip tooltip contains "tiann" or "babysit" with **no** estate file → FAIL
 - `pre_pr` appears in `@hapi/protocol` schemas → FAIL
 - Estate file can restore ✅/⚠️/🔁/📝/🔧 mood ring without protocol change → PASS
+- Findings:None + CI green + only **outdated** unresolved bot Major thread(s) → chip ✅ not ⚠️ (#847) → PASS (`pec_count_chip_unresolved_threads` excludes `isOutdated`)
+
+## Classifier note (#847, 2026-07-30)
+
+`hapi-pr-emoji-batch` `_fetch_review_signals` now requests `isOutdated` and counts only `isResolved==false && isOutdated!=true` for chip THREADS_N. Conversation archaeology (old review cards) stays on GitHub; chip does not amplify it.
 
 ## Friction
 
 Steelman: one coarse status enum is simpler for agents. Rejected for upstream because `clean` already means two different things (GH CLEAN vs Meta green). Opaque `estateCode` + forge facts is the cheapest split that keeps both honest.
+
+Steelman (#847): count all unresolved threads forever so humans clean archaeology. Rejected for chip — outdated means the line is gone; Findings:None on tip is the living verdict. Keep threads visible in GitHub UI; do not Meta-ping storm on them.
