@@ -2,9 +2,20 @@ import { describe, expect, it } from 'vitest'
 import { projectToolResultForBrain } from './toolProjection'
 
 describe('projectToolResultForBrain', () => {
+    it('derives total from items length and reports segment counts', () => {
+        const full = {
+            items: [{ id: 1, title: 'a', status: 'surfaced', priority: 9 }, { id: 2, title: 'b', status: 'new', priority: 5 }],
+            candidates: [{ id: 2 }],
+            surfaced: [{ id: 1 }],
+            held: []
+        }
+        const lean = projectToolResultForBrain('query_inbox', full) as { total: number; counts: Record<string, number> }
+        expect(lean.total).toBe(2)
+        expect(lean.counts).toEqual({ candidates: 1, surfaced: 1, held: 0 })
+    })
+
     it('thins inbox items to id/what/status/priority and drops the fat', () => {
         const full = {
-            total: 2,
             items: [
                 {
                     id: 7, title: 'CI auth blocking 3 workers', status: 'surfaced', priority: 90,

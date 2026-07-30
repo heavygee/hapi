@@ -31,10 +31,23 @@ function projectInboxItem(item: unknown): Record<string, unknown> {
     return { id: o.id, what: o.title, status: o.status, priority: o.priority }
 }
 
+function len(value: unknown): number | undefined {
+    return Array.isArray(value) ? value.length : undefined
+}
+
 export function projectToolResultForBrain(tool: OverseerToolName, result: unknown): unknown {
     if (tool === 'query_inbox' && isObj(result) && Array.isArray(result.items)) {
+        // The raw result is {items, candidates, surfaced, held} — four arrays that
+        // repeat the same rows (a big part of the ~75k-token bloat). We keep only
+        // the union `items` (thinned) plus cheap segment counts. `total` comes from
+        // items.length because the raw result has no total field (was null before).
         return {
-            total: result.total,
+            total: result.items.length,
+            counts: {
+                candidates: len(result.candidates),
+                surfaced: len(result.surfaced),
+                held: len(result.held)
+            },
             items: result.items.map(projectInboxItem)
         }
     }
