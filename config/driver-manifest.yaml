@@ -320,6 +320,14 @@ layers:
   # Verified live end-to-end vs the 27B brain. Worktree: overseer-text-converse. Tip d67b9f56f.
   - branch: feat/overseer-text-converse
 
+  # 2026-07-31: overseer open-loops lens (PR #100) — "what am I forgetting?"
+  # cold-open-loops view. Adds 8th read-only tool query_open_loops + system-prompt
+  # tweaks (two-axes framing + priority lower-is-higher fix). Read-only
+  # entity/shared/prompt only; additive store query, no DDL / no schema-version
+  # step. STACKS ON feat/overseer-text-converse (must sit immediately after it).
+  # No env change (reuses the converse OpenAI-profile env). Tip 74acbcc03.
+  - branch: feat/overseer-open-loops
+
   # Overseer replay harness (thin): harness+CI+fixtures only. Tip 96c8e7bf4,
   # ahead=1, zero FCM. Stack after umbrella; no substrate in this tip.
   - branch: feat/overseer-replay-harness
