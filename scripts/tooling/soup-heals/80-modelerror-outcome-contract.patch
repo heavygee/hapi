@@ -1,0 +1,108 @@
+diff --git a/hub/src/notifications/notificationTypes.ts b/hub/src/notifications/notificationTypes.ts
+index 8338f018..080a79bf 100644
+--- a/hub/src/notifications/notificationTypes.ts
++++ b/hub/src/notifications/notificationTypes.ts
+@@ -40,7 +40,11 @@ export type NotificationChannel = {
+      * pings (matches sendSessionCompletion's pattern). Wire this when
+      * the channel can render a higher-urgency error variant.
+      */
+-    sendModelError?: (session: Session, notification: ModelErrorNotification) => Promise<void>
++    sendModelError?: (
++        session: Session,
++        notification: ModelErrorNotification,
++        ctx?: NotificationSendContext
++    ) => Promise<ModelErrorSendOutcome>
+ }
+ 
+ export type NotificationHubOptions = {
+diff --git a/hub/src/push/pushNotificationChannel.ts b/hub/src/push/pushNotificationChannel.ts
+index 771e14c9..6c9dfa1c 100644
+--- a/hub/src/push/pushNotificationChannel.ts
++++ b/hub/src/push/pushNotificationChannel.ts
+@@ -1,6 +1,7 @@
+ import type { Session } from '../sync/syncEngine'
+ import type {
+     ModelErrorNotification,
++    ModelErrorSendOutcome,
+     NotificationChannel,
+     TaskNotification
+ } from '../notifications/notificationTypes'
+@@ -144,12 +145,12 @@ export class PushNotificationChannel implements NotificationChannel {
+         session: Session,
+         notification: ModelErrorNotification,
+         ctx?: import('../notifications/notificationSendContext').NotificationSendContext,
+-    ): Promise<void> {
++    ): Promise<ModelErrorSendOutcome> {
+         if (ctx?.nativeGate?.sent) {
+-            return
++            return 'unavailable'
+         }
+         if (!session.active) {
+-            return
++            return 'unavailable'
+         }
+ 
+         const agentName = getAgentName(session)
+@@ -179,6 +180,7 @@ export class PushNotificationChannel implements NotificationChannel {
+         // a system-tray ping. The web banner + pulsing-dot already
+         // cover the foreground case.
+         await this.pushService.sendToNamespace(session.namespace, payload)
++        return 'delivered'
+     }
+ 
+     private buildSessionPath(sessionId: string): string {
+diff --git a/hub/src/telegram/bot.ts b/hub/src/telegram/bot.ts
+index 001bd646..a99d44b1 100644
+--- a/hub/src/telegram/bot.ts
++++ b/hub/src/telegram/bot.ts
+@@ -12,9 +12,11 @@ import { formatReadyNotification, formatSessionNotification, createNotificationK
+ import { getAgentName, getSessionName } from '../notifications/sessionInfo'
+ import type {
+     ModelErrorNotification,
++    ModelErrorSendOutcome,
+     NotificationChannel,
+     TaskNotification
+ } from '../notifications/notificationTypes'
++import type { NotificationSendContext } from '../notifications/notificationSendContext'
+ import { formatModelErrorBody, formatModelErrorTitle } from '../notifications/modelErrorCopy'
+ import type { Store } from '../store'
+ 
+@@ -269,9 +271,13 @@ export class HappyBot implements NotificationChannel {
+         }
+     }
+ 
+-    async sendModelError(session: Session, notification: ModelErrorNotification): Promise<void> {
++    async sendModelError(
++        session: Session,
++        notification: ModelErrorNotification,
++        _ctx?: NotificationSendContext
++    ): Promise<ModelErrorSendOutcome> {
+         if (!session.active) {
+-            return
++            return 'unavailable'
+         }
+ 
+         const agentName = getAgentName(session)
+@@ -286,18 +292,21 @@ export class HappyBot implements NotificationChannel {
+ 
+         const chatIds = this.getBoundChatIds(session.namespace)
+         if (chatIds.length === 0) {
+-            return
++            return 'unavailable'
+         }
+ 
++        let delivered = 0
+         for (const chatId of chatIds) {
+             try {
+                 await this.bot.api.sendMessage(chatId, text, {
+                     reply_markup: keyboard
+                 })
++                delivered++
+             } catch (error) {
+                 console.error(`[HAPIBot] Failed to send model-error notification to chat ${chatId}:`, error)
+             }
+         }
++        return delivered > 0 ? 'delivered' : 'failed'
+     }
+ 
+     async sendTaskNotification(session: Session, notification: TaskNotification): Promise<void> {
