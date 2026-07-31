@@ -110,6 +110,15 @@ export function FueCallout(props: {
     /** Override the default panel width. */
     width?: number
     style?: CSSProperties
+    /** Renders a small secondary link (left of the primary button) when
+     *  provided. Two known uses: a feature dot wires this to
+     *  `disableAllFue()` (use-fue.ts) as a global "don't show tips again"
+     *  escape hatch; a shell-tour step wires this to "skip the whole tour"
+     *  instead. Same visual slot, different scope — caller picks the label. */
+    onSecondaryAction?: () => void
+    /** Label for the secondary link. No default — callers must supply one
+     *  since its meaning depends on what onSecondaryAction does. */
+    secondaryActionLabel?: string
 }) {
     const panelWidth = props.width ?? 256
     const [pos, setPos] = useState<{
@@ -226,7 +235,18 @@ export function FueCallout(props: {
             {/* Affirmative-action dismiss. No auto-timeout: reading speed
                 varies, and a popover that disappears on its own undercuts
                 the "user is in control" model. */}
-            <div className="mt-3 flex justify-end">
+            <div className="mt-3 flex items-center justify-between gap-2">
+                {props.onSecondaryAction ? (
+                    <button
+                        type="button"
+                        onClick={props.onSecondaryAction}
+                        className="text-[11px] text-[var(--app-fg)]/50 underline decoration-dotted hover:text-[var(--app-fg)]/80"
+                    >
+                        {props.secondaryActionLabel}
+                    </button>
+                ) : (
+                    <span />
+                )}
                 <button
                     type="button"
                     onClick={props.onDismiss}

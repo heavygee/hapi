@@ -1,6 +1,9 @@
 import type { RefObject } from 'react'
+import { useRef } from 'react'
 import type { SessionType } from './types'
 import { useTranslation } from '@/lib/use-translation'
+import { disableAllFue, useFue } from '@/lib/use-fue'
+import { FueCallout, FueDot } from '@/components/Fue'
 
 export function SessionTypeSelector(props: {
     sessionType: SessionType
@@ -11,6 +14,17 @@ export function SessionTypeSelector(props: {
     onWorktreeNameChange: (value: string) => void
 }) {
     const { t } = useTranslation()
+    // Just-in-time FUE: "Worktree" is a real alternative mode most new
+    // operators won't know exists until they open this form for the first
+    // time. Same useFue + FueDot + FueCallout wiring as the composer's
+    // terminal/scratchlist FUEs (see use-fue.ts for the contract).
+    const fue = useFue('create-session-worktree-option')
+    // Anchored to the row, not the label span: the label swaps out for a
+    // text input the instant "worktree" is selected (the same click that
+    // engages the FUE), which would unmount a label-scoped ref before the
+    // callout's first layout measurement ever runs. The row wrapping both
+    // the radio and the label/input area stays mounted either way.
+    const worktreeRowRef = useRef<HTMLDivElement>(null)
 
     return (
         <div className="flex flex-col gap-1.5 px-3 py-3">
@@ -21,14 +35,17 @@ export function SessionTypeSelector(props: {
                 {(['simple', 'worktree'] as const).map((type) => (
                     <div key={type} className="flex flex-col gap-2">
                         {type === 'worktree' ? (
-                            <div className="flex items-center gap-2">
+                            <div ref={worktreeRowRef} className="flex items-center gap-2">
                                 <input
                                     id="session-type-worktree"
                                     type="radio"
                                     name="sessionType"
                                     value="worktree"
                                     checked={props.sessionType === 'worktree'}
-                                    onChange={() => props.onSessionTypeChange('worktree')}
+                                    onChange={() => {
+                                        fue.engage()
+                                        props.onSessionTypeChange('worktree')
+                                    }}
                                     disabled={props.isDisabled}
                                     className="accent-[var(--app-link)]"
                                 />
@@ -46,12 +63,20 @@ export function SessionTypeSelector(props: {
                                             />
                                         ) : (
                                             <>
-                                                <label
-                                                    htmlFor="session-type-worktree"
-                                                    className="text-sm capitalize cursor-pointer"
-                                                >
-                                                    {t('newSession.type.worktree')}
-                                                </label>
+                                                <span className="relative">
+                                                    <label
+                                                        htmlFor="session-type-worktree"
+                                                        className="text-sm capitalize cursor-pointer"
+                                                    >
+                                                        {t('newSession.type.worktree')}
+                                                    </label>
+                                                    {fue.status !== 'acknowledged' ? (
+                                                        <FueDot
+                                                            pulsing={fue.status === 'unseen'}
+                                                            ariaLabel={t('fue.newFeatureDot')}
+                                                        />
+                                                    ) : null}
+                                                </span>
                                                 <span className="ml-2 text-xs text-[var(--app-hint)]">
                                                     {t('newSession.type.worktree.desc')}
                                                 </span>
@@ -81,6 +106,21 @@ export function SessionTypeSelector(props: {
                     </div>
                 ))}
             </div>
+            {fue.status === 'engaging' ? (
+                <FueCallout
+                    title={t('newSessionWorktree.fueTitle')}
+                    body={t('newSessionWorktree.fueBody')}
+                    onDismiss={fue.dismiss}
+                    dismissLabel={t('fue.gotIt')}
+                    closeAriaLabel={t('fue.closeAriaLabel')}
+                    anchorRef={worktreeRowRef}
+                    onSecondaryAction={() => {
+                        disableAllFue()
+                        fue.dismiss()
+                    }}
+                    secondaryActionLabel={t('fue.dontShowAgain')}
+                />
+            ) : null}
         </div>
     )
 }
