@@ -42,21 +42,54 @@ describe('FueCallout', () => {
         expect(onDismiss).toHaveBeenCalledOnce()
     })
 
-    it('does not render a secondary link when onSecondaryAction is omitted', () => {
+    it('does not render a secondary checkbox when onSecondaryAction is omitted', () => {
         render(<Harness onDismiss={vi.fn()} />)
-        expect(screen.queryByText(/don't show/i)).not.toBeInTheDocument()
+        expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
     })
 
-    it('renders and wires the secondary link when provided (e.g. global FUE disable, or "skip tour")', () => {
+    it('checking the secondary box is inert on its own — no callback fires until confirmed', () => {
         const onSecondaryAction = vi.fn()
+        const onDismiss = vi.fn()
         render(
             <Harness
-                onDismiss={vi.fn()}
+                onDismiss={onDismiss}
                 onSecondaryAction={onSecondaryAction}
                 secondaryActionLabel="Skip tour"
             />
         )
-        fireEvent.click(screen.getByText('Skip tour'))
+        fireEvent.click(screen.getByRole('checkbox', { name: 'Skip tour' }))
+        expect(onSecondaryAction).not.toHaveBeenCalled()
+        expect(onDismiss).not.toHaveBeenCalled()
+    })
+
+    it('fires onSecondaryAction before onDismiss when the box is checked and the primary button is clicked', () => {
+        const onSecondaryAction = vi.fn()
+        const onDismiss = vi.fn()
+        render(
+            <Harness
+                onDismiss={onDismiss}
+                onSecondaryAction={onSecondaryAction}
+                secondaryActionLabel="Skip tour"
+            />
+        )
+        fireEvent.click(screen.getByRole('checkbox', { name: 'Skip tour' }))
+        fireEvent.click(screen.getByText('Got it'))
         expect(onSecondaryAction).toHaveBeenCalledOnce()
+        expect(onDismiss).toHaveBeenCalledOnce()
+    })
+
+    it('does not fire onSecondaryAction when the box is left unchecked', () => {
+        const onSecondaryAction = vi.fn()
+        const onDismiss = vi.fn()
+        render(
+            <Harness
+                onDismiss={onDismiss}
+                onSecondaryAction={onSecondaryAction}
+                secondaryActionLabel="Skip tour"
+            />
+        )
+        fireEvent.click(screen.getByText('Got it'))
+        expect(onSecondaryAction).not.toHaveBeenCalled()
+        expect(onDismiss).toHaveBeenCalledOnce()
     })
 })
