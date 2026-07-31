@@ -173,6 +173,69 @@ read-only steps below are cheap falsification gates — pass through them fast, 
 | Disposition write-path (conversational), tombstone rendering, autonomy-tier execution, poll-on-turn, delegation via ping-peer, system prompt | 🔁overseer prep (converse/entity) |
 | Disposition records feeding priority/learning; standing-order **discovery watcher**; causal poll filter over events provenance; Phase 0.5 retrospective bucket analysis | ingest/scoring peer (this session) |
 
+## R8 — disposition snapshot column contract (ingest peer proposal, evidence-based)
+
+R8 (overseer prep): freeze a denormalized snapshot of the as-seen event features **on the
+disposition row at write time**, because events get re-scored and discovery must cluster on what
+the operator *saw*. Makes P2 a `GROUP BY`. **The deep invariant:** these columns are one shared
+vocabulary — *snapshot columns ≡ standing-order predicate fields ≡ discovery GROUP BY keys.* If
+they diverge, discovery suggests buckets you can't express as policy, or policy matches on axes
+you never clustered on.
+
+**Proposed set — discrete predicate columns** (indexable, clean `GROUP BY`; these ARE the
+standing-order match keys):
+
+| Column | Source | Why (validated on live DB, P0.5 below) |
+|--------|--------|-----|
+| `source_kind` | event | worker / system / channel — top-level discriminator |
+| `source_ref` | event | which specific source (`contrib-state:tiann/hapi`, `peer`, machine) |
+| `event_type` | event | blocked / needs_decision / completed / stale / … |
+| `category` | inbox item | the as-seen grouping (snapshot — the map may drift; dispositions already cluster on it) |
+| `project` | payload `$.session.project` | 63 projects; per-project standing orders are prime (hapi 776, server-setup 355, lockhouse 350 …) |
+| `artifact_kind` | artifact_refs[0].kind | github_pr / github_issue / null |
+| `repo` | artifact_refs[0].repo (or parsed URL) | bucket by repo (all channel = `tiann/hapi`) |
+
+**Plus `context_snapshot_json`** (blob, as-seen, for the R3 tombstone render + audit + future keys):
+`title`, `summary`, `severity`, `base_priority`/`priority`, `provenance`, full `artifact_refs`,
+source event ids. Not GROUP BY keys; a new bucket axis graduates from the blob to a discrete
+column later via deterministic backfill.
+
+`provenance` stays in the blob (audit: `AGENT_NOTIFY_SUMMARY`, `contrib-state@meta-daily`,
+`hub-inferred …`) rather than a predicate key — `source_kind` + `source_ref` already carry the
+matchable producer identity.
+
+## P0.5 — retrospective bucket analysis (live DB `/var/lib/hapi/hapi.db`, 2026-07-31)
+
+Ran read-only over 4848 events / 183 inbox items / **11 existing dispositions** (not zero). Buckets
+cluster cleanly on the R8 columns — the standing-orders premise holds. Top candidate buckets to
+seed the operator's first **hand-authored** standing orders (before discovery exists):
+
+- **B1 — routine upstream PR progress:** `channel / tiann/hapi / progress` (`contrib-state@meta-daily`),
+  72 events. The 📝/🔁 flood. Candidate tier: `notify:resolve` (or suppress). This is the exact
+  thing #99 de-prioritized; a standing order retires it entirely.
+- **B2 — worker completed:** `worker / completed`, 1601 events -> FINALE. Already handled by F5
+  auto-resolve.
+- **B3 — dead hub-inferred stale:** `system / stale` (`hub-inferred from session silence threshold`),
+  656 historical, **newest 2026-07-17** (stopped 14d ago), recent ones `attention_candidate=0`.
+  Candidate: operator-approved one-shot historical cleanup (NOT the live sweep — see F5 correction).
+- **B4 — PR babysit lifecycle:** `channel / tiann/hapi / {blocked,completed,needs_decision}`,
+  ~76 events. Keep, but demoted (#99 channel band).
+- Existing 11 dispositions already cluster: `done` on QUESTION(4)/BLOCKED(3), `open` on
+  QUESTION(2)/BLOCKED(1), `dismiss` on QUESTION(1) — the write-path + GROUP BY shape works today.
+
+**Stale reconciliation (corrects the earlier "0 stale events" shorthand):** two different things
+share `event_type='stale'`:
+1. **hub-inferred silence** (`source_kind=system`, "No agent output for 30 minutes") — the retired,
+   wrong-headed concept. 656 historical rows, **nothing new since 2026-07-17**. Dead, as claimed.
+2. **worker self-reported `stalled`** (`source_kind=worker`, via AGENT_NOTIFY_SUMMARY) — a LIVE,
+   legitimate signal (10 rows, newest 3 days ago). Also maps to category STALE.
+
+The earlier "0 live" came from the overseer `query_events` tool (recent hub-inferred rows are
+`attention_candidate=0`); the DB retains the history. **F5 correction:** the committed F5 blanket-
+obsoleted category=STALE, which would have eaten the live worker self-reports (#2). Fixed to sweep
+**FINALE only** (commit `72aaab1ba`). Caught pre-soup by this P0.5 pass — the case for running the
+read-only analysis before building the actuator.
+
 ## Open questions (for overseer prep + operator)
 
 1. Tier names — `notify / propose / ask` OK, or map onto the existing permission-mode vocabulary?
@@ -181,3 +244,106 @@ read-only steps below are cheap falsification gates — pass through them fast, 
 3. Where do standing orders live — a new table, or reuse a policy field on the operator's namespace?
 4. Undo horizon for auto-handled items — how long is "one-step undo" available?
 5. Delegation clarifying-question relay — synchronous wait vs async notify-back to the operator?
+
+---
+
+## Overseer-prep review — red-lines (2026-07-31, converse/entity owner)
+
+Shape accepted. The frozen design above stands; the notes below are precision + sequencing for the
+bricks I own. Agreements first so the red isn't the whole picture:
+
+**Agreed / keep as-is:** keystone-first; human-ON-the-loop (not in-it); causality > rank for
+interrupts; tombstone-as-summarizer (no separate summarize-engine); discovery suggests-never-enacts;
+the brain never authors policy or invents a tier. P0.5 is cheap — **recommend NOT skipping it**: it
+also mints the operator's first *hand-authored* buckets before the discovery engine exists, so P1/P3
+have seed standing orders without waiting for P2 data.
+
+**R1 — Pin the keystone WRITE trigger before P1 (the crux).** "Manual disposition write-path"
+underspecifies the *trigger surface*. To honor "the write IS the tombstone trigger — no fuzzy 'did we
+decide?' classifier," the write must be an explicit **act**, not a retro-scan of the transcript. Two
+clean surfaces, ship **both**:
+  - (a) **UI affordance** — tap resolve/snooze/dismiss on the item card. Unambiguous, zero brain
+    judgment, works with the brain offline. This is the truth-path.
+  - (b) **`record_disposition` write-tool** the brain calls **only on an explicit operator
+    imperative** ("resolve that", "snooze jellyfin 3 days") — the voice/hands-free path.
+  Caveat to the spec's wording: (b) still contains a lightweight *intent boundary* ("is this an
+  imperative?"). That's acceptable because the failure mode is reversible (undo) — but the "no
+  classifier at all" claim is slightly too strong. The win isn't "zero intent detection," it's "an
+  explicit act at a well-defined boundary instead of a retro-scan." Both surfaces write the same row.
+
+**R2 — This breaches the Stage-0 read-only invariant; name the transition.** The disposition write is
+the Overseer's **first state mutation beyond `convo_turn` memory**. Today `buildOverseerIdentity()`
+sets `canDispatch: false` and the system prompt hard-says "You CANNOT … change any state." That line
+must be revised **surgically**: the Overseer may now *record dispositions* (and later *relay*), but
+still cannot spawn / dispatch / mutate worker state. Recommend a **granular capability enum**
+(`canDisposition`, `canRelay`) rather than flipping `canDispatch`, so the leash stays fine-grained.
+Call this Stage 0 → Stage 1 explicitly in the identity + prompt.
+
+**R3 — The tombstone needs a READER; H3 is coupled to P1, not deferrable.** The tombstone's
+cross-turn value (collapse prior context on turn N+1) requires later turns to *see* prior
+dispositions. Converse is stateless per request (`messages` in each call), so either the transport
+substitutes the one-liner into resent history **or** the brain re-queries — both need a lean
+`query_dispositions` reader. So H3 ("deferred, ~0 volume") is actually a **P1 dependency** the moment
+tombstones must render. Minimum viable: the write-tool returns the tombstone string for same-turn
+render, and the lean reader ships in the same brick.
+
+**R4 — Reversibility × blast-radius are AUTHORING-time inputs, not runtime.** The tier table's "Gate"
+column conflates them. At **match** time the brain must not weigh reversibility/blast-radius — that's
+judgment. Runtime = *predicate match → operator-assigned tier → canned action; else ask.* The two
+axes are guidance the **operator** uses when authoring a bucket's tier (they already encoded "this is
+reversible + low-blast" by picking `notify`). Restate so the brain's runtime job is purely mechanical.
+
+**R5 — Delegation is the sharpest edge: not cleanly reversible, and don't shell `ping-peer` from the
+hub.** A relay can't be un-sent; "one-step undo" is weaker here (a retract follow-up, not a rollback).
+Default relays to `propose`/`ask`; **`notify`-tier auto-relay should be excluded or gated hardest** —
+it is the one place auto-fire mails an irreversible instruction to another agent. Also: reuse the
+*capability*, not the script — the hub already has the internal primitive (`POST /sessions/:id/messages`
++ resume in `hub/src/web/routes/sessions.ts`); call it directly. `hapi-ping-peer` is the operator/agent
+CLI wrapper; the hub shelling out to it would be a layering inversion.
+
+**R6 — poll-on-turn needs a causal-set CARRIER (doesn't exist today).** "Sessions this conversation
+dispatched to / the in-focus item" is not tracked — converse is stateless. Define the carrier:
+`causal set = sessionIds from dispositions/relays recorded in THIS conversation + an explicit
+focusSessionId on the converse request`. Without it the interrupt tier is uncomputable. Cost note: the
+interrupt-tier adds a tiny `query_events{sessionId, sinceTs}` per turn — gate it to fire **only when
+the causal set is non-empty**, else every turn pays for a poll.
+
+**R7 — Causal-gating can mute a true P0.** Silencing even high-priority ambient events is the right
+default, but it can starve a genuine emergency from a *non-dispatched* session (prod-down failure the
+operator never dispatched). Add a narrow, **operator-authored** `interrupt` escape hatch (a standing
+order flag: e.g. `severity ≥ 5 + bucket → always interrupt`) so causality-gating stays human-on-the-loop
+instead of silently rank-blind. → new open question.
+
+**R8 — Freeze the bucket features ON the disposition row (write-time snapshot).** Record a
+denormalized `{sourceKind, eventType, category, repo, provenance}` snapshot on the disposition at
+write time. Events can be re-scored later; discovery must cluster on **what the operator saw**. Cheap,
+and it makes P2 discovery a `GROUP BY` instead of a re-derivation. Write-path is mine; the column is a
+shared/ingest touchpoint — do it in P1 so P2 is trivial.
+
+### Open-question votes
+1. **Tier names:** keep `notify / propose / ask`. They describe the *operator experience*; the
+   `modes.ts` permission vocab (`acceptEdits / bypassPermissions`) gates *per-tool-call* and would
+   overload the terms. Document the analogy; don't merge the vocabularies.
+2. **notify-tier phase:** longer suggest-only soak — agree with the friction vote. Auto-fire only
+   *after* P2 proves buckets; never in the same brick as discovery.
+3. **Standing-order storage:** a dedicated, **additive** `standing_orders` table (idempotent DDL, no
+   `SCHEMA_VERSION` step — same pattern as `ensureOverseerEventsSchema`), not a JSON blob on the
+   namespace. Predicates are matched per event → they must be indexable; and a table gives audit
+   (created_ts, hand-authored vs discovery-suggested, enabled flag).
+4. **Undo horizon:** record-actions (resolve/snooze/dismiss) are reversible **indefinitely** — it's a
+   row flip. Relays get a **short retract window** (conversation-scoped or N minutes) then become
+   audit-only. Two different undo semantics; don't promise "rollback" for the irreversible one.
+5. **Clarifying relay:** **async** notify-back. A synchronous wait blocks the secretary and destroys
+   the constant-context-cost property that justifies the whole delegation model. The agent answers
+   whenever; the answer arrives as an ambient/interrupt event.
+
+### Ingest touchpoints I need sequenced (ping back)
+- **Disposition schema:** I write the row incl. the R8 feature snapshot; you consume it for
+  scoring/learning + the discovery watcher. Agree the column set before I cut the write-path.
+- **`query_dispositions` reader:** I'll own the lean reader (converse needs it for tombstones per R3).
+  Confirm the discovery watcher doesn't need a different shape, or we share one.
+- **Causal poll filter:** I own the converse-side causal-set carrier (R6); you own the
+  provenance/`relatedEventId` chain query over events. Boundary: I hand you `{sessionIds, sinceTs}`,
+  you return meaningful-transition events (completed/blocked/needs_decision, not progress).
+- **P0.5 output:** when you run retrospective bucket analysis, hand me the top candidate buckets —
+  they become the operator's first hand-authored standing orders in P1/P3 (pre-discovery bootstrap).

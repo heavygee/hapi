@@ -61,7 +61,7 @@ Second de-flood lever. Live inbox was **73% FINALE** (128/174) that never gets d
 
 `sweepDecayedTerminalItems(db, now, windowMs)`:
 - **FINALE** (completed) → `status='resolved'` once past `FINALE_DECAY_WINDOW_MS` (14d).
-- **STALE** → `status='obsoleted'` immediately, any age. Idle-silence detection is retired (`checkStaleSessions` returns `[]`; **0 stale events live** on :3006), so STALE rows are orphaned legacy. This also answers the operator's "what is still emitting these?" — nothing is.
+- **STALE** → **NOT swept** (corrected 2026-07-31, commit `72aaab1ba`). The initial version blanket-obsoleted STALE on the theory it was all retired hub-inferred silence noise. P0.5 analysis of the live DB found two things share `event_type='stale'`: (1) hub-inferred silence (`source_kind=system`, "No agent output for 30 minutes") — genuinely retired, nothing new since 2026-07-17; and (2) **worker self-reported `stalled`** via AGENT_NOTIFY_SUMMARY (`source_kind=worker`) — a LIVE signal (4 in the last 7d) that also maps to category STALE. Blanket-obsoleting STALE would eat the live self-reports, so the sweep now resolves FINALE only. Historical hub-inferred cruft is a separate operator-approved one-shot.
 - Rows **retained as history** (status leaves the active set, never deleted). Idempotent.
 - Runs on Store init (immediate) + the 5s sync tick (`syncEngine.expireInactive`, alongside `checkStaleSessions`) for live decay.
 - Tests: `hub/src/store/inboxItems.test.ts` (decayed vs fresh vs non-terminal FINALE; STALE obsolete). 12 pass; `typecheck:hub` clean.
