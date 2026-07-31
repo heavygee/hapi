@@ -1,0 +1,13 @@
+diff --git a/web/src/components/SessionList.tsx b/web/src/components/SessionList.tsx
+index 9bda796a..ce5814d6 100644
+--- a/web/src/components/SessionList.tsx
++++ b/web/src/components/SessionList.tsx
+@@ -638,7 +638,7 @@ function SessionDateRangePicker(props: {
+     )
+ }
+ 
+-function SessionListSearch(props: {
++export function SessionListSearch(props: {
+     value: string
+     onChange: (value: string) => void
+     customStart: string

@@ -1,0 +1,20 @@
+diff --git a/cli/src/claude/utils/startHappyServer.ts b/cli/src/claude/utils/startHappyServer.ts
+index 6565153e..eafcb211 100644
+--- a/cli/src/claude/utils/startHappyServer.ts
++++ b/cli/src/claude/utils/startHappyServer.ts
+@@ -110,15 +110,6 @@ function createHapiMcpServer(
+ 
+     const maxInlineMediaBytes = 25 * 1024 * 1024;
+ 
+-    const inspectPeerInputSchema: z.ZodTypeAny = z.object({
+-        sessionIdPrefix: z.string().trim().min(1).describe(
+-            'Target HAPI session id or unique id prefix. Prefer the full UUID from a [title](/sessions/<id>) citation.'
+-        ),
+-        messageLimit: z.number().int().min(1).max(100).optional().describe(
+-            'Recent message page size (default 30, max 100). Text snippets only.'
+-        ),
+-    });
+-
+     async function displayInlineMedia(
+         args: { path: string; title?: string },
+         mediaKind: 'image' | 'video',

@@ -1,0 +1,107 @@
+From 3e4cb0982474a439490e2daa5fa0714a47bb13f8 Mon Sep 17 00:00:00 2001
+From: HeavyGee <133152184+heavygee@users.noreply.github.com>
+Date: Fri, 31 Jul 2026 14:25:42 +0000
+Subject: [PATCH] fix(soup): restore githubPrAwareness wiring in SessionList
+
+Heal 83 moved SessionPrChip into SessionRowSummary trailing without the
+feature flag / primaryPrRef locals. Restore useFeatures + LinkPrDialog
+and classname exports for typecheck.
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ web/src/components/SessionList.tsx | 29 ++++++++++++++++++++++++++++-
+ 1 file changed, 28 insertions(+), 1 deletion(-)
+
+diff --git a/web/src/components/SessionList.tsx b/web/src/components/SessionList.tsx
+index ec4a7d12..bf0c8e09 100644
+--- a/web/src/components/SessionList.tsx
++++ b/web/src/components/SessionList.tsx
+@@ -7,6 +7,7 @@ import { useSessionActions } from '@/hooks/mutations/useSessionActions'
+ import { SessionActionMenu } from '@/components/SessionActionMenu'
+ import { SessionExportDialog } from '@/components/SessionExportDialog'
+ import { RenameSessionDialog } from '@/components/RenameSessionDialog'
++import { LinkPrDialog } from '@/components/LinkPrDialog'
+ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+ import { CopyIcon, CheckIcon } from '@/components/icons'
+ import { cn } from '@/lib/utils'
+@@ -26,11 +27,23 @@ import { getMachinePlatform, presentMachineHealth } from '@/lib/machineHealth'
+ import { MachineFilterBar } from '@/components/MachineFilterBar'
+ import { useSessionListMachineFilter } from '@/hooks/useSessionListMachineFilter'
+ import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
++import { useFeatures } from '@/hooks/queries/useFeatures'
+ import { SessionRowSummary } from '@/components/SessionRowSummary'
+ import { SessionPrChip } from '@/components/SessionPrChip'
++import { getPrimaryGithubPrRef } from '@hapi/protocol'
+ 
+ export { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
+ 
++/** Outer row chrome — selected background lives here, not on the button. */
++export function sessionListItemWrapperClassName(selected: boolean): string {
++    return `session-list-item flex w-full items-stretch rounded-lg transition-colors${selected ? ' bg-[var(--app-secondary-bg)]' : ''}`
++}
++
++/** Focusable row control — owns `group/session-row` for keyboard tooltip reveal. */
++export function sessionListItemButtonClassName(): string {
++    return 'group/session-row flex min-w-0 flex-1 flex-col gap-1 px-2.5 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg'
++}
++
+ type SessionGroup = {
+     key: string
+     directory: string
+@@ -771,9 +784,12 @@ function SessionItem(props: {
+     const [menuOpen, setMenuOpen] = useState(false)
+     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
+     const [renameOpen, setRenameOpen] = useState(false)
++    const [linkPrOpen, setLinkPrOpen] = useState(false)
+     const [exportOpen, setExportOpen] = useState(false)
+     const [archiveOpen, setArchiveOpen] = useState(false)
+     const [deleteOpen, setDeleteOpen] = useState(false)
++    const { features } = useFeatures(api)
++    const githubPrAwarenessEnabled = Boolean(features?.githubPrAwareness.enabled)
+     const {
+         status: cursorChatStoreStatus,
+         isApplicable: cursorChatStoreApplicable,
+@@ -791,7 +807,7 @@ function SessionItem(props: {
+                 : t('session.action.reopenCursorChecking')
+         : undefined
+ 
+-    const { archiveSession, reopenSession, renameSession, deleteSession, isPending } = useSessionActions(
++    const { archiveSession, reopenSession, renameSession, setExternalRefs, deleteSession, isPending } = useSessionActions(
+         api,
+         s.id,
+         s.metadata?.flavor ?? null
+@@ -827,6 +843,7 @@ function SessionItem(props: {
+     })
+ 
+     const sessionName = getSessionTitle(s)
++    const primaryPrRef = getPrimaryGithubPrRef(s.metadata?.externalRefs)
+     const attention = useMemo(
+         () => showDetailedStatus
+             ? classifySessionAttention(s, {
+@@ -872,6 +889,7 @@ function SessionItem(props: {
+                 sessionTitle={sessionName}
+                 sessionActive={s.active}
+                 onRename={() => setRenameOpen(true)}
++                onLinkPr={githubPrAwarenessEnabled ? () => setLinkPrOpen(true) : undefined}
+                 onExport={() => setExportOpen(true)}
+                 onArchive={() => setArchiveOpen(true)}
+                 onReopen={cursorReopenDisabledReason ? undefined : handleReopen}
+@@ -904,6 +922,15 @@ function SessionItem(props: {
+                 />
+             ) : null}
+ 
++            <LinkPrDialog
++                isOpen={linkPrOpen}
++                onClose={() => setLinkPrOpen(false)}
++                currentPrimaryLabel={primaryPrRef ? `${primaryPrRef.repo}#${primaryPrRef.number}` : null}
++                onLink={setExternalRefs}
++                onUnlink={primaryPrRef ? () => setExternalRefs([]) : undefined}
++                isPending={isPending}
++            />
++
+             {exportOpen ? (
+                 <SessionExportDialog
+                     isOpen={true}
+-- 
+2.39.5
+
