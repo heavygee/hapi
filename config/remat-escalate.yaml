@@ -7,10 +7,11 @@
 # owner_labels: HAPI_AGENT_LABEL values treated as owner when HAPI_REMAT_OWNER=1
 # ping_cmd: best-effort notify on hold set (empty = skip)
 
-# Rotated 2026-07-31: prior prefix 8c6b5a7d had no live session (stale pings).
-owner_session_prefix: "9f5f7e1d"
+# Sole soup writer (operator 2026-07-31): meta-soup driver session 5bcf291c.
+# PR watcher sessions must NOT remat — ping this owner instead.
+owner_session_prefix: "5bcf291c"
 owner_labels:
   - meta-soup
   - meta-soup-stabilize
   - tooling-meta
-ping_cmd: "hapi-ping-peer 9f5f7e1d"
+ping_cmd: "hapi-ping-peer 5bcf291c"

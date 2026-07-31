@@ -63,6 +63,8 @@ source "$LIB_DIR/driver-remat-hold.sh"
 # Escalation hold blocks remat for everyone except the designated owner.
 # Not skipped by HAPI_SKIP_DRIVER_LOCK (that only bypasses the flock).
 driver_remat_hold_require_clear_or_owner "hapi-driver-rebuild"
+# Single-writer lease: even owner-labelled sessions defer to the one live holder.
+driver_remat_lease_require "hapi-driver-rebuild"
 if [[ "${HAPI_SKIP_DRIVER_LOCK:-}" != "1" ]]; then
     driver_status_init
     driver_status_acquire rebuild

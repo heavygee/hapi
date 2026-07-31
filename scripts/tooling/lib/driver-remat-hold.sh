@@ -35,7 +35,7 @@ _driver_remat_hold_ensure_dir() {
 # Env HAPI_REMAT_OWNER_PREFIX / _LABELS / _PING_CMD win if already set.
 _driver_remat_hold_load_config() {
     local cfg="$HAPI_REMAT_ESCALATE_CONFIG"
-    local prefix="9f5f7e1d" ping="hapi-ping-peer 9f5f7e1d" labels="meta-soup meta-soup-stabilize tooling-meta"
+    local prefix="5bcf291c" ping="hapi-ping-peer 5bcf291c" labels="meta-soup meta-soup-stabilize tooling-meta"
     local line key val in_labels=0
 
     if [[ -f "$cfg" ]]; then
@@ -329,21 +329,151 @@ driver_remat_hold_clear_on_success() {
 driver_remat_hold_status_text() {
     if ! driver_remat_hold_active; then
         echo "remat-hold: idle (no escalation)"
+    else
+        _driver_remat_hold_load_config
+        echo "remat-hold: ACTIVE"
+        if command -v jq >/dev/null 2>&1; then
+            jq -r '
+              "  set_at:  \(.set_at // "?")",
+              "  set_by:  \(.set_by // "?")",
+              "  reason:  \(.reason // "?")",
+              "  remat:   \(.remat_wt // "?")",
+              "  prev:    \(.prev_tip // "?")",
+              "  wip:     \(.wip_branch // "?")",
+              "  conflict:\(.merge_ref // "?")",
+              "  owner:   \(.owner_session_prefix // "?")",
+              "  ping:    \(.ping_cmd // "?")"
+            ' "$HAPI_REMAT_HOLD_FILE"
+        fi
+    fi
+    driver_remat_lease_status_text
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Single-writer LEASE (2026-07-31).
+#
+# The hold's owner gate passes on LABEL match alone, so two owner-labelled
+# sessions (e.g. the meta-soup driver AND the PR watcher) both satisfy it and
+# can race the same remat worktree — the corruption class the operator forbade.
+# The lease pins remat to ONE live session: whoever holds it blocks every other
+# caller (even owner-labelled ones) until they release it or the holder dies /
+# goes stale. This is the mechanical single-writer guarantee.
+#
+# Keyed on HAPI_SESSION_ID (the HAPI session id, present in the agent's process
+# cmdline so liveness is a pgrep). Stale-steal after HAPI_REMAT_LEASE_STALE_SEC
+# of no heartbeat OR when the holder process is gone.
+# ─────────────────────────────────────────────────────────────────────────────
+HAPI_REMAT_LEASE_FILE="${HAPI_REMAT_LEASE_FILE:-$HAPI_STATE_DIR/remat-owner.lease}"
+HAPI_REMAT_LEASE_STALE_SEC="${HAPI_REMAT_LEASE_STALE_SEC:-1800}"
+
+_driver_remat_lease_session() { echo "${HAPI_SESSION_ID:-${HAPI_SESSION:-}}"; }
+
+# Live if a process carries the session id in its cmdline.
+_driver_remat_lease_session_live() {
+    local sid="$1"
+    [[ -n "$sid" ]] || return 1
+    pgrep -f "$sid" >/dev/null 2>&1
+}
+
+driver_remat_lease_holder() {
+    [[ -f "$HAPI_REMAT_LEASE_FILE" ]] || return 0
+    command -v jq >/dev/null 2>&1 || return 0
+    jq -r '.session // empty' "$HAPI_REMAT_LEASE_FILE" 2>/dev/null
+}
+
+driver_remat_lease_claim() {
+    local reason="${1:-}"
+    _driver_remat_hold_ensure_dir
+    command -v jq >/dev/null 2>&1 || return 1
+    local sid now tmp
+    sid="$(_driver_remat_lease_session)"
+    if [[ -z "$sid" ]]; then
+        echo "WARN: no HAPI_SESSION_ID — cannot claim remat lease" >&2
+        return 1
+    fi
+    now="$(_driver_remat_hold_now)"
+    tmp="$(mktemp -p "$HAPI_STATE_DIR" .remat-lease.XXXXXX.json)"
+    jq -n --arg sid "$sid" --arg lbl "${HAPI_AGENT_LABEL:-}" --arg reason "$reason" \
+          --arg now "$now" \
+        '{"schema":1, "session":$sid, "label":$lbl, "reason":$reason,
+          "claimed_at":$now, "heartbeat_at":$now}' >"$tmp"
+    mv "$tmp" "$HAPI_REMAT_LEASE_FILE"
+}
+
+driver_remat_lease_heartbeat() {
+    [[ -f "$HAPI_REMAT_LEASE_FILE" ]] || return 0
+    command -v jq >/dev/null 2>&1 || return 0
+    local sid now tmp
+    sid="$(_driver_remat_lease_session)"
+    [[ "$(driver_remat_lease_holder)" == "$sid" ]] || return 0
+    now="$(_driver_remat_hold_now)"
+    tmp="$(mktemp -p "$HAPI_STATE_DIR" .remat-lease.XXXXXX.json)"
+    jq --arg now "$now" '.heartbeat_at=$now' "$HAPI_REMAT_LEASE_FILE" >"$tmp" && mv "$tmp" "$HAPI_REMAT_LEASE_FILE"
+}
+
+driver_remat_lease_release() {
+    local sid; sid="$(_driver_remat_lease_session)"
+    [[ -f "$HAPI_REMAT_LEASE_FILE" ]] || return 0
+    if [[ "$(driver_remat_lease_holder)" == "$sid" || "${1:-}" == "--force" ]]; then
+        rm -f "$HAPI_REMAT_LEASE_FILE"
+        echo "remat single-writer lease released (${sid:-force})" >&2
+    fi
+}
+
+# Gate: refuse (exit 76) if a DIFFERENT live+fresh session holds the lease;
+# otherwise claim/refresh it for the current session. Operator TTY steal:
+# HAPI_OPERATOR_REMAT_LEASE_STEAL=1 (needs controlling tty).
+driver_remat_lease_require() {
+    local what="${1:-soup mutation}"
+    command -v jq >/dev/null 2>&1 || return 0
+    local mine holder hb hb_epoch now_epoch age live
+    mine="$(_driver_remat_lease_session)"
+    holder="$(driver_remat_lease_holder)"
+
+    if [[ -z "$holder" || "$holder" == "$mine" ]]; then
+        driver_remat_lease_claim "$what"
         return 0
     fi
-    _driver_remat_hold_load_config
-    echo "remat-hold: ACTIVE"
+
+    live=1; _driver_remat_lease_session_live "$holder" || live=0
+    hb="$(jq -r '.heartbeat_at // empty' "$HAPI_REMAT_LEASE_FILE" 2>/dev/null)"
+    hb_epoch="$(date -u -d "$hb" +%s 2>/dev/null || echo 0)"
+    now_epoch="$(date -u +%s)"
+    age=$(( now_epoch - hb_epoch ))
+
+    if [[ "$live" -eq 1 && "$hb_epoch" -gt 0 && "$age" -lt "$HAPI_REMAT_LEASE_STALE_SEC" ]]; then
+        if [[ "${HAPI_OPERATOR_REMAT_LEASE_STEAL:-}" == "1" && -t 0 ]]; then
+            echo "NOTE: operator TTY stealing remat lease from $holder" >&2
+            driver_remat_lease_claim "$what (operator steal)"
+            return 0
+        fi
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+        echo "ERROR: remat single-writer LEASE held by another LIVE session — refusing $what" >&2
+        echo "       holder:    $holder (label $(jq -r '.label // "?"' "$HAPI_REMAT_LEASE_FILE"))" >&2
+        echo "       heartbeat: $hb (${age}s ago)" >&2
+        echo "       you are:   ${mine:-<no HAPI_SESSION_ID>}" >&2
+        echo "       Only ONE session may build soup at a time. Ping the holder; do not build concurrently." >&2
+        echo "       Operator TTY steal (holder wedged): HAPI_OPERATOR_REMAT_LEASE_STEAL=1" >&2
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+        exit 76
+    fi
+
+    echo "NOTE: stealing stale remat lease from $holder (live=$live age=${age}s)" >&2
+    driver_remat_lease_claim "$what (stole stale)"
+    return 0
+}
+
+driver_remat_lease_status_text() {
+    local holder
+    holder="$(driver_remat_lease_holder)"
+    if [[ -z "$holder" ]]; then
+        echo "remat-lease: unheld (any owner may claim)"
+        return 0
+    fi
+    local live=1; _driver_remat_lease_session_live "$holder" || live=0
     if command -v jq >/dev/null 2>&1; then
-        jq -r '
-          "  set_at:  \(.set_at // "?")",
-          "  set_by:  \(.set_by // "?")",
-          "  reason:  \(.reason // "?")",
-          "  remat:   \(.remat_wt // "?")",
-          "  prev:    \(.prev_tip // "?")",
-          "  wip:     \(.wip_branch // "?")",
-          "  conflict:\(.merge_ref // "?")",
-          "  owner:   \(.owner_session_prefix // "?")",
-          "  ping:    \(.ping_cmd // "?")"
-        ' "$HAPI_REMAT_HOLD_FILE"
+        echo "remat-lease: HELD by $holder (label $(jq -r '.label // "?"' "$HAPI_REMAT_LEASE_FILE"), live=$live, hb $(jq -r '.heartbeat_at // "?"' "$HAPI_REMAT_LEASE_FILE"))"
+    else
+        echo "remat-lease: HELD by $holder (live=$live)"
     fi
 }

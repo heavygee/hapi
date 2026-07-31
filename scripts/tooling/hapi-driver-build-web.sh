@@ -36,6 +36,8 @@ source "$LIB_DIR/build-web-atomic.sh"
 
 # Hold blocks build-web for non-owners (same tip thrash class as remat).
 driver_remat_hold_require_clear_or_owner "hapi-driver-build-web"
+# Single-writer lease: even owner-labelled sessions defer to the one live holder.
+driver_remat_lease_require "hapi-driver-build-web"
 
 if [[ "${HAPI_SKIP_DRIVER_LOCK:-}" != "1" ]]; then
     driver_status_init
