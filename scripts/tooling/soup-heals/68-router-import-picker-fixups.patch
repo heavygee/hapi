@@ -1,0 +1,41 @@
+diff --git a/web/src/router.tsx b/web/src/router.tsx
+index 6d1df80a3..b251b4098 100644
+--- a/web/src/router.tsx
++++ b/web/src/router.tsx
+@@ -110,6 +110,28 @@ function PlusIcon(props: { className?: string }) {
+     )
+ }
+ 
++function CodexImportIcon(props: { className?: string }) {
++    return (
++        <svg
++            xmlns="http://www.w3.org/2000/svg"
++            width="20"
++            height="20"
++            viewBox="0 0 24 24"
++            fill="none"
++            stroke="currentColor"
++            strokeWidth="2"
++            strokeLinecap="round"
++            strokeLinejoin="round"
++            className={props.className}
++        >
++            {/* 中文注释：导入图标使用“下载进托盘”样式，与刷新按钮的循环箭头区分开，避免两个相邻按钮看起来一样。 */}
++            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
++            <polyline points="7 10 12 15 17 10" />
++            <line x1="12" y1="15" x2="12" y2="3" />
++        </svg>
++    )
++}
++
+ function RefreshIcon(props: { className?: string }) {
+     return (
+         <svg
+@@ -172,6 +194,7 @@ function SettingsIcon(props: { className?: string }) {
+ function SessionsPage() {
+     const { api } = useAppContext()
+     const navigate = useNavigate()
++    const queryClient = useQueryClient()
+     const pathname = useLocation({ select: location => location.pathname })
+     const matchRoute = useMatchRoute()
+     const { t } = useTranslation()

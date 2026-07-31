@@ -46,10 +46,11 @@ index 54eb67cef..a358eabba 100644
      const outlineItems = useMemo(
          () => buildConversationOutline(reconciled.blocks),
          [reconciled.blocks]
-@@ -1375,7 +1381,7 @@ function SessionChatInner(props: SessionChatProps) {
+@@ -1375,8 +1381,8 @@ function SessionChatInner(props: SessionChatProps) {
                          hasMoreMessages={props.hasMoreMessages}
                          isLoadingMoreMessages={props.isLoadingMoreMessages}
                          onLoadMore={props.onLoadMore}
+                         onCancelLoadMore={props.onCancelLoadMore}
 -                        unseenCount={props.unseenCount}
 +                        unseenCount={unseenCount}
                          rawMessagesCount={visibleMessages.length}
