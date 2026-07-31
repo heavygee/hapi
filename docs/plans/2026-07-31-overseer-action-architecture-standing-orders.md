@@ -236,7 +236,25 @@ obsoleted category=STALE, which would have eaten the live worker self-reports (#
 **FINALE only** (commit `72aaab1ba`). Caught pre-soup by this P0.5 pass — the case for running the
 read-only analysis before building the actuator.
 
+## Disposition population boundary (settled 2026-07-31)
+
+- **`recordInboxOperatorAction` is the single centralized snapshot-population point** (PR #102).
+- **F5 auto-resolve deliberately does NOT route through it** — it is a bulk `UPDATE inbox_items`
+  and writes no disposition row. Rationale: routing mechanical decay through the training-label
+  table would pollute discovery (a flood of `done`-on-FINALE rows would "discover" that the
+  operator always resolves completed items — circular; that's just the F5 mechanism). Therefore
+  `inbox_operator_actions` is a **decisions** table, not a full status-transition audit. Auto-
+  resolved FINALE items do not appear in `query_dispositions` / discovery and do not render as
+  tombstones (they were never decided; `query_events` rehydrates on demand). This is the intended
+  line, not a gap.
+
 ## Open questions (for overseer prep + operator)
+
+6. **Actor provenance on dispositions** (Phase 3, not now): when standing-order auto-handling
+   lands, enactments SHOULD write dispositions (pre-authorized decisions) WITH the snapshot — but
+   discovery must exclude them or it re-suggests orders it is already enacting. That's when an
+   `actor` column (`operator` | `standing_order:<id>` | `system`) is needed, and discovery mines
+   `actor='operator'` only. Don't paint into a corner now.
 
 1. Tier names — `notify / propose / ask` OK, or map onto the existing permission-mode vocabulary?
 2. Does `notify`-tier auto-handling ship in Phase 3, or does the operator want a longer
