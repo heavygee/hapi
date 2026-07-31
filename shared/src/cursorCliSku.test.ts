@@ -235,10 +235,22 @@ describe('isCursorAcpCatalogModelId', () => {
 });
 
 describe('matchCliSkuToAcpWireId with bare ACP catalog (#1129)', () => {
-    it('maps CLI SKUs onto bare same-base ACP ids', () => {
+    it('maps base SKUs onto bare ACP ids but rejects suffixed variants', () => {
         const bare = [{ modelId: 'composer-2.5' }, { modelId: 'gpt-5.5' }];
-        expect(matchCliSkuToAcpWireId('composer-2.5-fast', bare)).toBe('composer-2.5');
         expect(matchCliSkuToAcpWireId('composer-2.5', bare)).toBe('composer-2.5');
-        expect(matchCliSkuToAcpWireId('gpt-5.5-high-fast', bare)).toBe('gpt-5.5');
+        expect(matchCliSkuToAcpWireId('gpt-5.5', bare)).toBe('gpt-5.5');
+        expect(matchCliSkuToAcpWireId('composer-2.5-fast', bare)).toBeNull();
+        expect(matchCliSkuToAcpWireId('gpt-5.5-high-fast', bare)).toBeNull();
+        expect(matchCliSkuToAcpWireId('gpt-5.5-medium', bare)).toBeNull();
+    });
+
+    it('still maps suffixed SKUs when parameterized ACP wires exist', () => {
+        const wires = [
+            { modelId: 'gpt-5.5[context=272k,reasoning=medium,fast=false]' },
+            { modelId: 'gpt-5.5[context=272k,reasoning=high,fast=true]' }
+        ];
+        expect(matchCliSkuToAcpWireId('gpt-5.5-high-fast', wires)).toBe(
+            'gpt-5.5[context=272k,reasoning=high,fast=true]'
+        );
     });
 });

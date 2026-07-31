@@ -353,6 +353,12 @@ export function matchCliSkuToAcpWireId(
     if (wires.length === 0) {
         return null;
     }
+    // Suffixed SKUs must not collapse onto a bare-only ACP catalog — those rows
+    // cannot express effort/speed (apply is model + fast on parameterized wires).
+    const hasParameterizedWire = wires.some((entry) => isCursorAcpWireModelId(entry.modelId));
+    if (isCursorCliSkuVariantId(trimmed) && !hasParameterizedWire) {
+        return null;
+    }
     if (wires.length === 1) {
         return wires[0].modelId;
     }
