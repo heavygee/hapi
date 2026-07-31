@@ -7,11 +7,14 @@
 # owner_labels: HAPI_AGENT_LABEL values treated as owner when HAPI_REMAT_OWNER=1
 # ping_cmd: best-effort notify on hold set (empty = skip)
 
-# Sole soup writer (operator 2026-07-31): meta-soup driver session 5bcf291c.
+# Sole soup writer (operator 2026-07-31): meta-soup driver session.
+# NOTE: the session id rotates on reconnect/mass-archive (5bcf291c -> 05d9f0f2 on
+# 2026-07-31), so the LABEL gate below is the durable owner identity; the prefix is
+# a best-effort hint kept pointed at the live session for ping/coordination.
 # PR watcher sessions must NOT remat — ping this owner instead.
-owner_session_prefix: "5bcf291c"
+owner_session_prefix: "05d9f0f2"
 owner_labels:
   - meta-soup
   - meta-soup-stabilize
   - tooling-meta
-ping_cmd: "hapi-ping-peer 5bcf291c"
+ping_cmd: "hapi-ping-peer 05d9f0f2"

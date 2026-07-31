@@ -349,6 +349,19 @@ layers:
   # Gates green: hub 559 + shared 170, tsc clean.
   - branch: feat/overseer-dispositions
 
+  # 2026-07-31: overseer admin console (PR #103). Dedicated /overseer console
+  # (consolidates brain switch + talk-to + events/inbox debug + identity) + RUNTIME
+  # brain switching: persisted active brain (profile+model) in a NEW overseer_settings
+  # KV table (idempotent DDL in finishSchemaInit alongside ensureOverseerInboxSchema —
+  # no schema-version ladder change). REQUIRED_TABLES gains 'overseer_settings'.
+  # STACKS ON feat/overseer-dispositions (must sit immediately after it). Tip 70b11fb5.
+  # Unions cleanly with dispositions' ensureOverseerInboxSchema (different table, same
+  # finishSchemaInit block). Switcher env: OVERSEER_BRAIN_URL (local default) +
+  # OVERSEER_BRAIN_PROFILE_OPENAI_URL/_API_KEY/_MODEL; switching among configured
+  # profiles is fully runtime (profile add/remove needs a hub restart). Gates green:
+  # root tsc (cli+web+hub), hub 574.
+  - branch: feat/overseer-admin-console
+
   # Overseer replay harness (thin): harness+CI+fixtures only. Tip 96c8e7bf4,
   # ahead=1, zero FCM. Stack after umbrella; no substrate in this tip.
   - branch: feat/overseer-replay-harness
