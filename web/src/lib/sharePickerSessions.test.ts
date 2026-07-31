@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSummary } from '@/types/api'
+import { DEFAULT_SESSION_PREVIEW_LIMIT } from '@/hooks/useSessionPreviewLimit'
 import {
     countHiddenActiveSharePickerSessions,
     filterSharePickerSessions,
-    SHARE_PICKER_ACTIVE_LIMIT,
 } from './sharePickerSessions'
 
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
@@ -40,11 +40,12 @@ describe('filterSharePickerSessions', () => {
     })
 
     it('caps active sessions when query is empty', () => {
-        const sessions = Array.from({ length: SHARE_PICKER_ACTIVE_LIMIT + 3 }, (_, index) =>
+        const previewLimit = DEFAULT_SESSION_PREVIEW_LIMIT
+        const sessions = Array.from({ length: previewLimit + 3 }, (_, index) =>
             makeSession({ id: `s-${index}`, active: true, updatedAt: index }))
-        const result = filterSharePickerSessions(sessions, '', machineLabel)
-        expect(result).toHaveLength(SHARE_PICKER_ACTIVE_LIMIT)
-        expect(result[0].id).toBe(`s-${SHARE_PICKER_ACTIVE_LIMIT + 2}`)
+        const result = filterSharePickerSessions(sessions, '', machineLabel, null, previewLimit)
+        expect(result).toHaveLength(previewLimit)
+        expect(result[0].id).toBe(`s-${previewLimit + 2}`)
     })
 
     it('searches all sessions including inactive when query is non-empty', () => {
@@ -89,8 +90,16 @@ describe('countHiddenActiveSharePickerSessions', () => {
     })
 
     it('counts active sessions beyond the cap', () => {
-        const sessions = Array.from({ length: SHARE_PICKER_ACTIVE_LIMIT + 2 }, (_, index) =>
+        const previewLimit = DEFAULT_SESSION_PREVIEW_LIMIT
+        const sessions = Array.from({ length: previewLimit + 2 }, (_, index) =>
             makeSession({ id: `s-${index}`, active: true }))
-        expect(countHiddenActiveSharePickerSessions(sessions)).toBe(2)
+        expect(countHiddenActiveSharePickerSessions(sessions, previewLimit)).toBe(2)
+    })
+
+    it('honors a custom preview limit', () => {
+        const sessions = Array.from({ length: 5 }, (_, index) =>
+            makeSession({ id: `s-${index}`, active: true, updatedAt: index }))
+        expect(filterSharePickerSessions(sessions, '', machineLabel, null, 3)).toHaveLength(3)
+        expect(countHiddenActiveSharePickerSessions(sessions, 3)).toBe(2)
     })
 })

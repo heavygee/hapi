@@ -7,9 +7,6 @@ import {
     type SessionTimeRange,
 } from '@/components/SessionList'
 
-/** Max active sessions shown before the operator must search for more. */
-export const SHARE_PICKER_ACTIVE_LIMIT = DEFAULT_SESSION_PREVIEW_LIMIT
-
 export type SharePickerMachineLabelResolver = (machineId: string | null) => string
 
 function sortByUpdatedAtDesc(sessions: SessionSummary[]): SessionSummary[] {
@@ -26,6 +23,7 @@ export function filterSharePickerSessions(
     query: string,
     resolveMachineLabel: SharePickerMachineLabelResolver,
     timeRange: SessionTimeRange | null = null,
+    previewLimit: number = DEFAULT_SESSION_PREVIEW_LIMIT,
 ): SessionSummary[] {
     const normalizedQuery = normalizeSearch(query)
     const sorted = sortByUpdatedAtDesc(sessions)
@@ -43,11 +41,14 @@ export function filterSharePickerSessions(
         })
     }
 
-    return sorted.filter((session) => session.active).slice(0, SHARE_PICKER_ACTIVE_LIMIT)
+    return sorted.filter((session) => session.active).slice(0, previewLimit)
 }
 
 /** Active sessions hidden by the empty-query cap (for "search for more" hint). */
-export function countHiddenActiveSharePickerSessions(sessions: SessionSummary[]): number {
+export function countHiddenActiveSharePickerSessions(
+    sessions: SessionSummary[],
+    previewLimit: number = DEFAULT_SESSION_PREVIEW_LIMIT,
+): number {
     const activeCount = sessions.filter((session) => session.active).length
-    return Math.max(0, activeCount - SHARE_PICKER_ACTIVE_LIMIT)
+    return Math.max(0, activeCount - previewLimit)
 }
