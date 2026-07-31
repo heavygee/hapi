@@ -35,7 +35,7 @@ _driver_remat_hold_ensure_dir() {
 # Env HAPI_REMAT_OWNER_PREFIX / _LABELS / _PING_CMD win if already set.
 _driver_remat_hold_load_config() {
     local cfg="$HAPI_REMAT_ESCALATE_CONFIG"
-    local prefix="8c6b5a7d" ping="hapi-ping-peer 8c6b5a7d" labels="meta-soup meta-soup-stabilize tooling-meta"
+    local prefix="9f5f7e1d" ping="hapi-ping-peer 9f5f7e1d" labels="meta-soup meta-soup-stabilize tooling-meta"
     local line key val in_labels=0
 
     if [[ -f "$cfg" ]]; then

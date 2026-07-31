@@ -7,9 +7,10 @@
 # owner_labels: HAPI_AGENT_LABEL values treated as owner when HAPI_REMAT_OWNER=1
 # ping_cmd: best-effort notify on hold set (empty = skip)
 
-owner_session_prefix: "8c6b5a7d"
+# Rotated 2026-07-31: prior prefix 8c6b5a7d had no live session (stale pings).
+owner_session_prefix: "9f5f7e1d"
 owner_labels:
   - meta-soup
   - meta-soup-stabilize
   - tooling-meta
-ping_cmd: "hapi-ping-peer 8c6b5a7d"
+ping_cmd: "hapi-ping-peer 9f5f7e1d"
