@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode, RefObject } from 'react'
-import { useEffect, useLayoutEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 /**
@@ -121,6 +121,7 @@ export function FueCallout(props: {
     secondaryActionLabel?: string
 }) {
     const panelWidth = props.width ?? 256
+    const panelRef = useRef<HTMLDivElement>(null)
     const [pos, setPos] = useState<{
         top: number
         left: number
@@ -148,9 +149,13 @@ export function FueCallout(props: {
             if (!a) return
             const rect = a.getBoundingClientRect()
             const vp = window.visualViewport
-            // Estimate panel height before render — close enough for clamping;
-            // the actual layout adapts via Tailwind classes anyway.
-            const panelHeight = 96
+            // Measure the panel's real rendered height (it's already laid
+            // out — just visibility:hidden — by the time this runs) rather
+            // than guessing a fixed number. A hardcoded estimate here
+            // previously under-counted taller callouts (long body text, or
+            // the secondary-action row) and clamped them right on top of
+            // their own anchor instead of clear of it.
+            const panelHeight = panelRef.current?.getBoundingClientRect().height || 96
             setPos(
                 computeFueCalloutPlacement({
                     anchor: rect,
@@ -182,6 +187,7 @@ export function FueCallout(props: {
 
     const node = (
         <div
+            ref={panelRef}
             role="dialog"
             aria-label={props.title}
             style={
@@ -193,7 +199,10 @@ export function FueCallout(props: {
                           width: panelWidth,
                           ...props.style,
                       }
-                    : { position: 'fixed', visibility: 'hidden' }
+                    // Pre-measure pass: same width as the real render so
+                    // text wraps identically and the height we measure is
+                    // the height we'll actually clamp against.
+                    : { position: 'fixed', top: 0, left: 0, width: panelWidth, visibility: 'hidden' }
             }
             // Solid theme-aware bg + solid amber border. The badge-warning CSS
             // vars are alpha 0.2 (designed to layer over chat content); using

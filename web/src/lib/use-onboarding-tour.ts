@@ -5,23 +5,25 @@ import { isFueDisabledGlobally } from './use-fue'
  * useOnboardingTour — app-shell first-run guided walk, distinct from the
  * per-feature dots in use-fue.ts.
  *
- * Relationship to useFue: a feature FUE (scratchlist, composer terminal,
- * the Create Session worktree option) waits for the operator to *reach*
- * that affordance, then reveals itself on click. The shell tour is the
- * opposite shape — it runs unprompted, once, on the very first visit, to
- * point at 3 primary affordances on the /sessions screen (new session,
- * browse, settings) before the operator has necessarily clicked anything.
- * Both respect the same global kill switch (`isFueDisabledGlobally`), so
- * turning off FUE turns off the tour too.
+ * Relationship to useFue: a feature FUE (scratchlist, composer terminal)
+ * waits for the operator to *reach* that affordance, then reveals itself
+ * on click. The shell tour is the opposite shape — it runs unprompted,
+ * once, on the very first visit, to point at 3 primary affordances on the
+ * /sessions screen (new session, browse, settings) before the operator
+ * has necessarily clicked anything. Both respect the same global kill
+ * switch (`isFueDisabledGlobally`), so turning off FUE turns off the tour
+ * too.
  *
  * Scoped to /sessions only: desktop shows the session list and its detail
  * pane side by side, but mobile is single-pane (selecting a session
  * replaces the list in the DOM). A tour step anchored to a sidebar button
  * would have nothing to anchor to once the operator navigates into a
  * session on mobile, so the tour never tries to follow them there — the
- * composer-terminal and create-session-worktree-option FUEs cover the
- * "deeper" affordances instead, just-in-time, once the operator reaches
- * them naturally.
+ * composer-terminal FUE covers that "deeper" affordance instead,
+ * just-in-time, once the operator reaches it naturally. Not every deeper
+ * affordance needs a FUE, though: if the UI already explains itself
+ * inline (e.g. Create Session's "Worktree" option has an always-visible
+ * description), wrapping it in a click-to-reveal FUE only adds friction.
  *
  * Storage: hapi.onboarding.v1.shell-tour ('1' once finished/skipped/
  * silently pre-acknowledged for an upgrading user, absent otherwise).
