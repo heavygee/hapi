@@ -606,11 +606,9 @@ layers:
 
   # DROPPED 2026-07-29: feat/session-at-mention-autocomplete MERGED as tiann/hapi#1217 (tip 0c8a34e1a / merge e32fe146c).
 
-  # tiann/hapi#1215 — feature-flagged rich composer with inline session @ tokens.
-  # Worktree: ~/coding/hapi/worktrees/session-mention-rich-composer
-  # Tip e191f101c — upstream-simple playwright + testIgnore only (reverted fork absorb). Soup dogfood still on remat b0cc07853.
-  # Kill-switch only: richMentions=0. Drop when #1215 merges.
-  - branch: feat/session-mention-rich-composer
+  # DROPPED 2026-07-31 (meta remat recovery): feat/session-mention-rich-composer graduated
+  # upstream as tiann/hapi#1228 (bc543dc49 — "rich composer session @-mentions + inspect_peer").
+  # Branch deleted post-merge; feature content is in the synced fork-main base.
 
   # DROPPED 2026-07-30: feat/session-header-machine-meta MERGED as tiann/hapi#1244
   # (f8934d81e — machine + last-active in session detail header; Fixes #1241)
