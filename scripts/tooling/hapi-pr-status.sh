@@ -16,7 +16,8 @@
 # Bot surface detection (auto):
 #   - tiann/hapi (upstream): bot is `github-actions[bot]` posting FORMAL REVIEWS
 #     via the openai/codex-action@v1 GitHub Action (.github/workflows/codex-pr-review.yml).
-#     Clean signal: review body matches /No findings|No high-confidence|No issues found|No actionable/.
+#     Clean signal: review body matches /No findings|…|No Blocker, Major, Minor, or Nit findings/
+#     (HAPI Bot's clean Findings line — do not treat Questions "- None." as clean; #1108).
 #   - heavygee/hapi (fork, cloud-Codex auto-review): bot is `chatgpt-codex-connector`
 #     posting ISSUE COMMENTS (not reviews) via the ChatGPT subscription-side App.
 #     Clean signal: latest comment body matches /Codex Review:.*Didn.t find any/.
@@ -167,7 +168,10 @@ else
                 | select(.user.login == "github-actions[bot]")]
                 | sort_by(.submitted_at) | reverse | .[0] // null' \
             2>/dev/null || echo "null")
-        CLEAN_REGEX="No findings|No high-confidence|No issues found|No actionable|\*\*Findings\*\*\\n- None|- None\\."
+        # Do NOT match bare "- None." — Codex puts that under **Questions** even
+        # when Findings still has Majors (#1108). Include HAPI Bot's clean line
+        # ("No Blocker, Major, Minor, or Nit findings…") which lacks "No findings".
+        CLEAN_REGEX="No findings|No high-confidence|No issues found|No actionable|No Blocker, Major, Minor, or Nit findings|No Blocker[[:space:]].*findings|\*\*Findings\*\*\\n- None"
         BOT_DESC="github-actions[bot] review"
         TIMESTAMP_FIELD=".submitted_at"
     fi

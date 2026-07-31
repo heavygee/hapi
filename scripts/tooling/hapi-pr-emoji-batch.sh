@@ -240,8 +240,12 @@ query {
 # even when **Findings** still has [Major] (#1108 attach-time false ✅).
 _bot_body_findings_clean() {
     local body="$1" findings stripped
+    # HAPI Bot (upstream github-actions) uses:
+    #   "- No Blocker, Major, Minor, or Nit findings in the added or modified lines."
+    # That is clean — but it does NOT contain the literal substring "No findings"
+    # (false ⚠️ / "address latest bot review" on #1253 and kin).
     if echo "$body" | grep -qiE \
-        'No findings|No high-confidence|No issues found|No actionable|Didn.t find any|No new issues found'; then
+        'No findings|No high-confidence|No issues found|No actionable|Didn.t find any|No new issues found|No Blocker, Major, Minor, or Nit findings|No Blocker[[:space:]].*findings'; then
         return 0
     fi
     findings="$(printf '%s' "$body" | awk '
