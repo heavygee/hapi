@@ -252,7 +252,11 @@ describe('Overseer inbox schema (init-gated, not SCHEMA_VERSION)', () => {
         expect(sweepDecayedTerminalItems(db, now)).toBe(0)
     })
 
-    it('obsoletes orphaned STALE items immediately regardless of age', () => {
+    it('leaves STALE items alone (worker self-reported stalls share category STALE)', () => {
+        // A worker that self-reports status:"stalled" via AGENT_NOTIFY_SUMMARY lands
+        // as event_type 'stale' -> category STALE, same as the retired hub-inferred
+        // silence detection. Sweeping STALE would eat those live signals, so the
+        // sweep must ignore STALE entirely — even when well past the decay window.
         const store = new Store(':memory:')
         const db: Database = (store as unknown as { db: Database }).db
         const now = 1_000_000_000_000
@@ -262,14 +266,13 @@ describe('Overseer inbox schema (init-gated, not SCHEMA_VERSION)', () => {
                 attention_class, created_at, updated_at, related_session_id, title, category, summary
             ) VALUES (
                 'surfaced', 60, 60, '[]', '[]', 'live', ?, ?, NULL,
-                'No agent output for 30 minutes', 'STALE', 'silent'
+                'worker self-reported stalled', 'STALE', 'stalled'
             )
-        `).run(now - 1000, now - 1000)
+        `).run(now - FINALE_DECAY_WINDOW_MS - 1, now - FINALE_DECAY_WINDOW_MS - 1)
         const staleId = Number(res.lastInsertRowid)
 
-        expect(sweepDecayedTerminalItems(db, now)).toBe(1)
-        expect(store.inbox.getById(staleId)?.status).toBe('obsoleted')
-        expect(store.inbox.getById(staleId)?.resolvedAt).toBe(now)
+        expect(sweepDecayedTerminalItems(db, now)).toBe(0)
+        expect(store.inbox.getById(staleId)?.status).toBe('surfaced')
     })
 
     it('records operator actions as training labels', () => {

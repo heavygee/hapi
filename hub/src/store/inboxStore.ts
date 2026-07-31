@@ -52,7 +52,7 @@ export class InboxStore {
         return repointSessionInboxItems(this.db, fromSessionId, toSessionId)
     }
 
-    /** Auto-dispose decayed terminal (completed) + orphaned stale items. Returns rows disposed. */
+    /** Auto-resolve decayed terminal (completed) items. Returns rows resolved. */
     sweepDecayedTerminal(now: number = Date.now()): number {
         return sweepDecayedTerminalItems(this.db, now)
     }

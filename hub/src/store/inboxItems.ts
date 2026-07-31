@@ -407,36 +407,38 @@ export function backfillInboxDerivedFields(db: Database): void {
 export const FINALE_DECAY_WINDOW_MS = 14 * 24 * 60 * 60 * 1000
 
 /**
- * Auto-dispose terminal inbox items so a backlog of finished work stops crowding
- * the operator's attention surface. Rows are RETAINED as history — status is
- * moved out of the active set, never deleted.
+ * Auto-resolve decayed terminal (completed) inbox items so a backlog of finished
+ * work stops crowding the operator's attention surface. Rows are RETAINED as
+ * history — status leaves the active set, never deleted.
  *
- * - FINALE (completed): resolve once the item has sat past the decay window.
- * - STALE: idle-silence detection was retired as noise (see
- *   `OverseerEventRecorder.checkStaleSessions`, which now returns []). Any
- *   lingering STALE rows are orphaned legacy from before that removal — obsolete
- *   them immediately regardless of age.
+ * Only FINALE (completed) is swept, and only once it has sat past the decay
+ * window.
+ *
+ * STALE is deliberately NOT swept here. The hub-inferred "No agent output for N
+ * minutes" silence detection was retired (see
+ * `OverseerEventRecorder.checkStaleSessions`, now returns []; last such event on
+ * the live DB was 2026-07-17) — but a worker that self-reports status:"stalled"
+ * via AGENT_NOTIFY_SUMMARY ALSO lands as `event_type='stale'` → category STALE,
+ * and that is a live, operator-relevant signal (observed as recently as 3 days
+ * before this was written). Blanket-obsoleting STALE would eat those self-
+ * reports. Historical hub-inferred STALE cruft is a separate operator-approved
+ * one-shot, not this live sweep.
  *
  * Idempotent: matches only active rows, so re-running changes nothing once swept.
- * Returns the number of rows disposed.
+ * Returns the number of rows resolved.
  */
 export function sweepDecayedTerminalItems(
     db: Database,
     now: number = Date.now(),
     windowMs: number = FINALE_DECAY_WINDOW_MS
 ): number {
-    const active = "status IN ('new', 'surfaced', 'deferred', 'snoozed')"
-    const resolved = db.prepare(
+    const result = db.prepare(
         `UPDATE inbox_items
             SET status = 'resolved', resolved_at = ?, updated_at = ?
-          WHERE ${active} AND category = 'FINALE' AND updated_at < ?`
+          WHERE status IN ('new', 'surfaced', 'deferred', 'snoozed')
+            AND category = 'FINALE' AND updated_at < ?`
     ).run(now, now, now - windowMs)
-    const obsoleted = db.prepare(
-        `UPDATE inbox_items
-            SET status = 'obsoleted', resolved_at = ?, updated_at = ?
-          WHERE ${active} AND category = 'STALE'`
-    ).run(now, now)
-    return resolved.changes + obsoleted.changes
+    return result.changes
 }
 
 /**
