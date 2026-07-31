@@ -86,7 +86,16 @@
 #   * Keep fix/soup-markdown-standalone-cast (NonNullable pre/code casts still
 #     needed for soup typecheck; not in upstream #957 tip).
 
-base: upstream/main
+# RECOVERY PIN 2026-07-31 (meta remat, session 8c6b5a7d): base pinned to upstream
+# tiann/hapi @ bc543dc49 (the tip all rerere resolutions were recorded against) to
+# recover a canonical gated build after a remat-hold bypass (peer #1271) left
+# driver/integration ungated at WIP 2757258d0. Upstream advanced to 3f73a5f6e mid-
+# recovery ("collapse session search into sidebar toolbar row" — UI only, irrelevant
+# to the overseer dogfood); re-basing onto it would re-conflict SessionList/router
+# across ~10 layers. Pinning replays the recorded resolutions in one clean pass.
+# FOLLOW-UP: advance to upstream/main + re-resolve at the next wave-clear (not under
+# recovery pressure), then restore `base: upstream/main`.
+base: bc543dc49
 
 layers:
 
