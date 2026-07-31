@@ -6,11 +6,12 @@ import { useMachines } from '@/hooks/queries/useMachines'
 import { useMachineLabels } from '@/hooks/useMachineLabels'
 import { useTranslation } from '@/lib/use-translation'
 import { LoadingState } from '@/components/LoadingState'
-import { SessionListSearch, getSessionTimeRange } from '@/components/SessionList'
+import { SessionListSearch, getSessionTimeRange, prepareSidebarSessions } from '@/components/SessionList'
 import {
     countHiddenActiveSharePickerSessions,
     filterSharePickerSessions,
 } from '@/lib/sharePickerSessions'
+import { useSessionPreviewLimit } from '@/hooks/useSessionPreviewLimit'
 import {
     deleteShareTransfer,
     getShareTransfer,
@@ -112,6 +113,7 @@ export default function SharePage() {
     const { sessions, isLoading: sessionsLoading } = useSessions(api)
     const { machines } = useMachines(api, true)
     const machineLabelsById = useMachineLabels(machines)
+    const { sessionPreviewLimit } = useSessionPreviewLimit()
     const [searchQuery, setSearchQuery] = useState('')
     const [customStart, setCustomStart] = useState('')
     const [customEnd, setCustomEnd] = useState('')
@@ -169,7 +171,7 @@ export default function SharePage() {
     useEffect(() => {
         if (sessionsSnapshot !== null) return
         if (sessionsLoading) return
-        setSessionsSnapshot([...sessions])
+        setSessionsSnapshot(prepareSidebarSessions(sessions))
     }, [sessionsSnapshot, sessions, sessionsLoading])
 
     const isSearching = searchQuery.trim().length > 0 || timeRange !== null
@@ -190,13 +192,14 @@ export default function SharePage() {
             searchQuery,
             resolveMachineLabel,
             timeRange,
+            sessionPreviewLimit,
         )
-    }, [sessionsSnapshot, searchQuery, resolveMachineLabel, timeRange])
+    }, [sessionsSnapshot, searchQuery, resolveMachineLabel, timeRange, sessionPreviewLimit])
 
     const hiddenActiveCount = useMemo(() => {
         if (!sessionsSnapshot || isSearching) return 0
-        return countHiddenActiveSharePickerSessions(sessionsSnapshot)
-    }, [sessionsSnapshot, isSearching])
+        return countHiddenActiveSharePickerSessions(sessionsSnapshot, sessionPreviewLimit)
+    }, [sessionsSnapshot, isSearching, sessionPreviewLimit])
 
     const handlePickSession = useCallback((sessionId: string) => {
         if (!transferId) return
