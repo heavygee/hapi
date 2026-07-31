@@ -17,6 +17,10 @@ import { test, expect, type Page } from '@playwright/test'
 
 const hubUrl = (process.env.HAPI_PEER_WEB_URL ?? process.env.HAPI_PEER_HUB_URL ?? '').replace(/\/$/, '')
 const sessionId = process.env.HAPI_PEER_SESSION_ID ?? ''
+// Separate session seeded with agentState.controlledByUser=true — the
+// switch-to-remote button only renders on a locally-controlled session,
+// which the normal seed-peer-session.mjs path doesn't produce.
+const controlledSessionId = process.env.HAPI_PEER_SESSION_ID_CONTROLLED ?? ''
 const accessToken = process.env.HAPI_PEER_CLI_TOKEN ?? process.env.HAPI_PEER_ACCESS_TOKEN ?? ''
 const artifactRoot = process.env.HAPI_PEER_WORKTREE ?? process.cwd()
 
@@ -96,6 +100,152 @@ test.describe('just-in-time FUEs — peer stack, seeded session (#1272)', () => 
         await dialog.getByRole('button', { name: 'Got it' }).click()
         await expect(dialog).toHaveCount(0)
         const stored = await page.evaluate(() => localStorage.getItem('hapi.fue.v1.composer-terminal'))
+        expect(stored).toBe('1')
+    })
+
+    test('composer per-session settings gear shows a dot + FUE callout', async ({ page }) => {
+        // Evidence tier: PNG — same safe click-through shape as scratchlist
+        // (toggling the panel is a local boolean flip, no navigation).
+        await primeAuth(page, { clearKeys: ['hapi.fue.v1.composer-per-session-settings', 'hapi.fue.v1.disabled'] })
+        await page.goto(`/sessions/${sessionId}`, { waitUntil: 'domcontentloaded', timeout: 60_000 })
+
+        const login = page.getByPlaceholder('Access token')
+        if (await login.isVisible({ timeout: 3000 }).catch(() => false)) {
+            await login.fill(accessToken)
+            await page.getByRole('button', { name: /sign in|login|connect/i }).click()
+            await page.waitForLoadState('domcontentloaded', { timeout: 60_000 })
+        }
+
+        // "Settings" collides with the sidebar's global settings icon on
+        // desktop split-pane (same accessible name) — the composer's gear
+        // renders after the sidebar in DOM order, so .last() is the
+        // composer one.
+        const settingsButton = page.getByRole('button', { name: 'Settings', exact: true }).last()
+        await settingsButton.waitFor({ state: 'visible', timeout: 60_000 })
+        await expect(settingsButton.getByRole('status', { name: 'New feature available' })).toBeVisible()
+
+        await settingsButton.click()
+        const dialog = page.getByRole('dialog', { name: 'Session settings', exact: true })
+        await expect(dialog).toBeVisible()
+
+        mkdirSync(resolve(artifactRoot, 'localdocs/playwright-runs'), { recursive: true })
+        await page.screenshot({
+            path: resolve(artifactRoot, 'localdocs/playwright-runs/1272-composer-settings-fue.png'),
+            fullPage: false,
+        })
+
+        await dialog.getByRole('button', { name: 'Got it' }).click()
+        await expect(dialog).toHaveCount(0)
+        const stored = await page.evaluate(() => localStorage.getItem('hapi.fue.v1.composer-per-session-settings'))
+        expect(stored).toBe('1')
+    })
+
+    test('composer schedule-send button shows the explainer first, then opens the real picker on confirm', async ({ page }) => {
+        // Evidence tier: PNG keyframes for both states — the whole point is
+        // that the FUE callout and the real ScheduleTimePicker never occupy
+        // the same anchor at once.
+        await primeAuth(page, { clearKeys: ['hapi.fue.v1.composer-schedule-send', 'hapi.fue.v1.disabled'] })
+        await page.goto(`/sessions/${sessionId}`, { waitUntil: 'domcontentloaded', timeout: 60_000 })
+
+        const login = page.getByPlaceholder('Access token')
+        if (await login.isVisible({ timeout: 3000 }).catch(() => false)) {
+            await login.fill(accessToken)
+            await page.getByRole('button', { name: /sign in|login|connect/i }).click()
+            await page.waitForLoadState('domcontentloaded', { timeout: 60_000 })
+        }
+
+        const scheduleButton = page.getByRole('button', { name: 'Schedule send', exact: true })
+        await scheduleButton.waitFor({ state: 'visible', timeout: 60_000 })
+        await expect(scheduleButton.getByRole('status', { name: 'New feature available' })).toBeVisible()
+
+        await scheduleButton.click()
+        const dialog = page.getByRole('dialog', { name: 'Schedule for later', exact: true })
+        await expect(dialog).toBeVisible()
+
+        mkdirSync(resolve(artifactRoot, 'localdocs/playwright-runs'), { recursive: true })
+        await page.screenshot({
+            path: resolve(artifactRoot, 'localdocs/playwright-runs/1272-composer-schedule-fue-before.png'),
+            fullPage: false,
+        })
+
+        await dialog.getByRole('button', { name: 'Got it' }).click()
+        await expect(dialog).toHaveCount(0)
+        // Confirming opens the real time picker — proves the delayed-action
+        // handoff actually works, not just that the explainer renders.
+        await expect(page.locator('text=/schedule|send at|pick a time/i').first()).toBeVisible({ timeout: 10_000 })
+
+        await page.screenshot({
+            path: resolve(artifactRoot, 'localdocs/playwright-runs/1272-composer-schedule-fue-after.png'),
+            fullPage: false,
+        })
+
+        const stored = await page.evaluate(() => localStorage.getItem('hapi.fue.v1.composer-schedule-send'))
+        expect(stored).toBe('1')
+    })
+
+    test('session header Outline toggle shows a dot + FUE callout', async ({ page }) => {
+        // Evidence tier: PNG — same safe click-through shape as Files toggle.
+        await primeAuth(page, { clearKeys: ['hapi.fue.v1.session-outline-toggle', 'hapi.fue.v1.disabled'] })
+        await page.goto(`/sessions/${sessionId}`, { waitUntil: 'domcontentloaded', timeout: 60_000 })
+
+        const login = page.getByPlaceholder('Access token')
+        if (await login.isVisible({ timeout: 3000 }).catch(() => false)) {
+            await login.fill(accessToken)
+            await page.getByRole('button', { name: /sign in|login|connect/i }).click()
+            await page.waitForLoadState('domcontentloaded', { timeout: 60_000 })
+        }
+
+        const outlineButton = page.getByRole('button', { name: 'Conversation outline', exact: true })
+        await outlineButton.waitFor({ state: 'visible', timeout: 60_000 })
+        await expect(outlineButton.getByRole('status', { name: 'New feature available' })).toBeVisible()
+
+        await outlineButton.click()
+        const dialog = page.getByRole('dialog', { name: 'Jump to any message', exact: true })
+        await expect(dialog).toBeVisible()
+
+        mkdirSync(resolve(artifactRoot, 'localdocs/playwright-runs'), { recursive: true })
+        await page.screenshot({
+            path: resolve(artifactRoot, 'localdocs/playwright-runs/1272-session-outline-fue.png'),
+            fullPage: false,
+        })
+
+        await dialog.getByRole('button', { name: 'Got it' }).click()
+        await expect(dialog).toHaveCount(0)
+        const stored = await page.evaluate(() => localStorage.getItem('hapi.fue.v1.session-outline-toggle'))
+        expect(stored).toBe('1')
+    })
+
+    test('composer switch-to-remote button shows explainer first, then performs the switch on confirm', async ({ page }) => {
+        // Evidence tier: PNG — requires a session seeded with
+        // agentState.controlledByUser=true (see controlledSessionId above).
+        test.skip(!controlledSessionId, 'requires HAPI_PEER_SESSION_ID_CONTROLLED')
+        await primeAuth(page, { clearKeys: ['hapi.fue.v1.composer-switch-remote', 'hapi.fue.v1.disabled'] })
+        await page.goto(`/sessions/${controlledSessionId}`, { waitUntil: 'domcontentloaded', timeout: 60_000 })
+
+        const login = page.getByPlaceholder('Access token')
+        if (await login.isVisible({ timeout: 3000 }).catch(() => false)) {
+            await login.fill(accessToken)
+            await page.getByRole('button', { name: /sign in|login|connect/i }).click()
+            await page.waitForLoadState('domcontentloaded', { timeout: 60_000 })
+        }
+
+        const switchButton = page.getByRole('button', { name: 'Switch to remote mode', exact: true })
+        await switchButton.waitFor({ state: 'visible', timeout: 60_000 })
+        await expect(switchButton.getByRole('status', { name: 'New feature available' })).toBeVisible()
+
+        await switchButton.click()
+        const dialog = page.getByRole('dialog', { name: 'Switch to remote control', exact: true })
+        await expect(dialog).toBeVisible()
+
+        mkdirSync(resolve(artifactRoot, 'localdocs/playwright-runs'), { recursive: true })
+        await page.screenshot({
+            path: resolve(artifactRoot, 'localdocs/playwright-runs/1272-composer-switch-remote-fue.png'),
+            fullPage: false,
+        })
+
+        await dialog.getByRole('button', { name: 'Got it' }).click()
+        await expect(dialog).toHaveCount(0)
+        const stored = await page.evaluate(() => localStorage.getItem('hapi.fue.v1.composer-switch-remote'))
         expect(stored).toBe('1')
     })
 })
