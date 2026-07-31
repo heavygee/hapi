@@ -3,6 +3,7 @@ import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useAppContext } from '@/lib/app-context'
 import { useSessions } from '@/hooks/queries/useSessions'
 import { useMachines } from '@/hooks/queries/useMachines'
+import { useMachineLabels } from '@/hooks/useMachineLabels'
 import { useTranslation } from '@/lib/use-translation'
 import { LoadingState } from '@/components/LoadingState'
 import { SessionListSearch, getSessionTimeRange } from '@/components/SessionList'
@@ -116,6 +117,7 @@ export default function SharePage() {
     const [load, setLoad] = useState<LoadState>({ state: 'loading' })
     const { sessions, isLoading: sessionsLoading } = useSessions(api)
     const { machines } = useMachines(api, true)
+    const machineLabelsById = useMachineLabels(machines)
     const [searchQuery, setSearchQuery] = useState('')
     const [customStart, setCustomStart] = useState('')
     const [customEnd, setCustomEnd] = useState('')
@@ -123,20 +125,6 @@ export default function SharePage() {
         () => getSessionTimeRange(customStart, customEnd),
         [customStart, customEnd],
     )
-
-    const machineLabelsById = useMemo(() => {
-        const labels: Record<string, string> = {}
-        for (const machine of machines) {
-            if (machine.metadata?.displayName) {
-                labels[machine.id] = machine.metadata.displayName
-            } else if (machine.metadata?.host) {
-                labels[machine.id] = machine.metadata.host
-            } else {
-                labels[machine.id] = machine.id.slice(0, 8)
-            }
-        }
-        return labels
-    }, [machines])
 
     const resolveMachineLabel = useCallback((machineId: string | null): string => {
         if (machineId && machineLabelsById[machineId]) {
