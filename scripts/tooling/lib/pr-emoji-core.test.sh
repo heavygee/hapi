@@ -249,7 +249,7 @@ eq "session + reminder both suffixed" \
     "contrib:tiann/hapi#947:$FP_A:sess:3c141438:reminder:2026-07-25"
 
 body="$(pec_build_channel_event_body \
-    --repo tiann/hapi --number 999 --emoji "✅" --action "full green — wait on tiann" \
+    --repo tiann/hapi --number 999 --emoji "✅" --action "full green - wait on tiann" \
     --fingerprint "$FP_A" --session-id "aaaaaaaa-1111" --reason transition \
     --date 2026-07-25)"
 eq "body sourceKind channel" "$(jq -r '.sourceKind' <<<"$body")" "channel"

@@ -51,7 +51,7 @@ j='{}'
 for a in "$@"; do
     case "$a" in
         100) j="$(echo "$j" | jq -c '. + {"100":{emoji:"⚠️",action:"resolve 1 open thread(s)",prePr:false,merged:false,closed:false,dataUnavailable:false}}')" ;;
-        200) j="$(echo "$j" | jq -c '. + {"200":{emoji:"✅",action:"full green — wait on tiann",prePr:false,merged:false}}')" ;;
+        200) j="$(echo "$j" | jq -c '. + {"200":{emoji:"✅",action:"full green - wait on tiann",prePr:false,merged:false}}')" ;;
         300) j="$(echo "$j" | jq -c '. + {"300":{emoji:"🔧",action:"MERGED — clean up",prePr:false,merged:true}}')" ;;
         400) j="$(echo "$j" | jq -c '. + {"400":{emoji:"⚠️",action:"fix failing CI",prePr:false,merged:false}}')" ;;
         999) j="$(echo "$j" | jq -c '. + {"999":{emoji:"⚠️",action:"push to trigger bot review",prePr:false,merged:false}}')" ;;
@@ -653,7 +653,7 @@ j='{}'
 for a in "$@"; do
     case "$a" in
         1085) j="$(echo "$j" | jq -c '. + {"1085":{emoji:"📝",action:"pre-PR — no open PR",prePr:true,merged:false}}')" ;;
-        1087) j="$(echo "$j" | jq -c '. + {"1087":{emoji:"✅",action:"full green — wait on tiann",prePr:false,merged:false}}')" ;;
+        1087) j="$(echo "$j" | jq -c '. + {"1087":{emoji:"✅",action:"full green - wait on tiann",prePr:false,merged:false}}')" ;;
     esac
 done
 echo "$j"

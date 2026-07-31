@@ -371,7 +371,7 @@ pec_decide_emoji() {
     if [[ "$checks_ok" == "1" && "$checks_seen" == "1" && "$threads_n" == "0" \
         && "$bot_clean" == "1" && "$bot_major_actionable" == "0" \
         && "$merge_bad" == "0" && "$review_changes" == "0" ]]; then
-        emoji="✅"; action="full green — wait on tiann"
+        emoji="✅"; action="full green - wait on tiann"
     elif [[ "$checks_seen" == "0" && "$merge_bad" == "0" && "$bot_major_actionable" == "0" && "$review_changes" == "0" ]]; then
         # No CI evidence yet: never call it green. Nudge instead of false ✅.
         emoji="🔁"; action="no CI checks visible yet — push/retry then re-sweep"

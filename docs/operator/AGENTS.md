@@ -23,7 +23,7 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 | Re-thin a soup layer after remat conflict | **Not** onto `origin/driver/integration` — use `upstream/main` or the exact pre-layer SHA Meta names; each remat mint may differ | [`driver-soup.md`](../tooling/driver-soup.md#re-thin-bases-2026-07-29--awareness-remat) |
 | Claim wave remat / web soup “green” | Smoke `/sessions` past error boundary; new `index-*.js` hash if UI was broken; hard-reload / clear Workbox if sticky | [`driver-soup.md`](../tooling/driver-soup.md) § NEVER park + When upstream moves |
 | About to claim gates / PR ready | Mechanical verify before assertion | Lifecycle §6 + [`pr-review-loop.md`](../tooling/pr-review-loop.md) |
-| Upstream PR “babysit / merge-ready” | **Prepare only — never merge on `tiann/hapi`** | § Upstream relationship — only @tiann merges upstream `main` |
+| Upstream PR “babysit / merge-ready” | **Prepare only** (agents); lane B self-merge is operator/Meta | § Upstream relationship - lanes A/B/C; #1096; #1268 blessing |
 | **Daily PR sweep / "the dance"** | Run **`hapi-meta-daily.sh`** — classify → chip status cache → strip title emoji (chipped) → policy-ping → action queue. Don't reinvent it each morning. | § Meta PR watcher (below) |
 | Upstream PR **merged** (Meta daily / chip `merged`) | Notify peer → drop soup layer → clean worktree/branch → rematerialize **once** after the wave → archive when idle (peers: no mid-turn self-archive; **no** `🔧` title rewrite) | Lifecycle [§ After upstream merge](../tooling/feature-work-lifecycle.md#after-upstream-merge-fleet-cleanup--meta-sweep-must-advise-this) |
 | Session title / PR health | Title = workstream only (no `PR #N:` once chipped); identity+health on **chip**; attach via `hapi link-pr` / MCP `link_pr` | Lifecycle [§ Session titles and PR chips](../tooling/feature-work-lifecycle.md#session-titles-and-pr-chips) |
@@ -53,9 +53,25 @@ upstream  →  https://github.com/tiann/hapi.git
 origin    →  https://github.com/heavygee/hapi.git
 ```
 
-**Do not merge on `tiann/hapi`.** By convention (and historically always) only **@tiann** merges to upstream `main`. Write access on the upstream repo does **not** authorize `gh pr merge`, squash/rebase merge, or any other merge of PRs (ours or others'). **Babysit / “to merge” / merge-ready means prepare only** — green CI, rebase, triage threads, ping maintainer — then stop. Incident: #1096 (2026-07-20) was the first-ever heavygee-performed upstream merge; do not repeat.
+### Merge lanes (A / B / C) - post #1268 blessing
 
-**Fork `main` mirror:** after upstream activity run `hapi-sync-fork-main` (in `scripts/tooling/`) and `git push origin main`. Primary checkout `~/coding/hapi` must contain **upstream product code + fork docs** — not docs-only drift. `hapi-driver-rebuild` refuses if `main` is behind `upstream/main`.
+Chip status stays **PR health only** (`✅` / `🔁` / `⚠️` / …). Merge authority is an **estate overlay** (`scripts/tooling/lib/pr-merge-policy.sh`, config `~/.hapi/pr-merge-policy.json` - see `scripts/tooling/pr-merge-policy.example.json`). Meta queue splits green PRs into **WAIT TIANN** vs **SELF-MERGE ELIGIBLE**.
+
+| Lane | Who merges | How you get there | Agents |
+|------|------------|-------------------|--------|
+| **A** maintainer | **@tiann** | Default for product / large PRs | Prepare only - never `gh pr merge` |
+| **B** self-merge | Operator / Meta tooling (not agents) | Auto: tests/docs-only + size caps; **or** human promote via GitHub label `low-impact` / `self-merge-ok` **or** `allow_pr_numbers` in policy | Prepare only - no auto merge yet |
+| **C** forbidden | Nobody here | Others' PRs, direct push to `main`, settings, force-push | Hard no |
+
+**Blessing:** after heavygee self-merged test-only [#1268](https://github.com/tiann/hapi/pull/1268), @tiann replied ([comment](https://github.com/tiann/hapi/pull/1268#issuecomment-5141575753)): *"Sounds great! Thanks for helping out."* That authorizes taking **low-impact** PRs off tiann's plate - not a blank check for every green PR.
+
+**"Small enough" is not deterministic from size alone.** Open-PR audit (2026-07-31): every open heavygee PR classified **lane A** under auto-B (all touch product paths). Local tip for issue [#1270](https://github.com/tiann/hapi/issues/1270) (stale Cursor model remap; PR not filed at audit) is ~8 files / +511 - *feels* small but still product (`cli/` + `shared/` SKU) → auto-B **no**; promote with `low-impact` / allowlist if you want lane B. Recently merged #1268/#1269 were true auto-B (tests only). Salience: `docs/plans/2026-07-31-pr-merge-lanes.md`.
+
+**Incident #1096** (2026-07-20): first accidental heavygee upstream merge - do not treat write access as "merge anything green."
+
+**Agents:** babysit / "to merge" / merge-ready still means **prepare only** (CI, rebase, threads, ping). Do **not** run `gh pr merge` on `tiann/hapi` unless an operator with a controlling TTY explicitly directs a **lane B** merge. Meta CLI never merges.
+
+**Fork `main` mirror:** after upstream activity run `hapi-sync-fork-main` (in `scripts/tooling/`) and `git push origin main`. Primary checkout `~/coding/hapi` must contain **upstream product code + fork docs** - not docs-only drift. `hapi-driver-rebuild` refuses if `main` is behind `upstream/main`.
 
 - Extend upstream; PR-sized slices; default path unchanged when new code off
 - **Never modify maintainer canon** in upstream PRs - see § Upstream file boundaries
@@ -63,19 +79,20 @@ origin    →  https://github.com/heavygee/hapi.git
 
 ### Upstream collaborator status (heavygee on tiann/hapi)
 
-`heavygee` has **`write`** permission on `tiann/hapi` (verify: `gh api repos/tiann/hapi/collaborators/heavygee/permission`). This is unusual for what is otherwise documented as a fork relationship and post-dates the fork canon. **Status: awaiting explicit guidance from @tiann on the intended scope of this access.** Write ≠ merge authority.
+`heavygee` has **`write`** permission on `tiann/hapi` (verify: `gh api repos/tiann/hapi/collaborators/heavygee/permission`). Write ≠ blank-check merge authority. Scoped by lanes A/B/C above (blessing: #1268 comment).
 
-Until @tiann signals otherwise, default to **fork-contributor discipline** (PRs from `upstream/main`-based branches via `hapi-pr-create`, comments and reviews welcome on others' PRs, no direct writes to upstream branches or other people's work).
+Default remains **fork-contributor discipline** for product work (PRs from `upstream/main`-based branches via `hapi-pr-create`, comments and reviews welcome on others' PRs, no direct writes to upstream branches or other people's work).
 
-**What we self-permit absent guidance:**
+**What we self-permit:**
 
-- **Label management** on `tiann/hapi` issues and PRs - low-risk, reversible, helpful for triage
+- **Label management** on `tiann/hapi` issues and PRs - including applying `low-impact` / `self-merge-ok` for lane B promote. Daily taxonomy owner: HAPI session **Issue labelling (tiann/hapi)** (`f3c41205…`); see `docs/plans/2026-07-31-pr-merge-lanes.md` § Label ownership.
+- **Lane B self-merge** of **our** PRs when policy says eligible (operator/Meta; agents prepare-only until merge automation is explicitly enabled)
 - **Pushing to PR branches via `maintainerCanModify`** *only when* (a) the PR has `maintainerCanModify: true`, (b) we have coordinated with the PR author first (comment + reasonable response window), and (c) we are addressing a clear stall (conflicts, no author iteration, no maintainer review). Stays attributed: author's commits keep their authorship; our rebase / fix commits add `Co-authored-by:` lines
 
-**What we explicitly do NOT do absent guidance:**
+**What we explicitly do NOT do (lane C):**
 
 - Direct push to `tiann/hapi:main` or any other upstream branch (use the normal PR flow)
-- **Merging PRs on `tiann/hapi`** (ours or others') — including `gh pr merge`, GitHub UI merge, auto-merge enablement. Prepare for merge; @tiann merges.
+- Merging **others'** PRs, or merging **lane A** PRs without @tiann
 - Force-pushing to others' PR branches
 - Closing issues or PRs we don't own
 - Editing PR titles / bodies / descriptions on others' PRs
@@ -84,7 +101,7 @@ Until @tiann signals otherwise, default to **fork-contributor discipline** (PRs 
 - Granting or revoking access to others
 - Triggering / dismissing workflows on others' PRs
 
-If @tiann clarifies broader (or narrower) scope, revise this section.
+If @tiann narrows or expands scope, revise this section.
 
 ---
 

@@ -31,6 +31,9 @@ SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 CORE_LIB="$SCRIPT_DIR/lib/pr-emoji-core.sh"
 # shellcheck source=lib/pr-emoji-core.sh
 source "$CORE_LIB"
+# shellcheck source=lib/pr-merge-policy.sh
+source "$SCRIPT_DIR/lib/pr-merge-policy.sh"
+MERGE_POLICY_JSON="$(pmp_load_policy)"
 # shellcheck source=lib/require-gh-version.sh
 source "$SCRIPT_DIR/lib/require-gh-version.sh"
 require_gh_version
@@ -99,16 +102,18 @@ fetch_latest_bot_body() {
 }
 
 # Emit the per-PR JSON blob. All signal bits are 0/1 strings; jq converts.
+# Optional mergeLane (maintainer|self_merge) for ✅ PRs — chip stays health-only.
 _emit_pr_json() {
     local out="$1" emoji="$2" action="$3" exists="$4" merged="$5" closed="$6" \
         prepr="$7" data_unavail="$8" threads="$9" checks_ok="${10}" \
         checks_pending="${11}" checks_seen="${12}" bot_clean="${13}" \
-        bot_major="${14}" merge_state="${15}"
+        bot_major="${14}" merge_state="${15}" merge_lane="${16:-}"
     local in_queue=true
     [[ "$exists" == "1" && "$merged" == "0" && "$closed" == "0" && "$data_unavail" == "0" ]] || in_queue=false
     b() { [[ "$1" == "1" ]] && echo true || echo false; }
     jq -n \
         --arg emoji "$emoji" --arg action "$action" --arg merge "$merge_state" \
+        --arg mergeLane "$merge_lane" \
         --argjson exists "$(b "$exists")" --argjson merged "$(b "$merged")" \
         --argjson closed "$(b "$closed")" --argjson prePr "$(b "$prepr")" \
         --argjson dataUnavailable "$(b "$data_unavail")" \
@@ -117,8 +122,30 @@ _emit_pr_json() {
         --argjson checksOk "$(b "$checks_ok")" --argjson checksPending "$(b "$checks_pending")" \
         --argjson checksSeen "$(b "$checks_seen")" \
         --argjson botClean "$(b "$bot_clean")" --argjson botMajor "$(b "$bot_major")" \
-        '{emoji:$emoji,exists:$exists,inQueue:$inQueue,open:$inQueue,prePr:$prePr,merged:$merged,closed:$closed,dataUnavailable:$dataUnavailable,threads:$threads,checksOk:$checksOk,checksPending:$checksPending,checksSeen:$checksSeen,botClean:$botClean,botMajor:$botMajor,mergeState:$merge,action:$action}' \
+        '{emoji:$emoji,exists:$exists,inQueue:$inQueue,open:$inQueue,prePr:$prePr,merged:$merged,closed:$closed,dataUnavailable:$dataUnavailable,threads:$threads,checksOk:$checksOk,checksPending:$checksPending,checksSeen:$checksSeen,botClean:$botClean,botMajor:$botMajor,mergeState:$merge,action:$action}
+         + (if ($mergeLane|length)>0 then {mergeLane:$mergeLane} else {} end)' \
         >"$out"
+}
+
+# When health is ✅, overlay estate merge-lane policy onto statusAction.
+# Chip emoji stays ✅; action string becomes wait-on-tiann vs self-merge eligible.
+_apply_merge_lane() {
+    local n="$1" action_inout="$2"
+    local meta files labs additions deletions class lane reason
+    meta="$(gh_t pr view "$n" --repo "$REPO" --json files,labels,additions,deletions \
+        --jq '{files:[.files[].path],labels:[.labels[].name],additions,deletions}' 2>/dev/null || echo "")"
+    if [[ -z "$meta" ]] || ! printf '%s' "$meta" | jq -e . >/dev/null 2>&1; then
+        printf '%s\t%s' "maintainer" "$(pmp_action_for_lane maintainer)"
+        return
+    fi
+    files="$(printf '%s' "$meta" | jq -r '.files[]?' )"
+    labs="$(printf '%s' "$meta" | jq -r '.labels|join(",")')"
+    additions="$(printf '%s' "$meta" | jq -r '.additions // 0')"
+    deletions="$(printf '%s' "$meta" | jq -r '.deletions // 0')"
+    class="$(pmp_classify "${MERGE_POLICY_JSON}" "$n" "$files" "$additions" "$deletions" "$labs")"
+    lane="${class%%$'\t'*}"
+    reason="${class#*$'\t'}"
+    printf '%s\t%s' "$lane" "$(pmp_action_for_lane "$lane") (${reason})"
 }
 
 # Derive CI signals. Requires gh >= HAPI_GH_MIN_VERSION (see require-gh-version.sh).
@@ -326,13 +353,23 @@ classify_one() {
         "$threads_n" "$bot_clean" "$bot_major" "$bot_has_body" "$merge_bad" 0 "$review_changes")"
     emoji="${decided%%$'\t'*}"
     action="${decided#*$'\t'}"
+    local merge_lane=""
+    if [[ "$emoji" == "✅" ]]; then
+        local lane_out
+        lane_out="$(_apply_merge_lane "$n" "$action")"
+        merge_lane="${lane_out%%$'\t'*}"
+        action="${lane_out#*$'\t'}"
+    fi
 
     _emit_pr_json "$out" "$emoji" "$action" 1 0 0 0 0 "$threads_n" \
-        "$checks_ok" "$checks_pending" "$checks_seen" "$bot_clean" "$bot_major" "$merge_state"
+        "$checks_ok" "$checks_pending" "$checks_seen" "$bot_clean" "$bot_major" "$merge_state" \
+        "$merge_lane"
 }
 
-export REPO OWNER NAME TIMEOUT TMPDIR WALL_LIMIT
-export -f classify_one gh_t fetch_latest_bot_body _emit_pr_json pec_decide_emoji \
+export REPO OWNER NAME TIMEOUT TMPDIR WALL_LIMIT MERGE_POLICY_JSON
+export -f classify_one gh_t fetch_latest_bot_body _emit_pr_json _apply_merge_lane \
+    pec_decide_emoji pmp_classify pmp_action_for_lane pmp_load_policy \
+    pmp_default_policy_json pmp_path_is_test pmp_path_is_product pmp_files_have_product \
     _gh_check_signals _fetch_review_signals _bot_body_findings_clean \
     pec_count_chip_unresolved_threads
 

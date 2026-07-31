@@ -597,7 +597,7 @@ main() {
 
     # --- per-session: rename + policy ping; build next state ---
     local new_state="$state"
-    local -a Q_WARN Q_MERGED Q_ORPHAN Q_INACTIVE Q_PINGED Q_RENAMED Q_STATUS
+    local -a Q_WARN Q_MERGED Q_ORPHAN Q_INACTIVE Q_PINGED Q_RENAMED Q_STATUS Q_WAIT_TIANN Q_SELF_MERGE
     local -a PLAN_ROWS   # for --json
     MD_EMIT_FAILURES=0
     local now_ms=$(( now * 1000 ))
@@ -753,7 +753,15 @@ main() {
         # action queue rows
         case "$combined" in
             ⚠️) Q_WARN+=("#$(echo "$prs" | tr ' ' ',') [$sid8] $(echo "$acts" | tr '\n' ' ' | sed 's/ *$//')") ;;
-            🔧) Q_MERGED+=("#$(echo "$prs" | tr ' ' ',') [$sid8] MERGED — peer: drop soup layer, clean worktree/branch, ack") ;;
+            🔧) Q_MERGED+=("#$(echo "$prs" | tr ' ' ',') [$sid8] MERGED - peer: drop soup layer, clean worktree/branch, ack") ;;
+            ✅)
+                # Lane overlay: self-merge eligible vs wait on tiann (chip stays ✅).
+                if printf '%s' "$acts" | grep -q 'self-merge eligible'; then
+                    Q_SELF_MERGE+=("#$(echo "$prs" | tr ' ' ',') [$sid8] $(echo "$acts" | tr '\n' ' ' | sed 's/ *$//')")
+                else
+                    Q_WAIT_TIANN+=("#$(echo "$prs" | tr ' ' ',') [$sid8] $(echo "$acts" | tr '\n' ' ' | sed 's/ *$//')")
+                fi
+                ;;
         esac
 
         PLAN_ROWS+=("$(jq -cn --arg sid "$sid8" --arg emoji "$combined" --arg prs "$prs" \
@@ -1030,11 +1038,17 @@ _do_ping() {  # <sid8> <emoji> <prs> <acts>
     local sid8="$1" emoji="$2" prs="$3" acts="$4"
     local state_desc rouse=""
     case "$emoji" in
-        ✅) state_desc="open PR green — wait on tiann" ;;
+        ✅)
+            if printf '%s' "$acts" | grep -q 'self-merge eligible'; then
+                state_desc="open PR green - self-merge eligible (lane B)"
+            else
+                state_desc="open PR green - wait on tiann (lane A)"
+            fi
+            ;;
         🔁) state_desc="CI/rebase in flight" ;;
         ⚠️) state_desc="needs work"; rouse=$'\n\n**Meta ping window — are you done yet?** Resume work or reply with the blocker.' ;;
-        📝) state_desc="pre-PR — not filed upstream yet" ;;
-        🔧) state_desc="MERGED — clean up, idle (no mid-turn self-archive)"; rouse=$'\n\n**Meta ping window — are you done yet?** Drop soup layer + clean worktree/branch, then ack. Do not rematerialize mid-wave.' ;;
+        📝) state_desc="pre-PR - not filed upstream yet" ;;
+        🔧) state_desc="MERGED - clean up, idle (no mid-turn self-archive)"; rouse=$'\n\n**Meta ping window — are you done yet?** Drop soup layer + clean worktree/branch, then ack. Do not rematerialize mid-wave.' ;;
         *) state_desc="see title" ;;
     esac
     local msg="Meta daily — PR status is now **${emoji}** (${state_desc}).${rouse}
@@ -1043,7 +1057,7 @@ Tracked PR(s): #$(echo "$prs" | tr ' ' ',')
 
 ${acts}
 Status lives on the **session PR chip** (\`externalRefs.status\`), not in the title. Do **not** put ✅/🔁/⚠️/📝/🔧 in your session title; leave the title as \`PR #N: …\` / \`Peer #N: …\`. If the chip is missing, run \`hapi link-pr <url>\` (or MCP \`link_pr\`) with awareness on.
-Legend: ✅ green/wait · 🔁 CI in flight · ⚠️ fix threads/CI/rebase · 📝 pre-PR · 🔧 merged (drop soup layer, clean worktree/branch, ack; no mid-turn self-archive).
+Legend: ✅ green (lane A wait / lane B self-merge) · 🔁 CI in flight · ⚠️ fix threads/CI/rebase · 📝 pre-PR · 🔧 merged (drop soup layer, clean worktree/branch, ack; no mid-turn self-archive).
 Canon: docs/operator/AGENTS.md § Meta PR watcher + feature-work-lifecycle.md § Session titles and PR chips"
     if [[ "$DRY_RUN" -eq 1 ]]; then
         echo "    [dry-run] ping $sid8 ($emoji)" >&2
@@ -1075,9 +1089,14 @@ _print_queue() {
     _print_section "✅ RENAMED this run:" "${Q_RENAMED[@]:-}"
     _print_section "🏷️  CHIP STATUS updated (externalRefs cache):" "${Q_STATUS[@]:-}"
     _print_section "📣 PINGED this run:" "${Q_PINGED[@]:-}"
+    _print_section "🟢 WAIT TIANN (✅ green, lane A - maintainer merge):" "${Q_WAIT_TIANN[@]:-}"
+    _print_section "🟣 SELF-MERGE ELIGIBLE (✅ green, lane B - operator/Meta may merge):" "${Q_SELF_MERGE[@]:-}"
     echo ""
     echo "NEXT STEPS:"
-    echo "  - Merges are @tiann's call. Never 'gh pr merge' on tiann/hapi."
+    echo "  - Lane A (WAIT TIANN): prepare only; @tiann merges. Agents never gh pr merge."
+    echo "  - Lane B (SELF-MERGE): tests/docs auto or low-impact/allowlist promote."
+    echo "    Operator/Meta may merge; agents still prepare-only (no auto merge yet)."
+    echo "    Policy: ~/.hapi/pr-merge-policy.json (example: scripts/tooling/pr-merge-policy.example.json)."
     echo "  - Wave-clear unlock pings Meta tooling (HAPI_META_TOOLING_SESSION_ID) on"
     echo "    ping windows only; CLI never runs hapi-driver-rebuild itself."
     echo "  - Manual soup rebuilds outside windows are fine — unlock defers while"
