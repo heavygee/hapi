@@ -86,13 +86,13 @@ Default remains **fork-contributor discipline** for product work (PRs from `upst
 **What we self-permit:**
 
 - **Label management** on `tiann/hapi` issues and PRs - including applying `low-impact` for lane B promote. Daily taxonomy owner: HAPI session **Issue labelling (tiann/hapi)** (`f3c41205…`); see `docs/plans/2026-07-31-pr-merge-lanes.md` § Label ownership.
-- **Lane B self-merge** of **our** PRs when policy says eligible (operator/Meta; agents prepare-only until merge automation is explicitly enabled)
+- **Lane B self-merge** when policy says eligible (operator/Meta; agents prepare-only until merge automation is explicitly enabled). Includes our PRs **and** others' auto-B / `low-impact` PRs. **Merge quietly** - no PR comments explaining estate lanes, the #1268 blessing, or why we are allowed to merge. Policy + chip are the paper trail; the merge commit is enough.
 - **Pushing to PR branches via `maintainerCanModify`** *only when* (a) the PR has `maintainerCanModify: true`, (b) we have coordinated with the PR author first (comment + reasonable response window), and (c) we are addressing a clear stall (conflicts, no author iteration, no maintainer review). Stays attributed: author's commits keep their authorship; our rebase / fix commits add `Co-authored-by:` lines
 
 **What we explicitly do NOT do (lane C):**
 
 - Direct push to `tiann/hapi:main` or any other upstream branch (use the normal PR flow)
-- Merging **others'** PRs, or merging **lane A** PRs without @tiann
+- Merging **lane A** PRs without @tiann (or any PR that is not policy lane B)
 - Force-pushing to others' PR branches
 - Closing issues or PRs we don't own
 - Editing PR titles / bodies / descriptions on others' PRs

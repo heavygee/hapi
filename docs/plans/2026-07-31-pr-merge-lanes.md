@@ -34,7 +34,11 @@ So salience for policy design:
 - `hapi-meta-daily.sh`: queue sections **WAIT TIANN** / **SELF-MERGE ELIGIBLE**
 - `docs/operator/AGENTS.md` § Upstream relationship
 
-Meta CLI still never runs `gh pr merge`.
+Meta CLI still never runs `gh pr merge` (operator/Meta-with-TTY does).
+
+## Merge UX (quiet)
+
+When merging lane B: **just merge** (squash). Do **not** leave a trail comment about "estate lane B", the #1268 blessing, or why the merge is allowed. That was a one-time courtesy on the first community auto-B (#978). From then on, eligibility is read from policy + chip - not restated on the PR.
 
 ## Label ownership
 
