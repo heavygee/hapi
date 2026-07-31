@@ -171,7 +171,7 @@ describe('live bare ACP catalog (#1129)', () => {
         expect(picker.modelOptions.some((row) => row.value === 'composer-2.5-fast')).toBe(false)
         // Default tokens stay out of the catalog rows (Default row is synthetic auto).
         expect(picker.modelOptions.some((row) => row.value === 'default')).toBe(false)
-        expect(picker.modelOptions[0]).toEqual({ value: 'auto', label: 'Default' })
+        expect(picker.modelOptions[0]).toEqual({ value: 'auto', label: 'Auto' })
     })
 
     it('attaches CLI SKUs under bare ACP bases for dual/nested variant UX', () => {
