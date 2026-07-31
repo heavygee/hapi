@@ -56,6 +56,18 @@ Result: worker blocked/needs_decision/failed/review/completed/stale = 20/30/35/4
 ### F4 — producer title (`pr-emoji-core.sh` + `hapi-meta-daily.sh`) — best-effort
 `pec_build_channel_event_body` gains `--title`; emits `artifactRefs[].title` only when set. Wired at the notification site (`_emit_notif_event`) where the GitHub subject title is in hand ("if the notification payload carries it"). Transition sites keep relying on F1's `repo#number`.
 
+### F5 — auto-dispose terminal items (`hub/src/store/inboxItems.ts`) — operator-greenlit 2026-07-31
+Second de-flood lever. Live inbox was **73% FINALE** (128/174) that never gets disposed. Operator: a completed item is *"nothing more to do — the only relevance is that it happened"* (context, not attention).
+
+`sweepDecayedTerminalItems(db, now, windowMs)`:
+- **FINALE** (completed) → `status='resolved'` once past `FINALE_DECAY_WINDOW_MS` (14d).
+- **STALE** → `status='obsoleted'` immediately, any age. Idle-silence detection is retired (`checkStaleSessions` returns `[]`; **0 stale events live** on :3006), so STALE rows are orphaned legacy. This also answers the operator's "what is still emitting these?" — nothing is.
+- Rows **retained as history** (status leaves the active set, never deleted). Idempotent.
+- Runs on Store init (immediate) + the 5s sync tick (`syncEngine.expireInactive`, alongside `checkStaleSessions`) for live decay.
+- Tests: `hub/src/store/inboxItems.test.ts` (decayed vs fresh vs non-terminal FINALE; STALE obsolete). 12 pass; `typecheck:hub` clean.
+
+**Archiving reframe (operator, 2026-07-31):** active-vs-archived is meaningless noise (restart artifacts); only **exists vs deleted** matters. So there is **no mass-archiving bucket** — the levers are (a) auto-resolve completed [F5], (b) close open loops (converse open-loops lens), (c) deletion (operator-only, destructive). Consequence for the converse layer: the open-loops / forgotten lens must consider **all non-deleted sessions**, not active-only — flagged to 🔁overseer prep.
+
 ## Out of scope
 - The converse layer's priority-direction interpretation (the 27B currently calls priority-50 "highest"). Owned by 🔁overseer prep.
 - A dedicated de-emphasis inbox category (would expand the `INBOX_CATEGORIES` enum + web/converse consumers). The priority band achieves the ranking goal without that risk; noted as a future option.
