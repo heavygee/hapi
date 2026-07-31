@@ -638,5 +638,14 @@ layers:
   # tiann/hapi#1273 — rich-composer @-mention FUE + always-on placeholder copy.
   # Web-only. Drop when upstream PR merges.
   # Worktree: ~/coding/hapi/worktrees/fue-rich-composer-mentions @ feat/fue-rich-composer-mentions
-  - branch: feat/fue-rich-composer-mentions
+  #
+  # DEFERRED 2026-07-31 (meta remat recovery): this branch was authored on top of
+  # upstream 3f73a5f6e (SessionList search-collapse toolbar restructure). The recovery
+  # build pins base to bc543dc49 (pre-collapse) to keep the 32-layer rerere stack stable,
+  # so fue's collapsed-search test expectations (fireEvent.click('Search sessions'),
+  # searchWrapper pb-2, directory-action.test.tsx) fight the simple always-visible search
+  # we keep via --ours. Feature (composer @-mention FUE dot) is independent of the toolbar
+  # restructure but the layer can't merge cleanly against the pin. RE-ADD when the base is
+  # advanced to >= 3f73a5f6e in the base-unpin follow-up. Branch/worktree preserved.
+  # - branch: feat/fue-rich-composer-mentions
 
