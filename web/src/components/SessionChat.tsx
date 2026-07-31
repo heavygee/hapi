@@ -802,7 +802,7 @@ function SessionChatInner(props: SessionChatProps) {
     }, [agentFlavor, props.session.model, cursorPicker])
 
     const cursorSelectedBaseValue = useMemo(() => (
-        agentFlavor === 'cursor' && cursorPicker?.mode === 'dual'
+        agentFlavor === 'cursor' && cursorPicker
             ? resolveSessionCursorBaseSelectValue(cursorPicker, cursorSelectedBase)
             : undefined
     ), [agentFlavor, cursorPicker, cursorSelectedBase])
@@ -1475,7 +1475,7 @@ function SessionChatInner(props: SessionChatProps) {
                         }
                         onPermissionModeChange={handlePermissionModeChange}
                         selectedModelBase={
-                            agentFlavor === 'cursor' && cursorPicker?.mode === 'dual'
+                            agentFlavor === 'cursor' && cursorPicker
                                 ? cursorSelectedBaseValue
                                 : undefined
                         }
