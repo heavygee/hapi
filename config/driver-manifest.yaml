@@ -86,16 +86,16 @@
 #   * Keep fix/soup-markdown-standalone-cast (NonNullable pre/code casts still
 #     needed for soup typecheck; not in upstream #957 tip).
 
-# RECOVERY PIN 2026-07-31 (meta remat, session 8c6b5a7d): base pinned to upstream
-# tiann/hapi @ bc543dc49 (the tip all rerere resolutions were recorded against) to
-# recover a canonical gated build after a remat-hold bypass (peer #1271) left
-# driver/integration ungated at WIP 2757258d0. Upstream advanced to 3f73a5f6e mid-
-# recovery ("collapse session search into sidebar toolbar row" — UI only, irrelevant
-# to the overseer dogfood); re-basing onto it would re-conflict SessionList/router
-# across ~10 layers. Pinning replays the recorded resolutions in one clean pass.
-# FOLLOW-UP: advance to upstream/main + re-resolve at the next wave-clear (not under
-# recovery pressure), then restore `base: upstream/main`.
-base: bc543dc49
+# BASE ADVANCE 2026-07-31 (meta remat, session 9f5f7e1d): base returned to
+# upstream/main (@ 39da5c4b) at wave-clear w-1228/w-1271, per the recovery pin's
+# own follow-up. The prior pin (bc543dc49) replayed rerere cleanly during the
+# post-#1271 recovery; now that upstream carries #1228 (rich composer @-mentions +
+# the search-collapse sidebar toolbar) and the dogfood/model-error layers merged
+# upstream or were dropped, re-resolving SessionList/router against live upstream
+# folds the double-toolbar merge artifact into ONE toolbar and lets
+# feat/fue-rich-composer-mentions rebase cleanly (its author base is now in HEAD).
+# Rerere will re-record fresh resolutions against the new base in one pass.
+base: upstream/main
 
 layers:
 
