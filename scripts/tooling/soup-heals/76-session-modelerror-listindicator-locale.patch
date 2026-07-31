@@ -1,0 +1,24 @@
+diff --git a/web/src/lib/locales/en.ts b/web/src/lib/locales/en.ts
+index 3192cb560..64b079623 100644
+--- a/web/src/lib/locales/en.ts
++++ b/web/src/lib/locales/en.ts
+@@ -236,6 +236,7 @@ export default {
+   'session.modelError.banner.bridgeRetry': 'Bridge & retry',
+   'session.modelError.banner.bridging': 'Bridging…',
+   'session.modelError.banner.bridgeFailed': 'Bridge failed — try again or dismiss.',
++  'session.modelError.listIndicator': 'Model error',
+   'settings.chat.modelErrors': 'Model errors',
+   'settings.chat.autoBridgeTransientModelErrors': 'Automatically bridge transient model errors',
+   'settings.chat.autoBridgeTransientModelErrors.description': 'When enabled, Cursor sessions re-send your last message once after a recoverable model error.',
+diff --git a/web/src/lib/locales/zh-CN.ts b/web/src/lib/locales/zh-CN.ts
+index be79b71be..aaf768edd 100644
+--- a/web/src/lib/locales/zh-CN.ts
++++ b/web/src/lib/locales/zh-CN.ts
+@@ -236,6 +236,7 @@ export default {
+   'session.modelError.banner.bridgeRetry': '桥接并重试',
+   'session.modelError.banner.bridging': '桥接中…',
+   'session.modelError.banner.bridgeFailed': '桥接失败 — 请重试或忽略。',
++  'session.modelError.listIndicator': '模型错误',
+   'settings.chat.modelErrors': '模型错误',
+   'settings.chat.autoBridgeTransientModelErrors': '自动桥接暂时性模型错误',
+   'settings.chat.autoBridgeTransientModelErrors.description': '启用后，Cursor 会话在可恢复的模型错误后会自动重发上一条用户消息一次。',
