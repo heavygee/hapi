@@ -68,6 +68,41 @@ Second de-flood lever. Live inbox was **73% FINALE** (128/174) that never gets d
 
 **Archiving reframe (operator, 2026-07-31):** active-vs-archived is meaningless noise (restart artifacts); only **exists vs deleted** matters. So there is **no mass-archiving bucket** — the levers are (a) auto-resolve completed [F5], (b) close open loops (converse open-loops lens), (c) deletion (operator-only, destructive). Consequence for the converse layer: the open-loops / forgotten lens must consider **all non-deleted sessions**, not active-only — flagged to 🔁overseer prep.
 
+## Handoff to 🔁overseer prep (converse/entity layer — NOT this layer)
+
+These are owned by the overseer entity/converse layers (`toolProjection.ts`, tool-arg
+schemas in `shared/src/overseerEntity.ts`, converse system prompt) which stack **above**
+this ingest layer. Recorded here so they survive the conversation; do not edit from the
+ingest worktree.
+
+### H1 — pull session context when discussing an item (operator-approved 2026-07-31)
+When the operator converses about a specific inbox item, the brain should first pull that
+item's session backlog (`query_events { sessionId }`, and optionally `query_inbox { sessionId }`)
+so it has the history of *other* recorded activity in that session as salience. One-line
+system-prompt instruction; the capability already exists (`query_events` accepts `sessionId`).
+
+### H2 — context-size-sensitive output option on ALL context tools (recurring operator requirement)
+The brain-facing projection (`projectToolResultForBrain`) must be **budget-aware and
+caller-controllable**, uniformly:
+- **Gap A (coverage):** it currently thins only `query_events`, `query_inbox`,
+  `list_active_workers`, `query_open_loops`. `get_session_state`, `get_session_recent_output`
+  (raw terminal chunks — token bomb), and `get_worker_health` fall through **raw**. Extend
+  projection to cover them (and any future `query_session_actions`).
+- **Gap B (no knob):** thinning is path-binary (lean on brain path / full on HTTP), not a
+  caller option. Add `detail: 'lean' | 'full'` (default `'lean'`) to every context tool's
+  arg schema, threaded into `projectToolResultForBrain(tool, result, detail)`. Lean = the
+  current token-cheap shape; full = richer fields, still bounded by `limit`. Goal: max signal
+  for min tokens by default, escalate deliberately per-call.
+
+### H3 — operator-disposition-history tool (deferred, per operator)
+`inbox_operator_actions` (snooze/dismiss/resolve/done + feedback + ts) is recorded but has
+**no read tool**. Deferred until operator disposition volume justifies it (currently ~0).
+~30-line add: store query + `query_session_actions` tool schema + entity method + (H2) projection.
+
+### H4 — open-loops lens spans all non-deleted sessions
+Per the archiving reframe (F5): active-vs-archived is noise; the lens must not post-filter to
+active-only or it misses open loops in archived-but-existing sessions that still matter.
+
 ## Out of scope
 - The converse layer's priority-direction interpretation (the 27B currently calls priority-50 "highest"). Owned by 🔁overseer prep.
 - A dedicated de-emphasis inbox category (would expand the `INBOX_CATEGORIES` enum + web/converse consumers). The priority band achieves the ranking goal without that risk; noted as a future option.
