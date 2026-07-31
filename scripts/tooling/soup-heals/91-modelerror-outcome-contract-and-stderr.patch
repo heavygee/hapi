@@ -1,0 +1,201 @@
+# 91-modelerror-outcome-contract-and-stderr.patch (meta-soup 5bcf291c, 2026-07-31)
+#
+# The feat/cursor-detect-inline-model-errors + feat/cursor-model-error-bridge layers
+# were DROPPED from the manifest (owner #987), but their fingerprints survive
+# transitively via soup/cursor-model-error-fcm-bridge and the merged launcher/tests.
+# That left the ModelErrorSendOutcome contract half-applied and the launcher stderr
+# classification dropped. This backfills a COHERENT contract (the manifest note
+# "the ModelErrorSendOutcome contract it needs is backfilled by soup-heals"):
+#   - notificationTypes.ts: NotificationChannel.sendModelError -> (…, ctx?) =>
+#     Promise<ModelErrorSendOutcome>.
+#   - push / telegram / fcm channels: 3-arg signature returning the outcome
+#     (nativeGate defer -> 'unavailable'; delivered -> 'delivered'; none -> 'failed').
+#   - cursorAcpRemoteLauncher.ts: restore dropped @hapi/protocol + cursorModelErrorBridge
+#     imports and the typed-stderr -> mapAcpStderrToFailure -> recordModelError path
+#     (fixes "records modelError for typed rate_limit stderr" launcher test).
+# The outcome return is currently ignored by notificationHub (dead-but-harmless);
+# adopting it is less invasive than excising the leaked tests. Revisit if #987 lands.
+diff --git a/cli/src/cursor/cursorAcpRemoteLauncher.ts b/cli/src/cursor/cursorAcpRemoteLauncher.ts
+index e8986238..dc01f692 100644
+--- a/cli/src/cursor/cursorAcpRemoteLauncher.ts
++++ b/cli/src/cursor/cursorAcpRemoteLauncher.ts
+@@ -48,6 +48,20 @@ import {
+     installCursorNotifyRuleOverlay,
+     type CursorNotifyRuleOverlay
+ } from './utils/cursorNotifyRuleOverlay';
++import {
++    RPC_METHODS,
++    classifyAcpRpcRejection,
++    classifyCursorAgentMessage,
++    isCompletionClaim,
++    mapAcpStderrToFailure,
++    type CursorAgentStreamFailure
++} from '@hapi/protocol';
++import {
++    buildModelErrorBridgePrompt,
++    canBridgeModelError,
++    truncateLastUserMessage
++} from './cursorModelErrorBridge';
++import { getAutoBridgeTransientModelErrors } from './cursorModelErrorBridgePrefs';
+ 
+ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
+     private readonly session: CursorSession;
+@@ -521,6 +535,15 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
+                 session.sendAgentMessage(converted);
+             }
+             messageBuffer.addMessage(error.message, 'status');
++            // STRUCTURAL signal: route typed stderr into the modelError pipeline
++            // (rate_limited / quota_exhausted / auth_failed / model_not_found)
++            // without text matching. Generic `unknown` stderr stays status-only —
++            // ACP treats stderr as logging, and the transport labels any
++            // "error"/"failed"/"exception" line as unknown.
++            const failure = mapAcpStderrToFailure(error);
++            if (failure) {
++                this.recordModelError(failure);
++            }
+         });
+     }
+ 
+diff --git a/hub/src/fcm/fcmNotificationChannel.ts b/hub/src/fcm/fcmNotificationChannel.ts
+index b6fa303e..ae3fefac 100644
+--- a/hub/src/fcm/fcmNotificationChannel.ts
++++ b/hub/src/fcm/fcmNotificationChannel.ts
+@@ -1,5 +1,5 @@
+ import type { Session } from '../sync/syncEngine'
+-import type { ModelErrorNotification, NotificationChannel, TaskNotification } from '../notifications/notificationTypes'
++import type { ModelErrorNotification, ModelErrorSendOutcome, NotificationChannel, TaskNotification } from '../notifications/notificationTypes'
+ import type { NotificationSendContext } from '../notifications/notificationSendContext'
+ import { formatModelErrorBody, formatModelErrorTitle } from '../notifications/modelErrorCopy'
+ import { getAgentName, getSessionName } from '../notifications/sessionInfo'
+@@ -262,9 +262,9 @@ export class FcmNotificationChannel implements NotificationChannel {
+         session: Session,
+         notification: ModelErrorNotification,
+         ctx?: NotificationSendContext
+-    ): Promise<void> {
++    ): Promise<ModelErrorSendOutcome> {
+         if (!session.active) {
+-            return
++            return 'unavailable'
+         }
+ 
+         const agentName = getAgentName(session)
+@@ -285,6 +285,7 @@ export class FcmNotificationChannel implements NotificationChannel {
+         })
+ 
+         await this.deliver(session, payload, ctx)
++        return 'delivered'
+     }
+ 
+     private buildPayload(input: {
+diff --git a/hub/src/notifications/notificationTypes.ts b/hub/src/notifications/notificationTypes.ts
+index 8338f018..080a79bf 100644
+--- a/hub/src/notifications/notificationTypes.ts
++++ b/hub/src/notifications/notificationTypes.ts
+@@ -40,7 +40,11 @@ export type NotificationChannel = {
+      * pings (matches sendSessionCompletion's pattern). Wire this when
+      * the channel can render a higher-urgency error variant.
+      */
+-    sendModelError?: (session: Session, notification: ModelErrorNotification) => Promise<void>
++    sendModelError?: (
++        session: Session,
++        notification: ModelErrorNotification,
++        ctx?: NotificationSendContext
++    ) => Promise<ModelErrorSendOutcome>
+ }
+ 
+ export type NotificationHubOptions = {
+diff --git a/hub/src/push/pushNotificationChannel.ts b/hub/src/push/pushNotificationChannel.ts
+index d71f988f..b825ac01 100644
+--- a/hub/src/push/pushNotificationChannel.ts
++++ b/hub/src/push/pushNotificationChannel.ts
+@@ -1,6 +1,7 @@
+ import type { Session } from '../sync/syncEngine'
+ import type {
+     ModelErrorNotification,
++    ModelErrorSendOutcome,
+     NotificationChannel,
+     TaskNotification
+ } from '../notifications/notificationTypes'
+@@ -140,9 +141,17 @@ export class PushNotificationChannel implements NotificationChannel {
+         await this.pushService.sendToNamespace(session.namespace, payload)
+     }
+ 
+-    async sendModelError(session: Session, notification: ModelErrorNotification): Promise<void> {
++    async sendModelError(
++        session: Session,
++        notification: ModelErrorNotification,
++        ctx?: NotificationSendContext
++    ): Promise<ModelErrorSendOutcome> {
++        // FCM already delivered this dispatch — don't double-ping via web push.
++        if (ctx?.nativeGate?.sent) {
++            return 'unavailable'
++        }
+         if (!session.active) {
+-            return
++            return 'unavailable'
+         }
+ 
+         const agentName = getAgentName(session)
+@@ -172,6 +181,7 @@ export class PushNotificationChannel implements NotificationChannel {
+         // a system-tray ping. The web banner + pulsing-dot already
+         // cover the foreground case.
+         await this.pushService.sendToNamespace(session.namespace, payload)
++        return 'delivered'
+     }
+ 
+     private buildSessionPath(sessionId: string): string {
+diff --git a/hub/src/telegram/bot.ts b/hub/src/telegram/bot.ts
+index 001bd646..a99d44b1 100644
+--- a/hub/src/telegram/bot.ts
++++ b/hub/src/telegram/bot.ts
+@@ -12,9 +12,11 @@ import { formatReadyNotification, formatSessionNotification, createNotificationK
+ import { getAgentName, getSessionName } from '../notifications/sessionInfo'
+ import type {
+     ModelErrorNotification,
++    ModelErrorSendOutcome,
+     NotificationChannel,
+     TaskNotification
+ } from '../notifications/notificationTypes'
++import type { NotificationSendContext } from '../notifications/notificationSendContext'
+ import { formatModelErrorBody, formatModelErrorTitle } from '../notifications/modelErrorCopy'
+ import type { Store } from '../store'
+ 
+@@ -269,9 +271,13 @@ export class HappyBot implements NotificationChannel {
+         }
+     }
+ 
+-    async sendModelError(session: Session, notification: ModelErrorNotification): Promise<void> {
++    async sendModelError(
++        session: Session,
++        notification: ModelErrorNotification,
++        _ctx?: NotificationSendContext
++    ): Promise<ModelErrorSendOutcome> {
+         if (!session.active) {
+-            return
++            return 'unavailable'
+         }
+ 
+         const agentName = getAgentName(session)
+@@ -286,18 +292,21 @@ export class HappyBot implements NotificationChannel {
+ 
+         const chatIds = this.getBoundChatIds(session.namespace)
+         if (chatIds.length === 0) {
+-            return
++            return 'unavailable'
+         }
+ 
++        let delivered = 0
+         for (const chatId of chatIds) {
+             try {
+                 await this.bot.api.sendMessage(chatId, text, {
+                     reply_markup: keyboard
+                 })
++                delivered++
+             } catch (error) {
+                 console.error(`[HAPIBot] Failed to send model-error notification to chat ${chatId}:`, error)
+             }
+         }
++        return delivered > 0 ? 'delivered' : 'failed'
+     }
+ 
+     async sendTaskNotification(session: Session, notification: TaskNotification): Promise<void> {
