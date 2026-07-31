@@ -1,0 +1,81 @@
+# 89-router-shell-tour-single-toolbar.patch
+#
+# feat/fue-app-shell-onboarding added a SECOND inline toolbar (refresh/browse/
+# settings/new + FueDot tour dots + FueCallout) in web/src/router.tsx. The newer
+# upstream base moved the real toolbar into <SessionList headerActions>, so the
+# soup merge kept BOTH -> the double-toolbar bug (duplicate settings/refresh/
+# browse/new buttons the operator saw on :3006).
+#
+# rerere resolves the conflict region by dropping fue's inline toolbar (take
+# HEAD's flex wrapper). That leaves the onboarding tour refs/vars (287-306)
+# defined-but-unused (typecheck fail) and the tour non-functional. This heal
+# folds the tour INTO the single headerActions toolbar: ref+relative+FueDot on
+# the browse/settings/new buttons, and re-adds the FueCallout after SessionList.
+# Net: ONE toolbar, tour intact.
+diff --git a/web/src/router.tsx b/web/src/router.tsx
+index 8239fa5..52f282a 100644
+--- a/web/src/router.tsx
++++ b/web/src/router.tsx
+@@ -787,28 +787,40 @@ function SessionsPage() {
+                                     <RefreshIcon className={`h-5 w-5 ${isLoading ? 'animate-spin' : ''}`} />
+                                 </button>
+                                 <button
++                                    ref={tourBrowseRef}
+                                     type="button"
+                                     onClick={() => navigate({ to: '/browse' })}
+-                                    className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
++                                    className="relative p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
+                                     title={t('browse.nav')}
+                                 >
+                                     <FolderOpenIcon className="h-5 w-5" />
++                                    {visibleTourStep === 'browse' ? (
++                                        <FueDot pulsing ariaLabel={t('fue.newFeatureDot')} />
++                                    ) : null}
+                                 </button>
+                                 <button
++                                    ref={tourSettingsRef}
+                                     type="button"
+                                     onClick={() => navigate({ to: '/settings' })}
+-                                    className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
++                                    className="relative p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
+                                     title={t('settings.title')}
+                                 >
+                                     <SettingsIcon className="h-5 w-5" />
++                                    {visibleTourStep === 'settings' ? (
++                                        <FueDot pulsing ariaLabel={t('fue.newFeatureDot')} />
++                                    ) : null}
+                                 </button>
+                                 <button
++                                    ref={tourNewSessionRef}
+                                     type="button"
+                                     onClick={() => navigate({ to: '/sessions/new' })}
+-                                    className="session-list-new-button flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-link)] transition-colors"
++                                    className="session-list-new-button relative flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-link)] transition-colors"
+                                     title={t('sessions.new')}
+                                 >
+                                     <PlusIcon className="h-5 w-5" />
++                                    {visibleTourStep === 'new-session' ? (
++                                        <FueDot pulsing ariaLabel={t('fue.newFeatureDot')} />
++                                    ) : null}
+                                 </button>
+                             </div>
+                         )}
+@@ -816,6 +828,18 @@ function SessionsPage() {
+                         machineLabelsById={machineLabelsById}
+                         machinesById={machinesById}
+                     />
++                    {visibleTourStep ? (
++                        <FueCallout
++                            title={tourStepCopy[visibleTourStep].title}
++                            body={tourStepCopy[visibleTourStep].body}
++                            anchorRef={tourStepRef[visibleTourStep]}
++                            onDismiss={tour.next}
++                            dismissLabel={tour.isLastStep ? t('onboarding.tour.finish') : t('onboarding.tour.next')}
++                            closeAriaLabel={t('fue.closeAriaLabel')}
++                            onSecondaryAction={tour.skipAll}
++                            secondaryActionLabel={t('onboarding.tour.skip')}
++                        />
++                    ) : null}
+                 </div>
+             </div>
+ 
