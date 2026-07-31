@@ -627,8 +627,8 @@ function SessionPage() {
     const getAutocompleteSuggestions = useCallback(async (query: string) => {
         if (query.startsWith('@')) {
             const search = query.slice(1)
-            // v1: plain-text expansion (same grammar as Copy reference).
-            // v2: segmented rich composer with inline session tokens (#1215).
+            // v1: plain-text expansion (same grammar as Copy reference) — #1213.
+            // v2: segmented rich composer with inline session tokens — #1215.
             // Match via sessionMatchesQuery (share/sidebar); label/insert via getSessionTitle.
             const sessionHits = matchSessionsForMention(allSessions, search, {
                 excludeId: sessionId,
@@ -645,6 +645,8 @@ function SessionPage() {
                     description: s.active
                         ? `Session · ${idPrefix} · active`
                         : `Session · ${idPrefix}`,
+                    // Rich composer atom; textarea path still inserts `text` prose.
+                    sessionMention: { id: s.id, title: title || idPrefix },
                 }
             })
 
