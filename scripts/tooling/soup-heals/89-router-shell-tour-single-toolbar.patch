@@ -6,20 +6,17 @@
 # soup merge kept BOTH -> the double-toolbar bug (duplicate settings/refresh/
 # browse/new buttons the operator saw on :3006).
 #
-# rerere resolves the conflict region by dropping the inline toolbar (take HEAD's
-# flex wrapper). feat/overseer-admin-console (#103) re-introduced the same inline
-# toolbar (this time WITH an Overseer nav button); rerere drops that inline copy
-# too. That leaves the onboarding tour refs/vars defined-but-unused (typecheck
-# fail) and the tour non-functional, and loses admin-console's Overseer entry.
-# This heal folds BOTH into the single headerActions toolbar: ref+relative+FueDot
-# on the browse/settings/new buttons, an Overseer nav button (-> /overseer)
-# between browse and settings, and re-adds the FueCallout after SessionList.
-# Net: ONE toolbar, tour intact, Overseer console reachable from the shell.
+# rerere resolves the conflict region by dropping fue's inline toolbar (take
+# HEAD's flex wrapper). That leaves the onboarding tour refs/vars (287-306)
+# defined-but-unused (typecheck fail) and the tour non-functional. This heal
+# folds the tour INTO the single headerActions toolbar: ref+relative+FueDot on
+# the browse/settings/new buttons, and re-adds the FueCallout after SessionList.
+# Net: ONE toolbar, tour intact.
 diff --git a/web/src/router.tsx b/web/src/router.tsx
-index d244cc22..bae04590 100644
+index 8239fa5..52f282a 100644
 --- a/web/src/router.tsx
 +++ b/web/src/router.tsx
-@@ -779,28 +779,48 @@ function SessionsPage() {
+@@ -787,28 +787,40 @@ function SessionsPage() {
                                      <RefreshIcon className={`h-5 w-5 ${isLoading ? 'animate-spin' : ''}`} />
                                  </button>
                                  <button
@@ -36,18 +33,10 @@ index d244cc22..bae04590 100644
 +                                    ) : null}
                                  </button>
                                  <button
-                                     type="button"
--                                    onClick={() => navigate({ to: '/settings' })}
-+                                    onClick={() => navigate({ to: '/overseer' })}
-                                     className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
-+                                    title="Overseer"
-+                                >
-+                                    <OverseerIcon className="h-5 w-5" />
-+                                </button>
-+                                <button
 +                                    ref={tourSettingsRef}
-+                                    type="button"
-+                                    onClick={() => navigate({ to: '/settings' })}
+                                     type="button"
+                                     onClick={() => navigate({ to: '/settings' })}
+-                                    className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
 +                                    className="relative p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
                                      title={t('settings.title')}
                                  >
@@ -71,7 +60,7 @@ index d244cc22..bae04590 100644
                                  </button>
                              </div>
                          )}
-@@ -808,6 +828,18 @@ function SessionsPage() {
+@@ -816,6 +828,18 @@ function SessionsPage() {
                          machineLabelsById={machineLabelsById}
                          machinesById={machinesById}
                      />
