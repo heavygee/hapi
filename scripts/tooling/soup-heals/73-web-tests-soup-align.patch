@@ -11,30 +11,6 @@ index c0642d777..58b45bf41 100644
          expect(screen.getByTestId('runner-version-skew-minimize')).toBeInTheDocument()
          expect(screen.getByTestId('runner-version-skew-dismiss')).toBeInTheDocument()
          expect(screen.getByTestId('runner-version-skew-restart-old')).toBeInTheDocument()
-diff --git a/web/src/components/SessionList.directory-action.test.tsx b/web/src/components/SessionList.directory-action.test.tsx
-index 9d0abfb72..364650c31 100644
---- a/web/src/components/SessionList.directory-action.test.tsx
-+++ b/web/src/components/SessionList.directory-action.test.tsx
-@@ -117,15 +117,15 @@ describe('SessionList directory action', () => {
- 
-         const projectHeader = screen.getByTitle('/home/ubuntu')
-         expect(projectHeader).toHaveClass('bg-[var(--app-bg)]')
--        expect(projectHeader).toHaveClass('hover:bg-[var(--app-secondary-bg)]')
--        expect(projectHeader).not.toHaveClass('hover:bg-[var(--app-subtle-bg)]')
-+        expect(projectHeader).toHaveClass('hover:bg-[var(--app-subtle-bg)]')
-+        expect(projectHeader).not.toHaveClass('hover:bg-[var(--app-secondary-bg)]')
- 
-         const listContent = projectHeader.parentElement?.parentElement
--        expect(listContent).not.toHaveClass('pt-1')
-+        expect(listContent).toHaveClass('pt-1')
- 
-         const searchInput = screen.getByPlaceholderText(/Search sessions/)
-         const searchWrapper = searchInput.parentElement?.parentElement
--        expect(searchWrapper).toHaveClass('pb-1')
-+        expect(searchWrapper).toHaveClass('pb-2')
-     })
- 
-     it('hides the directory action for sessions without path metadata', () => {
 diff --git a/web/src/components/SessionList.test.ts b/web/src/components/SessionList.test.ts
 index c2827af4d..0f30eb535 100644
 --- a/web/src/components/SessionList.test.ts
