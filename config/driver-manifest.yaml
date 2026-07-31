@@ -325,7 +325,8 @@ layers:
   # tweaks (two-axes framing + priority lower-is-higher fix). Read-only
   # entity/shared/prompt only; additive store query, no DDL / no schema-version
   # step. STACKS ON feat/overseer-text-converse (must sit immediately after it).
-  # No env change (reuses the converse OpenAI-profile env). Tip 74acbcc03.
+  # No env change (reuses the converse OpenAI-profile env). Tip 6792bea07
+  # (adds detail:'lean'|'full' knob + lean session-tool projections, H1/H2/H4).
   - branch: feat/overseer-open-loops
 
   # Overseer replay harness (thin): harness+CI+fixtures only. Tip 96c8e7bf4,
