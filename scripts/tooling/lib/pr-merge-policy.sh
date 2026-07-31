@@ -18,7 +18,7 @@ pmp_default_policy_json() {
   "schema": 1,
   "default_lane": "maintainer",
   "self_merge": {
-    "github_labels": ["low-impact", "self-merge-ok"],
+    "github_labels": ["low-impact"],
     "allow_pr_numbers": [],
     "auto": {
       "product_path_prefixes": ["cli/src/", "hub/src/", "web/src/", "shared/src/"],
@@ -137,7 +137,7 @@ pmp_classify() {
 # pmp_action_for_lane LANE → statusAction fragment for clean PRs
 pmp_action_for_lane() {
     case "$1" in
-        self_merge) echo "full green - self-merge eligible (low-impact / promoted)" ;;
+        self_merge) echo "full green - self-merge eligible (low-impact)" ;;
         *) echo "full green - wait on tiann" ;;
     esac
 }

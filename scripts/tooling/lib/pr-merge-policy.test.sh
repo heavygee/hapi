@@ -37,7 +37,7 @@ files=$'docs/guide/foo.md\ndocs/guide/bar.md'
 got="$(pmp_classify "$POL" 1 "$files" 200 50 "")"
 eq "fat docs → maintainer" "$got" $'maintainer\ttoo_large_delta:250>120'
 
-eq "action self_merge" "$(pmp_action_for_lane self_merge)" "full green - self-merge eligible (low-impact / promoted)"
+eq "action self_merge" "$(pmp_action_for_lane self_merge)" "full green - self-merge eligible (low-impact)"
 eq "action maintainer" "$(pmp_action_for_lane maintainer)" "full green - wait on tiann"
 
 echo "pr-merge-policy.test.sh: $PASS passed, $FAIL failed"

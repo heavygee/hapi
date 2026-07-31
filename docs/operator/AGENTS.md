@@ -60,7 +60,7 @@ Chip status stays **PR health only** (`✅` / `🔁` / `⚠️` / …). Merge au
 | Lane | Who merges | How you get there | Agents |
 |------|------------|-------------------|--------|
 | **A** maintainer | **@tiann** | Default for product / large PRs | Prepare only - never `gh pr merge` |
-| **B** self-merge | Operator / Meta tooling (not agents) | Auto: tests/docs-only + size caps; **or** human promote via GitHub label `low-impact` / `self-merge-ok` **or** `allow_pr_numbers` in policy | Prepare only - no auto merge yet |
+| **B** self-merge | Operator / Meta tooling (not agents) | Auto: tests/docs-only + size caps; **or** human promote via GitHub label `low-impact` **or** `allow_pr_numbers` in policy | Prepare only - no auto merge yet |
 | **C** forbidden | Nobody here | Others' PRs, direct push to `main`, settings, force-push | Hard no |
 
 **Blessing:** after heavygee self-merged test-only [#1268](https://github.com/tiann/hapi/pull/1268), @tiann replied ([comment](https://github.com/tiann/hapi/pull/1268#issuecomment-5141575753)): *"Sounds great! Thanks for helping out."* That authorizes taking **low-impact** PRs off tiann's plate - not a blank check for every green PR.
@@ -85,7 +85,7 @@ Default remains **fork-contributor discipline** for product work (PRs from `upst
 
 **What we self-permit:**
 
-- **Label management** on `tiann/hapi` issues and PRs - including applying `low-impact` / `self-merge-ok` for lane B promote. Daily taxonomy owner: HAPI session **Issue labelling (tiann/hapi)** (`f3c41205…`); see `docs/plans/2026-07-31-pr-merge-lanes.md` § Label ownership.
+- **Label management** on `tiann/hapi` issues and PRs - including applying `low-impact` for lane B promote. Daily taxonomy owner: HAPI session **Issue labelling (tiann/hapi)** (`f3c41205…`); see `docs/plans/2026-07-31-pr-merge-lanes.md` § Label ownership.
 - **Lane B self-merge** of **our** PRs when policy says eligible (operator/Meta; agents prepare-only until merge automation is explicitly enabled)
 - **Pushing to PR branches via `maintainerCanModify`** *only when* (a) the PR has `maintainerCanModify: true`, (b) we have coordinated with the PR author first (comment + reasonable response window), and (c) we are addressing a clear stall (conflicts, no author iteration, no maintainer review). Stays attributed: author's commits keep their authorship; our rebase / fix commits add `Co-authored-by:` lines
 

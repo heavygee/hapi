@@ -38,13 +38,14 @@ Meta CLI still never runs `gh pr merge`.
 
 ## Label ownership
 
-Repo labels `low-impact` and `self-merge-ok` on `tiann/hapi` are part of the issue/PR labelling taxonomy.
+One promote label: **`low-impact`** on `tiann/hapi`.
 
-**Owner session:** [Issue labelling (tiann/hapi)](/sessions/f3c41205-ba17-465e-8964-8e46f190f208) (`f3c41205-ba17-465e-8964-8e46f190f208`) - daily ~09:00 UTC sweep already labels open issues; extend to PRs for these two.
+We dropped `self-merge-ok` - it was on-the-nose and redundant. Lane B = `low-impact` (or auto tests/docs) **and** chip `✅` (CI/bot/threads). The health chip already gates "ok to merge"; a second "please merge me" label added no signal.
+
+**Owner session:** [Issue labelling (tiann/hapi)](/sessions/f3c41205-ba17-465e-8964-8e46f190f208) (`f3c41205-ba17-465e-8964-8e46f190f208`) - daily ~09:00 UTC sweep; apply `low-impact` on focused heavygee PRs by judgment.
 
 | Label | Apply when | Do not |
 |-------|------------|--------|
-| `low-impact` | Focused PR (or issue whose fix PR will be) with small blast radius - product OK if scoped; human judgment | Auto-slap on every "small" bug; never as sole size heuristic |
-| `self-merge-ok` | Explicit promote to lane B after green CI + clean bot (or operator ask) | Apply to others' PRs; apply while ⚠️ / Majors open |
+| `low-impact` | Focused PR (or issue whose fix PR will be) with small blast radius - product OK if scoped; human judgment | Auto-slap on every "small" bug; never as sole size heuristic; never on others' / `community-pr` without ask |
 
-Policy reads **PR** labels via `pr-merge-policy.sh`. Issue-only labels are advisory until the PR exists.
+Policy reads **PR** labels via `pr-merge-policy.sh`. Issue-only labels are advisory until the PR exists. Allowlist (`allow_pr_numbers`) remains the escape hatch if you want B without the public label.

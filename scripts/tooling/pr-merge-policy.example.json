@@ -2,7 +2,7 @@
   "schema": 1,
   "default_lane": "maintainer",
   "self_merge": {
-    "github_labels": ["low-impact", "self-merge-ok"],
+    "github_labels": ["low-impact"],
     "allow_pr_numbers": [],
     "auto": {
       "product_path_prefixes": ["cli/src/", "hub/src/", "web/src/", "shared/src/"],
@@ -11,5 +11,5 @@
       "max_delta_lines": 120
     }
   },
-  "_comment": "Copy to ~/.hapi/pr-merge-policy.json. Chip status stays health-only; this overlay picks lane A (maintainer) vs B (self-merge). Auto-B requires zero product paths + size caps. Promote focused runtime fixes via label or allow_pr_numbers (e.g. 1270)."
+  "_comment": "Copy to ~/.hapi/pr-merge-policy.json. Chip status stays health-only; this overlay picks lane A (maintainer) vs B (self-merge). Auto-B requires zero product paths + size caps. Promote focused runtime fixes via low-impact label or allow_pr_numbers. self-merge-ok was retired as redundant with chip green."
 }
