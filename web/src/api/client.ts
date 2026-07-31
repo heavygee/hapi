@@ -49,6 +49,7 @@ import type {
     OpencodeReasoningEffortResponse,
     QueuedStateResponse,
     ReopenSessionResponse,
+    SqliteStorageUsageResponse,
     UploadFileResponse
 } from '@hapi/protocol/apiTypes'
 import type { AgentFlavor } from '@hapi/protocol'
@@ -660,6 +661,10 @@ export class ApiClient {
             method: 'PATCH',
             body: JSON.stringify({ displayName })
         })
+    }
+
+    async getSqliteStorageUsage(): Promise<SqliteStorageUsageResponse> {
+        return await this.request<SqliteStorageUsageResponse>('/api/storage/sqlite')
     }
 
     async listMachineDirectory(

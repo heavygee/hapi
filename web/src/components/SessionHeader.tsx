@@ -1,4 +1,4 @@
-import { useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { Session } from '@/types/api'
 import type { ApiClient } from '@/api/client'
@@ -19,6 +19,28 @@ import { getSessionTitle } from '@/lib/sessionTitle'
 import { useToast } from '@/lib/toast-context'
 import { queryKeys } from '@/lib/query-keys'
 import { markCodexSessionsImported } from '@/lib/codexImportedSessions'
+import { useMachines } from '@/hooks/queries/useMachines'
+import { useMachineLabels } from '@/hooks/useMachineLabels'
+import { formatAbsoluteDateTime, formatRelativeTime } from '@/lib/relativeTime'
+
+/** Same preference order as session-list chips: display label → host → short id. */
+export function resolveSessionHeaderMachineLabel(
+    session: Session,
+    labelsById: Record<string, string>
+): string | null {
+    const machineId = session.metadata?.machineId?.trim() || null
+    if (machineId && labelsById[machineId]) {
+        return labelsById[machineId]
+    }
+    const host = session.metadata?.host?.trim()
+    if (host) {
+        return host
+    }
+    if (machineId) {
+        return machineId.slice(0, 8)
+    }
+    return null
+}
 
 function FilesIcon(props: { className?: string }) {
     return (
@@ -119,6 +141,27 @@ export function SessionHeader(props: {
     const codexSessionId = session.metadata?.flavor === 'codex'
         ? session.metadata.codexSessionId?.trim() || null
         : null
+    const { machines } = useMachines(api, Boolean(api))
+    const machineLabelsById = useMachineLabels(machines)
+    const machineLabel = useMemo(
+        () => resolveSessionHeaderMachineLabel(session, machineLabelsById),
+        [session, machineLabelsById]
+    )
+    const lastActiveAt = session.activeAt || session.updatedAt || session.createdAt
+    // Relative labels cross minute/hour boundaries without new patches; tick
+    // once a minute so "just now" does not freeze forever on inactive sessions.
+    const [relativeTimeTick, setRelativeTimeTick] = useState(0)
+    useEffect(() => {
+        const timer = window.setInterval(() => {
+            setRelativeTimeTick((tick) => tick + 1)
+        }, 60_000)
+        return () => window.clearInterval(timer)
+    }, [])
+    const ageLabel = useMemo(
+        () => (lastActiveAt > 0 ? formatRelativeTime(lastActiveAt, t) : null),
+        [lastActiveAt, t, relativeTimeTick]
+    )
+    const ageAbsolute = lastActiveAt > 0 ? formatAbsoluteDateTime(lastActiveAt) : null
 
     const [menuOpen, setMenuOpen] = useState(false)
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
@@ -248,6 +291,16 @@ export function SessionHeader(props: {
                                 <AgentFlavorIcon flavor={session.metadata?.flavor} className="h-3.5 w-3.5 shrink-0 -translate-y-px" />
                                 {session.metadata?.flavor?.trim() || 'unknown'}
                             </span>
+                            {machineLabel ? (
+                                <span data-testid="session-header-machine" className="truncate max-w-[12rem]" title={machineLabel}>
+                                    {t('session.item.machine')}: {machineLabel}
+                                </span>
+                            ) : null}
+                            {ageLabel ? (
+                                <span data-testid="session-header-age" title={ageAbsolute ?? undefined}>
+                                    {ageLabel}
+                                </span>
+                            ) : null}
                             {modelLabel ? (
                                 <span>
                                     {t(modelLabel.key)}: {modelLabel.value}

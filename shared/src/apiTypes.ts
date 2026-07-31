@@ -771,3 +771,11 @@ export type SlashCommandsResponse = {
     commands?: SlashCommand[]
     error?: string
 }
+
+export type SqliteStorageUsageResponse = {
+    path: string
+    databaseBytes: number
+    walBytes: number
+    shmBytes: number
+    totalBytes: number
+}

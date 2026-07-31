@@ -63,6 +63,7 @@ import SettingsVoiceVoicesPage from '@/routes/settings/voice-voices'
 import SettingsVoiceAdvancedPage from '@/routes/settings/voice-advanced'
 import SettingsMachinesPage from '@/routes/settings/machines'
 import SettingsAboutPage from '@/routes/settings/about'
+import SettingsStoragePage from '@/routes/settings/storage'
 import SharePage from '@/routes/share'
 import { setSharePendingTransfer } from '@/lib/sharePendingState'
 import { deleteShareTransfer } from '@/lib/shareTransfer'
@@ -103,28 +104,6 @@ function PlusIcon(props: { className?: string }) {
         >
             <line x1="12" y1="5" x2="12" y2="19" />
             <line x1="5" y1="12" x2="19" y2="12" />
-        </svg>
-    )
-}
-
-function CodexImportIcon(props: { className?: string }) {
-    return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={props.className}
-        >
-            {/* 中文注释：导入图标使用“下载进托盘”样式，与刷新按钮的循环箭头区分开，避免两个相邻按钮看起来一样。 */}
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" y1="15" x2="12" y2="3" />
         </svg>
     )
 }
@@ -191,7 +170,6 @@ function SettingsIcon(props: { className?: string }) {
 function SessionsPage() {
     const { api } = useAppContext()
     const navigate = useNavigate()
-    const queryClient = useQueryClient()
     const pathname = useLocation({ select: location => location.pathname })
     const matchRoute = useMatchRoute()
     const { t } = useTranslation()
@@ -901,8 +879,9 @@ function SessionPage() {
         isLoadingMore: messagesLoadingMore,
         hasMore: messagesHasMore,
         loadMore: loadMoreMessages,
+        cancelLoadMore: cancelLoadMoreMessages,
         refetch: refetchMessages,
-        unseenCount,
+        viewMode: messagesViewMode,
         messagesVersion,
         historyVersion,
         setViewMode,
@@ -1159,8 +1138,8 @@ function SessionPage() {
     const getAutocompleteSuggestions = useCallback(async (query: string) => {
         if (query.startsWith('@')) {
             const search = query.slice(1)
-            // v1: plain-text expansion (same grammar as Copy reference).
-            // v2: segmented rich composer with inline session tokens (#1215).
+            // v1: plain-text expansion (same grammar as Copy reference) — #1213.
+            // v2: segmented rich composer with inline session tokens — #1215.
             // Match via sessionMatchesQuery (share/sidebar); label/insert via getSessionTitle.
             const sessionHits = matchSessionsForMention(allSessions, search, {
                 excludeId: sessionId,
@@ -1177,6 +1156,8 @@ function SessionPage() {
                     description: s.active
                         ? `Session · ${idPrefix} · active`
                         : `Session · ${idPrefix}`,
+                    // Rich composer atom; textarea path still inserts `text` prose.
+                    sessionMention: { id: s.id, title: title || idPrefix },
                 }
             })
 
@@ -1269,12 +1250,13 @@ function SessionPage() {
             isSyncingTail={messagesSyncingTail}
             isLoadingMoreMessages={messagesLoadingMore}
             isSending={isSending}
-            unseenCount={unseenCount}
+            viewMode={messagesViewMode}
             messagesVersion={messagesVersion}
             historyVersion={historyVersion}
             onBack={goBack}
             onRefresh={refreshSelectedSession}
             onLoadMore={loadMoreMessages}
+            onCancelLoadMore={cancelLoadMoreMessages}
             onSend={sendMessage}
             onViewModeChange={setViewMode}
             onRetryMessage={retryMessage}
@@ -1480,15 +1462,21 @@ const sessionDetailRoute = createRoute({
 const sessionFilesRoute = createRoute({
     getParentRoute: () => sessionDetailRoute,
     path: 'files',
-    validateSearch: (search: Record<string, unknown>): { tab?: 'changes' | 'directories' } => {
+    validateSearch: (search: Record<string, unknown>): { tab?: 'changes' | 'directories'; query?: string } => {
         const tabValue = typeof search.tab === 'string' ? search.tab : undefined
         const tab = tabValue === 'directories'
             ? 'directories'
             : tabValue === 'changes'
                 ? 'changes'
                 : undefined
+        const query = typeof search.query === 'string' && search.query.length > 0
+            ? search.query
+            : undefined
 
-        return tab ? { tab } : {}
+        return {
+            ...(tab ? { tab } : {}),
+            ...(query ? { query } : {}),
+        }
     },
     component: FilesPage,
 })
@@ -1503,6 +1491,7 @@ type SessionFileSearch = {
     path: string
     staged?: boolean
     tab?: 'changes' | 'directories'
+    query?: string
 }
 
 const sessionFileRoute = createRoute({
@@ -1522,6 +1511,9 @@ const sessionFileRoute = createRoute({
             : tabValue === 'changes'
                 ? 'changes'
                 : undefined
+        const query = typeof search.query === 'string' && search.query.length > 0
+            ? search.query
+            : undefined
 
         const result: SessionFileSearch = { path }
         if (staged !== undefined) {
@@ -1529,6 +1521,9 @@ const sessionFileRoute = createRoute({
         }
         if (tab !== undefined) {
             result.tab = tab
+        }
+        if (query !== undefined) {
+            result.query = query
         }
         return result
     },
@@ -1636,6 +1631,12 @@ const settingsAboutRoute = createRoute({
     component: SettingsAboutPage,
 })
 
+const settingsStorageRoute = createRoute({
+    getParentRoute: () => settingsRoute,
+    path: 'storage',
+    component: SettingsStoragePage,
+})
+
 // Web Share Target landing route. Service worker (`web/src/sw.ts`)
 // intercepts the manifest's `POST /share` and 303-redirects here with an
 // IDB transfer id. `error=ingest` is set when the SW failed to write IDB.
@@ -1676,6 +1677,7 @@ export const routeTree = rootRoute.addChildren([
         settingsVoiceVoicesRoute,
         settingsVoiceAdvancedRoute,
         settingsMachinesRoute,
+        settingsStorageRoute,
         settingsAboutRoute,
     ]),
     shareRoute,
