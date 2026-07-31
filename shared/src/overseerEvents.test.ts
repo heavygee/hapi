@@ -8,12 +8,15 @@ import {
     deriveSessionDisplayName,
     deriveSessionProject,
     extractHttpUrls,
+    isNoOpAction,
     mapNotifyStatusToEventType,
     buildEventSummaryFromNotify,
     detectEmptyHapiEventsSentinel,
     mergeEventPayloadWithSession,
     normalizeUrlIdempotencyKey,
+    openLoopBucket,
     OVERSEER_EVENT_TYPES,
+    OVERSEER_OPEN_LOOP_EVENT_TYPES,
     HAPI_EVENTS_BEGIN,
     HAPI_EVENTS_END
 } from './overseerEvents'
@@ -111,5 +114,32 @@ describe('overseerEvents mapping', () => {
 
     test('normalizeUrlIdempotencyKey drops hash and lowercases host', () => {
         expect(normalizeUrlIdempotencyKey('https://Example.COM/path/#frag')).toBe('https://example.com/path')
+    })
+
+    test('isNoOpAction treats placeholders and empties as no action', () => {
+        for (const noop of ['', '  ', 'none', 'None.', 'N/A', 'complete', 'Done', 'nothing', 'no action', 'optional', '-', '—', 'tbd']) {
+            expect(isNoOpAction(noop)).toBe(true)
+        }
+        expect(isNoOpAction(null)).toBe(true)
+        expect(isNoOpAction(undefined)).toBe(true)
+    })
+
+    test('isNoOpAction keeps a real next step', () => {
+        expect(isNoOpAction('Merge PR #99')).toBe(false)
+        expect(isNoOpAction('choose deploy target')).toBe(false)
+    })
+
+    test('openLoopBucket splits waiting-on-you from half-finished', () => {
+        expect(openLoopBucket('needs_decision')).toBe('waiting_on_you')
+        expect(openLoopBucket('needs_review')).toBe('waiting_on_you')
+        expect(openLoopBucket('blocked')).toBe('half_finished')
+        expect(openLoopBucket('failed')).toBe('half_finished')
+        expect(openLoopBucket('stale')).toBe('half_finished')
+    })
+
+    test('OVERSEER_OPEN_LOOP_EVENT_TYPES excludes completed and progress', () => {
+        expect(OVERSEER_OPEN_LOOP_EVENT_TYPES).not.toContain('completed')
+        expect(OVERSEER_OPEN_LOOP_EVENT_TYPES).not.toContain('progress')
+        expect(OVERSEER_OPEN_LOOP_EVENT_TYPES).toContain('needs_decision')
     })
 })
