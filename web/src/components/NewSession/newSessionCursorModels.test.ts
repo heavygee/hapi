@@ -117,7 +117,7 @@ describe('flat vs dual cursor model pickers', () => {
         const options = buildNewSessionCursorModelOptions(picker)
         expect(picker.mode).toBe('flat')
         expect(options).toEqual([
-            { value: 'auto', label: 'Default' },
+            { value: 'auto', label: 'Auto' },
             {
                 value: 'claude-opus-4-7[thinking=true,context=300k,effort=xhigh,fast=false]',
                 label: 'claude-opus-4-7 · thinking=true,context=300k,effort=xhigh,fast=false'
@@ -130,7 +130,7 @@ describe('flat vs dual cursor model pickers', () => {
         const picker = buildNewSessionCursorPickerState([...acpModels], 'auto')
         expect(picker.mode).toBe('dual')
         expect(buildNewSessionCursorModelOptions(picker)).toEqual([
-            { value: 'auto', label: 'Default' },
+            { value: 'auto', label: 'Auto' },
             { value: 'composer-2.5', label: 'composer-2.5' },
         ])
     })
@@ -175,7 +175,7 @@ describe('probe slug catalog (New Session cold start)', () => {
         const picker = buildNewSessionCursorPickerState(probeOnly, 'composer-2.5')
         expect(picker.mode).toBe('flat')
         expect(picker.modelOptions).toEqual([
-            { value: 'auto', label: 'Default' },
+            { value: 'auto', label: 'Auto' },
             { value: 'composer-2.5', label: 'composer-2.5' },
         ])
         expect(picker.effortOptions).toEqual([])
@@ -193,7 +193,7 @@ describe('probe slug catalog (New Session cold start)', () => {
             { modelId: 'gpt-5.5-high-fast', name: 'GPT-5.5 High Fast' },
         ]
         const picker = buildNewSessionCursorPickerState(skuOnly, 'composer-2.5-fast')
-        expect(picker.modelOptions).toEqual([{ value: 'auto', label: 'Default' }])
+        expect(picker.modelOptions).toEqual([{ value: 'auto', label: 'Auto' }])
         expect(shouldShowCursorModelsUnavailable({
             agent: 'cursor',
             isLoading: false,
@@ -207,7 +207,7 @@ describe('new session cursor model options', () => {
     it('maps base options with auto default and raw variant labels', () => {
         const picker = buildNewSessionCursorPickerState([...acpModels], 'composer-2.5[fast=true]')
         expect(buildNewSessionCursorModelOptions(picker)).toEqual([
-            { value: 'auto', label: 'Default' },
+            { value: 'auto', label: 'Auto' },
             { value: 'composer-2.5', label: 'composer-2.5' },
         ])
         expect(buildNewSessionCursorEffortOptions(picker)).toEqual([
