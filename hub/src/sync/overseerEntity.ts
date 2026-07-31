@@ -9,23 +9,29 @@
  */
 
 import {
+    OVERSEER_LOOP_CLOSED_EVENT_TYPE,
     OVERSEER_STALE_SILENCE_MS,
     buildOverseerConvoTurnEventInput,
     buildOverseerIdentity,
     buildOverseerSystemPrompt,
     deriveObservedWorkerState,
     inferWorkerState,
+    isNoOpAction,
     mapEventTypeToWorkerState,
+    openLoopBucket,
     type OverseerActiveWorker,
     type OverseerConvoTurnInput,
     type OverseerExplainPriority,
     type OverseerIdentity,
+    type OverseerOpenLoop,
+    type OverseerOpenLoopsResult,
     type OverseerRecentOutputChunk,
     type OverseerSessionStateView,
     type OverseerWorkerHealth,
     type OverseerWorkerState,
     type QueryEventsArgs,
     type QueryInboxArgs,
+    type QueryOpenLoopsArgs,
     type ListActiveWorkersArgs
 } from '@hapi/protocol'
 import { buildOverseerSessionIdentity } from '@hapi/protocol'
@@ -43,6 +49,10 @@ export type OverseerEntityDeps = {
     getSessions: () => Session[]
     now?: () => number
     staleSilenceMs?: number
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function deriveIdentity(session: Session): { name: string | null; project: string | null; flavor: string | null } {
@@ -332,6 +342,80 @@ export class OverseerEntity {
         return roster.slice(0, limit)
     }
 
+    // --- Tool 8: query_open_loops -------------------------------------------
+
+    /**
+     * The "what am I forgetting?" lens (neglect axis, not urgency). For each
+     * session takes its latest status-bearing worker event; a loop is OPEN when
+     * that latest event is not `completed`. No-op `action` placeholders are
+     * nulled (status≠done is the strong filter; action is only a tiebreak).
+     * Presents "Waiting on You" (operator owes a decision) before half-finished
+     * work, each coldest-first.
+     */
+    queryOpenLoops(args: QueryOpenLoopsArgs = {}): OverseerOpenLoopsResult {
+        const now = this.now()
+        const minAgeMs = args.minAgeMs ?? 0
+        const limit = Math.min(Math.max(args.limit ?? 50, 1), 100)
+
+        const loops: OverseerOpenLoop[] = []
+        for (const event of this.events.latestWorkerStatusPerSession()) {
+            if (event.eventType === OVERSEER_LOOP_CLOSED_EVENT_TYPE) continue // loop closed by a later done turn
+
+            const payload = this.parseEventPayload(event.payloadJson)
+            const notify = payload && isObjectRecord(payload.notify_summary)
+                ? payload.notify_summary as { status?: unknown; action?: unknown }
+                : null
+            const status = typeof notify?.status === 'string' && notify.status.length > 0
+                ? notify.status
+                : event.eventType
+            const rawAction = typeof notify?.action === 'string'
+                ? notify.action
+                : typeof payload?.suggested_action === 'string'
+                    ? payload.suggested_action
+                    : null
+            const action = rawAction && !isNoOpAction(rawAction) ? rawAction.trim() : null
+
+            const identity = this.openLoopIdentity(event)
+            if (args.project && identity.project !== args.project) continue
+
+            const ageMs = Math.max(0, now - event.ts)
+            if (ageMs < minAgeMs) continue
+
+            const bucket = openLoopBucket(event.eventType)
+            if (args.bucket && bucket !== args.bucket) continue
+
+            loops.push({
+                sessionId: event.relatedSessionId ?? '',
+                name: identity.name,
+                project: identity.project,
+                flavor: identity.flavor,
+                status,
+                eventType: event.eventType,
+                eventId: event.id,
+                action,
+                summary: event.summary,
+                lastTs: event.ts,
+                ageMs,
+                ageDays: Math.round((ageMs / 86_400_000) * 10) / 10,
+                bucket
+            })
+        }
+
+        // Waiting-on-You first, then half-finished; each coldest (oldest) first.
+        const bucketRank = (b: OverseerOpenLoop['bucket']): number => (b === 'waiting_on_you' ? 0 : 1)
+        loops.sort((a, b) => bucketRank(a.bucket) - bucketRank(b.bucket) || b.ageMs - a.ageMs)
+
+        const waitingOnYou = loops.filter((l) => l.bucket === 'waiting_on_you').length
+        return {
+            openLoops: loops.slice(0, limit),
+            counts: {
+                total: loops.length,
+                waitingOnYou,
+                halfFinished: loops.length - waitingOnYou
+            }
+        }
+    }
+
     // --- convo_turn writeback -----------------------------------------------
 
     recordConvoTurn(input: OverseerConvoTurnInput): StoredSystemEvent | null {
@@ -340,6 +424,36 @@ export class OverseerEntity {
     }
 
     // --- internals -----------------------------------------------------------
+
+    private parseEventPayload(payloadJson: string | null): {
+        notify_summary?: unknown
+        suggested_action?: unknown
+        session?: { id?: string; name?: string | null; project?: string | null; flavor?: string | null }
+    } | null {
+        if (!payloadJson) return null
+        try {
+            const parsed: unknown = JSON.parse(payloadJson)
+            return isObjectRecord(parsed) ? parsed : null
+        } catch {
+            return null
+        }
+    }
+
+    /** Identity for an open loop — prefer the event's denormalized session (survives session deletion). */
+    private openLoopIdentity(event: StoredSystemEvent): { name: string | null; project: string | null; flavor: string | null } {
+        const payload = this.parseEventPayload(event.payloadJson)
+        const denorm = payload?.session
+        if (denorm && (denorm.name || denorm.project || denorm.flavor)) {
+            return {
+                name: denorm.name ?? null,
+                project: denorm.project ?? null,
+                flavor: denorm.flavor ?? null
+            }
+        }
+        const session = event.relatedSessionId ? this.getSession(event.relatedSessionId) : undefined
+        if (session) return deriveIdentity(session)
+        return { name: null, project: null, flavor: null }
+    }
 
     private computeLastActivityAt(session: Session, latestEvent: StoredSystemEvent | null): number | null {
         const candidates = [session.activeAt, session.updatedAt, latestEvent?.ts]

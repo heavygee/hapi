@@ -64,12 +64,30 @@ function projectWorker(worker: unknown): Record<string, unknown> {
     }
 }
 
+/** Open loop → the minimum for the "what am I forgetting?" answer. */
+function projectOpenLoop(loop: unknown): Record<string, unknown> {
+    const o = isObj(loop) ? loop : {}
+    return {
+        id: o.sessionId,
+        name: o.name,
+        project: o.project,
+        status: o.status,
+        action: o.action,
+        what: o.summary,
+        ageDays: o.ageDays,
+        bucket: o.bucket
+    }
+}
+
 export function projectToolResultForBrain(tool: OverseerToolName, result: unknown): unknown {
     if (tool === 'query_events' && isObj(result) && Array.isArray(result.events)) {
         return { total: result.events.length, events: result.events.map(projectEvent) }
     }
     if (tool === 'list_active_workers' && isObj(result) && Array.isArray(result.workers)) {
         return { total: result.workers.length, workers: result.workers.map(projectWorker) }
+    }
+    if (tool === 'query_open_loops' && isObj(result) && Array.isArray(result.openLoops)) {
+        return { counts: result.counts, openLoops: result.openLoops.map(projectOpenLoop) }
     }
     if (tool === 'query_inbox' && isObj(result) && Array.isArray(result.items)) {
         // The raw result is {items, candidates, surfaced, held} — four arrays that

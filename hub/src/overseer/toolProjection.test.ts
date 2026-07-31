@@ -67,6 +67,20 @@ describe('projectToolResultForBrain', () => {
         expect(JSON.stringify(lean)).not.toContain('flavor')
     })
 
+    it('thins open loops to id/name/project/status/action/what/ageDays/bucket', () => {
+        const raw = {
+            counts: { total: 2, waitingOnYou: 1, halfFinished: 1 },
+            openLoops: [
+                { sessionId: 'a', name: 'peer-a', project: 'web', flavor: 'cursor', status: 'needs_decision', eventType: 'needs_decision', eventId: 5, action: 'choose target', summary: 'peer-a needs_decision', lastTs: 111, ageMs: 999, ageDays: 10, bucket: 'waiting_on_you' }
+            ]
+        }
+        const lean = projectToolResultForBrain('query_open_loops', raw) as { counts: unknown; openLoops: unknown[] }
+        expect(lean.counts).toEqual({ total: 2, waitingOnYou: 1, halfFinished: 1 })
+        expect(lean.openLoops[0]).toEqual({ id: 'a', name: 'peer-a', project: 'web', status: 'needs_decision', action: 'choose target', what: 'peer-a needs_decision', ageDays: 10, bucket: 'waiting_on_you' })
+        expect(JSON.stringify(lean)).not.toContain('eventId')
+        expect(JSON.stringify(lean)).not.toContain('lastTs')
+    })
+
     it('passes un-projected tools through untouched', () => {
         const state = { state: { sessionId: 'x', observedState: 'idle' } }
         expect(projectToolResultForBrain('get_session_state', state)).toBe(state)

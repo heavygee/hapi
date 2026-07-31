@@ -136,6 +136,12 @@ const OVERSEER_TOOL_PARAMS: Record<OverseerToolName, JsonSchema> = {
         state: { type: 'string', enum: [...OVERSEER_WORKER_STATES] },
         minAgeMs: { type: 'integer', minimum: 0 },
         limit: { type: 'integer', minimum: 1, maximum: 200 }
+    }),
+    query_open_loops: obj({
+        minAgeMs: { type: 'integer', minimum: 0, description: 'Only loops at least this old (ms). Raise it to focus on genuinely cold threads.' },
+        bucket: { type: 'string', enum: ['waiting_on_you', 'half_finished'], description: 'Restrict to one bucket; omit for both (waiting_on_you first).' },
+        project: { type: 'string' },
+        limit: { type: 'integer', minimum: 1, maximum: 100 }
     })
 }
 
