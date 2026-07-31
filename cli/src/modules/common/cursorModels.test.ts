@@ -237,7 +237,7 @@ describe('listCursorModels', () => {
         expect(spawnMock).not.toHaveBeenCalled()
     })
 
-    test('enriches bare ACP snapshot with shared cliModelSkus (#1129)', async () => {
+    test('enriches bare ACP snapshot with base cliModelSkus only (#1129)', async () => {
         vi.mocked(isAgentAcpTransportActive).mockReturnValue(true)
         setCursorAcpModelsSnapshot({
             availableModels: [
@@ -266,10 +266,9 @@ describe('listCursorModels', () => {
             'composer-2.5',
             'gpt-5.5'
         ])
+        // Bare catalogs cannot apply effort/speed SKUs — keep base rows only.
         expect(result.cliModelSkus?.map((row) => row.modelId)).toEqual([
-            'composer-2.5',
-            'composer-2.5-fast',
-            'gpt-5.5-high-fast'
+            'composer-2.5'
         ])
         expect(spawnMock).not.toHaveBeenCalled()
     })
