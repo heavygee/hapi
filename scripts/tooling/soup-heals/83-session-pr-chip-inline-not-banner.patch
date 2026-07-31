@@ -1,0 +1,53 @@
+diff --git a/web/src/components/SessionList.tsx b/web/src/components/SessionList.tsx
+index aeff19da..30e4c0f0 100644
+--- a/web/src/components/SessionList.tsx
++++ b/web/src/components/SessionList.tsx
+@@ -889,10 +889,10 @@ function SessionItem(props: {
+                     nestedTooltips
+                     attentionTooltipId={attentionId}
+                     scheduleTooltipId={scheduleId}
++                    trailing={githubPrAwarenessEnabled && primaryPrRef ? (
++                        <SessionPrChip refs={s.metadata?.externalRefs} />
++                    ) : null}
+                 />
+-                {githubPrAwarenessEnabled && primaryPrRef ? (
+-                    <SessionPrChip refs={s.metadata?.externalRefs} />
+-                ) : null}
+             </button>
+ 
+             <SessionActionMenu
+diff --git a/web/src/components/SessionRowSummary.tsx b/web/src/components/SessionRowSummary.tsx
+index 23699fbe..86414238 100644
+--- a/web/src/components/SessionRowSummary.tsx
++++ b/web/src/components/SessionRowSummary.tsx
+@@ -1,4 +1,4 @@
+-import { useMemo } from 'react'
++import { useMemo, type ReactNode } from 'react'
+ import type { SessionSummary } from '@/types/api'
+ import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
+ import { ScheduleIcon } from '@/components/icons'
+@@ -112,6 +112,8 @@ export function SessionRowSummary(props: {
+     attentionTooltipId?: string
+     scheduleTooltipId?: string
+     className?: string
++    /** Rendered inline in the trailing meta row (before the time label) — e.g. PR chip. */
++    trailing?: ReactNode
+ }) {
+     const {
+         session: s,
+@@ -122,6 +124,7 @@ export function SessionRowSummary(props: {
+         attentionTooltipId: attentionTooltipIdProp,
+         scheduleTooltipId: scheduleTooltipIdProp,
+         className,
++        trailing,
+     } = props
+     const { t } = useTranslation()
+     const sessionName = getSessionTitle(s)
+@@ -218,6 +221,7 @@ export function SessionRowSummary(props: {
+                             {t('session.item.pending')} {s.pendingRequestsCount}
+                         </span>
+                     ) : null}
++                    {trailing}
+                     {timeLabel ? (
+                         <span className="tabular-nums text-[var(--app-hint)]">{timeLabel}</span>
+                     ) : null}
