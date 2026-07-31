@@ -484,9 +484,10 @@ export class OverseerEntity {
 
     /**
      * The single mutation the Overseer performs on the substrate: record the operator's explicit
-     * decision on one inbox item, freezing the R8 as-seen snapshot, and return a tombstone. Every
-     * write path (this + F5 auto-resolve) funnels through the shared `recordOperatorAction` store
-     * method so the predicate vocabulary is populated identically.
+     * decision on one inbox item, freezing the R8 as-seen snapshot, and return a tombstone. Goes
+     * through the shared `recordOperatorAction` store method (the same path a Phase 3 standing-order
+     * enactment will use). F5 auto-decay does NOT produce dispositions — it is bulk plumbing, kept
+     * out of the decisions table so discovery does not eat its own tail (see buildDispositionSnapshot).
      */
     recordDisposition(args: RecordDispositionArgs): OverseerDispositionResult {
         const item = this.inbox.getById(args.itemId)

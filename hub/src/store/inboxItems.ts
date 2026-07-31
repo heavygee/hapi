@@ -351,8 +351,16 @@ function repoFromArtifact(ref: ArtifactRef | undefined): string | null {
 
 /**
  * Freeze the R8 as-seen snapshot for a disposition (write-time). Derived from the item plus its
- * primary (latest) source event. Shared by every write path (conversational + F5 auto-resolve) so
- * the predicate vocabulary is populated identically regardless of who triggers the disposition.
+ * primary (latest) source event. Shared by every DISPOSITION write path — the conversational
+ * `record_disposition` now, and standing-order enactments in Phase 3 — so the predicate vocabulary
+ * is populated identically regardless of who records the decision.
+ *
+ * NOT used by F5 auto-decay: `sweepDecayedTerminalItems` is a bulk `UPDATE inbox_items` that never
+ * calls `recordInboxOperatorAction`, and deliberately so. `inbox_operator_actions` is a DECISIONS
+ * table, not a full status-transition audit — routing mechanical auto-resolve through it would flood
+ * discovery with `action='done'` on FINALE and let the GROUP BY "discover" a preference that is just
+ * the F5 mechanism (circular). Dispositions = decisions; F5 = plumbing. (`query_events` rehydrates
+ * "what happened to X?" for auto-resolved items.)
  */
 export function buildDispositionSnapshot(db: Database, item: StoredInboxItem): DispositionSnapshot {
     const primaryEventId = item.sourceEventIds.length
@@ -680,6 +688,12 @@ export function ensureOverseerInboxSchema(db: Database): void {
     // keystone. The snapshot columns ARE the standing-order predicate fields and the discovery
     // GROUP BY keys (one shared vocabulary). Blob (context_snapshot_json) holds as-seen render
     // context (title/summary/severity/priority/provenance/artifact_refs/source event ids).
+    //
+    // Phase 3 forward flag (NOT now): when standing-order auto-handling enacts operator policy, those
+    // enactments SHOULD write dispositions WITH the snapshot (they are pre-authorized decisions) — but
+    // discovery must then mine operator-authored rows only, or it re-suggests orders it already
+    // enacts. That is when an `actor` column (operator | standing_order:<id> | system) starts to
+    // matter. Left out of v1 deliberately; the ADD COLUMN pattern here graduates it cleanly later.
     ensureInboxOperatorActionSnapshotColumns(db)
 
     // Discovery clusters on the predicate vocabulary (P2 GROUP BY); index the primary axes.
