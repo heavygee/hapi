@@ -399,6 +399,47 @@ export function backfillInboxDerivedFields(db: Database): void {
 }
 
 /**
+ * How long a terminal (FINALE / completed) item stays on the active attention
+ * surface before it auto-resolves. A completed item is "nothing more to do —
+ * the only relevance is that it happened" (operator, 2026-07-31), so it is
+ * context, not attention. Keep it visible briefly, then get it out of the way.
+ */
+export const FINALE_DECAY_WINDOW_MS = 14 * 24 * 60 * 60 * 1000
+
+/**
+ * Auto-dispose terminal inbox items so a backlog of finished work stops crowding
+ * the operator's attention surface. Rows are RETAINED as history — status is
+ * moved out of the active set, never deleted.
+ *
+ * - FINALE (completed): resolve once the item has sat past the decay window.
+ * - STALE: idle-silence detection was retired as noise (see
+ *   `OverseerEventRecorder.checkStaleSessions`, which now returns []). Any
+ *   lingering STALE rows are orphaned legacy from before that removal — obsolete
+ *   them immediately regardless of age.
+ *
+ * Idempotent: matches only active rows, so re-running changes nothing once swept.
+ * Returns the number of rows disposed.
+ */
+export function sweepDecayedTerminalItems(
+    db: Database,
+    now: number = Date.now(),
+    windowMs: number = FINALE_DECAY_WINDOW_MS
+): number {
+    const active = "status IN ('new', 'surfaced', 'deferred', 'snoozed')"
+    const resolved = db.prepare(
+        `UPDATE inbox_items
+            SET status = 'resolved', resolved_at = ?, updated_at = ?
+          WHERE ${active} AND category = 'FINALE' AND updated_at < ?`
+    ).run(now, now, now - windowMs)
+    const obsoleted = db.prepare(
+        `UPDATE inbox_items
+            SET status = 'obsoleted', resolved_at = ?, updated_at = ?
+          WHERE ${active} AND category = 'STALE'`
+    ).run(now, now)
+    return resolved.changes + obsoleted.changes
+}
+
+/**
  * Idempotent Overseer inbox DDL — runs on every Store init, NOT gated on SCHEMA_VERSION.
  */
 export function ensureOverseerInboxSchema(db: Database): void {
@@ -452,6 +493,7 @@ export function ensureOverseerInboxSchema(db: Database): void {
     `)
 
     backfillInboxDerivedFields(db)
+    sweepDecayedTerminalItems(db)
 }
 
 export function dropOverseerInboxSchema(db: Database): void {

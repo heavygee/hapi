@@ -3,7 +3,7 @@ import { buildOverseerSessionIdentity, mergeEventPayloadWithSession } from '@hap
 import { Store } from './index'
 import type { StoredSession } from './types'
 import { deleteSession } from './sessions'
-import { backfillInboxDerivedFields } from './inboxItems'
+import { backfillInboxDerivedFields, sweepDecayedTerminalItems, FINALE_DECAY_WINDOW_MS } from './inboxItems'
 import { Database } from 'bun:sqlite'
 
 function payloadForSession(session: StoredSession, extra: Record<string, unknown> = {}): string {
@@ -220,6 +220,56 @@ describe('Overseer inbox schema (init-gated, not SCHEMA_VERSION)', () => {
         expect(fixed?.priority).toBe(120)
         // Status untouched by backfill.
         expect(fixed?.status).toBe('surfaced')
+    })
+
+    it('auto-resolves decayed FINALE items but keeps recent ones and non-terminal ones', () => {
+        const store = new Store(':memory:')
+        const db: Database = (store as unknown as { db: Database }).db
+        const now = 1_000_000_000_000
+        const insert = (category: string, updatedAt: number, title: string): number => {
+            const res = db.prepare(`
+                INSERT INTO inbox_items (
+                    status, priority, base_priority, source_event_ids, related_inbox_ids,
+                    attention_class, created_at, updated_at, related_session_id, title, category, summary
+                ) VALUES (
+                    'surfaced', 50, 50, '[]', '[]', 'live', 1, ?, NULL, ?, ?, 's'
+                )
+            `).run(updatedAt, title, category)
+            return Number(res.lastInsertRowid)
+        }
+        const oldDone = insert('FINALE', now - FINALE_DECAY_WINDOW_MS - 1, 'old-done')
+        const freshDone = insert('FINALE', now - 1000, 'fresh-done')
+        const blocked = insert('BLOCKED', now - FINALE_DECAY_WINDOW_MS - 1, 'still-blocked')
+
+        const disposed = sweepDecayedTerminalItems(db, now)
+        expect(disposed).toBe(1)
+        expect(store.inbox.getById(oldDone)?.status).toBe('resolved')
+        expect(store.inbox.getById(oldDone)?.resolvedAt).toBe(now)
+        expect(store.inbox.getById(freshDone)?.status).toBe('surfaced')
+        expect(store.inbox.getById(blocked)?.status).toBe('surfaced')
+
+        // Idempotent: nothing left to sweep.
+        expect(sweepDecayedTerminalItems(db, now)).toBe(0)
+    })
+
+    it('obsoletes orphaned STALE items immediately regardless of age', () => {
+        const store = new Store(':memory:')
+        const db: Database = (store as unknown as { db: Database }).db
+        const now = 1_000_000_000_000
+        const res = db.prepare(`
+            INSERT INTO inbox_items (
+                status, priority, base_priority, source_event_ids, related_inbox_ids,
+                attention_class, created_at, updated_at, related_session_id, title, category, summary
+            ) VALUES (
+                'surfaced', 60, 60, '[]', '[]', 'live', ?, ?, NULL,
+                'No agent output for 30 minutes', 'STALE', 'silent'
+            )
+        `).run(now - 1000, now - 1000)
+        const staleId = Number(res.lastInsertRowid)
+
+        expect(sweepDecayedTerminalItems(db, now)).toBe(1)
+        expect(store.inbox.getById(staleId)?.status).toBe('obsoleted')
+        expect(store.inbox.getById(staleId)?.resolvedAt).toBe(now)
     })
 
     it('records operator actions as training labels', () => {
