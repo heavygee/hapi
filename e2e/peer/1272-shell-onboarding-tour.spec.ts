@@ -95,15 +95,19 @@ test.describe('shell onboarding tour — peer stack, empty install (#1272)', () 
         await expect(page.getByRole('dialog', { name: 'Start a new session' })).toHaveCount(0)
     })
 
-    test('"Skip tour" ends the walk immediately and persists the same ack', async ({ page }) => {
+    test('checking "Skip tour" then confirming ends the walk immediately and persists the same ack', async ({ page }) => {
         // Evidence tier: PNG is enough here — the whole point is a single
-        // before/after (skip link click removes the dialog for good).
+        // before/after. "Skip tour" is a checkbox, not a button (operator
+        // feedback #1272: a dotted-underline link read as "hover for more
+        // info", not "take an action" — a checkbox that only takes effect
+        // once confirmed via the primary button is unambiguous either way).
         await gotoEmptySessionsList(page)
 
         const step1 = page.getByRole('dialog', { name: 'Start a new session' })
         await expect(step1).toBeVisible({ timeout: 10_000 })
 
-        await step1.getByRole('button', { name: 'Skip tour' }).click()
+        await step1.getByRole('checkbox', { name: 'Skip tour' }).click()
+        await step1.getByRole('button', { name: 'Next' }).click()
         await expect(step1).toHaveCount(0)
 
         const ack = await page.evaluate(() => localStorage.getItem('hapi.onboarding.v1.shell-tour'))
