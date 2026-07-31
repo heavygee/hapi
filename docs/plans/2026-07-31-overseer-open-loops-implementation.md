@@ -55,6 +55,25 @@ priority; this is about neglect, not urgency. Keep it to the top ~15.
 This doubles as a **triage bootstrap**: surface ~15 cold loops, operator dispositions them, and the
 inbox disposition loop the spec always wanted becomes tractable.
 
+## Ingest-peer handoff items (PR #99 → this layer)
+
+- **H1 (done):** system-prompt rule — when the operator asks about a *specific* inbox item, the brain
+  first calls `explain_priority` then `query_events{sessionId}` to pull the rest of that session's
+  recorded activity as salience (capability already existed; `sessionId` is an accepted arg).
+- **H2 (done):** a two-level `detail: 'lean' | 'full'` knob (default `lean`) on every context tool
+  (`query_events` / `query_inbox` / `get_session_state` / `get_session_recent_output` /
+  `get_worker_health` / `list_active_workers` / `query_open_loops`), threaded into
+  `projectToolResultForBrain(tool, result, detail)`. Coverage gap closed: `get_session_state`,
+  `get_session_recent_output` (raw terminal text capped at 280 chars in lean — was a token bomb), and
+  `get_worker_health` (signal trail dropped in lean) now have lean projections. `full` returns the raw
+  rows, still bounded by `limit`/`n` and the outer char clamp. Deliberately NOT a token-budget engine —
+  two levels + good defaults.
+- **H3 (deferred):** `query_session_actions` reader over `inbox_operator_actions` — deferred until
+  disposition volume justifies it (~0 today). ~30-line add when wanted.
+- **H4 (confirmed):** `query_open_loops` spans **all non-deleted sessions** (active AND archived). It
+  reads only the events table and never filters on `session.active`; deleted sessions drop out because
+  `deleteSession` detaches their events (`related_session_id = NULL`).
+
 ## Not in this branch (follow-ups)
 
 - **Archiving hygiene (step 3):** aggressive session archive + sweeping legacy `stale`

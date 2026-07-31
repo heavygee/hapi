@@ -124,8 +124,10 @@ export async function runOverseerConverse(params: {
             try {
                 const result = runOverseerTool(overseer, name, args)
                 toolTrace.push({ tool: name, args, ok: true })
-                const lean = projectToolResultForBrain(name, result)
-                resultLines.push(`${name}(${argsRaw}) => ${clampToolResult(JSON.stringify(lean ?? null))}`)
+                // The brain opts into 'full' per call when it needs depth; default lean.
+                const detail = args.detail === 'full' ? 'full' : 'lean'
+                const projected = projectToolResultForBrain(name, result, detail)
+                resultLines.push(`${name}(${argsRaw}) => ${clampToolResult(JSON.stringify(projected ?? null))}`)
             } catch (error) {
                 const msg = error instanceof Error ? error.message : String(error)
                 toolTrace.push({ tool: name, args, ok: false, error: msg })

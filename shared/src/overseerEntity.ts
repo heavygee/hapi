@@ -270,6 +270,15 @@ export type OverseerToolName = typeof OVERSEER_TOOL_NAMES[number]
 
 const sessionIdSchema = z.string().min(1)
 
+/**
+ * Output-detail knob shared by every context-gathering tool. `lean` (default)
+ * returns the cheap brain-facing shape; `full` returns the richer rows (still
+ * bounded by `limit`/`n`). Two levels only — no token-budget engine. The knob is
+ * consumed by the converse projection layer; the entity methods ignore it.
+ */
+export const toolDetailSchema = z.enum(['lean', 'full'])
+export type ToolResultDetailArg = z.infer<typeof toolDetailSchema>
+
 export const queryEventsArgsSchema = z.object({
     sessionId: sessionIdSchema.optional(),
     project: z.string().min(1).optional(),
@@ -280,7 +289,8 @@ export const queryEventsArgsSchema = z.object({
     sinceTs: z.number().int().nonnegative().optional(),
     untilTs: z.number().int().nonnegative().optional(),
     beforeId: z.number().int().positive().optional(),
-    limit: z.number().int().min(1).max(200).optional()
+    limit: z.number().int().min(1).max(200).optional(),
+    detail: toolDetailSchema.optional()
 })
 export type QueryEventsArgs = z.infer<typeof queryEventsArgsSchema>
 
@@ -288,23 +298,27 @@ export const queryInboxArgsSchema = z.object({
     statuses: z.array(z.string().min(1)).min(1).optional(),
     sessionId: sessionIdSchema.optional(),
     category: z.string().min(1).optional(),
-    limit: z.number().int().min(1).max(200).optional()
+    limit: z.number().int().min(1).max(200).optional(),
+    detail: toolDetailSchema.optional()
 })
 export type QueryInboxArgs = z.infer<typeof queryInboxArgsSchema>
 
 export const getSessionStateArgsSchema = z.object({
-    sessionId: sessionIdSchema
+    sessionId: sessionIdSchema,
+    detail: toolDetailSchema.optional()
 })
 export type GetSessionStateArgs = z.infer<typeof getSessionStateArgsSchema>
 
 export const getSessionRecentOutputArgsSchema = z.object({
     sessionId: sessionIdSchema,
-    n: z.number().int().min(1).max(50).optional()
+    n: z.number().int().min(1).max(50).optional(),
+    detail: toolDetailSchema.optional()
 })
 export type GetSessionRecentOutputArgs = z.infer<typeof getSessionRecentOutputArgsSchema>
 
 export const getWorkerHealthArgsSchema = z.object({
-    sessionId: sessionIdSchema
+    sessionId: sessionIdSchema,
+    detail: toolDetailSchema.optional()
 })
 export type GetWorkerHealthArgs = z.infer<typeof getWorkerHealthArgsSchema>
 
@@ -317,7 +331,8 @@ export const listActiveWorkersArgsSchema = z.object({
     project: z.string().min(1).optional(),
     state: z.enum(OVERSEER_WORKER_STATES).optional(),
     minAgeMs: z.number().int().nonnegative().optional(),
-    limit: z.number().int().min(1).max(200).optional()
+    limit: z.number().int().min(1).max(200).optional(),
+    detail: toolDetailSchema.optional()
 })
 export type ListActiveWorkersArgs = z.infer<typeof listActiveWorkersArgsSchema>
 
@@ -327,7 +342,8 @@ export const queryOpenLoopsArgsSchema = z.object({
     /** Restrict to one lens bucket. Default: both, waiting_on_you first. */
     bucket: z.enum(['waiting_on_you', 'half_finished']).optional(),
     project: z.string().min(1).optional(),
-    limit: z.number().int().min(1).max(100).optional()
+    limit: z.number().int().min(1).max(100).optional(),
+    detail: toolDetailSchema.optional()
 })
 export type QueryOpenLoopsArgs = z.infer<typeof queryOpenLoopsArgsSchema>
 
@@ -484,6 +500,9 @@ export function buildOverseerSystemPrompt(): string {
         '- Prefer direct tool/system evidence over a worker\'s self-report when they conflict.',
         '- Prioritize. Surface the root cause, not five symptoms ("GitHub auth is blocking 5 workers",',
         '  not a roll-call of each blocked worker).',
+        '- When the operator asks about a SPECIFIC inbox item, first call explain_priority for its',
+        '  provenance, then query_events with that item\'s sessionId to pull the rest of that session\'s',
+        '  recorded activity as context/salience before answering — do not answer from the item alone.',
         '',
         '# Two questions, two axes',
         '',

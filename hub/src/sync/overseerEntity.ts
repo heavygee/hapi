@@ -351,6 +351,11 @@ export class OverseerEntity {
      * nulled (status≠done is the strong filter; action is only a tiebreak).
      * Presents "Waiting on You" (operator owes a decision) before half-finished
      * work, each coldest-first.
+     *
+     * Spans ALL non-deleted sessions (active AND archived) — it reads only the
+     * events table and never filters on `session.active`. Deleted sessions drop
+     * out automatically because `deleteSession` detaches their events
+     * (`related_session_id = NULL`) and the substrate query requires it non-null.
      */
     queryOpenLoops(args: QueryOpenLoopsArgs = {}): OverseerOpenLoopsResult {
         const now = this.now()
