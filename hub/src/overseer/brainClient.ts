@@ -107,6 +107,31 @@ export function resolveBrainConfig(
     return model ? { ...cfg, model } : cfg
 }
 
+/**
+ * Collapse the three brain-selection layers into a single `{ profile, model }` to hand
+ * to `resolveBrainConfig`. Precedence, highest first:
+ *   1. per-request override (converse body `profile`/`model`) — testing "at whim"
+ *   2. persisted active brain (operator's console choice, survives restart)
+ *   3. env default (falls through as no profile/model)
+ *
+ * An explicit per-request `profile` overrides the active profile wholesale (its own optional
+ * model, not the active profile's model). A per-request `model` alone re-skins the active profile.
+ */
+export function resolveBrainSelection(
+    active: { profile: string; model: string | null } | null,
+    opts: { profile?: string; model?: string } = {}
+): { profile?: string; model?: string } {
+    const reqProfile = opts.profile?.trim()
+    const reqModel = opts.model?.trim()
+    if (reqProfile) {
+        return { profile: reqProfile, model: reqModel || undefined }
+    }
+    if (active) {
+        return { profile: active.profile, model: reqModel || active.model || undefined }
+    }
+    return { model: reqModel || undefined }
+}
+
 const NON_CHAT_MODEL = /embedding|whisper|tts|dall-?e|moderation|audio|realtime|image|transcribe|-search|babbage|davinci-002|instruct/i
 
 /** Keep the chat-usable model ids (drop embeddings/audio/image/etc.), sorted. */

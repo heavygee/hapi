@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { filterChatModels, listBrainProfiles, resolveBrainConfig } from './brainClient'
+import { filterChatModels, listBrainProfiles, resolveBrainConfig, resolveBrainSelection } from './brainClient'
 
 const baseEnv = {
     OVERSEER_BRAIN_URL: 'http://local.test/v1/',
@@ -38,6 +38,35 @@ describe('resolveBrainConfig', () => {
 
     it('model override wins over the selected profile model', () => {
         expect(resolveBrainConfig(multiEnv, { profile: 'openai', model: 'gpt-4o-mini' })?.model).toBe('gpt-4o-mini')
+    })
+})
+
+describe('resolveBrainSelection', () => {
+    it('falls through to env default when nothing is set', () => {
+        expect(resolveBrainSelection(null)).toEqual({ model: undefined })
+    })
+
+    it('uses the persisted active brain when no per-request override', () => {
+        expect(resolveBrainSelection({ profile: 'openai', model: 'gpt-4o' })).toEqual({ profile: 'openai', model: 'gpt-4o' })
+    })
+
+    it('per-request profile overrides the active profile wholesale', () => {
+        expect(resolveBrainSelection({ profile: 'openai', model: 'gpt-4o' }, { profile: 'default' }))
+            .toEqual({ profile: 'default', model: undefined })
+    })
+
+    it('per-request model alone re-skins the active profile', () => {
+        expect(resolveBrainSelection({ profile: 'openai', model: 'gpt-4o' }, { model: 'gpt-4o-mini' }))
+            .toEqual({ profile: 'openai', model: 'gpt-4o-mini' })
+    })
+
+    it('active profile with null model resolves to profile default', () => {
+        expect(resolveBrainSelection({ profile: 'local', model: null })).toEqual({ profile: 'local', model: undefined })
+    })
+
+    it('composes with resolveBrainConfig so the active brain becomes the effective config', () => {
+        const cfg = resolveBrainConfig(multiEnv, resolveBrainSelection({ profile: 'openai', model: 'gpt-4o-mini' }))
+        expect(cfg).toMatchObject({ baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', apiKey: 'sk-test' })
     })
 })
 

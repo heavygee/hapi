@@ -12,7 +12,7 @@ import type { WebAppEnv } from '../middleware/auth'
 import { requireSyncEngine } from './guards'
 import { isOverseerToolName, OverseerWriteNotAllowedError, runOverseerTool } from '../../overseer/runOverseerTool'
 import { runOverseerConverse } from '../../overseer/converse'
-import { BrainUnavailableError, filterChatModels, listBrainModels, listBrainProfiles, resolveBrainConfig } from '../../overseer/brainClient'
+import { BrainUnavailableError, filterChatModels, listBrainModels, listBrainProfiles, resolveBrainConfig, resolveBrainSelection } from '../../overseer/brainClient'
 
 const convoTurnBodySchema = z.object({
     operatorText: z.string().max(8000).default(''),
@@ -34,6 +34,11 @@ const converseBodySchema = z.object({
     relatedSessionId: z.string().min(1).optional(),
     model: z.string().max(100).optional(),
     profile: z.string().max(64).optional()
+})
+
+const activeBrainBodySchema = z.object({
+    profile: z.string().min(1).max(64),
+    model: z.string().max(100).nullish()
 })
 
 export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
@@ -62,12 +67,53 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
         })
     })
 
-    // Configured brain profiles for the converse UI (id/label/model only — no
-    // url or api key is exposed to the client).
+    // Configured brain profiles for the console UI (id/label/model only — no url
+    // or api key is exposed to the client) plus the persisted active selection.
     app.get('/overseer/brains', (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)
         if (engine instanceof Response) return engine
-        return c.json({ profiles: listBrainProfiles(process.env) })
+        return c.json({
+            profiles: listBrainProfiles(process.env),
+            active: engine.getSettings().getActiveBrain()
+        })
+    })
+
+    // The persisted active brain — the profile/model the converse + voice surfaces
+    // default to when a request does not override. Switchable at whim, survives a
+    // restart, no env edit / hub bounce required.
+    app.get('/overseer/brain/active', (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) return engine
+        const active = engine.getSettings().getActiveBrain()
+        const config = resolveBrainConfig(process.env, resolveBrainSelection(active))
+        return c.json({ active, effective: config ? { profile: active?.profile ?? 'default', model: config.model } : null })
+    })
+
+    app.put('/overseer/brain/active', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) return engine
+
+        let body: unknown
+        try {
+            body = await c.req.json()
+        } catch {
+            return c.json({ error: 'Invalid JSON body' }, 400)
+        }
+        const parsed = activeBrainBodySchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body', issues: parsed.error.flatten() }, 400)
+        }
+
+        // Only allow selecting a profile the hub actually has configured, so the
+        // console can never persist a dead brain that would silently fall back to env.
+        const known = listBrainProfiles(process.env).some((p) => p.id === parsed.data.profile)
+        if (!known) {
+            return c.json({ error: `Unknown brain profile: ${parsed.data.profile}` }, 400)
+        }
+
+        const active = { profile: parsed.data.profile, model: parsed.data.model ?? null }
+        engine.getSettings().setActiveBrain(active)
+        return c.json({ active })
     })
 
     // Live model list for a brain profile (proxies the endpoint's GET /models so
@@ -146,10 +192,11 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Last message must be from the operator' }, 400)
         }
 
-        const config = resolveBrainConfig(process.env, {
+        const active = engine.getSettings().getActiveBrain()
+        const config = resolveBrainConfig(process.env, resolveBrainSelection(active, {
             profile: parsed.data.profile,
             model: parsed.data.model
-        })
+        }))
         if (!config) {
             return c.json({
                 reply: 'The Overseer brain is not configured on this hub (set OVERSEER_BRAIN_URL). I can still show raw events and inbox items, but I cannot answer in conversation yet.',

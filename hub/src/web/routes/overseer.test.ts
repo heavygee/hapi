@@ -111,4 +111,70 @@ describe('overseer routes', () => {
         })
         expect(res.status).toBe(400)
     })
+
+    it('GET /overseer/brains reports profiles + a null active until one is set', async () => {
+        const prev = process.env.OVERSEER_BRAIN_URL
+        process.env.OVERSEER_BRAIN_URL = 'http://brain.test/v1'
+        try {
+            const app = buildApp(new Store(':memory:'))
+            const res = await app.request('/api/overseer/brains')
+            expect(res.status).toBe(200)
+            const body = await res.json() as { profiles: Array<{ id: string }>; active: unknown }
+            expect(body.profiles.some((p) => p.id === 'default')).toBe(true)
+            expect(body.active).toBeNull()
+        } finally {
+            if (prev === undefined) delete process.env.OVERSEER_BRAIN_URL
+            else process.env.OVERSEER_BRAIN_URL = prev
+        }
+    })
+
+    it('PUT /overseer/brain/active rejects an unconfigured profile (400) and persists a known one', async () => {
+        const prev = process.env.OVERSEER_BRAIN_URL
+        process.env.OVERSEER_BRAIN_URL = 'http://brain.test/v1'
+        try {
+            const app = buildApp(new Store(':memory:'))
+
+            const bad = await app.request('/api/overseer/brain/active', {
+                method: 'PUT', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ profile: 'ghost' })
+            })
+            expect(bad.status).toBe(400)
+
+            const ok = await app.request('/api/overseer/brain/active', {
+                method: 'PUT', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ profile: 'default', model: 'main' })
+            })
+            expect(ok.status).toBe(200)
+            const okBody = await ok.json() as { active: { profile: string; model: string | null } }
+            expect(okBody.active).toEqual({ profile: 'default', model: 'main' })
+
+            const get = await app.request('/api/overseer/brain/active')
+            const getBody = await get.json() as { active: { profile: string; model: string | null } }
+            expect(getBody.active).toEqual({ profile: 'default', model: 'main' })
+        } finally {
+            if (prev === undefined) delete process.env.OVERSEER_BRAIN_URL
+            else process.env.OVERSEER_BRAIN_URL = prev
+        }
+    })
+
+    it('PUT /overseer/brain/active persists across engine rebuilds on the same store', async () => {
+        const prev = process.env.OVERSEER_BRAIN_URL
+        process.env.OVERSEER_BRAIN_URL = 'http://brain.test/v1'
+        try {
+            const store = new Store(':memory:')
+            const app = buildApp(store)
+            await app.request('/api/overseer/brain/active', {
+                method: 'PUT', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ profile: 'default', model: null })
+            })
+            // A fresh engine over the same store must observe the persisted choice.
+            const app2 = buildApp(store)
+            const get = await app2.request('/api/overseer/brain/active')
+            const body = await get.json() as { active: { profile: string; model: string | null } }
+            expect(body.active).toEqual({ profile: 'default', model: null })
+        } finally {
+            if (prev === undefined) delete process.env.OVERSEER_BRAIN_URL
+            else process.env.OVERSEER_BRAIN_URL = prev
+        }
+    })
 })
