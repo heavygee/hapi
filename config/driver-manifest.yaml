@@ -462,7 +462,14 @@ layers:
   # layer restores CLI/hub path + RetriableError prefix (@ 17394805).
   # Bridge leg ships separately on feat/cursor-model-error-bridge (peer 902b7f8a).
   # Upstream PR pending; dogfood here first. Topmost for cheap rollback.
-  - branch: feat/cursor-detect-inline-model-errors
+  # DROPPED 2026-07-31 (base advance / meta-soup 5bcf291c): layer owner (#987 peer
+  # 96f67085) reworked detect+bridge as upstream PR #987 @ 5d86ee60 ("wait-tiann")
+  # and already commented both out in the override manifest to unblock remat.
+  # Syncing the tracked manifest to that decision — the recurring conflict in
+  # cli/src/cursor/cursorAcpRemoteLauncher.ts was this layer. Re-add when #987
+  # merges or the owner re-thins. soup/cursor-model-error-fcm-bridge stays; the
+  # ModelErrorSendOutcome contract it needs is backfilled by soup-heals.
+  # - branch: feat/cursor-detect-inline-model-errors
 
   # #878 leg 3 - transient model error bridge (one prompt per atTs).
   # Manual [Bridge & retry], opt-in auto-bridge, retriedAndFailed gating.
@@ -474,8 +481,12 @@ layers:
   # backup/cursor-model-error-bridge-231647558. Proof merge onto driver
   # @ac21e6614 → 3 additive conflicts (syncEngine both setSessionExternalRefs+
   # bridgeModelError; shared index+rpcMethods via prior rerere); rerere trained.
-  # Do NOT park this layer to green rematerialize — re-thin in place instead.
-  - branch: feat/cursor-model-error-bridge
+  # DROPPED 2026-07-31 (base advance / meta-soup 5bcf291c): paired with
+  # feat/cursor-detect-inline-model-errors above — detect is no longer ancestor
+  # of this bridge tip (08991a36) and the owner (#987 peer) commented both out in
+  # the override to unblock. The prior "do NOT park — re-thin" note is superseded
+  # by the owner's own #987 rework. Re-add when #987 merges.
+  # - branch: feat/cursor-model-error-bridge
 
   # tiann/hapi#991 / upstream PR #1128 - Cursor ACP remote resume: reuse
   # original HAPI row via existingSessionId. Hub already passes
