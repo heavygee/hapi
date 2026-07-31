@@ -1,0 +1,66 @@
+diff --git a/cli/src/claude/utils/startHappyServer.ts b/cli/src/claude/utils/startHappyServer.ts
+index 6565153ea..eafcb2119 100644
+--- a/cli/src/claude/utils/startHappyServer.ts
++++ b/cli/src/claude/utils/startHappyServer.ts
+@@ -110,15 +110,6 @@ function createHapiMcpServer(
+ 
+     const maxInlineMediaBytes = 25 * 1024 * 1024;
+ 
+-    const inspectPeerInputSchema: z.ZodTypeAny = z.object({
+-        sessionIdPrefix: z.string().trim().min(1).describe(
+-            'Target HAPI session id or unique id prefix. Prefer the full UUID from a [title](/sessions/<id>) citation.'
+-        ),
+-        messageLimit: z.number().int().min(1).max(100).optional().describe(
+-            'Recent message page size (default 30, max 100). Text snippets only.'
+-        ),
+-    });
+-
+     async function displayInlineMedia(
+         args: { path: string; title?: string },
+         mediaKind: 'image' | 'video',
+diff --git a/cli/src/cursor/cursorAcpRemoteLauncher.ts b/cli/src/cursor/cursorAcpRemoteLauncher.ts
+index 8f483f9a6..929a3e986 100644
+--- a/cli/src/cursor/cursorAcpRemoteLauncher.ts
++++ b/cli/src/cursor/cursorAcpRemoteLauncher.ts
+@@ -157,25 +157,6 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
+         let spawnModel = resolveCursorSpawnModel(requestedSpawnModel);
+         let backend: AcpSdkBackend | null = null;
+         let recentStderrHint: string | null = null;
+-        backend.onStderrError((error) => {
+-            logger.debug('[cursor-acp] stderr error', error);
+-            recentStderrHint = error.raw || error.message;
+-            const converted = convertAgentMessage({ type: 'error', message: error.message });
+-            if (converted) {
+-                session.sendAgentMessage(converted);
+-            }
+-            messageBuffer.addMessage(error.message, 'status');
+-            // STRUCTURAL signal: route typed stderr error into the modelError
+-            // pipeline so the banner + pulsing dot fire on the typed kind
+-            // (rate_limited / quota_exhausted / auth_failed / model_not_found)
+-            // without any text matching. Generic `unknown` stderr stays
+-            // status-only — ACP treats stderr as logging, and the transport
+-            // labels any "error"/"failed"/"exception" line as unknown.
+-            const failure = mapAcpStderrToFailure(error);
+-            if (failure) {
+-                this.recordModelError(failure);
+-            }
+-        });
+ 
+         for (let connectAttempt = 0; connectAttempt < 2; connectAttempt += 1) {
+             if (spawnModel && spawnModel !== session.model) {
+@@ -554,6 +535,15 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
+                 session.sendAgentMessage(converted);
+             }
+             messageBuffer.addMessage(error.message, 'status');
++            // STRUCTURAL signal: route typed stderr error into the modelError
++            // pipeline so the banner + pulsing dot fire on the typed kind
++            // (rate_limited / quota_exhausted / auth_failed / model_not_found)
++            // without any text matching. The model_not_found + remap case
++            // returns early above, so remap retries stay banner-free.
++            const failure = mapAcpStderrToFailure(error);
++            if (failure) {
++                this.recordModelError(failure);
++            }
+         });
+     }
+ 
