@@ -286,7 +286,9 @@ Peer stack and soup are **both** required for normal feature work. They solve di
 - **Safe for agents:** `hapi-peer-stack up|down|status|doctor` — **never** touches systemd or `:3006`
 - **Proof:** Playwright on real `/sessions/:id` UI; PNG and/or MP4 under `localdocs/playwright-runs/` (gitignored)
 - **Inline in HAPI chat:** `display_image` / `display_video` MCP, or `bun scripts/tooling/hapi-display-image.mjs <session-prefix> <absolute-path> [title]`
+- **Always-on (not only dogfood):** any image/video you create or revise for the operator must be shown inline — see [`docs/operator/AGENTS.md`](../operator/AGENTS.md) § Inline media for the operator
 - **Not a soup substitute:** peer proof does **not** mean skip manifest promotion
+- **Done for peer:** gates pass + inline media in operator-readable session — **not** soup rebuild
 
 ### 2. Soup — daily driver on `:3006` (**always promote**)
 
