@@ -333,9 +333,11 @@ layers:
   # disposition write path: ADD COLUMN migration on inbox_operator_actions +
   # new reader fns + snapshot population inside recordInboxOperatorAction.
   # STACKS ON feat/overseer-open-loops (must sit immediately after it). Tip
-  # 67f7ffea3. Additive DDL composes cleanly; possible collision with ingest
-  # stack (#99 F5) only if both edit recordInboxOperatorAction body — watch
-  # hub/src/store/inboxItems.ts. Gates green: hub 559 + shared 170, tsc clean.
+  # 3b6873b38. Shared surface with ingest stack (#99) is ensureOverseerInboxSchema
+  # in hub/src/store/inboxItems.ts: #102 appends ADD COLUMN + bucket index, #99
+  # appends sweepDecayedTerminalItems/backfillInboxDerivedFields — additive,
+  # order-independent, final init fn must union BOTH sets (no ordering constraint).
+  # Gates green: hub 559 + shared 170, tsc clean.
   - branch: feat/overseer-dispositions
 
   # Overseer replay harness (thin): harness+CI+fixtures only. Tip 96c8e7bf4,
