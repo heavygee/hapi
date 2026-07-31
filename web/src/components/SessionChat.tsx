@@ -29,6 +29,7 @@ import {
     getCodexModelReasoningEfforts,
     supportsCodexReasoningEffort
 } from '@/lib/codexModelCapabilities'
+import { createSerialAsyncQueue } from '@/lib/serialAsyncQueue'
 import { HappyComposer, type ComposerSendError } from '@/components/AssistantChat/HappyComposer'
 import { codexModelAdvertisesFastTier, getEffectiveCodexServiceTier } from '@/components/AssistantChat/codexFastMode'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
@@ -527,6 +528,9 @@ function SessionChatInner(props: SessionChatProps) {
     }, [props.initialOutlineOpen, props.onInitialOutlineConsumed])
 
     const [cursorSelectedBase, setCursorSelectedBase] = useState('auto')
+    // Serialize Cursor setModel RPCs so drill-down default apply cannot finish
+    // after a later explicit variant click and overwrite it.
+    const enqueueCursorModelApply = useMemo(() => createSerialAsyncQueue(), [])
     const lastSyncedCursorModelRef = useRef<string | null | undefined>(undefined)
     const scratchlist = useHubScratchlist(props.session.id, props.api)
     const { sessions: allSessions } = useSessions(props.api)
@@ -1312,7 +1316,7 @@ function SessionChatInner(props: SessionChatProps) {
 
     const handleCursorBaseModelChange = useCallback(async (baseKey: string | null) => {
         if (!cursorPicker) {
-            await handleModelChange(baseKey)
+            await enqueueCursorModelApply(() => handleModelChange(baseKey))
             return
         }
         const plan = resolveSessionCursorModelChange({
@@ -1327,13 +1331,13 @@ function SessionChatInner(props: SessionChatProps) {
         }
         setCursorSelectedBase(plan.nextSelectedBase)
         if (plan.shouldApply) {
-            await handleModelChange(plan.wireId)
+            await enqueueCursorModelApply(() => handleModelChange(plan.wireId))
         }
-    }, [cursorPicker, cursorSelectedBase, handleModelChange, props.session.model])
+    }, [cursorPicker, cursorSelectedBase, enqueueCursorModelApply, handleModelChange, props.session.model])
 
     const handleCursorEffortChange = useCallback(async (wireId: string | null) => {
         if (!cursorPicker) {
-            await handleModelChange(wireId)
+            await enqueueCursorModelApply(() => handleModelChange(wireId))
             return
         }
         const plan = resolveSessionCursorModelChange({
@@ -1348,8 +1352,8 @@ function SessionChatInner(props: SessionChatProps) {
             return
         }
         setCursorSelectedBase(plan.nextSelectedBase)
-        await handleModelChange(plan.wireId)
-    }, [cursorPicker, cursorSelectedBase, handleModelChange, props.session.model])
+        await enqueueCursorModelApply(() => handleModelChange(plan.wireId))
+    }, [cursorPicker, cursorSelectedBase, enqueueCursorModelApply, handleModelChange, props.session.model])
 
     const handleModelReasoningEffortChange = useCallback(async (modelReasoningEffort: string | null) => {
         try {
