@@ -1,140 +1,37 @@
-From af5408d4768b2b376df3dd555843d8483a20e578 Mon Sep 17 00:00:00 2001
-From: HeavyGee <133152184+heavygee@users.noreply.github.com>
-Date: Fri, 31 Jul 2026 14:23:32 +0000
-Subject: [PATCH] fix(soup): use complete #1271+#1129 cursorCliSku
- (aliases+helpers)
-
-Prior restore dropped CURSOR_LEGACY_MODEL_BASE_ALIASES and private
-helpers while leaving call sites, breaking typecheck.
-
-Co-authored-by: Cursor <cursoragent@cursor.com>
----
- shared/src/cursorCliSku.test.ts |  54 +++++++++++++-
- shared/src/cursorCliSku.ts      | 120 ++++++++++++++++++++++++--------
- 2 files changed, 143 insertions(+), 31 deletions(-)
-
-diff --git a/shared/src/cursorCliSku.test.ts b/shared/src/cursorCliSku.test.ts
-index 0734a8c7..91c7f344 100644
---- a/shared/src/cursorCliSku.test.ts
-+++ b/shared/src/cursorCliSku.test.ts
-@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
- import {
-     cursorCliSkuBaseId,
-     findBestCliSkuForAcpWire,
-+    isCursorAcpCatalogModelId,
-     isCursorAcpWireModelId,
-+    isCursorCliSkuVariantId,
-     matchCliSkuToAcpWireId,
-     parseCursorAvailableModelsFromRejection,
-     remapStaleCursorModelId
-@@ -197,8 +199,58 @@ describe('round-trip (regression for #883: "selected but no response")', () => {
- });
- 
- describe('isCursorAcpWireModelId', () => {
--    it('detects wire ids', () => {
-+    it('detects parameterized wire ids only', () => {
-         expect(isCursorAcpWireModelId('gpt-5.5[fast=false]')).toBe(true);
-+        expect(isCursorAcpWireModelId('default[]')).toBe(true);
-+        expect(isCursorAcpWireModelId('composer-2.5')).toBe(false);
-         expect(isCursorAcpWireModelId('gpt-5.5-high-fast')).toBe(false);
-     });
- });
-+
-+describe('isCursorCliSkuVariantId', () => {
-+    it('detects effort/speed CLI SKU slugs', () => {
-+        expect(isCursorCliSkuVariantId('gpt-5.5-high-fast')).toBe(true);
-+        expect(isCursorCliSkuVariantId('composer-2.5-fast')).toBe(true);
-+        expect(isCursorCliSkuVariantId('claude-opus-4-8-thinking-high-fast')).toBe(true);
-+        expect(isCursorCliSkuVariantId('composer-2.5')).toBe(false);
-+        expect(isCursorCliSkuVariantId('composer-2.5[fast=true]')).toBe(false);
-+    });
-+});
-+
-+describe('isCursorAcpCatalogModelId', () => {
-+    it('accepts parameterized wires and bare non-default ACP bases', () => {
-+        expect(isCursorAcpCatalogModelId('composer-2.5[fast=false]')).toBe(true);
-+        expect(isCursorAcpCatalogModelId('default[]')).toBe(true);
-+        expect(isCursorAcpCatalogModelId('composer-2.5')).toBe(true);
-+        expect(isCursorAcpCatalogModelId('claude-opus-4-8')).toBe(true);
-+    });
-+
-+    it('rejects CLI effort/speed SKUs and default tokens', () => {
-+        expect(isCursorAcpCatalogModelId('gpt-5.5-high-fast')).toBe(false);
-+        expect(isCursorAcpCatalogModelId('composer-2.5-fast')).toBe(false);
-+        expect(isCursorAcpCatalogModelId('default')).toBe(false);
-+        expect(isCursorAcpCatalogModelId('auto')).toBe(false);
-+        expect(isCursorAcpCatalogModelId('')).toBe(false);
-+    });
-+});
-+
-+describe('matchCliSkuToAcpWireId with bare ACP catalog (#1129)', () => {
-+    it('maps base SKUs onto bare ACP ids but rejects suffixed variants', () => {
-+        const bare = [{ modelId: 'composer-2.5' }, { modelId: 'gpt-5.5' }];
-+        expect(matchCliSkuToAcpWireId('composer-2.5', bare)).toBe('composer-2.5');
-+        expect(matchCliSkuToAcpWireId('gpt-5.5', bare)).toBe('gpt-5.5');
-+        expect(matchCliSkuToAcpWireId('composer-2.5-fast', bare)).toBeNull();
-+        expect(matchCliSkuToAcpWireId('gpt-5.5-high-fast', bare)).toBeNull();
-+        expect(matchCliSkuToAcpWireId('gpt-5.5-medium', bare)).toBeNull();
-+    });
-+
-+    it('still maps suffixed SKUs when parameterized ACP wires exist', () => {
-+        const wires = [
-+            { modelId: 'gpt-5.5[context=272k,reasoning=medium,fast=false]' },
-+            { modelId: 'gpt-5.5[context=272k,reasoning=high,fast=true]' }
-+        ];
-+        expect(matchCliSkuToAcpWireId('gpt-5.5-high-fast', wires)).toBe(
-+            'gpt-5.5[context=272k,reasoning=high,fast=true]'
-+        );
-+    });
-+});
+# 86-cursor-cli-sku-1271-catalog.patch (regenerated 2026-07-31, meta-soup 5bcf291c)
+#
+# Adds the #1271 stale-model-remap trio + #1129 catalog helpers to
+# shared/src/cursorCliSku.ts: CURSOR_LEGACY_MODEL_BASE_ALIASES +
+# resolveCursorLegacyModelBase, parseCursorAvailableModelsFromRejection,
+# remapStaleCursorModelId, pickBestCatalogSku/syntheticSkuFromWireParams/
+# pseudoWireFromSku, exported parseCursorWireParams, and the legacy-base branch
+# in matchCliSkuToAcpWireId. Consumers cli/src/cursor/utils/cursorStaleModelRemap.ts
+# and cursorModeConfig.ts import these from @hapi/protocol.
+#
+# Regenerated as a SELF-CONTAINED HEAD->target diff (full function bodies, no
+# dependency on a base blob). The original heal treated the trio as pre-existing
+# context and 3-way-conflicted after the github-pr-awareness rerere resolution
+# took upstream's cursorCliSku.ts (which lacks the trio). Test hunk dropped:
+# HEAD's cursorCliSku.test.ts already carries the #1129 cases via a layer.
 diff --git a/shared/src/cursorCliSku.ts b/shared/src/cursorCliSku.ts
-index 1dc32e04..c199f7fc 100644
+index 0c6498c9..c199f7fc 100644
 --- a/shared/src/cursorCliSku.ts
 +++ b/shared/src/cursorCliSku.ts
-@@ -1,9 +1,14 @@
--/** ACP parameterized wire ids use bracket params; CLI `agent --list-models` slugs do not. */
+@@ -1,3 +1,13 @@
 +/** Renamed ACP wire bases → live Cursor CLI sku family (e.g. grok-4.5 → cursor-grok-4.5). */
 +const CURSOR_LEGACY_MODEL_BASE_ALIASES: Readonly<Record<string, string>> = {
 +    'grok-4.5': 'cursor-grok-4.5',
 +};
 +
- export function resolveCursorLegacyModelBase(baseId: string): string {
-     const trimmed = baseId.trim();
-     return CURSOR_LEGACY_MODEL_BASE_ALIASES[trimmed] ?? trimmed;
- }
- 
-+/** ACP parameterized wire ids use bracket params; CLI `agent --list-models` slugs do not. */
++export function resolveCursorLegacyModelBase(baseId: string): string {
++    const trimmed = baseId.trim();
++    return CURSOR_LEGACY_MODEL_BASE_ALIASES[trimmed] ?? trimmed;
++}
++
+ /** ACP parameterized wire ids use bracket params; CLI `agent --list-models` slugs do not. */
  export function isCursorAcpWireModelId(modelId: string): boolean {
      const trimmed = modelId.trim();
-     return trimmed === 'default[]' || trimmed.includes('[');
-@@ -60,26 +65,6 @@ export function cursorCliSkuBaseId(slug: string): string {
-  * CLI probe SKUs that carry effort/speed suffixes (e.g. `gpt-5.5-high-fast`).
-  * Base-only slugs like `composer-2.5` are not variant SKUs.
-  */
--export function parseCursorWireParams(modelId: string): Record<string, string> {
--    const variant = modelId.includes('[') ? modelId.slice(modelId.indexOf('[') + 1).replace(/\]$/, '') : '';
--    if (!variant) {
--        return {};
--    }
--
--    const params: Record<string, string> = {};
--    for (const part of variant.split(',')) {
--        const segment = part.trim();
--        if (!segment) continue;
--        const eq = segment.indexOf('=');
--        if (eq === -1) {
--            params[segment] = 'true';
--            continue;
--        }
--        params[segment.slice(0, eq).trim()] = segment.slice(eq + 1).trim();
--    }
--    return params;
--}
--
- export function isCursorCliSkuVariantId(modelId: string): boolean {
-     const trimmed = modelId.trim();
-     if (!trimmed || isCursorAcpWireModelId(trimmed)) {
-@@ -111,7 +96,7 @@ export function isCursorAcpCatalogModelId(modelId: string): boolean {
+@@ -86,7 +96,7 @@ export function isCursorAcpCatalogModelId(modelId: string): boolean {
      return true;
  }
  
@@ -143,7 +40,7 @@ index 1dc32e04..c199f7fc 100644
      const variant = modelId.includes('[') ? modelId.slice(modelId.indexOf('[') + 1).replace(/\]$/, '') : '';
      if (!variant) {
          return {};
-@@ -165,7 +150,7 @@ function inferSkuParamHints(slug: string): Record<string, string> {
+@@ -140,7 +150,7 @@ function inferSkuParamHints(slug: string): Record<string, string> {
  
  function scoreWireAgainstSku(slug: string, wireId: string): number {
      const hints = inferSkuParamHints(slug);
@@ -152,13 +49,10 @@ index 1dc32e04..c199f7fc 100644
      let score = 0;
  
      for (const [key, value] of Object.entries(hints)) {
-@@ -205,9 +190,76 @@ export function findBestCliSkuForAcpWire(
+@@ -180,6 +190,138 @@ export function findBestCliSkuForAcpWire(
      return best;
  }
  
--/**
-- * Map UI/CLI model id (wire or slug) onto an ACP configOptions wire id.
-- */
 +function syntheticSkuFromWireParams(base: string, params: Record<string, string>): string {
 +    const effort = params.reasoning ?? params.effort ?? 'medium';
 +    let sku = resolveCursorLegacyModelBase(base);
@@ -229,31 +123,72 @@ index 1dc32e04..c199f7fc 100644
 +    return best;
 +}
 +
- /** Parse model ids from Cursor `Cannot use this model` stderr (Available models: …). */
- export function parseCursorAvailableModelsFromRejection(text: string): string[] {
-     const match = text.match(/Available models:\s*([^\n]*)/i);
-@@ -227,10 +279,6 @@ export function parseCursorAvailableModelsFromRejection(text: string): string[]
-         .filter((part) => part.length > 0 && part.toLowerCase() !== 'auto');
- }
- 
--/**
-- * Remap a stale hub/ACP wire id onto a live Cursor catalog entry.
-- * Returns null when no catalog candidate matches.
-- */
- /**
-  * Remap a stale hub/ACP wire id onto a live Cursor catalog entry.
-  * Returns null when no catalog candidate matches.
-@@ -274,6 +322,9 @@ export function remapStaleCursorModelId(
-     return null;
- }
- 
++/** Parse model ids from Cursor `Cannot use this model` stderr (Available models: …). */
++export function parseCursorAvailableModelsFromRejection(text: string): string[] {
++    const match = text.match(/Available models:\s*([^\n]*)/i);
++    if (!match) {
++        return [];
++    }
++
++    let catalog = match[1].trim();
++    const tipIdx = catalog.search(/\s+Tip:/i);
++    if (tipIdx !== -1) {
++        catalog = catalog.slice(0, tipIdx).trim();
++    }
++
++    return catalog
++        .split(',')
++        .map((part) => part.trim())
++        .filter((part) => part.length > 0 && part.toLowerCase() !== 'auto');
++}
++
 +/**
-+ * Map UI/CLI model id (wire or slug) onto an ACP configOptions wire id.
++ * Remap a stale hub/ACP wire id onto a live Cursor catalog entry.
++ * Returns null when no catalog candidate matches.
 + */
- export function matchCliSkuToAcpWireId(
-     requested: string,
-     available: readonly { modelId: string }[]
-@@ -289,6 +340,9 @@ export function matchCliSkuToAcpWireId(
++export function remapStaleCursorModelId(
++    requested: string,
++    available: readonly { modelId: string }[]
++): string | null {
++    const trimmed = requested.trim();
++    if (!trimmed) {
++        return null;
++    }
++
++    const exact = available.find((entry) => entry.modelId === trimmed);
++    const legacyWire = isCursorAcpWireModelId(trimmed)
++        && resolveCursorLegacyModelBase(cursorModelBaseId(trimmed)) !== cursorModelBaseId(trimmed);
++    if (exact && !legacyWire) {
++        return trimmed;
++    }
++
++    if (isCursorAcpWireModelId(trimmed)) {
++        const wireBase = cursorModelBaseId(trimmed);
++        if (resolveCursorLegacyModelBase(wireBase) === wireBase) {
++            return null;
++        }
++        const syntheticSku = syntheticSkuFromWireParams(
++            wireBase,
++            parseCursorWireParams(trimmed)
++        );
++        return pickBestCatalogSku(syntheticSku, available)
++            ?? matchCliSkuToAcpWireId(syntheticSku, available);
++    }
++
++    const legacyBase = resolveCursorLegacyModelBase(cursorCliSkuBaseId(trimmed));
++    if (legacyBase !== cursorCliSkuBaseId(trimmed)) {
++        const rewritten = trimmed.replace(cursorCliSkuBaseId(trimmed), legacyBase);
++        return pickBestCatalogSku(rewritten, available)
++            ?? matchCliSkuToAcpWireId(rewritten, available);
++    }
++
++    return null;
++}
++
+ /**
+  * Map UI/CLI model id (wire or slug) onto an ACP configOptions wire id.
+  */
+@@ -198,6 +340,9 @@ export function matchCliSkuToAcpWireId(
      }
  
      if (isCursorAcpWireModelId(trimmed)) {
@@ -263,19 +198,3 @@ index 1dc32e04..c199f7fc 100644
          return null;
      }
  
-@@ -299,6 +353,12 @@ export function matchCliSkuToAcpWireId(
-     if (wires.length === 0) {
-         return null;
-     }
-+    // Suffixed SKUs must not collapse onto a bare-only ACP catalog — those rows
-+    // cannot express effort/speed (apply is model + fast on parameterized wires).
-+    const hasParameterizedWire = wires.some((entry) => isCursorAcpWireModelId(entry.modelId));
-+    if (isCursorCliSkuVariantId(trimmed) && !hasParameterizedWire) {
-+        return null;
-+    }
-     if (wires.length === 1) {
-         return wires[0].modelId;
-     }
--- 
-2.39.5
-
