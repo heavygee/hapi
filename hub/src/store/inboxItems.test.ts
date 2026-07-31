@@ -3,6 +3,7 @@ import { buildOverseerSessionIdentity, mergeEventPayloadWithSession } from '@hap
 import { Store } from './index'
 import type { StoredSession } from './types'
 import { deleteSession } from './sessions'
+import { ensureOverseerInboxSchema } from './inboxItems'
 import { Database } from 'bun:sqlite'
 
 function payloadForSession(session: StoredSession, extra: Record<string, unknown> = {}): string {
@@ -26,6 +27,36 @@ describe('Overseer inbox schema (init-gated, not SCHEMA_VERSION)', () => {
         expect(names.has('inbox_items')).toBe(true)
         expect(names.has('inbox_item_source_events')).toBe(true)
         expect(names.has('inbox_operator_actions')).toBe(true)
+    })
+
+    it('adds the R8 disposition snapshot columns to a pre-existing inbox_operator_actions table', () => {
+        const db = new Database(':memory:')
+        db.exec('PRAGMA foreign_keys = ON')
+        // Simulate the live DB shape BEFORE the keystone: the old 6-column table.
+        db.exec(`
+            CREATE TABLE inbox_operator_actions (
+                id INTEGER PRIMARY KEY,
+                inbox_item_id INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                status_after TEXT NOT NULL,
+                feedback TEXT,
+                created_at INTEGER NOT NULL
+            );
+        `)
+        db.exec("INSERT INTO inbox_operator_actions (inbox_item_id, action, status_after, feedback, created_at) VALUES (1, 'done', 'resolved', NULL, 1000)")
+
+        ensureOverseerInboxSchema(db)
+
+        const cols = new Set(
+            (db.prepare('PRAGMA table_info(inbox_operator_actions)').all() as { name: string }[]).map((c) => c.name)
+        )
+        for (const col of ['source_kind', 'source_ref', 'event_type', 'category', 'project', 'artifact_kind', 'repo', 'context_snapshot_json']) {
+            expect(cols.has(col)).toBe(true)
+        }
+        // Pre-existing row survives with NULL snapshot; migration is idempotent on re-run.
+        expect((db.prepare('SELECT COUNT(*) AS n FROM inbox_operator_actions').get() as { n: number }).n).toBe(1)
+        expect(() => ensureOverseerInboxSchema(db)).not.toThrow()
+        db.close()
     })
 
     it('promotes attention events into one active item per session', () => {

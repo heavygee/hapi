@@ -29,8 +29,19 @@ describe('overseer routes', () => {
             systemPrompt: string
         }
         expect(body.identity.canDispatch).toBe(false)
-        expect(body.identity.tools.length).toBe(8)
+        expect(body.identity.tools.length).toBe(10)
         expect(body.systemPrompt).toContain('Overseer')
+    })
+
+    it('POST /overseer/tools/record_disposition is gated off on the read-only HTTP surface (403)', async () => {
+        const store = new Store(':memory:')
+        const app = buildApp(store)
+        const res = await app.request('/api/overseer/tools/record_disposition', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ itemId: 1, action: 'done' })
+        })
+        expect(res.status).toBe(403)
     })
 
     it('GET /overseer/voice returns prompt + backend descriptor', async () => {

@@ -10,6 +10,7 @@ import {
     buildOverseerSystemPrompt,
     deriveObservedWorkerState,
     inferWorkerState,
+    isOverseerWriteTool,
     mapEventTypeToWorkerState,
     mapNotifyStatusToWorkerState,
     overseerToolArgsSchemas
@@ -18,24 +19,29 @@ import {
 const STALE = 30 * 60 * 1000
 
 describe('overseer entity protocol', () => {
-    it('catalog covers every tool name and is read-only', () => {
+    it('catalog covers every tool name; only record_disposition writes (R2)', () => {
         const catalogNames = OVERSEER_TOOL_CATALOG.map((t) => t.name).sort()
         expect(catalogNames).toEqual([...OVERSEER_TOOL_NAMES].sort())
-        expect(OVERSEER_TOOL_CATALOG.every((t) => t.readonly === true)).toBe(true)
+        const writeTools = OVERSEER_TOOL_CATALOG.filter((t) => !t.readonly).map((t) => t.name)
+        expect(writeTools).toEqual(['record_disposition'])
+        expect(isOverseerWriteTool('record_disposition')).toBe(true)
+        expect(isOverseerWriteTool('query_events')).toBe(false)
     })
 
-    it('exposes a read-only (cannot dispatch) identity', () => {
+    it('exposes a cannot-dispatch identity that CAN record dispositions (Stage 1)', () => {
         const identity = buildOverseerIdentity()
         expect(identity.id).toBe(OVERSEER_ENTITY_ID)
         expect(identity.kind).toBe(OVERSEER_SOURCE_KIND)
         expect(identity.canDispatch).toBe(false)
+        expect(identity.canDisposition).toBe(true)
         expect(identity.tools).toHaveLength(OVERSEER_TOOL_NAMES.length)
     })
 
-    it('system prompt frames chief-of-staff + read-only + provenance', () => {
+    it('system prompt frames chief-of-staff + read-only tools + disposition write discipline', () => {
         const prompt = buildOverseerSystemPrompt()
         expect(prompt).toContain('chief-of-staff')
-        expect(prompt.toLowerCase()).toContain('read only')
+        expect(prompt).toContain('Read-only tools')
+        expect(prompt).toContain('record_disposition')
         expect(prompt).toContain('CANNOT dispatch')
         expect(prompt).toContain('Show receipts')
     })

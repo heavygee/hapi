@@ -122,7 +122,9 @@ export async function runOverseerConverse(params: {
                 continue
             }
             try {
-                const result = runOverseerTool(overseer, name, args)
+                // The conversational surface is the operator-directed write-path, so dispositions
+                // are allowed here (gated off on the raw HTTP tool-dispatch endpoint).
+                const result = runOverseerTool(overseer, name, args, true)
                 toolTrace.push({ tool: name, args, ok: true })
                 // The brain opts into 'full' per call when it needs depth; default lean.
                 const detail = args.detail === 'full' ? 'full' : 'lean'

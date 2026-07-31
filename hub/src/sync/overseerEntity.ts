@@ -1,11 +1,12 @@
 /**
- * Overseer entity — read-only hub service (Step 3 / Stage 0).
+ * Overseer entity — hub service (Step 3 / Stage 1 keystone).
  *
- * Implements the seven read-only tools the Overseer uses to reason about the
- * fleet, plus `convo_turn` writeback. Everything here is read-only against the
- * substrate (events + inbox + sessions + messages); no dispatch, no mutation of
- * worker state. The single mutation it performs is appending its own
- * memory-bearing `convo_turn` events (contracts §1 three-layer model).
+ * Implements the read-only tools the Overseer uses to reason about the fleet,
+ * plus `convo_turn` writeback, plus the single substrate write: `record_disposition`
+ * (the operator's explicit decision on an inbox item, freezing the R8 as-seen
+ * snapshot). No dispatch, no mutation of worker state. Reads are against
+ * events + inbox + sessions + messages; the one write funnels through the shared
+ * `recordOperatorAction` store method (contracts §1 three-layer model).
  */
 
 import {
@@ -23,15 +24,21 @@ import {
     type OverseerConvoTurnInput,
     type OverseerExplainPriority,
     type OverseerIdentity,
+    type OverseerDispositionCluster,
+    type OverseerDispositionResult,
+    type OverseerDispositionRow,
+    type OverseerDispositionsResult,
     type OverseerOpenLoop,
     type OverseerOpenLoopsResult,
     type OverseerRecentOutputChunk,
     type OverseerSessionStateView,
     type OverseerWorkerHealth,
     type OverseerWorkerState,
+    type QueryDispositionsArgs,
     type QueryEventsArgs,
     type QueryInboxArgs,
     type QueryOpenLoopsArgs,
+    type RecordDispositionArgs,
     type ListActiveWorkersArgs
 } from '@hapi/protocol'
 import { buildOverseerSessionIdentity } from '@hapi/protocol'
@@ -419,6 +426,124 @@ export class OverseerEntity {
                 halfFinished: loops.length - waitingOnYou
             }
         }
+    }
+
+    // --- Tool 9: query_dispositions (read) ----------------------------------
+
+    /**
+     * R3 shared reader — one reader, two modes on the disposition row shape.
+     *  - default: list recent disposition rows (thinned to the predicate vocabulary + as-seen title).
+     *  - `groupBy` set: cluster mode (`GROUP BY` + `HAVING count>=minCount`) — the discovery watcher shape.
+     */
+    queryDispositions(args: QueryDispositionsArgs = {}): OverseerDispositionsResult {
+        const filter = {
+            action: args.action ?? null,
+            sourceKind: args.sourceKind ?? null,
+            eventType: args.eventType ?? null,
+            category: args.category ?? null,
+            project: args.project ?? null,
+            repo: args.repo ?? null,
+            sinceTs: args.sinceTs ?? null,
+            limit: args.limit ?? 50
+        }
+
+        if (args.groupBy && args.groupBy.length > 0) {
+            const clusters = this.inbox
+                .clusterDispositions(args.groupBy, args.minCount ?? 1, filter)
+                .map(
+                    (c): OverseerDispositionCluster => ({
+                        keys: c.keys,
+                        count: c.count,
+                        actions: c.actions,
+                        lastCreatedAt: c.lastCreatedAt
+                    })
+                )
+            return { mode: 'cluster', clusters, total: clusters.length }
+        }
+
+        const rows = this.inbox.listDispositions(filter).map(
+            (r): OverseerDispositionRow => ({
+                id: r.id,
+                itemId: r.inboxItemId,
+                action: r.action,
+                statusAfter: r.statusAfter,
+                feedback: r.feedback,
+                createdAt: r.createdAt,
+                sourceKind: r.sourceKind,
+                eventType: r.eventType,
+                category: r.category,
+                project: r.project,
+                repo: r.repo,
+                title: r.contextSnapshot?.title ?? null
+            })
+        )
+        return { mode: 'list', rows, total: rows.length }
+    }
+
+    // --- Tool 10: record_disposition (WRITE — the Stage 1 keystone) ----------
+
+    /**
+     * The single mutation the Overseer performs on the substrate: record the operator's explicit
+     * decision on one inbox item, freezing the R8 as-seen snapshot, and return a tombstone. Every
+     * write path (this + F5 auto-resolve) funnels through the shared `recordOperatorAction` store
+     * method so the predicate vocabulary is populated identically.
+     */
+    recordDisposition(args: RecordDispositionArgs): OverseerDispositionResult {
+        const item = this.inbox.getById(args.itemId)
+        if (!item) {
+            return {
+                ok: false,
+                itemId: args.itemId,
+                action: args.action,
+                statusAfter: 'unknown',
+                tombstone: `No inbox item #${args.itemId} — nothing recorded.`
+            }
+        }
+        if (args.action === 'snooze' && args.snoozedUntil == null) {
+            return {
+                ok: false,
+                itemId: args.itemId,
+                action: args.action,
+                statusAfter: item.status,
+                tombstone: `Snooze needs a snoozedUntil timestamp — nothing recorded for #${args.itemId}.`
+            }
+        }
+
+        const updated = this.inbox.recordOperatorAction(
+            args.itemId,
+            args.action,
+            args.feedback ?? null,
+            args.snoozedUntil ?? null
+        )
+        const statusAfter = updated?.status ?? item.status
+        return {
+            ok: true,
+            itemId: args.itemId,
+            action: args.action,
+            statusAfter,
+            tombstone: this.buildTombstone(args.action, statusAfter, item)
+        }
+    }
+
+    private buildTombstone(action: string, statusAfter: string, item: StoredInboxItem): string {
+        const verb =
+            action === 'done'
+                ? 'Resolved'
+                : action === 'dismiss'
+                    ? 'Dismissed'
+                    : action === 'snooze'
+                        ? 'Snoozed'
+                        : action === 'open'
+                            ? 'Reopened'
+                            : `Recorded ${action} on`
+        const session = item.relatedSessionId ? this.getSession(item.relatedSessionId) : undefined
+        const project = session ? deriveIdentity(session).project : null
+        const where = [item.category, project]
+            .filter((s): s is string => typeof s === 'string' && s.length > 0)
+            .join(' / ')
+        const title = item.title.length > 80 ? `${item.title.slice(0, 77)}…` : item.title
+        const tail = where ? ` — ${where}` : ''
+        return `${verb} #${item.id} (${statusAfter})${tail}: ${title}`
     }
 
     // --- convo_turn writeback -----------------------------------------------

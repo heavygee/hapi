@@ -21,6 +21,24 @@ export const INBOX_OPERATOR_ACTIONS = [
 
 export type InboxOperatorAction = typeof INBOX_OPERATOR_ACTIONS[number]
 
+/**
+ * The disposition predicate vocabulary (R8): the snapshot columns frozen on each disposition row
+ * ARE the standing-order match keys AND the discovery `GROUP BY` keys — one shared vocabulary.
+ * `query_dispositions` filters and clusters on exactly these columns.
+ */
+export const DISPOSITION_PREDICATE_COLUMNS = [
+    'action',
+    'source_kind',
+    'source_ref',
+    'event_type',
+    'category',
+    'project',
+    'artifact_kind',
+    'repo'
+] as const
+
+export type DispositionPredicateColumn = typeof DISPOSITION_PREDICATE_COLUMNS[number]
+
 export const INBOX_CATEGORIES = [
     'APPROVAL',
     'BLOCKED',
