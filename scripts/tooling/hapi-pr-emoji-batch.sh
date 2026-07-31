@@ -74,13 +74,26 @@ fetch_latest_bot_body() {
     label="$(gh_t pr view "$n" --repo "$REPO" --json labels \
         --jq '[.labels[].name]|contains(["cold-review-clean"])' 2>/dev/null || echo false)"
     [[ "$label" == "true" ]] && { echo "__CLEAN_LABEL__"; return 0; }
+    # IMPORTANT: never use `gh api --paginate --jq '…|last|…'`.
+    # With --jq, gh filters EACH page and concatenates string outputs. On long
+    # PRs (#1108 had 2+ review pages) that glues an older page's tip body onto
+    # the real tip — body-grep then false-[Major] (⚠️) while tip is Findings:None.
+    # --slurp cannot combine with --jq (gh 2.96); pipe pages through jq `add`.
     if [[ "$OWNER" == "heavygee" ]]; then
-        gh_t api "repos/${REPO}/issues/${n}/comments" --paginate \
-            --jq '[.[]|select(.user.login|test("^chatgpt-codex-connector"))]|sort_by(.created_at)|last|.body//""' \
+        gh_t api "repos/${REPO}/issues/${n}/comments" --paginate --slurp 2>/dev/null \
+            | jq -r 'add
+                | map(select(.user.login|test("^chatgpt-codex-connector")))
+                | sort_by(.created_at)
+                | last
+                | .body // empty' \
             2>/dev/null || echo ""
     else
-        gh_t api "repos/${REPO}/pulls/${n}/reviews" --paginate \
-            --jq '[.[]|select(.user.login=="github-actions[bot]")]|sort_by(.submitted_at)|last|.body//""' \
+        gh_t api "repos/${REPO}/pulls/${n}/reviews" --paginate --slurp 2>/dev/null \
+            | jq -r 'add
+                | map(select(.user.login=="github-actions[bot]"))
+                | sort_by(.submitted_at)
+                | last
+                | .body // empty' \
             2>/dev/null || echo ""
     fi
 }

@@ -145,17 +145,28 @@ if [[ "$HAS_CLEAN_LABEL" == "true" ]]; then
     echo "     → PASS"
 else
     # Determine surface from owner
+    # IMPORTANT: never `gh api --paginate --jq '…|.[0]'` — --jq runs per page and
+    # concatenates JSON values, so jq streaming can mix tip + prior-page tip
+    # (false CLEAN when an older page ended Findings:None, or false FINDINGS when
+    # an older page still had [Major]). --slurp + jq `add` merges pages first.
     if [[ "$OWNER" == "heavygee" ]]; then
         # Fork: cloud-Codex posts as issue-comments by chatgpt-codex-connector[bot]
-        LATEST_BOT=$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
-            --jq '[.[] | select(.user.login == "chatgpt-codex-connector[bot]" or .user.login == "chatgpt-codex-connector")] | sort_by(.created_at) | reverse | .[0]' 2>/dev/null || echo "null")
+        LATEST_BOT=$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate --slurp 2>/dev/null \
+            | jq '[add[]
+                | select(.user.login == "chatgpt-codex-connector[bot]"
+                    or .user.login == "chatgpt-codex-connector")]
+                | sort_by(.created_at) | reverse | .[0] // null' \
+            2>/dev/null || echo "null")
         CLEAN_REGEX="Codex Review:.*Didn.t find any|Codex Review:.*No.*issues|Didn.t find any major"
         BOT_DESC="chatgpt-codex-connector[bot] comment"
         TIMESTAMP_FIELD=".created_at"
     else
         # Upstream: openai/codex-action GHA posts formal reviews as github-actions[bot]
-        LATEST_BOT=$(gh api "repos/${REPO}/pulls/${PR}/reviews" --paginate \
-            --jq '[.[] | select(.user.login == "github-actions[bot]")] | sort_by(.submitted_at) | reverse | .[0]' 2>/dev/null || echo "null")
+        LATEST_BOT=$(gh api "repos/${REPO}/pulls/${PR}/reviews" --paginate --slurp 2>/dev/null \
+            | jq '[add[]
+                | select(.user.login == "github-actions[bot]")]
+                | sort_by(.submitted_at) | reverse | .[0] // null' \
+            2>/dev/null || echo "null")
         CLEAN_REGEX="No findings|No high-confidence|No issues found|No actionable|\*\*Findings\*\*\\n- None|- None\\."
         BOT_DESC="github-actions[bot] review"
         TIMESTAMP_FIELD=".submitted_at"
