@@ -1,0 +1,13 @@
+diff --git a/web/src/routes/share/index.tsx b/web/src/routes/share/index.tsx
+index b074fcccf..90ebc8cf5 100644
+--- a/web/src/routes/share/index.tsx
++++ b/web/src/routes/share/index.tsx
+@@ -298,6 +298,8 @@ export default function SharePage() {
+                                 setCustomStart(start)
+                                 setCustomEnd(end)
+                             }}
++                            expanded
++                            onExpandedChange={() => {}}
+                         />
+                         {pickerSessions === null ? (
+                             <LoadingState label={t('share.loading')} className="text-sm py-4" />
