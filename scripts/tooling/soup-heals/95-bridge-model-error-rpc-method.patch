@@ -1,0 +1,16 @@
+# 95-bridge-model-error-rpc-method.patch
+#
+# Remat locale/fat-layer unions can drop BridgeModelError from shared/src/rpcMethods.ts
+# while heal 91 + model-error UI still register/call RPC_METHODS.BridgeModelError.
+# Restores the method so cli typecheck passes.
+diff --git a/shared/src/rpcMethods.ts b/shared/src/rpcMethods.ts
+--- a/shared/src/rpcMethods.ts
++++ b/shared/src/rpcMethods.ts
+@@ -41,6 +41,7 @@ export const RPC_METHODS = {
+     ListGrokModels: 'listGrokModels',
+     ListGrokReasoningEffortOptions: 'listGrokReasoningEffortOptions',
+     ListOpencodeReasoningEffortOptions: 'listOpencodeReasoningEffortOptions',
++    BridgeModelError: 'bridge-model-error',
+     RunnerSelfUpgrade: 'runner-self-upgrade',
+ } as const
+ 
