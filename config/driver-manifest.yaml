@@ -365,7 +365,7 @@ layers:
 
   # 2026-08-01: overseer relay ping (PR #104). Stage 1.5 write tool ping_session —
   # overseer can ping a live session via the hub relay. STACKS ON
-  # feat/overseer-admin-console (must sit immediately after it). Tip f389c889.
+  # feat/overseer-admin-console (must sit immediately after it). Tip cfafd320 (prefix resolve on overseer read tools; ping already had it).
   # Touches overseerEntity + syncEngine + converse tool surface + /overseer console
   # chrome; no new DDL / schema-version step. Dogfood: /overseer talk-to with
   # active brain exercising ping_session.
