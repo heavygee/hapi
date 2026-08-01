@@ -104,26 +104,6 @@ function PlusIcon(props: { className?: string }) {
     )
 }
 
-function RefreshIcon(props: { className?: string }) {
-    return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={props.className}
-        >
-            <path d="M21 12a9 9 0 1 1-2.64-6.36L21 8" />
-            <path d="M21 3v5h-5" />
-        </svg>
-    )
-}
-
 function FolderOpenIcon(props: { className?: string }) {
     return (
         <svg
@@ -173,15 +153,9 @@ function SessionsPage() {
     const { sessions, isLoading, error, refetch } = useSessions(api)
     const { machines } = useMachines(api, true)
     const handleRefresh = useCallback(() => {
-        void (async () => {
+        return (async () => {
             try {
                 await refetch()
-                addToast({
-                    title: t('sessions.refresh.success.title'),
-                    body: t('sessions.refresh.success.body'),
-                    sessionId: '',
-                    url: ''
-                })
             } catch (error) {
                 addToast({
                     title: t('sessions.refresh.failed.title'),
@@ -201,6 +175,12 @@ function SessionsPage() {
         }
         return byId
     }, [machines])
+    // Workspace browsing is opt-in per runner (`--workspace-root`); only show
+    // browse affordances when at least one machine reported roots.
+    const canBrowse = useMemo(
+        () => machines.some(m => (m.metadata?.workspaceRoots?.length ?? 0) > 0),
+        [machines]
+    )
     const sessionMatch = matchRoute({ to: '/sessions/$sessionId', fuzzy: true })
     const selectedSessionId = sessionMatch && sessionMatch.sessionId !== 'new' ? sessionMatch.sessionId : null
     const selectedSession = useMemo(
@@ -246,31 +226,22 @@ function SessionsPage() {
                         })}
                         onNewSession={() => navigate({ to: '/sessions/new' })}
                         onNewSessionInDirectory={handleNewSessionInDirectory}
-                        onBrowse={() => navigate({ to: '/browse' })}
+                        onBrowse={canBrowse ? () => navigate({ to: '/browse' }) : undefined}
                         onRefresh={handleRefresh}
                         isLoading={isLoading}
                         renderHeader={false}
                         headerActions={(
                             <div className="flex items-center gap-2">
-                                <button
-                                    type="button"
-                                    onClick={handleRefresh}
-                                    disabled={isLoading}
-                                    aria-label={t('button.refresh')}
-                                    aria-busy={isLoading}
-                                    className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors disabled:opacity-60 disabled:cursor-wait"
-                                    title={t('button.refresh')}
-                                >
-                                    <RefreshIcon className={`h-5 w-5 ${isLoading ? 'animate-spin' : ''}`} />
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => navigate({ to: '/browse' })}
-                                    className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
-                                    title={t('browse.nav')}
-                                >
-                                    <FolderOpenIcon className="h-5 w-5" />
-                                </button>
+                                {canBrowse && (
+                                    <button
+                                        type="button"
+                                        onClick={() => navigate({ to: '/browse' })}
+                                        className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
+                                        title={t('browse.nav')}
+                                    >
+                                        <FolderOpenIcon className="h-5 w-5" />
+                                    </button>
+                                )}
                                 <button
                                     type="button"
                                     onClick={() => navigate({ to: '/settings' })}

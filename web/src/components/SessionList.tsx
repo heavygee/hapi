@@ -23,10 +23,11 @@ import { getSessionTitle } from '@/lib/sessionTitle'
 import { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
 import type { Machine } from '@/types/api'
 import { getMachinePlatform, presentMachineHealth } from '@/lib/machineHealth'
-import { MachineFilterBar } from '@/components/MachineFilterBar'
+import { MachineFilterBar, MachineFilterMenu } from '@/components/MachineFilterBar'
 import { useSessionListMachineFilter } from '@/hooks/useSessionListMachineFilter'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
 import { SessionRowSummary } from '@/components/SessionRowSummary'
+import { Spinner } from '@/components/Spinner'
 
 export { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
 
@@ -942,13 +943,28 @@ function SessionItem(props: {
     )
 }
 
+type PullToRefreshState = 'idle' | 'pulling' | 'ready'
+
+const PULL_REFRESH_FEEDBACK_PX = 16
+const PULL_REFRESH_TRIGGER_PX = 64
+
+export function getPullToRefreshState(distancePx: number): PullToRefreshState {
+    if (distancePx >= PULL_REFRESH_TRIGGER_PX) {
+        return 'ready'
+    }
+    if (distancePx >= PULL_REFRESH_FEEDBACK_PX) {
+        return 'pulling'
+    }
+    return 'idle'
+}
+
 export function SessionList(props: {
     sessions: SessionSummary[]
     onSelect: (sessionId: string) => void
     onNewSession: () => void
     onNewSessionInDirectory?: (args: { machineId: string | null; directory: string }) => void
     onBrowse?: () => void
-    onRefresh: () => void
+    onRefresh: () => Promise<unknown> | void
     isLoading: boolean
     renderHeader?: boolean
     headerActions?: React.ReactNode
@@ -1021,6 +1037,21 @@ export function SessionList(props: {
     const machineFilters = useMemo(
         () => groupByMachine(allGroups, resolveMachineLabel),
         [allGroups, machineLabelsById] // eslint-disable-line react-hooks/exhaustive-deps
+    )
+    const machineFilterItems = useMemo(
+        () => machineFilters.map((mg) => {
+            const machine = mg.machineId ? machinesById[mg.machineId] : undefined
+            return {
+                id: mg.machineId ?? UNKNOWN_MACHINE_ID,
+                label: mg.label,
+                sessionCount: mg.totalSessions,
+                healthPresentation: presentMachineHealth(
+                    machine?.health,
+                    getMachinePlatform(machine)
+                )
+            }
+        }),
+        [machineFilters, machinesById]
     )
     const showMachineFilterBar = machineFilters.length >= 2
     // A persisted filter whose machine no longer has sessions falls back to
@@ -1188,6 +1219,95 @@ export function SessionList(props: {
 
     const showHeaderRow = showSearch || renderHeader || Boolean(props.headerActions)
 
+    // Pull-to-refresh on the scrollable list. Touch-only gesture mirroring the
+    // pull-to-load-older pattern in HappyThread; desktop has no overscroll
+    // bounce to make a wheel pull feel right, so it stays on live updates.
+    const scrollContainerRef = useRef<HTMLDivElement>(null)
+    const [pullState, setPullState] = useState<PullToRefreshState>('idle')
+    const pullStateRef = useRef<PullToRefreshState>('idle')
+    const [isRefreshing, setIsRefreshing] = useState(false)
+    const isRefreshingRef = useRef(false)
+    const onRefreshRef = useRef(props.onRefresh)
+    useEffect(() => {
+        onRefreshRef.current = props.onRefresh
+    }, [props.onRefresh])
+
+    useEffect(() => {
+        const container = scrollContainerRef.current
+        if (!container) return
+
+        let pullStartY: number | null = null
+
+        const updatePullState = (state: PullToRefreshState) => {
+            if (pullStateRef.current === state) {
+                return
+            }
+            pullStateRef.current = state
+            setPullState(state)
+        }
+
+        const triggerRefresh = () => {
+            if (isRefreshingRef.current) {
+                return
+            }
+            isRefreshingRef.current = true
+            setIsRefreshing(true)
+            void Promise.resolve(onRefreshRef.current()).finally(() => {
+                isRefreshingRef.current = false
+                setIsRefreshing(false)
+            })
+        }
+
+        const handleTouchStart = (event: TouchEvent) => {
+            updatePullState('idle')
+            pullStartY = container.scrollTop <= 0 && !isRefreshingRef.current
+                ? event.touches[0]?.clientY ?? null
+                : null
+        }
+
+        const handleTouchMove = (event: TouchEvent) => {
+            if (pullStartY === null) {
+                return
+            }
+            if (container.scrollTop > 0) {
+                pullStartY = null
+                updatePullState('idle')
+                return
+            }
+            const currentY = event.touches[0]?.clientY
+            if (currentY !== undefined) {
+                updatePullState(getPullToRefreshState(currentY - pullStartY))
+            }
+        }
+
+        const handleTouchEnd = () => {
+            const shouldRefresh = pullStartY !== null
+                && pullStateRef.current === 'ready'
+                && container.scrollTop <= 0
+            pullStartY = null
+            updatePullState('idle')
+            if (shouldRefresh) {
+                triggerRefresh()
+            }
+        }
+
+        const handleTouchCancel = () => {
+            pullStartY = null
+            updatePullState('idle')
+        }
+
+        container.addEventListener('touchstart', handleTouchStart, { passive: true })
+        container.addEventListener('touchmove', handleTouchMove, { passive: true })
+        container.addEventListener('touchend', handleTouchEnd, { passive: true })
+        container.addEventListener('touchcancel', handleTouchCancel, { passive: true })
+        return () => {
+            container.removeEventListener('touchstart', handleTouchStart)
+            container.removeEventListener('touchmove', handleTouchMove)
+            container.removeEventListener('touchend', handleTouchEnd)
+            container.removeEventListener('touchcancel', handleTouchCancel)
+        }
+    }, [])
+
     return (
         <div className="flex min-h-0 w-full flex-1 flex-col">
             <div className="session-list-scrollbar-offset mx-auto w-full max-w-content shrink-0">
@@ -1211,6 +1331,14 @@ export function SessionList(props: {
                     {!(showSearch && searchExpanded) ? (
                         <>
                             <div className="flex-1" />
+                            {showMachineFilterBar ? (
+                                <MachineFilterMenu
+                                    machines={machineFilterItems}
+                                    totalCount={allSessions.length}
+                                    value={activeMachineFilter}
+                                    onChange={setMachineFilter}
+                                />
+                            ) : null}
                             {renderHeader ? (
                                 <button
                                     type="button"
@@ -1227,33 +1355,9 @@ export function SessionList(props: {
                 </div>
             ) : null}
 
-            {props.sessions.length === 0 && (
-                <SessionsEmptyState
-                    onNewSession={props.onNewSession}
-                    onBrowse={props.onBrowse}
-                />
-            )}
-
-            {props.sessions.length > 0 && (isFiltering || activeMachineFilter !== null) && groups.length === 0 ? (
-                <div className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
-                    {t('sessions.search.noResults')}
-                </div>
-            ) : null}
-
             {showMachineFilterBar ? (
                 <MachineFilterBar
-                    machines={machineFilters.map((mg) => {
-                        const machine = mg.machineId ? machinesById[mg.machineId] : undefined
-                        return {
-                            id: mg.machineId ?? UNKNOWN_MACHINE_ID,
-                            label: mg.label,
-                            sessionCount: mg.totalSessions,
-                            healthPresentation: presentMachineHealth(
-                                machine?.health,
-                                getMachinePlatform(machine)
-                            )
-                        }
-                    })}
+                    machines={machineFilterItems}
                     totalCount={allSessions.length}
                     value={activeMachineFilter}
                     onChange={setMachineFilter}
@@ -1261,8 +1365,40 @@ export function SessionList(props: {
             ) : null}
             </div>
 
-            <div className="app-scroll-y session-list-scrollbar-left min-h-0 flex-1">
+            <div className="relative flex min-h-0 flex-1 flex-col">
+            {isRefreshing || pullState !== 'idle' || props.isLoading ? (
+                <div
+                    role="status"
+                    aria-live="polite"
+                    className="pointer-events-none absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-[var(--app-border)] bg-[var(--app-bg)]/90 px-2.5 py-1 text-xs text-[var(--app-hint)] shadow-sm backdrop-blur"
+                >
+                    {isRefreshing || props.isLoading ? <Spinner size="sm" label={null} className="text-current" /> : null}
+                    <span>
+                        {isRefreshing
+                            ? t('sessions.refresh.refreshing')
+                            : props.isLoading
+                                ? t('misc.loading')
+                                : pullState === 'ready'
+                                    ? t('sessions.refresh.release')
+                                    : t('sessions.refresh.pull')}
+                    </span>
+                </div>
+            ) : null}
+            <div ref={scrollContainerRef} className="app-scroll-y session-list-scrollbar-left min-h-0 flex-1">
             <div className="mx-auto flex w-full max-w-content flex-col gap-1 pl-1.5 pr-2 pb-2">
+                {props.sessions.length === 0 && !props.isLoading ? (
+                    <SessionsEmptyState
+                        onNewSession={props.onNewSession}
+                        onBrowse={props.onBrowse}
+                    />
+                ) : null}
+
+                {props.sessions.length > 0 && (isFiltering || activeMachineFilter !== null) && groups.length === 0 ? (
+                    <div className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
+                        {t('sessions.search.noResults')}
+                    </div>
+                ) : null}
+
                 {groups.map((group) => {
                     const isCollapsed = isGroupCollapsed(group)
                     const visibleGroupSessions = getVisibleGroupSessions(group)
@@ -1364,6 +1500,7 @@ export function SessionList(props: {
                         </div>
                     )
                 })}
+            </div>
             </div>
             </div>
         </div>

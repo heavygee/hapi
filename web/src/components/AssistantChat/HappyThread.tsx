@@ -52,6 +52,7 @@ type ShareTurnState = {
     id: number
     snapshots: ShareTurnSnapshot[]
     title: string
+    sourceContentWidth: number | null
 } | null
 
 type ShareTurnSnapshot = {
@@ -461,6 +462,28 @@ export function HappyThread(props: {
         failureCount: 0,
         autoPaused: false
     })
+
+    useLayoutEffect(() => {
+        const viewport = viewportRef.current
+        if (!viewport) return
+
+        const updateScrollbarGutter = () => {
+            const supportsStableBothEdges = typeof CSS !== 'undefined'
+                && typeof CSS.supports === 'function'
+                && CSS.supports('scrollbar-gutter: stable both-edges')
+            const gutter = supportsStableBothEdges
+                ? Math.max(0, (viewport.offsetWidth - viewport.clientWidth) / 2)
+                : 0
+            viewport.style.setProperty('--chat-scroll-gutter-inline', `${gutter}px`)
+        }
+
+        updateScrollbarGutter()
+        if (typeof ResizeObserver === 'undefined') return
+
+        const observer = new ResizeObserver(updateScrollbarGutter)
+        observer.observe(viewport)
+        return () => observer.disconnect()
+    }, [])
     const requestOlderRef = useRef<(source: HistoryLoadSource) => Promise<OlderHistoryLoadResult>>(
         () => Promise.resolve('transient-stop')
     )
@@ -1311,6 +1334,9 @@ export function HappyThread(props: {
     ) => {
         const content = contentRef.current
         if (!content) return
+        const messageContainer = content.querySelector<HTMLElement>('.happy-thread-messages')
+        const sourceContentWidth = messageContainer?.getBoundingClientRect().width
+            ?? content.getBoundingClientRect().width
 
         let target: HTMLElement | null = typeof messageTarget === 'string'
             ? document.getElementById(messageTarget)
@@ -1323,6 +1349,7 @@ export function HappyThread(props: {
                 id: ++shareTurnIdRef.current,
                 snapshots: fallbackSnapshot ? [fallbackSnapshot] : [],
                 title: props.metadata?.summary?.text ?? props.metadata?.name ?? props.metadata?.path ?? props.sessionId.slice(0, 8),
+                sourceContentWidth: sourceContentWidth > 0 ? sourceContentWidth : null,
             })
             return
         }
@@ -1366,6 +1393,7 @@ export function HappyThread(props: {
             id: ++shareTurnIdRef.current,
             snapshots: completeSnapshots,
             title: props.metadata?.summary?.text ?? props.metadata?.name ?? props.metadata?.path ?? props.sessionId.slice(0, 8),
+            sourceContentWidth: sourceContentWidth > 0 ? sourceContentWidth : null,
         })
     }, [props.metadata, props.sessionId])
 
@@ -1414,10 +1442,10 @@ export function HappyThread(props: {
                 >
                     <div
                         ref={viewportRef}
-                        className="app-scroll-y min-h-0 flex-1 overflow-x-hidden"
+                        className="app-scroll-y chat-scroll-y min-h-0 flex-1 overflow-x-hidden"
                         tabIndex={0}
                     >
-                        <div ref={contentRef} className="mx-auto w-full max-w-content min-w-0 p-3">
+                        <div ref={contentRef} className="chat-scroll-content mx-auto w-full max-w-content min-w-0 p-3">
                             <div ref={topSentinelRef} className="h-px w-full" aria-hidden="true" />
                             {showSkeleton ? (
                                 <MessageSkeleton />
@@ -1478,6 +1506,7 @@ export function HappyThread(props: {
                     showFastBadge={props.session.metadata?.flavor === 'codex' && isFastServiceTier(props.session.serviceTier)}
                     worktreeBranch={props.session.metadata?.worktree?.branch ?? null}
                     sourceSnapshots={shareTurn?.snapshots ?? []}
+                    sourceContentWidth={shareTurn?.sourceContentWidth ?? null}
                     onClose={() => setShareTurn(null)}
                 />
             </ThreadPrimitive.Root>
