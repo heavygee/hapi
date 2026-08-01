@@ -342,7 +342,8 @@ layers:
   # disposition write path: ADD COLUMN migration on inbox_operator_actions +
   # new reader fns + snapshot population inside recordInboxOperatorAction.
   # STACKS ON feat/overseer-open-loops (must sit immediately after it). Tip
-  # 3b6873b38. Shared surface with ingest stack (#99) is ensureOverseerInboxSchema
+  # ed4f30cf (#102 CI: stub Overseer debug panels in About settings test).
+  # Shared surface with ingest stack (#99) is ensureOverseerInboxSchema
   # in hub/src/store/inboxItems.ts: #102 appends ADD COLUMN + bucket index, #99
   # appends sweepDecayedTerminalItems/backfillInboxDerivedFields — additive,
   # order-independent, final init fn must union BOTH sets (no ordering constraint).
@@ -354,13 +355,21 @@ layers:
   # brain switching: persisted active brain (profile+model) in a NEW overseer_settings
   # KV table (idempotent DDL in finishSchemaInit alongside ensureOverseerInboxSchema —
   # no schema-version ladder change). REQUIRED_TABLES gains 'overseer_settings'.
-  # STACKS ON feat/overseer-dispositions (must sit immediately after it). Tip 70b11fb5.
-  # Unions cleanly with dispositions' ensureOverseerInboxSchema (different table, same
-  # finishSchemaInit block). Switcher env: OVERSEER_BRAIN_URL (local default) +
+  # STACKS ON feat/overseer-dispositions (must sit immediately after it). Tip 1cb8781f
+  # (rebased on #102 CI stub + About deep-link assert). Unions cleanly with
+  # dispositions' ensureOverseerInboxSchema (different table, same finishSchemaInit
+  # block). Switcher env: OVERSEER_BRAIN_URL (local default) +
   # OVERSEER_BRAIN_PROFILE_OPENAI_URL/_API_KEY/_MODEL; switching among configured
-  # profiles is fully runtime (profile add/remove needs a hub restart). Gates green:
-  # root tsc (cli+web+hub), hub 574.
+  # profiles is fully runtime (profile add/remove needs a hub restart).
   - branch: feat/overseer-admin-console
+
+  # 2026-08-01: overseer relay ping (PR #104). Stage 1.5 write tool ping_session —
+  # overseer can ping a live session via the hub relay. STACKS ON
+  # feat/overseer-admin-console (must sit immediately after it). Tip f389c889.
+  # Touches overseerEntity + syncEngine + converse tool surface + /overseer console
+  # chrome; no new DDL / schema-version step. Dogfood: /overseer talk-to with
+  # active brain exercising ping_session.
+  - branch: feat/overseer-relay-ping
 
   # Overseer replay harness (thin): harness+CI+fixtures only. Tip 96c8e7bf4,
   # ahead=1, zero FCM. Stack after umbrella; no substrate in this tip.
