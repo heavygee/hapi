@@ -118,6 +118,12 @@ export type OverseerExplainPriority = {
     reasonForPriority: string | null
     sourceEventIds: number[]
     relatedSessionId: string | null
+    /** Session display name when the related session still exists in the hub. */
+    relatedSessionName: string | null
+    /** Hub `active` flag for the related session; null when the session row is gone. */
+    relatedSessionActive: boolean | null
+    /** Inbox item summary (action line) — often more useful than a bare URL title. */
+    summary: string
     /** Lightweight detail for each contributing event (provenance trail). */
     sourceEvents: Array<{
         id: number
@@ -539,17 +545,17 @@ export const OVERSEER_TOOL_CATALOG: OverseerToolCatalogEntry[] = [
     },
     {
         name: 'get_session_state',
-        description: 'Hub-observed state for one session: activity, tool-call recency, pending requests, and the worker-reported state when available.',
+        description: 'Hub-observed state for one session (full id or unique short prefix): activity, tool-call recency, pending requests, and the worker-reported state when available. Inactive sessions still return a state object (active:false) — null means no matching session, not "deleted".',
         readonly: true
     },
     {
         name: 'get_session_recent_output',
-        description: 'Last N transcript chunks for one session, for context.',
+        description: 'Last N transcript chunks for one session (full id or unique short prefix).',
         readonly: true
     },
     {
         name: 'get_worker_health',
-        description: 'Combined worker health: reported + observed + inferred state with a signal trail (never collapses a reported/observed conflict).',
+        description: 'Combined worker health for one session (full id or unique short prefix): reported + observed + inferred state with a signal trail (never collapses a reported/observed conflict).',
         readonly: true
     },
     {
@@ -644,9 +650,11 @@ export function buildOverseerSystemPrompt(): string {
         'Read-only tools:',
         '- query_events — the events stream (blockers, completions, decisions, progress, errors).',
         '- query_inbox — what currently needs the operator: candidates, surfaced items, held items.',
-        '- get_session_state — one session\'s observed state, activity, and reported state.',
-        '- get_session_recent_output — the last few transcript chunks of a session.',
-        '- get_worker_health — reported + observed + inferred state for one worker.',
+        '- get_session_state — one session\'s observed state, activity, and reported state',
+        '  (sessionId: full UUID or unique short prefix; inactive sessions still return a state',
+        '  object with active:false — null means no match, NOT that the session was deleted).',
+        '- get_session_recent_output — the last few transcript chunks of a session (same id rules).',
+        '- get_worker_health — reported + observed + inferred state for one worker (same id rules).',
         '- explain_priority — why an inbox item sits where it does, with its provenance.',
         '- list_active_workers — the current roster, filterable by project / state / age.',
         '- query_open_loops — the "what am I forgetting?" lens: cold threads whose latest status is not done.',
@@ -692,8 +700,15 @@ export function buildOverseerSystemPrompt(): string {
         '- Prioritize. Surface the root cause, not five symptoms ("GitHub auth is blocking 5 workers",',
         '  not a roll-call of each blocked worker).',
         '- When the operator asks about a SPECIFIC inbox item, first call explain_priority for its',
-        '  provenance, then query_events with that item\'s sessionId to pull the rest of that session\'s',
-        '  recorded activity as context/salience before answering — do not answer from the item alone.',
+        '  provenance, then query_events with that item\'s relatedSessionId (full UUID from the tool',
+        '  result — do not truncate it yourself) to pull the rest of that session\'s recorded activity',
+        '  as context/salience before answering — do not answer from the item alone.',
+        '- Prefer relatedSessionId / session fields from tool results over inventing short prefixes.',
+        '  Unique short prefixes are accepted by session tools, but truncating a UUID is how you get',
+        '  false "session missing" answers.',
+        '- An inbox item can still need a decision after its worker goes idle/complete — that is not',
+        '  a ghost. Check get_session_state (expect active:false + reported/observed) before claiming',
+        '  the session is gone.',
         '',
         '# Two questions, two axes',
         '',

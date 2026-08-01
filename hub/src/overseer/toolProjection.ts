@@ -37,6 +37,8 @@ function truncate(text: unknown, max: number): unknown {
  * Inbox item → the minimum for triage:
  *  - `id`       — to reference it (explain_priority, follow-ups)
  *  - `what`     — the title (the "what")
+ *  - `summary`  — action line (often better than a bare URL title)
+ *  - `session`  — full relatedSessionId (so get_session_state can be called without truncating)
  *  - `status`   — new / surfaced / held (has the operator seen it?)
  *  - `priority` — explicit rank (also implied by order, but explicit lets the
  *                 brain speak with confidence)
@@ -44,7 +46,15 @@ function truncate(text: unknown, max: number): unknown {
  */
 function projectInboxItem(item: unknown): Record<string, unknown> {
     const o = isObj(item) ? item : {}
-    return { id: o.id, what: o.title, status: o.status, priority: o.priority }
+    return {
+        id: o.id,
+        what: o.title,
+        summary: truncate(o.summary, 160),
+        category: o.category,
+        session: o.relatedSessionId,
+        status: o.status,
+        priority: o.priority
+    }
 }
 
 /** Disposition list row → the predicate keys + as-seen title (the rest is one query away). */

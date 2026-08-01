@@ -126,6 +126,58 @@ describe('OverseerEntity read-only tools', () => {
         expect(overseer(engine).getWorkerHealth('does-not-exist')).toBeNull()
     })
 
+    it('session-scoped tools resolve unique id prefixes (inactive still returns state)', () => {
+        const store = new Store(':memory:')
+        const fullId = '96f67085-5dd3-4a10-aa7c-785f72a227c2'
+        const collisionId = '96f67085-aaaa-bbbb-cccc-ddddeeeeffff'
+        store.sessions.getOrCreateSession(
+            'prefix-a',
+            { flavor: 'cursor', host: 'local', path: '/tmp/inline-model-error-detect', name: 'cursor inline model-error detect' },
+            null,
+            'default',
+            undefined,
+            undefined,
+            undefined,
+            fullId
+        )
+        store.events.insert({
+            ts: Date.now(), sourceKind: 'worker', eventType: 'completed', attentionCandidate: 0, severity: 2,
+            summary: 'done', relatedSessionId: fullId,
+            payloadJson: JSON.stringify({ session: { project: 'inline-model-error-detect', name: 'cursor inline model-error detect' } })
+        })
+        store.messages.addMessage(fullId, agentMessage('shipped the bridge'))
+
+        // Unique 8-char prefix resolves (the live bug: brain truncates, tool used to return null).
+        const oUnique = overseer(buildEngine(store))
+        const byPrefix = oUnique.getSessionState('96f67085')
+        expect(byPrefix).not.toBeNull()
+        expect(byPrefix!.sessionId).toBe(fullId)
+        expect(byPrefix!.name).toBe('cursor inline model-error detect')
+        expect(byPrefix!.workerReportedState).toBe('complete')
+        expect(oUnique.getWorkerHealth('96f67085')!.sessionId).toBe(fullId)
+        expect(oUnique.getSessionRecentOutput('96f67085').some((c) => c.text.includes('shipped'))).toBe(true)
+        expect(oUnique.queryEvents({ sessionId: '96f67085' }).length).toBe(1)
+
+        // Ambiguous prefix must NOT silently pick a winner (rebuild engine so cache sees both).
+        store.sessions.getOrCreateSession(
+            'prefix-b',
+            { flavor: 'codex', path: '/tmp/other', name: 'collision' },
+            null,
+            'default',
+            undefined,
+            undefined,
+            undefined,
+            collisionId
+        )
+        const oAmbiguous = overseer(buildEngine(store))
+        expect(oAmbiguous.getSessionState('96f67085')).toBeNull()
+        expect(oAmbiguous.getWorkerHealth('96f67085')).toBeNull()
+        expect(oAmbiguous.getSessionRecentOutput('96f67085')).toEqual([])
+        expect(oAmbiguous.queryEvents({ sessionId: '96f67085' })).toEqual([])
+        // Longer unique prefix still works after the collision appears.
+        expect(oAmbiguous.getSessionState('96f67085-5dd3')!.sessionId).toBe(fullId)
+    })
+
     it('get_session_recent_output returns last transcript chunks with roles', () => {
         const store = new Store(':memory:')
         const session = store.sessions.getOrCreateSession('out', { flavor: 'codex', path: '/tmp/web' }, null, 'default')

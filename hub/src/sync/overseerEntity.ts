@@ -124,8 +124,17 @@ export class OverseerEntity {
     // --- Tool 1: query_events ------------------------------------------------
 
     queryEvents(args: QueryEventsArgs): StoredSystemEvent[] {
+        // Resolve unique prefixes before querying — brain (and operators) often
+        // pass the short form. Ambiguous / unknown prefix → empty result (same
+        // as "no events for that session"), never a partial match.
+        let sessionId = args.sessionId ?? null
+        if (sessionId) {
+            const resolved = this.resolveSession(sessionId)
+            if (!resolved) return []
+            sessionId = resolved.id
+        }
         return this.events.query({
-            sessionId: args.sessionId ?? null,
+            sessionId,
             project: args.project ?? null,
             eventType: args.eventType ?? null,
             sourceKind: args.sourceKind ?? null,
@@ -173,12 +182,13 @@ export class OverseerEntity {
     // --- Tool 3: get_session_state ------------------------------------------
 
     getSessionState(sessionId: string): OverseerSessionStateView | null {
-        const session = this.getSession(sessionId)
+        const session = this.resolveSession(sessionId)
         if (!session) return null
 
+        const resolvedId = session.id
         const now = this.now()
         const { name, project, flavor } = deriveIdentity(session)
-        const latestEvent = this.events.query({ sessionId, limit: 1 })[0] ?? null
+        const latestEvent = this.events.query({ sessionId: resolvedId, limit: 1 })[0] ?? null
         const lastActivityAt = this.computeLastActivityAt(session, latestEvent)
         const silenceMs = lastActivityAt !== null ? Math.max(0, now - lastActivityAt) : null
         const pending = pendingRequestCount(session)
@@ -191,19 +201,19 @@ export class OverseerEntity {
             staleSilenceMs: this.staleSilenceMs
         })
 
-        const lastToolCall = this.events.query({ sessionId, eventType: 'tool_call', limit: 1 })[0]
-            ?? this.events.query({ sessionId, eventType: 'tool_result', limit: 1 })[0]
+        const lastToolCall = this.events.query({ sessionId: resolvedId, eventType: 'tool_call', limit: 1 })[0]
+            ?? this.events.query({ sessionId: resolvedId, eventType: 'tool_result', limit: 1 })[0]
             ?? null
 
         return {
-            sessionId,
+            sessionId: resolvedId,
             name,
             project,
             flavor,
             active: session.active,
             thinking: session.thinking,
             observedState,
-            workerReportedState: this.deriveReportedState(sessionId),
+            workerReportedState: this.deriveReportedState(resolvedId),
             lastActivityAt,
             silenceMs,
             lastToolCallAgeMs: lastToolCall ? Math.max(0, now - lastToolCall.ts) : null,
@@ -214,8 +224,10 @@ export class OverseerEntity {
     // --- Tool 4: get_session_recent_output ----------------------------------
 
     getSessionRecentOutput(sessionId: string, n = 10): OverseerRecentOutputChunk[] {
+        const session = this.resolveSession(sessionId)
+        if (!session) return []
         const limit = Math.min(Math.max(n, 1), 50)
-        const messages = this.messages.getMessages(sessionId, limit)
+        const messages = this.messages.getMessages(session.id, limit)
         const chunks: OverseerRecentOutputChunk[] = []
         for (const message of messages) {
             const text = this.extractMessageText(message.content)
@@ -233,12 +245,13 @@ export class OverseerEntity {
     // --- Tool 5: get_worker_health ------------------------------------------
 
     getWorkerHealth(sessionId: string): OverseerWorkerHealth | null {
-        const session = this.getSession(sessionId)
+        const session = this.resolveSession(sessionId)
         if (!session) return null
 
+        const resolvedId = session.id
         const now = this.now()
         const { name, project, flavor } = deriveIdentity(session)
-        const latestEvent = this.events.query({ sessionId, limit: 1 })[0] ?? null
+        const latestEvent = this.events.query({ sessionId: resolvedId, limit: 1 })[0] ?? null
         const lastActivityAt = this.computeLastActivityAt(session, latestEvent)
         const silenceMs = lastActivityAt !== null ? Math.max(0, now - lastActivityAt) : null
         const pending = pendingRequestCount(session)
@@ -250,7 +263,7 @@ export class OverseerEntity {
             pendingRequestCount: pending,
             staleSilenceMs: this.staleSilenceMs
         })
-        const reportedState = this.deriveReportedState(sessionId)
+        const reportedState = this.deriveReportedState(resolvedId)
         const inferred = inferWorkerState({
             reported: reportedState,
             observed: observedState,
@@ -273,7 +286,7 @@ export class OverseerEntity {
         signals.push(inferred.note)
 
         return {
-            sessionId,
+            sessionId: resolvedId,
             name,
             project,
             flavor,
@@ -306,6 +319,10 @@ export class OverseerEntity {
                 sourceKind: event.sourceKind
             }))
 
+        const relatedSessionId = item.relatedSessionId
+        const related = relatedSessionId ? this.resolveSession(relatedSessionId) : null
+        const identity = related ? deriveIdentity(related) : null
+
         return {
             inboxItemId: item.id,
             title: item.title,
@@ -318,7 +335,10 @@ export class OverseerEntity {
             // Recite the stored provenance — do NOT recompute (substrate authored it).
             reasonForPriority: item.reasonForPriority,
             sourceEventIds: item.sourceEventIds,
-            relatedSessionId: item.relatedSessionId,
+            relatedSessionId,
+            relatedSessionName: identity?.name ?? null,
+            relatedSessionActive: related ? related.active : null,
+            summary: item.summary,
             sourceEvents
         }
     }
@@ -633,35 +653,30 @@ export class OverseerEntity {
             return { ok: false, error: 'sessionId or itemId is required — nothing relayed.' }
         }
 
-        // Exact match first, then unique prefix (same as hapi-ping-peer).
-        let session = this.getSession(sessionId)
-        if (!session) {
-            const matches = this.getSessions().filter((s) => s.id.startsWith(sessionId!))
-            if (matches.length === 1) {
-                session = matches[0]
-                sessionId = session.id
-            } else if (matches.length > 1) {
-                return {
-                    ok: false,
-                    sessionId,
-                    error: `Ambiguous session prefix "${sessionId}" (${matches.length} matches) — nothing relayed.`
-                }
-            } else {
-                return {
-                    ok: false,
-                    sessionId,
-                    error: `No session matching "${sessionId}" — nothing relayed.`
-                }
+        // Exact match first, then unique prefix (same as hapi-ping-peer / resolveSession).
+        const matches = this.matchSessions(sessionId)
+        if (matches.length === 1) {
+            const session = matches[0]!
+            const identity = deriveIdentity(session)
+            return {
+                ok: true,
+                sessionId: session.id,
+                sessionName: identity.name,
+                project: identity.project,
+                namespace: session.namespace || 'default'
             }
         }
-
-        const identity = deriveIdentity(session)
+        if (matches.length > 1) {
+            return {
+                ok: false,
+                sessionId,
+                error: `Ambiguous session prefix "${sessionId}" (${matches.length} matches) — nothing relayed.`
+            }
+        }
         return {
-            ok: true,
-            sessionId: session.id,
-            sessionName: identity.name,
-            project: identity.project,
-            namespace: session.namespace || 'default'
+            ok: false,
+            sessionId,
+            error: `No session matching "${sessionId}" — nothing relayed.`
         }
     }
 
@@ -694,6 +709,24 @@ export class OverseerEntity {
     }
 
     // --- internals -----------------------------------------------------------
+
+    /**
+     * Exact session id, else unique prefix (hapi-ping-peer / loomux / pi pattern).
+     * Ambiguous or unknown → undefined. Never silently picks among collisions.
+     */
+    private resolveSession(sessionId: string): Session | undefined {
+        const matches = this.matchSessions(sessionId)
+        return matches.length === 1 ? matches[0] : undefined
+    }
+
+    /** Exact hit as a singleton, else all prefix matches (may be 0/1/many). */
+    private matchSessions(sessionId: string): Session[] {
+        const trimmed = sessionId.trim()
+        if (!trimmed) return []
+        const exact = this.getSession(trimmed)
+        if (exact) return [exact]
+        return this.getSessions().filter((s) => s.id.startsWith(trimmed))
+    }
 
     private parseEventPayload(payloadJson: string | null): {
         notify_summary?: unknown
