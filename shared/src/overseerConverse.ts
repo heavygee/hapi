@@ -158,9 +158,11 @@ const OVERSEER_TOOL_PARAMS: Record<OverseerToolName, JsonSchema> = {
     query_dispositions: obj({
         action: { type: 'string', enum: [...OVERSEER_DISPOSITION_ACTIONS], description: 'Filter to one disposition action.' },
         sourceKind: { type: 'string' },
+        sourceRef: { type: 'string', description: 'Filter by frozen source_ref predicate.' },
         eventType: { type: 'string' },
         category: { type: 'string' },
         project: { type: 'string' },
+        artifactKind: { type: 'string', description: 'Filter by frozen artifact_kind predicate (e.g. github_pr).' },
         repo: { type: 'string' },
         sinceTs: { type: 'integer', minimum: 0, description: 'Epoch ms lower bound on when the disposition was recorded.' },
         groupBy: { type: 'array', items: { type: 'string', enum: [...DISPOSITION_PREDICATE_COLUMNS] }, description: 'Switch to cluster mode: group dispositions by these predicate columns.' },

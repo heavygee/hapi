@@ -439,9 +439,11 @@ export class OverseerEntity {
         const filter = {
             action: args.action ?? null,
             sourceKind: args.sourceKind ?? null,
+            sourceRef: args.sourceRef ?? null,
             eventType: args.eventType ?? null,
             category: args.category ?? null,
             project: args.project ?? null,
+            artifactKind: args.artifactKind ?? null,
             repo: args.repo ?? null,
             sinceTs: args.sinceTs ?? null,
             limit: args.limit ?? 50

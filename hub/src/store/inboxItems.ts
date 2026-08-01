@@ -8,6 +8,7 @@ import {
     mapEventTypeToInboxCategory,
     mapOperatorActionToStatus,
     parseArtifactRefs,
+    pickPrimaryArtifact,
     type ArtifactRef,
     type DispositionPredicateColumn,
     type InboxOperatorAction
@@ -234,10 +235,17 @@ export function listInboxItems(db: Database, options: ListInboxItemsOptions = {}
         const placeholders = options.statuses.map(() => '?').join(', ')
         clauses.push(`status IN (${placeholders})`)
         params.push(...options.statuses)
+        // Explicit status lists that include snoozed must return sleeping rows
+        // (e.g. "what is currently snoozed?"). Default/active views still hide them.
+        if (!options.statuses.includes('snoozed')) {
+            appendSnoozeVisibilityClause(clauses, params, now)
+        }
     } else if (options.activeOnly) {
         clauses.push("status IN ('new', 'surfaced', 'deferred', 'snoozed')")
+        appendSnoozeVisibilityClause(clauses, params, now)
+    } else {
+        appendSnoozeVisibilityClause(clauses, params, now)
     }
-    appendSnoozeVisibilityClause(clauses, params, now)
     if (options.sessionId) {
         clauses.push('related_session_id = ?')
         params.push(options.sessionId)
@@ -257,6 +265,10 @@ export function listInboxItems(db: Database, options: ListInboxItemsOptions = {}
     return rows.map(mapRow)
 }
 
+/**
+ * Visible active item for a session (excludes still-sleeping snoozes).
+ * Use for operator-facing inbox views.
+ */
 export function findActiveInboxItemForSession(db: Database, sessionId: string): StoredInboxItem | null {
     const now = Date.now()
     wakeExpiredSnoozes(db, now)
@@ -272,6 +284,25 @@ export function findActiveInboxItemForSession(db: Database, sessionId: string): 
     return row ? mapRow(row) : null
 }
 
+/**
+ * Dedup lookup for promoteAttentionEvent — includes sleeping snoozed rows so a
+ * new attention event during a snooze updates the existing item instead of
+ * inserting a second active row for the same session.
+ */
+export function findInboxItemForSessionDedup(db: Database, sessionId: string): StoredInboxItem | null {
+    const now = Date.now()
+    wakeExpiredSnoozes(db, now)
+
+    const row = db.prepare(`
+        SELECT * FROM inbox_items
+        WHERE related_session_id = ?
+          AND status IN ('new', 'surfaced', 'deferred', 'snoozed')
+        ORDER BY updated_at DESC
+        LIMIT 1
+    `).get(sessionId) as InboxItemRow | undefined
+    return row ? mapRow(row) : null
+}
+
 export function promoteAttentionEvent(
     db: Database,
     event: StoredSystemEvent
@@ -284,7 +315,7 @@ export function promoteAttentionEvent(
     const basePriority = computeCoarseBasePriority(event.eventType)
     const title = buildInboxTitleFromEvent(event.artifactRefs, event.payloadJson, event.summary)
     const suggestedAction = extractSuggestedAction(event.payloadJson)
-    const existing = findActiveInboxItemForSession(db, event.relatedSessionId)
+    const existing = findInboxItemForSessionDedup(db, event.relatedSessionId)
 
     const sourceEventIds = existing
         ? Array.from(new Set([...existing.sourceEventIds, event.id]))
@@ -406,9 +437,9 @@ export function buildDispositionSnapshot(db: Database, item: StoredInboxItem): D
     }
 
     // as-seen artifacts prefer the inbox item's snapshot, falling back to the source event.
+    // Use the same priority rule as the displayed inbox title (PR > URL, etc.).
     const artifactsRaw = item.artifactRefs ?? event?.artifactRefs ?? null
-    const artifacts = parseArtifactRefs(artifactsRaw)
-    const primaryArtifact = artifacts[0]
+    const primaryArtifact = pickPrimaryArtifact(parseArtifactRefs(artifactsRaw))
 
     return {
         sourceKind: event?.sourceKind ?? null,
@@ -486,9 +517,11 @@ export type DispositionGroupColumn = DispositionPredicateColumn
 export type QueryDispositionsFilter = {
     action?: string | null
     sourceKind?: string | null
+    sourceRef?: string | null
     eventType?: string | null
     category?: string | null
     project?: string | null
+    artifactKind?: string | null
     repo?: string | null
     sinceTs?: number | null
     limit?: number
@@ -561,9 +594,11 @@ function buildDispositionWhere(filter: QueryDispositionsFilter): {
     }
     eq('action', filter.action)
     eq('source_kind', filter.sourceKind)
+    eq('source_ref', filter.sourceRef)
     eq('event_type', filter.eventType)
     eq('category', filter.category)
     eq('project', filter.project)
+    eq('artifact_kind', filter.artifactKind)
     eq('repo', filter.repo)
     if (filter.sinceTs != null) {
         clauses.push('created_at >= ?')

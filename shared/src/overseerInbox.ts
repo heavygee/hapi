@@ -131,18 +131,20 @@ export function parseArtifactRefs(raw: string | null | undefined): ArtifactRef[]
     }
 }
 
-export function pickPrimaryArtifactTitle(artifactRefs: ArtifactRef[]): string | null {
+export function pickPrimaryArtifact(artifactRefs: ArtifactRef[]): ArtifactRef | null {
     for (const kind of TITLE_PRIORITY_KINDS) {
         const match = artifactRefs.find((ref) => ref.kind === kind)
-        if (!match) continue
-        if (match.title?.trim()) return match.title.trim()
-        if (match.ref?.trim()) return match.ref.trim()
-        if (match.url?.trim()) return match.url.trim()
+        if (match) return match
     }
-    for (const ref of artifactRefs) {
-        if (ref.title?.trim()) return ref.title.trim()
-        if (ref.ref?.trim()) return ref.ref.trim()
-    }
+    return artifactRefs[0] ?? null
+}
+
+export function pickPrimaryArtifactTitle(artifactRefs: ArtifactRef[]): string | null {
+    const match = pickPrimaryArtifact(artifactRefs)
+    if (!match) return null
+    if (match.title?.trim()) return match.title.trim()
+    if (match.ref?.trim()) return match.ref.trim()
+    if (match.url?.trim()) return match.url.trim()
     return null
 }
 

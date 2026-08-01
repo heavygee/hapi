@@ -373,9 +373,11 @@ const overseerDispositionActionSchema = z.enum(OVERSEER_DISPOSITION_ACTIONS)
 export const queryDispositionsArgsSchema = z.object({
     action: overseerDispositionActionSchema.optional(),
     sourceKind: z.string().min(1).optional(),
+    sourceRef: z.string().min(1).optional(),
     eventType: z.string().min(1).optional(),
     category: z.string().min(1).optional(),
     project: z.string().min(1).optional(),
+    artifactKind: z.string().min(1).optional(),
     repo: z.string().min(1).optional(),
     sinceTs: z.number().int().nonnegative().optional(),
     /** Set to switch to cluster/discovery mode. Columns from the R8 predicate vocabulary. */
