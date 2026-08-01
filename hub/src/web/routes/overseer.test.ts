@@ -122,6 +122,26 @@ describe('overseer routes', () => {
         expect(res.status).toBe(400)
     })
 
+    it('GET /overseer/converse/recent returns chronological hub-owned turns', async () => {
+        const store = new Store(':memory:')
+        const app = buildApp(store)
+        await app.request('/api/overseer/convo-turns', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ operatorText: 'first', overseerText: 'one' })
+        })
+        await app.request('/api/overseer/convo-turns', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ operatorText: 'second', overseerText: 'two' })
+        })
+        const res = await app.request('/api/overseer/converse/recent?limit=10')
+        expect(res.status).toBe(200)
+        const body = await res.json() as { turns: Array<{ operatorText: string; overseerText: string }> }
+        expect(body.turns.map((t) => t.operatorText)).toEqual(['first', 'second'])
+        expect(body.turns.map((t) => t.overseerText)).toEqual(['one', 'two'])
+    })
+
     it('GET /overseer/brains reports profiles + a null active until one is set', async () => {
         const prev = process.env.OVERSEER_BRAIN_URL
         process.env.OVERSEER_BRAIN_URL = 'http://brain.test/v1'
