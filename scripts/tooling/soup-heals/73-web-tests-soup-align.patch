@@ -11,32 +11,6 @@ index c0642d777..58b45bf41 100644
          expect(screen.getByTestId('runner-version-skew-minimize')).toBeInTheDocument()
          expect(screen.getByTestId('runner-version-skew-dismiss')).toBeInTheDocument()
          expect(screen.getByTestId('runner-version-skew-restart-old')).toBeInTheDocument()
-diff --git a/web/src/components/SessionList.test.ts b/web/src/components/SessionList.test.ts
-index c2827af4d..0f30eb535 100644
---- a/web/src/components/SessionList.test.ts
-+++ b/web/src/components/SessionList.test.ts
-@@ -434,7 +434,7 @@ describe('getNextSessionVisibleCount', () => {
- })
- 
- describe('expandSelectedSessionCollapseOverrides', () => {
--    it('expands collapsed project and machine, but preserves session preview folding', () => {
-+    it('expands collapsed project key, preserves session preview and machine folding', () => {
-         const overrides = new Map<string, boolean>([
-             ['machine-1::/work/hapi', true],
-             ['sessions::machine-1::/work/hapi', true],
-@@ -445,9 +445,10 @@ describe('expandSelectedSessionCollapseOverrides', () => {
-             key: 'machine-1::/work/hapi'
-         })
- 
--        expect(result.has('machine-1::/work/hapi')).toBe(false)
-+        // false override = force expanded (Map keeps the key)
-+        expect(result.get('machine-1::/work/hapi')).toBe(false)
-         expect(result.get('sessions::machine-1::/work/hapi')).toBe(true)
--        expect(result.has('machine::machine-1')).toBe(false)
-+        expect(result.get('machine::machine-1')).toBe(true)
-     })
- 
-     it('leaves missing session preview override unset', () => {
 diff --git a/web/src/routes/settings/index.test.tsx b/web/src/routes/settings/index.test.tsx
 index f08d04ac9..46923a64e 100644
 --- a/web/src/routes/settings/index.test.tsx
