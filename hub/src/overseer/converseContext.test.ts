@@ -98,7 +98,42 @@ describe('converseContext assembler', () => {
         const overseer = buildEngine(store).getOverseer()
         overseer.recordConvoTurn({ operatorText: 'first', overseerText: 'one', ts: 1 })
         overseer.recordConvoTurn({ operatorText: 'second', overseerText: 'two', ts: 2 })
-        const list = listRecentConvoTurns(overseer, { limit: 10 })
+        const { turns: list, clippedByLimit } = listRecentConvoTurns(overseer, { limit: 10 })
         expect(list.map((t) => t.operatorText)).toEqual(['first', 'second'])
+        expect(clippedByLimit).toBe(false)
+    })
+
+    it('reports truncated when store query clipped older turns', () => {
+        const store = new Store(':memory:')
+        const overseer = buildEngine(store).getOverseer()
+        for (let i = 0; i < 5; i++) {
+            overseer.recordConvoTurn({
+                operatorText: `q${i}`,
+                overseerText: `a${i}`,
+                ts: 1000 + i
+            })
+        }
+        const assembled = assembleOverseerConverseMessages({
+            overseer,
+            clientMessages: [{ role: 'operator', content: 'now' }],
+            maxTurns: 2
+        })
+        expect(assembled.hydratedTurns).toBe(2)
+        expect(assembled.truncated).toBe(true)
+        expect(assembled.messages.map((m) => m.content)).toEqual(['q3', 'a3', 'q4', 'a4', 'now'])
+    })
+
+    it('dedupes dangling operator retry after a completed pair', () => {
+        const store = new Store(':memory:')
+        const overseer = buildEngine(store).getOverseer()
+        overseer.recordConvoTurn({ operatorText: 'done pair', overseerText: 'answered', ts: 1 })
+        // Dangling operator-only row (empty overseer reply permitted by write path).
+        overseer.recordConvoTurn({ operatorText: 'retry me', overseerText: '', ts: 2 })
+        const assembled = assembleOverseerConverseMessages({
+            overseer,
+            clientMessages: [{ role: 'operator', content: 'retry me' }]
+        })
+        expect(assembled.messages.filter((m) => m.content === 'retry me')).toHaveLength(1)
+        expect(assembled.messages.at(-1)).toEqual({ role: 'operator', content: 'retry me' })
     })
 })

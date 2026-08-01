@@ -91,23 +91,26 @@ export function eventToConvoTurnView(event: StoredSystemEvent): StoredConvoTurnV
     }
 }
 
-/** Newest-first from the store; returned oldest-first for display / assemble. */
+/** Newest-first from the store; returned oldest-first for display / assemble.
+ *  Fetches `limit + 1` so callers can detect that older history was clipped. */
 export function listRecentConvoTurns(
     overseer: OverseerEntity,
     opts: { limit?: number } = {}
-): StoredConvoTurnView[] {
+): { turns: StoredConvoTurnView[]; clippedByLimit: boolean } {
     const limit = Math.min(Math.max(opts.limit ?? DEFAULT_CONVERSE_HISTORY_MAX_TURNS, 1), 50)
     const events = overseer.queryEvents({
         eventType: OVERSEER_CONVO_TURN_EVENT_TYPE,
-        limit
+        limit: limit + 1
     })
     const views: StoredConvoTurnView[] = []
     for (const event of events) {
         const view = eventToConvoTurnView(event)
         if (view) views.push(view)
     }
+    const clippedByLimit = views.length > limit
+    const kept = clippedByLimit ? views.slice(0, limit) : views
     // events.query is id DESC — reverse to chronological.
-    return views.reverse()
+    return { turns: kept.reverse(), clippedByLimit }
 }
 
 function turnsToMessages(turns: StoredConvoTurnView[]): OverseerConverseMessage[] {
@@ -131,13 +134,13 @@ function messagesCharCount(messages: OverseerConverseMessage[]): number {
  */
 export function budgetConvoTurns(
     turnsOldestFirst: StoredConvoTurnView[],
-    opts: { maxTurns?: number; maxChars?: number } = {}
+    opts: { maxTurns?: number; maxChars?: number; alreadyClipped?: boolean } = {}
 ): { turns: StoredConvoTurnView[]; truncated: boolean } {
     const maxTurns = opts.maxTurns ?? DEFAULT_CONVERSE_HISTORY_MAX_TURNS
     const maxChars = opts.maxChars ?? DEFAULT_CONVERSE_HISTORY_MAX_CHARS
 
     let kept = turnsOldestFirst
-    let truncated = false
+    let truncated = opts.alreadyClipped === true
     if (kept.length > maxTurns) {
         kept = kept.slice(kept.length - maxTurns)
         truncated = true
@@ -169,21 +172,21 @@ export function assembleOverseerConverseMessages(params: {
         throw new Error('Last client message must be from the operator')
     }
 
-    const fetched = listRecentConvoTurns(overseer, {
-        limit: Math.max(maxTurns ?? DEFAULT_CONVERSE_HISTORY_MAX_TURNS, 1)
+    const max = Math.max(maxTurns ?? DEFAULT_CONVERSE_HISTORY_MAX_TURNS, 1)
+    const { turns: fetched, clippedByLimit } = listRecentConvoTurns(overseer, { limit: max })
+    const { turns, truncated } = budgetConvoTurns(fetched, {
+        maxTurns: max,
+        maxChars,
+        alreadyClipped: clippedByLimit
     })
-    const { turns, truncated } = budgetConvoTurns(fetched, { maxTurns, maxChars })
     const history = turnsToMessages(turns)
 
-    // If the operator re-sent the exact last logged question without a reply yet
-    // (unlikely — we only record after reply), avoid duplicating. Normal path:
-    // current utterance is not in the store until after this turn completes.
+    // Dedup a dangling operator line (same text already last in history with no
+    // overseer reply after it). Do not require the previous message to be non-overseer —
+    // after a completed pair the prior message IS overseer, and a dangling operator
+    // turn is still the common retry shape.
     const lastHistory = history[history.length - 1]
-    if (
-        lastHistory?.role === 'operator'
-        && lastHistory.content === latest.content
-        && (history.length < 2 || history[history.length - 2]?.role !== 'overseer')
-    ) {
+    if (lastHistory?.role === 'operator' && lastHistory.content === latest.content) {
         return { messages: history, hydratedTurns: turns.length, truncated }
     }
 

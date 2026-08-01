@@ -23,7 +23,7 @@ export function OverseerChatDebugControls() {
     const { api } = useAppContext()
     const [open, setOpen] = useState(false)
     const [turns, setTurns] = useState<ChatTurn[]>([])
-    const [hydrated, setHydrated] = useState(false)
+    const [hydrating, setHydrating] = useState(false)
     const [input, setInput] = useState('')
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
@@ -35,6 +35,7 @@ export function OverseerChatDebugControls() {
     const [modelsError, setModelsError] = useState<string | null>(null)
     const [selectedModel, setSelectedModel] = useState('')
     const scrollRef = useRef<HTMLDivElement>(null)
+    const hydrateGenRef = useRef(0)
 
     useEffect(() => {
         if (!open || !api || profiles.length > 0) return
@@ -43,13 +44,16 @@ export function OverseerChatDebugControls() {
             .catch(() => { /* brains list is optional chrome */ })
     }, [open, api, profiles.length])
 
-    // Hydrate from hub-owned convo_turns once per open (reload-safe continuity).
+    // Rehydrate from hub every time the panel opens (other transports may have
+    // written turns while closed). Block send until this settles.
     useEffect(() => {
-        if (!open || !api || hydrated) return
+        if (!open || !api) return
+        const gen = ++hydrateGenRef.current
         let cancelled = false
+        setHydrating(true)
         void api.fetchOverseerConverseRecent(24)
             .then((res) => {
-                if (cancelled) return
+                if (cancelled || gen !== hydrateGenRef.current) return
                 const next: ChatTurn[] = []
                 for (const turn of res.turns) {
                     if (turn.operatorText.trim()) {
@@ -68,16 +72,16 @@ export function OverseerChatDebugControls() {
                     }
                 }
                 setTurns(next)
-                setHydrated(true)
                 requestAnimationFrame(() => {
                     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
                 })
             })
-            .catch(() => {
-                if (!cancelled) setHydrated(true)
+            .catch(() => { /* empty local view; hub still owns memory on send */ })
+            .finally(() => {
+                if (!cancelled && gen === hydrateGenRef.current) setHydrating(false)
             })
         return () => { cancelled = true }
-    }, [open, api, hydrated])
+    }, [open, api])
 
     // Populate the model dropdown live from the selected profile's endpoint
     // (server proxies GET /models so the api key never reaches the browser).
@@ -99,10 +103,11 @@ export function OverseerChatDebugControls() {
     }, [open, api, selectedProfile])
 
     const profileDefaultModel = profiles.find((p) => p.id === selectedProfile)?.model ?? null
+    const sendBlocked = loading || hydrating
 
     const send = useCallback(async (text: string) => {
         const trimmed = text.trim()
-        if (!trimmed || !api || loading) return
+        if (!trimmed || !api || sendBlocked) return
         setError(null)
         setInput('')
 
@@ -130,7 +135,7 @@ export function OverseerChatDebugControls() {
         } finally {
             setLoading(false)
         }
-    }, [api, loading, selectedProfile, selectedModel])
+    }, [api, sendBlocked, selectedProfile, selectedModel])
 
     return (
         <div className="border-t border-[var(--app-divider)]">
@@ -201,7 +206,7 @@ export function OverseerChatDebugControls() {
                                         <button
                                             key={q}
                                             type="button"
-                                            disabled={loading}
+                                            disabled={sendBlocked}
                                             onClick={() => void send(q)}
                                             className="rounded border border-[var(--app-border)] px-1.5 py-0.5 text-[11px] text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] disabled:opacity-50"
                                         >
@@ -245,6 +250,7 @@ export function OverseerChatDebugControls() {
                                 </div>
                             ))
                         )}
+                        {hydrating ? <p className="px-1 text-xs text-[var(--app-hint)]">Loading hub thread…</p> : null}
                         {loading ? <p className="px-1 text-xs text-[var(--app-hint)]">Overseer is thinking…</p> : null}
                     </div>
 
@@ -258,13 +264,13 @@ export function OverseerChatDebugControls() {
                             type="text"
                             value={input}
                             onChange={(e) => setInput(e.target.value)}
-                            placeholder="Ask the Overseer…"
-                            disabled={loading}
+                            placeholder={hydrating ? 'Loading thread…' : 'Ask the Overseer…'}
+                            disabled={sendBlocked}
                             className="flex-1 rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1.5 text-[13px] text-[var(--app-fg)] disabled:opacity-50"
                         />
                         <button
                             type="submit"
-                            disabled={loading || input.trim().length === 0}
+                            disabled={sendBlocked || input.trim().length === 0}
                             className="rounded-md border border-[var(--app-border)] px-3 py-1.5 text-xs text-[var(--app-fg)] hover:bg-[var(--app-bg)] disabled:opacity-50"
                         >
                             Send
@@ -272,7 +278,7 @@ export function OverseerChatDebugControls() {
                         {turns.length > 0 ? (
                             <button
                                 type="button"
-                                disabled={loading}
+                                disabled={sendBlocked}
                                 title="Clears this view only — hub convo_turn memory remains"
                                 onClick={() => { setTurns([]); setError(null) }}
                                 className="rounded-md border border-[var(--app-border)] px-2 py-1.5 text-xs text-[var(--app-hint)] hover:bg-[var(--app-bg)] disabled:opacity-50"
