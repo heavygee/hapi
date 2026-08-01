@@ -4,7 +4,7 @@ import { Store } from '../store'
 import { SyncEngine } from './syncEngine'
 import { RpcRegistry } from '../socket/rpcRegistry'
 import { OverseerWriteNotAllowedError, runOverseerTool } from '../overseer/runOverseerTool'
-import type { OverseerEntity } from './overseerEntity'
+import { OverseerEntity } from './overseerEntity'
 
 function makeEngine(): { store: Store; engine: SyncEngine } {
     const store = new Store(':memory:')
@@ -124,6 +124,58 @@ describe('OverseerEntity read-only tools', () => {
 
         expect(overseer(engine).getSessionState('does-not-exist')).toBeNull()
         expect(overseer(engine).getWorkerHealth('does-not-exist')).toBeNull()
+    })
+
+    it('session-scoped tools resolve unique id prefixes (inactive still returns state)', () => {
+        const store = new Store(':memory:')
+        const fullId = '96f67085-5dd3-4a10-aa7c-785f72a227c2'
+        const collisionId = '96f67085-aaaa-bbbb-cccc-ddddeeeeffff'
+        store.sessions.getOrCreateSession(
+            'prefix-a',
+            { flavor: 'cursor', host: 'local', path: '/tmp/inline-model-error-detect', name: 'cursor inline model-error detect' },
+            null,
+            'default',
+            undefined,
+            undefined,
+            undefined,
+            fullId
+        )
+        store.events.insert({
+            ts: Date.now(), sourceKind: 'worker', eventType: 'completed', attentionCandidate: 0, severity: 2,
+            summary: 'done', relatedSessionId: fullId,
+            payloadJson: JSON.stringify({ session: { project: 'inline-model-error-detect', name: 'cursor inline model-error detect' } })
+        })
+        store.messages.addMessage(fullId, agentMessage('shipped the bridge'))
+
+        // Unique 8-char prefix resolves (the live bug: brain truncates, tool used to return null).
+        const oUnique = overseer(buildEngine(store))
+        const byPrefix = oUnique.getSessionState('96f67085')
+        expect(byPrefix).not.toBeNull()
+        expect(byPrefix!.sessionId).toBe(fullId)
+        expect(byPrefix!.name).toBe('cursor inline model-error detect')
+        expect(byPrefix!.workerReportedState).toBe('complete')
+        expect(oUnique.getWorkerHealth('96f67085')!.sessionId).toBe(fullId)
+        expect(oUnique.getSessionRecentOutput('96f67085').some((c) => c.text.includes('shipped'))).toBe(true)
+        expect(oUnique.queryEvents({ sessionId: '96f67085' }).length).toBe(1)
+
+        // Ambiguous prefix must NOT silently pick a winner (rebuild engine so cache sees both).
+        store.sessions.getOrCreateSession(
+            'prefix-b',
+            { flavor: 'codex', path: '/tmp/other', name: 'collision' },
+            null,
+            'default',
+            undefined,
+            undefined,
+            undefined,
+            collisionId
+        )
+        const oAmbiguous = overseer(buildEngine(store))
+        expect(oAmbiguous.getSessionState('96f67085')).toBeNull()
+        expect(oAmbiguous.getWorkerHealth('96f67085')).toBeNull()
+        expect(oAmbiguous.getSessionRecentOutput('96f67085')).toEqual([])
+        expect(oAmbiguous.queryEvents({ sessionId: '96f67085' })).toEqual([])
+        // Longer unique prefix still works after the collision appears.
+        expect(oAmbiguous.getSessionState('96f67085-5dd3')!.sessionId).toBe(fullId)
     })
 
     it('get_session_recent_output returns last transcript chunks with roles', () => {
@@ -400,17 +452,135 @@ describe('OverseerEntity dispositions (Stage 1 keystone)', () => {
         expect(o.queryDispositions({}).total).toBe(0)
     })
 
-    it('record_disposition is gated: runOverseerTool refuses the write unless allowWrites', () => {
+    it('record_disposition is gated: runOverseerTool refuses the write unless allowWrites', async () => {
         const store = new Store(':memory:')
         const { itemId } = promoteItem(store, { key: 'gate', eventType: 'blocked', project: 'hapi' })
         const o = overseer(buildEngine(store))
-        expect(() => runOverseerTool(o, 'record_disposition', { itemId, action: 'done' })).toThrow(
+        await expect(runOverseerTool(o, 'record_disposition', { itemId, action: 'done' })).rejects.toBeInstanceOf(
             OverseerWriteNotAllowedError
         )
         // With writes allowed (the conversational path) it lands.
-        const res = runOverseerTool(o, 'record_disposition', { itemId, action: 'done' }, true) as {
+        const res = await runOverseerTool(o, 'record_disposition', { itemId, action: 'done' }, true) as {
             ok: boolean
         }
         expect(res.ok).toBe(true)
+    })
+
+    it('ping_session resolves by sessionId / itemId and returns a tombstone via injected relay', async () => {
+        const store = new Store(':memory:')
+        const { itemId } = promoteItem(store, {
+            key: 'expenses',
+            eventType: 'blocked',
+            project: 'expenses'
+        })
+        const item = store.inbox.getById(itemId)!
+        const sessionId = item.relatedSessionId!
+        expect(sessionId).toBeTruthy()
+
+        let lastRelay: { sessionId: string; message: string } | undefined
+        const o = new OverseerEntity({
+            events: store.events,
+            inbox: store.inbox,
+            messages: store.messages,
+            getSession: (id) => {
+                const s = store.sessions.getSession(id)
+                if (!s) return undefined
+                return { ...s, active: true, namespace: s.namespace || 'default' } as never
+            },
+            getSessions: () =>
+                store.sessions
+                    .getSessions()
+                    .map((s) => ({ ...s, active: true, namespace: s.namespace || 'default' }) as never),
+            relayToSession: async ({ sessionId: sid, message }) => {
+                lastRelay = { sessionId: sid, message }
+                return { ok: true, resumed: false }
+            }
+        })
+
+        const byItem = await o.pingSession({
+            itemId,
+            message: 'Please draft the Cursor Pro June note.'
+        })
+        expect(byItem.ok).toBe(true)
+        expect(byItem.sessionId).toBe(sessionId)
+        expect(byItem.tombstone).toContain('Relayed')
+        expect(lastRelay).toEqual({
+            sessionId,
+            message: 'Please draft the Cursor Pro June note.'
+        })
+        const byPrefix = await o.pingSession({
+            sessionId: sessionId.slice(0, 8),
+            message: 'Second ping'
+        })
+        expect(byPrefix.ok).toBe(true)
+        expect(byPrefix.sessionId).toBe(sessionId)
+
+        await expect(runOverseerTool(o, 'ping_session', { sessionId, message: 'x' })).rejects.toBeInstanceOf(
+            OverseerWriteNotAllowedError
+        )
+
+        const dispatched = store.events.query({ sessionId, eventType: 'dispatched', limit: 10 })
+        expect(dispatched.length).toBeGreaterThanOrEqual(1)
+        expect(dispatched[0]?.summary).toMatch(/Relayed/)
+
+        // Conflicting sessionId + itemId must refuse (not silently prefer sessionId).
+        const other = store.sessions.getOrCreateSession(
+            'other-conflict',
+            { flavor: 'claude', path: '/tmp/other', name: 'other' },
+            null,
+            'default'
+        )
+        const conflict = await o.pingSession({
+            sessionId: other.id,
+            itemId,
+            message: 'wrong target'
+        })
+        expect(conflict.ok).toBe(false)
+        expect(conflict.error).toMatch(/Conflicting relay targets/)
+        expect(lastRelay?.message).not.toBe('wrong target')
+    })
+})
+
+describe('OverseerEntity namespace isolation (#107 kill criterion)', () => {
+    it('refuses to resolve or relay a session that only exists in another namespace', async () => {
+        const store = new Store(':memory:')
+        const inA = store.sessions.getOrCreateSession(
+            'ns-a-session-aaaaaaaa',
+            { flavor: 'claude', path: '/tmp/a', name: 'worker-a' },
+            null,
+            'ns-a'
+        )
+        const inB = store.sessions.getOrCreateSession(
+            'ns-b-session-bbbbbbbb',
+            { flavor: 'claude', path: '/tmp/b', name: 'worker-b' },
+            null,
+            'ns-b'
+        )
+        store.events.insert({
+            ts: Date.now(),
+            sourceKind: 'worker',
+            eventType: 'blocked',
+            attentionCandidate: 1,
+            severity: 4,
+            summary: 'secret from B',
+            relatedSessionId: inB.id,
+            payloadJson: JSON.stringify({ session: { project: 'secret', name: 'worker-b' } })
+        })
+
+        const engine = buildEngine(store)
+        const overseerA = engine.getOverseer('ns-a')
+        const overseerB = engine.getOverseer('ns-b')
+
+        expect(overseerA.getSessionState(inA.id)?.sessionId).toBe(inA.id)
+        expect(overseerA.getSessionState(inB.id)).toBeNull()
+        expect(overseerA.queryEvents({}).map((e) => e.summary)).not.toContain('secret from B')
+        expect(overseerB.queryEvents({}).map((e) => e.summary)).toContain('secret from B')
+
+        const crossRelay = await overseerA.pingSession({
+            sessionId: inB.id,
+            message: 'cross-namespace injection'
+        })
+        expect(crossRelay.ok).toBe(false)
+        expect(crossRelay.error).toMatch(/No session matching/)
     })
 })

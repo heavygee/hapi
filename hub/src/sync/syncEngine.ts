@@ -44,6 +44,7 @@ import {
 import { SessionCache } from './sessionCache'
 import { OverseerEventRecorder, toSessionSnapshot } from './overseerEventRecorder'
 import { OverseerEntity } from './overseerEntity'
+import { executeSessionRelay } from './sessionRelay'
 import { extractAssistantPlainText } from '@hapi/protocol/messages'
 import type { InboxOperatorAction } from '@hapi/protocol'
 import type { ListSystemEventsOptions, StoredSystemEvent } from '../store'
@@ -145,7 +146,7 @@ export class SyncEngine {
     private readonly messageService: MessageService
     private readonly rpcGateway: RpcGateway
     private readonly overseerEvents: OverseerEventRecorder
-    private readonly overseer: OverseerEntity
+    private readonly overseerByNamespace: Map<string, OverseerEntity>
     private inactivityTimer: NodeJS.Timeout | null = null
     /** Sessions that emitted `session-ready` (Cursor ACP load/newSession complete). */
     private readonly sessionReadyIds = new Set<string>()
@@ -167,13 +168,9 @@ export class SyncEngine {
         )
         this.rpcGateway = new RpcGateway(io, rpcRegistry)
         this.overseerEvents = new OverseerEventRecorder(store.events, store.inbox)
-        this.overseer = new OverseerEntity({
-            events: store.events,
-            inbox: store.inbox,
-            messages: store.messages,
-            getSession: (sessionId) => this.getSession(sessionId),
-            getSessions: () => this.getSessions()
-        })
+        this.overseerByNamespace = new Map()
+        // Default namespace entity — most tests call getOverseer() with no arg.
+        this.overseerByNamespace.set('default', this.createOverseerForNamespace('default'))
         this.reloadAll()
         this.inactivityTimer = setInterval(() => this.expireInactive(), 5_000)
     }
@@ -337,8 +334,40 @@ export class SyncEngine {
         this.eventPublisher.emit(event)
     }
 
-    getOverseer(): OverseerEntity {
-        return this.overseer
+    getOverseer(namespace = 'default'): OverseerEntity {
+        const key = namespace.trim() || 'default'
+        let entity = this.overseerByNamespace.get(key)
+        if (!entity) {
+            entity = this.createOverseerForNamespace(key)
+            this.overseerByNamespace.set(key, entity)
+        }
+        return entity
+    }
+
+    private createOverseerForNamespace(namespace: string): OverseerEntity {
+        return new OverseerEntity({
+            events: this.store.events,
+            inbox: this.store.inbox,
+            messages: this.store.messages,
+            getSession: (sessionId) => {
+                const access = this.resolveSessionAccess(sessionId, namespace)
+                return access.ok ? access.session : undefined
+            },
+            getSessions: () => this.getSessionsByNamespace(namespace),
+            relayToSession: async ({ sessionId, message, namespace: relayNs = namespace }) => {
+                return executeSessionRelay(
+                    {
+                        getSession: (id) => {
+                            const access = this.resolveSessionAccess(id, relayNs)
+                            return access.ok ? { active: access.session.active } : undefined
+                        },
+                        resumeSession: (id, ns) => this.resumeSession(id, ns, { allowFreshSpawn: false }),
+                        sendMessage: (id, payload) => this.sendMessage(id, payload)
+                    },
+                    { sessionId, message, namespace: relayNs }
+                )
+            }
+        })
     }
 
     /** Hub settings KV (persisted active brain, etc.) — see SettingsStore. */
@@ -1209,7 +1238,11 @@ export class SyncEngine {
         return this.store.messages.getFirstMessages(sessionId, 1).length === 0
     }
 
-    async resumeSession(sessionId: string, namespace: string, opts?: { permissionMode?: PermissionMode }): Promise<ResumeSessionResult> {
+    async resumeSession(sessionId: string, namespace: string, opts?: {
+        permissionMode?: PermissionMode
+        /** When false, refuse never-started stubs that would fresh-spawn (Overseer relay). Default true. */
+        allowFreshSpawn?: boolean
+    }): Promise<ResumeSessionResult> {
         const access = this.sessionCache.resolveSessionAccess(sessionId, namespace)
         if (!access.ok) {
             return {
@@ -1243,6 +1276,7 @@ export class SyncEngine {
             directory = targetResult.target.directory
         } else if (
             targetResult.code === 'resume_unavailable'
+            && opts?.allowFreshSpawn !== false
             && this.canFreshSpawnNeverStartedSession(session, access.sessionId, namespace)
         ) {
             const metadata = session.metadata!

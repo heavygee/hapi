@@ -34,7 +34,9 @@ const converseBodySchema = z.object({
     })).min(1).max(40),
     relatedSessionId: z.string().min(1).optional(),
     model: z.string().max(100).optional(),
-    profile: z.string().max(64).optional()
+    profile: z.string().max(64).optional(),
+    /** Explicit opt-in for write tools; otherwise server detects intent from the latest operator line. */
+    allowWrites: z.boolean().optional()
 })
 
 const activeBrainBodySchema = z.object({
@@ -43,12 +45,12 @@ const activeBrainBodySchema = z.object({
 })
 
 /** Drop a persisted active brain when its profile was removed from env after restart. */
-function getSanitizedActiveBrain(engine: SyncEngine): ActiveBrainSetting | null {
+function getSanitizedActiveBrain(engine: SyncEngine, namespace = 'default'): ActiveBrainSetting | null {
     const settings = engine.getSettings()
-    const active = settings.getActiveBrain()
+    const active = settings.getActiveBrain(namespace)
     if (!active) return null
     if (isKnownBrainProfile(active.profile)) return active
-    settings.clearActiveBrain()
+    settings.clearActiveBrain(namespace)
     return null
 }
 
@@ -85,7 +87,7 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
         if (engine instanceof Response) return engine
         return c.json({
             profiles: listBrainProfiles(process.env),
-            active: getSanitizedActiveBrain(engine)
+            active: getSanitizedActiveBrain(engine, c.get('namespace'))
         })
     })
 
@@ -95,7 +97,7 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
     app.get('/overseer/brain/active', (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)
         if (engine instanceof Response) return engine
-        const active = getSanitizedActiveBrain(engine)
+        const active = getSanitizedActiveBrain(engine, c.get('namespace'))
         const selection = resolveBrainSelection(active)
         const config = resolveBrainConfig(process.env, selection)
         return c.json({
@@ -127,7 +129,7 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         const active = { profile: parsed.data.profile, model: parsed.data.model ?? null }
-        engine.getSettings().setActiveBrain(active)
+        engine.getSettings().setActiveBrain(active, c.get('namespace'))
         return c.json({ active })
     })
 
@@ -170,7 +172,7 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         try {
-            const result = runOverseerTool(engine.getOverseer(), tool, body ?? {})
+            const result = await runOverseerTool(engine.getOverseer(c.get('namespace')), tool, body ?? {})
             return c.json({ tool, result })
         } catch (error) {
             if (error instanceof z.ZodError) {
@@ -208,7 +210,8 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Last message must be from the operator' }, 400)
         }
 
-        const active = getSanitizedActiveBrain(engine)
+        const overseer = engine.getOverseer(c.get('namespace'))
+        const active = getSanitizedActiveBrain(engine, c.get('namespace'))
         const config = resolveBrainConfig(process.env, resolveBrainSelection(active, {
             profile: parsed.data.profile,
             model: parsed.data.model
@@ -224,13 +227,14 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
 
         try {
             const { reply, toolTrace } = await runOverseerConverse({
-                overseer: engine.getOverseer(),
+                overseer,
                 config,
-                messages
+                messages,
+                allowWrites: parsed.data.allowWrites
             })
 
             const lastOperator = [...messages].reverse().find((m) => m.role === 'operator')?.content ?? ''
-            engine.getOverseer().recordConvoTurn({
+            overseer.recordConvoTurn({
                 operatorText: lastOperator,
                 overseerText: reply,
                 relatedSessionId: parsed.data.relatedSessionId ?? null,
@@ -279,7 +283,7 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'operatorText or overseerText is required' }, 400)
         }
 
-        const event = engine.getOverseer().recordConvoTurn({
+        const event = engine.getOverseer(c.get('namespace')).recordConvoTurn({
             operatorText: parsed.data.operatorText,
             overseerText: parsed.data.overseerText,
             relatedSessionId: parsed.data.relatedSessionId ?? null,

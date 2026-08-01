@@ -19,33 +19,35 @@ import {
 const STALE = 30 * 60 * 1000
 
 describe('overseer entity protocol', () => {
-    it('catalog covers every tool name; only record_disposition writes (R2)', () => {
+    it('catalog covers every tool name; only write tools are non-readonly (R2)', () => {
         const catalogNames = OVERSEER_TOOL_CATALOG.map((t) => t.name).sort()
         expect(catalogNames).toEqual([...OVERSEER_TOOL_NAMES].sort())
-        const writeTools = OVERSEER_TOOL_CATALOG.filter((t) => !t.readonly).map((t) => t.name)
-        expect(writeTools).toEqual(['record_disposition'])
+        const writeTools = OVERSEER_TOOL_CATALOG.filter((t) => !t.readonly).map((t) => t.name).sort()
+        expect(writeTools).toEqual(['ping_session', 'record_disposition'])
         expect(isOverseerWriteTool('record_disposition')).toBe(true)
+        expect(isOverseerWriteTool('ping_session')).toBe(true)
         expect(isOverseerWriteTool('query_events')).toBe(false)
     })
 
-    it('exposes a cannot-dispatch identity that CAN record dispositions (Stage 1)', () => {
+    it('exposes a cannot-dispatch identity that CAN disposition + relay (Stage 1.5)', () => {
         const identity = buildOverseerIdentity()
         expect(identity.id).toBe(OVERSEER_ENTITY_ID)
         expect(identity.kind).toBe(OVERSEER_SOURCE_KIND)
         expect(identity.canDispatch).toBe(false)
         expect(identity.canDisposition).toBe(true)
+        expect(identity.canRelay).toBe(true)
         expect(identity.tools).toHaveLength(OVERSEER_TOOL_NAMES.length)
     })
 
-    it('system prompt frames chief-of-staff + read-only tools + disposition write discipline', () => {
+    it('system prompt frames chief-of-staff + read tools + disposition/relay write discipline', () => {
         const prompt = buildOverseerSystemPrompt()
         expect(prompt).toContain('chief-of-staff')
         expect(prompt).toContain('Read-only tools')
         expect(prompt).toContain('record_disposition')
-        expect(prompt).toContain('CANNOT dispatch')
+        expect(prompt).toContain('ping_session')
+        expect(prompt).toContain('CANNOT spawn')
         expect(prompt).toContain('Show receipts')
     })
-
     describe('worker state derivation', () => {
         it('maps notify status and event type to worker state', () => {
             expect(mapNotifyStatusToWorkerState('blocked')).toBe('blocked')

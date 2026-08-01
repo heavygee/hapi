@@ -175,10 +175,25 @@ const OVERSEER_TOOL_PARAMS: Record<OverseerToolName, JsonSchema> = {
         action: { type: 'string', enum: [...OVERSEER_DISPOSITION_ACTIONS], description: 'done=resolve, dismiss=tombstone, snooze (needs snoozedUntil), open=reopen.' },
         feedback: { type: 'string', description: 'Optional operator note / learning label to freeze with the disposition.' },
         snoozedUntil: { type: 'integer', minimum: 1, description: 'Required for snooze: epoch ms to sleep the item until.' }
-    }, ['itemId', 'action'])
+    }, ['itemId', 'action']),
+    // anyOf mirrors runtime Zod: message plus at least one of sessionId|itemId.
+    ping_session: {
+        type: 'object',
+        properties: {
+            sessionId: { type: 'string', description: 'Worker session id (full UUID or unique prefix).' },
+            itemId: { type: 'integer', minimum: 1, description: 'Inbox item id — resolves its relatedSessionId when sessionId omitted.' },
+            message: { type: 'string', description: 'Operator-directed message to relay to that session.' }
+        },
+        required: ['message'],
+        anyOf: [
+            { required: ['sessionId'] },
+            { required: ['itemId'] }
+        ],
+        additionalProperties: false
+    }
 }
 
-/** The Overseer tool catalog (read-only + the single disposition write) as an OpenAI `tools` array. */
+/** The Overseer tool catalog (reads + disposition + relay writes) as an OpenAI `tools` array. */
 export function buildOverseerOpenAiTools(): OverseerOpenAiTool[] {
     return OVERSEER_TOOL_CATALOG.map((entry) => ({
         type: 'function',
