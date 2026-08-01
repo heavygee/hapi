@@ -10,8 +10,10 @@
 import {
     buildOverseerOpenAiTools,
     buildOverseerSystemPrompt,
+    fingerprintWriteToolCall,
     isOverseerWriteTool,
     isWriteToolAuthorized,
+    isWriteToolCallAuthorized,
     resolveOverseerWriteAuthorization,
     type OverseerConverseMessage,
     type OverseerToolName,
@@ -125,8 +127,9 @@ export async function runOverseerConverse(params: {
         const name = tool.function?.name ?? ''
         return isWriteToolAuthorized(name, writeAuth)
     })
+    const clockLine = `Server time now: ${new Date().toISOString()} (epoch ms ${Date.now()}, timezone ${Intl.DateTimeFormat().resolvedOptions().timeZone}). Relative snoozes must use absolute snoozedUntil epoch ms from this clock.`
     const convo: OpenAiChatMessage[] = [
-        { role: 'system', content: `${buildOverseerSystemPrompt()}\n\n${GROUNDING_DIRECTIVE}` },
+        { role: 'system', content: `${buildOverseerSystemPrompt()}\n\n${GROUNDING_DIRECTIVE}\n\n# Clock\n\n${clockLine}` },
         ...messages.map((m): OpenAiChatMessage => ({
             role: m.role === 'operator' ? 'user' : 'assistant',
             content: m.content
@@ -136,6 +139,8 @@ export async function runOverseerConverse(params: {
     const toolTrace: OverseerToolTraceEntry[] = []
     /** Tombstones from successful write tools — used if a later brain call fails. */
     const writeConfirmations: string[] = []
+    /** Successful irreversible call fingerprints — reject duplicates in this turn. */
+    const consumedWriteFingerprints = new Set<string>()
     // The brain (llama-server) does not honor tool_choice:'required', so it will
     // sometimes answer a fleet question from nothing (e.g. "the inbox is empty"
     // when it never called query_inbox). Guardrail: if the very first answer
@@ -177,6 +182,10 @@ export async function runOverseerConverse(params: {
         // user/assistant path that all templates render. We also drop the raw
         // assistant tool-call message from history for the same reason.
         const resultLines: string[] = []
+        const batchHasRead = calls.some((call) => {
+            const name = call.function?.name ?? ''
+            return isOverseerToolName(name) && !isOverseerWriteTool(name)
+        })
         for (const call of calls) {
             const name = call.function?.name ?? ''
             const argsRaw = call.function?.arguments ?? ''
@@ -186,11 +195,26 @@ export async function runOverseerConverse(params: {
                 resultLines.push(`${name || 'unknown'}(${argsRaw}) => ${JSON.stringify({ error: `unknown tool: ${name}` })}`)
                 continue
             }
-            if (!isWriteToolAuthorized(name, writeAuth)) {
-                const denied = 'write not authorized by operator message (no explicit write intent)'
-                toolTrace.push({ tool: name, args, ok: false, error: denied })
-                resultLines.push(`${name}(${argsRaw}) => ${JSON.stringify({ error: denied })}`)
+            if (batchHasRead && isOverseerWriteTool(name)) {
+                const deferred = 'write deferred: resolve identifying read tools first, then call the write in a later turn'
+                toolTrace.push({ tool: name, args, ok: false, error: deferred })
+                resultLines.push(`${name}(${argsRaw}) => ${JSON.stringify({ error: deferred })}`)
                 continue
+            }
+            const authz = isWriteToolCallAuthorized(name, args, writeAuth)
+            if (!authz.ok) {
+                toolTrace.push({ tool: name, args, ok: false, error: authz.error })
+                resultLines.push(`${name}(${argsRaw}) => ${JSON.stringify({ error: authz.error })}`)
+                continue
+            }
+            if (isOverseerWriteTool(name)) {
+                const fp = fingerprintWriteToolCall(name, args)
+                if (consumedWriteFingerprints.has(fp)) {
+                    const dup = 'duplicate irreversible tool call rejected (already executed this turn)'
+                    toolTrace.push({ tool: name, args, ok: false, error: dup })
+                    resultLines.push(`${name}(${argsRaw}) => ${JSON.stringify({ error: dup })}`)
+                    continue
+                }
             }
             try {
                 // The conversational surface is the operator-directed write-path, so dispositions
@@ -204,6 +228,7 @@ export async function runOverseerConverse(params: {
                     ...(ok ? {} : { error: toolResultError(result) })
                 })
                 if (ok && isOverseerWriteTool(name)) {
+                    consumedWriteFingerprints.add(fingerprintWriteToolCall(name, args))
                     const tombstone = writeResultTombstone(result)
                     writeConfirmations.push(tombstone ?? `${name} succeeded`)
                 }

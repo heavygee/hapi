@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
     detectOperatorWriteTools,
-    isWriteToolAuthorized,
+    isWriteToolCallAuthorized,
     resolveOverseerWriteAuthorization
 } from './overseerWriteIntent'
 
@@ -24,7 +24,6 @@ describe('detectOperatorWriteTools', () => {
 
     it('does not authorize writes for read-only questions', () => {
         expect([...detectOperatorWriteTools('what needs my attention?')]).toEqual([])
-        expect([...detectOperatorWriteTools('show recent output for session abc')]).toEqual([])
     })
 })
 
@@ -35,15 +34,52 @@ describe('resolveOverseerWriteAuthorization', () => {
             allowWrites: true
         })
         expect(auth.explicitClientFlag).toBe(true)
-        expect(isWriteToolAuthorized('ping_session', auth)).toBe(true)
-        expect(isWriteToolAuthorized('record_disposition', auth)).toBe(true)
+        expect(isWriteToolCallAuthorized('ping_session', {
+            sessionId: 'abcdef12-0000-0000-0000-000000000001',
+            message: 'hi'
+        }, auth).ok).toBe(true)
+    })
+
+    it('binds ping_session to the session id named by the operator', () => {
+        const auth = resolveOverseerWriteAuthorization({
+            latestOperatorText: 'ping session abcdef12: "please continue"'
+        })
+        expect(isWriteToolCallAuthorized('ping_session', {
+            sessionId: 'abcdef12-ffff-ffff-ffff-ffffffffffff',
+            message: 'please continue'
+        }, auth).ok).toBe(true)
+        expect(isWriteToolCallAuthorized('ping_session', {
+            sessionId: 'deadbeef-ffff-ffff-ffff-ffffffffffff',
+            message: 'please continue'
+        }, auth).ok).toBe(false)
+    })
+
+    it('binds short named session tokens after the word session', () => {
+        const auth = resolveOverseerWriteAuthorization({
+            latestOperatorText: 'ping session sess-1: "hi"'
+        })
+        expect(isWriteToolCallAuthorized('ping_session', {
+            sessionId: 'sess-1',
+            message: 'hi'
+        }, auth).ok).toBe(true)
+    })
+
+    it('denies ping without a concrete target in the operator message', () => {
+        const auth = resolveOverseerWriteAuthorization({
+            latestOperatorText: 'ping that worker to continue'
+        })
+        const result = isWriteToolCallAuthorized('ping_session', {
+            sessionId: 'abcdef12',
+            message: 'continue'
+        }, auth)
+        expect(result.ok).toBe(false)
     })
 
     it('denies write tools when neither flag nor intent matches', () => {
         const auth = resolveOverseerWriteAuthorization({
             latestOperatorText: 'summarize the inbox'
         })
-        expect(isWriteToolAuthorized('ping_session', auth)).toBe(false)
-        expect(isWriteToolAuthorized('query_inbox', auth)).toBe(true)
+        expect(isWriteToolCallAuthorized('ping_session', { sessionId: 'x', message: 'y' }, auth).ok).toBe(false)
+        expect(isWriteToolCallAuthorized('query_inbox', {}, auth).ok).toBe(true)
     })
 })

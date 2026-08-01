@@ -205,7 +205,7 @@ describe('runOverseerConverse', () => {
         const { toolTrace } = await runOverseerConverse({
             overseer,
             config,
-            messages: [{ role: 'operator', content: 'ping sess-1: hi' }]
+            messages: [{ role: 'operator', content: 'ping session sess-1: "hi"' }]
         })
 
         expect(toolTrace[0]).toMatchObject({
@@ -243,7 +243,7 @@ describe('runOverseerConverse', () => {
         const { reply, toolTrace } = await runOverseerConverse({
             overseer,
             config,
-            messages: [{ role: 'operator', content: 'ping session old-id: please continue' }]
+            messages: [{ role: 'operator', content: 'ping session old-id: "please continue"' }]
         })
 
         expect(toolTrace).toHaveLength(1)

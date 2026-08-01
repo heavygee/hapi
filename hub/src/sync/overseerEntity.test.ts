@@ -540,3 +540,47 @@ describe('OverseerEntity dispositions (Stage 1 keystone)', () => {
         expect(lastRelay?.message).not.toBe('wrong target')
     })
 })
+
+describe('OverseerEntity namespace isolation (#107 kill criterion)', () => {
+    it('refuses to resolve or relay a session that only exists in another namespace', async () => {
+        const store = new Store(':memory:')
+        const inA = store.sessions.getOrCreateSession(
+            'ns-a-session-aaaaaaaa',
+            { flavor: 'claude', path: '/tmp/a', name: 'worker-a' },
+            null,
+            'ns-a'
+        )
+        const inB = store.sessions.getOrCreateSession(
+            'ns-b-session-bbbbbbbb',
+            { flavor: 'claude', path: '/tmp/b', name: 'worker-b' },
+            null,
+            'ns-b'
+        )
+        store.events.insert({
+            ts: Date.now(),
+            sourceKind: 'worker',
+            eventType: 'blocked',
+            attentionCandidate: 1,
+            severity: 4,
+            summary: 'secret from B',
+            relatedSessionId: inB.id,
+            payloadJson: JSON.stringify({ session: { project: 'secret', name: 'worker-b' } })
+        })
+
+        const engine = buildEngine(store)
+        const overseerA = engine.getOverseer('ns-a')
+        const overseerB = engine.getOverseer('ns-b')
+
+        expect(overseerA.getSessionState(inA.id)?.sessionId).toBe(inA.id)
+        expect(overseerA.getSessionState(inB.id)).toBeNull()
+        expect(overseerA.queryEvents({}).map((e) => e.summary)).not.toContain('secret from B')
+        expect(overseerB.queryEvents({}).map((e) => e.summary)).toContain('secret from B')
+
+        const crossRelay = await overseerA.pingSession({
+            sessionId: inB.id,
+            message: 'cross-namespace injection'
+        })
+        expect(crossRelay.ok).toBe(false)
+        expect(crossRelay.error).toMatch(/No session matching/)
+    })
+})

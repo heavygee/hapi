@@ -21,6 +21,7 @@ import {
     isNoOpAction,
     mapEventTypeToWorkerState,
     openLoopBucket,
+    OVERSEER_DISPOSITION_ACTIONS,
     type OverseerActiveWorker,
     type OverseerConvoTurnInput,
     type OverseerExplainPriority,
@@ -145,7 +146,7 @@ export class OverseerEntity {
             untilTs: args.untilTs ?? null,
             beforeId: args.beforeId ?? null,
             limit: args.limit ?? 50
-        })
+        }).filter((event) => this.eventInCallerScope(event))
     }
 
     // --- Tool 2: query_inbox -------------------------------------------------
@@ -171,7 +172,7 @@ export class OverseerEntity {
             category: args.category ?? null,
             limit: args.limit ?? 50,
             includeSleepingSnoozed: statusesExplicit && statuses.includes('snoozed')
-        })
+        }).filter((item) => this.itemInCallerScope(item))
         return {
             items,
             candidates: items.filter((item) => item.status === 'new'),
@@ -474,6 +475,7 @@ export class OverseerEntity {
     queryDispositions(args: QueryDispositionsArgs = {}): OverseerDispositionsResult {
         const filter = {
             action: args.action ?? null,
+            actionsAllowlist: args.action ? null : [...OVERSEER_DISPOSITION_ACTIONS],
             sourceKind: args.sourceKind ?? null,
             sourceRef: args.sourceRef ?? null,
             eventType: args.eventType ?? null,
@@ -499,24 +501,30 @@ export class OverseerEntity {
             return { mode: 'cluster', clusters, total: clusters.length }
         }
 
-        const rows = this.inbox.listDispositions(filter).map(
-            (r): OverseerDispositionRow => ({
-                id: r.id,
-                itemId: r.inboxItemId,
-                action: r.action,
-                statusAfter: r.statusAfter,
-                feedback: r.feedback,
-                createdAt: r.createdAt,
-                sourceKind: r.sourceKind,
-                sourceRef: r.sourceRef,
-                eventType: r.eventType,
-                category: r.category,
-                project: r.project,
-                artifactKind: r.artifactKind,
-                repo: r.repo,
-                title: r.contextSnapshot?.title ?? null
+        const rows = this.inbox
+            .listDispositions(filter)
+            .filter((r) => {
+                const item = this.inbox.getById(r.inboxItemId)
+                return item != null && this.itemInCallerScope(item)
             })
-        )
+            .map(
+                (r): OverseerDispositionRow => ({
+                    id: r.id,
+                    itemId: r.inboxItemId,
+                    action: r.action,
+                    statusAfter: r.statusAfter,
+                    feedback: r.feedback,
+                    createdAt: r.createdAt,
+                    sourceKind: r.sourceKind,
+                    sourceRef: r.sourceRef,
+                    eventType: r.eventType,
+                    category: r.category,
+                    project: r.project,
+                    artifactKind: r.artifactKind,
+                    repo: r.repo,
+                    title: r.contextSnapshot?.title ?? null
+                })
+            )
         return { mode: 'list', rows, total: rows.length }
     }
 
@@ -531,7 +539,7 @@ export class OverseerEntity {
      */
     recordDisposition(args: RecordDispositionArgs): OverseerDispositionResult {
         const item = this.inbox.getById(args.itemId)
-        if (!item) {
+        if (!item || !this.itemInCallerScope(item)) {
             return {
                 ok: false,
                 itemId: args.itemId,
@@ -620,12 +628,16 @@ export class OverseerEntity {
         }
 
         const tombstone = `Relayed to ${label} (${deliveredSessionId.slice(0, 8)})${result.resumed ? ' [resumed]' : ''}: "${snippet}"`
-        this.recordDispatchedRelay({
-            sessionId: deliveredSessionId,
-            message: args.message,
-            resumed: result.resumed,
-            tombstone
-        })
+        try {
+            this.recordDispatchedRelay({
+                sessionId: deliveredSessionId,
+                message: args.message,
+                resumed: result.resumed,
+                tombstone
+            })
+        } catch {
+            // Delivery already succeeded — audit failure must not flip ok or invite retry.
+        }
         return {
             ok: true,
             sessionId: deliveredSessionId,
@@ -663,7 +675,7 @@ export class OverseerEntity {
 
         if (args.itemId != null) {
             const item = this.inbox.getById(args.itemId)
-            if (!item) {
+            if (!item || !this.itemInCallerScope(item)) {
                 return { ok: false, error: `No inbox item #${args.itemId} — nothing relayed.` }
             }
             sessionIdFromItem = item.relatedSessionId?.trim() || null
@@ -773,6 +785,24 @@ export class OverseerEntity {
     }
 
     // --- internals -----------------------------------------------------------
+
+    /**
+     * Fail-closed for cross-namespace: a related session must resolve uniquely
+     * inside this entity's injected session list (already namespace-scoped).
+     * Rows with no relatedSessionId stay visible until #107 adds a namespace
+     * column (convo_turns / orphan inbox rows are hub-global today).
+     */
+    private itemInCallerScope(item: { relatedSessionId: string | null }): boolean {
+        const related = item.relatedSessionId?.trim()
+        if (!related) return true
+        return this.matchSessions(related).length === 1
+    }
+
+    private eventInCallerScope(event: { relatedSessionId: string | null }): boolean {
+        const related = event.relatedSessionId?.trim()
+        if (!related) return true
+        return this.matchSessions(related).length === 1
+    }
 
     /**
      * Exact session id, else unique prefix (hapi-ping-peer / loomux / pi pattern).
