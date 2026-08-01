@@ -110,7 +110,7 @@ export function OverseerChatDebugControls() {
             {open && (
                 <div className="space-y-2 border-t border-[var(--app-divider)] bg-[var(--app-subtle-bg)]/40 px-3 py-2">
                     <p className="text-xs text-[var(--app-hint)]">
-                        Fleet chief-of-staff (Stage 1). Text transport over the same converse core voice will use. The brain can read fleet state and record operator-directed dispositions (done / dismiss / snooze / open) on inbox items — it still cannot dispatch or message workers.
+                        Fleet chief-of-staff (Stage 1.5 — read + dispositions + relay). Text transport over the same converse core voice will use. The brain can read fleet state, record operator-directed dispositions (done / dismiss / snooze / open), and relay a message to a worker when you explicitly ask (ping / tell / snooze…).
                     </p>
 
                     <div className="flex flex-wrap items-center gap-2">

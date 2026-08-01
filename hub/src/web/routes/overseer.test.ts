@@ -29,7 +29,7 @@ describe('overseer routes', () => {
             systemPrompt: string
         }
         expect(body.identity.canDispatch).toBe(false)
-        expect(body.identity.tools.length).toBe(10)
+        expect(body.identity.tools.length).toBe(11)
         expect(body.systemPrompt).toContain('Overseer')
     })
 
@@ -40,6 +40,16 @@ describe('overseer routes', () => {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ itemId: 1, action: 'done' })
+        })
+        expect(res.status).toBe(403)
+    })
+
+    it('POST /overseer/tools/ping_session is gated off on the read-only HTTP surface (403)', async () => {
+        const app = buildApp(new Store(':memory:'))
+        const res = await app.request('/api/overseer/tools/ping_session', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ sessionId: 'abc', message: 'hi' })
         })
         expect(res.status).toBe(403)
     })

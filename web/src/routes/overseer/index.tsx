@@ -42,6 +42,7 @@ function OverseerIdentityPanel() {
                 <span className="text-xs text-[var(--app-hint)]">
                     {identity.id} · {identity.tools.length} tool{identity.tools.length === 1 ? '' : 's'}
                     {identity.canDisposition ? ' · can disposition' : ''}
+                    {identity.canRelay ? ' · can relay' : ''}
                 </span>
             </button>
             {open ? (

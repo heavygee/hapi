@@ -266,17 +266,18 @@ export const OVERSEER_TOOL_NAMES = [
     'list_active_workers',
     'query_open_loops',
     'query_dispositions',
-    'record_disposition'
+    'record_disposition',
+    'ping_session'
 ] as const
 
 export type OverseerToolName = typeof OVERSEER_TOOL_NAMES[number]
 
 /**
- * The one tool that writes (Stage 0→1 keystone). Every other tool is read-only against the
- * substrate; `record_disposition` is the single explicit, operator-directed mutation. It is
- * clearly marked non-`readonly` in the catalog so the write surface stays enumerable (R2).
+ * Write tools (Stage 1+). Every other tool is read-only against the substrate.
+ * `record_disposition` = operator decision on an inbox item; `ping_session` = relay
+ * a message to a worker session (resume + enqueue). Both are operator-directed only (R2/R5).
  */
-export const OVERSEER_WRITE_TOOL_NAMES = ['record_disposition'] as const
+export const OVERSEER_WRITE_TOOL_NAMES = ['record_disposition', 'ping_session'] as const
 export type OverseerWriteToolName = typeof OVERSEER_WRITE_TOOL_NAMES[number]
 
 export function isOverseerWriteTool(name: string): name is OverseerWriteToolName {
@@ -406,6 +407,33 @@ export const recordDispositionArgsSchema = z.object({
 export type RecordDispositionArgs = z.infer<typeof recordDispositionArgsSchema>
 
 /**
+ * `ping_session` — relay an operator-directed message to one worker session (R5).
+ * Resolves by `sessionId` (full id or unique prefix) and/or `itemId` (inbox item →
+ * relatedSessionId). Hub resumes if inactive, then enqueues the message — same
+ * primitives as `hapi-ping-peer`, called in-process (never shell out).
+ */
+export const pingSessionArgsSchema = z.object({
+    sessionId: z.string().min(1).max(128).optional(),
+    itemId: z.number().int().positive().optional(),
+    message: z.string().min(1).max(8000),
+}).refine((v) => Boolean(v.sessionId?.trim()) || typeof v.itemId === 'number', {
+    message: 'sessionId or itemId is required'
+})
+export type PingSessionArgs = z.infer<typeof pingSessionArgsSchema>
+
+export type OverseerPingResult = {
+    ok: boolean
+    sessionId: string
+    sessionName: string | null
+    project: string | null
+    /** True when the hub had to resume before sending. */
+    resumed: boolean
+    /** One-line human confirmation to read back ("Relayed to Expenses (a492…): …"). */
+    tombstone: string
+    error?: string
+}
+
+/**
  * One cold open loop: a session whose latest worker status is not `done`,
  * carrying how long it has sat and which lens bucket it belongs to.
  */
@@ -486,7 +514,8 @@ export const overseerToolArgsSchemas = {
     list_active_workers: listActiveWorkersArgsSchema,
     query_open_loops: queryOpenLoopsArgsSchema,
     query_dispositions: queryDispositionsArgsSchema,
-    record_disposition: recordDispositionArgsSchema
+    record_disposition: recordDispositionArgsSchema,
+    ping_session: pingSessionArgsSchema
 } as const satisfies Record<OverseerToolName, z.ZodTypeAny>
 
 export type OverseerToolCatalogEntry = {
@@ -496,7 +525,7 @@ export type OverseerToolCatalogEntry = {
     readonly: boolean
 }
 
-/** Catalog surfaced to the voice/system layer; exactly one entry (`record_disposition`) writes. */
+/** Catalog surfaced to the voice/system layer; write tools are marked `readonly: false` (R2). */
 export const OVERSEER_TOOL_CATALOG: OverseerToolCatalogEntry[] = [
     {
         name: 'query_events',
@@ -547,12 +576,22 @@ export const OVERSEER_TOOL_CATALOG: OverseerToolCatalogEntry[] = [
         name: 'record_disposition',
         description: 'WRITE: record the operator\'s explicit decision on one inbox item — done (resolve), dismiss (tombstone), snooze (needs snoozedUntil), or open (reopen). Only call this when the operator has clearly directed it in the conversation; never on your own judgement. Returns a tombstone to read back.',
         readonly: false
+    },
+    {
+        name: 'ping_session',
+        description: 'WRITE: relay an operator-directed message to one worker session (resume if inactive, then enqueue). Pass sessionId (full id or unique prefix) and/or itemId (inbox item → its related session). Only call when the operator has clearly said to tell / ping / ask that project or agent something. Irreversible once delivered — never invent a ping.',
+        readonly: false
     }
 ]
 
 /** Whether the Overseer may write dispositions — Stage 1 keystone gate (still no dispatch). */
 export function overseerCanDisposition(): boolean {
     return OVERSEER_TOOL_CATALOG.some((t) => t.name === 'record_disposition' && !t.readonly)
+}
+
+/** Whether the Overseer may relay to a worker session — Stage 1.5 delegation gate (R5). */
+export function overseerCanRelay(): boolean {
+    return OVERSEER_TOOL_CATALOG.some((t) => t.name === 'ping_session' && !t.readonly)
 }
 
 export type OverseerIdentity = {
@@ -562,6 +601,8 @@ export type OverseerIdentity = {
     canDispatch: false
     /** Stage 1 keystone: the Overseer may record operator-directed dispositions on inbox items. */
     canDisposition: boolean
+    /** Stage 1.5: the Overseer may relay operator-directed messages to a worker session. */
+    canRelay: boolean
     tools: OverseerToolCatalogEntry[]
 }
 
@@ -571,6 +612,7 @@ export function buildOverseerIdentity(): OverseerIdentity {
         kind: OVERSEER_SOURCE_KIND,
         canDispatch: false,
         canDisposition: overseerCanDisposition(),
+        canRelay: overseerCanRelay(),
         tools: OVERSEER_TOOL_CATALOG
     }
 }
@@ -594,9 +636,10 @@ export function buildOverseerSystemPrompt(): string {
         'You hold a continuous view of the whole fleet and speak to the operator about it. You are not',
         'any single worker, and you never speak as one.',
         '',
-        '# What you can do (Stage 1 — read + record dispositions)',
+        '# What you can do (Stage 1.5 — read + dispositions + relay)',
         '',
-        'You can READ the fleet, ANSWER questions, and RECORD the operator\'s decisions on inbox items.',
+        'You can READ the fleet, ANSWER questions, RECORD the operator\'s decisions on inbox items,',
+        'and RELAY an operator-directed message to one worker session.',
         '',
         'Read-only tools:',
         '- query_events — the events stream (blockers, completions, decisions, progress, errors).',
@@ -609,12 +652,14 @@ export function buildOverseerSystemPrompt(): string {
         '- query_open_loops — the "what am I forgetting?" lens: cold threads whose latest status is not done.',
         '- query_dispositions — past operator decisions (list, or groupBy+minCount to cluster them).',
         '',
-        'Write tool (the ONLY thing you can change):',
+        'Write tools (the ONLY things you can change):',
         '- record_disposition — record the operator\'s decision on ONE inbox item: done (resolve),',
         '  dismiss (tombstone), snooze (needs snoozedUntil), or open (reopen).',
+        '- ping_session — relay a message to ONE worker session (resume if needed, then enqueue).',
+        '  Pass sessionId and/or itemId. Irreversible once delivered.',
         '',
-        'You still CANNOT dispatch, message workers, spawn, or confirm anything on a worker. If the',
-        'operator asks you to act on a worker, say you can advise but cannot dispatch yet.',
+        'You still CANNOT spawn new workers, invent work, or confirm anything on a worker\'s behalf.',
+        'If the operator asks you to "just handle it" without naming a target and an intent, ask.',
         '',
         '# Recording a disposition (be careful — this writes)',
         '',
@@ -624,6 +669,16 @@ export function buildOverseerSystemPrompt(): string {
         '- If which item is ambiguous, ask which one before writing. Identify the item first (query_inbox',
         '  / explain_priority) so you pass the right itemId.',
         '- After it lands, read the returned tombstone back in one line so the operator knows it stuck.',
+        '',
+        '# Relaying to a project / session (be careful — this writes and is not undoable)',
+        '',
+        '- Call ping_session ONLY when the operator has clearly directed a relay: "tell that expenses',
+        '  session…", "ping the hapi peer about…", "ask that project to…". Never invent a ping.',
+        '- Prefer itemId when the conversation is about a specific inbox item (it resolves the related',
+        '  session). Otherwise use sessionId (full id or unique short prefix).',
+        '- Keep the message short and complete — the worker rehydrates its own context; you are a',
+        '  secretary passing intent, not transferring your whole briefing.',
+        '- After it lands, read the returned tombstone back in one line.',
         '',
         '# How to answer',
         '',

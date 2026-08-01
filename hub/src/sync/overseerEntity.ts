@@ -39,6 +39,8 @@ import {
     type QueryInboxArgs,
     type QueryOpenLoopsArgs,
     type RecordDispositionArgs,
+    type PingSessionArgs,
+    type OverseerPingResult,
     type ListActiveWorkersArgs
 } from '@hapi/protocol'
 import { buildOverseerSessionIdentity } from '@hapi/protocol'
@@ -54,6 +56,15 @@ export type OverseerEntityDeps = {
     messages: MessageStore
     getSession: (sessionId: string) => Session | undefined
     getSessions: () => Session[]
+    /**
+     * Stage 1.5 relay (R5): resume if inactive, then enqueue a user message.
+     * Injected from SyncEngine — never shell out to `hapi-ping-peer`.
+     */
+    relayToSession?: (args: {
+        sessionId: string
+        message: string
+        namespace?: string
+    }) => Promise<{ ok: boolean; resumed: boolean; error?: string }>
     now?: () => number
     staleSilenceMs?: number
 }
@@ -87,6 +98,7 @@ export class OverseerEntity {
     private readonly messages: MessageStore
     private readonly getSession: (sessionId: string) => Session | undefined
     private readonly getSessions: () => Session[]
+    private readonly relayToSession: OverseerEntityDeps['relayToSession']
     private readonly now: () => number
     private readonly staleSilenceMs: number
 
@@ -96,6 +108,7 @@ export class OverseerEntity {
         this.messages = deps.messages
         this.getSession = deps.getSession
         this.getSessions = deps.getSessions
+        this.relayToSession = deps.relayToSession
         this.now = deps.now ?? (() => Date.now())
         this.staleSilenceMs = deps.staleSilenceMs ?? OVERSEER_STALE_SILENCE_MS
     }
@@ -529,6 +542,126 @@ export class OverseerEntity {
             action: args.action,
             statusAfter,
             tombstone: this.buildTombstone(args.action, statusAfter, item)
+        }
+    }
+
+    /**
+     * Stage 1.5 write — relay an operator-directed message to one worker session (R5).
+     * Resolves sessionId (full or unique prefix) and/or itemId → relatedSessionId, then
+     * calls the injected SyncEngine resume+send primitive.
+     */
+    async pingSession(args: PingSessionArgs): Promise<OverseerPingResult> {
+        const resolved = this.resolvePingTarget(args)
+        if (!resolved.ok) {
+            return {
+                ok: false,
+                sessionId: resolved.sessionId ?? '',
+                sessionName: null,
+                project: null,
+                resumed: false,
+                tombstone: resolved.error,
+                error: resolved.error
+            }
+        }
+
+        if (!this.relayToSession) {
+            return {
+                ok: false,
+                sessionId: resolved.sessionId,
+                sessionName: resolved.sessionName,
+                project: resolved.project,
+                resumed: false,
+                tombstone: 'Relay not wired on this hub — nothing sent.',
+                error: 'relay_not_configured'
+            }
+        }
+
+        const result = await this.relayToSession({
+            sessionId: resolved.sessionId,
+            message: args.message,
+            namespace: resolved.namespace
+        })
+
+        const label = resolved.sessionName ?? resolved.project ?? resolved.sessionId.slice(0, 8)
+        const snippet = args.message.length > 80 ? `${args.message.slice(0, 77)}…` : args.message
+        if (!result.ok) {
+            return {
+                ok: false,
+                sessionId: resolved.sessionId,
+                sessionName: resolved.sessionName,
+                project: resolved.project,
+                resumed: result.resumed,
+                tombstone: `Failed to relay to ${label}: ${result.error ?? 'unknown error'}`,
+                error: result.error
+            }
+        }
+
+        return {
+            ok: true,
+            sessionId: resolved.sessionId,
+            sessionName: resolved.sessionName,
+            project: resolved.project,
+            resumed: result.resumed,
+            tombstone: `Relayed to ${label} (${resolved.sessionId.slice(0, 8)})${result.resumed ? ' [resumed]' : ''}: "${snippet}"`
+        }
+    }
+
+    private resolvePingTarget(args: PingSessionArgs): {
+        ok: true
+        sessionId: string
+        sessionName: string | null
+        project: string | null
+        namespace: string
+    } | { ok: false; sessionId?: string; error: string } {
+        let sessionId = args.sessionId?.trim() || null
+
+        if (!sessionId && args.itemId != null) {
+            const item = this.inbox.getById(args.itemId)
+            if (!item) {
+                return { ok: false, error: `No inbox item #${args.itemId} — nothing relayed.` }
+            }
+            sessionId = item.relatedSessionId?.trim() || null
+            if (!sessionId) {
+                return {
+                    ok: false,
+                    error: `Inbox item #${args.itemId} has no related session — nothing relayed.`
+                }
+            }
+        }
+
+        if (!sessionId) {
+            return { ok: false, error: 'sessionId or itemId is required — nothing relayed.' }
+        }
+
+        // Exact match first, then unique prefix (same as hapi-ping-peer).
+        let session = this.getSession(sessionId)
+        if (!session) {
+            const matches = this.getSessions().filter((s) => s.id.startsWith(sessionId!))
+            if (matches.length === 1) {
+                session = matches[0]
+                sessionId = session.id
+            } else if (matches.length > 1) {
+                return {
+                    ok: false,
+                    sessionId,
+                    error: `Ambiguous session prefix "${sessionId}" (${matches.length} matches) — nothing relayed.`
+                }
+            } else {
+                return {
+                    ok: false,
+                    sessionId,
+                    error: `No session matching "${sessionId}" — nothing relayed.`
+                }
+            }
+        }
+
+        const identity = deriveIdentity(session)
+        return {
+            ok: true,
+            sessionId: session.id,
+            sessionName: identity.name,
+            project: identity.project,
+            namespace: session.namespace || 'default'
         }
     }
 

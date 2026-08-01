@@ -4,7 +4,7 @@ import { Store } from '../store'
 import { SyncEngine } from './syncEngine'
 import { RpcRegistry } from '../socket/rpcRegistry'
 import { OverseerWriteNotAllowedError, runOverseerTool } from '../overseer/runOverseerTool'
-import type { OverseerEntity } from './overseerEntity'
+import { OverseerEntity } from './overseerEntity'
 
 function makeEngine(): { store: Store; engine: SyncEngine } {
     const store = new Store(':memory:')
@@ -400,17 +400,71 @@ describe('OverseerEntity dispositions (Stage 1 keystone)', () => {
         expect(o.queryDispositions({}).total).toBe(0)
     })
 
-    it('record_disposition is gated: runOverseerTool refuses the write unless allowWrites', () => {
+    it('record_disposition is gated: runOverseerTool refuses the write unless allowWrites', async () => {
         const store = new Store(':memory:')
         const { itemId } = promoteItem(store, { key: 'gate', eventType: 'blocked', project: 'hapi' })
         const o = overseer(buildEngine(store))
-        expect(() => runOverseerTool(o, 'record_disposition', { itemId, action: 'done' })).toThrow(
+        await expect(runOverseerTool(o, 'record_disposition', { itemId, action: 'done' })).rejects.toBeInstanceOf(
             OverseerWriteNotAllowedError
         )
         // With writes allowed (the conversational path) it lands.
-        const res = runOverseerTool(o, 'record_disposition', { itemId, action: 'done' }, true) as {
+        const res = await runOverseerTool(o, 'record_disposition', { itemId, action: 'done' }, true) as {
             ok: boolean
         }
         expect(res.ok).toBe(true)
+    })
+
+    it('ping_session resolves by sessionId / itemId and returns a tombstone via injected relay', async () => {
+        const store = new Store(':memory:')
+        const { itemId } = promoteItem(store, {
+            key: 'expenses',
+            eventType: 'blocked',
+            project: 'expenses'
+        })
+        const item = store.inbox.getById(itemId)!
+        const sessionId = item.relatedSessionId!
+        expect(sessionId).toBeTruthy()
+
+        let lastRelay: { sessionId: string; message: string } | undefined
+        const o = new OverseerEntity({
+            events: store.events,
+            inbox: store.inbox,
+            messages: store.messages,
+            getSession: (id) => {
+                const s = store.sessions.getSession(id)
+                if (!s) return undefined
+                return { ...s, active: true, namespace: s.namespace || 'default' } as never
+            },
+            getSessions: () => {
+                const s = store.sessions.getSession(sessionId)
+                return s ? [{ ...s, active: true, namespace: s.namespace || 'default' } as never] : []
+            },
+            relayToSession: async ({ sessionId: sid, message }) => {
+                lastRelay = { sessionId: sid, message }
+                return { ok: true, resumed: false }
+            }
+        })
+
+        const byItem = await o.pingSession({
+            itemId,
+            message: 'Please draft the Cursor Pro June note.'
+        })
+        expect(byItem.ok).toBe(true)
+        expect(byItem.sessionId).toBe(sessionId)
+        expect(byItem.tombstone).toContain('Relayed')
+        expect(lastRelay).toEqual({
+            sessionId,
+            message: 'Please draft the Cursor Pro June note.'
+        })
+        const byPrefix = await o.pingSession({
+            sessionId: sessionId.slice(0, 8),
+            message: 'Second ping'
+        })
+        expect(byPrefix.ok).toBe(true)
+        expect(byPrefix.sessionId).toBe(sessionId)
+
+        await expect(runOverseerTool(o, 'ping_session', { sessionId, message: 'x' })).rejects.toBeInstanceOf(
+            OverseerWriteNotAllowedError
+        )
     })
 })

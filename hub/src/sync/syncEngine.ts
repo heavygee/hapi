@@ -172,7 +172,35 @@ export class SyncEngine {
             inbox: store.inbox,
             messages: store.messages,
             getSession: (sessionId) => this.getSession(sessionId),
-            getSessions: () => this.getSessions()
+            getSessions: () => this.getSessions(),
+            relayToSession: async ({ sessionId, message, namespace = 'default' }) => {
+                const existing = this.getSession(sessionId)
+                if (!existing) {
+                    return { ok: false, resumed: false, error: 'session_not_found' }
+                }
+                let resumed = false
+                if (!existing.active) {
+                    const resume = await this.resumeSession(sessionId, namespace)
+                    if (resume.type !== 'success') {
+                        return {
+                            ok: false,
+                            resumed: false,
+                            error: resume.code ?? resume.message ?? 'resume_failed'
+                        }
+                    }
+                    resumed = true
+                }
+                try {
+                    await this.sendMessage(sessionId, { text: message, sentFrom: 'webapp' })
+                    return { ok: true, resumed }
+                } catch (error) {
+                    return {
+                        ok: false,
+                        resumed,
+                        error: error instanceof Error ? error.message : 'send_failed'
+                    }
+                }
+            }
         })
         this.reloadAll()
         this.inactivityTimer = setInterval(() => this.expireInactive(), 5_000)

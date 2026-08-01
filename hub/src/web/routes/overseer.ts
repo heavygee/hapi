@@ -170,7 +170,7 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         try {
-            const result = runOverseerTool(engine.getOverseer(), tool, body ?? {})
+            const result = await runOverseerTool(engine.getOverseer(), tool, body ?? {})
             return c.json({ tool, result })
         } catch (error) {
             if (error instanceof z.ZodError) {
