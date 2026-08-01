@@ -9,7 +9,7 @@ import {
 } from '@/modules/common/hooks/resolveHapiToolingRoot';
 
 type HookCommandConfig = {
-    matcher: string;
+    matcher?: string;
     hooks: Array<{
         type: 'command';
         command: string;
@@ -22,6 +22,7 @@ type HookSettings = {
     };
     hooks: {
         SessionStart: HookCommandConfig[];
+        UserPromptSubmit?: HookCommandConfig[];
         PreToolUse?: HookCommandConfig[];
     };
 };
@@ -30,6 +31,14 @@ export type HookSettingsOptions = {
     filenamePrefix: string;
     logLabel: string;
     hooksEnabled?: boolean;
+    /**
+     * Also forward UserPromptSubmit and PreToolUse hooks. Unlike SessionStart,
+     * their payloads carry `permission_mode`, letting HAPI track the mode the
+     * user picks inside the interactive TUI (shift+tab). Keep this off for the
+     * remote SDK process: these hooks block Claude while the forwarder runs,
+     * and remote permission state is owned by the hub/RPC path anyway.
+     */
+    trackPermissionMode?: boolean;
     /** When set and cwd resolves to hapi, inject project-scoped PreToolUse guards. */
     workingDirectory?: string;
 };
@@ -50,49 +59,55 @@ function shellJoin(parts: string[]): string {
     return parts.map(shellQuote).join(' ');
 }
 
-function buildHookSettings(
-    sessionStartCommand: string,
-    options: Pick<HookSettingsOptions, 'hooksEnabled' | 'workingDirectory'>
+/**
+ * Build Claude Code hook settings.
+ * Soup union: upstream trackPermissionMode (UserPromptSubmit + PreToolUse *) plus
+ * fork workingDirectory PreToolUse Bash guard when cwd is under a hapi tree.
+ */
+export function buildHookSettings(
+    command: string,
+    hooksEnabled?: boolean,
+    trackPermissionMode?: boolean,
+    workingDirectory?: string
 ): HookSettings {
-    const hooks: HookSettings['hooks'] = {
-        SessionStart: [
+    const commandHook = {
+        hooks: [
             {
-                matcher: '*',
-                hooks: [
-                    {
-                        type: 'command',
-                        command: sessionStartCommand
-                    }
-                ]
+                type: 'command' as const,
+                command
             }
         ]
     };
+    const hooks: HookSettings['hooks'] = {
+        SessionStart: [{ matcher: '*', ...commandHook }]
+    };
+    if (trackPermissionMode) {
+        hooks.UserPromptSubmit = [commandHook];
+        hooks.PreToolUse = [{ matcher: '*', ...commandHook }];
+    }
 
-    const hapiRoot = options.workingDirectory
-        ? resolveHapiToolingRoot(options.workingDirectory)
-        : null;
+    const hapiRoot = workingDirectory ? resolveHapiToolingRoot(workingDirectory) : null;
     if (hapiRoot) {
         const guardCommand = hapiClaudePreToolUseGuardCommand(hapiRoot);
         if (existsSync(guardCommand)) {
-            hooks.PreToolUse = [
-                {
-                    matcher: 'Bash',
-                    hooks: [
-                        {
-                            type: 'command',
-                            command: guardCommand
-                        }
-                    ]
-                }
-            ];
+            const guardEntry: HookCommandConfig = {
+                matcher: 'Bash',
+                hooks: [
+                    {
+                        type: 'command',
+                        command: guardCommand
+                    }
+                ]
+            };
+            hooks.PreToolUse = [...(hooks.PreToolUse ?? []), guardEntry];
             logger.debug(`[generateHookSettings] HAPI PreToolUse guard: ${guardCommand}`);
         }
     }
 
     const settings: HookSettings = { hooks };
-    if (options.hooksEnabled !== undefined) {
+    if (hooksEnabled !== undefined) {
         settings.hooksConfig = {
-            enabled: options.hooksEnabled
+            enabled: hooksEnabled
         };
     }
 
@@ -119,7 +134,12 @@ export function generateHookSettingsFile(
     ]);
     const hookCommand = shellJoin([command, ...args]);
 
-    const settings = buildHookSettings(hookCommand, options);
+    const settings = buildHookSettings(
+        hookCommand,
+        options.hooksEnabled,
+        options.trackPermissionMode,
+        options.workingDirectory
+    );
 
     writeFileSync(filepath, JSON.stringify(settings, null, 4));
     logger.debug(`[${options.logLabel}] Created hook settings file: ${filepath}`);
