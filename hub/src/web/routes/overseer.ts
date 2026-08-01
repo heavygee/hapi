@@ -185,8 +185,6 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
     })
 
-    })
-
     // Converse — the modality-agnostic conversation core. Runs the brain LLM
     // with the read-only tools and returns a human-facing reply + tool trace.
     // Text is the first transport (debug settings); voice/XR reuse this. When
