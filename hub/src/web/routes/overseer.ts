@@ -191,8 +191,6 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
     })
 
-    })
-
     // Recent convo_turns for transport hydrate (talk-to reload, voice attach).
     // Durable memory lives in events — this is a thin read, not a chat DB.
     app.get('/overseer/converse/recent', (c) => {
