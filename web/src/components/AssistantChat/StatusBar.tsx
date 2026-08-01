@@ -132,11 +132,6 @@ export function shouldShowCodexFastBadge(
     return agentFlavor === 'codex' && isFastServiceTier(serviceTier)
 }
 
-/** Cursor native ACP does not emit usage_update; hide the bar to avoid empty/misleading UI. */
-export function shouldShowComposerStatusBar(agentFlavor: string | null | undefined): boolean {
-    return agentFlavor !== 'cursor'
-}
-
 export function StatusBar(props: {
     active: boolean
     thinking: boolean
