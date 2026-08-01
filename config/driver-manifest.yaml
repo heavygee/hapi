@@ -342,7 +342,7 @@ layers:
   # disposition write path: ADD COLUMN migration on inbox_operator_actions +
   # new reader fns + snapshot population inside recordInboxOperatorAction.
   # STACKS ON feat/overseer-open-loops (must sit immediately after it). Tip
-  # ed4f30cf (#102 CI: stub Overseer debug panels in About settings test).
+  # b18370b3 (null-safe primary artifact + snooze/dedup/filter dogfood fixes).
   # Shared surface with ingest stack (#99) is ensureOverseerInboxSchema
   # in hub/src/store/inboxItems.ts: #102 appends ADD COLUMN + bucket index, #99
   # appends sweepDecayedTerminalItems/backfillInboxDerivedFields — additive,
@@ -355,8 +355,8 @@ layers:
   # brain switching: persisted active brain (profile+model) in a NEW overseer_settings
   # KV table (idempotent DDL in finishSchemaInit alongside ensureOverseerInboxSchema —
   # no schema-version ladder change). REQUIRED_TABLES gains 'overseer_settings'.
-  # STACKS ON feat/overseer-dispositions (must sit immediately after it). Tip 1cb8781f
-  # (rebased on #102 CI stub + About deep-link assert). Unions cleanly with
+  # STACKS ON feat/overseer-dispositions (must sit immediately after it). Tip 8b9c5d51
+  # (CORS PUT + brain switch dogfood fixes; About deep-link assert). Unions cleanly with
   # dispositions' ensureOverseerInboxSchema (different table, same finishSchemaInit
   # block). Switcher env: OVERSEER_BRAIN_URL (local default) +
   # OVERSEER_BRAIN_PROFILE_OPENAI_URL/_API_KEY/_MODEL; switching among configured
@@ -365,18 +365,20 @@ layers:
 
   # 2026-08-01: overseer relay ping (PR #104). Stage 1.5 write tool ping_session —
   # overseer can ping a live session via the hub relay. STACKS ON
-  # feat/overseer-admin-console (must sit immediately after it). Tip cfafd320 (prefix resolve on overseer read tools; ping already had it).
-  # Touches overseerEntity + syncEngine + converse tool surface + /overseer console
-  # chrome; no new DDL / schema-version step. Dogfood: /overseer talk-to with
-  # active brain exercising ping_session.
+  # feat/overseer-admin-console (must sit immediately after it). Tip 284c12c8
+  # (resume-ID delivery, write-intent gate, conflicting targets, dispatched audit;
+  # includes prefix resolve on read tools). Touches overseerEntity + syncEngine +
+  # converse tool surface + /overseer console chrome; no new DDL / schema-version
+  # step. Dogfood: /overseer talk-to with active brain exercising ping_session.
   - branch: feat/overseer-relay-ping
 
   # 2026-08-01: overseer converse context (PR #106). Hub-owned converse context
   # assembly from convo_turns + GET /converse/recent + talk-to hydrate so hard-reload
   # keeps the /overseer thread and the next ask still has prior context. STACKS ON
-  # feat/overseer-relay-ping (must sit immediately after it; includes tip cfafd320
-  # prefix resolve). Tip 5097bcca. Additive hub+web surface (converseContext module,
-  # overseer routes, OverseerChatDebugControls hydrate); no new DDL.
+  # feat/overseer-relay-ping (must sit immediately after it; tip stack through
+  # 284c12c8). Tip 4a76baaf (hydrate P2 dogfood blockers). Additive hub+web surface
+  # (converseContext module, overseer routes, OverseerChatDebugControls hydrate);
+  # no new DDL. Namespace epic #107 deferred (not blocking dogfood).
   - branch: feat/overseer-converse-context
 
   # Overseer replay harness (thin): harness+CI+fixtures only. Tip 96c8e7bf4,
