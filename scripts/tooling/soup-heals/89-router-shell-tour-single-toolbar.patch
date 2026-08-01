@@ -1,42 +1,50 @@
 # 89-router-shell-tour-single-toolbar.patch
 #
-# feat/fue-app-shell-onboarding added a SECOND inline toolbar (refresh/browse/
-# settings/new + FueDot tour dots + FueCallout) in web/src/router.tsx. The newer
-# upstream base moved the real toolbar into <SessionList headerActions>, so the
-# soup merge kept BOTH -> the double-toolbar bug (duplicate settings/refresh/
-# browse/new buttons the operator saw on :3006).
+# feat/fue-app-shell-onboarding adds tour refs/vars + an inline toolbar that
+# rerere drops (take HEAD's single <SessionList headerActions> toolbar). Without
+# this heal the tour refs are defined-but-unused (typecheck fail) and the tour
+# is dead. Upstream also wrapped browse in `{canBrowse && (...)}` and moved
+# refresh into SessionList (onRefresh) — so this heal targets that shape.
 #
-# rerere resolves the conflict region by dropping fue's inline toolbar (take
-# HEAD's flex wrapper). That leaves the onboarding tour refs/vars (287-306)
-# defined-but-unused (typecheck fail) and the tour non-functional. This heal
-# folds the tour INTO the single headerActions toolbar: ref+relative+FueDot on
-# the browse/settings/new buttons, and re-adds the FueCallout after SessionList.
-# Net: ONE toolbar, tour intact.
+# Folds into headerActions: tour refs/FueDot on browse/settings/new, Overseer
+# nav button (-> /overseer) between browse and settings (from #103 admin-console
+# — previously heal 93, merged here after canBrowse context drift made the
+# split 89+93 3-way-conflict), and FueCallout after SessionList.
+# Net: ONE toolbar, tour intact, Overseer console reachable from the shell.
 diff --git a/web/src/router.tsx b/web/src/router.tsx
-index 8239fa5..52f282a 100644
+index e81595d..26ea018 100644
 --- a/web/src/router.tsx
 +++ b/web/src/router.tsx
-@@ -787,28 +787,40 @@ function SessionsPage() {
-                                     <RefreshIcon className={`h-5 w-5 ${isLoading ? 'animate-spin' : ''}`} />
+@@ -777,29 +777,49 @@ function SessionsPage() {
                                  </button>
+                                 {canBrowse && (
+                                     <button
++                                        ref={tourBrowseRef}
+                                         type="button"
+                                         onClick={() => navigate({ to: '/browse' })}
+-                                        className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
++                                        className="relative p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
+                                         title={t('browse.nav')}
+                                     >
+                                         <FolderOpenIcon className="h-5 w-5" />
++                                        {visibleTourStep === 'browse' ? (
++                                            <FueDot pulsing ariaLabel={t('fue.newFeatureDot')} />
++                                        ) : null}
+                                     </button>
+                                 )}
                                  <button
-+                                    ref={tourBrowseRef}
                                      type="button"
-                                     onClick={() => navigate({ to: '/browse' })}
--                                    className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
-+                                    className="relative p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
-                                     title={t('browse.nav')}
-                                 >
-                                     <FolderOpenIcon className="h-5 w-5" />
-+                                    {visibleTourStep === 'browse' ? (
-+                                        <FueDot pulsing ariaLabel={t('fue.newFeatureDot')} />
-+                                    ) : null}
-                                 </button>
-                                 <button
+-                                    onClick={() => navigate({ to: '/settings' })}
++                                    onClick={() => navigate({ to: '/overseer' })}
+                                     className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
++                                    title="Overseer"
++                                >
++                                    <OverseerIcon className="h-5 w-5" />
++                                </button>
++                                <button
 +                                    ref={tourSettingsRef}
-                                     type="button"
-                                     onClick={() => navigate({ to: '/settings' })}
--                                    className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
++                                    type="button"
++                                    onClick={() => navigate({ to: '/settings' })}
 +                                    className="relative p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
                                      title={t('settings.title')}
                                  >
@@ -60,7 +68,7 @@ index 8239fa5..52f282a 100644
                                  </button>
                              </div>
                          )}
-@@ -816,6 +828,18 @@ function SessionsPage() {
+@@ -807,6 +827,18 @@ function SessionsPage() {
                          machineLabelsById={machineLabelsById}
                          machinesById={machinesById}
                      />
