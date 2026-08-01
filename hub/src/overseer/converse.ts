@@ -11,9 +11,12 @@ import {
     buildOverseerOpenAiTools,
     buildOverseerSystemPrompt,
     isOverseerWriteTool,
+    isWriteToolAuthorized,
+    resolveOverseerWriteAuthorization,
     type OverseerConverseMessage,
     type OverseerToolName,
-    type OverseerToolTraceEntry
+    type OverseerToolTraceEntry,
+    type OverseerWriteAuthorization
 } from '@hapi/protocol'
 import type { OverseerEntity } from '../sync/overseerEntity'
 import { isOverseerToolName, runOverseerTool } from './runOverseerTool'
@@ -107,10 +110,21 @@ export async function runOverseerConverse(params: {
     messages: OverseerConverseMessage[]
     maxIterations?: number
     signal?: AbortSignal
+    /** Explicit client opt-in for write tools (admin/voice confirm). */
+    allowWrites?: boolean
 }): Promise<{ reply: string; toolTrace: OverseerToolTraceEntry[] }> {
-    const { overseer, config, messages, maxIterations = 6, signal } = params
+    const { overseer, config, messages, maxIterations = 6, signal, allowWrites } = params
 
-    const tools = buildOverseerOpenAiTools() as OverseerOpenAiToolLike[]
+    const latestOperatorText = [...messages].reverse().find((m) => m.role === 'operator')?.content ?? ''
+    const writeAuth: OverseerWriteAuthorization = resolveOverseerWriteAuthorization({
+        latestOperatorText,
+        allowWrites
+    })
+
+    const tools = (buildOverseerOpenAiTools() as OverseerOpenAiToolLike[]).filter((tool) => {
+        const name = tool.function?.name ?? ''
+        return isWriteToolAuthorized(name, writeAuth)
+    })
     const convo: OpenAiChatMessage[] = [
         { role: 'system', content: `${buildOverseerSystemPrompt()}\n\n${GROUNDING_DIRECTIVE}` },
         ...messages.map((m): OpenAiChatMessage => ({
@@ -170,6 +184,12 @@ export async function runOverseerConverse(params: {
             if (!isOverseerToolName(name)) {
                 toolTrace.push({ tool: name as never, args, ok: false, error: 'unknown tool' })
                 resultLines.push(`${name || 'unknown'}(${argsRaw}) => ${JSON.stringify({ error: `unknown tool: ${name}` })}`)
+                continue
+            }
+            if (!isWriteToolAuthorized(name, writeAuth)) {
+                const denied = 'write not authorized by operator message (no explicit write intent)'
+                toolTrace.push({ tool: name, args, ok: false, error: denied })
+                resultLines.push(`${name}(${argsRaw}) => ${JSON.stringify({ error: denied })}`)
                 continue
             }
             try {

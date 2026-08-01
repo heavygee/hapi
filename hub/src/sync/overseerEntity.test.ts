@@ -487,10 +487,10 @@ describe('OverseerEntity dispositions (Stage 1 keystone)', () => {
                 if (!s) return undefined
                 return { ...s, active: true, namespace: s.namespace || 'default' } as never
             },
-            getSessions: () => {
-                const s = store.sessions.getSession(sessionId)
-                return s ? [{ ...s, active: true, namespace: s.namespace || 'default' } as never] : []
-            },
+            getSessions: () =>
+                store.sessions
+                    .getSessions()
+                    .map((s) => ({ ...s, active: true, namespace: s.namespace || 'default' }) as never),
             relayToSession: async ({ sessionId: sid, message }) => {
                 lastRelay = { sessionId: sid, message }
                 return { ok: true, resumed: false }
@@ -518,5 +518,25 @@ describe('OverseerEntity dispositions (Stage 1 keystone)', () => {
         await expect(runOverseerTool(o, 'ping_session', { sessionId, message: 'x' })).rejects.toBeInstanceOf(
             OverseerWriteNotAllowedError
         )
+
+        const dispatched = store.events.query({ sessionId, eventType: 'dispatched', limit: 10 })
+        expect(dispatched.length).toBeGreaterThanOrEqual(1)
+        expect(dispatched[0]?.summary).toMatch(/Relayed/)
+
+        // Conflicting sessionId + itemId must refuse (not silently prefer sessionId).
+        const other = store.sessions.getOrCreateSession(
+            'other-conflict',
+            { flavor: 'claude', path: '/tmp/other', name: 'other' },
+            null,
+            'default'
+        )
+        const conflict = await o.pingSession({
+            sessionId: other.id,
+            itemId,
+            message: 'wrong target'
+        })
+        expect(conflict.ok).toBe(false)
+        expect(conflict.error).toMatch(/Conflicting relay targets/)
+        expect(lastRelay?.message).not.toBe('wrong target')
     })
 })

@@ -34,7 +34,9 @@ const converseBodySchema = z.object({
     })).min(1).max(40),
     relatedSessionId: z.string().min(1).optional(),
     model: z.string().max(100).optional(),
-    profile: z.string().max(64).optional()
+    profile: z.string().max(64).optional(),
+    /** Explicit opt-in for write tools; otherwise server detects intent from the latest operator line. */
+    allowWrites: z.boolean().optional()
 })
 
 const activeBrainBodySchema = z.object({
@@ -226,7 +228,8 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
             const { reply, toolTrace } = await runOverseerConverse({
                 overseer: engine.getOverseer(),
                 config,
-                messages
+                messages,
+                allowWrites: parsed.data.allowWrites
             })
 
             const lastOperator = [...messages].reverse().find((m) => m.role === 'operator')?.content ?? ''

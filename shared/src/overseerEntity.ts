@@ -29,6 +29,9 @@ export const OVERSEER_ENTITY_ID = 'overseer'
 /** `source_kind` / `sink_kind` used for Overseer-authored events. */
 export const OVERSEER_SOURCE_KIND = 'overseer' as const
 
+/** Event type for an operator-directed outbound relay (audit / session timeline). */
+export const OVERSEER_DISPATCHED_EVENT_TYPE = 'dispatched' as const
+
 /** Event type for an operator<->Overseer conversation segment (memory-bearing). */
 export const OVERSEER_CONVO_TURN_EVENT_TYPE = 'convo_turn' as const
 
@@ -795,4 +798,65 @@ export function buildOverseerConvoTurnEventInput(input: OverseerConvoTurnInput):
         relatedEventId: input.relatedEventId ?? null,
         provenance: 'overseer-convo'
     }
+}
+
+export type OverseerDispatchedEventInput = {
+    ts: number
+    sourceKind: typeof OVERSEER_SOURCE_KIND
+    sourceRef: string
+    sinkKind: 'worker'
+    eventType: typeof OVERSEER_DISPATCHED_EVENT_TYPE
+    attentionCandidate: 0
+    operatorActionRequired: 0
+    summary: string
+    payloadJson: string
+    relatedSessionId: string
+    relatedEventId: number | null
+    provenance: string
+    idempotencyKey: string
+}
+
+export type OverseerDispatchedInput = {
+    sessionId: string
+    message: string
+    resumed: boolean
+    tombstone: string
+    ts?: number
+}
+
+/** Build an idempotent `dispatched` event after a successful ping_session relay. */
+export function buildOverseerDispatchedEventInput(input: OverseerDispatchedInput): OverseerDispatchedEventInput {
+    const ts = input.ts ?? Date.now()
+    const snippet = input.message.length > 120 ? `${input.message.slice(0, 117)}…` : input.message
+    // Bucket to the second so identical retries within the same second collapse.
+    const idempotencyKey = `overseer-dispatched:${input.sessionId}:${ts - (ts % 1000)}:${hashRelaySnippet(input.message)}`
+    return {
+        ts,
+        sourceKind: OVERSEER_SOURCE_KIND,
+        sourceRef: OVERSEER_ENTITY_ID,
+        sinkKind: 'worker',
+        eventType: OVERSEER_DISPATCHED_EVENT_TYPE,
+        attentionCandidate: 0,
+        operatorActionRequired: 0,
+        summary: input.tombstone.slice(0, 240) || `Relayed to ${input.sessionId.slice(0, 8)}: ${snippet}`,
+        payloadJson: JSON.stringify({
+            message: input.message,
+            resumed: input.resumed,
+            tombstone: input.tombstone
+        }),
+        relatedSessionId: input.sessionId,
+        relatedEventId: null,
+        provenance: 'overseer-relay',
+        idempotencyKey
+    }
+}
+
+function hashRelaySnippet(message: string): string {
+    // Short stable fingerprint — not cryptographic; enough for idempotency bucketing.
+    let h = 2166136261
+    for (let i = 0; i < message.length; i++) {
+        h ^= message.charCodeAt(i)
+        h = Math.imul(h, 16777619)
+    }
+    return (h >>> 0).toString(16)
 }

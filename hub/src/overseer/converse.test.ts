@@ -243,7 +243,7 @@ describe('runOverseerConverse', () => {
         const { reply, toolTrace } = await runOverseerConverse({
             overseer,
             config,
-            messages: [{ role: 'operator', content: 'tell that session to continue' }]
+            messages: [{ role: 'operator', content: 'ping session old-id: please continue' }]
         })
 
         expect(toolTrace).toHaveLength(1)
@@ -251,5 +251,38 @@ describe('runOverseerConverse', () => {
         expect(reply).toContain('already succeeded')
         expect(reply).toContain('Relayed to Worker')
         expect(reply).toContain('Do not retry')
+    })
+
+    it('refuses ping_session when the operator message has no write intent', async () => {
+        const pingSession = vi.fn()
+        const overseer = {
+            ...fakeOverseer,
+            pingSession
+        } as unknown as OverseerEntity
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(chatResponse({
+                role: 'assistant',
+                content: '',
+                tool_calls: [{
+                    id: 'c1',
+                    type: 'function',
+                    function: { name: 'ping_session', arguments: '{"sessionId":"sess-1","message":"hi"}' }
+                }]
+            }))
+            .mockResolvedValueOnce(chatResponse({
+                role: 'assistant',
+                content: 'I cannot relay without an explicit operator request.'
+            }))
+        setFetch(fetchMock)
+
+        const { toolTrace } = await runOverseerConverse({
+            overseer,
+            config,
+            messages: [{ role: 'operator', content: 'what needs my attention?' }]
+        })
+
+        expect(pingSession).not.toHaveBeenCalled()
+        expect(toolTrace[0]).toMatchObject({ tool: 'ping_session', ok: false })
+        expect(toolTrace[0]?.error).toMatch(/not authorized/i)
     })
 })

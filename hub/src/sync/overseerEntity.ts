@@ -13,6 +13,7 @@ import {
     OVERSEER_LOOP_CLOSED_EVENT_TYPE,
     OVERSEER_STALE_SILENCE_MS,
     buildOverseerConvoTurnEventInput,
+    buildOverseerDispatchedEventInput,
     buildOverseerIdentity,
     buildOverseerSystemPrompt,
     deriveObservedWorkerState,
@@ -618,14 +619,36 @@ export class OverseerEntity {
             }
         }
 
+        const tombstone = `Relayed to ${label} (${deliveredSessionId.slice(0, 8)})${result.resumed ? ' [resumed]' : ''}: "${snippet}"`
+        this.recordDispatchedRelay({
+            sessionId: deliveredSessionId,
+            message: args.message,
+            resumed: result.resumed,
+            tombstone
+        })
         return {
             ok: true,
             sessionId: deliveredSessionId,
             sessionName: resolved.sessionName,
             project: resolved.project,
             resumed: result.resumed,
-            tombstone: `Relayed to ${label} (${deliveredSessionId.slice(0, 8)})${result.resumed ? ' [resumed]' : ''}: "${snippet}"`
+            tombstone
         }
+    }
+
+    private recordDispatchedRelay(args: {
+        sessionId: string
+        message: string
+        resumed: boolean
+        tombstone: string
+    }): void {
+        this.events.insert(buildOverseerDispatchedEventInput({
+            sessionId: args.sessionId,
+            message: args.message,
+            resumed: args.resumed,
+            tombstone: args.tombstone,
+            ts: this.now()
+        }))
     }
 
     private resolvePingTarget(args: PingSessionArgs): {
@@ -635,15 +658,16 @@ export class OverseerEntity {
         project: string | null
         namespace: string
     } | { ok: false; sessionId?: string; error: string } {
-        let sessionId = args.sessionId?.trim() || null
+        const rawSessionId = args.sessionId?.trim() || null
+        let sessionIdFromItem: string | null = null
 
-        if (!sessionId && args.itemId != null) {
+        if (args.itemId != null) {
             const item = this.inbox.getById(args.itemId)
             if (!item) {
                 return { ok: false, error: `No inbox item #${args.itemId} — nothing relayed.` }
             }
-            sessionId = item.relatedSessionId?.trim() || null
-            if (!sessionId) {
+            sessionIdFromItem = item.relatedSessionId?.trim() || null
+            if (!sessionIdFromItem) {
                 return {
                     ok: false,
                     error: `Inbox item #${args.itemId} has no related session — nothing relayed.`
@@ -651,6 +675,44 @@ export class OverseerEntity {
             }
         }
 
+        if (rawSessionId && sessionIdFromItem) {
+            const fromSession = this.matchSessions(rawSessionId)
+            const fromItem = this.matchSessions(sessionIdFromItem)
+            if (fromSession.length !== 1) {
+                return {
+                    ok: false,
+                    sessionId: rawSessionId,
+                    error: fromSession.length > 1
+                        ? `Ambiguous session prefix "${rawSessionId}" (${fromSession.length} matches) — nothing relayed.`
+                        : `No session matching "${rawSessionId}" — nothing relayed.`
+                }
+            }
+            if (fromItem.length !== 1) {
+                return {
+                    ok: false,
+                    sessionId: sessionIdFromItem,
+                    error: `Inbox item #${args.itemId} related session unresolved — nothing relayed.`
+                }
+            }
+            if (fromSession[0]!.id !== fromItem[0]!.id) {
+                return {
+                    ok: false,
+                    sessionId: fromSession[0]!.id,
+                    error: `Conflicting relay targets: sessionId resolves to ${fromSession[0]!.id.slice(0, 8)}… but item #${args.itemId} points at ${fromItem[0]!.id.slice(0, 8)}… — nothing relayed.`
+                }
+            }
+            const session = fromSession[0]!
+            const identity = deriveIdentity(session)
+            return {
+                ok: true,
+                sessionId: session.id,
+                sessionName: identity.name,
+                project: identity.project,
+                namespace: session.namespace || 'default'
+            }
+        }
+
+        const sessionId = rawSessionId ?? sessionIdFromItem
         if (!sessionId) {
             return { ok: false, error: 'sessionId or itemId is required — nothing relayed.' }
         }
