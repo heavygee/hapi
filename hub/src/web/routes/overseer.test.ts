@@ -122,6 +122,33 @@ describe('overseer routes', () => {
         expect(res.status).toBe(400)
     })
 
+    it('POST /overseer/converse persists offline reply when brain is unconfigured', async () => {
+        const prev = process.env.OVERSEER_BRAIN_URL
+        delete process.env.OVERSEER_BRAIN_URL
+        try {
+            const store = new Store(':memory:')
+            const app = buildApp(store)
+            const res = await app.request('/api/overseer/converse', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ messages: [{ role: 'operator', content: 'hello fleet' }] })
+            })
+            expect(res.status).toBe(200)
+            const body = await res.json() as { brainOnline: boolean; reply: string }
+            expect(body.brainOnline).toBe(false)
+            expect(body.reply).toContain('not configured')
+
+            const recent = await app.request('/api/overseer/converse/recent?limit=5')
+            const recentBody = await recent.json() as { turns: Array<{ operatorText: string; overseerText: string }> }
+            expect(recentBody.turns).toHaveLength(1)
+            expect(recentBody.turns[0]?.operatorText).toBe('hello fleet')
+            expect(recentBody.turns[0]?.overseerText).toContain('not configured')
+        } finally {
+            if (prev === undefined) delete process.env.OVERSEER_BRAIN_URL
+            else process.env.OVERSEER_BRAIN_URL = prev
+        }
+    })
+
     it('GET /overseer/converse/recent returns chronological hub-owned turns', async () => {
         const store = new Store(':memory:')
         const app = buildApp(store)

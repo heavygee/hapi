@@ -7,7 +7,9 @@ import {
     budgetConvoTurns,
     DEFAULT_CONVERSE_HISTORY_MAX_CHARS,
     listRecentConvoTurns,
-    parseConvoTurnPayload
+    parseConvoTurnPayload,
+    persistOverseerConvoExchange,
+    sortConvoTurnsChronologically
 } from './converseContext'
 
 function buildEngine(store: Store): SyncEngine {
@@ -135,5 +137,49 @@ describe('converseContext assembler', () => {
         })
         expect(assembled.messages.filter((m) => m.content === 'retry me')).toHaveLength(1)
         expect(assembled.messages.at(-1)).toEqual({ role: 'operator', content: 'retry me' })
+        expect(assembled.completeDanglingTurnId).toBeTypeOf('number')
+    })
+
+    it('orders hydrated turns by ts with id tie-breaker (not insertion id)', () => {
+        const store = new Store(':memory:')
+        const overseer = buildEngine(store).getOverseer()
+        overseer.recordConvoTurn({ operatorText: 'older-ts', overseerText: 'first', ts: 100 })
+        overseer.recordConvoTurn({ operatorText: 'newer-ts', overseerText: 'second', ts: 300 })
+        // Backfilled row: higher id but older ts should sort before the middle turn.
+        overseer.recordConvoTurn({ operatorText: 'backfilled', overseerText: 'between', ts: 200 })
+
+        const { turns } = listRecentConvoTurns(overseer, { limit: 10 })
+        expect(turns.map((t) => t.operatorText)).toEqual(['older-ts', 'backfilled', 'newer-ts'])
+    })
+
+    it('sortConvoTurnsChronologically uses ts then id', () => {
+        const sorted = sortConvoTurnsChronologically([
+            { id: 3, ts: 200, operatorText: 'b', overseerText: '', relatedSessionId: null, toolCalls: [] },
+            { id: 1, ts: 100, operatorText: 'a', overseerText: '', relatedSessionId: null, toolCalls: [] },
+            { id: 2, ts: 200, operatorText: 'c', overseerText: '', relatedSessionId: null, toolCalls: [] }
+        ])
+        expect(sorted.map((t) => t.id)).toEqual([1, 2, 3])
+    })
+
+    it('persistOverseerConvoExchange completes a dangling turn instead of duplicating operator', () => {
+        const store = new Store(':memory:')
+        const overseer = buildEngine(store).getOverseer()
+        const dangling = overseer.recordConvoTurn({ operatorText: 'retry me', overseerText: '', ts: 1 })
+        expect(dangling).not.toBeNull()
+
+        const assembled = assembleOverseerConverseMessages({
+            overseer,
+            clientMessages: [{ role: 'operator', content: 'retry me' }]
+        })
+        persistOverseerConvoExchange(overseer, assembled, {
+            operatorText: 'retry me',
+            overseerText: 'finally answered'
+        })
+
+        const { turns } = listRecentConvoTurns(overseer, { limit: 10 })
+        expect(turns).toHaveLength(1)
+        expect(turns[0]!.operatorText).toBe('retry me')
+        expect(turns[0]!.overseerText).toBe('finally answered')
+        expect(turns[0]!.id).toBe(dangling!.id)
     })
 })

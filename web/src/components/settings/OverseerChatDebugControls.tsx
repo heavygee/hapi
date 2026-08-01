@@ -45,9 +45,10 @@ export function OverseerChatDebugControls() {
     }, [open, api, profiles.length])
 
     // Rehydrate from hub every time the panel opens (other transports may have
-    // written turns while closed). Block send until this settles.
+    // written turns while closed). Block send until this settles. Skip while a
+    // converse request is in flight so reopening does not wipe the operator turn.
     useEffect(() => {
-        if (!open || !api) return
+        if (!open || !api || loading) return
         const gen = ++hydrateGenRef.current
         let cancelled = false
         setHydrating(true)
@@ -81,7 +82,7 @@ export function OverseerChatDebugControls() {
                 if (!cancelled && gen === hydrateGenRef.current) setHydrating(false)
             })
         return () => { cancelled = true }
-    }, [open, api])
+    }, [open, api, loading])
 
     // Populate the model dropdown live from the selected profile's endpoint
     // (server proxies GET /models so the api key never reaches the browser).

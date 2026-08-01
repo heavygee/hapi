@@ -41,6 +41,11 @@ export type AssembleConverseContextResult = {
     hydratedTurns: number
     /** True when older turns were dropped to stay under maxChars / maxTurns. */
     truncated: boolean
+    /**
+     * When set, the latest operator line already exists as an incomplete convo_turn
+     * row — persist only the overseer reply via completeConvoTurn.
+     */
+    completeDanglingTurnId?: number | null
 }
 
 function isObj(value: unknown): value is Record<string, unknown> {
@@ -91,6 +96,11 @@ export function eventToConvoTurnView(event: StoredSystemEvent): StoredConvoTurnV
     }
 }
 
+/** Oldest-first by event ts, then id (supports backfilled / delayed ts). */
+export function sortConvoTurnsChronologically(turns: StoredConvoTurnView[]): StoredConvoTurnView[] {
+    return [...turns].sort((a, b) => a.ts - b.ts || a.id - b.id)
+}
+
 /** Newest-first from the store; returned oldest-first for display / assemble.
  *  Fetches `limit + 1` so callers can detect that older history was clipped. */
 export function listRecentConvoTurns(
@@ -109,8 +119,7 @@ export function listRecentConvoTurns(
     }
     const clippedByLimit = views.length > limit
     const kept = clippedByLimit ? views.slice(0, limit) : views
-    // events.query is id DESC — reverse to chronological.
-    return { turns: kept.reverse(), clippedByLimit }
+    return { turns: sortConvoTurnsChronologically(kept), clippedByLimit }
 }
 
 function turnsToMessages(turns: StoredConvoTurnView[]): OverseerConverseMessage[] {
@@ -187,7 +196,13 @@ export function assembleOverseerConverseMessages(params: {
     // turn is still the common retry shape.
     const lastHistory = history[history.length - 1]
     if (lastHistory?.role === 'operator' && lastHistory.content === latest.content) {
-        return { messages: history, hydratedTurns: turns.length, truncated }
+        const dangling = turns[turns.length - 1]
+        return {
+            messages: history,
+            hydratedTurns: turns.length,
+            truncated,
+            completeDanglingTurnId: dangling?.id ?? null
+        }
     }
 
     return {
@@ -195,4 +210,31 @@ export function assembleOverseerConverseMessages(params: {
         hydratedTurns: turns.length,
         truncated
     }
+}
+
+/** Record or complete a convo_turn after converse (brain online or offline). */
+export function persistOverseerConvoExchange(
+    overseer: OverseerEntity,
+    assembled: AssembleConverseContextResult,
+    input: {
+        operatorText: string
+        overseerText: string
+        relatedSessionId?: string | null
+        toolCalls?: Array<{ tool: OverseerToolName; argsSummary?: string }>
+    }
+): void {
+    if (assembled.completeDanglingTurnId != null) {
+        overseer.completeConvoTurn({
+            eventId: assembled.completeDanglingTurnId,
+            overseerText: input.overseerText,
+            toolCalls: input.toolCalls
+        })
+        return
+    }
+    overseer.recordConvoTurn({
+        operatorText: input.operatorText,
+        overseerText: input.overseerText,
+        relatedSessionId: input.relatedSessionId ?? null,
+        toolCalls: input.toolCalls
+    })
 }

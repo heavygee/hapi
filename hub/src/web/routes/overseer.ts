@@ -12,7 +12,7 @@ import type { WebAppEnv } from '../middleware/auth'
 import { requireSyncEngine } from './guards'
 import { isOverseerToolName, OverseerWriteNotAllowedError, runOverseerTool } from '../../overseer/runOverseerTool'
 import { runOverseerConverse } from '../../overseer/converse'
-import { assembleOverseerConverseMessages, listRecentConvoTurns } from '../../overseer/converseContext'
+import { assembleOverseerConverseMessages, listRecentConvoTurns, persistOverseerConvoExchange } from '../../overseer/converseContext'
 import { BrainUnavailableError, filterChatModels, isKnownBrainProfile, listBrainModels, listBrainProfiles, resolveBrainConfig, resolveBrainSelection } from '../../overseer/brainClient'
 import type { ActiveBrainSetting } from '../../store/settingsStore'
 
@@ -238,6 +238,7 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
             clientMessages
         })
         const messages = assembled.messages
+        const lastOperator = [...messages].reverse().find((m) => m.role === 'operator')?.content ?? ''
 
         const active = getSanitizedActiveBrain(engine, c.get('namespace'))
         const config = resolveBrainConfig(process.env, resolveBrainSelection(active, {
@@ -245,8 +246,14 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
             model: parsed.data.model
         }))
         if (!config) {
+            const reply = 'The Overseer brain is not configured on this hub (set OVERSEER_BRAIN_URL). I can still show raw events and inbox items, but I cannot answer in conversation yet.'
+            persistOverseerConvoExchange(overseer, assembled, {
+                operatorText: lastOperator,
+                overseerText: reply,
+                relatedSessionId: parsed.data.relatedSessionId ?? null
+            })
             return c.json({
-                reply: 'The Overseer brain is not configured on this hub (set OVERSEER_BRAIN_URL). I can still show raw events and inbox items, but I cannot answer in conversation yet.',
+                reply,
                 toolTrace: [],
                 model: null,
                 brainOnline: false,
@@ -263,8 +270,7 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 allowWrites: parsed.data.allowWrites
             })
 
-            const lastOperator = [...messages].reverse().find((m) => m.role === 'operator')?.content ?? ''
-            overseer.recordConvoTurn({
+            persistOverseerConvoExchange(overseer, assembled, {
                 operatorText: lastOperator,
                 overseerText: reply,
                 relatedSessionId: parsed.data.relatedSessionId ?? null,
@@ -288,6 +294,11 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 const reply = error.reachable
                     ? 'I reached the Overseer brain but could not complete the tool conversation (request error). This is a converse-loop issue, not the brain being offline — please retry, and flag it if it persists.'
                     : 'The Overseer brain is offline right now (the GPU may be in use for VR). Try again shortly — your events and inbox are still being captured.'
+                persistOverseerConvoExchange(overseer, assembled, {
+                    operatorText: lastOperator,
+                    overseerText: reply,
+                    relatedSessionId: parsed.data.relatedSessionId ?? null
+                })
                 return c.json({
                     reply,
                     toolTrace: [],
