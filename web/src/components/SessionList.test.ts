@@ -7,6 +7,7 @@ import {
     getSessionTimeRange,
     getNextSessionVisibleCount,
     getPreviousSessionVisibleCount,
+    getPullToRefreshState,
     getSessionDedupKey,
     getWorktreeSessionLabel,
     getVisibleSessionPreview,
@@ -468,5 +469,14 @@ describe('expandSelectedSessionCollapseOverrides', () => {
         })
 
         expect(result.has('sessions::machine-1::/work/hapi')).toBe(false)
+    })
+})
+
+describe('getPullToRefreshState', () => {
+    it('requires a deliberate pull past the trigger distance', () => {
+        expect(getPullToRefreshState(15)).toBe('idle')
+        expect(getPullToRefreshState(16)).toBe('pulling')
+        expect(getPullToRefreshState(63)).toBe('pulling')
+        expect(getPullToRefreshState(64)).toBe('ready')
     })
 })

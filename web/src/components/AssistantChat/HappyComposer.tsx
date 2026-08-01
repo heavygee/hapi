@@ -33,7 +33,7 @@ import { useComposerDraft } from '@/hooks/useComposerDraft'
 import { useComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
 import { Autocomplete } from '@/components/ChatInput/Autocomplete'
-import { shouldShowComposerStatusBar, StatusBar } from '@/components/AssistantChat/StatusBar'
+import { StatusBar } from '@/components/AssistantChat/StatusBar'
 import { ComposerButtons } from '@/components/AssistantChat/ComposerButtons'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { AttachmentItem } from '@/components/AssistantChat/AttachmentItem'
@@ -1322,25 +1322,23 @@ export function HappyComposer(props: {
                 <ComposerPrimitive.Root className="relative" onSubmit={handleSubmit}>
                     {overlays}
 
-                    {shouldShowComposerStatusBar(agentFlavor) ? (
-                        <StatusBar
-                            active={active}
-                            thinking={thinking}
-                            agentState={agentState}
-                            backgroundTaskCount={backgroundTaskCount}
-                            contextSize={contextSize}
-                            contextCacheRead={contextCacheRead}
-                            contextWindow={contextWindow}
-                            model={model}
-                            modelReasoningEffort={modelReasoningEffort}
-                            serviceTier={serviceTier}
-                            permissionMode={permissionMode}
-                            collaborationMode={collaborationMode}
-                            threadGoal={threadGoal}
-                            agentFlavor={agentFlavor}
-                            voiceStatus={voiceStatus}
-                        />
-                    ) : null}
+                    <StatusBar
+                        active={active}
+                        thinking={thinking}
+                        agentState={agentState}
+                        backgroundTaskCount={backgroundTaskCount}
+                        contextSize={contextSize}
+                        contextCacheRead={contextCacheRead}
+                        contextWindow={contextWindow}
+                        model={model}
+                        modelReasoningEffort={modelReasoningEffort}
+                        serviceTier={serviceTier}
+                        permissionMode={permissionMode}
+                        collaborationMode={collaborationMode}
+                        threadGoal={threadGoal}
+                        agentFlavor={agentFlavor}
+                        voiceStatus={voiceStatus}
+                    />
 
                     {sendError ? (
                         <div
