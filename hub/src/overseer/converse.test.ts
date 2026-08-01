@@ -175,4 +175,81 @@ describe('runOverseerConverse', () => {
             expect((e as BrainUnavailableError).reachable).toBe(true)
         }
     })
+
+    it('marks ping_session ok:false in the tool trace when relay fails', async () => {
+        const overseer = {
+            ...fakeOverseer,
+            pingSession: async () => ({
+                ok: false,
+                sessionId: 'sess-1',
+                sessionName: null,
+                project: null,
+                resumed: false,
+                tombstone: 'Failed to relay: session_not_found',
+                error: 'session_not_found'
+            })
+        } as unknown as OverseerEntity
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(chatResponse({
+                role: 'assistant',
+                content: '',
+                tool_calls: [{
+                    id: 'c1',
+                    type: 'function',
+                    function: { name: 'ping_session', arguments: '{"sessionId":"sess-1","message":"hi"}' }
+                }]
+            }))
+            .mockResolvedValueOnce(chatResponse({ role: 'assistant', content: 'Could not reach that session.' }))
+        setFetch(fetchMock)
+
+        const { toolTrace } = await runOverseerConverse({
+            overseer,
+            config,
+            messages: [{ role: 'operator', content: 'ping sess-1: hi' }]
+        })
+
+        expect(toolTrace[0]).toMatchObject({
+            tool: 'ping_session',
+            ok: false,
+            error: 'session_not_found'
+        })
+    })
+
+    it('keeps successful relay in the tool trace when the follow-up brain call fails', async () => {
+        const overseer = {
+            ...fakeOverseer,
+            pingSession: async () => ({
+                ok: true,
+                sessionId: 'new-id',
+                sessionName: 'Worker',
+                project: 'hapi',
+                resumed: true,
+                tombstone: 'Relayed to Worker (new-id00) [resumed]: "please continue"'
+            })
+        } as unknown as OverseerEntity
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(chatResponse({
+                role: 'assistant',
+                content: '',
+                tool_calls: [{
+                    id: 'c1',
+                    type: 'function',
+                    function: { name: 'ping_session', arguments: '{"sessionId":"old-id","message":"please continue"}' }
+                }]
+            }))
+            .mockRejectedValueOnce(new Error('ECONNREFUSED'))
+        setFetch(fetchMock)
+
+        const { reply, toolTrace } = await runOverseerConverse({
+            overseer,
+            config,
+            messages: [{ role: 'operator', content: 'tell that session to continue' }]
+        })
+
+        expect(toolTrace).toHaveLength(1)
+        expect(toolTrace[0]).toMatchObject({ tool: 'ping_session', ok: true })
+        expect(reply).toContain('already succeeded')
+        expect(reply).toContain('Relayed to Worker')
+        expect(reply).toContain('Do not retry')
+    })
 })

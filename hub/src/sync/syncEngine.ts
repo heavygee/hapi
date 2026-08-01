@@ -44,6 +44,7 @@ import {
 import { SessionCache } from './sessionCache'
 import { OverseerEventRecorder, toSessionSnapshot } from './overseerEventRecorder'
 import { OverseerEntity } from './overseerEntity'
+import { executeSessionRelay } from './sessionRelay'
 import { extractAssistantPlainText } from '@hapi/protocol/messages'
 import type { InboxOperatorAction } from '@hapi/protocol'
 import type { ListSystemEventsOptions, StoredSystemEvent } from '../store'
@@ -174,32 +175,16 @@ export class SyncEngine {
             getSession: (sessionId) => this.getSession(sessionId),
             getSessions: () => this.getSessions(),
             relayToSession: async ({ sessionId, message, namespace = 'default' }) => {
-                const existing = this.getSession(sessionId)
-                if (!existing) {
-                    return { ok: false, resumed: false, error: 'session_not_found' }
-                }
-                let resumed = false
-                if (!existing.active) {
-                    const resume = await this.resumeSession(sessionId, namespace)
-                    if (resume.type !== 'success') {
-                        return {
-                            ok: false,
-                            resumed: false,
-                            error: resume.code ?? resume.message ?? 'resume_failed'
-                        }
-                    }
-                    resumed = true
-                }
-                try {
-                    await this.sendMessage(sessionId, { text: message, sentFrom: 'webapp' })
-                    return { ok: true, resumed }
-                } catch (error) {
-                    return {
-                        ok: false,
-                        resumed,
-                        error: error instanceof Error ? error.message : 'send_failed'
-                    }
-                }
+                // Resume may return a replacement hub session id after spawn+merge;
+                // always deliver to that id (see executeSessionRelay).
+                return executeSessionRelay(
+                    {
+                        getSession: (id) => this.getSession(id),
+                        resumeSession: (id, ns) => this.resumeSession(id, ns),
+                        sendMessage: (id, payload) => this.sendMessage(id, payload)
+                    },
+                    { sessionId, message, namespace }
+                )
             }
         })
         this.reloadAll()

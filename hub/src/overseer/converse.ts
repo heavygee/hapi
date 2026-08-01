@@ -10,7 +10,9 @@
 import {
     buildOverseerOpenAiTools,
     buildOverseerSystemPrompt,
+    isOverseerWriteTool,
     type OverseerConverseMessage,
+    type OverseerToolName,
     type OverseerToolTraceEntry
 } from '@hapi/protocol'
 import type { OverseerEntity } from '../sync/overseerEntity'
@@ -62,6 +64,43 @@ function parseToolArgs(raw: string): Record<string, unknown> {
     }
 }
 
+/** Write tools return `{ ok: boolean, … }`; propagate that into the converse audit trail. */
+export function toolResultOk(result: unknown): boolean {
+    if (result && typeof result === 'object' && 'ok' in result) {
+        return (result as { ok: unknown }).ok !== false
+    }
+    return true
+}
+
+function toolResultError(result: unknown): string | undefined {
+    if (!result || typeof result !== 'object') return undefined
+    const record = result as { error?: unknown; tombstone?: unknown }
+    if (typeof record.error === 'string' && record.error.trim()) return record.error
+    if (typeof record.tombstone === 'string' && record.tombstone.trim()) return record.tombstone
+    return 'tool returned ok:false'
+}
+
+function writeResultTombstone(result: unknown): string | null {
+    if (!result || typeof result !== 'object') return null
+    const tombstone = (result as { tombstone?: unknown }).tombstone
+    return typeof tombstone === 'string' && tombstone.trim() ? tombstone.trim() : null
+}
+
+function fallbackReplyAfterWriteSuccess(confirmations: string[]): string {
+    if (confirmations.length === 0) {
+        return 'A follow-up brain call failed after tools ran. Check the tool trace before retrying.'
+    }
+    return [
+        'Write tool(s) already succeeded; the brain failed while composing the confirmation.',
+        'Do not retry the same write unless you intend a duplicate.',
+        ...confirmations.map((line) => `- ${line}`)
+    ].join('\n')
+}
+
+function hasSuccessfulWrite(toolTrace: OverseerToolTraceEntry[]): boolean {
+    return toolTrace.some((entry) => entry.ok && isOverseerWriteTool(entry.tool as OverseerToolName))
+}
+
 export async function runOverseerConverse(params: {
     overseer: OverseerEntity
     config: BrainConfig
@@ -81,6 +120,8 @@ export async function runOverseerConverse(params: {
     ]
 
     const toolTrace: OverseerToolTraceEntry[] = []
+    /** Tombstones from successful write tools — used if a later brain call fails. */
+    const writeConfirmations: string[] = []
     // The brain (llama-server) does not honor tool_choice:'required', so it will
     // sometimes answer a fleet question from nothing (e.g. "the inbox is empty"
     // when it never called query_inbox). Guardrail: if the very first answer
@@ -89,7 +130,17 @@ export async function runOverseerConverse(params: {
     let nudged = false
 
     for (let iter = 0; iter < maxIterations; iter++) {
-        const message = await callBrain({ config, messages: convo, tools, signal })
+        let message: OpenAiChatMessage
+        try {
+            message = await callBrain({ config, messages: convo, tools, signal })
+        } catch (error) {
+            // Irreversible writes already landed — return their audit trail so the
+            // route can record the turn and the operator does not duplicate-retry.
+            if (hasSuccessfulWrite(toolTrace)) {
+                return { reply: fallbackReplyAfterWriteSuccess(writeConfirmations), toolTrace }
+            }
+            throw error
+        }
         const calls = message.tool_calls ?? []
 
         if (calls.length === 0) {
@@ -125,7 +176,17 @@ export async function runOverseerConverse(params: {
                 // The conversational surface is the operator-directed write-path, so dispositions
                 // are allowed here (gated off on the raw HTTP tool-dispatch endpoint).
                 const result = await runOverseerTool(overseer, name, args, true)
-                toolTrace.push({ tool: name, args, ok: true })
+                const ok = toolResultOk(result)
+                toolTrace.push({
+                    tool: name,
+                    args,
+                    ok,
+                    ...(ok ? {} : { error: toolResultError(result) })
+                })
+                if (ok && isOverseerWriteTool(name)) {
+                    const tombstone = writeResultTombstone(result)
+                    writeConfirmations.push(tombstone ?? `${name} succeeded`)
+                }
                 // The brain opts into 'full' per call when it needs depth; default lean.
                 const detail = args.detail === 'full' ? 'full' : 'lean'
                 const projected = projectToolResultForBrain(name, result, detail)
@@ -143,10 +204,17 @@ export async function runOverseerConverse(params: {
     }
 
     // Iteration cap hit while still calling tools — ask once more for a plain answer.
-    const finalMsg = await callBrain({
-        config,
-        messages: [...convo, { role: 'user', content: 'Answer now in plain text, no more tools.' }],
-        signal
-    })
-    return { reply: (finalMsg.content ?? '').trim() || 'I gathered the data but could not compose an answer.', toolTrace }
+    try {
+        const finalMsg = await callBrain({
+            config,
+            messages: [...convo, { role: 'user', content: 'Answer now in plain text, no more tools.' }],
+            signal
+        })
+        return { reply: (finalMsg.content ?? '').trim() || 'I gathered the data but could not compose an answer.', toolTrace }
+    } catch (error) {
+        if (hasSuccessfulWrite(toolTrace)) {
+            return { reply: fallbackReplyAfterWriteSuccess(writeConfirmations), toolTrace }
+        }
+        throw error
+    }
 }

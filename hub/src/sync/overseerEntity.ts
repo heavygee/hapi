@@ -64,7 +64,7 @@ export type OverseerEntityDeps = {
         sessionId: string
         message: string
         namespace?: string
-    }) => Promise<{ ok: boolean; resumed: boolean; error?: string }>
+    }) => Promise<{ ok: boolean; resumed: boolean; sessionId?: string; error?: string }>
     now?: () => number
     staleSilenceMs?: number
 }
@@ -602,12 +602,14 @@ export class OverseerEntity {
             namespace: resolved.namespace
         })
 
-        const label = resolved.sessionName ?? resolved.project ?? resolved.sessionId.slice(0, 8)
+        // After resume+merge the hub may have remapped to a replacement session id.
+        const deliveredSessionId = result.sessionId ?? resolved.sessionId
+        const label = resolved.sessionName ?? resolved.project ?? deliveredSessionId.slice(0, 8)
         const snippet = args.message.length > 80 ? `${args.message.slice(0, 77)}…` : args.message
         if (!result.ok) {
             return {
                 ok: false,
-                sessionId: resolved.sessionId,
+                sessionId: deliveredSessionId,
                 sessionName: resolved.sessionName,
                 project: resolved.project,
                 resumed: result.resumed,
@@ -618,11 +620,11 @@ export class OverseerEntity {
 
         return {
             ok: true,
-            sessionId: resolved.sessionId,
+            sessionId: deliveredSessionId,
             sessionName: resolved.sessionName,
             project: resolved.project,
             resumed: result.resumed,
-            tombstone: `Relayed to ${label} (${resolved.sessionId.slice(0, 8)})${result.resumed ? ' [resumed]' : ''}: "${snippet}"`
+            tombstone: `Relayed to ${label} (${deliveredSessionId.slice(0, 8)})${result.resumed ? ' [resumed]' : ''}: "${snippet}"`
         }
     }
 
