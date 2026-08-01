@@ -448,7 +448,7 @@ export function buildDispositionSnapshot(db: Database, item: StoredInboxItem): D
         category: item.category,
         project,
         artifactKind: primaryArtifact?.kind ?? null,
-        repo: repoFromArtifact(primaryArtifact),
+        repo: repoFromArtifact(primaryArtifact ?? undefined),
         contextSnapshot: {
             title: item.title,
             summary: item.summary,
