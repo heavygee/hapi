@@ -371,6 +371,14 @@ layers:
   # active brain exercising ping_session.
   - branch: feat/overseer-relay-ping
 
+  # 2026-08-01: overseer converse context (PR #106). Hub-owned converse context
+  # assembly from convo_turns + GET /converse/recent + talk-to hydrate so hard-reload
+  # keeps the /overseer thread and the next ask still has prior context. STACKS ON
+  # feat/overseer-relay-ping (must sit immediately after it; includes tip cfafd320
+  # prefix resolve). Tip 5097bcca. Additive hub+web surface (converseContext module,
+  # overseer routes, OverseerChatDebugControls hydrate); no new DDL.
+  - branch: feat/overseer-converse-context
+
   # Overseer replay harness (thin): harness+CI+fixtures only. Tip 96c8e7bf4,
   # ahead=1, zero FCM. Stack after umbrella; no substrate in this tip.
   - branch: feat/overseer-replay-harness
