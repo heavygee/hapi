@@ -19,6 +19,7 @@ export function OverseerBrainPanel() {
     const [models, setModels] = useState<string[]>([])
     const [modelsLoading, setModelsLoading] = useState(false)
     const [modelsError, setModelsError] = useState<string | null>(null)
+    const [modelsReachable, setModelsReachable] = useState<boolean | null>(null)
     const [saving, setSaving] = useState(false)
     const [saveError, setSaveError] = useState<string | null>(null)
     const [loaded, setLoaded] = useState(false)
@@ -43,11 +44,17 @@ export function OverseerBrainPanel() {
         let cancelled = false
         setModelsLoading(true)
         setModelsError(null)
+        setModelsReachable(null)
         void api.fetchOverseerBrainModels(selectedProfile)
             .then((res) => {
                 if (cancelled) return
                 setModels(res.models)
-                if (res.error) setModelsError(res.error)
+                if (res.error) {
+                    setModelsError(res.error)
+                    setModelsReachable(res.reachable ?? false)
+                } else {
+                    setModelsReachable(true)
+                }
             })
             .catch((err) => { if (!cancelled) setModelsError(err instanceof Error ? err.message : 'model list failed') })
             .finally(() => { if (!cancelled) setModelsLoading(false) })
@@ -135,7 +142,11 @@ export function OverseerBrainPanel() {
 
             <div className="flex flex-wrap items-center gap-3 text-[11px]">
                 {modelsError ? (
-                    <span className="text-amber-500">offline / unreachable: {modelsError}</span>
+                    modelsReachable ? (
+                        <span className="text-amber-500">endpoint reachable, model list failed: {modelsError}</span>
+                    ) : (
+                        <span className="text-amber-500">offline / unreachable: {modelsError}</span>
+                    )
                 ) : modelsLoading ? (
                     <span className="text-[var(--app-hint)]">probing endpoint…</span>
                 ) : (

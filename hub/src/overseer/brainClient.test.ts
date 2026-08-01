@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { filterChatModels, listBrainProfiles, resolveBrainConfig, resolveBrainSelection } from './brainClient'
+import { filterChatModels, isKnownBrainProfile, listBrainProfiles, resolveBrainConfig, resolveBrainSelection } from './brainClient'
 
 const baseEnv = {
     OVERSEER_BRAIN_URL: 'http://local.test/v1/',
@@ -32,8 +32,13 @@ describe('resolveBrainConfig', () => {
         expect(cfg).toMatchObject({ baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o', apiKey: 'sk-test' })
     })
 
-    it('falls back to default for an unknown profile', () => {
-        expect(resolveBrainConfig(multiEnv, { profile: 'nope' })?.baseUrl).toBe('http://local.test/v1')
+    it('returns null for an unknown named profile (no silent fallback to env default)', () => {
+        expect(resolveBrainConfig(multiEnv, { profile: 'nope' })).toBeNull()
+    })
+
+    it('uses only the env default when profile is explicitly default', () => {
+        const cfg = resolveBrainConfig(multiEnv, { profile: 'default' })
+        expect(cfg).toMatchObject({ baseUrl: 'http://local.test/v1', model: 'main' })
     })
 
     it('model override wins over the selected profile model', () => {
@@ -81,6 +86,14 @@ describe('listBrainProfiles', () => {
 
     it('is empty when no brain is configured', () => {
         expect(listBrainProfiles({} as NodeJS.ProcessEnv)).toEqual([])
+    })
+})
+
+describe('isKnownBrainProfile', () => {
+    it('returns true for configured profile ids and false otherwise', () => {
+        expect(isKnownBrainProfile('default', multiEnv)).toBe(true)
+        expect(isKnownBrainProfile('openai', multiEnv)).toBe(true)
+        expect(isKnownBrainProfile('ghost', multiEnv)).toBe(false)
     })
 })
 

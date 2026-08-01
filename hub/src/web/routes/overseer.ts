@@ -12,7 +12,8 @@ import type { WebAppEnv } from '../middleware/auth'
 import { requireSyncEngine } from './guards'
 import { isOverseerToolName, OverseerWriteNotAllowedError, runOverseerTool } from '../../overseer/runOverseerTool'
 import { runOverseerConverse } from '../../overseer/converse'
-import { BrainUnavailableError, filterChatModels, listBrainModels, listBrainProfiles, resolveBrainConfig, resolveBrainSelection } from '../../overseer/brainClient'
+import { BrainUnavailableError, filterChatModels, isKnownBrainProfile, listBrainModels, listBrainProfiles, resolveBrainConfig, resolveBrainSelection } from '../../overseer/brainClient'
+import type { ActiveBrainSetting } from '../../store/settingsStore'
 
 const convoTurnBodySchema = z.object({
     operatorText: z.string().max(8000).default(''),
@@ -40,6 +41,16 @@ const activeBrainBodySchema = z.object({
     profile: z.string().min(1).max(64),
     model: z.string().max(100).nullish()
 })
+
+/** Drop a persisted active brain when its profile was removed from env after restart. */
+function getSanitizedActiveBrain(engine: SyncEngine): ActiveBrainSetting | null {
+    const settings = engine.getSettings()
+    const active = settings.getActiveBrain()
+    if (!active) return null
+    if (isKnownBrainProfile(active.profile)) return active
+    settings.clearActiveBrain()
+    return null
+}
 
 export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
@@ -74,7 +85,7 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
         if (engine instanceof Response) return engine
         return c.json({
             profiles: listBrainProfiles(process.env),
-            active: engine.getSettings().getActiveBrain()
+            active: getSanitizedActiveBrain(engine)
         })
     })
 
@@ -84,9 +95,13 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
     app.get('/overseer/brain/active', (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)
         if (engine instanceof Response) return engine
-        const active = engine.getSettings().getActiveBrain()
-        const config = resolveBrainConfig(process.env, resolveBrainSelection(active))
-        return c.json({ active, effective: config ? { profile: active?.profile ?? 'default', model: config.model } : null })
+        const active = getSanitizedActiveBrain(engine)
+        const selection = resolveBrainSelection(active)
+        const config = resolveBrainConfig(process.env, selection)
+        return c.json({
+            active,
+            effective: config ? { profile: selection.profile ?? 'default', model: config.model } : null
+        })
     })
 
     app.put('/overseer/brain/active', async (c) => {
@@ -131,7 +146,8 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ profile: id, defaultModel: config.model, models })
         } catch (error) {
             const message = error instanceof Error ? error.message : 'failed to list models'
-            return c.json({ profile: id, defaultModel: config.model, models: [], error: message })
+            const reachable = error instanceof BrainUnavailableError ? error.reachable : false
+            return c.json({ profile: id, defaultModel: config.model, models: [], error: message, reachable })
         }
     })
 
@@ -192,7 +208,7 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Last message must be from the operator' }, 400)
         }
 
-        const active = engine.getSettings().getActiveBrain()
+        const active = getSanitizedActiveBrain(engine)
         const config = resolveBrainConfig(process.env, resolveBrainSelection(active, {
             profile: parsed.data.profile,
             model: parsed.data.model

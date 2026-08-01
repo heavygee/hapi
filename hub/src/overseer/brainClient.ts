@@ -96,12 +96,15 @@ export function resolveBrainConfig(
     env: NodeJS.ProcessEnv = process.env,
     opts: { profile?: string; model?: string } = {}
 ): BrainConfig | null {
-    let cfg: BrainConfig | null = null
     const profile = opts.profile?.trim()
+    let cfg: BrainConfig | null = null
     if (profile && profile.toLowerCase() !== 'default') {
         cfg = readProfile(env, `OVERSEER_BRAIN_PROFILE_${profile.toUpperCase()}_`)
+        // Named profile requested but not configured — do not silently fall back to env default.
+        if (!cfg) return null
+    } else {
+        cfg = readProfile(env, 'OVERSEER_BRAIN_')
     }
-    if (!cfg) cfg = readProfile(env, 'OVERSEER_BRAIN_')
     if (!cfg) return null
     const model = opts.model?.trim()
     return model ? { ...cfg, model } : cfg
@@ -160,6 +163,11 @@ export async function listBrainModels(config: BrainConfig, timeoutMs = 12_000): 
     return (json?.data ?? [])
         .map((m) => m?.id)
         .filter((id): id is string => typeof id === 'string' && id.length > 0)
+}
+
+/** True when `profile` is a brain the hub currently has configured in env. */
+export function isKnownBrainProfile(profile: string, env: NodeJS.ProcessEnv = process.env): boolean {
+    return listBrainProfiles(env).some((p) => p.id === profile)
 }
 
 /** List configured brain profiles for the UI (id/label/model only — no url/key). */

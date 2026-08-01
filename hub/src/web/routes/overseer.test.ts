@@ -177,4 +177,26 @@ describe('overseer routes', () => {
             else process.env.OVERSEER_BRAIN_URL = prev
         }
     })
+
+    it('GET /overseer/brains clears a stale persisted profile that is no longer configured', async () => {
+        const prevUrl = process.env.OVERSEER_BRAIN_URL
+        const prevOpenAi = process.env.OVERSEER_BRAIN_PROFILE_OPENAI_URL
+        process.env.OVERSEER_BRAIN_URL = 'http://brain.test/v1'
+        delete process.env.OVERSEER_BRAIN_PROFILE_OPENAI_URL
+        try {
+            const store = new Store(':memory:')
+            store.settings.setActiveBrain({ profile: 'openai', model: 'gpt-4o' })
+            const app = buildApp(store)
+            const res = await app.request('/api/overseer/brains')
+            expect(res.status).toBe(200)
+            const body = await res.json() as { active: unknown }
+            expect(body.active).toBeNull()
+            expect(store.settings.getActiveBrain()).toBeNull()
+        } finally {
+            if (prevUrl === undefined) delete process.env.OVERSEER_BRAIN_URL
+            else process.env.OVERSEER_BRAIN_URL = prevUrl
+            if (prevOpenAi === undefined) delete process.env.OVERSEER_BRAIN_PROFILE_OPENAI_URL
+            else process.env.OVERSEER_BRAIN_PROFILE_OPENAI_URL = prevOpenAi
+        }
+    })
 })

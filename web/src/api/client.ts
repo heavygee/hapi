@@ -843,7 +843,7 @@ export class ApiClient {
 
     async fetchOverseerBrainModels(
         profileId: string
-    ): Promise<{ profile: string; defaultModel: string | null; models: string[]; error?: string }> {
+    ): Promise<{ profile: string; defaultModel: string | null; models: string[]; error?: string; reachable?: boolean }> {
         return await this.request(`/api/overseer/brains/${encodeURIComponent(profileId)}/models`)
     }
 
