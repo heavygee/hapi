@@ -277,7 +277,10 @@ describe('Overseer inbox schema (init-gated, not SCHEMA_VERSION)', () => {
         store.inbox.recordOperatorAction(item.id, 'snooze', null, wake)
 
         expect(store.inbox.list({ activeOnly: true }).map((i) => i.id)).not.toContain(item.id)
-        expect(store.inbox.list({ statuses: ['snoozed'] }).map((i) => i.id)).toContain(item.id)
+        expect(store.inbox.list({
+            statuses: ['snoozed'],
+            includeSleepingSnoozed: true
+        }).map((i) => i.id)).toContain(item.id)
     })
 
     it('promotion during an active snooze updates the same item instead of inserting a duplicate', () => {

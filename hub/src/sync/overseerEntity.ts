@@ -138,14 +138,16 @@ export class OverseerEntity {
         surfaced: StoredInboxItem[]
         held: StoredInboxItem[]
     } {
-        const statuses = args.statuses && args.statuses.length > 0
-            ? args.statuses
+        const statusesExplicit = Boolean(args.statuses && args.statuses.length > 0)
+        const statuses = statusesExplicit
+            ? args.statuses!
             : ['new', 'surfaced', 'deferred', 'snoozed', 'held']
         const items = this.inbox.list({
             statuses,
             sessionId: args.sessionId ?? null,
             category: args.category ?? null,
-            limit: args.limit ?? 50
+            limit: args.limit ?? 50,
+            includeSleepingSnoozed: statusesExplicit && statuses.includes('snoozed')
         })
         return {
             items,

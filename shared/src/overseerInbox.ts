@@ -131,12 +131,16 @@ export function parseArtifactRefs(raw: string | null | undefined): ArtifactRef[]
     }
 }
 
+function artifactHasDisplayText(ref: ArtifactRef): boolean {
+    return Boolean(ref.title?.trim() || ref.ref?.trim() || ref.url?.trim())
+}
+
 export function pickPrimaryArtifact(artifactRefs: ArtifactRef[]): ArtifactRef | null {
     for (const kind of TITLE_PRIORITY_KINDS) {
-        const match = artifactRefs.find((ref) => ref.kind === kind)
+        const match = artifactRefs.find((ref) => ref.kind === kind && artifactHasDisplayText(ref))
         if (match) return match
     }
-    return artifactRefs[0] ?? null
+    return artifactRefs.find(artifactHasDisplayText) ?? null
 }
 
 export function pickPrimaryArtifactTitle(artifactRefs: ArtifactRef[]): string | null {

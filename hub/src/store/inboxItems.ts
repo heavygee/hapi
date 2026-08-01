@@ -94,6 +94,12 @@ export type ListInboxItemsOptions = {
     /** Explicit status allow-list (overrides activeOnly when set). */
     statuses?: string[] | null
     category?: string | null
+    /**
+     * When true and statuses includes `snoozed`, return still-sleeping rows
+     * (explicit "what is snoozed?" queries). Default false: hide sleeping snoozes
+     * even if `snoozed` appears in a default status list.
+     */
+    includeSleepingSnoozed?: boolean
 }
 
 type InboxItemRow = {
@@ -235,9 +241,9 @@ export function listInboxItems(db: Database, options: ListInboxItemsOptions = {}
         const placeholders = options.statuses.map(() => '?').join(', ')
         clauses.push(`status IN (${placeholders})`)
         params.push(...options.statuses)
-        // Explicit status lists that include snoozed must return sleeping rows
-        // (e.g. "what is currently snoozed?"). Default/active views still hide them.
-        if (!options.statuses.includes('snoozed')) {
+        // Only an explicit "include sleeping" request returns future snoozes.
+        // Default Overseer inbox lists may mention status 'snoozed' but still hide sleepers.
+        if (!(options.includeSleepingSnoozed && options.statuses.includes('snoozed'))) {
             appendSnoozeVisibilityClause(clauses, params, now)
         }
     } else if (options.activeOnly) {
@@ -516,6 +522,8 @@ export type DispositionGroupColumn = DispositionPredicateColumn
 
 export type QueryDispositionsFilter = {
     action?: string | null
+    /** When action is unset, restrict to these actions (exclude route/retry noise). */
+    actionsAllowlist?: readonly string[] | null
     sourceKind?: string | null
     sourceRef?: string | null
     eventType?: string | null
@@ -593,6 +601,11 @@ function buildDispositionWhere(filter: QueryDispositionsFilter): {
         }
     }
     eq('action', filter.action)
+    if (!filter.action && filter.actionsAllowlist && filter.actionsAllowlist.length > 0) {
+        const placeholders = filter.actionsAllowlist.map(() => '?').join(', ')
+        clauses.push(`action IN (${placeholders})`)
+        params.push(...filter.actionsAllowlist)
+    }
     eq('source_kind', filter.sourceKind)
     eq('source_ref', filter.sourceRef)
     eq('event_type', filter.eventType)
