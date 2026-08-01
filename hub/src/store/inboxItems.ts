@@ -174,6 +174,23 @@ function syncSourceEventLinks(db: Database, inboxItemId: number, eventIds: numbe
     }
 }
 
+/** Wake snoozed items whose sleep window has elapsed (wake-on-read). */
+function wakeExpiredSnoozes(db: Database, now: number): void {
+    db.prepare(`
+        UPDATE inbox_items
+        SET status = 'surfaced', snoozed_until = NULL, updated_at = ?
+        WHERE status = 'snoozed'
+          AND snoozed_until IS NOT NULL
+          AND snoozed_until <= ?
+    `).run(now, now)
+}
+
+/** Exclude items still sleeping: status=snoozed with a future snoozed_until. */
+function appendSnoozeVisibilityClause(clauses: string[], params: Array<string | number>, now: number): void {
+    clauses.push("(status != 'snoozed' OR snoozed_until IS NULL OR snoozed_until <= ?)")
+    params.push(now)
+}
+
 /** Clear session FK refs so DELETE FROM sessions succeeds (items are audit-retained). */
 export function detachSessionInboxItems(db: Database, sessionId: string): number {
     const result = db.prepare(
@@ -206,6 +223,9 @@ export function countInboxItems(db: Database): number {
 }
 
 export function listInboxItems(db: Database, options: ListInboxItemsOptions = {}): StoredInboxItem[] {
+    const now = Date.now()
+    wakeExpiredSnoozes(db, now)
+
     const limit = Math.min(Math.max(options.limit ?? 50, 1), 200)
     const clauses: string[] = []
     const params: Array<string | number> = []
@@ -217,6 +237,7 @@ export function listInboxItems(db: Database, options: ListInboxItemsOptions = {}
     } else if (options.activeOnly) {
         clauses.push("status IN ('new', 'surfaced', 'deferred', 'snoozed')")
     }
+    appendSnoozeVisibilityClause(clauses, params, now)
     if (options.sessionId) {
         clauses.push('related_session_id = ?')
         params.push(options.sessionId)
@@ -237,13 +258,17 @@ export function listInboxItems(db: Database, options: ListInboxItemsOptions = {}
 }
 
 export function findActiveInboxItemForSession(db: Database, sessionId: string): StoredInboxItem | null {
+    const now = Date.now()
+    wakeExpiredSnoozes(db, now)
+
     const row = db.prepare(`
         SELECT * FROM inbox_items
         WHERE related_session_id = ?
           AND status IN ('new', 'surfaced', 'deferred', 'snoozed')
+          AND (status != 'snoozed' OR snoozed_until IS NULL OR snoozed_until <= ?)
         ORDER BY updated_at DESC
         LIMIT 1
-    `).get(sessionId) as InboxItemRow | undefined
+    `).get(sessionId, now) as InboxItemRow | undefined
     return row ? mapRow(row) : null
 }
 
@@ -605,6 +630,7 @@ export function clusterDispositions(
     return Array.from(byKey.values())
         .filter((c) => c.count >= Math.max(1, minCount))
         .sort((a, b) => b.count - a.count)
+        .slice(0, Math.max(1, Math.min(filter.limit ?? 50, 200)))
 }
 
 function extractSuggestedAction(payloadJson: string | null): string | null {

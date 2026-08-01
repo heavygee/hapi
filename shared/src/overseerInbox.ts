@@ -22,6 +22,15 @@ export const INBOX_OPERATOR_ACTIONS = [
 export type InboxOperatorAction = typeof INBOX_OPERATOR_ACTIONS[number]
 
 /**
+ * Subset of inbox operator actions exposed to Overseer disposition tools.
+ * `route` and `retry` are inbox-UI actions only — the brain must not emit them
+ * via `record_disposition` (they would map to `surfaced` without doing the work).
+ */
+export const OVERSEER_DISPOSITION_ACTIONS = ['done', 'dismiss', 'snooze', 'open'] as const
+
+export type OverseerDispositionAction = typeof OVERSEER_DISPOSITION_ACTIONS[number]
+
+/**
  * The disposition predicate vocabulary (R8): the snapshot columns frozen on each disposition row
  * ARE the standing-order match keys AND the discovery `GROUP BY` keys — one shared vocabulary.
  * `query_dispositions` filters and clusters on exactly these columns.

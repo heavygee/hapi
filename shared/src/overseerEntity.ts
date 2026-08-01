@@ -20,8 +20,8 @@
  */
 
 import { z } from 'zod'
-import { DISPOSITION_PREDICATE_COLUMNS, INBOX_OPERATOR_ACTIONS } from './overseerInbox'
-import type { DispositionPredicateColumn, InboxItemStatus, InboxOperatorAction } from './overseerInbox'
+import { DISPOSITION_PREDICATE_COLUMNS, OVERSEER_DISPOSITION_ACTIONS } from './overseerInbox'
+import type { DispositionPredicateColumn, InboxItemStatus, InboxOperatorAction, OverseerDispositionAction } from './overseerInbox'
 
 /** Stable id for the single fleet-level Overseer entity. */
 export const OVERSEER_ENTITY_ID = 'overseer'
@@ -363,7 +363,7 @@ export const queryOpenLoopsArgsSchema = z.object({
 export type QueryOpenLoopsArgs = z.infer<typeof queryOpenLoopsArgsSchema>
 
 const dispositionPredicateColumnSchema = z.enum(DISPOSITION_PREDICATE_COLUMNS)
-const inboxOperatorActionSchema = z.enum(INBOX_OPERATOR_ACTIONS)
+const overseerDispositionActionSchema = z.enum(OVERSEER_DISPOSITION_ACTIONS)
 
 /**
  * `query_dispositions` (R3): one reader, two modes on the same row shape.
@@ -371,7 +371,7 @@ const inboxOperatorActionSchema = z.enum(INBOX_OPERATOR_ACTIONS)
  *  - cluster mode (`groupBy` set): `GROUP BY(groupBy)` + `HAVING count>=minCount` — the discovery watcher.
  */
 export const queryDispositionsArgsSchema = z.object({
-    action: inboxOperatorActionSchema.optional(),
+    action: overseerDispositionActionSchema.optional(),
     sourceKind: z.string().min(1).optional(),
     eventType: z.string().min(1).optional(),
     category: z.string().min(1).optional(),
@@ -395,7 +395,7 @@ export type QueryDispositionsArgs = z.infer<typeof queryDispositionsArgsSchema>
  */
 export const recordDispositionArgsSchema = z.object({
     itemId: z.number().int().positive(),
-    action: inboxOperatorActionSchema,
+    action: overseerDispositionActionSchema,
     /** Optional operator note / learning label frozen with the disposition. */
     feedback: z.string().min(1).max(2000).optional(),
     /** Required for `snooze`: epoch ms to sleep the item until. */
@@ -440,9 +440,11 @@ export type OverseerDispositionRow = {
     feedback: string | null
     createdAt: number
     sourceKind: string | null
+    sourceRef: string | null
     eventType: string | null
     category: string | null
     project: string | null
+    artifactKind: string | null
     repo: string | null
     title: string | null
 }
@@ -466,7 +468,7 @@ export type OverseerDispositionsResult = {
 export type OverseerDispositionResult = {
     ok: boolean
     itemId: number
-    action: InboxOperatorAction
+    action: OverseerDispositionAction
     statusAfter: string
     /** One-line human confirmation ("Marked #42 done — QUESTION / hapi …"). */
     tombstone: string

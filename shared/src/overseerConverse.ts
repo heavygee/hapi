@@ -19,7 +19,7 @@ import {
     OVERSEER_WORKER_STATES,
     type OverseerToolName
 } from './overseerEntity'
-import { DISPOSITION_PREDICATE_COLUMNS, INBOX_OPERATOR_ACTIONS } from './overseerInbox'
+import { DISPOSITION_PREDICATE_COLUMNS, OVERSEER_DISPOSITION_ACTIONS } from './overseerInbox'
 
 export type OverseerConverseRole = 'operator' | 'overseer'
 
@@ -156,7 +156,7 @@ const OVERSEER_TOOL_PARAMS: Record<OverseerToolName, JsonSchema> = {
         detail: detailProp
     }),
     query_dispositions: obj({
-        action: { type: 'string', enum: [...INBOX_OPERATOR_ACTIONS], description: 'Filter to one disposition action.' },
+        action: { type: 'string', enum: [...OVERSEER_DISPOSITION_ACTIONS], description: 'Filter to one disposition action.' },
         sourceKind: { type: 'string' },
         eventType: { type: 'string' },
         category: { type: 'string' },
@@ -170,7 +170,7 @@ const OVERSEER_TOOL_PARAMS: Record<OverseerToolName, JsonSchema> = {
     }),
     record_disposition: obj({
         itemId: { type: 'integer', minimum: 1, description: 'Inbox item id to dispose.' },
-        action: { type: 'string', enum: [...INBOX_OPERATOR_ACTIONS], description: 'done=resolve, dismiss=tombstone, snooze (needs snoozedUntil), open=reopen.' },
+        action: { type: 'string', enum: [...OVERSEER_DISPOSITION_ACTIONS], description: 'done=resolve, dismiss=tombstone, snooze (needs snoozedUntil), open=reopen.' },
         feedback: { type: 'string', description: 'Optional operator note / learning label to freeze with the disposition.' },
         snoozedUntil: { type: 'integer', minimum: 1, description: 'Required for snooze: epoch ms to sleep the item until.' }
     }, ['itemId', 'action'])

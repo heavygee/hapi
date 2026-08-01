@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test'
+import { Database } from 'bun:sqlite'
 import { Store } from '../store'
 import { SyncEngine } from './syncEngine'
 import { RpcRegistry } from '../socket/rpcRegistry'
@@ -265,6 +266,7 @@ describe('OverseerEntity dispositions (Stage 1 keystone)', () => {
         const event = store.events.insert({
             ts: Date.now(),
             sourceKind: 'worker',
+            sourceRef: opts.key,
             eventType: opts.eventType,
             attentionCandidate: 1,
             severity: 4,
@@ -306,6 +308,8 @@ describe('OverseerEntity dispositions (Stage 1 keystone)', () => {
         expect(row?.category).toBe('QUESTION')
         expect(row?.project).toBe('hapi')
         expect(row?.eventType).toBe('needs_decision')
+        expect(row?.sourceRef).toBe('disp-1')
+        expect(row?.artifactKind).toBe('github_pr')
         expect(row?.feedback).toBe('ship it')
     })
 
@@ -345,6 +349,41 @@ describe('OverseerEntity dispositions (Stage 1 keystone)', () => {
         expect(only?.keys.category).toBe('QUESTION')
         expect(only?.keys.action).toBe('done')
         expect(only?.count).toBe(2)
+    })
+
+    it('query_dispositions cluster mode respects limit', () => {
+        const store = new Store(':memory:')
+        const o = overseer(buildEngine(store))
+        for (let i = 0; i < 4; i++) {
+            const { itemId } = promoteItem(store, {
+                key: `lim-${i}`,
+                eventType: 'needs_decision',
+                project: `proj-${i}`
+            })
+            o.recordDisposition({ itemId, action: 'done' })
+        }
+        const clusters = o.queryDispositions({ groupBy: ['project'], minCount: 1, limit: 2 })
+        expect(clusters.clusters?.length).toBe(2)
+        expect(clusters.total).toBe(2)
+    })
+
+    it('snoozed inbox items stay hidden until wake time, then resurface on read', () => {
+        const store = new Store(':memory:')
+        const { itemId } = promoteItem(store, { key: 'snooze-hide', eventType: 'blocked', project: 'hapi' })
+        const o = overseer(buildEngine(store))
+        const future = Date.now() + 86_400_000
+        o.recordDisposition({ itemId, action: 'snooze', snoozedUntil: future })
+
+        expect(o.queryInbox({}).items).toHaveLength(0)
+
+        const db: Database = (store as unknown as { db: Database }).db
+        db.prepare(
+            'UPDATE inbox_items SET snoozed_until = ?, updated_at = ? WHERE id = ?'
+        ).run(Date.now() - 1000, Date.now() - 1000, itemId)
+
+        const afterWake = o.queryInbox({})
+        expect(afterWake.items).toHaveLength(1)
+        expect(afterWake.items[0]?.status).toBe('surfaced')
     })
 
     it('record_disposition rejects unknown item and snooze-without-timestamp without writing', () => {

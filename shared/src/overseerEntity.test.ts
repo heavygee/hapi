@@ -126,5 +126,11 @@ describe('overseer entity protocol', () => {
             expect(overseerToolArgsSchemas.explain_priority.safeParse({ itemId: 0 }).success).toBe(false)
             expect(overseerToolArgsSchemas.explain_priority.safeParse({ itemId: 12 }).success).toBe(true)
         })
+
+        it('record_disposition rejects route/retry (overseer disposition enum only)', () => {
+            expect(overseerToolArgsSchemas.record_disposition.safeParse({ itemId: 1, action: 'route' }).success).toBe(false)
+            expect(overseerToolArgsSchemas.record_disposition.safeParse({ itemId: 1, action: 'retry' }).success).toBe(false)
+            expect(overseerToolArgsSchemas.record_disposition.safeParse({ itemId: 1, action: 'done' }).success).toBe(true)
+        })
     })
 })

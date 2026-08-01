@@ -470,9 +470,11 @@ export class OverseerEntity {
                 feedback: r.feedback,
                 createdAt: r.createdAt,
                 sourceKind: r.sourceKind,
+                sourceRef: r.sourceRef,
                 eventType: r.eventType,
                 category: r.category,
                 project: r.project,
+                artifactKind: r.artifactKind,
                 repo: r.repo,
                 title: r.contextSnapshot?.title ?? null
             })
