@@ -9,10 +9,9 @@ type ChatTurn = {
     brainOnline?: boolean
 }
 
-// Debug-only text transport for the modality-agnostic Overseer converse core.
-// This is deliberately a Settings/debug affordance, not a top-level surface:
-// voice/XR are the intended first-class modalities and reuse the same
-// /api/overseer/converse endpoint. Text is here only to exercise the loop.
+// Text transport for the modality-agnostic Overseer converse core.
+// Durable memory is hub-owned (`convo_turn` events); this panel hydrates on open
+// and sends only the latest operator line — voice/XR reuse the same core.
 const STARTER_QUESTIONS = [
     'What needs my attention?',
     'Which agents are blocked?',
@@ -24,6 +23,7 @@ export function OverseerChatDebugControls() {
     const { api } = useAppContext()
     const [open, setOpen] = useState(false)
     const [turns, setTurns] = useState<ChatTurn[]>([])
+    const [hydrating, setHydrating] = useState(false)
     const [input, setInput] = useState('')
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
@@ -35,6 +35,7 @@ export function OverseerChatDebugControls() {
     const [modelsError, setModelsError] = useState<string | null>(null)
     const [selectedModel, setSelectedModel] = useState('')
     const scrollRef = useRef<HTMLDivElement>(null)
+    const hydrateGenRef = useRef(0)
 
     useEffect(() => {
         if (!open || !api || profiles.length > 0) return
@@ -42,6 +43,46 @@ export function OverseerChatDebugControls() {
             .then((res) => setProfiles(res.profiles))
             .catch(() => { /* brains list is optional chrome */ })
     }, [open, api, profiles.length])
+
+    // Rehydrate from hub every time the panel opens (other transports may have
+    // written turns while closed). Block send until this settles. Skip while a
+    // converse request is in flight so reopening does not wipe the operator turn.
+    useEffect(() => {
+        if (!open || !api || loading) return
+        const gen = ++hydrateGenRef.current
+        let cancelled = false
+        setHydrating(true)
+        void api.fetchOverseerConverseRecent(24)
+            .then((res) => {
+                if (cancelled || gen !== hydrateGenRef.current) return
+                const next: ChatTurn[] = []
+                for (const turn of res.turns) {
+                    if (turn.operatorText.trim()) {
+                        next.push({ role: 'operator', content: turn.operatorText })
+                    }
+                    if (turn.overseerText.trim()) {
+                        next.push({
+                            role: 'overseer',
+                            content: turn.overseerText,
+                            toolTrace: turn.toolCalls.map((t) => ({
+                                tool: t.tool,
+                                args: t.argsSummary ? safeJsonArgs(t.argsSummary) : {},
+                                ok: true
+                            }))
+                        })
+                    }
+                }
+                setTurns(next)
+                requestAnimationFrame(() => {
+                    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
+                })
+            })
+            .catch(() => { /* empty local view; hub still owns memory on send */ })
+            .finally(() => {
+                if (!cancelled && gen === hydrateGenRef.current) setHydrating(false)
+            })
+        return () => { cancelled = true }
+    }, [open, api, loading])
 
     // Populate the model dropdown live from the selected profile's endpoint
     // (server proxies GET /models so the api key never reaches the browser).
@@ -63,15 +104,16 @@ export function OverseerChatDebugControls() {
     }, [open, api, selectedProfile])
 
     const profileDefaultModel = profiles.find((p) => p.id === selectedProfile)?.model ?? null
+    const sendBlocked = loading || hydrating
 
     const send = useCallback(async (text: string) => {
         const trimmed = text.trim()
-        if (!trimmed || !api || loading) return
+        if (!trimmed || !api || sendBlocked) return
         setError(null)
         setInput('')
 
-        const history = turns.map((turn): OverseerConverseMessage => ({ role: turn.role, content: turn.content }))
-        const nextHistory: OverseerConverseMessage[] = [...history, { role: 'operator', content: trimmed }]
+        // Hub owns prior context — send only the new operator line.
+        const nextHistory: OverseerConverseMessage[] = [{ role: 'operator', content: trimmed }]
         setTurns((prev) => [...prev, { role: 'operator', content: trimmed }])
         setLoading(true)
         try {
@@ -94,7 +136,7 @@ export function OverseerChatDebugControls() {
         } finally {
             setLoading(false)
         }
-    }, [api, loading, turns, selectedProfile, selectedModel])
+    }, [api, sendBlocked, selectedProfile, selectedModel])
 
     return (
         <div className="border-t border-[var(--app-divider)]">
@@ -110,7 +152,7 @@ export function OverseerChatDebugControls() {
             {open && (
                 <div className="space-y-2 border-t border-[var(--app-divider)] bg-[var(--app-subtle-bg)]/40 px-3 py-2">
                     <p className="text-xs text-[var(--app-hint)]">
-                        Fleet chief-of-staff (Stage 1.5 — read + dispositions + relay). Text transport over the same converse core voice will use. The brain can read fleet state, record operator-directed dispositions (done / dismiss / snooze / open), and relay a message to a worker when you explicitly ask (ping / tell / snooze…).
+                        Fleet chief-of-staff (Stage 1.5 — read + dispositions + relay). Hub-owned memory via convo_turns — reload keeps the thread. The brain can read fleet state, record operator-directed dispositions (done / dismiss / snooze / open), and relay a message to a worker when you explicitly ask (ping / tell / snooze…).
                     </p>
 
                     <div className="flex flex-wrap items-center gap-2">
@@ -165,7 +207,7 @@ export function OverseerChatDebugControls() {
                                         <button
                                             key={q}
                                             type="button"
-                                            disabled={loading}
+                                            disabled={sendBlocked}
                                             onClick={() => void send(q)}
                                             className="rounded border border-[var(--app-border)] px-1.5 py-0.5 text-[11px] text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] disabled:opacity-50"
                                         >
@@ -209,6 +251,7 @@ export function OverseerChatDebugControls() {
                                 </div>
                             ))
                         )}
+                        {hydrating ? <p className="px-1 text-xs text-[var(--app-hint)]">Loading hub thread…</p> : null}
                         {loading ? <p className="px-1 text-xs text-[var(--app-hint)]">Overseer is thinking…</p> : null}
                     </div>
 
@@ -222,13 +265,13 @@ export function OverseerChatDebugControls() {
                             type="text"
                             value={input}
                             onChange={(e) => setInput(e.target.value)}
-                            placeholder="Ask the Overseer…"
-                            disabled={loading}
+                            placeholder={hydrating ? 'Loading thread…' : 'Ask the Overseer…'}
+                            disabled={sendBlocked}
                             className="flex-1 rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1.5 text-[13px] text-[var(--app-fg)] disabled:opacity-50"
                         />
                         <button
                             type="submit"
-                            disabled={loading || input.trim().length === 0}
+                            disabled={sendBlocked || input.trim().length === 0}
                             className="rounded-md border border-[var(--app-border)] px-3 py-1.5 text-xs text-[var(--app-fg)] hover:bg-[var(--app-bg)] disabled:opacity-50"
                         >
                             Send
@@ -236,7 +279,8 @@ export function OverseerChatDebugControls() {
                         {turns.length > 0 ? (
                             <button
                                 type="button"
-                                disabled={loading}
+                                disabled={sendBlocked}
+                                title="Clears this view only — hub convo_turn memory remains"
                                 onClick={() => { setTurns([]); setError(null) }}
                                 className="rounded-md border border-[var(--app-border)] px-2 py-1.5 text-xs text-[var(--app-hint)] hover:bg-[var(--app-bg)] disabled:opacity-50"
                             >
@@ -248,4 +292,15 @@ export function OverseerChatDebugControls() {
             )}
         </div>
     )
+}
+
+function safeJsonArgs(raw: string): Record<string, unknown> {
+    try {
+        const parsed: unknown = JSON.parse(raw)
+        return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+            ? parsed as Record<string, unknown>
+            : { raw }
+    } catch {
+        return { raw }
+    }
 }

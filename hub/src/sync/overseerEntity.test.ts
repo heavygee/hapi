@@ -302,6 +302,27 @@ describe('OverseerEntity read-only tools', () => {
         const convoEvents = engine.getSystemEvents({ eventType: 'convo_turn' })
         expect(convoEvents.length).toBe(1)
     })
+
+    it('completeConvoTurn fills overseerText on an existing operator-only row', () => {
+        const { store, engine } = makeEngine()
+        const dangling = overseer(engine).recordConvoTurn({
+            operatorText: 'still waiting',
+            overseerText: ''
+        })
+        expect(dangling).not.toBeNull()
+
+        const completed = overseer(engine).completeConvoTurn({
+            eventId: dangling!.id,
+            overseerText: 'here is the answer'
+        })
+        expect(completed).not.toBeNull()
+        expect(completed!.id).toBe(dangling!.id)
+
+        const payload = JSON.parse(completed!.payloadJson ?? '{}') as { operatorText: string; overseerText: string }
+        expect(payload.operatorText).toBe('still waiting')
+        expect(payload.overseerText).toBe('here is the answer')
+        expect(store.events.query({ eventType: 'convo_turn' }).length).toBe(1)
+    })
 })
 
 describe('OverseerEntity dispositions (Stage 1 keystone)', () => {

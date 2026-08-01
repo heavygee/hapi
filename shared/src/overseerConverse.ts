@@ -75,6 +75,20 @@ export type OverseerConverseResponse = {
      * treat this as an error.
      */
     brainOnline: boolean
+    /** How many prior `convo_turn` rows the hub hydrated into this request. */
+    hydratedTurns?: number
+    /** True when older turns were dropped to stay under the history budget. */
+    truncated?: boolean
+}
+
+/** One durable operator↔Overseer exchange for transport hydrate (UI / voice attach). */
+export type OverseerRecentConvoTurn = {
+    id: number
+    ts: number
+    operatorText: string
+    overseerText: string
+    relatedSessionId: string | null
+    toolCalls: Array<{ tool: OverseerToolName; argsSummary?: string }>
 }
 
 // ---------------------------------------------------------------------------

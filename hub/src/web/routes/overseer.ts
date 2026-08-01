@@ -12,6 +12,7 @@ import type { WebAppEnv } from '../middleware/auth'
 import { requireSyncEngine } from './guards'
 import { isOverseerToolName, OverseerWriteNotAllowedError, runOverseerTool } from '../../overseer/runOverseerTool'
 import { runOverseerConverse } from '../../overseer/converse'
+import { assembleOverseerConverseMessages, listRecentConvoTurns, persistOverseerConvoExchange } from '../../overseer/converseContext'
 import { BrainUnavailableError, filterChatModels, isKnownBrainProfile, listBrainModels, listBrainProfiles, resolveBrainConfig, resolveBrainSelection } from '../../overseer/brainClient'
 import type { ActiveBrainSetting } from '../../store/settingsStore'
 
@@ -28,6 +29,11 @@ const convoTurnBodySchema = z.object({
 })
 
 const converseBodySchema = z.object({
+    /**
+     * Transport may send full local history or just the latest operator line.
+     * Hub hydrates prior `convo_turn`s and keeps only the last operator utterance
+     * from this array (hub-owned memory — transports do not fork the thread).
+     */
     messages: z.array(z.object({
         role: z.enum(['operator', 'overseer']),
         content: z.string().max(8000)
@@ -187,11 +193,25 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
 
     })
 
+    // Recent convo_turns for transport hydrate (talk-to reload, voice attach).
+    // Durable memory lives in events — this is a thin read, not a chat DB.
+    app.get('/overseer/converse/recent', (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) return engine
+        const rawLimit = Number(c.req.query('limit') ?? '20')
+        const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.trunc(rawLimit), 1), 50) : 20
+        const { turns } = listRecentConvoTurns(engine.getOverseer(c.get('namespace')), { limit })
+        return c.json({ turns })
+    })
+
     // Converse — the modality-agnostic conversation core. Runs the brain LLM
     // with the read-only tools and returns a human-facing reply + tool trace.
     // Text is the first transport (debug settings); voice/XR reuse this. When
     // the brain is offline (GPU pulled for VR), returns brainOnline:false with a
     // friendly message rather than an error.
+    //
+    // Continuity: hub assembles prior `convo_turn`s (budgeted) + latest operator
+    // line. Transports do not own the thread.
     app.post('/overseer/converse', async (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)
         if (engine instanceof Response) return engine
@@ -207,23 +227,38 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
         if (!parsed.success) {
             return c.json({ error: 'Invalid body', issues: parsed.error.flatten() }, 400)
         }
-        const messages = parsed.data.messages as OverseerConverseMessage[]
-        if (messages[messages.length - 1]?.role !== 'operator') {
+        const clientMessages = parsed.data.messages as OverseerConverseMessage[]
+        if (clientMessages[clientMessages.length - 1]?.role !== 'operator') {
             return c.json({ error: 'Last message must be from the operator' }, 400)
         }
 
         const overseer = engine.getOverseer(c.get('namespace'))
+        const assembled = assembleOverseerConverseMessages({
+            overseer,
+            clientMessages
+        })
+        const messages = assembled.messages
+        const lastOperator = [...messages].reverse().find((m) => m.role === 'operator')?.content ?? ''
+
         const active = getSanitizedActiveBrain(engine, c.get('namespace'))
         const config = resolveBrainConfig(process.env, resolveBrainSelection(active, {
             profile: parsed.data.profile,
             model: parsed.data.model
         }))
         if (!config) {
+            const reply = 'The Overseer brain is not configured on this hub (set OVERSEER_BRAIN_URL). I can still show raw events and inbox items, but I cannot answer in conversation yet.'
+            persistOverseerConvoExchange(overseer, assembled, {
+                operatorText: lastOperator,
+                overseerText: reply,
+                relatedSessionId: parsed.data.relatedSessionId ?? null
+            })
             return c.json({
-                reply: 'The Overseer brain is not configured on this hub (set OVERSEER_BRAIN_URL). I can still show raw events and inbox items, but I cannot answer in conversation yet.',
+                reply,
                 toolTrace: [],
                 model: null,
-                brainOnline: false
+                brainOnline: false,
+                hydratedTurns: assembled.hydratedTurns,
+                truncated: assembled.truncated
             })
         }
 
@@ -235,8 +270,7 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 allowWrites: parsed.data.allowWrites
             })
 
-            const lastOperator = [...messages].reverse().find((m) => m.role === 'operator')?.content ?? ''
-            overseer.recordConvoTurn({
+            persistOverseerConvoExchange(overseer, assembled, {
                 operatorText: lastOperator,
                 overseerText: reply,
                 relatedSessionId: parsed.data.relatedSessionId ?? null,
@@ -245,7 +279,14 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
                     .map((t) => ({ tool: t.tool, argsSummary: JSON.stringify(t.args).slice(0, 500) }))
             })
 
-            return c.json({ reply, toolTrace, model: config.model, brainOnline: true })
+            return c.json({
+                reply,
+                toolTrace,
+                model: config.model,
+                brainOnline: true,
+                hydratedTurns: assembled.hydratedTurns,
+                truncated: assembled.truncated
+            })
         } catch (error) {
             if (error instanceof BrainUnavailableError) {
                 // Reachable-but-failed (http 4xx/5xx, malformed body) is a converse
@@ -253,11 +294,18 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 const reply = error.reachable
                     ? 'I reached the Overseer brain but could not complete the tool conversation (request error). This is a converse-loop issue, not the brain being offline — please retry, and flag it if it persists.'
                     : 'The Overseer brain is offline right now (the GPU may be in use for VR). Try again shortly — your events and inbox are still being captured.'
+                persistOverseerConvoExchange(overseer, assembled, {
+                    operatorText: lastOperator,
+                    overseerText: reply,
+                    relatedSessionId: parsed.data.relatedSessionId ?? null
+                })
                 return c.json({
                     reply,
                     toolTrace: [],
                     model: config.model,
-                    brainOnline: error.reachable
+                    brainOnline: error.reachable,
+                    hydratedTurns: assembled.hydratedTurns,
+                    truncated: assembled.truncated
                 })
             }
             throw error
