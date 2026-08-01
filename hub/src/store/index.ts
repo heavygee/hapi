@@ -9,6 +9,7 @@ import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
 import { EventStore } from './eventStore'
 import { InboxStore } from './inboxStore'
+import { SettingsStore, ensureOverseerSettingsSchema } from './settingsStore'
 import { ensureOverseerEventsSchema, ensureDeletedSessionsSchema } from './events'
 import { ensureOverseerInboxSchema } from './inboxItems'
 
@@ -28,6 +29,8 @@ export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
 export { EventStore } from './eventStore'
 export { InboxStore } from './inboxStore'
+export { SettingsStore } from './settingsStore'
+export type { ActiveBrainSetting } from './settingsStore'
 export type { InsertSystemEventInput, ListSystemEventsOptions, StoredSystemEvent } from './eventStore'
 export type { ListInboxItemsOptions, StoredInboxItem } from './inboxStore'
 
@@ -44,6 +47,7 @@ const REQUIRED_TABLES = [
     'inbox_items',
     'inbox_item_source_events',
     'inbox_operator_actions',
+    'overseer_settings',
 ] as const
 
 export class Store {
@@ -58,6 +62,7 @@ export class Store {
     readonly push: PushStore
     readonly events: EventStore
     readonly inbox: InboxStore
+    readonly settings: SettingsStore
 
     /**
      * Filesystem path of the underlying SQLite database, or ':memory:' for
@@ -110,6 +115,7 @@ export class Store {
         this.push = new PushStore(this.db)
         this.events = new EventStore(this.db)
         this.inbox = new InboxStore(this.db)
+        this.settings = new SettingsStore(this.db)
     }
 
     close(): void {
@@ -195,6 +201,7 @@ export class Store {
         ensureOverseerEventsSchema(this.db)
         ensureDeletedSessionsSchema(this.db)
         ensureOverseerInboxSchema(this.db)
+        ensureOverseerSettingsSchema(this.db)
         this.assertRequiredTablesPresent()
     }
 

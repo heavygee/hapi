@@ -196,6 +196,9 @@ describe('responsive settings pages', () => {
         expect(screen.getByText(String(__APP_VERSION__))).toBeInTheDocument()
         expect(screen.getByText('Protocol Version')).toBeInTheDocument()
         expect(screen.getByRole('link', { name: 'hapi.run' })).toHaveAttribute('rel', 'noopener noreferrer')
+        // Debug panels moved to /overseer; About keeps a console deep-link.
+        fireEvent.click(screen.getByRole('button', { name: /Overseer console/ }))
+        expect(navigate).toHaveBeenCalledWith({ to: '/overseer' })
     })
 
     it('links common voice settings to full-page voices and advanced pages', () => {

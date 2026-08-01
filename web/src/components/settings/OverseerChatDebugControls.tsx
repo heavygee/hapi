@@ -76,7 +76,7 @@ export function OverseerChatDebugControls() {
         setLoading(true)
         try {
             const res = await api.overseerConverse(nextHistory, {
-                profile: selectedProfile !== 'default' ? selectedProfile : undefined,
+                profile: selectedProfile,
                 model: selectedModel || undefined
             }) as OverseerConverseResponse
             setModel(res.model)

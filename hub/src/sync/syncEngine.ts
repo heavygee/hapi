@@ -47,6 +47,7 @@ import { OverseerEntity } from './overseerEntity'
 import { extractAssistantPlainText } from '@hapi/protocol/messages'
 import type { InboxOperatorAction } from '@hapi/protocol'
 import type { ListSystemEventsOptions, StoredSystemEvent } from '../store'
+import type { SettingsStore } from '../store'
 import type { ListInboxItemsOptions, StoredInboxItem } from '../store/inboxItems'
 
 export type { Session, SyncEvent } from '@hapi/protocol/types'
@@ -338,6 +339,11 @@ export class SyncEngine {
 
     getOverseer(): OverseerEntity {
         return this.overseer
+    }
+
+    /** Hub settings KV (persisted active brain, etc.) — see SettingsStore. */
+    getSettings(): SettingsStore {
+        return this.store.settings
     }
 
     getSystemEvents(options: ListSystemEventsOptions = {}): StoredSystemEvent[] {
