@@ -1,5 +1,5 @@
 /**
- * Overseer entity — Step 3 (read-only / Stage 0).
+ * Overseer entity — Step 3 (read-only tools + Stage 1 disposition write).
  *
  * The Overseer is a continuous conversational entity over the fleet. Unlike a
  * worker session it has no agent process; its "session-equivalent" is the
@@ -20,7 +20,8 @@
  */
 
 import { z } from 'zod'
-import type { InboxItemStatus } from './overseerInbox'
+import { DISPOSITION_PREDICATE_COLUMNS, OVERSEER_DISPOSITION_ACTIONS } from './overseerInbox'
+import type { DispositionPredicateColumn, InboxItemStatus, InboxOperatorAction, OverseerDispositionAction } from './overseerInbox'
 
 /** Stable id for the single fleet-level Overseer entity. */
 export const OVERSEER_ENTITY_ID = 'overseer'
@@ -263,10 +264,24 @@ export const OVERSEER_TOOL_NAMES = [
     'get_worker_health',
     'explain_priority',
     'list_active_workers',
-    'query_open_loops'
+    'query_open_loops',
+    'query_dispositions',
+    'record_disposition'
 ] as const
 
 export type OverseerToolName = typeof OVERSEER_TOOL_NAMES[number]
+
+/**
+ * The one tool that writes (Stage 0→1 keystone). Every other tool is read-only against the
+ * substrate; `record_disposition` is the single explicit, operator-directed mutation. It is
+ * clearly marked non-`readonly` in the catalog so the write surface stays enumerable (R2).
+ */
+export const OVERSEER_WRITE_TOOL_NAMES = ['record_disposition'] as const
+export type OverseerWriteToolName = typeof OVERSEER_WRITE_TOOL_NAMES[number]
+
+export function isOverseerWriteTool(name: string): name is OverseerWriteToolName {
+    return (OVERSEER_WRITE_TOOL_NAMES as readonly string[]).includes(name)
+}
 
 const sessionIdSchema = z.string().min(1)
 
@@ -347,6 +362,49 @@ export const queryOpenLoopsArgsSchema = z.object({
 })
 export type QueryOpenLoopsArgs = z.infer<typeof queryOpenLoopsArgsSchema>
 
+const dispositionPredicateColumnSchema = z.enum(DISPOSITION_PREDICATE_COLUMNS)
+const overseerDispositionActionSchema = z.enum(OVERSEER_DISPOSITION_ACTIONS)
+
+/**
+ * `query_dispositions` (R3): one reader, two modes on the same row shape.
+ *  - list mode (default): recorded disposition rows, newest first, filtered by the predicate vocabulary.
+ *  - cluster mode (`groupBy` set): `GROUP BY(groupBy)` + `HAVING count>=minCount` — the discovery watcher.
+ */
+export const queryDispositionsArgsSchema = z.object({
+    action: overseerDispositionActionSchema.optional(),
+    sourceKind: z.string().min(1).optional(),
+    sourceRef: z.string().min(1).optional(),
+    eventType: z.string().min(1).optional(),
+    category: z.string().min(1).optional(),
+    project: z.string().min(1).optional(),
+    artifactKind: z.string().min(1).optional(),
+    repo: z.string().min(1).optional(),
+    sinceTs: z.number().int().nonnegative().optional(),
+    /** Set to switch to cluster/discovery mode. Columns from the R8 predicate vocabulary. */
+    groupBy: z.array(dispositionPredicateColumnSchema).min(1).optional(),
+    /** Cluster mode only: minimum rows per cluster (`HAVING`). Default 1. */
+    minCount: z.number().int().min(1).optional(),
+    limit: z.number().int().min(1).max(200).optional(),
+    detail: toolDetailSchema.optional()
+})
+export type QueryDispositionsArgs = z.infer<typeof queryDispositionsArgsSchema>
+
+/**
+ * `record_disposition` — the keystone write. An explicit operator decision on one inbox item:
+ * resolve (`done`), tombstone (`dismiss`), snooze, or reopen (`open`). Records the as-seen R8
+ * snapshot and returns a tombstone the brain reads back. Never invented by the brain on its own
+ * judgement in P1 — invoked only when the operator directs a disposition in the conversation.
+ */
+export const recordDispositionArgsSchema = z.object({
+    itemId: z.number().int().positive(),
+    action: overseerDispositionActionSchema,
+    /** Optional operator note / learning label frozen with the disposition. */
+    feedback: z.string().min(1).max(2000).optional(),
+    /** Required for `snooze`: epoch ms to sleep the item until. */
+    snoozedUntil: z.number().int().positive().optional()
+})
+export type RecordDispositionArgs = z.infer<typeof recordDispositionArgsSchema>
+
 /**
  * One cold open loop: a session whose latest worker status is not `done`,
  * carrying how long it has sat and which lens bucket it belongs to.
@@ -375,6 +433,49 @@ export type OverseerOpenLoopsResult = {
     counts: { total: number; waitingOnYou: number; halfFinished: number }
 }
 
+/** One recorded disposition row (list mode), thinned to the predicate vocabulary + as-seen title. */
+export type OverseerDispositionRow = {
+    id: number
+    itemId: number
+    action: InboxOperatorAction
+    statusAfter: string
+    feedback: string | null
+    createdAt: number
+    sourceKind: string | null
+    sourceRef: string | null
+    eventType: string | null
+    category: string | null
+    project: string | null
+    artifactKind: string | null
+    repo: string | null
+    title: string | null
+}
+
+/** One disposition cluster (cluster mode): the predicate key tuple + counts (R3 discovery shape). */
+export type OverseerDispositionCluster = {
+    keys: Partial<Record<DispositionPredicateColumn, string | null>>
+    count: number
+    actions: Record<string, number>
+    lastCreatedAt: number
+}
+
+export type OverseerDispositionsResult = {
+    mode: 'list' | 'cluster'
+    rows?: OverseerDispositionRow[]
+    clusters?: OverseerDispositionCluster[]
+    total: number
+}
+
+/** Result of the keystone write — the tombstone the brain reads back after a disposition lands. */
+export type OverseerDispositionResult = {
+    ok: boolean
+    itemId: number
+    action: OverseerDispositionAction
+    statusAfter: string
+    /** One-line human confirmation ("Marked #42 done — QUESTION / hapi …"). */
+    tombstone: string
+}
+
 export const overseerToolArgsSchemas = {
     query_events: queryEventsArgsSchema,
     query_inbox: queryInboxArgsSchema,
@@ -383,16 +484,19 @@ export const overseerToolArgsSchemas = {
     get_worker_health: getWorkerHealthArgsSchema,
     explain_priority: explainPriorityArgsSchema,
     list_active_workers: listActiveWorkersArgsSchema,
-    query_open_loops: queryOpenLoopsArgsSchema
+    query_open_loops: queryOpenLoopsArgsSchema,
+    query_dispositions: queryDispositionsArgsSchema,
+    record_disposition: recordDispositionArgsSchema
 } as const satisfies Record<OverseerToolName, z.ZodTypeAny>
 
 export type OverseerToolCatalogEntry = {
     name: OverseerToolName
     description: string
-    readonly: true
+    /** `false` marks the single write tool (`record_disposition`); every other entry is read-only (R2). */
+    readonly: boolean
 }
 
-/** Catalog surfaced to the voice/system layer; all entries are read-only. */
+/** Catalog surfaced to the voice/system layer; exactly one entry (`record_disposition`) writes. */
 export const OVERSEER_TOOL_CATALOG: OverseerToolCatalogEntry[] = [
     {
         name: 'query_events',
@@ -433,14 +537,31 @@ export const OVERSEER_TOOL_CATALOG: OverseerToolCatalogEntry[] = [
         name: 'query_open_loops',
         description: 'The "what am I forgetting?" lens: threads whose latest worker status is NOT done (needs_decision / needs_review / blocked / failed / stalled) and never got closed, sorted coldest-first. "Waiting on You" (a decision the operator owes) is bucketed separately from half-finished work. Neglect-axis, not priority — use this for "what have I abandoned / forgotten?", not "what is most urgent?".',
         readonly: true
+    },
+    {
+        name: 'query_dispositions',
+        description: 'Read past operator dispositions (done / dismiss / snooze / open) with the as-seen snapshot. List mode returns recent rows; set groupBy (e.g. ["category","project"]) with minCount to cluster them — the shape standing-order discovery uses to find "you always do X to this kind of item".',
+        readonly: true
+    },
+    {
+        name: 'record_disposition',
+        description: 'WRITE: record the operator\'s explicit decision on one inbox item — done (resolve), dismiss (tombstone), snooze (needs snoozedUntil), or open (reopen). Only call this when the operator has clearly directed it in the conversation; never on your own judgement. Returns a tombstone to read back.',
+        readonly: false
     }
 ]
+
+/** Whether the Overseer may write dispositions — Stage 1 keystone gate (still no dispatch). */
+export function overseerCanDisposition(): boolean {
+    return OVERSEER_TOOL_CATALOG.some((t) => t.name === 'record_disposition' && !t.readonly)
+}
 
 export type OverseerIdentity = {
     id: string
     kind: typeof OVERSEER_SOURCE_KIND
-    /** Stage 0: read-only. The Overseer can inform but cannot dispatch. */
+    /** Still no dispatch — the Overseer never spawns or drives a worker. */
     canDispatch: false
+    /** Stage 1 keystone: the Overseer may record operator-directed dispositions on inbox items. */
+    canDisposition: boolean
     tools: OverseerToolCatalogEntry[]
 }
 
@@ -449,6 +570,7 @@ export function buildOverseerIdentity(): OverseerIdentity {
         id: OVERSEER_ENTITY_ID,
         kind: OVERSEER_SOURCE_KIND,
         canDispatch: false,
+        canDisposition: overseerCanDisposition(),
         tools: OVERSEER_TOOL_CATALOG
     }
 }
@@ -472,10 +594,11 @@ export function buildOverseerSystemPrompt(): string {
         'You hold a continuous view of the whole fleet and speak to the operator about it. You are not',
         'any single worker, and you never speak as one.',
         '',
-        '# What you can do (Stage 0 — read only)',
+        '# What you can do (Stage 1 — read + record dispositions)',
         '',
-        'You can READ the fleet and ANSWER questions. You have read-only tools and nothing else:',
+        'You can READ the fleet, ANSWER questions, and RECORD the operator\'s decisions on inbox items.',
         '',
+        'Read-only tools:',
         '- query_events — the events stream (blockers, completions, decisions, progress, errors).',
         '- query_inbox — what currently needs the operator: candidates, surfaced items, held items.',
         '- get_session_state — one session\'s observed state, activity, and reported state.',
@@ -484,10 +607,23 @@ export function buildOverseerSystemPrompt(): string {
         '- explain_priority — why an inbox item sits where it does, with its provenance.',
         '- list_active_workers — the current roster, filterable by project / state / age.',
         '- query_open_loops — the "what am I forgetting?" lens: cold threads whose latest status is not done.',
+        '- query_dispositions — past operator decisions (list, or groupBy+minCount to cluster them).',
         '',
-        'You CANNOT dispatch, message workers, spawn, confirm, or change any state. If the operator asks',
-        'you to act on a worker, say plainly that you can advise but cannot dispatch yet, and tell them',
-        'what you would recommend.',
+        'Write tool (the ONLY thing you can change):',
+        '- record_disposition — record the operator\'s decision on ONE inbox item: done (resolve),',
+        '  dismiss (tombstone), snooze (needs snoozedUntil), or open (reopen).',
+        '',
+        'You still CANNOT dispatch, message workers, spawn, or confirm anything on a worker. If the',
+        'operator asks you to act on a worker, say you can advise but cannot dispatch yet.',
+        '',
+        '# Recording a disposition (be careful — this writes)',
+        '',
+        '- Call record_disposition ONLY when the operator has clearly directed a decision on a specific',
+        '  item ("mark that done", "dismiss the PR-flood one", "snooze it till tomorrow"). Never decide',
+        '  on your own judgement, and never dispose of an item the operator was only asking ABOUT.',
+        '- If which item is ambiguous, ask which one before writing. Identify the item first (query_inbox',
+        '  / explain_priority) so you pass the right itemId.',
+        '- After it lands, read the returned tombstone back in one line so the operator knows it stuck.',
         '',
         '# How to answer',
         '',

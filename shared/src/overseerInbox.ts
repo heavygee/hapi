@@ -21,6 +21,33 @@ export const INBOX_OPERATOR_ACTIONS = [
 
 export type InboxOperatorAction = typeof INBOX_OPERATOR_ACTIONS[number]
 
+/**
+ * Subset of inbox operator actions exposed to Overseer disposition tools.
+ * `route` and `retry` are inbox-UI actions only — the brain must not emit them
+ * via `record_disposition` (they would map to `surfaced` without doing the work).
+ */
+export const OVERSEER_DISPOSITION_ACTIONS = ['done', 'dismiss', 'snooze', 'open'] as const
+
+export type OverseerDispositionAction = typeof OVERSEER_DISPOSITION_ACTIONS[number]
+
+/**
+ * The disposition predicate vocabulary (R8): the snapshot columns frozen on each disposition row
+ * ARE the standing-order match keys AND the discovery `GROUP BY` keys — one shared vocabulary.
+ * `query_dispositions` filters and clusters on exactly these columns.
+ */
+export const DISPOSITION_PREDICATE_COLUMNS = [
+    'action',
+    'source_kind',
+    'source_ref',
+    'event_type',
+    'category',
+    'project',
+    'artifact_kind',
+    'repo'
+] as const
+
+export type DispositionPredicateColumn = typeof DISPOSITION_PREDICATE_COLUMNS[number]
+
 export const INBOX_CATEGORIES = [
     'APPROVAL',
     'BLOCKED',
@@ -104,18 +131,24 @@ export function parseArtifactRefs(raw: string | null | undefined): ArtifactRef[]
     }
 }
 
-export function pickPrimaryArtifactTitle(artifactRefs: ArtifactRef[]): string | null {
+function artifactHasDisplayText(ref: ArtifactRef): boolean {
+    return Boolean(ref.title?.trim() || ref.ref?.trim() || ref.url?.trim())
+}
+
+export function pickPrimaryArtifact(artifactRefs: ArtifactRef[]): ArtifactRef | null {
     for (const kind of TITLE_PRIORITY_KINDS) {
-        const match = artifactRefs.find((ref) => ref.kind === kind)
-        if (!match) continue
-        if (match.title?.trim()) return match.title.trim()
-        if (match.ref?.trim()) return match.ref.trim()
-        if (match.url?.trim()) return match.url.trim()
+        const match = artifactRefs.find((ref) => ref.kind === kind && artifactHasDisplayText(ref))
+        if (match) return match
     }
-    for (const ref of artifactRefs) {
-        if (ref.title?.trim()) return ref.title.trim()
-        if (ref.ref?.trim()) return ref.ref.trim()
-    }
+    return artifactRefs.find(artifactHasDisplayText) ?? null
+}
+
+export function pickPrimaryArtifactTitle(artifactRefs: ArtifactRef[]): string | null {
+    const match = pickPrimaryArtifact(artifactRefs)
+    if (!match) return null
+    if (match.title?.trim()) return match.title.trim()
+    if (match.ref?.trim()) return match.ref.trim()
+    if (match.url?.trim()) return match.url.trim()
     return null
 }
 
