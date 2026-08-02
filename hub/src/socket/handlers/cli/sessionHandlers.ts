@@ -115,6 +115,8 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
         const msg = store.messages.addMessage(sid, content, localId)
         if (shouldRecordSessionActivity(content)) {
             onSessionActivity?.(sid, msg.createdAt)
+            // Local CLI operator turn — tip-of-surface inbox dies (#108).
+            store.inbox.supersedeForOperatorTurn(sid)
         }
 
         const todos = extractTodoWriteTodosFromMessageContent(content)

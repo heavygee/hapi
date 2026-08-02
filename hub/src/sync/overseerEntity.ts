@@ -53,6 +53,7 @@ import type { Session } from '@hapi/protocol/types'
 import type { EventStore, StoredSystemEvent } from '../store'
 import type { InboxStore, StoredInboxItem } from '../store/inboxStore'
 import type { MessageStore } from '../store/messageStore'
+import { shouldRecordSessionActivity } from './sessionActivity'
 
 export type OverseerEntityDeps = {
     events: EventStore
@@ -402,6 +403,10 @@ export class OverseerEntity {
      * events table and never filters on `session.active`. Deleted sessions drop
      * out automatically because `deleteSession` detaches their events
      * (`related_session_id = NULL`) and the substrate query requires it non-null.
+     *
+     * Cross-session neglect only (#108): sessions the operator has already
+     * turned on since the open-loop event are excluded — within-session memory
+     * is the agent's job, not the Overseer's.
      */
     queryOpenLoops(args: QueryOpenLoopsArgs = {}): OverseerOpenLoopsResult {
         const now = this.now()
@@ -432,11 +437,18 @@ export class OverseerEntity {
             const ageMs = Math.max(0, now - event.ts)
             if (ageMs < minAgeMs) continue
 
+            const sessionId = event.relatedSessionId ?? ''
+            if (!sessionId) continue
+            // "What am I forgetting?" = whole sessions still needing attention that
+            // the operator has not turned on since that need (#108). Intra-session
+            // memory stays with the agent — if you already re-entered, it is not forgotten.
+            if (this.sessionHasOperatorTurnSince(sessionId, event.ts)) continue
+
             const bucket = openLoopBucket(event.eventType)
             if (args.bucket && bucket !== args.bucket) continue
 
             loops.push({
-                sessionId: event.relatedSessionId ?? '',
+                sessionId,
                 name: identity.name,
                 project: identity.project,
                 flavor: identity.flavor,
@@ -756,6 +768,17 @@ export class OverseerEntity {
             sessionId,
             error: `No session matching "${sessionId}" — nothing relayed.`
         }
+    }
+
+    /**
+     * True when the operator authored a human user-message after `sinceTs`
+     * (same predicate as session activity / inbox supersede — #108).
+     */
+    private sessionHasOperatorTurnSince(sessionId: string, sinceTs: number): boolean {
+        const recent = this.messages.getMessages(sessionId, 80)
+        return recent.some(
+            (message) => message.createdAt > sinceTs && shouldRecordSessionActivity(message.content)
+        )
     }
 
     private buildTombstone(action: string, statusAfter: string, item: StoredInboxItem): string {

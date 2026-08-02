@@ -338,4 +338,41 @@ describe('Overseer inbox schema (init-gated, not SCHEMA_VERSION)', () => {
         expect(rows[0]?.artifactKind).toBe('github_pr')
         expect(rows[0]?.repo).toBe('heavygee/hapi')
     })
+
+    it('operator turn supersedes all active inbox items for that session (#108)', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('turn-super', { name: 's' }, null, 'default')
+        const event = store.events.insert({
+            ts: 1000,
+            sourceKind: 'worker',
+            eventType: 'blocked',
+            attentionCandidate: 1,
+            summary: 'blocked',
+            relatedSessionId: session.id,
+            payloadJson: payloadForSession(session),
+            provenance: 'test'
+        })
+        const item = store.inbox.promoteAttentionEvent(event!)!
+        expect(item.status).toBe('new')
+
+        const count = store.inbox.supersedeForOperatorTurn(session.id)
+        expect(count).toBe(1)
+        expect(store.inbox.getById(item.id)?.status).toBe('obsoleted')
+        expect(store.inbox.findActiveForSession(session.id)).toBeNull()
+
+        // A newer attention event may re-promote after the turn.
+        const later = store.events.insert({
+            ts: 2000,
+            sourceKind: 'worker',
+            eventType: 'needs_decision',
+            attentionCandidate: 1,
+            summary: 'new ask',
+            relatedSessionId: session.id,
+            payloadJson: payloadForSession(session),
+            provenance: 'test'
+        })
+        const again = store.inbox.promoteAttentionEvent(later!)
+        expect(again?.status).toBe('new')
+        expect(again?.id).not.toBe(item.id)
+    })
 })
