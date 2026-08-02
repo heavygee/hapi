@@ -473,6 +473,8 @@ export class MessageService {
             payload.scheduledAt ?? null
         )
         this.onSessionActivity?.(sessionId, msg.createdAt)
+        // Operator turn (web / telegram / ping_session) — tip-of-surface inbox dies (#108).
+        this.store.inbox.supersedeForOperatorTurn(sessionId)
 
         // Only emit to CLI if the message is not scheduled for the future.
         // Mature or non-scheduled messages go through immediately; future scheduled

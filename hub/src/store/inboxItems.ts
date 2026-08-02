@@ -309,6 +309,46 @@ export function findInboxItemForSessionDedup(db: Database, sessionId: string): S
     return row ? mapRow(row) : null
 }
 
+/**
+ * Active + sleeping-snoozed rows for a session (dedup set). Used when an
+ * operator turn supersedes tip-of-surface interrupts for that session.
+ */
+export function listActiveInboxItemsForSession(db: Database, sessionId: string): StoredInboxItem[] {
+    const now = Date.now()
+    wakeExpiredSnoozes(db, now)
+
+    const rows = db.prepare(`
+        SELECT * FROM inbox_items
+        WHERE related_session_id = ?
+          AND status IN ('new', 'surfaced', 'deferred', 'snoozed')
+        ORDER BY updated_at DESC
+    `).all(sessionId) as InboxItemRow[]
+    return rows.map(mapRow)
+}
+
+export const SUPERSEDED_BY_OPERATOR_TURN = 'superseded_by_operator_turn'
+
+/**
+ * Cross-session canon: an operator turn on S retires tip-of-surface inbox
+ * cards for S. Resume alone does not. Agent-only messages do not.
+ * Returns how many items were dismissed.
+ */
+export function supersedeInboxItemsForOperatorTurn(
+    db: Database,
+    sessionId: string,
+    feedback: string = SUPERSEDED_BY_OPERATOR_TURN
+): number {
+    const trimmed = sessionId.trim()
+    if (!trimmed) return 0
+    const items = listActiveInboxItemsForSession(db, trimmed)
+    let count = 0
+    for (const item of items) {
+        const updated = recordInboxOperatorAction(db, item.id, 'dismiss', feedback, null)
+        if (updated) count += 1
+    }
+    return count
+}
+
 export function promoteAttentionEvent(
     db: Database,
     event: StoredSystemEvent

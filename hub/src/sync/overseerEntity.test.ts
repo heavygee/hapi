@@ -285,6 +285,39 @@ describe('OverseerEntity read-only tools', () => {
         expect(o.queryOpenLoops({ limit: 1 }).openLoops.length).toBe(1)
     })
 
+    it('query_open_loops excludes sessions the operator has turned on since the need (#108)', () => {
+        const store = new Store(':memory:')
+        const now = Date.now()
+        const day = 86_400_000
+        const session = store.sessions.getOrCreateSession(
+            'touched',
+            { flavor: 'codex', path: '/tmp/web', name: 'peer' },
+            null,
+            'default'
+        )
+        store.events.insert({
+            ts: now - 5 * day,
+            sourceKind: 'worker',
+            eventType: 'needs_decision',
+            attentionCandidate: 1,
+            severity: 4,
+            summary: 'needs you',
+            relatedSessionId: session.id,
+            payloadJson: JSON.stringify({
+                notify_summary: { status: 'needs_decision', action: 'pick one' },
+                session: { id: session.id, project: 'web', name: 'peer' }
+            })
+        })
+        // Operator turn after the open-loop event → not forgotten.
+        store.messages.addMessage(session.id, {
+            role: 'user',
+            content: { type: 'text', text: 'continuing this thread' }
+        })
+
+        const o = overseer(buildEngine(store))
+        expect(o.queryOpenLoops({}).openLoops.map((l) => l.sessionId)).not.toContain(session.id)
+    })
+
     it('recordConvoTurn writes a memory-bearing convo_turn event (never an inbox item)', () => {
         const { store, engine } = makeEngine()
         const inboxBefore = store.inbox.count()

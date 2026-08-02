@@ -11,6 +11,7 @@ import {
     promoteAttentionEvent,
     recordInboxOperatorAction,
     repointSessionInboxItems,
+    supersedeInboxItemsForOperatorTurn,
     type DispositionCluster,
     type DispositionGroupColumn,
     type ListInboxItemsOptions,
@@ -42,6 +43,14 @@ export class InboxStore {
 
     findActiveForSession(sessionId: string): StoredInboxItem | null {
         return findActiveInboxItemForSession(this.db, sessionId)
+    }
+
+    /**
+     * Operator turn on this session → dismiss tip-of-surface inbox cards (#108).
+     * Resume without a turn does nothing; call only from human user-message paths.
+     */
+    supersedeForOperatorTurn(sessionId: string): number {
+        return supersedeInboxItemsForOperatorTurn(this.db, sessionId)
     }
 
     recordOperatorAction(

@@ -473,6 +473,14 @@ export class SyncEngine {
         this.sessionCache.recordSessionActivity(sessionId, updatedAt)
     }
 
+    /**
+     * Operator authored a turn on this session — retire cross-session inbox
+     * interrupts for it (#108). Not called on resume-alone or agent-only traffic.
+     */
+    onOperatorTurn(sessionId: string): void {
+        this.store.inbox.supersedeForOperatorTurn(sessionId)
+    }
+
     handleMachineAlive(payload: { machineId: string; time: number; health?: unknown }): void {
         this.machineCache.handleMachineAlive(payload)
     }
