@@ -40,7 +40,15 @@ export function OverseerChatDebugControls() {
     useEffect(() => {
         if (!open || !api || profiles.length > 0) return
         void api.fetchOverseerBrains()
-            .then((res) => setProfiles(res.profiles))
+            .then((res) => {
+                setProfiles(res.profiles)
+                // Prefer hub active brain — do not stick on hard-coded "default" when
+                // the operator saved a working profile (e.g. local loopback).
+                if (res.active?.profile) {
+                    setSelectedProfile(res.active.profile)
+                    setSelectedModel(res.active.model ?? '')
+                }
+            })
             .catch(() => { /* brains list is optional chrome */ })
     }, [open, api, profiles.length])
 
