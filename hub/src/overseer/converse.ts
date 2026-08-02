@@ -8,13 +8,17 @@
  */
 
 import {
+    applyFocusFromOperatorText,
+    applyFocusFromToolResolve,
     buildOverseerOpenAiTools,
     buildOverseerSystemPrompt,
     fingerprintWriteToolCall,
+    formatConverseFocusDirective,
     isOverseerWriteTool,
     isWriteToolAuthorized,
     isWriteToolCallAuthorized,
     resolveOverseerWriteAuthorization,
+    type OverseerConverseFocus,
     type OverseerConverseMessage,
     type OverseerToolName,
     type OverseerToolTraceEntry,
@@ -114,22 +118,41 @@ export async function runOverseerConverse(params: {
     signal?: AbortSignal
     /** Explicit client opt-in for write tools (admin/voice confirm). */
     allowWrites?: boolean
-}): Promise<{ reply: string; toolTrace: OverseerToolTraceEntry[] }> {
+    /** Hub-owned subject from prior turns (session and/or inbox item). */
+    focus?: OverseerConverseFocus | null
+}): Promise<{
+    reply: string
+    toolTrace: OverseerToolTraceEntry[]
+    focus: OverseerConverseFocus | null
+}> {
     const { overseer, config, messages, maxIterations = 6, signal, allowWrites } = params
 
     const latestOperatorText = [...messages].reverse().find((m) => m.role === 'operator')?.content ?? ''
-    const writeAuth: OverseerWriteAuthorization = resolveOverseerWriteAuthorization({
-        latestOperatorText,
-        allowWrites
-    })
+    let focus = applyFocusFromOperatorText(params.focus ?? null, latestOperatorText)
+
+    const writeAuthFor = (): OverseerWriteAuthorization =>
+        resolveOverseerWriteAuthorization({
+            latestOperatorText,
+            allowWrites,
+            focus
+        })
 
     const tools = (buildOverseerOpenAiTools() as OverseerOpenAiToolLike[]).filter((tool) => {
         const name = tool.function?.name ?? ''
-        return isWriteToolAuthorized(name, writeAuth)
+        return isWriteToolAuthorized(name, writeAuthFor())
     })
     const clockLine = `Server time now: ${new Date().toISOString()} (epoch ms ${Date.now()}, timezone ${Intl.DateTimeFormat().resolvedOptions().timeZone}). Relative snoozes must use absolute snoozedUntil epoch ms from this clock.`
+    const focusDirective = formatConverseFocusDirective(focus)
+    const systemContent = [
+        buildOverseerSystemPrompt(),
+        GROUNDING_DIRECTIVE,
+        focusDirective,
+        `# Clock\n\n${clockLine}`
+    ]
+        .filter((block): block is string => Boolean(block && block.trim()))
+        .join('\n\n')
     const convo: OpenAiChatMessage[] = [
-        { role: 'system', content: `${buildOverseerSystemPrompt()}\n\n${GROUNDING_DIRECTIVE}\n\n# Clock\n\n${clockLine}` },
+        { role: 'system', content: systemContent },
         ...messages.map((m): OpenAiChatMessage => ({
             role: m.role === 'operator' ? 'user' : 'assistant',
             content: m.content
@@ -148,6 +171,8 @@ export async function runOverseerConverse(params: {
     // it to verify. If it still declines, the question genuinely needed no tool.
     let nudged = false
 
+    const finish = (reply: string) => ({ reply, toolTrace, focus })
+
     for (let iter = 0; iter < maxIterations; iter++) {
         let message: OpenAiChatMessage
         try {
@@ -156,7 +181,7 @@ export async function runOverseerConverse(params: {
             // Irreversible writes already landed — return their audit trail so the
             // route can record the turn and the operator does not duplicate-retry.
             if (hasSuccessfulWrite(toolTrace)) {
-                return { reply: fallbackReplyAfterWriteSuccess(writeConfirmations), toolTrace }
+                return finish(fallbackReplyAfterWriteSuccess(writeConfirmations))
             }
             throw error
         }
@@ -172,7 +197,7 @@ export async function runOverseerConverse(params: {
                 })
                 continue
             }
-            return { reply: (message.content ?? '').trim(), toolTrace }
+            return finish((message.content ?? '').trim())
         }
 
         // Execute the requested tools and feed the results back as a plain USER
@@ -201,7 +226,7 @@ export async function runOverseerConverse(params: {
                 resultLines.push(`${name}(${argsRaw}) => ${JSON.stringify({ error: deferred })}`)
                 continue
             }
-            const authz = isWriteToolCallAuthorized(name, args, writeAuth)
+            const authz = isWriteToolCallAuthorized(name, args, writeAuthFor())
             if (!authz.ok) {
                 toolTrace.push({ tool: name, args, ok: false, error: authz.error })
                 resultLines.push(`${name}(${argsRaw}) => ${JSON.stringify({ error: authz.error })}`)
@@ -227,6 +252,14 @@ export async function runOverseerConverse(params: {
                     ok,
                     ...(ok ? {} : { error: toolResultError(result) })
                 })
+                if (ok) {
+                    focus = applyFocusFromToolResolve(focus, {
+                        tool: name,
+                        ok: true,
+                        args,
+                        result
+                    })
+                }
                 if (ok && isOverseerWriteTool(name)) {
                     consumedWriteFingerprints.add(fingerprintWriteToolCall(name, args))
                     const tombstone = writeResultTombstone(result)
@@ -255,10 +288,12 @@ export async function runOverseerConverse(params: {
             messages: [...convo, { role: 'user', content: 'Answer now in plain text, no more tools.' }],
             signal
         })
-        return { reply: (finalMsg.content ?? '').trim() || 'I gathered the data but could not compose an answer.', toolTrace }
+        return finish(
+            (finalMsg.content ?? '').trim() || 'I gathered the data but could not compose an answer.'
+        )
     } catch (error) {
         if (hasSuccessfulWrite(toolTrace)) {
-            return { reply: fallbackReplyAfterWriteSuccess(writeConfirmations), toolTrace }
+            return finish(fallbackReplyAfterWriteSuccess(writeConfirmations))
         }
         throw error
     }

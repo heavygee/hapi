@@ -1,4 +1,5 @@
 import type { Database } from 'bun:sqlite'
+import { parseConverseFocus, type OverseerConverseFocus } from '@hapi/protocol'
 
 /**
  * Tiny key/value settings table for hub-side runtime config that must survive a restart and be
@@ -23,10 +24,16 @@ export type ActiveBrainSetting = {
 }
 
 const ACTIVE_BRAIN_KEY = 'active_brain'
+const CONVERSE_FOCUS_KEY = 'converse_focus'
 
 function activeBrainKey(namespace: string): string {
     const ns = namespace.trim() || 'default'
     return ns === 'default' ? ACTIVE_BRAIN_KEY : `${ACTIVE_BRAIN_KEY}:${ns}`
+}
+
+function converseFocusKey(namespace: string): string {
+    const ns = namespace.trim() || 'default'
+    return ns === 'default' ? CONVERSE_FOCUS_KEY : `${CONVERSE_FOCUS_KEY}:${ns}`
 }
 
 export class SettingsStore {
@@ -71,5 +78,32 @@ export class SettingsStore {
 
     clearActiveBrain(namespace = 'default'): void {
         this.delete(activeBrainKey(namespace))
+    }
+
+    /** Hub-owned conversational focus for talk-to (session and/or inbox item). */
+    getConverseFocus(namespace = 'default'): OverseerConverseFocus | null {
+        const raw = this.get(converseFocusKey(namespace))
+        if (!raw) return null
+        try {
+            return parseConverseFocus(JSON.parse(raw) as unknown)
+        } catch {
+            return null
+        }
+    }
+
+    setConverseFocus(value: OverseerConverseFocus, namespace = 'default'): void {
+        this.set(
+            converseFocusKey(namespace),
+            JSON.stringify({
+                sessionId: value.sessionId,
+                itemId: value.itemId,
+                source: value.source,
+                updatedAt: value.updatedAt
+            })
+        )
+    }
+
+    clearConverseFocus(namespace = 'default'): void {
+        this.delete(converseFocusKey(namespace))
     }
 }

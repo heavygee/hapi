@@ -79,6 +79,13 @@ export type OverseerConverseResponse = {
     hydratedTurns?: number
     /** True when older turns were dropped to stay under the history budget. */
     truncated?: boolean
+    /** Hub-owned conversational focus after this turn (session and/or inbox item). */
+    focus?: {
+        sessionId: string | null
+        itemId: number | null
+        source: 'operator' | 'tool_resolve' | 'client'
+        updatedAt: number
+    } | null
 }
 
 /** One durable operator↔Overseer exchange for transport hydrate (UI / voice attach). */

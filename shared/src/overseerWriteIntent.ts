@@ -9,9 +9,13 @@
  *
  * Grants are bound to extracted targets/payloads when present so a later
  * injected tool call cannot retarget a legitimate "ping session X" grant.
+ *
+ * Hub-owned conversational focus supplies targets for anaphoric follow-ups
+ * ("tell it to…") when the latest line has write intent but no fresh ids.
  */
 
 import { isOverseerWriteTool, type OverseerWriteToolName } from './overseerEntity'
+import type { OverseerConverseFocus } from './overseerConverseFocus'
 
 export type OverseerWriteAuthorization = {
     allowed: ReadonlySet<OverseerWriteToolName>
@@ -77,25 +81,50 @@ export function detectOperatorWriteTools(operatorText: string): Set<OverseerWrit
     return allowed
 }
 
+function mergeFocusTargets(
+    fromText: { sessionIdPrefixes: string[]; itemIds: number[] },
+    focus: OverseerConverseFocus | null | undefined
+): { sessionIdPrefixes: string[]; itemIds: number[] } {
+    const sessionIdPrefixes = [...fromText.sessionIdPrefixes]
+    const itemIds = [...fromText.itemIds]
+    if (!focus) return { sessionIdPrefixes, itemIds }
+
+    // Line-local ids win for binding; focus fills gaps for anaphora.
+    if (sessionIdPrefixes.length === 0 && focus.sessionId) {
+        sessionIdPrefixes.push(focus.sessionId.toLowerCase())
+    }
+    if (itemIds.length === 0 && focus.itemId != null) {
+        itemIds.push(focus.itemId)
+    }
+    return { sessionIdPrefixes, itemIds }
+}
+
 export function resolveOverseerWriteAuthorization(opts: {
     latestOperatorText: string
     allowWrites?: boolean
+    /** Hub-owned subject from prior turns / successful tool resolves. */
+    focus?: OverseerConverseFocus | null
 }): OverseerWriteAuthorization {
     const text = opts.latestOperatorText
+    const fromText = {
+        sessionIdPrefixes: extractSessionIdPrefixes(text),
+        itemIds: extractItemIds(text)
+    }
+    const merged = mergeFocusTargets(fromText, opts.focus)
     if (opts.allowWrites === true) {
         return {
             allowed: new Set<OverseerWriteToolName>(['ping_session', 'record_disposition']),
             explicitClientFlag: true,
-            sessionIdPrefixes: extractSessionIdPrefixes(text),
-            itemIds: extractItemIds(text),
+            sessionIdPrefixes: merged.sessionIdPrefixes,
+            itemIds: merged.itemIds,
             messageSnippets: extractQuotedSnippets(text)
         }
     }
     return {
         allowed: detectOperatorWriteTools(text),
         explicitClientFlag: false,
-        sessionIdPrefixes: extractSessionIdPrefixes(text),
-        itemIds: extractItemIds(text),
+        sessionIdPrefixes: merged.sessionIdPrefixes,
+        itemIds: merged.itemIds,
         messageSnippets: extractQuotedSnippets(text)
     }
 }
@@ -140,7 +169,8 @@ export function isWriteToolCallAuthorized(
         if (!hasTargetGrant) {
             return {
                 ok: false,
-                error: 'relay requires an explicit session id / item id in the operator message (or allowWrites)'
+                error:
+                    'relay requires a focused session/item (or an explicit id in the operator message / allowWrites)'
             }
         }
         const sessionOk = sessionId.length > 0 && sessionIdMatchesGrant(sessionId, auth.sessionIdPrefixes)
@@ -160,7 +190,8 @@ export function isWriteToolCallAuthorized(
         if (auth.itemIds.length === 0) {
             return {
                 ok: false,
-                error: 'disposition requires an explicit item id in the operator message (or allowWrites)'
+                error:
+                    'disposition requires a focused item (or an explicit item id in the operator message / allowWrites)'
             }
         }
         if (itemId == null || !auth.itemIds.includes(itemId)) {

@@ -231,12 +231,15 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         const overseer = engine.getOverseer(c.get('namespace'))
+        const namespace = c.get('namespace')
+        const settings = engine.getSettings()
         const assembled = assembleOverseerConverseMessages({
             overseer,
             clientMessages
         })
         const messages = assembled.messages
         const lastOperator = [...messages].reverse().find((m) => m.role === 'operator')?.content ?? ''
+        const priorFocus = settings.getConverseFocus(namespace)
 
         const active = getSanitizedActiveBrain(engine, c.get('namespace'))
         const config = resolveBrainConfig(process.env, resolveBrainSelection(active, {
@@ -256,7 +259,7 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
             persistOverseerConvoExchange(overseer, assembled, {
                 operatorText: lastOperator,
                 overseerText: reply,
-                relatedSessionId: parsed.data.relatedSessionId ?? null
+                relatedSessionId: parsed.data.relatedSessionId ?? priorFocus?.sessionId ?? null
             })
             return c.json({
                 reply,
@@ -264,22 +267,28 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 model: null,
                 brainOnline: false,
                 hydratedTurns: assembled.hydratedTurns,
-                truncated: assembled.truncated
+                truncated: assembled.truncated,
+                focus: priorFocus
             })
         }
 
         try {
-            const { reply, toolTrace } = await runOverseerConverse({
+            const { reply, toolTrace, focus } = await runOverseerConverse({
                 overseer,
                 config,
                 messages,
-                allowWrites: parsed.data.allowWrites
+                allowWrites: parsed.data.allowWrites,
+                focus: priorFocus
             })
+
+            if (focus) settings.setConverseFocus(focus, namespace)
+            else settings.clearConverseFocus(namespace)
 
             persistOverseerConvoExchange(overseer, assembled, {
                 operatorText: lastOperator,
                 overseerText: reply,
-                relatedSessionId: parsed.data.relatedSessionId ?? null,
+                relatedSessionId:
+                    parsed.data.relatedSessionId ?? focus?.sessionId ?? null,
                 toolCalls: toolTrace
                     .filter((t) => t.ok)
                     .map((t) => ({ tool: t.tool, argsSummary: JSON.stringify(t.args).slice(0, 500) }))
@@ -291,7 +300,8 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 model: config.model,
                 brainOnline: true,
                 hydratedTurns: assembled.hydratedTurns,
-                truncated: assembled.truncated
+                truncated: assembled.truncated,
+                focus
             })
         } catch (error) {
             if (error instanceof BrainUnavailableError) {
@@ -313,7 +323,7 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 persistOverseerConvoExchange(overseer, assembled, {
                     operatorText: lastOperator,
                     overseerText: reply,
-                    relatedSessionId: parsed.data.relatedSessionId ?? null
+                    relatedSessionId: parsed.data.relatedSessionId ?? priorFocus?.sessionId ?? null
                 })
                 return c.json({
                     reply,
@@ -321,7 +331,8 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
                     model: config.model,
                     brainOnline: error.reachable,
                     hydratedTurns: assembled.hydratedTurns,
-                    truncated: assembled.truncated
+                    truncated: assembled.truncated,
+                    focus: priorFocus
                 })
             }
             throw error

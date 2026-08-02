@@ -285,4 +285,119 @@ describe('runOverseerConverse', () => {
         expect(toolTrace[0]).toMatchObject({ tool: 'ping_session', ok: false })
         expect(toolTrace[0]?.error).toMatch(/not authorized/i)
     })
+
+    it('authorizes anaphoric ping_session from hub focus without ids in the follow-up line', async () => {
+        const sessionId = '6cd8d0c3-aaaa-bbbb-cccc-ddddeeeeffff'
+        const pingSession = vi.fn(async () => ({
+            ok: true,
+            sessionId,
+            sessionName: 'W1.8 worker',
+            project: 'hapi',
+            resumed: true,
+            tombstone: `Relayed to W1.8 worker (${sessionId.slice(0, 8)}) [resumed]: "go ahead"`
+        }))
+        const overseer = {
+            ...fakeOverseer,
+            pingSession
+        } as unknown as OverseerEntity
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(chatResponse({
+                role: 'assistant',
+                content: '',
+                tool_calls: [{
+                    id: 'c1',
+                    type: 'function',
+                    function: {
+                        name: 'ping_session',
+                        arguments: JSON.stringify({
+                            sessionId,
+                            itemId: 118,
+                            message: 'go ahead — tear down and rebuild is fine'
+                        })
+                    }
+                }]
+            }))
+            .mockResolvedValueOnce(chatResponse({
+                role: 'assistant',
+                content: 'Relayed to the W1.8 worker.'
+            }))
+        setFetch(fetchMock)
+
+        const { toolTrace, focus } = await runOverseerConverse({
+            overseer,
+            config,
+            messages: [{
+                role: 'operator',
+                content: 'tell it to go ahead - explain tear down and rebuild is the point'
+            }],
+            focus: {
+                sessionId,
+                itemId: 118,
+                source: 'tool_resolve',
+                updatedAt: 1
+            }
+        })
+
+        expect(pingSession).toHaveBeenCalledOnce()
+        expect(toolTrace[0]).toMatchObject({ tool: 'ping_session', ok: true })
+        expect(focus?.sessionId).toBe(sessionId)
+        expect(focus?.itemId).toBe(118)
+    })
+
+    it('sets focus from explain_priority and keeps multi-item inbox dumps from retargeting', async () => {
+        const sessionId = '6cd8d0c3-aaaa-bbbb-cccc-ddddeeeeffff'
+        const overseer = {
+            ...fakeOverseer,
+            explainPriority: () => ({
+                inboxItemId: 118,
+                relatedSessionId: sessionId,
+                title: 'W1.8 acceptance'
+            }),
+            queryInbox: () => ({
+                items: [
+                    { id: 1, title: 'noise', relatedSessionId: '96f67085-1111-2222-3333-444455556666' },
+                    { id: 118, title: 'W1.8', relatedSessionId: sessionId }
+                ],
+                candidates: [],
+                surfaced: [],
+                held: []
+            })
+        } as unknown as OverseerEntity
+
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(chatResponse({
+                role: 'assistant',
+                content: '',
+                tool_calls: [{
+                    id: 'c1',
+                    type: 'function',
+                    function: { name: 'explain_priority', arguments: '{"itemId":118}' }
+                }]
+            }))
+            .mockResolvedValueOnce(chatResponse({
+                role: 'assistant',
+                content: '',
+                tool_calls: [{
+                    id: 'c2',
+                    type: 'function',
+                    function: { name: 'query_inbox', arguments: '{"limit":25}' }
+                }]
+            }))
+            .mockResolvedValueOnce(chatResponse({
+                role: 'assistant',
+                content: 'Item 118 is the W1.8 worker.'
+            }))
+        setFetch(fetchMock)
+
+        const { focus } = await runOverseerConverse({
+            overseer,
+            config,
+            messages: [{ role: 'operator', content: 'query it then' }],
+            focus: null
+        })
+
+        expect(focus?.itemId).toBe(118)
+        expect(focus?.sessionId).toBe(sessionId)
+        expect(focus?.source).toBe('tool_resolve')
+    })
 })

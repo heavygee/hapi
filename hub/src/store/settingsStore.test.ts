@@ -43,6 +43,36 @@ describe('SettingsStore', () => {
         expect(s.getActiveBrain()).toBeNull()
     })
 
+    it('round-trips conversational focus per namespace', () => {
+        const s = freshStore()
+        expect(s.getConverseFocus()).toBeNull()
+        s.setConverseFocus({
+            sessionId: '6cd8d0c3-aaaa-bbbb-cccc-ddddeeeeffff',
+            itemId: 118,
+            source: 'tool_resolve',
+            updatedAt: 42
+        })
+        expect(s.getConverseFocus()).toEqual({
+            sessionId: '6cd8d0c3-aaaa-bbbb-cccc-ddddeeeeffff',
+            itemId: 118,
+            source: 'tool_resolve',
+            updatedAt: 42
+        })
+        s.setConverseFocus(
+            {
+                sessionId: 'other',
+                itemId: null,
+                source: 'operator',
+                updatedAt: 99
+            },
+            'ns-a'
+        )
+        expect(s.getConverseFocus('ns-a')?.sessionId).toBe('other')
+        expect(s.getConverseFocus()?.itemId).toBe(118)
+        s.clearConverseFocus()
+        expect(s.getConverseFocus()).toBeNull()
+    })
+
     it('DDL is idempotent', () => {
         const db = new Database(':memory:', { strict: true })
         ensureOverseerSettingsSchema(db)
