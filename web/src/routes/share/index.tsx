@@ -121,6 +121,7 @@ export default function SharePage() {
     const machineLabelsById = useMachineLabels(machines)
     const { sessionPreviewLimit } = useSessionPreviewLimit()
     const [searchQuery, setSearchQuery] = useState('')
+    const [searchExpanded, setSearchExpanded] = useState(true)
     const [customStart, setCustomStart] = useState('')
     const [customEnd, setCustomEnd] = useState('')
     const timeRange = useMemo(
@@ -333,6 +334,8 @@ export default function SharePage() {
                                 setCustomStart(start)
                                 setCustomEnd(end)
                             }}
+                            expanded={searchExpanded}
+                            onExpandedChange={setSearchExpanded}
                         />
                         {pickerSessions === null ? (
                             <LoadingState label={t('share.loading')} className="text-sm py-4" />
