@@ -413,7 +413,7 @@ describe('runOverseerConverse', () => {
         expect(focus?.source).toBe('tool_resolve')
     })
 
-    it('unlocks ping mid-turn after a subject-resolving read establishes focus', async () => {
+    it('persists mid-turn tool focus for the next turn but does not unlock same-turn writes', async () => {
         const sessionId = '6cd8d0c3-aaaa-bbbb-cccc-ddddeeeeffff'
         const pingSession = vi.fn(async () => ({
             ok: true,
@@ -461,7 +461,7 @@ describe('runOverseerConverse', () => {
             }))
             .mockResolvedValueOnce(chatResponse({
                 role: 'assistant',
-                content: 'Relayed.'
+                content: 'Need focus from a prior turn to relay.'
             }))
         setFetch(fetchMock)
 
@@ -473,8 +473,10 @@ describe('runOverseerConverse', () => {
         })
 
         expect(toolTrace.find((t) => t.tool === 'explain_priority')?.ok).toBe(true)
-        expect(toolTrace.find((t) => t.tool === 'ping_session')?.ok).toBe(true)
-        expect(pingSession).toHaveBeenCalledOnce()
+        expect(toolTrace.find((t) => t.tool === 'ping_session')?.ok).toBe(false)
+        expect(pingSession).not.toHaveBeenCalled()
+        // Focus is ready for the *next* operator turn.
         expect(focus?.itemId).toBe(118)
+        expect(focus?.sessionId).toBe(sessionId)
     })
 })

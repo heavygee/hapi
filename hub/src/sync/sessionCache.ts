@@ -803,6 +803,8 @@ export class SessionCache {
             throw new Error('Failed to delete session')
         }
 
+        this.store.settings.clearConverseFocusIfSession(sessionId, session.namespace)
+
         this.sessions.delete(sessionId)
         this.lastBroadcastAtBySessionId.delete(sessionId)
         this.todoBackfillAttemptedSessionIds.delete(sessionId)
@@ -950,6 +952,7 @@ export class SessionCache {
         if (options.deleteOldSession) {
             this.store.events.repointSession(oldSessionId, newSessionId)
             this.store.inbox.repointSession(oldSessionId, newSessionId)
+            this.store.settings.repointConverseFocusSession(oldSessionId, newSessionId, namespace)
             const deleted = this.store.sessions.deleteSession(oldSessionId, namespace)
             if (!deleted) {
                 throw new Error('Failed to delete old session during merge')

@@ -260,6 +260,7 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 profile: parsed.data.profile ?? null
             })
             const reply = 'The Overseer brain is not configured on this hub (set OVERSEER_BRAIN_URL). I can still show raw events and inbox items, but I cannot answer in conversation yet.'
+            if (priorFocus) settings.setConverseFocusIfNewer(priorFocus, namespace)
             persistOverseerConvoExchange(overseer, assembled, {
                 operatorText: lastOperator,
                 overseerText: reply,
@@ -285,8 +286,11 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 focus: priorFocus
             })
 
-            if (focus) settings.setConverseFocus(focus, namespace)
-            else settings.clearConverseFocus(namespace)
+            if (focus) {
+                settings.setConverseFocusIfNewer(focus, namespace)
+            }
+            // Do not clear durable focus on an empty result — a concurrent newer
+            // turn may have already advanced it (lost-update race).
 
             persistOverseerConvoExchange(overseer, assembled, {
                 operatorText: lastOperator,
@@ -324,6 +328,7 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 const reply = error.reachable
                     ? 'I reached the Overseer brain but could not complete the tool conversation (request error). This is a converse-loop issue, not the brain being offline — please retry, and flag it if it persists.'
                     : 'The Overseer brain is offline right now. Try again shortly — your events and inbox are still being captured.'
+                if (priorFocus) settings.setConverseFocusIfNewer(priorFocus, namespace)
                 persistOverseerConvoExchange(overseer, assembled, {
                     operatorText: lastOperator,
                     overseerText: reply,

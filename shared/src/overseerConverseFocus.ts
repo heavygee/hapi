@@ -78,12 +78,16 @@ export function applyFocusFromClientSession(
 ): OverseerConverseFocus | null {
     const id = typeof sessionId === 'string' ? sessionId.trim() : ''
     if (!id) return previous
-    return buildFocus({
-        previous,
+    if (previous?.sessionId && previous.sessionId.toLowerCase() === id.toLowerCase()) {
+        return previous
+    }
+    // Client thread wins over durable focus — clear item (may belong to the old session).
+    return {
         sessionId: id,
+        itemId: null,
         source: 'client',
-        now
-    })
+        updatedAt: now
+    }
 }
 
 function sessionFromResult(result: unknown): string | null {
@@ -91,11 +95,21 @@ function sessionFromResult(result: unknown): string | null {
     if (typeof result.sessionId === 'string' && result.sessionId.trim()) {
         return result.sessionId.trim()
     }
-    if (isObj(result.state) && typeof result.state.id === 'string' && result.state.id.trim()) {
-        return result.state.id.trim()
+    if (isObj(result.state)) {
+        if (typeof result.state.sessionId === 'string' && result.state.sessionId.trim()) {
+            return result.state.sessionId.trim()
+        }
+        if (typeof result.state.id === 'string' && result.state.id.trim()) {
+            return result.state.id.trim()
+        }
     }
-    if (isObj(result.health) && typeof result.health.id === 'string' && result.health.id.trim()) {
-        return result.health.id.trim()
+    if (isObj(result.health)) {
+        if (typeof result.health.sessionId === 'string' && result.health.sessionId.trim()) {
+            return result.health.sessionId.trim()
+        }
+        if (typeof result.health.id === 'string' && result.health.id.trim()) {
+            return result.health.id.trim()
+        }
     }
     if (
         isObj(result.explanation) &&
@@ -137,6 +151,7 @@ export function applyFocusFromToolResolve(
     const result = event.result
 
     if (tool === 'explain_priority') {
+        if (!isObj(result) || result.explanation == null) return previous
         const itemId =
             itemFromResult(result) ??
             (typeof args.itemId === 'number' ? args.itemId : null)
@@ -151,15 +166,10 @@ export function applyFocusFromToolResolve(
         }
     }
 
-    if (
-        tool === 'get_session_state' ||
-        tool === 'get_session_recent_output' ||
-        tool === 'get_worker_health'
-    ) {
-        const fromArgs = typeof args.sessionId === 'string' ? args.sessionId.trim() : ''
-        const sessionId = sessionFromResult(result) ?? (fromArgs || null)
+    if (tool === 'get_session_state') {
+        if (!isObj(result) || result.state == null) return previous
+        const sessionId = sessionFromResult(result)
         if (!sessionId) return previous
-        // Session probe replaces session; clear item unless same session keeps prior item.
         const keepItem =
             previous?.sessionId &&
             previous.sessionId.toLowerCase() === sessionId.toLowerCase()
@@ -171,6 +181,29 @@ export function applyFocusFromToolResolve(
             source: 'tool_resolve',
             updatedAt: now
         }
+    }
+
+    if (tool === 'get_worker_health') {
+        if (!isObj(result) || result.health == null) return previous
+        const sessionId = sessionFromResult(result)
+        if (!sessionId) return previous
+        const keepItem =
+            previous?.sessionId &&
+            previous.sessionId.toLowerCase() === sessionId.toLowerCase()
+                ? previous.itemId
+                : null
+        return {
+            sessionId,
+            itemId: keepItem,
+            source: 'tool_resolve',
+            updatedAt: now
+        }
+    }
+
+    // recent_output has no resolved session identity in the result — do not
+    // promote a model-supplied arg into durable focus.
+    if (tool === 'get_session_recent_output') {
+        return previous
     }
 
     if (tool === 'ping_session') {

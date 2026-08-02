@@ -108,6 +108,37 @@ describe('hub-owned conversational focus (capability, not pattern matching)', ()
         expect(seeded).toEqual(
             expect.objectContaining({ sessionId: SESSION_A, itemId: null, source: 'client' })
         )
+        const replaced = applyFocusFromClientSession(focus(), SESSION_B)
+        expect(replaced?.sessionId).toBe(SESSION_B)
+        expect(replaced?.itemId).toBeNull()
+    })
+
+    it('does not adopt null session probes or model-arg-only recent_output', () => {
+        expect(
+            applyFocusFromToolResolve(focus(), {
+                tool: 'get_session_state',
+                ok: true,
+                args: { sessionId: SESSION_B },
+                result: { state: null }
+            })
+        ).toEqual(focus())
+
+        expect(
+            applyFocusFromToolResolve(null, {
+                tool: 'get_session_recent_output',
+                ok: true,
+                args: { sessionId: SESSION_B },
+                result: { chunks: [] }
+            })
+        ).toBeNull()
+
+        const resolved = applyFocusFromToolResolve(null, {
+            tool: 'get_session_state',
+            ok: true,
+            args: { sessionId: 'short' },
+            result: { state: { sessionId: SESSION_A, name: 'W1.8' } }
+        })
+        expect(resolved?.sessionId).toBe(SESSION_A)
     })
 
     it('formats a focus directive for the brain assemble path', () => {

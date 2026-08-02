@@ -103,7 +103,51 @@ export class SettingsStore {
         )
     }
 
+    /**
+     * Persist focus only when it is strictly newer than the durable row.
+     * Prevents an older overlapping converse request from rolling focus back.
+     */
+    setConverseFocusIfNewer(value: OverseerConverseFocus, namespace = 'default'): boolean {
+        const current = this.getConverseFocus(namespace)
+        if (current && current.updatedAt > value.updatedAt) return false
+        this.setConverseFocus(value, namespace)
+        return true
+    }
+
     clearConverseFocus(namespace = 'default'): void {
         this.delete(converseFocusKey(namespace))
+    }
+
+    /** After session merge/resume remaps ids — keep anaphoric writes on the live session. */
+    repointConverseFocusSession(
+        oldSessionId: string,
+        newSessionId: string,
+        namespace = 'default'
+    ): void {
+        const focus = this.getConverseFocus(namespace)
+        if (!focus?.sessionId) return
+        if (focus.sessionId.toLowerCase() !== oldSessionId.trim().toLowerCase()) return
+        this.setConverseFocus({
+            ...focus,
+            sessionId: newSessionId,
+            updatedAt: Date.now()
+        }, namespace)
+    }
+
+    /** Drop session slot (or clear entirely) when the focused session is deleted. */
+    clearConverseFocusIfSession(sessionId: string, namespace = 'default'): void {
+        const focus = this.getConverseFocus(namespace)
+        if (!focus?.sessionId) return
+        if (focus.sessionId.toLowerCase() !== sessionId.trim().toLowerCase()) return
+        if (focus.itemId != null) {
+            this.setConverseFocus({
+                sessionId: null,
+                itemId: focus.itemId,
+                source: focus.source,
+                updatedAt: Date.now()
+            }, namespace)
+            return
+        }
+        this.clearConverseFocus(namespace)
     }
 }

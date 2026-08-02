@@ -73,6 +73,49 @@ describe('SettingsStore', () => {
         expect(s.getConverseFocus()).toBeNull()
     })
 
+    it('setConverseFocusIfNewer refuses older overlapping writes', () => {
+        const s = freshStore()
+        s.setConverseFocus({
+            sessionId: 'new',
+            itemId: 1,
+            source: 'tool_resolve',
+            updatedAt: 200
+        })
+        expect(
+            s.setConverseFocusIfNewer({
+                sessionId: 'old',
+                itemId: 2,
+                source: 'client',
+                updatedAt: 100
+            })
+        ).toBe(false)
+        expect(s.getConverseFocus()?.sessionId).toBe('new')
+        expect(
+            s.setConverseFocusIfNewer({
+                sessionId: 'newer',
+                itemId: 3,
+                source: 'tool_resolve',
+                updatedAt: 300
+            })
+        ).toBe(true)
+        expect(s.getConverseFocus()?.sessionId).toBe('newer')
+    })
+
+    it('repoints and clears focus when sessions merge or delete', () => {
+        const s = freshStore()
+        s.setConverseFocus({
+            sessionId: 'old-id',
+            itemId: 118,
+            source: 'tool_resolve',
+            updatedAt: 1
+        })
+        s.repointConverseFocusSession('old-id', 'new-id')
+        expect(s.getConverseFocus()?.sessionId).toBe('new-id')
+        s.clearConverseFocusIfSession('new-id')
+        expect(s.getConverseFocus()?.sessionId).toBeNull()
+        expect(s.getConverseFocus()?.itemId).toBe(118)
+    })
+
     it('DDL is idempotent', () => {
         const db = new Database(':memory:', { strict: true })
         ensureOverseerSettingsSchema(db)
