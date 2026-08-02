@@ -15,6 +15,7 @@ import { runOverseerConverse } from '../../overseer/converse'
 import { assembleOverseerConverseMessages, listRecentConvoTurns, persistOverseerConvoExchange } from '../../overseer/converseContext'
 import { BrainUnavailableError, filterChatModels, isKnownBrainProfile, listBrainModels, listBrainProfiles, resolveBrainConfig, resolveBrainSelection } from '../../overseer/brainClient'
 import type { ActiveBrainSetting } from '../../store/settingsStore'
+import { applyFocusFromClientSession } from '@hapi/protocol'
 
 const convoTurnBodySchema = z.object({
     operatorText: z.string().max(8000).default(''),
@@ -239,7 +240,10 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
         })
         const messages = assembled.messages
         const lastOperator = [...messages].reverse().find((m) => m.role === 'operator')?.content ?? ''
-        const priorFocus = settings.getConverseFocus(namespace)
+        const priorFocus = applyFocusFromClientSession(
+            settings.getConverseFocus(namespace),
+            parsed.data.relatedSessionId
+        )
 
         const active = getSanitizedActiveBrain(engine, c.get('namespace'))
         const config = resolveBrainConfig(process.env, resolveBrainSelection(active, {

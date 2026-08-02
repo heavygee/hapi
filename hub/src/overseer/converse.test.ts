@@ -205,7 +205,13 @@ describe('runOverseerConverse', () => {
         const { toolTrace } = await runOverseerConverse({
             overseer,
             config,
-            messages: [{ role: 'operator', content: 'ping session sess-1: "hi"' }]
+            messages: [{ role: 'operator', content: 'ping session sess-1: "hi"' }],
+            focus: {
+                sessionId: 'sess-1',
+                itemId: null,
+                source: 'tool_resolve',
+                updatedAt: 1
+            }
         })
 
         expect(toolTrace[0]).toMatchObject({
@@ -243,7 +249,13 @@ describe('runOverseerConverse', () => {
         const { reply, toolTrace } = await runOverseerConverse({
             overseer,
             config,
-            messages: [{ role: 'operator', content: 'ping session old-id: "please continue"' }]
+            messages: [{ role: 'operator', content: 'ping session old-id: "please continue"' }],
+            focus: {
+                sessionId: 'old-id',
+                itemId: null,
+                source: 'tool_resolve',
+                updatedAt: 1
+            }
         })
 
         expect(toolTrace).toHaveLength(1)
@@ -253,7 +265,7 @@ describe('runOverseerConverse', () => {
         expect(reply).toContain('Do not retry')
     })
 
-    it('refuses ping_session when the operator message has no write intent', async () => {
+    it('refuses ping_session when there is no conversational focus and no allowWrites', async () => {
         const pingSession = vi.fn()
         const overseer = {
             ...fakeOverseer,
@@ -271,7 +283,7 @@ describe('runOverseerConverse', () => {
             }))
             .mockResolvedValueOnce(chatResponse({
                 role: 'assistant',
-                content: 'I cannot relay without an explicit operator request.'
+                content: 'I cannot relay without conversational focus.'
             }))
         setFetch(fetchMock)
 
@@ -283,7 +295,7 @@ describe('runOverseerConverse', () => {
 
         expect(pingSession).not.toHaveBeenCalled()
         expect(toolTrace[0]).toMatchObject({ tool: 'ping_session', ok: false })
-        expect(toolTrace[0]?.error).toMatch(/not authorized/i)
+        expect(toolTrace[0]?.error).toMatch(/not authorized|no conversational focus/i)
     })
 
     it('authorizes anaphoric ping_session from hub focus without ids in the follow-up line', async () => {
@@ -399,5 +411,70 @@ describe('runOverseerConverse', () => {
         expect(focus?.itemId).toBe(118)
         expect(focus?.sessionId).toBe(sessionId)
         expect(focus?.source).toBe('tool_resolve')
+    })
+
+    it('unlocks ping mid-turn after a subject-resolving read establishes focus', async () => {
+        const sessionId = '6cd8d0c3-aaaa-bbbb-cccc-ddddeeeeffff'
+        const pingSession = vi.fn(async () => ({
+            ok: true,
+            sessionId,
+            sessionName: 'W1.8',
+            project: 'hapi',
+            resumed: true,
+            tombstone: 'Relayed'
+        }))
+        const overseer = {
+            ...fakeOverseer,
+            explainPriority: () => ({
+                inboxItemId: 118,
+                relatedSessionId: sessionId,
+                title: 'W1.8'
+            }),
+            pingSession
+        } as unknown as OverseerEntity
+
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(chatResponse({
+                role: 'assistant',
+                content: '',
+                tool_calls: [{
+                    id: 'c1',
+                    type: 'function',
+                    function: { name: 'explain_priority', arguments: '{"itemId":118}' }
+                }]
+            }))
+            .mockResolvedValueOnce(chatResponse({
+                role: 'assistant',
+                content: '',
+                tool_calls: [{
+                    id: 'c2',
+                    type: 'function',
+                    function: {
+                        name: 'ping_session',
+                        arguments: JSON.stringify({
+                            sessionId,
+                            itemId: 118,
+                            message: 'go ahead'
+                        })
+                    }
+                }]
+            }))
+            .mockResolvedValueOnce(chatResponse({
+                role: 'assistant',
+                content: 'Relayed.'
+            }))
+        setFetch(fetchMock)
+
+        const { toolTrace, focus } = await runOverseerConverse({
+            overseer,
+            config,
+            messages: [{ role: 'operator', content: 'tell it to go ahead' }],
+            focus: null
+        })
+
+        expect(toolTrace.find((t) => t.tool === 'explain_priority')?.ok).toBe(true)
+        expect(toolTrace.find((t) => t.tool === 'ping_session')?.ok).toBe(true)
+        expect(pingSession).toHaveBeenCalledOnce()
+        expect(focus?.itemId).toBe(118)
     })
 })

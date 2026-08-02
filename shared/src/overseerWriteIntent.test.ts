@@ -1,34 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import {
-    detectOperatorWriteTools,
     isWriteToolCallAuthorized,
     resolveOverseerWriteAuthorization
 } from './overseerWriteIntent'
+import type { OverseerConverseFocus } from './overseerConverseFocus'
 
-describe('detectOperatorWriteTools', () => {
-    it('authorizes relay for ping/tell session phrasing', () => {
-        expect([...detectOperatorWriteTools('ping the expenses session: please continue')]).toEqual([
-            'ping_session'
-        ])
-        expect([...detectOperatorWriteTools('tell that worker to retry the flaky test')]).toContain(
-            'ping_session'
-        )
-    })
+const SESSION_A = '6cd8d0c3-aaaa-bbbb-cccc-ddddeeeeffff'
+const SESSION_B = '96f67085-1111-2222-3333-444455556666'
 
-    it('authorizes disposition for snooze/done phrasing', () => {
-        expect([...detectOperatorWriteTools('snooze item 12 until tomorrow')]).toEqual([
-            'record_disposition'
-        ])
-        expect([...detectOperatorWriteTools('mark #7 done')]).toContain('record_disposition')
-    })
+const focused: OverseerConverseFocus = {
+    sessionId: SESSION_A,
+    itemId: 118,
+    source: 'tool_resolve',
+    updatedAt: 1
+}
 
-    it('does not authorize writes for read-only questions', () => {
-        expect([...detectOperatorWriteTools('what needs my attention?')]).toEqual([])
-    })
-})
-
-describe('resolveOverseerWriteAuthorization', () => {
-    it('explicit allowWrites unlocks both write tools', () => {
+describe('resolveOverseerWriteAuthorization (focus-owned, not regex)', () => {
+    it('explicit allowWrites unlocks both write tools without focus', () => {
         const auth = resolveOverseerWriteAuthorization({
             latestOperatorText: 'what is in the inbox?',
             allowWrites: true
@@ -40,46 +28,56 @@ describe('resolveOverseerWriteAuthorization', () => {
         }, auth).ok).toBe(true)
     })
 
-    it('binds ping_session to the session id named by the operator', () => {
+    it('focus alone unlocks writes bound to that subject — no RELAY_INTENT / ids in the line', () => {
+        const auth = resolveOverseerWriteAuthorization({
+            latestOperatorText: 'tell it to go ahead - tear down and rebuild is fine',
+            focus: focused
+        })
+        expect([...auth.allowed].sort()).toEqual(['ping_session', 'record_disposition'])
+        expect(
+            isWriteToolCallAuthorized(
+                'ping_session',
+                { sessionId: SESSION_A, itemId: 118, message: 'go ahead' },
+                auth
+            ).ok
+        ).toBe(true)
+        expect(
+            isWriteToolCallAuthorized(
+                'ping_session',
+                { sessionId: SESSION_B, message: 'go ahead' },
+                auth
+            ).ok
+        ).toBe(false)
+    })
+
+    it('denies writes when there is no focus and no allowWrites — even if the line looks like a ping', () => {
         const auth = resolveOverseerWriteAuthorization({
             latestOperatorText: 'ping session abcdef12: "please continue"'
         })
-        expect(isWriteToolCallAuthorized('ping_session', {
-            sessionId: 'abcdef12-ffff-ffff-ffff-ffffffffffff',
-            message: 'please continue'
-        }, auth).ok).toBe(true)
-        expect(isWriteToolCallAuthorized('ping_session', {
-            sessionId: 'deadbeef-ffff-ffff-ffff-ffffffffffff',
-            message: 'please continue'
-        }, auth).ok).toBe(false)
+        expect([...auth.allowed]).toEqual([])
+        expect(
+            isWriteToolCallAuthorized(
+                'ping_session',
+                { sessionId: 'abcdef12-ffff-ffff-ffff-ffffffffffff', message: 'please continue' },
+                auth
+            ).ok
+        ).toBe(false)
     })
 
-    it('binds short named session tokens after the word session', () => {
-        const auth = resolveOverseerWriteAuthorization({
-            latestOperatorText: 'ping session sess-1: "hi"'
-        })
-        expect(isWriteToolCallAuthorized('ping_session', {
-            sessionId: 'sess-1',
-            message: 'hi'
-        }, auth).ok).toBe(true)
-    })
-
-    it('denies ping without a concrete target in the operator message', () => {
-        const auth = resolveOverseerWriteAuthorization({
-            latestOperatorText: 'ping that worker to continue'
-        })
-        const result = isWriteToolCallAuthorized('ping_session', {
-            sessionId: 'abcdef12',
-            message: 'continue'
-        }, auth)
-        expect(result.ok).toBe(false)
-    })
-
-    it('denies write tools when neither flag nor intent matches', () => {
+    it('denies write tools on a read-only ask with no focus', () => {
         const auth = resolveOverseerWriteAuthorization({
             latestOperatorText: 'summarize the inbox'
         })
         expect(isWriteToolCallAuthorized('ping_session', { sessionId: 'x', message: 'y' }, auth).ok).toBe(false)
         expect(isWriteToolCallAuthorized('query_inbox', {}, auth).ok).toBe(true)
+    })
+
+    it('disposition binds to focused itemId', () => {
+        const auth = resolveOverseerWriteAuthorization({
+            latestOperatorText: 'mark it done',
+            focus: focused
+        })
+        expect(isWriteToolCallAuthorized('record_disposition', { itemId: 118, action: 'done' }, auth).ok).toBe(true)
+        expect(isWriteToolCallAuthorized('record_disposition', { itemId: 999, action: 'done' }, auth).ok).toBe(false)
     })
 })

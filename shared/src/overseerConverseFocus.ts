@@ -2,12 +2,13 @@
  * Hub-owned conversational focus for Overseer converse.
  *
  * Structured dialogue-state (session and/or inbox item) that brain + write gate
- * share. Not pronoun/regex grepping — focus updates from clear operator naming
- * and successful hub-executed tool resolutions. Tool-result *prose* fed back to
- * the brain is untrusted and must not retarget focus by itself.
+ * share. Focus updates from successful hub-executed tool resolutions that
+ * identify a subject — not from grepping pronouns or ids out of operator prose.
+ * Tool-result *prose* fed back to the brain is untrusted and must not retarget
+ * focus by itself.
  */
 
-export type OverseerConverseFocusSource = 'operator' | 'tool_resolve' | 'client'
+export type OverseerConverseFocusSource = 'tool_resolve' | 'client'
 
 export type OverseerConverseFocus = {
     sessionId: string | null
@@ -23,35 +24,8 @@ export type OverseerToolResolveEvent = {
     result: unknown
 }
 
-const ITEM_ID_RE = /\b(?:item\s*#?|#)(\d+)\b/gi
-const UUID_OR_HEX_SESSION_RE =
-    /\b([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{8,})\b/gi
-const NAMED_SESSION_RE = /\bsession\s+([a-z0-9][a-z0-9_-]{1,63})\b/gi
-
 function isObj(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function extractItemIds(text: string): number[] {
-    const out: number[] = []
-    for (const match of text.matchAll(ITEM_ID_RE)) {
-        const id = Number(match[1])
-        if (Number.isFinite(id) && id > 0 && !out.includes(id)) out.push(id)
-    }
-    return out
-}
-
-function extractSessionIdPrefixes(text: string): string[] {
-    const out: string[] = []
-    for (const match of text.matchAll(UUID_OR_HEX_SESSION_RE)) {
-        const value = match[1]?.toLowerCase()
-        if (value && !out.includes(value)) out.push(value)
-    }
-    for (const match of text.matchAll(NAMED_SESSION_RE)) {
-        const value = match[1]?.toLowerCase()
-        if (value && !out.includes(value)) out.push(value)
-    }
-    return out
 }
 
 function buildFocus(input: {
@@ -96,35 +70,20 @@ function buildFocus(input: {
     }
 }
 
-/**
- * Establish / replace focus from clear operator naming in the latest utterance.
- * Does not invent subjects from pronouns — ids / `item #N` / `session <token>` only.
- * Returns previous focus unchanged when the line names nothing.
- *
- * Naming only an item clears a prior session (and vice versa) so we do not keep
- * a stale pair across subjects; successful tool resolves fill the other slot.
- */
-export function applyFocusFromOperatorText(
+/** Seed focus from an explicit client-related session (transport thread), not NL grep. */
+export function applyFocusFromClientSession(
     previous: OverseerConverseFocus | null,
-    operatorText: string,
+    sessionId: string | null | undefined,
     now = Date.now()
 ): OverseerConverseFocus | null {
-    const text = operatorText.trim()
-    if (!text) return previous
-
-    const itemIds = extractItemIds(text)
-    const sessions = extractSessionIdPrefixes(text)
-    if (itemIds.length === 0 && sessions.length === 0) return previous
-
-    const itemId = itemIds.length > 0 ? itemIds[itemIds.length - 1]! : null
-    const sessionId = sessions.length > 0 ? sessions[sessions.length - 1]! : null
-
-    return {
-        sessionId,
-        itemId,
-        source: 'operator',
-        updatedAt: now
-    }
+    const id = typeof sessionId === 'string' ? sessionId.trim() : ''
+    if (!id) return previous
+    return buildFocus({
+        previous,
+        sessionId: id,
+        source: 'client',
+        now
+    })
 }
 
 function sessionFromResult(result: unknown): string | null {
@@ -183,13 +142,13 @@ export function applyFocusFromToolResolve(
             (typeof args.itemId === 'number' ? args.itemId : null)
         const sessionId = sessionFromResult(result)
         if (itemId == null && !sessionId) return previous
-        return buildFocus({
-            previous,
-            itemId: itemId ?? undefined,
-            sessionId: sessionId ?? undefined,
+        // New item resolve replaces the prior pair (subject change).
+        return {
+            sessionId: sessionId,
+            itemId: itemId,
             source: 'tool_resolve',
-            now
-        })
+            updatedAt: now
+        }
     }
 
     if (
@@ -200,13 +159,18 @@ export function applyFocusFromToolResolve(
         const fromArgs = typeof args.sessionId === 'string' ? args.sessionId.trim() : ''
         const sessionId = sessionFromResult(result) ?? (fromArgs || null)
         if (!sessionId) return previous
-        return buildFocus({
-            previous,
+        // Session probe replaces session; clear item unless same session keeps prior item.
+        const keepItem =
+            previous?.sessionId &&
+            previous.sessionId.toLowerCase() === sessionId.toLowerCase()
+                ? previous.itemId
+                : null
+        return {
             sessionId,
-            // Session-only probe: keep prior item if any (same worker thread).
+            itemId: keepItem,
             source: 'tool_resolve',
-            now
-        })
+            updatedAt: now
+        }
     }
 
     if (tool === 'ping_session') {
@@ -237,7 +201,7 @@ export function applyFocusFromToolResolve(
         })
     }
 
-    // query_inbox / query_events / list dumps: only retarget when exactly one subject.
+    // query_inbox: only retarget when exactly one subject.
     if (tool === 'query_inbox' && isObj(result) && Array.isArray(result.items)) {
         if (result.items.length !== 1) return previous
         const only = result.items[0]
@@ -250,13 +214,12 @@ export function applyFocusFromToolResolve(
                     ? only.session
                     : null
         if (itemId == null && !sessionId) return previous
-        return buildFocus({
-            previous,
-            itemId: itemId ?? undefined,
-            sessionId: sessionId ?? undefined,
+        return {
+            sessionId,
+            itemId,
             source: 'tool_resolve',
-            now
-        })
+            updatedAt: now
+        }
     }
 
     return previous
@@ -268,8 +231,9 @@ export function formatConverseFocusDirective(focus: OverseerConverseFocus | null
     const parts: string[] = ['# Conversational focus (hub-owned)', '']
     parts.push(
         'The operator is currently focused on the subject below. Prefer this referent for',
-        'queries and writes unless they clearly name a different session or inbox item.',
-        'Do not invent a different session id.'
+        'queries and writes unless they clearly direct you to a different session or inbox item',
+        '(via a tool resolve). Do not invent a different session id.',
+        'When they direct action on this subject in natural language, use write tools against it.'
     )
     parts.push('')
     if (focus.itemId != null) parts.push(`- inbox itemId: ${focus.itemId}`)
@@ -288,9 +252,7 @@ export function parseConverseFocus(raw: unknown): OverseerConverseFocus | null {
             : null
     if (!sessionId && itemId == null) return null
     const source: OverseerConverseFocusSource =
-        raw.source === 'operator' || raw.source === 'tool_resolve' || raw.source === 'client'
-            ? raw.source
-            : 'tool_resolve'
+        raw.source === 'tool_resolve' || raw.source === 'client' ? raw.source : 'tool_resolve'
     const updatedAt =
         typeof raw.updatedAt === 'number' && Number.isFinite(raw.updatedAt)
             ? raw.updatedAt

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-    applyFocusFromOperatorText,
+    applyFocusFromClientSession,
     applyFocusFromToolResolve,
     formatConverseFocusDirective,
     type OverseerConverseFocus
@@ -23,8 +23,8 @@ function focus(partial: Partial<OverseerConverseFocus> = {}): OverseerConverseFo
     }
 }
 
-describe('hub-owned conversational focus (capability, not pronoun grep)', () => {
-    it('authorizes anaphoric relay against established focus without ids in the follow-up line', () => {
+describe('hub-owned conversational focus (capability, not pattern matching)', () => {
+    it('authorizes natural-language action against established focus without ids in the utterance', () => {
         const auth = resolveOverseerWriteAuthorization({
             latestOperatorText: 'tell it to go ahead - explain we can tear down and rebuild',
             focus: focus()
@@ -46,24 +46,7 @@ describe('hub-owned conversational focus (capability, not pronoun grep)', () => 
         ).toBe(false)
     })
 
-    it('updates focus when the operator clearly names a new subject', () => {
-        const next = applyFocusFromOperatorText(focus({ itemId: 10, sessionId: SESSION_B }), 'look at item #118')
-        expect(next?.itemId).toBe(118)
-        expect(next?.sessionId).toBeNull()
-        expect(next?.source).toBe('operator')
-    })
-
-    it('replaces focus when the operator names a different session', () => {
-        const next = applyFocusFromOperatorText(
-            focus(),
-            `switch to session ${SESSION_B}`
-        )
-        expect(next?.sessionId).toBe(SESSION_B)
-        expect(next?.itemId).toBeNull()
-        expect(next?.source).toBe('operator')
-    })
-
-    it('updates focus from a successful subject-resolving tool, not from multi-item dumps', () => {
+    it('updates focus from a successful subject-resolving tool; subject change replaces prior focus', () => {
         const afterExplain = applyFocusFromToolResolve(null, {
             tool: 'explain_priority',
             ok: true,
@@ -84,25 +67,23 @@ describe('hub-owned conversational focus (capability, not pronoun grep)', () => 
             })
         )
 
-        const afterDump = applyFocusFromToolResolve(focus(), {
-            tool: 'query_inbox',
+        const changed = applyFocusFromToolResolve(afterExplain, {
+            tool: 'explain_priority',
             ok: true,
-            args: { limit: 25 },
+            args: { itemId: 99 },
             result: {
-                items: [
-                    { id: 1, relatedSessionId: SESSION_B, title: 'noise' },
-                    { id: 118, relatedSessionId: SESSION_A, title: 'W1.8' }
-                ]
+                explanation: {
+                    inboxItemId: 99,
+                    relatedSessionId: SESSION_B,
+                    title: 'other'
+                }
             }
         })
-        // Multi-item list must not silently retarget away from established focus.
-        expect(afterDump).toEqual(focus())
+        expect(changed?.itemId).toBe(99)
+        expect(changed?.sessionId).toBe(SESSION_B)
     })
 
-    it('does not retarget focus from tool-result content alone (injection surface)', () => {
-        // Focus updates only from structured hub tool resolves / operator naming —
-        // never from re-parsing the projected tool-result prose fed to the brain.
-        // A multi-row dump that *mentions* another session must leave focus alone.
+    it('does not retarget focus from multi-item tool dumps (injection surface)', () => {
         const still = applyFocusFromToolResolve(focus(), {
             tool: 'query_inbox',
             ok: true,
@@ -120,6 +101,13 @@ describe('hub-owned conversational focus (capability, not pronoun grep)', () => 
         })
         expect(still?.sessionId).toBe(SESSION_A)
         expect(still?.itemId).toBe(118)
+    })
+
+    it('seeds focus from explicit client session id, not from operator prose grepping', () => {
+        const seeded = applyFocusFromClientSession(null, SESSION_A)
+        expect(seeded).toEqual(
+            expect.objectContaining({ sessionId: SESSION_A, itemId: null, source: 'client' })
+        )
     })
 
     it('formats a focus directive for the brain assemble path', () => {

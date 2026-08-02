@@ -83,7 +83,7 @@ export type OverseerConverseResponse = {
     focus?: {
         sessionId: string | null
         itemId: number | null
-        source: 'operator' | 'tool_resolve' | 'client'
+        source: 'tool_resolve' | 'client'
         updatedAt: number
     } | null
 }

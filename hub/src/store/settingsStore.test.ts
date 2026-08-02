@@ -62,7 +62,7 @@ describe('SettingsStore', () => {
             {
                 sessionId: 'other',
                 itemId: null,
-                source: 'operator',
+                source: 'client',
                 updatedAt: 99
             },
             'ns-a'

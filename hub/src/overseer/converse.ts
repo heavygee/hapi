@@ -8,14 +8,12 @@
  */
 
 import {
-    applyFocusFromOperatorText,
     applyFocusFromToolResolve,
     buildOverseerOpenAiTools,
     buildOverseerSystemPrompt,
     fingerprintWriteToolCall,
     formatConverseFocusDirective,
     isOverseerWriteTool,
-    isWriteToolAuthorized,
     isWriteToolCallAuthorized,
     resolveOverseerWriteAuthorization,
     type OverseerConverseFocus,
@@ -128,7 +126,7 @@ export async function runOverseerConverse(params: {
     const { overseer, config, messages, maxIterations = 6, signal, allowWrites } = params
 
     const latestOperatorText = [...messages].reverse().find((m) => m.role === 'operator')?.content ?? ''
-    let focus = applyFocusFromOperatorText(params.focus ?? null, latestOperatorText)
+    let focus = params.focus ?? null
 
     const writeAuthFor = (): OverseerWriteAuthorization =>
         resolveOverseerWriteAuthorization({
@@ -137,10 +135,11 @@ export async function runOverseerConverse(params: {
             focus
         })
 
-    const tools = (buildOverseerOpenAiTools() as OverseerOpenAiToolLike[]).filter((tool) => {
-        const name = tool.function?.name ?? ''
-        return isWriteToolAuthorized(name, writeAuthFor())
-    })
+    // Always expose the full tool catalog. Write authorization is enforced at
+    // call time against hub focus (which may be established mid-turn by a
+    // successful subject-resolving read). Filtering writes out of `tools` when
+    // focus starts empty would prevent the brain from acting after resolve.
+    const tools = buildOverseerOpenAiTools() as OverseerOpenAiToolLike[]
     const clockLine = `Server time now: ${new Date().toISOString()} (epoch ms ${Date.now()}, timezone ${Intl.DateTimeFormat().resolvedOptions().timeZone}). Relative snoozes must use absolute snoozedUntil epoch ms from this clock.`
     const focusDirective = formatConverseFocusDirective(focus)
     const systemContent = [
