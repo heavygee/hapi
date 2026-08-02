@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, spyOn } from 'bun:test'
 import { Hono } from 'hono'
 import { Store } from '../../store'
 import { SyncEngine } from '../../sync/syncEngine'
@@ -125,6 +125,7 @@ describe('overseer routes', () => {
     it('POST /overseer/converse persists offline reply when brain is unconfigured', async () => {
         const prev = process.env.OVERSEER_BRAIN_URL
         delete process.env.OVERSEER_BRAIN_URL
+        const warnSpy = spyOn(console, 'warn').mockImplementation(() => {})
         try {
             const store = new Store(':memory:')
             const app = buildApp(store)
@@ -137,6 +138,10 @@ describe('overseer routes', () => {
             const body = await res.json() as { brainOnline: boolean; reply: string }
             expect(body.brainOnline).toBe(false)
             expect(body.reply).toContain('not configured')
+            expect(warnSpy).toHaveBeenCalledWith(
+                '[Overseer][Converse] brain unavailable',
+                expect.objectContaining({ reason: 'not_configured', kind: 'not_configured', reachable: false })
+            )
 
             const recent = await app.request('/api/overseer/converse/recent?limit=5')
             const recentBody = await recent.json() as { turns: Array<{ operatorText: string; overseerText: string }> }
@@ -144,6 +149,7 @@ describe('overseer routes', () => {
             expect(recentBody.turns[0]?.operatorText).toBe('hello fleet')
             expect(recentBody.turns[0]?.overseerText).toContain('not configured')
         } finally {
+            warnSpy.mockRestore()
             if (prev === undefined) delete process.env.OVERSEER_BRAIN_URL
             else process.env.OVERSEER_BRAIN_URL = prev
         }

@@ -205,7 +205,7 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
     // Converse — the modality-agnostic conversation core. Runs the brain LLM
     // with the read-only tools and returns a human-facing reply + tool trace.
     // Text is the first transport (debug settings); voice/XR reuse this. When
-    // the brain is offline (GPU pulled for VR), returns brainOnline:false with a
+    // the brain is offline, returns brainOnline:false with a
     // friendly message rather than an error.
     //
     // Continuity: hub assembles prior `convo_turn`s (budgeted) + latest operator
@@ -244,6 +244,14 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
             model: parsed.data.model
         }))
         if (!config) {
+            // Soft 200 for clients — journal still needs a greppable line (access log is 200).
+            console.warn('[Overseer][Converse] brain unavailable', {
+                reason: 'not_configured',
+                kind: 'not_configured',
+                reachable: false,
+                model: null,
+                profile: parsed.data.profile ?? null
+            })
             const reply = 'The Overseer brain is not configured on this hub (set OVERSEER_BRAIN_URL). I can still show raw events and inbox items, but I cannot answer in conversation yet.'
             persistOverseerConvoExchange(overseer, assembled, {
                 operatorText: lastOperator,
@@ -289,9 +297,19 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
             if (error instanceof BrainUnavailableError) {
                 // Reachable-but-failed (http 4xx/5xx, malformed body) is a converse
                 // bug, not an offline brain — do not mislabel it as GPU/VR downtime.
+                // Soft 200 for clients — structured warn so journalctl can find it.
+                console.warn('[Overseer][Converse] brain unavailable', {
+                    reason: error.reachable ? 'request_error' : 'unreachable',
+                    kind: error.kind,
+                    reachable: error.reachable,
+                    status: error.status ?? null,
+                    model: config.model,
+                    profile: parsed.data.profile ?? null,
+                    message: error.message.slice(0, 200)
+                })
                 const reply = error.reachable
                     ? 'I reached the Overseer brain but could not complete the tool conversation (request error). This is a converse-loop issue, not the brain being offline — please retry, and flag it if it persists.'
-                    : 'The Overseer brain is offline right now (the GPU may be in use for VR). Try again shortly — your events and inbox are still being captured.'
+                    : 'The Overseer brain is offline right now. Try again shortly — your events and inbox are still being captured.'
                 persistOverseerConvoExchange(overseer, assembled, {
                     operatorText: lastOperator,
                     overseerText: reply,
