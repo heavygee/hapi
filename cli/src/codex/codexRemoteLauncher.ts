@@ -17,7 +17,7 @@ import { AppServerEventConverter } from './utils/appServerEventConverter';
 import { registerGeneratedImageFromPath } from '@/modules/common/generatedImages';
 import { convertCodexEvent } from './utils/codexEventConverter';
 import { createCodexSessionScanner, type CodexSessionScanner } from './utils/codexSessionScanner';
-import { createReplayUsageAccumulator, filterTranscriptUsageForLive, markLiveUsageDimensions, noteReplayUsageSample, orderedReplayUsagePayloads, type LiveUsageDimensions } from './utils/codexUsage';
+import { createReplayUsageAccumulator, emptyLiveUsageDimensions, filterTranscriptUsageForLive, markLiveUsageDimensions, noteReplayUsageSample, orderedReplayUsagePayloads, type LiveUsageDimensions } from './utils/codexUsage';
 import { registerAppServerPermissionHandlers } from './utils/appServerPermissionAdapter';
 import {
     buildThreadStartParams,
@@ -257,7 +257,17 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
     private usageScannerThreadId: string | null = null;
     private usageScannerSetup: Promise<void> | null = null;
     private readonly liveUsageByThread = new Map<string, LiveUsageDimensions>();
+    /** Account-scoped rate limits can arrive before any thread id exists. */
+    private liveAccountRateLimits = false;
     private shuttingDown = false;
+
+    private liveUsageForThread(threadId: string): LiveUsageDimensions {
+        const threadLive = this.liveUsageByThread.get(threadId) ?? emptyLiveUsageDimensions();
+        return {
+            tokens: threadLive.tokens,
+            rateLimits: threadLive.rateLimits || this.liveAccountRateLimits
+        };
+    }
 
     constructor(session: CodexSession) {
         super(process.env.DEBUG ? session.logPath : undefined);
@@ -411,15 +421,12 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     ) {
                         continue;
                     }
-                    const live = this.liveUsageByThread.get(threadId);
+                    const live = this.liveUsageForThread(threadId);
                     if (replayingHistory) {
                         noteReplayUsageSample(replayUsage, message);
                         continue;
                     }
-                    const filtered = filterTranscriptUsageForLive(
-                        message,
-                        live ?? { tokens: false, rateLimits: false }
-                    );
+                    const filtered = filterTranscriptUsageForLive(message, live);
                     if (filtered) {
                         this.session.recordCodexUsage(filtered);
                     }
@@ -432,7 +439,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             return;
         }
         if (this.currentThreadId === threadId && this.usageScannerThreadId === threadId) {
-            const live = this.liveUsageByThread.get(threadId) ?? { tokens: false, rateLimits: false };
+            const live = this.liveUsageForThread(threadId);
             for (const payload of orderedReplayUsagePayloads(replayUsage)) {
                 const filtered = filterTranscriptUsageForLive(payload, live);
                 if (filtered) {
@@ -3417,6 +3424,9 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 const isAccountUsage = msg.usage_scope === 'account' || msg.usageScope === 'account';
                 if (!isAccountUsage && eventThreadId && eventThreadId !== this.currentThreadId) {
                     return;
+                }
+                if (isAccountUsage) {
+                    this.liveAccountRateLimits = true;
                 }
                 const threadId = eventThreadId ?? this.currentThreadId;
                 if (threadId) {
