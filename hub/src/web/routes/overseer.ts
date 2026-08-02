@@ -205,7 +205,7 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
     // Converse — the modality-agnostic conversation core. Runs the brain LLM
     // with the read-only tools and returns a human-facing reply + tool trace.
     // Text is the first transport (debug settings); voice/XR reuse this. When
-    // the brain is offline (GPU pulled for VR), returns brainOnline:false with a
+    // the brain is offline, returns brainOnline:false with a
     // friendly message rather than an error.
     //
     // Continuity: hub assembles prior `convo_turn`s (budgeted) + latest operator
@@ -309,7 +309,7 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 })
                 const reply = error.reachable
                     ? 'I reached the Overseer brain but could not complete the tool conversation (request error). This is a converse-loop issue, not the brain being offline — please retry, and flag it if it persists.'
-                    : 'The Overseer brain is offline right now (the GPU may be in use for VR). Try again shortly — your events and inbox are still being captured.'
+                    : 'The Overseer brain is offline right now. Try again shortly — your events and inbox are still being captured.'
                 persistOverseerConvoExchange(overseer, assembled, {
                     operatorText: lastOperator,
                     overseerText: reply,
