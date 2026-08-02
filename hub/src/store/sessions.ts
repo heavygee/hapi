@@ -64,7 +64,8 @@ const SIMPLE_RESUME_TOKENS = [
     'opencodeSessionId',
     'grokSessionId',
     'cursorSessionId',
-    'kimiSessionId'
+    'kimiSessionId',
+    'piSessionId'
 ] as const
 
 const CONTRIBUTION_FIELDS = ['externalRefs'] as const

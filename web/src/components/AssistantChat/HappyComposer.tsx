@@ -1,5 +1,5 @@
 import { getCodexCollaborationModeOptions, getPermissionModeOptionsForFlavor } from '@hapi/protocol'
-import { ComposerPrimitive, useAssistantApi, useAssistantState } from '@assistant-ui/react'
+import { ComposerPrimitive, useAui, useAuiState } from '@assistant-ui/react'
 import {
     type ChangeEvent as ReactChangeEvent,
     type ClipboardEvent as ReactClipboardEvent,
@@ -156,6 +156,8 @@ export function HappyComposer(props: {
     contextSize?: number
     contextCacheRead?: number
     contextWindow?: number | null
+    /** Model for the context-window heuristic; see StatusBar.contextModel. */
+    contextModel?: string | null
     controlledByUser?: boolean
     agentFlavor?: string | null
     availableModelOptions?: Array<{ value: string | null; label: string }>
@@ -229,6 +231,7 @@ export function HappyComposer(props: {
         contextSize,
         contextCacheRead,
         contextWindow,
+        contextModel,
         controlledByUser = false,
         agentFlavor,
         availableModelOptions,
@@ -273,12 +276,12 @@ export function HappyComposer(props: {
     const serviceTier = rawServiceTier ?? null
     const displayedServiceTier = getDisplayedCodexServiceTier(serviceTier)
 
-    const api = useAssistantApi()
+    const api = useAui()
     const { composerEnterBehavior } = useComposerEnterBehavior()
-    const composerText = useAssistantState(({ composer }) => composer.text)
-    const attachments = useAssistantState(({ composer }) => composer.attachments)
-    const threadIsRunning = useAssistantState(({ thread }) => thread.isRunning)
-    const threadIsDisabled = useAssistantState(({ thread }) => thread.isDisabled)
+    const composerText = useAuiState((s) => s.composer.text)
+    const attachments = useAuiState((s) => s.composer.attachments)
+    const threadIsRunning = useAuiState((s) => s.thread.isRunning)
+    const threadIsDisabled = useAuiState((s) => s.thread.isDisabled)
 
     const controlsDisabled = disabled || (!active && !allowSendWhenInactive) || threadIsDisabled
     const trimmed = composerText.trim()
@@ -1330,6 +1333,7 @@ export function HappyComposer(props: {
                         contextSize={contextSize}
                         contextCacheRead={contextCacheRead}
                         contextWindow={contextWindow}
+                        contextModel={contextModel}
                         model={model}
                         modelReasoningEffort={modelReasoningEffort}
                         serviceTier={serviceTier}

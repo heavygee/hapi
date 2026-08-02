@@ -24,7 +24,7 @@ import { getSessionTitle } from '@/lib/sessionTitle'
 import { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
 import type { Machine } from '@/types/api'
 import { getMachinePlatform, presentMachineHealth } from '@/lib/machineHealth'
-import { MachineFilterBar } from '@/components/MachineFilterBar'
+import { MachineFilterBar, MachineFilterMenu } from '@/components/MachineFilterBar'
 import { useSessionListMachineFilter } from '@/hooks/useSessionListMachineFilter'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
 import { useFeatures } from '@/hooks/queries/useFeatures'
@@ -1058,6 +1058,21 @@ export function SessionList(props: {
         () => groupByMachine(allGroups, resolveMachineLabel),
         [allGroups, machineLabelsById] // eslint-disable-line react-hooks/exhaustive-deps
     )
+    const machineFilterItems = useMemo(
+        () => machineFilters.map((mg) => {
+            const machine = mg.machineId ? machinesById[mg.machineId] : undefined
+            return {
+                id: mg.machineId ?? UNKNOWN_MACHINE_ID,
+                label: mg.label,
+                sessionCount: mg.totalSessions,
+                healthPresentation: presentMachineHealth(
+                    machine?.health,
+                    getMachinePlatform(machine)
+                )
+            }
+        }),
+        [machineFilters, machinesById]
+    )
     const showMachineFilterBar = machineFilters.length >= 2
     // A persisted filter whose machine no longer has sessions falls back to
     // "All"; with at most one machine the bar is hidden and never filters.
@@ -1336,6 +1351,14 @@ export function SessionList(props: {
                     {!(showSearch && searchExpanded) ? (
                         <>
                             <div className="flex-1" />
+                            {showMachineFilterBar ? (
+                                <MachineFilterMenu
+                                    machines={machineFilterItems}
+                                    totalCount={allSessions.length}
+                                    value={activeMachineFilter}
+                                    onChange={setMachineFilter}
+                                />
+                            ) : null}
                             {renderHeader ? (
                                 <button
                                     type="button"
@@ -1354,18 +1377,7 @@ export function SessionList(props: {
 
             {showMachineFilterBar ? (
                 <MachineFilterBar
-                    machines={machineFilters.map((mg) => {
-                        const machine = mg.machineId ? machinesById[mg.machineId] : undefined
-                        return {
-                            id: mg.machineId ?? UNKNOWN_MACHINE_ID,
-                            label: mg.label,
-                            sessionCount: mg.totalSessions,
-                            healthPresentation: presentMachineHealth(
-                                machine?.health,
-                                getMachinePlatform(machine)
-                            )
-                        }
-                    })}
+                    machines={machineFilterItems}
                     totalCount={allSessions.length}
                     value={activeMachineFilter}
                     onChange={setMachineFilter}
