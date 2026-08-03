@@ -23,7 +23,7 @@ describe('resolveSessionCursorModelChange', () => {
         sessionCurrentModelId: 'composer-2.5[fast=true]'
     })
 
-    it('updates selected base without applying when the base has multiple variants', () => {
+    it('applies the default variant and keeps base selected when the base has multiple variants', () => {
         const plan = resolveSessionCursorModelChange({
             picker,
             sessionModel: 'composer-2.5[fast=true]',
@@ -33,9 +33,9 @@ describe('resolveSessionCursorModelChange', () => {
         })
         expect(plan).toEqual({
             ok: true,
-            wireId: null,
+            wireId: 'composer-2.5[fast=true]',
             nextSelectedBase: 'composer-2.5',
-            shouldApply: false
+            shouldApply: true
         })
     })
 
@@ -138,6 +138,21 @@ describe('resolveSessionCursorModelChange', () => {
         expect(flatPicker.mode).toBe('flat')
         expect(resolveSessionCursorBaseSelectValue(flatPicker, 'auto'))
             .toBe('gpt-5.5[context=272k,reasoning=medium,fast=false]')
+    })
+
+    it('highlights bare ACP bases in flat mode (#1129)', () => {
+        const flatPicker = buildSessionCursorPickerState({
+            sessionModels: [
+                { modelId: 'composer-2.5', name: 'composer-2.5' },
+                { modelId: 'gpt-5.5', name: 'gpt-5.5' }
+            ],
+            machineModels: [],
+            sessionModel: 'composer-2.5',
+            sessionCurrentModelId: 'composer-2.5'
+        })
+        expect(flatPicker.mode).toBe('flat')
+        expect(flatPicker.modelOptions.some((row) => row.value === 'composer-2.5')).toBe(true)
+        expect(resolveSessionCursorBaseSelectValue(flatPicker, 'auto')).toBe('composer-2.5')
     })
 })
 
