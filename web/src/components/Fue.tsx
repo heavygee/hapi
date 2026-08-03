@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode, RefObject } from 'react'
-import { useEffect, useLayoutEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 /**
@@ -110,22 +110,46 @@ export function FueCallout(props: {
     /** Override the default panel width. */
     width?: number
     style?: CSSProperties
+    /** Renders a checkbox (not a link — a dotted-underline link reads as
+     *  "hover for more info", the wrong affordance for something this
+     *  consequential) when provided. Checking it is inert on its own;
+     *  it only takes effect when the operator then confirms via the
+     *  primary button or the X, at which point this fires *before*
+     *  `onDismiss`. Two known uses: a feature dot wires this to
+     *  `disableAllFue()` (use-fue.ts) as a global "don't show tips again"
+     *  escape hatch; a shell-tour step wires this to "skip the whole tour"
+     *  instead. Same slot, different scope — caller picks the label. */
+    onSecondaryAction?: () => void
+    /** Label for the secondary checkbox. No default — callers must supply
+     *  one since its meaning depends on what onSecondaryAction does. */
+    secondaryActionLabel?: string
 }) {
     const panelWidth = props.width ?? 256
+    const panelRef = useRef<HTMLDivElement>(null)
     const [pos, setPos] = useState<{
         top: number
         left: number
         placement: 'above' | 'below'
     } | null>(null)
+    const [secondaryChecked, setSecondaryChecked] = useState(false)
+
+    // Checking the box is inert by itself (reversible, no side effect);
+    // the checked state is only acted on once the operator confirms via
+    // Got it / the X / Escape, so a stray click never silently disables
+    // anything.
+    const confirmDismiss = () => {
+        if (secondaryChecked) props.onSecondaryAction?.()
+        props.onDismiss()
+    }
 
     // Esc-to-dismiss for keyboard users.
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') props.onDismiss()
+            if (e.key === 'Escape') confirmDismiss()
         }
         window.addEventListener('keydown', onKey)
         return () => window.removeEventListener('keydown', onKey)
-    }, [props])
+    }, [secondaryChecked, props.onSecondaryAction, props.onDismiss])
 
     // Position once the anchor is mounted; re-position on viewport changes.
     // useLayoutEffect so first paint already has correct position
@@ -139,9 +163,13 @@ export function FueCallout(props: {
             if (!a) return
             const rect = a.getBoundingClientRect()
             const vp = window.visualViewport
-            // Estimate panel height before render — close enough for clamping;
-            // the actual layout adapts via Tailwind classes anyway.
-            const panelHeight = 96
+            // Measure the panel's real rendered height (it's already laid
+            // out — just visibility:hidden — by the time this runs) rather
+            // than guessing a fixed number. A hardcoded estimate here
+            // previously under-counted taller callouts (long body text, or
+            // the secondary-action row) and clamped them right on top of
+            // their own anchor instead of clear of it.
+            const panelHeight = panelRef.current?.getBoundingClientRect().height || 96
             setPos(
                 computeFueCalloutPlacement({
                     anchor: rect,
@@ -173,6 +201,7 @@ export function FueCallout(props: {
 
     const node = (
         <div
+            ref={panelRef}
             role="dialog"
             aria-label={props.title}
             style={
@@ -184,7 +213,10 @@ export function FueCallout(props: {
                           width: panelWidth,
                           ...props.style,
                       }
-                    : { position: 'fixed', visibility: 'hidden' }
+                    // Pre-measure pass: same width as the real render so
+                    // text wraps identically and the height we measure is
+                    // the height we'll actually clamp against.
+                    : { position: 'fixed', top: 0, left: 0, width: panelWidth, visibility: 'hidden' }
             }
             // Solid theme-aware bg + solid amber border. The badge-warning CSS
             // vars are alpha 0.2 (designed to layer over chat content); using
@@ -203,7 +235,7 @@ export function FueCallout(props: {
                 </div>
                 <button
                     type="button"
-                    onClick={props.onDismiss}
+                    onClick={confirmDismiss}
                     aria-label={props.closeAriaLabel ?? 'Dismiss'}
                     className="flex h-5 w-5 -mr-1 -mt-1 items-center justify-center rounded-full text-[var(--app-fg)]/60 hover:bg-[var(--app-fg)]/10 hover:text-[var(--app-fg)]"
                 >
@@ -223,13 +255,24 @@ export function FueCallout(props: {
                     </svg>
                 </button>
             </div>
+            {props.onSecondaryAction ? (
+                <label className="mt-2.5 flex items-center gap-1.5 text-[11px] text-[var(--app-fg)]/60 cursor-pointer select-none">
+                    <input
+                        type="checkbox"
+                        checked={secondaryChecked}
+                        onChange={(e) => setSecondaryChecked(e.target.checked)}
+                        className="h-3 w-3 rounded-sm accent-amber-500"
+                    />
+                    {props.secondaryActionLabel}
+                </label>
+            ) : null}
             {/* Affirmative-action dismiss. No auto-timeout: reading speed
                 varies, and a popover that disappears on its own undercuts
                 the "user is in control" model. */}
-            <div className="mt-3 flex justify-end">
+            <div className="mt-2.5 flex justify-end">
                 <button
                     type="button"
-                    onClick={props.onDismiss}
+                    onClick={confirmDismiss}
                     className="rounded-md bg-amber-500 px-3 py-1 text-xs font-medium text-white hover:bg-amber-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
                 >
                     {props.dismissLabel ?? 'Got it'}

@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { resetFue, useFue } from './use-fue'
+import { disableAllFue, enableAllFue, isFueDisabledGlobally, resetFue, useFue } from './use-fue'
 
 const FEATURE = 'test-feature'
 const STORAGE_KEY = `hapi.fue.v1.${FEATURE}`
@@ -99,5 +99,43 @@ describe('useFue', () => {
         expect(result.current.status).toBe('acknowledged')
         rerender({ id: 'feature-b' })
         expect(result.current.status).toBe('unseen')
+    })
+
+    describe('global disable', () => {
+        it('isFueDisabledGlobally() is false by default', () => {
+            expect(isFueDisabledGlobally()).toBe(false)
+        })
+
+        it('disableAllFue() flips the flag and every useFue() reports acknowledged on next read', () => {
+            disableAllFue()
+            expect(isFueDisabledGlobally()).toBe(true)
+            const { result } = renderHook(() => useFue(FEATURE))
+            expect(result.current.status).toBe('acknowledged')
+        })
+
+        it('does not persist a per-feature ack — re-enabling restores the unseen dot', () => {
+            disableAllFue()
+            renderHook(() => useFue(FEATURE))
+            expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
+            enableAllFue()
+            const { result } = renderHook(() => useFue(FEATURE))
+            expect(result.current.status).toBe('unseen')
+        })
+
+        it('engage() no-ops (stays acknowledged) when disabled mid-session', () => {
+            const { result } = renderHook(() => useFue(FEATURE))
+            expect(result.current.status).toBe('unseen')
+            disableAllFue()
+            act(() => {
+                result.current.engage()
+            })
+            expect(result.current.status).toBe('acknowledged')
+        })
+
+        it('enableAllFue() clears the flag', () => {
+            disableAllFue()
+            enableAllFue()
+            expect(isFueDisabledGlobally()).toBe(false)
+        })
     })
 })

@@ -61,6 +61,21 @@ export default function SettingsGeneralPage() {
                     }}
                 />
             </SettingsSection>
+            <SettingsSection title={t('settings.onboarding.title')}>
+                <SettingsSwitch
+                    label={t('settings.onboarding.toggle.label')}
+                    description={t('settings.onboarding.toggle.description')}
+                    checked={onboardingTipsEnabled}
+                    onChange={(checked) => {
+                        setOnboardingTipsEnabled(checked)
+                        if (checked) {
+                            enableAllFue()
+                        } else {
+                            disableAllFue()
+                        }
+                    }}
+                />
+            </SettingsSection>
             <SettingsSection title={t('settings.companion.title')}>
                 <div className="px-3 py-3">
                     <CompanionPairing baseUrl={baseUrl} />

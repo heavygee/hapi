@@ -32,6 +32,8 @@ import { formatAbsoluteDateTime, formatRelativeTime } from '@/lib/relativeTime'
 import { useSessionHeaderMetadata } from '@/hooks/useSessionHeaderMetadata'
 import { formatSessionHeaderTimestamp } from '@/lib/sessionHeaderTimestamp'
 import { selectMobileSessionHeaderSecondary } from '@/lib/sessionHeaderMobileMetadata'
+import { disableAllFue, useFue } from '@/lib/use-fue'
+import { FueCallout, FueDot } from '@/components/Fue'
 
 /** Same preference order as session-list chips: display label → host → short id. */
 export function resolveSessionHeaderMachineLabel(
@@ -193,6 +195,13 @@ export function SessionHeader(props: {
     const queryClient = useQueryClient()
     const { addToast } = useToast()
     const { session, api, onSessionDeleted, onSessionReopened } = props
+    // Just-in-time FUE: the outline icon has no text label until hover, and
+    // "jump to a message" isn't guessable from a table-of-contents glyph
+    // alone. Same useFue + FueDot + FueCallout wiring as the composer FUEs
+    // (see use-fue.ts) — toggling outline is a local boolean flip, so
+    // there's no unmount-on-click risk to guard against here.
+    const outlineFue = useFue('session-outline-toggle')
+    const outlineButtonRef = useRef<HTMLButtonElement>(null)
     const title = useMemo(() => getSessionTitle(session), [session])
     const worktreeBranch = session.metadata?.worktree?.branch?.trim() || null
     const { preferences: headerMetadata } = useSessionHeaderMetadata()
@@ -448,15 +457,37 @@ export function SessionHeader(props: {
 
                     {props.onToggleOutline ? (
                         <button
+                            ref={outlineButtonRef}
                             type="button"
-                            onClick={props.onToggleOutline}
-                            className={headerToggleClass(props.outlineActive ?? false)}
+                            onClick={() => {
+                                outlineFue.engage()
+                                props.onToggleOutline?.()
+                            }}
+                            className={`relative ${headerToggleClass(props.outlineActive ?? false)}`}
                             title={props.outlineActive ? t('session.outline.close') : t('session.outline.open')}
                             aria-label={props.outlineActive ? t('session.outline.close') : t('session.outline.open')}
                             aria-pressed={props.outlineActive ?? false}
                         >
                             <OutlineIcon />
+                            {outlineFue.status !== 'acknowledged' ? (
+                                <FueDot
+                                    pulsing={outlineFue.status === 'unseen'}
+                                    ariaLabel={t('fue.newFeatureDot')}
+                                />
+                            ) : null}
                         </button>
+                    ) : null}
+                    {outlineFue.status === 'engaging' ? (
+                        <FueCallout
+                            title={t('sessionOutline.fueTitle')}
+                            body={t('sessionOutline.fueBody')}
+                            onDismiss={outlineFue.dismiss}
+                            dismissLabel={t('fue.gotIt')}
+                            closeAriaLabel={t('fue.closeAriaLabel')}
+                            anchorRef={outlineButtonRef}
+                            onSecondaryAction={disableAllFue}
+                            secondaryActionLabel={t('fue.dontShowAgain')}
+                        />
                     ) : null}
 
                     {props.onToggleSessionLog ? (

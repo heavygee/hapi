@@ -182,8 +182,23 @@ Rules:
 - Affirmative action only: there is no auto-timeout — user dismisses by clicking "Got it" (reading speed varies).
 - The FUE dot and any feature-specific badge (e.g. an entry counter) should be **mutually exclusive**: onboarding signal beats inventory signal until acknowledged.
 - Storage is opt-in per-feature; if upstream ships its own onboarding for a feature, just don't wrap that affordance.
+- Give operators an out: pass `onSecondaryAction={() => { disableAllFue(); fue.dismiss() }}` + `secondaryActionLabel={t('fue.dontShowAgain')}` to `<FueCallout>` so a single dismiss can also mean "stop showing me all of these." This is the same `hapi.fue.v1.disabled` flag as the Settings → General → "Show onboarding tips" toggle — every `useFue()` instance checks it automatically, current and future.
 
 Canonical example: scratchlist toggle in `web/src/components/AssistantChat/ComposerButtons.tsx` (`ScratchlistToggleButton`).
+
+### Shell-wide onboarding tour vs. per-feature FUE
+
+`web/src/lib/use-onboarding-tour.ts` is a **separate** mechanism from `useFue` — do not conflate them:
+
+| | `useFue(featureId)` | `useOnboardingTour()` |
+|---|---|---|
+| Shape | Reactive: waits for the operator to reach the affordance, reveals on click | Proactive: runs unprompted on first visit |
+| Scope | One affordance, anywhere in the app, any time | 3 fixed steps (new session, browse, settings) on `/sessions` only |
+| Storage | `hapi.fue.v1.<featureId>` | `hapi.onboarding.v1.shell-tour` (one key, terminal) |
+| When it fires | First time the operator clicks the wrapped affordance | Once, on first-ever load, only if the session list is empty (a genuinely new install — an upgrading operator with existing sessions is silently pre-acknowledged, never interrupted) |
+| Add a step? | Yes, freely, for any non-essential feature | Rarely — the tour is reserved for primary shell navigation. A new feature almost always wants a `useFue` dot, not a new tour step |
+
+Both respect `isFueDisabledGlobally()` (use-fue.ts) — flipping Settings → General → "Show onboarding tips" off, or any single callout's "don't show tips again" link, silences the tour and every feature dot at once.
 
 ## Critical Thinking
 

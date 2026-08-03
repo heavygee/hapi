@@ -31,6 +31,8 @@ import { useMachineLabels } from '@/hooks/useMachineLabels'
 import { useSession } from '@/hooks/queries/useSession'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
 import { useSessions } from '@/hooks/queries/useSessions'
+import { useOnboardingTour, type ShellTourStepId } from '@/lib/use-onboarding-tour'
+import { FueCallout, FueDot } from '@/components/Fue'
 import { useSlashCommands } from '@/hooks/queries/useSlashCommands'
 import { useSkills } from '@/hooks/queries/useSkills'
 import { getSessionTitle } from '@/lib/sessionTitle'
@@ -280,6 +282,29 @@ function SessionsPage() {
         : null
     const isSessionsIndex = pathname === '/sessions' || pathname === '/sessions/'
     const sidebar = useSidebarResize()
+    // Shell onboarding tour — spotlights new-session/browse/settings for a
+    // brand-new install. See use-onboarding-tour.ts for why this is scoped
+    // to /sessions only (mobile single-pane vs desktop split-pane).
+    const tour = useOnboardingTour({ sessionCount: sessions.length, sessionsLoaded: !isLoading })
+    const tourNewSessionRef = useRef<HTMLButtonElement>(null)
+    const tourBrowseRef = useRef<HTMLButtonElement>(null)
+    const tourSettingsRef = useRef<HTMLButtonElement>(null)
+    const tourStepRef: Record<ShellTourStepId, React.RefObject<HTMLButtonElement | null>> = {
+        'new-session': tourNewSessionRef,
+        browse: tourBrowseRef,
+        settings: tourSettingsRef,
+    }
+    const tourStepCopy: Record<ShellTourStepId, { title: string; body: string }> = {
+        'new-session': { title: t('onboarding.tour.newSession.title'), body: t('onboarding.tour.newSession.body') },
+        browse: { title: t('onboarding.tour.browse.title'), body: t('onboarding.tour.browse.body') },
+        settings: { title: t('onboarding.tour.settings.title'), body: t('onboarding.tour.settings.body') },
+    }
+    // Desktop keeps the sidebar mounted even off /sessions (split-pane), so
+    // gate the dot the same way as the callout below — otherwise clicking
+    // the very button the tour is spotlighting (e.g. "New Session", which
+    // navigates to /sessions/new) leaves an unexplained dot pulsing with no
+    // callout in sight, since the callout alone was gated on isSessionsIndex.
+    const visibleTourStep = isSessionsIndex ? tour.activeStepId : null
     const handleNewSessionInDirectory = useCallback((args: { machineId: string | null; directory: string }) => {
         navigate({
             to: '/sessions/new',
@@ -750,32 +775,56 @@ function SessionsPage() {
                                 <RefreshIcon className={`h-5 w-5 ${isLoading ? 'animate-spin' : ''}`} />
                             </button>
                             <button
+                                ref={tourBrowseRef}
                                 type="button"
                                 onClick={() => navigate({ to: '/browse' })}
-                                className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
+                                className="relative p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
                                 title={t('browse.nav')}
                             >
                                 <FolderOpenIcon className="h-5 w-5" />
+                                {visibleTourStep === 'browse' ? (
+                                    <FueDot pulsing ariaLabel={t('fue.newFeatureDot')} />
+                                ) : null}
                             </button>
                             <button
+                                ref={tourSettingsRef}
                                 type="button"
                                 onClick={() => navigate({ to: '/settings' })}
-                                className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
+                                className="relative p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
                                 title={t('settings.title')}
                             >
                                 <SettingsIcon className="h-5 w-5" />
+                                {visibleTourStep === 'settings' ? (
+                                    <FueDot pulsing ariaLabel={t('fue.newFeatureDot')} />
+                                ) : null}
                             </button>
                             <button
+                                ref={tourNewSessionRef}
                                 type="button"
                                 onClick={() => navigate({ to: '/sessions/new' })}
-                                className="session-list-new-button flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-link)] transition-colors"
+                                className="session-list-new-button relative flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-link)] transition-colors"
                                 title={t('sessions.new')}
                             >
                                 <PlusIcon className="h-5 w-5" />
+                                {visibleTourStep === 'new-session' ? (
+                                    <FueDot pulsing ariaLabel={t('fue.newFeatureDot')} />
+                                ) : null}
                             </button>
                         </div>
                     </div>
                 </div>
+                {visibleTourStep ? (
+                    <FueCallout
+                        title={tourStepCopy[visibleTourStep].title}
+                        body={tourStepCopy[visibleTourStep].body}
+                        anchorRef={tourStepRef[visibleTourStep]}
+                        onDismiss={tour.next}
+                        dismissLabel={tour.isLastStep ? t('onboarding.tour.finish') : t('onboarding.tour.next')}
+                        closeAriaLabel={t('fue.closeAriaLabel')}
+                        onSecondaryAction={tour.skipAll}
+                        secondaryActionLabel={t('onboarding.tour.skip')}
+                    />
+                ) : null}
 
                 <div className="flex min-h-0 flex-1 flex-col">
                     {error ? (
