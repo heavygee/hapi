@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { isObject, toSessionSummary } from '@hapi/protocol'
+import {
+    computePendingRequestKinds,
+    computePendingRequests,
+    computePendingRequestsCount,
+    computeTodoProgress,
+    isObject,
+    toSessionSummary,
+    toSessionSummaryMetadata
+} from '@hapi/protocol'
 import { MachinePatchSchema, MachineSchema, SessionPatchSchema, SessionSchema } from '@hapi/protocol/schemas'
 import type {
     Machine,
@@ -36,6 +44,36 @@ export function isGlobalScopedMessageStreamEvent(scope: SSEScope, eventType: Syn
 
 export function shouldInvalidateSessionListForEvent(scope: SSEScope, eventType: SyncEvent['type']): boolean {
     return scope === 'global' && eventType === 'messages-invalidated'
+}
+
+// Version-monotonicity gate for structured patches carrying metadata or
+// agentState. SSE reconnects + per-query invalidation can leave the cache
+// holding state that's NEWER than a buffered older patch about to replay;
+// applying that older patch would regress resume / session-id / pending-
+// requests state. Mirrors the CLI room handler contract: strictly newer
+// only. Exported so the rule is unit-testable in isolation from the hook.
+export function isNewerVersionedPatch(patchVersion: number, currentVersion: number): boolean {
+    return patchVersion > currentVersion
+}
+
+/**
+ * @deprecated Prefer gating against SessionSummary watermarks. Kept for unit
+ * tests of the old "detail required" rule; summary path no longer uses this
+ * for metadata/agentState/todos (teamState is a summary no-op).
+ */
+export function canApplyVersionedSummaryPatch(
+    patch: Pick<SessionPatch, 'metadata' | 'agentState' | 'todos' | 'teamState'>,
+    detailPresent: boolean
+): boolean {
+    // teamState is not rendered on SessionSummary — never block list patches.
+    if (
+        patch.metadata === undefined
+        && patch.agentState === undefined
+        && patch.todos === undefined
+    ) {
+        return true
+    }
+    return detailPresent
 }
 
 type VisibilityState = 'visible' | 'hidden'
@@ -102,6 +140,30 @@ function isSessionRecord(value: unknown): value is Session {
  * `updatedAt` and sorts on active/pendingRequestsCount/updatedAt - so storing
  * it costs a new object identity and a full list re-render for nothing.
  */
+export function sameSessionSummaryMetadata(
+    current: SessionSummary['metadata'],
+    next: SessionSummary['metadata']
+): boolean {
+    if (current === next) {
+        return true
+    }
+    if (current == null || next == null) {
+        return current == null && next == null
+    }
+    return current.name === next.name
+        && current.path === next.path
+        && current.machineId === next.machineId
+        && current.summary?.text === next.summary?.text
+        && current.flavor === next.flavor
+        && current.agentSessionId === next.agentSessionId
+        && current.lifecycleState === next.lifecycleState
+        && current.worktree?.basePath === next.worktree?.basePath
+        && current.worktree?.branch === next.worktree?.branch
+        && current.worktree?.name === next.worktree?.name
+        && current.worktree?.worktreePath === next.worktree?.worktreePath
+        && current.worktree?.createdAt === next.worktree?.createdAt
+}
+
 export function isRenderIrrelevantPatch(current: SessionSummary, next: SessionSummary): boolean {
     return current.active === next.active
         && current.thinking === next.thinking
@@ -111,6 +173,25 @@ export function isRenderIrrelevantPatch(current: SessionSummary, next: SessionSu
         && current.modelReasoningEffort === next.modelReasoningEffort
         && current.effort === next.effort
         && current.pendingRequestsCount === next.pendingRequestsCount
+        // Structured SSE patches (#897) can move these without touching the
+        // keep-alive fields above; omit them and a todos/metadata/agentState
+        // patch would be dropped as "activeAt-only" churn.
+        && current.todoProgress?.completed === next.todoProgress?.completed
+        && current.todoProgress?.total === next.todoProgress?.total
+        && (current.todoProgress == null) === (next.todoProgress == null)
+        && current.pendingRequestKinds.length === next.pendingRequestKinds.length
+        && current.pendingRequestKinds.every((kind, i) => kind === next.pendingRequestKinds[i])
+        && current.pendingRequests.length === next.pendingRequests.length
+        && current.pendingRequests.every((req, i) => {
+            const nextReq = next.pendingRequests[i]
+            return req.id === nextReq?.id
+                && req.kind === nextReq.kind
+                && req.tool === nextReq.tool
+        })
+        && sameSessionSummaryMetadata(current.metadata, next.metadata)
+        && current.metadataVersion === next.metadataVersion
+        && current.agentStateVersion === next.agentStateVersion
+        && current.todosUpdatedAt === next.todosUpdatedAt
 }
 
 function getSessionPatch(value: unknown): SessionPatch | null {
@@ -412,7 +493,11 @@ export function useSSE(options: {
                     active: patch.active ?? current.active,
                     thinking: patch.thinking ?? current.thinking,
                     activeAt: patch.activeAt ?? current.activeAt,
-                    updatedAt: patch.updatedAt ?? current.updatedAt,
+                    // Monotonic: stale versioned-patch replays can carry an
+                    // older updatedAt; never move the list clock backward.
+                    updatedAt: patch.updatedAt !== undefined
+                        ? Math.max(current.updatedAt, patch.updatedAt)
+                        : current.updatedAt,
                     backgroundTaskCount: Object.prototype.hasOwnProperty.call(patch, 'backgroundTaskCount')
                         ? patch.backgroundTaskCount ?? 0
                         : current.backgroundTaskCount,
@@ -421,6 +506,25 @@ export function useSSE(options: {
                         ? patch.modelReasoningEffort ?? null
                         : current.modelReasoningEffort,
                     effort: Object.prototype.hasOwnProperty.call(patch, 'effort') ? patch.effort ?? null : current.effort
+                }
+
+                // Gate versioned fields against THIS summary's watermarks —
+                // not the detail query. Global SSE covers every session;
+                // requiring detail would force O(N) /sessions invalidation.
+                // teamState is a summary no-op (not rendered on the list).
+                if (patch.todos !== undefined && patch.todos.version >= current.todosUpdatedAt) {
+                    nextSummary.todoProgress = computeTodoProgress(patch.todos.value)
+                    nextSummary.todosUpdatedAt = patch.todos.version
+                }
+                if (patch.agentState !== undefined && patch.agentState.version >= current.agentStateVersion) {
+                    nextSummary.pendingRequestsCount = computePendingRequestsCount(patch.agentState.value)
+                    nextSummary.pendingRequestKinds = computePendingRequestKinds(patch.agentState.value)
+                    nextSummary.pendingRequests = computePendingRequests(patch.agentState.value, nextSummary.updatedAt)
+                    nextSummary.agentStateVersion = patch.agentState.version
+                }
+                if (patch.metadata !== undefined && patch.metadata.version >= current.metadataVersion) {
+                    nextSummary.metadata = toSessionSummaryMetadata(patch.metadata.value)
+                    nextSummary.metadataVersion = patch.metadata.version
                 }
 
                 patched = true
@@ -445,15 +549,68 @@ export function useSSE(options: {
                     return previous
                 }
                 patched = true
+                // Keep-alive patches repeat every field every ~10s; if nothing
+                // render-relevant moved (ignore activeAt), keep the existing
+                // object identity. Still field-by-field below for structured
+                // patches — never wholesale-spread { version, value } wrappers.
                 if (isRenderIrrelevantSessionPatch(previous.session, patch)) {
+                    return previous
+                }
+                let changed = false
+                const nextSession: Session = { ...previous.session }
+                const assign = <K extends keyof Session>(key: K, value: Session[K]) => {
+                    if (nextSession[key] !== value) {
+                        nextSession[key] = value
+                        changed = true
+                    }
+                }
+                if (patch.active !== undefined) assign('active', patch.active)
+                if (patch.thinking !== undefined) assign('thinking', patch.thinking)
+                if (patch.activeAt !== undefined) assign('activeAt', patch.activeAt)
+                // Monotonic with hub applySessionPatch: a rejected stale
+                // metadata/agentState replay must not rewind updatedAt.
+                if (patch.updatedAt !== undefined) {
+                    const nextUpdatedAt = Math.max(nextSession.updatedAt, patch.updatedAt)
+                    assign('updatedAt', nextUpdatedAt)
+                }
+                if (patch.model !== undefined) assign('model', patch.model)
+                if (patch.modelReasoningEffort !== undefined) assign('modelReasoningEffort', patch.modelReasoningEffort)
+                if (patch.effort !== undefined) assign('effort', patch.effort)
+                if (Object.prototype.hasOwnProperty.call(patch, 'serviceTier')) {
+                    assign('serviceTier', patch.serviceTier ?? null)
+                }
+                if (patch.permissionMode !== undefined) assign('permissionMode', patch.permissionMode)
+                if (patch.collaborationMode !== undefined) assign('collaborationMode', patch.collaborationMode)
+                if (patch.backgroundTaskCount !== undefined) assign('backgroundTaskCount', patch.backgroundTaskCount)
+                // Version gates: dual SSE can deliver duplicates out of order.
+                // Only mark changed when a strictly newer version lands —
+                // otherwise keep previous object identity (no redundant render).
+                if (patch.todos !== undefined && isNewerVersionedPatch(patch.todos.version, nextSession.todosUpdatedAt ?? 0)) {
+                    nextSession.todos = patch.todos.value
+                    nextSession.todosUpdatedAt = patch.todos.version
+                    changed = true
+                }
+                if (patch.teamState !== undefined && isNewerVersionedPatch(patch.teamState.version, nextSession.teamStateUpdatedAt ?? 0)) {
+                    nextSession.teamState = patch.teamState.value ?? undefined
+                    nextSession.teamStateUpdatedAt = patch.teamState.version
+                    changed = true
+                }
+                if (patch.metadata !== undefined && isNewerVersionedPatch(patch.metadata.version, nextSession.metadataVersion)) {
+                    nextSession.metadata = patch.metadata.value
+                    nextSession.metadataVersion = patch.metadata.version
+                    changed = true
+                }
+                if (patch.agentState !== undefined && isNewerVersionedPatch(patch.agentState.version, nextSession.agentStateVersion)) {
+                    nextSession.agentState = patch.agentState.value
+                    nextSession.agentStateVersion = patch.agentState.version
+                    changed = true
+                }
+                if (!changed) {
                     return previous
                 }
                 return {
                     ...previous,
-                    session: {
-                        ...previous.session,
-                        ...patch
-                    }
+                    session: nextSession
                 }
             })
             return patched
