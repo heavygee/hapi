@@ -257,6 +257,18 @@ export default {
   'session.outline.searchLabel': 'Search outline items',
   'session.outline.searchResults': '{matched} of {total} items',
   'session.outline.noSearchResults': 'No matching outline items',
+  'session.outline.kind.user': 'User',
+  'session.log.open': 'Session log',
+  'session.log.close': 'Close session log',
+  'session.log.title': 'Session Log',
+  'session.log.refresh': 'Refresh log',
+  'session.log.filters': 'Log filters',
+  'session.log.filter.all': 'All',
+  'session.log.filter.links': 'Links',
+  'session.log.empty': 'No durable events for this session yet',
+  'session.log.emptyLinks': 'No links scooped for this session yet',
+  'session.log.loadOlder': 'Load earlier',
+  'session.log.provenance': 'Source',
 
   // Session actions
   'session.action.rename': 'Rename',

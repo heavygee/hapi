@@ -19,6 +19,7 @@ import { useTerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 import { useTranslation } from '@/lib/use-translation'
 import { CloseIcon } from '@/components/icons'
 import { ShareTurnDialog } from '@/components/AssistantChat/ShareTurnDialog'
+import { SessionLogPanel } from '@/components/AssistantChat/SessionLogPanel'
 import { formatCodexReasoningLabel, shouldShowCodexReasoningLabel } from '@/lib/codexStatusLabels'
 import { getSessionModelLabel } from '@/lib/sessionModelLabel'
 import { isFastServiceTier } from '@/components/AssistantChat/codexFastMode'
@@ -443,6 +444,8 @@ export function HappyThread(props: {
     outlineItems: readonly ConversationOutlineItem[]
     onOutlineOpenChange: (open: boolean) => void
     onOutlineItemClick?: (item: ConversationOutlineItem) => void
+    sessionLogOpen?: boolean
+    onSessionLogOpenChange?: (open: boolean) => void
 }) {
     const { t } = useTranslation()
     const { terminalToolDisplayMode } = useTerminalToolDisplayMode()
@@ -1551,6 +1554,22 @@ export function HappyThread(props: {
                     sourceContentWidth={shareTurn?.sourceContentWidth ?? null}
                     onClose={() => setShareTurn(null)}
                 />
+                {props.sessionLogOpen ? (
+                    <>
+                        <button
+                            type="button"
+                            className="absolute inset-0 z-20 bg-black/20"
+                            aria-label={t('session.log.close')}
+                            onClick={() => props.onSessionLogOpenChange?.(false)}
+                        />
+                        <SessionLogPanel
+                            api={props.api}
+                            sessionId={props.sessionId}
+                            title={props.outlineTitle}
+                            onClose={() => props.onSessionLogOpenChange?.(false)}
+                        />
+                    </>
+                ) : null}
             </ThreadPrimitive.Root>
         </HappyChatProvider>
     )

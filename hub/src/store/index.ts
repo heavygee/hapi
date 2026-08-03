@@ -9,6 +9,11 @@ import type { StoredMessage } from './types'
 import { PushStore } from './pushStore'
 import { FcmStore } from './fcmStore'
 import { ScratchlistStore } from './scratchlistStore'
+import { EventStore } from './eventStore'
+import { InboxStore } from './inboxStore'
+import { SettingsStore, ensureOverseerSettingsSchema } from './settingsStore'
+import { ensureOverseerEventsSchema, ensureDeletedSessionsSchema } from './events'
+import { ensureOverseerInboxSchema } from './inboxItems'
 import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
 import { UsageStore } from './usageStore'
@@ -29,6 +34,12 @@ export { MessageStore } from './messageStore'
 export { PushStore } from './pushStore'
 export { FcmStore } from './fcmStore'
 export { ScratchlistStore } from './scratchlistStore'
+export { EventStore } from './eventStore'
+export { InboxStore } from './inboxStore'
+export { SettingsStore } from './settingsStore'
+export type { ActiveBrainSetting } from './settingsStore'
+export type { InsertSystemEventInput, ListSystemEventsOptions, StoredSystemEvent } from './eventStore'
+export type { ListInboxItemsOptions, StoredInboxItem } from './inboxStore'
 export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
 export { UsageStore } from './usageStore'
@@ -44,7 +55,14 @@ const REQUIRED_TABLES = [
     'fcm_devices',
     'session_scratchlist',
     'usage_events',
-    'usage_scan_state'
+    'usage_scan_state',
+    'events',
+    'event_links',
+    'deleted_sessions',
+    'inbox_items',
+    'inbox_item_source_events',
+    'inbox_operator_actions',
+    'overseer_settings'
 ] as const
 
 export class Store {
@@ -59,6 +77,9 @@ export class Store {
     readonly push: PushStore
     readonly fcm: FcmStore
     readonly scratchlist: ScratchlistStore
+    readonly events: EventStore
+    readonly inbox: InboxStore
+    readonly settings: SettingsStore
     readonly usage: UsageStore
 
     /**
@@ -112,6 +133,9 @@ export class Store {
         this.push = new PushStore(this.db)
         this.fcm = new FcmStore(this.db)
         this.scratchlist = new ScratchlistStore(this.db)
+        this.events = new EventStore(this.db)
+        this.inbox = new InboxStore(this.db)
+        this.settings = new SettingsStore(this.db)
         this.usage = new UsageStore(this.db)
     }
 
