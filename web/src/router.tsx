@@ -718,7 +718,67 @@ function SessionsPage() {
                 className={`${isSessionsIndex ? 'flex' : 'hidden split:flex'} w-full shrink-0 flex-col bg-[var(--app-bg)]`}
                 style={{ '--sidebar-w': `${sidebar.width}px` } as React.CSSProperties}
             >
-                <div className="flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)]">                    {error ? (
+                <div className="session-list-scrollbar-offset shrink-0 bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
+                    <div className="mx-auto flex w-full max-w-content items-center justify-between gap-2 px-2 py-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                            <div className="shrink-0 text-xs text-[var(--app-hint)]">
+                                {t('sessions.count', { n: sessions.length, m: projectCount })}
+                            </div>
+                            <GardenXrEntryChip />
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => void openCodexImportDialog()}
+                                disabled={isSyncingCodexSession || isLoadingCodexSessions || isImportingCursorSessions || isSyncingClaudeSession || isLoadingClaudeSessions}
+                                aria-label={t('agentImport.tooltip')}
+                                aria-busy={isSyncingCodexSession || isLoadingCodexSessions || isImportingCursorSessions || isSyncingClaudeSession || isLoadingClaudeSessions}
+                                className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors disabled:opacity-60 disabled:cursor-wait"
+                                title={t('agentImport.tooltip')}
+                            >
+                                <CodexImportIcon className={`h-5 w-5 ${isLoadingCodexSessions || isLoadingCursorSessions || isLoadingClaudeSessions ? 'animate-spin' : ''}`} />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleRefresh}
+                                disabled={isLoading}
+                                aria-label={t('button.refresh')}
+                                aria-busy={isLoading}
+                                className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors disabled:opacity-60 disabled:cursor-wait"
+                                title={t('button.refresh')}
+                            >
+                                <RefreshIcon className={`h-5 w-5 ${isLoading ? 'animate-spin' : ''}`} />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => navigate({ to: '/browse' })}
+                                className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
+                                title={t('browse.nav')}
+                            >
+                                <FolderOpenIcon className="h-5 w-5" />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => navigate({ to: '/settings' })}
+                                className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
+                                title={t('settings.title')}
+                            >
+                                <SettingsIcon className="h-5 w-5" />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => navigate({ to: '/sessions/new' })}
+                                className="session-list-new-button flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-link)] transition-colors"
+                                title={t('sessions.new')}
+                            >
+                                <PlusIcon className="h-5 w-5" />
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="flex min-h-0 flex-1 flex-col">
+                    {error ? (
                         <div className="mx-auto w-full max-w-content px-3 py-2">
                             <div className="text-sm text-red-600">{error}</div>
                         </div>

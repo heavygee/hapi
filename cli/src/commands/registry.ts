@@ -14,6 +14,7 @@ import { piCommand } from './pi'
 import { hookForwarderCommand } from './hookForwarder'
 import { mcpCommand } from './mcp'
 import { notifyCommand } from './notify'
+import { linkPrCommand } from './linkPr'
 import { hubCommand } from './hub'
 import { pingPeerCommand } from './pingPeer'
 import { inspectPeerCommand } from './inspectPeer'
@@ -53,6 +54,7 @@ const COMMANDS: CommandDefinition[] = [
     resumeCommand,
     runnerCommand,
     notifyCommand,
+    linkPrCommand,
     pingPeerCommand,
     inspectPeerCommand
 ]

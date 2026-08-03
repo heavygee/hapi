@@ -44,6 +44,48 @@ export const WorktreeMetadataSchema = z.object({
 
 export type WorktreeMetadata = z.infer<typeof WorktreeMetadataSchema>
 
+
+export const GithubRepoSlugSchema = z.string().regex(
+    /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/,
+    'expected owner/name'
+)
+
+export const GithubPrStatusSchema = z.enum([
+    'clean',
+    'pending',
+    'needs_work',
+    'pre_pr',
+    'merged',
+    'unknown'
+])
+export type GithubPrStatus = z.infer<typeof GithubPrStatusSchema>
+
+export const GithubPrExternalRefSchema = z.object({
+    kind: z.literal('github_pr'),
+    repo: GithubRepoSlugSchema,
+    number: z.number().int().positive(),
+    url: z.string().url(),
+    role: z.enum(['primary', 'secondary']),
+    source: z.enum(['agent', 'user', 'inferred']).optional(),
+    linkedAt: z.number().int().positive().optional(),
+    status: GithubPrStatusSchema.optional(),
+    statusCheckedAt: z.number().int().positive().optional(),
+    statusAction: z.string().max(400).optional()
+}).superRefine((ref, ctx) => {
+    const expectedUrl = `https://github.com/${ref.repo}/pull/${ref.number}`
+    if (ref.url !== expectedUrl) {
+        ctx.addIssue({
+            code: 'custom',
+            path: ['url'],
+            message: 'expected GitHub PR URL matching repo and number'
+        })
+    }
+})
+
+export type GithubPrExternalRef = z.infer<typeof GithubPrExternalRefSchema>
+export const ExternalRefSchema = GithubPrExternalRefSchema
+export type ExternalRef = z.infer<typeof ExternalRefSchema>
+
 export const MetadataSchema = z.object({
     path: z.string(),
     host: z.string(),
@@ -125,7 +167,19 @@ export const MetadataSchema = z.object({
     // field stores only modelId (shared across all flavors); this preserves
     // the provider so web can resolve the exact model when two providers
     // share a modelId.
-    piSelectedModel: z.object({ provider: z.string(), modelId: z.string() }).nullable().optional()
+    piSelectedModel: z.object({ provider: z.string(), modelId: z.string() }).nullable().optional(),
+    lastModelError: z.object({
+        kind: z.string(),
+        transient: z.boolean(),
+        rawSnippet: z.string(),
+        atTs: z.number(),
+        priorAssistantClaimsDone: z.boolean(),
+        lastUserMessage: z.string().optional(),
+        bridgedForAtTs: z.number().optional(),
+        retriedAndFailed: z.boolean().optional(),
+        acknowledgedAt: z.number().optional()
+    }).optional(),
+    externalRefs: z.array(ExternalRefSchema).optional()
 })
 
 export type Metadata = z.infer<typeof MetadataSchema>

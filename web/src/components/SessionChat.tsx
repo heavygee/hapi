@@ -66,6 +66,8 @@ import { useTranslation } from '@/lib/use-translation'
 import { SessionHeader } from '@/components/SessionHeader'
 import { SessionFlowPanel } from '@/components/SessionFlowPanel'
 import { CursorMigrationBanner } from '@/components/CursorMigrationBanner'
+import { ModelErrorBanner } from '@/components/ModelErrorBanner'
+import { readAutoBridgeTransientModelErrors } from '@/lib/modelErrorBridgePrefs'
 import { TeamPanel } from '@/components/TeamPanel'
 import { SessionStatusPanel } from '@/components/SessionStatusPanel'
 import { buildSessionStatusData } from '@/chat/sessionStatus'
@@ -905,6 +907,48 @@ function SessionChatInner(props: SessionChatProps) {
         agentFlavor,
         codexCollaborationModeSupported
     )
+
+    const handleAcknowledgeModelError = useCallback(async () => {
+        const atTs = props.session.metadata?.lastModelError?.atTs
+        if (typeof atTs !== 'number') {
+            props.onRefresh()
+            return
+        }
+        await props.api.acknowledgeModelError(props.session.id, atTs).catch(() => {})
+        props.onRefresh()
+    }, [props.api, props.session.id, props.session.metadata?.lastModelError?.atTs, props.onRefresh])
+
+    const [isBridgingModelError, setIsBridgingModelError] = useState(false)
+    const [bridgeModelErrorReason, setBridgeModelErrorReason] = useState<string | null>(null)
+
+    const handleBridgeModelError = useCallback(async () => {
+        if (isBridgingModelError) {
+            return
+        }
+        setIsBridgingModelError(true)
+        setBridgeModelErrorReason(null)
+        try {
+            const result = await props.api.bridgeModelError(props.session.id)
+            if (!result.ok) {
+                setBridgeModelErrorReason(result.reason ?? 'not_bridgeable')
+            }
+            props.onRefresh()
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'bridge_failed'
+            setBridgeModelErrorReason(message)
+            console.warn('[SessionChat] model error bridge failed:', error)
+        } finally {
+            setIsBridgingModelError(false)
+        }
+    }, [props.api, props.session.id, props.onRefresh, isBridgingModelError])
+
+    useEffect(() => {
+        if (agentFlavor !== 'cursor' || !props.session.active) {
+            return
+        }
+        const enabled = readAutoBridgeTransientModelErrors()
+        void props.api.setModelErrorAutoBridge(props.session.id, enabled).catch(() => {})
+    }, [agentFlavor, props.api, props.session.active, props.session.id])
 
     // Voice assistant integration
     const voice = useVoiceOptional()

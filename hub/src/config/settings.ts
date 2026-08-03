@@ -21,6 +21,8 @@ export interface Settings {
     listenPort?: number
     publicUrl?: string
     corsOrigins?: string[]
+    /** Opt-in GitHub PR awareness for sessions. Default off. */
+    githubPrAwareness?: boolean
     // Operator fleet-upgrade policy (no alert / alert / auto-upgrade)
     fleetUpgradePolicy?: FleetUpgradePolicy
 }

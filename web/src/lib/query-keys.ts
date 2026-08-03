@@ -31,4 +31,5 @@ export const queryKeys = {
     skills: (sessionId: string) => ['skills', sessionId] as const,
     scratchlist: (sessionId: string) => ['scratchlist', sessionId] as const,
     sessionSystemEvents: (sessionId: string, filter: string) => ['session-system-events', sessionId, filter] as const,
+    features: ['features'] as const,
 }

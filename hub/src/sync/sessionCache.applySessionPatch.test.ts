@@ -35,13 +35,10 @@ describe('SessionCache.applySessionPatch', () => {
         const todos = [
             { content: 'one', status: 'pending' as const, priority: 'medium' as const, id: '1' }
         ]
-        const applied = cache.applySessionPatch(created.id, {
-            todos: { version: 100, value: todos }
-        })
+        const applied = cache.applySessionPatch(created.id, { todos })
 
         expect(applied).toBe(true)
         expect(cache.getSession(created.id)?.todos).toEqual(todos)
-        expect(cache.getSession(created.id)?.todosUpdatedAt).toBe(100)
     })
 
     it('applies a versioned metadata patch by unwrapping value + version', () => {
@@ -99,7 +96,7 @@ describe('SessionCache.applySessionPatch', () => {
         const events: SyncEvent[] = []
         const cache = new SessionCache(store, createPublisher(events))
 
-        const applied = cache.applySessionPatch('does-not-exist', { todos: { version: 1, value: [] } })
+        const applied = cache.applySessionPatch('does-not-exist', { todos: [] })
         expect(applied).toBe(false)
     })
 
@@ -161,13 +158,13 @@ describe('SessionCache.applySessionPatch', () => {
         )
         // Seed cached teamState (the pre-delete state).
         const seedApplied = cache.applySessionPatch(created.id, {
-            teamState: { version: 10, value: { teamName: 'crew', members: [{ name: 'a' }] } }
+            teamState: { teamName: 'crew', members: [{ name: 'a' }] }
         })
         expect(seedApplied).toBe(true)
         expect(cache.getSession(created.id)?.teamState?.teamName).toBe('crew')
 
-        // TeamDelete: null teamState value must clear the cache.
-        const cleared = cache.applySessionPatch(created.id, { teamState: { version: 11, value: null } })
+        // TeamDelete: null teamState patch must clear the cache.
+        const cleared = cache.applySessionPatch(created.id, { teamState: null })
         expect(cleared).toBe(true)
         expect(cache.getSession(created.id)?.teamState).toBeUndefined()
     })
@@ -188,15 +185,12 @@ describe('SessionCache.applySessionPatch', () => {
             'default'
         )
         cache.applySessionPatch(created.id, {
-            teamState: { version: 10, value: { teamName: 'crew', members: [{ name: 'a' }] } }
+            teamState: { teamName: 'crew', members: [{ name: 'a' }] }
         })
         expect(cache.getSession(created.id)?.teamState?.teamName).toBe('crew')
 
         const todosOnly = cache.applySessionPatch(created.id, {
-            todos: {
-                version: 20,
-                value: [{ content: 'one', status: 'pending' as const, priority: 'medium' as const, id: '1' }]
-            }
+            todos: [{ content: 'one', status: 'pending' as const, priority: 'medium' as const, id: '1' }]
         })
         expect(todosOnly).toBe(true)
         expect(cache.getSession(created.id)?.teamState?.teamName).toBe('crew')
@@ -214,7 +208,7 @@ describe('SessionCache.applySessionPatch', () => {
             'tenant-a'
         )
 
-        const applied = cache.applySessionPatch(created.id, { todos: { version: 1, value: [] } }, 'tenant-b')
+        const applied = cache.applySessionPatch(created.id, { todos: [] }, 'tenant-b')
         expect(applied).toBe(false)
     })
 })

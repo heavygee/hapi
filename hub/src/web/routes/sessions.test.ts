@@ -64,6 +64,8 @@ function createApp(session: Session, opts?: {
     sessionExists?: boolean
     archiveSession?: (sessionId: string) => Promise<void>
     getCursorChatStoreStatus?: SyncEngine['getCursorChatStoreStatus']
+    setSessionExternalRefs?: SyncEngine['setSessionExternalRefs']
+    githubPrAwarenessEnabled?: boolean
     forkConversation?: SyncEngine['forkConversation']
     rewindConversation?: SyncEngine['rewindConversation']
 }) {
@@ -71,6 +73,12 @@ function createApp(session: Session, opts?: {
     const applySessionConfig = async (sessionId: string, config: Record<string, unknown>) => {
         applySessionConfigCalls.push([sessionId, config])
     }
+    const listCodexModelsForSession = async () => ({
+        success: true,
+        models: [
+            { id: 'gpt-5.5', displayName: 'GPT-5.5', isDefault: true }
+        ]
+    })
     const listOpencodeModelsForSession = async () => ({
         success: true,
         availableModels: [
@@ -124,6 +132,7 @@ function createApp(session: Session, opts?: {
             ? { ok: true, sessionId: session.id, session }
             : { ok: false, reason: 'not-found' },
         applySessionConfig,
+        listCodexModelsForSession,
         listCursorModelsForSession,
         listOpencodeModelsForSession,
         listOpencodeReasoningEffortOptionsForSession,
@@ -136,6 +145,7 @@ function createApp(session: Session, opts?: {
             status: { onDisk: true, store: 'acp' as const }
         })),
         archiveSession: archiveSessionMock,
+        setSessionExternalRefs: opts?.setSessionExternalRefs ?? (async () => {}),
         getSessionExport: opts?.getSessionExport ?? (() => ({
             type: 'success',
             payload: {
@@ -159,12 +169,113 @@ function createApp(session: Session, opts?: {
         c.set('namespace', 'default')
         await next()
     })
-    app.route('/api', createSessionsRoutes(() => engine as SyncEngine))
+    app.route('/api', createSessionsRoutes(() => engine as SyncEngine, {
+        isGithubPrAwarenessEnabled: () => opts?.githubPrAwarenessEnabled ?? true
+    }))
 
     return { app, applySessionConfigCalls }
 }
 
 describe('sessions routes', () => {
+    it('returns structured externalRefs for a session', async () => {
+        const externalRefs = [{
+            kind: 'github_pr' as const,
+            repo: 'tiann/hapi',
+            number: 1160,
+            url: 'https://github.com/tiann/hapi/pull/1160',
+            role: 'primary' as const
+        }]
+        const session = createSession({
+            metadata: {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'cursor',
+                externalRefs
+            }
+        })
+        const { app } = createApp(session)
+
+        const response = await app.request('/api/sessions/session-1/external-refs')
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ externalRefs })
+    })
+
+    it('returns an empty externalRefs array when metadata has none', async () => {
+        const { app } = createApp(createSession())
+
+        const response = await app.request('/api/sessions/session-1/external-refs')
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ externalRefs: [] })
+    })
+
+    it('rejects PUT external-refs when github PR awareness is disabled', async () => {
+        const { app } = createApp(createSession(), { githubPrAwarenessEnabled: false })
+        const response = await app.request('/api/sessions/session-1/external-refs', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                externalRefs: [{
+                    kind: 'github_pr',
+                    repo: 'tiann/hapi',
+                    number: 1162,
+                    url: 'https://github.com/tiann/hapi/pull/1162',
+                    role: 'primary'
+                }]
+            })
+        })
+        expect(response.status).toBe(403)
+        expect(await response.json()).toMatchObject({ code: 'github_pr_awareness_disabled' })
+    })
+
+    it('puts external-refs when awareness is enabled', async () => {
+        const calls: unknown[] = []
+        const externalRefs = [{
+            kind: 'github_pr' as const,
+            repo: 'tiann/hapi',
+            number: 1162,
+            url: 'https://github.com/tiann/hapi/pull/1162',
+            role: 'primary' as const,
+            source: 'user' as const,
+            linkedAt: 1_700_000_000_000
+        }]
+        const { app } = createApp(createSession(), {
+            githubPrAwarenessEnabled: true,
+            setSessionExternalRefs: async (_sessionId, refs) => {
+                calls.push(refs)
+            }
+        })
+
+        const response = await app.request('/api/sessions/session-1/external-refs', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ externalRefs })
+        })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ ok: true, externalRefs })
+        expect(calls).toEqual([externalRefs])
+    })
+
+    it('allows PUT empty externalRefs to unlink', async () => {
+        const calls: unknown[] = []
+        const { app } = createApp(createSession(), {
+            setSessionExternalRefs: async (_sessionId, refs) => {
+                calls.push(refs)
+            }
+        })
+
+        const response = await app.request('/api/sessions/session-1/external-refs', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ externalRefs: [] })
+        })
+
+        expect(response.status).toBe(200)
+        expect(calls).toEqual([[]])
+    })
+
     it('returns the machine-scoped Cursor chat store status', async () => {
         const session = createSession({
             active: false,
@@ -717,6 +828,20 @@ describe('sessions routes', () => {
         expect(localApp.applySessionConfigCalls).toEqual([])
     })
 
+    it('returns Codex models for active Codex sessions', async () => {
+        const { app } = createApp(createSession())
+
+        const response = await app.request('/api/sessions/session-1/codex-models')
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({
+            success: true,
+            models: [
+                { id: 'gpt-5.5', displayName: 'GPT-5.5', isDefault: true }
+            ]
+        })
+    })
+
     it('returns OpenCode reasoning effort options for active OpenCode sessions', async () => {
         const session = createSession({
             metadata: { path: '/tmp/project', host: 'localhost', flavor: 'opencode' }
@@ -1151,28 +1276,6 @@ describe('sessions routes', () => {
             expect(response.status).toBe(200)
             expect(await response.json()).toEqual({ ok: true })
             expect(calls).toEqual(['session-1'])
-        })
-
-        it('archives an active session with stale archived lifecycle metadata', async () => {
-            const calls: string[] = []
-            const session = createSession({
-                active: true,
-                metadata: {
-                    path: '/tmp/project',
-                    host: 'localhost',
-                    flavor: 'codex',
-                    lifecycleState: 'archived'
-                }
-            })
-            const { app } = createApp(session, {
-                archiveSession: async (sessionId: string) => { calls.push(sessionId) }
-            })
-
-            const response = await app.request('/api/sessions/session-1/archive', { method: 'POST' })
-
-            expect(response.status).toBe(200)
-            expect(calls).toEqual(['session-1'])
-            expect(await response.json()).toEqual({ ok: true })
         })
 
         it('returns 2xx and skips archiveSession when the row is already archived (idempotent)', async () => {

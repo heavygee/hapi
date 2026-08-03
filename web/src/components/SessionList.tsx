@@ -7,6 +7,8 @@ import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { SessionExportDialog } from '@/components/SessionExportDialog'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
+import { LinkPrDialog } from '@/components/LinkPrDialog'
+import { SessionPrChip } from '@/components/SessionPrChip'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { CopyIcon, CheckIcon } from '@/components/icons'
 import { cn } from '@/lib/utils'
@@ -782,9 +784,12 @@ function SessionItem(props: {
     const [menuOpen, setMenuOpen] = useState(false)
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
     const [renameOpen, setRenameOpen] = useState(false)
+    const [linkPrOpen, setLinkPrOpen] = useState(false)
     const [exportOpen, setExportOpen] = useState(false)
     const [archiveOpen, setArchiveOpen] = useState(false)
     const [deleteOpen, setDeleteOpen] = useState(false)
+    const { features } = useFeatures(api)
+    const githubPrAwarenessEnabled = Boolean(features?.githubPrAwareness.enabled)
     const {
         status: cursorChatStoreStatus,
         isApplicable: cursorChatStoreApplicable,
@@ -810,7 +815,7 @@ function SessionItem(props: {
         ? t('session.action.reopenCursorUnverified')
         : undefined
 
-    const { archiveSession, reopenSession, renameSession, deleteSession, isPending } = useSessionActions(
+    const { archiveSession, reopenSession, renameSession, setExternalRefs, deleteSession, isPending } = useSessionActions(
         api,
         s.id,
         s.metadata?.flavor ?? null
@@ -892,6 +897,7 @@ function SessionItem(props: {
                 sessionTitle={sessionName}
                 sessionActive={s.active}
                 onRename={() => setRenameOpen(true)}
+                onLinkPr={githubPrAwarenessEnabled ? () => setLinkPrOpen(true) : undefined}
                 onExport={() => setExportOpen(true)}
                 onArchive={() => setArchiveOpen(true)}
                 onReopen={cursorReopenDisabledReason ? undefined : handleReopen}
@@ -915,15 +921,22 @@ function SessionItem(props: {
                 />
             ) : null}
 
-            {renameOpen ? (
-                <RenameSessionDialog
-                    isOpen={true}
-                    onClose={() => setRenameOpen(false)}
-                    currentName={sessionName}
-                    onRename={renameSession}
-                    isPending={isPending}
-                />
-            ) : null}
+            <RenameSessionDialog
+                isOpen={renameOpen}
+                onClose={() => setRenameOpen(false)}
+                currentName={sessionName}
+                onRename={renameSession}
+                isPending={isPending}
+            />
+
+            <LinkPrDialog
+                isOpen={linkPrOpen}
+                onClose={() => setLinkPrOpen(false)}
+                currentPrimaryLabel={primaryPrRef ? `${primaryPrRef.repo}#${primaryPrRef.number}` : null}
+                onLink={setExternalRefs}
+                onUnlink={primaryPrRef ? () => setExternalRefs([]) : undefined}
+                isPending={isPending}
+            />
 
             {exportOpen ? (
                 <SessionExportDialog
@@ -1570,7 +1583,7 @@ export function SessionList(props: {
                     return (
                         <div key={group.key}>
                             <div
-                                className="group/project sticky top-0 z-10 flex items-center gap-2 bg-[var(--app-bg)] py-1.5 pl-2 pr-2 text-left rounded-lg transition-colors hover:bg-[var(--app-secondary-bg)] cursor-pointer min-w-0 w-full select-none"
+                                className="group/project sticky top-0 z-10 flex items-center gap-2 bg-[var(--app-bg)] py-1.5 pl-2 pr-2 text-left rounded-lg transition-colors hover:bg-[var(--app-subtle-bg)] cursor-pointer min-w-0 w-full select-none"
                                 onClick={() => toggleGroup(group.key, isCollapsed)}
                                 title={group.directory}
                             >

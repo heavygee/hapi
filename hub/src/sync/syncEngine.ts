@@ -21,7 +21,7 @@ import {
     type RunnerSelfUpgradeResponse,
 } from '@hapi/protocol/upgradeChannel'
 import type { CursorChatStoreStatus, CursorMigrateOutcome, CursorMigrateToAcpRequest, MessagesResponse, QueuedStateResponse, SlashCommandsResponse } from '@hapi/protocol/apiTypes'
-import type { AgentFlavor, CodexCollaborationMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
+import type { AgentFlavor, CodexCollaborationMode, DecryptedMessage, ExternalRef, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
 import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
 import type { Server } from 'socket.io'
 import { randomUUID } from 'node:crypto'
@@ -2049,6 +2049,54 @@ export class SyncEngine {
         await this.sessionCache.renameSession(sessionId, name)
     }
 
+    async setSessionExternalRefs(sessionId: string, externalRefs: ExternalRef[]): Promise<void> {
+        await this.sessionCache.setSessionExternalRefs(sessionId, externalRefs)
+    }
+
+
+    async acknowledgeModelError(sessionId: string, atTs: number): Promise<void> {
+        await this.sessionCache.acknowledgeModelError(sessionId, atTs)
+    }
+
+    async bridgeModelError(sessionId: string): Promise<{ ok: boolean; reason?: string }> {
+        const session = this.sessionCache.refreshSession(sessionId)
+            ?? this.sessionCache.getSession(sessionId)
+        if (!session) {
+            throw new Error('Session not found')
+        }
+
+        const err = session.metadata?.lastModelError
+        if (!err) {
+            throw new Error('No model error to bridge')
+        }
+        if (!err.transient) {
+            throw new Error('Model error is not transient')
+        }
+        if (err.bridgedForAtTs === err.atTs) {
+            throw new Error('Model error was already bridged')
+        }
+        if (err.retriedAndFailed) {
+            throw new Error('Bridge already failed for this error')
+        }
+
+        const result = await this.rpcGateway.bridgeModelError(sessionId, {
+            atTs: err.atTs,
+            kind: err.kind,
+            rawSnippet: err.rawSnippet,
+            lastUserMessage: err.lastUserMessage,
+            priorAssistantClaimsDone: err.priorAssistantClaimsDone,
+            transient: err.transient,
+            bridgedForAtTs: err.bridgedForAtTs,
+            retriedAndFailed: err.retriedAndFailed
+        })
+
+        if (result.ok) {
+            await this.sessionCache.markModelErrorBridged(sessionId, err.atTs)
+        }
+
+        return result
+    }
+
     async deleteSession(sessionId: string): Promise<void> {
         await this.sessionCache.deleteSession(sessionId)
     }
@@ -2062,6 +2110,7 @@ export class SyncEngine {
             effort?: string | null
             serviceTier?: string | null
             collaborationMode?: CodexCollaborationMode
+            autoBridgeTransientModelErrors?: boolean
         }
     ): Promise<void> {
         const session = this.sessionCache.getSession(sessionId)

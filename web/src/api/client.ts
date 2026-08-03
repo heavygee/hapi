@@ -547,6 +547,56 @@ export class ApiClient {
         })
     }
 
+    async acknowledgeModelError(sessionId: string, atTs: number): Promise<void> {
+        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/model-error/acknowledge`, {
+            method: 'POST',
+            body: JSON.stringify({ atTs })
+        })
+    }
+
+    async bridgeModelError(sessionId: string): Promise<{ ok: boolean; reason?: string }> {
+        const path = `/api/sessions/${encodeURIComponent(sessionId)}/model-error/bridge`
+        const headers = new Headers({ 'content-type': 'application/json' })
+        const authToken = this.getToken ? this.getToken() : this.token
+        if (authToken) {
+            headers.set('authorization', `Bearer ${authToken}`)
+        }
+
+        const res = await fetch(this.buildUrl(path), {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({})
+        })
+
+        if (res.status === 401) {
+            throw new Error('Session expired. Please sign in again.')
+        }
+
+        const body = await res.json().catch(() => null) as { ok?: boolean; reason?: string; error?: string } | null
+        if (res.status === 409 && body && typeof body.ok === 'boolean') {
+            return { ok: body.ok, reason: body.reason }
+        }
+
+        if (!res.ok) {
+            const detail = body?.error ?? (typeof body === 'object' ? JSON.stringify(body) : '')
+            throw new ApiError(
+                `HTTP ${res.status} ${res.statusText}: ${detail}`,
+                res.status,
+                undefined,
+                detail || undefined
+            )
+        }
+
+        return { ok: true }
+    }
+
+    async setModelErrorAutoBridge(sessionId: string, enabled: boolean): Promise<void> {
+        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/model-error/auto-bridge-setting`, {
+            method: 'POST',
+            body: JSON.stringify({ enabled })
+        })
+    }
+
     async reopenSession(sessionId: string): Promise<ReopenSessionResponse> {
         return await this.request<ReopenSessionResponse>(
             `/api/sessions/${encodeURIComponent(sessionId)}/reopen`,
@@ -692,6 +742,32 @@ export class ApiClient {
         await this.request(`/api/machines/${encodeURIComponent(machineId)}`, {
             method: 'PATCH',
             body: JSON.stringify({ displayName })
+        })
+    }
+
+
+    async getFeatures(): Promise<{
+        githubPrAwareness: { enabled: boolean; source: 'env' | 'file' | 'default' }
+    }> {
+        return await this.request('/api/features')
+    }
+
+    async patchFeatures(patch: { githubPrAwareness?: boolean }): Promise<{
+        githubPrAwareness: { enabled: boolean; source: 'env' | 'file' | 'default' }
+    }> {
+        return await this.request('/api/features', {
+            method: 'PATCH',
+            body: JSON.stringify(patch)
+        })
+    }
+
+    async setSessionExternalRefs(
+        sessionId: string,
+        externalRefs: import('@/types/api').ExternalRef[]
+    ): Promise<{ ok: true; externalRefs: import('@/types/api').ExternalRef[] }> {
+        return await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/external-refs`, {
+            method: 'PUT',
+            body: JSON.stringify({ externalRefs })
         })
     }
 

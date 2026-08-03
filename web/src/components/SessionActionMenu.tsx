@@ -21,6 +21,7 @@ type SessionActionMenuProps = {
     sessionTitle: string
     sessionActive: boolean
     onRename: () => void
+    onLinkPr?: () => void
     onExport?: () => void
     onSyncCodex?: () => void
     onArchive: () => void
@@ -176,6 +177,7 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         sessionTitle,
         sessionActive,
         onRename,
+        onLinkPr,
         onExport,
         onSyncCodex,
         onArchive,
@@ -195,6 +197,11 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
     const handleRename = () => {
         onClose()
         onRename()
+    }
+
+    const handleLinkPr = () => {
+        onClose()
+        onLinkPr?.()
     }
 
     const handleCopyReference = async () => {
@@ -347,6 +354,18 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                     <EditIcon className="text-[var(--app-hint)]" />
                     {t('session.action.rename')}
                 </button>
+
+                {onLinkPr ? (
+                    <button
+                        type="button"
+                        role="menuitem"
+                        className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
+                        onClick={handleLinkPr}
+                    >
+                        <EditIcon className="text-[var(--app-hint)]" />
+                        {t('session.menu.linkPr')}
+                    </button>
+                ) : null}
 
                 <button
                     type="button"

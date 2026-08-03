@@ -7,10 +7,16 @@ import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { SessionExportDialog } from '@/components/SessionExportDialog'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
+import { LinkPrDialog } from '@/components/LinkPrDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useScratchlistCount } from '@/lib/use-scratchlist-count'
 import { formatReopenError } from '@/lib/reopenError'
-import { formatReasoningLabel, getReasoningEffortForFlavor } from '@/lib/codexStatusLabels'
+import {
+    formatCodexReasoningLabel,
+    formatReasoningLabel,
+    getReasoningEffortForFlavor,
+    shouldShowCodexReasoningLabel,
+} from '@/lib/codexStatusLabels'
 import { retargetSharePendingTransfer } from '@/lib/sharePendingState'
 import { getSessionModelLabel } from '@/lib/sessionModelLabel'
 import { useTranslation } from '@/lib/use-translation'
@@ -45,6 +51,8 @@ export function resolveSessionHeaderMachineLabel(
     }
     return null
 }
+import { useFeatures } from '@/hooks/queries/useFeatures'
+import { getPrimaryGithubPrRef } from '@hapi/protocol'
 
 function FilesIcon(props: { className?: string }) {
     return (
@@ -244,12 +252,16 @@ export function SessionHeader(props: {
     const menuId = useId()
     const menuAnchorRef = useRef<HTMLButtonElement | null>(null)
     const [renameOpen, setRenameOpen] = useState(false)
+    const [linkPrOpen, setLinkPrOpen] = useState(false)
     const [exportOpen, setExportOpen] = useState(false)
     const [archiveOpen, setArchiveOpen] = useState(false)
     const [deleteOpen, setDeleteOpen] = useState(false)
     const [isSyncingCodex, setIsSyncingCodex] = useState(false)
+    const { features } = useFeatures(api)
+    const githubPrAwarenessEnabled = Boolean(features?.githubPrAwareness.enabled)
+    const primaryPrRef = getPrimaryGithubPrRef(session.metadata?.externalRefs)
 
-    const { archiveSession, reopenSession, renameSession, deleteSession, isPending } = useSessionActions(
+    const { archiveSession, reopenSession, renameSession, setExternalRefs, deleteSession, isPending } = useSessionActions(
         api,
         session.id,
         session.metadata?.flavor ?? null
@@ -496,6 +508,7 @@ export function SessionHeader(props: {
                 sessionTitle={title}
                 sessionActive={session.active}
                 onRename={() => setRenameOpen(true)}
+                onLinkPr={githubPrAwarenessEnabled ? () => setLinkPrOpen(true) : undefined}
                 onExport={() => setExportOpen(true)}
                 onSyncCodex={api && codexSessionId ? handleSyncCodex : undefined}
                 onArchive={() => setArchiveOpen(true)}
@@ -526,6 +539,15 @@ export function SessionHeader(props: {
                 onClose={() => setRenameOpen(false)}
                 currentName={title}
                 onRename={renameSession}
+                isPending={isPending}
+            />
+
+            <LinkPrDialog
+                isOpen={linkPrOpen}
+                onClose={() => setLinkPrOpen(false)}
+                currentPrimaryLabel={primaryPrRef ? `${primaryPrRef.repo}#${primaryPrRef.number}` : null}
+                onLink={setExternalRefs}
+                onUnlink={primaryPrRef ? () => setExternalRefs([]) : undefined}
                 isPending={isPending}
             />
 

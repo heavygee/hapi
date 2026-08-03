@@ -1,6 +1,7 @@
 import type { AgentState, Metadata, Session, TodoItem, WorktreeMetadata } from './schemas'
 import { isKnownFlavor } from './flavors'
 import type { AgentFlavor } from './modes'
+import type { AgentState, ExternalRef, Metadata, Session, TodoItem, WorktreeMetadata } from './schemas'
 
 export type PendingRequestKind = 'permission' | 'input'
 
@@ -45,6 +46,17 @@ export type SessionSummaryMetadata = {
     lifecycleState?: string
     /** Loopback MCP URL when session CLI happy server is running (#956). */
     hapiMcpUrl?: string
+    lastModelError?: {
+        kind: string
+        transient: boolean
+        rawSnippet: string
+        atTs: number
+        priorAssistantClaimsDone: boolean
+        retriedAndFailed?: boolean
+        acknowledgedAt?: number
+    }
+    /** Structured contribution links (GitHub PRs, …). tiann/hapi#1160. */
+    externalRefs?: ExternalRef[]
 }
 
 export type SessionSummary = {
@@ -192,9 +204,13 @@ export function toSessionSummaryMetadata(metadata: Metadata | null | undefined):
         flavor: metadata.flavor ?? null,
         worktree: metadata.worktree,
         agentSessionId: getSummaryAgentSessionId(metadata),
+        // Native Claude id kept distinct from flattened agentSessionId (import picker).
         claudeSessionId: metadata.claudeSessionId ?? undefined,
         lifecycleState: metadata.lifecycleState,
-        hapiMcpUrl: metadata.hapiMcpUrl ?? undefined
+        // Loopback MCP URL when session CLI happy server is running (#956).
+        hapiMcpUrl: metadata.hapiMcpUrl ?? undefined,
+        lastModelError: metadata.lastModelError,
+        externalRefs: metadata.externalRefs
     }
 }
 
