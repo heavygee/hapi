@@ -125,6 +125,8 @@ export function collectConfirmedAutoUpgradeToasts(options: {
         }
         const machine = options.machines.find((entry) => entry.id === id)
         if (!machine) {
+            // /api/machines is online-only — absence is a disconnect, not success.
+            nextAutoSkewIds.add(id)
             continue
         }
         if (!machine.active) {

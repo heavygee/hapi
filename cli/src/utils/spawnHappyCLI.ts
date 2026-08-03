@@ -183,6 +183,16 @@ export function spawnHappyCLI(args: string[], options: SpawnOptions = {}): Child
   if (shouldSetEnv) {
     finalOptions.env = finalEnv;
   }
+  // Windows npm shims (.cmd/.bat) cannot be CreateProcess'd directly. After a
+  // fleet npm upgrade, HAPI_CLI_EXECUTABLE may point at hapi.cmd — enable shell
+  // unless the caller already set shell explicitly (runCli / selfUpgrade).
+  if (
+    process.platform === 'win32'
+    && /\.(cmd|bat)$/i.test(spawnCommand)
+    && finalOptions.shell === undefined
+  ) {
+    finalOptions.shell = true;
+  }
   if (process.platform === 'win32' && options.detached) {
     finalOptions.windowsHide = true;
   }

@@ -163,6 +163,24 @@ describe('spawnHappyCLI windowsHide behavior', () => {
     expect(command.command).toBe(process.env.HAPI_CLI_EXECUTABLE);
   });
 
+  it('enables shell for Windows .cmd npm shims inherited via HAPI_CLI_EXECUTABLE', async () => {
+    setPlatform('win32');
+    isBunCompiledMock.mockReturnValue(true);
+    process.env.HAPI_CLI_EXECUTABLE = 'C:\\Users\\Administrator\\AppData\\Roaming\\npm\\hapi.cmd';
+    const { spawnHappyCLI } = await import('./spawnHappyCLI');
+
+    spawnHappyCLI(['cursor', '--hapi-starting-mode', 'remote'], {
+      detached: true,
+      stdio: 'ignore',
+    });
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    const [command, , options] = spawnMock.mock.calls[0] as [string, string[], SpawnOptions];
+    expect(command).toBe(process.env.HAPI_CLI_EXECUTABLE);
+    expect(options.shell).toBe(true);
+    expect(options.windowsHide).toBe(true);
+  });
+
   it('falls back to a real argv0 executable before process.execPath in compiled mode', async () => {
     isBunCompiledMock.mockReturnValue(true);
     const previousCliExecutable = process.env.HAPI_CLI_EXECUTABLE;
