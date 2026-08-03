@@ -95,7 +95,6 @@ function SessionsEmptyState(props: {
     onBrowse?: () => void
 }) {
     const { t } = useTranslation()
-    const { addToast } = useToast()
     return (
         <div className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
             <svg
@@ -805,6 +804,7 @@ function SessionItem(props: {
     machineLabel?: string
 }) {
     const { t } = useTranslation()
+    const { addToast } = useToast()
     const { session: s, onSelect, showPath = true, api, selected = false, showDetailedStatus = false, inRunningSection = false, projectLabel, machineLabel } = props
     const { haptic } = usePlatform()
     const [menuOpen, setMenuOpen] = useState(false)
