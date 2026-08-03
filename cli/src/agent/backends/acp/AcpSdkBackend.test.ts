@@ -916,7 +916,7 @@ describe('AcpSdkBackend', () => {
         expect(realtimeUsage.map((m) => m.contextTokens)).toEqual([1_000, 2_500]);
     });
 
-    it('forwards title changes from session_info_update', () => {
+    it('forwards title changes from session_info_update', async () => {
         const backend = new AcpSdkBackend({ command: 'agent' });
         const updates: Array<{ sessionId: string | null; title: string | null }> = [];
         backend.setSessionInfoUpdateListener((update) => updates.push(update));
@@ -924,6 +924,7 @@ describe('AcpSdkBackend', () => {
         const backendInternal = backend as unknown as {
             activeSessionId: string | null;
             handleSessionUpdate: (params: unknown) => void;
+            sessionUpdateQueue: Promise<void>;
         };
         backendInternal.activeSessionId = 'session-1';
 
@@ -955,6 +956,8 @@ describe('AcpSdkBackend', () => {
                 title: 'Wrong session'
             }
         });
+
+        await backendInternal.sessionUpdateQueue;
 
         expect(updates).toEqual([
             { sessionId: 'session-1', title: 'Native ACP title' },
