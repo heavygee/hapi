@@ -69,7 +69,7 @@ import SettingsStoragePage from '@/routes/settings/storage'
 import SettingsUsagePage from '@/routes/settings/usage'
 import OverseerConsolePage from '@/routes/overseer'
 import SharePage from '@/routes/share'
-import { setSharePendingTransfer } from '@/lib/sharePendingState'
+import { retargetSharePendingTransfer, setSharePendingTransfer } from '@/lib/sharePendingState'
 import { deleteShareTransfer } from '@/lib/shareTransfer'
 import { GardenXrEntryChip } from '@/garden/components/GardenXrEntryChip'
 
@@ -974,6 +974,7 @@ function SessionPage() {
                 await queryClient.invalidateQueries({ queryKey: queryKeys.session(result.sessionId) })
                 await queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
                 if (result.sessionId && result.sessionId !== errorSessionId) {
+                    retargetSharePendingTransfer(errorSessionId, result.sessionId)
                     navigate({
                         to: '/sessions/$sessionId',
                         params: { sessionId: result.sessionId },
@@ -1108,6 +1109,7 @@ function SessionPage() {
                 if (api) {
                     if (session) {
                         if (resolvedSessionId !== session.id) {
+                            retargetSharePendingTransfer(session.id, resolvedSessionId)
                             seedMessageWindowFromSession(session.id, resolvedSessionId)
                         }
                         void queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
@@ -1389,7 +1391,7 @@ function NewSessionPage() {
 
     const handleSuccess = useCallback((sessionId: string) => {
         if (shareTransferId) {
-            setSharePendingTransfer(shareTransferId)
+            setSharePendingTransfer(shareTransferId, sessionId)
         }
         void queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
         // Replace current page with /sessions to clear spawn flow from history
