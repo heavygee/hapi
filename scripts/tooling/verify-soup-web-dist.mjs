@@ -64,13 +64,16 @@ function walk(dir, out = []) {
 function parseEnLocale(enPath) {
     const text = readFileSync(enPath, 'utf8')
     const map = new Map()
-    const sqValue = String.raw`'(?:\\'|\\u[0-9a-fA-F]{4}|[^'\\])*'`
-    const dqValue = String.raw`"(?:\\"|\\u[0-9a-fA-F]{4}|[^"\\])*"`
+    // Allow common JS string escapes (\n, \\, \', \uXXXX). Values like
+    // message.fork.confirmDescription use \n and were false-missing under [^'\\].
+    const sqValue = String.raw`'(?:\\.|\\u[0-9a-fA-F]{4}|[^'\\])*'`
+    const dqValue = String.raw`"(?:\\.|\\u[0-9a-fA-F]{4}|[^"\\])*"`
     const re = new RegExp(String.raw`'([^']+)':\s*(${sqValue}|${dqValue})`, 'g')
     for (const m of text.matchAll(re)) {
         const raw = m[2]
         const unquoted = raw.slice(1, -1)
         const value = unquoted
+            .replace(/\\n/g, '\n')
             .replace(/\\'/g, "'")
             .replace(/\\"/g, '"')
             .replace(/\\u2014/g, '\u2014')
