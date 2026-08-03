@@ -694,7 +694,6 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/fue-app-shell-onboarding @ feat/fue-app-shell-onboarding
   - branch: feat/fue-app-shell-onboarding
 
-  # tiann/hapi#1345 — full voice platform fixtures in Settings preview (closes #1341).
-  # Web + shared. Drop when upstream PR merges.
-  # Worktree: ~/coding/hapi/worktrees/voice-fixtures-preview @ fix/voice-fixtures-full-preview
-  - branch: fix/voice-fixtures-full-preview
+  # DROPPED 2026-08-03: fix/voice-fixtures-full-preview MERGED as tiann/hapi#1345
+  # (82639c66 — show full voice platform rules in settings preview; closes #1341)
+  # - branch: fix/voice-fixtures-full-preview
