@@ -189,7 +189,9 @@ else
         echo "     Source: ${BOT_DESC}"
         echo "     Last run: ${SUBMITTED}"
         echo "$SNIPPET" | sed 's/^/     /'
-        if echo "$SNIPPET" | grep -qE "$CLEAN_REGEX"; then
+        # grep is line-oriented; HAPI Bot puts "**Findings**" and "- None." on
+        # separate lines, so flatten before matching (otherwise false dirty).
+        if printf '%s' "$SNIPPET" | tr '\n' ' ' | grep -qE "$CLEAN_REGEX"; then
             echo "     → PASS"
         else
             echo "     → FINDINGS PRESENT (apply 'cold-review-clean' label to override after addressing)"
