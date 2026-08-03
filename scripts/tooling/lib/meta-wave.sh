@@ -61,13 +61,16 @@ _mw_block_dropped_pr() {
     printf '%s' "$block" | grep -Eiq "DROPPED.*#${pr}\\b|#${pr}\\b.*DROPPED|MERGED[[:space:]]+(UPSTREAM[[:space:]]+)?as[[:space:]]+(PR[[:space:]]*)?#${pr}\\b"
 }
 
-# mw_worktree_present <path> — exit 0 if path exists as a directory under …/worktrees/
+# mw_worktree_present <path> — exit 0 if a real checkout exists under …/worktrees/
 # Empty / non-worktree paths → absent (exit 1) = clean for gate A.
+# Cursor/IDE may recreate a husk (`.cursor/` only) after `git worktree remove`;
+# those must not keep gate A dirty — require a `.git` file/dir (gitlink or repo).
 mw_worktree_present() {
     local path="$1"
     [[ -n "$path" ]] || return 1
     [[ "$path" == */worktrees/* || "$path" == */worktrees ]] || return 1
-    [[ -d "$path" ]]
+    [[ -d "$path" ]] || return 1
+    [[ -e "$path/.git" ]]
 }
 
 # mw_wave_member_clean <manifest_text> <session_path> <pr_number>

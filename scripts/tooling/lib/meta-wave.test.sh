@@ -64,7 +64,10 @@ if mw_manifest_pr_layer_active "$MANIFEST_INCIDENTAL" 1195; then bad "incidental
 # --- worktree presence ---
 WT="$(mktemp -d)"
 mkdir -p "$WT/worktrees/foo"
+touch "$WT/worktrees/foo/.git"
 if mw_worktree_present "$WT/worktrees/foo"; then ok; else bad "existing worktree"; fi
+mkdir -p "$WT/worktrees/husk/.cursor/rules"
+if mw_worktree_present "$WT/worktrees/husk"; then bad "IDE husk (.cursor only) must be absent"; else ok; fi
 if mw_worktree_present "$WT/worktrees/missing"; then bad "missing worktree"; else ok; fi
 if mw_worktree_present "$HOME/coding/hapi"; then bad "mirror is not a worktree"; else ok; fi
 if mw_worktree_present ""; then bad "empty path"; else ok; fi
@@ -75,9 +78,13 @@ got="$(mw_wave_member_clean "$MANIFEST_CLEAN" "/nope/worktrees/x" 896)" && ok ||
 eq "member clean both gone" "$got" "clean"
 reason="$(mw_wave_member_clean "$MANIFEST_ACTIVE" "" 896 || true)"
 eq "member dirty layer only" "$reason" "layer"
-WT="$(mktemp -d)"; mkdir -p "$WT/worktrees/foo"
+WT="$(mktemp -d)"; mkdir -p "$WT/worktrees/foo"; touch "$WT/worktrees/foo/.git"
 reason="$(mw_wave_member_clean "$MANIFEST_CLEAN" "$WT/worktrees/foo" 896 || true)"
 eq "member dirty worktree only" "$reason" "worktree"
+# husk after worktree remove must not dirty gate A
+mkdir -p "$WT/worktrees/husk/.cursor"
+got="$(mw_wave_member_clean "$MANIFEST_CLEAN" "$WT/worktrees/husk" 896)" && ok || bad "husk should be clean"
+eq "member clean IDE husk" "$got" "clean"
 rm -rf "$WT"
 
 # --- wave id ---
