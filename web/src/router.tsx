@@ -67,6 +67,7 @@ import SettingsMachinesPage from '@/routes/settings/machines'
 import SettingsAboutPage from '@/routes/settings/about'
 import SettingsStoragePage from '@/routes/settings/storage'
 import SettingsUsagePage from '@/routes/settings/usage'
+import OverseerConsolePage from '@/routes/overseer'
 import SharePage from '@/routes/share'
 import { setSharePendingTransfer } from '@/lib/sharePendingState'
 import { deleteShareTransfer } from '@/lib/shareTransfer'
@@ -148,6 +149,26 @@ function FolderOpenIcon(props: { className?: string }) {
             className={props.className}
         >
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+        </svg>
+    )
+}
+
+function OverseerIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+            <circle cx="12" cy="12" r="3" />
         </svg>
     )
 }
@@ -696,8 +717,7 @@ function SessionsPage() {
                 className={`${isSessionsIndex ? 'flex' : 'hidden split:flex'} w-full shrink-0 flex-col bg-[var(--app-bg)]`}
                 style={{ '--sidebar-w': `${sidebar.width}px` } as React.CSSProperties}
             >
-                <div className="flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)]">
-                    {error ? (
+                <div className="flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)]">                    {error ? (
                         <div className="mx-auto w-full max-w-content px-3 py-2">
                             <div className="text-sm text-red-600">{error}</div>
                         </div>
@@ -1628,6 +1648,12 @@ const browseRoute = createRoute({
     component: BrowsePage,
 })
 
+const overseerRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/overseer',
+    component: OverseerConsolePage,
+})
+
 const settingsRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/settings',
@@ -1745,6 +1771,7 @@ export const routeTree = rootRoute.addChildren([
         ]),
     ]),
     browseRoute,
+    overseerRoute,
     settingsRoute.addChildren([
         settingsIndexRoute,
         settingsGeneralRoute,

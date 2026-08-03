@@ -62,8 +62,7 @@ const REQUIRED_TABLES = [
     'inbox_items',
     'inbox_item_source_events',
     'inbox_operator_actions',
-    'overseer_settings'
-] as const
+    'overseer_settings'] as const
 
 export class Store {
     private db: Database
@@ -81,7 +80,6 @@ export class Store {
     readonly inbox: InboxStore
     readonly settings: SettingsStore
     readonly usage: UsageStore
-
     /**
      * Filesystem path of the underlying SQLite database, or ':memory:' for
      * in-memory stores. Used by the legacy → ACP migrator (#824) to take a
@@ -261,8 +259,7 @@ export class Store {
                 return { result: 'version-mismatch' as const }
             }
             return this.sessions.updateSessionMetadata(sessionId, metadata, expectedVersion, namespace, { touchUpdatedAt: false })
-        })()
-    }
+        })()    }
 
     close(): void {
         if (this.closed) return
@@ -345,6 +342,15 @@ export class Store {
             throw this.buildSchemaMismatchError(currentVersion)
         }
 
+        this.finishSchemaInit()
+    }
+
+    /** Idempotent Overseer self-heal + loud missing-table check on every boot path. */
+    private finishSchemaInit(): void {
+        ensureOverseerEventsSchema(this.db)
+        ensureDeletedSessionsSchema(this.db)
+        ensureOverseerInboxSchema(this.db)
+        ensureOverseerSettingsSchema(this.db)
         this.assertRequiredTablesPresent()
     }
 

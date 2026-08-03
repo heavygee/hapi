@@ -1123,14 +1123,35 @@ export class ApiClient {
         })
     }
 
-    async fetchOverseerBrains(): Promise<{ profiles: import('@hapi/protocol').OverseerBrainProfileInfo[] }> {
+    async fetchOverseerBrains(): Promise<{
+        profiles: import('@hapi/protocol').OverseerBrainProfileInfo[]
+        active: { profile: string; model: string | null } | null
+    }> {
         return await this.request('/api/overseer/brains')
     }
 
     async fetchOverseerBrainModels(
         profileId: string
-    ): Promise<{ profile: string; defaultModel: string | null; models: string[]; error?: string }> {
+    ): Promise<{ profile: string; defaultModel: string | null; models: string[]; error?: string; reachable?: boolean }> {
         return await this.request(`/api/overseer/brains/${encodeURIComponent(profileId)}/models`)
+    }
+
+    /** Persist the active brain (profile + optional model) — survives restart, no env bounce. */
+    async setOverseerActiveBrain(
+        profile: string,
+        model: string | null
+    ): Promise<{ active: { profile: string; model: string | null } }> {
+        return await this.request('/api/overseer/brain/active', {
+            method: 'PUT',
+            body: JSON.stringify({ profile, model })
+        })
+    }
+
+    async fetchOverseerIdentity(): Promise<{
+        identity: import('@hapi/protocol').OverseerIdentity
+        systemPrompt: string
+    }> {
+        return await this.request('/api/overseer/identity')
     }
 
 }

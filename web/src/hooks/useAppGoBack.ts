@@ -1,6 +1,11 @@
 import { useCallback } from 'react'
 import { useLocation, useNavigate, useRouter } from '@tanstack/react-router'
 
+export function getOverseerBackTarget(pathname: string): string | null {
+    if (pathname === '/overseer') return '/sessions'
+    return null
+}
+
 export function getSettingsBackTarget(pathname: string): string | null {
     if (pathname === '/settings') return '/sessions'
     if (pathname === '/settings/voice/advanced' || pathname === '/settings/voice/voices') return '/settings/voice'
@@ -40,6 +45,13 @@ export function useAppGoBack(): () => void {
         const settingsBackTarget = getSettingsBackTarget(pathname)
         if (settingsBackTarget) {
             navigate({ to: settingsBackTarget })
+            return
+        }
+
+        // Overseer console opened as first history entry (bookmark/PWA) has nowhere to go back.
+        const overseerBackTarget = getOverseerBackTarget(pathname)
+        if (overseerBackTarget) {
+            navigate({ to: overseerBackTarget })
             return
         }
 
