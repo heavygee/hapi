@@ -48,7 +48,6 @@ import {
     installCursorNotifyRuleOverlay,
     type CursorNotifyRuleOverlay
 } from './utils/cursorNotifyRuleOverlay';
-import { installCursorMcpOverlay, type CursorMcpOverlayHandle } from './utils/cursorMcpOverlay';
 import {
     classifyAcpRpcRejection,
     classifyCursorAgentMessage,
@@ -541,7 +540,10 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             }
             messageBuffer.addMessage(error.message, 'status');
             // STRUCTURAL signal: route typed stderr into modelError pipeline.
-            this.recordModelError(mapAcpStderrToFailure(error));
+            const failure = mapAcpStderrToFailure(error);
+            if (failure) {
+                this.recordModelError(failure);
+            }
         });
     }
 

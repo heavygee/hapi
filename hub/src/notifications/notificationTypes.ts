@@ -40,7 +40,7 @@ export type NotificationChannel = {
      * pings (matches sendSessionCompletion's pattern). Wire this when
      * the channel can render a higher-urgency error variant.
      */
-    sendModelError?: (session: Session, notification: ModelErrorNotification) => Promise<void>
+    sendModelError?: (session: Session, notification: ModelErrorNotification) => Promise<ModelErrorSendOutcome>
 }
 
 export type NotificationHubOptions = {

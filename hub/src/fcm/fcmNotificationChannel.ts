@@ -1,5 +1,5 @@
 import type { Session } from '../sync/syncEngine'
-import type { ModelErrorNotification, NotificationChannel, TaskNotification } from '../notifications/notificationTypes'
+import type { ModelErrorNotification, ModelErrorSendOutcome, NotificationChannel, TaskNotification } from '../notifications/notificationTypes'
 import type { NotificationSendContext } from '../notifications/notificationSendContext'
 import { formatModelErrorBody, formatModelErrorTitle } from '../notifications/modelErrorCopy'
 import { getAgentName, getSessionName } from '../notifications/sessionInfo'
@@ -258,9 +258,9 @@ export class FcmNotificationChannel implements NotificationChannel {
         await this.deliver(session, payload, ctx)
     }
 
-    async sendModelError(session: Session, notification: ModelErrorNotification): Promise<void> {
+    async sendModelError(session: Session, notification: ModelErrorNotification): Promise<ModelErrorSendOutcome> {
         if (!session.active) {
-            return
+            return 'unavailable'
         }
 
         const agentName = getAgentName(session)
@@ -281,6 +281,7 @@ export class FcmNotificationChannel implements NotificationChannel {
         })
 
         await this.deliver(session, payload)
+        return 'delivered'
     }
 
     private buildPayload(input: {

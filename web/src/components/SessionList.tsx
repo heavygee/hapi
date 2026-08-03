@@ -31,10 +31,22 @@ import { getMachinePlatform, presentMachineHealth } from '@/lib/machineHealth'
 import { MachineFilterBar, MachineFilterMenu } from '@/components/MachineFilterBar'
 import { useSessionListMachineFilter } from '@/hooks/useSessionListMachineFilter'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
+import { useFeatures } from '@/hooks/queries/useFeatures'
+import { getPrimaryGithubPrRef } from '@hapi/protocol'
 import { SessionRowSummary } from '@/components/SessionRowSummary'
 import { Spinner } from '@/components/Spinner'
 
 export { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
+
+/** Outer row chrome — selected background lives here, not on the button. */
+export function sessionListItemWrapperClassName(selected: boolean): string {
+    return `session-list-item flex w-full items-stretch rounded-lg transition-colors${selected ? ' bg-[var(--app-secondary-bg)]' : ''}`
+}
+
+/** Focusable row control — owns `group/session-row` for keyboard tooltip reveal. */
+export function sessionListItemButtonClassName(): string {
+    return 'group/session-row flex min-w-0 flex-1 flex-col gap-1 px-2.5 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg'
+}
 
 type SessionGroup = {
     key: string
@@ -801,6 +813,7 @@ function SessionItem(props: {
     const [deleteOpen, setDeleteOpen] = useState(false)
     const { features } = useFeatures(api)
     const githubPrAwarenessEnabled = Boolean(features?.githubPrAwareness.enabled)
+    const primaryPrRef = getPrimaryGithubPrRef(s.metadata?.externalRefs)
     const {
         status: cursorChatStoreStatus,
         isApplicable: cursorChatStoreApplicable,
@@ -898,6 +911,9 @@ function SessionItem(props: {
                     inRunningSection={inRunningSection}
                     projectLabel={projectLabel}
                     machineLabel={machineLabel}
+                    trailing={githubPrAwarenessEnabled && primaryPrRef ? (
+                        <SessionPrChip refs={s.metadata?.externalRefs} />
+                    ) : null}
                 />
             </button>
 
