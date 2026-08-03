@@ -47,6 +47,19 @@ See `src/configuration.ts` for all options.
 - `HAPI_RELAY_FORCE_TCP` - Force TCP relay mode (true/1).
 - `VAPID_SUBJECT` - Contact email/URL for Web Push.
 
+### Optional (Overseer LLM fallback — fork, default OFF)
+
+Only when primary agents omit `AGENT_NOTIFY_SUMMARY`. Costs a full-turn LLM call
+per miss — enable after miss rate is rare (~<5%). See
+`docs/plans/2026-07-24-overseer-summary-emission.md`.
+
+- `HAPI_OVERSEER_LLM_FALLBACK` - `1`/`true` to enable (default: off).
+- `HAPI_OVERSEER_LLM_BASE_URL` - OpenAI-compatible base including `/v1` (required when enabled).
+- `HAPI_OVERSEER_LLM_MODEL` - Model id (required when enabled).
+- `HAPI_OVERSEER_LLM_API_KEY` - Bearer token (optional for local gateways).
+- `HAPI_OVERSEER_LLM_API` - `chat-completions` (default) or `responses`.
+- `HAPI_OVERSEER_LLM_TIMEOUT_MS` - Request timeout (default: 30000).
+
 ## Running
 
 Binary (single executable):

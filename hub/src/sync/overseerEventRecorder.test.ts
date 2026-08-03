@@ -28,7 +28,7 @@ function makeSession(id: string, flavor: string, overrides?: Partial<Session>): 
 }
 
 describe('OverseerEventRecorder', () => {
-    it('records AGENT_NOTIFY_SUMMARY from codex assistant text', () => {
+    it('records AGENT_NOTIFY_SUMMARY from codex assistant text', async () => {
         const store = new Store(':memory:')
         const recorder = new OverseerEventRecorder(store.events, store.inbox)
         const session = store.sessions.getOrCreateSession('test', { flavor: 'codex', path: '/tmp', host: 'local' }, null, 'default')
@@ -44,7 +44,7 @@ describe('OverseerEventRecorder', () => {
             }
         }
 
-        const event = recorder.onAgentMessage(
+        const event = await recorder.onAgentMessage(
             toSessionSnapshot(makeSession(session.id, 'codex'), session.tag),
             'msg-1',
             content,
@@ -72,7 +72,7 @@ describe('OverseerEventRecorder', () => {
         expect(item?.title).toBe('test')
     })
 
-    it('captures done without action as captured-only', () => {
+    it('captures done without action as captured-only', async () => {
         const store = new Store(':memory:')
         const recorder = new OverseerEventRecorder(store.events, store.inbox)
         const session = store.sessions.getOrCreateSession('test2', { flavor: 'claude', path: '/tmp', host: 'local' }, null, 'default')
@@ -88,7 +88,7 @@ describe('OverseerEventRecorder', () => {
             }
         }
 
-        const event = recorder.onAgentMessage(
+        const event = await recorder.onAgentMessage(
             toSessionSnapshot(makeSession(session.id, 'claude'), session.tag),
             'msg-2',
             content,
@@ -144,7 +144,7 @@ describe('OverseerEventRecorder', () => {
         expect(store.inbox.list()[0]?.title).toBe('perm')
     })
 
-    it('denormalizes session display name and project into payload.session', () => {
+    it('denormalizes session display name and project into payload.session', async () => {
         const store = new Store(':memory:')
         const recorder = new OverseerEventRecorder(store.events, store.inbox)
         const stored = store.sessions.getOrCreateSession(
@@ -168,7 +168,7 @@ describe('OverseerEventRecorder', () => {
             }
         }
 
-        const event = recorder.onAgentMessage(
+        const event = await recorder.onAgentMessage(
             toSessionSnapshot(live, stored.tag),
             'msg-meta',
             content,
@@ -185,7 +185,7 @@ describe('OverseerEventRecorder', () => {
         expect(payload.session.id).toBe(stored.id)
     })
 
-    it('titles inbox items from payload.session.name after session delete', () => {
+    it('titles inbox items from payload.session.name after session delete', async () => {
         const store = new Store(':memory:')
         const recorder = new OverseerEventRecorder(store.events, store.inbox)
         const stored = store.sessions.getOrCreateSession(
@@ -195,7 +195,7 @@ describe('OverseerEventRecorder', () => {
             'default'
         )
 
-        recorder.onAgentMessage(
+        await recorder.onAgentMessage(
             toSessionSnapshot(makeSession(stored.id, 'codex', {
                 metadata: { flavor: 'codex', path: '/coding/hapi', name: 'meta HAPI triage', host: 'local' }
             }), stored.tag),
@@ -223,7 +223,7 @@ describe('OverseerEventRecorder', () => {
         expect(itemAfter?.relatedSessionId).toBeNull()
     })
 
-    it('scoops http(s) URLs into link_seen with artifact_refs kind:url', () => {
+    it('scoops http(s) URLs into link_seen with artifact_refs kind:url', async () => {
         const store = new Store(':memory:')
         const recorder = new OverseerEventRecorder(store.events, store.inbox)
         const session = store.sessions.getOrCreateSession('links', { flavor: 'codex', path: '/tmp', host: 'local' }, null, 'default')
@@ -243,7 +243,7 @@ describe('OverseerEventRecorder', () => {
             }
         }
 
-        const notify = recorder.onAgentMessage(
+        const notify = await recorder.onAgentMessage(
             toSessionSnapshot(makeSession(session.id, 'codex'), session.tag),
             'msg-links',
             content,
@@ -268,7 +268,7 @@ describe('OverseerEventRecorder', () => {
         expect(payload.session.id).toBe(session.id)
     })
 
-    it('idempotently scoops the same URL from the same message once', () => {
+    it('idempotently scoops the same URL from the same message once', async () => {
         const store = new Store(':memory:')
         const recorder = new OverseerEventRecorder(store.events, store.inbox)
         const session = store.sessions.getOrCreateSession('dedupe', { flavor: 'claude', path: '/tmp', host: 'local' }, null, 'default')
@@ -283,8 +283,8 @@ describe('OverseerEventRecorder', () => {
             }
         }
         const snapshot = toSessionSnapshot(makeSession(session.id, 'claude'), session.tag)
-        recorder.onAgentMessage(snapshot, 'msg-dup', content, Date.now())
-        recorder.onAgentMessage(snapshot, 'msg-dup', content, Date.now())
+        await recorder.onAgentMessage(snapshot, 'msg-dup', content, Date.now())
+        await recorder.onAgentMessage(snapshot, 'msg-dup', content, Date.now())
         expect(store.events.list({ eventType: 'link_seen' })).toHaveLength(1)
     })
 })
