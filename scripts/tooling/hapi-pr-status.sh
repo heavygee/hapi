@@ -171,7 +171,9 @@ else
         # Do NOT match bare "- None." — Codex puts that under **Questions** even
         # when Findings still has Majors (#1108). Include HAPI Bot's clean line
         # ("No Blocker, Major, Minor, or Nit findings…") which lacks "No findings".
-        CLEAN_REGEX="No findings|No high-confidence|No issues found|No actionable|No Blocker, Major, Minor, or Nit findings|No Blocker[[:space:]].*findings|\*\*Findings\*\*\\n- None"
+        # Allow blank line(s) between **Findings** and "- None." (HAPI Bot often
+        # emits that shape; a strict \\n- None false-positived #1274 as dirty).
+        CLEAN_REGEX="No findings|No high-confidence|No issues found|No reportable issues found|No actionable|No Blocker, Major, Minor, or Nit findings|No Blocker[[:space:]].*findings|\*\*Findings\*\*[[:space:]]*- None"
         BOT_DESC="github-actions[bot] review"
         TIMESTAMP_FIELD=".submitted_at"
     fi
