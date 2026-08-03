@@ -244,6 +244,9 @@ function SessionsPage() {
         })()
     }, [addToast, refetch, t])
 
+    const projectCount = useMemo(() => new Set(sessions.map(s =>
+        s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other'
+    )).size, [sessions])
     const machineLabelsById = useMachineLabels(machines)
     const machinesById = useMemo(() => {
         const byId: Record<string, typeof machines[number]> = {}
