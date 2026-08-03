@@ -85,4 +85,30 @@ if (failures.length > 0) {
     process.exit(1)
 }
 
+// Fail-closed: SessionsPage must not render BOTH an outer chrome toolbar and
+// SessionList headerActions (remat "double tools" — 2026-08-03). More than one
+// openCodexImportDialog() call site in router.tsx means the outer cluster leaked.
+{
+    const routerPath = join(webSrc, 'router.tsx')
+    let routerSrc = ''
+    try {
+        routerSrc = stripComments(readFileSync(routerPath, 'utf8'))
+    } catch {
+        routerSrc = ''
+    }
+    if (routerSrc) {
+        const importCalls = routerSrc.match(/\bopenCodexImportDialog\s*\(/g) ?? []
+        if (importCalls.length > 1) {
+            console.error('verify-sessionlist-bindings: FAIL')
+            console.error(
+                `  - web/src/router.tsx: ${importCalls.length} openCodexImportDialog(…) call sites — outer chrome + headerActions double toolbar`,
+            )
+            console.error(
+                '  Keep ONE toolbar via SessionList headerActions; strip outer action cluster (heal 97-router-strip-outer-duplicate-toolbar).',
+            )
+            process.exit(1)
+        }
+    }
+}
+
 console.log(`verify-sessionlist-bindings: OK (${targets.length} file(s), hot calls bound)`)

@@ -11,6 +11,10 @@
 # — previously heal 93, merged here after canBrowse context drift made the
 # split 89+93 3-way-conflict), and FueCallout after SessionList.
 # Net: ONE toolbar, tour intact, Overseer console reachable from the shell.
+#
+# If remat still leaves the OUTER chrome action cluster (count-row buttons)
+# stacked above headerActions, heal 97-router-strip-outer-duplicate-toolbar
+# deletes that outer cluster. Apply order: 89 then 97.
 diff --git a/web/src/router.tsx b/web/src/router.tsx
 index e81595d..26ea018 100644
 --- a/web/src/router.tsx
