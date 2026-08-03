@@ -1,0 +1,21 @@
+{
+    "name": "alarm-flood",
+    "description": "11 attention-candidate events inside a 10-minute window. Expected: detectAlarmFlood reports flood=true (EEMUA 191 >10/10min).",
+    "sessions": [
+        { "key": "a", "tag": "peer-a", "flavor": "claude", "name": "peer-a" },
+        { "key": "b", "tag": "peer-b", "flavor": "codex", "name": "peer-b" }
+    ],
+    "events": [
+        { "sid": 1, "ts": 1700000000000, "sessionKey": "a", "sourceKind": "worker", "eventType": "blocked", "attentionCandidate": 1, "operatorActionRequired": 1, "summary": "blocked 1" },
+        { "sid": 2, "ts": 1700000030000, "sessionKey": "b", "sourceKind": "worker", "eventType": "needs_decision", "attentionCandidate": 1, "operatorActionRequired": 1, "summary": "decision 1" },
+        { "sid": 3, "ts": 1700000060000, "sessionKey": "a", "sourceKind": "worker", "eventType": "failed", "attentionCandidate": 1, "operatorActionRequired": 1, "summary": "failed 1" },
+        { "sid": 4, "ts": 1700000090000, "sessionKey": "b", "sourceKind": "worker", "eventType": "needs_review", "attentionCandidate": 1, "operatorActionRequired": 1, "summary": "review 1" },
+        { "sid": 5, "ts": 1700000120000, "sessionKey": "a", "sourceKind": "worker", "eventType": "blocked", "attentionCandidate": 1, "operatorActionRequired": 1, "summary": "blocked 2" },
+        { "sid": 6, "ts": 1700000150000, "sessionKey": "b", "sourceKind": "worker", "eventType": "needs_decision", "attentionCandidate": 1, "operatorActionRequired": 1, "summary": "decision 2" },
+        { "sid": 7, "ts": 1700000180000, "sessionKey": "a", "sourceKind": "worker", "eventType": "failed", "attentionCandidate": 1, "operatorActionRequired": 1, "summary": "failed 2" },
+        { "sid": 8, "ts": 1700000210000, "sessionKey": "b", "sourceKind": "worker", "eventType": "needs_review", "attentionCandidate": 1, "operatorActionRequired": 1, "summary": "review 2" },
+        { "sid": 9, "ts": 1700000240000, "sessionKey": "a", "sourceKind": "worker", "eventType": "blocked", "attentionCandidate": 1, "operatorActionRequired": 1, "summary": "blocked 3" },
+        { "sid": 10, "ts": 1700000270000, "sessionKey": "b", "sourceKind": "worker", "eventType": "needs_decision", "attentionCandidate": 1, "operatorActionRequired": 1, "summary": "decision 3" },
+        { "sid": 11, "ts": 1700000300000, "sessionKey": "a", "sourceKind": "worker", "eventType": "failed", "attentionCandidate": 1, "operatorActionRequired": 1, "summary": "failed 3" }
+    ]
+}

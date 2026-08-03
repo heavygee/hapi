@@ -1,0 +1,10 @@
+{
+    "name": "completed-review-pr",
+    "description": "Worker completes with operator_action_required and a github_pr artifact. Expected: surfaced as a review-needed FINALE item whose title is the PR handle.",
+    "sessions": [
+        { "key": "s", "tag": "peer-pr", "flavor": "claude", "name": "peer-pr" }
+    ],
+    "events": [
+        { "sid": 1, "ts": 1700000000000, "sessionKey": "s", "sourceKind": "worker", "eventType": "completed", "attentionCandidate": 1, "operatorActionRequired": 1, "summary": "Implemented replay harness", "artifactRefs": [{ "kind": "github_pr", "title": "feat(overseer): replay harness v0", "url": "https://github.com/heavygee/hapi/pull/999" }], "payload": { "suggested_action": "review and merge PR #999" } }
+    ]
+}
