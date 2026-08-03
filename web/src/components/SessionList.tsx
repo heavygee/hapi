@@ -697,9 +697,10 @@ export function SessionListSearch(props: {
                 className={cn(
                     'relative flex min-w-0 max-w-[9rem] items-center gap-1 rounded-full transition-colors',
                     hasTextQuery
-                        // Same accent family as the old indicator dot / date-range highlight so
-                        // the chip still reads "active" when truncated text disappears.
-                        ? 'bg-[var(--app-link)]/15 px-2 py-1 text-[var(--app-link)] hover:bg-[var(--app-link)]/25'
+                        // Dedicated chip tokens (blue wash) — --app-link/15 washes out to gray
+                        // in default light mode where --app-link is near-black. Keep the solid
+                        // --app-link dot for date-only so the original small-dimension cue stays.
+                        ? 'bg-[var(--app-chat-user-chip-bg)] px-2 py-1 text-[var(--app-chat-user-chip-fg)] hover:opacity-90'
                         : 'shrink-0 p-1.5 text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
                 )}
                 title={collapsedLabel}
