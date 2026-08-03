@@ -24,6 +24,11 @@ export type ActiveBrainSetting = {
 
 const ACTIVE_BRAIN_KEY = 'active_brain'
 
+function activeBrainKey(namespace: string): string {
+    const ns = namespace.trim() || 'default'
+    return ns === 'default' ? ACTIVE_BRAIN_KEY : `${ACTIVE_BRAIN_KEY}:${ns}`
+}
+
 export class SettingsStore {
     constructor(private readonly db: Database) {}
 
@@ -47,9 +52,9 @@ export class SettingsStore {
         this.db.prepare('DELETE FROM overseer_settings WHERE key = ?').run(key)
     }
 
-    /** Read the persisted active brain, or null when the operator has never chosen one (use env default). */
-    getActiveBrain(): ActiveBrainSetting | null {
-        const raw = this.get(ACTIVE_BRAIN_KEY)
+    /** Read the persisted active brain for a namespace, or null when unset. */
+    getActiveBrain(namespace = 'default'): ActiveBrainSetting | null {
+        const raw = this.get(activeBrainKey(namespace))
         if (!raw) return null
         try {
             const parsed = JSON.parse(raw) as Partial<ActiveBrainSetting>
@@ -60,11 +65,11 @@ export class SettingsStore {
         }
     }
 
-    setActiveBrain(value: ActiveBrainSetting): void {
-        this.set(ACTIVE_BRAIN_KEY, JSON.stringify({ profile: value.profile, model: value.model ?? null }))
+    setActiveBrain(value: ActiveBrainSetting, namespace = 'default'): void {
+        this.set(activeBrainKey(namespace), JSON.stringify({ profile: value.profile, model: value.model ?? null }))
     }
 
-    clearActiveBrain(): void {
-        this.delete(ACTIVE_BRAIN_KEY)
+    clearActiveBrain(namespace = 'default'): void {
+        this.delete(activeBrainKey(namespace))
     }
 }

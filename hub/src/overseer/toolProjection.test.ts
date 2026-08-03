@@ -14,12 +14,13 @@ describe('projectToolResultForBrain', () => {
         expect(lean.counts).toEqual({ candidates: 1, surfaced: 1, held: 0 })
     })
 
-    it('thins inbox items to id/what/status/priority and drops the fat', () => {
+    it('thins inbox items to id/what/summary/category/session/status/priority and drops the fat', () => {
         const full = {
             items: [
                 {
                     id: 7, title: 'CI auth blocking 3 workers', status: 'surfaced', priority: 90,
                     category: 'blocker', summary: 'long summary…', reasonForPriority: 'shared root cause',
+                    relatedSessionId: '96f67085-5dd3-4a10-aa7c-785f72a227c2',
                     sourceEventIds: [1, 2, 3], artifactRefs: ['a'.repeat(400)], createdAt: 1, updatedAt: 2
                 },
                 { id: 8, title: 'needs a decision', status: 'new', priority: 40, artifactRefs: ['x'.repeat(400)] }
@@ -28,8 +29,16 @@ describe('projectToolResultForBrain', () => {
         const lean = projectToolResultForBrain('query_inbox', full) as { total: number; items: unknown[] }
         expect(lean.total).toBe(2)
         expect(lean.items).toEqual([
-            { id: 7, what: 'CI auth blocking 3 workers', status: 'surfaced', priority: 90 },
-            { id: 8, what: 'needs a decision', status: 'new', priority: 40 }
+            {
+                id: 7,
+                what: 'CI auth blocking 3 workers',
+                summary: 'long summary…',
+                category: 'blocker',
+                session: '96f67085-5dd3-4a10-aa7c-785f72a227c2',
+                status: 'surfaced',
+                priority: 90
+            },
+            { id: 8, what: 'needs a decision', summary: undefined, category: undefined, session: undefined, status: 'new', priority: 40 }
         ])
         // the fat is gone
         expect(JSON.stringify(lean)).not.toContain('artifactRefs')
