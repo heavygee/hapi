@@ -3,6 +3,7 @@ import { buildOverseerSessionIdentity, mergeEventPayloadWithSession } from '@hap
 import { Store } from './index'
 import type { StoredSession } from './types'
 import { deleteSession } from './sessions'
+import { ensureOverseerInboxSchema } from './inboxItems'
 import { Database } from 'bun:sqlite'
 
 function payloadForSession(session: StoredSession, extra: Record<string, unknown> = {}): string {
@@ -26,6 +27,36 @@ describe('Overseer inbox schema (init-gated, not SCHEMA_VERSION)', () => {
         expect(names.has('inbox_items')).toBe(true)
         expect(names.has('inbox_item_source_events')).toBe(true)
         expect(names.has('inbox_operator_actions')).toBe(true)
+    })
+
+    it('adds the R8 disposition snapshot columns to a pre-existing inbox_operator_actions table', () => {
+        const db = new Database(':memory:')
+        db.exec('PRAGMA foreign_keys = ON')
+        // Simulate the live DB shape BEFORE the keystone: the old 6-column table.
+        db.exec(`
+            CREATE TABLE inbox_operator_actions (
+                id INTEGER PRIMARY KEY,
+                inbox_item_id INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                status_after TEXT NOT NULL,
+                feedback TEXT,
+                created_at INTEGER NOT NULL
+            );
+        `)
+        db.exec("INSERT INTO inbox_operator_actions (inbox_item_id, action, status_after, feedback, created_at) VALUES (1, 'done', 'resolved', NULL, 1000)")
+
+        ensureOverseerInboxSchema(db)
+
+        const cols = new Set(
+            (db.prepare('PRAGMA table_info(inbox_operator_actions)').all() as { name: string }[]).map((c) => c.name)
+        )
+        for (const col of ['source_kind', 'source_ref', 'event_type', 'category', 'project', 'artifact_kind', 'repo', 'context_snapshot_json']) {
+            expect(cols.has(col)).toBe(true)
+        }
+        // Pre-existing row survives with NULL snapshot; migration is idempotent on re-run.
+        expect((db.prepare('SELECT COUNT(*) AS n FROM inbox_operator_actions').get() as { n: number }).n).toBe(1)
+        expect(() => ensureOverseerInboxSchema(db)).not.toThrow()
+        db.close()
     })
 
     it('promotes attention events into one active item per session', () => {
@@ -226,5 +257,85 @@ describe('Overseer inbox schema (init-gated, not SCHEMA_VERSION)', () => {
         const after = store.inbox.getById(item!.id)
         expect(after?.title).toBe('meta HAPI triage')
         expect(after?.relatedSessionId).toBeNull()
+    })
+
+    it('hides sleeping snoozes by default but returns them when statuses includes snoozed', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('snooze-q', { name: 's' }, null, 'default')
+        const event = store.events.insert({
+            ts: 1000,
+            sourceKind: 'worker',
+            eventType: 'blocked',
+            attentionCandidate: 1,
+            summary: 'blocked',
+            relatedSessionId: session.id,
+            payloadJson: payloadForSession(session),
+            provenance: 'test'
+        })
+        const item = store.inbox.promoteAttentionEvent(event!)!
+        const wake = Date.now() + 60_000
+        store.inbox.recordOperatorAction(item.id, 'snooze', null, wake)
+
+        expect(store.inbox.list({ activeOnly: true }).map((i) => i.id)).not.toContain(item.id)
+        expect(store.inbox.list({
+            statuses: ['snoozed'],
+            includeSleepingSnoozed: true
+        }).map((i) => i.id)).toContain(item.id)
+    })
+
+    it('promotion during an active snooze updates the same item instead of inserting a duplicate', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('snooze-dedup', { name: 's' }, null, 'default')
+        const first = store.events.insert({
+            ts: 1000,
+            sourceKind: 'worker',
+            eventType: 'blocked',
+            attentionCandidate: 1,
+            summary: 'first',
+            relatedSessionId: session.id,
+            payloadJson: payloadForSession(session),
+            provenance: 'test'
+        })
+        const item = store.inbox.promoteAttentionEvent(first!)!
+        store.inbox.recordOperatorAction(item.id, 'snooze', null, Date.now() + 60_000)
+
+        const second = store.events.insert({
+            ts: 2000,
+            sourceKind: 'worker',
+            eventType: 'needs_decision',
+            attentionCandidate: 1,
+            summary: 'second while snoozed',
+            relatedSessionId: session.id,
+            payloadJson: payloadForSession(session),
+            provenance: 'test'
+        })
+        const again = store.inbox.promoteAttentionEvent(second!)!
+        expect(again.id).toBe(item.id)
+        expect(store.inbox.list({ statuses: ['new', 'surfaced', 'deferred', 'snoozed'] }).filter((i) => i.relatedSessionId === session.id)).toHaveLength(1)
+    })
+
+    it('disposition snapshot uses title-priority artifact kind (PR over generic URL)', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('art-prio', { name: 's' }, null, 'default')
+        const refs = JSON.stringify([
+            { kind: 'url', url: 'https://example.com', title: 'generic' },
+            { kind: 'github_pr', ref: 'heavygee/hapi#102', title: 'fix: snooze', repo: 'heavygee/hapi' }
+        ])
+        const event = store.events.insert({
+            ts: 1000,
+            sourceKind: 'worker',
+            eventType: 'needs_review',
+            attentionCandidate: 1,
+            summary: 'review',
+            relatedSessionId: session.id,
+            artifactRefs: refs,
+            payloadJson: payloadForSession(session),
+            provenance: 'test'
+        })
+        const item = store.inbox.promoteAttentionEvent(event!)!
+        store.inbox.recordOperatorAction(item.id, 'done', null, null)
+        const rows = store.inbox.listDispositions({ limit: 5 })
+        expect(rows[0]?.artifactKind).toBe('github_pr')
+        expect(rows[0]?.repo).toBe('heavygee/hapi')
     })
 })

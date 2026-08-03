@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'bun:test'
+import { Database } from 'bun:sqlite'
 import { Store } from '../store'
 import { SyncEngine } from './syncEngine'
 import { RpcRegistry } from '../socket/rpcRegistry'
+import { OverseerWriteNotAllowedError, runOverseerTool } from '../overseer/runOverseerTool'
 import type { OverseerEntity } from './overseerEntity'
 
 function makeEngine(): { store: Store; engine: SyncEngine } {
@@ -247,5 +249,168 @@ describe('OverseerEntity read-only tools', () => {
 
         const convoEvents = engine.getSystemEvents({ eventType: 'convo_turn' })
         expect(convoEvents.length).toBe(1)
+    })
+})
+
+describe('OverseerEntity dispositions (Stage 1 keystone)', () => {
+    function promoteItem(
+        store: Store,
+        opts: { key: string; eventType: string; project: string; artifactRefs?: string | null }
+    ): { itemId: number } {
+        const session = store.sessions.getOrCreateSession(
+            opts.key,
+            { flavor: 'codex', path: '/tmp/web' },
+            null,
+            'default'
+        )
+        const event = store.events.insert({
+            ts: Date.now(),
+            sourceKind: 'worker',
+            sourceRef: opts.key,
+            eventType: opts.eventType,
+            attentionCandidate: 1,
+            severity: 4,
+            summary: `${opts.eventType} on ${opts.project}`,
+            relatedSessionId: session.id,
+            artifactRefs: opts.artifactRefs ?? null,
+            payloadJson: JSON.stringify({ session: { project: opts.project, name: opts.key } })
+        })
+        expect(event).not.toBeNull()
+        const item = store.inbox.promoteAttentionEvent(event!)
+        expect(item).not.toBeNull()
+        return { itemId: item!.id }
+    }
+
+    it('record_disposition writes the R8 snapshot and returns a tombstone', () => {
+        const store = new Store(':memory:')
+        const { itemId } = promoteItem(store, {
+            key: 'disp-1',
+            eventType: 'needs_decision',
+            project: 'hapi',
+            artifactRefs: JSON.stringify([{ kind: 'github_pr', url: 'https://github.com/tiann/hapi/pull/42' }])
+        })
+        const o = overseer(buildEngine(store))
+
+        const res = o.recordDisposition({ itemId, action: 'done', feedback: 'ship it' })
+        expect(res.ok).toBe(true)
+        expect(res.action).toBe('done')
+        expect(res.statusAfter).toBe('resolved')
+        expect(res.tombstone).toContain(`#${itemId}`)
+        expect(res.tombstone.toLowerCase()).toContain('resolved')
+
+        // The disposition row carries the frozen predicate vocabulary (R8).
+        const listed = o.queryDispositions({})
+        expect(listed.mode).toBe('list')
+        expect(listed.total).toBe(1)
+        const row = listed.rows?.[0]
+        expect(row?.itemId).toBe(itemId)
+        expect(row?.action).toBe('done')
+        expect(row?.category).toBe('QUESTION')
+        expect(row?.project).toBe('hapi')
+        expect(row?.eventType).toBe('needs_decision')
+        expect(row?.sourceRef).toBe('disp-1')
+        expect(row?.artifactKind).toBe('github_pr')
+        expect(row?.feedback).toBe('ship it')
+    })
+
+    it('record_disposition derives artifact_kind + repo from the as-seen artifact', () => {
+        const store = new Store(':memory:')
+        const { itemId } = promoteItem(store, {
+            key: 'disp-repo',
+            eventType: 'needs_review',
+            project: 'hapi',
+            artifactRefs: JSON.stringify([{ kind: 'github_pr', url: 'https://github.com/tiann/hapi/pull/99' }])
+        })
+        const o = overseer(buildEngine(store))
+        o.recordDisposition({ itemId, action: 'dismiss' })
+
+        const cluster = o.queryDispositions({ groupBy: ['repo', 'artifact_kind'], minCount: 1 })
+        expect(cluster.mode).toBe('cluster')
+        const c = cluster.clusters?.[0]
+        expect(c?.keys.repo).toBe('tiann/hapi')
+        expect(c?.keys.artifact_kind).toBe('github_pr')
+        expect(c?.count).toBe(1)
+    })
+
+    it('query_dispositions cluster mode groups by predicate columns with HAVING minCount', () => {
+        const store = new Store(':memory:')
+        const a = promoteItem(store, { key: 'c-a', eventType: 'needs_decision', project: 'hapi' })
+        const b = promoteItem(store, { key: 'c-b', eventType: 'needs_decision', project: 'hapi' })
+        const c = promoteItem(store, { key: 'c-c', eventType: 'blocked', project: 'lockhouse' })
+        const o = overseer(buildEngine(store))
+        o.recordDisposition({ itemId: a.itemId, action: 'done' })
+        o.recordDisposition({ itemId: b.itemId, action: 'done' })
+        o.recordDisposition({ itemId: c.itemId, action: 'dismiss' })
+
+        // Two QUESTION/done, one BLOCKED/dismiss. minCount 2 keeps only the dominant bucket.
+        const clusters = o.queryDispositions({ groupBy: ['category', 'action'], minCount: 2 })
+        expect(clusters.clusters?.length).toBe(1)
+        const only = clusters.clusters?.[0]
+        expect(only?.keys.category).toBe('QUESTION')
+        expect(only?.keys.action).toBe('done')
+        expect(only?.count).toBe(2)
+    })
+
+    it('query_dispositions cluster mode respects limit', () => {
+        const store = new Store(':memory:')
+        const o = overseer(buildEngine(store))
+        for (let i = 0; i < 4; i++) {
+            const { itemId } = promoteItem(store, {
+                key: `lim-${i}`,
+                eventType: 'needs_decision',
+                project: `proj-${i}`
+            })
+            o.recordDisposition({ itemId, action: 'done' })
+        }
+        const clusters = o.queryDispositions({ groupBy: ['project'], minCount: 1, limit: 2 })
+        expect(clusters.clusters?.length).toBe(2)
+        expect(clusters.total).toBe(2)
+    })
+
+    it('snoozed inbox items stay hidden until wake time, then resurface on read', () => {
+        const store = new Store(':memory:')
+        const { itemId } = promoteItem(store, { key: 'snooze-hide', eventType: 'blocked', project: 'hapi' })
+        const o = overseer(buildEngine(store))
+        const future = Date.now() + 86_400_000
+        o.recordDisposition({ itemId, action: 'snooze', snoozedUntil: future })
+
+        expect(o.queryInbox({}).items).toHaveLength(0)
+
+        const db: Database = (store as unknown as { db: Database }).db
+        db.prepare(
+            'UPDATE inbox_items SET snoozed_until = ?, updated_at = ? WHERE id = ?'
+        ).run(Date.now() - 1000, Date.now() - 1000, itemId)
+
+        const afterWake = o.queryInbox({})
+        expect(afterWake.items).toHaveLength(1)
+        expect(afterWake.items[0]?.status).toBe('surfaced')
+    })
+
+    it('record_disposition rejects unknown item and snooze-without-timestamp without writing', () => {
+        const store = new Store(':memory:')
+        const o = overseer(buildEngine(store))
+
+        const missing = o.recordDisposition({ itemId: 9999, action: 'done' })
+        expect(missing.ok).toBe(false)
+
+        const { itemId } = promoteItem(store, { key: 'sn', eventType: 'blocked', project: 'hapi' })
+        const badSnooze = o.recordDisposition({ itemId, action: 'snooze' })
+        expect(badSnooze.ok).toBe(false)
+        // Nothing recorded on either failure.
+        expect(o.queryDispositions({}).total).toBe(0)
+    })
+
+    it('record_disposition is gated: runOverseerTool refuses the write unless allowWrites', () => {
+        const store = new Store(':memory:')
+        const { itemId } = promoteItem(store, { key: 'gate', eventType: 'blocked', project: 'hapi' })
+        const o = overseer(buildEngine(store))
+        expect(() => runOverseerTool(o, 'record_disposition', { itemId, action: 'done' })).toThrow(
+            OverseerWriteNotAllowedError
+        )
+        // With writes allowed (the conversational path) it lands.
+        const res = runOverseerTool(o, 'record_disposition', { itemId, action: 'done' }, true) as {
+            ok: boolean
+        }
+        expect(res.ok).toBe(true)
     })
 })
