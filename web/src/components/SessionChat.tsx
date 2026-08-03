@@ -63,6 +63,7 @@ import type { ScratchlistEntry } from '@/lib/scratchlist'
 import { isHubScratchlistAttachmentPath } from '@hapi/protocol'
 import { useTranslation } from '@/lib/use-translation'
 import { SessionHeader } from '@/components/SessionHeader'
+import { SessionFlowPanel } from '@/components/SessionFlowPanel'
 import { CursorMigrationBanner } from '@/components/CursorMigrationBanner'
 import { TeamPanel } from '@/components/TeamPanel'
 import { SessionStatusPanel } from '@/components/SessionStatusPanel'
@@ -425,6 +426,7 @@ function SessionChatInner(props: SessionChatProps) {
     const [forceScrollToken, setForceScrollToken] = useState(0)
     const [outlineOpen, setOutlineOpen] = useState(props.initialOutlineOpen ?? false)
     const [sessionLogOpen, setSessionLogOpen] = useState(props.initialSessionLogOpen ?? false)
+    const [flowOpen, setFlowOpen] = useState(false)
     useEffect(() => {
         if (!props.initialOutlineOpen) {
             return
@@ -989,6 +991,7 @@ function SessionChatInner(props: SessionChatProps) {
         visibleGroupsRef.current = []
         setOutlineOpen(false)
         setSessionLogOpen(false)
+        setFlowOpen(false)
     }, [props.session.id])
 
     // Exclude user messages that haven't been invoked yet — those appear in the
@@ -1285,7 +1288,10 @@ function SessionChatInner(props: SessionChatProps) {
     const handleToggleOutline = useCallback(() => {
         setOutlineOpen((open) => {
             const next = !open
-            if (next) setSessionLogOpen(false)
+            if (next) {
+                setSessionLogOpen(false)
+                setFlowOpen(false)
+            }
             return next
         })
     }, [])
@@ -1293,7 +1299,10 @@ function SessionChatInner(props: SessionChatProps) {
     const handleToggleSessionLog = useCallback(() => {
         setSessionLogOpen((open) => {
             const next = !open
-            if (next) setOutlineOpen(false)
+            if (next) {
+                setOutlineOpen(false)
+                setFlowOpen(false)
+            }
             return next
         })
     }, [])
@@ -1306,6 +1315,17 @@ function SessionChatInner(props: SessionChatProps) {
     const handleSessionLogOpenChange = useCallback((open: boolean) => {
         setSessionLogOpen(open)
         if (open) setOutlineOpen(false)
+    }, [])
+
+    const handleToggleFlow = useCallback(() => {
+        setFlowOpen((open) => {
+            const next = !open
+            if (next) {
+                setOutlineOpen(false)
+                setSessionLogOpen(false)
+            }
+            return next
+        })
     }, [])
 
     const handleViewTerminal = useCallback(() => {
@@ -1416,6 +1436,8 @@ function SessionChatInner(props: SessionChatProps) {
                 outlineActive={outlineOpen}
                 onToggleSessionLog={handleToggleSessionLog}
                 sessionLogActive={sessionLogOpen}
+                onToggleFlow={handleToggleFlow}
+                flowActive={flowOpen}
                 api={props.api}
                 canReopen={inactiveCanResume}
                 reopenDisabledReason={props.reopenDisabledReason}
@@ -1442,6 +1464,12 @@ function SessionChatInner(props: SessionChatProps) {
                     {inactiveCanResume
                         ? t('session.inactive.autoResume')
                         : t('session.inactive.cannotResume')}
+                </div>
+            ) : null}
+
+            {flowOpen ? (
+                <div className="overflow-y-auto pt-3">
+                    <SessionFlowPanel blocks={reconciled.blocks} metadata={props.session.metadata ?? null} />
                 </div>
             ) : null}
 
