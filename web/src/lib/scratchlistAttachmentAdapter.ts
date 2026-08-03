@@ -44,7 +44,10 @@ export function createScratchlistAttachmentAdapter(api: ApiClient, sessionId: st
     const cancelledAttachmentIds = new Set<string>()
 
     return {
-        accept: '*/*',
+        // assistant-ui uses the exact "*" sentinel for an allow-all adapter.
+        // "*/*" is forwarded to MIME matching and rejects every file before
+        // this adapter's add() method can run.
+        accept: '*',
 
         async *add({ file }): AsyncGenerator<PendingAttachment> {
             const contentType = file.type || 'application/octet-stream'
@@ -124,7 +127,16 @@ export function createScratchlistAttachmentAdapter(api: ApiClient, sessionId: st
 
                 let previewUrl: string | undefined
                 if (isImageMimeType(contentType) && file.size <= MAX_PREVIEW_BYTES) {
-                    previewUrl = await fileToDataUrl(file)
+                    try {
+                        previewUrl = await fileToDataUrl(file)
+                    } catch {
+                        // Preview generation is optional after the upload has succeeded.
+                    }
+                }
+
+                if (cancelledAttachmentIds.has(id)) {
+                    await api.deleteScratchlistAttachment(sessionId, result.attachment.id).catch(() => {})
+                    return
                 }
 
                 yield {

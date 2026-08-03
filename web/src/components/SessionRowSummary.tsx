@@ -116,6 +116,12 @@ export function SessionRowSummary(props: {
     /** When enabled, show primary GitHub PR chip left of the time column (ADR D8). */
     githubPrAwarenessEnabled?: boolean
     prChipDisplay?: PrChipDisplayProfile
+    /** Rows inside the pinned "in progress" section skip the text label (dot only). */
+    inRunningSection?: boolean
+    /** Short project name shown under the title (pinned "in progress" rows). */
+    projectLabel?: string
+    /** Machine label shown next to the project name (pinned "in progress" rows). */
+    machineLabel?: string
 }) {
     const {
         session: s,
@@ -128,6 +134,9 @@ export function SessionRowSummary(props: {
         className,
         githubPrAwarenessEnabled = false,
         prChipDisplay,
+        inRunningSection = false,
+        projectLabel,
+        machineLabel,
     } = props
     const { t } = useTranslation()
     const sessionName = getSessionTitle(s)
@@ -143,6 +152,8 @@ export function SessionRowSummary(props: {
         [s, selected, showDetailedStatus]
     )
     const attentionLabel = attention ? getAttentionLabel(attention, t) : null
+    const urgentAttention = attention !== null
+        && (attention.kind === 'permission' || attention.kind === 'input')
     const scheduledLabel = s.futureScheduledMessageCount > 1
         ? t('session.item.scheduledMessages', { count: s.futureScheduledMessageCount })
         : t('session.item.scheduledMessage')
@@ -170,7 +181,50 @@ export function SessionRowSummary(props: {
                         {sessionName}
                     </div>
                     {s.active && s.thinking ? (
-                        <LoaderIcon className="h-3.5 w-3.5 shrink-0 animate-spin-slow text-[var(--app-hint)]" />
+                        <LoaderIcon className="h-3.5 w-3.5 shrink-0 animate-spin-slow text-[var(--app-badge-success-text)]" />
+                    ) : urgentAttention && nestedTooltips && attentionId ? (
+                        <SessionAttentionIndicator
+                            attention={attention}
+                            summary={s}
+                            label={attentionLabel ?? ''}
+                            tooltipId={attentionId}
+                        />
+                    ) : urgentAttention ? (
+                        <span
+                            className={`inline-flex h-2 w-2 shrink-0 rounded-full ${ATTENTION_DOT_CLASS[attention.kind]}`}
+                            title={attentionLabel ?? undefined}
+                            aria-label={attentionLabel ?? undefined}
+                        />
+                    ) : s.active && (s.backgroundTaskCount ?? 0) > 0 ? (
+                        <span
+                            className="inline-flex shrink-0 items-center gap-1 text-[var(--app-badge-success-text)]"
+                            title={t('session.item.running')}
+                        >
+                            <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse" aria-hidden="true" />
+                            {!inRunningSection ? (
+                                <span className="text-[11px] font-medium leading-none">{t('session.item.running')}</span>
+                            ) : null}
+                        </span>
+                    ) : s.active && (s.pendingRequestsCount ?? 0) > 0 ? (
+                        <span
+                            className="inline-flex shrink-0 items-center gap-1 text-[var(--app-badge-warning-text)]"
+                            title={t('session.item.pending')}
+                        >
+                            <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse" aria-hidden="true" />
+                            {!inRunningSection ? (
+                                <span className="text-[11px] font-medium leading-none">{t('session.item.pending')}</span>
+                            ) : null}
+                        </span>
+                    ) : s.active ? (
+                        <span
+                            className="inline-flex shrink-0 items-center gap-1 text-[var(--app-hint)]"
+                            title={t('session.item.idle')}
+                        >
+                            <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true" />
+                            {!inRunningSection ? (
+                                <span className="text-[11px] font-medium leading-none">{t('session.item.idle')}</span>
+                            ) : null}
+                        </span>
                     ) : attention && nestedTooltips && attentionId ? (
                         <SessionAttentionIndicator
                             attention={attention}
@@ -230,7 +284,11 @@ export function SessionRowSummary(props: {
                     ) : null}
                 </div>
             </div>
-            {showPath || worktreeLabel ? (
+            {projectLabel || machineLabel ? (
+                <div className="truncate text-xs text-[var(--app-hint)]" title={[projectLabel, machineLabel].filter(Boolean).join(' · ')}>
+                    {[projectLabel, machineLabel].filter(Boolean).join(' · ')}
+                </div>
+            ) : showPath || worktreeLabel ? (
                 <div
                     className="truncate text-xs text-[var(--app-hint)]"
                     title={worktreeLabel

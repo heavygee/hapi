@@ -11,9 +11,18 @@ const MetadataSummarySchema = z.object({
     updatedAt: z.number()
 })
 
-const SessionCapabilitiesSchema = z.object({
-    terminal: z.boolean().optional()
+const ConversationHistoryCapabilitiesSchema = z.object({
+    forkCurrent: z.boolean().optional(),
+    forkAtMessage: z.boolean().optional(),
+    rewindToMessage: z.boolean().optional()
 })
+
+const SessionCapabilitiesSchema = z.object({
+    terminal: z.boolean().optional(),
+    conversationHistory: ConversationHistoryCapabilitiesSchema.optional()
+})
+
+export type ConversationHistoryCapabilities = z.infer<typeof ConversationHistoryCapabilitiesSchema>
 
 export const WorktreeMetadataSchema = z.object({
     basePath: z.string(),
@@ -105,6 +114,10 @@ export const MetadataSchema = z.object({
     summary: MetadataSummarySchema.optional(),
     machineId: z.string().optional(),
     claudeSessionId: z.string().optional(),
+    // Parent HAPI session id when this session was created by message-level fork
+    // (`claude --resume <id> --fork-session`). Lets the web list mark the new
+    // session as a branch of `<id>` instead of an unrelated duplicate.
+    forkedFrom: z.string().optional(),
     codexSessionId: z.string().optional(),
     // 原始 Codex thread id。导入 Codex 历史后，HAPI 会 fork 出自己的续写 thread；
     // codexSessionId 保存 fork 后的 thread，codexSourceSessionId 保留来源 thread 便于同步/展示。
@@ -123,6 +136,18 @@ export const MetadataSchema = z.object({
     cursorMigrationState: z.enum(['in_progress', 'ambiguous']).optional(),
     kimiSessionId: z.string().optional(),
     piSessionId: z.string().optional(),
+    piResumeAttempt: z.object({
+        state: z.enum(['resuming', 'terminating', 'quarantined']),
+        machineId: z.string(),
+        startedAt: z.number(),
+        childSessionId: z.string().optional(),
+        archiveSnapshot: z.object({
+            lifecycleState: z.string().optional(),
+            lifecycleStateSince: z.number().optional(),
+            archivedBy: z.string().optional(),
+            archiveReason: z.string().optional(),
+        }).optional(),
+    }).optional(),
     tools: z.array(z.string()).optional(),
     slashCommands: z.array(z.string()).optional(),
     homeDir: z.string().optional(),
@@ -140,6 +165,14 @@ export const MetadataSchema = z.object({
     preferredPermissionMode: PermissionModeSchema.optional(),
     flavor: z.string().nullish(),
     capabilities: SessionCapabilitiesSchema.optional(),
+    conversationHistoryPoints: z.record(z.string(), z.literal(true)).optional(),
+    // Native locators for historical fork/rewind (e.g. Grok prompt indexes).
+    // Kept separately from the boolean UI markers above.
+    conversationHistoryIndexes: z.record(z.string(), z.number().int().nonnegative()).optional(),
+    // Codex localId → turnId mapping (durable across runner relaunches).
+    conversationHistoryTurns: z.record(z.string(), z.string().min(1)).optional(),
+    // Set when native rewind succeeded but HAPI truncate/hydrate failed.
+    conversationHistoryDiverged: z.boolean().optional(),
     worktree: WorktreeMetadataSchema.optional(),
     // Cached Pi model list — written by CLI, read by web (inactive session fallback).
     // Minimal shape: each entry must have modelId; other fields (provider, name, etc.) pass through.
@@ -377,6 +410,7 @@ export const RunnerStateSchema = z.object({
     pid: z.number().optional(),
     httpPort: z.number().optional(),
     startedAt: z.number().optional(),
+    capabilities: z.object({ piExistingSessionResume: z.literal(true).optional() }).optional(),
     shutdownRequestedAt: z.number().optional(),
     shutdownSource: z.union([z.enum(['mobile-app', 'cli', 'os-signal', 'unknown']), z.string()]).optional(),
     lastSpawnError: z.object({

@@ -11,7 +11,7 @@ import { LinkPrDialog } from '@/components/LinkPrDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useScratchlistCount } from '@/lib/use-scratchlist-count'
 import { formatReopenError } from '@/lib/reopenError'
-import { formatCodexReasoningLabel, shouldShowCodexReasoningLabel } from '@/lib/codexStatusLabels'
+import { formatReasoningLabel, getReasoningEffortForFlavor } from '@/lib/codexStatusLabels'
 import { getSessionModelLabel } from '@/lib/sessionModelLabel'
 import { useTranslation } from '@/lib/use-translation'
 import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
@@ -141,9 +141,13 @@ export function SessionHeader(props: {
     const modelLabel = getSessionModelLabel(session)
     const agentFlavor = session.metadata?.flavor ?? null
     const agentLabel = agentFlavor?.trim() || null
-    const reasoningEffort = session.modelReasoningEffort?.trim() || null
-    const reasoningLabel = reasoningEffort && shouldShowCodexReasoningLabel(agentFlavor)
-        ? formatCodexReasoningLabel(reasoningEffort, headerMetadata.showLabels)
+    const reasoningEffort = getReasoningEffortForFlavor(
+        agentFlavor,
+        session.modelReasoningEffort,
+        session.effort
+    )
+    const reasoningLabel = reasoningEffort
+        ? formatReasoningLabel(reasoningEffort, headerMetadata.showLabels)
         : null
     // Match expected Fast badge semantics (#1004): only explicit service tier, no effort/model heuristics.
     const showFastBadge = agentFlavor === 'codex' && isFastServiceTier(props.serviceTier ?? session.serviceTier)

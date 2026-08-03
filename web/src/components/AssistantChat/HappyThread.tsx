@@ -117,6 +117,7 @@ const TOP_PULL_TRIGGER_PX = 64
 // run after its bounded retry budget is exhausted.
 const WHEEL_GESTURE_GAP_MS = 250
 const KEYBOARD_SCROLL_INTENT_WINDOW_MS = 750
+const POINTER_CANCEL_INTENT_WINDOW_MS = 750
 const UPWARD_SCROLL_KEYS = new Set(['ArrowUp', 'PageUp', 'Home'])
 
 export function getPullToLoadState(distancePx: number): PullToLoadState {
@@ -420,6 +421,10 @@ export function HappyThread(props: {
     disabled: boolean
     onRefresh: () => void
     onRetryMessage?: (localId: string) => void
+    historyActionPending?: boolean
+    onForkConversation?: (messageLocalId?: string) => Promise<void>
+    onRewindConversation?: (messageLocalId: string) => Promise<void>
+    isLatestCompletedBoundary?: (messageId: string) => boolean
     onViewModeChange: (mode: 'tail' | 'history') => void
     isSyncingTail: boolean
     messagesWarning: string | null
@@ -607,6 +612,7 @@ export function HappyThread(props: {
         }
 
         let pointerResumeActive = false
+        let pointerResumeUntil = 0
         let pointerResumeLatched = false
         let keyboardResumeUntil = 0
         let lastWheelAt = 0
@@ -616,6 +622,7 @@ export function HappyThread(props: {
         const hasExplicitUpwardIntent = (intent: ScrollIntent): boolean => {
             return intent.isScrollingUp && (
                 pointerResumeActive
+                || pointerResumeUntil >= Date.now()
                 || keyboardResumeUntil >= Date.now()
                 || wheelIntentUntil >= Date.now()
             )
@@ -625,7 +632,7 @@ export function HappyThread(props: {
             if (!hasExplicitUpwardIntent(intent)) {
                 return false
             }
-            if (pointerResumeActive && !pointerResumeLatched) {
+            if ((pointerResumeActive || pointerResumeUntil >= Date.now()) && !pointerResumeLatched) {
                 pointerResumeLatched = true
                 return true
             }
@@ -750,11 +757,27 @@ export function HappyThread(props: {
                 return
             }
             pointerResumeActive = true
+            pointerResumeUntil = 0
             pointerResumeLatched = false
         }
 
-        const handlePointerEnd = () => {
+        const clearPointerIntent = () => {
             pointerResumeActive = false
+            pointerResumeUntil = 0
+            pointerResumeLatched = false
+        }
+
+        const handlePointerCancel = (event: PointerEvent) => {
+            const hadActivePointer = pointerResumeActive
+            pointerResumeActive = false
+            if (hadActivePointer && (event.pointerType === 'touch' || event.pointerType === 'pen')) {
+                // Native panning cancels the pointer before some mobile browsers
+                // dispatch the resulting scroll event. Retain that explicit input
+                // briefly so initial bottom-settling cannot reclaim the viewport.
+                pointerResumeUntil = Date.now() + POINTER_CANCEL_INTENT_WINDOW_MS
+                return
+            }
+            pointerResumeUntil = 0
             pointerResumeLatched = false
         }
 
@@ -832,9 +855,9 @@ export function HappyThread(props: {
         viewport.addEventListener('touchmove', handleTouchMove, { passive: true })
         viewport.addEventListener('touchend', handleTouchEnd, { passive: true })
         viewport.addEventListener('touchcancel', handleTouchCancel, { passive: true })
-        window.addEventListener('pointerup', handlePointerEnd, { passive: true })
-        window.addEventListener('pointercancel', handlePointerEnd, { passive: true })
-        window.addEventListener('blur', handlePointerEnd)
+        window.addEventListener('pointerup', clearPointerIntent, { passive: true })
+        window.addEventListener('pointercancel', handlePointerCancel, { passive: true })
+        window.addEventListener('blur', clearPointerIntent)
         return () => {
             viewport.removeEventListener('scroll', handleScroll)
             viewport.removeEventListener('keydown', handleKeyDown)
@@ -844,9 +867,9 @@ export function HappyThread(props: {
             viewport.removeEventListener('touchmove', handleTouchMove)
             viewport.removeEventListener('touchend', handleTouchEnd)
             viewport.removeEventListener('touchcancel', handleTouchCancel)
-            window.removeEventListener('pointerup', handlePointerEnd)
-            window.removeEventListener('pointercancel', handlePointerEnd)
-            window.removeEventListener('blur', handlePointerEnd)
+            window.removeEventListener('pointerup', clearPointerIntent)
+            window.removeEventListener('pointercancel', handlePointerCancel)
+            window.removeEventListener('blur', clearPointerIntent)
         }
     }, []) // Stable: no dependencies, reads from refs
 
@@ -1420,6 +1443,10 @@ export function HappyThread(props: {
             disabled: props.disabled,
             onRefresh: props.onRefresh,
             onRetryMessage: props.onRetryMessage,
+            historyActionPending: props.historyActionPending,
+            onForkConversation: props.onForkConversation,
+            onRewindConversation: props.onRewindConversation,
+            isLatestCompletedBoundary: props.isLatestCompletedBoundary,
             onShareTurn: handleShareTurn,
             hasMoreMessages: props.hasMoreMessages,
             isSyncingTail: props.isSyncingTail,
