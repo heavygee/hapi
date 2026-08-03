@@ -92,7 +92,10 @@ function createSessionStub() {
         consumeOneTimeFlags: () => {},
         onSessionFound: () => {},
         clearSessionId: () => {},
-        getModel: () => undefined
+        getModel: () => undefined,
+        getPermissionMode: () => 'default',
+        getEffort: () => undefined,
+        expandSkillReference: (message: string) => message
     };
     return { session, events };
 }
