@@ -703,7 +703,7 @@ layers:
   # (not purple-dot-only). Thin tip on upstream/main @ 3f73a5f6e follow-up.
   # Drop when upstream PR merges. Do not open upstream PR until operator dogfood OK.
   # Worktree: ~/coding/hapi/worktrees/session-search-collapsed-query @ feat/session-search-collapsed-query
-  # Tip: e6ef6f377 (origin/feat/session-search-collapsed-query)
+  # Tip: 5b541fd65 (origin/feat/session-search-collapsed-query) — link-accent chip
   - branch: feat/session-search-collapsed-query
 
   # DROPPED 2026-08-03: fix/voice-fixtures-full-preview MERGED as tiann/hapi#1345
