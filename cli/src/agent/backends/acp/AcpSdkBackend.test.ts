@@ -51,13 +51,14 @@ afterEach(() => {
 });
 
 describe('AcpSdkBackend', () => {
-    it('forwards ACP session_info_update titles without requiring an active prompt', () => {
+    it('forwards ACP session_info_update titles without requiring an active prompt', async () => {
         const backend = new AcpSdkBackend({ command: 'agent' });
         const updates: Array<{ sessionId: string | null; title: string | null }> = [];
         backend.setSessionInfoUpdateListener((update) => updates.push(update));
 
         const backendInternal = backend as unknown as {
             handleSessionUpdate: (params: unknown) => void;
+            sessionUpdateQueue: Promise<void>;
         };
         backendInternal.handleSessionUpdate({
             sessionId: 'session-1',
@@ -73,6 +74,8 @@ describe('AcpSdkBackend', () => {
                 updatedAt: '2026-07-12T00:00:00Z'
             }
         });
+
+        await backendInternal.sessionUpdateQueue;
 
         expect(updates).toEqual([{ sessionId: 'session-1', title: 'Native session title' }]);
     });
