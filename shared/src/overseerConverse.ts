@@ -102,6 +102,12 @@ function obj(properties: Record<string, JsonSchema>, required: string[] = []): J
 
 const sessionIdProp: JsonSchema = { type: 'string', description: 'Exact session id (resolve a human name via list_active_workers first).' }
 
+const detailProp: JsonSchema = {
+    type: 'string',
+    enum: ['lean', 'full'],
+    description: 'Output detail. Default "lean" (cheap summary). Ask "full" only when you need the richer rows (e.g. the worker-health signal trail or untruncated transcript text); still bounded by limit.'
+}
+
 /** Hand-mapped params mirroring `overseerToolArgsSchemas` (kept simple + stable). */
 const OVERSEER_TOOL_PARAMS: Record<OverseerToolName, JsonSchema> = {
     query_events: obj({
@@ -114,20 +120,23 @@ const OVERSEER_TOOL_PARAMS: Record<OverseerToolName, JsonSchema> = {
         sinceTs: { type: 'integer', minimum: 0, description: 'Epoch ms lower bound.' },
         untilTs: { type: 'integer', minimum: 0, description: 'Epoch ms upper bound.' },
         beforeId: { type: 'integer', minimum: 1 },
-        limit: { type: 'integer', minimum: 1, maximum: 200 }
+        limit: { type: 'integer', minimum: 1, maximum: 200 },
+        detail: detailProp
     }),
     query_inbox: obj({
         statuses: { type: 'array', items: { type: 'string' }, description: 'e.g. candidate, surfaced, held.' },
         sessionId: sessionIdProp,
         category: { type: 'string' },
-        limit: { type: 'integer', minimum: 1, maximum: 200 }
+        limit: { type: 'integer', minimum: 1, maximum: 200 },
+        detail: detailProp
     }),
-    get_session_state: obj({ sessionId: sessionIdProp }, ['sessionId']),
+    get_session_state: obj({ sessionId: sessionIdProp, detail: detailProp }, ['sessionId']),
     get_session_recent_output: obj({
         sessionId: sessionIdProp,
-        n: { type: 'integer', minimum: 1, maximum: 50, description: 'How many recent transcript chunks.' }
+        n: { type: 'integer', minimum: 1, maximum: 50, description: 'How many recent transcript chunks.' },
+        detail: detailProp
     }, ['sessionId']),
-    get_worker_health: obj({ sessionId: sessionIdProp }, ['sessionId']),
+    get_worker_health: obj({ sessionId: sessionIdProp, detail: detailProp }, ['sessionId']),
     explain_priority: obj({
         itemId: { type: 'integer', minimum: 1, description: 'Inbox item id.' }
     }, ['itemId']),
@@ -135,7 +144,15 @@ const OVERSEER_TOOL_PARAMS: Record<OverseerToolName, JsonSchema> = {
         project: { type: 'string' },
         state: { type: 'string', enum: [...OVERSEER_WORKER_STATES] },
         minAgeMs: { type: 'integer', minimum: 0 },
-        limit: { type: 'integer', minimum: 1, maximum: 200 }
+        limit: { type: 'integer', minimum: 1, maximum: 200 },
+        detail: detailProp
+    }),
+    query_open_loops: obj({
+        minAgeMs: { type: 'integer', minimum: 0, description: 'Only loops at least this old (ms). Raise it to focus on genuinely cold threads.' },
+        bucket: { type: 'string', enum: ['waiting_on_you', 'half_finished'], description: 'Restrict to one bucket; omit for both (waiting_on_you first).' },
+        project: { type: 'string' },
+        limit: { type: 'integer', minimum: 1, maximum: 100 },
+        detail: detailProp
     })
 }
 

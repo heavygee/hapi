@@ -6,6 +6,7 @@ import {
     insertSystemEvent,
     listSystemEvents,
     queryEvents,
+    queryLatestWorkerStatusPerSession,
     repointSessionEvents,
     type InsertSystemEventInput,
     type ListSystemEventsOptions,
@@ -28,6 +29,11 @@ export class EventStore {
 
     query(options: QueryEventsOptions = {}): StoredSystemEvent[] {
         return queryEvents(this.db, options)
+    }
+
+    /** Latest status-bearing worker event per session (cold-open-loops substrate). */
+    latestWorkerStatusPerSession(limit?: number): StoredSystemEvent[] {
+        return queryLatestWorkerStatusPerSession(this.db, limit)
     }
 
     getById(id: number): StoredSystemEvent | null {

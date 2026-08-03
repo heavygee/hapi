@@ -150,6 +150,87 @@ describe('OverseerEntity read-only tools', () => {
         expect(web[0]?.project).toBe('web')
     })
 
+    it('query_open_loops surfaces cold non-done threads, waiting-on-you first, coldest-first', () => {
+        const store = new Store(':memory:')
+        const now = Date.now()
+        const day = 86_400_000
+        const mkSession = (key: string, project: string, name: string) =>
+            store.sessions.getOrCreateSession(key, { flavor: 'codex', path: `/tmp/${project}`, name }, null, 'default').id
+        const worker = (id: string, project: string, name: string, eventType: string, ts: number, action: string | null, status?: string) => {
+            store.events.insert({
+                ts, sourceKind: 'worker', eventType, attentionCandidate: 1, severity: 4,
+                summary: `${name}: ${eventType}`, relatedSessionId: id,
+                payloadJson: JSON.stringify({
+                    notify_summary: { status: status ?? eventType, action, summary: `${name} ${eventType}` },
+                    suggested_action: action,
+                    session: { id, project, name }
+                })
+            })
+        }
+
+        const a = mkSession('a', 'web', 'peer-a')
+        const b = mkSession('b', 'api', 'peer-b')
+        const c = mkSession('c', 'web', 'peer-c')
+        const d = mkSession('d', 'ops', 'peer-d')
+
+        // A: needs_decision 10d cold (waiting_on_you)
+        worker(a, 'web', 'peer-a', 'needs_decision', now - 10 * day, 'choose deploy target', 'needs_decision')
+        // B: blocked 5d cold (half_finished)
+        worker(b, 'api', 'peer-b', 'blocked', now - 5 * day, 'fix CI auth', 'blocked')
+        // C: needs_decision 3d then completed 1d -> loop CLOSED, excluded
+        worker(c, 'web', 'peer-c', 'needs_decision', now - 3 * day, 'pick lib', 'needs_decision')
+        worker(c, 'web', 'peer-c', 'completed', now - 1 * day, null, 'done')
+        // D: needs_review 2d with a no-op action -> waiting_on_you, action nulled
+        worker(d, 'ops', 'peer-d', 'needs_review', now - 2 * day, 'none', 'needs_review')
+
+        const o = overseer(buildEngine(store))
+        const result = o.queryOpenLoops({})
+
+        // C excluded (closed by a later completed); A, D (waiting) before B (half-finished)
+        expect(result.openLoops.map((l) => l.sessionId)).toEqual([a, d, b])
+        expect(result.counts).toEqual({ total: 3, waitingOnYou: 2, halfFinished: 1 })
+
+        const first = result.openLoops[0]!
+        expect(first.bucket).toBe('waiting_on_you')
+        expect(first.action).toBe('choose deploy target')
+        expect(first.ageDays).toBeGreaterThanOrEqual(9)
+
+        // no-op action is nulled but the loop still surfaces
+        const second = result.openLoops[1]!
+        expect(second.sessionId).toBe(d)
+        expect(second.action).toBeNull()
+        expect(second.bucket).toBe('waiting_on_you')
+
+        expect(result.openLoops[2]!.bucket).toBe('half_finished')
+    })
+
+    it('query_open_loops honors minAgeMs, project, and bucket filters', () => {
+        const store = new Store(':memory:')
+        const now = Date.now()
+        const day = 86_400_000
+        const mkSession = (key: string, project: string) =>
+            store.sessions.getOrCreateSession(key, { flavor: 'codex', path: `/tmp/${project}` }, null, 'default').id
+        const worker = (id: string, project: string, eventType: string, ts: number) => {
+            store.events.insert({
+                ts, sourceKind: 'worker', eventType, attentionCandidate: 1, severity: 4,
+                summary: `${id}: ${eventType}`, relatedSessionId: id,
+                payloadJson: JSON.stringify({ notify_summary: { status: eventType, action: 'do a thing' }, session: { id, project } })
+            })
+        }
+        const a = mkSession('a', 'web')
+        const b = mkSession('b', 'api')
+        const d = mkSession('d', 'ops')
+        worker(a, 'web', 'needs_decision', now - 10 * day)
+        worker(b, 'api', 'blocked', now - 5 * day)
+        worker(d, 'ops', 'needs_review', now - 2 * day)
+
+        const o = overseer(buildEngine(store))
+        expect(o.queryOpenLoops({ minAgeMs: 4 * day }).openLoops.map((l) => l.sessionId)).toEqual([a, b])
+        expect(o.queryOpenLoops({ project: 'web' }).openLoops.map((l) => l.sessionId)).toEqual([a])
+        expect(o.queryOpenLoops({ bucket: 'half_finished' }).openLoops.map((l) => l.sessionId)).toEqual([b])
+        expect(o.queryOpenLoops({ limit: 1 }).openLoops.length).toBe(1)
+    })
+
     it('recordConvoTurn writes a memory-bearing convo_turn event (never an inbox item)', () => {
         const { store, engine } = makeEngine()
         const inboxBefore = store.inbox.count()
