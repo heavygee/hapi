@@ -3,11 +3,13 @@ import type { SpawnOptions } from 'child_process';
 
 const {
   spawnMock,
+  crossSpawnMock,
   existsSyncMock,
   isBunCompiledMock,
   projectPathMock
 } = vi.hoisted(() => ({
   spawnMock: vi.fn((..._args: any[]) => ({ pid: 12345 }) as any),
+  crossSpawnMock: vi.fn((..._args: any[]) => ({ pid: 54321 }) as any),
   existsSyncMock: vi.fn((path: string) => !path.includes('missing-hapi.exe')),
   isBunCompiledMock: vi.fn(() => false),
   projectPathMock: vi.fn(() => process.cwd())
@@ -20,6 +22,10 @@ vi.mock('child_process', async () => {
     spawn: spawnMock
   };
 });
+
+vi.mock('cross-spawn', () => ({
+  default: crossSpawnMock
+}));
 
 vi.mock('node:fs', async () => {
   const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
@@ -163,7 +169,7 @@ describe('spawnHappyCLI windowsHide behavior', () => {
     expect(command.command).toBe(process.env.HAPI_CLI_EXECUTABLE);
   });
 
-  it('enables shell for Windows .cmd npm shims inherited via HAPI_CLI_EXECUTABLE', async () => {
+  it('routes Windows .cmd npm shims through cross-spawn without shell:true', async () => {
     setPlatform('win32');
     isBunCompiledMock.mockReturnValue(true);
     process.env.HAPI_CLI_EXECUTABLE = 'C:\\Users\\Administrator\\AppData\\Roaming\\npm\\hapi.cmd';
@@ -174,10 +180,11 @@ describe('spawnHappyCLI windowsHide behavior', () => {
       stdio: 'ignore',
     });
 
-    expect(spawnMock).toHaveBeenCalledTimes(1);
-    const [command, , options] = spawnMock.mock.calls[0] as [string, string[], SpawnOptions];
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(crossSpawnMock).toHaveBeenCalledTimes(1);
+    const [command, , options] = crossSpawnMock.mock.calls[0] as [string, string[], SpawnOptions];
     expect(command).toBe(process.env.HAPI_CLI_EXECUTABLE);
-    expect(options.shell).toBe(true);
+    expect(options.shell).toBeUndefined();
     expect(options.windowsHide).toBe(true);
   });
 

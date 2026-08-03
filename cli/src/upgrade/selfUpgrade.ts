@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
+import crossSpawn from 'cross-spawn'
 import { chmodSync, copyFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, unlinkSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -276,7 +277,7 @@ async function resolveInstalledGlobalHapi(
 /**
  * Build the command used to probe an installed hapi binary's --version.
  * Windows npm shims are `.cmd`/`.bat`; CreateProcess cannot run them directly,
- * so route through cmd.exe the same way the relaunch path uses shell:true.
+ * so route through cmd.exe (same need as relaunch via cross-spawn, fixed argv).
  */
 export function versionProbeCommand(
     installed: string,
@@ -531,17 +532,17 @@ async function scheduleRunnerRelaunch(cliExecutable: string): Promise<void> {
         // the old generation and report a false "started".
         HAPI_CLI_EXECUTABLE: cliExecutable,
     }
-    // Windows npm shims are `.cmd`/`.bat` and need shell:true (CreateProcess cannot
-    // exec them directly). Prefer hapi.exe via resolvePostNpmInstallExecutable when
-    // present so we usually avoid this path.
-    const needsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(cliExecutable)
-    const child = spawn(cliExecutable, args, {
+    // Windows npm shims are `.cmd`/`.bat` and need CreateProcess via cmd.exe with
+    // escaped argv. Prefer hapi.exe via resolvePostNpmInstallExecutable when
+    // present so we usually avoid this path. Never shell:true — spawn args
+    // (workspace roots, etc.) must not hit cmd metacharacter parsing.
+    const isWindowsShim = process.platform === 'win32' && /\.(cmd|bat)$/i.test(cliExecutable)
+    const child = (isWindowsShim ? crossSpawn : spawn)(cliExecutable, args, {
         detached: true,
         stdio: 'ignore',
         env,
-        shell: needsShell,
         windowsHide: process.platform === 'win32',
-    })
+    }) as ChildProcess
     // Wait for OS spawn success/failure before releasing the runner lock.
     // spawn() itself rarely throws; launch errors arrive on the 'error' event.
     await waitForChildSpawn(child)
