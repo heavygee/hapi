@@ -793,6 +793,8 @@ describe('SessionList search toggle', () => {
         expect(screen.queryByPlaceholderText('Search sessions…')).toBeNull()
         const collapsed = screen.getByRole('button', { name: /Search sessions/ })
         expect(collapsed).toHaveTextContent('jellybot')
+        expect(collapsed.className).toContain('bg-[var(--app-link)]/15')
+        expect(collapsed.className).toContain('text-[var(--app-link)]')
         expect(screen.getByRole('button', { name: /jellybot task/ })).toBeInTheDocument()
         expect(screen.queryByRole('button', { name: /Other task/ })).toBeNull()
     })

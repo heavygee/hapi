@@ -695,8 +695,12 @@ export function SessionListSearch(props: {
                 type="button"
                 onClick={() => props.onExpandedChange(true)}
                 className={cn(
-                    'relative flex min-w-0 max-w-[9rem] items-center gap-1 rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]',
-                    hasTextQuery ? 'bg-[var(--app-subtle-bg)] px-2 py-1 text-[var(--app-fg)]' : 'shrink-0 p-1.5'
+                    'relative flex min-w-0 max-w-[9rem] items-center gap-1 rounded-full transition-colors',
+                    hasTextQuery
+                        // Same accent family as the old indicator dot / date-range highlight so
+                        // the chip still reads "active" when truncated text disappears.
+                        ? 'bg-[var(--app-link)]/15 px-2 py-1 text-[var(--app-link)] hover:bg-[var(--app-link)]/25'
+                        : 'shrink-0 p-1.5 text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
                 )}
                 title={collapsedLabel}
                 aria-label={collapsedLabel}
