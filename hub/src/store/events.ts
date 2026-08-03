@@ -57,6 +57,7 @@ export type ListSystemEventsOptions = {
     sessionId?: string | null
     attentionCandidate?: 0 | 1 | null
     eventType?: string | null
+    sourceKind?: string | null
 }
 
 /** Extended read-only filter set for the Overseer `query_events` tool. */
@@ -241,6 +242,10 @@ export function listSystemEvents(db: Database, options: ListSystemEventsOptions 
         clauses.push('event_type = ?')
         params.push(options.eventType)
     }
+    if (options.sourceKind) {
+        clauses.push('source_kind = ?')
+        params.push(options.sourceKind)
+    }
     if (options.beforeId) {
         clauses.push('id < ?')
         params.push(options.beforeId)
@@ -252,6 +257,13 @@ export function listSystemEvents(db: Database, options: ListSystemEventsOptions 
     ).all(...params, limit) as SystemEventRow[]
 
     return rows.map(mapRow)
+}
+
+export function getSystemEventByIdempotencyKey(db: Database, idempotencyKey: string): StoredSystemEvent | null {
+    const row = db.prepare(
+        'SELECT * FROM events WHERE idempotency_key = ? LIMIT 1'
+    ).get(idempotencyKey) as SystemEventRow | undefined
+    return row ? mapRow(row) : null
 }
 
 /**
