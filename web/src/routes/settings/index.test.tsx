@@ -54,6 +54,19 @@ vi.mock('@/lib/app-context', () => ({
     useAppContext: () => ({ api: null, token: context.token }),
 }))
 
+vi.mock('@/hooks/queries/useFeatures', () => ({
+    useFeatures: () => ({
+        features: { githubPrAwareness: { enabled: false, source: 'default' } },
+        isLoading: false,
+        error: null,
+        refetch: async () => undefined,
+    }),
+    usePatchFeatures: () => ({
+        setGithubPrAwareness: vi.fn(),
+        isPending: false,
+    }),
+}))
+
 vi.mock('@/hooks/queries/useUpgradeInfo', () => ({
     useUpgradeInfo: () => ({ info: null, isLoading: false }),
     useSetFleetUpgradePolicy: () => ({ mutate: setFleetPolicy }),
