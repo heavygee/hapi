@@ -12,7 +12,8 @@ import {
     readUpgradeTarget,
     shouldDelegateToUpgradeTarget,
 } from '@/upgrade/upgradeTarget'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
+import crossSpawn from 'cross-spawn'
 
 /** Wait for delegated child exit; reject on spawn error so caller can clear the marker. */
 export function waitForDelegatedRunner(child: ChildProcess): Promise<number> {
@@ -26,6 +27,42 @@ export function waitForDelegatedRunner(child: ChildProcess): Promise<number> {
             resolve(status ?? 1)
         })
     })
+}
+
+/**
+ * Spawn the durable upgrade-target binary for runner restart.
+ * Windows npm shims (.cmd/.bat) use cross-spawn — never shell:true — so
+ * preserved argv (e.g. --workspace-root with cmd metacharacters) stays one arg.
+ */
+export function spawnDurableUpgradeDelegate(
+    upgradePath: string,
+    args: readonly string[],
+    options: {
+        platform?: NodeJS.Platform
+        env?: NodeJS.ProcessEnv
+        spawnImpl?: typeof spawn
+        crossSpawnImpl?: typeof crossSpawn
+    } = {},
+): ChildProcess {
+    const platform = options.platform ?? process.platform
+    const env = options.env ?? process.env
+    const spawnImpl = options.spawnImpl ?? spawn
+    const crossSpawnImpl = options.crossSpawnImpl ?? crossSpawn
+    const useProcessGroup = platform !== 'win32'
+    const isWindowsShim = platform === 'win32' && /\.(cmd|bat)$/i.test(upgradePath)
+    const spawnOptions: SpawnOptions = {
+        stdio: 'inherit',
+        env: {
+            ...env,
+            HAPI_CLI_EXECUTABLE: upgradePath,
+        },
+        detached: useProcessGroup,
+    }
+    return (isWindowsShim ? crossSpawnImpl : spawnImpl)(
+        upgradePath,
+        [...args],
+        spawnOptions,
+    ) as ChildProcess
 }
 
 export async function runCli(): Promise<void> {
@@ -55,15 +92,7 @@ export async function runCli(): Promise<void> {
         // Unix: new process group so SIGTERM under KillMode=process reaches the
         // npm shim AND its execFileSync grandchild runner, not just the shim PID.
         const useProcessGroup = process.platform !== 'win32'
-        const child = spawn(upgradeTarget.path, args, {
-            stdio: 'inherit',
-            env: {
-                ...process.env,
-                HAPI_CLI_EXECUTABLE: upgradeTarget.path,
-            },
-            shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(upgradeTarget.path),
-            detached: useProcessGroup,
-        })
+        const child = spawnDurableUpgradeDelegate(upgradeTarget.path, args)
         const forward = (signal: NodeJS.Signals): void => {
             try {
                 if (useProcessGroup && child.pid) {
