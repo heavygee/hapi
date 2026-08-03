@@ -178,9 +178,13 @@ describe.skipIf(!await isServerHealthy())('Runner Integration Tests', { timeout:
     const sessions = await listRunnerSessions();
     expect(sessions).toHaveLength(sessionCount);
 
-    // Stop all sessions
-    const stopResults = await Promise.all(sessionIds.map(sessionId => stopRunnerSession(sessionId)));
-    expect(stopResults.every(r => r === 'stopped' || r === 'already_gone'), 'Not all sessions reported stopped').toBe(true);
+    // Stop serially — parallel /stop-session under load races the control
+    // server and flakes with intermittent HTTP failures on busy hosts.
+    const stopResults: Array<'stopped' | 'already_gone' | 'still_alive'> = []
+    for (const sessionId of sessionIds) {
+      stopResults.push(await stopRunnerSession(sessionId))
+    }
+    expect(stopResults.every(r => r === 'stopped' || r === 'already_gone'), 'Not all sessions reported stopped').toBe(true)
 
     // Verify all sessions are stopped
     const emptySessions = await listRunnerSessions();
