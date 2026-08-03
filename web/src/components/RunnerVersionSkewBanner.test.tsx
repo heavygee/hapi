@@ -145,6 +145,16 @@ describe('collectConfirmedAutoUpgradeToasts', () => {
             offer: TEST_OFFER,
         }).toastHosts).toEqual(['personal-win'])
     })
+
+    it('keeps pending IDs when the machine is missing from the online-only list', () => {
+        const result = collectConfirmedAutoUpgradeToasts({
+            previousAutoSkewIds: new Set(['win']),
+            machines: [],
+            offer: TEST_OFFER,
+        })
+        expect(result.toastHosts).toEqual([])
+        expect(result.nextAutoSkewIds.has('win')).toBe(true)
+    })
 })
 
 describe('listBannerSkewMachines', () => {
