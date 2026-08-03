@@ -19,7 +19,7 @@ import { normalizeDecryptedMessage } from '@/chat/normalize'
 import { reduceChatBlocks } from '@/chat/reducer'
 import { reconcileChatBlocks } from '@/chat/reconcile'
 import { buildConversationOutline } from '@/chat/outline'
-import { buildVisibleChatBlocks, isToolGroupBlock, type ToolGroupBlock } from '@/chat/toolGroups'
+import { buildVisibleChatBlocks, isToolGroupBlock, visibleBlockRole, type ToolGroupBlock } from '@/chat/toolGroups'
 import { useUnseenBlockCount } from '@/hooks/useUnseenBlockCount'
 import { isQueuedForInvocation } from '@/lib/messages'
 import { inactiveSessionCanResume } from '@/lib/sessionResume'
@@ -42,7 +42,7 @@ import { classifySessionAttention, getSessionAttentionLabelKey } from '@/lib/ses
 import { getSessionLastSeenAt } from '@/lib/sessionLastSeen'
 import { formatRelativeTime } from '@/lib/relativeTime'
 import { ScratchlistMigrationBanner } from '@/components/AssistantChat/ScratchlistMigrationBanner'
-import { useHappyRuntime } from '@/lib/assistant-runtime'
+import { assignThreadMessageIds, useHappyRuntime } from '@/lib/assistant-runtime'
 import type { OlderLoadOutcome } from '@/lib/message-window-store'
 import { createAttachmentAdapter } from '@/lib/attachmentAdapter'
 import { createScratchlistAttachmentAdapter } from '@/lib/scratchlistAttachmentAdapter'
@@ -59,6 +59,8 @@ import { useTranslation } from '@/lib/use-translation'
 import { SessionHeader } from '@/components/SessionHeader'
 import { CursorMigrationBanner } from '@/components/CursorMigrationBanner'
 import { TeamPanel } from '@/components/TeamPanel'
+import { SessionStatusPanel } from '@/components/SessionStatusPanel'
+import { buildSessionStatusData } from '@/chat/sessionStatus'
 import { usePlatform } from '@/hooks/usePlatform'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { useCodexModels } from '@/hooks/queries/useCodexModels'
@@ -331,9 +333,11 @@ export function ScratchlistDrawerHost(props: {
     onDelete: ReturnType<typeof useHubScratchlist>['remove']
     onSend: (text: string, attachments?: AttachmentMetadata[], scheduledAt?: number | null) => Promise<boolean>
     onExitScratchlistMode: () => void
+    disabled?: boolean
 }) {
     const assistantApi = useAui()
     const handlePromoteToComposer = useCallback(async (entry: ScratchlistEntry) => {
+        if (props.disabled) return
         assistantApi.composer().setText(entry.text)
         // Exit scratchlist mode before rehydrating attachments so addAttachment
         // uses the normal chat upload adapter (not the scratchlist hub adapter).
@@ -348,8 +352,9 @@ export function ScratchlistDrawerHost(props: {
                 assistantApi.composer()
             )
         }
-    }, [assistantApi, props.api, props.onExitScratchlistMode, props.sessionId])
+    }, [assistantApi, props.api, props.disabled, props.onExitScratchlistMode, props.sessionId])
     const handlePromoteToQueue = useCallback(async (entry: ScratchlistEntry) => {
+        if (props.disabled) return false
         let attachments: AttachmentMetadata[] | undefined
         if (entry.attachments && entry.attachments.length > 0) {
             attachments = await stageScratchlistAttachmentsForComposeSend(
@@ -363,7 +368,7 @@ export function ScratchlistDrawerHost(props: {
             props.onExitScratchlistMode()
         }
         return accepted
-    }, [props.api, props.onSend, props.onExitScratchlistMode, props.sessionId])
+    }, [props.api, props.disabled, props.onSend, props.onExitScratchlistMode, props.sessionId])
     return (
         <ScratchlistDrawer
             entries={props.entries}
@@ -373,6 +378,7 @@ export function ScratchlistDrawerHost(props: {
             onDelete={props.onDelete}
             onPromoteToComposer={handlePromoteToComposer}
             onPromoteToQueue={handlePromoteToQueue}
+            disabled={props.disabled}
         />
     )
 }
@@ -433,6 +439,7 @@ type SessionChatProps = {
     // user dismisses or starts editing.
     sendError?: ComposerSendError | null
     onClearSendError?: () => void
+    onSuppressSendErrorRestore?: (id: number) => void
     initialOutlineOpen?: boolean
     onInitialOutlineConsumed?: () => void
 }
@@ -461,6 +468,27 @@ function SessionChatInner(props: SessionChatProps) {
     const { haptic } = usePlatform()
     const { t } = useTranslation()
     const navigate = useNavigate()
+    const [historyActionPending, setHistoryActionPending] = useState(false)
+
+    const onForkConversation = useCallback(async (messageLocalId?: string) => {
+        setHistoryActionPending(true)
+        try {
+            const result = await props.api.forkConversation(props.session.id, messageLocalId)
+            await navigate({ to: '/sessions/$sessionId', params: { sessionId: result.sessionId } })
+        } finally {
+            setHistoryActionPending(false)
+        }
+    }, [navigate, props.api, props.session.id])
+
+    const onRewindConversation = useCallback(async (messageLocalId: string) => {
+        setHistoryActionPending(true)
+        try {
+            await props.api.rewindConversation(props.session.id, messageLocalId)
+            props.onRefresh()
+        } finally {
+            setHistoryActionPending(false)
+        }
+    }, [props.api, props.onRefresh, props.session.id])
     const sessionInactive = !props.session.active
     const inactiveCanResume = inactiveSessionCanResume(
         props.session,
@@ -1009,6 +1037,22 @@ function SessionChatInner(props: SessionChatProps) {
         () => reconcileChatBlocks(reduced.blocks, blocksByIdRef.current),
         [reduced.blocks]
     )
+    const sessionStatus = useMemo(
+        () => buildSessionStatusData({
+            goal: reduced.latestGoal,
+            tasks: props.session.todos,
+            blocks: reconciled.blocks,
+            messages: normalizedMessages,
+            backgroundTaskCount: props.session.backgroundTaskCount
+        }),
+        [
+            reduced.latestGoal,
+            props.session.todos,
+            props.session.backgroundTaskCount,
+            reconciled.blocks,
+            normalizedMessages
+        ]
+    )
     const hasRunningChildAgent = useMemo(
         () => hasAbortableAgentRun(reduced.blocks),
         [reduced.blocks]
@@ -1025,6 +1069,30 @@ function SessionChatInner(props: SessionChatProps) {
         }),
         [reconciled.blocks, props.hasMoreMessages]
     )
+
+    // Fork-current must compare against assistant-ui message ids (`kind:id`),
+    // not raw hub message ids — MessageActions receive the rendered card id,
+    // and adjacent assistant blocks join under the first block's id.
+    const latestCompletedBoundaryId = useMemo(() => {
+        if (props.viewMode !== 'tail') return null
+        let candidate: string | null = null
+        let previousRole: ReturnType<typeof visibleBlockRole> | null = null
+        for (const { block, threadMessageId } of assignThreadMessageIds(visibleBlocks)) {
+            const role = visibleBlockRole(block)
+            if (
+                (role === 'user' && block.invokedAt != null)
+                || (role === 'assistant' && previousRole !== 'assistant')
+            ) {
+                candidate = threadMessageId
+            }
+            previousRole = role
+        }
+        return candidate
+    }, [props.viewMode, visibleBlocks])
+
+    const isLatestCompletedBoundary = useCallback((messageId: string) => {
+        return latestCompletedBoundaryId === messageId
+    }, [latestCompletedBoundaryId])
 
     useEffect(() => {
         visibleGroupsRef.current = visibleBlocks.filter(isToolGroupBlock)
@@ -1209,6 +1277,11 @@ function SessionChatInner(props: SessionChatProps) {
     // The ref is read at send time; resolvePendingSchedule converts it to an
     // absolute epoch-ms using Date.now() at that moment (send-time base for presets).
     const [pendingSchedule, setPendingSchedule] = useState<PendingSchedule | null>(null)
+    const [pendingScheduleRevision, setPendingScheduleRevision] = useState(0)
+    const updatePendingSchedule = useCallback((next: PendingSchedule | null) => {
+        setPendingSchedule(next)
+        setPendingScheduleRevision((revision) => revision + 1)
+    }, [])
     const pendingScheduleRef = useRef<PendingSchedule | null>(null)
     // Keep render ref in sync so onNew can snapshot at send time
     pendingScheduleRef.current = pendingSchedule
@@ -1224,12 +1297,12 @@ function SessionChatInner(props: SessionChatProps) {
         const ms = (pendingSchedule as Extract<PendingSchedule, { type: 'absolute' }>).ms
         const remaining = ms - Date.now()
         if (remaining <= 0) {
-            setPendingSchedule(null)
+            updatePendingSchedule(null)
             return
         }
-        const timer = setTimeout(() => setPendingSchedule(null), remaining)
+        const timer = setTimeout(() => updatePendingSchedule(null), remaining)
         return () => clearTimeout(timer)
-    }, [pendingSchedule])
+    }, [pendingSchedule, updatePendingSchedule])
 
     const handleSend = useCallback(async (text: string, attachments?: AttachmentMetadata[], scheduledAt?: number | null) => {
         // Route through the scratchlist-aware wrapper. When scratchlistMode
@@ -1254,10 +1327,10 @@ function SessionChatInner(props: SessionChatProps) {
             // its own send path). Schedule clear / forced scroll only
             // matter for chat sends; scratchlist adds don't have a
             // schedule and shouldn't move the chat viewport.
-            setPendingSchedule(null)
+            updatePendingSchedule(null)
             setForceScrollToken((token) => token + 1)
         }
-    }, [onSendForComposer, scratchlistMode])
+    }, [onSendForComposer, scratchlistMode, updatePendingSchedule])
 
     const attachmentAdapter = useMemo(() => {
         if (!props.session.active) {
@@ -1307,17 +1380,17 @@ function SessionChatInner(props: SessionChatProps) {
 
             <CursorMigrationBanner metadata={props.session.metadata} />
 
+            {sessionStatus ? <SessionStatusPanel data={sessionStatus} /> : null}
+
             {props.session.teamState && (
                 <TeamPanel teamState={props.session.teamState} />
             )}
 
             {sessionInactive ? (
-                <div className="px-3 pt-3">
-                    <div className="mx-auto w-full max-w-content rounded-md bg-[var(--app-subtle-bg)] p-3 text-sm text-[var(--app-hint)]">
-                        {inactiveCanResume
-                            ? t('session.inactive.autoResume')
-                            : t('session.inactive.cannotResume')}
-                    </div>
+                <div className="mx-auto w-full max-w-content bg-[var(--app-subtle-bg)] p-3 text-sm text-[var(--app-hint)]">
+                    {inactiveCanResume
+                        ? t('session.inactive.autoResume')
+                        : t('session.inactive.cannotResume')}
                 </div>
             ) : null}
 
@@ -1338,6 +1411,10 @@ function SessionChatInner(props: SessionChatProps) {
                         disabled={sessionInactive}
                         onRefresh={props.onRefresh}
                         onRetryMessage={props.onRetryMessage}
+                        historyActionPending={historyActionPending}
+                        onForkConversation={controlledByUser ? undefined : onForkConversation}
+                        onRewindConversation={controlledByUser ? undefined : onRewindConversation}
+                        isLatestCompletedBoundary={isLatestCompletedBoundary}
                         onViewModeChange={props.onViewModeChange}
                         isSyncingTail={props.isSyncingTail}
                         messagesWarning={props.messagesWarning}
@@ -1395,14 +1472,17 @@ function SessionChatInner(props: SessionChatProps) {
                                     onDelete={scratchlist.remove}
                                     onSend={props.onSend}
                                     onExitScratchlistMode={() => setScratchlistMode(false)}
+                                    disabled={props.isSending}
                                 />
                             ) : null}
                             <QueuedMessagesBar
                                 sessionId={props.session.id}
                                 api={props.api}
+                                pendingSchedule={pendingSchedule}
+                                pendingScheduleRevision={pendingScheduleRevision}
                                 onEdit={({ pendingSchedule: restored }) => {
                                     // Restore the schedule so the clock button re-activates
-                                    setPendingSchedule(restored)
+                                    updatePendingSchedule(restored)
                                 }}
                             />
                         </div>
@@ -1413,11 +1493,10 @@ function SessionChatInner(props: SessionChatProps) {
                         resolveSessionMentionTooltip={resolveSessionMentionTooltip}
                         disabled={props.isSending}
                         pendingSchedule={pendingSchedule}
-                        onSchedule={setPendingSchedule}
-                        onClearSchedule={() => setPendingSchedule(null)}
+                        onSchedule={updatePendingSchedule}
+                        onClearSchedule={() => updatePendingSchedule(null)}
                         permissionMode={props.session.permissionMode}
                         collaborationMode={codexCollaborationModeSupported ? props.session.collaborationMode : undefined}
-                        threadGoal={reduced.latestGoal}
                         model={props.session.model}
                         modelReasoningEffort={agentFlavor === 'codex' || agentFlavor === 'opencode' ? props.session.modelReasoningEffort : undefined}
                         effort={props.session.effort}
@@ -1556,11 +1635,13 @@ function SessionChatInner(props: SessionChatProps) {
                         voiceMicMuted={voice?.micMuted}
                         onVoiceToggle={voice && voiceBackendReady ? handleVoiceToggle : undefined}
                         onVoiceMicToggle={voice && voiceBackendReady ? handleVoiceMicToggle : undefined}
+                        voiceTranscriptionApi={props.api}
                         scratchlistMode={scratchlistMode}
                         scratchlistCount={scratchlist.entries.length}
                         onScratchlistToggle={handleScratchlistToggle}
                         sendError={props.sendError ?? null}
                         onClearSendError={props.onClearSendError}
+                        onSuppressSendErrorRestore={props.onSuppressSendErrorRestore}
                         />
                     </div>
                 </DragDropZone>

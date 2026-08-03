@@ -28,6 +28,11 @@ See `src/configuration.ts` for all options.
 
 - `ELEVENLABS_API_KEY` - ElevenLabs API key for voice assistant.
 - `ELEVENLABS_AGENT_ID` - Custom ElevenLabs agent ID (auto-created if not set).
+- `OPENAI_API_KEY` - OpenAI dictation (`gpt-4o-transcribe`).
+- `DEEPGRAM_API_KEY` - Deepgram dictation (`nova-3`).
+- `GROQ_API_KEY` - Groq dictation (`whisper-large-v3`).
+- `TRANSCRIPTION_BASE_URL` and `TRANSCRIPTION_MODEL` - OpenAI-compatible/local transcription endpoint and model.
+- `TRANSCRIPTION_API_KEY` - Optional bearer token for the OpenAI-compatible endpoint.
 
 ### Optional
 
@@ -210,6 +215,19 @@ See `src/store/index.ts` for SQLite persistence:
 - Machines with runner state.
 - Todo extraction from messages.
 - Users table for Telegram bindings (includes namespace).
+
+Message content is stored via `src/store/contentCodec.ts`: oversized strings
+inside agent messages (giant tool output) are head+tail truncated at ingest,
+and payloads ≥256 chars are zstd-compressed (TEXT = plaintext JSON, BLOB =
+zstd). User prompts are never truncated — queued rows are delivered to the CLI
+verbatim.
+
+Maintenance scripts (run with the hub stopped before swapping files):
+
+- `scripts/compact-db.ts` — retroactively truncate + compress + VACUUM an
+  existing DB into a new file (the source is only opened read-only).
+- `scripts/cleanup-sessions.ts` — bulk-delete sessions by message count, path
+  glob, or first-message pattern.
 
 ## Source structure
 
