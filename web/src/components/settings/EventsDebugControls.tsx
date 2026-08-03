@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useAppContext } from '@/lib/app-context'
+import { formatAbsoluteDateTime, formatRelativeTime } from '@/lib/relative-time'
+import { useTranslation } from '@/lib/use-translation'
 
 export type SystemEventRow = {
     id: number
@@ -21,12 +23,9 @@ type SystemEventsResponse = {
     events: SystemEventRow[]
 }
 
-function formatTs(ts: number): string {
-    return new Date(ts).toLocaleString()
-}
-
 export function EventsDebugControls() {
     const { api } = useAppContext()
+    const { t } = useTranslation()
     const [open, setOpen] = useState(false)
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
@@ -94,29 +93,35 @@ export function EventsDebugControls() {
                             <p className="p-3 text-xs text-[var(--app-hint)]">No events yet.</p>
                         ) : (
                             <ul className="divide-y divide-[var(--app-divider)]">
-                                {events.map((event) => (
-                                    <li key={event.id} className="px-2 py-2 text-[11px] leading-snug">
-                                        <div className="flex flex-wrap items-center gap-1">
-                                            <span className="font-mono text-[var(--app-hint)]">#{event.id}</span>
-                                            <span className="rounded bg-[var(--app-subtle-bg)] px-1 py-0.5 font-medium uppercase tracking-wide text-[var(--app-fg)]">
-                                                {event.eventType}
-                                            </span>
-                                            {event.attentionCandidate ? (
-                                                <span className="rounded bg-amber-500/15 px-1 py-0.5 text-amber-700 dark:text-amber-300">
-                                                    attention
+                                {events.map((event) => {
+                                    const relative = formatRelativeTime(event.ts, t) ?? ''
+                                    const absolute = formatAbsoluteDateTime(event.ts) ?? undefined
+                                    return (
+                                        <li key={event.id} className="px-2 py-2 text-[11px] leading-snug">
+                                            <div className="flex flex-wrap items-center gap-1">
+                                                <span className="font-mono text-[var(--app-hint)]">#{event.id}</span>
+                                                <span className="rounded bg-[var(--app-subtle-bg)] px-1 py-0.5 font-medium uppercase tracking-wide text-[var(--app-fg)]">
+                                                    {event.eventType}
                                                 </span>
-                                            ) : null}
-                                            <span className="text-[var(--app-hint)]">{formatTs(event.ts)}</span>
-                                        </div>
-                                        <p className="mt-1 text-[var(--app-fg)]">{event.summary}</p>
-                                        <p className="mt-0.5 text-[var(--app-hint)]">
-                                            {event.sourceKind}
-                                            {event.sourceRef ? ` · ${event.sourceRef}` : ''}
-                                            {event.relatedSessionId ? ` · session ${event.relatedSessionId.slice(0, 8)}…` : ''}
-                                            {event.provenance ? ` · ${event.provenance}` : ''}
-                                        </p>
-                                    </li>
-                                ))}
+                                                {event.attentionCandidate ? (
+                                                    <span className="rounded bg-amber-500/15 px-1 py-0.5 text-amber-700 dark:text-amber-300">
+                                                        attention
+                                                    </span>
+                                                ) : null}
+                                                <span className="text-[var(--app-hint)]" title={absolute}>
+                                                    {relative}
+                                                </span>
+                                            </div>
+                                            <p className="mt-1 text-[var(--app-fg)]">{event.summary}</p>
+                                            <p className="mt-0.5 text-[var(--app-hint)]">
+                                                {event.sourceKind}
+                                                {event.sourceRef ? ` · ${event.sourceRef}` : ''}
+                                                {event.relatedSessionId ? ` · session ${event.relatedSessionId.slice(0, 8)}…` : ''}
+                                                {event.provenance ? ` · ${event.provenance}` : ''}
+                                            </p>
+                                        </li>
+                                    )
+                                })}
                             </ul>
                         )}
                     </div>

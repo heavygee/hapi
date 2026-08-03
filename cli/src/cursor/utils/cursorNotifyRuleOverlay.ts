@@ -121,6 +121,9 @@ export function installCursorNotifyRuleOverlay(
         }
 
         writeFileSync(rulePath, buildNotifyRuleContent(opts), 'utf-8');
+        // File-only (debug) so journal/dogfood can prove the alwaysApply rule
+        // landed before cursor-agent spawn without spamming the TUI.
+        logger.debug(`[cursor-notify-rule] installed alwaysApply rule at ${rulePath}`);
     } catch (error) {
         logger.debug('[cursor-notify-rule] install failed', error);
     }

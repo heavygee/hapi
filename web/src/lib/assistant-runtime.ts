@@ -5,6 +5,7 @@ import { useExternalMessageConverter, useExternalStoreRuntime } from '@assistant
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { resolvePendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { safeStringify, stripAgentContract } from '@hapi/protocol'
+import { useShowAgentContract } from '@/hooks/useShowAgentContract'
 import { renderEventLabel } from '@/chat/presentation'
 import type { ChatBlock, CliOutputBlock, CodexReview, UsageData } from '@/chat/types'
 import type { AgentEvent, ToolCallBlock } from '@/chat/types'
@@ -360,10 +361,21 @@ export function assignThreadMessageIds(
     return assignThreadMessageIdsWithStableWrappers(blocks, new WeakMap())
 }
 
+/**
+ * Human-facing text for chat cards. Default strips the machine notify contract
+ * (Half A). When Settings → About → "Show AGENT_NOTIFY line" is on, leave the
+ * raw text so the operator can verify emission end-to-end.
+ */
+export function textForHumanRender(text: string, showAgentContract: boolean): string {
+    return showAgentContract ? text : stripAgentContract(text)
+}
+
 function toThreadMessageLike(
     block: VisibleChatBlock,
     threadMessageId: string,
-    timestamp: number
+    timestamp: number,
+    showAgentContract: boolean
+
 ): ThreadMessageLike {
     if (block.kind === 'user-text') {
         return {
@@ -373,8 +385,8 @@ function toThreadMessageLike(
             // Strip the machine-only notify contract from the human render. On
             // non-Cursor flavors the hub prepends an inline contract prefix to
             // the stored operator message (#20); stripAgentContract removes that
-            // leading block. No-op when absent.
-            content: [{ type: 'text', text: stripAgentContract(block.text) }],
+            // leading block. No-op when absent. Debug toggle keeps it visible.
+            content: [{ type: 'text', text: textForHumanRender(block.text, showAgentContract) }],
             metadata: {
                 custom: {
                     kind: 'user',
@@ -395,10 +407,10 @@ function toThreadMessageLike(
             createdAt: new Date(timestamp),
             // Strip the trailing AGENT_NOTIFY_SUMMARY line (collapse-normalized,
             // so Cursor's corrupted SUMARY variant strips too) so the human never
-            // sees the machine contract. The raw text stays in the store for the
-            // overseer event/inbox pipeline. copyText derives from this content,
-            // so the clipboard is clean too.
-            content: [{ type: 'text', text: stripAgentContract(block.text) }],
+            // sees the machine contract - unless the debug toggle is on. The raw
+            // text always stays in the store for overseer. copyText derives from
+            // this content, so the clipboard follows the same visibility rule.
+            content: [{ type: 'text', text: textForHumanRender(block.text, showAgentContract) }],
             metadata: {
                 custom: {
                     kind: 'assistant',
@@ -627,6 +639,7 @@ export function useHappyRuntime(props: {
     pendingScheduleRef?: React.RefObject<PendingSchedule | null>
 }) {
     const isRunning = props.isRunning ?? props.session.thinking
+    const { showAgentContract } = useShowAgentContract()
 
     // Compute response-group aggregates once per block list so we can
     // inject the summed metadata onto each group's first visible block.
@@ -658,8 +671,10 @@ export function useHappyRuntime(props: {
             const message = toThreadMessageLike(
                 block,
                 threadMessageId,
-                responseGroupTimestamps.get(block) ?? getBlockPresentationTimestamp(block)
+                responseGroupTimestamps.get(block) ?? getBlockPresentationTimestamp(block),
+                showAgentContract
             )
+
             const aggregate = aggregates.get(block.id)
             if (!aggregate) return message
             const existing = message.metadata?.custom as HappyChatMessageMetadata | undefined
@@ -678,7 +693,8 @@ export function useHappyRuntime(props: {
                 }
             }
         },
-        [aggregates, responseGroupTimestamps]
+        [aggregates, responseGroupTimestamps, showAgentContract]
+
     )
 
     // Use cached message converter for performance optimization
