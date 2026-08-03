@@ -13,8 +13,6 @@ const accessToken = process.env.HAPI_PEER_CLI_TOKEN ?? process.env.HAPI_PEER_ACC
 const artifactRoot = process.env.HAPI_PEER_WORKTREE ?? process.cwd()
 
 const SCREENSHOT_PATH = resolve(artifactRoot, 'localdocs/playwright-runs/1356-session-search-collapsed-query.png')
-const MATCH_TITLE = 'jellybot peer1356'
-const OTHER_TITLE = 'other peer1356'
 const QUERY = 'jellybot'
 
 function requirePeerEnv(): void {
@@ -69,8 +67,10 @@ test.describe('collapsed session search query — peer stack (#1356)', () => {
 
     test('collapsed control shows truncated query text, not only a dot', async ({ page }) => {
         const runId = Date.now()
-        await createSession(MATCH_TITLE, `/tmp/peer1356-match-${runId}`)
-        await createSession(OTHER_TITLE, `/tmp/peer1356-other-${runId}`)
+        const matchTitle = `jellybot peer1356 ${runId}`
+        const otherTitle = `other peer1356 ${runId}`
+        await createSession(matchTitle, `/tmp/peer1356-match-${runId}`)
+        await createSession(otherTitle, `/tmp/peer1356-other-${runId}`)
 
         await injectAuth(page)
         await page.goto('/sessions', { waitUntil: 'domcontentloaded', timeout: 60_000 })
@@ -82,8 +82,8 @@ test.describe('collapsed session search query — peer stack (#1356)', () => {
         const input = page.getByPlaceholder('Search sessions…')
         await expect(input).toBeVisible({ timeout: 15_000 })
         await input.fill(QUERY)
-        await expect(page.getByRole('button', { name: new RegExp(MATCH_TITLE) })).toBeVisible({ timeout: 15_000 })
-        await expect(page.getByRole('button', { name: new RegExp(OTHER_TITLE) })).toHaveCount(0)
+        await expect(page.getByRole('button', { name: new RegExp(matchTitle) })).toBeVisible({ timeout: 15_000 })
+        await expect(page.getByRole('button', { name: new RegExp(otherTitle) })).toHaveCount(0)
 
         // Collapse via blur (click outside the search wrapper).
         await page.locator('body').click({ position: { x: 8, y: 8 } })
@@ -96,8 +96,8 @@ test.describe('collapsed session search query — peer stack (#1356)', () => {
         mkdirSync(dirname(SCREENSHOT_PATH), { recursive: true })
         await collapsed.screenshot({ path: SCREENSHOT_PATH })
         // Also capture the full sidebar header row for operator proof.
-        const header = page.locator('.session-list-scrollbar-offset').first()
-        await header.screenshot({
+        const toolbar = collapsed.locator('xpath=ancestor::div[contains(@class,"flex") and contains(@class,"items-center")][1]')
+        await toolbar.screenshot({
             path: resolve(artifactRoot, 'localdocs/playwright-runs/1356-session-search-collapsed-header.png'),
         })
     })
