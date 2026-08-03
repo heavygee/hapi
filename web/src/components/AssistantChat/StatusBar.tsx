@@ -9,12 +9,12 @@ import * as Popover from '@radix-ui/react-popover'
 import { useMemo } from 'react'
 import type { AgentState, CodexCollaborationMode, PermissionMode } from '@/types/api'
 import type { ConversationStatus } from '@/realtime/types'
-import type { ThreadGoal } from '@/types/api'
 import { getContextBudgetTokens } from '@/chat/modelConfig'
 import {
-    formatCodexReasoningLabel,
-    formatCompactCodexReasoningLabel,
-    shouldShowCodexReasoningLabel
+    formatReasoningLabel,
+    formatCompactReasoningLabel,
+    getReasoningEffortForFlavor,
+    shouldShowReasoningStatusLabel
 } from '@/lib/codexStatusLabels'
 import { isFastServiceTier } from './codexFastMode'
 import { useTranslation } from '@/lib/use-translation'
@@ -196,12 +196,19 @@ export function StatusBar(props: {
     contextSize?: number
     contextCacheRead?: number
     contextWindow?: number | null
+    /**
+     * Model to use for the context-window fallback heuristic when
+     * contextWindow is absent. Falls back to `model`. Callers pass the
+     * usage-bearing message's own model here so local Claude sessions (whose
+     * session.model is often null) still resolve a plausible window.
+     */
+    contextModel?: string | null
     model?: string | null
     modelReasoningEffort?: string | null
+    effort?: string | null
     serviceTier?: string | null
     permissionMode?: PermissionMode
     collaborationMode?: CodexCollaborationMode
-    threadGoal?: ThreadGoal | null
     agentFlavor?: string | null
     voiceStatus?: ConversationStatus
 }) {
@@ -212,30 +219,31 @@ export function StatusBar(props: {
         [props.active, props.thinking, props.agentState, props.voiceStatus, props.backgroundTaskCount, t]
     )
 
+    const contextHeuristicModel = props.contextModel ?? props.model
     const contextWarning = useMemo(
         () => {
             if (props.contextSize === undefined) return null
-            const maxContextSize = props.contextWindow ?? getContextBudgetTokens(props.model, props.agentFlavor)
+            const maxContextSize = props.contextWindow ?? getContextBudgetTokens(contextHeuristicModel, props.agentFlavor)
             if (!maxContextSize) return null
             return getContextWarning(props.contextSize, maxContextSize)
         },
-        [props.contextSize, props.contextWindow, props.model, props.agentFlavor]
+        [props.contextSize, props.contextWindow, contextHeuristicModel, props.agentFlavor]
     )
     const contextUsageLabel = useMemo(() => {
         if (props.contextSize === undefined) return null
-        const maxContextSize = props.contextWindow ?? getContextBudgetTokens(props.model, props.agentFlavor)
+        const maxContextSize = props.contextWindow ?? getContextBudgetTokens(contextHeuristicModel, props.agentFlavor)
         return formatContextUsageLabel(props.contextSize, maxContextSize)
-    }, [props.contextSize, props.contextWindow, props.model, props.agentFlavor])
+    }, [props.contextSize, props.contextWindow, contextHeuristicModel, props.agentFlavor])
     const compactContextUsageLabel = useMemo(() => {
         if (props.contextSize === undefined) return null
-        const maxContextSize = props.contextWindow ?? getContextBudgetTokens(props.model, props.agentFlavor)
+        const maxContextSize = props.contextWindow ?? getContextBudgetTokens(contextHeuristicModel, props.agentFlavor)
         return formatCompactContextUsageLabel(props.contextSize, maxContextSize)
-    }, [props.contextSize, props.contextWindow, props.model, props.agentFlavor])
+    }, [props.contextSize, props.contextWindow, contextHeuristicModel, props.agentFlavor])
     const contextUsageDetails = useMemo(() => {
         if (props.contextSize === undefined) return null
-        const maxContextSize = props.contextWindow ?? getContextBudgetTokens(props.model, props.agentFlavor)
+        const maxContextSize = props.contextWindow ?? getContextBudgetTokens(contextHeuristicModel, props.agentFlavor)
         return getContextUsageDetails(props.contextSize, maxContextSize, props.contextCacheRead)
-    }, [props.contextSize, props.contextCacheRead, props.contextWindow, props.model, props.agentFlavor])
+    }, [props.contextSize, props.contextCacheRead, props.contextWindow, contextHeuristicModel, props.agentFlavor])
     const contextUsedPercentage = contextUsageDetails?.usedPercentage ?? null
 
     const permissionMode = props.permissionMode
@@ -254,19 +262,19 @@ export function StatusBar(props: {
     const collaborationModeLabel = displayCollaborationMode
         ? getCodexCollaborationModeLabel(displayCollaborationMode)
         : null
-    const displaysCodexReasoning = shouldShowCodexReasoningLabel(props.agentFlavor)
-    const codexReasoningLabel = displaysCodexReasoning
-        ? formatCodexReasoningLabel(props.modelReasoningEffort, headerMetadata.showLabels)
+    const reasoningEffort = getReasoningEffortForFlavor(
+        props.agentFlavor,
+        props.modelReasoningEffort,
+        props.effort
+    )
+    const displaysReasoning = shouldShowReasoningStatusLabel(props.agentFlavor, reasoningEffort)
+    const reasoningLabel = displaysReasoning
+        ? formatReasoningLabel(reasoningEffort, headerMetadata.showLabels)
         : null
-    const compactCodexReasoningLabel = displaysCodexReasoning
-        ? formatCompactCodexReasoningLabel(props.modelReasoningEffort)
+    const compactReasoningLabel = displaysReasoning
+        ? formatCompactReasoningLabel(reasoningEffort)
         : null
     const codexFastMode = shouldShowCodexFastBadge(props.agentFlavor, props.serviceTier)
-    const goalLabel = props.agentFlavor === 'codex' && props.threadGoal
-        ? props.threadGoal.status === 'active'
-            ? 'goal'
-            : `goal ${props.threadGoal.status === 'budgetLimited' ? 'limited' : props.threadGoal.status}`
-        : null
 
     return (
         <div className="flex min-w-0 items-baseline justify-between gap-2 px-2 pb-1">
@@ -342,20 +350,15 @@ export function StatusBar(props: {
             </div>
 
             <div className="flex min-w-0 shrink-0 items-baseline gap-2">
-                {codexReasoningLabel ? (
+                {reasoningLabel ? (
                     <span className="whitespace-nowrap text-xs text-[var(--app-hint)]">
-                        <span className="sm:hidden">{compactCodexReasoningLabel}</span>
-                        <span className="hidden sm:inline">{codexReasoningLabel}</span>
+                        <span className="sm:hidden">{compactReasoningLabel}</span>
+                        <span className="hidden sm:inline">{reasoningLabel}</span>
                     </span>
                 ) : null}
                 {codexFastMode ? (
                     <span className="whitespace-nowrap text-xs text-[#34C759]">
                         fast
-                    </span>
-                ) : null}
-                {goalLabel ? (
-                    <span className="whitespace-nowrap text-xs text-[var(--app-link)]">
-                        {goalLabel}
                     </span>
                 ) : null}
                 {collaborationModeLabel ? (

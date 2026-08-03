@@ -387,6 +387,11 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
                         mcpServers: session.mcpServers,
                         hookSettingsPath: session.hookSettingsPath,
                         canCallTool: permissionHandler.handleToolCall,
+                        bootstrapMode: {
+                            permissionMode: session.getPermissionMode() ?? 'default',
+                            model: session.getModel() ?? undefined,
+                            effort: session.getEffort() ?? undefined,
+                        },
                         isAborted: (toolCallId: string) => {
                             return permissionHandler.isAborted(toolCallId);
                         },
@@ -418,7 +423,7 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
                                 sdkToLogConverter.updateSelectedModel(p.mode.model ?? null);
                                 inFlightMessage = { items: p.items, mode: p.mode, isolate: p.isolate };
                                 deliveredMessageThisAttempt = true;
-                                return p;
+                                return { ...p, message: session.expandSkillReference(p.message) };
                             }
 
                             let msg = await session.queue.waitForMessagesAndGetAsString(controller.signal);
@@ -449,7 +454,7 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
                                 inFlightMessage = { items: msg.items, mode: msg.mode, isolate: msg.isolate };
                                 deliveredMessageThisAttempt = true;
                                 return {
-                                    message: msg.message,
+                                    message: session.expandSkillReference(msg.message),
                                     mode: msg.mode
                                 };
                             }

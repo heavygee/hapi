@@ -23,6 +23,7 @@ export class Session extends AgentSessionBase<EnhancedMode> {
     readonly startedBy: 'runner' | 'terminal';
     readonly startingMode: 'local' | 'remote';
     localLaunchFailure: LocalLaunchFailure | null = null;
+    private nativeSkillNames = new Set<string>();
 
     constructor(opts: {
         api: ApiClient;
@@ -97,6 +98,17 @@ export class Session extends AgentSessionBase<EnhancedMode> {
         this.effort = effort;
     };
 
+    setNativeSkillNames = (names: readonly string[]): void => {
+        this.nativeSkillNames = new Set(names);
+    };
+
+    expandSkillReference = (message: string, trailingContext = ''): string => {
+        const match = /^\s*\$([^\s]+)(?=\s|$)/.exec(message);
+        if (!match || !this.nativeSkillNames.has(match[1])) return message;
+        const expanded = `/${match[1]}${message.slice(match[0].length)}`;
+        return trailingContext ? `${expanded}\n\n${trailingContext}` : expanded;
+    };
+
     recordLocalLaunchFailure = (message: string, exitReason: LocalLaunchExitReason): void => {
         this.localLaunchFailure = { message, exitReason };
     };
@@ -110,8 +122,10 @@ export class Session extends AgentSessionBase<EnhancedMode> {
     };
 
     /**
-     * Consume one-time Claude flags from claudeArgs after Claude spawn
-     * Currently handles: --resume (with or without session ID)
+     * Consume one-time Claude flags from claudeArgs after Claude spawn.
+     * Handles: --resume (with or without session ID) and --fork-session.
+     * `--fork-session` must be one-shot; keeping it across relaunches would
+     * branch again off the already-forked native id.
      */
     consumeOneTimeFlags = (): void => {
         if (!this.claudeArgs) return;
@@ -135,6 +149,8 @@ export class Session extends AgentSessionBase<EnhancedMode> {
                     // --resume at the end of args
                     logger.debug('[Session] Consumed --resume flag (no session ID)');
                 }
+            } else if (this.claudeArgs[i] === '--fork-session') {
+                logger.debug('[Session] Consumed --fork-session flag');
             } else {
                 filteredArgs.push(this.claudeArgs[i]);
             }
