@@ -1,7 +1,7 @@
 # Peer briefing: optional "In progress" session section
 
-> **Date:** 2026-08-03  
-> **Worktree:** `~/coding/hapi/worktrees/in-progress-optional`  
+> **Date:** 2026-08-03
+> **Worktree:** `~/coding/hapi/worktrees/in-progress-optional`
 > **Branch:** `feat/in-progress-section-optional` (from `upstream/main`, includes #1315)
 
 ## Operator request (verbatim intent)
