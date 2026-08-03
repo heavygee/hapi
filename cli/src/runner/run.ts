@@ -12,7 +12,8 @@ import { configuration } from '@/configuration';
 import packageJson from '../../package.json';
 import { getEnvironmentInfo } from '@/ui/doctor';
 import { spawnHappyCLI } from '@/utils/spawnHappyCLI';
-import { writeRunnerState, RunnerLocallyPersistedState, readRunnerState, acquireRunnerLock, releaseRunnerLock } from '@/persistence';
+import { writeRunnerState, RunnerLocallyPersistedState, readRunnerState, readSettings, acquireRunnerLock, releaseRunnerLock } from '@/persistence';
+import { resolveVersionHandoffDisabledAtStart } from './versionHandoff';
 import { getCliArgs } from '@/utils/cliArgs';
 import { getProcessStartMarker, isProcessAlive, isWindows, killProcess, killProcessByChildProcess, killProcessTreeByPid } from '@/utils/process';
 import { PERMISSION_MODES } from '@hapi/protocol/modes';
@@ -1083,7 +1084,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     // Persisted to runner.state.json so a later `hapi runner start` from a
     // shell where the env var is NOT set can still honour the opt-out
     // (Codex review #814 [Major] - controlClient.ts:192 fix).
-    const startedWithVersionHandoffDisabled = process.env.HAPI_DISABLE_VERSION_HANDOFF === '1';
+    const settings = await readSettings();
+    const startedWithVersionHandoffDisabled = resolveVersionHandoffDisabledAtStart(settings);
 
     // Write initial runner state (no lock needed for state file)
     const fileState: RunnerLocallyPersistedState = {
@@ -1268,9 +1270,9 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       // unrelated to an actual npm upgrade. HAPI_DISABLE_VERSION_HANDOFF=1
       // keeps the rest of the heartbeat (session pruning, state file
       // persistence) intact.
-      if (process.env.HAPI_DISABLE_VERSION_HANDOFF === '1') {
+      if (startedWithVersionHandoffDisabled) {
         if (process.env.DEBUG) {
-          logger.debug('[RUNNER RUN] HAPI_DISABLE_VERSION_HANDOFF=1 set, skipping mtime/version drift self-restart');
+          logger.debug('[RUNNER RUN] Version handoff disabled, skipping mtime/version drift self-restart');
         }
       } else {
         const installedCliMtimeMs = getInstalledCliMtimeMs();
