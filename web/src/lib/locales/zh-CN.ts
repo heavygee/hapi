@@ -69,6 +69,8 @@ export default {
   'sessions.empty.startSession': '启动会话',
   'sessions.empty.browse': '浏览 workspace',
   'sessions.search.placeholder': '搜索会话…',
+  'sessions.count': '{n} 个会话 · {m} 个项目',
+  'button.refresh': '刷新',
   'sessions.search.open': '搜索会话',
   'sessions.search.clear': '清除搜索',
   'sessions.search.noResults': '没有符合筛选条件的会话。',

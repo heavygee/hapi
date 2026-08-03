@@ -69,6 +69,8 @@ export default {
   'sessions.empty.startSession': 'Start a session',
   'sessions.empty.browse': 'Browse workspace',
   'sessions.search.placeholder': 'Search sessions…',
+  'sessions.count': '{n} sessions · {m} projects',
+  'button.refresh': 'Refresh',
   'sessions.search.open': 'Search sessions',
   'sessions.search.clear': 'Clear search',
   'sessions.search.noResults': 'No sessions match your filters.',
