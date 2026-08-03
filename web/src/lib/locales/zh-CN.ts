@@ -908,6 +908,8 @@ export default {
   'settings.display.sessionPreviewLimit.increase': '增加折叠前显示的会话数',
   'settings.display.activeSessionsOnly': '仅显示活跃会话',
   'settings.display.activeSessionsOnly.desc': '在侧边栏隐藏非活跃会话；当前打开的会话仍会保留显示。',
+  'settings.display.pinInProgressSessions': '置顶进行中会话',
+  'settings.display.pinInProgressSessions.desc': '将活跃会话移到侧边栏顶部的「进行中」分区。关闭后仍保留在各自项目目录分组中。',
   'settings.display.sessionListStatus': '会话列表状态',
   'settings.display.sessionListStatus.standard': '标准',
   'settings.display.sessionListStatus.detailed': '详细',

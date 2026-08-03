@@ -926,6 +926,8 @@ export default {
   'settings.display.sessionPreviewLimit.increase': 'Show more sessions before folding',
   'settings.display.activeSessionsOnly': 'Active sessions only',
   'settings.display.activeSessionsOnly.desc': 'Hide inactive sessions in the sidebar. The session you have open stays visible.',
+  'settings.display.pinInProgressSessions': 'Pin in-progress sessions',
+  'settings.display.pinInProgressSessions.desc': 'Move active sessions into a pinned In progress section at the top of the sidebar. Off keeps them inside their project directories.',
   'settings.display.sessionListStatus': 'Session list status',
   'settings.display.sessionListStatus.standard': 'Standard',
   'settings.display.sessionListStatus.detailed': 'Detailed',
