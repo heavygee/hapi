@@ -15,8 +15,10 @@ import {
     normalizeUrlIdempotencyKey,
     OVERSEER_EVENT_TYPES,
     HAPI_EVENTS_BEGIN,
-    HAPI_EVENTS_END
+    HAPI_EVENTS_END,
+    stripAgentContract
 } from './overseerEvents'
+import { extractNotifySummary } from './messages'
 
 describe('overseerEvents mapping', () => {
     test('maps notify status to event_type', () => {
@@ -111,5 +113,47 @@ describe('overseerEvents mapping', () => {
 
     test('normalizeUrlIdempotencyKey drops hash and lowercases host', () => {
         expect(normalizeUrlIdempotencyKey('https://Example.COM/path/#frag')).toBe('https://example.com/path')
+    })
+})
+
+describe('stripAgentContract (render-only, human-facing)', () => {
+    test('strips a correct trailing summary line + the blank line above it', () => {
+        const text = 'Here is the answer.\n\nAGENT_NOTIFY_SUMMARY {"status":"done","summary":"ok"}'
+        expect(stripAgentContract(text)).toBe('Here is the answer.')
+    })
+
+    test('strips a corrupted (SUMARY) trailing summary line', () => {
+        const text = 'Here is the answer.\nAGENT_NOTIFY_SUMARY {"status":"done"}'
+        expect(stripAgentContract(text)).toBe('Here is the answer.')
+    })
+
+    test('strips the leading inline-contract prefix block (historical stored msgs)', () => {
+        const text = `${AGENT_NOTIFY_CONTRACT_INLINE_PREFIX}please do the thing`
+        expect(stripAgentContract(text)).toBe('please do the thing')
+    })
+
+    test('strips both leading prefix and trailing summary in one pass', () => {
+        const text = `${AGENT_NOTIFY_CONTRACT_INLINE_PREFIX}real content\nAGENT_NOTIFY_SUMMARY {"status":"done"}`
+        expect(stripAgentContract(text)).toBe('real content')
+    })
+
+    test('leaves a quoted-but-not-last token untouched', () => {
+        const text = 'I emit AGENT_NOTIFY_SUMMARY {json} at the end.\nThen more prose.'
+        expect(stripAgentContract(text)).toBe(text)
+    })
+
+    test('no-ops on clean text and empty input', () => {
+        expect(stripAgentContract('just a normal reply')).toBe('just a normal reply')
+        expect(stripAgentContract('')).toBe('')
+    })
+
+    test('round-trip invariant: overseer still parses raw, human view has no marker', () => {
+        const raw = 'Work done.\nAGENT_NOTIFY_SUMARY {"status":"done","summary":"shipped"}'
+        // overseer reads the RAW text and still gets the event (corruption-tolerant)
+        expect(extractNotifySummary(raw)?.summary).toBe('shipped')
+        // the human render is stripped clean and can no longer parse a marker
+        const human = stripAgentContract(raw)
+        expect(human).toBe('Work done.')
+        expect(extractNotifySummary(human)).toBeNull()
     })
 })
