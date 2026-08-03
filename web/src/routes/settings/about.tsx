@@ -3,6 +3,7 @@ import { useTranslation } from '@/lib/use-translation'
 import { AgentContractDebugControls } from '@/components/settings/AgentContractDebugControls'
 import { EventsDebugControls } from '@/components/settings/EventsDebugControls'
 import { InboxDebugControls } from '@/components/settings/InboxDebugControls'
+import { OverseerChatDebugControls } from '@/components/settings/OverseerChatDebugControls'
 import { SettingsPageContent, SettingsRow, SettingsSection } from '@/components/settings/SettingsPrimitives'
 
 export default function SettingsAboutPage() {
@@ -20,6 +21,7 @@ export default function SettingsAboutPage() {
                 <AgentContractDebugControls />
                 <EventsDebugControls />
                 <InboxDebugControls />
+                <OverseerChatDebugControls />
             </SettingsSection>
         </SettingsPageContent>
     )
