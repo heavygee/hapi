@@ -16,6 +16,31 @@ import type { SessionEndReason } from '@hapi/protocol'
 import type { AccessErrorReason, AccessResult } from './types'
 import { getConfiguration } from '../../../configuration'
 
+/**
+ * CLI `update-metadata` often sends a local cache snapshot. Empty
+ * `externalRefs: []` on that path is almost never an intentional unlink
+ * (unlink is PUT /sessions/:id/external-refs → setSessionExternalRefs).
+ * Drop the key so mergeSessionMetadata carry-forward keeps prior links.
+ *
+ * Incident 2026-07-30: mid-stack hub without CONTRIBUTION_FIELDS + sparse
+ * writes wiped PR chips; empty-[] on this socket path is the same class.
+ */
+function omitEmptyExternalRefsOnCliMetadataWrite(metadata: unknown): unknown {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+        return metadata
+    }
+    if (!Object.prototype.hasOwnProperty.call(metadata, 'externalRefs')) {
+        return metadata
+    }
+    const refs = (metadata as Record<string, unknown>).externalRefs
+    if (!Array.isArray(refs) || refs.length > 0) {
+        return metadata
+    }
+    const next = { ...(metadata as Record<string, unknown>) }
+    delete next.externalRefs
+    return next
+}
+
 function stripExternalRefsWhenAwarenessDisabled(metadata: unknown): unknown {
     if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
         return metadata
@@ -287,7 +312,9 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             return
         }
 
-        const gatedMetadata = stripExternalRefsWhenAwarenessDisabled(metadata)
+        const gatedMetadata = stripExternalRefsWhenAwarenessDisabled(
+            omitEmptyExternalRefsOnCliMetadataWrite(metadata)
+        )
 
         const result = store.sessions.updateSessionMetadata(
             sid,
