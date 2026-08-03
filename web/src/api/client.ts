@@ -1123,6 +1123,14 @@ export class ApiClient {
         })
     }
 
+    /** Hub-owned recent Overseer turns for talk-to / voice hydrate after reload. */
+    async fetchOverseerConverseRecent(
+        limit = 20
+    ): Promise<{ turns: import('@hapi/protocol').OverseerRecentConvoTurn[] }> {
+        const q = new URLSearchParams({ limit: String(limit) })
+        return await this.request(`/api/overseer/converse/recent?${q}`)
+    }
+
     async fetchOverseerBrains(): Promise<{
         profiles: import('@hapi/protocol').OverseerBrainProfileInfo[]
         active: { profile: string; model: string | null } | null

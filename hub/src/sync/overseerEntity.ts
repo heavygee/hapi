@@ -10,6 +10,7 @@
  */
 
 import {
+    OVERSEER_CONVO_TURN_EVENT_TYPE,
     OVERSEER_LOOP_CLOSED_EVENT_TYPE,
     OVERSEER_STALE_SILENCE_MS,
     buildOverseerConvoTurnEventInput,
@@ -26,6 +27,7 @@ import {
     type OverseerConvoTurnInput,
     type OverseerExplainPriority,
     type OverseerIdentity,
+    type OverseerToolName,
     type OverseerDispositionCluster,
     type OverseerDispositionResult,
     type OverseerDispositionRow,
@@ -782,6 +784,35 @@ export class OverseerEntity {
     recordConvoTurn(input: OverseerConvoTurnInput): StoredSystemEvent | null {
         const eventInput = buildOverseerConvoTurnEventInput({ ...input, ts: input.ts ?? this.now() })
         return this.events.insert(eventInput)
+    }
+
+    /**
+     * Fill in overseerText on an existing operator-only convo_turn row (retry /
+     * dedup path — avoids inserting a second operator line).
+     */
+    completeConvoTurn(input: {
+        eventId: number
+        overseerText: string
+        toolCalls?: Array<{ tool: OverseerToolName; argsSummary?: string }>
+    }): StoredSystemEvent | null {
+        const existing = this.events.getById(input.eventId)
+        if (!existing || existing.eventType !== OVERSEER_CONVO_TURN_EVENT_TYPE) return null
+        let operatorText = ''
+        try {
+            const parsed: unknown = existing.payloadJson ? JSON.parse(existing.payloadJson) : null
+            if (isObjectRecord(parsed) && typeof parsed.operatorText === 'string') {
+                operatorText = parsed.operatorText
+            }
+        } catch {
+            return null
+        }
+        const overseerText = input.overseerText.trim()
+        const toolCalls = input.toolCalls ?? []
+        const payloadJson = JSON.stringify({ operatorText, overseerText, toolCalls })
+        const summary = operatorText.length > 0
+            ? `Operator: ${operatorText.slice(0, 160)}`
+            : 'Overseer conversation turn'
+        return this.events.updatePayload(input.eventId, payloadJson, summary)
     }
 
     // --- internals -----------------------------------------------------------

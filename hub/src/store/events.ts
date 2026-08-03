@@ -209,6 +209,21 @@ export function getSystemEventById(db: Database, id: number): StoredSystemEvent 
     return row ? mapRow(row) : null
 }
 
+/** Patch payload (and optionally summary) on an existing audit-retained event row. */
+export function updateSystemEventPayload(
+    db: Database,
+    id: number,
+    payloadJson: string,
+    summary?: string
+): StoredSystemEvent | null {
+    if (summary !== undefined) {
+        db.prepare('UPDATE events SET payload_json = ?, summary = ? WHERE id = ?').run(payloadJson, summary, id)
+    } else {
+        db.prepare('UPDATE events SET payload_json = ? WHERE id = ?').run(payloadJson, id)
+    }
+    return getSystemEventById(db, id)
+}
+
 export function listSystemEvents(db: Database, options: ListSystemEventsOptions = {}): StoredSystemEvent[] {
     const limit = Math.min(Math.max(options.limit ?? 50, 1), 200)
     const clauses: string[] = []
