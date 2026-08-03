@@ -666,12 +666,9 @@ layers:
   # DROPPED 2026-07-30: feat/session-header-machine-meta MERGED as tiann/hapi#1244
   # (f8934d81e — machine + last-active in session detail header; Fixes #1241)
 
-  # tiann/hapi#1226 / upstream PR #1227 — attach-before-scratchlist-mode park kept
-  # chat-path chips as text-only. Soup tip unions park-before-clear + in-flight
-  # lock with rich-mentions flushAndSend. Upstream thin tip remains
-  # fix/scratchlist-attach-park-chat-paths. Drop when #1227 merges.
-  # Worktree: ~/coding/hapi/worktrees/soup-scratchlist-attach-park
-  - branch: driver/scratchlist-attach-park-chat-paths
+  # DROPPED 2026-08-03: driver/scratchlist-attach-park-chat-paths MERGED as tiann/hapi#1227
+  # (2d904de7 — migrate chat-path attachments on scratchlist park; Fixes #1226)
+  # - branch: driver/scratchlist-attach-park-chat-paths
 
   # tiann/hapi#1273 — rich-composer @-mention FUE + always-on placeholder copy.
   # Web-only. Drop when upstream PR merges.
