@@ -1,4 +1,8 @@
-import { basename } from 'path'
+import { basename } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { lstat, readFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { asString, isObject } from '@hapi/protocol'
 
 export type GeneratedImageMetadata = {
     id: string
@@ -8,9 +12,23 @@ export type GeneratedImageMetadata = {
     createdAt: number
 }
 
-const MAX_GENERATED_IMAGE_BYTES = 25 * 1024 * 1024
+export const MAX_GENERATED_IMAGE_BYTES = 25 * 1024 * 1024
+/** Reject base64 strings that cannot fit under MAX_GENERATED_IMAGE_BYTES once decoded (+ padding). */
+export const MAX_GENERATED_IMAGE_BASE64_CHARS = Math.ceil(MAX_GENERATED_IMAGE_BYTES * 4 / 3) + 4
 const MAX_GENERATED_IMAGE_TOTAL_BYTES = 100 * 1024 * 1024
 const MAX_GENERATED_IMAGE_COUNT = 100
+
+/** Decode inline media base64 only after a cheap length gate (avoids huge Buffer allocations). */
+export function decodeGeneratedImageBase64(data: string): Buffer | null {
+    if (data.length > MAX_GENERATED_IMAGE_BASE64_CHARS) {
+        return null
+    }
+    const bytes = Buffer.from(data, 'base64')
+    if (bytes.byteLength > MAX_GENERATED_IMAGE_BYTES) {
+        return null
+    }
+    return bytes
+}
 
 const generatedImages = new Map<string, GeneratedImageMetadata>()
 let generatedImageBytes = 0
@@ -55,6 +73,85 @@ export function detectImageMimeType(bytes: Uint8Array): string | null {
     return null
 }
 
+const MP4_FTYP_BRANDS = new Set([
+    'isom',
+    'iso2',
+    'iso3',
+    'iso4',
+    'iso5',
+    'iso6',
+    'mp41',
+    'mp42',
+    'mp71',
+    'avc1',
+    'avc3',
+    'hev1',
+    'hvc1',
+    'mmp4',
+    'dash',
+    'msnv',
+    'ndas',
+    'ndsc',
+    'ndsh',
+    'ndsm',
+    'ndsp',
+    'ndss',
+    'ndxc',
+    'ndxh',
+    'ndxm',
+    'ndxp',
+    'ndxs',
+])
+
+/** EBML DocType (element 0x4282) from the first header bytes; null if absent/unreadable. */
+function readEbmlDocType(bytes: Uint8Array): string | null {
+    const limit = Math.min(bytes.length, 128)
+    for (let i = 4; i + 3 < limit; i += 1) {
+        if (bytes[i] !== 0x42 || bytes[i + 1] !== 0x82) {
+            continue
+        }
+        const sizeByte = bytes[i + 2]
+        // Single-byte VINT: high bit set, length in low 7 bits.
+        if ((sizeByte & 0x80) === 0) {
+            continue
+        }
+        const len = sizeByte & 0x7f
+        if (len === 0 || i + 3 + len > limit) {
+            continue
+        }
+        return ascii(bytes, i + 3, i + 3 + len)
+    }
+    return null
+}
+
+export function detectVideoMimeType(bytes: Uint8Array): string | null {
+    if (bytes.length >= 12 && ascii(bytes, 4, 8) === 'ftyp') {
+        const brand = ascii(bytes, 8, 12)
+        if (MP4_FTYP_BRANDS.has(brand)) {
+            return 'video/mp4'
+        }
+        return null
+    }
+
+    if (bytes.length >= 4
+        && bytes[0] === 0x1a
+        && bytes[1] === 0x45
+        && bytes[2] === 0xdf
+        && bytes[3] === 0xa3) {
+        // EBML is shared by WebM and Matroska/MKV — only accept DocType webm.
+        if (readEbmlDocType(bytes) === 'webm') {
+            return 'video/webm'
+        }
+        return null
+    }
+
+    return null
+}
+
+export function isInlineMediaMimeType(mimeType: string): boolean {
+    return mimeType.startsWith('image/') || mimeType.startsWith('video/')
+}
+
 function ascii(bytes: Uint8Array, start: number, end: number): string {
     return String.fromCharCode(...bytes.subarray(start, end))
 }
@@ -62,7 +159,11 @@ function ascii(bytes: Uint8Array, start: number, end: number): string {
 export function registerGeneratedImage(args: { id: string; path: string; mimeType: string; bytes: Uint8Array; fileName?: string | null }): GeneratedImageMetadata {
     const content = Buffer.from(args.bytes)
     if (content.byteLength > MAX_GENERATED_IMAGE_BYTES) {
-        throw new Error('Image is too large to display inline')
+        throw new Error('File is too large to display inline')
+    }
+
+    if (!isInlineMediaMimeType(args.mimeType)) {
+        throw new Error('Unsupported inline media MIME type')
     }
 
     const previous = generatedImages.get(args.id)
@@ -104,4 +205,106 @@ export function getGeneratedImage(id: string): GeneratedImageMetadata | null {
 export function clearGeneratedImages(): void {
     generatedImages.clear()
     generatedImageBytes = 0
+}
+
+export async function registerGeneratedImageFromPath(args: {
+    id?: string
+    path: string
+    fileName?: string | null
+}): Promise<GeneratedImageMetadata | null> {
+    try {
+        const info = await lstat(args.path)
+        if (!info.isFile()) {
+            throw new Error('Path is not a regular file')
+        }
+        if (info.size > MAX_GENERATED_IMAGE_BYTES) {
+            throw new Error('Image is too large to display inline')
+        }
+        const bytes = await readFile(args.path)
+        const mimeType = detectImageMimeType(bytes) ?? detectVideoMimeType(bytes)
+        if (!mimeType) {
+            throw new Error('Unsupported inline media content')
+        }
+        return registerGeneratedImage({
+            id: args.id ?? randomUUID(),
+            path: args.path,
+            fileName: args.fileName,
+            mimeType,
+            bytes
+        })
+    } catch {
+        return null
+    }
+}
+
+function parseAcpImageUri(uri: string): string | null {
+    if (uri.startsWith('file://')) {
+        try {
+            return fileURLToPath(uri)
+        } catch {
+            return null
+        }
+    }
+    if (/^https?:\/\//i.test(uri)) {
+        return null
+    }
+    return uri
+}
+
+/** Bound safe display name from an ACP uri/url — never reuse raw data/signed URLs. */
+export function safeAcpFileName(uri: string | undefined | null): string | null {
+    if (!uri) return null
+    try {
+        if (uri.startsWith('file://')) {
+            return basename(fileURLToPath(uri)).slice(0, 255) || null
+        }
+        if (/^https?:\/\//i.test(uri)) {
+            const name = basename(new URL(uri).pathname)
+            return name.slice(0, 255) || null
+        }
+        // Reject scheme-bearing forms (data:, blob:, etc.) — only bare paths.
+        if (!uri.includes(':')) {
+            return basename(uri).slice(0, 255) || null
+        }
+    } catch {
+        return null
+    }
+    return null
+}
+
+export async function registerGeneratedImageFromAcpBlock(block: unknown): Promise<GeneratedImageMetadata | null> {
+    if (!isObject(block) || block.type !== 'image') {
+        return null
+    }
+
+    const data = asString(block.data)
+    const declaredMimeType = asString(block.mimeType ?? block.mime_type)
+    const uri = asString(block.uri ?? block.url)
+
+    if (data) {
+        const bytes = decodeGeneratedImageBase64(data)
+        if (!bytes) {
+            return null
+        }
+        const sniffedMimeType = detectImageMimeType(bytes)
+        if (!sniffedMimeType) {
+            return null
+        }
+        if (declaredMimeType && declaredMimeType !== sniffedMimeType) {
+            return null
+        }
+        const localPath = uri ? parseAcpImageUri(uri) : null
+        const fileName = safeAcpFileName(uri) ?? `generated-${randomUUID()}.png`
+        return registerGeneratedImage({
+            id: randomUUID(),
+            path: localPath ?? fileName,
+            fileName,
+            mimeType: sniffedMimeType,
+            bytes
+        })
+    }
+
+    // URI-only ACP image blocks are not permission-gated. Local-path display must
+    // go through display_image / display_video MCP tools (approval_mode: prompt).
+    return null
 }
