@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
 import { spawnDurableUpgradeDelegate, waitForDelegatedRunner } from './runCli'
-import type { ChildProcess } from 'node:child_process'
+import type { ChildProcess, SpawnOptions } from 'node:child_process'
 
 describe('waitForDelegatedRunner', () => {
     it('rejects on asynchronous spawn error so the marker can be cleared', async () => {
@@ -25,8 +25,14 @@ describe('waitForDelegatedRunner', () => {
 
 describe('spawnDurableUpgradeDelegate', () => {
     it('routes Windows .cmd durable targets through cross-spawn without shell:true', () => {
-        const spawnImpl = vi.fn()
-        const crossSpawnImpl = vi.fn(() => ({ pid: 99 }) as ChildProcess)
+        const spawnImpl = vi.fn(
+            (_command: string, _args: string[], _options: SpawnOptions) =>
+                ({ pid: 1 }) as ChildProcess,
+        )
+        const crossSpawnImpl = vi.fn(
+            (_command: string, _args: string[], _options: SpawnOptions) =>
+                ({ pid: 99 }) as ChildProcess,
+        )
         const upgradePath = 'C:\\Users\\me\\AppData\\Roaming\\npm\\hapi.cmd'
         const workspaceRoot = 'C:\\work\\A & B'
         const args = ['runner', 'start-sync', '--workspace-root', workspaceRoot]
@@ -39,11 +45,7 @@ describe('spawnDurableUpgradeDelegate', () => {
 
         expect(spawnImpl).not.toHaveBeenCalled()
         expect(crossSpawnImpl).toHaveBeenCalledTimes(1)
-        const [command, passedArgs, options] = crossSpawnImpl.mock.calls[0] as [
-            string,
-            string[],
-            { shell?: boolean; env?: NodeJS.ProcessEnv },
-        ]
+        const [command, passedArgs, options] = crossSpawnImpl.mock.calls[0]!
         expect(command).toBe(upgradePath)
         expect(passedArgs).toEqual(args)
         expect(passedArgs[3]).toBe(workspaceRoot)
@@ -52,8 +54,14 @@ describe('spawnDurableUpgradeDelegate', () => {
     })
 
     it('uses plain spawn for non-shim Windows executables', () => {
-        const spawnImpl = vi.fn(() => ({ pid: 42 }) as ChildProcess)
-        const crossSpawnImpl = vi.fn()
+        const spawnImpl = vi.fn(
+            (_command: string, _args: string[], _options: SpawnOptions) =>
+                ({ pid: 42 }) as ChildProcess,
+        )
+        const crossSpawnImpl = vi.fn(
+            (_command: string, _args: string[], _options: SpawnOptions) =>
+                ({ pid: 99 }) as ChildProcess,
+        )
         const upgradePath = 'C:\\Users\\me\\.hapi\\artifacts\\hapi.exe'
 
         spawnDurableUpgradeDelegate(upgradePath, ['runner', 'start'], {
@@ -64,7 +72,7 @@ describe('spawnDurableUpgradeDelegate', () => {
 
         expect(crossSpawnImpl).not.toHaveBeenCalled()
         expect(spawnImpl).toHaveBeenCalledTimes(1)
-        const [, , options] = spawnImpl.mock.calls[0] as [string, string[], { shell?: boolean }]
+        const [, , options] = spawnImpl.mock.calls[0]!
         expect(options.shell).toBeUndefined()
     })
 })
