@@ -160,12 +160,12 @@ describe('SyncEngine.clearOpenCodeSession', () => {
             engine.handleSessionAlive({ sid: reserved.sessionId, time: Date.now() + 1 })
             ;(engine as unknown as { messageService: { releaseMatureScheduledMessages(now: number): void } })
                 .messageService.releaseMatureScheduledMessages(Date.now())
-            expect(emitted).toEqual([])
+            expect(emitted.filter((update) => update.body?.message)).toEqual([])
 
             releaseSpawn()
             await reconcile
             expect(store.isOpenCodeClearDeliveryGated(reserved.sessionId)).toBe(false)
-            expect(emitted.map((update) => update.body?.message?.localId)).toEqual([
+            expect(emitted.filter((update) => update.body?.message).map((update) => update.body?.message?.localId)).toEqual([
                 'gated-a', 'gated-b', 'gated-scheduled'
             ])
         } finally { engine.stop() }
@@ -630,6 +630,8 @@ describe('SyncEngine.clearOpenCodeSession', () => {
                 undefined,
                 replacementSessionId,
                 undefined,
+                undefined,
+                // startingMode — not applicable to an OpenCode clear replacement
                 undefined
             )
             expect(engine.getSessionByNamespace(replacementSessionId, 'default')?.metadata).toMatchObject({

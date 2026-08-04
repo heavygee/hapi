@@ -515,11 +515,15 @@ export const MessagesQuerySchema = z.object({
 
 export type MessagesQuery = z.infer<typeof MessagesQuerySchema>
 
+export const MessageDeliveryModeSchema = z.enum(['queue', 'steer'])
+export type MessageDeliveryMode = z.infer<typeof MessageDeliveryModeSchema>
+
 export const SendMessageRequestSchema = z.object({
     text: z.string(),
     localId: z.string().min(1).optional(),
     attachments: z.array(AttachmentMetadataSchema).optional(),
-    scheduledAt: z.number().int().positive().nullable().optional()
+    scheduledAt: z.number().int().positive().nullable().optional(),
+    deliveryMode: MessageDeliveryModeSchema.optional()
 }).refine(
     (data) => data.scheduledAt == null || typeof data.localId === 'string',
     { message: 'scheduledAt requires localId', path: ['localId'] }
@@ -529,6 +533,9 @@ export const SendMessageRequestSchema = z.object({
 ).refine(
     (data) => data.scheduledAt == null || !data.attachments?.length,
     { message: 'scheduled messages with attachments are not supported', path: ['attachments'] }
+).refine(
+    (data) => data.scheduledAt == null || data.deliveryMode !== 'steer',
+    { message: 'scheduled messages cannot use steer delivery', path: ['deliveryMode'] }
 )
 
 export type SendMessageRequest = z.infer<typeof SendMessageRequestSchema>
@@ -570,6 +577,11 @@ export type RewindConversationRpcResult = {
         createdAt?: number
         invokedAt?: number | null
     }>
+} | {
+    success: false
+    error: string
+    /** Native state is unchanged, cancelled, or was restored exactly. */
+    outcome: 'rejected' | 'cancelled' | 'source_restored'
 }
 
 export const QueuedStateRequestSchema = z.object({
@@ -598,7 +610,8 @@ export const SpawnSessionRequestSchema = z.object({
     worktreeName: z.string().optional(),
     serviceTier: z.enum(['fast', 'standard']).optional(),
     collaborationMode: CodexCollaborationModeSchema.optional(),
-    copilotAgentMode: CopilotAgentModeSchema.optional()
+    copilotAgentMode: CopilotAgentModeSchema.optional(),
+    startingMode: z.enum(['remote', 'pty']).optional()
 })
 
 export type SpawnSessionRequest = z.infer<typeof SpawnSessionRequestSchema>
@@ -789,6 +802,20 @@ export type OpencodeReasoningEffortResponse = {
     currentValue?: string | null
     error?: string
 }
+
+export type AgyModelSummary = {
+    modelId: string
+    name?: string
+}
+
+export type AgyModelsResponse = {
+    success: boolean
+    availableModels?: AgyModelSummary[]
+    currentModelId?: string | null
+    error?: string
+}
+
+export type ListAgyModelsResponse = AgyModelsResponse
 
 export type CursorModelSummary = OpencodeModelSummary
 

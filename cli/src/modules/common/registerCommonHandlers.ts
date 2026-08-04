@@ -1,4 +1,5 @@
 import type { RpcHandlerManager } from '@/api/rpc/RpcHandlerManager'
+import { registerAgyModelHandlers } from './handlers/agyModels'
 import { registerBashHandlers } from './handlers/bash'
 import { registerCodexModelHandlers } from './handlers/codexModels'
 import { registerCursorModelHandlers } from './handlers/cursorModels'
@@ -15,6 +16,7 @@ import { registerSkillsHandlers } from './handlers/skills'
 import { registerUploadHandlers } from './handlers/uploads'
 
 export function registerCommonHandlers(rpcHandlerManager: RpcHandlerManager, workingDirectory: string): void {
+    registerAgyModelHandlers(rpcHandlerManager)
     registerBashHandlers(rpcHandlerManager, workingDirectory)
     registerCodexModelHandlers(rpcHandlerManager)
     registerCursorModelHandlers(rpcHandlerManager)

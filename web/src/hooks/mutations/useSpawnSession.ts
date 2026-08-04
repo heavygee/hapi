@@ -18,6 +18,7 @@ type SpawnInput = {
     serviceTier?: 'fast' | 'standard'
     collaborationMode?: CodexCollaborationMode
     copilotAgentMode?: CopilotAgentMode
+    startingMode?: 'remote' | 'pty'
 }
 
 export function useSpawnSession(api: ApiClient | null): {
@@ -45,7 +46,8 @@ export function useSpawnSession(api: ApiClient | null): {
                 input.permissionMode,
                 input.serviceTier,
                 input.collaborationMode,
-                input.copilotAgentMode
+                input.copilotAgentMode,
+                input.startingMode
             )
         },
         onSuccess: () => {

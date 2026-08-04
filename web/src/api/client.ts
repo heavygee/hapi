@@ -33,6 +33,7 @@ import type {
     SessionsResponse
 } from '@/types/api'
 import type {
+    AgyModelsResponse,
     CodexModelsResponse,
     CursorMigrateOutcome,
     CursorMigrateToAcpRequest,
@@ -55,7 +56,7 @@ import type {
     UsageSummaryResponse,
     UploadFileResponse
 } from '@hapi/protocol/apiTypes'
-import type { AgentFlavor } from '@hapi/protocol'
+import type { AgentFlavor, MessageDeliveryMode } from '@hapi/protocol'
 import type { CancelMessageResponse } from '@hapi/protocol/schemas'
 import type { TranscriptionMode, TranscriptionProvider, TranscriptionProviderInfo } from '@hapi/protocol/voice'
 
@@ -475,14 +476,22 @@ export class ApiClient {
         )
     }
 
-    async sendMessage(sessionId: string, text: string, localId?: string | null, attachments?: AttachmentMetadata[], scheduledAt?: number | null): Promise<void> {
+    async sendMessage(
+        sessionId: string,
+        text: string,
+        localId?: string | null,
+        attachments?: AttachmentMetadata[],
+        scheduledAt?: number | null,
+        deliveryMode?: MessageDeliveryMode,
+    ): Promise<void> {
         await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
             method: 'POST',
             body: JSON.stringify({
                 text,
                 localId: localId ?? undefined,
                 attachments: attachments ?? undefined,
-                scheduledAt: scheduledAt ?? undefined
+                scheduledAt: scheduledAt ?? undefined,
+                deliveryMode: deliveryMode ?? undefined,
             })
         })
     }
@@ -742,7 +751,8 @@ export class ApiClient {
         permissionMode?: PermissionMode,
         serviceTier?: 'fast' | 'standard',
         collaborationMode?: CodexCollaborationMode,
-        copilotAgentMode?: CopilotAgentMode
+        copilotAgentMode?: CopilotAgentMode,
+        startingMode?: 'remote' | 'pty'
     ): Promise<SpawnResponse> {
         return await this.request<SpawnResponse>(`/api/machines/${encodeURIComponent(machineId)}/spawn`, {
             method: 'POST',
@@ -758,9 +768,16 @@ export class ApiClient {
                 permissionMode,
                 serviceTier,
                 collaborationMode,
-                copilotAgentMode
+                copilotAgentMode,
+                startingMode
             })
         })
+    }
+
+    async getMachineAgyModels(machineId: string): Promise<AgyModelsResponse> {
+        return await this.request<AgyModelsResponse>(
+            `/api/machines/${encodeURIComponent(machineId)}/agy-models`
+        )
     }
 
     async getMachineCodexModels(machineId: string): Promise<CodexModelsResponse> {

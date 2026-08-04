@@ -18,7 +18,7 @@
         "@assistant-ui/tap": "^0.9.8",
         "@elevenlabs/react": "^0.13.0",
         "@hapi/protocol": "workspace:*",
-        "@lobehub/icons": "^5.4.0",
+        "@lobehub/icons": "^5.14.0",
         "@radix-ui/react-dialog": "^1.1.15",
         "@radix-ui/react-popover": "^1.1.15",
         "@radix-ui/react-slot": "^1.2.4",
@@ -59,11 +59,11 @@
     "devDependencies": {
         "@testing-library/jest-dom": "^6.6.3",
         "@testing-library/react": "^16.3.0",
+        "@types/hast": "^3.0.4",
+        "@types/mdast": "^4.0.4",
         "@types/react": "^19.2.7",
         "@types/react-dom": "^19.2.3",
         "@types/qrcode": "^1.5.6",
-        "@types/hast": "^3.0.4",
-        "@types/mdast": "^4.0.4",
         "@tailwindcss/postcss": "^4.1.18",
         "@vitejs/plugin-react": "^5.1.2",
         "autoprefixer": "^10.4.23",
@@ -76,9 +76,9 @@
         "tailwindcss": "^4.1.18",
         "typescript": "^5.9.3",
         "unified": "^11.0.5",
+        "vfile": "^6.0.3",
         "vite": "^7.3.0",
         "vitest": "^4.0.16",
-        "vfile": "^6.0.3",
         "@playwright/test": "1.60.0"
     }
 }

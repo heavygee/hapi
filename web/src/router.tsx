@@ -39,6 +39,7 @@ import type { Suggestion } from '@/hooks/useActiveSuggestions'
 import { useSendMessage, type SendErrorInfo } from '@/hooks/mutations/useSendMessage'
 import type { ComposerSendError } from '@/components/AssistantChat/HappyComposer'
 import { ApiError } from '@/api/client'
+import type { MessageDeliveryMode } from '@hapi/protocol'
 import { queryKeys } from '@/lib/query-keys'
 import { useToast } from '@/lib/toast-context'
 import { useTranslation } from '@/lib/use-translation'
@@ -912,6 +913,7 @@ function SessionPage() {
         message: string
         code: string | null
         scheduledAt: number | null
+        deliveryMode: MessageDeliveryMode
         mutationStarted: boolean
         restoreSuppressed: boolean
     }
@@ -999,6 +1001,7 @@ function SessionPage() {
             text: rawSendError.text,
             message: rawSendError.message,
             scheduledAt: rawSendError.scheduledAt,
+            deliveryMode: rawSendError.deliveryMode,
             mutationStarted: rawSendError.mutationStarted,
             restoreSuppressed: rawSendError.restoreSuppressed,
             action: rawSendError.code === 'session_inactive' && canOfferInactiveReopen
@@ -1043,6 +1046,7 @@ function SessionPage() {
                     message,
                     code,
                     scheduledAt: info.scheduledAt,
+                    deliveryMode: info.deliveryMode,
                     mutationStarted: info.mutationStarted,
                     restoreSuppressed: false,
                 }
@@ -1297,6 +1301,22 @@ function SessionPage() {
             onSuppressSendErrorRestore={suppressSendErrorRestore}
             initialOutlineOpen={outline}
             onInitialOutlineConsumed={handleInitialOutlineConsumed}
+            onAbortRestore={(text) => {
+                sendErrorIdRef.current += 1
+                setSendErrors((prev) => ({
+                    ...prev,
+                    [sessionId]: {
+                        id: sendErrorIdRef.current,
+                        text,
+                        message: t('chat.sendError.aborted'),
+                        code: 'abort',
+                        scheduledAt: null,
+                        deliveryMode: 'queue',
+                        mutationStarted: true,
+                        restoreSuppressed: false
+                    }
+                }))
+            }}
         />
     )
 }
@@ -1339,7 +1359,7 @@ function SessionDetailRoute() {
             return
         }
         navigate({ to: '/sessions', replace: true })
-    }, [navigate, sessionNotFound])
+    }, [navigate, sessionNotFound, sessionId])
 
     if (sessionNotFound) {
         return (

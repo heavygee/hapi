@@ -44,9 +44,16 @@ export function addMessage(
     sessionId: string,
     content: unknown,
     localId?: string,
-    scheduledAt?: number | null
+    scheduledAt?: number | null,
+    createdAt?: number
 ): StoredMessage {
     const now = Date.now()
+    // Client-provided origin timestamp (e.g. a Claude transcript entry's own
+    // `timestamp`), falling back to server-receive time when absent. Only
+    // agent-message callers (sessionHandlers' `on('message')`) pass this today.
+    const stampedAt = Number.isFinite(createdAt)
+        ? Math.min(createdAt!, now)
+        : now
 
     // Without a localId, invoked_at is stamped immediately below — there is no
     // ack path to flip it later.  A scheduled message in that state would be
@@ -76,31 +83,37 @@ export function addMessage(
 
     // Messages without a localId have no ack path (markMessagesInvoked matches by localId).
     // Treat them as already-invoked at insert time so they land in the thread normally instead
-    // of being stuck in the queued floating bar forever.
-    const invokedAt = localId ? null : now
+    // of being stuck in the queued floating bar forever. Stamped with `stampedAt` (the
+    // client-provided createdAt when present) rather than server-now so getMessagesByPosition's
+    // COALESCE(invoked_at, created_at) sort reflects the transcript's own jsonl order instead of
+    // hub arrival order.
+    const invokedAt = localId ? null : stampedAt
 
-    db.prepare(`
-        INSERT INTO messages (
-            id, session_id, content, created_at, seq, local_id, invoked_at, scheduled_at
-        ) VALUES (
-            @id, @session_id, @content, @created_at, @seq, @local_id, @invoked_at, @scheduled_at
-        )
-    `).run({
-        id,
-        session_id: sessionId,
-        content: encoded,
-        created_at: now,
-        seq: msgSeq,
-        local_id: localId ?? null,
-        invoked_at: invokedAt,
-        scheduled_at: scheduledAt ?? null
-    })
+    return db.transaction(() => {
+        const previousHead = getNewestMessagePosition(db, sessionId)
+        db.prepare(`
+            INSERT INTO messages (
+                id, session_id, content, created_at, seq, local_id, invoked_at, scheduled_at
+            ) VALUES (
+                @id, @session_id, @content, @created_at, @seq, @local_id, @invoked_at, @scheduled_at
+            )
+        `).run({
+            id,
+            session_id: sessionId,
+            content: encoded,
+            created_at: stampedAt,
+            seq: msgSeq,
+            local_id: localId ?? null,
+            invoked_at: invokedAt,
+            scheduled_at: scheduledAt ?? null
+        })
 
-    const row = db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as DbMessageRow | undefined
-    if (!row) {
-        throw new Error('Failed to create message')
-    }
-    return toStoredMessage(row)
+        const positionAt = invokedAt ?? stampedAt
+        if (previousHead && positionAt < previousHead.at) bumpMessageEpoch(db, sessionId)
+        const row = db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as DbMessageRow | undefined
+        if (!row) throw new Error('Failed to create message')
+        return toStoredMessage(row)
+    })()
 }
 
 export function copyMessageToSession(
