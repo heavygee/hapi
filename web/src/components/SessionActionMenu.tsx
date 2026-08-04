@@ -14,6 +14,12 @@ import { buildSessionReferenceText } from '@/lib/sessionReference'
 import { usePlatform } from '@/hooks/usePlatform'
 import { CopyIcon } from '@/components/icons'
 
+export type SessionActionMenuLinkedPr = {
+    /** Full detail line: `owner/repo#N · status · …` */
+    detail: string
+    href: string
+}
+
 type SessionActionMenuProps = {
     isOpen: boolean
     onClose: () => void
@@ -22,6 +28,8 @@ type SessionActionMenuProps = {
     sessionActive: boolean
     onRename: () => void
     onLinkPr?: () => void
+    /** When linked, shown at the top of the long-press / more menu. */
+    linkedPr?: SessionActionMenuLinkedPr | null
     onExport?: () => void
     onSyncCodex?: () => void
     onArchive: () => void
@@ -176,6 +184,7 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         sessionActive,
         onRename,
         onLinkPr,
+        linkedPr,
         onExport,
         onSyncCodex,
         onArchive,
@@ -324,12 +333,34 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
     const baseItemClassName =
         'flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-base transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]'
 
+    const linkedPrHeadingId = `${resolvedMenuId}-linked-pr`
+
     return (
         <div
             ref={menuRef}
-            className="fixed z-50 min-w-[200px] rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-1 shadow-lg animate-menu-pop"
+            className="fixed z-50 min-w-[200px] max-w-[min(20rem,calc(100vw-16px))] rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-1 shadow-lg animate-menu-pop"
             style={menuStyle}
         >
+            {linkedPr ? (
+                <div
+                    id={linkedPrHeadingId}
+                    className="border-b border-[var(--app-border)] px-3 py-2"
+                    data-testid="session-action-menu-linked-pr"
+                >
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--app-hint)]">
+                        {t('session.menu.linkedPr')}
+                    </div>
+                    <a
+                        href={linkedPr.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1 block whitespace-normal text-sm font-medium leading-snug text-[var(--app-link)] hover:underline"
+                        onClick={onClose}
+                    >
+                        {linkedPr.detail}
+                    </a>
+                </div>
+            ) : null}
             <div
                 id={headingId}
                 className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--app-hint)]"

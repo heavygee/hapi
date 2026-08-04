@@ -229,6 +229,7 @@ export default {
   'dialog.linkPr.current': '当前关联：{label}',
   'dialog.linkPr.error': '更新 PR 关联失败，请重试。',
   'session.menu.linkPr': '关联拉取请求…',
+  'session.menu.linkedPr': '已关联拉取请求',
   'settings.general.githubPrAwareness': 'GitHub PR 感知',
   'settings.general.githubPrAwareness.desc': '显示 PR 标签，并允许会话关联到 GitHub 拉取请求。默认关闭。',
   'settings.general.githubPrAwareness.envPinned': '由 HAPI_GITHUB_PR_AWARENESS 固定',

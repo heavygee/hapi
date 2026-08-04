@@ -21,7 +21,12 @@ import { useToast } from '@/lib/toast-context'
 import { queryKeys } from '@/lib/query-keys'
 import { markCodexSessionsImported } from '@/lib/codexImportedSessions'
 import { useFeatures } from '@/hooks/queries/useFeatures'
-import { getPrimaryGithubPrRef } from '@hapi/protocol'
+import {
+    DEFAULT_PR_CHIP_DISPLAY,
+    getPrimaryGithubPrRef,
+    resolveGithubPrChipDisplay
+} from '@hapi/protocol'
+import { formatGithubPrChipTitle } from '@/components/SessionPrChip'
 import { useMachines } from '@/hooks/queries/useMachines'
 import { useMachineLabels } from '@/hooks/useMachineLabels'
 import { formatAbsoluteDateTime, formatRelativeTime } from '@/lib/relativeTime'
@@ -221,7 +226,18 @@ export function SessionHeader(props: {
     const [isSyncingCodex, setIsSyncingCodex] = useState(false)
     const { features } = useFeatures(api)
     const githubPrAwarenessEnabled = Boolean(features?.githubPrAwareness.enabled)
+    const prChipDisplay = features?.prChipDisplay
     const primaryPrRef = getPrimaryGithubPrRef(session.metadata?.externalRefs)
+    const linkedPr = useMemo(() => {
+        if (!githubPrAwarenessEnabled || !primaryPrRef) return null
+        const nowMs = Date.now()
+        const profile = prChipDisplay ?? DEFAULT_PR_CHIP_DISPLAY
+        const display = resolveGithubPrChipDisplay(primaryPrRef, profile, nowMs)
+        return {
+            detail: formatGithubPrChipTitle(primaryPrRef, display, t),
+            href: primaryPrRef.url
+        }
+    }, [githubPrAwarenessEnabled, primaryPrRef, prChipDisplay, t])
 
     const { archiveSession, reopenSession, renameSession, setExternalRefs, deleteSession, isPending } = useSessionActions(
         api,
@@ -458,6 +474,7 @@ export function SessionHeader(props: {
                 sessionActive={session.active}
                 onRename={() => setRenameOpen(true)}
                 onLinkPr={githubPrAwarenessEnabled ? () => setLinkPrOpen(true) : undefined}
+                linkedPr={linkedPr}
                 onExport={() => setExportOpen(true)}
                 onSyncCodex={api && codexSessionId ? handleSyncCodex : undefined}
                 onArchive={() => setArchiveOpen(true)}

@@ -30,7 +30,12 @@ import { useSessionListMachineFilter } from '@/hooks/useSessionListMachineFilter
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
 import { useFeatures } from '@/hooks/queries/useFeatures'
 import { SessionRowSummary } from '@/components/SessionRowSummary'
-import { getPrimaryGithubPrRef } from '@hapi/protocol'
+import {
+    DEFAULT_PR_CHIP_DISPLAY,
+    getPrimaryGithubPrRef,
+    resolveGithubPrChipDisplay
+} from '@hapi/protocol'
+import { formatGithubPrChipTitle } from '@/components/SessionPrChip'
 import { Spinner } from '@/components/Spinner'
 
 export { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
@@ -845,6 +850,16 @@ function SessionItem(props: {
 
     const sessionName = getSessionTitle(s)
     const primaryPrRef = getPrimaryGithubPrRef(s.metadata?.externalRefs)
+    const linkedPr = useMemo(() => {
+        if (!githubPrAwarenessEnabled || !primaryPrRef) return null
+        const nowMs = Date.now()
+        const profile = prChipDisplay ?? DEFAULT_PR_CHIP_DISPLAY
+        const display = resolveGithubPrChipDisplay(primaryPrRef, profile, nowMs)
+        return {
+            detail: formatGithubPrChipTitle(primaryPrRef, display, t),
+            href: primaryPrRef.url
+        }
+    }, [githubPrAwarenessEnabled, primaryPrRef, prChipDisplay, t])
     const attention = useMemo(
         () => showDetailedStatus
             ? classifySessionAttention(s, {
@@ -893,6 +908,7 @@ function SessionItem(props: {
                 sessionActive={s.active}
                 onRename={() => setRenameOpen(true)}
                 onLinkPr={githubPrAwarenessEnabled ? () => setLinkPrOpen(true) : undefined}
+                linkedPr={linkedPr}
                 onExport={() => setExportOpen(true)}
                 onArchive={() => setArchiveOpen(true)}
                 onReopen={cursorReopenDisabledReason ? undefined : handleReopen}
