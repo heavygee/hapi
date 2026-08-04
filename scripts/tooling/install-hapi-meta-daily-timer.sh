@@ -8,11 +8,10 @@
 #   hapi-meta-daily.timer         — hourly at :00 Europe/London
 #                                   (BST summer / GMT winter; host may stay UTC)
 #                                   + RandomizedDelaySec=2min
-#                                   (peer pings + wave-clear unlock)
-#   hapi-meta-daily-refresh.timer — every 45m 24/7 (--no-ping --emit-events)
-#                                   OnBootSec=3min then OnUnitActiveSec=45min
-#                                   so chips never hit the 2h stale mute (odd hours)
-#                                   (monotonic — not wall-clock / not London)
+#                                   (chip cache + peer pings + wave-clear unlock)
+#
+# Quiet 45m refresh (hapi-meta-daily-refresh.timer) RETIRED 2026-08-04 —
+# hourly cadence + 3h chip mute replaced it. Installer disables leftover units.
 #
 # Optional ~/.hapi/meta-daily.env:
 #   HAPI_META_TOOLING_SESSION_ID=<sid>   # wave-clear unlock ping target
@@ -20,7 +19,7 @@
 #
 # Usage:
 #   sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh
-#   sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh --run-now   # one refresh after enable
+#   sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh --run-now   # one full run after enable
 #   sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh --disable
 
 set -euo pipefail
@@ -36,7 +35,7 @@ for arg in "$@"; do
         --run-now) DO_RUN_NOW=1 ;;
         --disable) DO_DISABLE=1 ;;
         -h|--help)
-            sed -n '2,20p' "$0"
+            sed -n '2,22p' "$0"
             exit 0
             ;;
         *)
@@ -78,24 +77,23 @@ install -m 0644 "$SYS_D/hapi-meta-daily.timer" /etc/systemd/system/hapi-meta-dai
 install -m 0644 "$SYS_D/hapi-meta-daily-refresh.service" /etc/systemd/system/hapi-meta-daily-refresh.service
 install -m 0644 "$SYS_D/hapi-meta-daily-refresh.timer" /etc/systemd/system/hapi-meta-daily-refresh.timer
 
-# Ensure flock path parent exists for the morning unit too (no ExecStartPre there historically)
-# Refresh unit has ExecStartPre; morning relies on this install step.
-
 systemctl daemon-reload
 systemctl enable --now hapi-meta-daily.timer
-systemctl enable --now hapi-meta-daily-refresh.timer
+# Retire quiet refresh if a prior install left it enabled.
+systemctl disable --now hapi-meta-daily-refresh.timer 2>/dev/null || true
 
 echo
-echo "Installed Meta PR watcher timers (fork-local)."
+echo "Installed Meta PR watcher timer (hourly only; quiet refresh disabled)."
 timedatectl show -p Timezone --value 2>/dev/null | awk '{print "Host timezone: " $0}'
-systemctl is-enabled hapi-meta-daily.timer hapi-meta-daily-refresh.timer
+systemctl is-enabled hapi-meta-daily.timer || true
+systemctl is-enabled hapi-meta-daily-refresh.timer 2>/dev/null || echo "hapi-meta-daily-refresh.timer: disabled (expected)"
 systemctl list-timers 'hapi-meta-daily*' --all --no-pager
 
 echo
 echo "Manual run:"
-echo "  sudo systemctl start hapi-meta-daily.service            # hourly ping window (pings + wave unlock)"
-echo "  sudo systemctl start hapi-meta-daily-refresh.service    # quiet refresh (24/7)"
-echo "  journalctl -u hapi-meta-daily -u hapi-meta-daily-refresh -n 50 --no-pager"
+echo "  sudo systemctl start hapi-meta-daily.service            # hourly ping window (chips + pings + wave)"
+echo "  hapi-meta-daily.sh --no-ping --emit-events              # quiet one-shot (no timer)"
+echo "  journalctl -u hapi-meta-daily -n 50 --no-pager"
 echo
 echo "Optional env overrides: /home/heavygee/.hapi/meta-daily.env"
 echo "  HAPI_META_TOOLING_SESSION_ID=…   # required for wave-clear unlock ping"
@@ -103,7 +101,7 @@ echo "Disable: sudo bash $0 --disable"
 
 if [[ "$DO_RUN_NOW" -eq 1 ]]; then
     echo
-    echo "Starting one quiet refresh now..."
-    systemctl start hapi-meta-daily-refresh.service
-    systemctl --no-pager --full status hapi-meta-daily-refresh.service | head -30 || true
+    echo "Starting one full Meta run now..."
+    systemctl start hapi-meta-daily.service
+    systemctl --no-pager --full status hapi-meta-daily.service | head -30 || true
 fi

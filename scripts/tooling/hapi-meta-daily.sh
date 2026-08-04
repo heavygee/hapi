@@ -11,10 +11,10 @@
 #      Keeps "Peer #N:" incubating titles (no issue chip yet).
 #   4. Pings a session ONLY when policy says it is actionable and not noise
 #      (ping windows: always rouse sticky ⚠️/🔧 incl. inactive resume;
-#      transition / fingerprint / reminder still apply off-window / for greens)
+#      🧹 complete never pings; transition / fingerprint / reminder for greens)
 #   5. Reads GitHub notifications for tiann/hapi + heavygee/hapi since a stored
 #      cursor and folds new human comms into the action queue. Never marks read.
-#   6. Prints a sorted operator ACTION QUEUE (⚠️ / 🔧 wave / orphans / inactive /
+#   6. Prints a sorted operator ACTION QUEUE (⚠️ / 🔧 / 🧹 / wave / orphans / inactive /
 #      new comms) plus the non-automated next steps (sync, rematerialize).
 #   7. Wave-clear (gate A): for owned 🔧 sessions, detect soup-layer + worktree
 #      cleanup. Start a 30m collect fuse when members go clean; when the wave is
@@ -257,6 +257,7 @@ md_refs_apply_status() {
                        elif $emoji == "🔁" then {openState:"open", checks:"pending"}
                        elif $emoji == "⚠️" then {openState:"open"}
                        elif $emoji == "🔧" then {openState:"merged"}
+                       elif $emoji == "🧹" then {openState:"merged"}
                        elif $emoji == "📝" then {openState:"draft"}
                        else {} end)
                 )
@@ -514,13 +515,13 @@ main() {
     sessions_json="$(hub_sessions "$jwt")"
 
     # --- discovery: PR numbers from sessions + open + merged ---
-    declare -A SESS_ID SESS_ACTIVE SESS_NAME SESS_PRS SESS_REFS SESS_PATH
+    declare -A SESS_ID SESS_ACTIVE SESS_NAME SESS_PRS SESS_REFS SESS_PATH SESS_LIFECYCLE
     declare -A PR_SESSIONS      # pr -> "sid8,sid8"
     declare -A ALL_PR           # pr -> 1
     declare -A MERGED_TITLE
 
-    local row sid sid8 active name prs refs_json path
-    while IFS=$'\t' read -r sid active name refs_json path; do
+    local row sid sid8 active name prs refs_json path lifecycle
+    while IFS=$'\t' read -r sid active name refs_json path lifecycle; do
         [[ -z "$sid" ]] && continue
         [[ "$name" =~ [Yy][Aa][Aa][Cc][Cc] ]] && continue
         prs="$(md_session_prs "$name")"
@@ -545,6 +546,7 @@ main() {
         SESS_PRS["$sid8"]="$prs"
         SESS_REFS["$sid8"]="${refs_json:-[]}"
         SESS_PATH["$sid8"]="${path:-}"
+        SESS_LIFECYCLE["$sid8"]="${lifecycle:-}"
         local p
         for p in $prs; do
             ALL_PR["$p"]=1
@@ -561,7 +563,8 @@ main() {
             (.active // false),
             (.metadata.name // ""),
             ((.metadata.externalRefs // []) | tostring),
-            (.metadata.path // "")
+            (.metadata.path // ""),
+            (.metadata.lifecycleState // "")
           ]
         | @tsv')
 
@@ -588,16 +591,27 @@ main() {
     batch_json="$(HAPI_PR_REPO="$UPSTREAM_REPO" "$BATCH_BIN" --repo "$UPSTREAM_REPO" "${pr_list[@]}")" \
         || die "batch classify failed"
 
-    declare -A PR_EMOJI PR_ACTION PR_PREPR
+    declare -A PR_EMOJI PR_ACTION PR_PREPR PR_HEADREF
+    declare -A SESS_PR_EMOJI SESS_PR_ACTION
     for p in "${pr_list[@]}"; do
         PR_EMOJI["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].emoji // "?"')"
         PR_ACTION["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].action // ""')"
         PR_PREPR["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].prePr // false')"
+        PR_HEADREF["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].headRef // ""')"
     done
+
+    # Manifest once for 🧹 complete promotion (same path as wave-clear).
+    local manifest_path_early manifest_text_early
+    manifest_path_early="${HAPI_META_MANIFEST:-$(hapi_manifest_path "$HAPI_PRIMARY")}"
+    if [[ -f "$manifest_path_early" ]]; then
+        manifest_text_early="$(cat "$manifest_path_early")"
+    else
+        manifest_text_early=""
+    fi
 
     # --- per-session: rename + policy ping; build next state ---
     local new_state="$state"
-    local -a Q_WARN Q_MERGED Q_ORPHAN Q_INACTIVE Q_PINGED Q_RENAMED Q_STATUS Q_WAIT_TIANN Q_SELF_MERGE
+    local -a Q_WARN Q_MERGED Q_COMPLETE Q_ORPHAN Q_INACTIVE Q_PINGED Q_RENAMED Q_STATUS Q_WAIT_TIANN Q_SELF_MERGE
     local -a PLAN_ROWS   # for --json
     MD_EMIT_FAILURES=0
     local now_ms=$(( now * 1000 ))
@@ -619,11 +633,30 @@ main() {
         fi
         local emojis=() acts="" combined pre=0 first_pr=""
         for p in $prs; do
-            # Default "?" — same contract as chip status cache (preserve last good).
-            emojis+=("${PR_EMOJI[$p]:-?}")
+            # Per-session 🔧→🧹 when estate complete predicates hold (config/pr-chip-states.yaml).
+            local emoji_sess="${PR_EMOJI[$p]:-?}"
+            local action_sess="${PR_ACTION[$p]:-}"
+            if [[ "$emoji_sess" == "🔧" ]]; then
+                local complete_reason=""
+                if complete_reason="$(mw_member_complete \
+                    "$manifest_text_early" \
+                    "${SESS_PATH[$sid8]:-}" \
+                    "$p" \
+                    "${SESS_LIFECYCLE[$sid8]:-}" \
+                    "$HAPI_PRIMARY" \
+                    "${PR_HEADREF[$p]:-}")"; then
+                    emoji_sess="🧹"
+                    action_sess="fully cleaned — babysit ended"
+                else
+                    vlog "complete? #$p [$sid8] → $complete_reason"
+                fi
+            fi
+            emojis+=("$emoji_sess")
             [[ -z "$first_pr" ]] && first_pr="$p"
-            local a="${PR_ACTION[$p]:-}"
-            [[ -n "$a" ]] && acts+="#$p: $a"$'\n'
+            [[ -n "$action_sess" ]] && acts+="#$p: $action_sess"$'\n'
+            # Stash per-session emoji for chip write (may differ from PR_EMOJI global).
+            SESS_PR_EMOJI["$sid8:$p"]="$emoji_sess"
+            SESS_PR_ACTION["$sid8:$p"]="$action_sess"
         done
         combined="$(md_combined_emoji "${emojis[@]}")"
         [[ -z "$combined" ]] && combined="?"
@@ -654,8 +687,8 @@ main() {
         if [[ "$refs_cur" != "[]" && "$refs_cur" != "null" && -n "$refs_cur" ]]; then
             local p emoji_p action_p patched
             for p in $prs; do
-                emoji_p="${PR_EMOJI[$p]:-?}"
-                action_p="${PR_ACTION[$p]:-}"
+                emoji_p="${SESS_PR_EMOJI[$sid8:$p]:-${PR_EMOJI[$p]:-?}}"
+                action_p="${SESS_PR_ACTION[$sid8:$p]:-${PR_ACTION[$p]:-}}"
                 if patched="$(md_refs_apply_status "$refs_next" "$p" "$emoji_p" "$action_p" "$now_ms")"; then
                     refs_next="$patched"
                     changed_status=1
@@ -753,7 +786,8 @@ main() {
         # action queue rows
         case "$combined" in
             ⚠️) Q_WARN+=("#$(echo "$prs" | tr ' ' ',') [$sid8] $(echo "$acts" | tr '\n' ' ' | sed 's/ *$//')") ;;
-            🔧) Q_MERGED+=("#$(echo "$prs" | tr ' ' ',') [$sid8] MERGED - peer: drop soup layer, clean worktree/branch, ack") ;;
+            🔧) Q_MERGED+=("#$(echo "$prs" | tr ' ' ',') [$sid8] MERGED - peer: drop soup layer, clean worktree/branch, archive") ;;
+            🧹) Q_COMPLETE+=("#$(echo "$prs" | tr ' ' ',') [$sid8] COMPLETE - babysit ended (no ping)") ;;
             ✅)
                 # Lane overlay: self-merge eligible vs wait on tiann (chip stays ✅).
                 if printf '%s' "$acts" | grep -q 'self-merge eligible'; then
@@ -1048,7 +1082,8 @@ _do_ping() {  # <sid8> <emoji> <prs> <acts>
         🔁) state_desc="CI/rebase in flight" ;;
         ⚠️) state_desc="needs work"; rouse=$'\n\n**Meta ping window — are you done yet?** Resume work or reply with the blocker.' ;;
         📝) state_desc="pre-PR - not filed upstream yet" ;;
-        🔧) state_desc="MERGED - clean up, idle (no mid-turn self-archive)"; rouse=$'\n\n**Meta ping window — are you done yet?** Drop soup layer + clean worktree/branch, then ack. Do not rematerialize mid-wave.' ;;
+        🔧) state_desc="MERGED - clean up soup/worktree/branch, archive when idle"; rouse=$'\n\n**Meta ping window — are you done yet?** Drop soup layer + clean worktree/branch, then ack. Do not rematerialize mid-wave. Do not mid-turn self-archive.' ;;
+        🧹) state_desc="COMPLETE - fully cleaned; babysit ended"; rouse="" ;;
         *) state_desc="see title" ;;
     esac
     local msg="Meta daily — PR status is now **${emoji}** (${state_desc}).${rouse}
@@ -1056,8 +1091,8 @@ _do_ping() {  # <sid8> <emoji> <prs> <acts>
 Tracked PR(s): #$(echo "$prs" | tr ' ' ',')
 
 ${acts}
-Status lives on the **session PR chip** (\`externalRefs.status\`), not in the title. Do **not** put ✅/🔁/⚠️/📝/🔧 in your session title; leave the title as \`PR #N: …\` / \`Peer #N: …\`. If the chip is missing, run \`hapi link-pr <url>\` (or MCP \`link_pr\`) with awareness on.
-Legend: ✅ green (lane A wait / lane B self-merge) · 🔁 CI in flight · ⚠️ fix threads/CI/rebase · 📝 pre-PR · 🔧 merged (drop soup layer, clean worktree/branch, ack; no mid-turn self-archive).
+Status lives on the **session PR chip** (\`externalRefs.status\`), not in the title. Do **not** put ✅/🔁/⚠️/📝/🔧/🧹 in your session title; leave the title as workstream-only. If the chip is missing, run \`hapi link-pr <url>\` (or MCP \`link_pr\`) with awareness on.
+Legend: ✅ green (lane A wait / lane B self-merge) · 🔁 CI in flight · ⚠️ fix threads/CI/rebase · 📝 pre-PR · 🔧 merged (cleanup owed) · 🧹 complete (babysit ended — no further Meta pings).
 Canon: docs/operator/AGENTS.md § Meta PR watcher + feature-work-lifecycle.md § Session titles and PR chips"
     if [[ "$DRY_RUN" -eq 1 ]]; then
         echo "    [dry-run] ping $sid8 ($emoji)" >&2
@@ -1082,6 +1117,7 @@ _print_section() {  # <title> <array-name>
 _print_queue() {
     _print_section "⚠️  NEEDS WORK (yours to unblock / direct the peer):" "${Q_WARN[@]:-}"
     _print_section "🔧  MERGED — advise wave cleanup:" "${Q_MERGED[@]:-}"
+    _print_section "🧹  COMPLETE — babysit ended:" "${Q_COMPLETE[@]:-}"
     _print_section "🌊 WAVE CLEAR (gate A — owned only; orphans never block):" "${Q_WAVE[@]:-}"
     _print_section "❓ ORPHANS (anomaly — do not block wave-clear):" "${Q_ORPHAN[@]:-}"
     _print_section "😴 INACTIVE (policy wanted a ping; session asleep):" "${Q_INACTIVE[@]:-}"

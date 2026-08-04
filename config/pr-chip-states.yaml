@@ -1,0 +1,72 @@
+# PR chip / Meta babysit states (estate contract).
+#
+# Chip owns health (ADR D8) — never put these emoji in session titles.
+# Meta (`hapi-meta-daily.sh` + `lib/pr-emoji-core.sh`) classifies and caches
+# `externalRefs.status` / `estateCode` / `statusAction`.
+#
+# Display profile sample: scripts/tooling/config/pr-chip-display.estate.json
+# (copy → $HAPI_HOME/pr-chip-display.json). Chip honesty mute uses staleMs there
+# and in SessionPrChip (default 3h after hourly Meta-only cadence).
+
+staleMs: 10800000  # 3h — hourly Meta refresh; kill-criterion if hourly fails
+
+states:
+  clean:
+    emoji: "✅"
+    estateCode: babysit.green
+    status: clean
+    stickyPing: false
+    meaning: Open PR, CI green, threads clean — wait on maintainer (or lane B).
+
+  pending:
+    emoji: "🔁"
+    estateCode: babysit.pending
+    status: pending
+    stickyPing: false
+    meaning: CI/bot in flight, or thread/CI data momentarily unavailable.
+
+  needs_work:
+    emoji: "⚠️"
+    estateCode: babysit.needs_work
+    status: needs_work
+    stickyPing: true
+    meaning: Failing CI, open threads, bot findings, rebase, or closed-unmerged.
+
+  pre_pr:
+    emoji: "📝"
+    estateCode: peer.incubating
+    status: pre_pr
+    stickyPing: false
+    meaning: Tracked workstream number; no open upstream PR yet.
+
+  merged:
+    emoji: "🔧"
+    estateCode: babysit.merged
+    status: merged
+    stickyPing: true
+    meaning: Upstream merged; cleanup still owed (soup layer / worktree / branch / archive).
+
+  complete:
+    emoji: "🧹"
+    estateCode: babysit.complete
+    status: complete
+    stickyPing: false
+    # Never ping on transition or hourly rouse — babysit ended.
+    meaning: Fully cleaned by estate definition; Meta babysit ended.
+    requires:
+      github: merged
+      # Manifest: no active (uncommented) layer for this PR — DROPPED/commented is enough.
+      # Remat of soup is Meta/tooling-bot work; not a chip gate.
+      manifestLayer: absent
+      worktree: absent
+      # Local + origin/<branch> tips gone (headRef from classifier when known).
+      # Unknown headRef → fail closed (stay 🔧).
+      branch: absent
+      session: archived  # metadata.lifecycleState == archived
+
+  unknown:
+    emoji: "?"
+    estateCode: ""
+    status: unknown
+    stickyPing: false
+    meaning: GitHub data unavailable this run — preserve last good chip; never ping.

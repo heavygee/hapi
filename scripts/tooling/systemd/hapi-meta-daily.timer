@@ -7,7 +7,8 @@
 # ":00" mean the top of the operator-local hour. Syntax:
 # `*-*-* *:00:00 Europe/London` (prefix form is rejected on this host).
 #
-# Quiet chip refresh stays on hapi-meta-daily-refresh.timer (45m, --no-ping).
+# Chip cache + pings share this hourly cadence (quiet 45m refresh retired 2026-08-04;
+# chip honesty mute is 3h — see config/pr-chip-states.yaml staleMs).
 
 [Unit]
 Description=HAPI Meta PR watcher timer (hourly ping windows Europe/London)

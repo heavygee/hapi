@@ -8,13 +8,14 @@
 #   scripts/tooling/hapi-meta-daily.sh         (orchestrator → ping policy + state)
 #   (hapi-pr-session-emoji.sh is a removed stub — no longer sources this)
 #
-# Emoji contract (see docs/operator/AGENTS.md § Meta PR watcher):
+# Emoji contract (canonical YAML: config/pr-chip-states.yaml; docs/operator/AGENTS.md):
 #   ✅  open PR, CI green, 0 threads, bot clean, mergeable — wait on tiann
 #   🔁  CI/bot in flight, or thread/CI data momentarily unavailable — retry
 #   ⚠️  needs work — failing CI, *current* open threads, bot findings, rebase, or closed-unmerged
 #                     (outdated unresolved threads do not count — #847 false ⚠️)
 #   📝  pre-PR — tracked number, no open PR on upstream yet
-#   🔧  merged — clean up soup/worktree, idle (no mid-turn self-archive)
+#   🔧  merged — clean up soup/worktree/branch/archive still owed (sticky ping)
+#   🧹  complete — fully cleaned by estate predicates; babysit ended (never ping)
 #   ?   UNKNOWN — GitHub data unavailable this run; caller MUST NOT rename/ping on this
 #
 # Lives on fork main under scripts/tooling/lib/ — commit here; never hand-edit driver.
@@ -44,6 +45,7 @@ pec_strip_leading_emojis() {
             ⚠️*) s="${s#⚠️}" ;;
             📝*) s="${s#📝}" ;;
             🔧*) s="${s#🔧}" ;;
+            🧹*) s="${s#🧹}" ;;
             "?"*) s="${s#\?}" ;;
             *) break ;;
         esac
@@ -211,6 +213,7 @@ pec_emoji_rank() {
         ✅) echo 3 ;;
         📝) echo 2 ;;
         🔧) echo 1 ;;
+        🧹) echo 0 ;;
         *) echo 0 ;;
     esac
 }
@@ -233,12 +236,13 @@ pec_estate_code_from_emoji() {
         ⚠️) printf 'babysit.needs_work' ;;
         📝) printf 'peer.incubating' ;;
         🔧) printf 'babysit.merged' ;;
+        🧹) printf 'babysit.complete' ;;
         *) printf '' ;;
     esac
 }
 
 # pec_status_from_emoji — LEGACY alias for unit tests; prefer pec_estate_code_from_emoji.
-# Maps emoji → old enum names only for test compatibility (not written to hub).
+# Maps emoji → protocol GithubPrStatus (written to externalRefs.status).
 pec_status_from_emoji() {
     case "$1" in
         ✅) printf 'clean' ;;
@@ -246,6 +250,7 @@ pec_status_from_emoji() {
         ⚠️) printf 'needs_work' ;;
         📝) printf 'pre_pr' ;;
         🔧) printf 'merged' ;;
+        🧹) printf 'complete' ;;
         *) printf 'unknown' ;;
     esac
 }
@@ -277,6 +282,7 @@ pec_emoji_from_status() {
         needs_work) printf '⚠️' ;;
         pre_pr) printf '📝' ;;
         merged) printf '🔧' ;;
+        complete) printf '🧹' ;;
         *) printf '?' ;;
     esac
 }
@@ -289,6 +295,7 @@ pec_leading_emoji() {
         ⚠️*) echo "⚠️" ;;
         📝*) echo "📝" ;;
         🔧*) echo "🔧" ;;
+        🧹*) echo "🧹" ;;
         "?"*) echo "?" ;;
         *) echo "" ;;
     esac
@@ -406,6 +413,7 @@ pec_action_fingerprint() {
 #
 # Rules:
 #   - "?" (unknown)                     → never ping
+#   - 🧹 (complete)                     → never ping (incl. 🔧→🧹 transition)
 #   - emoji changed vs recorded state   → ping (transition)
 #   - sticky ⚠️ or 🔧:
 #       - WINDOW_ROUSE=1 (Meta ping windows) → always yes ("are you done yet?")
@@ -417,7 +425,7 @@ pec_should_ping() {
     local new_emoji="$1" prev_emoji="$2" new_fp="$3" prev_fp="$4" \
         last_ping="${5:-0}" now="${6:-0}" reminder="${7:-86400}" window_rouse="${8:-0}"
 
-    if [[ "$new_emoji" == "?" ]]; then
+    if [[ "$new_emoji" == "?" || "$new_emoji" == "🧹" ]]; then
         echo "no"; return 1
     fi
     if [[ "$new_emoji" != "$prev_emoji" ]]; then
@@ -461,7 +469,7 @@ pec_emit_reason() {
     local new_emoji="$1" prev_emoji="$2" new_fp="$3" prev_fp="$4" \
         last_ping="${5:-0}" now="${6:-0}" reminder="${7:-86400}" window_rouse="${8:-0}"
 
-    if [[ "$new_emoji" == "?" ]]; then
+    if [[ "$new_emoji" == "?" || "$new_emoji" == "🧹" ]]; then
         echo "none"; return 1
     fi
     if [[ "$new_emoji" != "$prev_emoji" ]]; then

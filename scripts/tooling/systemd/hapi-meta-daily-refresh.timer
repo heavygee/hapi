@@ -1,19 +1,22 @@
-# Quiet Meta refresh — every 45 minutes, 24/7 (odd-hours safe).
+# RETIRED 2026-08-04 — do not re-enable.
 #
-# Keeps chip statusCheckedAt fresh so the UI never hits the 2h stale mute.
-# Does NOT ping peers (that is morning hapi-meta-daily.timer only).
+# Quiet chip-only refresh every 45m was for the pre-hourly era (chips hit a 2h
+# statusCheckedAt mute between rare ping windows). Hourly hapi-meta-daily.timer
+# now refreshes chips; mute raised to 3h (config/pr-chip-states.yaml).
 #
-# OnUnitActiveSec (not OnCalendar daytime window): operator keeps odd hours;
-# overnight gaps were making chips go ?.
+# Unit files kept so `systemctl disable` / install --disable can clean up hosts
+# that still have the timer enabled. Installer no longer enables this unit.
 #
-# Fork-local. Install: sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh
+# Manual quiet run (escape hatch): 
+#   sudo systemctl start hapi-meta-daily-refresh.service
+# or: hapi-meta-daily.sh --no-ping --emit-events
 
 [Unit]
-Description=HAPI Meta PR watcher timer (quiet chip/inbox refresh, 24/7)
+Description=HAPI Meta PR watcher quiet refresh (RETIRED — prefer hourly timer)
 Documentation=file:///home/heavygee/coding/hapi/docs/operator/AGENTS.md
+ConditionPathExists=/nonexistent/hapi-meta-daily-refresh-retired
 
 [Timer]
-# Catch up soon after boot / enable, then every 45m forever
 OnBootSec=3min
 OnUnitActiveSec=45min
 AccuracySec=1min

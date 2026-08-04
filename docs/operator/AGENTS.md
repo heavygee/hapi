@@ -134,7 +134,7 @@ sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh
 | `hapi-meta-daily.timer` | **hourly :00 Europe/London** (+ up to 2m random; BST/GMT) | full Meta (peer pings + wave-clear unlock) |
 | `hapi-meta-daily-refresh.timer` | every **45m 24/7** (`OnBootSec=3min` + `OnUnitActiveSec=45min`) | `--no-ping --emit-events` |
 
-Quiet refresh is round-the-clock on purpose (odd hours) — max gap ~45m so chips stay under the **2h** `statusCheckedAt` mute. Only the hourly London wall-clock ping windows may ping peers or unlock Meta tooling for rematerialize. Host TZ on oos may stay `Etc/UTC`; the timer unit suffixes `Europe/London` so the hour is operator-local, not UTC. Units: `scripts/tooling/systemd/hapi-meta-daily*`. Optional env: `~/.hapi/meta-daily.env` (`HAPI_META_TOOLING_SESSION_ID`, `HAPI_META_WAVE_COLLECT_SECS`). Chip UI never live-queries GitHub. Logs: `journalctl -u hapi-meta-daily -u hapi-meta-daily-refresh`.
+Quiet chip-only refresh (45m) was retired 2026-08-04 — hourly London `:00` refreshes chips and may ping peers / unlock Meta tooling for rematerialize. Chip UI mutes to `?` when `statusCheckedAt` is older than **3h** (`config/pr-chip-states.yaml` / `$HAPI_HOME/pr-chip-display.json` staleMs). Host TZ on oos may stay `Etc/UTC`; the timer unit suffixes `Europe/London` so the hour is operator-local, not UTC. Units: `scripts/tooling/systemd/hapi-meta-daily*`. Optional env: `~/.hapi/meta-daily.env` (`HAPI_META_TOOLING_SESSION_ID`, `HAPI_META_WAVE_COLLECT_SECS`). Chip UI never live-queries GitHub. Logs: `journalctl -u hapi-meta-daily`.
 
 What it does, idempotently:
 
@@ -145,9 +145,9 @@ What it does, idempotently:
 5. **Pings only when actionable** (see policy) — state-gated so a second run the same morning is a no-op. Ping text tells peers the chip status changed; it does **not** ask them to keep emoji in the title.
 6. **Reads GitHub notifications** for both repos since a stored cursor (`all=true`, actionable reasons only: comment/mention/review_requested/state_change/…) and folds new human comms into the queue.
 7. **Wave-clear (gate A):** for owned 🔧 sessions only, detect soup-layer + worktree cleanup (`lib/meta-wave.sh`). Start a ~30m collect fuse when members go clean; when the wave is clear, unlock-ping Meta tooling (`HAPI_META_TOOLING_SESSION_ID`) on ping windows. Defers while `hapi-driver-status --quiet` is busy (exit 75) so mid-window manual rebuilds are respected. Orphans are anomalies and **never** block. Meta CLI still never runs `hapi-driver-rebuild` itself — the tooling bot may.
-8. Prints a sorted **action queue** (⚠️ / 🔧 / wave / orphans / inactive / new comms) + next steps.
+8. Prints a sorted **action queue** (⚠️ / 🔧 / 🧹 / wave / orphans / inactive / new comms) + next steps.
 
-**Status contract** (chip + Meta queue; worst wins when a session tracks >1 PR):
+**Status contract** (chip + Meta queue; worst wins when a session tracks >1 PR). Canon: [`config/pr-chip-states.yaml`](../../config/pr-chip-states.yaml).
 
 | Emoji / status | Meaning | Advice pinged |
 |----------------|---------|---------------|
@@ -155,12 +155,13 @@ What it does, idempotently:
 | 🔁 `pending` | CI/bot in flight, or thread/CI data momentarily unavailable | wait / retry |
 | ⚠️ `needs_work` | failing CI, **current** open threads, bot findings, rebase, or **closed-unmerged** | fix per action string |
 | 📝 `pre_pr` | tracked number, no open PR upstream yet | file when ready |
-| 🔧 `merged` | merged | drop soup layer → clean worktree/branch → ack (peers: **no mid-turn self-archive**) |
+| 🔧 `merged` | merged; cleanup still owed | drop soup layer → clean worktree/branch → archive (peers: **no mid-turn self-archive**) |
+| 🧹 `complete` | fully cleaned (layer DROPPED, no worktree/branch, session archived) | **never** (babysit ended) |
 | `?` `unknown` | GitHub data unavailable this run | **chip left at last good status; never pinged** |
 
 Chip thread count excludes GraphQL `isOutdated` unresolved threads (#847: leftover bot Majors on old lines must not keep ⚠️ after Findings:None + green CI on tip).
 
-**Ping policy (why it isn't spam for greens, but is a rouse for work):** on **hourly ping windows** (Europe/London :00 — not the 45m quiet refresh), Meta **always** pings sticky ⚠️ / 🔧 sessions — "are you done yet?" — including **inactive** ones (`hapi-ping-peer` resumes them). ✅ / 🔁 / 📝 only ping on an emoji **transition** (first sight / state change), never on every window. Quiet `--no-ping` refresh never pings. `?` never pings. State lives at `${XDG_STATE_HOME:-~/.local/state}/hapi/meta-daily.json`.
+**Ping policy (why it isn't spam for greens, but is a rouse for work):** on **hourly ping windows** (Europe/London :00), Meta **always** pings sticky ⚠️ / 🔧 sessions — "are you done yet?" — including **inactive** ones (`hapi-ping-peer` resumes them). ✅ / 🔁 / 📝 only ping on an emoji **transition** (first sight / state change), never on every window. 🧹 / `?` **never** ping (incl. 🔧→🧹). Manual `--no-ping` never pings. State lives at `${XDG_STATE_HOME:-~/.local/state}/hapi/meta-daily.json`.
 
 **Scope guard:** PR-number extraction requires **3-4 digits**. Peer/overseer sessions carrying internal workstream refs (`W1.6 provenance (#22)`) are intentionally *not* swept — those 1-2 digit numbers would cross-wire to unrelated upstream PRs. Use `--pr <N>` for a rare low-numbered upstream PR.
 

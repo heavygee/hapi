@@ -98,6 +98,59 @@ mw_wave_member_clean() {
     return 1
 }
 
+# mw_branch_absent <git_dir> <branch>
+# Exit 0 if neither refs/heads/<branch> nor refs/remotes/origin/<branch> exists.
+# Empty branch → fail closed (exit 1) — unknown headRef must not promote to complete.
+mw_branch_absent() {
+    local git_dir="${1:?}" branch="${2:-}"
+    [[ -n "$branch" ]] || return 1
+    [[ "$branch" != HEAD ]] || return 1
+    if git -C "$git_dir" show-ref --verify --quiet "refs/heads/${branch}" 2>/dev/null; then
+        return 1
+    fi
+    if git -C "$git_dir" show-ref --verify --quiet "refs/remotes/origin/${branch}" 2>/dev/null; then
+        return 1
+    fi
+    return 0
+}
+
+# mw_member_complete <manifest_text> <session_path> <pr_number> <lifecycle_state> <git_dir> <head_branch>
+# Estate "complete" (🧹): merged cleanup done — layer DROPPED/absent, no worktree,
+# branch gone, session archived. Fail closed on any dirty bit or unknown branch.
+# Prints: complete|not_archived|no_branch|layer|worktree|branch|layer+… (reason codes)
+# Exit 0 only when complete.
+mw_member_complete() {
+    local manifest="$1" path="$2" pr="$3" lifecycle="${4:-}" git_dir="${5:-}" branch="${6:-}"
+    local reasons=()
+
+    if [[ "$lifecycle" != "archived" ]]; then
+        reasons+=("not_archived")
+    fi
+    if [[ -z "$branch" ]]; then
+        reasons+=("no_branch")
+    fi
+
+    local clean_reason
+    clean_reason="$(mw_wave_member_clean "$manifest" "$path" "$pr")" || true
+    if [[ "$clean_reason" != "clean" ]]; then
+        reasons+=("$clean_reason")
+    fi
+
+    if [[ -n "$branch" ]]; then
+        if [[ -z "$git_dir" ]] || ! mw_branch_absent "$git_dir" "$branch"; then
+            reasons+=("branch")
+        fi
+    fi
+
+    if [[ ${#reasons[@]} -eq 0 ]]; then
+        echo "complete"
+        return 0
+    fi
+    local IFS=+
+    echo "${reasons[*]}"
+    return 1
+}
+
 # mw_wave_id_from_prs <pr pr pr...> — stable id for a member set
 mw_wave_id_from_prs() {
     if [[ $# -eq 0 ]]; then

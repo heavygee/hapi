@@ -318,6 +318,16 @@ eq "status_from_emoji clean" "$(pec_status_from_emoji '✅')" "clean"
 eq "status_from_emoji needs_work" "$(pec_status_from_emoji '⚠️')" "needs_work"
 eq "status_from_emoji unknown" "$(pec_status_from_emoji '?')" "unknown"
 eq "emoji_from_status merged" "$(pec_emoji_from_status merged)" "🔧"
+eq "status_from_emoji complete" "$(pec_status_from_emoji '🧹')" "complete"
+eq "emoji_from_status complete" "$(pec_emoji_from_status complete)" "🧹"
+eq "estate complete" "$(pec_estate_code_from_emoji '🧹')" "babysit.complete"
+eq "worst 🔧 vs 🧹" "$(pec_worst_emoji "🔧" "🧹")" "🔧"
+eq "strip 🧹" "$(pec_strip_leading_emojis "🧹PR #941: foo")" "PR #941: foo"
+
+# complete never pings (incl. transition from 🔧)
+eq "ping never on complete" "$(pec_should_ping "🧹" "🔧" "a" "b" 0 100 10 1 || true)" "no"
+eq "ping sticky 🔧 on window" "$(pec_should_ping "🔧" "🔧" "a" "a" 0 100 10 1 || true)" "yes"
+eq "emit none on complete" "$(pec_emit_reason "🧹" "🔧" "a" "b" 0 100 10 1 || true)" "none"
 
 echo ""
 echo "pr-emoji-core.test.sh: $PASS passed, $FAIL failed"

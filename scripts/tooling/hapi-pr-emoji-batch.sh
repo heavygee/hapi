@@ -107,13 +107,14 @@ _emit_pr_json() {
     local out="$1" emoji="$2" action="$3" exists="$4" merged="$5" closed="$6" \
         prepr="$7" data_unavail="$8" threads="$9" checks_ok="${10}" \
         checks_pending="${11}" checks_seen="${12}" bot_clean="${13}" \
-        bot_major="${14}" merge_state="${15}" merge_lane="${16:-}"
+        bot_major="${14}" merge_state="${15}" merge_lane="${16:-}" \
+        head_ref="${17:-}"
     local in_queue=true
     [[ "$exists" == "1" && "$merged" == "0" && "$closed" == "0" && "$data_unavail" == "0" ]] || in_queue=false
     b() { [[ "$1" == "1" ]] && echo true || echo false; }
     jq -n \
         --arg emoji "$emoji" --arg action "$action" --arg merge "$merge_state" \
-        --arg mergeLane "$merge_lane" \
+        --arg mergeLane "$merge_lane" --arg headRef "$head_ref" \
         --argjson exists "$(b "$exists")" --argjson merged "$(b "$merged")" \
         --argjson closed "$(b "$closed")" --argjson prePr "$(b "$prepr")" \
         --argjson dataUnavailable "$(b "$data_unavail")" \
@@ -123,7 +124,8 @@ _emit_pr_json() {
         --argjson checksSeen "$(b "$checks_seen")" \
         --argjson botClean "$(b "$bot_clean")" --argjson botMajor "$(b "$bot_major")" \
         '{emoji:$emoji,exists:$exists,inQueue:$inQueue,open:$inQueue,prePr:$prePr,merged:$merged,closed:$closed,dataUnavailable:$dataUnavailable,threads:$threads,checksOk:$checksOk,checksPending:$checksPending,checksSeen:$checksSeen,botClean:$botClean,botMajor:$botMajor,mergeState:$merge,action:$action}
-         + (if ($mergeLane|length)>0 then {mergeLane:$mergeLane} else {} end)' \
+         + (if ($mergeLane|length)>0 then {mergeLane:$mergeLane} else {} end)
+         + (if ($headRef|length)>0 then {headRef:$headRef} else {} end)' \
         >"$out"
 }
 
@@ -278,7 +280,7 @@ classify_one() {
     # substitution in an `if` so `set -e` does not kill us on the 404 exit.
     local err_out rc=0
     if err_out="$(gh_t api "repos/${REPO}/pulls/${n}" \
-        --jq '[.state, (.merged|tostring), (.mergeable_state // "unknown")] | @tsv' 2>&1)"; then
+        --jq '[.state, (.merged|tostring), (.mergeable_state // "unknown"), (.head.ref // "")] | @tsv' 2>&1)"; then
         rc=0
     else
         rc=$?
@@ -302,19 +304,20 @@ classify_one() {
     fi
 
     exists=1
-    IFS=$'\t' read -r pr_state pr_json merge_state <<< "$err_out"
+    local head_ref=""
+    IFS=$'\t' read -r pr_state pr_json merge_state head_ref <<< "$err_out"
     [[ "$pr_json" == "true" ]] && merged=1
     [[ "$pr_state" == "closed" && "$merged" -eq 0 ]] && closed=1
     [[ "$merge_state" == "dirty" || "$merge_state" == "behind" ]] && merge_bad=1
 
     if [[ "$merged" -eq 1 ]]; then
         decided="$(pec_decide_emoji 1 1 0 1 0 1 0 1 0 0 0 0)"
-        _emit_pr_json "$out" "${decided%%$'\t'*}" "${decided#*$'\t'}" 1 1 0 0 0 0 1 0 1 1 0 "MERGED"
+        _emit_pr_json "$out" "${decided%%$'\t'*}" "${decided#*$'\t'}" 1 1 0 0 0 0 1 0 1 1 0 "MERGED" "" "$head_ref"
         return
     fi
     if [[ "$closed" -eq 1 ]]; then
         decided="$(pec_decide_emoji 1 0 1 0 0 0 0 0 0 0 0 0)"
-        _emit_pr_json "$out" "${decided%%$'\t'*}" "${decided#*$'\t'}" 1 0 1 0 0 -1 0 0 0 0 0 "$merge_state"
+        _emit_pr_json "$out" "${decided%%$'\t'*}" "${decided#*$'\t'}" 1 0 1 0 0 -1 0 0 0 0 0 "$merge_state" "" "$head_ref"
         return
     fi
 

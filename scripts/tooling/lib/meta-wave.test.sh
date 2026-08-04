@@ -138,6 +138,33 @@ eq "event tags soup-rebuild" "$(jq -r '.tags[0]' <<<"$body")" "soup-rebuild"
 eq "event type needs_decision" "$(jq -r '.eventType' <<<"$body")" "needs_decision"
 eq "event summary wave clear" "$(jq -r '.summary' <<<"$body" | grep -c 'WAVE CLEAR')" "1"
 
+# --- complete (🧹) predicates ---
+GIT_TMP="$(mktemp -d)"
+git -C "$GIT_TMP" init -q
+git -C "$GIT_TMP" commit --allow-empty -q -m init
+# default branch tip exists but feat/gone does not
+if mw_branch_absent "$GIT_TMP" "feat/gone"; then ok; else bad "absent branch should be clean"; fi
+git -C "$GIT_TMP" checkout -q -b feat/alive
+if mw_branch_absent "$GIT_TMP" "feat/alive"; then bad "alive branch present"; else ok; fi
+
+MANIFEST_DROP="$(cat <<'EOF'
+  # DROPPED 2026-08-04: feat/x MERGED as #1366
+  # - branch: feat/x
+EOF
+)"
+reason="$(mw_member_complete "$MANIFEST_DROP" "/tmp/no-wt" 1366 archived "$GIT_TMP" "feat/gone" || true)"
+eq "complete all preds" "$reason" "complete"
+# mw_member_complete exits 0 on complete — re-run for exit check
+if mw_member_complete "$MANIFEST_DROP" "/tmp/no-wt" 1366 archived "$GIT_TMP" "feat/gone"; then ok; else bad "should be complete"; fi
+
+reason="$(mw_member_complete "$MANIFEST_DROP" "/tmp/no-wt" 1366 running "$GIT_TMP" "feat/gone" || true)"
+eq "complete needs archived" "$reason" "not_archived"
+
+reason="$(mw_member_complete "$MANIFEST_DROP" "/tmp/no-wt" 1366 archived "$GIT_TMP" "" || true)"
+eq "complete needs headRef" "$reason" "no_branch"
+
+rm -rf "$GIT_TMP"
+
 echo ""
 echo "meta-wave.test.sh: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]] || exit 1

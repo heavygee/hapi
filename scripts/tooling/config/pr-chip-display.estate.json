@@ -1,5 +1,5 @@
 {
-  "staleMs": 7200000,
+  "staleMs": 10800000,
   "forge": {},
   "estateCodes": {
     "babysit.green": {
@@ -28,6 +28,12 @@
       "emoji": "🔧",
       "tone": "merged",
       "label": "merged"
+    },
+    "babysit.complete": {
+      "emoji": "🧹",
+      "tone": "complete",
+      "label": "complete",
+      "action": "fully cleaned — babysit ended"
     }
   }
 }
