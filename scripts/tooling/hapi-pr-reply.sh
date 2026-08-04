@@ -97,11 +97,30 @@ else
 fi
 
 # Look up the GraphQL thread id for this comment so we can resolve it after reply.
+# Paginate: long-lived PRs exceed the first-100 page (#1108 tip-bot threads on page 2).
 echo "[hapi-pr-reply] looking up GraphQL thread for ${owner}/${repo}#${pr} comment_id=${comment_id}..." >&2
-thread_id=$(gh api graphql \
-    -f query="{ repository(owner:\"$owner\", name:\"$repo\") { pullRequest(number: $pr) { reviewThreads(first: 100) { nodes { id isResolved comments(first:1) { nodes { databaseId } } } } } } }" \
-    --jq ".data.repository.pullRequest.reviewThreads.nodes[] | select(.comments.nodes[0].databaseId == ${comment_id}) | .id" \
-    2>/dev/null || true)
+thread_id=""
+cursor=""
+has_next=true
+while [[ "$has_next" == "true" && -z "$thread_id" ]]; do
+    if [[ -n "$cursor" ]]; then
+        page_json=$(gh api graphql \
+            -f query="{ repository(owner:\"$owner\", name:\"$repo\") { pullRequest(number: $pr) { reviewThreads(first: 100, after: \"$cursor\") { pageInfo { hasNextPage endCursor } nodes { id isResolved comments(first:1) { nodes { databaseId } } } } } } }" \
+            2>/dev/null || true)
+    else
+        page_json=$(gh api graphql \
+            -f query="{ repository(owner:\"$owner\", name:\"$repo\") { pullRequest(number: $pr) { reviewThreads(first: 100) { pageInfo { hasNextPage endCursor } nodes { id isResolved comments(first:1) { nodes { databaseId } } } } } } }" \
+            2>/dev/null || true)
+    fi
+    thread_id=$(echo "$page_json" | jq -r \
+        --argjson cid "$comment_id" \
+        '.data.repository.pullRequest.reviewThreads.nodes[]
+         | select(.comments.nodes[0].databaseId == $cid)
+         | .id' 2>/dev/null | head -1)
+    has_next=$(echo "$page_json" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage // false')
+    cursor=$(echo "$page_json" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor // empty')
+    [[ "$has_next" == "true" && -n "$cursor" ]] || has_next=false
+done
 
 if [ -z "$thread_id" ]; then
     echo "[hapi-pr-reply] ERROR: could not find a review thread containing comment_id=${comment_id} on ${owner}/${repo}#${pr}." >&2
@@ -139,9 +158,24 @@ else
     exit 5
 fi
 
-# Report remaining unresolved count
-remaining=$(gh api graphql \
-    -f query="{ repository(owner:\"$owner\", name:\"$repo\") { pullRequest(number: $pr) { reviewThreads(first: 100) { nodes { isResolved } } } } }" \
-    --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length' \
-    2>/dev/null || echo "?")
+# Report remaining unresolved count (paginate — same as emoji-batch / pr-status)
+remaining=0
+cursor=""
+has_next=true
+while [[ "$has_next" == "true" ]]; do
+    if [[ -n "$cursor" ]]; then
+        page_json=$(gh api graphql \
+            -f query="{ repository(owner:\"$owner\", name:\"$repo\") { pullRequest(number: $pr) { reviewThreads(first: 100, after: \"$cursor\") { pageInfo { hasNextPage endCursor } nodes { isResolved } } } } }" \
+            2>/dev/null || true)
+    else
+        page_json=$(gh api graphql \
+            -f query="{ repository(owner:\"$owner\", name:\"$repo\") { pullRequest(number: $pr) { reviewThreads(first: 100) { pageInfo { hasNextPage endCursor } nodes { isResolved } } } } }" \
+            2>/dev/null || true)
+    fi
+    page_n=$(echo "$page_json" | jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length' 2>/dev/null || echo 0)
+    remaining=$(( remaining + page_n ))
+    has_next=$(echo "$page_json" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage // false')
+    cursor=$(echo "$page_json" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor // empty')
+    [[ "$has_next" == "true" && -n "$cursor" ]] || has_next=false
+done
 echo "[hapi-pr-reply] ${owner}/${repo}#${pr}: ${remaining} unresolved thread(s) remaining"

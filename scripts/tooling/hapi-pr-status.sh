@@ -101,30 +101,68 @@ fi
 # ── 2. Unresolved review threads ────────────────────────────────────────────
 echo ""
 echo "  2. Unresolved review threads"
-UNRESOLVED=$(gh api graphql -f query="
-{
+# Paginate: #1108 had 120 threads; first-100-only missed tip-bot Majors on page 2
+# and Meta chip said ⚠️ while this script reported CLEAN.
+COUNT=0
+THREAD_SNIPS=()
+cursor=""
+has_next=true
+while [[ "$has_next" == "true" ]]; do
+    if [[ -n "$cursor" ]]; then
+        PAGE_JSON=$(gh api graphql -f query="
+query(\$cursor: String!) {
   repository(owner: \"${OWNER}\", name: \"${NAME}\") {
     pullRequest(number: ${PR}) {
-      reviewThreads(first: 100) {
+      reviewThreads(first: 100, after: \$cursor) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           isResolved
-          comments(first: 1) {
-            nodes { body }
-          }
+          comments(first: 1) { nodes { body } }
         }
       }
     }
   }
-}" --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)]')
+}" -f cursor="$cursor")
+    else
+        PAGE_JSON=$(gh api graphql -f query="
+{
+  repository(owner: \"${OWNER}\", name: \"${NAME}\") {
+    pullRequest(number: ${PR}) {
+      reviewThreads(first: 100) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          isResolved
+          comments(first: 1) { nodes { body } }
+        }
+      }
+    }
+  }
+}")
+    fi
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        THREAD_SNIPS+=("$line")
+        COUNT=$((COUNT + 1))
+    done < <(echo "$PAGE_JSON" | jq -r '
+      .data.repository.pullRequest.reviewThreads.nodes[]
+      | select(.isResolved == false)
+      | "· [" + .id + "]  " + (.comments.nodes[0].body // "" | .[0:90])
+    ')
+    has_next=$(echo "$PAGE_JSON" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')
+    cursor=$(echo "$PAGE_JSON" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor // empty')
+    [[ "$has_next" == "true" && -n "$cursor" ]] || has_next=false
+done
 
-COUNT=$(echo "$UNRESOLVED" | jq 'length')
 if [[ "$COUNT" -eq 0 ]]; then
     echo "     ✓ 0 unresolved threads"
     echo "     → PASS"
 else
     echo "     ✗ ${COUNT} unresolved thread(s):"
-    echo "$UNRESOLVED" | jq -r '.[] | "       · [" + .id + "]  " + .comments.nodes[0].body[0:90]'
+    for snip in "${THREAD_SNIPS[@]}"; do
+        echo "       $snip"
+    done
     echo "     → FAIL"
     THREADS_OK=false
     PASS=1
