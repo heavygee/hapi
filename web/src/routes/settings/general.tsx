@@ -1,7 +1,9 @@
+import { useNavigate } from '@tanstack/react-router'
 import { useTranslation, type Locale } from '@/lib/use-translation'
 import { useAppContext } from '@/lib/app-context'
+import { isDefaultNamespaceToken } from '@/lib/tokenNamespace'
 import { CompanionPairing } from '@/components/settings/CompanionPairing'
-import { SettingsChoiceGroup, SettingsPageContent, SettingsSection } from '@/components/settings/SettingsPrimitives'
+import { SettingsChoiceGroup, SettingsLinkRow, SettingsPageContent, SettingsSection } from '@/components/settings/SettingsPrimitives'
 
 const locales: ReadonlyArray<{ value: Locale; label: string }> = [
     { value: 'en', label: 'English' },
@@ -10,7 +12,10 @@ const locales: ReadonlyArray<{ value: Locale; label: string }> = [
 
 export default function SettingsGeneralPage() {
     const { t, locale, setLocale } = useTranslation()
-    const { baseUrl } = useAppContext()
+    const { baseUrl, token } = useAppContext()
+    const navigate = useNavigate()
+    const showRunnerManagement = isDefaultNamespaceToken(token)
+
     return (
         <SettingsPageContent description={t('settings.general.description')}>
             <SettingsSection title={t('settings.language.label')}>
@@ -21,6 +26,15 @@ export default function SettingsGeneralPage() {
                     <CompanionPairing baseUrl={baseUrl} />
                 </div>
             </SettingsSection>
+            {showRunnerManagement ? (
+                <SettingsSection>
+                    <SettingsLinkRow
+                        label={t('settings.runnerMgmt.title')}
+                        description={t('settings.runnerMgmt.linkHint')}
+                        onClick={() => navigate({ to: '/settings/general/runners' })}
+                    />
+                </SettingsSection>
+            ) : null}
         </SettingsPageContent>
     )
 }
