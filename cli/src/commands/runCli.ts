@@ -13,6 +13,7 @@ import {
     shouldDelegateToUpgradeTarget,
 } from '@/upgrade/upgradeTarget'
 import { waitForRunnerHandoff } from '@/runner/controlClient'
+import { killProcessByChildProcess } from '@/utils/process'
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import crossSpawn from 'cross-spawn'
 
@@ -48,9 +49,11 @@ export async function settleDurableDelegate(options: {
         oldPid: number,
         opts?: { timeoutMs?: number },
     ) => Promise<boolean>
+    killChild?: (child: ChildProcess, force?: boolean) => Promise<boolean>
 }): Promise<{ ready: true; exitCode: number } | { ready: false }> {
     const waitForExit = options.waitForExit ?? waitForDelegatedRunner
     const waitForReady = options.waitForReady ?? waitForRunnerHandoff
+    const killChild = options.killChild ?? killProcessByChildProcess
     const timeoutMs = options.timeoutMs ?? 30_000
     const exitPromise = waitForExit(options.child)
     const ready = await Promise.race([
@@ -58,16 +61,13 @@ export async function settleDurableDelegate(options: {
         exitPromise.then(() => false),
     ])
     if (!ready) {
-        try {
-            if (options.useProcessGroup && options.child.pid) {
-                process.kill(-options.child.pid, 'SIGTERM')
-            } else {
-                options.child.kill('SIGTERM')
-            }
-        } catch {
-            // child may already be gone
-        }
-        await exitPromise.catch(() => undefined)
+        // Force-kill tree; a wedged target that ignores SIGTERM must not keep
+        // this wrapper blocked forever (marker clear / fallback never runs).
+        await killChild(options.child, true).catch(() => false)
+        await Promise.race([
+            exitPromise.catch(() => undefined),
+            new Promise<void>((resolve) => setTimeout(resolve, 3_000)),
+        ])
         return { ready: false }
     }
     return { ready: true, exitCode: await exitPromise }
@@ -167,6 +167,9 @@ export async function runCli(): Promise<void> {
             clearUpgradeTarget()
             logger.debug('[UPGRADE] Durable target failed to spawn; using current CLI', error)
             // Fall through to the current CLI's normal command dispatch.
+        } finally {
+            process.off('SIGTERM', forward)
+            process.off('SIGINT', forward)
         }
     }
 
