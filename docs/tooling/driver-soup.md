@@ -191,9 +191,9 @@ Mechanical rebuild steps (after layers are dropped and fork `main` is synced):
 2. Edit manifest — drop layers merged to `upstream/main` (prefer the owning peer did this already; meta verifies none remain)
 3. `hapi-driver-rebuild --build-web --verify`
 4. `hapi-restart-hub` when hub/cli changed; hard-reload when web changed
-5. **Dogfood smoke (mandatory after web remat):** `curl -sf http://127.0.0.1:3006/health` **and** load `/sessions` past the error boundary (Playwright or operator phone). Unit tests + `verify-soup-web-dist` are not enough if Meta resolved SessionList / composer unions in-driver.
+5. **Dogfood smoke (mandatory after web remat):** `curl -sf http://127.0.0.1:3006/health` **and** `hapi-session-open-smoke` (opens real `/sessions/:id` URLs; fails on error-boundary "Show Error" / React #185 / missing composer). List-page health + `verify-soup-web-dist` alone are **not** enough — incident 2026-08-04 wave absorb (`2191ceced`) was verify-green while every session route error-boundaried.
 6. Garden / VR check when those layers matter
-6. Log drift in `~/coding/hapi-garden/GARDEN_LOGBOOK.md` if API changed
+7. Log drift in `~/coding/hapi-garden/GARDEN_LOGBOOK.md` if API changed
 
 Do **not** leave merged feature branches as live soup layers — they bitrot against `upstream/main` and break rebuild when the remote tip is deleted.
 
