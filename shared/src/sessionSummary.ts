@@ -192,7 +192,6 @@ function getSummaryAgentSessionId(metadata: Metadata): string | undefined {
         ?? metadata.cursorSessionId
         ?? metadata.kimiSessionId
         ?? metadata.copilotSessionId
-        ?? metadata.piSessionId
         ?? undefined
 }
 
