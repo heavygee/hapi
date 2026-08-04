@@ -3,6 +3,7 @@ import type { Session, SyncEvent, SyncEventListener, SyncEngine } from '../sync/
 import type { SessionEndReason } from '@hapi/protocol'
 import type {
     ModelErrorNotification,
+    ModelErrorSendOutcome,
     NotificationChannel,
     TaskNotification
 } from './notificationTypes'
@@ -57,8 +58,9 @@ class StubChannel implements NotificationChannel {
         this.sessionCompletions.push(session)
     }
 
-    async sendModelError(session: Session, notification: ModelErrorNotification): Promise<void> {
+    async sendModelError(session: Session, notification: ModelErrorNotification): Promise<ModelErrorSendOutcome> {
         this.modelErrors.push({ session, notification })
+        return 'delivered'
     }
 }
 
