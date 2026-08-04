@@ -710,8 +710,4 @@ layers:
   # (82639c66 — show full voice platform rules in settings preview; closes #1341)
   # - branch: fix/voice-fixtures-full-preview
 
-  # Pi New Session model catalog from ~/.pi/agent/models.json (Fable-Fusion / oos-llm).
-  # Thin tip: feat/pi-oos-model-catalog @ upstream/main. Soup union: driver/pi-oos-model-catalog.
-  # Worktree: ~/coding/hapi/worktrees/pi-oos-model-catalog-soup
-  - branch: driver/pi-oos-model-catalog
 
