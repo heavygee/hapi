@@ -25,20 +25,20 @@ afterEach(() => {
 })
 
 describe('SessionPrChip helpers', () => {
-    it('formats the chip label from the PR number only when status is absent', () => {
-        expect(formatGithubPrChipLabel(baseRef({ number: 1160, url: 'https://github.com/tiann/hapi/pull/1160' }))).toBe('#1160')
+    it('formats a compact PR marker when status is absent', () => {
+        expect(formatGithubPrChipLabel(baseRef({ number: 1160, url: 'https://github.com/tiann/hapi/pull/1160' }))).toBe('PR')
     })
 
-    it('prefixes the Meta status emoji when status is cached on the ref', () => {
+    it('shows the Meta status emoji only when status is cached on the ref', () => {
         const now = 1_700_000_000_000 + 60_000
         expect(formatGithubPrChipLabel(baseRef({
             status: 'needs_work',
             statusCheckedAt: 1_700_000_000_000,
             statusAction: 'fix failing CI'
-        }), now)).toBe('⚠️#1163')
+        }), now)).toBe('⚠️')
     })
 
-    it('mutes to ? when statusCheckedAt is older than 2h', () => {
+    it('mutes to ❓ when statusCheckedAt is older than 2h', () => {
         const checkedAt = 1_700_000_000_000
         const now = checkedAt + GITHUB_PR_CHIP_STALE_MS + 1
         const ref = baseRef({
@@ -49,7 +49,7 @@ describe('SessionPrChip helpers', () => {
             status: 'unknown',
             stale: true
         })
-        expect(formatGithubPrChipLabel(ref, now)).toBe('❓#1163')
+        expect(formatGithubPrChipLabel(ref, now)).toBe('❓')
     })
 
     it('keeps tone when cache is fresh', () => {
