@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test'
+import { createHash } from 'node:crypto'
 import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -537,18 +538,44 @@ describe('fingerprintArtifactInputs / isArtifactCacheFresh', () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-artifact-legacy-'))
         try {
             const path = join(dir, 'hapi-0.25.1-linux-x64')
-            writeFileSync(path, 'bytes')
+            const bytes = Buffer.from('bytes')
+            writeFileSync(path, bytes)
+            const sha256 = createHash('sha256').update(bytes).digest('hex')
             const legacy = {
                 version: '0.25.1',
                 platform: 'linux',
                 arch: 'x64',
                 path,
-                sha256: 'abc',
-                sizeBytes: 5,
+                sha256,
+                sizeBytes: bytes.byteLength,
             } as ArtifactMeta
             expect(isArtifactCacheFresh(legacy, 'deadbeef')).toBe(false)
             expect(isArtifactCacheFresh({ ...legacy, sourceFingerprint: 'deadbeef' }, 'deadbeef')).toBe(true)
             expect(isArtifactCacheFresh({ ...legacy, sourceFingerprint: 'deadbeef' }, 'cafebabe')).toBe(false)
+        } finally {
+            rmSync(dir, { recursive: true, force: true })
+        }
+    })
+
+    it('rejects corrupted binaries that still have a matching sidecar fingerprint', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-artifact-corrupt-'))
+        try {
+            const path = join(dir, 'hapi-0.25.1-linux-x64')
+            const good = Buffer.from('good-bytes')
+            writeFileSync(path, good)
+            const sha256 = createHash('sha256').update(good).digest('hex')
+            const meta: ArtifactMeta = {
+                version: '0.25.1',
+                platform: 'linux',
+                arch: 'x64',
+                path,
+                sha256,
+                sizeBytes: good.byteLength,
+                sourceFingerprint: 'deadbeef',
+            }
+            expect(isArtifactCacheFresh(meta, 'deadbeef')).toBe(true)
+            writeFileSync(path, 'truncated')
+            expect(isArtifactCacheFresh(meta, 'deadbeef')).toBe(false)
         } finally {
             rmSync(dir, { recursive: true, force: true })
         }
