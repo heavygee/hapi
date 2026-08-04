@@ -666,4 +666,9 @@ layers:
   # Tip: 417512340 (origin/feat/session-idle-badge-noise)
   - branch: feat/session-idle-badge-noise
 
+  # tiann/hapi#1370 / PR #1373 — steer Copy-reference + /sessions/<id> citations
+  # toward MCP inspect_peer (not local Grep/Glob). Shared sessionCitation +
+  # clipboard steer suffix + MCP/system-prompt alignment. Drop when upstream merges.
+  # Worktree: ~/coding/hapi/worktrees/a2a-citation-steer @ feat/a2a-citation-steer
+  - branch: feat/a2a-citation-steer
 
