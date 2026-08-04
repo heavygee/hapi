@@ -56,7 +56,7 @@ import { loadOverseerLlmFallbackConfig } from './overseerLlmFallbackConfig'
 import { OverseerEntity } from './overseerEntity'
 import { extractAssistantPlainText } from '@hapi/protocol/messages'
 import type { InboxOperatorAction } from '@hapi/protocol'
-import type { ListSystemEventsOptions, StoredSystemEvent } from '../store'
+import type { ListSystemEventsOptions, StoredSystemEvent, InsertSystemEventInput } from '../store'
 import type { ListInboxItemsOptions, StoredInboxItem } from '../store/inboxItems'
 
 type PiResumeAttempt = NonNullable<NonNullable<Session['metadata']>['piResumeAttempt']>
@@ -511,6 +511,36 @@ export class SyncEngine {
 
     getSystemEventCount(): number {
         return this.overseerEvents.count()
+    }
+
+    /**
+     * Channel ingest path for ContributionState / external producers.
+     * Uses store-level insertSystemEvent (idempotency dedupe). Does not mutate
+     * session metadata, mark GitHub notifications read, or write session
+     * transcript messages (ADR-001).
+     *
+     * Non-deduped attention=1 events with relatedSessionId are promoted into
+     * the operator inbox. Deduped replays return the prior row without
+     * re-promoting or mutating inbox.
+     */
+    insertChannelSystemEvent(input: InsertSystemEventInput): { event: StoredSystemEvent; deduped: boolean } | null {
+        if (input.sourceKind !== 'channel') {
+            throw new Error('insertChannelSystemEvent requires sourceKind channel')
+        }
+        if (input.idempotencyKey) {
+            const existing = this.store.events.getByIdempotencyKey(input.idempotencyKey)
+            if (existing) {
+                return { event: existing, deduped: true }
+            }
+        }
+        const event = this.store.events.insert(input)
+        if (!event) {
+            return null
+        }
+        if (event.attentionCandidate === 1 && event.relatedSessionId) {
+            this.store.inbox.promoteAttentionEvent(event)
+        }
+        return { event, deduped: false }
     }
 
     getInboxItems(options: ListInboxItemsOptions = {}): StoredInboxItem[] {
