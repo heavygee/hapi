@@ -15,10 +15,22 @@ export const I18nContext = createContext<I18nContextValue | null>(null)
 
 const locales: Record<Locale, Translations> = { en, 'zh-CN': zhCN }
 
-function interpolate(str: string, params?: Record<string, string | number>): string {
+/**
+ * Replace `{key}` placeholders. When `n` is present and `s` is not, derive the
+ * English plural suffix for locale strings like `{n} new message{s}`
+ * (HappyThread NewMessagesIndicator — otherwise the UI shows literal `{s}`).
+ */
+export function interpolate(str: string, params?: Record<string, string | number>): string {
   if (!params) return str
-  return str.replace(/\{(\w+)\}/g, (match, key) => {
-    const value = params[key]
+  const resolved: Record<string, string | number> = { ...params }
+  if (resolved.s === undefined && resolved.n !== undefined) {
+    const n = typeof resolved.n === 'number' ? resolved.n : Number(resolved.n)
+    if (Number.isFinite(n)) {
+      resolved.s = n === 1 ? '' : 's'
+    }
+  }
+  return str.replace(/\{(\w+)\}/g, (match, key: string) => {
+    const value = resolved[key]
     return value !== undefined ? String(value) : match
   })
 }
