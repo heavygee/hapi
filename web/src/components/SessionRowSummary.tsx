@@ -261,7 +261,8 @@ export function SessionRowSummary(props: {
                         </span>
                     ) : null}
                 </div>
-                <div className="flex min-w-0 items-center justify-end gap-2 overflow-hidden text-xs">
+                {/* overflow-visible so the PR chip HoverTooltip is not clipped */}
+                <div className="flex min-w-0 items-center justify-end gap-2 overflow-visible text-xs">
                     {todoProgress ? (
                         <span className="flex shrink-0 items-center gap-1 text-[var(--app-hint)]">
                             <BulbIcon className="h-3 w-3" />

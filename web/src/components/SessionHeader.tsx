@@ -26,7 +26,7 @@ import {
     getPrimaryGithubPrRef,
     resolveGithubPrChipDisplay
 } from '@hapi/protocol'
-import { formatGithubPrChipTitle } from '@/components/SessionPrChip'
+import { formatGithubPrChipDetailParts } from '@/components/SessionPrChip'
 import { useMachines } from '@/hooks/queries/useMachines'
 import { useMachineLabels } from '@/hooks/useMachineLabels'
 import { formatAbsoluteDateTime, formatRelativeTime } from '@/lib/relativeTime'
@@ -233,8 +233,10 @@ export function SessionHeader(props: {
         const nowMs = Date.now()
         const profile = prChipDisplay ?? DEFAULT_PR_CHIP_DISPLAY
         const display = resolveGithubPrChipDisplay(primaryPrRef, profile, nowMs)
+        const parts = formatGithubPrChipDetailParts(primaryPrRef, display, t)
         return {
-            detail: formatGithubPrChipTitle(primaryPrRef, display, t),
+            glyph: parts.glyph,
+            detail: parts.detail,
             href: primaryPrRef.url
         }
     }, [githubPrAwarenessEnabled, primaryPrRef, prChipDisplay, t])

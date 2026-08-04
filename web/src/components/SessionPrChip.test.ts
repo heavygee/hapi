@@ -82,7 +82,7 @@ describe('SessionPrChip helpers', () => {
         const title = formatGithubPrChipTitle(ref, display, keyedT)
         expect(formatGithubPrChipLabel(ref, display)).toBe('⚠️')
         expect(title).toBe(
-            'tiann/hapi#1163 · needs work · checked session.time.hoursAgo:1 — rebase (merge state dirty)'
+            '⚠️ tiann/hapi#1163 · needs work · checked session.time.hoursAgo:1 — rebase (merge state dirty)'
         )
         expect(title).not.toMatch(/T\d{2}:\d{2}:\d{2}/)
     })
