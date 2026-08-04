@@ -8,12 +8,31 @@ import {
     resolveHapiToolingRoot
 } from '@/modules/common/hooks/resolveHapiToolingRoot';
 
+// agy PreToolUse hooks block the agent until the user answers on their phone —
+// which can take minutes. Give the PreToolUse hook a generous timeout so a
+// human has time to respond.
+const PRE_TOOL_USE_TIMEOUT_SECONDS = 3600;
+
 type HookCommandConfig = {
     matcher?: string;
     hooks: Array<{
         type: 'command';
         command: string;
     }>;
+};
+
+type AgyHookEntry = {
+    matcher: string;
+    hooks: Array<{
+        command: string;
+        timeout?: number;
+    }>;
+};
+
+type AgyHooksJson = {
+    [hookName: string]: {
+        PreToolUse: AgyHookEntry[];
+    };
 };
 
 type HookSettings = {
@@ -145,6 +164,28 @@ export function generateHookSettingsFile(
     logger.debug(`[${options.logLabel}] Created hook settings file: ${filepath}`);
 
     return filepath;
+}
+
+/**
+ * Build the JSON string for agy's hooks.json. The returned string is suitable
+ * for writing into a workspace-local .agents/hooks.json carrier.
+ *
+ * agy does not use a `type` field on hook entries (unlike claude which requires
+ * `"type": "command"`). The timeout is in seconds; 3600 gives the user an hour
+ * to answer a permission prompt on their phone.
+ */
+export function buildAgyHooksJson(command: string, hookName = 'hapi-bridge'): string {
+    const content: AgyHooksJson = {
+        [hookName]: {
+            PreToolUse: [
+                {
+                    matcher: '*',
+                    hooks: [{ command, timeout: PRE_TOOL_USE_TIMEOUT_SECONDS }]
+                }
+            ]
+        }
+    };
+    return JSON.stringify(content, null, 4);
 }
 
 export function cleanupHookSettingsFile(filepath: string, logLabel: string): void {

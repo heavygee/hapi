@@ -6,7 +6,7 @@ import {
 } from '@hapi/protocol'
 import type { OverseerEntity } from '../sync/overseerEntity'
 
-/** Thrown when a write tool (`record_disposition`) is dispatched on a read-only surface (R2 gate). */
+/** Thrown when a write tool is dispatched on a read-only surface (R2 gate). */
 export class OverseerWriteNotAllowedError extends Error {
     constructor(tool: string) {
         super(`Tool "${tool}" writes and is not allowed on this surface`)
@@ -17,15 +17,16 @@ export class OverseerWriteNotAllowedError extends Error {
 /**
  * Execute one Overseer tool by name against the entity. Shared by the HTTP tool-dispatch route and
  * the converse tool-calling loop so both go through exactly one place. Throws `ZodError` on invalid
- * args. Every tool is read-only EXCEPT `record_disposition`; writes are gated behind `allowWrites`
- * (the conversational path sets it; the raw HTTP dispatch does not).
+ * args. Write tools (`record_disposition`, `ping_session`) are gated behind `allowWrites`
+ * (the conversational path sets it; the raw HTTP dispatch does not). Async because `ping_session`
+ * may resume a worker before enqueueing.
  */
-export function runOverseerTool(
+export async function runOverseerTool(
     overseer: OverseerEntity,
     tool: OverseerToolName,
     args: unknown,
     allowWrites = false
-): unknown {
+): Promise<unknown> {
     if (isOverseerWriteTool(tool) && !allowWrites) {
         throw new OverseerWriteNotAllowedError(tool)
     }
@@ -58,6 +59,8 @@ export function runOverseerTool(
             return overseer.queryDispositions(overseerToolArgsSchemas.query_dispositions.parse(args))
         case 'record_disposition':
             return overseer.recordDisposition(overseerToolArgsSchemas.record_disposition.parse(args))
+        case 'ping_session':
+            return overseer.pingSession(overseerToolArgsSchemas.ping_session.parse(args))
         default: {
             const exhaustive: never = tool
             throw new Error(`Unknown overseer tool: ${String(exhaustive)}`)

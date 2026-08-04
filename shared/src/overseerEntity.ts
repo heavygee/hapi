@@ -29,6 +29,9 @@ export const OVERSEER_ENTITY_ID = 'overseer'
 /** `source_kind` / `sink_kind` used for Overseer-authored events. */
 export const OVERSEER_SOURCE_KIND = 'overseer' as const
 
+/** Event type for an operator-directed outbound relay (audit / session timeline). */
+export const OVERSEER_DISPATCHED_EVENT_TYPE = 'dispatched' as const
+
 /** Event type for an operator<->Overseer conversation segment (memory-bearing). */
 export const OVERSEER_CONVO_TURN_EVENT_TYPE = 'convo_turn' as const
 
@@ -118,6 +121,12 @@ export type OverseerExplainPriority = {
     reasonForPriority: string | null
     sourceEventIds: number[]
     relatedSessionId: string | null
+    /** Session display name when the related session still exists in the hub. */
+    relatedSessionName: string | null
+    /** Hub `active` flag for the related session; null when the session row is gone. */
+    relatedSessionActive: boolean | null
+    /** Inbox item summary (action line) — often more useful than a bare URL title. */
+    summary: string
     /** Lightweight detail for each contributing event (provenance trail). */
     sourceEvents: Array<{
         id: number
@@ -266,17 +275,18 @@ export const OVERSEER_TOOL_NAMES = [
     'list_active_workers',
     'query_open_loops',
     'query_dispositions',
-    'record_disposition'
+    'record_disposition',
+    'ping_session'
 ] as const
 
 export type OverseerToolName = typeof OVERSEER_TOOL_NAMES[number]
 
 /**
- * The one tool that writes (Stage 0→1 keystone). Every other tool is read-only against the
- * substrate; `record_disposition` is the single explicit, operator-directed mutation. It is
- * clearly marked non-`readonly` in the catalog so the write surface stays enumerable (R2).
+ * Write tools (Stage 1+). Every other tool is read-only against the substrate.
+ * `record_disposition` = operator decision on an inbox item; `ping_session` = relay
+ * a message to a worker session (resume + enqueue). Both are operator-directed only (R2/R5).
  */
-export const OVERSEER_WRITE_TOOL_NAMES = ['record_disposition'] as const
+export const OVERSEER_WRITE_TOOL_NAMES = ['record_disposition', 'ping_session'] as const
 export type OverseerWriteToolName = typeof OVERSEER_WRITE_TOOL_NAMES[number]
 
 export function isOverseerWriteTool(name: string): name is OverseerWriteToolName {
@@ -406,6 +416,33 @@ export const recordDispositionArgsSchema = z.object({
 export type RecordDispositionArgs = z.infer<typeof recordDispositionArgsSchema>
 
 /**
+ * `ping_session` — relay an operator-directed message to one worker session (R5).
+ * Resolves by `sessionId` (full id or unique prefix) and/or `itemId` (inbox item →
+ * relatedSessionId). Hub resumes if inactive, then enqueues the message — same
+ * primitives as `hapi-ping-peer`, called in-process (never shell out).
+ */
+export const pingSessionArgsSchema = z.object({
+    sessionId: z.string().min(1).max(128).optional(),
+    itemId: z.number().int().positive().optional(),
+    message: z.string().min(1).max(8000),
+}).refine((v) => Boolean(v.sessionId?.trim()) || typeof v.itemId === 'number', {
+    message: 'sessionId or itemId is required'
+})
+export type PingSessionArgs = z.infer<typeof pingSessionArgsSchema>
+
+export type OverseerPingResult = {
+    ok: boolean
+    sessionId: string
+    sessionName: string | null
+    project: string | null
+    /** True when the hub had to resume before sending. */
+    resumed: boolean
+    /** One-line human confirmation to read back ("Relayed to Expenses (a492…): …"). */
+    tombstone: string
+    error?: string
+}
+
+/**
  * One cold open loop: a session whose latest worker status is not `done`,
  * carrying how long it has sat and which lens bucket it belongs to.
  */
@@ -486,7 +523,8 @@ export const overseerToolArgsSchemas = {
     list_active_workers: listActiveWorkersArgsSchema,
     query_open_loops: queryOpenLoopsArgsSchema,
     query_dispositions: queryDispositionsArgsSchema,
-    record_disposition: recordDispositionArgsSchema
+    record_disposition: recordDispositionArgsSchema,
+    ping_session: pingSessionArgsSchema
 } as const satisfies Record<OverseerToolName, z.ZodTypeAny>
 
 export type OverseerToolCatalogEntry = {
@@ -496,7 +534,7 @@ export type OverseerToolCatalogEntry = {
     readonly: boolean
 }
 
-/** Catalog surfaced to the voice/system layer; exactly one entry (`record_disposition`) writes. */
+/** Catalog surfaced to the voice/system layer; write tools are marked `readonly: false` (R2). */
 export const OVERSEER_TOOL_CATALOG: OverseerToolCatalogEntry[] = [
     {
         name: 'query_events',
@@ -510,17 +548,17 @@ export const OVERSEER_TOOL_CATALOG: OverseerToolCatalogEntry[] = [
     },
     {
         name: 'get_session_state',
-        description: 'Hub-observed state for one session: activity, tool-call recency, pending requests, and the worker-reported state when available.',
+        description: 'Hub-observed state for one session (full id or unique short prefix): activity, tool-call recency, pending requests, and the worker-reported state when available. Inactive sessions still return a state object (active:false) — null means no matching session, not "deleted".',
         readonly: true
     },
     {
         name: 'get_session_recent_output',
-        description: 'Last N transcript chunks for one session, for context.',
+        description: 'Last N transcript chunks for one session (full id or unique short prefix).',
         readonly: true
     },
     {
         name: 'get_worker_health',
-        description: 'Combined worker health: reported + observed + inferred state with a signal trail (never collapses a reported/observed conflict).',
+        description: 'Combined worker health for one session (full id or unique short prefix): reported + observed + inferred state with a signal trail (never collapses a reported/observed conflict).',
         readonly: true
     },
     {
@@ -547,12 +585,22 @@ export const OVERSEER_TOOL_CATALOG: OverseerToolCatalogEntry[] = [
         name: 'record_disposition',
         description: 'WRITE: record the operator\'s explicit decision on one inbox item — done (resolve), dismiss (tombstone), snooze (needs snoozedUntil), or open (reopen). Only call this when the operator has clearly directed it in the conversation; never on your own judgement. Returns a tombstone to read back.',
         readonly: false
+    },
+    {
+        name: 'ping_session',
+        description: 'WRITE: relay an operator-directed message to one worker session (resume if inactive, then enqueue). Pass sessionId (full id or unique prefix) and/or itemId (inbox item → its related session). Only call when the operator has clearly said to tell / ping / ask that project or agent something. Irreversible once delivered — never invent a ping.',
+        readonly: false
     }
 ]
 
 /** Whether the Overseer may write dispositions — Stage 1 keystone gate (still no dispatch). */
 export function overseerCanDisposition(): boolean {
     return OVERSEER_TOOL_CATALOG.some((t) => t.name === 'record_disposition' && !t.readonly)
+}
+
+/** Whether the Overseer may relay to a worker session — Stage 1.5 delegation gate (R5). */
+export function overseerCanRelay(): boolean {
+    return OVERSEER_TOOL_CATALOG.some((t) => t.name === 'ping_session' && !t.readonly)
 }
 
 export type OverseerIdentity = {
@@ -562,6 +610,8 @@ export type OverseerIdentity = {
     canDispatch: false
     /** Stage 1 keystone: the Overseer may record operator-directed dispositions on inbox items. */
     canDisposition: boolean
+    /** Stage 1.5: the Overseer may relay operator-directed messages to a worker session. */
+    canRelay: boolean
     tools: OverseerToolCatalogEntry[]
 }
 
@@ -571,6 +621,7 @@ export function buildOverseerIdentity(): OverseerIdentity {
         kind: OVERSEER_SOURCE_KIND,
         canDispatch: false,
         canDisposition: overseerCanDisposition(),
+        canRelay: overseerCanRelay(),
         tools: OVERSEER_TOOL_CATALOG
     }
 }
@@ -594,27 +645,32 @@ export function buildOverseerSystemPrompt(): string {
         'You hold a continuous view of the whole fleet and speak to the operator about it. You are not',
         'any single worker, and you never speak as one.',
         '',
-        '# What you can do (Stage 1 — read + record dispositions)',
+        '# What you can do (Stage 1.5 — read + dispositions + relay)',
         '',
-        'You can READ the fleet, ANSWER questions, and RECORD the operator\'s decisions on inbox items.',
+        'You can READ the fleet, ANSWER questions, RECORD the operator\'s decisions on inbox items,',
+        'and RELAY an operator-directed message to one worker session.',
         '',
         'Read-only tools:',
         '- query_events — the events stream (blockers, completions, decisions, progress, errors).',
         '- query_inbox — what currently needs the operator: candidates, surfaced items, held items.',
-        '- get_session_state — one session\'s observed state, activity, and reported state.',
-        '- get_session_recent_output — the last few transcript chunks of a session.',
-        '- get_worker_health — reported + observed + inferred state for one worker.',
+        '- get_session_state — one session\'s observed state, activity, and reported state',
+        '  (sessionId: full UUID or unique short prefix; inactive sessions still return a state',
+        '  object with active:false — null means no match, NOT that the session was deleted).',
+        '- get_session_recent_output — the last few transcript chunks of a session (same id rules).',
+        '- get_worker_health — reported + observed + inferred state for one worker (same id rules).',
         '- explain_priority — why an inbox item sits where it does, with its provenance.',
         '- list_active_workers — the current roster, filterable by project / state / age.',
         '- query_open_loops — the "what am I forgetting?" lens: cold threads whose latest status is not done.',
         '- query_dispositions — past operator decisions (list, or groupBy+minCount to cluster them).',
         '',
-        'Write tool (the ONLY thing you can change):',
+        'Write tools (the ONLY things you can change):',
         '- record_disposition — record the operator\'s decision on ONE inbox item: done (resolve),',
         '  dismiss (tombstone), snooze (needs snoozedUntil), or open (reopen).',
+        '- ping_session — relay a message to ONE worker session (resume if needed, then enqueue).',
+        '  Pass sessionId and/or itemId. Irreversible once delivered.',
         '',
-        'You still CANNOT dispatch, message workers, spawn, or confirm anything on a worker. If the',
-        'operator asks you to act on a worker, say you can advise but cannot dispatch yet.',
+        'You still CANNOT spawn new workers, invent work, or confirm anything on a worker\'s behalf.',
+        'If the operator asks you to "just handle it" without naming a target and an intent, ask.',
         '',
         '# Recording a disposition (be careful — this writes)',
         '',
@@ -624,6 +680,16 @@ export function buildOverseerSystemPrompt(): string {
         '- If which item is ambiguous, ask which one before writing. Identify the item first (query_inbox',
         '  / explain_priority) so you pass the right itemId.',
         '- After it lands, read the returned tombstone back in one line so the operator knows it stuck.',
+        '',
+        '# Relaying to a project / session (be careful — this writes and is not undoable)',
+        '',
+        '- Call ping_session ONLY when the operator has clearly directed a relay: "tell that expenses',
+        '  session…", "ping the hapi peer about…", "ask that project to…". Never invent a ping.',
+        '- Prefer itemId when the conversation is about a specific inbox item (it resolves the related',
+        '  session). Otherwise use sessionId (full id or unique short prefix).',
+        '- Keep the message short and complete — the worker rehydrates its own context; you are a',
+        '  secretary passing intent, not transferring your whole briefing.',
+        '- After it lands, read the returned tombstone back in one line.',
         '',
         '# How to answer',
         '',
@@ -637,8 +703,15 @@ export function buildOverseerSystemPrompt(): string {
         '- Prioritize. Surface the root cause, not five symptoms ("GitHub auth is blocking 5 workers",',
         '  not a roll-call of each blocked worker).',
         '- When the operator asks about a SPECIFIC inbox item, first call explain_priority for its',
-        '  provenance, then query_events with that item\'s sessionId to pull the rest of that session\'s',
-        '  recorded activity as context/salience before answering — do not answer from the item alone.',
+        '  provenance, then query_events with that item\'s relatedSessionId (full UUID from the tool',
+        '  result — do not truncate it yourself) to pull the rest of that session\'s recorded activity',
+        '  as context/salience before answering — do not answer from the item alone.',
+        '- Prefer relatedSessionId / session fields from tool results over inventing short prefixes.',
+        '  Unique short prefixes are accepted by session tools, but truncating a UUID is how you get',
+        '  false "session missing" answers.',
+        '- An inbox item can still need a decision after its worker goes idle/complete — that is not',
+        '  a ghost. Check get_session_state (expect active:false + reported/observed) before claiming',
+        '  the session is gone.',
         '',
         '# Two questions, two axes',
         '',
@@ -725,4 +798,65 @@ export function buildOverseerConvoTurnEventInput(input: OverseerConvoTurnInput):
         relatedEventId: input.relatedEventId ?? null,
         provenance: 'overseer-convo'
     }
+}
+
+export type OverseerDispatchedEventInput = {
+    ts: number
+    sourceKind: typeof OVERSEER_SOURCE_KIND
+    sourceRef: string
+    sinkKind: 'worker'
+    eventType: typeof OVERSEER_DISPATCHED_EVENT_TYPE
+    attentionCandidate: 0
+    operatorActionRequired: 0
+    summary: string
+    payloadJson: string
+    relatedSessionId: string
+    relatedEventId: number | null
+    provenance: string
+    idempotencyKey: string
+}
+
+export type OverseerDispatchedInput = {
+    sessionId: string
+    message: string
+    resumed: boolean
+    tombstone: string
+    ts?: number
+}
+
+/** Build an idempotent `dispatched` event after a successful ping_session relay. */
+export function buildOverseerDispatchedEventInput(input: OverseerDispatchedInput): OverseerDispatchedEventInput {
+    const ts = input.ts ?? Date.now()
+    const snippet = input.message.length > 120 ? `${input.message.slice(0, 117)}…` : input.message
+    // Bucket to the second so identical retries within the same second collapse.
+    const idempotencyKey = `overseer-dispatched:${input.sessionId}:${ts - (ts % 1000)}:${hashRelaySnippet(input.message)}`
+    return {
+        ts,
+        sourceKind: OVERSEER_SOURCE_KIND,
+        sourceRef: OVERSEER_ENTITY_ID,
+        sinkKind: 'worker',
+        eventType: OVERSEER_DISPATCHED_EVENT_TYPE,
+        attentionCandidate: 0,
+        operatorActionRequired: 0,
+        summary: input.tombstone.slice(0, 240) || `Relayed to ${input.sessionId.slice(0, 8)}: ${snippet}`,
+        payloadJson: JSON.stringify({
+            message: input.message,
+            resumed: input.resumed,
+            tombstone: input.tombstone
+        }),
+        relatedSessionId: input.sessionId,
+        relatedEventId: null,
+        provenance: 'overseer-relay',
+        idempotencyKey
+    }
+}
+
+function hashRelaySnippet(message: string): string {
+    // Short stable fingerprint — not cryptographic; enough for idempotency bucketing.
+    let h = 2166136261
+    for (let i = 0; i < message.length; i++) {
+        h ^= message.charCodeAt(i)
+        h = Math.imul(h, 16777619)
+    }
+    return (h >>> 0).toString(16)
 }

@@ -4,7 +4,6 @@ import { useRef, useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
-import type { ComposerSendIntent } from '@/lib/messageDelivery'
 import { HappyComposer, type ComposerSendError } from './HappyComposer'
 
 /**
@@ -29,8 +28,6 @@ const runtime = vi.hoisted(() => ({
         thread: { isRunning: false, isDisabled: false },
     } as FakeRuntimeState,
     setSnapshot: null as null | ((updater: (current: FakeRuntimeState) => FakeRuntimeState) => void),
-    pendingSendIntentRef: null as null | { current: ComposerSendIntent },
-    sentIntents: [] as ComposerSendIntent[],
 }))
 
 vi.mock('@assistant-ui/react', async () => {
@@ -45,9 +42,6 @@ vi.mock('@assistant-ui/react', async () => {
                     }))
                 },
                 send: () => {
-                    const intent = runtime.pendingSendIntentRef?.current ?? 'default'
-                    runtime.sentIntents.push(intent)
-                    if (runtime.pendingSendIntentRef) runtime.pendingSendIntentRef.current = 'default'
                     runtime.setSnapshot!((current) => ({
                         ...current,
                         composer: { text: '', attachments: [] },
@@ -83,11 +77,7 @@ vi.mock('@assistant-ui/react', async () => {
     }
 })
 
-vi.mock('@/lib/composerSegments', () => ({
-    isRichComposerMentionsEnabled: () => false,
-    resolveComposerPlaceholderKey: ({ showContinueHint }: { showContinueHint: boolean }) =>
-        showContinueHint ? 'misc.typeMessage' : 'misc.typeAMessage',
-}))
+vi.mock('@/lib/composerSegments', () => ({ isRichComposerMentionsEnabled: () => false }))
 vi.mock('@/hooks/useComposerDraft', () => ({
     useComposerDraft: (sessionId: string | undefined) => ({ sessionId, complete: true, restoredAny: false }),
 }))
@@ -127,25 +117,18 @@ type HarnessControls = {
     getClearErrorCalls: () => number
 }
 
-function ComposerHarness(props: {
-    initialText: string
-    initialSchedule?: PendingSchedule | null
-    piRunning?: boolean
-    controls: { current: HarnessControls | null }
-}) {
+function ComposerHarness(props: { initialText: string; initialSchedule?: PendingSchedule | null; controls: { current: HarnessControls | null } }) {
     const [snapshot, setSnapshot] = useState<FakeRuntimeState>(() => ({
         composer: { text: props.initialText, attachments: [] },
-        thread: { isRunning: props.piRunning ?? false, isDisabled: false },
+        thread: { isRunning: false, isDisabled: false },
     }))
     const [schedule, setSchedule] = useState<PendingSchedule | null>(props.initialSchedule ?? null)
     const [sendError, setSendError] = useState<ComposerSendError | null>(null)
     const [composerKey, setComposerKey] = useState('composer-a')
     const clearErrorCallsRef = useRef(0)
-    const pendingSendIntentRef = useRef<ComposerSendIntent>('default')
 
     runtime.snapshot = snapshot
     runtime.setSnapshot = setSnapshot
-    runtime.pendingSendIntentRef = pendingSendIntentRef
     props.controls.current = {
         setError: sendError => setSendError(sendError),
         addAttachment: () => setSnapshot((current) => ({
@@ -186,22 +169,14 @@ function ComposerHarness(props: {
                         ? { ...current, restoreSuppressed: true }
                         : current
                 )}
-                agentFlavor="pi"
-                thinking={props.piRunning}
-                pendingSendIntentRef={pendingSendIntentRef}
             />
         </I18nProvider>
     )
 }
 
-function renderComposer(
-    initialText = 'failed text',
-    initialSchedule: PendingSchedule | null = { type: 'absolute', ms: 1234 },
-    piRunning = false,
-) {
+function renderComposer(initialText = 'failed text', initialSchedule: PendingSchedule | null = { type: 'absolute', ms: 1234 }) {
     const controls: { current: HarnessControls | null } = { current: null }
-    runtime.sentIntents = []
-    render(<ComposerHarness initialText={initialText} initialSchedule={initialSchedule} piRunning={piRunning} controls={controls} />)
+    render(<ComposerHarness initialText={initialText} initialSchedule={initialSchedule} controls={controls} />)
     return controls
 }
 
@@ -434,54 +409,5 @@ describe('HappyComposer send-error atomic restore', () => {
 
         await waitFor(() => expect(input()).toHaveValue('immediate'))
         expect(screen.getByTestId('pending-schedule')).toHaveTextContent('null')
-    })
-})
-
-describe('HappyComposer send intent gestures', () => {
-    afterEach(() => {
-        cleanup()
-        runtime.pendingSendIntentRef = null
-        runtime.sentIntents = []
-    })
-
-    it('uses queue for Alt/Option+Enter only while the Pi main thread is running', () => {
-        renderComposer('follow-up', null, true)
-
-        fireEvent.keyDown(input(), { key: 'Enter', altKey: true })
-
-        expect(runtime.sentIntents).toEqual(['queue'])
-        expect(runtime.pendingSendIntentRef?.current).toBe('default')
-    })
-
-    it('uses default intent for the configured normal Enter send', () => {
-        renderComposer('ordinary send', null, true)
-
-        fireEvent.keyDown(input(), { key: 'Enter' })
-
-        expect(runtime.sentIntents).toEqual(['default'])
-        expect(runtime.pendingSendIntentRef?.current).toBe('default')
-    })
-
-    it('consumes a restored queue retry mark before resetting the shared ref', () => {
-        renderComposer('retry queue', null, true)
-        runtime.pendingSendIntentRef!.current = 'queue'
-
-        fireEvent.keyDown(input(), { key: 'Enter' })
-
-        expect(runtime.sentIntents).toEqual(['queue'])
-        expect(runtime.pendingSendIntentRef?.current).toBe('default')
-    })
-
-    it('does not turn Alt/Option+Enter into queue when Pi is idle or a schedule is active', () => {
-        const idle = renderComposer('idle', null, false)
-        fireEvent.keyDown(input(), { key: 'Enter', altKey: true })
-        expect(runtime.sentIntents).toEqual([])
-        expect(idle.current).not.toBeNull()
-
-        cleanup()
-        renderComposer('scheduled', { type: 'absolute', ms: 1234 }, true)
-        fireEvent.keyDown(input(), { key: 'Enter', altKey: true })
-        expect(runtime.sentIntents).toEqual([])
-        expect(runtime.pendingSendIntentRef?.current).toBe('default')
     })
 })

@@ -45,6 +45,7 @@ import {
     type RpcListDirectoryResponse,
     type RpcStatFilesResponse,
     type RpcListCodexModelsResponse,
+    type RpcListAgyModelsResponse,
     type RpcArchiveCodexSessionResponse,
     type RpcListCursorModelsResponse,
     type RpcListOpencodeModelsResponse,
@@ -84,6 +85,7 @@ export type {
     RpcListDirectoryResponse,
     RpcStatFilesResponse,
     RpcListCodexModelsResponse,
+    RpcListAgyModelsResponse,
     RpcListCursorModelsResponse,
     RpcListOpencodeModelsResponse,
     RpcListGrokModelsResponse,
@@ -1327,12 +1329,13 @@ export class SyncEngine {
             }>
             sentFrom?: 'telegram-bot' | 'webapp'
             scheduledAt?: number | null
+            deliveryMode?: import('@hapi/protocol').MessageDeliveryMode
         }
     ): Promise<void> {
         if (this.historyActionsInFlight.has(sessionId)) {
             throw new Error('Conversation history action already in progress')
         }
-        const actualSessionId = await this.messageService.sendMessage(sessionId, payload)
+        const { actualSessionId } = await this.messageService.sendMessage(sessionId, payload)
         this.sessionCache.markMessageQueued(actualSessionId)
         this.sessionCache.recordSessionActivity(actualSessionId, Date.now())
     }
@@ -1708,6 +1711,7 @@ export class SyncEngine {
                 source.serviceTier ?? undefined,
                 childId,
                 source.collaborationMode,
+                undefined,
                 undefined,
                 rpcResult.forkSession === true
             )
@@ -2175,7 +2179,8 @@ export class SyncEngine {
         serviceTier?: string,
         existingSessionId?: string,
         collaborationMode?: CodexCollaborationMode,
-        copilotAgentMode?: CopilotAgentMode
+        copilotAgentMode?: CopilotAgentMode,
+        startingMode?: 'remote' | 'pty'
     ): Promise<{ type: 'success'; sessionId: string } | { type: 'error'; message: string }> {
         return await this.rpcGateway.spawnSession(
             machineId,
@@ -2192,7 +2197,8 @@ export class SyncEngine {
             serviceTier,
             existingSessionId,
             collaborationMode,
-            copilotAgentMode
+            copilotAgentMode,
+            startingMode
         )
     }
 
@@ -3910,6 +3916,10 @@ export class SyncEngine {
 
     async listCodexModelsForMachine(machineId: string): Promise<RpcListCodexModelsResponse> {
         return await this.rpcGateway.listCodexModelsForMachine(machineId)
+    }
+
+    async listAgyModelsForMachine(machineId: string): Promise<RpcListAgyModelsResponse> {
+        return await this.rpcGateway.listAgyModelsForMachine(machineId)
     }
 
     async listCodexSessionsForMachine(machineId: string, cwd?: string | null, sessionIds?: string[]) {

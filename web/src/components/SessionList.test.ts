@@ -495,8 +495,7 @@ describe('expandSelectedSessionCollapseOverrides', () => {
         ])
 
         const result = expandSelectedSessionCollapseOverrides(overrides, {
-            key: 'machine-1::/work/hapi',
-            machineId: 'machine-1'
+            key: 'machine-1::/work/hapi'
         })
 
         expect(result.has('machine-1::/work/hapi')).toBe(false)
@@ -508,8 +507,7 @@ describe('expandSelectedSessionCollapseOverrides', () => {
         const overrides = new Map<string, boolean>()
 
         const result = expandSelectedSessionCollapseOverrides(overrides, {
-            key: 'machine-1::/work/hapi',
-            machineId: 'machine-1'
+            key: 'machine-1::/work/hapi'
         })
 
         expect(result.has('sessions::machine-1::/work/hapi')).toBe(false)
