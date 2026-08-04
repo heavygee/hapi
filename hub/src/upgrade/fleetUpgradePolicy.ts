@@ -9,12 +9,10 @@ import {
     isFleetUpgradePolicy,
     type FleetUpgradePolicy,
 } from '@hapi/protocol/upgradeChannel'
-import { getSettingsFile, readSettings, writeSettings } from '../config/settings'
+import { getSettingsFile, updateSettingsFile } from '../config/settings'
 
 let cachedPolicy: FleetUpgradePolicy = DEFAULT_FLEET_UPGRADE_POLICY
 let dataDir: string | null = null
-/** Serialize overlapping radio-click / multi-client RMW of settings.json. */
-let policyWriteTail: Promise<void> = Promise.resolve()
 
 /** Seed the cache from persisted settings on hub startup. */
 export function initFleetUpgradePolicy(options: { dataDir: string; persisted?: unknown }): void {
@@ -28,32 +26,21 @@ export function getFleetUpgradePolicy(): FleetUpgradePolicy {
     return cachedPolicy
 }
 
-/** Update the cache and persist to settings.json (best-effort atomic write). */
+/** Update the cache and persist to settings.json (process-wide settings queue). */
 export async function setFleetUpgradePolicy(policy: FleetUpgradePolicy): Promise<void> {
-    const task = policyWriteTail.then(async () => {
-        if (!dataDir) {
-            cachedPolicy = policy
-            return
-        }
-        const file = getSettingsFile(dataDir)
-        const settings = await readSettings(file)
-        // readSettings returns null on parse errors to avoid clobbering a recoverable
-        // settings.json. Refuse the write rather than replacing the file with {}.
-        if (settings === null) {
-            throw new Error(`Cannot read ${file}; fix or remove it before updating fleet upgrade policy`)
-        }
-        settings.fleetUpgradePolicy = policy
-        await writeSettings(file, settings)
+    if (!dataDir) {
         cachedPolicy = policy
+        return
+    }
+    const file = getSettingsFile(dataDir)
+    await updateSettingsFile(file, (settings) => {
+        settings.fleetUpgradePolicy = policy
     })
-    // Keep the chain alive after failures so later clicks still serialize.
-    policyWriteTail = task.catch(() => {})
-    return task
+    cachedPolicy = policy
 }
 
 /** Test-only reset so suites don't leak cached state across cases. */
 export function resetFleetUpgradePolicyForTests(): void {
     cachedPolicy = DEFAULT_FLEET_UPGRADE_POLICY
     dataDir = null
-    policyWriteTail = Promise.resolve()
 }

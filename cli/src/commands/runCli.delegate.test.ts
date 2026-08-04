@@ -1,6 +1,10 @@
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
-import { spawnDurableUpgradeDelegate, waitForDelegatedRunner } from './runCli'
+import {
+    settleDurableDelegate,
+    spawnDurableUpgradeDelegate,
+    waitForDelegatedRunner,
+} from './runCli'
 import type { ChildProcess, SpawnOptions } from 'node:child_process'
 
 describe('waitForDelegatedRunner', () => {
@@ -20,6 +24,57 @@ describe('waitForDelegatedRunner', () => {
             child.emit('exit', 7, null)
         })
         await expect(pending).resolves.toBe(7)
+    })
+})
+
+describe('settleDurableDelegate', () => {
+    it('clears the path when the child exits before hubReadyAt', async () => {
+        const child = Object.assign(new EventEmitter(), {
+            pid: 4242,
+            kill: vi.fn(),
+        }) as EventEmitter & ChildProcess & { kill: ReturnType<typeof vi.fn> }
+        const waitForExit = vi.fn(async () => 1)
+        const waitForReady = vi.fn(async () => {
+            await new Promise((r) => setTimeout(r, 20))
+            return true
+        })
+
+        const settled = await settleDurableDelegate({
+            child,
+            wrapperPid: 1,
+            useProcessGroup: false,
+            waitForExit,
+            waitForReady,
+            timeoutMs: 50,
+        })
+        expect(settled).toEqual({ ready: false })
+        expect(child.kill).toHaveBeenCalled()
+    })
+
+    it('returns the exit code after readiness is confirmed', async () => {
+        const child = Object.assign(new EventEmitter(), {
+            pid: 4242,
+            kill: vi.fn(),
+        }) as EventEmitter & ChildProcess & { kill: ReturnType<typeof vi.fn> }
+        let resolveExit!: (code: number) => void
+        const waitForExit = vi.fn(
+            () => new Promise<number>((resolve) => {
+                resolveExit = resolve
+            }),
+        )
+        const waitForReady = vi.fn(async () => true)
+
+        const pending = settleDurableDelegate({
+            child,
+            wrapperPid: 1,
+            useProcessGroup: false,
+            waitForExit,
+            waitForReady,
+        })
+        await Promise.resolve()
+        resolveExit(0)
+        await expect(pending).resolves.toEqual({ ready: true, exitCode: 0 })
+        expect(child.kill).not.toHaveBeenCalled()
     })
 })
 
