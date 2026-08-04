@@ -1,9 +1,9 @@
 # RFC: HAPI Agent-to-Agent (A2A) Control Plane
 
 > **Status:** draft proposal for upstream discussion
-> **Date:** 2026-08-03
+> **Date:** 2026-08-03 (revised 2026-08-04)
 > **Authors:** @heavygee (with community review requested)
-> **Related:** [Discussion #1258](https://github.com/tiann/hapi/discussions/1258), [#1195](https://github.com/tiann/hapi/pull/1195), [#1228](https://github.com/tiann/hapi/pull/1228), [#803](https://github.com/tiann/hapi/pull/803)
+> **Related:** [Discussion #1258](https://github.com/tiann/hapi/discussions/1258), [#1195](https://github.com/tiann/hapi/pull/1195), [#1228](https://github.com/tiann/hapi/pull/1228), [#803](https://github.com/tiann/hapi/pull/803), [#1370](https://github.com/tiann/hapi/issues/1370), [#1371](https://github.com/tiann/hapi/issues/1371)
 
 ---
 
@@ -41,6 +41,8 @@ That works for nudges. It fails for:
 
 Vendor stacks will solve these problems inside their own ecosystems. HAPI's opportunity is the **horizontal** path: same collaboration contract across native agents, without forcing every worker into one vendor's cloud.
 
+Layer 0 dogfooding also produced the sharpest argument for structure. [#1370](https://github.com/tiann/hapi/issues/1370) (a pasted session citation does not reliably steer an agent to `inspect_peer` - it searches the local filesystem instead) and [#1371](https://github.com/tiann/hapi/issues/1371) (peer listing behaves differently either side of the hub/runner boundary) are both cases of a collaboration contract that lives only in prompt text and client-side convention. **A contract that agents must infer from prose is not a contract.** Layer 1 puts it in hub-owned objects and gates it on a hub capability, so behavior does not depend on whether a given flavor's system prompt happened to steer correctly.
+
 This RFC is the actionable first brick suggested in [#1258](https://github.com/tiann/hapi/discussions/1258).
 
 ---
@@ -56,11 +58,13 @@ This RFC is the actionable first brick suggested in [#1258](https://github.com/t
 
 ## Non-goals
 
+The following are **out of scope for Layer 1**, not architectural prohibitions. Layer 1 should leave room for each of them without shipping any:
+
 - Auto-dispatch or standing policies
 - Cross-hub organization federation
 - Replacing Claude / Codex / Cursor team features
-- Shipping a fleet-manager UI in this RFC
-- Requiring every agent to emit status lines on day one
+- A fleet-manager UI
+- Requiring every agent to emit status lines
 
 ---
 
@@ -78,9 +82,11 @@ Worker A  -- cite / inspect / ping -->  Hub control plane  -->  Worker B
 |-------|------|--------|
 | **0** | Cite, inspect, ping, session summaries | Upstream today |
 | **1** | Work ledger + typed A2A objects | This RFC |
-| Later | Any consumer that reads the ledger | Out of scope |
+| Later | Consumers that read the ledger, including a privileged reader with fleet-wide salience | Out of scope |
 
 Layer 0 remains fully supported. Prose `ping_peer` does not break. Layer 1 adds structure on top.
+
+The ledger is explicitly designed to be read later by a **privileged consumer** - one operating under an accountable principal, with fleet-wide visibility, presenting or acting on work across sessions. This RFC does not design such a consumer and does not require one to exist. It does mean Layer 1 should avoid choices that would foreclose one: see [Bounds](#bounds) and the principal model in [Security and tenancy](#security-and-tenancy).
 
 ---
 
@@ -126,24 +132,32 @@ Minimal hub tables (shape intentionally boring and SQLite-native):
 events(
   id, ts,
   source_kind, source_ref,
-  sink_kind, sink_ref,
+  sink_kind, sink_ref,          -- open vocabularies; see note below
   event_type,
   summary, payload_json,
-  artifact_refs,          -- JSON array of ArtifactRef
+  artifact_refs,                -- JSON array of ArtifactRef
+  tags,                         -- JSON array; grouping without parsing payload_json
   related_session_id,
-  related_event_id,       -- weak parent pointer; prefer event_links for typed edges
+  related_event_id,             -- weak parent pointer; prefer event_links for typed edges
   provenance,
   idempotency_key, dedupe_key,
   confidence, severity,
-  namespace, principal     -- required before any multi-user claims
+  expires_at,                   -- indexed staleness; see WorkAdvertisement
+  namespace, principal_json     -- required before any multi-user claims
 )
 
 event_links(
   id, from_event_id, to_event_id,
-  relation_type,          -- spawned | blocks | blocked_by | resolves | duplicates | ...
+  relation_type,          -- spawned | blocks | blocked_by | resolves | retries | supersedes | duplicates | ...
   created_at, metadata_json
 )
 ```
+
+Three notes on shape:
+
+- **`sink_kind` / `source_kind` are open vocabularies.** v1 needs only `session`. Keeping them open means a future sink (for example a placement request for a session that does not exist yet) is an additive change rather than a redesign.
+- **`expires_at` is a column, not a payload field.** Staleness is the single most common filter on a work ad ("what is currently true across the fleet"), and it must be indexable without parsing JSON.
+- **`tags` is a column for the same reason** - consumers group and filter without reaching into `payload_json`.
 
 This ledger is the durable home for work ads, handoffs, and receipts. UI for prioritization / management is explicitly deferred.
 
@@ -170,7 +184,7 @@ Shared handle to something produced or referenced:
 
 Suggested `kind` values: `github_pr`, `github_issue`, `commit`, `branch`, `file_path`, `diff`, `log_url`, `url`, `screenshot`, `session_id`.
 
-Secrets must never be embedded. Credential references stay elsewhere.
+Artifact refs are **handles, never payloads**. Secrets must never be embedded; credential references stay elsewhere. Command output, transcripts and diffs are referenced (`log_url`, `file_path`), never inlined - otherwise the ledger becomes both a bloat and a leak surface.
 
 ### 2. WorkAdvertisement
 
@@ -181,10 +195,10 @@ A session's claim about current or completed work:
   "event_type": "work_ad",
   "related_session_id": "…",
   "summary": "Implementing A2A handoff receipts",
+  "expires_at": 1785323800000,
   "payload_json": {
     "status": "in_progress",
     "project": "hapi",
-    "fresh_until": 1785323800000,
     "confidence": 0.8
   },
   "artifact_refs": []
@@ -192,6 +206,8 @@ A session's claim about current or completed work:
 ```
 
 Status vocabulary (v1): `in_progress`, `blocked`, `needs_decision`, `done`, `failed`, `stale`, `unknown`.
+
+Work ads are both **session-scoped and project-scoped**: the useful queries are "what is this session doing" and "what is happening on this project right now", and both must be indexed. A single fleet-wide pass over current ads is a first-class query, not a scan.
 
 ### 3. HandoffEnvelope
 
@@ -207,8 +223,10 @@ Structured request from one session to another:
     "intent": "review_and_test",
     "instructions": "Focus on regressions in peer messaging.",
     "constraints": ["no_git_push", "read_repo_ok"],
+    "notify_source": true,
+    "delivery_state": "queued",
     "confirmation": {
-      "principal": "operator",
+      "principal": { "kind": "human", "id": "operator" },
       "source": "human_approved_peer_tool"
     }
   },
@@ -218,7 +236,11 @@ Structured request from one session to another:
 }
 ```
 
-Delivery still goes through the hub (see flows). The envelope is the durable object; the worker-facing message is a rendering of it.
+- **`notify_source`** (default `true`) - when a receipt resolves this handoff, the hub delivers a rendered notice back to the source session over the existing Layer 0 peer path. Without this, a handoff is fire-and-forget: the ledger learns the outcome and the requesting session never does.
+- **`delivery_state`** - `queued` | `delivered` | `consumed` | `undeliverable`. Delivery is not consumption; a handoff delivered to a session that then dies mid-turn is a distinct state from one that was never delivered, and retries must be able to tell them apart.
+- **`confirmation.source`** - `human_approved_peer_tool` today; see [One Boss rules](#one-boss-rules) for delegated authority.
+
+Delivery still goes through the hub (see flows). The envelope is the durable object; the worker-facing message is a **rendering** of it, not the object itself.
 
 ### 4. HandoffReceipt
 
@@ -231,7 +253,17 @@ Outcome of a handoff:
   "summary": "Tests passed; two nits noted",
   "payload_json": {
     "status": "completed",
-    "notes": "No regressions in ping_peer resolve path."
+    "notes": "No regressions in ping_peer resolve path.",
+    "checks": [
+      {
+        "command": "npm test -- peer",
+        "exit_code": 0,
+        "passed": true,
+        "started_at": 1785320300000,
+        "completed_at": 1785320480000,
+        "output_ref": { "kind": "log_url", "url": "…" }
+      }
+    ]
   },
   "artifact_refs": [
     { "kind": "log_url", "url": "…", "source": "worker" }
@@ -239,9 +271,14 @@ Outcome of a handoff:
 }
 ```
 
-Receipt statuses (v1): `accepted`, `rejected`, `completed`, `blocked`, `failed`.
+Receipt statuses (v1): `accepted`, `rejected`, `completed`, `incomplete`, `blocked`, `failed`.
+
+- **`incomplete`** means "no terminal evidence yet - inspect the target session before deciding". A completion timeout is not a failure: some agent turns are legitimately long. Without this status the vocabulary forces a false choice between `blocked` and `failed`, and silence gets recorded as a verdict.
+- **`checks[]`** is optional and carries **facts, not judgements**: a command, its exit code, and a reference to its output. A verifier's opinion belongs in `notes`. This is the difference between a receipt that says *an agent reported tests passed* and one that says *this command exited 0 at this time, output here* - which is the whole point of a review-and-test handoff. Output is referenced, never inlined.
 
 Link the receipt to the handoff with `event_links.relation_type = resolves` (or `blocked_by` when blocked).
+
+**A late receipt is still valid.** If a timeout notice already went out and the target later finishes, its receipt links `resolves` as normal and must not be dropped. Retries are new events linked with `retries` / `supersedes` - never overwrites of a prior attempt.
 
 ---
 
@@ -270,12 +307,11 @@ Promote this format from "nicer push body" to **best-effort worker status emissi
 
 Rules:
 
-- Emission remains **optional by default**
-- A session or estate may opt into required status protocol later
-- Missing summary ≠ failed task; it may leave a work ad `unknown` / eventually `stale`
+- Emission remains **optional by default, and should stay optional indefinitely**. Missing status is not failure: it leaves a work ad `unknown`, and eventually `stale` via `expires_at`. Treating silence as a verdict is the same mistake as treating timeout as failure.
 - Invalid lines stay ignored (current parser behavior)
+- A session or estate may opt into a required status protocol later
 
-This avoids inventing a second worker status dialect while still making the existing format useful beyond FCM.
+This avoids inventing a second worker status dialect. Note the deliberate division of labour with receipt `checks[]`: the notify line is a **self-report** (what the agent believes about its turn), `checks[]` is **machine fact** (what a command actually returned). Both are structured sidecars condensed for humans and durable for machines; only one is evidence.
 
 ---
 
@@ -296,16 +332,31 @@ sequenceDiagram
   B->>Hub: Handoff receipt accepted
   B->>B: Do the work (native agent)
   B->>Hub: Handoff receipt completed + artifacts
+  Hub->>A: Rendered receipt notice (when notify_source)
   Hub-->>H: Durable audit chain in events ledger
 ```
+
+### What the worker actually sees
+
+The worker-facing message renders `summary`, `intent`, `constraints`, `instructions` (verbatim), the artifact list, and a hub-issued handle for the handoff event. The rest of the envelope stays in the ledger and can be fetched through the query API.
+
+This is a boundary, not concealment - the worker can retrieve everything. Four reasons it matters:
+
+1. **A rendered `confirmation` block is a forgeable badge.** If the worker reads `principal: operator, source: human_approved_peer_tool` as prompt text, then any writer who can create an event can write their own confirmation block and have it read as a grant. Authority is established by the hub at delivery time; a worker should never be in a position to *read* its own authorization.
+2. **Attribution collapses.** Inlined, a worker cannot distinguish "the hub asserts this" from "the sender claimed this". Retrieved, that distinction is structural.
+3. **Signal dilution.** Envelope metadata will grow. An agent handed sixty lines of control metadata and three lines of instruction follows the metadata's shape - the observed failure mode in #1370.
+4. **Rendering must version independently of storage.** As a projection, the ledger can gain fields without changing what any agent sees, across hub/runner version skew that is otherwise untestable.
+
+Hub-owned mutable fields (`delivery_state`, `expires_at`, `confidence`) are additionally unsafe to inline because a rendered copy is stale the moment it is read.
 
 ### Artifact review example
 
 1. Session A (e.g. Claude Code) finishes an implementation
 2. A creates a `handoff` with `diff` / `github_pr` artifact refs
 3. Hub delivers to Session B (e.g. local coding worker)
-4. B inspects artifacts, runs tests, writes `handoff_receipt`
-5. Humans (or later automation) query the ledger by PR / session / status
+4. B inspects artifacts, runs tests, writes `handoff_receipt` with `checks[]`
+5. Hub notifies A that the handoff resolved
+6. Humans (or later consumers) query the ledger by PR / session / status
 
 ### Discover → inspect → handoff → receipt
 
@@ -313,7 +364,7 @@ sequenceDiagram
 2. **Inspect** - `inspect_peer` and/or event query by session or artifact
 3. **Handoff** - write envelope event; deliver via hub
 4. **Act** - receiver works under its native flavor
-5. **Receipt** - write outcome + artifacts
+5. **Receipt** - write outcome + artifacts (+ notice back to source)
 6. **Audit** - follow `event_links`
 
 Layer 0 tools remain the human/agent UX for read/nudge. Layer 1 makes the collaboration reconstructible.
@@ -324,10 +375,19 @@ Layer 0 tools remain the human/agent UX for read/nudge. Layer 1 makes the collab
 
 1. **All A2A through the hub** - no agent-to-agent side channels
 2. **Same hub + same namespace only (v1)**
-3. **Worker-facing messages remain human-attributed** - the hub is the router; authority stays with the human principal
+3. **Every worker-facing message is attributable to a principal, and every non-human principal resolves to a human owner.** The hub is the router; authority terminates in an accountable human. (This is deliberately stronger than "messages are human-attributed": it admits an agent or service principal acting under a recorded grant, while refusing an action whose audit chain ends at "an agent said so".)
 4. **Humans can interrupt** - peer tools may require approval; delivery can be denied
 5. **Authorization at action time** - untrusted content (peer text, issue comments, MCP output, artifact metadata) must not become instruction authority merely by being stored or summarized
 6. **Idempotent writes** - retries must not create duplicate handoffs
+7. **Flavor adapters report facts; the hub owns policy and vocabulary.** An adapter may emit only observations - a notify line, a turn ended, a session unreachable, a process exit. The hub alone maps facts onto the status vocabulary. No flavor's internal state names may appear in `event_type` or any status field.
+
+Rule 7 is what keeps "keep native agents native" ([#1258](https://github.com/tiann/hapi/discussions/1258)) true structurally rather than aspirationally, and it is also what keeps A2A transport-neutral: several flavors reach HAPI over ACP today and several do not, so handoff semantics must never be expressed in any single backend's terms.
+
+### Bounds
+
+Worker sessions may read only hub-owned data about peers they are permitted to see, and may not use the ledger as a self-service work queue. There is no polling for work, and no wake-up that is not hub-mediated and attributable to a principal.
+
+The ledger is nevertheless designed to be read by a privileged consumer with fleet-wide salience, operating under an accountable principal. That consumer's design is out of scope here; the bounds above constrain **unprivileged worker sessions**, which is where confused-deputy risk actually lives.
 
 These rules are the product difference versus "agents DMing each other."
 
@@ -340,10 +400,17 @@ Exact routes can bikeshed; the capabilities matter:
 | Capability | Proposal |
 |------------|----------|
 | Write event | authenticated hub write with schema validation + idempotency |
-| Query events | filter by session, type, artifact, time, status |
-| Create handoff | helper that writes `handoff` and delivers to target session |
-| Write receipt | binds to handoff via `event_links` |
+| Query events | filter by session, project, type, artifact, tag, time, status, staleness |
+| Create handoff | **dedicated helper** that writes `handoff`, creates links, and delivers - atomically |
+| Write receipt | binds to handoff via `event_links`; delivers notice to source when `notify_source` |
 | Compatibility | `ping_peer` may emit a `handoff` when message/payload matches envelope schema |
+
+Handoff creation is a dedicated route rather than "compose `create event` + `ping_peer`" because idempotency, link creation and delivery have to succeed or fail together. Composed from two calls, a client crash between them yields a delivered instruction with no ledger row, or a ledger row nobody received.
+
+Two queries are first-class, indexed, and not filter-scans:
+
+- **by artifact** - "which handoffs and ads touch PR #1234" answers the ownership question from Motivation
+- **fleet-wide current ads** - one pass over unexpired work ads across sessions
 
 Backward compatible default:
 
@@ -355,16 +422,19 @@ Backward compatible default:
 ## Security and tenancy
 
 - Namespace isolation on every event write/query
-- Principal recorded on every write
+- **Principal recorded on every write, structured:** `{ kind: "human" | "agent" | "service", id, on_behalf_of }`. A non-human principal must carry an accountable human owner. A bare string cannot express "CI wrote this under my grant" without lying about one of the two.
+- **Delegated authority is explicit.** `confirmation.source` may be `human_approved_peer_tool` (a human approved this specific action) or `delegated_authority` with a `granting_event_id` pointing at the event that recorded the grant. Every delegated action's audit chain terminates at a human grant.
 - Artifact refs are handles, never secret material
 - Peer tools stay same-hub / same-namespace
 - Prompt-injection / confused-deputy tests before any auto-actuation claims
+- Any privileged reader must treat ledger content as **data**, never as instruction authority, and must obtain fresh authorization for its own actions (rule 5 applies to consumers, not just workers)
 
 **Kill criteria**
 
 - Cross-namespace read or write possible → stop
 - Duplicate handoffs on retry → stop
 - Untrusted stored text can broaden action scope without fresh authorization → stop
+- A non-human principal can act with no resolvable human owner → stop
 
 ---
 
@@ -379,19 +449,36 @@ Backward compatible default:
 | typed handoff + receipt | no | add |
 | work advertisements | no (chat only) | add |
 
+### Wire contract
+
+Schemas are **additive-only**, not frozen - freezing is not achievable across independently updated hub, runner and app:
+
+- New fields are optional with a sensible default
+- Never narrow a type, never flip optional to required, never remove a field. A field you stop writing stays readable.
+- The feature is gated on a **hub capability flag**. An old runner or app does not get a degraded simulation of Layer 1; it simply does not offer it.
+- Every compatibility shim is tagged with a name, the version it arrived in, and a removal condition, so the cleanup backlog is greppable.
+
+Two questions before any schema change lands: does a six-month-old client still parse this, and does a six-month-old hub still send something this client accepts?
+
+This matters here specifically because [#1371](https://github.com/tiann/hapi/issues/1371) is a hub/runner skew bug. A new collaboration contract that depends on both sides being current would reproduce it by design.
+
 ---
 
 ## Phased delivery
 
 | Phase | Deliverable |
 |-------|-------------|
-| **P0** | This RFC + frozen object schemas |
-| **P1** | `events` / `event_links` + namespace/principal ownership + tests |
-| **P2** | Handoff create / deliver / receipt |
+| **P0** | This RFC + additive-only object schemas + capability flag |
+| **P1** | `events` / `event_links` + namespace/principal ownership + isolation tests |
+| **P2** | Handoff create / deliver / receipt (+ notice back to source) |
 | **P3** | `AGENT_NOTIFY_SUMMARY` → work-ad / status ingest |
-| **P4** | Query APIs + minimal debug surfaces (no full manager UI) |
+| **P4** | Query APIs + minimal debug surfaces (no manager UI) |
 
 Each phase should be independently useful. P1 without P2 still gives a place to put structured status. P2 without P3 still gives explicit handoffs.
+
+The smallest useful upstream slice is **P1 alone**: tables, write/query, structured principal, namespace isolation tests - no handoff helper, no UI.
+
+P4's debug surface is an API plus one read-only JSON route. Not a panel.
 
 ---
 
@@ -399,23 +486,31 @@ Each phase should be independently useful. P1 without P2 still gives a place to 
 
 - Handoff remains queryable after both sessions are archived
 - Artifact refs survive and can be listed by PR / commit / path
+- Query by artifact (`github_pr`) returns every handoff and ad touching that PR
 - Retry with same idempotency key does not duplicate handoff
+- Retry after a failed delivery creates a new linked event (`retries`), never overwrites the prior one
+- Two concurrent handoffs to the same busy session are both retained and individually resolvable
+- A receipt arriving after a timeout notice still links `resolves` and is not dropped
+- Receipt `checks[]` round-trips with output as refs and no secret material
 - Cross-namespace handoff is refused
+- A write whose principal is non-human with no resolvable human owner is refused
 - Valid `AGENT_NOTIFY_SUMMARY` can promote into a work-ad / status event
 - Invalid notify line is ignored (no crash, no bogus event)
 - Plain prose `ping_peer` still works unchanged
 - Event query by `related_session_id` returns that session's A2A history
+- An old client without the capability flag neither offers nor breaks on Layer 1
 
 ---
 
 ## Open questions
 
-1. Dedicated handoff route vs compose `create event` + existing peer delivery?
-2. Should notify-summary stay optional forever, or become opt-in-required per session?
-3. How much of the envelope is rendered into the worker-facing message vs hub-only?
-4. Are work ads primarily session-scoped, project-scoped, or both?
-5. Ship API-only first, or include a tiny debug panel in P4?
-6. Exact `event_type` vocabulary: keep small (`work_ad`, `handoff`, `handoff_receipt`) or start wider?
+1. Should `delivery_state` transitions be hub-inferred (turn boundaries, session reachability) or explicitly acknowledged by the receiving session?
+2. Does `work_ad` need an explicit supersede rule, or is `expires_at` plus latest-per-session sufficient?
+3. How should a handoff to an unreachable or archived session resolve - `undeliverable` receipt, or no receipt and a stale handoff?
+4. Should the artifact index be a derived table, or is querying `artifact_refs` JSON acceptable at expected volumes?
+5. Is `tags` the right grouping primitive, or should project be a first-class column given how often ads are project-scoped?
+
+Resolved since the first draft, recorded here so the reasoning is not relitigated: notify-summary stays optional indefinitely; the `event_type` vocabulary stays at `work_ad` / `handoff` / `handoff_receipt`; handoff creation gets a dedicated route; work ads are both session- and project-scoped; the worker-facing message is a projection rather than the payload.
 
 ---
 
@@ -423,8 +518,8 @@ Each phase should be independently useful. P1 without P2 still gives a place to 
 
 | Ask | This RFC |
 |-----|----------|
-| Artifact-based handoffs | `HandoffEnvelope` + `ArtifactRef` + receipts |
-| One Boss via HAPI | hub-only routing, human attribution, interruptible peer tools |
+| Artifact-based handoffs | `HandoffEnvelope` + `ArtifactRef` + receipts with `checks[]` |
+| One Boss via HAPI | hub-only routing, principal attribution, interruptible peer tools |
 | Unified work advertisements | `WorkAdvertisement` + notify-summary elevation |
 
 ## Appendix B - related upstream work
@@ -433,6 +528,8 @@ Each phase should be independently useful. P1 without P2 still gives a place to 
 - [#1246](https://github.com/tiann/hapi/issues/1246) / [#1228](https://github.com/tiann/hapi/pull/1228) - `inspect_peer` + rich session mentions
 - [#1215](https://github.com/tiann/hapi/issues/1215) / [#1217](https://github.com/tiann/hapi/pull/1217) - session `@` citations
 - [#803](https://github.com/tiann/hapi/pull/803) - `AGENT_NOTIFY_SUMMARY` parse for FCM
+- [#1370](https://github.com/tiann/hapi/issues/1370) - citation → `inspect_peer` steering
+- [#1371](https://github.com/tiann/hapi/issues/1371) - peer listing across the hub/runner boundary
 - [#1258](https://github.com/tiann/hapi/discussions/1258) - strategic discussion that requested this RFC
 
 ## Appendix C - non-normative example chain
@@ -441,10 +538,29 @@ Each phase should be independently useful. P1 without P2 still gives a place to 
 work_ad(session A, in_progress, "impl peer handoff")
 handoff(A → B, review_and_test, artifact=diff)
 handoff_receipt(B, accepted)
-handoff_receipt(B, completed, artifact=log)
+handoff_receipt(B, completed, artifact=log, checks=[npm test → 0])
 work_ad(session A, done, artifact=github_pr)
 event_links: handoff --spawned--> receipt*; receipt --resolves--> handoff
 ```
+
+## Appendix D - prior art
+
+Assessed from primary sources (repos, design docs, public product docs) so this RFC is not reinventing existing work. Thanks to @KorenKrita in [#1258](https://github.com/tiann/hapi/discussions/1258) for the pointers.
+
+| | [Paseo](https://github.com/getpaseo/paseo) | [CCB](https://github.com/SeemSeam/claude_codex_bridge) | [Lody](https://lody.ai/) (closed) |
+|---|---|---|---|
+| Shape | local daemon + desktop/mobile/web/CLI clients | visible multi-agent terminal panes + daemon | local CLI + hosted team workspace |
+| A2A primitive | cross-provider subagents via injected tool catalog | `/ask <agent>` between panes | agent creates/inspects/follows-up other conversations |
+| Artifact handoff | prose briefing template (a *skill*, not a schema) | shared memory `.md` + payload refs | shared session context + linked PR |
+| Receipts | `notifyOnFinish` callback; `Loop` records carry verify-check results with exit codes | `ReplyRecord` + terminal status, with attempt lineage | results return to the requesting conversation |
+| Durable work graph | none (agent records, chat rooms, loops, schedules) | messages / attempts / replies + dead-letter (design doc) | not public |
+| Audit surface | Subagents track in the app | watch the pane and take over | shared team workspace |
+
+What this RFC takes from them: the requester must be notified when delegated work resolves (all three); delivery, attempt and reply are distinct with retry lineage (CCB); timeout means inspect rather than fail (CCB, Lody); receipts should carry machine evidence, not assertions (Paseo `Loop` verify checks); provider facts must not leak into user-visible state vocabulary (CCB, Paseo); wire schemas are additive with capability gating (Paseo).
+
+What it deliberately does not take: injecting a central capability catalog into every agent (fights "keep native agents native" - #1258); parent-owns-child lifecycle for peer sessions; coordination contracts that live in prompt templates rather than stored objects (#1370); a full mailbox scheduler with leases, quorum and priority classes; cloud/team tenancy models; pane-visibility as the audit mechanism; and any requirement that a worker's runtime speak one particular protocol to participate.
+
+Notably, **none of the three has a typed artifact object or a fleet-wide work-advertisement object.** Those two remain this RFC's differentiated - and therefore least externally validated - parts, which argues for keeping them small in v1.
 
 ---
 
@@ -454,7 +570,8 @@ Looking for feedback on:
 
 1. Does Layer 0 → Layer 1 sequencing feel right?
 2. Is elevating `AGENT_NOTIFY_SUMMARY` acceptable, or should status ads use a new object?
-3. Smallest useful P1/P2 slice for an upstream PR?
+3. Is P1-alone (tables + write/query + isolation tests) the right first upstream PR?
 4. Any hard constraints from existing hub/SQLite / namespace design we should bake into P1?
+5. Is the structured `principal` shape right, or does upstream already have a convention to reuse?
 
 If this direction looks good, next step is a thin P1 implementation PR: ledger schema + write/query + isolation tests, with no manager UI.
