@@ -115,4 +115,40 @@ describe('projectToolResultForBrain', () => {
         const explanation = { explanation: { inboxItemId: 1, title: 'x' } }
         expect(projectToolResultForBrain('explain_priority', explanation)).toBe(explanation)
     })
+
+    it('thins query_dispositions list rows to predicate keys + as-seen title', () => {
+        const raw = {
+            mode: 'list',
+            total: 1,
+            rows: [
+                {
+                    id: 9,
+                    itemId: 42,
+                    action: 'done',
+                    statusAfter: 'resolved',
+                    feedback: 'y'.repeat(500),
+                    createdAt: 5,
+                    sourceKind: 'worker',
+                    eventType: 'needs_decision',
+                    category: 'QUESTION',
+                    project: 'hapi',
+                    repo: 'tiann/hapi',
+                    title: 'x'.repeat(500)
+                }
+            ]
+        }
+        const projected = projectToolResultForBrain('query_dispositions', raw) as {
+            rows: { statusAfter?: unknown; what: string; feedback: string; itemId: number }[]
+        }
+        expect(projected.rows[0]?.itemId).toBe(42)
+        // fat dropped, title/feedback truncated
+        expect(projected.rows[0]?.statusAfter).toBeUndefined()
+        expect((projected.rows[0]?.what as string).length).toBeLessThan(100)
+        expect((projected.rows[0]?.feedback as string).length).toBeLessThan(140)
+    })
+
+    it('passes query_dispositions cluster mode through untouched (already tiny)', () => {
+        const raw = { mode: 'cluster', total: 1, clusters: [{ keys: { category: 'QUESTION' }, count: 3, actions: { done: 3 }, lastCreatedAt: 9 }] }
+        expect(projectToolResultForBrain('query_dispositions', raw)).toBe(raw)
+    })
 })

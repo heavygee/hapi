@@ -10,7 +10,7 @@ import { listConfiguredVoiceBackends, resolveHubVoiceBackend } from '@hapi/proto
 import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireSyncEngine } from './guards'
-import { isOverseerToolName, runOverseerTool } from '../../overseer/runOverseerTool'
+import { isOverseerToolName, OverseerWriteNotAllowedError, runOverseerTool } from '../../overseer/runOverseerTool'
 import { runOverseerConverse } from '../../overseer/converse'
 import { BrainUnavailableError, filterChatModels, listBrainModels, listBrainProfiles, resolveBrainConfig } from '../../overseer/brainClient'
 
@@ -89,8 +89,8 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
     })
 
-    // Read-only tool dispatch. All tools are read-only; this endpoint never
-    // mutates worker or inbox state.
+    // Read-only tool dispatch. Writes (record_disposition) are gated off here and
+    // return 403; the conversational path is the operator-directed write surface.
     app.post('/overseer/tools/:tool', async (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)
         if (engine instanceof Response) return engine
@@ -113,6 +113,9 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
         } catch (error) {
             if (error instanceof z.ZodError) {
                 return c.json({ error: 'Invalid tool arguments', issues: error.flatten() }, 400)
+            }
+            if (error instanceof OverseerWriteNotAllowedError) {
+                return c.json({ error: error.message }, 403)
             }
             throw error
         }

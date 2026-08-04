@@ -1,16 +1,34 @@
 import {
     OVERSEER_TOOL_NAMES,
+    isOverseerWriteTool,
     overseerToolArgsSchemas,
     type OverseerToolName
 } from '@hapi/protocol'
 import type { OverseerEntity } from '../sync/overseerEntity'
 
+/** Thrown when a write tool (`record_disposition`) is dispatched on a read-only surface (R2 gate). */
+export class OverseerWriteNotAllowedError extends Error {
+    constructor(tool: string) {
+        super(`Tool "${tool}" writes and is not allowed on this surface`)
+        this.name = 'OverseerWriteNotAllowedError'
+    }
+}
+
 /**
- * Execute one read-only Overseer tool by name against the entity. Shared by the
- * HTTP tool-dispatch route and the converse tool-calling loop so both go through
- * exactly one place. Throws `ZodError` on invalid args; every tool is read-only.
+ * Execute one Overseer tool by name against the entity. Shared by the HTTP tool-dispatch route and
+ * the converse tool-calling loop so both go through exactly one place. Throws `ZodError` on invalid
+ * args. Every tool is read-only EXCEPT `record_disposition`; writes are gated behind `allowWrites`
+ * (the conversational path sets it; the raw HTTP dispatch does not).
  */
-export function runOverseerTool(overseer: OverseerEntity, tool: OverseerToolName, args: unknown): unknown {
+export function runOverseerTool(
+    overseer: OverseerEntity,
+    tool: OverseerToolName,
+    args: unknown,
+    allowWrites = false
+): unknown {
+    if (isOverseerWriteTool(tool) && !allowWrites) {
+        throw new OverseerWriteNotAllowedError(tool)
+    }
     switch (tool) {
         case 'query_events':
             return { events: overseer.queryEvents(overseerToolArgsSchemas.query_events.parse(args)) }
@@ -36,6 +54,10 @@ export function runOverseerTool(overseer: OverseerEntity, tool: OverseerToolName
             return { workers: overseer.listActiveWorkers(overseerToolArgsSchemas.list_active_workers.parse(args)) }
         case 'query_open_loops':
             return overseer.queryOpenLoops(overseerToolArgsSchemas.query_open_loops.parse(args))
+        case 'query_dispositions':
+            return overseer.queryDispositions(overseerToolArgsSchemas.query_dispositions.parse(args))
+        case 'record_disposition':
+            return overseer.recordDisposition(overseerToolArgsSchemas.record_disposition.parse(args))
         default: {
             const exhaustive: never = tool
             throw new Error(`Unknown overseer tool: ${String(exhaustive)}`)
