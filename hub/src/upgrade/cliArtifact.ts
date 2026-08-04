@@ -26,11 +26,7 @@ export class TransientArtifactBuildError extends Error {
 }
 
 export function isTransientArtifactBuildFailure(error: unknown): boolean {
-    if (error instanceof TransientArtifactBuildError) {
-        return true
-    }
-    const message = error instanceof Error ? error.message : String(error)
-    return /incomplete hub source tree|Could not resolve:/i.test(message)
+    return error instanceof TransientArtifactBuildError
 }
 
 export type ArtifactMeta = {
@@ -583,12 +579,16 @@ export async function ensureCliArtifact(options: {
                     `bun compile timed out or killed (${proc.signalCode}) after artifact budget: ${detail}`,
                 )
             }
-            // Half-souped driver tips (imports without files) fail here during remat.
-            // Typed as TransientArtifactBuildError → upgrade_deferred (no auto toast).
+            // Only treat unresolved imports as transient when the source tree
+            // changed during compile (active remat). Stable missing modules
+            // must stay upgrade_failed so auto fleet still toasts.
             if (/Could not resolve:/i.test(detail)) {
-                throw new TransientArtifactBuildError(
-                    `bun compile failed (incomplete hub source tree — mid-rebuild?): ${detail}`,
-                )
+                const fingerprintAfter = resolveArtifactSourceFingerprint(monorepo)
+                if (fingerprintAfter !== sourceFingerprint) {
+                    throw new TransientArtifactBuildError(
+                        `bun compile failed (source changed during build): ${detail}`,
+                    )
+                }
             }
             throw new Error(`bun compile failed: ${detail}`)
         }

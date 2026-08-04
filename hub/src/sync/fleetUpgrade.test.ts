@@ -2,6 +2,7 @@ import { describe, expect, it, mock } from 'bun:test'
 import { MACHINE_CAPABILITIES } from '@hapi/protocol/runnerCapabilities'
 import { Store } from '../store'
 import { RpcRegistry } from '../socket/rpcRegistry'
+import { TransientArtifactBuildError } from '../upgrade/cliArtifact'
 import { SyncEngine } from './syncEngine'
 import type { HubUpgradeOffer } from '@hapi/protocol/upgradeChannel'
 
@@ -663,7 +664,9 @@ describe('SyncEngine fleet upgrade', () => {
                 getUpgradeOffer: () => offer,
                 getFleetUpgradePolicy: () => 'auto',
                 prepareArtifactOffer: async () => {
-                    throw new Error('bun compile failed: Could not resolve: "./settingsStore"')
+                    throw new TransientArtifactBuildError(
+                        'bun compile failed (source changed during build): Could not resolve: "./settingsStore"',
+                    )
                 },
             },
         )
@@ -694,6 +697,68 @@ describe('SyncEngine fleet upgrade', () => {
             await new Promise((resolve) => setTimeout(resolve, 20))
             expect(runnerSelfUpgrade).not.toHaveBeenCalled()
             expect(sendToast).not.toHaveBeenCalled()
+        } finally {
+            engine.stop()
+        }
+    })
+
+    it('auto fleet toasts stable Could not resolve (not mid-rebuild)', async () => {
+        const offer: HubUpgradeOffer = {
+            channel: 'hub-artifact',
+            targetVersion: '0.26.0',
+            targetCapabilities: ['cursor-chat-store-status'],
+            targetGeneration: 'new-fingerprint',
+        }
+        const store = new Store(':memory:')
+        const sendToast = mock(async () => {})
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {}, sendToast } as never,
+            {
+                getUpgradeOffer: () => offer,
+                getFleetUpgradePolicy: () => 'auto',
+                prepareArtifactOffer: async () => {
+                    // Plain Error: fingerprint unchanged during compile → permanent miss
+                    throw new Error('bun compile failed: Could not resolve: "./settingsStore"')
+                },
+            },
+        )
+
+        try {
+            ;(engine as any).rpcGateway.runnerSelfUpgrade = mock(async () => ({
+                status: 'started',
+                message: 'ok',
+                channel: 'hub-artifact',
+            }))
+
+            engine.getOrCreateMachine(
+                'teemo-stable',
+                {
+                    host: 'Teemo',
+                    platform: 'win32',
+                    arch: 'x64',
+                    happyCliVersion: '0.26.0',
+                    capabilities: ['cursor-chat-store-status', 'runner-self-upgrade', 'cli-artifact-generation'],
+                    cliArtifactGeneration: 'old-fingerprint',
+                },
+                null,
+                'default',
+            )
+            engine.handleMachineAlive({ machineId: 'teemo-stable', time: Date.now() })
+            await Promise.resolve()
+            await new Promise((resolve) => setTimeout(resolve, 20))
+            expect(sendToast).toHaveBeenCalledWith(
+                'default',
+                expect.objectContaining({
+                    type: 'toast',
+                    data: expect.objectContaining({
+                        title: 'Runner upgrade failed',
+                        body: expect.stringContaining('Could not resolve'),
+                    }),
+                }),
+            )
         } finally {
             engine.stop()
         }
