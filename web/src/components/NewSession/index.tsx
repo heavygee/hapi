@@ -8,6 +8,10 @@ import { useMachinePathsExists } from '@/hooks/useMachinePathsExists'
 import { useSpawnSession } from '@/hooks/mutations/useSpawnSession'
 import { useCodexModels } from '@/hooks/queries/useCodexModels'
 import { useCursorModelsForMachine } from '@/hooks/queries/useCursorModelsForMachine'
+import {
+    buildPiNewSessionModelOptions,
+    usePiModelsForMachine,
+} from '@/hooks/queries/usePiModelsForMachine'
 import { useOpencodeModelsForCwd } from '@/hooks/queries/useOpencodeModelsForCwd'
 import { useGrokModelsForCwd } from '@/hooks/queries/useGrokModelsForCwd'
 import { useSessions } from '@/hooks/queries/useSessions'
@@ -317,6 +321,25 @@ export function NewSession(props: {
         machineId,
         enabled: agent === 'cursor' && Boolean(machineId)
     })
+    const piModelsState = usePiModelsForMachine({
+        api: props.api,
+        machineId,
+        enabled: agent === 'pi' && Boolean(machineId),
+    })
+    const piModelOptions = useMemo(
+        () => buildPiNewSessionModelOptions(
+            piModelsState.availableModels,
+            piModelsState.currentModelId,
+        ),
+        [piModelsState.availableModels, piModelsState.currentModelId],
+    )
+    useEffect(() => {
+        if (agent !== 'pi' || piModelsState.isLoading) return
+        if (model !== 'auto') return
+        if (piModelsState.currentModelId) {
+            setModel(piModelsState.currentModelId)
+        }
+    }, [agent, model, piModelsState.currentModelId, piModelsState.isLoading])
     const cursorPicker = useMemo(
         () => buildNewSessionCursorPickerState(
             cursorModelsState.availableModels,
@@ -1325,19 +1348,25 @@ export function NewSession(props: {
                                 ? codexModelOptions
                                 : agent === 'grok'
                                     ? grokModelOptions
+                                    : agent === 'pi'
+                                        ? piModelOptions
                                 : undefined
                         }
                         isDisabled={
                             isFormDisabled
                             || (agent === 'codex' && Boolean(codexModelsState.error))
                             || (agent === 'grok' && Boolean(grokModelsState.error))
+                            || (agent === 'pi' && Boolean(piModelsState.error))
                         }
                         isLoading={(agent === 'codex' && codexModelsState.isLoading)
-                            || (agent === 'grok' && grokModelsState.isLoading)}
+                            || (agent === 'grok' && grokModelsState.isLoading)
+                            || (agent === 'pi' && piModelsState.isLoading)}
                         error={agent === 'codex' && codexModelsState.error
                             ? `${t('newSession.model.loadFailed')}: ${codexModelsState.error}`
                             : agent === 'grok' && grokModelsState.error
                                 ? `${t('newSession.model.loadFailed')}: ${grokModelsState.error}`
+                                : agent === 'pi' && piModelsState.error
+                                    ? `${t('newSession.model.loadFailed')}: ${piModelsState.error}`
                                 : null}
                         onModelChange={setModel}
                     />
