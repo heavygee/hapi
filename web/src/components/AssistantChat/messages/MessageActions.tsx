@@ -45,7 +45,7 @@ export function MessageActions({
         const extras = thread?.extras as HappyRuntimeExtras | undefined
         const isRunning = thread?.isRunning ?? false
         return {
-            hideShareButton: extras?.shareHiddenByMessageId.has(message.id) ?? isRunning,
+            hideShareButton: extras?.shareHiddenByMessageId?.has(message.id) ?? isRunning,
             threadIsRunning: isRunning
         }
     })
