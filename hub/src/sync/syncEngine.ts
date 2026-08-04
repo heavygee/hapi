@@ -178,6 +178,8 @@ function extractClaudeUserMessageTextFromAgentOutput(content: unknown): string |
     return extractUserMessageText(message.content)
 }
 
+type PtyResumeAttempt = NonNullable<NonNullable<Session['metadata']>['ptyResumeAttempt']>
+
 export type SyncEngineOptions = {
     /** Resolve the current hub upgrade offer (channel + version + optional artifact). */
     getUpgradeOffer?: () => HubUpgradeOffer
@@ -199,6 +201,10 @@ export class SyncEngine {
     private inactivityTimer: NodeJS.Timeout | null = null
     /** Sessions that emitted `session-ready` (Cursor ACP or validated Pi get_state). */
     private readonly sessionReadyIds = new Set<string>()
+    /** Same-ID PTY rows with a resume currently in flight. */
+    private readonly ptyResumeInFlightIds = new Set<string>()
+    /** PTY rows kept fail-closed after a metadata write/clear failure. */
+    private readonly ptyResumeQuarantinedIds = new Set<string>()
     /** Original Pi rows with a native resume currently in flight. */
     private readonly piResumeInFlightIds = new Set<string>()
     /** Pi rows whose runner child could not be confirmed terminated. */
@@ -674,6 +680,7 @@ export class SyncEngine {
             }
         }
         const ownsPiAttempt = before?.metadata?.piResumeAttempt !== undefined
+        const ownsPtyAttempt = before?.metadata?.ptyResumeAttempt !== undefined
         const isPiAttemptChild = this.sessionCache.getSessions().some(
             (session) => session.metadata?.piResumeAttempt?.childSessionId === payload.sid
         )
@@ -707,8 +714,12 @@ export class SyncEngine {
         this.sessionReadyIds.delete(payload.sid)
         this.piResumeQuarantinedIds.delete(payload.sid)
         this.piUnexpectedTempOriginalIds.delete(payload.sid)
+        this.ptyResumeInFlightIds.delete(payload.sid)
         if (ownsPiAttempt || isPiAttemptChild) {
             void this.clearPiAttemptForEndedSession(payload.sid, restorePiArchive)
+        }
+        if (ownsPtyAttempt) {
+            void this.writePtyResumeAttempt(payload.sid, before!.namespace, null).catch(() => {})
         }
     }
 
@@ -1459,6 +1470,30 @@ export class SyncEngine {
     }
 
     /** Drop history locators that no longer have a corresponding message row. */
+    private async waitForExactNativeForkBound(
+        childId: string,
+        expectedNativeSessionId: string,
+        metadataKey: 'grokSessionId' | 'piSessionId',
+        requireSessionReady: boolean,
+        timeoutMs: number = 60_000
+    ): Promise<boolean> {
+        const startedAt = Date.now()
+        while (Date.now() - startedAt < timeoutMs) {
+            this.sessionCache.refreshSession(childId)
+            const child = this.sessionCache.getSession(childId)
+            const boundId = child?.metadata?.[metadataKey]
+            if (typeof boundId === 'string' && boundId.length > 0) {
+                if (boundId !== expectedNativeSessionId) return false
+                if (!requireSessionReady || this.sessionReadyIds.has(childId)) return true
+            }
+            if (child && !child.active && Date.now() - startedAt > 5_000) {
+                return false
+            }
+            await new Promise((resolve) => setTimeout(resolve, 250))
+        }
+        return false
+    }
+
     private scrubHistoryLocators(sessionId: string, namespace: string): void {
         const remainingLocalIds = new Set(
             this.store.messages.getAllMessages(sessionId)
@@ -3040,6 +3075,31 @@ export class SyncEngine {
                 code: 'resume_unavailable'
             }
         }
+        const initialPtyMode =
+            (initialSession.agentState as { startingMode?: 'local' | 'remote' | 'pty' } | null)?.startingMode === 'pty'
+        if (initialPtyMode && this.ptyResumeInFlightIds.has(access.sessionId)) {
+            return { type: 'error', message: 'PTY resume is already in progress', code: 'resume_failed' }
+        }
+        if (
+            initialPtyMode
+            && this.ptyResumeQuarantinedIds.has(access.sessionId)
+            && !initialSession.metadata?.ptyResumeAttempt
+        ) {
+            return { type: 'error', message: 'PTY resume cleanup is incomplete', code: 'resume_failed', rollbackSafe: false }
+        }
+        if (initialSession.metadata?.ptyResumeAttempt) {
+            const reconciled = await this.reconcilePersistedPtyResumeAttempt(initialSession)
+            if (!reconciled) {
+                return {
+                    type: 'error',
+                    message: 'PTY resume timed out and the child is still active',
+                    code: 'resume_failed',
+                    rollbackSafe: false,
+                }
+            }
+            this.ptyResumeQuarantinedIds.delete(access.sessionId)
+            initialSession = this.sessionCache.getSessionByNamespace(access.sessionId, namespace) ?? initialSession
+        }
         if (initialSession.active) {
             return { type: 'success', sessionId: access.sessionId }
         }
@@ -3130,15 +3190,11 @@ export class SyncEngine {
                     }
                 }
             } catch (error) {
-                // Soft-fail on probe skew / missing handler (#1084): definitive
-                // onDisk:false still blocks above; probe errors must not be
-                // reported as missing chat data.
-                const message = error instanceof Error ? error.message : 'Failed to inspect Cursor chat store'
-                console.warn('[resume] Cursor chat-store probe failed; proceeding with reopen attempt', {
-                    sessionId: access.sessionId,
-                    machineId: targetMachine.id,
-                    message
-                })
+                return {
+                    type: 'error',
+                    message: error instanceof Error ? error.message : 'Failed to inspect Cursor chat store',
+                    code: 'resume_failed'
+                }
             }
         }
 
@@ -3148,6 +3204,32 @@ export class SyncEngine {
             : opts?.permissionMode
                 ?? session.permissionMode
                 ?? metadataPermissionMode
+        const resumedStartingMode =
+            (session.agentState as { startingMode?: 'local' | 'remote' | 'pty' } | null)?.startingMode === 'pty'
+                ? 'pty'
+                : undefined
+        if (resumedStartingMode === 'pty') {
+            if (this.ptyResumeInFlightIds.has(access.sessionId)) {
+                return { type: 'error', message: 'PTY resume is already in progress', code: 'resume_failed' }
+            }
+            this.ptyResumeInFlightIds.add(access.sessionId)
+            // Persist before spawn so a Hub restart cannot forget an in-place
+            // child whose readiness outcome is still unknown.
+            try {
+                await this.writePtyResumeAttempt(access.sessionId, namespace, {
+                    state: 'resuming',
+                    machineId: targetMachine.id,
+                    startedAt: Date.now(),
+                })
+            } catch {
+                this.ptyResumeInFlightIds.delete(access.sessionId)
+                return { type: 'error', message: 'Failed to record PTY resume attempt', code: 'resume_failed' }
+            }
+            // PTY reopen intentionally reuses the archived session id. Any
+            // readiness bit from the previous process must not satisfy the
+            // replacement process's readiness barrier.
+            this.sessionReadyIds.delete(access.sessionId)
+        }
         let piResumeSucceeded = false
         try {
             const spawnResult = await this.rpcGateway.spawnSession(
@@ -3165,7 +3247,8 @@ export class SyncEngine {
                 session.serviceTier ?? undefined,
                 access.sessionId,
                 session.collaborationMode ?? undefined,
-                session.copilotAgentMode ?? undefined
+                session.copilotAgentMode ?? undefined,
+                resumedStartingMode
             )
 
             if (spawnResult.type !== 'success') {
@@ -3206,6 +3289,21 @@ export class SyncEngine {
 
             const becameActive = await this.waitForSessionActive(spawnResult.sessionId)
             if (!becameActive) {
+                if (resumedStartingMode === 'pty') {
+                    const current = this.sessionCache.getSessionByNamespace(access.sessionId, namespace)
+                    const stopped = current
+                        ? await this.reconcilePersistedPtyResumeAttempt(current)
+                        : false
+                    if (!stopped) {
+                        this.ptyResumeQuarantinedIds.add(access.sessionId)
+                        return {
+                            type: 'error',
+                            message: 'PTY resume failed and the child is still active',
+                            code: 'resume_failed',
+                            rollbackSafe: false,
+                        }
+                    }
+                }
                 if (requiresPiNativeReady) {
                     const inactive = await this.terminateInPlacePiResume(
                         targetMachine.id,
@@ -3220,7 +3318,8 @@ export class SyncEngine {
                 return { type: 'error', message: 'Session failed to become active', code: 'resume_failed' }
             }
 
-            const needsReadyBeforeSuccess = requiresPiNativeReady
+            const needsReadyBeforeSuccess = resumedStartingMode === 'pty'
+                || requiresPiNativeReady
                 || (
                     spawnResult.sessionId !== access.sessionId
                     && flavor === 'cursor'
@@ -3229,6 +3328,46 @@ export class SyncEngine {
             if (needsReadyBeforeSuccess) {
                 const readyResult = await this.waitForSessionReady(spawnResult.sessionId)
                 if (readyResult !== 'ready') {
+                    if (resumedStartingMode === 'pty' && readyResult === 'timeout') {
+                        let status: 'stopped' | 'already_gone' | 'still_alive'
+                        try {
+                            status = await this.rpcGateway.stopRunnerSession(
+                                targetMachine.id,
+                                spawnResult.sessionId
+                            )
+                        } catch {
+                            status = 'still_alive'
+                        }
+                        let inactive = false
+                        if (status === 'already_gone') {
+                            const current = this.sessionCache.getSession(spawnResult.sessionId)
+                            if (current?.active) {
+                                this.handleSessionEnd({ sid: spawnResult.sessionId, time: Date.now(), reason: 'error' })
+                            }
+                            inactive = true
+                        } else if (status === 'stopped') {
+                            inactive = await this.waitForSessionInactive(spawnResult.sessionId)
+                        }
+                        if (!inactive) {
+                            this.ptyResumeQuarantinedIds.add(access.sessionId)
+                            try {
+                                await this.writePtyResumeAttempt(access.sessionId, namespace, {
+                                    state: 'quarantined',
+                                    machineId: targetMachine.id,
+                                    startedAt: Date.now(),
+                                })
+                            } catch {
+                                // The durable pre-spawn `resuming` marker remains
+                                // the restart-safe fail-closed source of truth.
+                            }
+                            return {
+                                type: 'error',
+                                message: 'PTY resume timed out and the child is still active',
+                                code: 'resume_failed',
+                                rollbackSafe: false,
+                            }
+                        }
+                    }
                     if (requiresPiNativeReady && readyResult !== 'ended') {
                         const inactive = await this.terminateInPlacePiResume(
                             targetMachine.id,
@@ -3240,10 +3379,27 @@ export class SyncEngine {
                             return { type: 'error', message: 'Pi native resume timed out and the child is still active', code: 'resume_failed', rollbackSafe: false }
                         }
                     }
+                    if (resumedStartingMode === 'pty') {
+                        try {
+                            await this.writePtyResumeAttempt(access.sessionId, namespace, null)
+                        } catch {
+                            this.ptyResumeQuarantinedIds.add(access.sessionId)
+                            return {
+                                type: 'error',
+                                message: 'PTY resume failed and cleanup metadata could not be cleared',
+                                code: 'resume_failed',
+                                rollbackSafe: false,
+                            }
+                        }
+                    }
                     const message = flavor === 'pi'
                         ? readyResult === 'ended'
                             ? 'Pi session ended before native resume completed'
                             : 'Pi session failed to become native-ready'
+                        : resumedStartingMode === 'pty'
+                            ? readyResult === 'ended'
+                                ? 'Session ended before the agent PTY became ready'
+                                : 'Session failed to become ready'
                         : readyResult === 'ended'
                             ? 'Session ended before Cursor ACP load completed'
                             : 'Session failed to become ready'
@@ -3266,8 +3422,25 @@ export class SyncEngine {
             this.sessionCache.markSessionActive(spawnResult.sessionId)
             piResumeSucceeded = true
             if (requiresPiNativeReady) await this.writePiResumeAttempt(access.sessionId, namespace, null)
+            if (resumedStartingMode === 'pty') {
+                try {
+                    await this.writePtyResumeAttempt(access.sessionId, namespace, null)
+                    this.ptyResumeQuarantinedIds.delete(access.sessionId)
+                } catch {
+                    this.ptyResumeQuarantinedIds.add(access.sessionId)
+                    return {
+                        type: 'error',
+                        message: 'PTY resumed but cleanup metadata could not be cleared',
+                        code: 'resume_failed',
+                        rollbackSafe: false,
+                    }
+                }
+            }
             return { type: 'success', sessionId: spawnResult.sessionId }
         } finally {
+            if (resumedStartingMode === 'pty') {
+                this.ptyResumeInFlightIds.delete(access.sessionId)
+            }
             if (requiresPiNativeReady) {
                 this.piResumeInFlightIds.delete(access.sessionId)
                 if (!piResumeSucceeded && this.sessionCache.getSession(access.sessionId)?.metadata?.piResumeAttempt?.state === 'resuming') {
@@ -3315,7 +3488,32 @@ export class SyncEngine {
         if (await this.recoverInactiveReservedClear(session, namespace)) {
             session = this.sessionCache.getSessionByNamespace(sessionId, namespace) ?? session
         }
-        const metadata = session.metadata
+        let metadata = session.metadata
+        const isPtyResume =
+            (session.agentState as { startingMode?: 'local' | 'remote' | 'pty' } | null)?.startingMode === 'pty'
+        if (isPtyResume && this.ptyResumeInFlightIds.has(access.sessionId)) {
+            return { type: 'error', message: 'PTY resume is already in progress', code: 'resume_failed' }
+        }
+
+        if (
+            this.ptyResumeQuarantinedIds.has(access.sessionId)
+            && !metadata?.ptyResumeAttempt
+        ) {
+            return { type: 'error', message: 'PTY resume cleanup is incomplete', code: 'resume_failed' }
+        }
+        if (metadata?.ptyResumeAttempt) {
+            const reconciled = await this.reconcilePersistedPtyResumeAttempt(session)
+            if (!reconciled) {
+                return {
+                    type: 'error',
+                    message: 'PTY resume timed out and the child is still active',
+                    code: 'resume_failed',
+                }
+            }
+            this.ptyResumeQuarantinedIds.delete(access.sessionId)
+            session = this.sessionCache.getSessionByNamespace(access.sessionId, namespace) ?? session
+            metadata = session.metadata
+        }
 
         if (this.isOpenCodeClearSource(session)) {
             return {
@@ -3368,10 +3566,14 @@ export class SyncEngine {
             }
 
             let applied: { cursorSessionProtocol?: 'acp' | 'stream-json' } = {}
-            // Pi reuses the original HAPI row. Keep its archive snapshot persisted
-            // until the CLI successfully bootstraps that row as running; this avoids
-            // an inactive, non-archived gap if the Hub restarts before spawn.
-            if (metadata.flavor !== 'pi') {
+            // Pi and PTY resumes both reuse the original HAPI row. Keep the archive
+            // snapshot persisted until the CLI successfully bootstraps that row as
+            // running; this avoids an inactive, non-archived gap if the Hub restarts
+            // before spawn — the in-memory snapshot below cannot survive that, and
+            // ptyResumeAttempt carries no copy of it. The CLI's sessionFactory
+            // re-stamps lifecycleState='running' on boot and does not carry over
+            // archivedBy/archiveReason, so the row still leaves the archived state.
+            if (metadata.flavor !== 'pi' && !isPtyResume) {
                 try {
                     applied = await this.sessionCache.clearSessionArchiveMetadata(access.sessionId)
                 } catch (error) {
@@ -3772,6 +3974,60 @@ export class SyncEngine {
             if (session.metadata?.piResumeAttempt?.childSessionId === endedSessionId) {
                 await this.writePiResumeAttempt(session.id, session.namespace, null, true).catch(() => {})
             }
+        }
+    }
+
+    private async writePtyResumeAttempt(
+        sessionId: string,
+        namespace: string,
+        attempt: PtyResumeAttempt | null
+    ): Promise<void> {
+        for (let i = 0; i < 5; i += 1) {
+            const current = this.sessionCache.getSessionByNamespace(sessionId, namespace)
+                ?? this.sessionCache.refreshSession(sessionId)
+            if (!current?.metadata) throw new Error('PTY resume attempt session metadata is unavailable')
+            const next = { ...current.metadata }
+            if (attempt) next.ptyResumeAttempt = attempt
+            else delete next.ptyResumeAttempt
+            const result = this.store.sessions.updateSessionMetadata(
+                sessionId,
+                next,
+                current.metadataVersion,
+                namespace,
+                { touchUpdatedAt: false }
+            )
+            if (result.result === 'success') {
+                this.sessionCache.refreshSession(sessionId)
+                return
+            }
+            if (result.result !== 'version-mismatch') throw new Error('Failed to update PTY resume attempt')
+            this.sessionCache.refreshSession(sessionId)
+        }
+        throw new Error('PTY resume attempt metadata was modified concurrently')
+    }
+
+    private async reconcilePersistedPtyResumeAttempt(session: Session): Promise<boolean> {
+        const attempt = session.metadata?.ptyResumeAttempt
+        if (!attempt) return true
+        let status: 'stopped' | 'already_gone' | 'still_alive'
+        try {
+            status = await this.rpcGateway.stopRunnerSession(attempt.machineId, session.id)
+        } catch {
+            return false
+        }
+        if (status === 'still_alive') return false
+
+        const current = this.sessionCache.getSession(session.id)
+        if (current?.active) {
+            this.handleSessionEnd({ sid: session.id, time: Date.now(), reason: 'error' })
+        }
+        try {
+            await this.writePtyResumeAttempt(session.id, session.namespace, null)
+            this.ptyResumeQuarantinedIds.delete(session.id)
+            return true
+        } catch {
+            this.ptyResumeQuarantinedIds.add(session.id)
+            return false
         }
     }
 
