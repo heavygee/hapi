@@ -8,7 +8,6 @@ import { MessageMetadata, buildMessageMetadataLabels, type MessageMetadataProps 
 import { MessageTimestamp } from './MessageTimestamp'
 import { cn } from '@/lib/utils'
 import { ShareTurnButton } from './ShareTurnButton'
-import type { HappyRuntimeExtras } from '@/lib/assistant-runtime'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 
 export type MessageHistoryAction = {
@@ -41,14 +40,7 @@ export function MessageActions({
 }: MessageActionsProps) {
     const { copied, copy } = useCopyToClipboard()
     const { t } = useTranslation()
-    const { hideShareButton, threadIsRunning } = useAuiState(({ message, thread }) => {
-        const extras = thread?.extras as HappyRuntimeExtras | undefined
-        const isRunning = thread?.isRunning ?? false
-        return {
-            hideShareButton: extras?.shareHiddenByMessageId?.has(message.id) ?? isRunning,
-            threadIsRunning: isRunning
-        }
-    })
+    const threadIsRunning = useAuiState(({ thread }) => thread?.isRunning ?? false)
     const canCopy = Boolean(copyText)
     const hasMetadata = metadata ? buildMessageMetadataLabels(metadata).length > 0 : false
     const [forkOpen, setForkOpen] = useState(false)
@@ -57,7 +49,7 @@ export function MessageActions({
     const [rewindPending, setRewindPending] = useState(false)
     const actionsLocked = historyActionPending || forkPending || rewindPending || threadIsRunning
 
-    const shareButton = messageElementId && !hideShareButton ? (
+    const shareButton = messageElementId && !threadIsRunning ? (
         <ShareTurnButton
             messageElementId={messageElementId}
             fallbackText={copyText}

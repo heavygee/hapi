@@ -20,8 +20,10 @@ import { useTranslation } from '@/lib/use-translation'
 import { CloseIcon } from '@/components/icons'
 import { ShareTurnDialog } from '@/components/AssistantChat/ShareTurnDialog'
 import { SessionLogPanel } from '@/components/AssistantChat/SessionLogPanel'
+import { formatCodexReasoningLabel, shouldShowCodexReasoningLabel } from '@/lib/codexStatusLabels'
+import { getSessionModelLabel } from '@/lib/sessionModelLabel'
+import { isFastServiceTier } from '@/components/AssistantChat/codexFastMode'
 import type { OlderLoadOutcome } from '@/lib/message-window-store'
-import type { ShareTurnMetadataItem } from '@/lib/shareTurnMetadata'
 
 type ScrollAnchor = {
     id: string
@@ -452,9 +454,6 @@ export function HappyThread(props: {
     const appliedHistoryVersion = runtimeExtras?.historyVersion ?? props.historyVersion
     const viewportRef = useRef<HTMLDivElement | null>(null)
     const contentRef = useRef<HTMLDivElement | null>(null)
-    // Stable empty metadata until share-dialog open path is healed for soup
-    // (full #1306 selectShareTurnMetadata wiring caused React #185 on remat).
-    const shareMetadataItems = useMemo<ShareTurnMetadataItem[]>(() => [], [])
     const [shareTurn, setShareTurn] = useState<ShareTurnState>(null)
     const [pullToLoadState, setPullToLoadState] = useState<PullToLoadState>('idle')
     const pullToLoadStateRef = useRef<PullToLoadState>('idle')
@@ -1541,7 +1540,16 @@ export function HappyThread(props: {
                     key={shareTurn?.id ?? 'closed'}
                     isOpen={shareTurn !== null}
                     title={shareTurn?.title ?? ''}
-                    metadataItems={shareMetadataItems}
+                    flavor={props.session.metadata?.flavor ?? null}
+                    modelLabel={(() => {
+                        const label = getSessionModelLabel(props.session)
+                        return label ? `${t(label.key)}: ${label.value}` : null
+                    })()}
+                    reasoningLabel={shouldShowCodexReasoningLabel(props.session.metadata?.flavor ?? null)
+                        ? formatCodexReasoningLabel(props.session.modelReasoningEffort)
+                        : null}
+                    showFastBadge={props.session.metadata?.flavor === 'codex' && isFastServiceTier(props.session.serviceTier)}
+                    worktreeBranch={props.session.metadata?.worktree?.branch ?? null}
                     sourceSnapshots={shareTurn?.snapshots ?? []}
                     sourceContentWidth={shareTurn?.sourceContentWidth ?? null}
                     onClose={() => setShareTurn(null)}
