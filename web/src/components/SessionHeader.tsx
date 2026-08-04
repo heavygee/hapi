@@ -23,6 +23,7 @@ import { queryKeys } from '@/lib/query-keys'
 import { markCodexSessionsImported } from '@/lib/codexImportedSessions'
 import { useFeatures } from '@/hooks/queries/useFeatures'
 import { getPrimaryGithubPrRef } from '@hapi/protocol'
+import { formatGithubPrChipTitle, resolveGithubPrChipDisplay } from '@/components/SessionPrChip'
 
 function FilesIcon(props: { className?: string }) {
     return (
@@ -189,6 +190,15 @@ export function SessionHeader(props: {
     const { features } = useFeatures(api)
     const githubPrAwarenessEnabled = Boolean(features?.githubPrAwareness.enabled)
     const primaryPrRef = getPrimaryGithubPrRef(session.metadata?.externalRefs)
+    const linkedPr = useMemo(() => {
+        if (!githubPrAwarenessEnabled || !primaryPrRef) return null
+        const nowMs = Date.now()
+        const display = resolveGithubPrChipDisplay(primaryPrRef, nowMs)
+        return {
+            detail: formatGithubPrChipTitle(primaryPrRef, display, t),
+            href: primaryPrRef.url
+        }
+    }, [githubPrAwarenessEnabled, primaryPrRef, t])
 
     const { archiveSession, reopenSession, renameSession, setExternalRefs, deleteSession, isPending } = useSessionActions(
         api,
@@ -406,6 +416,7 @@ export function SessionHeader(props: {
                 sessionActive={session.active}
                 onRename={() => setRenameOpen(true)}
                 onLinkPr={githubPrAwarenessEnabled ? () => setLinkPrOpen(true) : undefined}
+                linkedPr={linkedPr}
                 onExport={() => setExportOpen(true)}
                 onSyncCodex={api && codexSessionId ? handleSyncCodex : undefined}
                 onArchive={() => setArchiveOpen(true)}

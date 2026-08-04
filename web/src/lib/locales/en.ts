@@ -360,6 +360,7 @@ export default {
   'dialog.linkPr.current': 'Currently linked: {label}',
   'dialog.linkPr.error': 'Failed to update PR link. Please try again.',
   'session.menu.linkPr': 'Link pull request…',
+  'session.menu.linkedPr': 'Linked pull request',
   'settings.general.githubPrAwareness': 'GitHub PR awareness',
   'settings.general.githubPrAwareness.desc': 'Show PR chips and let sessions attach to GitHub pull requests. Off by default.',
   'settings.general.githubPrAwareness.envPinned': 'Pinned by HAPI_GITHUB_PR_AWARENESS',

@@ -1,19 +1,15 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { useId } from 'react'
 import type { ExternalRef, GithubPrExternalRef, GithubPrStatus } from '@/types/api'
 import { getPrimaryGithubPrRef, githubPrStatusEmoji } from '@hapi/protocol'
 import { cn } from '@/lib/utils'
 import { formatRelativeTime } from '@/lib/relativeTime'
 import { useTranslation } from '@/lib/use-translation'
 import { HoverTooltip } from '@/components/HoverTooltip'
-import { useLongPress } from '@/hooks/useLongPress'
 
 type RelativeTimeTFunc = (key: string, params?: Record<string, string | number>) => string
 
 /** Chip cache older than this is treated as honesty-❓ (muted tone). */
 export const GITHUB_PR_CHIP_STALE_MS = 2 * 60 * 60 * 1000
-
-/** How long a touch long-press keeps the detail tooltip open. */
-const TOUCH_TOOLTIP_HOLD_MS = 2500
 
 export type SessionPrChipProps = {
     refs: readonly ExternalRef[] | null | undefined
@@ -49,7 +45,7 @@ export function resolveGithubPrChipDisplay(
 
 /**
  * Compact chip glyph: status emoji only (or `PR` when uncached).
- * Full `repo#N` + status copy lives in the tooltip / aria-label.
+ * Full `repo#N` + status copy lives in the tooltip / action-menu header.
  */
 export function formatGithubPrChipLabel(
     ref: GithubPrExternalRef,
@@ -81,10 +77,8 @@ function statusToneClass(status: GithubPrStatus | undefined): string {
 }
 
 /**
- * Detail tooltip body for the PR chip (hover / focus / touch long-press).
- *
- * Exception to the usual "ago in UI + absolute in tooltip" rule: this string
- * *is* the tooltip, so nest absolute datetime nowhere - use relative "ago".
+ * Detail body for the PR chip (desktop hover/focus tooltip) and session
+ * long-press action menu header. Mobile long-press stays on the session row.
  */
 export function formatGithubPrChipTitle(
     ref: GithubPrExternalRef,
@@ -105,35 +99,12 @@ export function formatGithubPrChipTitle(
 
 /**
  * Compact primary GitHub PR chip for session list rows.
- * Visible glyph = status emoji (or `PR`); full identity in tooltip.
- * Stale cache (>2h) mutes tone and shows ❓.
+ * Visible glyph = status emoji (or `PR`); full identity on desktop hover.
+ * On mobile, the same detail sits atop the session action menu.
  */
 export function SessionPrChip(props: SessionPrChipProps) {
     const { t } = useTranslation()
     const tooltipId = useId()
-    const [touchTooltipOpen, setTouchTooltipOpen] = useState(false)
-    const touchTooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-    const clearTouchTooltipTimer = useCallback(() => {
-        if (touchTooltipTimerRef.current) {
-            clearTimeout(touchTooltipTimerRef.current)
-            touchTooltipTimerRef.current = null
-        }
-    }, [])
-
-    useEffect(() => () => clearTouchTooltipTimer(), [clearTouchTooltipTimer])
-
-    const longPressHandlers = useLongPress({
-        threshold: 450,
-        onLongPress: () => {
-            clearTouchTooltipTimer()
-            setTouchTooltipOpen(true)
-            touchTooltipTimerRef.current = setTimeout(() => {
-                setTouchTooltipOpen(false)
-                touchTooltipTimerRef.current = null
-            }, TOUCH_TOOLTIP_HOLD_MS)
-        }
-    })
 
     const primary = getPrimaryGithubPrRef(props.refs)
     if (!primary) return null
@@ -148,7 +119,6 @@ export function SessionPrChip(props: SessionPrChipProps) {
             id={tooltipId}
             side="bottom"
             align="end"
-            open={touchTooltipOpen}
             className={cn('shrink-0', props.className)}
             tooltipClassName="max-w-[16rem] whitespace-normal"
             target={(
@@ -168,16 +138,8 @@ export function SessionPrChip(props: SessionPrChipProps) {
                             })
                             : t('session.item.prChip', { number: primary.number })
                     }
-                    {...longPressHandlers}
                     onClick={(event) => event.stopPropagation()}
-                    onMouseDown={(event) => {
-                        event.stopPropagation()
-                        longPressHandlers.onMouseDown(event)
-                    }}
-                    onTouchStart={(event) => {
-                        event.stopPropagation()
-                        longPressHandlers.onTouchStart(event)
-                    }}
+                    onMouseDown={(event) => event.stopPropagation()}
                     onPointerDown={(event) => event.stopPropagation()}
                     className={cn(
                         'inline-flex min-w-[1.35rem] shrink-0 items-center justify-center rounded-md border',
