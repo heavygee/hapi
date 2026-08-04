@@ -865,7 +865,7 @@ function SessionPage() {
     const queryClient = useQueryClient()
     const { addToast } = useToast()
     const { sessionId } = useParams({ from: '/sessions/$sessionId' })
-    const { outline } = useSearch({ from: '/sessions/$sessionId' })
+    const { outline, log } = useSearch({ from: '/sessions/$sessionId' })
     const {
         session,
         error: sessionError,
@@ -1241,6 +1241,14 @@ function SessionPage() {
         })
     }, [navigate, sessionId])
 
+    const handleInitialSessionLogConsumed = useCallback(() => {
+        navigate({
+            to: '/sessions/$sessionId',
+            params: { sessionId },
+            replace: true,
+        })
+    }, [navigate, sessionId])
+
     if (!session) {
         if (sessionError) {
             return (
@@ -1318,6 +1326,8 @@ function SessionPage() {
                     }
                 }))
             }}
+            initialSessionLogOpen={log}
+            onInitialSessionLogConsumed={handleInitialSessionLogConsumed}
         />
     )
 }
@@ -1527,9 +1537,13 @@ const sessionsIndexRoute = createRoute({
 const sessionDetailRoute = createRoute({
     getParentRoute: () => sessionsRoute,
     path: '$sessionId',
-    validateSearch: (search: Record<string, unknown>): { outline?: boolean } => {
+    validateSearch: (search: Record<string, unknown>): { outline?: boolean; log?: boolean } => {
         const outline = search.outline === true || search.outline === 'true'
-        return outline ? { outline: true } : {}
+        const log = search.log === true || search.log === 'true'
+        const result: { outline?: boolean; log?: boolean } = {}
+        if (outline) result.outline = true
+        if (log) result.log = true
+        return result
     },
     component: SessionDetailRoute,
 })

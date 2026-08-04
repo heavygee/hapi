@@ -527,6 +527,8 @@ type SessionChatProps = {
     // Called when an `abort-restore` event arrives and the composer is not empty,
     // so the caller can surface the aborted text via the existing sendError path.
     onAbortRestore?: (text: string) => void
+    initialSessionLogOpen?: boolean
+    onInitialSessionLogConsumed?: () => void
 }
 
 /**
@@ -595,13 +597,24 @@ function SessionChatInner(props: SessionChatProps) {
     const [forceScrollToken, setForceScrollToken] = useState(0)
     const [outlineOpen, setOutlineOpen] = useState(props.initialOutlineOpen ?? false)
     const [terminalVisible, setTerminalVisible] = useState(false)
+    const [sessionLogOpen, setSessionLogOpen] = useState(props.initialSessionLogOpen ?? false)
     useEffect(() => {
         if (!props.initialOutlineOpen) {
             return
         }
         setOutlineOpen(true)
+        setSessionLogOpen(false)
         props.onInitialOutlineConsumed?.()
     }, [props.initialOutlineOpen, props.onInitialOutlineConsumed])
+    useEffect(() => {
+        if (!props.initialSessionLogOpen) {
+            return
+        }
+        setSessionLogOpen(true)
+        setOutlineOpen(false)
+        props.onInitialSessionLogConsumed?.()
+    }, [props.initialSessionLogOpen, props.onInitialSessionLogConsumed])
+
     const [cursorSelectedBase, setCursorSelectedBase] = useState('auto')
     // Serialize Cursor setModel RPCs so drill-down default apply cannot finish
     // after a later explicit variant click and overwrite it.
@@ -1186,6 +1199,7 @@ function SessionChatInner(props: SessionChatProps) {
         blocksByIdRef.current.clear()
         visibleGroupsRef.current = []
         setOutlineOpen(false)
+        setSessionLogOpen(false)
     }, [props.session.id])
 
     // Exclude user messages that haven't been invoked yet — those appear in the
@@ -1484,6 +1498,7 @@ function SessionChatInner(props: SessionChatProps) {
 
     const handleToggleFiles = useCallback(() => {
         setOutlineOpen(false)
+        setSessionLogOpen(false)
         navigate({
             to: '/sessions/$sessionId/files',
             params: { sessionId: props.session.id }
@@ -1491,7 +1506,29 @@ function SessionChatInner(props: SessionChatProps) {
     }, [navigate, props.session.id])
 
     const handleToggleOutline = useCallback(() => {
-        setOutlineOpen((open) => !open)
+        setOutlineOpen((open) => {
+            const next = !open
+            if (next) setSessionLogOpen(false)
+            return next
+        })
+    }, [])
+
+    const handleToggleSessionLog = useCallback(() => {
+        setSessionLogOpen((open) => {
+            const next = !open
+            if (next) setOutlineOpen(false)
+            return next
+        })
+    }, [])
+
+    const handleOutlineOpenChange = useCallback((open: boolean) => {
+        setOutlineOpen(open)
+        if (open) setSessionLogOpen(false)
+    }, [])
+
+    const handleSessionLogOpenChange = useCallback((open: boolean) => {
+        setSessionLogOpen(open)
+        if (open) setOutlineOpen(false)
     }, [])
 
     const handleViewTerminal = useCallback(() => {
@@ -1642,6 +1679,8 @@ function SessionChatInner(props: SessionChatProps) {
                 outlineActive={outlineOpen}
                 onToggleTerminal={canViewAgentTerminal ? () => setTerminalVisible(v => !v) : undefined}
                 terminalActive={terminalVisible}
+                onToggleSessionLog={handleToggleSessionLog}
+                sessionLogActive={sessionLogOpen}
                 api={props.api}
                 canReopen={inactiveCanResume}
                 reopenDisabledReason={props.reopenDisabledReason}
@@ -1719,7 +1758,9 @@ function SessionChatInner(props: SessionChatProps) {
                         forceScrollToken={forceScrollToken}
                         outlineOpen={outlineOpen}
                         outlineItems={outlineItems}
-                        onOutlineOpenChange={setOutlineOpen}
+                        onOutlineOpenChange={handleOutlineOpenChange}
+                        sessionLogOpen={sessionLogOpen}
+                        onSessionLogOpenChange={handleSessionLogOpenChange}
                     />
                     </div>
 
