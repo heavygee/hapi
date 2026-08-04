@@ -447,6 +447,11 @@ export function HappyThread(props: {
 }) {
     const { t } = useTranslation()
     const { terminalToolDisplayMode } = useTerminalToolDisplayMode()
+    const runtimeExtras = useAuiState((s) => s.thread.extras) as HappyRuntimeExtras | undefined
+    const appliedMessagesVersion = runtimeExtras?.messagesVersion ?? props.messagesVersion
+    const appliedHistoryVersion = runtimeExtras?.historyVersion ?? props.historyVersion
+    const viewportRef = useRef<HTMLDivElement | null>(null)
+    const contentRef = useRef<HTMLDivElement | null>(null)
     // Stable empty metadata until share-dialog open path is healed for soup
     // (full #1306 selectShareTurnMetadata wiring caused React #185 on remat).
     const shareMetadataItems = useMemo<ShareTurnMetadataItem[]>(() => [], [])
