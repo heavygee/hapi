@@ -22,6 +22,8 @@ export interface Settings {
     corsOrigins?: string[]
     /** Opt-in GitHub PR awareness for sessions (tiann/hapi#1162). Default off. */
     githubPrAwareness?: boolean
+    /** Per-hub relay auth key issued by the relay server (/issue) */
+    relayAuthKey?: string
 }
 
 export function getSettingsFile(dataDir: string): string {

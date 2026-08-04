@@ -1,5 +1,5 @@
 import { AgentStateSchema, MetadataSchema, TeamStateSchema } from '@hapi/protocol/schemas'
-import type { CodexCollaborationMode, ExternalRef, PermissionMode, Session, SessionPatch } from '@hapi/protocol/types'
+import type { CodexCollaborationMode, CopilotAgentMode, ExternalRef, PermissionMode, Session, SessionPatch } from '@hapi/protocol/types'
 import type { Store } from '../store'
 import { clampAliveTime } from './aliveTime'
 import { EventPublisher } from './eventPublisher'
@@ -12,7 +12,7 @@ const QUEUED_MESSAGE_THINKING_GRACE_MS = 15_000
 // snapshot. Cap retries so genuine concurrent contention still surfaces to the
 // HTTP caller as 409 instead of spinning forever.
 const METADATA_RETRY_ATTEMPTS = 5
-type RuntimeConfigKey = 'permissionMode' | 'model' | 'modelReasoningEffort' | 'effort' | 'serviceTier' | 'collaborationMode'
+type RuntimeConfigKey = 'permissionMode' | 'model' | 'modelReasoningEffort' | 'effort' | 'serviceTier' | 'collaborationMode' | 'copilotAgentMode'
 
 /**
  * Metadata merge used when consolidating an old session row into a replacement
@@ -65,6 +65,10 @@ export function mergeSessionMetadataForSessionMerge(
     }
     if (typeof oldObj.preferredPermissionMode === 'string' && typeof newObj.preferredPermissionMode !== 'string') {
         merged.preferredPermissionMode = oldObj.preferredPermissionMode
+        changed = true
+    }
+    if (typeof oldObj.preferredCopilotAgentMode === 'string' && typeof newObj.preferredCopilotAgentMode !== 'string') {
+        merged.preferredCopilotAgentMode = oldObj.preferredCopilotAgentMode
         changed = true
     }
 
@@ -265,7 +269,8 @@ export class SessionCache {
             effort: stored.effort,
             serviceTier: stored.serviceTier,
             permissionMode: existing?.permissionMode ?? metadata?.preferredPermissionMode,
-            collaborationMode: existing?.collaborationMode
+            collaborationMode: existing?.collaborationMode,
+            copilotAgentMode: existing?.copilotAgentMode ?? metadata?.preferredCopilotAgentMode
         }
 
         this.sessions.set(sessionId, session)
@@ -317,6 +322,7 @@ export class SessionCache {
         effort?: string | null
         serviceTier?: string | null
         collaborationMode?: CodexCollaborationMode
+        copilotAgentMode?: CopilotAgentMode
     }): void {
         const t = clampAliveTime(payload.time)
         if (!t) return
@@ -332,6 +338,7 @@ export class SessionCache {
         const previousEffort = session.effort
         const previousServiceTier = session.serviceTier
         const previousCollaborationMode = session.collaborationMode
+        const previousCopilotAgentMode = session.copilotAgentMode
         const pendingThinkingUntil = this.pendingThinkingUntilBySessionId.get(session.id) ?? 0
         const requestedThinking = Boolean(payload.thinking)
         const hubNow = Date.now()
@@ -383,6 +390,10 @@ export class SessionCache {
         if (payload.collaborationMode !== undefined && !this.isStaleRuntimeKeepAlive(session.id, 'collaborationMode', t)) {
             session.collaborationMode = payload.collaborationMode
         }
+        if (payload.copilotAgentMode !== undefined && !this.isStaleRuntimeKeepAlive(session.id, 'copilotAgentMode', t)) {
+            session.copilotAgentMode = payload.copilotAgentMode
+            this.persistPreferredCopilotAgentMode(session, payload.copilotAgentMode)
+        }
 
         const now = Date.now()
         const lastBroadcastAt = this.lastBroadcastAtBySessionId.get(session.id) ?? 0
@@ -392,6 +403,7 @@ export class SessionCache {
             || previousEffort !== session.effort
             || previousServiceTier !== session.serviceTier
             || previousCollaborationMode !== session.collaborationMode
+            || previousCopilotAgentMode !== session.copilotAgentMode
         const shouldBroadcast = (!wasActive && session.active)
             || (wasThinking !== session.thinking)
             || modeChanged
@@ -411,7 +423,8 @@ export class SessionCache {
                     modelReasoningEffort: session.modelReasoningEffort,
                     effort: session.effort,
                     serviceTier: session.serviceTier,
-                    collaborationMode: session.collaborationMode
+                    collaborationMode: session.collaborationMode,
+                    copilotAgentMode: session.copilotAgentMode
                 } satisfies SessionPatch
             })
         }
@@ -594,6 +607,7 @@ export class SessionCache {
             effort?: string | null
             serviceTier?: string | null
             collaborationMode?: CodexCollaborationMode
+            copilotAgentMode?: CopilotAgentMode
         }
     ): void {
         const session = this.sessions.get(sessionId) ?? this.refreshSession(sessionId)
@@ -670,6 +684,11 @@ export class SessionCache {
         if (config.collaborationMode !== undefined) {
             session.collaborationMode = config.collaborationMode
             this.markRuntimeConfigUpdated(sessionId, 'collaborationMode', appliedAt)
+        }
+        if (config.copilotAgentMode !== undefined) {
+            session.copilotAgentMode = config.copilotAgentMode
+            this.persistPreferredCopilotAgentMode(session, config.copilotAgentMode)
+            this.markRuntimeConfigUpdated(sessionId, 'copilotAgentMode', appliedAt)
         }
 
         this.publisher.emit({ type: 'session-updated', sessionId, data: session })
@@ -1252,6 +1271,34 @@ export class SessionCache {
         session.metadataVersion = result.version
     }
 
+    private persistPreferredCopilotAgentMode(session: Session, copilotAgentMode: CopilotAgentMode): void {
+        const currentMetadata = session.metadata
+        if (!currentMetadata || currentMetadata.preferredCopilotAgentMode === copilotAgentMode) {
+            return
+        }
+
+        const nextMetadata = { ...currentMetadata, preferredCopilotAgentMode: copilotAgentMode }
+        const result = this.store.sessions.updateSessionMetadata(
+            session.id,
+            nextMetadata,
+            session.metadataVersion,
+            session.namespace,
+            { touchUpdatedAt: false }
+        )
+
+        if (result.result === 'error') {
+            return
+        }
+
+        const parsed = MetadataSchema.safeParse(result.value)
+        if (!parsed.success) {
+            return
+        }
+
+        session.metadata = parsed.data
+        session.metadataVersion = result.version
+    }
+
     private persistPiSelectedModel(session: Session, piSelected: { provider: string; modelId: string } | null): void {
         const currentMetadata = session.metadata
         if (!currentMetadata || currentMetadata.piSelectedModel === piSelected) {
@@ -1305,7 +1352,7 @@ export class SessionCache {
 
     private extractAgentSessionId(
         metadata: NonNullable<Session['metadata']>
-    ): { field: 'codexSessionId' | 'claudeSessionId' | 'geminiSessionId' | 'opencodeSessionId' | 'grokSessionId' | 'cursorSessionId' | 'piSessionId'; value: string } | null {
+    ): { field: 'codexSessionId' | 'claudeSessionId' | 'geminiSessionId' | 'opencodeSessionId' | 'grokSessionId' | 'cursorSessionId' | 'piSessionId' | 'copilotSessionId'; value: string } | null {
         if (metadata.codexSessionId) return { field: 'codexSessionId', value: metadata.codexSessionId }
         if (metadata.claudeSessionId) return { field: 'claudeSessionId', value: metadata.claudeSessionId }
         if (metadata.geminiSessionId) return { field: 'geminiSessionId', value: metadata.geminiSessionId }
@@ -1313,6 +1360,7 @@ export class SessionCache {
         if (metadata.grokSessionId) return { field: 'grokSessionId', value: metadata.grokSessionId }
         if (metadata.cursorSessionId) return { field: 'cursorSessionId', value: metadata.cursorSessionId }
         if (metadata.piSessionId) return { field: 'piSessionId', value: metadata.piSessionId }
+        if (metadata.copilotSessionId) return { field: 'copilotSessionId', value: metadata.copilotSessionId }
         return null
     }
 
