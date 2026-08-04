@@ -294,6 +294,34 @@ export function queryEvents(db: Database, options: QueryEventsOptions = {}): Sto
     return rows.map(mapRow)
 }
 
+/**
+ * Latest status-bearing worker event per session — the substrate for the
+ * cold-open-loops lens. "Status-bearing" = the notify-derived types that either
+ * open a loop (needs_decision/needs_review/blocked/failed/stale) or close it
+ * (completed); `progress` is intentionally excluded so a progress ping does not
+ * mask an unanswered decision. The caller decides open vs closed by inspecting
+ * the returned event's type. Bounded and index-friendly (one row per session).
+ */
+export function queryLatestWorkerStatusPerSession(db: Database, limit = 500): StoredSystemEvent[] {
+    const cap = Math.min(Math.max(limit, 1), 2000)
+    const rows = db.prepare(`
+        SELECT e.* FROM events e
+        JOIN (
+            SELECT related_session_id AS sid, MAX(id) AS max_id
+            FROM events
+            WHERE source_kind = 'worker'
+              AND related_session_id IS NOT NULL
+              AND event_type IN (
+                  'needs_decision', 'needs_review', 'blocked', 'failed', 'stale', 'completed'
+              )
+            GROUP BY related_session_id
+        ) latest ON e.id = latest.max_id
+        ORDER BY e.ts ASC
+        LIMIT ?
+    `).all(cap) as SystemEventRow[]
+    return rows.map(mapRow)
+}
+
 export function insertEventLink(
     db: Database,
     input: {

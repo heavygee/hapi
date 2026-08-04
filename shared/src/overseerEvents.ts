@@ -93,6 +93,73 @@ export const OVERSEER_EVENT_TYPES = [
 
 export type OverseerEventType = typeof OVERSEER_EVENT_TYPES[number]
 
+/**
+ * Event types whose latest occurrence per session marks a still-open loop — a
+ * thread whose most recent worker status is NOT `done`. `completed` is included
+ * here (not as an open type) because it is what *closes* a loop: the cold-open-
+ * loops lens takes the latest event of this set per session and treats it as
+ * open only when that latest event is not `completed`. `progress` is excluded
+ * on purpose — a progress ping does not close an operator-owed decision.
+ */
+export const OVERSEER_OPEN_LOOP_EVENT_TYPES = [
+    'needs_decision',
+    'needs_review',
+    'blocked',
+    'failed',
+    'stale'
+] as const
+
+export type OverseerOpenLoopEventType = typeof OVERSEER_OPEN_LOOP_EVENT_TYPES[number]
+
+/** The event type that closes an open loop (latest `done` turn). */
+export const OVERSEER_LOOP_CLOSED_EVENT_TYPE = 'completed' as const
+
+/**
+ * No-op `action` values agents stuff into a summary when nothing is actually
+ * pending ("none", "complete", "n/a", …). Treated as *no action* so the lens
+ * does not surface a done-shaped thread as a live loop. Matching is on the
+ * trimmed, lowercased, punctuation-stripped action.
+ */
+const NO_OP_ACTION_VALUES = new Set([
+    '',
+    'none',
+    'n/a',
+    'na',
+    'nil',
+    'nothing',
+    'no action',
+    'no further action',
+    'no followup',
+    'no follow-up',
+    'no follow up',
+    'no-op',
+    'noop',
+    'complete',
+    'completed',
+    'done',
+    'finished',
+    'optional',
+    'tbd'
+])
+
+/**
+ * True when an `action` string is absent or a known no-op placeholder. The lens
+ * keeps a loop regardless (status≠done is the strong filter), but nulls a no-op
+ * action so it is not mistaken for a real next step (spec: "action is a tiebreak").
+ */
+export function isNoOpAction(action: string | null | undefined): boolean {
+    if (action == null) return true
+    const normalized = action.trim().toLowerCase().replace(/[.!\-—–\s]+$/g, '').trim()
+    return normalized.length === 0 || NO_OP_ACTION_VALUES.has(normalized)
+}
+
+/** Which lens bucket an open-loop event type belongs to. */
+export function openLoopBucket(eventType: string): 'waiting_on_you' | 'half_finished' {
+    return eventType === 'needs_decision' || eventType === 'needs_review'
+        ? 'waiting_on_you'
+        : 'half_finished'
+}
+
 export type OverseerArtifactRef = {
     kind: string
     url?: string

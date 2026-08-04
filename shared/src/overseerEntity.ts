@@ -262,12 +262,22 @@ export const OVERSEER_TOOL_NAMES = [
     'get_session_recent_output',
     'get_worker_health',
     'explain_priority',
-    'list_active_workers'
+    'list_active_workers',
+    'query_open_loops'
 ] as const
 
 export type OverseerToolName = typeof OVERSEER_TOOL_NAMES[number]
 
 const sessionIdSchema = z.string().min(1)
+
+/**
+ * Output-detail knob shared by every context-gathering tool. `lean` (default)
+ * returns the cheap brain-facing shape; `full` returns the richer rows (still
+ * bounded by `limit`/`n`). Two levels only — no token-budget engine. The knob is
+ * consumed by the converse projection layer; the entity methods ignore it.
+ */
+export const toolDetailSchema = z.enum(['lean', 'full'])
+export type ToolResultDetailArg = z.infer<typeof toolDetailSchema>
 
 export const queryEventsArgsSchema = z.object({
     sessionId: sessionIdSchema.optional(),
@@ -279,7 +289,8 @@ export const queryEventsArgsSchema = z.object({
     sinceTs: z.number().int().nonnegative().optional(),
     untilTs: z.number().int().nonnegative().optional(),
     beforeId: z.number().int().positive().optional(),
-    limit: z.number().int().min(1).max(200).optional()
+    limit: z.number().int().min(1).max(200).optional(),
+    detail: toolDetailSchema.optional()
 })
 export type QueryEventsArgs = z.infer<typeof queryEventsArgsSchema>
 
@@ -287,23 +298,27 @@ export const queryInboxArgsSchema = z.object({
     statuses: z.array(z.string().min(1)).min(1).optional(),
     sessionId: sessionIdSchema.optional(),
     category: z.string().min(1).optional(),
-    limit: z.number().int().min(1).max(200).optional()
+    limit: z.number().int().min(1).max(200).optional(),
+    detail: toolDetailSchema.optional()
 })
 export type QueryInboxArgs = z.infer<typeof queryInboxArgsSchema>
 
 export const getSessionStateArgsSchema = z.object({
-    sessionId: sessionIdSchema
+    sessionId: sessionIdSchema,
+    detail: toolDetailSchema.optional()
 })
 export type GetSessionStateArgs = z.infer<typeof getSessionStateArgsSchema>
 
 export const getSessionRecentOutputArgsSchema = z.object({
     sessionId: sessionIdSchema,
-    n: z.number().int().min(1).max(50).optional()
+    n: z.number().int().min(1).max(50).optional(),
+    detail: toolDetailSchema.optional()
 })
 export type GetSessionRecentOutputArgs = z.infer<typeof getSessionRecentOutputArgsSchema>
 
 export const getWorkerHealthArgsSchema = z.object({
-    sessionId: sessionIdSchema
+    sessionId: sessionIdSchema,
+    detail: toolDetailSchema.optional()
 })
 export type GetWorkerHealthArgs = z.infer<typeof getWorkerHealthArgsSchema>
 
@@ -316,9 +331,49 @@ export const listActiveWorkersArgsSchema = z.object({
     project: z.string().min(1).optional(),
     state: z.enum(OVERSEER_WORKER_STATES).optional(),
     minAgeMs: z.number().int().nonnegative().optional(),
-    limit: z.number().int().min(1).max(200).optional()
+    limit: z.number().int().min(1).max(200).optional(),
+    detail: toolDetailSchema.optional()
 })
 export type ListActiveWorkersArgs = z.infer<typeof listActiveWorkersArgsSchema>
+
+export const queryOpenLoopsArgsSchema = z.object({
+    /** Only loops at least this old (ms) — the "went cold" knob. Default 0. */
+    minAgeMs: z.number().int().nonnegative().optional(),
+    /** Restrict to one lens bucket. Default: both, waiting_on_you first. */
+    bucket: z.enum(['waiting_on_you', 'half_finished']).optional(),
+    project: z.string().min(1).optional(),
+    limit: z.number().int().min(1).max(100).optional(),
+    detail: toolDetailSchema.optional()
+})
+export type QueryOpenLoopsArgs = z.infer<typeof queryOpenLoopsArgsSchema>
+
+/**
+ * One cold open loop: a session whose latest worker status is not `done`,
+ * carrying how long it has sat and which lens bucket it belongs to.
+ */
+export type OverseerOpenLoop = {
+    sessionId: string
+    name: string | null
+    project: string | null
+    flavor: string | null
+    /** Worker notify status (needs_decision / blocked / failed / …). */
+    status: string
+    /** Stored event_type of the latest open event. */
+    eventType: string
+    eventId: number
+    /** Concrete next step, or null when the agent left a no-op placeholder. */
+    action: string | null
+    summary: string
+    lastTs: number
+    ageMs: number
+    ageDays: number
+    bucket: 'waiting_on_you' | 'half_finished'
+}
+
+export type OverseerOpenLoopsResult = {
+    openLoops: OverseerOpenLoop[]
+    counts: { total: number; waitingOnYou: number; halfFinished: number }
+}
 
 export const overseerToolArgsSchemas = {
     query_events: queryEventsArgsSchema,
@@ -327,7 +382,8 @@ export const overseerToolArgsSchemas = {
     get_session_recent_output: getSessionRecentOutputArgsSchema,
     get_worker_health: getWorkerHealthArgsSchema,
     explain_priority: explainPriorityArgsSchema,
-    list_active_workers: listActiveWorkersArgsSchema
+    list_active_workers: listActiveWorkersArgsSchema,
+    query_open_loops: queryOpenLoopsArgsSchema
 } as const satisfies Record<OverseerToolName, z.ZodTypeAny>
 
 export type OverseerToolCatalogEntry = {
@@ -371,6 +427,11 @@ export const OVERSEER_TOOL_CATALOG: OverseerToolCatalogEntry[] = [
     {
         name: 'list_active_workers',
         description: 'Summary roster of workers, filterable by project, state, and minimum age.',
+        readonly: true
+    },
+    {
+        name: 'query_open_loops',
+        description: 'The "what am I forgetting?" lens: threads whose latest worker status is NOT done (needs_decision / needs_review / blocked / failed / stalled) and never got closed, sorted coldest-first. "Waiting on You" (a decision the operator owes) is bucketed separately from half-finished work. Neglect-axis, not priority — use this for "what have I abandoned / forgotten?", not "what is most urgent?".',
         readonly: true
     }
 ]
@@ -422,6 +483,7 @@ export function buildOverseerSystemPrompt(): string {
         '- get_worker_health — reported + observed + inferred state for one worker.',
         '- explain_priority — why an inbox item sits where it does, with its provenance.',
         '- list_active_workers — the current roster, filterable by project / state / age.',
+        '- query_open_loops — the "what am I forgetting?" lens: cold threads whose latest status is not done.',
         '',
         'You CANNOT dispatch, message workers, spawn, confirm, or change any state. If the operator asks',
         'you to act on a worker, say plainly that you can advise but cannot dispatch yet, and tell them',
@@ -438,6 +500,26 @@ export function buildOverseerSystemPrompt(): string {
         '- Prefer direct tool/system evidence over a worker\'s self-report when they conflict.',
         '- Prioritize. Surface the root cause, not five symptoms ("GitHub auth is blocking 5 workers",',
         '  not a roll-call of each blocked worker).',
+        '- When the operator asks about a SPECIFIC inbox item, first call explain_priority for its',
+        '  provenance, then query_events with that item\'s sessionId to pull the rest of that session\'s',
+        '  recorded activity as context/salience before answering — do not answer from the item alone.',
+        '',
+        '# Two questions, two axes',
+        '',
+        'Urgency and neglect are different axes; do not conflate them.',
+        '',
+        '- "What needs me now?" / "what is most urgent?" → an URGENCY question. Use query_inbox (and',
+        '  explain_priority), which are priority-ordered.',
+        '- "What am I forgetting / abandoning / neglecting?" / "what have I not touched?" → a NEGLECT',
+        '  question. Use query_open_loops, which is age-sorted (coldest first) over threads whose latest',
+        '  status is not done. Lead with the "Waiting on You" bucket (a decision the operator owes), then',
+        '  half-finished work. A very old low-priority loop can matter here even if it is not urgent.',
+        '',
+        '# Priority direction (do not get this backwards)',
+        '',
+        'Inbox priority is LOWER-IS-HIGHER: priority 1 is the MOST important, priority 90 is the LEAST.',
+        'Never call a high number "highest priority". When you sort or rank by priority, the smallest',
+        'number comes first. If you cite a number, say e.g. "priority 5 (near the top)".',
         '',
         '# Voice output',
         '',
