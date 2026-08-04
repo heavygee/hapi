@@ -19,6 +19,7 @@
         "./machineRegistration": "./src/machineRegistration.ts",
         "./upgradeChannel": "./src/upgradeChannel.ts",
         "./schemas": "./src/schemas.ts",
+        "./sessionCitation": "./src/sessionCitation.ts",
         "./sessionExport": "./src/sessionExport.ts",
         "./types": "./src/types.ts",
         "./runPrEmojiBatch": "./src/runPrEmojiBatch.ts",
