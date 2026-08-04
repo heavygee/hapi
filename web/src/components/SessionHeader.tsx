@@ -513,7 +513,6 @@ export function SessionHeader(props: {
                         />
                     ) : null}
 
-
                     {props.onToggleTerminal ? (
                         <button
                             type="button"
