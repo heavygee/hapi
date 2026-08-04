@@ -8,6 +8,7 @@ import { useMachinePathsExists } from '@/hooks/useMachinePathsExists'
 import { useSpawnSession } from '@/hooks/mutations/useSpawnSession'
 import { useCodexModels } from '@/hooks/queries/useCodexModels'
 import { useCursorModelsForMachine } from '@/hooks/queries/useCursorModelsForMachine'
+import { useAgyModels } from '@/hooks/queries/useAgyModels'
 import { useOpencodeModelsForCwd } from '@/hooks/queries/useOpencodeModelsForCwd'
 import { useGrokModelsForCwd } from '@/hooks/queries/useGrokModelsForCwd'
 import { useCopilotModelsForCwd } from '@/hooks/queries/useCopilotModelsForCwd'
@@ -41,6 +42,7 @@ import { AgentSelector } from './AgentSelector'
 import { CollaborationModeSelector } from './CollaborationModeSelector'
 import { CodexImportActions } from './CodexImportActions'
 import { clearBatchImportedCodexSelection, resolveCodexImportRedirectSessionId } from './codexImportMerge'
+import { AgyModelSelector } from './AgyModelSelector'
 import { DirectorySection } from './DirectorySection'
 import { GrokPermissionModeSelector } from './GrokPermissionModeSelector'
 import { CodexFamilyPermissionModeSelector } from './CodexFamilyPermissionModeSelector'
@@ -214,6 +216,9 @@ export function NewSession(props: {
         setOpencodeSelectedModel(
             draft.agent === 'opencode' && draft.model !== 'auto' ? draft.model : null
         )
+        setAgySelectedModel(
+            draft.agent === 'agy' && draft.model !== 'auto' ? draft.model : null
+        )
         setServiceTier(draft.serviceTier)
         setCollaborationMode(draft.collaborationMode)
         setCopilotAgentMode(draft.copilotAgentMode)
@@ -256,6 +261,7 @@ export function NewSession(props: {
         machineId,
         enabled: agent === 'codex' && Boolean(machineId)
     })
+    const [agySelectedModel, setAgySelectedModel] = useState<string | null>(null)
     const runnerSpawnError = useMemo(
         () => formatRunnerSpawnError(selectedMachine),
         [selectedMachine]
@@ -552,6 +558,42 @@ export function NewSession(props: {
             setGrokPermissionMode('default')
         }
     }, [agent, grokPermissionMode, grokModelsState.autoPermissionModeSupported])
+    const agyModelsState = useAgyModels({
+        api: props.api,
+        machineId,
+        enabled: agent === 'agy' && Boolean(machineId)
+    })
+    useEffect(() => {
+        if (preserveRestoredDraftRef.current) {
+            return
+        }
+        // Reset selection when agent / machine changes. The default is "Default"
+        // (null → no --model → agy uses its own default); we intentionally do NOT
+        // auto-pick the first model, so the user's explicit "Default" choice
+        // sticks instead of snapping to the first option.
+        setAgySelectedModel(null)
+    }, [agent, machineId])
+
+    useEffect(() => {
+        if (
+            agent !== 'agy'
+            || agyModelsState.isLoading
+            || agyModelsState.error
+            || agySelectedModel === null
+        ) {
+            return
+        }
+        if (!agyModelsState.availableModels.some((candidate) => candidate.modelId === agySelectedModel)) {
+            setAgySelectedModel(null)
+        }
+    }, [
+        agent,
+        agyModelsState.availableModels,
+        agyModelsState.error,
+        agyModelsState.isLoading,
+        agySelectedModel
+    ])
+
     useEffect(() => {
         // Restore a remembered model when it is still advertised for this cwd;
         // otherwise auto-pick the backend default.
@@ -618,6 +660,9 @@ export function NewSession(props: {
         setModelReasoningEffort(preferred.modelReasoningEffort)
         setOpencodeSelectedModel(
             agent === 'opencode' && preferred.model !== 'auto' ? preferred.model : null
+        )
+        setAgySelectedModel(
+            agent === 'agy' && preferred.model !== 'auto' ? preferred.model : null
         )
     }, [agent, machineId])
 
@@ -1002,7 +1047,11 @@ export function NewSession(props: {
         }
         saveNewSessionFormDraft({
             agent,
-            model: agent === 'opencode' ? (opencodeSelectedModel ?? 'auto') : model,
+            model: agent === 'agy'
+                ? (agySelectedModel ?? 'auto')
+                : agent === 'opencode'
+                    ? (opencodeSelectedModel ?? 'auto')
+                    : model,
             cursorSelectedBase,
             machineId,
             effort,
@@ -1022,6 +1071,7 @@ export function NewSession(props: {
         agent,
         model,
         opencodeSelectedModel,
+        agySelectedModel,
         cursorSelectedBase,
         machineId,
         effort,
@@ -1131,7 +1181,9 @@ export function NewSession(props: {
 
             const resolvedModel = agent === 'opencode'
                 ? (opencodeSelectedModel ?? undefined)
-                : (model !== 'auto' ? model : undefined)
+                : agent === 'agy'
+                    ? (agySelectedModel ?? undefined)
+                    : (model !== 'auto' ? model : undefined)
             const resolvedEffort = (agent === 'claude' || agent === 'grok') && effort !== 'auto'
                 ? effort
                 : undefined
@@ -1139,7 +1191,11 @@ export function NewSession(props: {
                 ? modelReasoningEffort
                 : undefined
             const preferredLaunchSettings = {
-                model: agent === 'opencode' ? (opencodeSelectedModel ?? 'auto') : model,
+                model: agent === 'agy'
+                    ? (agySelectedModel ?? 'auto')
+                    : agent === 'opencode'
+                        ? (opencodeSelectedModel ?? 'auto')
+                        : model,
                 cursorSelectedBase,
                 effort,
                 modelReasoningEffort
@@ -1210,8 +1266,10 @@ export function NewSession(props: {
                 worktreeName: sessionType === 'worktree' ? (worktreeName.trim() || undefined) : undefined,
                 serviceTier: resolvedServiceTier,
                 collaborationMode: resolvedCollaborationMode,
-                copilotAgentMode: agent === 'copilot' ? copilotAgentMode : undefined
+                copilotAgentMode: agent === 'copilot' ? copilotAgentMode : undefined,
+                startingMode: agent === 'agy' ? 'pty' : undefined
             })
+
 
             if (result.type === 'success') {
                 haptic.notification('success')
@@ -1239,6 +1297,9 @@ export function NewSession(props: {
         (agent === 'codex'
             && (model !== 'auto' || modelReasoningEffort !== 'default')
             && codexModelsState.isLoading)
+        || (agent === 'agy'
+            && agySelectedModel !== null
+            && agyModelsState.isLoading)
         || (agent === 'cursor'
             && (model !== 'auto' || cursorSelectedBase !== 'auto')
             && cursorModelsState.isLoading)
@@ -1330,7 +1391,17 @@ export function NewSession(props: {
                     onClear={() => setSelectedCodexImportSessionId(null)}
                 />
             ) : null}
-            {agent === 'opencode' ? (
+            {agent === 'agy' ? (
+                <AgyModelSelector
+                    machineId={machineId}
+                    isLoading={agyModelsState.isLoading}
+                    error={agyModelsState.error}
+                    availableModels={agyModelsState.availableModels}
+                    selectedModel={agySelectedModel}
+                    onModelChange={setAgySelectedModel}
+                    onRetry={agyModelsState.refetch}
+                />
+            ) : agent === 'opencode' ? (
                 <OpencodeModelSelector
                     cwd={deferredDirectory}
                     machineId={machineId}

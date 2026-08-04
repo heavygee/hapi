@@ -40,6 +40,7 @@ export const RPC_METHODS = {
     ListCopilotModelsForCwd: 'listCopilotModelsForCwd',
     ListCopilotModels: 'listCopilotModels',
     ListOpencodeReasoningEffortOptions: 'listOpencodeReasoningEffortOptions',
+    ListAgyModels: 'listAgyModels',
     ForkConversation: 'fork-conversation',
     RewindConversation: 'rewind-conversation',
 } as const

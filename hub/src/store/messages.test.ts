@@ -236,6 +236,43 @@ describe('position pagination and structural epochs', () => {
         expect(store.messages.getMessageEpoch(target.id)).toBe(1)
     })
 
+    it('clamps future client timestamps to hub receive time', () => {
+        const store = makeStore()
+        const session = makeSession(store, 'future-client-clock')
+        const before = Date.now()
+
+        const message = store.messages.addMessage(
+            session.id,
+            { text: 'future clock' },
+            undefined,
+            undefined,
+            before + 60_000,
+        )
+
+        expect(message.createdAt).toBeGreaterThanOrEqual(before)
+        expect(message.createdAt).toBeLessThanOrEqual(Date.now())
+        expect(message.invokedAt).toBe(message.createdAt)
+    })
+
+    it('bumps the epoch when a newly inserted message is backdated behind the cached head', () => {
+        const store = makeStore()
+        const session = makeSession(store, 'epoch-backdated-insert')
+        const head = store.messages.addMessage(session.id, { text: 'head' })
+        const headPosition = { at: head.invokedAt ?? head.createdAt, seq: head.seq }
+
+        const backdated = store.messages.addMessage(
+            session.id,
+            { text: 'backdated' },
+            undefined,
+            undefined,
+            headPosition.at - 1_000,
+        )
+
+        expect(backdated.seq).toBeGreaterThan(head.seq)
+        expect(store.messages.getMessagesAfterPosition(session.id, 10, headPosition)).toEqual([])
+        expect(store.messages.getMessageEpoch(session.id)).toBe(1)
+    })
+
     it('bumps the target epoch when a copied message lands behind the cached head', () => {
         const store = makeStore()
         const target = makeSession(store, 'epoch-copy-target')
