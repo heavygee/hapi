@@ -350,7 +350,7 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
         if (result.type === 'error') {
             const status = result.code === 'machine_not_found' ? 404
                 : result.code === 'machine_offline' ? 503
-                    : result.code === 'upgrade_unavailable' ? 503
+                    : result.code === 'upgrade_unavailable' || result.code === 'upgrade_deferred' ? 503
                         : 502
             return c.json({ error: result.message, code: result.code }, status)
         }

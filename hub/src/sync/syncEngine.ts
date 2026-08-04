@@ -31,6 +31,7 @@ import type { RpcRegistry } from '../socket/rpcRegistry'
 import { clearAgentTerminalBuffer } from '../socket/agentTerminalBuffer'
 import type { SSEManager } from '../sse/sseManager'
 import { CursorLegacyMigrator, type CursorLegacyMigratorOptions } from '../cursor/cursorLegacyMigrator'
+import { isTransientArtifactBuildFailure } from '../upgrade/cliArtifact'
 
 import { EventPublisher, type SyncEventListener } from './eventPublisher'
 import { MachineCache, type Machine } from './machineCache'
@@ -914,10 +915,11 @@ export class SyncEngine {
                 channel: offer.channel,
                 result,
             })
-            // Only toast hard upgrade failures (RPC ran / runner reported failed).
-            // `upgrade_unavailable` includes mid-soup bun compile misses and other
-            // "cannot start" cases — toasting those as "Runner upgrade failed"
-            // during remat is a soup-fuelled false alarm (Teemo 2026-08-04).
+            // Only toast hard upgrade failures. `upgrade_deferred` is mid-soup
+            // bun compile (Teemo 2026-08-04); `upgrade_unavailable` is expected
+            // opt-out / channel-off / missing capability. Permanent artifact
+            // prep failures are classified as `upgrade_failed` so they stay visible
+            // under auto (banner hides self-upgrade-capable hosts).
             if (result.type === 'error' && result.code === 'upgrade_failed') {
                 this.eventPublisher.sendToast(
                     machine.namespace,
@@ -985,7 +987,7 @@ export class SyncEngine {
      */
     async upgradeMachineRunner(machineId: string, namespace: string): Promise<
         | { type: 'success'; message: string; response: RunnerSelfUpgradeResponse }
-        | { type: 'error'; message: string; code: 'machine_not_found' | 'machine_offline' | 'upgrade_unavailable' | 'upgrade_failed' }
+        | { type: 'error'; message: string; code: 'machine_not_found' | 'machine_offline' | 'upgrade_unavailable' | 'upgrade_deferred' | 'upgrade_failed' }
     > {
         if (!this.getUpgradeOffer) {
             return { type: 'error', message: 'Upgrade offer not configured', code: 'upgrade_unavailable' }
@@ -1047,11 +1049,13 @@ export class SyncEngine {
                     arch,
                 )
             } catch (error) {
-                return {
-                    type: 'error',
-                    message: error instanceof Error ? error.message : 'Failed to prepare CLI artifact',
-                    code: 'upgrade_unavailable',
+                const message = error instanceof Error ? error.message : 'Failed to prepare CLI artifact'
+                // Mid-soup unresolved imports → deferred (no auto toast). Permanent
+                // prep failures → upgrade_failed so auto policy still surfaces them.
+                if (isTransientArtifactBuildFailure(error)) {
+                    return { type: 'error', message, code: 'upgrade_deferred' }
                 }
+                return { type: 'error', message, code: 'upgrade_failed' }
             }
             if (!offer.artifact?.sha256) {
                 return { type: 'error', message: 'Artifact missing sha256', code: 'upgrade_unavailable' }

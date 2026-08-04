@@ -645,11 +645,12 @@ describe('SyncEngine fleet upgrade', () => {
         }
     })
 
-    it('auto fleet does not toast upgrade_unavailable (mid-soup bun compile)', async () => {
+    it('auto fleet does not toast upgrade_deferred (mid-soup bun compile)', async () => {
         const offer: HubUpgradeOffer = {
             channel: 'hub-artifact',
             targetVersion: '0.26.0',
             targetCapabilities: ['cursor-chat-store-status'],
+            targetGeneration: 'new-fingerprint',
         }
         const store = new Store(':memory:')
         const sendToast = mock(async () => {})
@@ -693,6 +694,68 @@ describe('SyncEngine fleet upgrade', () => {
             await new Promise((resolve) => setTimeout(resolve, 20))
             expect(runnerSelfUpgrade).not.toHaveBeenCalled()
             expect(sendToast).not.toHaveBeenCalled()
+        } finally {
+            engine.stop()
+        }
+    })
+
+    it('auto fleet toasts permanent artifact preparation failures', async () => {
+        const offer: HubUpgradeOffer = {
+            channel: 'hub-artifact',
+            targetVersion: '0.26.0',
+            targetCapabilities: ['cursor-chat-store-status'],
+            targetGeneration: 'new-fingerprint',
+        }
+        const store = new Store(':memory:')
+        const sendToast = mock(async () => {})
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {}, sendToast } as never,
+            {
+                getUpgradeOffer: () => offer,
+                getFleetUpgradePolicy: () => 'auto',
+                prepareArtifactOffer: async () => {
+                    throw new Error('Missing tool archive for compile: ripgrep-win32-x64.tar.gz')
+                },
+            },
+        )
+
+        try {
+            ;(engine as any).rpcGateway.runnerSelfUpgrade = mock(async () => ({
+                status: 'started',
+                message: 'ok',
+                channel: 'hub-artifact',
+            }))
+
+            engine.getOrCreateMachine(
+                'teemo',
+                {
+                    host: 'Teemo',
+                    platform: 'win32',
+                    arch: 'x64',
+                    happyCliVersion: '0.26.0',
+                    capabilities: ['cursor-chat-store-status', 'runner-self-upgrade', 'cli-artifact-generation'],
+                    cliArtifactGeneration: 'old-fingerprint',
+                },
+                null,
+                'default',
+            )
+            engine.handleMachineAlive({ machineId: 'teemo', time: Date.now() })
+            await Promise.resolve()
+            await new Promise((resolve) => setTimeout(resolve, 20))
+            // EventPublisher → sseManager.sendToast(namespace, SyncEvent toast)
+            expect(sendToast).toHaveBeenCalledWith(
+                'default',
+                expect.objectContaining({
+                    type: 'toast',
+                    data: expect.objectContaining({
+                        title: 'Runner upgrade failed',
+                        body: expect.stringContaining('Missing tool archive'),
+                    }),
+                }),
+            )
         } finally {
             engine.stop()
         }

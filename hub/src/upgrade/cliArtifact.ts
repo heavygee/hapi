@@ -13,6 +13,26 @@ import { homedir } from 'node:os'
 import { join, relative } from 'node:path'
 import { findMonorepoRoot, defaultHubPackageRoot } from './resolveUpgradeOffer'
 
+/**
+ * Mid-rebuild / half-soup compile miss. Auto fleet maps this to
+ * `upgrade_deferred` and skips the failure toast; permanent prepare
+ * failures stay `upgrade_failed` so operators still see them.
+ */
+export class TransientArtifactBuildError extends Error {
+    constructor(message: string) {
+        super(message)
+        this.name = 'TransientArtifactBuildError'
+    }
+}
+
+export function isTransientArtifactBuildFailure(error: unknown): boolean {
+    if (error instanceof TransientArtifactBuildError) {
+        return true
+    }
+    const message = error instanceof Error ? error.message : String(error)
+    return /incomplete hub source tree|Could not resolve:/i.test(message)
+}
+
 export type ArtifactMeta = {
     version: string
     platform: string
@@ -564,9 +584,9 @@ export async function ensureCliArtifact(options: {
                 )
             }
             // Half-souped driver tips (imports without files) fail here during remat.
-            // Callers treat this as upgrade_unavailable — do not toast as a hard fail.
+            // Typed as TransientArtifactBuildError → upgrade_deferred (no auto toast).
             if (/Could not resolve:/i.test(detail)) {
-                throw new Error(
+                throw new TransientArtifactBuildError(
                     `bun compile failed (incomplete hub source tree — mid-rebuild?): ${detail}`,
                 )
             }
