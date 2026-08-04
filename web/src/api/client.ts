@@ -40,6 +40,7 @@ import type {
     MachinePathsExistsResponse,
     OpencodeModelsResponse,
     OpencodeReasoningEffortResponse,
+    PiModelsResponse,
     QueuedStateResponse,
     ReopenSessionResponse,
     SqliteStorageUsageResponse,
@@ -753,6 +754,12 @@ export class ApiClient {
     async getMachineCursorModels(machineId: string): Promise<CursorModelsResponse> {
         return await this.request<CursorModelsResponse>(
             `/api/machines/${encodeURIComponent(machineId)}/cursor-models`
+        )
+    }
+
+    async getMachinePiModels(machineId: string): Promise<PiModelsResponse> {
+        return await this.request<PiModelsResponse>(
+            `/api/machines/${encodeURIComponent(machineId)}/pi-models`
         )
     }
 

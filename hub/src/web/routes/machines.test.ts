@@ -280,6 +280,41 @@ describe('machines routes', () => {
         })
     })
 
+    it('returns Pi models from ~/.pi/agent/models.json for New Session pickers', async () => {
+        const machine = createMachine()
+        const engine = {
+            getMachine: () => machine,
+            getMachineByNamespace: () => machine,
+            listPiModelsForMachine: async () => ({
+                success: true,
+                availableModels: [
+                    { provider: 'local-llm', modelId: 'fable-fusion', name: 'Fable-Fusion 711 (oos-llm)' },
+                    { provider: 'local-llm', modelId: 'qwen36-27b-ud', name: 'Qwen3.6-27B UD (bake-off winner)' },
+                ],
+                currentModelId: 'local-llm/fable-fusion',
+            }),
+        } as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createMachinesRoutes(() => engine as SyncEngine))
+
+        const response = await app.request('/api/machines/machine-1/pi-models')
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({
+            success: true,
+            availableModels: [
+                { provider: 'local-llm', modelId: 'fable-fusion', name: 'Fable-Fusion 711 (oos-llm)' },
+                { provider: 'local-llm', modelId: 'qwen36-27b-ud', name: 'Qwen3.6-27B UD (bake-off winner)' },
+            ],
+            currentModelId: 'local-llm/fable-fusion',
+        })
+    })
+
     it('returns ACP wire ids from the machine RPC for New Session model pickers', async () => {
         const machine = createMachine()
         const engine = {
