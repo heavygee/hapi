@@ -69,6 +69,7 @@ export default {
   'sessions.empty.startSession': '启动会话',
   'sessions.empty.browse': '浏览 workspace',
   'sessions.search.placeholder': '搜索会话…',
+  'sessions.count': '{n} 个会话 · {m} 个项目',
   'sessions.search.open': '搜索会话',
   'sessions.search.clear': '清除搜索',
   'sessions.search.noResults': '没有符合筛选条件的会话。',
@@ -487,6 +488,7 @@ export default {
   'chat.switchRemote': '切换到远程模式',
   'chat.sendError.fallback': '消息未能发送。请修改后重试。',
   'chat.sendError.sessionInactive': '此会话已归档。请先重新打开再发送消息。',
+  'chat.sendError.aborted': '发送已中止。草稿已恢复。',
   'chat.sendError.sessionInactive.action': '重新打开',
 
   // Codex review
