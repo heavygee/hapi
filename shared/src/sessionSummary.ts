@@ -1,4 +1,4 @@
-import type { AgentState, Metadata, Session, TodoItem, WorktreeMetadata } from './schemas'
+import type { AgentState, ExternalRef, Metadata, Session, TodoItem, WorktreeMetadata } from './schemas'
 import { isKnownFlavor } from './flavors'
 import type { AgentFlavor } from './modes'
 
@@ -45,6 +45,17 @@ export type SessionSummaryMetadata = {
     lifecycleState?: string
     /** Loopback MCP URL when session CLI happy server is running (#956). */
     hapiMcpUrl?: string
+    lastModelError?: {
+        kind: string
+        transient: boolean
+        rawSnippet: string
+        atTs: number
+        priorAssistantClaimsDone: boolean
+        retriedAndFailed?: boolean
+        acknowledgedAt?: number
+    }
+    /** Structured contribution links (GitHub PRs, …). tiann/hapi#1160. */
+    externalRefs?: ExternalRef[]
 }
 
 export type SessionSummary = {
@@ -154,7 +165,6 @@ const AGENT_SESSION_ID_FIELD_BY_FLAVOR = {
     gemini: 'geminiSessionId',
     opencode: 'opencodeSessionId',
     grok: 'grokSessionId',
-    agy: 'agySessionId',
     cursor: 'cursorSessionId',
     kimi: 'kimiSessionId',
     copilot: 'copilotSessionId',
@@ -177,7 +187,6 @@ function getSummaryAgentSessionId(metadata: Metadata): string | undefined {
         ?? metadata.geminiSessionId
         ?? metadata.opencodeSessionId
         ?? metadata.grokSessionId
-        ?? metadata.agySessionId
         ?? metadata.cursorSessionId
         ?? metadata.kimiSessionId
         ?? metadata.copilotSessionId
@@ -196,9 +205,13 @@ export function toSessionSummaryMetadata(metadata: Metadata | null | undefined):
         flavor: metadata.flavor ?? null,
         worktree: metadata.worktree,
         agentSessionId: getSummaryAgentSessionId(metadata),
+        // Native Claude id kept distinct from flattened agentSessionId (import picker).
         claudeSessionId: metadata.claudeSessionId ?? undefined,
         lifecycleState: metadata.lifecycleState,
-        hapiMcpUrl: metadata.hapiMcpUrl ?? undefined
+        // Loopback MCP URL when session CLI happy server is running (#956).
+        hapiMcpUrl: metadata.hapiMcpUrl ?? undefined,
+        lastModelError: metadata.lastModelError,
+        externalRefs: metadata.externalRefs
     }
 }
 

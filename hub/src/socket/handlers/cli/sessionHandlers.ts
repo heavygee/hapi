@@ -9,11 +9,59 @@ import type { SyncEvent } from '../../../sync/syncEngine'
 import { extractTodoWriteTodosFromMessageContent } from '../../../sync/todos'
 import { extractTeamStateFromMessageContent, applyTeamStateDelta } from '../../../sync/teams'
 import { extractBackgroundTaskDelta } from '../../../sync/backgroundTasks'
+import { tryPromoteCursorInlineModelErrorFromMessage } from '../../../sync/cursorInlineModelErrorBackstop'
 import { shouldRecordSessionActivity } from '../../../sync/sessionActivity'
 import { extractFailingMermaidBlocks, buildMermaidRenderIssueHint } from '../../../sync/mermaid'
 import type { CliSocketWithData } from '../../socketTypes'
 import type { SessionEndReason } from '@hapi/protocol'
 import type { AccessErrorReason, AccessResult } from './types'
+import { getConfiguration } from '../../../configuration'
+
+/**
+ * CLI `update-metadata` often sends a local cache snapshot. Empty
+ * `externalRefs: []` on that path is almost never an intentional unlink
+ * (unlink is PUT /sessions/:id/external-refs → setSessionExternalRefs).
+ * Drop the key so mergeSessionMetadata carry-forward keeps prior links.
+ *
+ * Incident 2026-07-30: mid-stack hub without CONTRIBUTION_FIELDS + sparse
+ * writes wiped PR chips; empty-[] on this socket path is the same class.
+ */
+function omitEmptyExternalRefsOnCliMetadataWrite(metadata: unknown): unknown {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+        return metadata
+    }
+    if (!Object.prototype.hasOwnProperty.call(metadata, 'externalRefs')) {
+        return metadata
+    }
+    const refs = (metadata as Record<string, unknown>).externalRefs
+    if (!Array.isArray(refs) || refs.length > 0) {
+        return metadata
+    }
+    const next = { ...(metadata as Record<string, unknown>) }
+    delete next.externalRefs
+    return next
+}
+
+function stripExternalRefsWhenAwarenessDisabled(metadata: unknown): unknown {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+        return metadata
+    }
+    let awarenessEnabled = false
+    try {
+        awarenessEnabled = getConfiguration().githubPrAwareness
+    } catch {
+        awarenessEnabled = false
+    }
+    if (awarenessEnabled) {
+        return metadata
+    }
+    if (!('externalRefs' in metadata)) {
+        return metadata
+    }
+    const next = { ...(metadata as Record<string, unknown>) }
+    delete next.externalRefs
+    return next
+}
 
 type SessionAlivePayload = {
     sid: string
@@ -50,11 +98,7 @@ type UpdateStateHandler = ClientToServerEvents['update-state']
 const messageSchema = z.object({
     sid: z.string(),
     message: z.union([z.string(), z.unknown()]),
-    localId: z.string().optional(),
-    // Client-provided origin timestamp (epoch ms) — e.g. a Claude transcript
-    // entry's own `timestamp`. Only honored for agent messages (no localId);
-    // see addMessage in messages.ts.
-    createdAt: z.number().optional()
+    localId: z.string().optional()
 })
 
 const updateMetadataSchema = z.object({
@@ -110,7 +154,7 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             return
         }
 
-        const { sid, localId, createdAt } = parsed.data
+        const { sid, localId } = parsed.data
         const raw = parsed.data.message
 
         const content = typeof raw === 'string'
@@ -134,9 +178,20 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             return
         }
 
-        const msg = store.messages.addMessage(sid, content, localId, undefined, createdAt)
+        const msg = store.messages.addMessage(sid, content, localId)
         if (shouldRecordSessionActivity(content)) {
             onSessionActivity?.(sid, msg.createdAt)
+        }
+
+        if (tryPromoteCursorInlineModelErrorFromMessage({
+            store,
+            sessionId: sid,
+            session,
+            content,
+            atTs: msg.createdAt,
+            messageSeq: msg.seq
+        })) {
+            onWebappEvent?.({ type: 'session-updated', sessionId: sid })
         }
 
         const todos = extractTodoWriteTodosFromMessageContent(content)
@@ -258,6 +313,10 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             cb({ result: 'error', reason: sessionAccess.reason })
             return
         }
+
+        const gatedMetadata = stripExternalRefsWhenAwarenessDisabled(
+            omitEmptyExternalRefsOnCliMetadataWrite(metadata)
+        )
 
         const result = store.sessions.updateSessionMetadata(
             sid,

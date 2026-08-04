@@ -55,7 +55,7 @@ export function resolveSessionHeaderMachineLabel(
 }
 import { useFeatures } from '@/hooks/queries/useFeatures'
 import { getPrimaryGithubPrRef } from '@hapi/protocol'
-import { formatGithubPrChipTitle, resolveGithubPrChipDisplay } from '@/components/SessionPrChip'
+import { formatGithubPrChipDetailParts, resolveGithubPrChipDisplay } from '@/components/SessionPrChip'
 
 function FilesIcon(props: { className?: string }) {
     return (
@@ -285,8 +285,10 @@ export function SessionHeader(props: {
         if (!githubPrAwarenessEnabled || !primaryPrRef) return null
         const nowMs = Date.now()
         const display = resolveGithubPrChipDisplay(primaryPrRef, nowMs)
+        const parts = formatGithubPrChipDetailParts(primaryPrRef, display, t, nowMs)
         return {
-            detail: formatGithubPrChipTitle(primaryPrRef, display, t),
+            glyph: parts.glyph,
+            detail: parts.detail,
             href: primaryPrRef.url
         }
     }, [githubPrAwarenessEnabled, primaryPrRef, t])

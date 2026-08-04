@@ -12,8 +12,6 @@ import {
     readUpgradeTarget,
     shouldDelegateToUpgradeTarget,
 } from '@/upgrade/upgradeTarget'
-import { waitForRunnerHandoff } from '@/runner/controlClient'
-import { killProcessByChildProcess } from '@/utils/process'
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import crossSpawn from 'cross-spawn'
 
@@ -29,48 +27,6 @@ export function waitForDelegatedRunner(child: ChildProcess): Promise<number> {
             resolve(status ?? 1)
         })
     })
-}
-
-/**
- * After spawning a durable upgrade target, require a live runner with hubReadyAt
- * before treating the marker as successful. Spawn-only success still restart-loops
- * under Restart=always when the target dies before publishing runner state.
- *
- * Uses waitForRunnerHandoff(wrapperPid): Windows .cmd shims make child.pid the
- * cmd.exe wrapper, while the real runner PID is a grandchild.
- */
-export async function settleDurableDelegate(options: {
-    child: ChildProcess
-    wrapperPid: number
-    useProcessGroup: boolean
-    timeoutMs?: number
-    waitForExit?: (child: ChildProcess) => Promise<number>
-    waitForReady?: (
-        oldPid: number,
-        opts?: { timeoutMs?: number },
-    ) => Promise<boolean>
-    killChild?: (child: ChildProcess, force?: boolean) => Promise<boolean>
-}): Promise<{ ready: true; exitCode: number } | { ready: false }> {
-    const waitForExit = options.waitForExit ?? waitForDelegatedRunner
-    const waitForReady = options.waitForReady ?? waitForRunnerHandoff
-    const killChild = options.killChild ?? killProcessByChildProcess
-    const timeoutMs = options.timeoutMs ?? 30_000
-    const exitPromise = waitForExit(options.child)
-    const ready = await Promise.race([
-        waitForReady(options.wrapperPid, { timeoutMs }),
-        exitPromise.then(() => false),
-    ])
-    if (!ready) {
-        // Force-kill tree; a wedged target that ignores SIGTERM must not keep
-        // this wrapper blocked forever (marker clear / fallback never runs).
-        await killChild(options.child, true).catch(() => false)
-        await Promise.race([
-            exitPromise.catch(() => undefined),
-            new Promise<void>((resolve) => setTimeout(resolve, 3_000)),
-        ])
-        return { ready: false }
-    }
-    return { ready: true, exitCode: await exitPromise }
 }
 
 /**
@@ -151,25 +107,12 @@ export async function runCli(): Promise<void> {
         process.on('SIGTERM', forward)
         process.on('SIGINT', forward)
         try {
-            const settled = await settleDurableDelegate({
-                child,
-                wrapperPid: process.pid,
-                useProcessGroup,
-            })
-            if (!settled.ready) {
-                clearUpgradeTarget()
-                logger.debug('[UPGRADE] Durable target never became ready; using current CLI')
-                // Fall through to the current CLI's normal command dispatch.
-            } else {
-                process.exit(settled.exitCode)
-            }
+            const code = await waitForDelegatedRunner(child)
+            process.exit(code)
         } catch (error) {
             clearUpgradeTarget()
             logger.debug('[UPGRADE] Durable target failed to spawn; using current CLI', error)
             // Fall through to the current CLI's normal command dispatch.
-        } finally {
-            process.off('SIGTERM', forward)
-            process.off('SIGINT', forward)
         }
     }
 

@@ -1,4 +1,5 @@
 import {
+    AcknowledgeModelErrorRequestSchema,
     CursorMigrateToAcpRequestSchema,
     DeleteUploadRequestSchema,
     ForkConversationRequestSchema,
@@ -17,6 +18,7 @@ import {
     SessionServiceTierRequestSchema,
     SessionModelRequestSchema,
     SessionPermissionModeRequestSchema,
+    SetExternalRefsRequestSchema,
     supportsModelChange,
     supportsEffort,
     toSessionSummary,
@@ -25,6 +27,7 @@ import {
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type { SlashCommand } from '@hapi/protocol/apiTypes'
 import { Hono, type Context } from 'hono'
+import { getConfiguration } from '../../configuration'
 import type { SyncEngine, Session } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { loadScratchlistAttachmentLimitsFromEnv } from '../../config/scratchlistAttachmentLimits'
@@ -32,6 +35,18 @@ import { validateScratchlistAttachmentsForWrite, scratchlistSessionBytesBeforeFo
 import { requireSessionFromParam, requireSyncEngine } from './guards'
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+
+export type SessionsRouteOptions = {
+    isGithubPrAwarenessEnabled?: () => boolean
+}
+
+function defaultGithubPrAwarenessEnabled(): boolean {
+    try {
+        return getConfiguration().githubPrAwareness
+    } catch {
+        return false
+    }
+}
 
 function commandsFromMetadataSlashCommands(names: readonly string[] | undefined): SlashCommand[] {
     if (!names?.length) {
@@ -64,8 +79,12 @@ function estimateBase64Bytes(base64: string): number {
     return Math.floor((len * 3) / 4) - padding
 }
 
-export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
+export function createSessionsRoutes(
+    getSyncEngine: () => SyncEngine | null,
+    options: SessionsRouteOptions = {}
+): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
+    const isGithubPrAwarenessEnabled = options.isGithubPrAwarenessEnabled ?? defaultGithubPrAwarenessEnabled
 
     app.get('/sessions', (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)
@@ -140,6 +159,52 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         return c.json({ session: sessionResult.session })
+    })
+
+    app.get('/sessions/:id/external-refs', (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        return c.json({ externalRefs: sessionResult.session.metadata?.externalRefs ?? [] })
+    })
+
+    app.put('/sessions/:id/external-refs', async (c) => {
+        if (!isGithubPrAwarenessEnabled()) {
+            return c.json({
+                error: 'GitHub PR awareness is disabled',
+                code: 'github_pr_awareness_disabled'
+            }, 403)
+        }
+
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const parsed = SetExternalRefsRequestSchema.safeParse(await c.req.json().catch(() => null))
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body: externalRefs is required' }, 400)
+        }
+
+        try {
+            await engine.setSessionExternalRefs(sessionResult.sessionId, parsed.data.externalRefs)
+            return c.json({ ok: true, externalRefs: parsed.data.externalRefs })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to update external refs'
+            return c.json({ error: message }, message.includes('concurrently') || message.includes('version') ? 409 : 500)
+        }
     })
 
     app.get('/sessions/:id/cursor-chat-store', async (c) => {
@@ -424,6 +489,102 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
 
         await engine.archiveSession(sessionResult.sessionId)
         return c.json({ ok: true })
+    })
+
+    app.post('/sessions/:id/model-error/acknowledge', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = AcknowledgeModelErrorRequestSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body', issues: parsed.error.issues }, 400)
+        }
+
+        try {
+            await engine.acknowledgeModelError(sessionResult.sessionId, parsed.data.atTs)
+            return c.json({ ok: true })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to acknowledge model error'
+            if (
+                message.includes('concurrently')
+                || message.includes('version')
+                || message.includes('changed')
+            ) {
+                return c.json({ error: message }, 409)
+            }
+            return c.json({ error: message }, 500)
+        }
+    })
+
+    app.post('/sessions/:id/model-error/bridge', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const flavor = sessionResult.session.metadata?.flavor ?? 'claude'
+        if (flavor !== 'cursor') {
+            return c.json({ error: 'Model error bridge is only supported for Cursor sessions' }, 400)
+        }
+
+        try {
+            const result = await engine.bridgeModelError(sessionResult.sessionId)
+            if (!result.ok) {
+                return c.json({ ok: false, reason: result.reason ?? 'not_bridgeable' }, 409)
+            }
+            return c.json({ ok: true })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to bridge model error'
+            if (message.includes('not active') || message.includes('not transient') || message.includes('already bridged') || message.includes('already failed')) {
+                return c.json({ error: message }, 409)
+            }
+            return c.json({ error: message }, 500)
+        }
+    })
+
+    app.post('/sessions/:id/model-error/auto-bridge-setting', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const flavor = sessionResult.session.metadata?.flavor ?? 'claude'
+        if (flavor !== 'cursor') {
+            return c.json({ error: 'Model error auto-bridge is only supported for Cursor sessions' }, 400)
+        }
+
+        const body = await c.req.json().catch(() => null)
+        if (!body || typeof body !== 'object' || typeof body.enabled !== 'boolean') {
+            return c.json({ error: 'Invalid body' }, 400)
+        }
+
+        try {
+            await engine.applySessionConfig(sessionResult.sessionId, {
+                autoBridgeTransientModelErrors: body.enabled
+            })
+            return c.json({ ok: true })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to apply auto-bridge setting'
+            return c.json({ error: message }, 409)
+        }
     })
 
     app.post('/sessions/:id/migrate-to-acp', async (c) => {

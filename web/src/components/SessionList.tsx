@@ -7,6 +7,8 @@ import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { SessionExportDialog } from '@/components/SessionExportDialog'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
+import { LinkPrDialog } from '@/components/LinkPrDialog'
+import { SessionPrChip, formatGithubPrChipDetailParts, resolveGithubPrChipDisplay } from '@/components/SessionPrChip'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { CopyIcon, CheckIcon } from '@/components/icons'
 import { cn } from '@/lib/utils'
@@ -29,10 +31,22 @@ import { getMachinePlatform, presentMachineHealth } from '@/lib/machineHealth'
 import { MachineFilterBar, MachineFilterMenu } from '@/components/MachineFilterBar'
 import { useSessionListMachineFilter } from '@/hooks/useSessionListMachineFilter'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
+import { useFeatures } from '@/hooks/queries/useFeatures'
+import { getPrimaryGithubPrRef } from '@hapi/protocol'
 import { SessionRowSummary } from '@/components/SessionRowSummary'
 import { Spinner } from '@/components/Spinner'
 
 export { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
+
+/** Outer row chrome — selected background lives here, not on the button. */
+export function sessionListItemWrapperClassName(selected: boolean): string {
+    return `session-list-item flex w-full items-stretch rounded-lg transition-colors${selected ? ' bg-[var(--app-secondary-bg)]' : ''}`
+}
+
+/** Focusable row control — owns `group/session-row` for keyboard tooltip reveal. */
+export function sessionListItemButtonClassName(): string {
+    return 'group/session-row flex min-w-0 flex-1 flex-col gap-1 px-2.5 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg'
+}
 
 type SessionGroup = {
     key: string
@@ -47,8 +61,17 @@ type SessionGroup = {
 const RUNNING_BUCKETS = [
     { key: 'working', labelKey: 'session.item.running', colorClass: 'text-[var(--app-badge-success-text)]', pulse: true },
     { key: 'pending', labelKey: 'session.item.pending', colorClass: 'text-[var(--app-badge-warning-text)]', pulse: true },
-    { key: 'idle', labelKey: 'session.item.idle', colorClass: 'text-[var(--app-hint)]', pulse: false },
 ] as const
+
+/** Active sessions that warrant the optional pinned In progress section. Quiet actives stay in directory groups. */
+function isPinnedInProgressSession(session: SessionSummary): boolean {
+    if (!session.active) {
+        return false
+    }
+    return session.thinking
+        || (session.backgroundTaskCount ?? 0) > 0
+        || (session.pendingRequestsCount ?? 0) > 0
+}
 
 export type SessionTimeRange = {
     start: number | null
@@ -673,16 +696,31 @@ export function SessionListSearch(props: {
     }, [props.expanded])
 
     if (!props.expanded) {
+        const hasTextQuery = props.value.length > 0
+        const openLabel = t('sessions.search.open')
+        const collapsedLabel = hasTextQuery ? `${openLabel}: ${props.value}` : openLabel
         return (
             <button
                 type="button"
                 onClick={() => props.onExpandedChange(true)}
-                className="relative shrink-0 rounded-full p-1.5 text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
-                title={t('sessions.search.open')}
-                aria-label={t('sessions.search.open')}
+                className={cn(
+                    'relative flex min-w-0 max-w-[9rem] items-center gap-1 rounded-full transition-colors',
+                    hasTextQuery
+                        // Dedicated chip tokens (blue wash) — --app-link/15 washes out to gray
+                        // in default light mode where --app-link is near-black. Keep the solid
+                        // --app-link dot for date-only so the original small-dimension cue stays.
+                        ? 'bg-[var(--app-chat-user-chip-bg)] px-2 py-1 text-[var(--app-chat-user-chip-fg)] hover:opacity-90'
+                        : 'shrink-0 p-1.5 text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
+                )}
+                title={collapsedLabel}
+                aria-label={collapsedLabel}
             >
-                <SearchIcon className="h-5 w-5" />
-                {hasActiveFilters ? <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-[var(--app-link)]" /> : null}
+                <SearchIcon className="h-5 w-5 shrink-0" />
+                {hasTextQuery ? (
+                    <span className="min-w-0 truncate text-xs font-medium">{props.value}</span>
+                ) : hasActiveFilters ? (
+                    <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-[var(--app-link)]" />
+                ) : null}
             </button>
         )
     }
@@ -783,9 +821,13 @@ function SessionItem(props: {
     const [menuOpen, setMenuOpen] = useState(false)
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
     const [renameOpen, setRenameOpen] = useState(false)
+    const [linkPrOpen, setLinkPrOpen] = useState(false)
     const [exportOpen, setExportOpen] = useState(false)
     const [archiveOpen, setArchiveOpen] = useState(false)
     const [deleteOpen, setDeleteOpen] = useState(false)
+    const { features } = useFeatures(api)
+    const githubPrAwarenessEnabled = Boolean(features?.githubPrAwareness.enabled)
+    const primaryPrRef = getPrimaryGithubPrRef(s.metadata?.externalRefs)
     const {
         status: cursorChatStoreStatus,
         isApplicable: cursorChatStoreApplicable,
@@ -811,7 +853,7 @@ function SessionItem(props: {
         ? t('session.action.reopenCursorUnverified')
         : undefined
 
-    const { archiveSession, reopenSession, renameSession, deleteSession, isPending } = useSessionActions(
+    const { archiveSession, reopenSession, renameSession, setExternalRefs, deleteSession, isPending } = useSessionActions(
         api,
         s.id,
         s.metadata?.flavor ?? null
@@ -848,6 +890,17 @@ function SessionItem(props: {
     })
 
     const sessionName = getSessionTitle(s)
+    const linkedPr = useMemo(() => {
+        if (!githubPrAwarenessEnabled || !primaryPrRef) return null
+        const nowMs = Date.now()
+        const display = resolveGithubPrChipDisplay(primaryPrRef, nowMs)
+        const parts = formatGithubPrChipDetailParts(primaryPrRef, display, t, nowMs)
+        return {
+            glyph: parts.glyph,
+            detail: parts.detail,
+            href: primaryPrRef.url
+        }
+    }, [githubPrAwarenessEnabled, primaryPrRef, t])
     const attention = useMemo(
         () => showDetailedStatus
             ? classifySessionAttention(s, {
@@ -883,6 +936,9 @@ function SessionItem(props: {
                     inRunningSection={inRunningSection}
                     projectLabel={projectLabel}
                     machineLabel={machineLabel}
+                    trailing={githubPrAwarenessEnabled && primaryPrRef ? (
+                        <SessionPrChip refs={s.metadata?.externalRefs} />
+                    ) : null}
                 />
             </button>
 
@@ -893,6 +949,8 @@ function SessionItem(props: {
                 sessionTitle={sessionName}
                 sessionActive={s.active}
                 onRename={() => setRenameOpen(true)}
+                onLinkPr={githubPrAwarenessEnabled ? () => setLinkPrOpen(true) : undefined}
+                linkedPr={linkedPr}
                 onExport={() => setExportOpen(true)}
                 onArchive={() => setArchiveOpen(true)}
                 onReopen={cursorReopenDisabledReason ? undefined : handleReopen}
@@ -916,15 +974,22 @@ function SessionItem(props: {
                 />
             ) : null}
 
-            {renameOpen ? (
-                <RenameSessionDialog
-                    isOpen={true}
-                    onClose={() => setRenameOpen(false)}
-                    currentName={sessionName}
-                    onRename={renameSession}
-                    isPending={isPending}
-                />
-            ) : null}
+            <RenameSessionDialog
+                isOpen={renameOpen}
+                onClose={() => setRenameOpen(false)}
+                currentName={sessionName}
+                onRename={renameSession}
+                isPending={isPending}
+            />
+
+            <LinkPrDialog
+                isOpen={linkPrOpen}
+                onClose={() => setLinkPrOpen(false)}
+                currentPrimaryLabel={primaryPrRef ? `${primaryPrRef.repo}#${primaryPrRef.number}` : null}
+                onLink={setExternalRefs}
+                onUnlink={primaryPrRef ? () => setExternalRefs([]) : undefined}
+                isPending={isPending}
+            />
 
             {exportOpen ? (
                 <SessionExportDialog
@@ -1111,10 +1176,9 @@ export function SessionList(props: {
         [visibleSessions, activeMachineFilter]
     )
     const runningSessions = useMemo(() => {
-        const buckets: Record<'working' | 'pending' | 'idle', SessionSummary[]> = {
+        const buckets: Record<'working' | 'pending', SessionSummary[]> = {
             working: [],
             pending: [],
-            idle: []
         }
         if (!pinInProgressSessions) {
             return buckets
@@ -1127,9 +1191,8 @@ export function SessionList(props: {
                 buckets.working.push(session)
             } else if ((session.pendingRequestsCount ?? 0) > 0) {
                 buckets.pending.push(session)
-            } else {
-                buckets.idle.push(session)
             }
+            // Quiet active sessions stay in directory groups (no Idle pin bucket).
         }
         const byRecent = (a: SessionSummary, b: SessionSummary) => b.updatedAt - a.updatedAt
         for (const key of Object.keys(buckets) as Array<keyof typeof buckets>) {
@@ -1139,11 +1202,10 @@ export function SessionList(props: {
     }, [machineFilteredSessions, pinInProgressSessions])
     const runningSessionTotal = runningSessions.working.length
         + runningSessions.pending.length
-        + runningSessions.idle.length
     const groups = useMemo(
         () => groupSessionsByDirectory(
             pinInProgressSessions
-                ? machineFilteredSessions.filter((session) => !session.active)
+                ? machineFilteredSessions.filter((session) => !isPinnedInProgressSession(session))
                 : machineFilteredSessions
         ),
         [machineFilteredSessions, pinInProgressSessions]
@@ -1579,7 +1641,7 @@ export function SessionList(props: {
                     return (
                         <div key={group.key}>
                             <div
-                                className="group/project sticky top-0 z-10 flex items-center gap-2 bg-[var(--app-bg)] py-1.5 pl-2 pr-2 text-left rounded-lg transition-colors hover:bg-[var(--app-secondary-bg)] cursor-pointer min-w-0 w-full select-none"
+                                className="group/project sticky top-0 z-10 flex items-center gap-2 bg-[var(--app-bg)] py-1.5 pl-2 pr-2 text-left rounded-lg transition-colors hover:bg-[var(--app-subtle-bg)] cursor-pointer min-w-0 w-full select-none"
                                 onClick={() => toggleGroup(group.key, isCollapsed)}
                                 title={group.directory}
                             >

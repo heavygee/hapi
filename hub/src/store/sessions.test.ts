@@ -92,6 +92,162 @@ describe('getOrCreateSession: requested identity', () => {
 })
 
 describe('updateSessionMetadata: protocol resume token preservation', () => {
+    it('preserves externalRefs when a sparse replacement omits them', () => {
+        const store = makeStore()
+        const externalRefs = [{
+            kind: 'github_pr',
+            repo: 'tiann/hapi',
+            number: 1160,
+            url: 'https://github.com/tiann/hapi/pull/1160',
+            role: 'primary'
+        }]
+        const session = store.sessions.getOrCreateSession(
+            'external-refs-preserve',
+            {
+                path: '/tmp/project',
+                host: 'example',
+                flavor: 'cursor',
+                externalRefs
+            },
+            null,
+            'default'
+        )
+
+        const result = store.sessions.updateSessionMetadata(
+            session.id,
+            {
+                path: '/tmp/project',
+                host: 'example',
+                flavor: 'cursor',
+                lifecycleState: 'running'
+            },
+            session.metadataVersion,
+            'default'
+        )
+        expect(result.result).toBe('success')
+        expect(getMetadata(store, session.id)?.externalRefs).toEqual(externalRefs)
+        store.close()
+    })
+
+    it('lets an explicit externalRefs write win, including clearing with []', () => {
+        const store = makeStore()
+        const session = store.sessions.getOrCreateSession(
+            'external-refs-explicit',
+            {
+                path: '/tmp/project',
+                host: 'example',
+                flavor: 'cursor',
+                externalRefs: [{
+                    kind: 'github_pr',
+                    repo: 'tiann/hapi',
+                    number: 1160,
+                    url: 'https://github.com/tiann/hapi/pull/1160',
+                    role: 'primary'
+                }]
+            },
+            null,
+            'default'
+        )
+
+        const replacement = [{
+            kind: 'github_pr',
+            repo: 'owner/other',
+            number: 42,
+            url: 'https://github.com/owner/other/pull/42',
+            role: 'secondary'
+        }]
+        let version = session.metadataVersion
+        let result = store.sessions.updateSessionMetadata(
+            session.id,
+            {
+                path: '/tmp/project',
+                host: 'example',
+                flavor: 'cursor',
+                externalRefs: replacement
+            },
+            version,
+            'default'
+        )
+        expect(result.result).toBe('success')
+        if (result.result === 'success') version = result.version
+        expect(getMetadata(store, session.id)?.externalRefs).toEqual(replacement)
+
+        result = store.sessions.updateSessionMetadata(
+            session.id,
+            {
+                path: '/tmp/project',
+                host: 'example',
+                flavor: 'cursor',
+                externalRefs: []
+            },
+            version,
+            'default'
+        )
+        expect(result.result).toBe('success')
+        expect(getMetadata(store, session.id)?.externalRefs).toEqual([])
+        store.close()
+    })
+
+    it('preserves Meta status cache when link-pr rewrites the same primary without status', () => {
+        const store = makeStore()
+        const session = store.sessions.getOrCreateSession(
+            'external-refs-status-relink',
+            {
+                path: '/tmp/project',
+                host: 'example',
+                flavor: 'cursor',
+                externalRefs: [{
+                    kind: 'github_pr',
+                    repo: 'tiann/hapi',
+                    number: 1205,
+                    url: 'https://github.com/tiann/hapi/pull/1205',
+                    role: 'primary',
+                    source: 'inferred',
+                    linkedAt: 100,
+                    status: 'needs_work',
+                    statusCheckedAt: 200,
+                    statusAction: 'CI failing'
+                }]
+            },
+            null,
+            'default'
+        )
+
+        const result = store.sessions.updateSessionMetadata(
+            session.id,
+            {
+                path: '/tmp/project',
+                host: 'example',
+                flavor: 'cursor',
+                externalRefs: [{
+                    kind: 'github_pr',
+                    repo: 'tiann/hapi',
+                    number: 1205,
+                    url: 'https://github.com/tiann/hapi/pull/1205',
+                    role: 'primary',
+                    source: 'agent',
+                    linkedAt: 300
+                }]
+            },
+            session.metadataVersion,
+            'default'
+        )
+        expect(result.result).toBe('success')
+        expect(getMetadata(store, session.id)?.externalRefs).toEqual([{
+            kind: 'github_pr',
+            repo: 'tiann/hapi',
+            number: 1205,
+            url: 'https://github.com/tiann/hapi/pull/1205',
+            role: 'primary',
+            source: 'agent',
+            linkedAt: 300,
+            status: 'needs_work',
+            statusCheckedAt: 200,
+            statusAction: 'CI failing'
+        }])
+        store.close()
+    })
+
     it('preserves cursorSessionId when archive payload omits it (Cursor crash-archive)', () => {
         const store = makeStore()
         const session = store.sessions.getOrCreateSession(
@@ -460,6 +616,44 @@ describe('updateSessionMetadata: protocol resume token preservation', () => {
         expect(metadata?.path).toBe('/tmp/project')
         expect(metadata?.host).toBe('example')
         expect(metadata?.cursorSessionId).toBe('parse-required')
+        expect(metadata?.lifecycleState).toBe('archived')
+    })
+
+    it('preserves lastModelError across sparse archive (durable alert state)', () => {
+        const store = makeStore()
+        const lastModelError = {
+            kind: 'quota_exhausted',
+            transient: false,
+            rawSnippet: 'Error: T: [resource_exhausted]',
+            atTs: 1_700_000_000_000,
+            priorAssistantClaimsDone: false
+        }
+        const session = store.sessions.getOrCreateSession(
+            'cursor-model-error-survives',
+            {
+                path: '/tmp/project',
+                host: 'example',
+                flavor: 'cursor',
+                cursorSessionId: 'err-uuid',
+                lastModelError
+            },
+            null,
+            'default'
+        )
+
+        store.sessions.updateSessionMetadata(
+            session.id,
+            {
+                lifecycleState: 'archived',
+                archivedBy: 'cli',
+                archiveReason: 'Session crashed'
+            },
+            session.metadataVersion,
+            'default'
+        )
+
+        const metadata = getMetadata(store, session.id) as Record<string, unknown> | null
+        expect(metadata?.lastModelError).toEqual(lastModelError)
         expect(metadata?.lifecycleState).toBe('archived')
     })
 

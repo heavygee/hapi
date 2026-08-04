@@ -6,7 +6,8 @@ import {
     DecryptedMessageSchema,
     MachineSchema,
     PermissionModeSchema,
-    SessionSchema
+    SessionSchema,
+    ExternalRefSchema,
 } from './schemas'
 import { AgentFlavorSchema } from './modes'
 import type {
@@ -198,6 +199,20 @@ export type ArchiveCodexSessionRpcRequest = z.infer<typeof ArchiveCodexSessionRp
 export type ArchiveCodexSessionRpcResponse = z.infer<typeof ArchiveCodexSessionRpcResponseSchema>
 
 /** Claude import messages use the same wire shape as Codex agent payloads (`type: 'codex'`). */
+
+export const SetExternalRefsRequestSchema = z.object({
+    externalRefs: z.array(ExternalRefSchema)
+})
+export type SetExternalRefsRequest = z.infer<typeof SetExternalRefsRequestSchema>
+
+export const FeaturesPatchRequestSchema = z.object({
+    githubPrAwareness: z.boolean().optional()
+}).refine((value) => value.githubPrAwareness !== undefined, {
+    message: 'at least one feature flag is required'
+})
+
+export type FeaturesPatchRequest = z.infer<typeof FeaturesPatchRequestSchema>
+
 export const ClaudeImportedMessageSchema = z.object({
     content: CodexImportedMessageSchema,
     createdAt: z.number().optional()
@@ -427,6 +442,13 @@ export const ScratchlistEntryUpdateRequestSchema = z.object({
 )
 
 export type ScratchlistEntryUpdateRequest = z.infer<typeof ScratchlistEntryUpdateRequestSchema>
+
+/** Dismiss the model-error banner for a specific displayed error (by atTs). */
+export const AcknowledgeModelErrorRequestSchema = z.object({
+    atTs: z.number()
+})
+
+export type AcknowledgeModelErrorRequest = z.infer<typeof AcknowledgeModelErrorRequestSchema>
 
 /** Per-session legacy stream-json → ACP migrator request. See tiann/hapi#824. */
 export const CursorMigrateToAcpRequestSchema = z.object({

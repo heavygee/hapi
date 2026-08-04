@@ -31,6 +31,8 @@ import { useMachineLabels } from '@/hooks/useMachineLabels'
 import { useSession } from '@/hooks/queries/useSession'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
 import { useSessions } from '@/hooks/queries/useSessions'
+import { useOnboardingTour, type ShellTourStepId } from '@/lib/use-onboarding-tour'
+import { FueCallout, FueDot } from '@/components/Fue'
 import { useSlashCommands } from '@/hooks/queries/useSlashCommands'
 import { useSkills } from '@/hooks/queries/useSkills'
 import { getSessionTitle } from '@/lib/sessionTitle'
@@ -39,7 +41,6 @@ import type { Suggestion } from '@/hooks/useActiveSuggestions'
 import { useSendMessage, type SendErrorInfo } from '@/hooks/mutations/useSendMessage'
 import type { ComposerSendError } from '@/components/AssistantChat/HappyComposer'
 import { ApiError } from '@/api/client'
-import type { MessageDeliveryMode } from '@hapi/protocol'
 import { queryKeys } from '@/lib/query-keys'
 import { useToast } from '@/lib/toast-context'
 import { useTranslation } from '@/lib/use-translation'
@@ -51,7 +52,7 @@ import { useSessionBrowserTitle } from '@/hooks/useSessionBrowserTitle'
 import { clearCodexImportedSession, markCodexSessionsImported } from '@/lib/codexImportedSessions'
 import { clearClaudeImportedSession, markClaudeSessionsImported } from '@/lib/claudeImportedSessions'
 import type { CodexDuplicateSessionGroup, CodexLocalSessionSummary, ClaudeLocalSessionSummary, AgentImportFlavor, CursorImportableSessionSummary, CursorImportRowOutcome } from '@/types/api'
-import { getSupersedingSessionId, prepareFollowSupersedingSession, shouldFollowSupersedingSession } from '@/routes/sessions/followSupersedingSession'
+import { getSupersedingSessionId, shouldFollowSupersedingSession } from '@/routes/sessions/followSupersedingSession'
 import { migrateSuppressedSendError } from '@/lib/suppressed-send-error'
 import FilesPage from '@/routes/sessions/files'
 import FilePage from '@/routes/sessions/file'
@@ -69,6 +70,7 @@ import SettingsMachinesPage from '@/routes/settings/machines'
 import SettingsAboutPage from '@/routes/settings/about'
 import SettingsStoragePage from '@/routes/settings/storage'
 import SettingsUsagePage from '@/routes/settings/usage'
+import OverseerConsolePage from '@/routes/overseer'
 import SharePage from '@/routes/share'
 import { retargetSharePendingTransfer, setSharePendingTransfer } from '@/lib/sharePendingState'
 import { deleteShareTransfer } from '@/lib/shareTransfer'
@@ -154,6 +156,26 @@ function FolderOpenIcon(props: { className?: string }) {
     )
 }
 
+function OverseerIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+            <circle cx="12" cy="12" r="3" />
+        </svg>
+    )
+}
+
 function SettingsIcon(props: { className?: string }) {
     return (
         <svg
@@ -223,6 +245,9 @@ function SessionsPage() {
         })()
     }, [addToast, refetch, t])
 
+    const projectCount = useMemo(() => new Set(sessions.map(s =>
+        s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other'
+    )).size, [sessions])
     const machineLabelsById = useMachineLabels(machines)
     const machinesById = useMemo(() => {
         const byId: Record<string, typeof machines[number]> = {}
@@ -268,6 +293,29 @@ function SessionsPage() {
         : null
     const isSessionsIndex = pathname === '/sessions' || pathname === '/sessions/'
     const sidebar = useSidebarResize()
+    // Shell onboarding tour — spotlights new-session/browse/settings for a
+    // brand-new install. See use-onboarding-tour.ts for why this is scoped
+    // to /sessions only (mobile single-pane vs desktop split-pane).
+    const tour = useOnboardingTour({ sessionCount: sessions.length, sessionsLoaded: !isLoading })
+    const tourNewSessionRef = useRef<HTMLButtonElement>(null)
+    const tourBrowseRef = useRef<HTMLButtonElement>(null)
+    const tourSettingsRef = useRef<HTMLButtonElement>(null)
+    const tourStepRef: Record<ShellTourStepId, React.RefObject<HTMLButtonElement | null>> = {
+        'new-session': tourNewSessionRef,
+        browse: tourBrowseRef,
+        settings: tourSettingsRef,
+    }
+    const tourStepCopy: Record<ShellTourStepId, { title: string; body: string }> = {
+        'new-session': { title: t('onboarding.tour.newSession.title'), body: t('onboarding.tour.newSession.body') },
+        browse: { title: t('onboarding.tour.browse.title'), body: t('onboarding.tour.browse.body') },
+        settings: { title: t('onboarding.tour.settings.title'), body: t('onboarding.tour.settings.body') },
+    }
+    // Desktop keeps the sidebar mounted even off /sessions (split-pane), so
+    // gate the dot the same way as the callout below — otherwise clicking
+    // the very button the tour is spotlighting (e.g. "New Session", which
+    // navigates to /sessions/new) leaves an unexplained dot pulsing with no
+    // callout in sight, since the callout alone was gated on isSessionsIndex.
+    const visibleTourStep = isSessionsIndex ? tour.activeStepId : null
     const handleNewSessionInDirectory = useCallback((args: { machineId: string | null; directory: string }) => {
         navigate({
             to: '/sessions/new',
@@ -706,7 +754,19 @@ function SessionsPage() {
                 className={`${isSessionsIndex ? 'flex' : 'hidden split:flex'} w-full shrink-0 flex-col bg-[var(--app-bg)]`}
                 style={{ '--sidebar-w': `${sidebar.width}px` } as React.CSSProperties}
             >
-                <div className="flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)]">
+                {/* Soup meta row only — tools live once in SessionList headerActions
+                    (upstream #collapse-search). Remat debris that keeps BOTH is the
+                    "double tools" regression; heal 89 must strip outer chrome. */}
+                <div className="session-list-scrollbar-offset shrink-0 bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
+                    <div className="mx-auto flex w-full max-w-content items-center gap-2 px-2 py-2">
+                        <div className="shrink-0 text-xs text-[var(--app-hint)]">
+                            {t('sessions.count', { n: sessions.length, m: projectCount })}
+                        </div>
+                        <GardenXrEntryChip />
+                    </div>
+                </div>
+
+                <div className="flex min-h-0 flex-1 flex-col">
                     {error ? (
                         <div className="mx-auto w-full max-w-content px-3 py-2">
                             <div className="text-sm text-red-600">{error}</div>
@@ -741,29 +801,49 @@ function SessionsPage() {
                                 </button>
                                 {canBrowse && (
                                     <button
+                                        ref={tourBrowseRef}
                                         type="button"
                                         onClick={() => navigate({ to: '/browse' })}
-                                        className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
+                                        className="relative p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
                                         title={t('browse.nav')}
                                     >
                                         <FolderOpenIcon className="h-5 w-5" />
+                                        {visibleTourStep === 'browse' ? (
+                                            <FueDot pulsing ariaLabel={t('fue.newFeatureDot')} />
+                                        ) : null}
                                     </button>
                                 )}
                                 <button
                                     type="button"
-                                    onClick={() => navigate({ to: '/settings' })}
+                                    onClick={() => navigate({ to: '/overseer' })}
                                     className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
+                                    title="Overseer"
+                                >
+                                    <OverseerIcon className="h-5 w-5" />
+                                </button>
+                                <button
+                                    ref={tourSettingsRef}
+                                    type="button"
+                                    onClick={() => navigate({ to: '/settings' })}
+                                    className="relative p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
                                     title={t('settings.title')}
                                 >
                                     <SettingsIcon className="h-5 w-5" />
+                                    {visibleTourStep === 'settings' ? (
+                                        <FueDot pulsing ariaLabel={t('fue.newFeatureDot')} />
+                                    ) : null}
                                 </button>
                                 <button
+                                    ref={tourNewSessionRef}
                                     type="button"
                                     onClick={() => navigate({ to: '/sessions/new' })}
-                                    className="session-list-new-button flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-link)] transition-colors"
+                                    className="session-list-new-button relative flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-link)] transition-colors"
                                     title={t('sessions.new')}
                                 >
                                     <PlusIcon className="h-5 w-5" />
+                                    {visibleTourStep === 'new-session' ? (
+                                        <FueDot pulsing ariaLabel={t('fue.newFeatureDot')} />
+                                    ) : null}
                                 </button>
                             </div>
                         )}
@@ -771,6 +851,18 @@ function SessionsPage() {
                         machineLabelsById={machineLabelsById}
                         machinesById={machinesById}
                     />
+                    {visibleTourStep ? (
+                        <FueCallout
+                            title={tourStepCopy[visibleTourStep].title}
+                            body={tourStepCopy[visibleTourStep].body}
+                            anchorRef={tourStepRef[visibleTourStep]}
+                            onDismiss={tour.next}
+                            dismissLabel={tour.isLastStep ? t('onboarding.tour.finish') : t('onboarding.tour.next')}
+                            closeAriaLabel={t('fue.closeAriaLabel')}
+                            onSecondaryAction={tour.skipAll}
+                            secondaryActionLabel={t('onboarding.tour.skip')}
+                        />
+                    ) : null}
                 </div>
             </div>
 
@@ -916,7 +1008,6 @@ function SessionPage() {
         message: string
         code: string | null
         scheduledAt: number | null
-        deliveryMode: MessageDeliveryMode
         mutationStarted: boolean
         restoreSuppressed: boolean
     }
@@ -1012,7 +1103,6 @@ function SessionPage() {
             text: rawSendError.text,
             message: rawSendError.message,
             scheduledAt: rawSendError.scheduledAt,
-            deliveryMode: rawSendError.deliveryMode,
             mutationStarted: rawSendError.mutationStarted,
             restoreSuppressed: rawSendError.restoreSuppressed,
             action: rawSendError.code === 'session_inactive' && canOfferInactiveReopen
@@ -1057,7 +1147,6 @@ function SessionPage() {
                     message,
                     code,
                     scheduledAt: info.scheduledAt,
-                    deliveryMode: info.deliveryMode,
                     mutationStarted: info.mutationStarted,
                     restoreSuppressed: false,
                 }
@@ -1322,23 +1411,6 @@ function SessionPage() {
             onSuppressSendErrorRestore={suppressSendErrorRestore}
             initialOutlineOpen={outline}
             onInitialOutlineConsumed={handleInitialOutlineConsumed}
-            onAbortRestore={(text) => {
-                sendErrorIdRef.current += 1
-                setSendErrors((prev) => ({
-                    ...prev,
-                    [sessionId]: {
-                        id: sendErrorIdRef.current,
-                        text,
-                        message: t('chat.sendError.aborted'),
-                        code: 'abort',
-                        scheduledAt: null,
-                        deliveryMode: 'queue',
-                        mutationStarted: true,
-                        restoreSuppressed: false,
-                        deliveryMode: 'queue'
-                    }
-                }))
-            }}
             initialSessionLogOpen={log}
             onInitialSessionLogConsumed={handleInitialSessionLogConsumed}
         />
@@ -1371,7 +1443,6 @@ function SessionDetailRoute() {
         )
         observedSessionRef.current = { sessionId, supersedingSessionId }
         if (!shouldFollow || !supersedingSessionId) return
-        prepareFollowSupersedingSession(sessionId, supersedingSessionId)
         navigate({
             to: '/sessions/$sessionId',
             params: { sessionId: supersedingSessionId },
@@ -1384,7 +1455,7 @@ function SessionDetailRoute() {
             return
         }
         navigate({ to: '/sessions', replace: true })
-    }, [navigate, sessionNotFound, sessionId])
+    }, [navigate, sessionNotFound])
 
     if (sessionNotFound) {
         return (
@@ -1674,6 +1745,12 @@ const browseRoute = createRoute({
     component: BrowsePage,
 })
 
+const overseerRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/overseer',
+    component: OverseerConsolePage,
+})
+
 const settingsRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/settings',
@@ -1797,6 +1874,7 @@ export const routeTree = rootRoute.addChildren([
         ]),
     ]),
     browseRoute,
+    overseerRoute,
     settingsRoute.addChildren([
         settingsIndexRoute,
         settingsGeneralRoute,

@@ -141,6 +141,7 @@ export class RpcGateway {
             modelReasoningEffort?: string | null
             effort?: string | null
             collaborationMode?: CodexCollaborationMode
+            autoBridgeTransientModelErrors?: boolean
             copilotAgentMode?: CopilotAgentMode
         }
     ): Promise<unknown> {
@@ -160,6 +161,25 @@ export class RpcGateway {
 
     async handoffSessionToLocal(sessionId: string): Promise<void> {
         await this.sessionRpc(sessionId, RPC_METHODS.HandoffLocal, {})
+    }
+
+    async bridgeModelError(
+        sessionId: string,
+        payload: {
+            atTs: number
+            kind: string
+            rawSnippet: string
+            lastUserMessage?: string
+            priorAssistantClaimsDone: boolean
+            transient: boolean
+            bridgedForAtTs?: number
+            retriedAndFailed?: boolean
+        }
+    ): Promise<{ ok: boolean; reason?: string }> {
+        return await this.sessionRpc(sessionId, RPC_METHODS.BridgeModelError, payload) as {
+            ok: boolean
+            reason?: string
+        }
     }
 
     async spawnSession(

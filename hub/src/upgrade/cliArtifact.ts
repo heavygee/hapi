@@ -283,28 +283,9 @@ export function isArtifactCacheFresh(
     }
     // Pre-fingerprint metas (and empty fingerprints) are never reusable —
     // same package version can hide newer source.
-    if (
-        typeof meta.sourceFingerprint !== 'string'
-        || meta.sourceFingerprint.length === 0
-        || meta.sourceFingerprint !== sourceFingerprint
-    ) {
-        return false
-    }
-    // Sidecar alone is not enough: a truncated/corrupted binary with an intact
-    // .json would otherwise be re-served forever while runners reject the SHA.
-    try {
-        const bytes = readFileSync(meta.path)
-        if (bytes.byteLength !== meta.sizeBytes) {
-            return false
-        }
-        if (typeof meta.sha256 !== 'string' || meta.sha256.length === 0) {
-            return false
-        }
-        const digest = createHash('sha256').update(bytes).digest('hex')
-        return digest.toLowerCase() === meta.sha256.toLowerCase()
-    } catch {
-        return false
-    }
+    return typeof meta.sourceFingerprint === 'string'
+        && meta.sourceFingerprint.length > 0
+        && meta.sourceFingerprint === sourceFingerprint
 }
 
 function featureFlagFor(platform: string, arch: string): string {

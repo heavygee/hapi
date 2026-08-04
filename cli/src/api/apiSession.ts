@@ -979,6 +979,17 @@ export class ApiSessionClient extends EventEmitter {
     } | {
         type: 'ready'
     } | {
+        type: 'modelError'
+        kind: string
+        transient: boolean
+        rawSnippet: string
+        priorAssistantClaimsDone: boolean
+    } | {
+        type: 'modelErrorBridged'
+        kind: string
+        auto: boolean
+        atTs: number
+    } | {
         // Emitted on abort so the web composer can restore the aborted prompt.
         // Carries the exact in-flight prompt text the web should restore.
         type: 'abort-restore'

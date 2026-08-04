@@ -43,9 +43,9 @@ export const RPC_METHODS = {
     ListCopilotModelsForCwd: 'listCopilotModelsForCwd',
     ListCopilotModels: 'listCopilotModels',
     ListOpencodeReasoningEffortOptions: 'listOpencodeReasoningEffortOptions',
-    ListAgyModels: 'listAgyModels',
     ForkConversation: 'fork-conversation',
     RewindConversation: 'rewind-conversation',
+    BridgeModelError: 'bridge-model-error',
     RunnerSelfUpgrade: 'runner-self-upgrade',
 } as const
 

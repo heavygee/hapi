@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import type { SessionSummary } from '@/types/api'
 import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
 import { ScheduleIcon } from '@/components/icons'
@@ -111,6 +111,8 @@ export function SessionRowSummary(props: {
     attentionTooltipId?: string
     scheduleTooltipId?: string
     className?: string
+    /** Rendered inline in the trailing meta row (before the time label) — e.g. PR chip. */
+    trailing?: ReactNode
     /** Rows inside the pinned "in progress" section skip the text label (dot only). */
     inRunningSection?: boolean
     /** Short project name shown under the title (pinned "in progress" rows). */
@@ -127,6 +129,7 @@ export function SessionRowSummary(props: {
         attentionTooltipId: attentionTooltipIdProp,
         scheduleTooltipId: scheduleTooltipIdProp,
         className,
+        trailing,
         inRunningSection = false,
         projectLabel,
         machineLabel,
@@ -205,16 +208,6 @@ export function SessionRowSummary(props: {
                                 <span className="text-[11px] font-medium leading-none">{t('session.item.pending')}</span>
                             ) : null}
                         </span>
-                    ) : s.active ? (
-                        <span
-                            className="inline-flex shrink-0 items-center gap-1 text-[var(--app-hint)]"
-                            title={t('session.item.idle')}
-                        >
-                            <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true" />
-                            {!inRunningSection ? (
-                                <span className="text-[11px] font-medium leading-none">{t('session.item.idle')}</span>
-                            ) : null}
-                        </span>
                     ) : attention && nestedTooltips && attentionId ? (
                         <SessionAttentionIndicator
                             attention={attention}
@@ -263,6 +256,7 @@ export function SessionRowSummary(props: {
                             {t('session.item.pending')} {s.pendingRequestsCount}
                         </span>
                     ) : null}
+                    {trailing}
                     {timeLabel ? (
                         <span className="min-w-0 truncate whitespace-nowrap tabular-nums text-[var(--app-hint)]">{timeLabel}</span>
                     ) : null}
