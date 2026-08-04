@@ -644,4 +644,57 @@ describe('SyncEngine fleet upgrade', () => {
             engine.stop()
         }
     })
+
+    it('auto fleet does not toast upgrade_unavailable (mid-soup bun compile)', async () => {
+        const offer: HubUpgradeOffer = {
+            channel: 'hub-artifact',
+            targetVersion: '0.26.0',
+            targetCapabilities: ['cursor-chat-store-status'],
+        }
+        const store = new Store(':memory:')
+        const sendToast = mock(async () => {})
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {}, sendToast } as never,
+            {
+                getUpgradeOffer: () => offer,
+                getFleetUpgradePolicy: () => 'auto',
+                prepareArtifactOffer: async () => {
+                    throw new Error('bun compile failed: Could not resolve: "./settingsStore"')
+                },
+            },
+        )
+
+        try {
+            const runnerSelfUpgrade = mock(async () => ({
+                status: 'started',
+                message: 'ok',
+                channel: 'hub-artifact',
+            }))
+            ;(engine as any).rpcGateway.runnerSelfUpgrade = runnerSelfUpgrade
+
+            engine.getOrCreateMachine(
+                'teemo',
+                {
+                    host: 'Teemo',
+                    platform: 'win32',
+                    arch: 'x64',
+                    happyCliVersion: '0.26.0',
+                    capabilities: ['cursor-chat-store-status', 'runner-self-upgrade', 'cli-artifact-generation'],
+                    cliArtifactGeneration: 'old-fingerprint',
+                },
+                null,
+                'default',
+            )
+            engine.handleMachineAlive({ machineId: 'teemo', time: Date.now() })
+            await Promise.resolve()
+            await new Promise((resolve) => setTimeout(resolve, 20))
+            expect(runnerSelfUpgrade).not.toHaveBeenCalled()
+            expect(sendToast).not.toHaveBeenCalled()
+        } finally {
+            engine.stop()
+        }
+    })
 })

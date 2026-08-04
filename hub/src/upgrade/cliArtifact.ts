@@ -563,6 +563,13 @@ export async function ensureCliArtifact(options: {
                     `bun compile timed out or killed (${proc.signalCode}) after artifact budget: ${detail}`,
                 )
             }
+            // Half-souped driver tips (imports without files) fail here during remat.
+            // Callers treat this as upgrade_unavailable — do not toast as a hard fail.
+            if (/Could not resolve:/i.test(detail)) {
+                throw new Error(
+                    `bun compile failed (incomplete hub source tree — mid-rebuild?): ${detail}`,
+                )
+            }
             throw new Error(`bun compile failed: ${detail}`)
         }
 

@@ -914,7 +914,11 @@ export class SyncEngine {
                 channel: offer.channel,
                 result,
             })
-            if (result.type === 'error') {
+            // Only toast hard upgrade failures (RPC ran / runner reported failed).
+            // `upgrade_unavailable` includes mid-soup bun compile misses and other
+            // "cannot start" cases — toasting those as "Runner upgrade failed"
+            // during remat is a soup-fuelled false alarm (Teemo 2026-08-04).
+            if (result.type === 'error' && result.code === 'upgrade_failed') {
                 this.eventPublisher.sendToast(
                     machine.namespace,
                     'Runner upgrade failed',
@@ -927,6 +931,8 @@ export class SyncEngine {
                 machineId,
                 message,
             })
+            // Unexpected throw — still toast; prepare/compile paths return
+            // typed errors instead of throwing into this catch.
             this.eventPublisher.sendToast(
                 machine.namespace,
                 'Runner upgrade failed',
