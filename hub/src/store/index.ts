@@ -319,11 +319,13 @@ export class Store {
                 // a partially-built legacy DB may not have yet.
                 this.createSchema()
                 this.setUserVersion(SCHEMA_VERSION)
+                this.finishSchemaInit()
                 return
             }
 
             this.createSchema()
             this.setUserVersion(SCHEMA_VERSION)
+            this.finishSchemaInit()
             return
         }
 
