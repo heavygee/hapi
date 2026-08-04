@@ -606,15 +606,9 @@ layers:
   # upstream PR merges.
   - branch: feat/trace-graph
 
-  # tiann/hapi#1085 / upstream PR #1087 - Cursor `agent acp --worktree` prints
-  # plain-text `Using worktree: …` on stdout before JSON-RPC; AcpStdioTransport
-  # treated parse failure as fatal and killed the session before cursorSessionId.
-  # Fail-soft ignore non-JSON ACP stdout. CLI-only. Dogfood: New Session →
-  # Cursor → sessionType worktree on a machine whose runner loads soup cli
-  # (oos-linux after hapi-restart-hub). Worktree:
-  # ~/coding/hapi/worktrees/cursor-worktree-acp-banner @
-  # fix/cursor-worktree-acp-stdout-banner. Drop when upstream PR merges.
-  - branch: fix/cursor-worktree-acp-stdout-banner
+  # DROPPED 2026-08-04: fix/cursor-worktree-acp-stdout-banner MERGED as #1087
+  # (Cursor worktree stdout banner + skip nested --worktree hang; #1085).
+  # On upstream/main @ 79f91e4b4; next rematerialize picks it up from base.
 
   # tiann/hapi#1084 / upstream PR #1086 (draft until operator dogfood) - Hub
   # governs runner capabilities so Cursor reopen soft-fails on version skew
@@ -636,15 +630,9 @@ layers:
   # PR #1142 (Peer #1120 — markdown links, inline code, .mmd + standalone
   # rewrite gate). On upstream/main; next rebuild picks it up from base.
 
-  # tiann/hapi#1129 CRITICAL + #947 nested UX — Cursor model picker empty on
-  # bare ACP ids (live agent returns composer-2.5 etc with no brackets; catalog
-  # filter dropped everything → Default-only). Also in-place variant drill-down.
-  # Touches shared/cli/web picker path; needs hub/cli restart after rebuild so
-  # enrichment + probe gates load. Worktree:
-  # ~/coding/hapi/worktrees/cursor-picker-ios-nested @ feat/cursor-picker-ios-nested
-  # (90dc261b9). Drop when upstream PR #947 merges. Topmost for dogfood so it
-  # wins over fix/cursor-flat-picker-default-highlight on overlapping files.
-  - branch: feat/cursor-picker-ios-nested
+  # DROPPED 2026-08-04: feat/cursor-picker-ios-nested MERGED UPSTREAM as
+  # PR #947 (also Closes #1129 — bare ACP catalog + nested variant drill-down).
+  # On upstream/main @ 3c83fe58c; next rematerialize picks it up from base.
 
   # tiann/hapi#1160/#1161/#1162/#1163 — opt-in GitHub PR awareness + session↔PR
   # attach (externalRefs chip, Settings toggle, hapi link-pr, MCP link_pr).
