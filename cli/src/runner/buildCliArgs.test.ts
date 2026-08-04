@@ -1,4 +1,8 @@
 import { describe, it, expect } from 'vitest'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { buildCliArgs, classifyRecoveredProcessGeneration, createSpawnDeduplicator, releaseRecoveredSpawnDedupe } from './run'
 
 describe('buildCliArgs', () => {
@@ -147,16 +151,17 @@ describe('buildCliArgs', () => {
         expect(args).not.toContain('--resume')
     })
 
-    it('does not pass existing session id flag to agents that do not reuse HAPI rows', () => {
-        const args = buildCliArgs('claude', {
+    it('passes the existing HAPI row id when resuming OpenCode', () => {
+        const args = buildCliArgs('opencode', {
             directory: '/tmp',
-            resumeSessionId: 'claude-session-1',
+            resumeSessionId: 'opencode-session-1',
             existingSessionId: 'hapi-session-1',
         })
         expect(args).toContain('--resume')
-        expect(args).toContain('claude-session-1')
-        expect(args).not.toContain('--existing-session-id')
-        expect(args).not.toContain('hapi-session-1')
+        expect(args).toContain('opencode-session-1')
+        expect(args).toContain('--existing-session-id')
+        expect(args).toContain('hapi-session-1')
+        expect(args).not.toContain('--hapi-session-id')
     })
 
     it('passes --existing-session-id for cursor resume when sessionId is set (#991)', () => {
@@ -207,6 +212,40 @@ describe('buildCliArgs', () => {
         })
         expect(args).toContain('--cursor-worktree')
         expect(args[args.length - 1]).toBe('--cursor-worktree')
+    })
+
+    it('skips --cursor-worktree when directory is already a linked git worktree', () => {
+        const main = mkdtempSync(join(tmpdir(), 'hapi-cliargs-main-'))
+        const linkedParent = mkdtempSync(join(tmpdir(), 'hapi-cliargs-wt-'))
+        const linked = join(linkedParent, 'feature')
+        const gitEnv = {
+            ...process.env,
+            GIT_AUTHOR_NAME: 'test',
+            GIT_AUTHOR_EMAIL: 'test@example.com',
+            GIT_COMMITTER_NAME: 'test',
+            GIT_COMMITTER_EMAIL: 'test@example.com'
+        }
+        const git = (cwd: string, args: string[]) => {
+            execFileSync('git', args, { cwd, stdio: ['ignore', 'ignore', 'pipe'], env: gitEnv })
+        }
+        try {
+            git(main, ['init'])
+            writeFileSync(join(main, 'README'), 'x\n')
+            git(main, ['add', 'README'])
+            git(main, ['commit', '-m', 'init'])
+            git(main, ['worktree', 'add', '-b', 'feature', linked])
+
+            const args = buildCliArgs('cursor', {
+                directory: linked,
+                sessionType: 'worktree',
+                worktreeName: 'should-not-appear',
+            })
+            expect(args).not.toContain('--cursor-worktree')
+            expect(args).not.toContain('should-not-appear')
+        } finally {
+            rmSync(linkedParent, { recursive: true, force: true })
+            rmSync(main, { recursive: true, force: true })
+        }
     })
 
     it('does not pass --cursor-worktree for non-cursor worktree sessions', () => {
@@ -305,6 +344,25 @@ describe('buildCliArgs', () => {
             '--permission-mode', 'plan'
         ])
     })
+    it('emits --hapi-session-id for agy reopen', () => {
+        const args = buildCliArgs('agy', {
+            directory: '/tmp',
+            existingSessionId: 'existing-hub-id',
+            startingMode: 'pty',
+        })
+        expect(args).toContain('--hapi-session-id')
+        expect(args[args.indexOf('--hapi-session-id') + 1]).toBe('existing-hub-id')
+    })
+
+    it('does not emit --hapi-session-id for a non-pty flavor', () => {
+        const args = buildCliArgs('opencode', {
+            directory: '/tmp',
+            existingSessionId: 'existing-hub-id',
+            startingMode: 'pty',
+        })
+        expect(args).not.toContain('--hapi-session-id')
+    })
+
 })
 
 

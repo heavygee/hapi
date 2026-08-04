@@ -6,6 +6,7 @@ import {
     ListCodexSessionsRpcResponseSchema
 } from '@hapi/protocol/apiTypes'
 import type {
+    AgyModelsResponse,
     CodexModelSummary,
     CodexModelsResponse,
     CommandResponse,
@@ -79,6 +80,7 @@ export type RpcListGrokModelsResponse = GrokModelsResponse
 export type RpcListCopilotModelsResponse = CopilotModelsResponse
 export type RpcListGrokReasoningEffortOptionsResponse = GrokReasoningEffortResponse
 export type RpcListOpencodeReasoningEffortOptionsResponse = OpencodeReasoningEffortResponse
+export type RpcListAgyModelsResponse = AgyModelsResponse
 
 export class RpcGateway {
     constructor(
@@ -170,6 +172,10 @@ export class RpcGateway {
         existingSessionId?: string,
         collaborationMode?: CodexCollaborationMode,
         copilotAgentMode?: CopilotAgentMode,
+        startingMode?: 'remote' | 'pty',
+        // Hub session id to reuse for this spawn. When set, the runner boots the
+        // CLI with `--hapi-session-id`, so the child reuses the existing hub
+        // session row (same id) instead of minting a new one.
         forkSession?: boolean
     ): Promise<{ type: 'success'; sessionId: string } | { type: 'error'; message: string }> {
         try {
@@ -193,6 +199,7 @@ export class RpcGateway {
                     sessionId: existingSessionId,
                     collaborationMode,
                     copilotAgentMode,
+                    startingMode,
                     forkSession: forkSession === true
                 }
             )
@@ -417,6 +424,10 @@ export class RpcGateway {
 
     async listOpencodeReasoningEffortOptionsForSession(sessionId: string): Promise<RpcListOpencodeReasoningEffortOptionsResponse> {
         return await this.sessionRpc(sessionId, RPC_METHODS.ListOpencodeReasoningEffortOptions, {}) as RpcListOpencodeReasoningEffortOptionsResponse
+    }
+
+    async listAgyModelsForMachine(machineId: string): Promise<RpcListAgyModelsResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.ListAgyModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListAgyModelsResponse
     }
 
     private async sessionRpc(

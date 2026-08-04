@@ -7,6 +7,7 @@ import {
     useRef,
     useState,
     type ClipboardEvent as ReactClipboardEvent,
+    type FocusEvent as ReactFocusEvent,
     type FormEvent as ReactFormEvent,
     type KeyboardEvent as ReactKeyboardEvent,
     type PointerEvent as ReactPointerEvent,
@@ -72,6 +73,7 @@ type Props = {
     onMirrorChange: (state: { text: string; selection: ComposerSelection }) => void
     onKeyDown?: (e: ReactKeyboardEvent<HTMLDivElement>) => void
     onPaste?: (e: ReactClipboardEvent<HTMLDivElement>) => void
+    onFocus?: (e: ReactFocusEvent<HTMLDivElement>) => void
     onEdit?: () => void
     /** Live session meta for chip hover / aria-label (from useSessions). */
     resolveSessionMentionTooltip?: ResolveSessionMentionTooltip
@@ -619,6 +621,7 @@ export const RichComposerInput = forwardRef<RichComposerInputHandle, Props>(func
         onMirrorChange,
         onKeyDown,
         onPaste,
+        onFocus,
         onEdit,
         resolveSessionMentionTooltip,
     },
@@ -683,6 +686,9 @@ export const RichComposerInput = forwardRef<RichComposerInputHandle, Props>(func
         syncFromValue(value)
     }, [value, syncFromValue])
 
+    const onFocusRef = useRef(onFocus)
+    onFocusRef.current = onFocus
+
     useEffect(() => {
         if (!autoFocus || disabled) return
         const root = rootRef.current
@@ -692,6 +698,18 @@ export const RichComposerInput = forwardRef<RichComposerInputHandle, Props>(func
         } catch {
             root.focus()
         }
+        // Programmatic focus is not guaranteed to fire a DOM focus event in
+        // every engine (notably Playwright headless). Notify the parent so
+        // FUE / other first-focus hooks still run.
+        onFocusRef.current?.(
+            {
+                type: 'focus',
+                target: root,
+                currentTarget: root,
+                preventDefault() {},
+                stopPropagation() {},
+            } as ReactFocusEvent<HTMLDivElement>
+        )
     }, [autoFocus, disabled])
 
     useImperativeHandle(ref, () => ({
@@ -995,7 +1013,7 @@ export const RichComposerInput = forwardRef<RichComposerInputHandle, Props>(func
             {domIsEmpty && placeholder ? (
                 <div
                     aria-hidden
-                    className="pointer-events-none absolute inset-0 text-base leading-snug text-[var(--app-hint)]"
+                    className="pointer-events-none absolute inset-0 overflow-hidden text-ellipsis whitespace-nowrap text-base leading-snug text-[var(--app-hint)]"
                 >
                     {placeholder}
                 </div>
@@ -1013,6 +1031,7 @@ export const RichComposerInput = forwardRef<RichComposerInputHandle, Props>(func
                 data-testid="rich-composer-input"
                 className={`${className ?? ''}${disabled ? ' cursor-not-allowed opacity-50' : ''}`}
                 onInput={handleInput}
+                onFocus={onFocus}
                 onKeyDown={handleKeyDown}
                 onPointerOver={handlePointerOver}
                 onPointerLeave={handlePointerLeave}

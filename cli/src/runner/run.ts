@@ -28,6 +28,7 @@ import { buildMachineMetadata } from '@/agent/sessionFactory';
 import { resolveWorkspaceRoots } from '@/utils/workspaceRoot';
 import { hashRunnerCliApiToken, hashRunnerExtraHeaders } from './runnerIdentity';
 import { scheduleCursorModelsPrewarm } from '@/modules/common/cursorModelsPrewarm';
+import { isLinkedGitWorktree } from '@/utils/isLinkedGitWorktree';
 
 /**
  * Deduplicates a preallocated HAPI-row spawn only while its child is alive.
@@ -548,9 +549,17 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       if (sessionType === 'worktree') {
         // Cursor Agent has native `--worktree` under ~/.cursor/worktrees/. Prefer that
         // over HAPI's sibling-directory worktree so Cursor sandbox/skills see the same layout.
+        // Exception: if `directory` is already a linked git worktree (e.g. HAPI feature
+        // worktree or driver/), nesting `--cursor-worktree` hangs ACP initialize (#1085).
         if (agent === 'cursor') {
           spawnDirectory = directory;
-          logger.debug(`[RUNNER RUN] Cursor-native worktree requested (nameHint=${worktreeName ?? '(auto)'})`);
+          if (isLinkedGitWorktree(directory)) {
+            logger.debug(
+              `[RUNNER RUN] Directory is already a linked git worktree; skipping Cursor --worktree (cwd=${directory})`
+            );
+          } else {
+            logger.debug(`[RUNNER RUN] Cursor-native worktree requested (nameHint=${worktreeName ?? '(auto)'})`);
+          }
         } else {
           const worktreeResult = await createWorktree({
             basePath: directory,
@@ -1469,7 +1478,9 @@ export function buildCliArgs(
             ? 'opencode'
             : agent === 'pi'
               ? 'pi'
-              : 'claude';
+              : agent === 'agy'
+                ? 'agy'
+                : 'claude';
   const args = [agentCommand];
   if (options.resumeSessionId) {
     if (agent === 'codex') {
@@ -1483,11 +1494,16 @@ export function buildCliArgs(
       args.push('--resume', options.resumeSessionId);
     }
   }
+  // agy PTY reuses the existing hub row directly on reopen/resume.
+  if (options.existingSessionId && agent === 'agy') {
+    args.push('--hapi-session-id', options.existingSessionId);
+  }
   // Message-level Fork current for Claude: must follow --resume.
   if (options.forkSession && agentCommand === 'claude') {
     args.push('--fork-session');
   }
-  args.push('--hapi-starting-mode', 'remote', '--started-by', 'runner');
+  const startingMode = options.startingMode || 'remote';
+  args.push('--hapi-starting-mode', startingMode, '--started-by', 'runner');
   // Codex, Cursor ACP, OpenCode, Pi native resume, and Claude message-level
   // forks reuse the original HAPI row via --existing-session-id.
   if (agent === 'codex' || agent === 'cursor' || agent === 'pi'
@@ -1533,10 +1549,14 @@ export function buildCliArgs(
     }
   }
   if (agent === 'cursor' && options.sessionType === 'worktree') {
-    args.push('--cursor-worktree');
-    const name = options.worktreeName?.trim();
-    if (name) {
-      args.push(name);
+    // Nested Cursor --worktree inside an existing linked git worktree hangs ACP
+    // initialize (banner ignored, but never reaches protocolVersion / cursorSessionId).
+    if (!isLinkedGitWorktree(options.directory)) {
+      args.push('--cursor-worktree');
+      const name = options.worktreeName?.trim();
+      if (name) {
+        args.push(name);
+      }
     }
   }
   return args;
