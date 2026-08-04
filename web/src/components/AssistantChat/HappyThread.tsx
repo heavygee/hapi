@@ -20,17 +20,8 @@ import { useTranslation } from '@/lib/use-translation'
 import { CloseIcon } from '@/components/icons'
 import { ShareTurnDialog } from '@/components/AssistantChat/ShareTurnDialog'
 import { SessionLogPanel } from '@/components/AssistantChat/SessionLogPanel'
-import { getSessionModelLabel } from '@/lib/sessionModelLabel'
-import { isFastServiceTier } from '@/components/AssistantChat/codexFastMode'
 import type { OlderLoadOutcome } from '@/lib/message-window-store'
-import { useMachines } from '@/hooks/queries/useMachines'
-import { useMachineLabels } from '@/hooks/useMachineLabels'
-import { useSessionHeaderMetadata } from '@/hooks/useSessionHeaderMetadata'
-import { useMinuteTick } from '@/hooks/useMinuteTick'
-import { resolveSessionHeaderMachineLabel } from '@/components/SessionHeader'
-import { formatRelativeTime } from '@/lib/relativeTime'
-import { formatSessionHeaderTimestamp } from '@/lib/sessionHeaderTimestamp'
-import { getShareTurnReasoningLabel, selectShareTurnMetadata } from '@/lib/shareTurnMetadata'
+import type { ShareTurnMetadataItem } from '@/lib/shareTurnMetadata'
 
 type ScrollAnchor = {
     id: string
@@ -454,60 +445,12 @@ export function HappyThread(props: {
     sessionLogOpen?: boolean
     onSessionLogOpenChange?: (open: boolean) => void
 }) {
-    const { t, locale } = useTranslation()
-    const { preferences: headerMetadata } = useSessionHeaderMetadata()
-    const { machines } = useMachines(props.api, true)
-    const machineLabelsById = useMachineLabels(machines)
+    const { t } = useTranslation()
     const { terminalToolDisplayMode } = useTerminalToolDisplayMode()
-    const runtimeExtras = useAuiState((s) => s.thread.extras) as HappyRuntimeExtras | undefined
-    const appliedMessagesVersion = runtimeExtras?.messagesVersion ?? props.messagesVersion
-    const appliedHistoryVersion = runtimeExtras?.historyVersion ?? props.historyVersion
-    const viewportRef = useRef<HTMLDivElement | null>(null)
-    const contentRef = useRef<HTMLDivElement | null>(null)
+    // Stable empty metadata until share-dialog open path is healed for soup
+    // (full #1306 selectShareTurnMetadata wiring caused React #185 on remat).
+    const shareMetadataItems = useMemo<ShareTurnMetadataItem[]>(() => [], [])
     const [shareTurn, setShareTurn] = useState<ShareTurnState>(null)
-    const shareDialogOpen = shareTurn !== null
-    const shareRelativeTimeTick = useMinuteTick(headerMetadata.lastActive && shareDialogOpen)
-    const shareMetadataItems = useMemo(() => {
-        const agentFlavor = props.session.metadata?.flavor ?? null
-        const agentLabel = agentFlavor?.trim() || null
-        const machineLabel = resolveSessionHeaderMachineLabel(props.session, machineLabelsById)
-        const modelLabel = getSessionModelLabel(props.session)
-        const reasoningLabel = getShareTurnReasoningLabel(
-            agentFlavor,
-            props.session.modelReasoningEffort,
-            props.session.effort,
-            headerMetadata.showLabels
-        )
-        const lastActiveAt = props.session.activeAt || props.session.updatedAt || props.session.createdAt
-        const lastActiveLabel = lastActiveAt > 0 ? formatRelativeTime(lastActiveAt, t) : null
-        const createdAtLabel = formatSessionHeaderTimestamp(props.session.createdAt, locale)
-        const updatedAtLabel = formatSessionHeaderTimestamp(props.session.updatedAt, locale)
-        const worktreeBranch = props.session.metadata?.worktree?.branch?.trim() || null
-        const showFastBadge = agentFlavor === 'codex'
-            && isFastServiceTier(props.serviceTier ?? props.session.serviceTier)
-
-        return selectShareTurnMetadata(headerMetadata, {
-            agent: agentLabel ? { text: agentLabel, flavor: agentFlavor } : undefined,
-            machine: machineLabel ? {
-                text: `${headerMetadata.showLabels ? `${t('session.item.machine')}: ` : ''}${machineLabel}`,
-            } : undefined,
-            lastActive: lastActiveLabel ? { text: lastActiveLabel } : undefined,
-            model: modelLabel ? {
-                text: `${headerMetadata.showLabels ? `${t(modelLabel.key)}: ` : ''}${modelLabel.value}`,
-            } : undefined,
-            reasoning: reasoningLabel ? { text: reasoningLabel } : undefined,
-            fastMode: showFastBadge ? { text: 'fast' } : undefined,
-            createdAt: createdAtLabel ? {
-                text: `${headerMetadata.showLabels ? `${t('session.header.createdAt')}: ` : ''}${createdAtLabel}`,
-            } : undefined,
-            updatedAt: updatedAtLabel ? {
-                text: `${headerMetadata.showLabels ? `${t('session.header.updatedAt')}: ` : ''}${updatedAtLabel}`,
-            } : undefined,
-            worktree: worktreeBranch ? {
-                text: `${headerMetadata.showLabels ? `${t('session.item.worktree')}: ` : ''}${worktreeBranch}`,
-            } : undefined,
-        })
-    }, [headerMetadata, locale, machineLabelsById, props.serviceTier, props.session, shareDialogOpen, shareRelativeTimeTick, t])
     const [pullToLoadState, setPullToLoadState] = useState<PullToLoadState>('idle')
     const pullToLoadStateRef = useRef<PullToLoadState>('idle')
     const shareTurnIdRef = useRef(0)
