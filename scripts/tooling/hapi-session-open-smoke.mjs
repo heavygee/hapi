@@ -134,7 +134,12 @@ async function main() {
                 timeout: 60_000,
             })
             await page.waitForTimeout(4500)
-            const hasBoundary = (await page.locator('button:has-text("Show Error")').count()) > 0
+            // Exact label only — chat code blocks often contain the string
+            // "Show Error" inside tool output and would false-positive a
+            // substring match (2026-08-04 meta session).
+            const hasBoundary = await page.locator('button').evaluateAll((buttons) =>
+                buttons.some((b) => (b.textContent || '').trim() === 'Show Error')
+            )
             const hasComposer = (await page.locator('[role="textbox"], textarea, [contenteditable]').count()) > 0
             const e185 = logs.some((l) => l.includes('#185'))
             const onSession = page.url().includes(id)
