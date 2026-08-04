@@ -658,18 +658,9 @@ layers:
   # (2d904de7 — migrate chat-path attachments on scratchlist park; Fixes #1226)
   # - branch: driver/scratchlist-attach-park-chat-paths
 
-  # tiann/hapi#1273 — rich-composer @-mention FUE + always-on placeholder copy.
-  # Web-only. Drop when upstream PR merges.
-  # Worktree: ~/coding/hapi/worktrees/fue-rich-composer-mentions @ feat/fue-rich-composer-mentions
-  #
-  # DEFERRED 2026-07-31 (meta remat recovery): this branch was authored on top of
-  # upstream 3f73a5f6e (SessionList search-collapse toolbar restructure). The recovery
-  # build pins base to bc543dc49 (pre-collapse) to keep the 32-layer rerere stack stable,
-  # so fue's collapsed-search test expectations (fireEvent.click('Search sessions'),
-  # searchWrapper pb-2, directory-action.test.tsx) fight the simple always-visible search
-  # we keep via --ours. Feature (composer @-mention FUE dot) is independent of the toolbar
-  # restructure but the layer can't merge cleanly against the pin. RE-ADD when the base is
-  # advanced to >= 3f73a5f6e in the base-unpin follow-up. Branch/worktree preserved.
+  # DROPPED 2026-08-04: feat/fue-rich-composer-mentions MERGED as tiann/hapi#1274
+  # (f6da005b5 — FUE + composer hint for session @-mentions; Fixes #1273).
+  # Was deferred during 2026-07-31 remat pin; graduated upstream after base advanced.
   # - branch: feat/fue-rich-composer-mentions
 
   # tiann/hapi#1272 — app-shell first-run onboarding tour + FUE v2 (global
@@ -677,7 +668,7 @@ layers:
   # composer-terminal / Create-Session-worktree-option FUEs). Web-only.
   # Authored directly against upstream/main @ bc543dc49 (the recovery-pin
   # base above) — no SessionList/router toolbar-collapse conflict like the
-  # deferred #1273 layer above, so this should merge clean under the pin.
+  # #1273 layer above (now DROPPED / merged as #1274), so this should merge clean under the pin.
   # Drop when upstream PR merges.
   # Worktree: ~/coding/hapi/worktrees/fue-app-shell-onboarding @ feat/fue-app-shell-onboarding
   - branch: feat/fue-app-shell-onboarding
