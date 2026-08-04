@@ -51,6 +51,8 @@ import {
 } from './rpcGateway'
 import { SessionCache } from './sessionCache'
 import { OverseerEventRecorder, toSessionSnapshot } from './overseerEventRecorder'
+import { createOverseerLlmFallbackClient } from './overseerLlmFallback'
+import { loadOverseerLlmFallbackConfig } from './overseerLlmFallbackConfig'
 import { OverseerEntity } from './overseerEntity'
 import { extractAssistantPlainText } from '@hapi/protocol/messages'
 import type { InboxOperatorAction } from '@hapi/protocol'
@@ -208,7 +210,16 @@ export class SyncEngine {
             (sessionId, updatedAt) => this.recordSessionActivity(sessionId, updatedAt)
         )
         this.rpcGateway = new RpcGateway(io, rpcRegistry)
-        this.overseerEvents = new OverseerEventRecorder(store.events, store.inbox)
+        const llmFallbackConfig = loadOverseerLlmFallbackConfig()
+        const llmFallback = llmFallbackConfig.enabled
+            ? createOverseerLlmFallbackClient(llmFallbackConfig)
+            : null
+        if (llmFallbackConfig.enabled) {
+            console.log(
+                `[overseer] LLM summary fallback ENABLED (api=${llmFallbackConfig.api}, model=${llmFallbackConfig.model}, base=${llmFallbackConfig.baseUrl})`
+            )
+        }
+        this.overseerEvents = new OverseerEventRecorder(store.events, store.inbox, { llmFallback })
         this.overseer = new OverseerEntity({
             events: store.events,
             inbox: store.inbox,
@@ -479,8 +490,11 @@ export class SyncEngine {
                     toSessionSnapshot(session, storedSession?.tag ?? null),
                     event.message.id,
                     event.message.content,
-                    event.message.createdAt
-                )
+                    event.message.createdAt,
+                    { thinking: session.thinking }
+                ).catch((error) => {
+                    console.error('[overseer] onAgentMessage failed', error)
+                })
             }
         }
 

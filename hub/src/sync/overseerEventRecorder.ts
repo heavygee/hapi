@@ -24,8 +24,28 @@ import {
 import type { Session } from '@hapi/protocol/types'
 import type { EventStore, InsertSystemEventInput, StoredSystemEvent } from '../store'
 import type { InboxStore } from '../store/inboxStore'
+import type { OverseerLlmFallbackClient } from './overseerLlmFallback'
 
 export type SessionSnapshot = OverseerSessionIdentity
+
+export type OverseerEventRecorderOptions = {
+    /** Opt-in OpenAI-compatible synthesizer (issue #90). Default: unset / off. */
+    llmFallback?: OverseerLlmFallbackClient | null
+}
+
+export type OnAgentMessageOptions = {
+    /**
+     * When true, defer opt-in LLM fallback until thinking clears so ACP
+     * mid-turn text flushes do not each trigger a synthesis call.
+     */
+    thinking?: boolean
+}
+
+type PendingLlmFallback = {
+    messageId: string
+    plainText: string
+    ts: number
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
     return isObject(value) ? value as Record<string, unknown> : null
@@ -141,11 +161,18 @@ function buildTags(notify: NotifySummary | null, flavor: string): string | null 
 export class OverseerEventRecorder {
     private readonly lastAgentMessageAt = new Map<string, number>()
     private readonly knownPermissionRequestIds = new Map<string, Set<string>>()
+    private readonly llmFallback: OverseerLlmFallbackClient | null
+    /** Latest no-notify assistant text awaiting end-of-turn LLM attempt. */
+    private readonly pendingLlmFallback = new Map<string, PendingLlmFallback>()
+    private readonly sessionThinking = new Map<string, boolean>()
 
     constructor(
         private readonly events: EventStore,
-        private readonly inbox?: InboxStore
-    ) {}
+        private readonly inbox?: InboxStore,
+        options?: OverseerEventRecorderOptions
+    ) {
+        this.llmFallback = options?.llmFallback ?? null
+    }
 
     list(options: Parameters<EventStore['list']>[0] = {}): StoredSystemEvent[] {
         return this.events.list(options)
@@ -155,12 +182,13 @@ export class OverseerEventRecorder {
         return this.events.count()
     }
 
-    onAgentMessage(
+    async onAgentMessage(
         session: SessionSnapshot,
         messageId: string,
         content: unknown,
-        ts: number
-    ): StoredSystemEvent | null {
+        ts: number,
+        opts: OnAgentMessageOptions = {}
+    ): Promise<StoredSystemEvent | null> {
         let primary: StoredSystemEvent | null = null
 
         if (isAgentMessageContent(content)) {
@@ -172,6 +200,7 @@ export class OverseerEventRecorder {
             const plainText = extractAssistantPlainText(agentContent)
             if (plainText) {
                 if (detectEmptyHapiEventsSentinel(plainText)) {
+                    this.pendingLlmFallback.delete(session.id)
                     primary = this.insertSystemEvent(session, {
                         ts,
                         sourceKind: 'system',
@@ -185,6 +214,7 @@ export class OverseerEventRecorder {
                         severity: 1
                     })
                 } else if (detectMalformedNotifySummaryLine(plainText)) {
+                    this.pendingLlmFallback.delete(session.id)
                     primary = this.insertSystemEvent(session, {
                         ts,
                         sourceKind: 'system',
@@ -200,6 +230,7 @@ export class OverseerEventRecorder {
                 } else {
                     const notify = extractNotifySummary(plainText)
                     if (notify) {
+                        this.pendingLlmFallback.delete(session.id)
                         primary = this.recordNotifySummary(session, messageId, notify, ts)
                     }
                 }
@@ -226,20 +257,31 @@ export class OverseerEventRecorder {
                 }
             }
 
-            // No hub-synthesized "first line of assistant text" events. Session
-            // Log is fed by AGENT_NOTIFY_SUMMARY (agent wrapup) only. Opt-in LLM
-            // fallback (#90 / HAPI_OVERSEER_LLM_FALLBACK) is a separate layer.
-            // Per-tool / mid-turn narrative belongs in session-flow experiments,
-            // not here.
+            // Opt-in LLM only (#90). No first-line heuristic. Defer while
+            // thinking so ACP mid-turn flushes do not each hit the LLM.
+            if (!primary && plainText && this.llmFallback) {
+                if (opts.thinking) {
+                    this.pendingLlmFallback.set(session.id, { messageId, plainText, ts })
+                } else {
+                    this.pendingLlmFallback.delete(session.id)
+                    primary = await this.tryLlmFallback(session, messageId, plainText, ts)
+                }
+            }
         }
 
-        // Always scoop URLs from any ingestible message text (agent or user).
         this.scoopLinksFromContent(session, messageId, content, ts)
         return primary
     }
 
     onSessionUpdated(session: Session, tag?: string | null): void {
+        const prevThinking = this.sessionThinking.get(session.id) ?? false
+        this.sessionThinking.set(session.id, session.thinking)
         this.syncPermissionRequests(session, tag ?? null)
+        if (prevThinking && !session.thinking) {
+            void this.flushPendingLlmFallback(toSessionSnapshot(session, tag ?? null)).catch((error) => {
+                console.error('[overseer] flushPendingLlmFallback failed', error)
+            })
+        }
     }
 
     onSessionEnd(
@@ -250,6 +292,10 @@ export class OverseerEventRecorder {
         getLastAgentPlainText: () => string | null
     ): StoredSystemEvent | null {
         this.knownPermissionRequestIds.delete(session.id)
+        this.sessionThinking.delete(session.id)
+        void this.flushPendingLlmFallback(toSessionSnapshot(session, tag)).catch((error) => {
+            console.error('[overseer] flushPendingLlmFallback on session-end failed', error)
+        })
 
         if (reason !== 'completed') {
             return null
@@ -260,8 +306,6 @@ export class OverseerEventRecorder {
             return null
         }
 
-        // Session ended without a self-report — still a rare hub signal (not
-        // per-message text synth). Keeps teardown visible when agents bail.
         const snapshot = toSessionSnapshot(session, tag)
         return this.insertSystemEvent(snapshot, {
             ts,
@@ -277,6 +321,56 @@ export class OverseerEventRecorder {
             severity: deriveSeverity('completed'),
             tags: buildTags(null, snapshot.flavor)
         })
+    }
+
+    async flushPendingLlmFallback(session: SessionSnapshot): Promise<StoredSystemEvent | null> {
+        const pending = this.pendingLlmFallback.get(session.id)
+        if (!pending) return null
+        this.pendingLlmFallback.delete(session.id)
+        if (extractNotifySummary(pending.plainText)) return null
+        return this.tryLlmFallback(session, pending.messageId, pending.plainText, pending.ts)
+    }
+
+    /**
+     * Opt-in LLM synthesis only. Failures return null — never invent a
+     * first-line heuristic Session Log row.
+     */
+    private async tryLlmFallback(
+        session: SessionSnapshot,
+        messageId: string,
+        plainText: string,
+        ts: number
+    ): Promise<StoredSystemEvent | null> {
+        if (!this.llmFallback) return null
+        try {
+            const notify = await this.llmFallback.synthesizeNotifySummary(plainText)
+            if (!notify) return null
+            const eventType = mapNotifyStatusToEventType(notify.status)
+            return this.insertSystemEvent(session, {
+                ts,
+                sourceKind: 'system',
+                sourceRef: session.id,
+                eventType,
+                attentionCandidate: 0,
+                operatorActionRequired: 0,
+                summary: buildEventSummaryFromNotify(notify),
+                relatedSessionId: session.id,
+                provenance: 'hub-llm-fallback (no AGENT_NOTIFY_SUMMARY from primary agent)',
+                idempotencyKey: `session:${session.id}:message:${messageId}:turn_fallback`,
+                payloadFields: {
+                    messageId,
+                    synthesized: true,
+                    synthesis: 'llm-fallback',
+                    notify_summary: notify,
+                    suggested_action: notify.action ?? null,
+                },
+                notifyProject: notify.project ?? null,
+                severity: deriveSeverity(eventType),
+                tags: buildTags(notify, session.flavor),
+            })
+        } catch {
+            return null
+        }
     }
 
     /**
