@@ -352,6 +352,14 @@ if [[ "$BUILD_WEB" -eq 1 ]] || [[ ! -f "$DRIVER/web/dist/index.html" ]]; then
             exit 1
         fi
     fi
+
+    # verify-soup-web-dist alone missed session-route error boundaries (2026-08-04).
+    # shellcheck source=lib/session-open-smoke-gate.sh
+    source "$LIB_DIR/session-open-smoke-gate.sh"
+    if ! driver_session_open_smoke_gate "$DRIVER"; then
+        remat_rollback_live_tip "session-open-smoke failed"
+        exit 1
+    fi
 elif [[ -f "$VERIFY_SCRIPT" ]] && [[ -f "$DRIVER/web/dist/index.html" ]]; then
     echo "Checking web/dist freshness vs merged driver HEAD..."
     if ! "$BUN" run "$VERIFY_SCRIPT" "$DRIVER" "$MANIFEST" "$PRIMARY"; then

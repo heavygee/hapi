@@ -75,4 +75,12 @@ if [[ "$SKIP_VERIFY" -eq 0 ]] && [[ -f "$VERIFY_SCRIPT" ]]; then
     fi
 fi
 
+if [[ "$SKIP_VERIFY" -eq 0 ]]; then
+    # shellcheck source=lib/session-open-smoke-gate.sh
+    source "$LIB_DIR/session-open-smoke-gate.sh"
+    if ! driver_session_open_smoke_gate "$DRIVER"; then
+        exit 1
+    fi
+fi
+
 echo "Done: web/dist refreshed at $(git -C "$DRIVER" rev-parse --short HEAD). Hard-reload :3006 browser."

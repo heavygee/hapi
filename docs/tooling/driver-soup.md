@@ -191,7 +191,8 @@ Mechanical rebuild steps (after layers are dropped and fork `main` is synced):
 2. Edit manifest — drop layers merged to `upstream/main` (prefer the owning peer did this already; meta verifies none remain)
 3. `hapi-driver-rebuild --build-web --verify`
 4. `hapi-restart-hub` when hub/cli changed; hard-reload when web changed
-5. **Dogfood smoke (mandatory after web remat):** `curl -sf http://127.0.0.1:3006/health` **and** `hapi-session-open-smoke` (opens real `/sessions/:id` URLs; fails on error-boundary "Show Error" / React #185 / missing composer). List-page health + `verify-soup-web-dist` alone are **not** enough — incident 2026-08-04 wave absorb (`2191ceced`) was verify-green while every session route error-boundaried.
+5. **Dogfood smoke (mandatory after web remat; now mechanical):** `hapi-driver-rebuild --build-web` and `hapi-driver-build-web` run `hapi-session-open-smoke` after verify and **auto-rollback** `web/dist` (+ live tip on full remat) on fail. Manual equivalent: `curl -sf http://127.0.0.1:3006/health` **and** `hapi-session-open-smoke`. List-page health + `verify-soup-web-dist` alone are **not** enough — incident 2026-08-04 wave absorb (`2191ceced`) was verify-green while every session route error-boundaried. Skip only with `HAPI_SKIP_SESSION_OPEN_SMOKE=1` (operator emergency).
+   - **Do not hand-`git reset` live `driver/integration` to unfinished remat WIP** to "try" a tip — that is what poisoned dogfood at 2026-08-04 13:40 (`d0e948d6f` → session-open-smoke FAIL → tip rollback to `04a1d31a9`). Finish layers/heals on `driver-remat`, then promote via `hapi-driver-rebuild` so smoke can refuse a bad tip.
 6. Garden / VR check when those layers matter
 7. Log drift in `~/coding/hapi-garden/GARDEN_LOGBOOK.md` if API changed
 
@@ -249,7 +250,8 @@ Pre-push hook blocks `web/src/garden/**` on upstream-PR-bound refs — Garden is
 | Command | Purpose |
 |---------|---------|
 | `hapi-driver-rebuild` | Rebuild soup from manifest (`--build-web` + verify-web-dist guard) |
-| `hapi-driver-build-web` | Web/dist only on current driver tree (no re-merge) |
+| `hapi-driver-build-web` | Web/dist only on current driver tree (no re-merge); runs session-open-smoke + dist rollback on fail |
+| `hapi-session-open-smoke` | Playwright gate: `/sessions/:id` must not Show Error / #185 / missing composer |
 | `hapi-verify-web-dist` | Audit: driver `web/src` strings present in live `web/dist` |
 | `hapi-driver-rollback-web` | Promote `web/dist.prev` back to live |
 | `hapi-worktree-create` | New PR worktree (+ merge train) |

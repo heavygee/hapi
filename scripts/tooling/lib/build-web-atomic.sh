@@ -2,6 +2,11 @@
 # build_web_atomic DRIVER
 # Build web/dist into dist.next, sanity-check, atomic swap to dist (prev preserved).
 # Caller must set BUN (defaults to ~/.bun/bin/bun).
+#
+# Note: the two-rename publish (`dist`→`dist.prev`, `dist.next`→`dist`) has a
+# brief path gap. Vite builds into dist.next with live dist untouched until
+# then; the gap is milliseconds. Session-route poison from a bad tip is gated
+# separately by session-open-smoke-gate.sh (not this rename).
 build_web_atomic() {
     local driver="$1"
     local bun="${BUN:-$HOME/.bun/bin/bun}"
