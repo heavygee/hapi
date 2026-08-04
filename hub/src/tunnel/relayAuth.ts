@@ -9,7 +9,7 @@
  * tunnel — there is no shared-key fallback.
  */
 
-import { readSettings, writeSettings, type Settings } from '../config/settings'
+import { readSettings, updateSettingsFile, type Settings } from '../config/settings'
 
 type FetchRelayAuth = (input: string | URL | Request, init?: RequestInit) => Promise<Response>
 
@@ -43,7 +43,9 @@ async function issueRelayAuthKey(
     }
     // settings === null means the file exists but is unparseable; don't clobber it
     if (settings !== null) {
-        await writeSettings(settingsFile, { ...settings, relayAuthKey: data.key })
+        await updateSettingsFile(settingsFile, (current) => {
+            current.relayAuthKey = data.key
+        })
     }
     console.log('[Tunnel] Obtained per-hub relay auth key')
     return data.key
@@ -90,7 +92,9 @@ export async function refreshRejectedRelayAuthKey(
 
     const clearedSettings = { ...settings }
     delete clearedSettings.relayAuthKey
-    await writeSettings(settingsFile, clearedSettings)
+    await updateSettingsFile(settingsFile, (current) => {
+        delete current.relayAuthKey
+    })
     console.warn('[Tunnel] Relay auth key rejected; requesting a replacement')
     return issueRelayAuthKey(apiDomain, settingsFile, clearedSettings, fetchRelayAuth)
 }
