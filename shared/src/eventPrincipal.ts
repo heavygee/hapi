@@ -4,6 +4,12 @@
  * Wire JSON uses snake_case (`on_behalf_of`, `granting_event_id`).
  * TS uses camelCase. A non-human principal without a resolvable human owner
  * is a hard refuse — day-one kill criterion, independent of multi-user claims.
+ *
+ * `granting_event_id` is parse-only until grant shape is decided (RFC open
+ * question). Serialize never emits it — unvalidated pointers must not
+ * accumulate in production. When shape lands: write only after the referenced
+ * row exists, is grant-typed, unexpired, and covers the action (fail-closed,
+ * same placement as ownership). Feed that contract back to Discussion #1332.
  */
 
 export type EventPrincipalKind = 'human' | 'agent' | 'service'
@@ -13,7 +19,10 @@ export type EventPrincipal = {
     id: string
     /** Accountable human owner when kind is not `human`. */
     onBehalfOf?: string | null
-    /** Optional pointer at the grant event for delegated_authority. */
+    /**
+     * Optional pointer at the grant event for delegated_authority.
+     * Accepted on read; **not written** until grant shape is validated.
+     */
     grantingEventId?: number | null
 }
 
@@ -22,6 +31,11 @@ export class EventPrincipalOwnershipError extends Error {
         super(message)
         this.name = 'EventPrincipalOwnershipError'
     }
+}
+
+/** Positive integer PK candidate — rejects floats / negatives / NaN. */
+export function isValidGrantingEventId(value: unknown): value is number {
+    return typeof value === 'number' && Number.isInteger(value) && value > 0
 }
 
 /** Refuse a non-human principal with no resolvable human owner. */
@@ -39,7 +53,11 @@ export function assertPrincipalHasHumanOwner(principal: EventPrincipal): void {
     }
 }
 
-/** Serialize for `events.principal_json` (RFC wire shape). */
+/**
+ * Serialize for `events.principal_json` (RFC wire shape).
+ * Ownership is enforced here so callers cannot bypass the kill criterion.
+ * `granting_event_id` is intentionally omitted until grant validation exists.
+ */
 export function serializeEventPrincipal(principal: EventPrincipal): string {
     assertPrincipalHasHumanOwner(principal)
     const wire: Record<string, unknown> = {
@@ -48,9 +66,7 @@ export function serializeEventPrincipal(principal: EventPrincipal): string {
     }
     const owner = principal.onBehalfOf?.trim()
     if (owner) wire.on_behalf_of = owner
-    if (principal.grantingEventId != null && Number.isFinite(principal.grantingEventId)) {
-        wire.granting_event_id = principal.grantingEventId
-    }
+    // granting_event_id: do not write. See file header / #1332.
     return JSON.stringify(wire)
 }
 
@@ -69,8 +85,7 @@ export function parseEventPrincipal(json: string | null | undefined): EventPrinc
                     ? raw.onBehalfOf
                     : null
         const grantingRaw = raw.granting_event_id ?? raw.grantingEventId
-        const grantingEventId =
-            typeof grantingRaw === 'number' && Number.isFinite(grantingRaw) ? grantingRaw : null
+        const grantingEventId = isValidGrantingEventId(grantingRaw) ? grantingRaw : null
         return {
             kind,
             id: raw.id.trim(),
