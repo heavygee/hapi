@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
     Navigate,
@@ -67,6 +67,7 @@ import SettingsUsagePage from '@/routes/settings/usage'
 import SharePage from '@/routes/share'
 import { setSharePendingTransfer } from '@/lib/sharePendingState'
 import { deleteShareTransfer } from '@/lib/shareTransfer'
+import { GardenXrEntryChip } from '@/garden/components/GardenXrEntryChip'
 
 
 function BackIcon(props: { className?: string }) {
@@ -1202,6 +1203,20 @@ const shareRoute = createRoute({
     component: SharePage,
 })
 
+const GardenPageLazy = lazy(() =>
+    import('@/garden/GardenPage').then(m => ({ default: m.GardenPage }))
+)
+
+const gardenRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/garden',
+    component: () => (
+        <Suspense fallback={null}>
+            <GardenPageLazy />
+        </Suspense>
+    ),
+})
+
 export const routeTree = rootRoute.addChildren([
     indexRoute,
     sessionsRoute.addChildren([
@@ -1228,6 +1243,7 @@ export const routeTree = rootRoute.addChildren([
         settingsAboutRoute,
     ]),
     shareRoute,
+    gardenRoute,
 ])
 
 type RouterHistory = Parameters<typeof createRouter>[0]['history']

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { registerVoiceSession, resetRealtimeSessionState } from './RealtimeSession'
 import { registerSessionStore } from './realtimeClientTools'
+import { resetVoiceAudioLevels, setVoiceAudioLevels, rmsFromPcm16Base64, smoothLevel } from './voiceAudioLevels'
 import { fetchQwenToken } from '@/api/voice'
 import { GeminiAudioRecorder } from './gemini/audioRecorder'
 import { GeminiAudioPlayer } from './gemini/audioPlayer'
@@ -30,6 +31,9 @@ interface QwenState {
     apiKey: string | null
     wsBaseUrl: string | null
     micMuted: boolean
+    modelSpeaking: boolean
+    inputLevel: number
+    outputLevel: number
 }
 
 const state: QwenState = {
@@ -40,7 +44,10 @@ const state: QwenState = {
     statusCallback: null,
     apiKey: null,
     wsBaseUrl: null,
-    micMuted: false
+    micMuted: false,
+    modelSpeaking: false,
+    inputLevel: 0,
+    outputLevel: 0
 }
 
 let eventCounter = 0
@@ -67,6 +74,10 @@ function cleanup() {
         }
         state.ws = null
     }
+    state.modelSpeaking = false
+    state.inputLevel = 0
+    state.outputLevel = 0
+    resetVoiceAudioLevels()
 }
 
 function sendEvent(type: string, payload?: Record<string, unknown>): void {
@@ -203,7 +214,7 @@ class QwenVoiceSessionImpl implements VoiceSession {
                         sendChunk: (chunk) => this.sendContextualUpdate(chunk)
                     })
 
-                    const proactive = isVoiceProactiveSummaryEnabled()
+                    const proactive = config.proactiveSummary ?? isVoiceProactiveSummaryEnabled()
                     if (proactive) {
                         this.sendTextMessage(
                             'Based on all session context above, give me a brief spoken summary of what the coding agent has been doing, then wait.'
@@ -223,6 +234,18 @@ class QwenVoiceSessionImpl implements VoiceSession {
                     const delta = data.delta as string
                     if (delta) {
                         state.player?.enqueue(delta)
+                        if (!state.modelSpeaking) {
+                            state.modelSpeaking = true
+                            setVoiceAudioLevels({ connected: true, isSpeaking: true, input: 0 })
+                        }
+                        const rms = rmsFromPcm16Base64(delta)
+                        state.outputLevel = smoothLevel(state.outputLevel, rms, 0.5)
+                        setVoiceAudioLevels({
+                            connected: true,
+                            isSpeaking: true,
+                            input: 0,
+                            output: state.outputLevel,
+                        })
                     }
                     return
                 }
