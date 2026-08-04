@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import type { ExternalRef, GithubPrExternalRef } from '@/types/api'
 import {
     DEFAULT_PR_CHIP_DISPLAY,
@@ -11,6 +12,8 @@ import {
 import { cn } from '@/lib/utils'
 import { formatRelativeTime } from '@/lib/relativeTime'
 import { useTranslation } from '@/lib/use-translation'
+import { HoverTooltip } from '@/components/HoverTooltip'
+import { useLongPress } from '@/hooks/useLongPress'
 
 type TFunc = (key: string, params?: Record<string, string | number>) => string
 
@@ -24,6 +27,9 @@ export type SessionPrChipProps = {
 }
 
 export { formatGithubPrChipLabel, resolveGithubPrChipDisplay }
+
+/** How long a touch long-press keeps the detail tooltip open. */
+const TOUCH_TOOLTIP_HOLD_MS = 2500
 
 function toneClass(tone: PrChipTone | undefined): string {
     switch (tone) {
@@ -45,7 +51,7 @@ function toneClass(tone: PrChipTone | undefined): string {
 }
 
 /**
- * Native `title` tooltip body for the PR chip.
+ * Detail tooltip body for the PR chip (hover / focus / touch long-press).
  * Terms come from the display profile (forge defaults or estate overrides).
  */
 export function formatGithubPrChipTitle(
@@ -66,48 +72,98 @@ export function formatGithubPrChipTitle(
 }
 
 /**
- * Clickable primary GitHub PR chip for session list rows.
- * Identity + optional cached forge snapshot; presentation via display profile.
+ * Compact primary GitHub PR chip for session list rows.
+ * Visible glyph = status emoji (or `PR` / `?`); full `repo#N` + status in tooltip.
  */
 export function SessionPrChip(props: SessionPrChipProps) {
     const { t } = useTranslation()
+    const tooltipId = useId()
+    const [touchTooltipOpen, setTouchTooltipOpen] = useState(false)
+    const touchTooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+    const clearTouchTooltipTimer = useCallback(() => {
+        if (touchTooltipTimerRef.current) {
+            clearTimeout(touchTooltipTimerRef.current)
+            touchTooltipTimerRef.current = null
+        }
+    }, [])
+
+    useEffect(() => () => clearTouchTooltipTimer(), [clearTouchTooltipTimer])
+
+    const longPressHandlers = useLongPress({
+        interaction: 'touch-only-native-click',
+        threshold: 450,
+        onLongPress: () => {
+            clearTouchTooltipTimer()
+            setTouchTooltipOpen(true)
+            touchTooltipTimerRef.current = setTimeout(() => {
+                setTouchTooltipOpen(false)
+                touchTooltipTimerRef.current = null
+            }, TOUCH_TOOLTIP_HOLD_MS)
+        }
+    })
+
     const primary = getPrimaryGithubPrRef(props.refs)
     if (!primary) return null
 
     const nowMs = props.nowMs ?? Date.now()
     const profile = props.displayProfile ?? DEFAULT_PR_CHIP_DISPLAY
     const display = resolveGithubPrChipDisplay(primary, profile, nowMs)
-    const label = formatGithubPrChipLabel(primary, display)
+    const glyph = formatGithubPrChipLabel(primary, display)
+    const detail = formatGithubPrChipTitle(primary, display, t)
 
     return (
-        <a
-            href={primary.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            data-testid="session-pr-chip"
-            data-pr-tone={display.tone ?? 'unset'}
-            data-pr-stale={display.stale ? '1' : '0'}
-            title={formatGithubPrChipTitle(primary, display, t)}
-            aria-label={
-                display.label
-                    ? t('session.item.prChipWithStatus', {
-                        number: primary.number,
-                        status: display.label
-                    })
-                    : t('session.item.prChip', { number: primary.number })
-            }
-            onClick={(event) => event.stopPropagation()}
-            onPointerDown={(event) => event.stopPropagation()}
-            className={cn(
-                'inline-flex shrink-0 items-center rounded-md border',
-                'bg-[var(--app-subtle-bg)] px-1.5 py-0.5 text-[11px] font-medium tabular-nums',
-                'hover:opacity-90 focus-visible:outline-none',
-                'focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
-                toneClass(display.tone),
-                props.className
+        <HoverTooltip
+            id={tooltipId}
+            side="bottom"
+            align="end"
+            open={touchTooltipOpen}
+            className={cn('shrink-0', props.className)}
+            tooltipClassName="max-w-[16rem] whitespace-normal"
+            target={(
+                <a
+                    href={primary.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    data-testid="session-pr-chip"
+                    data-pr-tone={display.tone ?? 'unset'}
+                    data-pr-stale={display.stale ? '1' : '0'}
+                    aria-describedby={tooltipId}
+                    aria-label={
+                        display.label
+                            ? t('session.item.prChipWithStatus', {
+                                number: primary.number,
+                                status: display.label
+                            })
+                            : t('session.item.prChip', { number: primary.number })
+                    }
+                    {...longPressHandlers}
+                    onClick={(event) => {
+                        event.stopPropagation()
+                        longPressHandlers.onClick?.(event)
+                    }}
+                    onMouseDown={(event) => {
+                        event.stopPropagation()
+                        longPressHandlers.onMouseDown(event)
+                    }}
+                    onTouchStart={(event) => {
+                        event.stopPropagation()
+                        longPressHandlers.onTouchStart(event)
+                    }}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    className={cn(
+                        'inline-flex min-w-[1.35rem] shrink-0 items-center justify-center rounded-md border',
+                        'bg-[var(--app-subtle-bg)] px-1 py-0.5 text-[12px] font-medium leading-none',
+                        'hover:opacity-90 focus-visible:outline-none',
+                        'focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
+                        toneClass(display.tone)
+                    )}
+                >
+                    {glyph}
+                </a>
             )}
         >
-            {label}
-        </a>
+            <span className="block font-medium">{detail}</span>
+        </HoverTooltip>
     )
 }

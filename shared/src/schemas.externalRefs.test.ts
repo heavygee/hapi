@@ -218,7 +218,7 @@ describe('pr chip display profile', () => {
         expect(display.label).toBe('ready to merge')
         expect(display.emoji).toBe('')
         expect(display.action).toBeUndefined()
-        expect(formatGithubPrChipLabel(baseRef, display)).toBe('#1163')
+        expect(formatGithubPrChipLabel(baseRef, display)).toBe('PR')
     })
 
     it('lets estateCodes override emoji and action terms', () => {
@@ -236,7 +236,7 @@ describe('pr chip display profile', () => {
         const display = resolveGithubPrChipDisplay(ref, profile, 1_700_000_000_000)
         expect(display.emoji).toBe('✅')
         expect(display.action).toBe('full green — wait on tiann')
-        expect(formatGithubPrChipLabel(ref, display)).toBe('✅#1163')
+        expect(formatGithubPrChipLabel(ref, display)).toBe('✅')
     })
 
     it('mutes to ? when statusCheckedAt is older than staleMs', () => {
@@ -246,6 +246,6 @@ describe('pr chip display profile', () => {
             1_700_000_000_000 + DEFAULT_PR_CHIP_DISPLAY.staleMs + 1
         )
         expect(display.stale).toBe(true)
-        expect(formatGithubPrChipLabel(baseRef, display)).toBe('?#1163')
+        expect(formatGithubPrChipLabel(baseRef, display)).toBe('?')
     })
 })

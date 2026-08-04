@@ -28,7 +28,7 @@ describe('SessionPrChip helpers', () => {
     it('formats the chip label from the PR number only when snapshot is absent', () => {
         const ref = baseRef()
         const display = resolveGithubPrChipDisplay(ref, DEFAULT_PR_CHIP_DISPLAY)
-        expect(formatGithubPrChipLabel(ref, display)).toBe('#1163')
+        expect(formatGithubPrChipLabel(ref, display)).toBe('PR')
     })
 
     it('uses generic forge label without Meta action prose by default', () => {
@@ -40,7 +40,8 @@ describe('SessionPrChip helpers', () => {
         const display = resolveGithubPrChipDisplay(ref, DEFAULT_PR_CHIP_DISPLAY, 1_700_000_000_000)
         expect(display.label).toBe('ready to merge')
         expect(display.action).toBeUndefined()
-        expect(formatGithubPrChipLabel(ref, display)).toBe('#1163')
+        // Forge defaults have no emoji — compact glyph is the PR marker.
+        expect(formatGithubPrChipLabel(ref, display)).toBe('PR')
     })
 
     it('mutes to ? when statusCheckedAt is older than staleMs', () => {
@@ -55,7 +56,7 @@ describe('SessionPrChip helpers', () => {
             checkedAt + DEFAULT_PR_CHIP_DISPLAY.staleMs + 1
         )
         expect(display.stale).toBe(true)
-        expect(formatGithubPrChipLabel(ref, display)).toBe('?#1163')
+        expect(formatGithubPrChipLabel(ref, display)).toBe('?')
     })
 
     it('applies estate display overrides for emoji and action terms', () => {
@@ -79,7 +80,7 @@ describe('SessionPrChip helpers', () => {
         })
         const display = resolveGithubPrChipDisplay(ref, profile, Date.now())
         const title = formatGithubPrChipTitle(ref, display, keyedT)
-        expect(formatGithubPrChipLabel(ref, display)).toBe('⚠️#1163')
+        expect(formatGithubPrChipLabel(ref, display)).toBe('⚠️')
         expect(title).toBe(
             'tiann/hapi#1163 · needs work · checked session.time.hoursAgo:1 — rebase (merge state dirty)'
         )
