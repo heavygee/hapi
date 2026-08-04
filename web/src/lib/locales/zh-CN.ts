@@ -1004,6 +1004,8 @@ export default {
   'settings.about.website': '官方网站',
   'settings.about.appVersion': '应用版本',
   'settings.about.protocolVersion': '协议版本',
+  'settings.about.showAgentContract': '显示 AGENT_NOTIFY 行',
+  'settings.about.showAgentContract.desc': '在会话聊天（及复制）中保留末尾 AGENT_NOTIFY_SUMMARY。默认关闭；无论是否显示，原始文本都会写入存储供 overseer 使用。',
 
   // Browse / Workspace
   'browse.title': '浏览',

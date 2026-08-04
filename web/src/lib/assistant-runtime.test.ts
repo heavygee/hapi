@@ -5,7 +5,9 @@ import {
     assignThreadMessageIds,
     assignThreadMessageIdsWithStableWrappers,
     getBlockPresentationTimestamp,
-    getResponseGroupTimestamps
+    getResponseGroupTimestamps,
+    textForHumanRender
+
 } from './assistant-runtime'
 import type { AgentEventBlock, AgentTextBlock, CliOutputBlock, ToolCallBlock, UserTextBlock } from '@/chat/types'
 import type { ToolGroupBlock, VisibleChatBlock } from '@/chat/toolGroups'
@@ -722,5 +724,17 @@ describe('aggregateResponseGroups', () => {
         const meta = aggregates.get('a1')
         expect(meta?.usage?.cache_creation_input_tokens).toBe(300)
         expect(meta?.usage?.cache_read_input_tokens).toBe(100)
+    })
+})
+
+describe('textForHumanRender', () => {
+    const raw = 'Answer body.\n\nAGENT_NOTIFY_SUMMARY {"version":1,"agent":"a","project":"p","status":"done","action":"none","summary":"ok"}'
+
+    it('strips by default', () => {
+        expect(textForHumanRender(raw, false)).toBe('Answer body.')
+    })
+
+    it('keeps the notify line when showAgentContract is true', () => {
+        expect(textForHumanRender(raw, true)).toBe(raw)
     })
 })

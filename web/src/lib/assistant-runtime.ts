@@ -9,6 +9,7 @@ import {
     type ComposerSendIntent,
 } from '@/lib/messageDelivery'
 import { safeStringify, stripAgentContract } from '@hapi/protocol'
+import { useShowAgentContract } from '@/hooks/useShowAgentContract'
 import { renderEventLabel } from '@/chat/presentation'
 import type { ChatBlock, CliOutputBlock, CodexReview, UsageData } from '@/chat/types'
 import type { AgentEvent, ToolCallBlock } from '@/chat/types'
@@ -367,18 +368,32 @@ export function assignThreadMessageIds(
     return assignThreadMessageIdsWithStableWrappers(blocks, new WeakMap())
 }
 
+
+/**
+ * Human-facing text for chat cards. Default strips the machine notify contract
+ * (Half A). When Settings → About → "Show AGENT_NOTIFY line" is on, leave the
+ * raw text so the operator can verify emission end-to-end.
+ */
+export function textForHumanRender(text: string, showAgentContract: boolean): string {
+    return showAgentContract ? text : stripAgentContract(text)
+}
+
 function toThreadMessageLike(
     block: VisibleChatBlock,
     threadMessageId: string,
-    timestamp: number
+    timestamp: number,
+    showAgentContract: boolean
 ): ThreadMessageLike {
     if (block.kind === 'user-text') {
         return {
             role: 'user',
             id: threadMessageId,
             createdAt: new Date(timestamp),
-            content: [{ type: 'text', text: block.text }],
-import { safeStringify, stripAgentContract } from '@hapi/protocol'
+                        // Strip the machine-only notify contract from the human render. On
+            // non-Cursor flavors the hub prepends an inline contract prefix to
+            // the stored operator message (#20); stripAgentContract removes that
+            // leading block. No-op when absent. Debug toggle keeps it visible.
+            content: [{ type: 'text', text: textForHumanRender(block.text, showAgentContract) }],
             metadata: {
                 custom: {
                     kind: 'user',
@@ -397,8 +412,12 @@ import { safeStringify, stripAgentContract } from '@hapi/protocol'
             role: 'assistant',
             id: threadMessageId,
             createdAt: new Date(timestamp),
-            content: [{ type: 'text', text: block.text }],
-import { safeStringify, stripAgentContract } from '@hapi/protocol'
+                        // Strip the trailing AGENT_NOTIFY_SUMMARY line (collapse-normalized,
+            // so Cursor's corrupted SUMARY variant strips too) so the human never
+            // sees the machine contract - unless the debug toggle is on. The raw
+            // text always stays in the store for overseer. copyText derives from
+            // this content, so the clipboard follows the same visibility rule.
+            content: [{ type: 'text', text: textForHumanRender(block.text, showAgentContract) }],
             metadata: {
                 custom: {
                     kind: 'assistant',
@@ -639,6 +658,8 @@ export function useHappyRuntime(props: {
 }) {
     const isRunning = props.isRunning ?? props.session.thinking
 
+    const { showAgentContract } = useShowAgentContract()
+
     // Compute response-group aggregates once per block list so we can
     // inject the summed metadata onto each group's first visible block.
     // The library's `joinExternalMessages` only preserves
@@ -669,7 +690,8 @@ export function useHappyRuntime(props: {
             const message = toThreadMessageLike(
                 block,
                 threadMessageId,
-                responseGroupTimestamps.get(block) ?? getBlockPresentationTimestamp(block)
+                responseGroupTimestamps.get(block) ?? getBlockPresentationTimestamp(block),
+                showAgentContract
             )
             const aggregate = aggregates.get(block.id)
             if (!aggregate) return message
@@ -689,7 +711,7 @@ export function useHappyRuntime(props: {
                 }
             }
         },
-        [aggregates, responseGroupTimestamps]
+        [aggregates, responseGroupTimestamps, showAgentContract]
     )
 
     // Use cached message converter for performance optimization
