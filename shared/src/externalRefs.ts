@@ -29,6 +29,8 @@ export function githubPrStatusFromEmoji(emoji: string): GithubPrStatus {
             return 'pre_pr'
         case '🔧':
             return 'merged'
+        case '🧹':
+            return 'complete'
         case '❓':
         case '?':
             return 'unknown'
@@ -49,6 +51,8 @@ export function githubPrStatusEmoji(status: GithubPrStatus | null | undefined): 
             return '📝'
         case 'merged':
             return '🔧'
+        case 'complete':
+            return '🧹'
         case 'unknown':
             return '❓'
         default:

@@ -8,8 +8,9 @@ import { HoverTooltip } from '@/components/HoverTooltip'
 
 type RelativeTimeTFunc = (key: string, params?: Record<string, string | number>) => string
 
-/** Chip cache older than this is treated as honesty-❓ (muted tone). */
-export const GITHUB_PR_CHIP_STALE_MS = 2 * 60 * 60 * 1000
+/** Chip cache older than this is treated as honesty-❓ (muted tone).
+ *  Default 3h — Meta refreshes hourly; see config/pr-chip-states.yaml staleMs. */
+export const GITHUB_PR_CHIP_STALE_MS = 3 * 60 * 60 * 1000
 
 export type SessionPrChipProps = {
     refs: readonly ExternalRef[] | null | undefined
@@ -26,7 +27,8 @@ export type GithubPrChipDisplay = {
 
 /**
  * Resolve display status from cached `externalRefs` fields.
- * Never live-queries GitHub — when `statusCheckedAt` is older than 2h, mute to `unknown` / ❓.
+ * Never live-queries GitHub — when `statusCheckedAt` is older than staleMs
+ * (default 3h), mute to `unknown` / ❓.
  */
 export function resolveGithubPrChipDisplay(
     ref: GithubPrExternalRef,
@@ -67,6 +69,8 @@ function statusToneClass(status: GithubPrStatus | undefined): string {
             return 'border-sky-500/40 text-sky-700 dark:text-sky-300'
         case 'merged':
             return 'border-violet-500/40 text-violet-700 dark:text-violet-300'
+        case 'complete':
+            return 'border-stone-500/40 text-stone-700 dark:text-stone-300'
         case 'pre_pr':
             return 'border-[var(--app-border)] text-[var(--app-muted-fg)]'
         case 'unknown':
@@ -92,7 +96,8 @@ export function formatGithubPrChipDetailParts(
         ? formatRelativeTime(ref.statusCheckedAt, t)
         : null
     const checked = relative ? ` · checked ${relative}` : ''
-    const staleNote = display.stale ? ' · stale (>2h)' : ''
+    const staleHours = Math.round(GITHUB_PR_CHIP_STALE_MS / (60 * 60 * 1000))
+    const staleNote = display.stale ? ` · stale (>${staleHours}h)` : ''
     const shown = display.status ?? ref.status
     const action = !display.stale && ref.statusAction ? ` — ${ref.statusAction}` : ''
     return { glyph, detail: `${identity} · ${shown}${checked}${staleNote}${action}` }

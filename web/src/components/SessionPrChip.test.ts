@@ -38,7 +38,7 @@ describe('SessionPrChip helpers', () => {
         }), now)).toBe('⚠️')
     })
 
-    it('mutes to ❓ when statusCheckedAt is older than 2h', () => {
+    it('mutes to ❓ when statusCheckedAt is older than staleMs (3h)', () => {
         const checkedAt = 1_700_000_000_000
         const now = checkedAt + GITHUB_PR_CHIP_STALE_MS + 1
         const ref = baseRef({

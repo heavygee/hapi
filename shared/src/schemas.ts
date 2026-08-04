@@ -37,6 +37,7 @@ export const GithubPrStatusSchema = z.enum([
     'needs_work',
     'pre_pr',
     'merged',
+    'complete',
     'unknown'
 ])
 export type GithubPrStatus = z.infer<typeof GithubPrStatusSchema>
