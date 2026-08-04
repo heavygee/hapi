@@ -77,16 +77,17 @@ function statusToneClass(status: GithubPrStatus | undefined): string {
 }
 
 /**
- * Detail body for the PR chip (desktop hover/focus tooltip) and session
- * long-press action menu header. Mobile long-press stays on the session row.
+ * Glyph + status body shared by chip tooltip and session action menus.
  */
-export function formatGithubPrChipTitle(
+export function formatGithubPrChipDetailParts(
     ref: GithubPrExternalRef,
     display: GithubPrChipDisplay,
-    t: RelativeTimeTFunc
-): string {
+    t: RelativeTimeTFunc,
+    nowMs?: number
+): { glyph: string; detail: string } {
+    const glyph = formatGithubPrChipLabel(ref, nowMs)
     const identity = `${ref.repo}#${ref.number}`
-    if (!ref.status && !display.status) return identity
+    if (!ref.status && !display.status) return { glyph, detail: identity }
     const relative = typeof ref.statusCheckedAt === 'number'
         ? formatRelativeTime(ref.statusCheckedAt, t)
         : null
@@ -94,13 +95,24 @@ export function formatGithubPrChipTitle(
     const staleNote = display.stale ? ' · stale (>2h)' : ''
     const shown = display.status ?? ref.status
     const action = !display.stale && ref.statusAction ? ` — ${ref.statusAction}` : ''
-    return `${identity} · ${shown}${checked}${staleNote}${action}`
+    return { glyph, detail: `${identity} · ${shown}${checked}${staleNote}${action}` }
+}
+
+/** Same string as chip mouseover tooltip: `glyph owner/repo#N · status…`. */
+export function formatGithubPrChipTitle(
+    ref: GithubPrExternalRef,
+    display: GithubPrChipDisplay,
+    t: RelativeTimeTFunc,
+    nowMs?: number
+): string {
+    const { glyph, detail } = formatGithubPrChipDetailParts(ref, display, t, nowMs)
+    return `${glyph} ${detail}`
 }
 
 /**
  * Compact primary GitHub PR chip for session list rows.
- * Visible glyph = status emoji (or `PR`); full identity on desktop hover.
- * On mobile, the same detail sits atop the session action menu.
+ * Glyph stays compact; mouseover/focus on *this chip* reveals the same
+ * detail string as the session action menu (emoji + status explanation).
  */
 export function SessionPrChip(props: SessionPrChipProps) {
     const { t } = useTranslation()
@@ -112,15 +124,16 @@ export function SessionPrChip(props: SessionPrChipProps) {
     const nowMs = props.nowMs ?? Date.now()
     const display = resolveGithubPrChipDisplay(primary, nowMs)
     const glyph = formatGithubPrChipLabel(primary, nowMs)
-    const detail = formatGithubPrChipTitle(primary, display, t)
+    const detail = formatGithubPrChipTitle(primary, display, t, nowMs)
 
     return (
         <HoverTooltip
             id={tooltipId}
             side="bottom"
             align="end"
-            className={cn('shrink-0', props.className)}
-            tooltipClassName="max-w-[16rem] whitespace-normal"
+            hoverGroup="help"
+            className={cn('relative z-20 shrink-0 overflow-visible', props.className)}
+            tooltipClassName="max-w-[18rem] whitespace-normal"
             target={(
                 <a
                     href={primary.url}
@@ -130,6 +143,7 @@ export function SessionPrChip(props: SessionPrChipProps) {
                     data-pr-status={display.status ?? 'unset'}
                     data-pr-stale={display.stale ? '1' : '0'}
                     aria-describedby={tooltipId}
+                    title={detail}
                     aria-label={
                         display.status
                             ? t('session.item.prChipWithStatus', {

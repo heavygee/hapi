@@ -8,7 +8,7 @@ import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { SessionExportDialog } from '@/components/SessionExportDialog'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { LinkPrDialog } from '@/components/LinkPrDialog'
-import { SessionPrChip, formatGithubPrChipTitle, resolveGithubPrChipDisplay } from '@/components/SessionPrChip'
+import { SessionPrChip, formatGithubPrChipDetailParts, resolveGithubPrChipDisplay } from '@/components/SessionPrChip'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { CopyIcon, CheckIcon, ScheduleIcon } from '@/components/icons'
 import { hasRecoveredModelError, hasUrgentModelError } from '@/components/ModelErrorBanner'
@@ -862,8 +862,10 @@ function SessionItem(props: {
         if (!githubPrAwarenessEnabled || !primaryPrRef) return null
         const nowMs = Date.now()
         const display = resolveGithubPrChipDisplay(primaryPrRef, nowMs)
+        const parts = formatGithubPrChipDetailParts(primaryPrRef, display, t, nowMs)
         return {
-            detail: formatGithubPrChipTitle(primaryPrRef, display, t),
+            glyph: parts.glyph,
+            detail: parts.detail,
             href: primaryPrRef.url
         }
     }, [githubPrAwarenessEnabled, primaryPrRef, t])

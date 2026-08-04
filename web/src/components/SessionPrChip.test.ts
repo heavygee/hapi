@@ -92,6 +92,7 @@ describe('SessionPrChip helpers', () => {
         })
         const display = resolveGithubPrChipDisplay(ref, Date.now())
         const title = formatGithubPrChipTitle(ref, display, keyedT)
+        expect(title.startsWith('⚠️ ')).toBe(true)
         expect(title).toContain('tiann/hapi#1163')
         expect(title).toContain('needs_work')
         expect(title).toContain('rebase (merge state dirty)')

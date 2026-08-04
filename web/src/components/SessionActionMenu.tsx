@@ -15,7 +15,9 @@ import { usePlatform } from '@/hooks/usePlatform'
 import { CopyIcon } from '@/components/icons'
 
 export type SessionActionMenuLinkedPr = {
-    /** Full detail line: `owner/repo#N · status · …` */
+    /** Chip glyph (emoji / `PR` / `?`) — leading the status explanation. */
+    glyph: string
+    /** Status line without glyph: `owner/repo#N · status · …` */
     detail: string
     href: string
 }
@@ -357,10 +359,13 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                         href={linkedPr.href}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="mt-1 block whitespace-normal text-sm font-medium leading-snug text-[var(--app-link)] hover:underline"
+                        className="mt-1 flex items-start gap-2 whitespace-normal text-sm font-medium leading-snug text-[var(--app-link)] hover:underline"
                         onClick={onClose}
                     >
-                        {linkedPr.detail}
+                        <span className="shrink-0 text-base leading-snug" aria-hidden="true">
+                            {linkedPr.glyph}
+                        </span>
+                        <span className="min-w-0">{linkedPr.detail}</span>
                     </a>
                 </div>
             ) : null}
