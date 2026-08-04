@@ -618,6 +618,7 @@ describe('OverseerEntity namespace isolation (#107 kill criterion)', () => {
             severity: 4,
             summary: 'secret from B',
             relatedSessionId: inB.id,
+            namespace: 'ns-b',
             payloadJson: JSON.stringify({ session: { project: 'secret', name: 'worker-b' } })
         })
 
