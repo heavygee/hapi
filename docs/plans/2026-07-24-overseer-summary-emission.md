@@ -1,8 +1,14 @@
 # Overseer summary emission (Half B) — 2026-07-24
 
-Status: in progress
+Status: both pieces implemented + tested (awaiting operator `hapi-restart-hub` + soup)
 Owner: feat/overseer-summary-emit (peer of 🔁overseer prep)
 Scope: FORK-ONLY. Never upstream. The whole overseer feature is fork-private.
+
+- Piece 1 — `feat/overseer-summary-emit` (fork PR #86): CLI Cursor rule overlay.
+  11 overlay tests + 19 launcher tests green; typecheck clean.
+- Piece 2 — `feat/overseer-summary-fallback` (stacked on Piece 1): hub per-turn
+  backstop in `overseerEventRecorder`. 6 fallback tests + full hub suite (524)
+  green; typecheck clean.
 
 ## Why this exists (the real WHY — keep it here, not in product code)
 
