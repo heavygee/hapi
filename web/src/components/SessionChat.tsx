@@ -7,6 +7,7 @@ import type { ApiClient } from '@/api/client'
 import type {
     AttachmentMetadata,
     CodexCollaborationMode,
+    CopilotAgentMode,
     DecryptedMessage,
     PermissionMode,
     Session,
@@ -91,6 +92,7 @@ import {
 import { buildCursorEffortPickerOptions, resolveCursorVariantOptions } from '@/lib/cursorModelOptions'
 import { useOpencodeModels } from '@/hooks/queries/useOpencodeModels'
 import { useGrokModels } from '@/hooks/queries/useGrokModels'
+import { useCopilotModels } from '@/hooks/queries/useCopilotModels'
 import { useGrokReasoningEffortOptions } from '@/hooks/queries/useGrokReasoningEffortOptions'
 import { usePiModels } from '@/hooks/queries/usePiModels'
 import { useOpencodeReasoningEffortOptions } from '@/hooks/queries/useOpencodeReasoningEffortOptions'
@@ -815,6 +817,24 @@ function SessionChatInner(props: SessionChatProps) {
             ]
             : undefined
     ), [agentFlavor, grokModelsState.availableModels])
+    const copilotModelsState = useCopilotModels({
+        api: props.api,
+        sessionId: props.session.id,
+        enabled: agentFlavor === 'copilot' && props.session.active && !controlledByUser
+    })
+    const copilotModelOptions = useMemo(() => (
+        agentFlavor === 'copilot'
+            ? [
+                { value: null, label: 'Auto' },
+                ...copilotModelsState.availableModels
+                    .filter((model) => model.modelId !== 'auto')
+                    .map((model) => ({
+                        value: model.modelId,
+                        label: model.name ?? model.modelId
+                    }))
+            ]
+            : undefined
+    ), [agentFlavor, copilotModelsState.availableModels])
     const cursorModelsState = useCursorModels({
         api: props.api,
         sessionId: props.session.id,
@@ -959,6 +979,7 @@ function SessionChatInner(props: SessionChatProps) {
         switchSession,
         setPermissionMode,
         setCollaborationMode,
+        setCopilotAgentMode,
         setModel,
         setModelReasoningEffort,
         setEffort,
@@ -1232,6 +1253,17 @@ function SessionChatInner(props: SessionChatProps) {
             console.error('Failed to set collaboration mode:', e)
         }
     }, [setCollaborationMode, props.onRefresh, haptic])
+
+    const handleCopilotAgentModeChange = useCallback(async (mode: CopilotAgentMode) => {
+        try {
+            await setCopilotAgentMode(mode)
+            haptic.notification('success')
+            props.onRefresh()
+        } catch (e) {
+            haptic.notification('error')
+            console.error('Failed to set Copilot agent mode:', e)
+        }
+    }, [setCopilotAgentMode, props.onRefresh, haptic])
 
     // Model mode change handler
     const handleModelChange = useCallback(async (model: SessionModelSelection) => {
@@ -1604,6 +1636,7 @@ function SessionChatInner(props: SessionChatProps) {
                         onClearSchedule={() => updatePendingSchedule(null)}
                         permissionMode={props.session.permissionMode}
                         collaborationMode={codexCollaborationModeSupported ? props.session.collaborationMode : undefined}
+                        copilotAgentMode={agentFlavor === 'copilot' ? props.session.copilotAgentMode : undefined}
                         model={props.session.model}
                         modelReasoningEffort={agentFlavor === 'codex' || agentFlavor === 'opencode' ? props.session.modelReasoningEffort : undefined}
                         effort={props.session.effort}
@@ -1623,6 +1656,8 @@ function SessionChatInner(props: SessionChatProps) {
                                         ? opencodeModelOptions
                                         : agentFlavor === 'grok'
                                             ? grokModelOptions
+                                        : agentFlavor === 'copilot'
+                                            ? copilotModelOptions
                                         // Pi uses its own provider-qualified picker (piModels prop).
                                         // Feeding piModelOptions here would make the generic Ctrl/Cmd+M
                                         // cycler (getNextModelForFlavor) post a bare modelId string,
@@ -1660,7 +1695,16 @@ function SessionChatInner(props: SessionChatProps) {
                                 ? handleCollaborationModeChange
                                 : undefined
                         }
-                        onPermissionModeChange={handlePermissionModeChange}
+                        onCopilotAgentModeChange={
+                            agentFlavor === 'copilot' && props.session.active && !controlledByUser
+                                ? handleCopilotAgentModeChange
+                                : undefined
+                        }
+                        onPermissionModeChange={
+                            agentFlavor === 'copilot' && controlledByUser
+                                ? undefined
+                                : handlePermissionModeChange
+                        }
                         selectedModelBase={
                             agentFlavor === 'cursor' && cursorPicker?.mode === 'dual'
                                 ? cursorSelectedBaseValue
@@ -1696,6 +1740,10 @@ function SessionChatInner(props: SessionChatProps) {
                                         ? (props.session.active && !piModelsState.error ? handleModelChange : undefined)
                                         : agentFlavor === 'grok'
                                             ? (props.session.active && !controlledByUser && !grokModelsState.error
+                                                ? handleModelChange
+                                                : undefined)
+                                        : agentFlavor === 'copilot'
+                                            ? (props.session.active && !controlledByUser
                                                 ? handleModelChange
                                                 : undefined)
                                         : handleModelChange

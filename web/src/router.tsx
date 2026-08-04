@@ -656,11 +656,14 @@ function SessionPage() {
             })
 
             const fileHits: Suggestion[] = []
-            if (agentType === 'codex' && api && sessionId) {
+            if ((agentType === 'codex' || agentType === 'copilot') && api && sessionId) {
                 const response = await api.searchSessionFiles(sessionId, search, 50)
                 if (response.success && response.files) {
                     for (const file of response.files) {
-                        const mentionText = `@"${file.fullPath.replace(/(["\\])/g, '\\$1')}"`
+                        // Codex App Server expects @"path"; Copilot CLI uses @path (relative preferred).
+                        const mentionText = agentType === 'copilot'
+                            ? `@${file.fullPath}`
+                            : `@"${file.fullPath.replace(/(["\\])/g, '\\$1')}"`
                         fileHits.push({
                             key: mentionText,
                             text: mentionText,
