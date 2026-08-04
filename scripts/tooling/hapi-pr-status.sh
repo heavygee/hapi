@@ -191,7 +191,9 @@ else
         echo "$SNIPPET" | sed 's/^/     /'
         # grep is line-oriented; HAPI Bot puts "**Findings**" and "- None." on
         # separate lines, so flatten before matching (otherwise false dirty).
-        if printf '%s' "$SNIPPET" | tr '\n' ' ' | grep -qE "$CLEAN_REGEX"; then
+        # Some tip-bot payloads also embed literal backslash-n sequences
+        # (not real newlines) — flatten those too (#1108 2026-08-04).
+        if printf '%s' "$SNIPPET" | sed 's/\\n/ /g' | tr '\n' ' ' | grep -qE "$CLEAN_REGEX"; then
             echo "     → PASS"
         else
             echo "     → FINDINGS PRESENT (apply 'cold-review-clean' label to override after addressing)"
