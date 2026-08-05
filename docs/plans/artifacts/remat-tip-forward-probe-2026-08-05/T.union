@@ -1,0 +1,17 @@
+cli/src/codex/utils/systemPrompt.ts
+cli/src/commands/runCli.delegate.test.ts
+cli/src/commands/runCli.ts
+cli/src/opencode/utils/systemPrompt.ts
+hub/src/config/settings.ts
+hub/src/upgrade/cliArtifact.test.ts
+hub/src/upgrade/fleetUpgradePolicy.ts
+hub/src/web/server.ts
+shared/src/rpcMethods.ts
+web/src/App.tsx
+web/src/api/client.ts
+web/src/hooks/queries/useUpgradeInfo.ts
+web/src/lib/locales/en.ts
+web/src/lib/locales/zh-CN.ts
+web/src/router.tsx
+web/src/routes/settings/general.tsx
+web/src/routes/settings/index.test.tsx
