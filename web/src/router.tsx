@@ -1311,7 +1311,7 @@ function SessionPage() {
                         message: t('chat.sendError.aborted'),
                         code: 'abort',
                         scheduledAt: null,
-                        deliveryMode: 'queue',
+                        deliveryMode: 'steer',
                         mutationStarted: true,
                         restoreSuppressed: false
                     }
