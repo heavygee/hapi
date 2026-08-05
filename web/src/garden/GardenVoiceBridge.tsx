@@ -8,6 +8,7 @@ import { useSession } from '@/hooks/queries/useSession'
 import { useMessages } from '@/hooks/queries/useMessages'
 import { VoiceBackendSession, registerSessionStore, registerVoiceHooksStore, voiceHooks } from '@/realtime'
 import { useGardenRuntime } from '@/garden/context/GardenRuntimeContext'
+import { useGardenXrLauncherOptional } from '@/garden/context/GardenXrLauncherContext'
 import {
     notifyGardenSessionFocus,
     prefetchGardenVoiceContext,
@@ -25,6 +26,8 @@ export function GardenVoiceBridge() {
     const voice = useVoiceOptional()
     const queryClient = useQueryClient()
     const { focusedId, isPresenting } = useGardenRuntime()
+    const gardenLauncher = useGardenXrLauncherOptional()
+    const overlayOpen = gardenLauncher?.overlayOpen === true
     const { sessions } = useSessions(api)
     const visible = filterGardenSessions(sessions)
     const { session: focusedSession, refetch: refetchSession } = useSession(api, focusedId)
@@ -66,8 +69,9 @@ export function GardenVoiceBridge() {
     }, [focusedId, queryClient, refetchSession])
 
     useEffect(() => {
-        if (!api || !focusedId || !focusedSession) {
-            registerSessionStore(null)
+        // Only own the global voice session store while the overlay is up.
+        // SessionChat yields on overlayOpen; we must (re)register after that.
+        if (!api || !focusedId || !focusedSession || !overlayOpen) {
             return
         }
 
@@ -77,20 +81,38 @@ export function GardenVoiceBridge() {
                     ? focusedSession as { agentState?: { requests?: Record<string, unknown> } }
                     : null
             ),
-            sendMessage: (_sessionId: string, message: string) => {
+            sendMessage: (sessionId: string, message: string) => {
+                // Honor realtime session id from client tools — never the flat-UI
+                // session that may still be mounted under the overlay.
+                if (!focusedId || sessionId !== focusedId) {
+                    console.error('[Garden Voice] refusing sendMessage session mismatch', {
+                        sessionId,
+                        focusedId,
+                    })
+                    return
+                }
                 const localId = makeClientSideId('local')
-                void api.sendMessage(focusedId, message, localId)
+                void api.sendMessage(sessionId, message, localId)
             },
-            approvePermission: async (_sessionId: string, requestId: string) => {
-                await api.approvePermission(focusedId, requestId)
+            approvePermission: async (sessionId: string, requestId: string) => {
+                if (!focusedId || sessionId !== focusedId) {
+                    return
+                }
+                await api.approvePermission(sessionId, requestId)
                 await refreshSession()
             },
-            denyPermission: async (_sessionId: string, requestId: string) => {
-                await api.denyPermission(focusedId, requestId)
+            denyPermission: async (sessionId: string, requestId: string) => {
+                if (!focusedId || sessionId !== focusedId) {
+                    return
+                }
+                await api.denyPermission(sessionId, requestId)
                 await refreshSession()
             },
         })
-    }, [api, focusedId, focusedSession, refreshSession])
+        return () => {
+            registerSessionStore(null)
+        }
+    }, [api, focusedId, focusedSession, refreshSession, overlayOpen])
 
     useEffect(() => {
         registerVoiceHooksStore(

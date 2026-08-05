@@ -42,6 +42,14 @@ describe('primeVoiceHooksForGarden', () => {
         const plan = voiceHooks.prepareVoiceSession('sess-1')
         expect(plan.bootstrap).toContain('sess-1')
     })
+
+    it('does not leak primed session to a different sessionId', () => {
+        const session = makeSession('sess-1')
+        primeVoiceHooksForGarden({ session, messages: [] })
+        const plan = voiceHooks.prepareVoiceSession('sess-OTHER')
+        // Wrong id must not inherit sess-1 bootstrap (regression for XR mis-route).
+        expect(plan.bootstrap).not.toContain('sess-1')
+    })
 })
 
 describe('notifyGardenSessionFocus', () => {
