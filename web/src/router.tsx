@@ -769,29 +769,49 @@ function SessionsPage() {
                                 </button>
                                 {canBrowse && (
                                     <button
+                                        ref={tourBrowseRef}
                                         type="button"
                                         onClick={() => navigate({ to: '/browse' })}
-                                        className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
+                                        className="relative p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
                                         title={t('browse.nav')}
                                     >
                                         <FolderOpenIcon className="h-5 w-5" />
+                                        {visibleTourStep === 'browse' ? (
+                                            <FueDot pulsing ariaLabel={t('fue.newFeatureDot')} />
+                                        ) : null}
                                     </button>
                                 )}
                                 <button
                                     type="button"
-                                    onClick={() => navigate({ to: '/settings' })}
+                                    onClick={() => navigate({ to: '/overseer' })}
                                     className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
+                                    title="Overseer"
+                                >
+                                    <OverseerIcon className="h-5 w-5" />
+                                </button>
+                                <button
+                                    ref={tourSettingsRef}
+                                    type="button"
+                                    onClick={() => navigate({ to: '/settings' })}
+                                    className="relative p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
                                     title={t('settings.title')}
                                 >
                                     <SettingsIcon className="h-5 w-5" />
+                                    {visibleTourStep === 'settings' ? (
+                                        <FueDot pulsing ariaLabel={t('fue.newFeatureDot')} />
+                                    ) : null}
                                 </button>
                                 <button
+                                    ref={tourNewSessionRef}
                                     type="button"
                                     onClick={() => navigate({ to: '/sessions/new' })}
-                                    className="session-list-new-button flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-link)] transition-colors"
+                                    className="session-list-new-button relative flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-link)] transition-colors"
                                     title={t('sessions.new')}
                                 >
                                     <PlusIcon className="h-5 w-5" />
+                                    {visibleTourStep === 'new-session' ? (
+                                        <FueDot pulsing ariaLabel={t('fue.newFeatureDot')} />
+                                    ) : null}
                                 </button>
                             </div>
                         )}
@@ -799,6 +819,18 @@ function SessionsPage() {
                         machineLabelsById={machineLabelsById}
                         machinesById={machinesById}
                     />
+                    {visibleTourStep ? (
+                        <FueCallout
+                            title={tourStepCopy[visibleTourStep].title}
+                            body={tourStepCopy[visibleTourStep].body}
+                            anchorRef={tourStepRef[visibleTourStep]}
+                            onDismiss={tour.next}
+                            dismissLabel={tour.isLastStep ? t('onboarding.tour.finish') : t('onboarding.tour.next')}
+                            closeAriaLabel={t('fue.closeAriaLabel')}
+                            onSecondaryAction={tour.skipAll}
+                            secondaryActionLabel={t('onboarding.tour.skip')}
+                        />
+                    ) : null}
                 </div>
             </div>
 
