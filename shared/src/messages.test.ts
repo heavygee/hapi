@@ -1,8 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 import {
+    collapseRepeats,
     extractAssistantPlainText,
     extractNotifySummary,
     isRedundantGoalStatusEventContent,
+    matchNotifySummaryLine,
+    NOTIFY_SUMMARY_TOKEN,
     type NotifySummary
 } from './messages'
 
@@ -204,6 +207,60 @@ describe('extractNotifySummary + extractAssistantPlainText (integration)', () =>
         const r = extractNotifySummary(text!)
         expect(r?.summary).toBe('All checks green')
         expect(r?.action).toBe('Merge PR')
+    })
+})
+
+describe('collapseRepeats (corruption normalizer)', () => {
+    test('collapses runs of a repeated character to one', () => {
+        expect(collapseRepeats('SUMMARY')).toBe('SUMARY')
+        expect(collapseRepeats('aaa-bb-c')).toBe('a-b-c')
+        expect(collapseRepeats('')).toBe('')
+        expect(collapseRepeats('abc')).toBe('abc')
+    })
+
+    test('the correct token and the Cursor dup-drop collapse to the same form', () => {
+        // AGENT_NOTIFY_SUMMARY -> AGENT_NOTIFY_SUMARY (drop one M);
+        // both must normalize equal so a corrupted line still matches.
+        expect(collapseRepeats(NOTIFY_SUMMARY_TOKEN)).toBe(collapseRepeats('AGENT_NOTIFY_SUMARY'))
+    })
+})
+
+describe('matchNotifySummaryLine (corruption-tolerant detector)', () => {
+    test('matches the correct token line and returns the JSON', () => {
+        expect(matchNotifySummaryLine('AGENT_NOTIFY_SUMMARY {"status":"done"}')).toBe('{"status":"done"}')
+    })
+
+    test('matches the Cursor dup-dropped token (SUMARY)', () => {
+        expect(matchNotifySummaryLine('AGENT_NOTIFY_SUMARY {"status":"done"}')).toBe('{"status":"done"}')
+    })
+
+    test('tolerates trailing/leading whitespace on the line', () => {
+        expect(matchNotifySummaryLine('  AGENT_NOTIFY_SUMMARY {"a":1}  ')).toBe('{"a":1}')
+    })
+
+    test('rejects a token embedded in prose (not a bare token)', () => {
+        expect(matchNotifySummaryLine('see the AGENT_NOTIFY_SUMMARY {"x":1}')).toBeNull()
+    })
+
+    test('rejects lines with no JSON or no leading token', () => {
+        expect(matchNotifySummaryLine('AGENT_NOTIFY_SUMMARY not json')).toBeNull()
+        expect(matchNotifySummaryLine('{"x":1}')).toBeNull()
+        expect(matchNotifySummaryLine('')).toBeNull()
+    })
+
+    test('rejects a non-dup deletion (NOTFY) - acceptable residual loss', () => {
+        // Non-adjacent-duplicate corruption is not recoverable by collapse-norm;
+        // observed rate in the wild is ~2 in 5800. Documented as acceptable.
+        expect(matchNotifySummaryLine('AGENT_NOTFY_SUMMARY {"x":1}')).toBeNull()
+    })
+})
+
+describe('extractNotifySummary (corruption-tolerant end-to-end)', () => {
+    test('parses a corrupted (SUMARY) trailing line into a summary object', () => {
+        const text = 'Did the thing.\n\nAGENT_NOTIFY_SUMARY {"version":1,"status":"blocked","summary":"needs key"}'
+        const r = extractNotifySummary(text)
+        expect(r?.status).toBe('blocked')
+        expect(r?.summary).toBe('needs key')
     })
 })
 

@@ -8,7 +8,7 @@ import {
     consumeComposerSendIntent,
     type ComposerSendIntent,
 } from '@/lib/messageDelivery'
-import { safeStringify } from '@hapi/protocol'
+import { safeStringify, stripAgentContract } from '@hapi/protocol'
 import { renderEventLabel } from '@/chat/presentation'
 import type { ChatBlock, CliOutputBlock, CodexReview, UsageData } from '@/chat/types'
 import type { AgentEvent, ToolCallBlock } from '@/chat/types'
@@ -378,6 +378,7 @@ function toThreadMessageLike(
             id: threadMessageId,
             createdAt: new Date(timestamp),
             content: [{ type: 'text', text: block.text }],
+import { safeStringify, stripAgentContract } from '@hapi/protocol'
             metadata: {
                 custom: {
                     kind: 'user',
@@ -397,6 +398,7 @@ function toThreadMessageLike(
             id: threadMessageId,
             createdAt: new Date(timestamp),
             content: [{ type: 'text', text: block.text }],
+import { safeStringify, stripAgentContract } from '@hapi/protocol'
             metadata: {
                 custom: {
                     kind: 'assistant',
