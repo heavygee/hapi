@@ -1312,6 +1312,22 @@ function SessionPage() {
             onInitialOutlineConsumed={handleInitialOutlineConsumed}
             initialSessionLogOpen={log}
             onInitialSessionLogConsumed={handleInitialSessionLogConsumed}
+            onAbortRestore={(text) => {
+                sendErrorIdRef.current += 1
+                setSendErrors((prev) => ({
+                    ...prev,
+                    [sessionId]: {
+                        id: sendErrorIdRef.current,
+                        text,
+                        message: t('chat.sendError.aborted'),
+                        code: 'abort',
+                        scheduledAt: null,
+                        mutationStarted: true,
+                        restoreSuppressed: false,
+                        deliveryMode: 'queue'
+                    }
+                }))
+            }}
         />
     )
 }
