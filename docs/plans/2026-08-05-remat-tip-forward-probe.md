@@ -2,6 +2,8 @@
 
 > **For Claude:** findings doc + recommended rewrite tasks. Probe only - no soup tip change.
 
+**Status (2026-08-05):** Rewrite **landed** on fork `main` (`130357d1f`) - default remat is tip-forward (`HAPI_REMAT_MODE=full-recipe` escape hatch); fat-tip gate in `driver-remat-layer-gate.sh`; tip-forward heal applyfails warn-skip. See `docs/tooling/driver-soup.md` § Atomic remat.
+
 **Goal:** Falsify tip-forward remat vs full-recipe remat with measurements; go/no-go on rewriting `hapi-driver-rebuild` remat.
 
 **Architecture:** Full-recipe remat (`driver_remat_prepare` hard-resets WIP to `upstream/main`, merges all manifest layers, applies `soup-heals/`). Tip-forward starts from last green soup tip, merges `upstream/main` only if needed, then merges only non-ancestor layer tips.
