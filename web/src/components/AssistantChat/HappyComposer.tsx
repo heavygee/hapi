@@ -105,6 +105,8 @@ export type ComposerSendError = {
     mutationStarted: boolean
     /** True once the user has retried; retain UI but never restore this id again. */
     restoreSuppressed: boolean
+    /** Preferred retry delivery when the failed send was queued vs steered. */
+    deliveryMode?: 'queue' | 'steer'
     action?: {
         label: string
         onClick: () => void

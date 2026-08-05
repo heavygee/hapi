@@ -165,6 +165,7 @@ const AGENT_SESSION_ID_FIELD_BY_FLAVOR = {
     gemini: 'geminiSessionId',
     opencode: 'opencodeSessionId',
     grok: 'grokSessionId',
+    agy: 'agySessionId',
     cursor: 'cursorSessionId',
     kimi: 'kimiSessionId',
     copilot: 'copilotSessionId',

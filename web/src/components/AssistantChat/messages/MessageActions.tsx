@@ -44,9 +44,13 @@ type MessageActionsAuiState = {
  * @internal Exported for unit testing.
  */
 export function selectHideShareButton(state: MessageActionsAuiState): boolean {
-    const extras = state.thread?.extras as HappyRuntimeExtras | undefined
+    // Prefer shareHiddenByMessageId when present; fall back to isRunning.
+    const extras = state.thread?.extras as (HappyRuntimeExtras & { shareHiddenByMessageId?: Set<string> }) | undefined
     const isRunning = state.thread?.isRunning ?? false
-    return extras?.shareHiddenByMessageId.has(state.message.id) ?? isRunning
+    if (extras?.shareHiddenByMessageId) {
+        return extras.shareHiddenByMessageId.has(state.message.id)
+    }
+    return isRunning
 }
 
 /** @internal Exported for unit testing. */

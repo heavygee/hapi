@@ -374,6 +374,7 @@ type SessionChatProps = {
     onInitialOutlineConsumed?: () => void
     initialSessionLogOpen?: boolean
     onInitialSessionLogConsumed?: () => void
+    onAbortRestore?: (text: string) => void
 }
 
 /**
