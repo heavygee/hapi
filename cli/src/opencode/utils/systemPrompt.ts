@@ -8,11 +8,14 @@
 import { trimIdent } from '@/utils/trimIdent';
 import { buildSessionCitationSteerInstruction } from '@hapi/protocol/sessionCitation';
 import { SKILL_LOOKUP_INSTRUCTION } from '@/modules/common/skillLookupInstruction';
+import { withSessionSummaryInstruction } from '@/modules/common/sessionSummaryInstruction';
 
 /**
  * Title instruction for OpenCode to call the hapi MCP tool.
+ * Keeps upstream skill-lookup; session-status summary contract rides when enabled
+ * (local instructions file + one-shot remote first-turn inject via instructionsSent).
  */
-export const TITLE_INSTRUCTION = trimIdent(`
+export const TITLE_INSTRUCTION = withSessionSummaryInstruction(trimIdent(`
     Use the title tool sparingly. For a new chat, call the tool "hapi_change_title" once after the user's initial request is clear, and set a concise task title. Do not rename the chat for routine progress, substeps, implementation details, or a slightly better wording. Rename only when the user's primary objective changes substantially and the existing title would be misleading.
     When you create or find a local image file that the user should see, call the tool "hapi_display_image" with the image path so HAPI can show it inline.
     ${buildSessionCitationSteerInstruction({
@@ -20,11 +23,12 @@ export const TITLE_INSTRUCTION = trimIdent(`
         pingTool: 'hapi_ping_peer',
     })}
     ${SKILL_LOOKUP_INSTRUCTION}
-`);
+`));
 
 /**
  * Tool instructions for native ACP sessions. Title updates come from ACP, so
  * advertise only the MCP tools that remain available to the model.
+ * (Generic-ACP summary coverage is #89 — not wrapped here yet.)
  */
 export const OPENCODE_NATIVE_TOOL_INSTRUCTION = trimIdent(`
     When you create or find a local image file that the user should see, call the tool "hapi_display_image" with the image path so HAPI can show it inline.
@@ -39,10 +43,3 @@ export const OPENCODE_NATIVE_TOOL_INSTRUCTION = trimIdent(`
  * The system prompt to inject for OpenCode sessions.
  */
 export const opencodeSystemPrompt = TITLE_INSTRUCTION;
-
-/**
- * Instruction prepended to OpenCode prompts while HAPI plan mode is active.
- */
-export const PLAN_MODE_INSTRUCTION = trimIdent(`
-    You are in plan mode. Do not execute tools or make changes. Analyze the request, ask clarifying questions if needed, and respond with a concise implementation plan only.
-`);

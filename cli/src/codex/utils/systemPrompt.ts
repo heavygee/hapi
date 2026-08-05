@@ -7,6 +7,7 @@
 
 import { trimIdent } from '@/utils/trimIdent';
 import { buildSessionCitationSteerInstruction } from '@hapi/protocol/sessionCitation';
+import { withSessionSummaryInstruction } from '@/modules/common/sessionSummaryInstruction';
 
 /**
  * Title instruction for Codex to call the hapi MCP tool.
@@ -28,5 +29,6 @@ export const TITLE_INSTRUCTION = trimIdent(`
 
 /**
  * The system prompt to inject via developer_instructions in local mode.
+ * Includes the session-status summary contract when enabled.
  */
-export const codexSystemPrompt = TITLE_INSTRUCTION;
+export const codexSystemPrompt = withSessionSummaryInstruction(TITLE_INSTRUCTION);

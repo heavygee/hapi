@@ -1036,6 +1036,8 @@ export default {
   'settings.about.website': 'Website',
   'settings.about.appVersion': 'App Version',
   'settings.about.protocolVersion': 'Protocol Version',
+  'settings.about.showAgentContract': 'Show AGENT_NOTIFY line',
+  'settings.about.showAgentContract.desc': 'Leave the trailing AGENT_NOTIFY_SUMMARY visible in session chat (and copy). Off by default - the line still lands in the store for overseer either way.',
 
   // Browse / Workspace
   'browse.title': 'Browse',
