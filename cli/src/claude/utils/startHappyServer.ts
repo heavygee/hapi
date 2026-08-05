@@ -21,7 +21,7 @@ import {
     PING_PEER_TOOL_DESCRIPTION,
     SESSION_ID_PREFIX_PARAM_DESCRIPTION,
 } from '@hapi/protocol/sessionCitation'
-import { PingPeerError, formatInspectPeerReport, inspectPeer, pingPeer } from "@/modules/pingPeer/pingPeer";
+import { PingPeerError, formatInspectPeerReport, formatPeerSessionsList, inspectPeer, listPeerSessions, peerListFetchLimit, pingPeer } from "@/modules/pingPeer/pingPeer";
 import { parseGithubPrInput } from "@hapi/protocol";
 import { buildAttachedGithubPrRefs } from "@hapi/protocol/attachGithubPrRef";
 import type { ExternalRef } from "@hapi/protocol";
@@ -47,6 +47,7 @@ const CLAUDE_MANUAL_APPROVAL_HAPI_TOOLS = new Set([
  * Map HAPI MCP tool names to Claude `--allowedTools` entries.
  * Keeps `display_video` (arbitrary local-path reader), `ping_peer`, and
  * `inspect_peer` off the auto-allow list so they still prompt.
+ * `list_peers` stays allowed (discovery shortlist only).
  */
 export function toClaudeAllowedHapiMcpTools(toolNames: string[]): string[] {
     return toolNames
@@ -105,6 +106,12 @@ function createHapiMcpServer(
         sessionIdPrefix: z.string().trim().min(1).describe(SESSION_ID_PREFIX_PARAM_DESCRIPTION),
         message: z.string().min(1).describe('Message text to deliver to the target session'),
     });
+    const listPeersInputSchema: z.ZodTypeAny = z.object({
+        limit: z.number().int().min(1).max(100).optional().describe(
+            'Max sessions to return (default 30, max 100). Newest updatedAt first.'
+        ),
+    });
+
 
     const maxInlineMediaBytes = 25 * 1024 * 1024;
 
@@ -158,6 +165,7 @@ function createHapiMcpServer(
             id: randomUUID(),
             source,
         });
+
 
         return media;
     }
@@ -386,6 +394,50 @@ function createHapiMcpServer(
         }
     });
 
+    mcp.registerTool<any, any>('list_peers', {
+        description: 'List peer HAPI sessions on the same hub/namespace (id prefix, active, flavor, name). Uses this session\'s hub credentials - works from runner-spawned agents without being on the hub host. Prefer this over shelling `hapi ping-peer --list`. Then call inspect_peer / ping_peer with a listed id.',
+        title: 'List Peer Sessions',
+        inputSchema: listPeersInputSchema,
+    }, async (args: { limit?: number }) => {
+        logger.debug('[hapiMCP] list_peers');
+        try {
+            const limit = args.limit ?? 30;
+            const sessions = await listPeerSessions({
+                limit: peerListFetchLimit(limit, { excludeCaller: true }),
+            });
+            const peers = sessions.filter((session) => session.id !== client.sessionId);
+            const hasMore = peers.length > limit;
+            return {
+                content: [
+                    {
+                        type: 'text' as const,
+                        text: formatPeerSessionsList(peers, {
+                            maxRows: limit,
+                            hasMore,
+                        }),
+                    },
+                ],
+                isError: false,
+            };
+        } catch (error) {
+            const message = error instanceof PingPeerError
+                ? error.message
+                : error instanceof Error
+                    ? error.message
+                    : String(error);
+            logger.debug('[hapiMCP] list_peers failed:', message);
+            return {
+                content: [
+                    {
+                        type: 'text' as const,
+                        text: `Failed to list peers: ${message}`,
+                    },
+                ],
+                isError: true,
+            };
+        }
+    });
+
     if (skillLookup) {
         mcp.registerTool<any, any>('skill_lookup', {
             description: 'Load a HAPI skill by exact name. When a user message starts with $name, call this tool with that name before acting.',
@@ -507,8 +559,8 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
     }));
 
     const toolNames = enableChangeTitle
-        ? ['change_title', 'display_image', 'display_video', 'ping_peer', 'inspect_peer']
-        : ['display_image', 'display_video', 'ping_peer', 'inspect_peer'];
+        ? ['change_title', 'display_image', 'display_video', 'list_peers', 'ping_peer', 'inspect_peer']
+        : ['display_image', 'display_video', 'list_peers', 'ping_peer', 'inspect_peer'];
     if (enableLinkPr) {
         toolNames.splice(enableChangeTitle ? 1 : 0, 0, 'link_pr')
     }

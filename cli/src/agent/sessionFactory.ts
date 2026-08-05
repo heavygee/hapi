@@ -17,7 +17,7 @@ import { exportHapiSessionEnv } from '@/agent/hapiSessionEnv'
 import packageJson from '../../package.json'
 import { readUpgradeTarget } from '@/upgrade/upgradeTarget'
 
-export { HAPI_SESSION_ID_ENV, exportHapiSessionEnv } from '@/agent/hapiSessionEnv'
+export { HAPI_SESSION_ID_ENV, exportHapiSessionEnv, exportHapiHubAuthEnv } from '@/agent/hapiSessionEnv'
 
 export type SessionStartedBy = 'runner' | 'terminal'
 

@@ -1276,7 +1276,7 @@ export class SyncEngine {
         for (const session of sorted) {
             this.triggerDedupIfNeeded(session.id)
         }
-        this.machineCache.expireInactive()
+        this.machineCache.expireInactive?.()
         this.overseerEvents.checkStaleSessions(this.sessionCache.getSessions())
         // Piggybacked on the inactivity tick; not a logical part of expireInactive
         // but shares its 5s cadence (avoids a second timer).

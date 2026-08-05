@@ -17,6 +17,7 @@ import { resolveVersionHandoffDisabledAtStart } from './versionHandoff';
 import { getCliArgs } from '@/utils/cliArgs';
 import { getProcessStartMarker, isProcessAlive, isWindows, killProcess, killProcessByChildProcess, killProcessTreeByPid } from '@/utils/process';
 import { PERMISSION_MODES } from '@hapi/protocol/modes';
+import { RUNNER_CAPABILITIES } from '@hapi/protocol';
 import { withRetry } from '@/utils/time';
 import { isRetryableConnectionError } from '@/utils/errorUtils';
 
@@ -1127,7 +1128,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       pid: process.pid,
       httpPort: controlPort,
       startedAt: Date.now(),
-      capabilities: { piExistingSessionResume: true }
+      capabilities: { ...RUNNER_CAPABILITIES }
     };
 
     // Create API client
