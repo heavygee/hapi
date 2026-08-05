@@ -25,14 +25,52 @@ import { useCallback, useEffect, useState } from 'react'
  * adds a different onboarding flow that uses other keys / mechanisms,
  * this system stays out of the way (caller decides whether to wrap a
  * given affordance with FUE or not).
+ *
+ * Global opt-out: `hapi.fue.v1.disabled` (a reserved featureId-shaped key
+ * under the same prefix) suppresses every `useFue()` instance at once —
+ * shell-tour steps (see use-onboarding-tour.ts) and per-feature dots alike.
+ * Reachable either from Settings → General or from the "don't show tips
+ * like this again" link on any single FueCallout — operators who don't
+ * want to be onboarded shouldn't have to dismiss every dot one at a time.
  */
 
 const STORAGE_PREFIX = 'hapi.fue.v1.'
+const DISABLE_ALL_KEY = STORAGE_PREFIX + 'disabled'
 
 export type FueStatus = 'unseen' | 'engaging' | 'acknowledged'
 
+export function isFueDisabledGlobally(): boolean {
+    if (typeof window === 'undefined') return false
+    try {
+        return window.localStorage.getItem(DISABLE_ALL_KEY) === '1'
+    } catch {
+        return false
+    }
+}
+
+/** Suppress every current and future FUE (shell tour + feature dots). */
+export function disableAllFue(): void {
+    if (typeof window === 'undefined') return
+    try {
+        window.localStorage.setItem(DISABLE_ALL_KEY, '1')
+    } catch {
+        // ignore
+    }
+}
+
+/** Re-enable FUE globally (Settings toggle flipped back on). */
+export function enableAllFue(): void {
+    if (typeof window === 'undefined') return
+    try {
+        window.localStorage.removeItem(DISABLE_ALL_KEY)
+    } catch {
+        // ignore
+    }
+}
+
 function readAcknowledged(featureId: string): boolean {
     if (typeof window === 'undefined') return false
+    if (isFueDisabledGlobally()) return true
     try {
         return window.localStorage.getItem(STORAGE_PREFIX + featureId) === '1'
     } catch {
@@ -69,6 +107,10 @@ export function useFue(featureId: string): {
     }, [featureId])
 
     const engage = useCallback(() => {
+        if (isFueDisabledGlobally()) {
+            setStatus('acknowledged')
+            return
+        }
         setStatus((prev) => (prev === 'unseen' ? 'engaging' : prev))
     }, [])
 
