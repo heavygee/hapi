@@ -58,9 +58,8 @@ class StubChannel implements NotificationChannel {
         this.sessionCompletions.push(session)
     }
 
-    async sendModelError(session: Session, notification: ModelErrorNotification): Promise<ModelErrorSendOutcome> {
+    async sendModelError(session: Session, notification: ModelErrorNotification): Promise<void> {
         this.modelErrors.push({ session, notification })
-        return 'delivered'
     }
 }
 
