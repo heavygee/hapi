@@ -1,0 +1,84 @@
+import { afterEach, describe, expect, it } from 'bun:test'
+import { loadOverseerLlmFallbackConfig } from './overseerLlmFallbackConfig'
+
+const ENV_KEYS = [
+    'HAPI_OVERSEER_LLM_FALLBACK',
+    'HAPI_OVERSEER_LLM_BASE_URL',
+    'HAPI_OVERSEER_LLM_API_KEY',
+    'HAPI_OVERSEER_LLM_MODEL',
+    'HAPI_OVERSEER_LLM_API',
+    'HAPI_OVERSEER_LLM_TIMEOUT_MS',
+] as const
+
+const saved: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {}
+
+function stashEnv(): void {
+    for (const key of ENV_KEYS) {
+        saved[key] = process.env[key]
+        delete process.env[key]
+    }
+}
+
+function restoreEnv(): void {
+    for (const key of ENV_KEYS) {
+        const value = saved[key]
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+    }
+}
+
+afterEach(() => {
+    restoreEnv()
+})
+
+describe('loadOverseerLlmFallbackConfig', () => {
+    it('defaults to disabled when env is unset', () => {
+        stashEnv()
+        const config = loadOverseerLlmFallbackConfig()
+        expect(config.enabled).toBe(false)
+        if (config.enabled) throw new Error('expected disabled')
+        expect(config.reasonDisabled).toBe('flag_off')
+    })
+
+    it('stays disabled when flag is on but base URL or model missing', () => {
+        stashEnv()
+        process.env.HAPI_OVERSEER_LLM_FALLBACK = '1'
+        process.env.HAPI_OVERSEER_LLM_MODEL = 'llama3.3'
+        const config = loadOverseerLlmFallbackConfig()
+        expect(config.enabled).toBe(false)
+        if (config.enabled) throw new Error('expected disabled')
+        expect(config.reasonDisabled).toBe('incomplete_config')
+    })
+
+    it('enables with chat-completions defaults when flag + url + model set', () => {
+        stashEnv()
+        process.env.HAPI_OVERSEER_LLM_FALLBACK = 'true'
+        process.env.HAPI_OVERSEER_LLM_BASE_URL = 'http://127.0.0.1:11434/v1'
+        process.env.HAPI_OVERSEER_LLM_MODEL = 'llama3.3'
+        const config = loadOverseerLlmFallbackConfig()
+        expect(config.enabled).toBe(true)
+        if (!config.enabled) throw new Error('expected enabled')
+        expect(config.baseUrl).toBe('http://127.0.0.1:11434/v1')
+        expect(config.model).toBe('llama3.3')
+        expect(config.api).toBe('chat-completions')
+        expect(config.apiKey).toBe('')
+        expect(config.timeoutMs).toBe(30_000)
+    })
+
+    it('accepts responses api mode and custom timeout/key', () => {
+        stashEnv()
+        process.env.HAPI_OVERSEER_LLM_FALLBACK = '1'
+        process.env.HAPI_OVERSEER_LLM_BASE_URL = 'https://api.openai.com/v1/'
+        process.env.HAPI_OVERSEER_LLM_MODEL = 'gpt-4.1-mini'
+        process.env.HAPI_OVERSEER_LLM_API = 'responses'
+        process.env.HAPI_OVERSEER_LLM_API_KEY = 'sk-test'
+        process.env.HAPI_OVERSEER_LLM_TIMEOUT_MS = '12000'
+        const config = loadOverseerLlmFallbackConfig()
+        expect(config.enabled).toBe(true)
+        if (!config.enabled) throw new Error('expected enabled')
+        expect(config.baseUrl).toBe('https://api.openai.com/v1')
+        expect(config.api).toBe('responses')
+        expect(config.apiKey).toBe('sk-test')
+        expect(config.timeoutMs).toBe(12_000)
+    })
+})

@@ -21,6 +21,8 @@
  * - VAPID_SUBJECT: Contact email or URL for Web Push (defaults to mailto:admin@hapi.run)
  * - HAPI_HOME: Data directory (default: ~/.hapi)
  * - DB_PATH: SQLite database path (default: {HAPI_HOME}/hapi.db)
+ * - HAPI_OVERSEER_LLM_FALLBACK: Opt-in hub LLM summary fallback when AGENT_NOTIFY_SUMMARY is missing (default: off)
+ * - HAPI_OVERSEER_LLM_BASE_URL / _MODEL / _API_KEY / _API / _TIMEOUT_MS: OpenAI-compatible endpoint for that fallback
  */
 
 import { existsSync, mkdirSync } from 'node:fs'
