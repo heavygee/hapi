@@ -34,6 +34,7 @@ type SessionActionMenuProps = {
     linkedPr?: SessionActionMenuLinkedPr | null
     onExport?: () => void
     onSyncCodex?: () => void
+    onSyncPi?: () => void
     onArchive: () => void
     onReopen?: () => void
     reopenDisabledReason?: string
@@ -189,6 +190,7 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         linkedPr,
         onExport,
         onSyncCodex,
+        onSyncPi,
         onArchive,
         onReopen,
         reopenDisabledReason,
@@ -240,6 +242,11 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
     const handleSyncCodex = () => {
         onClose()
         onSyncCodex?.()
+    }
+
+    const handleSyncPi = () => {
+        onClose()
+        onSyncPi?.()
     }
 
     const handleDelete = () => {
@@ -431,6 +438,18 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                     >
                         <SyncIcon className="text-[var(--app-hint)]" />
                         {t('session.action.syncCodex')}
+                    </button>
+                ) : null}
+
+                {onSyncPi ? (
+                    <button
+                        type="button"
+                        role="menuitem"
+                        className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
+                        onClick={handleSyncPi}
+                    >
+                        <SyncIcon className="text-[var(--app-hint)]" />
+                        {t('session.action.syncPi')}
                     </button>
                 ) : null}
 
