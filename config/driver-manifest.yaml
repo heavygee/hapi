@@ -667,6 +667,15 @@ layers:
   # (c7e38e87 — steer Copy-reference + /sessions/<id> to inspect_peer; Fixes #1370)
   # - branch: feat/a2a-citation-steer
 
+  # HOTFIX 2026-08-05: Garden voice always routed to the flat SessionChat session
+  # (Quest dual-pane). Dogfood: every XR orb conversation landed on
+  # "meta - PR watcher". SessionChat yields registerSessionStore while
+  # Garden overlayOpen; GardenVoiceBridge owns tools + honors realtime sessionId.
+  # Based on driver tip 8c5b5aea5 (soup band-aid pattern). Topmost for cheap
+  # rollback. Worktree: ~/coding/hapi/worktrees/garden-voice-fix
+  # Tip: 7b8effaed. Fold into feat/garden-route on next garden re-thin.
+  - branch: fix/garden-voice-orb-routing
+
 
   # tiann/hapi#1384 — Settings UI onboard for hub transcription provider credentials
   # (dictation first; env still wins). Hub+web. Live reload via process.env merge.
