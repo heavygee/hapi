@@ -9,6 +9,10 @@ import type { StoredMessage } from './types'
 import { PushStore } from './pushStore'
 import { FcmStore } from './fcmStore'
 import { ScratchlistStore } from './scratchlistStore'
+import { EventStore } from './eventStore'
+import { InboxStore } from './inboxStore'
+import { ensureOverseerEventsSchema, ensureDeletedSessionsSchema } from './events'
+import { ensureOverseerInboxSchema } from './inboxItems'
 import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
 import { UsageStore } from './usageStore'
@@ -29,6 +33,10 @@ export { MessageStore } from './messageStore'
 export { PushStore } from './pushStore'
 export { FcmStore } from './fcmStore'
 export { ScratchlistStore } from './scratchlistStore'
+export { EventStore } from './eventStore'
+export { InboxStore } from './inboxStore'
+export type { InsertSystemEventInput, ListSystemEventsOptions, StoredSystemEvent } from './eventStore'
+export type { ListInboxItemsOptions, StoredInboxItem } from './inboxStore'
 export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
 export { UsageStore } from './usageStore'
@@ -44,7 +52,13 @@ const REQUIRED_TABLES = [
     'fcm_devices',
     'session_scratchlist',
     'usage_events',
-    'usage_scan_state'
+    'usage_scan_state',
+    'events',
+    'event_links',
+    'deleted_sessions',
+    'inbox_items',
+    'inbox_item_source_events',
+    'inbox_operator_actions',
 ] as const
 
 export class Store {
@@ -59,8 +73,9 @@ export class Store {
     readonly push: PushStore
     readonly fcm: FcmStore
     readonly scratchlist: ScratchlistStore
+    readonly events: EventStore
+    readonly inbox: InboxStore
     readonly usage: UsageStore
-
     /**
      * Filesystem path of the underlying SQLite database, or ':memory:' for
      * in-memory stores. Used by the legacy → ACP migrator (#824) to take a
@@ -112,6 +127,8 @@ export class Store {
         this.push = new PushStore(this.db)
         this.fcm = new FcmStore(this.db)
         this.scratchlist = new ScratchlistStore(this.db)
+        this.events = new EventStore(this.db)
+        this.inbox = new InboxStore(this.db)
         this.usage = new UsageStore(this.db)
     }
 
@@ -151,7 +168,7 @@ export class Store {
         content: unknown,
         localId?: string,
         scheduledAt?: number | null
-    ): { sessionId: string; message: StoredMessage; inserted: boolean } {
+    ): { sessionId: string; message: StoredMessage } {
         return this.db.transaction(() => {
             const row = this.db.prepare('SELECT namespace, metadata FROM sessions WHERE id = ?').get(sessionId) as { namespace: string; metadata: string | null } | undefined
             if (!row) throw new Error('Message source session not found')
@@ -169,15 +186,7 @@ export class Store {
                     .get(targetSessionId, row.namespace)
                 if (!target) throw new Error('OpenCode clear redirect target is unavailable in the source namespace')
             }
-            const alreadyExists = localId
-                ? Boolean(this.db.prepare('SELECT 1 FROM messages WHERE session_id = ? AND local_id = ? LIMIT 1')
-                    .get(targetSessionId, localId))
-                : false
-            return {
-                sessionId: targetSessionId,
-                message: addMessage(this.db, targetSessionId, content, localId, scheduledAt),
-                inserted: !alreadyExists
-            }
+            return { sessionId: targetSessionId, message: addMessage(this.db, targetSessionId, content, localId, scheduledAt) }
         })()
     }
 
@@ -245,8 +254,7 @@ export class Store {
                 return { result: 'version-mismatch' as const }
             }
             return this.sessions.updateSessionMetadata(sessionId, metadata, expectedVersion, namespace, { touchUpdatedAt: false })
-        })()
-    }
+        })()    }
 
     close(): void {
         if (this.closed) return
@@ -327,9 +335,27 @@ export class Store {
         }
 
         if (currentVersion !== SCHEMA_VERSION) {
-            throw this.buildSchemaMismatchError(currentVersion)
+            if (
+                currentVersion > SCHEMA_VERSION &&
+                process.env.HAPI_STORE_ALLOW_NEWER_SCHEMA === '1'
+            ) {
+                console.warn(
+                    `[store] tolerating DB schema ahead of source (db=${currentVersion} > source=${SCHEMA_VERSION}); ` +
+                        `proceeding because HAPI_STORE_ALLOW_NEWER_SCHEMA=1. Newer columns/tables are invisible to this build.`
+                )
+            } else {
+                throw this.buildSchemaMismatchError(currentVersion)
+            }
         }
 
+        this.finishSchemaInit()
+    }
+
+    /** Idempotent Overseer self-heal + loud missing-table check on every boot path. */
+    private finishSchemaInit(): void {
+        ensureOverseerEventsSchema(this.db)
+        ensureDeletedSessionsSchema(this.db)
+        ensureOverseerInboxSchema(this.db)
         this.assertRequiredTablesPresent()
     }
 

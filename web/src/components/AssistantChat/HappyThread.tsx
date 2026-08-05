@@ -30,6 +30,7 @@ import { formatRelativeTime } from '@/lib/relativeTime'
 import { formatSessionHeaderTimestamp } from '@/lib/sessionHeaderTimestamp'
 import { getShareTurnReasoningLabel, selectShareTurnMetadata } from '@/lib/shareTurnMetadata'
 import { useMinuteTick } from '@/hooks/useMinuteTick'
+import { SessionLogPanel } from '@/components/AssistantChat/SessionLogPanel'
 
 type ScrollAnchor = {
     id: string
@@ -451,6 +452,8 @@ export function HappyThread(props: {
     outlineItems: readonly ConversationOutlineItem[]
     onOutlineOpenChange: (open: boolean) => void
     onOutlineItemClick?: (item: ConversationOutlineItem) => void
+    sessionLogOpen?: boolean
+    onSessionLogOpenChange?: (open: boolean) => void
 }) {
     const { t, locale } = useTranslation()
     const { preferences: headerMetadata } = useSessionHeaderMetadata()
@@ -1629,6 +1632,22 @@ export function HappyThread(props: {
                     sourceContentWidth={shareTurn?.sourceContentWidth ?? null}
                     onClose={() => setShareTurn(null)}
                 />
+                {props.sessionLogOpen ? (
+                    <>
+                        <button
+                            type="button"
+                            className="absolute inset-0 z-20 bg-black/20"
+                            aria-label={t('session.log.close')}
+                            onClick={() => props.onSessionLogOpenChange?.(false)}
+                        />
+                        <SessionLogPanel
+                            api={props.api}
+                            sessionId={props.sessionId}
+                            title={props.outlineTitle}
+                            onClose={() => props.onSessionLogOpenChange?.(false)}
+                        />
+                    </>
+                ) : null}
             </ThreadPrimitive.Root>
         </HappyChatProvider>
     )

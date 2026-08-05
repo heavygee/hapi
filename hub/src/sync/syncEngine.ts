@@ -50,6 +50,12 @@ import {
     type RpcUploadFileResponse
 } from './rpcGateway'
 import { SessionCache } from './sessionCache'
+import { OverseerEventRecorder, toSessionSnapshot } from './overseerEventRecorder'
+import { OverseerEntity } from './overseerEntity'
+import { extractAssistantPlainText } from '@hapi/protocol/messages'
+import type { InboxOperatorAction } from '@hapi/protocol'
+import type { ListSystemEventsOptions, StoredSystemEvent } from '../store'
+import type { ListInboxItemsOptions, StoredInboxItem } from '../store/inboxItems'
 
 type PiResumeAttempt = NonNullable<NonNullable<Session['metadata']>['piResumeAttempt']>
 type PtyResumeAttempt = NonNullable<NonNullable<Session['metadata']>['ptyResumeAttempt']>
@@ -164,6 +170,8 @@ export class SyncEngine {
     private readonly machineCache: MachineCache
     private readonly messageService: MessageService
     private readonly rpcGateway: RpcGateway
+    private readonly overseerEvents: OverseerEventRecorder
+    private readonly overseer: OverseerEntity
     private inactivityTimer: NodeJS.Timeout | null = null
     /** Sessions that emitted `session-ready` (Cursor ACP or validated Pi get_state). */
     private readonly sessionReadyIds = new Set<string>()
@@ -200,6 +208,14 @@ export class SyncEngine {
             (sessionId, updatedAt) => this.recordSessionActivity(sessionId, updatedAt)
         )
         this.rpcGateway = new RpcGateway(io, rpcRegistry)
+        this.overseerEvents = new OverseerEventRecorder(store.events, store.inbox)
+        this.overseer = new OverseerEntity({
+            events: store.events,
+            inbox: store.inbox,
+            messages: store.messages,
+            getSession: (sessionId) => this.getSession(sessionId),
+            getSessions: () => this.getSessions()
+        })
         this.reloadAll()
         this.inactivityTimer = setInterval(() => this.expireInactive(), 5_000)
     }
@@ -430,6 +446,12 @@ export class SyncEngine {
             // legacy refresh-from-DB-and-broadcast path.
             this.sessionCache.refreshSession(event.sessionId)
             const after = this.sessionCache.getSession(event.sessionId)
+            if (after) {
+                this.overseerEvents.onSessionUpdated(
+                    after,
+                    this.store.sessions.getSession(after.id)?.tag ?? null
+                )
+            }
             if (after?.metadata && !this.hasSameAgentSessionIds(beforeMetadata, after.metadata)) {
                 if (!this.canRunCursorDedup(after)) {
                     return
@@ -450,9 +472,57 @@ export class SyncEngine {
             if (!this.getSession(event.sessionId)) {
                 this.sessionCache.refreshSession(event.sessionId)
             }
+            const session = this.getSession(event.sessionId)
+            if (session && 'message' in event && event.message) {
+                const storedSession = this.store.sessions.getSession(event.sessionId)
+                this.overseerEvents.onAgentMessage(
+                    toSessionSnapshot(session, storedSession?.tag ?? null),
+                    event.message.id,
+                    event.message.content,
+                    event.message.createdAt
+                )
+            }
         }
 
         this.eventPublisher.emit(event)
+    }
+
+    getOverseer(): OverseerEntity {
+        return this.overseer
+    }
+
+    getSystemEvents(options: ListSystemEventsOptions = {}): StoredSystemEvent[] {
+        return this.overseerEvents.list(options)
+    }
+
+    getSystemEventCount(): number {
+        return this.overseerEvents.count()
+    }
+
+    getInboxItems(options: ListInboxItemsOptions = {}): StoredInboxItem[] {
+        return this.store.inbox.list(options)
+    }
+
+    getInboxItemCount(): number {
+        return this.store.inbox.count()
+    }
+
+    recordInboxOperatorAction(
+        inboxItemId: number,
+        action: InboxOperatorAction,
+        feedback: string | null = null,
+        snoozedUntil: number | null = null
+    ): StoredInboxItem | null {
+        return this.store.inbox.recordOperatorAction(inboxItemId, action, feedback, snoozedUntil)
+    }
+
+    private getLastAgentPlainText(sessionId: string): string | null {
+        const messages = this.store.messages.getMessages(sessionId, 80)
+        for (let i = messages.length - 1; i >= 0; i -= 1) {
+            const plain = extractAssistantPlainText(messages[i].content)
+            if (plain) return plain
+        }
+        return null
     }
 
     handleSessionAlive(payload: {
@@ -509,6 +579,16 @@ export class SyncEngine {
         const shouldRetryDedup = !ownsPiAttempt && !isPiAttemptChild && (!isCursorAcp || this.sessionReadyIds.has(payload.sid))
 
         this.sessionCache.handleSessionEnd(payload)
+        const session = this.getSession(payload.sid)
+        if (session) {
+            this.overseerEvents.onSessionEnd(
+                session,
+                this.store.sessions.getSession(session.id)?.tag ?? null,
+                payload.time,
+                payload.reason,
+                () => this.getLastAgentPlainText(session.id)
+            )
+        }
         this.eventPublisher.emit({
             type: 'session-ended',
             sessionId: payload.sid,
@@ -842,6 +922,7 @@ async uploadScratchlistAttachment(
             this.triggerDedupIfNeeded(session.id)
         }
         this.machineCache.expireInactive()
+        this.overseerEvents.checkStaleSessions(this.sessionCache.getSessions())
         // Piggybacked on the inactivity tick; not a logical part of expireInactive
         // but shares its 5s cadence (avoids a second timer).
         this.messageService.releaseMatureScheduledMessages(Date.now(), this.historyActionsInFlight)

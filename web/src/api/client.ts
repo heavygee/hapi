@@ -1118,4 +1118,51 @@ export class ApiClient {
             body: JSON.stringify({})
         })
     }
+
+    async fetchSystemEvents(params: {
+        limit?: number
+        beforeId?: number
+        sessionId?: string
+        attentionCandidate?: 0 | 1
+        eventType?: string
+    } = {}): Promise<{ total: number; events: unknown[] }> {
+        const query = new URLSearchParams()
+        if (params.limit !== undefined) query.set('limit', String(params.limit))
+        if (params.beforeId !== undefined) query.set('beforeId', String(params.beforeId))
+        if (params.sessionId) query.set('sessionId', params.sessionId)
+        if (params.attentionCandidate !== undefined) query.set('attentionCandidate', String(params.attentionCandidate))
+        if (params.eventType) query.set('eventType', params.eventType)
+        const suffix = query.toString()
+        return await this.request(`/api/system-events${suffix ? `?${suffix}` : ''}`)
+    }
+
+    async fetchInboxItems(params: {
+        limit?: number
+        activeOnly?: boolean
+        sessionId?: string
+    } = {}): Promise<{ total: number; items: unknown[] }> {
+        const query = new URLSearchParams()
+        if (params.limit !== undefined) query.set('limit', String(params.limit))
+        if (params.activeOnly) query.set('activeOnly', '1')
+        if (params.sessionId) query.set('sessionId', params.sessionId)
+        const suffix = query.toString()
+        return await this.request(`/api/inbox-items${suffix ? `?${suffix}` : ''}`)
+    }
+
+    async recordInboxOperatorAction(
+        inboxItemId: number,
+        action: import('@hapi/protocol').InboxOperatorAction,
+        feedback?: string | null,
+        snoozedUntil?: number | null
+    ): Promise<{ item: unknown }> {
+        return await this.request(`/api/inbox-items/${inboxItemId}/actions`, {
+            method: 'POST',
+            body: JSON.stringify({
+                action,
+                feedback: feedback ?? undefined,
+                snoozedUntil: snoozedUntil ?? undefined
+            })
+        })
+    }
+
 }
