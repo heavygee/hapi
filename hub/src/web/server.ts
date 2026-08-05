@@ -1,5 +1,4 @@
 import { Hono } from 'hono'
-import { compress } from 'hono/compress'
 import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
 import { join } from 'node:path'
@@ -24,6 +23,8 @@ import { createUsageRoutes } from './routes/usage'
 import { createGitRoutes } from './routes/git'
 import { createCliRoutes } from './routes/cli'
 import { createCodexDesktopRoutes } from './routes/codexDesktop'
+import { createClaudeDesktopRoutes } from './routes/claudeDesktop'
+import { createCursorImportRoutes } from './routes/cursorImport'
 import { createPiSessionRoutes } from './routes/piSessions'
 import { createPushRoutes } from './routes/push'
 import { createDevicesRoutes } from './routes/devices'
@@ -31,8 +32,6 @@ import { createVoiceRoutes } from './routes/voice'
 import type { SSEManager } from '../sse/sseManager'
 import type { VisibilityTracker } from '../visibility/visibilityTracker'
 import type { Server as BunServer, ServerWebSocket } from 'bun'
-import { applyDefaultWsCompression } from './wsCompression'
-import { acceptsGzip } from './sseCompression'
 import type { Server as SocketEngine } from '@socket.io/bun-engine'
 import { jwtVerify } from 'jose'
 import type { WebSocketData } from '@socket.io/bun-engine'
@@ -238,33 +237,10 @@ function createWebApp(options: {
     const corsMiddleware = cors({
         origin: corsOriginOption,
         allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-        // last-event-id: browsers attach it to EventSource reconnects for
-        // SSE replay; allow it in case a browser preflights the request.
-        allowHeaders: ['authorization', 'content-type', 'last-event-id']
+        allowHeaders: ['authorization', 'content-type']
     })
     app.use('/api/*', corsMiddleware)
     app.use('/cli/*', corsMiddleware)
-
-    // Gzip JSON API responses. Over the relay tunnel every byte is metered
-    // twice (the SNI proxy copies in both directions), and API payloads are
-    // repetitive JSON that compresses to roughly a quarter of its size.
-    //
-    // This deliberately does not touch /api/events: streamSSE sets
-    // Transfer-Encoding, which hono's compress() skips, and that stream is
-    // already gzipped by compressSseResponse with an explicit sync flush.
-    // Binary uploads/downloads are skipped too - compress() only handles
-    // content types it knows are compressible.
-    //
-    // Gated on the q-aware parser because hono's compress() matches the
-    // Accept-Encoding value by substring: `gzip;q=0` - an explicit refusal -
-    // would otherwise still get a gzip body it cannot consume.
-    const gzipCompress = compress({ encoding: 'gzip' })
-    app.use('/api/*', async (c, next) => {
-        if (acceptsGzip(c.req.header('Accept-Encoding'))) {
-            return gzipCompress(c, next)
-        }
-        return next()
-    })
 
     app.route('/cli', createCliRoutes(options.getSyncEngine))
 
@@ -282,6 +258,16 @@ function createWebApp(options: {
     app.route('/api', createGitRoutes(options.getSyncEngine))
     // 中文注释：这里提供两类 Codex 辅助能力：扫描本地 transcript 以导入到 Hapi，以及按需重启 Codex Desktop 客户端。
     app.route('/api', createCodexDesktopRoutes({
+        store: options.store,
+        getSyncEngine: options.getSyncEngine
+    }))
+    // 中文注释：与 Codex 对称，扫描本地 ~/.claude/projects transcript 以导入 Hapi（复用同一套导入引擎）。
+    app.route('/api', createClaudeDesktopRoutes({
+        store: options.store,
+        getSyncEngine: options.getSyncEngine
+    }))
+    // Cursor flavor of the multi-agent session import surface (ACP verify-probe).
+    app.route('/api', createCursorImportRoutes({
         store: options.store,
         getSyncEngine: options.getSyncEngine
     }))
@@ -439,13 +425,7 @@ export async function startWebServer(options: {
         maxRequestBodySize: Math.max(socketHandler.maxRequestBodySize, 68 * 1024 * 1024),
         websocket: {
             ...originalWsHandler,
-            // Advertise permessage-deflate. Negotiation alone compresses
-            // nothing in Bun — each send() opts in — so open() below also
-            // makes compression the default for flagless sends. See
-            // wsCompression.ts for the contract.
-            perMessageDeflate: true,
             open(ws: unknown) {
-                applyDefaultWsCompression(ws as ServerWebSocket<unknown>)
                 const wsAny = ws as ServerWebSocket<{ _qwenProxy?: boolean; _geminiProxy?: boolean }>
                 if (wsAny.data?._geminiProxy) {
                     geminiProxyHandler.open(wsAny)
