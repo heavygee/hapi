@@ -667,3 +667,11 @@ layers:
   # (c7e38e87 — steer Copy-reference + /sessions/<id> to inspect_peer; Fixes #1370)
   # - branch: feat/a2a-citation-steer
 
+
+  # tiann/hapi#1384 — Settings UI onboard for hub transcription provider credentials
+  # (dictation first; env still wins). Hub+web. Live reload via process.env merge.
+  # Rationale on issue: env-only was a shipping shortcut, not a design win.
+  # Do NOT open upstream PR until operator dogfood OK on :3006.
+  # Worktree: ~/coding/hapi/worktrees/settings-provider-onboard @ feat/settings-provider-onboard
+  # Tip: a8c89a21a (origin/feat/settings-provider-onboard)
+  - branch: feat/settings-provider-onboard
