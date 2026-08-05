@@ -237,7 +237,7 @@ function createWebApp(options: {
     const corsOriginOption = corsOrigins.includes('*') ? '*' : corsOrigins
     const corsMiddleware = cors({
         origin: corsOriginOption,
-        allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+        allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
         // last-event-id: browsers attach it to EventSource reconnects for
         // SSE replay; allow it in case a browser preflights the request.
         allowHeaders: ['authorization', 'content-type', 'last-event-id']
@@ -291,7 +291,7 @@ function createWebApp(options: {
     }))
     app.route('/api', createPushRoutes(options.store, options.vapidPublicKey))
     app.route('/api', createDevicesRoutes(options.store))
-    app.route('/api', createVoiceRoutes())
+    app.route('/api', createVoiceRoutes({ dataDir: configuration.dataDir }))
 
     // Skip static serving in relay mode, show helpful message on root
     if (options.relayMode) {
