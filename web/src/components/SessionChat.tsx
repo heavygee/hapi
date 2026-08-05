@@ -102,6 +102,7 @@ import { useVoiceOptional } from '@/lib/voice-context'
 import { VoiceBackendSession, registerSessionStore, registerVoiceHooksStore, voiceHooks } from '@/realtime'
 import { isRemoteTerminalSupported } from '@/utils/terminalSupport'
 import { useMarkGardenSeenFromChat } from '@/garden/hooks/useMarkGardenSeenFromChat'
+import { useGardenXrLauncherOptional } from '@/garden/context/GardenXrLauncherContext'
 
 type SessionModelSelection = { provider: string; modelId: string } | string | null
 
@@ -976,35 +977,72 @@ function SessionChatInner(props: SessionChatProps) {
     // Voice assistant integration
     const voice = useVoiceOptional()
     const [voiceBackendReady, setVoiceBackendReady] = useState(false)
+    // Quest dual-pane keeps SessionChat mounted under the Garden overlay. If we
+    // keep registering the flat-session voice store, every Garden utterance is
+    // stomped onto whatever session is open in the right pane (dogfood: all XR
+    // talk landed on "meta - PR watcher"). Garden owns voice while overlayOpen.
+    const gardenLauncher = useGardenXrLauncherOptional()
+    const gardenOverlayOpen = gardenLauncher?.overlayOpen === true
 
     // Register session store for voice client tools
     useEffect(() => {
+        if (gardenOverlayOpen) {
+            return
+        }
         registerSessionStore({
-            getSession: () => props.session as { agentState?: { requests?: Record<string, unknown> } } | null,
-            sendMessage: (_sessionId: string, message: string) => props.onSend(message),
-            approvePermission: async (_sessionId: string, requestId: string) => {
+            getSession: (sessionId: string) => (
+                sessionId === props.session.id
+                    ? props.session as { agentState?: { requests?: Record<string, unknown> } }
+                    : null
+            ),
+            sendMessage: (sessionId: string, message: string) => {
+                if (sessionId !== props.session.id) {
+                    console.error('[Voice] SessionChat refusing send to non-owned session', {
+                        sessionId,
+                        owned: props.session.id,
+                    })
+                    return
+                }
+                props.onSend(message)
+            },
+            approvePermission: async (sessionId: string, requestId: string) => {
+                if (sessionId !== props.session.id) {
+                    return
+                }
                 await props.api.approvePermission(props.session.id, requestId)
                 props.onRefresh()
             },
-            denyPermission: async (_sessionId: string, requestId: string) => {
+            denyPermission: async (sessionId: string, requestId: string) => {
+                if (sessionId !== props.session.id) {
+                    return
+                }
                 await props.api.denyPermission(props.session.id, requestId)
                 props.onRefresh()
             }
         })
-    }, [props.session, props.api, props.onSend, props.onRefresh])
+        return () => {
+            registerSessionStore(null)
+        }
+    }, [gardenOverlayOpen, props.session, props.api, props.onSend, props.onRefresh])
 
     useEffect(() => {
+        if (gardenOverlayOpen) {
+            return
+        }
         registerVoiceHooksStore(
             (sessionId) => (sessionId === props.session.id ? props.session : null),
             (sessionId) => (sessionId === props.session.id ? props.messages : [])
         )
-    }, [props.session, props.messages])
+    }, [gardenOverlayOpen, props.session, props.messages])
 
     // Track and report new messages to voice assistant
     // Note: voiceHooks internally checks isVoiceSessionStarted() so we don't need to check voice.status here
     const prevMessagesRef = useRef<DecryptedMessage[]>([])
 
     useEffect(() => {
+        if (gardenOverlayOpen) {
+            return
+        }
         const prevIds = new Set(prevMessagesRef.current.map(m => m.id))
         const newMessages = props.messages.filter(m => !prevIds.has(m.id))
 
@@ -1013,26 +1051,32 @@ function SessionChatInner(props: SessionChatProps) {
         }
 
         prevMessagesRef.current = props.messages
-    }, [props.messages, props.session.id])
+    }, [gardenOverlayOpen, props.messages, props.session.id])
 
     // Report ready event when thinking stops
     // Note: voiceHooks internally checks isVoiceSessionStarted() so we don't need to check voice.status here
     const prevThinkingRef = useRef(props.session.thinking)
 
     useEffect(() => {
+        if (gardenOverlayOpen) {
+            return
+        }
         // Detect transition: thinking → not thinking
         if (prevThinkingRef.current && !props.session.thinking) {
             voiceHooks.onReady(props.session.id)
         }
 
         prevThinkingRef.current = props.session.thinking
-    }, [props.session.thinking, props.session.id])
+    }, [gardenOverlayOpen, props.session.thinking, props.session.id])
 
     // Report permission requests to voice assistant
     // Note: voiceHooks internally checks isVoiceSessionStarted() so we don't need to check voice.status here
     const prevRequestIdsRef = useRef<Set<string>>(new Set())
 
     useEffect(() => {
+        if (gardenOverlayOpen) {
+            return
+        }
         const requests = props.session.agentState?.requests ?? {}
         const currentIds = new Set(Object.keys(requests))
 
@@ -1048,7 +1092,7 @@ function SessionChatInner(props: SessionChatProps) {
         }
 
         prevRequestIdsRef.current = currentIds
-    }, [props.session.agentState?.requests, props.session.id])
+    }, [gardenOverlayOpen, props.session.agentState?.requests, props.session.id])
 
     const handleVoiceToggle = useCallback(async () => {
         if (!voice) return
@@ -1846,8 +1890,8 @@ function SessionChatInner(props: SessionChatProps) {
                 </DragDropZone>
             </AssistantRuntimeProvider>
 
-            {/* Voice session component - renders nothing but initializes voice backend */}
-            {voice && (
+            {/* Voice session — suppressed while Garden overlay owns the voice stack */}
+            {voice && !gardenOverlayOpen && (
                 <VoiceBackendSession
                     api={props.api}
                     micMuted={voice.micMuted}

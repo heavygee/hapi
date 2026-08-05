@@ -26,9 +26,10 @@ export async function prefetchGardenVoiceContext(
 }
 
 export function primeVoiceHooksForGarden(prefetch: GardenVoicePrefetch): void {
+    const sessionId = prefetch.session.id
     registerVoiceHooksStore(
-        () => prefetch.session,
-        () => prefetch.messages,
+        (id) => (id === sessionId ? prefetch.session : null),
+        (id) => (id === sessionId ? prefetch.messages : []),
     )
 }
 
