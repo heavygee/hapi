@@ -682,5 +682,5 @@ layers:
   # Rationale on issue: env-only was a shipping shortcut, not a design win.
   # Do NOT open upstream PR until operator dogfood OK on :3006.
   # Worktree: ~/coding/hapi/worktrees/settings-provider-onboard @ feat/settings-provider-onboard
-  # Tip: a8c89a21a (origin/feat/settings-provider-onboard)
+  # Tip: fbf19aac4 (origin/feat/settings-provider-onboard)
   - branch: feat/settings-provider-onboard
