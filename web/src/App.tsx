@@ -20,6 +20,7 @@ import { clearMessageWindow, syncTailMessages } from '@/lib/message-window-store
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useTranslation } from '@/lib/use-translation'
 import { VoiceProvider } from '@/lib/voice-context'
+import { GardenXrLauncherProvider, GardenXrOverlayHost } from '@/garden/GardenXrLauncher'
 import { requireHubUrlForLogin } from '@/lib/runtime-config'
 import { getAppGlobalSseSubscription, getAppSessionSseSubscription } from '@/lib/appSseSubscriptions'
 import { reconcileQueuedStateAfterConnect } from '@/lib/queued-state-reconciliation'
@@ -464,6 +465,7 @@ function AppInner() {
     return (
         <AppContextProvider value={{ api, token, baseUrl }}>
             <VoiceProvider>
+                <GardenXrLauncherProvider>
                 <PwaUpdateBannerWithStatusOffset
                     isSyncing={isSyncing}
                     isReconnecting={showReconnectingBanner}
@@ -483,6 +485,8 @@ function AppInner() {
                 </div>
                 <ToastContainer />
                 <InstallPrompt />
+                <GardenXrOverlayHost />
+                </GardenXrLauncherProvider>
             </VoiceProvider>
         </AppContextProvider>
     )

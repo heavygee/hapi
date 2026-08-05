@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, useState } from 'react'
 import { useConversation } from '@elevenlabs/react'
 import { registerVoiceSession, resetRealtimeSessionState } from './RealtimeSession'
 import { realtimeClientTools, registerSessionStore } from './realtimeClientTools'
+import { resetVoiceAudioLevels, setVoiceAudioLevels } from './voiceAudioLevels'
 import { fetchVoiceToken } from '@/api/voice'
 import { buildElevenLabsSessionOverrides, capElevenLabsInitialContext } from '@/lib/voicePersonalitySession'
 import { deliverVoiceSessionContextAfterConnect, isVoiceProactiveSummaryEnabled } from '@/lib/voiceContextStream'
@@ -107,7 +108,7 @@ class RealtimeVoiceSessionImpl implements VoiceSession {
                 sendChunk: (chunk) => conversationInstance?.sendContextualUpdate(chunk)
             })
 
-            if (isVoiceProactiveSummaryEnabled()) {
+            if (config.proactiveSummary ?? isVoiceProactiveSummaryEnabled()) {
                 this.sendTextMessage(
                     'Based on the session context you received, give me a brief spoken summary, then wait for my next request.'
                 )
@@ -217,6 +218,7 @@ export function RealtimeVoiceSession({
     const handleDisconnect = useCallback(() => {
         if (DEBUG) console.log('[Voice] Realtime session disconnected')
         resetRealtimeSessionState()
+        resetVoiceAudioLevels()
         onStatusChange?.('disconnected')
     }, [onStatusChange])
 
@@ -279,6 +281,31 @@ export function RealtimeVoiceSession({
             conversationInstance = null
         }
     }, [conversation, api])
+
+    useEffect(() => {
+        let frame = 0
+
+        const tick = () => {
+            const conv = conversationInstance
+            if (conv?.status === 'connected') {
+                setVoiceAudioLevels({
+                    connected: true,
+                    input: conv.getInputVolume(),
+                    output: conv.getOutputVolume(),
+                    isSpeaking: conv.isSpeaking,
+                })
+            } else {
+                setVoiceAudioLevels({ connected: false, input: 0, output: 0, isSpeaking: false })
+            }
+            frame = requestAnimationFrame(tick)
+        }
+
+        frame = requestAnimationFrame(tick)
+        return () => {
+            cancelAnimationFrame(frame)
+            resetVoiceAudioLevels()
+        }
+    }, [conversation])
 
     // This component doesn't render anything visible
     return null
