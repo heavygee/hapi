@@ -659,12 +659,9 @@ layers:
   # (82639c66 — show full voice platform rules in settings preview; closes #1341)
   # - branch: fix/voice-fixtures-full-preview
 
-  # tiann/hapi#1366 / #1362 — drop Idle session-list badge; keep working/pending;
-  # pin-in-progress only surfaces exceptions. Web-only tip on upstream/main.
-  # Drop when upstream PR merges.
-  # Worktree: ~/coding/hapi/worktrees/session-idle-badge-assess @ feat/session-idle-badge-noise
-  # Tip: 417512340 (origin/feat/session-idle-badge-noise)
-  - branch: feat/session-idle-badge-noise
+  # DROPPED 2026-08-05: feat/session-idle-badge-noise MERGED as tiann/hapi#1366
+  # (27bc6bad — drop Idle session-list badge; keep working/pending; Fixes #1362)
+  # - branch: feat/session-idle-badge-noise
 
   # tiann/hapi#1370 / PR #1373 — steer Copy-reference + /sessions/<id> citations
   # toward MCP inspect_peer (not local Grep/Glob). Shared sessionCitation +
