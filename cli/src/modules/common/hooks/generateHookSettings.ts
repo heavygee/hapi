@@ -4,6 +4,10 @@ import { configuration } from '@/configuration';
 import { logger } from '@/ui/logger';
 import { getHappyCliCommand } from '@/utils/spawnHappyCLI';
 import { shellJoin } from '@/modules/common/shellQuote';
+import {
+    hapiClaudePreToolUseGuardCommand,
+    resolveHapiToolingRoot
+} from '@/modules/common/hooks/resolveHapiToolingRoot';
 
 type HookCommandConfig = {
     matcher?: string;
@@ -55,13 +59,21 @@ export type HookSettingsOptions = {
      * stdin `hook_event_name`.
      */
     includePreToolUse?: boolean;
+    /** When set and cwd resolves to hapi, inject project-scoped PreToolUse guards. */
+    workingDirectory?: string;
 };
 
+/**
+ * Build Claude Code hook settings.
+ * Soup union: upstream trackPermissionMode + includePreToolUse, plus fork
+ * workingDirectory PreToolUse Bash guard when cwd is under a hapi tree.
+ */
 export function buildHookSettings(
     command: string,
     hooksEnabled?: boolean,
     trackPermissionMode?: boolean,
-    includePreToolUse?: boolean
+    includePreToolUse?: boolean,
+    workingDirectory?: string
 ): HookSettings {
     const commandHook = {
         hooks: [
@@ -90,6 +102,24 @@ export function buildHookSettings(
                 hooks: [{ type: 'command', command, timeout: PRE_TOOL_USE_TIMEOUT_SECONDS }]
             }
         ];
+    }
+
+    const hapiRoot = workingDirectory ? resolveHapiToolingRoot(workingDirectory) : null;
+    if (hapiRoot) {
+        const guardCommand = hapiClaudePreToolUseGuardCommand(hapiRoot);
+        if (existsSync(guardCommand)) {
+            const guardEntry: HookCommandConfig = {
+                matcher: 'Bash',
+                hooks: [
+                    {
+                        type: 'command',
+                        command: guardCommand
+                    }
+                ]
+            };
+            hooks.PreToolUse = [...(hooks.PreToolUse ?? []), guardEntry];
+            logger.debug(`[generateHookSettings] HAPI PreToolUse guard: ${guardCommand}`);
+        }
     }
 
     const settings: HookSettings = { hooks };
@@ -127,7 +157,8 @@ export function generateHookSettingsFile(
         hookCommand,
         options.hooksEnabled,
         options.trackPermissionMode,
-        options.includePreToolUse
+        options.includePreToolUse,
+        options.workingDirectory
     );
 
     writeFileSync(filepath, JSON.stringify(settings, null, 4));

@@ -197,7 +197,8 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
 
     const hookSettingsPath = generateHookSettingsFile(hookServer.port, hookServer.token, {
         filenamePrefix: 'session-hook',
-        logLabel: 'generateHookSettings'
+        logLabel: 'generateHookSettings',
+        workingDirectory
     });
     // The interactive TUI gets a separate settings file that also forwards
     // UserPromptSubmit/PreToolUse (their payloads carry permission_mode), so a
