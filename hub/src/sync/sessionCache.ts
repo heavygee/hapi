@@ -1,5 +1,5 @@
 import { AgentStateSchema, MetadataSchema, SessionPatchSchema, TeamStateSchema } from '@hapi/protocol/schemas'
-import type { CodexCollaborationMode, CopilotAgentMode, PermissionMode, Session, SessionPatch } from '@hapi/protocol/types'
+import type { CodexCollaborationMode, CopilotAgentMode, ExternalRef, PermissionMode, Session, SessionPatch } from '@hapi/protocol/types'
 import type { Store } from '../store'
 import { clampAliveTime } from './aliveTime'
 import { EventPublisher } from './eventPublisher'
@@ -13,6 +13,69 @@ const QUEUED_MESSAGE_THINKING_GRACE_MS = 15_000
 // HTTP caller as 409 instead of spinning forever.
 const METADATA_RETRY_ATTEMPTS = 5
 type RuntimeConfigKey = 'permissionMode' | 'model' | 'modelReasoningEffort' | 'effort' | 'serviceTier' | 'collaborationMode' | 'copilotAgentMode'
+
+/**
+ * Metadata merge used when consolidating an old session row into a replacement
+ * (resume/reopen). Carry forward display/contribution fields the new row omitted.
+ * Explicit keys on `newMetadata` always win — including empty `externalRefs: []`.
+ * tiann/hapi#1160 / PR #1161.
+ */
+export function mergeSessionMetadataForSessionMerge(
+    oldMetadata: unknown | null,
+    newMetadata: unknown | null
+): unknown | null {
+    if (!oldMetadata || typeof oldMetadata !== 'object') {
+        return newMetadata
+    }
+    if (!newMetadata || typeof newMetadata !== 'object') {
+        return oldMetadata
+    }
+
+    const oldObj = oldMetadata as Record<string, unknown>
+    const newObj = newMetadata as Record<string, unknown>
+    const merged: Record<string, unknown> = { ...newObj }
+    let changed = false
+
+    if (typeof oldObj.name === 'string' && typeof newObj.name !== 'string') {
+        merged.name = oldObj.name
+        changed = true
+    }
+
+    const oldSummary = oldObj.summary as { text?: unknown; updatedAt?: unknown } | undefined
+    const newSummary = newObj.summary as { text?: unknown; updatedAt?: unknown } | undefined
+    const oldUpdatedAt = typeof oldSummary?.updatedAt === 'number' ? oldSummary.updatedAt : null
+    const newUpdatedAt = typeof newSummary?.updatedAt === 'number' ? newSummary.updatedAt : null
+    if (oldUpdatedAt !== null && (newUpdatedAt === null || oldUpdatedAt > newUpdatedAt)) {
+        merged.summary = oldSummary
+        changed = true
+    }
+
+    if (oldObj.worktree && !newObj.worktree) {
+        merged.worktree = oldObj.worktree
+        changed = true
+    }
+
+    if (typeof oldObj.path === 'string' && typeof newObj.path !== 'string') {
+        merged.path = oldObj.path
+        changed = true
+    }
+    if (typeof oldObj.host === 'string' && typeof newObj.host !== 'string') {
+        merged.host = oldObj.host
+        changed = true
+    }
+    if (typeof oldObj.preferredPermissionMode === 'string' && typeof newObj.preferredPermissionMode !== 'string') {
+        merged.preferredPermissionMode = oldObj.preferredPermissionMode
+        changed = true
+    }
+
+    // Preserve structured PR links when the replacement row never set them.
+    if (Array.isArray(oldObj.externalRefs) && !Object.prototype.hasOwnProperty.call(newObj, 'externalRefs')) {
+        merged.externalRefs = oldObj.externalRefs
+        changed = true
+    }
+
+    return changed ? merged : newMetadata
+}
 
 export class SessionCache {
     private readonly sessions: Map<string, Session> = new Map()
@@ -195,7 +258,6 @@ export class SessionCache {
             agentStateVersion: stored.agentStateVersion,
             thinking: existing?.thinking ?? false,
             thinkingAt: existing?.thinkingAt ?? 0,
-            activeTurnStartedAt: existing?.activeTurnStartedAt ?? null,
             backgroundTaskCount: existing?.backgroundTaskCount ?? 0,
             todos,
             teamState,
@@ -349,7 +411,6 @@ export class SessionCache {
 
         const wasActive = session.active
         const wasThinking = session.thinking
-        const previousActiveTurnStartedAt = session.activeTurnStartedAt
         const previousPermissionMode = session.permissionMode
         const previousModel = session.model
         const previousModelReasoningEffort = session.modelReasoningEffort
@@ -361,18 +422,11 @@ export class SessionCache {
         const requestedThinking = Boolean(payload.thinking)
         const hubNow = Date.now()
         const preserveQueuedThinking = !requestedThinking && pendingThinkingUntil > hubNow
-        const hasUnconsumedPrompt = preserveQueuedThinking
-            && this.store.messages.getImmediateQueuedLocalMessages(session.id).length > 0
 
         session.active = true
         session.activeAt = Math.max(session.activeAt, t)
         session.thinking = requestedThinking || preserveQueuedThinking
         session.thinkingAt = t
-        if (!requestedThinking && preserveQueuedThinking && hasUnconsumedPrompt) {
-            session.activeTurnStartedAt = hubNow
-        } else if (wasThinking && !session.thinking) {
-            session.activeTurnStartedAt = null
-        }
         if (requestedThinking || pendingThinkingUntil <= hubNow) {
             this.pendingThinkingUntilBySessionId.delete(session.id)
         }
@@ -429,10 +483,8 @@ export class SessionCache {
             || previousServiceTier !== session.serviceTier
             || previousCollaborationMode !== session.collaborationMode
             || previousCopilotAgentMode !== session.copilotAgentMode
-        const turnBoundaryChanged = previousActiveTurnStartedAt !== session.activeTurnStartedAt
         const shouldBroadcast = (!wasActive && session.active)
             || (wasThinking !== session.thinking)
-            || turnBoundaryChanged
             || modeChanged
             || (now - lastBroadcastAt > 10_000)
 
@@ -445,7 +497,6 @@ export class SessionCache {
                     active: true,
                     activeAt: session.activeAt,
                     thinking: session.thinking,
-                    activeTurnStartedAt: session.activeTurnStartedAt,
                     permissionMode: session.permissionMode,
                     model: session.model,
                     modelReasoningEffort: session.modelReasoningEffort,
@@ -600,14 +651,13 @@ export class SessionCache {
         this.store.sessions.setSessionActive(session.id, false, t, session.namespace)
         session.thinking = false
         session.thinkingAt = t
-        session.activeTurnStartedAt = null
         session.backgroundTaskCount = 0
         this.pendingThinkingUntilBySessionId.delete(session.id)
 
         this.publisher.emit({
             type: 'session-updated',
             sessionId: session.id,
-            data: { active: false, thinking: false, activeTurnStartedAt: null, backgroundTaskCount: 0 } satisfies SessionPatch
+            data: { active: false, thinking: false, backgroundTaskCount: 0 } satisfies SessionPatch
         })
     }
 
@@ -840,6 +890,140 @@ export class SessionCache {
 
             if (result.result === 'success') {
                 this.refreshSession(sessionId)
+                return
+            }
+
+            this.refreshSession(sessionId)
+        }
+
+        throw new Error('Session was modified concurrently. Please try again.')
+    }
+
+    async markModelErrorBridged(sessionId: string, atTs: number): Promise<void> {
+        const session = this.sessions.get(sessionId) ?? this.refreshSession(sessionId)
+        if (!session) {
+            throw new Error('Session not found')
+        }
+
+        const currentMetadata = session.metadata ?? { path: '', host: '' }
+        const currentError = currentMetadata.lastModelError
+        if (!currentError || currentError.atTs !== atTs) {
+            return
+        }
+        if (currentError.bridgedForAtTs === atTs) {
+            return
+        }
+
+        const newMetadata = {
+            ...currentMetadata,
+            lastModelError: {
+                ...currentError,
+                bridgedForAtTs: atTs
+            }
+        }
+
+        const result = this.store.sessions.updateSessionMetadata(
+            sessionId,
+            newMetadata,
+            session.metadataVersion,
+            session.namespace,
+            { touchUpdatedAt: false }
+        )
+
+        if (result.result === 'error') {
+            throw new Error('Failed to update session metadata')
+        }
+
+        if (result.result === 'version-mismatch') {
+            throw new Error('Session was modified concurrently. Please try again.')
+        }
+
+        this.refreshSession(sessionId)
+    }
+
+    async acknowledgeModelError(sessionId: string, atTs: number): Promise<void> {
+        const session = this.sessions.get(sessionId)
+        if (!session) {
+            throw new Error('Session not found')
+        }
+
+        const currentMetadata = session.metadata ?? { path: '', host: '' }
+        if (!currentMetadata.lastModelError) {
+            return
+        }
+
+        // Bind dismiss to the error the client actually showed. If a newer
+        // lastModelError replaced it between render and click, refuse so we
+        // don't silently ack the unseen error (banner/dot would vanish).
+        if (currentMetadata.lastModelError.atTs !== atTs) {
+            throw new Error('Model error changed; refresh before acknowledging.')
+        }
+
+        const newMetadata = {
+            ...currentMetadata,
+            lastModelError: {
+                ...currentMetadata.lastModelError,
+                acknowledgedAt: Date.now()
+            }
+        }
+
+        const result = this.store.sessions.updateSessionMetadata(
+            sessionId,
+            newMetadata,
+            session.metadataVersion,
+            session.namespace,
+            { touchUpdatedAt: false }
+        )
+
+        if (result.result === 'error') {
+            throw new Error('Failed to update session metadata')
+        }
+
+        if (result.result === 'version-mismatch') {
+            throw new Error('Session was modified concurrently. Please try again.')
+        }
+
+        this.refreshSession(sessionId)
+    }
+
+    async setSessionExternalRefs(
+        sessionId: string,
+        externalRefs: ExternalRef[],
+        options?: { skipStatusEnrichment?: boolean }
+    ): Promise<void> {
+        // tiann/hapi#1162: same metadata-version retry contract as renameSession.
+        for (let attempt = 0; attempt < METADATA_RETRY_ATTEMPTS; attempt += 1) {
+            const session = this.sessions.get(sessionId) ?? this.refreshSession(sessionId)
+            if (!session) {
+                throw new Error('Session not found')
+            }
+
+            const currentMetadata = session.metadata ?? { path: '', host: '' }
+            const newMetadata = { ...currentMetadata, externalRefs }
+
+            const result = this.store.sessions.updateSessionMetadata(
+                sessionId,
+                newMetadata,
+                session.metadataVersion,
+                session.namespace,
+                { touchUpdatedAt: false }
+            )
+
+            if (result.result === 'error') {
+                throw new Error('Failed to update session metadata')
+            }
+
+            if (result.result === 'success') {
+                this.refreshSession(sessionId)
+                if (!options?.skipStatusEnrichment) {
+                    // First-attach / dialog identity-only writes: fill chip status
+                    // async via Meta batch (does not block the PUT response).
+                    void import('@/github/enrichExternalRefsStatus')
+                        .then(({ enrichSessionExternalRefsStatus }) => (
+                            enrichSessionExternalRefsStatus(this, sessionId)
+                        ))
+                        .catch(() => undefined)
+                }
                 return
             }
 
@@ -1243,55 +1427,7 @@ export class SessionCache {
     }
 
     private mergeSessionMetadata(oldMetadata: unknown | null, newMetadata: unknown | null): unknown | null {
-        if (!oldMetadata || typeof oldMetadata !== 'object') {
-            return newMetadata
-        }
-        if (!newMetadata || typeof newMetadata !== 'object') {
-            return oldMetadata
-        }
-
-        const oldObj = oldMetadata as Record<string, unknown>
-        const newObj = newMetadata as Record<string, unknown>
-        const merged: Record<string, unknown> = { ...newObj }
-        let changed = false
-
-        if (typeof oldObj.name === 'string' && typeof newObj.name !== 'string') {
-            merged.name = oldObj.name
-            changed = true
-        }
-
-        const oldSummary = oldObj.summary as { text?: unknown; updatedAt?: unknown } | undefined
-        const newSummary = newObj.summary as { text?: unknown; updatedAt?: unknown } | undefined
-        const oldUpdatedAt = typeof oldSummary?.updatedAt === 'number' ? oldSummary.updatedAt : null
-        const newUpdatedAt = typeof newSummary?.updatedAt === 'number' ? newSummary.updatedAt : null
-        if (oldUpdatedAt !== null && (newUpdatedAt === null || oldUpdatedAt > newUpdatedAt)) {
-            merged.summary = oldSummary
-            changed = true
-        }
-
-        if (oldObj.worktree && !newObj.worktree) {
-            merged.worktree = oldObj.worktree
-            changed = true
-        }
-
-        if (typeof oldObj.path === 'string' && typeof newObj.path !== 'string') {
-            merged.path = oldObj.path
-            changed = true
-        }
-        if (typeof oldObj.host === 'string' && typeof newObj.host !== 'string') {
-            merged.host = oldObj.host
-            changed = true
-        }
-        if (typeof oldObj.preferredPermissionMode === 'string' && typeof newObj.preferredPermissionMode !== 'string') {
-            merged.preferredPermissionMode = oldObj.preferredPermissionMode
-            changed = true
-        }
-        if (typeof oldObj.preferredCopilotAgentMode === 'string' && typeof newObj.preferredCopilotAgentMode !== 'string') {
-            merged.preferredCopilotAgentMode = oldObj.preferredCopilotAgentMode
-            changed = true
-        }
-
-        return changed ? merged : newMetadata
+        return mergeSessionMetadataForSessionMerge(oldMetadata, newMetadata)
     }
 
     private persistPreferredPermissionMode(session: Session, permissionMode: PermissionMode): void {
@@ -1403,22 +1539,15 @@ export class SessionCache {
 
     private extractAgentSessionId(
         metadata: NonNullable<Session['metadata']>
-    ): { field: 'codexSessionId' | 'claudeSessionId' | 'geminiSessionId' | 'opencodeSessionId' | 'grokSessionId' | 'cursorSessionId' | 'piSessionId' | 'agySessionId' | 'copilotSessionId'; value: string; dedupeKey: string; machineId?: string } | null {
-        const scoped = (field: 'codexSessionId' | 'claudeSessionId' | 'geminiSessionId' | 'opencodeSessionId' | 'grokSessionId' | 'cursorSessionId' | 'piSessionId' | 'agySessionId' | 'copilotSessionId', value: string) => ({
-            field,
-            value,
-            dedupeKey: field === 'piSessionId' ? `${field}:${metadata.machineId ?? 'unscoped'}:${value}` : `${field}:${value}`,
-            ...(field === 'piSessionId' && metadata.machineId ? { machineId: metadata.machineId } : {})
-        })
-        if (metadata.codexSessionId) return scoped('codexSessionId', metadata.codexSessionId)
-        if (metadata.claudeSessionId) return scoped('claudeSessionId', metadata.claudeSessionId)
-        if (metadata.geminiSessionId) return scoped('geminiSessionId', metadata.geminiSessionId)
-        if (metadata.opencodeSessionId) return scoped('opencodeSessionId', metadata.opencodeSessionId)
-        if (metadata.grokSessionId) return scoped('grokSessionId', metadata.grokSessionId)
-        if (metadata.cursorSessionId) return scoped('cursorSessionId', metadata.cursorSessionId)
-        if (metadata.piSessionId) return scoped('piSessionId', metadata.piSessionId)
-        if (metadata.agySessionId) return scoped('agySessionId', metadata.agySessionId)
-        if (metadata.copilotSessionId) return scoped('copilotSessionId', metadata.copilotSessionId)
+    ): { field: 'codexSessionId' | 'claudeSessionId' | 'geminiSessionId' | 'opencodeSessionId' | 'grokSessionId' | 'cursorSessionId' | 'piSessionId' | 'copilotSessionId'; value: string } | null {
+        if (metadata.codexSessionId) return { field: 'codexSessionId', value: metadata.codexSessionId }
+        if (metadata.claudeSessionId) return { field: 'claudeSessionId', value: metadata.claudeSessionId }
+        if (metadata.geminiSessionId) return { field: 'geminiSessionId', value: metadata.geminiSessionId }
+        if (metadata.opencodeSessionId) return { field: 'opencodeSessionId', value: metadata.opencodeSessionId }
+        if (metadata.grokSessionId) return { field: 'grokSessionId', value: metadata.grokSessionId }
+        if (metadata.cursorSessionId) return { field: 'cursorSessionId', value: metadata.cursorSessionId }
+        if (metadata.piSessionId) return { field: 'piSessionId', value: metadata.piSessionId }
+        if (metadata.copilotSessionId) return { field: 'copilotSessionId', value: metadata.copilotSessionId }
         return null
     }
 
@@ -1434,29 +1563,26 @@ export class SessionCache {
         // for active duplicates: a session can become inactive while the first
         // pass is only allowed to move history, and the follow-up pass should
         // then be allowed to delete the inactive duplicate record.
-        if (this.deduplicateInProgress.has(agentId.dedupeKey)) {
-            this.deduplicatePending.add(agentId.dedupeKey)
+        if (this.deduplicateInProgress.has(agentId.value)) {
+            this.deduplicatePending.add(agentId.value)
             return
         }
-        this.deduplicateInProgress.add(agentId.dedupeKey)
+        this.deduplicateInProgress.add(agentId.value)
 
         try {
             do {
-                this.deduplicatePending.delete(agentId.dedupeKey)
+                this.deduplicatePending.delete(agentId.value)
 
                 const currentSession = this.sessions.get(sessionId)
                 const candidates: { id: string; session: Session }[] = []
                 if (currentSession?.metadata && currentSession.metadata[agentId.field] === agentId.value) {
-                    if (agentId.field !== 'piSessionId' || currentSession.metadata.machineId === agentId.machineId) {
-                        candidates.push({ id: sessionId, session: currentSession })
-                    }
+                    candidates.push({ id: sessionId, session: currentSession })
                 }
                 for (const [existingId, existing] of this.sessions) {
                     if (existingId === sessionId) continue
                     if (existing.namespace !== session.namespace) continue
                     if (!existing.metadata) continue
                     if (existing.metadata[agentId.field] !== agentId.value) continue
-                    if (agentId.field === 'piSessionId' && existing.metadata.machineId !== agentId.machineId) continue
                     candidates.push({ id: existingId, session: existing })
                 }
 
@@ -1504,10 +1630,10 @@ export class SessionCache {
                         // best-effort: duplicate remains if merge fails
                     }
                 }
-            } while (this.deduplicatePending.has(agentId.dedupeKey))
+            } while (this.deduplicatePending.has(agentId.value))
         } finally {
-            this.deduplicateInProgress.delete(agentId.dedupeKey)
-            this.deduplicatePending.delete(agentId.dedupeKey)
+            this.deduplicateInProgress.delete(agentId.value)
+            this.deduplicatePending.delete(agentId.value)
         }
     }
 }

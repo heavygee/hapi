@@ -22,10 +22,14 @@ import {
     SESSION_ID_PREFIX_PARAM_DESCRIPTION,
 } from '@hapi/protocol/sessionCitation'
 import { PingPeerError, formatInspectPeerReport, inspectPeer, pingPeer } from "@/modules/pingPeer/pingPeer";
+import { parseGithubPrInput } from "@hapi/protocol";
+import { buildAttachedGithubPrRefs } from "@hapi/protocol/attachGithubPrRef";
+import type { ExternalRef } from "@hapi/protocol";
 
 type StartHappyServerOptions = {
     emitTitleSummary?: boolean;
     enableChangeTitle?: boolean;
+    enableLinkPr?: boolean;
     skillLookup?: {
         workingDirectory: string;
         flavor: string;
@@ -54,6 +58,7 @@ function createHapiMcpServer(
     client: ApiSessionClient,
     emitTitleSummary: boolean,
     enableChangeTitle: boolean,
+    enableLinkPr: boolean,
     skillLookup: StartHappyServerOptions['skillLookup']
 ): McpServer {
     const handler = async (title: string) => {
@@ -186,6 +191,52 @@ function createHapiMcpServer(
                 ],
                 isError: true,
             };
+        });
+    }
+
+    if (enableLinkPr) {
+        const linkPrInputSchema: z.ZodTypeAny = z.object({
+            url: z.string().optional().describe('GitHub PR URL (https://github.com/owner/repo/pull/N)'),
+            repo: z.string().optional().describe('owner/repo slug when not passing url'),
+            number: z.number().int().positive().optional().describe('PR number when not passing url'),
+            role: z.enum(['primary', 'secondary']).optional().describe('Defaults to primary'),
+        });
+
+        mcp.registerTool<any, any>('link_pr', {
+            description: 'Attach the current HAPI session to a GitHub pull request. Requires hub githubPrAwareness. Self-session only.',
+            title: 'Link Pull Request',
+            inputSchema: linkPrInputSchema,
+        }, async (args: { url?: string; repo?: string; number?: number; role?: 'primary' | 'secondary' }) => {
+            const raw = args.url?.trim() || (args.repo && args.number ? `${args.repo}#${args.number}` : '')
+            const parsed = parseGithubPrInput(raw)
+            if (!parsed.ok) {
+                return {
+                    content: [{ type: 'text' as const, text: `Failed to link PR: ${parsed.error}` }],
+                    isError: true,
+                }
+            }
+
+            try {
+                const externalRefs = await buildAttachedGithubPrRefs({
+                    repo: parsed.repo,
+                    number: parsed.number,
+                    role: args.role ?? 'primary',
+                    source: 'agent',
+                    linkedAt: Date.now(),
+                    existingRefs: [] as ExternalRef[],
+                })
+                client.updateMetadata((metadata) => ({ ...metadata, externalRefs }))
+                await client.flushMetadata(5_000)
+                return {
+                    content: [{ type: 'text' as const, text: `Linked ${parsed.repo}#${parsed.number} to this session` }],
+                    isError: false,
+                }
+            } catch (error) {
+                return {
+                    content: [{ type: 'text' as const, text: `Failed to link PR: ${error instanceof Error ? error.message : String(error)}` }],
+                    isError: true,
+                }
+            }
         });
     }
 
@@ -396,11 +447,12 @@ function readMcpSessionId(req: IncomingMessage): string | undefined {
 export async function startHappyServer(client: ApiSessionClient, options: StartHappyServerOptions = {}) {
     const emitTitleSummary = options.emitTitleSummary ?? true;
     const enableChangeTitle = options.enableChangeTitle ?? true;
+    const enableLinkPr = options.enableLinkPr ?? true;
     const transports = new Map<string, StreamableHTTPServerTransport>();
     const mcps = new Map<string, McpServer>();
 
     const createMcpTransport = () => {
-        const mcp = createHapiMcpServer(client, emitTitleSummary, enableChangeTitle, options.skillLookup);
+        const mcp = createHapiMcpServer(client, emitTitleSummary, enableChangeTitle, enableLinkPr, options.skillLookup);
         const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomUUID(),
             onsessioninitialized: (sessionId) => {
@@ -457,6 +509,9 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
     const toolNames = enableChangeTitle
         ? ['change_title', 'display_image', 'display_video', 'ping_peer', 'inspect_peer']
         : ['display_image', 'display_video', 'ping_peer', 'inspect_peer'];
+    if (enableLinkPr) {
+        toolNames.splice(enableChangeTitle ? 1 : 0, 0, 'link_pr')
+    }
     if (options.skillLookup) {
         toolNames.push('skill_lookup');
     }

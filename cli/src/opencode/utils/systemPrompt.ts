@@ -6,18 +6,19 @@
  */
 
 import { trimIdent } from '@/utils/trimIdent';
-import { buildSessionCitationSteerInstruction } from '@hapi/protocol/sessionCitation';
 import { HAPI_MCP_BRIDGE_PROMPT } from '@/modules/common/hapiMcpBridgePrompt';
 import {
     DISPLAY_IMAGE_PROMPT_HAPI_MCP,
     DISPLAY_VIDEO_PROMPT_HAPI_MCP,
 } from '@/modules/common/displayImagePrompt';
+import { buildSessionCitationSteerInstruction } from '@hapi/protocol/sessionCitation';
 import { SKILL_LOOKUP_INSTRUCTION } from '@/modules/common/skillLookupInstruction';
 import { withSessionSummaryInstruction } from '@/modules/common/sessionSummaryInstruction';
 
 /**
  * Title and display_image / display_video instructions for OpenCode to call the hapi MCP tools.
- * Keeps upstream skill-lookup; session-status summary contract rides when enabled.
+ * Keeps upstream skill-lookup; session-status summary contract rides when enabled
+ * (local instructions file + one-shot remote first-turn inject via instructionsSent).
  */
 export const TITLE_INSTRUCTION = withSessionSummaryInstruction(trimIdent(`
     ${HAPI_MCP_BRIDGE_PROMPT}

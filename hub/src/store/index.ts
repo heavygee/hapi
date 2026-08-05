@@ -11,6 +11,7 @@ import { FcmStore } from './fcmStore'
 import { ScratchlistStore } from './scratchlistStore'
 import { EventStore } from './eventStore'
 import { InboxStore } from './inboxStore'
+import { SettingsStore, ensureOverseerSettingsSchema } from './settingsStore'
 import { ensureOverseerEventsSchema, ensureDeletedSessionsSchema } from './events'
 import { ensureOverseerInboxSchema } from './inboxItems'
 import { SessionStore } from './sessionStore'
@@ -35,6 +36,8 @@ export { FcmStore } from './fcmStore'
 export { ScratchlistStore } from './scratchlistStore'
 export { EventStore } from './eventStore'
 export { InboxStore } from './inboxStore'
+export { SettingsStore } from './settingsStore'
+export type { ActiveBrainSetting } from './settingsStore'
 export type { InsertSystemEventInput, ListSystemEventsOptions, StoredSystemEvent } from './eventStore'
 export type { ListInboxItemsOptions, StoredInboxItem } from './inboxStore'
 export { SessionStore } from './sessionStore'
@@ -59,7 +62,7 @@ const REQUIRED_TABLES = [
     'inbox_items',
     'inbox_item_source_events',
     'inbox_operator_actions',
-] as const
+    'overseer_settings'] as const
 
 export class Store {
     private db: Database
@@ -75,6 +78,7 @@ export class Store {
     readonly scratchlist: ScratchlistStore
     readonly events: EventStore
     readonly inbox: InboxStore
+    readonly settings: SettingsStore
     readonly usage: UsageStore
     /**
      * Filesystem path of the underlying SQLite database, or ':memory:' for
@@ -129,6 +133,7 @@ export class Store {
         this.scratchlist = new ScratchlistStore(this.db)
         this.events = new EventStore(this.db)
         this.inbox = new InboxStore(this.db)
+        this.settings = new SettingsStore(this.db)
         this.usage = new UsageStore(this.db)
     }
 
@@ -356,6 +361,7 @@ export class Store {
         ensureOverseerEventsSchema(this.db)
         ensureDeletedSessionsSchema(this.db)
         ensureOverseerInboxSchema(this.db)
+        ensureOverseerSettingsSchema(this.db)
         this.assertRequiredTablesPresent()
     }
 

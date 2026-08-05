@@ -1,0 +1,103 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+    formatGithubPrChipLabel,
+    formatGithubPrChipTitle,
+    GITHUB_PR_CHIP_STALE_MS,
+    resolveGithubPrChipDisplay
+} from './SessionPrChip'
+import { getPrimaryGithubPrRef, githubPrStatusFromEmoji, githubPrStatusEmoji } from '@hapi/protocol'
+import type { GithubPrExternalRef } from '@/types/api'
+
+const baseRef = (over: Partial<GithubPrExternalRef> = {}): GithubPrExternalRef => ({
+    kind: 'github_pr',
+    repo: 'tiann/hapi',
+    number: 1163,
+    url: 'https://github.com/tiann/hapi/pull/1163',
+    role: 'primary',
+    ...over
+})
+
+const keyedT = (key: string, params?: Record<string, string | number>) =>
+    params && 'n' in params ? `${key}:${params.n}` : key
+
+afterEach(() => {
+    vi.useRealTimers()
+})
+
+describe('SessionPrChip helpers', () => {
+    it('formats a compact PR marker when status is absent', () => {
+        expect(formatGithubPrChipLabel(baseRef({ number: 1160, url: 'https://github.com/tiann/hapi/pull/1160' }))).toBe('PR')
+    })
+
+    it('shows the Meta status emoji only when status is cached on the ref', () => {
+        const now = 1_700_000_000_000 + 60_000
+        expect(formatGithubPrChipLabel(baseRef({
+            status: 'needs_work',
+            statusCheckedAt: 1_700_000_000_000,
+            statusAction: 'fix failing CI'
+        }), now)).toBe('⚠️')
+    })
+
+    it('mutes to ❓ when statusCheckedAt is older than staleMs (3h)', () => {
+        const checkedAt = 1_700_000_000_000
+        const now = checkedAt + GITHUB_PR_CHIP_STALE_MS + 1
+        const ref = baseRef({
+            status: 'clean',
+            statusCheckedAt: checkedAt
+        })
+        expect(resolveGithubPrChipDisplay(ref, now)).toEqual({
+            status: 'unknown',
+            stale: true
+        })
+        expect(formatGithubPrChipLabel(ref, now)).toBe('❓')
+    })
+
+    it('keeps tone when cache is fresh', () => {
+        const checkedAt = 1_700_000_000_000
+        const now = checkedAt + GITHUB_PR_CHIP_STALE_MS - 1
+        expect(resolveGithubPrChipDisplay(baseRef({
+            status: 'pending',
+            statusCheckedAt: checkedAt
+        }), now)).toEqual({ status: 'pending', stale: false })
+    })
+
+    it('does not treat missing statusCheckedAt as stale', () => {
+        expect(resolveGithubPrChipDisplay(baseRef({ status: 'clean' }), Date.now())).toEqual({
+            status: 'clean',
+            stale: false
+        })
+    })
+
+    it('does not infer a PR from title-like strings (structured refs only)', () => {
+        // Callers must pass metadata.externalRefs — never parse "PR #1160" titles.
+        expect(getPrimaryGithubPrRef(undefined)).toBeNull()
+        expect(getPrimaryGithubPrRef([])).toBeNull()
+    })
+
+    it('maps Meta emoji contract to stable status enums', () => {
+        expect(githubPrStatusFromEmoji('✅')).toBe('clean')
+        expect(githubPrStatusFromEmoji('⚠️')).toBe('needs_work')
+        expect(githubPrStatusEmoji('merged')).toBe('🔧')
+        expect(githubPrStatusEmoji('unknown')).toBe('❓')
+        expect(githubPrStatusFromEmoji('❓')).toBe('unknown')
+        expect(githubPrStatusFromEmoji('?')).toBe('unknown')
+    })
+
+    it('uses relative ago in chip title (tooltip already - no absolute nest)', () => {
+        const checkedAt = Date.now() - 90 * 60_000
+        const ref = baseRef({
+            status: 'needs_work',
+            statusCheckedAt: checkedAt,
+            statusAction: 'rebase (merge state dirty)'
+        })
+        const display = resolveGithubPrChipDisplay(ref, Date.now())
+        const title = formatGithubPrChipTitle(ref, display, keyedT)
+        expect(title.startsWith('⚠️ ')).toBe(true)
+        expect(title).toContain('tiann/hapi#1163')
+        expect(title).toContain('needs_work')
+        expect(title).toContain('rebase (merge state dirty)')
+        // Prefer relative/keyed ago buckets — never nest an ISO timestamp in the title.
+        expect(title).not.toMatch(/T\d{2}:\d{2}:\d{2}/)
+        expect(title).toMatch(/session\.time\.(minutesAgo|hoursAgo)|ago/i)
+    })
+})

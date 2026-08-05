@@ -12,6 +12,7 @@
         "./slashCommands": "./src/slashCommands.ts",
         "./buildInfo": "./src/buildInfo.ts",
         "./conversationHistory": "./src/conversationHistory.ts",
+        "./cursorInlineModelError": "./src/cursorInlineModelError.ts",
         "./modes": "./src/modes.ts",
         "./rpcMethods": "./src/rpcMethods.ts",
         "./runnerCapabilities": "./src/runnerCapabilities.ts",
@@ -21,6 +22,8 @@
         "./sessionCitation": "./src/sessionCitation.ts",
         "./sessionExport": "./src/sessionExport.ts",
         "./types": "./src/types.ts",
+        "./runPrEmojiBatch": "./src/runPrEmojiBatch.ts",
+        "./attachGithubPrRef": "./src/attachGithubPrRef.ts",
         "./voice": "./src/voice.ts",
         "./voicePickerCatalog": "./src/voicePickerCatalog.ts",
         "./voice-personality": "./src/voicePersonality.ts"

@@ -6,9 +6,9 @@
  */
 
 import { trimIdent } from '@/utils/trimIdent';
-import { buildSessionCitationSteerInstruction } from '@hapi/protocol/sessionCitation';
-import { withSessionSummaryInstruction } from '@/modules/common/sessionSummaryInstruction';
 import { DISPLAY_IMAGE_PROMPT_CODEX, DISPLAY_VIDEO_PROMPT_CODEX } from '@/modules/common/displayImagePrompt';
+import { withSessionSummaryInstruction } from '@/modules/common/sessionSummaryInstruction';
+import { buildSessionCitationSteerInstruction } from '@hapi/protocol/sessionCitation';
 
 /**
  * Title instruction for Codex to call the hapi MCP tool.

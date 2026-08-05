@@ -96,7 +96,7 @@ describe('SyncEngine.handleRealtimeEvent dedup-on-metadata-change', () => {
         const event: SyncEvent = {
             type: 'session-updated',
             sessionId: created.id,
-            data: { todos: { version: 1, value: [] } } satisfies SessionPatch
+            data: { todos: [] } satisfies SessionPatch
         }
         engine.handleRealtimeEvent(event)
 

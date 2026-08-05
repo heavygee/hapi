@@ -1,4 +1,5 @@
 import { useTranslation } from '@/lib/use-translation'
+import { useAppContext } from '@/lib/app-context'
 import { getComposerEnterBehaviorOptions, useComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
 import { getTerminalToolDisplayModeOptions, useTerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 import { useCodexExplorationCollapse } from '@/hooks/useCodexExplorationCollapse'
@@ -11,6 +12,7 @@ import {
     type ChatSurfaceColorPreference,
     type ChatSurfaceColorPreset,
 } from '@/hooks/useChatSurfaceColors'
+import { useAutoBridgeTransientModelErrors } from '@/hooks/useAutoBridgeTransientModelErrors'
 import { SettingsChoiceGroup, SettingsFieldLabel, SettingsPageContent, SettingsSection, SettingsSwitch } from '@/components/settings/SettingsPrimitives'
 import { ComposerToolbarLayoutControl } from '@/components/settings/ComposerToolbarLayoutControl'
 
@@ -47,10 +49,13 @@ function ChatSurfaceColorControl(props: {
 
 export default function SettingsChatPage() {
     const { t } = useTranslation()
+    const { api } = useAppContext()
     const { composerEnterBehavior, setComposerEnterBehavior } = useComposerEnterBehavior()
     const { terminalToolDisplayMode, setTerminalToolDisplayMode } = useTerminalToolDisplayMode()
     const { codexExplorationCollapsed, setCodexExplorationCollapsed } = useCodexExplorationCollapse()
     const { toolGroupBackground, userMessageBackground, setToolGroupBackground, setUserMessageBackground } = useChatSurfaceColors()
+    const { enabled: autoBridgeTransientModelErrors, setEnabled: setAutoBridgeTransientModelErrors } =
+        useAutoBridgeTransientModelErrors()
     return (
         <SettingsPageContent description={t('settings.chat.description')}>
             <SettingsSection title={t('settings.chat.input')}>
@@ -80,6 +85,51 @@ export default function SettingsChatPage() {
                 <ChatSurfaceColorControl label={t('settings.chat.groupedToolBackground')} preference={toolGroupBackground} onPresetChange={(preset) => setToolGroupBackground(toPresetChatSurfaceColorPreference(preset))} onCustomChange={(value) => setToolGroupBackground(toCustomChatSurfaceColorPreference(value))} />
                 <ChatSurfaceColorControl label={t('settings.chat.userMessageBackground')} preference={userMessageBackground} onPresetChange={(preset) => setUserMessageBackground(toPresetChatSurfaceColorPreference(preset))} onCustomChange={(value) => setUserMessageBackground(toCustomChatSurfaceColorPreference(value))} />
             </SettingsSection>
+            <SettingsSection title={t('settings.chat.modelErrors')}>
+                <button
+                    type="button"
+                    onClick={() => {
+                        const next = !autoBridgeTransientModelErrors
+                        setAutoBridgeTransientModelErrors(next)
+                        void api.getSessions().then((response) => {
+                            const activeCursor = (response.sessions ?? []).filter(
+                                (s) => s.active && s.metadata?.flavor === 'cursor'
+                            )
+                            return Promise.all(
+                                activeCursor.map((s) =>
+                                    api.setModelErrorAutoBridge(s.id, next).catch(() => {})
+                                )
+                            )
+                        })
+                    }}
+                    className="flex w-full items-start justify-between gap-3 px-3 py-3 text-left"
+                    aria-pressed={autoBridgeTransientModelErrors}
+                >
+                    <span>
+                        <span className="block text-sm text-[var(--app-fg)]">
+                            {t('settings.chat.autoBridgeTransientModelErrors')}
+                        </span>
+                        <span className="mt-0.5 block text-xs text-[var(--app-hint)]">
+                            {t('settings.chat.autoBridgeTransientModelErrors.description')}
+                        </span>
+                    </span>
+                    <span
+                        className={`mt-0.5 inline-flex h-5 w-9 shrink-0 rounded-full border transition-colors ${
+                            autoBridgeTransientModelErrors
+                                ? 'border-[var(--app-link)] bg-[var(--app-link)]'
+                                : 'border-[var(--app-border)] bg-[var(--app-subtle-bg)]'
+                        }`}
+                        aria-hidden="true"
+                    >
+                        <span
+                            className={`m-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
+                                autoBridgeTransientModelErrors ? 'translate-x-4' : 'translate-x-0'
+                            }`}
+                        />
+                    </span>
+                </button>
+            </SettingsSection>
+
         </SettingsPageContent>
     )
 }

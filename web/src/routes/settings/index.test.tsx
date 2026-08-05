@@ -55,6 +55,19 @@ vi.mock('@/lib/app-context', () => ({
     useAppContext: () => ({ api: null, token: context.token }),
 }))
 
+vi.mock('@/hooks/queries/useFeatures', () => ({
+    useFeatures: () => ({
+        features: { githubPrAwareness: { enabled: false, source: 'default' } },
+        isLoading: false,
+        error: null,
+        refetch: async () => undefined,
+    }),
+    usePatchFeatures: () => ({
+        setGithubPrAwareness: vi.fn(),
+        isPending: false,
+    }),
+}))
+
 vi.mock('@/hooks/queries/useUpgradeInfo', () => ({
     useUpgradeInfo: () => ({ info: null, isLoading: false }),
     useSetFleetUpgradePolicy: () => ({ mutate: setFleetPolicy }),
@@ -177,7 +190,10 @@ vi.mock('@/hooks/useChatSurfaceColors', () => ({
 
 vi.mock('@/lib/app-context', () => ({
     useAppContext: () => ({
-        api: {},
+        api: {
+            getSessions: vi.fn(async () => ({ sessions: [] })),
+            setModelErrorAutoBridge: vi.fn(async () => {}),
+        },
         baseUrl: 'http://127.0.0.1:3006',
         token: context.token,
     }),
@@ -335,6 +351,9 @@ describe('responsive settings pages', () => {
         expect(screen.getByText(String(__APP_VERSION__))).toBeInTheDocument()
         expect(screen.getByText('Protocol Version')).toBeInTheDocument()
         expect(screen.getByRole('link', { name: 'hapi.run' })).toHaveAttribute('rel', 'noopener noreferrer')
+        // Debug panels moved to /overseer; About keeps a console deep-link.
+        fireEvent.click(screen.getByRole('button', { name: /Overseer console/ }))
+        expect(navigate).toHaveBeenCalledWith({ to: '/overseer' })
     })
 
     it('links common voice settings to full-page voices and advanced pages', () => {
