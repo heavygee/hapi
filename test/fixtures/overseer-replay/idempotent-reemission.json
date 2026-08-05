@@ -1,0 +1,11 @@
+{
+    "name": "idempotent-reemission",
+    "description": "Same event re-emitted with an identical idempotency_key. Expected: stored once (no double-count), one inbox item.",
+    "sessions": [
+        { "key": "s", "tag": "peer-y", "flavor": "claude", "name": "peer-y" }
+    ],
+    "events": [
+        { "sid": 1, "ts": 1700000000000, "sessionKey": "s", "sourceKind": "worker", "eventType": "needs_decision", "attentionCandidate": 1, "operatorActionRequired": 1, "summary": "Which migration strategy?", "idempotencyKey": "session:peer-y:message:m1:notify" },
+        { "sid": 2, "ts": 1700000005000, "sessionKey": "s", "sourceKind": "worker", "eventType": "needs_decision", "attentionCandidate": 1, "operatorActionRequired": 1, "summary": "Which migration strategy?", "idempotencyKey": "session:peer-y:message:m1:notify" }
+    ]
+}

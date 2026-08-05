@@ -1,0 +1,16 @@
+{
+    "name": "one-boss-clean",
+    "description": "A future-shaped dispatched event whose worker message is correctly operator-attributed (role=user, no Overseer metadata, no attribution boilerplate). Expected: one-boss invariant checks 1 dispatch, finds 0 violations. Proves the assertion shape is wired and will activate at Step 4.",
+    "sessions": [
+        { "key": "s", "tag": "peer-15", "flavor": "claude", "name": "peer-15" }
+    ],
+    "events": [
+        { "sid": 1, "ts": 1700000000000, "sessionKey": "s", "sourceKind": "overseer", "eventType": "dispatched", "attentionCandidate": 0, "summary": "dispatched merge instruction to peer-15", "idempotencyKey": "dispatch:peer-15:abc123" }
+    ],
+    "dispatchEnvelopes": [
+        { "idempotencyKey": "dispatch:peer-15:abc123", "messageId": "msg-1", "origin": "operator_confirmed", "rationale": "operator approved at breakpoint", "relatedEventIds": [42], "confirmationSource": "voice" }
+    ],
+    "workerMessages": [
+        { "id": "msg-1", "sessionKey": "s", "role": "user", "renderedInstruction": "Rebase onto main and re-run the integration tests when green." }
+    ]
+}

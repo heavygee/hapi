@@ -1,0 +1,12 @@
+{
+    "name": "stale-captured-only",
+    "description": "Hub-inferred stale silence (checkStaleSessions) is captured-only: recorded with attentionCandidate=0, NOT promoted to inbox. A worker that EXPLICITLY self-reports stalled keeps attentionCandidate=1 and DOES promote. Locks the fix/overseer-inbox-stale-noise behavior.",
+    "sessions": [
+        { "key": "idle", "tag": "peer-idle", "flavor": "claude", "name": "peer-idle" },
+        { "key": "vocal", "tag": "peer-vocal", "flavor": "codex", "name": "peer-vocal" }
+    ],
+    "events": [
+        { "sid": 1, "ts": 1700000000000, "sessionKey": "idle", "sourceKind": "system", "eventType": "stale", "attentionCandidate": 0, "operatorActionRequired": 0, "summary": "No agent output for 35 minutes", "provenance": "hub-inferred from session silence threshold" },
+        { "sid": 2, "ts": 1700000060000, "sessionKey": "vocal", "sourceKind": "worker", "eventType": "stale", "attentionCandidate": 1, "operatorActionRequired": 1, "summary": "I appear stuck waiting on an API key", "provenance": "AGENT_NOTIFY_SUMMARY" }
+    ]
+}
