@@ -23,6 +23,8 @@ interface Settings {
   extraHeaders?: unknown
   // Legacy field name (for migration, read-only)
   serverUrl?: string
+  /** Operator opt-out: runner must not self-restart on mtime/version drift (systemd-owned). */
+  runnerDisableVersionHandoff?: boolean
 }
 
 const defaultSettings: Settings = {}
