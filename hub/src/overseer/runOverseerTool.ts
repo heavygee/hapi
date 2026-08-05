@@ -34,6 +34,8 @@ export function runOverseerTool(overseer: OverseerEntity, tool: OverseerToolName
         }
         case 'list_active_workers':
             return { workers: overseer.listActiveWorkers(overseerToolArgsSchemas.list_active_workers.parse(args)) }
+        case 'query_open_loops':
+            return overseer.queryOpenLoops(overseerToolArgsSchemas.query_open_loops.parse(args))
         default: {
             const exhaustive: never = tool
             throw new Error(`Unknown overseer tool: ${String(exhaustive)}`)

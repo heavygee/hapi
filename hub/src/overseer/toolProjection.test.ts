@@ -67,8 +67,52 @@ describe('projectToolResultForBrain', () => {
         expect(JSON.stringify(lean)).not.toContain('flavor')
     })
 
-    it('passes un-projected tools through untouched', () => {
-        const state = { state: { sessionId: 'x', observedState: 'idle' } }
-        expect(projectToolResultForBrain('get_session_state', state)).toBe(state)
+    it('thins open loops to id/name/project/status/action/what/ageDays/bucket', () => {
+        const raw = {
+            counts: { total: 2, waitingOnYou: 1, halfFinished: 1 },
+            openLoops: [
+                { sessionId: 'a', name: 'peer-a', project: 'web', flavor: 'cursor', status: 'needs_decision', eventType: 'needs_decision', eventId: 5, action: 'choose target', summary: 'peer-a needs_decision', lastTs: 111, ageMs: 999, ageDays: 10, bucket: 'waiting_on_you' }
+            ]
+        }
+        const lean = projectToolResultForBrain('query_open_loops', raw) as { counts: unknown; openLoops: unknown[] }
+        expect(lean.counts).toEqual({ total: 2, waitingOnYou: 1, halfFinished: 1 })
+        expect(lean.openLoops[0]).toEqual({ id: 'a', name: 'peer-a', project: 'web', status: 'needs_decision', action: 'choose target', what: 'peer-a needs_decision', ageDays: 10, bucket: 'waiting_on_you' })
+        expect(JSON.stringify(lean)).not.toContain('eventId')
+        expect(JSON.stringify(lean)).not.toContain('lastTs')
+    })
+
+    it('thins session state to observed/reported essentials', () => {
+        const raw = { state: { sessionId: 'sess-a', name: 'peer-a', project: 'web', flavor: 'codex', active: true, thinking: false, observedState: 'idle', workerReportedState: 'blocked', lastActivityAt: 999, silenceMs: 1200, lastToolCallAgeMs: 500, pendingRequestCount: 1 } }
+        const lean = projectToolResultForBrain('get_session_state', raw) as { state: Record<string, unknown> }
+        expect(lean.state).toEqual({ id: 'sess-a', name: 'peer-a', project: 'web', observed: 'idle', reported: 'blocked', silenceMs: 1200, pending: 1 })
+        expect(JSON.stringify(lean)).not.toContain('lastToolCallAgeMs')
+    })
+
+    it('caps raw transcript chunk text (token bomb) in lean mode', () => {
+        const long = 'x'.repeat(1000)
+        const raw = { chunks: [{ messageId: 'm1', role: 'worker', text: long, createdAt: 5 }] }
+        const lean = projectToolResultForBrain('get_session_recent_output', raw) as { total: number; chunks: Array<{ text: string }> }
+        expect(lean.total).toBe(1)
+        expect(lean.chunks[0]!.text.length).toBeLessThan(300)
+        expect(lean.chunks[0]!.text.endsWith('…')).toBe(true)
+    })
+
+    it('thins worker health and drops the verbose signal trail', () => {
+        const raw = { health: { sessionId: 'sess-a', name: 'peer-a', project: 'web', flavor: 'codex', reportedState: 'blocked', observedState: 'stale', inferredState: 'blocked', inferredConfidence: 0.9, signals: ['a', 'b', 'c'], lastActivityAt: 1, silenceMs: 60000, pendingRequestCount: 0 } }
+        const lean = projectToolResultForBrain('get_worker_health', raw) as { health: Record<string, unknown> }
+        expect(lean.health).toEqual({ id: 'sess-a', name: 'peer-a', project: 'web', reported: 'blocked', observed: 'stale', inferred: 'blocked', confidence: 0.9, silenceMs: 60000, pending: 0 })
+        expect(JSON.stringify(lean)).not.toContain('signals')
+    })
+
+    it('detail:full returns the raw rows untouched', () => {
+        const raw = { chunks: [{ messageId: 'm1', role: 'worker', text: 'x'.repeat(1000), createdAt: 5 }] }
+        expect(projectToolResultForBrain('get_session_recent_output', raw, 'full')).toBe(raw)
+        const inbox = { items: [{ id: 1, title: 't', status: 'new', priority: 5, reasonForPriority: 'r' }] }
+        expect(projectToolResultForBrain('query_inbox', inbox, 'full')).toBe(inbox)
+    })
+
+    it('passes un-projected tools (explain_priority) through untouched', () => {
+        const explanation = { explanation: { inboxItemId: 1, title: 'x' } }
+        expect(projectToolResultForBrain('explain_priority', explanation)).toBe(explanation)
     })
 })
