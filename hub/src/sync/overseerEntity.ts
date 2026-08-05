@@ -10,9 +10,11 @@
  */
 
 import {
+    OVERSEER_CONVO_TURN_EVENT_TYPE,
     OVERSEER_LOOP_CLOSED_EVENT_TYPE,
     OVERSEER_STALE_SILENCE_MS,
     buildOverseerConvoTurnEventInput,
+    buildOverseerDispatchedEventInput,
     buildOverseerIdentity,
     buildOverseerSystemPrompt,
     deriveObservedWorkerState,
@@ -20,10 +22,12 @@ import {
     isNoOpAction,
     mapEventTypeToWorkerState,
     openLoopBucket,
+    OVERSEER_DISPOSITION_ACTIONS,
     type OverseerActiveWorker,
     type OverseerConvoTurnInput,
     type OverseerExplainPriority,
     type OverseerIdentity,
+    type OverseerToolName,
     type OverseerDispositionCluster,
     type OverseerDispositionResult,
     type OverseerDispositionRow,
@@ -39,6 +43,8 @@ import {
     type QueryInboxArgs,
     type QueryOpenLoopsArgs,
     type RecordDispositionArgs,
+    type PingSessionArgs,
+    type OverseerPingResult,
     type ListActiveWorkersArgs
 } from '@hapi/protocol'
 import { buildOverseerSessionIdentity } from '@hapi/protocol'
@@ -54,6 +60,15 @@ export type OverseerEntityDeps = {
     messages: MessageStore
     getSession: (sessionId: string) => Session | undefined
     getSessions: () => Session[]
+    /**
+     * Stage 1.5 relay (R5): resume if inactive, then enqueue a user message.
+     * Injected from SyncEngine — never shell out to `hapi-ping-peer`.
+     */
+    relayToSession?: (args: {
+        sessionId: string
+        message: string
+        namespace?: string
+    }) => Promise<{ ok: boolean; resumed: boolean; sessionId?: string; error?: string }>
     now?: () => number
     staleSilenceMs?: number
 }
@@ -87,6 +102,7 @@ export class OverseerEntity {
     private readonly messages: MessageStore
     private readonly getSession: (sessionId: string) => Session | undefined
     private readonly getSessions: () => Session[]
+    private readonly relayToSession: OverseerEntityDeps['relayToSession']
     private readonly now: () => number
     private readonly staleSilenceMs: number
 
@@ -96,6 +112,7 @@ export class OverseerEntity {
         this.messages = deps.messages
         this.getSession = deps.getSession
         this.getSessions = deps.getSessions
+        this.relayToSession = deps.relayToSession
         this.now = deps.now ?? (() => Date.now())
         this.staleSilenceMs = deps.staleSilenceMs ?? OVERSEER_STALE_SILENCE_MS
     }
@@ -111,8 +128,17 @@ export class OverseerEntity {
     // --- Tool 1: query_events ------------------------------------------------
 
     queryEvents(args: QueryEventsArgs): StoredSystemEvent[] {
+        // Resolve unique prefixes before querying — brain (and operators) often
+        // pass the short form. Ambiguous / unknown prefix → empty result (same
+        // as "no events for that session"), never a partial match.
+        let sessionId = args.sessionId ?? null
+        if (sessionId) {
+            const resolved = this.resolveSession(sessionId)
+            if (!resolved) return []
+            sessionId = resolved.id
+        }
         return this.events.query({
-            sessionId: args.sessionId ?? null,
+            sessionId,
             project: args.project ?? null,
             eventType: args.eventType ?? null,
             sourceKind: args.sourceKind ?? null,
@@ -122,7 +148,7 @@ export class OverseerEntity {
             untilTs: args.untilTs ?? null,
             beforeId: args.beforeId ?? null,
             limit: args.limit ?? 50
-        })
+        }).filter((event) => this.eventInCallerScope(event))
     }
 
     // --- Tool 2: query_inbox -------------------------------------------------
@@ -148,7 +174,7 @@ export class OverseerEntity {
             category: args.category ?? null,
             limit: args.limit ?? 50,
             includeSleepingSnoozed: statusesExplicit && statuses.includes('snoozed')
-        })
+        }).filter((item) => this.itemInCallerScope(item))
         return {
             items,
             candidates: items.filter((item) => item.status === 'new'),
@@ -160,12 +186,13 @@ export class OverseerEntity {
     // --- Tool 3: get_session_state ------------------------------------------
 
     getSessionState(sessionId: string): OverseerSessionStateView | null {
-        const session = this.getSession(sessionId)
+        const session = this.resolveSession(sessionId)
         if (!session) return null
 
+        const resolvedId = session.id
         const now = this.now()
         const { name, project, flavor } = deriveIdentity(session)
-        const latestEvent = this.events.query({ sessionId, limit: 1 })[0] ?? null
+        const latestEvent = this.events.query({ sessionId: resolvedId, limit: 1 })[0] ?? null
         const lastActivityAt = this.computeLastActivityAt(session, latestEvent)
         const silenceMs = lastActivityAt !== null ? Math.max(0, now - lastActivityAt) : null
         const pending = pendingRequestCount(session)
@@ -178,19 +205,19 @@ export class OverseerEntity {
             staleSilenceMs: this.staleSilenceMs
         })
 
-        const lastToolCall = this.events.query({ sessionId, eventType: 'tool_call', limit: 1 })[0]
-            ?? this.events.query({ sessionId, eventType: 'tool_result', limit: 1 })[0]
+        const lastToolCall = this.events.query({ sessionId: resolvedId, eventType: 'tool_call', limit: 1 })[0]
+            ?? this.events.query({ sessionId: resolvedId, eventType: 'tool_result', limit: 1 })[0]
             ?? null
 
         return {
-            sessionId,
+            sessionId: resolvedId,
             name,
             project,
             flavor,
             active: session.active,
             thinking: session.thinking,
             observedState,
-            workerReportedState: this.deriveReportedState(sessionId),
+            workerReportedState: this.deriveReportedState(resolvedId),
             lastActivityAt,
             silenceMs,
             lastToolCallAgeMs: lastToolCall ? Math.max(0, now - lastToolCall.ts) : null,
@@ -201,8 +228,10 @@ export class OverseerEntity {
     // --- Tool 4: get_session_recent_output ----------------------------------
 
     getSessionRecentOutput(sessionId: string, n = 10): OverseerRecentOutputChunk[] {
+        const session = this.resolveSession(sessionId)
+        if (!session) return []
         const limit = Math.min(Math.max(n, 1), 50)
-        const messages = this.messages.getMessages(sessionId, limit)
+        const messages = this.messages.getMessages(session.id, limit)
         const chunks: OverseerRecentOutputChunk[] = []
         for (const message of messages) {
             const text = this.extractMessageText(message.content)
@@ -220,12 +249,13 @@ export class OverseerEntity {
     // --- Tool 5: get_worker_health ------------------------------------------
 
     getWorkerHealth(sessionId: string): OverseerWorkerHealth | null {
-        const session = this.getSession(sessionId)
+        const session = this.resolveSession(sessionId)
         if (!session) return null
 
+        const resolvedId = session.id
         const now = this.now()
         const { name, project, flavor } = deriveIdentity(session)
-        const latestEvent = this.events.query({ sessionId, limit: 1 })[0] ?? null
+        const latestEvent = this.events.query({ sessionId: resolvedId, limit: 1 })[0] ?? null
         const lastActivityAt = this.computeLastActivityAt(session, latestEvent)
         const silenceMs = lastActivityAt !== null ? Math.max(0, now - lastActivityAt) : null
         const pending = pendingRequestCount(session)
@@ -237,7 +267,7 @@ export class OverseerEntity {
             pendingRequestCount: pending,
             staleSilenceMs: this.staleSilenceMs
         })
-        const reportedState = this.deriveReportedState(sessionId)
+        const reportedState = this.deriveReportedState(resolvedId)
         const inferred = inferWorkerState({
             reported: reportedState,
             observed: observedState,
@@ -260,7 +290,7 @@ export class OverseerEntity {
         signals.push(inferred.note)
 
         return {
-            sessionId,
+            sessionId: resolvedId,
             name,
             project,
             flavor,
@@ -293,6 +323,10 @@ export class OverseerEntity {
                 sourceKind: event.sourceKind
             }))
 
+        const relatedSessionId = item.relatedSessionId
+        const related = relatedSessionId ? this.resolveSession(relatedSessionId) : null
+        const identity = related ? deriveIdentity(related) : null
+
         return {
             inboxItemId: item.id,
             title: item.title,
@@ -305,7 +339,10 @@ export class OverseerEntity {
             // Recite the stored provenance — do NOT recompute (substrate authored it).
             reasonForPriority: item.reasonForPriority,
             sourceEventIds: item.sourceEventIds,
-            relatedSessionId: item.relatedSessionId,
+            relatedSessionId,
+            relatedSessionName: identity?.name ?? null,
+            relatedSessionActive: related ? related.active : null,
+            summary: item.summary,
             sourceEvents
         }
     }
@@ -440,6 +477,7 @@ export class OverseerEntity {
     queryDispositions(args: QueryDispositionsArgs = {}): OverseerDispositionsResult {
         const filter = {
             action: args.action ?? null,
+            actionsAllowlist: args.action ? null : [...OVERSEER_DISPOSITION_ACTIONS],
             sourceKind: args.sourceKind ?? null,
             sourceRef: args.sourceRef ?? null,
             eventType: args.eventType ?? null,
@@ -465,24 +503,30 @@ export class OverseerEntity {
             return { mode: 'cluster', clusters, total: clusters.length }
         }
 
-        const rows = this.inbox.listDispositions(filter).map(
-            (r): OverseerDispositionRow => ({
-                id: r.id,
-                itemId: r.inboxItemId,
-                action: r.action,
-                statusAfter: r.statusAfter,
-                feedback: r.feedback,
-                createdAt: r.createdAt,
-                sourceKind: r.sourceKind,
-                sourceRef: r.sourceRef,
-                eventType: r.eventType,
-                category: r.category,
-                project: r.project,
-                artifactKind: r.artifactKind,
-                repo: r.repo,
-                title: r.contextSnapshot?.title ?? null
+        const rows = this.inbox
+            .listDispositions(filter)
+            .filter((r) => {
+                const item = this.inbox.getById(r.inboxItemId)
+                return item != null && this.itemInCallerScope(item)
             })
-        )
+            .map(
+                (r): OverseerDispositionRow => ({
+                    id: r.id,
+                    itemId: r.inboxItemId,
+                    action: r.action,
+                    statusAfter: r.statusAfter,
+                    feedback: r.feedback,
+                    createdAt: r.createdAt,
+                    sourceKind: r.sourceKind,
+                    sourceRef: r.sourceRef,
+                    eventType: r.eventType,
+                    category: r.category,
+                    project: r.project,
+                    artifactKind: r.artifactKind,
+                    repo: r.repo,
+                    title: r.contextSnapshot?.title ?? null
+                })
+            )
         return { mode: 'list', rows, total: rows.length }
     }
 
@@ -497,7 +541,7 @@ export class OverseerEntity {
      */
     recordDisposition(args: RecordDispositionArgs): OverseerDispositionResult {
         const item = this.inbox.getById(args.itemId)
-        if (!item) {
+        if (!item || !this.itemInCallerScope(item)) {
             return {
                 ok: false,
                 itemId: args.itemId,
@@ -532,6 +576,188 @@ export class OverseerEntity {
         }
     }
 
+    /**
+     * Stage 1.5 write — relay an operator-directed message to one worker session (R5).
+     * Resolves sessionId (full or unique prefix) and/or itemId → relatedSessionId, then
+     * calls the injected SyncEngine resume+send primitive.
+     */
+    async pingSession(args: PingSessionArgs): Promise<OverseerPingResult> {
+        const resolved = this.resolvePingTarget(args)
+        if (!resolved.ok) {
+            return {
+                ok: false,
+                sessionId: resolved.sessionId ?? '',
+                sessionName: null,
+                project: null,
+                resumed: false,
+                tombstone: resolved.error,
+                error: resolved.error
+            }
+        }
+
+        if (!this.relayToSession) {
+            return {
+                ok: false,
+                sessionId: resolved.sessionId,
+                sessionName: resolved.sessionName,
+                project: resolved.project,
+                resumed: false,
+                tombstone: 'Relay not wired on this hub — nothing sent.',
+                error: 'relay_not_configured'
+            }
+        }
+
+        const result = await this.relayToSession({
+            sessionId: resolved.sessionId,
+            message: args.message,
+            namespace: resolved.namespace
+        })
+
+        // After resume+merge the hub may have remapped to a replacement session id.
+        const deliveredSessionId = result.sessionId ?? resolved.sessionId
+        const label = resolved.sessionName ?? resolved.project ?? deliveredSessionId.slice(0, 8)
+        const snippet = args.message.length > 80 ? `${args.message.slice(0, 77)}…` : args.message
+        if (!result.ok) {
+            return {
+                ok: false,
+                sessionId: deliveredSessionId,
+                sessionName: resolved.sessionName,
+                project: resolved.project,
+                resumed: result.resumed,
+                tombstone: `Failed to relay to ${label}: ${result.error ?? 'unknown error'}`,
+                error: result.error
+            }
+        }
+
+        const tombstone = `Relayed to ${label} (${deliveredSessionId.slice(0, 8)})${result.resumed ? ' [resumed]' : ''}: "${snippet}"`
+        try {
+            this.recordDispatchedRelay({
+                sessionId: deliveredSessionId,
+                message: args.message,
+                resumed: result.resumed,
+                tombstone
+            })
+        } catch {
+            // Delivery already succeeded — audit failure must not flip ok or invite retry.
+        }
+        return {
+            ok: true,
+            sessionId: deliveredSessionId,
+            sessionName: resolved.sessionName,
+            project: resolved.project,
+            resumed: result.resumed,
+            tombstone
+        }
+    }
+
+    private recordDispatchedRelay(args: {
+        sessionId: string
+        message: string
+        resumed: boolean
+        tombstone: string
+    }): void {
+        this.events.insert(buildOverseerDispatchedEventInput({
+            sessionId: args.sessionId,
+            message: args.message,
+            resumed: args.resumed,
+            tombstone: args.tombstone,
+            ts: this.now()
+        }))
+    }
+
+    private resolvePingTarget(args: PingSessionArgs): {
+        ok: true
+        sessionId: string
+        sessionName: string | null
+        project: string | null
+        namespace: string
+    } | { ok: false; sessionId?: string; error: string } {
+        const rawSessionId = args.sessionId?.trim() || null
+        let sessionIdFromItem: string | null = null
+
+        if (args.itemId != null) {
+            const item = this.inbox.getById(args.itemId)
+            if (!item || !this.itemInCallerScope(item)) {
+                return { ok: false, error: `No inbox item #${args.itemId} — nothing relayed.` }
+            }
+            sessionIdFromItem = item.relatedSessionId?.trim() || null
+            if (!sessionIdFromItem) {
+                return {
+                    ok: false,
+                    error: `Inbox item #${args.itemId} has no related session — nothing relayed.`
+                }
+            }
+        }
+
+        if (rawSessionId && sessionIdFromItem) {
+            const fromSession = this.matchSessions(rawSessionId)
+            const fromItem = this.matchSessions(sessionIdFromItem)
+            if (fromSession.length !== 1) {
+                return {
+                    ok: false,
+                    sessionId: rawSessionId,
+                    error: fromSession.length > 1
+                        ? `Ambiguous session prefix "${rawSessionId}" (${fromSession.length} matches) — nothing relayed.`
+                        : `No session matching "${rawSessionId}" — nothing relayed.`
+                }
+            }
+            if (fromItem.length !== 1) {
+                return {
+                    ok: false,
+                    sessionId: sessionIdFromItem,
+                    error: `Inbox item #${args.itemId} related session unresolved — nothing relayed.`
+                }
+            }
+            if (fromSession[0]!.id !== fromItem[0]!.id) {
+                return {
+                    ok: false,
+                    sessionId: fromSession[0]!.id,
+                    error: `Conflicting relay targets: sessionId resolves to ${fromSession[0]!.id.slice(0, 8)}… but item #${args.itemId} points at ${fromItem[0]!.id.slice(0, 8)}… — nothing relayed.`
+                }
+            }
+            const session = fromSession[0]!
+            const identity = deriveIdentity(session)
+            return {
+                ok: true,
+                sessionId: session.id,
+                sessionName: identity.name,
+                project: identity.project,
+                namespace: session.namespace || 'default'
+            }
+        }
+
+        const sessionId = rawSessionId ?? sessionIdFromItem
+        if (!sessionId) {
+            return { ok: false, error: 'sessionId or itemId is required — nothing relayed.' }
+        }
+
+        // Exact match first, then unique prefix (same as hapi-ping-peer / resolveSession).
+        const matches = this.matchSessions(sessionId)
+        if (matches.length === 1) {
+            const session = matches[0]!
+            const identity = deriveIdentity(session)
+            return {
+                ok: true,
+                sessionId: session.id,
+                sessionName: identity.name,
+                project: identity.project,
+                namespace: session.namespace || 'default'
+            }
+        }
+        if (matches.length > 1) {
+            return {
+                ok: false,
+                sessionId,
+                error: `Ambiguous session prefix "${sessionId}" (${matches.length} matches) — nothing relayed.`
+            }
+        }
+        return {
+            ok: false,
+            sessionId,
+            error: `No session matching "${sessionId}" — nothing relayed.`
+        }
+    }
+
     private buildTombstone(action: string, statusAfter: string, item: StoredInboxItem): string {
         const verb =
             action === 'done'
@@ -560,7 +786,72 @@ export class OverseerEntity {
         return this.events.insert(eventInput)
     }
 
+    /**
+     * Fill in overseerText on an existing operator-only convo_turn row (retry /
+     * dedup path — avoids inserting a second operator line).
+     */
+    completeConvoTurn(input: {
+        eventId: number
+        overseerText: string
+        toolCalls?: Array<{ tool: OverseerToolName; argsSummary?: string }>
+    }): StoredSystemEvent | null {
+        const existing = this.events.getById(input.eventId)
+        if (!existing || existing.eventType !== OVERSEER_CONVO_TURN_EVENT_TYPE) return null
+        let operatorText = ''
+        try {
+            const parsed: unknown = existing.payloadJson ? JSON.parse(existing.payloadJson) : null
+            if (isObjectRecord(parsed) && typeof parsed.operatorText === 'string') {
+                operatorText = parsed.operatorText
+            }
+        } catch {
+            return null
+        }
+        const overseerText = input.overseerText.trim()
+        const toolCalls = input.toolCalls ?? []
+        const payloadJson = JSON.stringify({ operatorText, overseerText, toolCalls })
+        const summary = operatorText.length > 0
+            ? `Operator: ${operatorText.slice(0, 160)}`
+            : 'Overseer conversation turn'
+        return this.events.updatePayload(input.eventId, payloadJson, summary)
+    }
+
     // --- internals -----------------------------------------------------------
+
+    /**
+     * Fail-closed for cross-namespace: a related session must resolve uniquely
+     * inside this entity's injected session list (already namespace-scoped).
+     * Rows with no relatedSessionId stay visible until #107 adds a namespace
+     * column (convo_turns / orphan inbox rows are hub-global today).
+     */
+    private itemInCallerScope(item: { relatedSessionId: string | null }): boolean {
+        const related = item.relatedSessionId?.trim()
+        if (!related) return true
+        return this.matchSessions(related).length === 1
+    }
+
+    private eventInCallerScope(event: { relatedSessionId: string | null }): boolean {
+        const related = event.relatedSessionId?.trim()
+        if (!related) return true
+        return this.matchSessions(related).length === 1
+    }
+
+    /**
+     * Exact session id, else unique prefix (hapi-ping-peer / loomux / pi pattern).
+     * Ambiguous or unknown → undefined. Never silently picks among collisions.
+     */
+    private resolveSession(sessionId: string): Session | undefined {
+        const matches = this.matchSessions(sessionId)
+        return matches.length === 1 ? matches[0] : undefined
+    }
+
+    /** Exact hit as a singleton, else all prefix matches (may be 0/1/many). */
+    private matchSessions(sessionId: string): Session[] {
+        const trimmed = sessionId.trim()
+        if (!trimmed) return []
+        const exact = this.getSession(trimmed)
+        if (exact) return [exact]
+        return this.getSessions().filter((s) => s.id.startsWith(trimmed))
+    }
 
     private parseEventPayload(payloadJson: string | null): {
         notify_summary?: unknown

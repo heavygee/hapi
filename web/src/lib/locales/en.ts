@@ -69,6 +69,7 @@ export default {
   'sessions.empty.startSession': 'Start a session',
   'sessions.empty.browse': 'Browse workspace',
   'sessions.search.placeholder': 'Search sessions…',
+  'sessions.count': '{n} sessions · {m} projects',
   'sessions.search.open': 'Search sessions',
   'sessions.search.clear': 'Clear search',
   'sessions.search.noResults': 'No sessions match your filters.',
@@ -541,6 +542,7 @@ export default {
   'chat.switchRemote': 'Switch to remote mode',
   'chat.sendError.fallback': "Couldn't send your message. Edit and try again.",
   'chat.sendError.sessionInactive': 'This session is archived. Reopen it to send your message.',
+  'chat.sendError.aborted': 'Send aborted. Your draft was restored.',
   'chat.sendError.sessionInactive.action': 'Reopen',
 
   // Codex review

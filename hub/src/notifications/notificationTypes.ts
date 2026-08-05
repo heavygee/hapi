@@ -21,6 +21,15 @@ export type ModelErrorNotification = {
     atTs: number                          // metadata.lastModelError.atTs, used for dedup
 }
 
+/**
+ * Outcome of a model-error channel send. Used by NotificationHub to decide
+ * whether to keep or roll back the per-session watermark:
+ * - delivered: at least one destination accepted the ping
+ * - unavailable: channel had nothing to do (no subs, deferred to native, inactive)
+ * - failed: channel tried and every destination failed
+ */
+export type ModelErrorSendOutcome = 'delivered' | 'unavailable' | 'failed'
+
 export type NotificationChannel = {
     sendReady: (session: Session, ctx?: NotificationSendContext) => Promise<void>
     sendPermissionRequest: (session: Session, ctx?: NotificationSendContext) => Promise<void>

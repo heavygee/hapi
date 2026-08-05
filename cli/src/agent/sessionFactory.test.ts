@@ -154,19 +154,12 @@ describe('bootstrapExistingSession', () => {
                 machineId: 'machine-1',
                 startedAt: 123,
             },
-            ptyResumeAttempt: {
-                state: 'quarantined',
-                machineId: 'machine-1',
-                startedAt: 456,
-            },
             summary: {
                 text: 'resume me',
                 updatedAt: 100
             },
             tools: ['read_file'],
             slashCommands: ['/compact'],
-            conversationHistoryPoints: { 'local-user-1': true },
-            conversationHistoryEntryIds: { 'local-user-1': 'pi-entry-1' },
             capabilities: {
                 terminal: true,
                 conversationHistory: { forkCurrent: true }
@@ -200,19 +193,12 @@ describe('bootstrapExistingSession', () => {
                 machineId: 'machine-1',
                 startedAt: 123,
             },
-            ptyResumeAttempt: {
-                state: 'quarantined',
-                machineId: 'machine-1',
-                startedAt: 456,
-            },
             summary: {
                 text: 'resume me',
                 updatedAt: 100
             },
             tools: ['read_file'],
             slashCommands: ['/compact'],
-            conversationHistoryPoints: { 'local-user-1': true },
-            conversationHistoryEntryIds: { 'local-user-1': 'pi-entry-1' },
             capabilities: {
                 terminal: true,
                 conversationHistory: { forkCurrent: true }
@@ -222,15 +208,13 @@ describe('bootstrapExistingSession', () => {
         const updateHandler = sessionClient.updateMetadata.mock.calls[0][0]
         expect(updateHandler(session.metadata)).toEqual(expect.objectContaining({
             codexSessionId: 'codex-thread-1',
-            grokSessionId: 'grok-thread-1',
-            conversationHistoryEntryIds: { 'local-user-1': 'pi-entry-1' }
+            grokSessionId: 'grok-thread-1'
         }))
         expect(notifyRunnerSessionStartedMock).toHaveBeenCalledWith(
             'hapi-session-1',
             expect.objectContaining({
                 codexSessionId: 'codex-thread-1',
-                grokSessionId: 'grok-thread-1',
-                conversationHistoryEntryIds: { 'local-user-1': 'pi-entry-1' }
+                grokSessionId: 'grok-thread-1'
             })
         )
     })

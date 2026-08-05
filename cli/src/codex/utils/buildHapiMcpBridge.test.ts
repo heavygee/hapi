@@ -74,6 +74,8 @@ describe('buildHapiMcpBridge skill lookup config', () => {
             'change_title,link_pr,display_image,display_video,ping_peer,inspect_peer,skill_lookup'
         ])
         expect(bridge.mcpServers.hapi.tools).toEqual({
+            display_image: { approval_mode: 'prompt' },
+            display_video: { approval_mode: 'prompt' },
             change_title: { approval_mode: 'approve' },
             link_pr: { approval_mode: 'approve' },
             skill_lookup: { approval_mode: 'approve' }
@@ -85,6 +87,8 @@ describe('buildHapiMcpBridge skill lookup config', () => {
 
         expect(harness.cliArgs.at(-1)).toBe('change_title,link_pr,display_image,display_video,ping_peer,inspect_peer')
         expect(bridge.mcpServers.hapi.tools).toEqual({
+            display_image: { approval_mode: 'prompt' },
+            display_video: { approval_mode: 'prompt' },
             change_title: { approval_mode: 'approve' },
             link_pr: { approval_mode: 'approve' }
         })

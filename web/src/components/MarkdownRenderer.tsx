@@ -73,8 +73,8 @@ function StandaloneMarkdownContent(props: MarkdownRendererProps) {
 
     const components = useMemo<Components>(() => ({
         ...(componentsRest as Components),
-        pre: StandalonePre,
-        code: StandaloneCode,
+        pre: StandalonePre as NonNullable<Components['pre']>,
+        code: StandaloneCode as NonNullable<Components['code']>,
     }), [componentsRest])
 
     return (

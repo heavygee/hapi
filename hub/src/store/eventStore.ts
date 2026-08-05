@@ -9,6 +9,7 @@ import {
     queryEvents,
     queryLatestWorkerStatusPerSession,
     repointSessionEvents,
+    updateSystemEventPayload,
     type InsertSystemEventInput,
     type ListSystemEventsOptions,
     type QueryEventsOptions,
@@ -39,6 +40,10 @@ export class EventStore {
 
     getById(id: number): StoredSystemEvent | null {
         return getSystemEventById(this.db, id)
+    }
+
+    updatePayload(id: number, payloadJson: string, summary?: string): StoredSystemEvent | null {
+        return updateSystemEventPayload(this.db, id, payloadJson, summary)
     }
 
     getByIdempotencyKey(idempotencyKey: string): StoredSystemEvent | null {

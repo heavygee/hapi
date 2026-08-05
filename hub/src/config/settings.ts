@@ -74,3 +74,38 @@ export async function writeSettings(settingsFile: string, settings: Settings): P
     await writeFile(tmpFile, JSON.stringify(settings, null, 2))
     await rename(tmpFile, settingsFile)
 }
+
+/** Process-wide queue so concurrent RMW writers share one settings.json + .tmp. */
+let settingsWriteTail: Promise<void> = Promise.resolve()
+
+/**
+ * Read-modify-write settings under a process-wide serial queue.
+ * Use this for any runtime writer (fleet policy, relay auth, …).
+ */
+export async function updateSettingsFile(
+    settingsFile: string,
+    mutate: (settings: Settings) => void,
+): Promise<Settings> {
+    const task = settingsWriteTail.then(async () => {
+        const settings = await readSettings(settingsFile)
+        if (settings === null) {
+            throw new Error(
+                `Cannot read ${settingsFile}; fix or remove it before updating settings`,
+            )
+        }
+        mutate(settings)
+        await writeSettings(settingsFile, settings)
+        return settings
+    })
+    // Keep the chain alive after failures so later writers still serialize.
+    settingsWriteTail = task.then(
+        () => undefined,
+        () => undefined,
+    )
+    return task
+}
+
+/** Test-only: reset the settings write queue between suites. */
+export function resetSettingsWriteQueueForTests(): void {
+    settingsWriteTail = Promise.resolve()
+}

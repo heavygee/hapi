@@ -3,6 +3,7 @@ import type { Session, SyncEvent, SyncEventListener, SyncEngine } from '../sync/
 import type { SessionEndReason } from '@hapi/protocol'
 import type {
     ModelErrorNotification,
+    ModelErrorSendOutcome,
     NotificationChannel,
     TaskNotification
 } from './notificationTypes'
