@@ -91,6 +91,11 @@ export interface TranscriptionCredentialStatus {
         modelEditable: boolean
         apiKey: MaskedCredentialStatus
     }
+    voiceBackends: {
+        elevenlabs: MaskedCredentialStatus
+        geminiLive: MaskedCredentialStatus
+        qwenRealtime: MaskedCredentialStatus
+    }
 }
 
 export interface TranscriptionCredentialsUpdate {
@@ -103,6 +108,8 @@ export interface TranscriptionCredentialsUpdate {
         model?: string | null
         apiKey?: string | null
     }
+    geminiLive?: string | null
+    qwenRealtime?: string | null
 }
 
 type ApiClientOptions = {
