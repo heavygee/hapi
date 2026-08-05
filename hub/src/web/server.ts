@@ -242,7 +242,9 @@ function createWebApp(options: {
     const corsMiddleware = cors({
         origin: corsOriginOption,
         allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-        allowHeaders: ['authorization', 'content-type']
+        // last-event-id: browsers attach it to EventSource reconnects for
+        // SSE replay; allow it in case a browser preflights the request.
+        allowHeaders: ['authorization', 'content-type', 'last-event-id']
     })
     app.use('/api/*', corsMiddleware)
     app.use('/cli/*', corsMiddleware)
@@ -285,7 +287,7 @@ function createWebApp(options: {
     }))
     app.route('/api', createPushRoutes(options.store, options.vapidPublicKey))
     app.route('/api', createDevicesRoutes(options.store))
-    app.route('/api', createVoiceRoutes())
+    app.route('/api', createVoiceRoutes({ dataDir: configuration.dataDir }))
     app.route('/api', createSystemEventsRoutes(options.getSyncEngine))
     app.route('/api', createInboxItemsRoutes(options.getSyncEngine))
     app.route('/api', createOverseerRoutes(options.getSyncEngine))
