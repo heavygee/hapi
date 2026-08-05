@@ -1,11 +1,70 @@
 import type { Machine } from '@/types/api'
+import { cliBinaryUpdatedOnDisk, MACHINE_CAPABILITIES } from '@hapi/protocol/runnerCapabilities'
+import {
+    DEFAULT_FLEET_UPGRADE_POLICY,
+    machineTrailsUpgradeOffer,
+    type FleetUpgradePolicy,
+    type HubUpgradeOffer,
+} from '@hapi/protocol/upgradeChannel'
 import { useTranslation } from '@/lib/use-translation'
 import { SelectControl } from '@/components/ui/select-control'
+import { useAppContext } from '@/lib/app-context'
+import { useUpgradeInfo } from '@/hooks/queries/useUpgradeInfo'
 
 function getMachineTitle(machine: Machine): string {
     if (machine.metadata?.displayName) return machine.metadata.displayName
     if (machine.metadata?.host) return machine.metadata.host
     return machine.id.slice(0, 8)
+}
+
+/** Exported for tests — same predicate family as RunnerVersionSkewBanner. */
+export function machineNeedsUpdateLabel(
+    machine: Machine,
+    offer: HubUpgradeOffer | null | undefined,
+    policy: FleetUpgradePolicy,
+): boolean {
+    if (policy === 'silent' || !offer) {
+        return false
+    }
+    if (!machine.active) {
+        return false
+    }
+    const handoffDisabled = machine.metadata?.versionHandoffDisabled === true
+    const trails = machineTrailsUpgradeOffer(
+        offer,
+        machine.metadata?.happyCliVersion,
+        machine.metadata?.capabilities,
+        machine.metadata?.cliArtifactGeneration,
+        { ignoreGenerationDrift: handoffDisabled },
+    ) || (handoffDisabled && cliBinaryUpdatedOnDisk(machine.metadata))
+    if (!trails) {
+        return false
+    }
+    // Under auto, only label hosts that need operator action (hub cannot RPC).
+    if (policy === 'auto') {
+        if (handoffDisabled) {
+            return true
+        }
+        return !(machine.metadata?.capabilities ?? []).includes(MACHINE_CAPABILITIES.RunnerSelfUpgrade)
+    }
+    return true
+}
+
+export function getMachineOptionLabel(
+    machine: Machine,
+    offer: HubUpgradeOffer | null | undefined,
+    policy: FleetUpgradePolicy,
+    updateRequiredLabel: string,
+): string {
+    const title = getMachineTitle(machine)
+    const platform = machine.metadata?.platform ? ` (${machine.metadata.platform})` : ''
+    const version = machine.metadata?.happyCliVersion
+        ? ` · CLI ${machine.metadata.happyCliVersion}`
+        : ''
+    const skew = machineNeedsUpdateLabel(machine, offer, policy)
+        ? ` · ${updateRequiredLabel}`
+        : ''
+    return `${title}${platform}${version}${skew}`
 }
 
 export function MachineSelector(props: {
@@ -16,6 +75,10 @@ export function MachineSelector(props: {
     onChange: (machineId: string) => void
 }) {
     const { t } = useTranslation()
+    const { api } = useAppContext()
+    const { info } = useUpgradeInfo(api)
+    const offer = info?.offer ?? null
+    const policy: FleetUpgradePolicy = info?.policy ?? DEFAULT_FLEET_UPGRADE_POLICY
 
     return (
         <div className="flex flex-col gap-1.5 px-3 py-3">
@@ -36,8 +99,7 @@ export function MachineSelector(props: {
                 )}
                 {props.machines.map((m) => (
                     <option key={m.id} value={m.id}>
-                        {getMachineTitle(m)}
-                        {m.metadata?.platform ? ` (${m.metadata.platform})` : ''}
+                        {getMachineOptionLabel(m, offer, policy, t('runner.skew.updateRequired'))}
                     </option>
                 ))}
             </SelectControl>

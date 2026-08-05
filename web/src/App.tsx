@@ -31,6 +31,7 @@ import { PwaUpdateBanner, PwaUpdateBannerWithStatusOffset } from '@/components/P
 import { SyncingBanner } from '@/components/SyncingBanner'
 import { ReconnectingBanner } from '@/components/ReconnectingBanner'
 import { VoiceErrorBanner } from '@/components/VoiceErrorBanner'
+import { RunnerVersionSkewBanner } from '@/components/RunnerVersionSkewBanner'
 import { LoadingState } from '@/components/LoadingState'
 import { ToastContainer } from '@/components/ToastContainer'
 import { PwaUpdateProvider } from '@/lib/pwa-update-context'
@@ -329,6 +330,33 @@ function AppInner() {
             }
         }
 
+        if (normalizedTitle === 'Runner upgraded') {
+            const host = normalizedBody.replace(/\s+is now on the hub version$/i, '').trim()
+            return {
+                title: t('toast.runnerUpgrade.success.title'),
+                body: host
+                    ? t('toast.runnerUpgrade.success.body', { host })
+                    : normalizedBody,
+            }
+        }
+
+        if (normalizedTitle === 'Runner upgrade failed') {
+            const match = normalizedBody.match(/^(.+?):\s*(.+)$/)
+            if (match) {
+                return {
+                    title: t('toast.runnerUpgrade.failed.title'),
+                    body: t('toast.runnerUpgrade.failed.body', {
+                        host: match[1]?.trim() ?? '',
+                        message: match[2]?.trim() ?? '',
+                    }),
+                }
+            }
+            return {
+                title: t('toast.runnerUpgrade.failed.title'),
+                body: normalizedBody,
+            }
+        }
+
         return { title, body }
     }, [t])
 
@@ -480,6 +508,7 @@ function AppInner() {
                     isHubConnected={globalSubscriptionId !== null}
                     isReconnecting={showReconnectingBanner}
                 />
+                <RunnerVersionSkewBanner />
                 <div className="h-full min-h-0 flex flex-col">
                     <Outlet />
                 </div>
