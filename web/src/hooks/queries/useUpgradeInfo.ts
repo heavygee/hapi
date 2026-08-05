@@ -21,7 +21,11 @@ export function useUpgradeInfo(api: ApiClient | null, enabled = true): {
             return await api.getUpgradeInfo()
         },
         enabled: Boolean(api && enabled),
+        // staleTime alone does not refetch a mounted query. Other open clients
+        // (phone/desktop) would keep the old silent/alert/auto policy until
+        // remount; poll so a PUT /api/upgrade/policy from one client converges.
         staleTime: 30_000,
+        refetchInterval: 30_000,
     })
     return { info: query.data ?? null, isLoading: query.isLoading }
 }
