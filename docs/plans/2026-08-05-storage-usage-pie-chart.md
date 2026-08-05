@@ -8,76 +8,44 @@
 
 **Tech Stack:** React 19, Vitest + Testing Library, existing `--app-*` theme tokens, `formatFileSize`.
 
-**Issue:** https://github.com/tiann/hapi/issues/1382
+**Issue:** https://github.com/tiann/hapi/issues/1382  
+**PR:** https://github.com/tiann/hapi/pull/1383  
+**Worktree:** `~/coding/hapi/worktrees/storage-pie` @ `feat/storage-usage-pie-chart`
 
-**Worktree:** `~/coding/hapi/worktrees/storage-pie` @ `feat/storage-usage-pie-chart` from `upstream/main`
+**Status (2026-08-05):** Implemented + peer-stack dogfood green. Soup promote blocked by remat-hold (`feat/agent-session-import-picker`).
 
 ---
 
 ### Task 1: Worktree
 
-**Step 1:** `hapi-worktree-create storage-pie --branch feat/storage-usage-pie-chart` (base `upstream/main`)
-
-**Step 2:** Confirm `git merge-base HEAD upstream/main` equals `upstream/main`
+- [x] `hapi-worktree-create storage-pie --branch feat/storage-usage-pie-chart`
 
 ---
 
 ### Task 2: Pure geometry + slice helpers (TDD)
 
-**Files:**
-- Create: `web/src/components/settings/storageUsagePie.ts`
-- Create: `web/src/components/settings/storageUsagePie.test.ts`
-
-**Step 1:** Write failing tests for:
-- building slices from `{databaseBytes, walBytes, shmBytes}` (drop zeros)
-- percent of total (round sensibly; 0 total → empty)
-- arc path / angles for known inputs (e.g. equal thirds)
-
-**Step 2:** Implement helpers until green
+- [x] `web/src/components/settings/storageUsagePie.ts` + tests
 
 ---
 
 ### Task 3: Interactive React component
 
-**Files:**
-- Create: `web/src/components/settings/StorageUsagePie.tsx`
-- Create: `web/src/components/settings/StorageUsagePie.test.tsx`
-
-**Behavior:**
-- Donut with center label (active slice name, size, %)
-- Pointer enter / click / keyboard (legend buttons or radiogroup) sets active slice
-- Active wedge slightly expanded (`outerRadius + 6`)
-- Colors from CSS vars / muted theme palette (not purple-on-white dashboard defaults)
-- `role="img"` + accessible name; legend as buttons with `aria-pressed`
-
-**Step 1:** Failing interaction test (click legend → center text updates)
-
-**Step 2:** Implement component
+- [x] `StorageUsagePie.tsx` + interaction test
 
 ---
 
 ### Task 4: Wire into Settings Storage page + i18n
 
-**Files:**
-- Modify: `web/src/routes/settings/storage.tsx`
-- Modify: `web/src/routes/settings/storage.test.tsx`
-- Modify: `web/src/lib/locales/en.ts`, `zh-CN.ts`
-
-**Step 1:** Render pie below the existing `SettingsSection` when `query.data` present
-
-**Step 2:** Add strings: chart title, empty state, percent suffix if needed
-
-**Step 3:** Extend page test to assert pie landmark / chart title present after load
+- [x] `storage.tsx` + en/zh-CN strings
 
 ---
 
 ### Task 5: Verify + dogfood + PR
 
-**Step 1:** In worktree: `bun install` then `bun typecheck` and `cd web && bun run test`
-
-**Step 2:** Peer stack Playwright smoke (existence PNG + interaction clip for slice select) OR soup promote for `:3006` dogfood per lifecycle
-
-**Step 3:** After operator dogfood OK: push branch, open upstream PR with `Fixes #1382`
+- [x] typecheck + unit tests
+- [x] Peer stack Playwright (`e2e/peer/1382-storage-usage-pie.spec.ts`) + PNG/webm
+- [x] Upstream PR #1383
+- [ ] Soup promote when remat-hold clears
 
 ---
 
