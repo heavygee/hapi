@@ -259,12 +259,13 @@ for i in $(seq 0 $((layer_count - 1))); do
     fi
 
     if [[ "$REMAT_MODE" == "tip-forward" ]]; then
+        # Refuse absorb ≠ abort remat. Tip already carries prior union content;
+        # skip fat/moved tips so upstream tip-forward can still promote (WAVE CLEAR).
+        # Layer owner must re-thin; Meta may HAPI_REMAT_ABSORB_FAT=1 to force.
         if ! driver_remat_layer_gate "$REMAT" HEAD "$merge_ref"; then
-            driver_remat_fail_leave_wip "$REMAT" "$WIP_BRANCH" "$DRIVER_BRANCH" "$PREV_TIP" "$merge_ref"
-            driver_remat_hold_set \
-                "fat layer tip blocked tip-forward: $merge_ref" \
-                "$REMAT" "$PREV_TIP" "$WIP_BRANCH" "$merge_ref"
-            exit 1
+            echo "Layer $((i + 1))/$layer_count: SKIP $merge_ref (fat tip; tip-forward refuse absorb)"
+            echo "       Re-thin onto current soup tip, then remat again to refresh this layer."
+            continue
         fi
     fi
 

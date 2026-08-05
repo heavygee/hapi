@@ -365,7 +365,7 @@ Escape hatch for disaster / recipe audit: `HAPI_REMAT_MODE=full-recipe` (old beh
 | Failure | Live `driver/integration` | Where to look |
 |---|---|---|
 | Merge conflict mid-stack | **Unchanged** (pre-remat SHA) | Remat worktree stays conflicted — resolve there, or `git merge --abort` |
-| Fat layer tip blocked (tip-forward gate) | **Unchanged** | Layer owner re-thins onto tip/upstream; Meta override `HAPI_REMAT_ABSORB_FAT=1` |
+| Fat layer tip skipped (tip-forward gate) | Remat continues (layer not absorbed) | Layer owner re-thins onto tip/upstream; Meta override `HAPI_REMAT_ABSORB_FAT=1` to force absorb |
 | Soup-heal apply conflict (`apply -3` base drift) / router-dedupe heal error | **Unchanged** (pre-remat SHA) | Tip-forward: warn-skip. Full-recipe: remat WT left for owner (`heal_fail`) |
 | Post-promote typecheck / tests / dist verify | **Restored** to pre-remat SHA | Re-run after fixing the gate |
 
