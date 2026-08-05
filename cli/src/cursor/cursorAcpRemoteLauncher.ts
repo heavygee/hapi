@@ -104,6 +104,11 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
      * in catch.
      */
     private pendingTextFailure: CursorAgentStreamFailure | null = null;
+    /**
+     * Typed stderr failure deferred while prompt is in flight so RPC rejection
+     * keeps precedence (RPC → stderr → text). Flushed on settle like text.
+     */
+    private pendingStderrFailure: CursorAgentStreamFailure | null = null;
     /** True while backend.prompt() is in flight — lets stderr model_not_found
      *  surface as modelError during a turn without breaking setup/load remap. */
     private promptInFlight = false;
@@ -665,13 +670,13 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             this.userAbortRequested = false;
             this.lastAssistantText = null;
             this.pendingTextFailure = null;
+            this.pendingStderrFailure = null;
             this.promptInFlight = true;
             session.client.updateAgentState?.((state) => ({ ...state, steeringActive: true }));
             this.activePromptModeHash = batch.hash;
 
             this.promptInFlight = true;
             try {
-                this.userAbortRequested = false;
                 for (let retryAttempt = 0; retryAttempt <= CURSOR_AUTO_RETRY_LIMIT; retryAttempt += 1) {
                     this.pendingRetryableError = null;
                     this.pendingRetryableFromStderr = false;
@@ -688,9 +693,11 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                             this.pendingRetryableError = null;
                         }
                         if (!this.pendingRetryableError) {
-                            if (this.pendingTextFailure && !this.turnHasModelError) {
-                                this.recordModelError(this.pendingTextFailure);
+                            const settled = this.pendingStderrFailure ?? this.pendingTextFailure;
+                            if (settled && !this.turnHasModelError) {
+                                this.recordModelError(settled);
                             }
+                            this.pendingStderrFailure = null;
                             this.pendingTextFailure = null;
                             void backend.refreshSessionInfo(acpSessionId, session.path);
                             break;
@@ -700,7 +707,10 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                         if (this.userAbortRequested) break;
                         if (!isRetryableCursorError(error)) {
                             this.surfacePromptFailure(error instanceof Error ? error.message : String(error));
-                            const failure = classifyAcpRpcRejection(error) ?? this.pendingTextFailure;
+                            const failure = classifyAcpRpcRejection(error)
+                                ?? this.pendingStderrFailure
+                                ?? this.pendingTextFailure;
+                            this.pendingStderrFailure = null;
                             this.pendingTextFailure = null;
                             if (failure) this.recordModelError(failure);
                             break;
@@ -719,7 +729,8 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                     this.surfacePromptFailure(`Cursor Agent failed after ${CURSOR_AUTO_RETRY_LIMIT} retries.`);
                     const exhaustedFailure = classifyAcpRpcRejection(
                         this.pendingRetryableError ?? 'Cursor Agent failed after retries'
-                    ) ?? this.pendingTextFailure;
+                    ) ?? this.pendingStderrFailure ?? this.pendingTextFailure;
+                    this.pendingStderrFailure = null;
                     this.pendingTextFailure = null;
                     if (exhaustedFailure) this.recordModelError(exhaustedFailure);
                 }
@@ -754,6 +765,7 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                 this.pendingRetryableFromStderr = false;
                 this.pendingInlineRetryableError = false;
                 this.attemptProducedToolActivity = false;
+                this.pendingStderrFailure = null;
                 this.pendingTextFailure = null;
                 session.onThinkingChange(false);
                 await this.permissionAdapter?.cancelAll('Prompt finished');
@@ -837,6 +849,8 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             const failure = mapAcpStderrToFailure(error);
             if (error.type === 'model_not_found' && extractCannotUseThisModelMessage(hint)) {
                 if (this.promptInFlight && failure) {
+                    this.pendingStderrFailure ??= failure;
+                } else if (failure && !this.promptInFlight) {
                     this.recordModelError(failure);
                 }
                 return;
@@ -851,8 +865,13 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             // without text matching. Generic `unknown` stderr stays status-only —
             // ACP treats stderr as logging, and the transport labels any
             // "error"/"failed"/"exception" line as unknown.
+            // While prompt is in flight, defer so RPC rejection keeps precedence.
             if (failure) {
-                this.recordModelError(failure);
+                if (this.promptInFlight) {
+                    this.pendingStderrFailure ??= failure;
+                } else {
+                    this.recordModelError(failure);
+                }
             }
         });
     }
@@ -1015,6 +1034,7 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         }
         this.turnHasModelError = true;
         this.pendingTextFailure = null;
+        this.pendingStderrFailure = null;
 
         // Same-message case: Cursor often appends `Error: T: ...` onto the
         // assistant block that already claimed "Done." — lastAssistantText is
