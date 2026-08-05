@@ -37,6 +37,12 @@ vi.mock('@tanstack/react-router', () => ({
     useNavigate: () => navigate,
 }))
 
+// About still mounts Overseer debug panels that call useAppContext; this suite only
+// asserts metadata, so stub the panels instead of wiring a full AppContext.
+vi.mock('@/components/settings/EventsDebugControls', () => ({ EventsDebugControls: () => null }))
+vi.mock('@/components/settings/InboxDebugControls', () => ({ InboxDebugControls: () => null }))
+vi.mock('@/components/settings/OverseerChatDebugControls', () => ({ OverseerChatDebugControls: () => null }))
+
 vi.mock('@hapi/protocol', () => ({ PROTOCOL_VERSION: 1 }))
 
 vi.mock('@/hooks/useTheme', () => ({

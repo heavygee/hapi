@@ -47,6 +47,20 @@ function projectInboxItem(item: unknown): Record<string, unknown> {
     return { id: o.id, what: o.title, status: o.status, priority: o.priority }
 }
 
+/** Disposition list row → the predicate keys + as-seen title (the rest is one query away). */
+function projectDispositionRow(row: unknown): Record<string, unknown> {
+    const o = isObj(row) ? row : {}
+    return {
+        itemId: o.itemId,
+        action: o.action,
+        category: o.category,
+        project: o.project,
+        eventType: o.eventType,
+        what: truncate(o.title, 80),
+        feedback: truncate(o.feedback, 120)
+    }
+}
+
 function len(value: unknown): number | undefined {
     return Array.isArray(value) ? value.length : undefined
 }
@@ -148,6 +162,13 @@ export function projectToolResultForBrain(
     }
     if (tool === 'query_open_loops' && isObj(result) && Array.isArray(result.openLoops)) {
         return { counts: result.counts, openLoops: result.openLoops.map(projectOpenLoop) }
+    }
+    if (tool === 'query_dispositions' && isObj(result)) {
+        // cluster mode is already tiny (key tuples + counts); only thin list rows.
+        if (Array.isArray(result.rows)) {
+            return { mode: result.mode, total: result.total, rows: result.rows.map(projectDispositionRow) }
+        }
+        return result
     }
     if (tool === 'get_session_state' && isObj(result) && 'state' in result) {
         return { state: result.state == null ? null : projectSessionState(result.state) }

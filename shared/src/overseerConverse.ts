@@ -19,6 +19,7 @@ import {
     OVERSEER_WORKER_STATES,
     type OverseerToolName
 } from './overseerEntity'
+import { DISPOSITION_PREDICATE_COLUMNS, OVERSEER_DISPOSITION_ACTIONS } from './overseerInbox'
 
 export type OverseerConverseRole = 'operator' | 'overseer'
 
@@ -77,7 +78,7 @@ export type OverseerConverseResponse = {
 }
 
 // ---------------------------------------------------------------------------
-// OpenAI-compatible function-tool schemas for the 7 read-only tools
+// OpenAI-compatible function-tool schemas for the Overseer tool catalog
 // ---------------------------------------------------------------------------
 
 export type OverseerOpenAiTool = {
@@ -153,10 +154,31 @@ const OVERSEER_TOOL_PARAMS: Record<OverseerToolName, JsonSchema> = {
         project: { type: 'string' },
         limit: { type: 'integer', minimum: 1, maximum: 100 },
         detail: detailProp
-    })
+    }),
+    query_dispositions: obj({
+        action: { type: 'string', enum: [...OVERSEER_DISPOSITION_ACTIONS], description: 'Filter to one disposition action.' },
+        sourceKind: { type: 'string' },
+        sourceRef: { type: 'string', description: 'Filter by frozen source_ref predicate.' },
+        eventType: { type: 'string' },
+        category: { type: 'string' },
+        project: { type: 'string' },
+        artifactKind: { type: 'string', description: 'Filter by frozen artifact_kind predicate (e.g. github_pr).' },
+        repo: { type: 'string' },
+        sinceTs: { type: 'integer', minimum: 0, description: 'Epoch ms lower bound on when the disposition was recorded.' },
+        groupBy: { type: 'array', items: { type: 'string', enum: [...DISPOSITION_PREDICATE_COLUMNS] }, description: 'Switch to cluster mode: group dispositions by these predicate columns.' },
+        minCount: { type: 'integer', minimum: 1, description: 'Cluster mode only: drop clusters smaller than this.' },
+        limit: { type: 'integer', minimum: 1, maximum: 200 },
+        detail: detailProp
+    }),
+    record_disposition: obj({
+        itemId: { type: 'integer', minimum: 1, description: 'Inbox item id to dispose.' },
+        action: { type: 'string', enum: [...OVERSEER_DISPOSITION_ACTIONS], description: 'done=resolve, dismiss=tombstone, snooze (needs snoozedUntil), open=reopen.' },
+        feedback: { type: 'string', description: 'Optional operator note / learning label to freeze with the disposition.' },
+        snoozedUntil: { type: 'integer', minimum: 1, description: 'Required for snooze: epoch ms to sleep the item until.' }
+    }, ['itemId', 'action'])
 }
 
-/** The 7 read-only tools as an OpenAI-compatible `tools` array for the brain. */
+/** The Overseer tool catalog (read-only + the single disposition write) as an OpenAI `tools` array. */
 export function buildOverseerOpenAiTools(): OverseerOpenAiTool[] {
     return OVERSEER_TOOL_CATALOG.map((entry) => ({
         type: 'function',
