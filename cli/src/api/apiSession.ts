@@ -50,6 +50,7 @@ const SYSTEM_INJECTION_PREFIXES = [
     '<command-name>',
     '<local-command-caveat>',
     '<system-reminder>',
+    '<render-issue>',
 ]
 
 // Cap for the runner-side in-memory agent-terminal screen buffer (matches the
