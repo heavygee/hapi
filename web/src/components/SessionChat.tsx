@@ -72,6 +72,7 @@ import type { ScratchlistEntry } from '@/lib/scratchlist'
 import { isHubScratchlistAttachmentPath } from '@hapi/protocol'
 import { useTranslation } from '@/lib/use-translation'
 import { SessionHeader } from '@/components/SessionHeader'
+import { SessionFlowPanel } from '@/components/SessionFlowPanel'
 import { CursorMigrationBanner } from '@/components/CursorMigrationBanner'
 import { TeamPanel } from '@/components/TeamPanel'
 import { SessionStatusPanel } from '@/components/SessionStatusPanel'
@@ -506,6 +507,7 @@ function SessionChatInner(props: SessionChatProps) {
     const [outlineOpen, setOutlineOpen] = useState(props.initialOutlineOpen ?? false)
     const [terminalVisible, setTerminalVisible] = useState(false)
     const [sessionLogOpen, setSessionLogOpen] = useState(props.initialSessionLogOpen ?? false)
+    const [flowOpen, setFlowOpen] = useState(false)
     useEffect(() => {
         if (!props.initialOutlineOpen) {
             return
@@ -1151,6 +1153,7 @@ function SessionChatInner(props: SessionChatProps) {
         visibleGroupsRef.current = []
         setOutlineOpen(false)
         setSessionLogOpen(false)
+        setFlowOpen(false)
     }, [props.session.id])
 
     // Exclude user messages that haven't been invoked yet — those appear in the
@@ -1482,6 +1485,10 @@ function SessionChatInner(props: SessionChatProps) {
         if (open) setOutlineOpen(false)
     }, [])
 
+    const handleToggleFlow = useCallback(() => {
+        setFlowOpen((open) => !open)
+    }, [])
+
     const handleViewTerminal = useCallback(() => {
         navigate({
             to: '/sessions/$sessionId/terminal',
@@ -1632,6 +1639,8 @@ function SessionChatInner(props: SessionChatProps) {
                 terminalActive={terminalVisible}
                 onToggleSessionLog={handleToggleSessionLog}
                 sessionLogActive={sessionLogOpen}
+                onToggleFlow={handleToggleFlow}
+                flowActive={flowOpen}
                 api={props.api}
                 canReopen={inactiveCanResume}
                 reopenDisabledReason={props.reopenDisabledReason}
@@ -1659,6 +1668,12 @@ function SessionChatInner(props: SessionChatProps) {
                     {inactiveCanResume
                         ? t('session.inactive.autoResume')
                         : t('session.inactive.cannotResume')}
+                </div>
+            ) : null}
+
+            {flowOpen ? (
+                <div className="overflow-y-auto pt-3">
+                    <SessionFlowPanel blocks={reconciled.blocks} metadata={props.session.metadata ?? null} />
                 </div>
             ) : null}
 
