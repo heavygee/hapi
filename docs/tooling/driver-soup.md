@@ -541,7 +541,7 @@ Sources: `scripts/tooling/systemd/`, `scripts/tooling/sudoers/`. Unit names auto
 |---|---|
 | `hapi-hub.service.d/cutover-oos.conf` (+ `cutover-oos-hub-only.conf`) | `ConditionPathExists=!/etc/hapi/homelab-hub-forbidden` + `Restart=no`. Purpose: refuse to run a **second** hub on the old host. On primary that is "please stay down if a sentinel appears" + disable crash restart — opposite of Tier-1 `Restart=always`. |
 | `/etc/hapi/homelab-hub-forbidden` | Empty sentinel that **blocks hub activation**. Correct on secondary; on primary it is a landmine (one accidental `touch` = no hub). |
-| Runner `cutover-oos.conf` (`HAPI_API_URL=https://hapi.tail9944ee.ts.net`) | Points a **secondary** runner at the remote primary. Oos already uses `http://127.0.0.1:3006`. Copying the remote URL onto the hub host is self-talk over Tailscale for no reason. |
+| Runner `cutover-oos.conf` (`HAPI_API_URL=https://hapi-gc-oos.forest-adder.ts.net`) | Points a **secondary** runner at the remote primary. Oos already uses `http://127.0.0.1:3006`. Copying the remote URL onto the hub host is self-talk over Tailscale for no reason. |
 | `30-soup-artifact.conf` (`ExecStart=~/.hapi/bin/hapi-<semver>`) | Temporary **stock binary** bridge when secondary `driver/cli` is stale. **Not soup** (no manifest layers). Primary *is* the soup kitchen — this drop-in would drop every layer and recreate the 2026-07-23 version-skew / Pi RPC class of bug on the wrong host. Remove on secondary once `hapi-runner-from-active` + rematerialized soup is current. |
 
 **Falsification (before you "just port it"):**

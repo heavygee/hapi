@@ -2,7 +2,7 @@
 
 **Audience:** Agents working in `~/coding/hapi/**`, orchestrators moving dev between homelab, oos-linux, and fleet runners.
 
-**Hub is always oos-linux** (`https://hapi.tail9944ee.ts.net`). Every other machine keeps a **runner** + local Cursor install. Migration moves **a subtree of `~/coding`**, its **ACP stores**, and **hub DB path/machine parenting** — not "move Cursor to the hub host."
+**Hub is always oos-linux** (`https://hapi-gc-oos.forest-adder.ts.net`). Every other machine keeps a **runner** + local Cursor install. Migration moves **a subtree of `~/coding`**, its **ACP stores**, and **hub DB path/machine parenting** — not "move Cursor to the hub host."
 
 Orchestration scripts live in **`~/coding/lockhouse-janus`** (SSH, ZFS, tailnet). This doc is the **agent entry point** inside the HAPI fork so work in HAPI folders knows where to look.
 
