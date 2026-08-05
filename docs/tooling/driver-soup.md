@@ -356,12 +356,17 @@ Config: `config/remat-escalate.yaml`. Token: `~/.config/hapi/remat-owner.token` 
 
 ### Atomic remat — failed rebuild must not move the live tip (2026-07-30)
 
-`hapi-driver-rebuild` rematerializes on **`driver/integration-wip`** in **`~/coding/hapi/worktrees/driver-remat`**, then promotes `driver/integration` only after layers + soup-heals succeed. **`web/dist` already had `dist.prev` rollback; the git tip now matches that contract.** On failure the escalation hold is set (see above) so peers cannot pile on.
+`hapi-driver-rebuild` rematerializes on **`driver/integration-wip`** in **`~/coding/hapi/worktrees/driver-remat`**, then promotes `driver/integration` only after layers (+ heals) succeed. **`web/dist` already had `dist.prev` rollback; the git tip now matches that contract.** On failure the escalation hold is set (see above) so peers cannot pile on.
+
+**Default mode (2026-08-05): tip-forward.** WIP starts at the last green soup tip (`PREV_TIP`), merges `upstream/main` only if needed, **skips** layers already ancestors of the tip, and runs a **fat-tip gate** before absorbing non-ancestors (refuse >20 non-merge commits or >40 files vs merge-base unless `HAPI_REMAT_ABSORB_FAT=1`). Soup-heals that fail to apply are **warn-skipped** in tip-forward (they are mostly no-ops on a green tip); full-recipe still fail-closes.
+
+Escape hatch for disaster / recipe audit: `HAPI_REMAT_MODE=full-recipe` (old behavior: hard-reset WIP to manifest `base` / `upstream/main` and replay every layer). Probe: `docs/plans/2026-08-05-remat-tip-forward-probe.md`, `scripts/tooling/probe-remat-tip-forward.sh`.
 
 | Failure | Live `driver/integration` | Where to look |
 |---|---|---|
 | Merge conflict mid-stack | **Unchanged** (pre-remat SHA) | Remat worktree stays conflicted — resolve there, or `git merge --abort` |
-| Soup-heal apply conflict (`apply -3` base drift) / router-dedupe heal error | **Unchanged** (pre-remat SHA) | Remat worktree left for owner; the heal likely went redundant/obsolete against a layer — trim or drop it (`heal_fail` path) |
+| Fat layer tip blocked (tip-forward gate) | **Unchanged** | Layer owner re-thins onto tip/upstream; Meta override `HAPI_REMAT_ABSORB_FAT=1` |
+| Soup-heal apply conflict (`apply -3` base drift) / router-dedupe heal error | **Unchanged** (pre-remat SHA) | Tip-forward: warn-skip. Full-recipe: remat WT left for owner (`heal_fail`) |
 | Post-promote typecheck / tests / dist verify | **Restored** to pre-remat SHA | Re-run after fixing the gate |
 
 Incident 2026-07-29 19:11Z: in-place `checkout -B driver/integration upstream/main` + layer loop `exit 1` left tip stuck after `feat/cursor-picker-ios-nested` — PR awareness + rich-composer vanished from source while stale dist still looked rich. That class must not recur.
@@ -397,7 +402,7 @@ Commenting out someone else's `- branch:` so `hapi-driver-rebuild` goes green **
 
 | Who | Must |
 |---|---|
-| **Feature peer** (layer owner) | Keep tip **thin**: prefer `upstream/main` + your delta, or the **exact remat pre-layer SHA** Meta names after a failed remat. **Do not** thin onto `origin/driver/integration` (stale publish tip — remat rebuilds from `upstream/main` + layers each run, so hashes diverge). When rematerialize fails on *your* layer: re-thin / force-push / fix conflicts yourself, then un-park if you parked. |
+| **Feature peer** (layer owner) | Keep tip **thin**: prefer `upstream/main` + your delta, or the **exact remat pre-layer SHA** Meta names after a failed remat. **Do not** thin onto `origin/driver/integration` (stale publish tip). Tip-forward remat starts from the live soup tip and **refuses fat moved tips** (>20 non-merge commits / >40 files) — re-thin onto current tip before asking Meta to remat. When rematerialize fails on *your* layer: re-thin / force-push / fix conflicts yourself, then un-park if you parked. |
 | **Meta / rematerialize agent** | **Do not** park peer layers to get a green rebuild. Fail closed: leave the layer active, ping the owning peer (`hapi-ping-peer`), report blocked. Allowed only if the operator **names the exact branch** to park. After a web-facing remat (esp. driver-side conflict unions): **smoke `/sessions` in a real browser** (or Playwright) before calling dogfood green — `bun test` + `verify-web-dist` alone missed `getTodoProgress is not defined` (2026-07-29). If the UI was broken, force a **new `index-*.js` content hash** and tell operators to hard-reload / clear Workbox if sticky. |
 | **Operator** | Explicit park instruction per branch — never "just make rematerialize green." |
 

@@ -19,28 +19,46 @@ driver_remat_worktree_path() {
     printf '%s\n' "${HAPI_DRIVER_REMAT_WT:-$primary/worktrees/driver-remat}"
 }
 
-# Ensure remat worktree exists and is checked out to WIP @ base_ref (hard reset).
+# Remat mode: tip-forward (default) starts WIP at last green soup tip and only
+# merges non-ancestor layers. full-recipe resets to upstream/base and replays
+# every layer (disaster / recipe-audit escape hatch).
+# Override: HAPI_REMAT_MODE=tip-forward|full-recipe
+driver_remat_mode() {
+    local mode="${HAPI_REMAT_MODE:-tip-forward}"
+    case "$mode" in
+        tip-forward|full-recipe) printf '%s\n' "$mode" ;;
+        *)
+            echo "ERROR: HAPI_REMAT_MODE must be tip-forward or full-recipe (got: $mode)" >&2
+            return 2
+            ;;
+    esac
+}
+
+# Ensure remat worktree exists and is checked out to WIP @ start_ref (hard reset).
+# tip-forward: start_ref = PREV_TIP. full-recipe: start_ref = upstream/main (or manifest base).
 # Does not touch the live driver worktree.
 # stdout: absolute path to remat worktree only (status → stderr).
 driver_remat_prepare() {
     local primary="${1:?}"
     local wip_branch="${2:?}"
-    local base_ref="${3:?}"
-    local remat_wt
+    local start_ref="${3:?}"
+    local remat_wt mode
     remat_wt="$(driver_remat_worktree_path "$primary")"
+    mode="$(driver_remat_mode)"
 
     if [[ ! -d "$remat_wt" ]]; then
-        echo "Creating remat worktree at $remat_wt (branch $wip_branch)..." >&2
+        echo "Creating remat worktree at $remat_wt (branch $wip_branch, mode=$mode)..." >&2
         # Canonical worktrees/<name> — guard allows this path.
-        git -C "$primary" worktree add -B "$wip_branch" "$remat_wt" "$base_ref" >&2
+        git -C "$primary" worktree add -B "$wip_branch" "$remat_wt" "$start_ref" >&2
     else
         # Re-enter WIP even if a prior failed remat left it conflicted/detached.
         git -C "$remat_wt" merge --abort >/dev/null 2>&1 || true
-        git -C "$remat_wt" checkout -f -B "$wip_branch" "$base_ref" >&2
-        git -C "$remat_wt" reset --hard "$base_ref" >&2
+        git -C "$remat_wt" checkout -f -B "$wip_branch" "$start_ref" >&2
+        git -C "$remat_wt" reset --hard "$start_ref" >&2
         git -C "$remat_wt" clean -fdq
     fi
 
+    echo "Remat prepare: $wip_branch @ $(git -C "$remat_wt" rev-parse --short HEAD) (mode=$mode)" >&2
     printf '%s\n' "$remat_wt"
 }
 

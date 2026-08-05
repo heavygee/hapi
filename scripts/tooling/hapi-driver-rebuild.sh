@@ -161,13 +161,63 @@ fi
 
 # Atomic remat: merge layers on WIP in a side worktree; only move live tip on success.
 # Failed remat must leave driver/integration (= dogfood source) unchanged (2026-07-29).
+#
+# Default mode tip-forward (2026-08-05 probe): start at PREV_TIP, merge upstream if
+# needed, skip ancestor layers, fat-tip gate on non-ancestors. Escape hatch:
+# HAPI_REMAT_MODE=full-recipe (reset to upstream/base + replay every layer).
 PREV_TIP="$(git -C "$DRIVER" rev-parse "$DRIVER_BRANCH" 2>/dev/null || git -C "$DRIVER" rev-parse HEAD)"
 WIP_BRANCH="$(driver_remat_wip_branch "$DRIVER_BRANCH")"
 PROMOTED=0
+REMAT_MODE="$(driver_remat_mode)"
+# shellcheck source=lib/driver-remat-layer-gate.sh
+source "$LIB_DIR/driver-remat-layer-gate.sh"
 
 echo "Atomic remat: live tip $DRIVER_BRANCH @ ${PREV_TIP:0:12} (unchanged until success)"
-echo "Preparing remat worktree for $WIP_BRANCH from $base_ref ($layer_count layer(s))..."
-REMAT="$(driver_remat_prepare "$PRIMARY" "$WIP_BRANCH" "$base_ref")"
+echo "Remat mode: $REMAT_MODE (override: HAPI_REMAT_MODE=tip-forward|full-recipe)"
+
+START_REF="$base_ref"
+if [[ "$REMAT_MODE" == "tip-forward" ]]; then
+    if [[ -z "$PREV_TIP" ]]; then
+        echo "WARNING: tip-forward requested but no PREV_TIP — falling back to full-recipe" >&2
+        REMAT_MODE=full-recipe
+    else
+        START_REF="$PREV_TIP"
+    fi
+fi
+
+echo "Preparing remat worktree for $WIP_BRANCH from $START_REF ($layer_count layer(s))..."
+REMAT="$(driver_remat_prepare "$PRIMARY" "$WIP_BRANCH" "$START_REF")"
+
+# Tip-forward: bring upstream/main in if tip has not absorbed it yet.
+if [[ "$REMAT_MODE" == "tip-forward" ]]; then
+    upstream_ref=""
+    if git -C "$REMAT" rev-parse --verify upstream/main^{commit} >/dev/null 2>&1; then
+        upstream_ref=upstream/main
+    elif [[ "$base_ref" != "$PREV_TIP" ]] && git -C "$REMAT" rev-parse --verify "${base_ref}^{commit}" >/dev/null 2>&1; then
+        upstream_ref="$base_ref"
+    fi
+    if [[ -n "$upstream_ref" ]]; then
+        if git -C "$REMAT" merge-base --is-ancestor "$upstream_ref" HEAD; then
+            echo "Tip-forward: $upstream_ref already ancestor of WIP — skip"
+        else
+            echo "Tip-forward: merging $upstream_ref into WIP..."
+            if ! git -C "$REMAT" merge --no-edit "$upstream_ref"; then
+                unmerged="$(git -C "$REMAT" diff --name-only --diff-filter=U 2>/dev/null)"
+                markers="$(git -C "$REMAT" grep -lE '^<<<<<<< |^>>>>>>> ' 2>/dev/null || true)"
+                if [[ -z "$unmerged" && -z "$markers" ]]; then
+                    git -C "$REMAT" commit --no-edit --no-verify -q
+                else
+                    echo "ERROR: merge conflict merging $upstream_ref into tip-forward WIP" >&2
+                    driver_remat_fail_leave_wip "$REMAT" "$WIP_BRANCH" "$DRIVER_BRANCH" "$PREV_TIP" "$upstream_ref"
+                    driver_remat_hold_set \
+                        "merge conflict on $upstream_ref (tip-forward)" \
+                        "$REMAT" "$PREV_TIP" "$WIP_BRANCH" "$upstream_ref"
+                    exit 1
+                fi
+            fi
+        fi
+    fi
+fi
 
 resolve_merge_ref() {
     local type="$1" ref="$2"
@@ -201,6 +251,22 @@ for i in $(seq 0 $((layer_count - 1))); do
     type="$(echo "$manifest_json" | jq -r ".layers[$i].type")"
     ref="$(echo "$manifest_json" | jq -r ".layers[$i].ref")"
     merge_ref="$(resolve_merge_ref "$type" "$ref")"
+
+    if [[ "$REMAT_MODE" == "tip-forward" ]] \
+        && git -C "$REMAT" merge-base --is-ancestor "$merge_ref" HEAD 2>/dev/null; then
+        echo "Layer $((i + 1))/$layer_count: skip $merge_ref (already ancestor of tip-forward WIP)"
+        continue
+    fi
+
+    if [[ "$REMAT_MODE" == "tip-forward" ]]; then
+        if ! driver_remat_layer_gate "$REMAT" HEAD "$merge_ref"; then
+            driver_remat_fail_leave_wip "$REMAT" "$WIP_BRANCH" "$DRIVER_BRANCH" "$PREV_TIP" "$merge_ref"
+            driver_remat_hold_set \
+                "fat layer tip blocked tip-forward: $merge_ref" \
+                "$REMAT" "$PREV_TIP" "$WIP_BRANCH" "$merge_ref"
+            exit 1
+        fi
+    fi
 
     echo "Layer $((i + 1))/$layer_count: merging $merge_ref ..."
     if ! git -C "$REMAT" merge --no-edit "$merge_ref"; then
@@ -287,16 +353,29 @@ if [[ -d "$HEAL_DIR" ]]; then
         for patch in "${heal_patches[@]}"; do
             if git -C "$REMAT" apply --check -3 "$patch" 2>/dev/null; then
                 # `apply -3` can still leave conflicts even when `--check` passed
-                # (3-way base drift). Trap that instead of dying bare under set -e.
+                # (3-way base drift). Tip-forward: warn-skip (probe: heals are mostly
+                # no-ops / stale). Full-recipe: fail-closed (heal_fail).
                 if ! git -C "$REMAT" apply -3 "$patch"; then
+                    if [[ "$REMAT_MODE" == "tip-forward" ]]; then
+                        echo "  WARN: skip $(basename "$patch") (apply -3 failed; tip-forward does not heal_fail)"
+                        git -C "$REMAT" checkout -- . >/dev/null 2>&1 || true
+                        git -C "$REMAT" clean -fdq >/dev/null 2>&1 || true
+                        continue
+                    fi
                     heal_fail "heal apply failed (3-way conflict): $(basename "$patch")"
                 fi
                 if git -C "$REMAT" grep -lE '^<<<<<<< |^>>>>>>> ' >/dev/null 2>&1; then
+                    if [[ "$REMAT_MODE" == "tip-forward" ]]; then
+                        echo "  WARN: skip $(basename "$patch") (left conflict markers; tip-forward)"
+                        git -C "$REMAT" checkout -- . >/dev/null 2>&1 || true
+                        git -C "$REMAT" clean -fdq >/dev/null 2>&1 || true
+                        continue
+                    fi
                     heal_fail "heal left conflict markers: $(basename "$patch")"
                 fi
                 git -C "$REMAT" add -A
                 if git -C "$REMAT" diff --cached --quiet; then
-                    echo "  applied $(basename "$patch") (no tree change)"
+                    echo "  skip $(basename "$patch") (no-op on WIP)"
                 else
                     git -C "$REMAT" commit --no-edit --no-verify -q -m "fix(soup): apply heal $(basename "$patch")"
                     echo "  applied $(basename "$patch")"

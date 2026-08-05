@@ -68,6 +68,21 @@ REMAT="$(driver_remat_prepare "$PRIMARY" "driver/integration-wip" "main")"
 [[ ! -f "$DRIVER/one.txt" ]] || { echo "FAIL: prepare leaked layer into driver"; exit 1; }
 echo "OK: prepare leaves live tip untouched"
 
+# tip-forward prepare starts at PREV tip (keeps soup-marker)
+REMAT="$(HAPI_REMAT_MODE=tip-forward driver_remat_prepare "$PRIMARY" "driver/integration-wip" "$PREV")"
+[[ "$(git -C "$REMAT" rev-parse HEAD)" == "$PREV" ]] || { echo "FAIL: tip-forward prepare not at PREV"; exit 1; }
+[[ -f "$REMAT/soup-marker.txt" ]] || { echo "FAIL: tip-forward lost soup marker"; exit 1; }
+[[ "$(git -C "$DRIVER" rev-parse HEAD)" == "$PREV" ]] || { echo "FAIL: tip-forward prepare mutated driver"; exit 1; }
+echo "OK: tip-forward prepare starts at PREV tip"
+
+# invalid mode
+set +e
+HAPI_REMAT_MODE=bogus driver_remat_mode >/dev/null 2>&1
+mode_rc=$?
+set -e
+[[ "$mode_rc" -ne 0 ]] || { echo "FAIL: bogus mode should fail"; exit 1; }
+echo "OK: driver_remat_mode rejects bogus"
+
 # merge clean layer on remat only
 git -C "$REMAT" merge --no-edit feat/one
 [[ -f "$REMAT/one.txt" ]] || { echo "FAIL: layer not on remat"; exit 1; }
