@@ -172,7 +172,14 @@ describe('runner capabilities backfill', () => {
             'ns'
         )
 
-        expect(refreshed.metadata).toEqual({ host: 'new-host', happyCliVersion: '0.28.0' })
+        // Identity refresh normalizes omitted metadata.capabilities to [] so a
+        // downgraded runner cannot keep stale RPC ads; runner-state object caps
+        // (piExistingSessionResume) still merge on the same call.
+        expect(refreshed.metadata).toEqual({
+            host: 'new-host',
+            happyCliVersion: '0.28.0',
+            capabilities: [],
+        })
         expect(refreshed.metadataVersion).toBe(created.metadataVersion + 1)
         expect(refreshed.runnerState).toEqual({
             status: 'offline',

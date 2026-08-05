@@ -98,6 +98,11 @@ export function getOrCreateMachine(
         // Re-registering runners used to keep stale hub metadata forever
         // (version/capabilities from the first connect). Refresh identity when
         // the client sends newer registration fields.
+        //
+        // Do not return early after identity refresh: upstream runner-state
+        // capability backfill (e.g. piExistingSessionResume) must still run on
+        // the same registration call when metadata also changes.
+        let current = stored
         if (machineRegistrationNeedsRefresh(stored.metadata, metadata)) {
             const merged = mergeMachineRegistrationMetadata(stored.metadata, metadata)
             const result = updateMachineMetadata(
@@ -108,37 +113,35 @@ export function getOrCreateMachine(
                 namespace,
             )
             if (result.result === 'success') {
-                const refreshed = getMachine(db, id)
-                if (refreshed) {
-                    return refreshed
+                current = getMachine(db, id) ?? stored
+            } else {
+                // Version conflict or race: keep current row; connect path can
+                // still push identity via machine-update-metadata.
+                current = getMachine(db, id) ?? stored
+            }
+        } else {
+            // General merge: fill missing machine-owned fields (e.g. arch)
+            // that are not covered by the identity refresh predicate above.
+            const merged = mergeMachineMetadata(stored.metadata, metadata)
+            if (merged !== undefined) {
+                db.prepare(`
+                    UPDATE machines
+                    SET metadata = @metadata,
+                        metadata_version = metadata_version + 1,
+                        updated_at = @updated_at,
+                        seq = seq + 1
+                    WHERE id = @id
+                `).run({
+                    metadata: JSON.stringify(merged),
+                    updated_at: Date.now(),
+                    id
+                })
+                const row = getMachine(db, id)
+                if (!row) {
+                    throw new Error('Failed to refresh machine metadata')
                 }
+                current = row
             }
-            // Version conflict or race: fall through to current row; connect
-            // path can still push identity via machine-update-metadata.
-            return getMachine(db, id) ?? stored
-        }
-        // General merge: fill missing machine-owned fields (e.g. arch)
-        // that are not covered by the identity refresh predicate above.
-        const merged = mergeMachineMetadata(stored.metadata, metadata)
-        let current = stored
-        if (merged !== undefined) {
-            db.prepare(`
-                UPDATE machines
-                SET metadata = @metadata,
-                    metadata_version = metadata_version + 1,
-                    updated_at = @updated_at,
-                    seq = seq + 1
-                WHERE id = @id
-            `).run({
-                metadata: JSON.stringify(merged),
-                updated_at: Date.now(),
-                id
-            })
-            const row = getMachine(db, id)
-            if (!row) {
-                throw new Error('Failed to refresh machine metadata')
-            }
-            current = row
         }
         const mergedRunnerState = mergeRunnerCapabilities(current.runnerState, runnerState)
         if (mergedRunnerState !== undefined) {
