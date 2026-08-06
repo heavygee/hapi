@@ -63,8 +63,14 @@ import {
     type ScratchlistParkResult,
 } from '@/lib/scratchlistAttachmentFlow'
 import type { ScratchlistEntry } from '@/lib/scratchlist'
-import { isHubScratchlistAttachmentPath } from '@hapi/protocol'
+import { isHubScratchlistAttachmentPath, type MessageDeliveryMode } from '@hapi/protocol'
 import { useTranslation } from '@/lib/use-translation'
+import type { SendMessageAcceptance, SendMessageSettlement } from '@/hooks/mutations/useSendMessage'
+import {
+    getRestoredComposerSendIntent,
+    resolveMessageDeliveryMode,
+    type ComposerSendIntent,
+} from '@/lib/messageDelivery'
 import { SessionHeader } from '@/components/SessionHeader'
 import { SessionFlowPanel } from '@/components/SessionFlowPanel'
 import { CursorMigrationBanner } from '@/components/CursorMigrationBanner'
@@ -260,7 +266,12 @@ export function ScratchlistDrawerHost(props: {
     entries: ReturnType<typeof useHubScratchlist>['entries']
     onMove: ReturnType<typeof useHubScratchlist>['move']
     onDelete: ReturnType<typeof useHubScratchlist>['remove']
-    onSend: (text: string, attachments?: AttachmentMetadata[], scheduledAt?: number | null) => Promise<boolean>
+    onSend: (
+        text: string,
+        attachments?: AttachmentMetadata[],
+        scheduledAt?: number | null,
+        deliveryMode?: MessageDeliveryMode,
+    ) => Promise<boolean | SendMessageAcceptance>
     onExitScratchlistMode: () => void
     disabled?: boolean
 }) {
@@ -296,7 +307,7 @@ export function ScratchlistDrawerHost(props: {
         if (accepted) {
             props.onExitScratchlistMode()
         }
-        return accepted
+        return Boolean(accepted)
     }, [props.api, props.disabled, props.onSend, props.onExitScratchlistMode, props.sessionId])
     return (
         <ScratchlistDrawer
@@ -347,6 +358,7 @@ type SessionChatProps = {
     isSyncingTail: boolean
     isLoadingMoreMessages: boolean
     isSending: boolean
+    sendSettlement: SendMessageSettlement | null
     viewMode: 'tail' | 'history'
     messagesVersion: number
     historyVersion: number
@@ -354,11 +366,16 @@ type SessionChatProps = {
     onRefresh: () => void
     onLoadMore: (onBeforeApply?: (historyVersion: number) => boolean) => Promise<OlderLoadOutcome>
     onCancelLoadMore: () => void
-    // Resolves true when the send was accepted by the underlying mutation, false when
+    // Returns the accepted mutation's attempt id, or false when
     // pre-mutation guards (no-api / no-session / pending) rejected the call OR async
     // inactive-session resume failed. Composer state that should only be cleared on
     // actual send (pendingSchedule) must await this — see handleSend below.
-    onSend: (text: string, attachments?: AttachmentMetadata[], scheduledAt?: number | null) => Promise<boolean>
+    onSend: (
+        text: string,
+        attachments?: AttachmentMetadata[],
+        scheduledAt?: number | null,
+        deliveryMode?: MessageDeliveryMode,
+    ) => Promise<SendMessageAcceptance | false>
     onViewModeChange: (mode: 'tail' | 'history') => void
     onRetryMessage?: (localId: string) => void
     autocompleteSuggestions?: (query: string) => Promise<Suggestion[]>
@@ -622,7 +639,8 @@ function SessionChatInner(props: SessionChatProps) {
             text: string,
             attachments?: AttachmentMetadata[],
             scheduledAt?: number | null,
-        ): Promise<boolean> => {
+            deliveryMode: MessageDeliveryMode = 'queue',
+        ): Promise<{ attemptId: string | null } | false> => {
             if (
                 scratchlistMode
                 && scheduledAt == null
@@ -641,7 +659,7 @@ function SessionChatInner(props: SessionChatProps) {
                     attachments,
                     accepted,
                 )
-                return accepted
+                return accepted ? { attemptId: null } : false
             }
             // If the user uploaded while scratchlist mode was on, then toggled
             // it off before send, pending items still carry hub paths. Stage
@@ -655,7 +673,7 @@ function SessionChatInner(props: SessionChatProps) {
                     props.session.id,
                     hubItems,
                 )
-                const accepted = await props.onSend(text, [...normalItems, ...staged], scheduledAt)
+                const accepted = await props.onSend(text, [...normalItems, ...staged], scheduledAt, deliveryMode)
                 if (accepted) {
                     // Hub blobs were copied into the normal upload dir; drop the
                     // scratchlist copies so they stop counting against the session cap.
@@ -665,7 +683,7 @@ function SessionChatInner(props: SessionChatProps) {
                 }
                 return accepted
             }
-            return props.onSend(text, attachments, scheduledAt)
+            return props.onSend(text, attachments, scheduledAt, deliveryMode)
         },
         [props.onSend, props.api, props.session.id, scratchlist, scratchlistMode],
     )
@@ -1481,6 +1499,28 @@ function SessionChatInner(props: SessionChatProps) {
     // absolute epoch-ms using Date.now() at that moment (send-time base for presets).
     const [pendingSchedule, setPendingSchedule] = useState<PendingSchedule | null>(null)
     const [pendingScheduleRevision, setPendingScheduleRevision] = useState(0)
+    // One-shot intent bridge: HappyComposer / useHappyRuntime
+    // -> handleSend. The runtime consumes and resets it in the same submit
+    // turn, so explicit or retry-safe queue intents never stick to later
+    // ordinary sends.
+    const pendingSendIntentRef = useRef<ComposerSendIntent>('default')
+    const restoredSendErrorIdRef = useRef<number | null>(null)
+
+    useEffect(() => {
+        const error = props.sendError
+        if (!error) {
+            restoredSendErrorIdRef.current = null
+            return
+        }
+        if (restoredSendErrorIdRef.current === error.id) return
+        // A retry cannot carry the original Pi streaming generation. Preserve
+        // queue, but deliberately downgrade a failed turn-scoped steer to the
+        // HAPI queue so a later active turn is never steered by stale text.
+        pendingSendIntentRef.current = getRestoredComposerSendIntent(error.deliveryMode)
+        restoredSendErrorIdRef.current = error.id
+    }, [props.sendError])
+
+    const [sendAcceptance, setSendAcceptance] = useState<{ attemptId: string | null } | null>(null)
     const updatePendingSchedule = useCallback((next: PendingSchedule | null) => {
         setPendingSchedule(next)
         setPendingScheduleRevision((revision) => revision + 1)
@@ -1507,7 +1547,12 @@ function SessionChatInner(props: SessionChatProps) {
         return () => clearTimeout(timer)
     }, [pendingSchedule, updatePendingSchedule])
 
-    const handleSend = useCallback(async (text: string, attachments?: AttachmentMetadata[], scheduledAt?: number | null) => {
+    const handleSend = useCallback(async (
+        text: string,
+        attachments?: AttachmentMetadata[],
+        scheduledAt?: number | null,
+        intent: ComposerSendIntent = 'default',
+    ) => {
         // Route through the scratchlist-aware wrapper. When scratchlistMode
         // is on AND the payload is pure text, this turns into
         // addScratchlistEntry; otherwise it goes to props.onSend (the chat
@@ -1520,8 +1565,18 @@ function SessionChatInner(props: SessionChatProps) {
         // upstream review on PR #798: [Major] "Clear accepted scheduled
         // chat sends after scratchlist fallback".)
         const routedToScratchlist = shouldRouteToScratchlist(scratchlistMode, attachments, scheduledAt)
-        const accepted = await onSendForComposer(text, attachments, scheduledAt)
+        const deliveryMode = resolveMessageDeliveryMode({
+            agentFlavor,
+            // Do not use assistant-ui's broader `isRunning` here: a
+            // child-agent run is not the Pi main session's steer target.
+            isSessionThinking: props.session.thinking,
+            intent,
+            scheduledAt,
+            routesToScratchlist: routedToScratchlist,
+        })
+        const accepted = await onSendForComposer(text, attachments, scheduledAt, deliveryMode)
         if (!accepted) return
+        setSendAcceptance({ attemptId: accepted.attemptId })
         if (!routedToScratchlist) {
             // Clear pendingSchedule only after the mutation is actually
             // accepted - covers both pre-mutation guards AND async
@@ -1533,7 +1588,7 @@ function SessionChatInner(props: SessionChatProps) {
             updatePendingSchedule(null)
             setForceScrollToken((token) => token + 1)
         }
-    }, [onSendForComposer, scratchlistMode, updatePendingSchedule])
+    }, [agentFlavor, onSendForComposer, props.session.thinking, scratchlistMode, updatePendingSchedule])
 
     const attachmentAdapter = useMemo(() => {
         if (!props.session.active) {
@@ -1714,6 +1769,9 @@ function SessionChatInner(props: SessionChatProps) {
                         resolveSessionMentionTooltip={resolveSessionMentionTooltip}
                         disabled={props.isSending}
                         pendingSchedule={pendingSchedule}
+                        sendAcceptance={sendAcceptance}
+                        sendSettlement={props.sendSettlement}
+                        pendingSendIntentRef={pendingSendIntentRef}
                         onSchedule={updatePendingSchedule}
                         onClearSchedule={() => updatePendingSchedule(null)}
                         permissionMode={props.session.permissionMode}

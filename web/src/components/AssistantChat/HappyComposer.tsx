@@ -11,6 +11,7 @@ import {
     type ClipboardEvent as ReactClipboardEvent,
     type FormEvent as ReactFormEvent,
     type KeyboardEvent as ReactKeyboardEvent,
+    type MutableRefObject,
     type SyntheticEvent as ReactSyntheticEvent,
     useCallback,
     useEffect,
@@ -57,6 +58,7 @@ import { PiThinkingLevelPanel } from './PiThinkingLevelPanel'
 import type { ApiClient } from '@/api/client'
 import { useVoiceInputPreferences } from '@/hooks/useVoiceInputPreferences'
 import { useDictation } from '@/hooks/useDictation'
+import type { ComposerSendIntent } from '@/lib/messageDelivery'
 
 export interface TextInputState {
     text: string
@@ -358,6 +360,16 @@ export function HappyComposer(props: {
     sendError?: ComposerSendError | null
     onClearSendError?: () => void
     onSuppressSendErrorRestore?: (id: number) => void
+    /** Emitted by SessionChat after a send is accepted. Null attempt ids are settled scratchlist sends. */
+    sendAcceptance?: { attemptId: string | null } | null
+    /** Terminal result for a chat mutation, including attachment-bearing failures. */
+    sendSettlement?: { attemptId: string; status: 'success' | 'error' } | null
+    /**
+     * One-shot intent bridge consumed by useHappyRuntime's onNew callback.
+     * SessionChat owns this ref so the composer never retains an explicit
+     * queue request after a scratchlist/scheduled/failed early path.
+     */
+    pendingSendIntentRef?: MutableRefObject<ComposerSendIntent>
     /** Chip hover / aria-label resolver (SessionChat → useSessions). */
     resolveSessionMentionTooltip?: (id: string, title: string) => SessionMentionResolveResult
 }) {
@@ -498,6 +510,8 @@ export function HappyComposer(props: {
         selection: { start: 0, end: 0 }
     })
     const [isExpanded, setIsExpanded] = useState(false)
+    const lastSendAcceptanceRef = useRef(props.sendAcceptance)
+    const pendingSendAttemptIdRef = useRef<string | null>(null)
     const [showSettings, setShowSettings] = useState(false)
     const [showPiModelPanel, setShowPiModelPanel] = useState(false)
     const [showPiThinkingPanel, setShowPiThinkingPanel] = useState(false)
@@ -509,6 +523,32 @@ export function HappyComposer(props: {
     const isControlled = onScheduleProp !== undefined
     const pendingSchedule = isControlled ? (pendingScheduleProp ?? null) : pendingScheduleLocal
     const setPendingSchedule = isControlled ? onScheduleProp : setPendingScheduleLocal
+
+    useEffect(() => {
+        const acceptance = props.sendAcceptance
+        if (!acceptance || acceptance === lastSendAcceptanceRef.current) return
+        lastSendAcceptanceRef.current = acceptance
+        if (acceptance.attemptId === null) {
+            pendingSendAttemptIdRef.current = null
+            setIsExpanded(false)
+            return
+        }
+        pendingSendAttemptIdRef.current = acceptance.attemptId
+        const settlement = props.sendSettlement
+        if (!settlement || settlement.attemptId !== acceptance.attemptId) return
+        pendingSendAttemptIdRef.current = null
+        if (settlement.status === 'success') setIsExpanded(false)
+    }, [props.sendAcceptance, props.sendSettlement])
+
+    // Match the terminal mutation result to the exact accepted attempt. Text
+    // failures also expose sendError for draft restoration, while attachment
+    // failures intentionally do not, so settlement must be the outcome source.
+    useEffect(() => {
+        const settlement = props.sendSettlement
+        if (!settlement || settlement.attemptId !== pendingSendAttemptIdRef.current) return
+        pendingSendAttemptIdRef.current = null
+        if (settlement.status === 'success') setIsExpanded(false)
+    }, [props.sendSettlement])
 
     const textareaRef = useRef<HTMLTextAreaElement>(null)
     const richInputRef = useRef<RichComposerInputHandle>(null)
@@ -1012,6 +1052,7 @@ export function HappyComposer(props: {
                 await prepared.beforeClear()
                 api.composer().setText('')
                 await api.composer().clearAttachments()
+                setIsExpanded(false)
             } finally {
                 parkInFlightRef.current = false
                 setIsParkingScratchlist(false)
