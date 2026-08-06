@@ -764,8 +764,6 @@ export default {
   'settings.display.sessionPreviewLimit.increase': '增加折叠前显示的会话数',
   'settings.display.activeSessionsOnly': '仅显示活跃会话',
   'settings.display.activeSessionsOnly.desc': '在侧边栏隐藏非活跃会话；当前打开的会话仍会保留显示。',
-  'settings.display.attentionSessionsOnly': '仅显示需要关注',
-  'settings.display.attentionSessionsOnly.desc': '仅显示有权限请求、等待输入或未读活动的会话；当前打开的会话仍会保留显示。',
   'settings.display.pinInProgressSessions': '置顶进行中会话',
   'settings.display.pinInProgressSessions.desc': '将运行中和待处理会话移到侧边栏顶部的「进行中」分区；安静的活跃会话仍留在各自项目目录分组中。关闭后全部保留在目录分组中。',
   'settings.display.sessionListStatus': '会话列表状态',
