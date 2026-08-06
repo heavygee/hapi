@@ -16,7 +16,6 @@ import { useTranslation } from '@/lib/use-translation'
 import { DEFAULT_SESSION_PREVIEW_LIMIT, useSessionPreviewLimit } from '@/hooks/useSessionPreviewLimit'
 import { useSessionListStatusMode } from '@/hooks/useSessionListStatusMode'
 import { useShowActiveSessionsOnly } from '@/hooks/useShowActiveSessionsOnly'
-import { useShowAttentionSessionsOnly } from '@/hooks/useShowAttentionSessionsOnly'
 import { usePinInProgressSessions } from '@/hooks/usePinInProgressSessions'
 import { classifySessionAttention, sessionNeedsAttentionReview } from '@/lib/sessionAttention'
 import { getSessionLastSeenAt } from '@/lib/sessionLastSeen'
@@ -1157,7 +1156,8 @@ export function SessionList(props: {
     const { sessionPreviewLimit } = useSessionPreviewLimit()
     const { sessionListStatusMode } = useSessionListStatusMode()
     const { showActiveSessionsOnly } = useShowActiveSessionsOnly()
-    const { showAttentionSessionsOnly, setShowAttentionSessionsOnly } = useShowAttentionSessionsOnly()
+    // Transient inbox lens — not a Settings preference. Cleared on reload; rows drop as they're seen.
+    const [showAttentionSessionsOnly, setShowAttentionSessionsOnly] = useState(false)
     const { pinInProgressSessions } = usePinInProgressSessions()
     const { machineFilter, setMachineFilter } = useSessionListMachineFilter()
     const showDetailedStatus = sessionListStatusMode === 'detailed'
