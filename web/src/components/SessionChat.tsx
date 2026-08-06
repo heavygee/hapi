@@ -1623,7 +1623,9 @@ function SessionChatInner(props: SessionChatProps) {
         if (props.session.active) {
             return createAttachmentAdapter(props.api, props.session.id)
         }
-        if (!props.resolveSessionIdForUpload) {
+        // Only offer attachments on inactive sessions that can actually resume;
+        // otherwise file picks become stuck error attachments that cannot send.
+        if (!inactiveCanResume || !props.resolveSessionIdForUpload) {
             return undefined
         }
         return createAttachmentAdapter(
@@ -1639,7 +1641,7 @@ function SessionChatInner(props: SessionChatProps) {
                 props.onUploadSessionResolved?.(resolvedSessionId)
             },
         )
-    }, [props.api, props.session.id, props.session.active, props.resolveSessionIdForUpload, scratchlistMode])
+    }, [props.api, props.session.id, props.session.active, props.resolveSessionIdForUpload, scratchlistMode, inactiveCanResume])
 
 
     const runtime = useHappyRuntime({
@@ -1703,7 +1705,7 @@ function SessionChatInner(props: SessionChatProps) {
             <AssistantRuntimeProvider runtime={runtime}>
                 <ShareSeedConsumer sessionId={props.session.id} sessionActive={props.session.active} />
                 <AbortRestoreConsumer messages={normalizedMessages} onAbortRestore={props.onAbortRestore ?? (() => {})} />
-                <DragDropZone disabled={props.isSending || pendingSchedule != null || isScratchlistParking}>
+                <DragDropZone disabled={(!props.session.active && !inactiveCanResume) || props.isSending || pendingSchedule != null || isScratchlistParking}>
                     <div className="relative flex min-h-0 flex-1 flex-col">
                         {canViewAgentTerminal && (
                             // SessionChatInner is keyed by session.id, so switching sessions remounts this subtree.
