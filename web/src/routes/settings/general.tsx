@@ -1,3 +1,4 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
 import { useTranslation, type Locale } from '@/lib/use-translation'
@@ -7,17 +8,33 @@ import { isDefaultNamespaceToken } from '@/lib/tokenNamespace'
 import { CompanionPairing } from '@/components/settings/CompanionPairing'
 import { SettingsChoiceGroup, SettingsLinkRow, SettingsPageContent, SettingsSection, SettingsSwitch } from '@/components/settings/SettingsPrimitives'
 import { disableAllFue, enableAllFue, isFueDisabledGlobally } from '@/lib/use-fue'
+import { queryKeys } from '@/lib/query-keys'
 
 const locales: ReadonlyArray<{ value: Locale; label: string }> = [
     { value: 'en', label: 'English' },
     { value: 'zh-CN', label: '简体中文' },
 ]
 
+function getNamespace(token: string | null): string | null {
+    if (!token) return null
+    try {
+        const payload = token.split('.')[1]
+        if (!payload) return null
+        const base64 = payload.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(payload.length / 4) * 4, '=')
+        const decoded = JSON.parse(atob(base64)) as { ns?: unknown }
+        return typeof decoded.ns === 'string' ? decoded.ns : null
+    } catch {
+        return null
+    }
+}
+
 export default function SettingsGeneralPage() {
     const { t, locale, setLocale } = useTranslation()
     const { api, baseUrl, token } = useAppContext()
     const navigate = useNavigate()
+    const queryClient = useQueryClient()
     const showRunnerManagement = isDefaultNamespaceToken(token)
+    const isOwner = getNamespace(token) === 'default'
     const { features } = useFeatures(api)
     const { setGithubPrAwareness, isPending } = usePatchFeatures(api)
     const awareness = features?.githubPrAwareness
@@ -27,6 +44,27 @@ export default function SettingsGeneralPage() {
     // surfaced here for operators who want to flip it back on, or who
     // prefer finding it in Settings over a popover link. See use-fue.ts.
     const [onboardingTipsEnabled, setOnboardingTipsEnabled] = useState(() => !isFueDisabledGlobally())
+
+    const hubSettingsQuery = useQuery({
+        queryKey: queryKeys.hubSettings,
+        queryFn: async () => {
+            if (!api) throw new Error('API unavailable')
+            return await api.getHubSettings()
+        },
+        enabled: Boolean(api) && isOwner,
+        staleTime: 30_000,
+        retry: false,
+    })
+
+    const hubSettingsMutation = useMutation({
+        mutationFn: async (sessionSummaryContract: boolean) => {
+            if (!api) throw new Error('API unavailable')
+            return await api.updateHubSettings({ sessionSummaryContract })
+        },
+        onSuccess: (data) => {
+            queryClient.setQueryData(queryKeys.hubSettings, data)
+        },
+    })
 
     return (
         <SettingsPageContent description={t('settings.general.description')}>
@@ -44,23 +82,22 @@ export default function SettingsGeneralPage() {
                         void setGithubPrAwareness(checked)
                     }}
                 />
-
             </SettingsSection>
-            <SettingsSection title={t('settings.onboarding.title')}>
-                <SettingsSwitch
-                    label={t('settings.onboarding.toggle.label')}
-                    description={t('settings.onboarding.toggle.description')}
-                    checked={onboardingTipsEnabled}
-                    onChange={(checked) => {
-                        setOnboardingTipsEnabled(checked)
-                        if (checked) {
-                            enableAllFue()
-                        } else {
-                            disableAllFue()
-                        }
-                    }}
-                />
-            </SettingsSection>
+            {isOwner ? (
+                <SettingsSection title={t('settings.general.agents.title')} description={t('settings.general.agents.description')}>
+                    {hubSettingsQuery.data ? (
+                        <SettingsSwitch
+                            label={t('settings.general.sessionSummaryContract')}
+                            description={t('settings.general.sessionSummaryContract.desc')}
+                            checked={hubSettingsQuery.data.sessionSummaryContract}
+                            onChange={(checked) => {
+                                if (hubSettingsMutation.isPending) return
+                                hubSettingsMutation.mutate(checked)
+                            }}
+                        />
+                    ) : null}
+                </SettingsSection>
+            ) : null}
             <SettingsSection title={t('settings.onboarding.title')}>
                 <SettingsSwitch
                     label={t('settings.onboarding.toggle.label')}
@@ -82,10 +119,10 @@ export default function SettingsGeneralPage() {
                 </div>
             </SettingsSection>
             {showRunnerManagement ? (
-                <SettingsSection>
+                <SettingsSection title={t('settings.runnerManagement.title')}>
                     <SettingsLinkRow
-                        label={t('settings.runnerMgmt.title')}
-                        description={t('settings.runnerMgmt.linkHint')}
+                        label={t('settings.runnerManagement.open')}
+                        description={t('settings.runnerManagement.desc')}
                         onClick={() => navigate({ to: '/settings/general/runners' })}
                     />
                 </SettingsSection>

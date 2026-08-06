@@ -26,7 +26,8 @@
         "./attachGithubPrRef": "./src/attachGithubPrRef.ts",
         "./voice": "./src/voice.ts",
         "./voicePickerCatalog": "./src/voicePickerCatalog.ts",
-        "./voice-personality": "./src/voicePersonality.ts"
+        "./voice-personality": "./src/voicePersonality.ts",
+        "./usage": "./src/usage.ts"
     },
     "sideEffects": false,
     "scripts": {

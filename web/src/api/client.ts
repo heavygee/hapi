@@ -55,6 +55,7 @@ import type {
     QueuedStateResponse,
     ReopenSessionResponse,
     SqliteStorageUsageResponse,
+    HubSettingsResponse,
     UsageSummaryResponse,
     UploadFileResponse
 } from '@hapi/protocol/apiTypes'
@@ -845,6 +846,17 @@ export class ApiClient {
 
     async getSqliteStorageUsage(): Promise<SqliteStorageUsageResponse> {
         return await this.request<SqliteStorageUsageResponse>('/api/storage/sqlite')
+    }
+
+    async getHubSettings(): Promise<HubSettingsResponse> {
+        return await this.request<HubSettingsResponse>('/api/hub-settings')
+    }
+
+    async updateHubSettings(settings: HubSettingsResponse): Promise<HubSettingsResponse> {
+        return await this.request<HubSettingsResponse>('/api/hub-settings', {
+            method: 'PUT',
+            body: JSON.stringify(settings)
+        })
     }
 
     async getUsageSummary(

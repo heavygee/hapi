@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from '@/lib/i18n-context'
 import SettingsHubPage from './index'
 import SettingsGeneralPage from './general'
@@ -23,6 +24,9 @@ const { context, navigate, setAppearance, setColorTheme, setFontScale, setTermin
     setVoice: vi.fn(),
     setFleetPolicy: vi.fn(),
 }))
+
+const getHubSettings = vi.fn().mockResolvedValue({ sessionSummaryContract: false })
+const updateHubSettings = vi.fn().mockResolvedValue({ sessionSummaryContract: true })
 
 vi.mock('@/hooks/useColorTheme', () => ({
     useColorTheme: () => ({ colorTheme: 'default', setColorTheme }),
@@ -193,6 +197,8 @@ vi.mock('@/lib/app-context', () => ({
         api: {
             getSessions: vi.fn(async () => ({ sessions: [] })),
             setModelErrorAutoBridge: vi.fn(async () => {}),
+            getHubSettings,
+            updateHubSettings,
         },
         baseUrl: 'http://127.0.0.1:3006',
         token: context.token,
@@ -237,13 +243,20 @@ vi.mock('./useVoiceSettings', () => ({
 }))
 
 function renderPage(page: React.ReactElement) {
-    return render(<I18nProvider>{page}</I18nProvider>)
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    return render(
+        <QueryClientProvider client={queryClient}>
+            <I18nProvider>{page}</I18nProvider>
+        </QueryClientProvider>,
+    )
 }
 
 describe('responsive settings pages', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         localStorage.clear()
+        getHubSettings.mockResolvedValue({ sessionSummaryContract: false })
+        updateHubSettings.mockResolvedValue({ sessionSummaryContract: true })
         context.token = `x.${btoa(JSON.stringify({ ns: 'default' }))}.x`
     })
 
@@ -267,10 +280,11 @@ describe('responsive settings pages', () => {
         expect(screen.queryByText('Hub database usage')).not.toBeInTheDocument()
     })
 
-    it('changes the application language inline', () => {
+    it('changes the application language inline', async () => {
         renderPage(<SettingsGeneralPage />)
         expect(screen.getByText('Companion')).toBeInTheDocument()
         expect(screen.getByText('Companion pairing')).toBeInTheDocument()
+        expect(await screen.findByRole('checkbox', { name: 'Ask agents to emit session status summary' })).toBeInTheDocument()
         fireEvent.click(screen.getByRole('radio', { name: '简体中文' }))
         expect(localStorage.getItem('hapi-lang')).toBe('zh-CN')
     })

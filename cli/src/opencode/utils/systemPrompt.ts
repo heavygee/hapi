@@ -30,6 +30,10 @@ export const TITLE_INSTRUCTION = withSessionSummaryInstruction(trimIdent(`
     ${SKILL_LOOKUP_INSTRUCTION}
 `));
 
+export function getTitleInstruction(env: NodeJS.ProcessEnv = process.env): string {
+    return withSessionSummaryInstruction(TITLE_INSTRUCTION, env)
+}
+
 /**
  * Tool instructions for native ACP sessions. Title updates come from ACP, so
  * advertise only the MCP tools that remain available to the model.
@@ -45,6 +49,10 @@ export const OPENCODE_NATIVE_TOOL_INSTRUCTION = trimIdent(`
     })}
     ${SKILL_LOOKUP_INSTRUCTION}
 `);
+
+export function getOpencodeNativeToolInstruction(env: NodeJS.ProcessEnv = process.env): string {
+    return withSessionSummaryInstruction(OPENCODE_NATIVE_TOOL_INSTRUCTION, env)
+}
 
 /**
  * The system prompt to inject for OpenCode sessions.
