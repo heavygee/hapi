@@ -5,6 +5,7 @@ import {
     deduplicateSessionsByAgentId,
     expandSelectedSessionCollapseOverrides,
     filterActiveSessionsOnly,
+    filterAttentionSessionsOnly,
     getSessionTimeRange,
     getNextSessionVisibleCount,
     getPullRefreshIndicatorRotation,
@@ -449,6 +450,34 @@ describe('filterActiveSessionsOnly', () => {
             makeSession({ id: 'c', active: true, metadata: { path: '/p' } })
         ]
         expect(filterActiveSessionsOnly(sessions).map(s => s.id)).toEqual(['a', 'c'])
+    })
+})
+
+describe('filterAttentionSessionsOnly', () => {
+    const lastSeen = (id: string): number => {
+        if (id === 'unread') return 1000
+        return 10_000
+    }
+
+    it('keeps permission, input, and unread; drops background-only and quiet', () => {
+        const sessions = [
+            makeSession({ id: 'permission', pendingRequestKinds: ['permission'], pendingRequestsCount: 1, updatedAt: 5000, metadata: { path: '/p' } }),
+            makeSession({ id: 'input', pendingRequestKinds: ['input'], pendingRequestsCount: 1, updatedAt: 5000, metadata: { path: '/p' } }),
+            makeSession({ id: 'unread', updatedAt: 5000, metadata: { path: '/p' } }),
+            makeSession({ id: 'background', active: true, backgroundTaskCount: 2, updatedAt: 5000, metadata: { path: '/p' } }),
+            makeSession({ id: 'quiet', updatedAt: 1000, metadata: { path: '/p' } }),
+        ]
+        expect(filterAttentionSessionsOnly(sessions, null, lastSeen).map(s => s.id))
+            .toEqual(['permission', 'input', 'unread'])
+    })
+
+    it('keeps the selected session visible even when it would otherwise filter out', () => {
+        const sessions = [
+            makeSession({ id: 'unread', updatedAt: 5000, metadata: { path: '/p' } }),
+            makeSession({ id: 'selected-quiet', updatedAt: 1000, metadata: { path: '/p' } }),
+        ]
+        expect(filterAttentionSessionsOnly(sessions, 'selected-quiet', lastSeen).map(s => s.id))
+            .toEqual(['unread', 'selected-quiet'])
     })
 })
 

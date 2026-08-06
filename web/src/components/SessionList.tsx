@@ -14,8 +14,9 @@ import { useTranslation } from '@/lib/use-translation'
 import { DEFAULT_SESSION_PREVIEW_LIMIT, useSessionPreviewLimit } from '@/hooks/useSessionPreviewLimit'
 import { useSessionListStatusMode } from '@/hooks/useSessionListStatusMode'
 import { useShowActiveSessionsOnly } from '@/hooks/useShowActiveSessionsOnly'
+import { useShowAttentionSessionsOnly } from '@/hooks/useShowAttentionSessionsOnly'
 import { usePinInProgressSessions } from '@/hooks/usePinInProgressSessions'
-import { classifySessionAttention } from '@/lib/sessionAttention'
+import { classifySessionAttention, sessionNeedsAttentionReview } from '@/lib/sessionAttention'
 import { getSessionLastSeenAt } from '@/lib/sessionLastSeen'
 import { useSessionRowTooltipIds } from '@/components/HoverTooltip'
 import { subscribeCodexImportedSessions } from '@/lib/codexImportedSessions'
@@ -236,6 +237,19 @@ export function filterActiveSessionsOnly(sessions: SessionSummary[], selectedSes
     return sessions.filter(session => session.active || session.id === selectedSessionId)
 }
 
+// Opt-in "needs attention" inbox: permission / input / unread. Keep selected visible.
+// Background-only busy work is excluded (busy ≠ needs review).
+export function filterAttentionSessionsOnly(
+    sessions: SessionSummary[],
+    selectedSessionId: string | null | undefined,
+    getLastSeenAt: (sessionId: string) => number
+): SessionSummary[] {
+    return sessions.filter(session =>
+        session.id === selectedSessionId
+        || sessionNeedsAttentionReview(session, { lastSeenAt: getLastSeenAt(session.id) })
+    )
+}
+
 // Paginated session previews move one batch at a time in either direction.
 // Counts always stay within the configured preview floor and the group total.
 export function getNextSessionVisibleCount(current: number, step: number, total: number): number {
@@ -429,6 +443,26 @@ function PlusIcon(props: { className?: string }) {
         >
             <line x1="12" y1="5" x2="12" y2="19" />
             <line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+    )
+}
+
+function InboxIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
+            <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
         </svg>
     )
 }
@@ -1054,6 +1088,7 @@ export function SessionList(props: {
     const { sessionPreviewLimit } = useSessionPreviewLimit()
     const { sessionListStatusMode } = useSessionListStatusMode()
     const { showActiveSessionsOnly } = useShowActiveSessionsOnly()
+    const { showAttentionSessionsOnly, setShowAttentionSessionsOnly } = useShowAttentionSessionsOnly()
     const { pinInProgressSessions } = usePinInProgressSessions()
     const { machineFilter, setMachineFilter } = useSessionListMachineFilter()
     const showDetailedStatus = sessionListStatusMode === 'detailed'
@@ -1085,10 +1120,16 @@ export function SessionList(props: {
 
     const allSessions = useMemo(
         () => {
-            const prepared = prepareSidebarSessions(props.sessions, selectedSessionId)
-            return showActiveSessionsOnly ? filterActiveSessionsOnly(prepared, selectedSessionId) : prepared
+            let prepared = prepareSidebarSessions(props.sessions, selectedSessionId)
+            if (showActiveSessionsOnly) {
+                prepared = filterActiveSessionsOnly(prepared, selectedSessionId)
+            }
+            if (showAttentionSessionsOnly) {
+                prepared = filterAttentionSessionsOnly(prepared, selectedSessionId, getSessionLastSeenAt)
+            }
+            return prepared
         },
-        [props.sessions, selectedSessionId, showActiveSessionsOnly]
+        [props.sessions, selectedSessionId, showActiveSessionsOnly, showAttentionSessionsOnly]
     )
     const sessionActivityDates = useMemo(
         () => new Set(allSessions.map(session => formatDateValue(new Date(session.updatedAt)))),
@@ -1459,6 +1500,21 @@ export function SessionList(props: {
                                     onChange={setMachineFilter}
                                 />
                             ) : null}
+                            <button
+                                type="button"
+                                onClick={() => setShowAttentionSessionsOnly(!showAttentionSessionsOnly)}
+                                aria-pressed={showAttentionSessionsOnly}
+                                title={t('sessions.attentionFilter.toggle')}
+                                aria-label={t('sessions.attentionFilter.toggle')}
+                                className={cn(
+                                    'flex h-9 w-9 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
+                                    showAttentionSessionsOnly
+                                        ? 'bg-[var(--app-subtle-bg)] text-[var(--app-link)]'
+                                        : 'text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
+                                )}
+                            >
+                                <InboxIcon className="h-5 w-5" />
+                            </button>
                             {renderHeader ? (
                                 <button
                                     type="button"
@@ -1515,7 +1571,7 @@ export function SessionList(props: {
                     />
                 ) : null}
 
-                {props.sessions.length > 0 && (isFiltering || activeMachineFilter !== null) && groups.length === 0 && runningSessionTotal === 0 ? (
+                {props.sessions.length > 0 && (isFiltering || activeMachineFilter !== null || showAttentionSessionsOnly) && groups.length === 0 && runningSessionTotal === 0 ? (
                     <div className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
                         {t('sessions.search.noResults')}
                     </div>
