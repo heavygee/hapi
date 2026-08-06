@@ -12,39 +12,41 @@ Someone else already built per-session Pin (context menu). Operator wants it on 
 
 ## Why you cannot just add `pr: 1115`
 
-Orchestrator trial-merged `techotaku39/feat/web-pinned-sessions` (`41a0afa43`) onto current `driver` tip (`7261e5e64`):
+Orchestrator trial-merged `techotaku39/feat/web-pinned-sessions` (`41a0afa43`) onto then-current `driver` tip:
 
-1. **Content conflicts** in: `hub/src/store/index.ts`, `migration-v18.test.ts`, `sessions.ts` / tests, `SessionActionMenu.tsx`, `SessionHeader.tsx`, `SessionList.tsx`, `useSessionActions.ts`.
-2. **SCHEMA collision (kill-criterion):** both claim `SCHEMA_VERSION = 20` for **different** migrations:
-   - **Soup/driver today:** `migrateFromV19ToV20` = usage_events reindex / scan-state clear (`tiann/hapi#1359` lineage). Live DB `user_version` is already **20**.
-   - **PR #1115:** `migrateFromV19ToV20` = `ALTER TABLE sessions ADD COLUMN pinned …`.
+1. **Content conflicts** in: `hub/src/store/index.ts`, migration tests, `sessions.ts` / tests, `SessionActionMenu.tsx`, `SessionHeader.tsx`, `SessionList.tsx`, `useSessionActions.ts`.
+2. **SCHEMA collision (kill-criterion):** #1115 claimed `SCHEMA_VERSION = 20` for `pinned` while soup already used v20 for usage reindex (#1359). Mid-promote, tip-forward remat also absorbed upstream #1390 which took **v21** for cache usage semantics. Pin therefore lands as **v22** on the union tip (not v21).
 
-Blind merge would either drop usage v20, never apply `pinned` on an already-v20 DB, or both. **Do not** add the raw PR layer to the manifest and hope.
+Blind merge of raw #1115 would drop usage migrations and/or never apply `pinned` on an already-advanced DB. **Do not** add the raw PR layer to the manifest and hope.
 
-Local ref already fetched: `refs/heads/techotaku39/feat/web-pinned-sessions` (same as `refs/remotes/techotaku39/feat/web-pinned-sessions`). `pr:` manifest resolver only fetches `origin/` - use a **local branch** layer.
+Local ref: `techotaku39/feat/web-pinned-sessions` @ `41a0afa43`. Use a **local/origin branch** layer (`pr:` only fetches `origin/`).
 
-## Your job (soup union)
+## Progress (2026-08-06 peer)
 
-1. Build `driver/web-pinned-sessions` that merges cleanly onto **current driver tip** (or remat WIP equivalent): take #1115 pin behavior (hub column + `PUT /api/sessions/:id/pin` + sidebar/header Pin/Unpin + list ordering).
-2. **Remap pin migration to v21** (or next free step): keep soup's existing v20 usage migration intact; add idempotent `pinned` column migration as **v21**; bump `SCHEMA_VERSION` to 21; add/adjust migration tests.
-3. Resolve the listed content conflicts in favor of: pin feature + current soup behavior (In progress optional, Idle changes, header metadata, etc.). Prefer small heals; `scripts/tooling/soup-heals/*.patch` if that is the estate pattern for remat.
-4. Trial `git merge-tree --write-tree --messages "$(git -C ~/coding/hapi/driver rev-parse HEAD)" driver/web-pinned-sessions` → must be **clean**.
-5. Add layer to **`~/.config/hapi/driver-manifest.yaml`** *and* mirror `config/driver-manifest.yaml` (keep in sync; commit mirror utensil):
-   ```yaml
-   - branch: driver/web-pinned-sessions
-     # SOUP 2026-08-06: upstream #1115 pin sessions; schema pin→v21 (soup v20=usage)
-   ```
-6. `hapi-driver-status --quiet` → `hapi-driver-rebuild --build-web --verify` → `hapi-verify-web-dist`. Hub/cli changed → `hapi-restart-hub` (patient). Confirm DB migrates 20→21 and Pin appears in session context menu on `:3006`.
-7. PNG / `display_image` proof: right-click → Pin; pinned session stays put.
-8. **Do not** open an upstream PR that races #1115. Optional: polite comment on #1115 noting soup remapped pin to v21 because upstream/main may already have usage as v20 - only if accurate at comment time.
+| Step | Status |
+|------|--------|
+| Union tip `driver/web-pinned-sessions` @ `9cb1e1bcd` | **DONE** — based on remat tip-forward `1964a3d67`; pin→**v22**; merge-tree clean vs driver |
+| Manifest layer (mirror + `~/.config`) | **DONE** — utensil commits `c04ae067a` / `8f2c1c964` |
+| `hapi-driver-rebuild --build-web --verify` | **BLOCKED** — remat-hold exit 76 (owner `05d9f0f2` / meta-soup-stabilize). Upstream/main conflict already resolved in remat WT; hold not cleared. Meta `hapi-restart-hub` pid 743518 patient-draining (WORKING=2). Pin layer not yet absorbed. |
+| Hub restart + DB 20→21→22 + Pin proof | **PENDING** hold clear + rebuild |
+
+**Pinged Meta twice** with tip SHA + deadlock note. Peer must not clear hold / steal remat-owner token.
+
+## Remaining after hold clear
+
+1. `hapi-driver-status --quiet` → `hapi-driver-rebuild --build-web --verify` → `hapi-verify-web-dist`
+2. Hub/cli changed → `hapi-restart-hub` (patient). Confirm `PRAGMA user_version` = 22 and Pin in session context menu on `:3006`.
+3. PNG / `display_image` proof: right-click → Pin; pinned session stays put.
+4. **Do not** open an upstream PR that races #1115. Optional comment on #1115: soup remapped pin to **v22** because soup v20=#1359 and upstream #1390 took v21.
 
 ## Intake ownership
 
 | Step | Status |
 |------|--------|
 | Archaeology / conflict discovery | DONE (orchestrator) |
-| Union tip + schema v21 remap | **YOU** |
-| Manifest + rebuild + dogfood proof | **YOU** |
+| Union tip + schema remap (→v22) | **DONE** |
+| Manifest | **DONE** |
+| Rebuild + dogfood proof | **BLOCKED** on remat-hold / Meta |
 | Competing upstream PR | **NO** |
 
 Hard rules: no agent stack-switch; no hand-edit inside `driver/` except via rebuild; commit tooling dirt same turn; never merge `tiann/hapi`.
