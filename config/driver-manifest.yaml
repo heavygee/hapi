@@ -697,5 +697,5 @@ layers:
   # permission/input/unread; exclude background-only. Sidebar inbox toggle + Settings Display.
   # Web-only. Peer-stack Playwright green 2026-08-06. Do NOT open upstream PR until dogfood OK.
   # Worktree: ~/coding/hapi/worktrees/session-attention-filter @ feat/session-attention-filter
-  # Tip: ff01045d4 (origin/feat/session-attention-filter)
+  # Tip: 0c3e0fd65 (origin/feat/session-attention-filter) — transient sidebar toggle only
   - branch: feat/session-attention-filter
