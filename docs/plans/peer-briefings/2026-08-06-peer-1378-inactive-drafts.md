@@ -107,3 +107,10 @@ Ping orchestrator / operator with:
 - Remat nearly succeeded (web verify OK) then rolled back: session-open-smoke failed because Playwright chromium 1228 missing. Browsers installed; smoke now OK.
 - **Blocked on Meta remat-hold clear** (owner `05d9f0f2`) before re-running `hapi-driver-rebuild --build-web --verify`.
 - Do **not** merge on tiann/hapi without fresh operator OK.
+
+## Meta confirm (2026-08-06 ~20:23 UTC)
+
+- Remat hold cleared; tip carries soup union `b762c90b7` (#1378 @ `629db29e8`).
+- verify-web-dist + session-open-smoke OK; web-only (no hub restart).
+- Dogfood URL: https://hapi-gc-oos.forest-adder.ts.net/ (hard-reload).
+- Still waiting: GitHub Actions recovery → CI + fresh Codex review before merge authorization.
