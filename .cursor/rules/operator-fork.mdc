@@ -11,6 +11,8 @@ This repo is a **fork** of `tiann/hapi`. Root **`AGENTS.md` is byte-identical to
 
 **NEVER merge on `tiann/hapi` from an agent shell.** Agents prepare only (CI, rebase, threads). Merge lanes A/B/C live in `docs/operator/AGENTS.md` § Upstream relationship: lane A = @tiann; lane B = operator/Meta for low-impact / policy-eligible PRs (blessing: tiann on #1268); lane C = forbidden. Write collaborator access is not a blank check. Incident #1096 was the first accidental heavygee upstream merge (2026-07-20).
 
+**Public GitHub voice:** do not unsolicited-comment on others' PRs/issues with estate jargon (soup, Meta, remat, lanes). Route findings to the operator; post only with operator-approved wording. Do not police other contributors - assume best intent + time lag; tests and the review bot catch real breakage. Canon: `docs/operator/AGENTS.md` § Public GitHub voice.
+
 - **Master workflow (sole source):** [`docs/tooling/feature-work-lifecycle.md`](../../docs/tooling/feature-work-lifecycle.md)
 - **New functionality requests:** [`docs/tooling/new-feature-intake.md`](../../docs/tooling/new-feature-intake.md) — §0 handoff only; workflow is lifecycle
 - **Session titles:** workstream only (`PR #N: …` / `Peer #N: …`). **Never** encode CI/health with ✅🔁⚠️📝🔧 in the title (ADR D8) — that lives on the **PR chip** via `hapi-meta-daily.sh`. Do not run deprecated `hapi-pr-session-emoji.sh`, and do not hand-`PATCH` emoji after it refuses. See lifecycle [§ Session titles and PR chips](../../docs/tooling/feature-work-lifecycle.md#session-titles-and-pr-chips-no-status-emoji).

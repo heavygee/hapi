@@ -235,6 +235,10 @@ When the hook reports unresolved threads:
 
 Bypass env-var names are deliberately ugly so they don't become muscle memory. Postmortem: `tiann/hapi#814` `#issuecomment-4639449666` (2026-06-06) - the orchestrator created a top-level comment instead of replying to the bot's review threads, hence these guards.
 
+### Others' PRs (do not police)
+
+Unsolicited top-level comments on **someone else's** upstream PR are an **operator decision**, not prepare-lane autonomy. Route soup/schema/rebase findings to the operator in-session. Do not dump estate jargon (soup, Meta, remat, lanes) onto contributors. Assume they are operating at their best; tests + the review bot catch real breakage. Full voice rules: [`docs/operator/AGENTS.md`](../operator/AGENTS.md) § Public GitHub voice. Incident: agent dump on `tiann/hapi#1115` `#issuecomment-5204453417` (operator corrected).
+
 ---
 
 ## What `cold-review-clean` means (and what it doesn't)

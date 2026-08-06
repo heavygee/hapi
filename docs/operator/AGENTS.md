@@ -24,6 +24,7 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 | Claim wave remat / web soup “green” | Smoke `/sessions` past error boundary; new `index-*.js` hash if UI was broken; hard-reload / clear Workbox if sticky | [`driver-soup.md`](../tooling/driver-soup.md) § NEVER park + When upstream moves |
 | About to claim gates / PR ready | Mechanical verify before assertion | Lifecycle §6 + [`pr-review-loop.md`](../tooling/pr-review-loop.md) |
 | Upstream PR “babysit / merge-ready” | **Prepare only** (agents); lane B self-merge is operator/Meta | § Upstream relationship - lanes A/B/C; #1096; #1268 blessing |
+| Public speech on others' PRs/issues | **Operator first**; no estate jargon; do not police other contributors | § Public GitHub voice |
 | **Daily PR sweep / "the dance"** | Run **`hapi-meta-daily.sh`** — classify → chip status cache → strip title emoji (chipped) → policy-ping → action queue. Don't reinvent it each morning. | § Meta PR watcher (below) |
 | Upstream PR **merged** (Meta daily / chip `merged`) | Notify peer → drop soup layer → clean worktree/branch → rematerialize **once** after the wave → archive when idle (peers: no mid-turn self-archive; **no** `🔧` title rewrite) | Lifecycle [§ After upstream merge](../tooling/feature-work-lifecycle.md#after-upstream-merge-fleet-cleanup--meta-sweep-must-advise-this) |
 | Session title / PR health | Title = workstream only (no `PR #N:` once chipped); identity+health on **chip**; attach via `hapi link-pr` / MCP `link_pr` | Lifecycle [§ Session titles and PR chips](../tooling/feature-work-lifecycle.md#session-titles-and-pr-chips) |
@@ -81,7 +82,7 @@ Chip status stays **PR health only** (`✅` / `🔁` / `⚠️` / …). Merge au
 
 `heavygee` has **`write`** permission on `tiann/hapi` (verify: `gh api repos/tiann/hapi/collaborators/heavygee/permission`). Write ≠ blank-check merge authority. Scoped by lanes A/B/C above (blessing: #1268 comment).
 
-Default remains **fork-contributor discipline** for product work (PRs from `upstream/main`-based branches via `hapi-pr-create`, comments and reviews welcome on others' PRs, no direct writes to upstream branches or other people's work).
+Default remains **fork-contributor discipline** for product work (PRs from `upstream/main`-based branches via `hapi-pr-create`, no direct writes to upstream branches or other people's work). Code review on others' PRs is welcome **when substance helps the author** (plain language, code-focused). Unsolicited top-level "estate status" comments are not - see § Public GitHub voice. Prefer operator-mediated offers (rebase help, scope expansion).
 
 **What we self-permit:**
 
@@ -100,6 +101,8 @@ Default remains **fork-contributor discipline** for product work (PRs from `upst
 - Acting on behalf of @tiann in any communication with contributors
 - Granting or revoking access to others
 - Triggering / dismissing workflows on others' PRs
+- Unsolicited public comments on others' PRs/issues that leak estate process or jargon (route to operator first - § Public GitHub voice)
+- Offering rebase/takeover/scope changes on others' work without operator-approved wording
 
 If @tiann narrows or expands scope, revise this section.
 
@@ -263,13 +266,45 @@ git commit -m "chore(fork): drop upstream AGENTS.md (canonical copy in docs/oper
 
 ---
 
-## Upstream PR voice (diffident contributor)
+## Public GitHub voice (tiann/hapi and the fork)
 
-PR prose = humble first-timer; work = first-class. Silent checklist: rebase, tests, default path note, no fork docs in diff.
+Audience is upstream maintainers and other contributors - not the estate.
+Write like a careful external collaborator. Diffident in tone; concrete in facts.
 
-Never in upstream PRs: AI disclosure, fork strategy, internal plans, canon edits.
+**Our PR bodies** = humble first-timer; work = first-class. Silent checklist: rebase, tests, default path note, no fork docs in diff. Skeleton: Summary / Problem / Approach / Testing / Related / Questions.
 
-See prior skeleton in git history or integration plan §16.9 - Summary / Problem / Approach / Testing / Related / Questions.
+Never in upstream PR **bodies**: AI disclosure, fork strategy, internal plans, canon edits.
+
+### Trust other contributors (do not police them)
+
+Assume authors and maintainers are operating at their best. If something looks "missed," treat it as **time / attention lag**, not incompetence. Upstream already has tests and the HAPI / Codex review bot - rebase collisions, stale threads, and broken CI get figured out without an estate lecture. Agents police **themselves** and the **operator channel**. They do **not** police other people's PRs.
+
+### Default: talk to the operator first
+
+Unsolicited top-level comments on **someone else's** issue/PR are **operator decisions**, not agent autonomy.
+If soup dogfood, schema remaps, rebase blockers, or product-direction offers matter:
+1. Report them in the HAPI session / to the operator.
+2. Do **not** `gh pr comment` / `gh issue comment` unless the operator explicitly asks you to post, or pastes the exact body to publish.
+3. Prepare-lane babysit of **our** PRs (thread replies via `hapi-pr-reply`, CI, rebase notes **to the operator**) stays allowed.
+
+Exception: answering a direct @-mention / review question on a thread we already own - still plain language, still no estate jargon.
+
+### Banned from public comments (always)
+
+- Estate jargon without translation: soup, Meta, remat, chip, lane A/B/C, union tip, dogfood note, `:3006`, worktree paths, session IDs
+- Explaining our fork strategy, blessing (#1268), merge policy, or why we may self-merge
+- Speaking as @tiann or "the project maintainers"
+- Dumping internal triage ("so Meta stops counting Codex threads") onto authors who cannot act on our tooling
+- Offering to rebase / take over / expand scope on others' PRs unless the operator asked you to make that offer
+- "Helpful" warnings that amount to policing someone else's open work
+
+### Allowed when the operator greenlights a public note
+
+- Plain technical facts the author can use (e.g. "main already has schema v21 from #1390; this PR's pin migration still claims v20 and needs remapping to v22")
+- Short, optional offer framed as **heavygee the human**, not "we/the soup kitchen"
+- Zero fork autobiography. If a local nickname must appear once, define it in one plain sentence - prefer not to use it at all
+
+Canonical correction example: `tiann/hapi#1115` comment `5204453417` (operator rewrite after an agent dump).
 
 ---
 
