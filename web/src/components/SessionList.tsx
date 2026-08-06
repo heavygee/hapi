@@ -37,6 +37,7 @@ import { getPrimaryGithubPrRef } from '@hapi/protocol'
 import { SessionRowSummary } from '@/components/SessionRowSummary'
 import { Spinner } from '@/components/Spinner'
 import { useToast } from '@/lib/toast-context'
+import { transferComposerDraft } from '@/lib/composer-draft-transfer'
 
 export { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
 
@@ -979,6 +980,7 @@ function SessionItem(props: {
             // Follow it so the operator lands on the live session.
             if (result.sessionId && result.sessionId !== s.id) {
                 retargetSharePendingTransfer(s.id, result.sessionId)
+                await transferComposerDraft(s.id, result.sessionId)
                 onSelect(result.sessionId)
             }
         } catch (error) {

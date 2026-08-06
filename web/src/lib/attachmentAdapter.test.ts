@@ -124,4 +124,71 @@ describe('attachmentAdapter image previews', () => {
         expect(emitted).toHaveLength(3)
         expect(emitted.every((attachment) => attachment.previewUrl === undefined)).toBe(true)
     })
+
+    it('hands an inactive attachment to the resumed session before uploading', async () => {
+        const { createAttachmentAdapter } = await import('./attachmentAdapter')
+        const file = new File(['image'], 'ready.png', { type: 'image/png' })
+        const uploadFile = vi.fn().mockResolvedValue({ success: true, path: '/uploads/ready.png' })
+        const resolveSessionId = vi.fn().mockResolvedValue('session-resumed')
+        const onSessionResolved = vi.fn().mockResolvedValue(undefined)
+        const adapter = createAttachmentAdapter(
+            { uploadFile } as never,
+            'session-inactive',
+            resolveSessionId,
+            onSessionResolved,
+        )
+
+        const additions = adapter.add({ file }) as AsyncIterable<unknown>
+        for await (const _attachment of additions) {
+            // Consume the upload lifecycle.
+        }
+
+        expect(resolveSessionId).toHaveBeenCalledOnce()
+        expect(onSessionResolved).toHaveBeenCalledWith('session-resumed', expect.objectContaining({
+            id: expect.any(String),
+            file,
+        }))
+        expect(uploadFile).not.toHaveBeenCalled()
+
+    })
+
+    it('skips handoff when the attachment is removed during resume', async () => {
+        const { createAttachmentAdapter } = await import('./attachmentAdapter')
+        const file = new File(['image'], 'ready.png', { type: 'image/png' })
+        const uploadFile = vi.fn().mockResolvedValue({ success: true, path: '/uploads/ready.png' })
+        let releaseResolve!: (sessionId: string) => void
+        let markResolveStarted!: () => void
+        const resolveSessionReady = new Promise<void>((resolve) => {
+            markResolveStarted = resolve
+        })
+        const resolveSessionId = vi.fn().mockImplementation(() => {
+            markResolveStarted()
+            return new Promise<string>((resolve) => {
+                releaseResolve = resolve
+            })
+        })
+        const onSessionResolved = vi.fn().mockResolvedValue(undefined)
+        const adapter = createAttachmentAdapter(
+            { uploadFile } as never,
+            'session-inactive',
+            resolveSessionId,
+            onSessionResolved,
+        )
+
+        const additions = adapter.add({ file }) as AsyncIterable<Record<string, unknown>>
+        const iterator = additions[Symbol.asyncIterator]()
+        const first = await iterator.next()
+        const pendingId = first.value?.id as string
+        expect(pendingId).toBeTruthy()
+
+        const remainder = iterator.next()
+        await resolveSessionReady
+        await adapter.remove({ id: pendingId } as never)
+        releaseResolve('session-resumed')
+        await remainder
+
+        expect(resolveSessionId).toHaveBeenCalledOnce()
+        expect(onSessionResolved).not.toHaveBeenCalled()
+        expect(uploadFile).not.toHaveBeenCalled()
+    })
 })

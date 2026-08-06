@@ -37,6 +37,9 @@ import { supportsEffort, supportsModelChange, PI_THINKING_LEVEL_LABELS } from '@
 import type { PiThinkingLevel } from '@hapi/protocol'
 import { markSkillUsed } from '@/lib/recent-skills'
 import { useComposerDraft } from '@/hooks/useComposerDraft'
+import { saveDraft } from '@/lib/composer-drafts'
+import type { AttachmentDraftInput } from '@/lib/composer-attachment-drafts'
+import { clearComposerDraftSnapshot, setComposerDraftSnapshot } from '@/lib/composer-draft-transfer'
 import { useComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
 import { Autocomplete } from '@/components/ChatInput/Autocomplete'
@@ -276,6 +279,8 @@ export function ModelEffortSettingsSection(props: {
 
 export function HappyComposer(props: {
     sessionId?: string
+    onUploadDraftSnapshot?: (text: string, attachments: AttachmentDraftInput[]) => void
+    canRestoreAttachments?: boolean
     disabled?: boolean
     permissionMode?: PermissionMode
     collaborationMode?: CodexCollaborationMode
@@ -592,22 +597,37 @@ export function HappyComposer(props: {
 
     const attachmentDrafts = attachments.flatMap((attachment) => {
         if (!attachment.file) return []
-        const upload = attachment as typeof attachment & { path?: string; previewUrl?: string }
+        const upload = attachment as typeof attachment & { path?: string; previewUrl?: string; uploadSessionId?: string }
         return [{
             id: attachment.id,
             file: attachment.file,
             path: upload.path,
             previewUrl: upload.previewUrl,
+            uploadSessionId: upload.uploadSessionId,
         }]
     })
     const draftHydration = useComposerDraft(
         sessionId,
         composerText,
         attachmentDrafts,
-        active,
+        props.canRestoreAttachments ?? active,
         (text) => api.composer().setText(text),
         (file) => api.composer().addAttachment(file),
     )
+
+    useEffect(() => {
+        if (draftHydration.sessionId !== sessionId || !draftHydration.complete || !sessionId) return
+        // Inactive sessions keep attachments in IndexedDB only. Publishing an
+        // empty live snapshot here would shadow those files on reopen/transfer.
+        const canHydrateAttachments = props.canRestoreAttachments ?? active
+        if (canHydrateAttachments) {
+            setComposerDraftSnapshot(sessionId, composerText, attachmentDrafts)
+            props.onUploadDraftSnapshot?.(composerText, attachmentDrafts)
+        } else {
+            saveDraft(sessionId, composerText)
+            clearComposerDraftSnapshot(sessionId)
+        }
+    }, [active, attachmentDrafts, composerText, draftHydration.complete, draftHydration.sessionId, props.canRestoreAttachments, props.onUploadDraftSnapshot, sessionId])
 
     // assistant-ui clears `composer.text` synchronously the moment a send is
     // invoked AND `SessionChat.handleSend` clears `pendingSchedule` after the

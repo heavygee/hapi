@@ -64,6 +64,9 @@ import {
 } from '@/lib/scratchlistAttachmentFlow'
 import type { ScratchlistEntry } from '@/lib/scratchlist'
 import { isHubScratchlistAttachmentPath, type MessageDeliveryMode } from '@hapi/protocol'
+import {
+    type AttachmentDraftInput,
+} from '@/lib/composer-attachment-drafts'
 import { useTranslation } from '@/lib/use-translation'
 import type { SendMessageAcceptance, SendMessageSettlement } from '@/hooks/mutations/useSendMessage'
 import {
@@ -71,6 +74,7 @@ import {
     resolveMessageDeliveryMode,
     type ComposerSendIntent,
 } from '@/lib/messageDelivery'
+import { handoffComposerDraft, transferComposerDraft } from '@/lib/composer-draft-transfer'
 import { SessionHeader } from '@/components/SessionHeader'
 import { SessionFlowPanel } from '@/components/SessionFlowPanel'
 import { CursorMigrationBanner } from '@/components/CursorMigrationBanner'
@@ -376,6 +380,8 @@ type SessionChatProps = {
         scheduledAt?: number | null,
         deliveryMode?: MessageDeliveryMode,
     ) => Promise<SendMessageAcceptance | false>
+    resolveSessionIdForUpload?: (sessionId: string) => Promise<string>
+    onUploadSessionResolved?: (sessionId: string) => void
     onViewModeChange: (mode: 'tail' | 'history') => void
     onRetryMessage?: (localId: string) => void
     autocompleteSuggestions?: (query: string) => Promise<Suggestion[]>
@@ -451,6 +457,10 @@ function SessionChatInner(props: SessionChatProps) {
     const blocksByIdRef = useRef<Map<string, ChatBlock>>(new Map())
     const visibleGroupsRef = useRef<ToolGroupBlock[]>([])
     const [forceScrollToken, setForceScrollToken] = useState(0)
+    const uploadDraftSnapshotRef = useRef<{ text: string; attachments: AttachmentDraftInput[] }>({
+        text: '',
+        attachments: [],
+    })
     const [outlineOpen, setOutlineOpen] = useState(props.initialOutlineOpen ?? false)
     const [sessionLogOpen, setSessionLogOpen] = useState(props.initialSessionLogOpen ?? false)
     const [flowOpen, setFlowOpen] = useState(false)
@@ -1591,18 +1601,39 @@ function SessionChatInner(props: SessionChatProps) {
     }, [agentFlavor, onSendForComposer, props.session.thinking, scratchlistMode, updatePendingSchedule])
 
     const attachmentAdapter = useMemo(() => {
-        if (!props.session.active) {
-            scratchlistAdapterRef.current = null
-            return undefined
-        }
-        if (scratchlistMode) {
+        if (props.session.active && scratchlistMode) {
             const adapter = createScratchlistAttachmentAdapter(props.api, props.session.id)
             scratchlistAdapterRef.current = adapter
             return adapter
         }
         scratchlistAdapterRef.current = null
-        return createAttachmentAdapter(props.api, props.session.id)
-    }, [props.api, props.session.id, props.session.active, scratchlistMode])
+        if (props.session.active) {
+            return createAttachmentAdapter(props.api, props.session.id)
+        }
+        // Only offer attachments on inactive sessions that can actually resume;
+        // otherwise file picks become stuck error attachments that cannot send.
+        if (!inactiveCanResume || !props.resolveSessionIdForUpload) {
+            return undefined
+        }
+        return createAttachmentAdapter(
+            props.api,
+            props.session.id,
+            () => props.resolveSessionIdForUpload!(props.session.id),
+            async (resolvedSessionId, pending) => {
+                // Include the in-flight file and coalesce multi-file drops into
+                // one transfer + navigation before the source composer unmounts.
+                await handoffComposerDraft(
+                    props.session.id,
+                    resolvedSessionId,
+                    pending,
+                    async (targetSessionId) => {
+                        props.onUploadSessionResolved?.(targetSessionId)
+                    },
+                )
+            },
+        )
+    }, [props.api, props.session.id, props.session.active, props.resolveSessionIdForUpload, scratchlistMode, inactiveCanResume])
+
 
     const runtime = useHappyRuntime({
         session: props.session,
@@ -1638,7 +1669,8 @@ function SessionChatInner(props: SessionChatProps) {
                 reopenDisabledReason={props.reopenDisabledReason}
                 reopenHint={props.reopenHint}
                 onSessionDeleted={props.onBack}
-                onSessionReopened={(newSessionId) => {
+                onSessionReopened={async (newSessionId) => {
+                    await transferComposerDraft(props.session.id, newSessionId)
                     navigate({
                         to: '/sessions/$sessionId',
                         params: { sessionId: newSessionId },
@@ -1671,7 +1703,7 @@ function SessionChatInner(props: SessionChatProps) {
 
             <AssistantRuntimeProvider runtime={runtime}>
                 <ShareSeedConsumer sessionId={props.session.id} sessionActive={props.session.active} />
-                <DragDropZone disabled={sessionInactive || props.isSending || pendingSchedule != null || isScratchlistParking}>
+                <DragDropZone disabled={(!props.session.active && !inactiveCanResume) || props.isSending || pendingSchedule != null || isScratchlistParking}>
 
                     <HappyThread
                         // Key with prefix: different components under the same session
@@ -1767,6 +1799,10 @@ function SessionChatInner(props: SessionChatProps) {
                         <HappyComposer
                         key={`composer-${props.session.id}`}
                         sessionId={props.session.id}
+                        canRestoreAttachments={props.session.active}
+                        onUploadDraftSnapshot={(text, attachments) => {
+                            uploadDraftSnapshotRef.current = { text, attachments }
+                        }}
                         resolveSessionMentionTooltip={resolveSessionMentionTooltip}
                         disabled={props.isSending}
                         pendingSchedule={pendingSchedule}

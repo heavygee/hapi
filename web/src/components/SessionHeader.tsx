@@ -214,7 +214,7 @@ export function SessionHeader(props: {
     reopenDisabledReason?: string
     reopenHint?: string
     onSessionDeleted?: () => void
-    onSessionReopened?: (newSessionId: string) => void
+    onSessionReopened?: (newSessionId: string) => void | Promise<void>
 }) {
     const { t, locale } = useTranslation()
     const queryClient = useQueryClient()
@@ -349,7 +349,7 @@ export function SessionHeader(props: {
             const result = await reopenSession()
             if (result.sessionId && result.sessionId !== session.id) {
                 retargetSharePendingTransfer(session.id, result.sessionId)
-                onSessionReopened?.(result.sessionId)
+                await onSessionReopened?.(result.sessionId)
             }
         } catch (error) {
             setReopenError(formatReopenError(error))
