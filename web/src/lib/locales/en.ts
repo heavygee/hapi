@@ -72,7 +72,7 @@ export default {
   'sessions.search.open': 'Search sessions',
   'sessions.search.clear': 'Clear search',
   'sessions.search.noResults': 'No sessions match your filters.',
-  'sessions.attentionFilter.toggle': 'Needs attention only',
+  'sessions.unreadFilter.toggle': 'Unread only',
   'sessions.timeFilter.label': 'Filter sessions by last activity',
   'sessions.timeFilter.pickStart': 'Select start date',
   'sessions.timeFilter.pickEnd': 'Select end date',
