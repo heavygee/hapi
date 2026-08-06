@@ -17,7 +17,7 @@ import { DEFAULT_SESSION_PREVIEW_LIMIT, useSessionPreviewLimit } from '@/hooks/u
 import { useSessionListStatusMode } from '@/hooks/useSessionListStatusMode'
 import { useShowActiveSessionsOnly } from '@/hooks/useShowActiveSessionsOnly'
 import { usePinInProgressSessions } from '@/hooks/usePinInProgressSessions'
-import { classifySessionAttention, sessionNeedsAttentionReview } from '@/lib/sessionAttention'
+import { classifySessionAttention, sessionIsUnread } from '@/lib/sessionAttention'
 import { getSessionLastSeenAt } from '@/lib/sessionLastSeen'
 import { useSessionRowTooltipIds } from '@/components/HoverTooltip'
 import { subscribeCodexImportedSessions } from '@/lib/codexImportedSessions'
@@ -252,16 +252,16 @@ export function filterActiveSessionsOnly(sessions: SessionSummary[], selectedSes
     return sessions.filter(session => session.active || session.id === selectedSessionId)
 }
 
-// Opt-in "needs attention" inbox: permission / input / unread. Keep selected visible.
-// Background-only busy work is excluded (busy ≠ needs review).
-export function filterAttentionSessionsOnly(
+// Transient unread lens: hide sessions the operator has already seen.
+// Keep the open session visible. Not Overseer / "needs attention" — just unread.
+export function filterUnreadSessionsOnly(
     sessions: SessionSummary[],
     selectedSessionId: string | null | undefined,
     getLastSeenAt: (sessionId: string) => number
 ): SessionSummary[] {
     return sessions.filter(session =>
         session.id === selectedSessionId
-        || sessionNeedsAttentionReview(session, { lastSeenAt: getLastSeenAt(session.id) })
+        || sessionIsUnread(session, { lastSeenAt: getLastSeenAt(session.id) })
     )
 }
 
@@ -1152,8 +1152,8 @@ export function SessionList(props: {
     const { sessionPreviewLimit } = useSessionPreviewLimit()
     const { sessionListStatusMode } = useSessionListStatusMode()
     const { showActiveSessionsOnly } = useShowActiveSessionsOnly()
-    // Transient inbox lens — not a Settings preference. Cleared on reload; rows drop as they're seen.
-    const [showAttentionSessionsOnly, setShowAttentionSessionsOnly] = useState(false)
+    // Transient unread lens — not a Settings preference. Cleared on reload; rows drop as they're seen.
+    const [showUnreadOnly, setShowUnreadOnly] = useState(false)
     const { pinInProgressSessions } = usePinInProgressSessions()
     const { machineFilter, setMachineFilter } = useSessionListMachineFilter()
     const showDetailedStatus = sessionListStatusMode === 'detailed'
@@ -1189,12 +1189,12 @@ export function SessionList(props: {
             if (showActiveSessionsOnly) {
                 prepared = filterActiveSessionsOnly(prepared, selectedSessionId)
             }
-            if (showAttentionSessionsOnly) {
-                prepared = filterAttentionSessionsOnly(prepared, selectedSessionId, getSessionLastSeenAt)
+            if (showUnreadOnly) {
+                prepared = filterUnreadSessionsOnly(prepared, selectedSessionId, getSessionLastSeenAt)
             }
             return prepared
         },
-        [props.sessions, selectedSessionId, showActiveSessionsOnly, showAttentionSessionsOnly]
+        [props.sessions, selectedSessionId, showActiveSessionsOnly, showUnreadOnly]
     )
     const sessionActivityDates = useMemo(
         () => new Set(allSessions.map(session => formatDateValue(new Date(session.updatedAt)))),
@@ -1567,13 +1567,13 @@ export function SessionList(props: {
                             ) : null}
                             <button
                                 type="button"
-                                onClick={() => setShowAttentionSessionsOnly(!showAttentionSessionsOnly)}
-                                aria-pressed={showAttentionSessionsOnly}
-                                title={t('sessions.attentionFilter.toggle')}
-                                aria-label={t('sessions.attentionFilter.toggle')}
+                                onClick={() => setShowUnreadOnly(!showUnreadOnly)}
+                                aria-pressed={showUnreadOnly}
+                                title={t('sessions.unreadFilter.toggle')}
+                                aria-label={t('sessions.unreadFilter.toggle')}
                                 className={cn(
                                     'flex h-9 w-9 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
-                                    showAttentionSessionsOnly
+                                    showUnreadOnly
                                         ? 'bg-[var(--app-subtle-bg)] text-[var(--app-link)]'
                                         : 'text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
                                 )}
@@ -1636,7 +1636,7 @@ export function SessionList(props: {
                     />
                 ) : null}
 
-                {props.sessions.length > 0 && (isFiltering || activeMachineFilter !== null || showAttentionSessionsOnly) && groups.length === 0 && runningSessionTotal === 0 ? (
+                {props.sessions.length > 0 && (isFiltering || activeMachineFilter !== null || showUnreadOnly) && groups.length === 0 && runningSessionTotal === 0 ? (
                     <div className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
                         {t('sessions.search.noResults')}
                     </div>

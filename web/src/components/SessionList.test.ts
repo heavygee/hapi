@@ -5,7 +5,7 @@ import {
     deduplicateSessionsByAgentId,
     expandSelectedSessionCollapseOverrides,
     filterActiveSessionsOnly,
-    filterAttentionSessionsOnly,
+    filterUnreadSessionsOnly,
     getSessionTimeRange,
     getNextSessionVisibleCount,
     getPullRefreshIndicatorRotation,
@@ -455,22 +455,26 @@ describe('filterActiveSessionsOnly', () => {
     })
 })
 
-describe('filterAttentionSessionsOnly', () => {
+describe('filterUnreadSessionsOnly', () => {
     const lastSeen = (id: string): number => {
         if (id === 'unread') return 1000
         return 10_000
     }
 
-    it('keeps permission, input, and unread; drops background-only and quiet', () => {
+    it('keeps only sessions newer than lastSeen; drops seen and selected-only quiet rows stay when selected', () => {
         const sessions = [
-            makeSession({ id: 'permission', pendingRequestKinds: ['permission'], pendingRequestsCount: 1, updatedAt: 5000, metadata: { path: '/p' } }),
-            makeSession({ id: 'input', pendingRequestKinds: ['input'], pendingRequestsCount: 1, updatedAt: 5000, metadata: { path: '/p' } }),
             makeSession({ id: 'unread', updatedAt: 5000, metadata: { path: '/p' } }),
-            makeSession({ id: 'background', active: true, backgroundTaskCount: 2, updatedAt: 5000, metadata: { path: '/p' } }),
-            makeSession({ id: 'quiet', updatedAt: 1000, metadata: { path: '/p' } }),
+            makeSession({ id: 'seen', updatedAt: 1000, metadata: { path: '/p' } }),
+            makeSession({
+                id: 'permission-but-seen',
+                pendingRequestKinds: ['permission'],
+                pendingRequestsCount: 1,
+                updatedAt: 1000,
+                metadata: { path: '/p' },
+            }),
         ]
-        expect(filterAttentionSessionsOnly(sessions, null, lastSeen).map(s => s.id))
-            .toEqual(['permission', 'input', 'unread'])
+        expect(filterUnreadSessionsOnly(sessions, null, lastSeen).map(s => s.id))
+            .toEqual(['unread'])
     })
 
     it('keeps the selected session visible even when it would otherwise filter out', () => {
@@ -478,7 +482,7 @@ describe('filterAttentionSessionsOnly', () => {
             makeSession({ id: 'unread', updatedAt: 5000, metadata: { path: '/p' } }),
             makeSession({ id: 'selected-quiet', updatedAt: 1000, metadata: { path: '/p' } }),
         ]
-        expect(filterAttentionSessionsOnly(sessions, 'selected-quiet', lastSeen).map(s => s.id))
+        expect(filterUnreadSessionsOnly(sessions, 'selected-quiet', lastSeen).map(s => s.id))
             .toEqual(['unread', 'selected-quiet'])
     })
 })
