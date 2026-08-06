@@ -85,6 +85,7 @@ export default {
   'sessions.group.expand': 'Expand {n}',
   'sessions.group.collapse': 'Collapse {n}',
   'sessions.runningSection': 'In progress',
+  'sessions.pinnedSection': 'Pinned',
   'sessions.group.new': 'New session in this directory',
   'sessions.machineFilter.label': 'Filter sessions by machine',
   'sessions.machineFilter.all': 'All',
