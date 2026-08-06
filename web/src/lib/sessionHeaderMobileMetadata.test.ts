@@ -3,12 +3,14 @@ import { selectMobileSessionHeaderSecondary } from './sessionHeaderMobileMetadat
 
 describe('selectMobileSessionHeaderSecondary', () => {
     it('follows the upstream-first display order', () => {
-        expect(selectMobileSessionHeaderSecondary({ machine: true, model: true, updatedAt: true })).toBe('machine')
+        expect(selectMobileSessionHeaderSecondary({ machine: true, project: true, model: true, updatedAt: true })).toBe('machine')
+        expect(selectMobileSessionHeaderSecondary({ project: true, model: true, updatedAt: true, worktree: true })).toBe('project')
         expect(selectMobileSessionHeaderSecondary({ model: true, updatedAt: true, worktree: true })).toBe('model')
     })
 
     it('uses the next enabled and available detail when the model is absent', () => {
         expect(selectMobileSessionHeaderSecondary({ machine: true, lastActive: true, updatedAt: true })).toBe('machine')
+        expect(selectMobileSessionHeaderSecondary({ project: true, lastActive: true, updatedAt: true })).toBe('project')
         expect(selectMobileSessionHeaderSecondary({ lastActive: true, updatedAt: true })).toBe('lastActive')
         expect(selectMobileSessionHeaderSecondary({ fastMode: true, updatedAt: true, createdAt: true, worktree: true })).toBe('fastMode')
         expect(selectMobileSessionHeaderSecondary({ updatedAt: true, createdAt: true, worktree: true })).toBe('createdAt')

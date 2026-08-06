@@ -7,6 +7,7 @@ export type SessionHeaderMetadataKey =
     | 'reasoning'
     | 'fastMode'
     | 'machine'
+    | 'project'
     | 'lastActive'
     | 'createdAt'
     | 'updatedAt'
@@ -21,6 +22,7 @@ export const DEFAULT_SESSION_HEADER_METADATA: SessionHeaderMetadataPreferences =
     reasoning: true,
     fastMode: true,
     machine: true,
+    project: true,
     lastActive: true,
     createdAt: false,
     updatedAt: false,

@@ -143,6 +143,7 @@ export default function SettingsDisplayPage() {
         { key: 'showLabels', labelKey: 'settings.display.sessionHeader.showLabels' },
         { key: 'agent', labelKey: 'settings.display.sessionHeader.agent' },
         { key: 'machine', labelKey: 'settings.display.sessionHeader.machine' },
+        { key: 'project', labelKey: 'settings.display.sessionHeader.project' },
         { key: 'lastActive', labelKey: 'settings.display.sessionHeader.lastActive' },
         { key: 'model', labelKey: 'settings.display.sessionHeader.model' },
         { key: 'reasoning', labelKey: 'settings.display.sessionHeader.reasoning' },

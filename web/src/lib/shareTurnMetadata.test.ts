@@ -12,12 +12,13 @@ describe('selectShareTurnMetadata', () => {
         fastMode: { text: 'fast' },
         createdAt: { text: 'Created: Aug 2, 2026, 10:00' },
         updatedAt: { text: 'Updated: Aug 2, 2026, 10:30' },
+        project: { text: 'path: coding/hapi' },
         worktree: { text: 'Worktree: feat/example' },
     }
 
     it('uses the desktop session-header order and default visibility', () => {
         expect(selectShareTurnMetadata(DEFAULT_SESSION_HEADER_METADATA, available).map((item) => item.key)).toEqual([
-            'agent', 'machine', 'lastActive', 'model', 'reasoning', 'fastMode', 'worktree',
+            'agent', 'machine', 'project', 'lastActive', 'model', 'reasoning', 'fastMode', 'worktree',
         ])
     })
 

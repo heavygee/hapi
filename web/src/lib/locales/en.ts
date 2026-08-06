@@ -995,6 +995,7 @@ export default {
   'settings.display.sessionHeader.reasoning': 'Reasoning effort',
   'settings.display.sessionHeader.fastMode': 'Fast mode',
   'settings.display.sessionHeader.machine': 'Machine',
+  'settings.display.sessionHeader.project': 'Project',
   'settings.display.sessionHeader.lastActive': 'Active time',
   'settings.display.sessionHeader.createdAt': 'Created time',
   'settings.display.sessionHeader.updatedAt': 'Updated time',
