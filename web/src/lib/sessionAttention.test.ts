@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSummary } from '@/types/api'
-import { classifySessionAttention } from './sessionAttention'
+import {
+    classifySessionAttention,
+    isAttentionReviewKind,
+    sessionNeedsAttentionReview,
+} from './sessionAttention'
 
 function makeSummary(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
     return {
@@ -94,5 +98,48 @@ describe('classifySessionAttention', () => {
             { selected: false, lastSeenAt: 1000 }
         )
         expect(attention).toEqual({ kind: 'unread' })
+    })
+})
+
+describe('isAttentionReviewKind', () => {
+    it('treats permission, input, and unread as review-worthy', () => {
+        expect(isAttentionReviewKind('permission')).toBe(true)
+        expect(isAttentionReviewKind('input')).toBe(true)
+        expect(isAttentionReviewKind('unread')).toBe(true)
+    })
+
+    it('excludes background-only busy work from the review filter', () => {
+        expect(isAttentionReviewKind('background')).toBe(false)
+    })
+})
+
+describe('sessionNeedsAttentionReview', () => {
+    it('includes permission, input, and unread sessions', () => {
+        expect(sessionNeedsAttentionReview(
+            makeSummary({ id: 'p', pendingRequestKinds: ['permission'], pendingRequestsCount: 1 }),
+            { lastSeenAt: 0 }
+        )).toBe(true)
+
+        expect(sessionNeedsAttentionReview(
+            makeSummary({ id: 'i', pendingRequestKinds: ['input'], pendingRequestsCount: 1 }),
+            { lastSeenAt: 0 }
+        )).toBe(true)
+
+        expect(sessionNeedsAttentionReview(
+            makeSummary({ id: 'u', updatedAt: 5000 }),
+            { lastSeenAt: 1000 }
+        )).toBe(true)
+    })
+
+    it('excludes background-only and quiet sessions', () => {
+        expect(sessionNeedsAttentionReview(
+            makeSummary({ id: 'bg', backgroundTaskCount: 2, updatedAt: 5000 }),
+            { lastSeenAt: 0 }
+        )).toBe(false)
+
+        expect(sessionNeedsAttentionReview(
+            makeSummary({ id: 'quiet', updatedAt: 1000 }),
+            { lastSeenAt: 5000 }
+        )).toBe(false)
     })
 })
