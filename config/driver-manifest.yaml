@@ -674,12 +674,12 @@ layers:
   - branch: fix/garden-voice-orb-routing
 
 
-  # PARKED 2026-08-06 (Meta remat): tip moved (37c898085+) conflicts tip-forward
-  # after #1368 / pin promote. Prior soup union content remains on tip.
-  # Re-thin onto current driver/integration tip, then unpark.
+  # tiann/hapi#1384 / PR #1392 — Settings UI onboard for hub transcription provider
+  # credentials. Upstream tip stays on feat/settings-provider-onboard (clean).
+  # Remat absorbs soup heal tip (union of remat @ 7f48c5eb3 + feat da0c6c258).
   # Worktree: ~/coding/hapi/worktrees/settings-provider-onboard @ feat/settings-provider-onboard
-  # Tip was: 37c898085 (origin/feat/settings-provider-onboard)
-  # - branch: feat/settings-provider-onboard
+  # Tip: cd2764527 (origin/driver/settings-provider-onboard-heal)
+  - branch: driver/settings-provider-onboard-heal
 
   # PARKED 2026-08-06 (Meta remat): tip moved vs soup tip; tip-forward NEED after
   # #1368 absorb. Prior pie union remains on tip. Re-thin then unpark.
