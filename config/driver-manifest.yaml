@@ -696,3 +696,10 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/session-attention-filter @ feat/session-attention-filter
   # Tip: ca27078f8 (origin/feat/session-attention-filter) — unread-only lens
   - branch: feat/session-attention-filter
+
+  # tiann/hapi#1395 — session header project/path (sidebar-style display name; default on).
+  # Extends #1267 configurable header metadata. Web-only. Peer-stack Playwright green.
+  # Do NOT open upstream PR until operator dogfood OK on :3006.
+  # Worktree: ~/coding/hapi/worktrees/session-header-project-path @ feat/session-header-project-path
+  # Tip: 888b382ed (origin/feat/session-header-project-path)
+  - branch: feat/session-header-project-path
