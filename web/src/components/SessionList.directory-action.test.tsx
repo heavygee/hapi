@@ -472,6 +472,60 @@ describe('SessionList collapse behavior', () => {
         expect(getProjectPanel().getAttribute('data-open')).toBeNull()
     })
 
+    it('lifts durable pins into a top Pinned section above project groups', () => {
+        const sessions = [
+            makeSession({
+                id: 'session-pinned',
+                pinned: true,
+                updatedAt: 100,
+                metadata: { path: '/work/other', name: 'Pinned task', flavor: 'codex' },
+            }),
+            makeSession({
+                id: 'session-idle',
+                updatedAt: 50,
+                metadata: { path: '/work/hapi', name: 'Idle task', flavor: 'codex' },
+            }),
+        ]
+        render(renderSessionList(sessions, null))
+
+        expect(screen.getByTitle('Pinned')).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /Pinned task/ })).toBeInTheDocument()
+        expect(screen.getByTitle('/work/hapi')).toBeInTheDocument()
+        expect(screen.queryByTitle('/work/other')).toBeNull()
+        const pinnedHeader = screen.getByTitle('Pinned')
+        const idleHeader = screen.getByTitle('/work/hapi')
+        expect(
+            pinnedHeader.compareDocumentPosition(idleHeader) & Node.DOCUMENT_POSITION_FOLLOWING
+        ).toBeTruthy()
+    })
+
+    it('keeps durable pins above In progress when both are present', () => {
+        localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
+        const sessions = [
+            makeSession({
+                id: 'session-pinned',
+                pinned: true,
+                updatedAt: 100,
+                metadata: { path: '/work/other', name: 'Pinned task', flavor: 'codex' },
+            }),
+            makeSession({
+                id: 'session-running',
+                active: true,
+                thinking: true,
+                updatedAt: 90,
+                metadata: { path: '/work/hapi', name: 'Running task', flavor: 'codex' },
+            }),
+        ]
+        render(renderSessionList(sessions, null))
+
+        const pinnedHeader = screen.getByTitle('Pinned')
+        const runningHeader = screen.getByTitle('In progress')
+        expect(
+            pinnedHeader.compareDocumentPosition(runningHeader) & Node.DOCUMENT_POSITION_FOLLOWING
+        ).toBeTruthy()
+        expect(screen.queryByTitle('/work/other')).toBeNull()
+    })
+
     it('does not label quiet active sessions as Idle', () => {
         const sessions = [
             makeSession({

@@ -21,8 +21,9 @@ import {
     sessionListItemWrapperClassName,
     sessionMatchesQuery,
     sessionMatchesTimeRange,
-    shouldShowPinnedDivider,
-    shouldShowSessionInSidebar
+    shouldShowSessionInSidebar,
+    partitionGlobalPinnedSessions,
+    sortGlobalPinnedSessions
 } from './SessionList'
 
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
@@ -93,24 +94,27 @@ describe('getWorktreeSessionLabel', () => {
     })
 })
 
-describe('shouldShowPinnedDivider', () => {
-    it('shows one divider at the visible pinned-to-unpinned boundary', () => {
+describe('partitionGlobalPinnedSessions', () => {
+    it('lifts pinned sessions into a flat top band and omits them from the remainder', () => {
         const sessions = [
-            makeSession({ id: 'pinned-a', pinned: true }),
-            makeSession({ id: 'pinned-b', pinned: true }),
-            makeSession({ id: 'regular-a' }),
-            makeSession({ id: 'regular-b' })
+            makeSession({ id: 'proj-a', metadata: { path: '/a' }, updatedAt: 50 }),
+            makeSession({ id: 'pinned-old', pinned: true, metadata: { path: '/b' }, updatedAt: 10 }),
+            makeSession({ id: 'pinned-new', pinned: true, active: true, metadata: { path: '/c' }, updatedAt: 20 }),
+            makeSession({ id: 'proj-b', metadata: { path: '/b' }, updatedAt: 40 })
         ]
 
-        expect(sessions.map((_, index) => shouldShowPinnedDivider(sessions, index)))
-            .toEqual([false, false, true, false])
+        const { pinned, unpinned } = partitionGlobalPinnedSessions(sessions)
+        expect(pinned.map(session => session.id)).toEqual(['pinned-new', 'pinned-old'])
+        expect(unpinned.map(session => session.id)).toEqual(['proj-a', 'proj-b'])
     })
 
-    it('does not show a divider when all visible sessions have the same pin state', () => {
-        expect(shouldShowPinnedDivider([
-            makeSession({ id: 'a' }),
-            makeSession({ id: 'b' })
-        ], 1)).toBe(false)
+    it('sorts pending pinned sessions ahead of quiet active pins', () => {
+        const sessions = [
+            makeSession({ id: 'quiet', pinned: true, active: true, pendingRequestsCount: 0, updatedAt: 100 }),
+            makeSession({ id: 'pending', pinned: true, active: true, pendingRequestsCount: 2, updatedAt: 50 })
+        ]
+        expect(sortGlobalPinnedSessions(sessions).map(session => session.id))
+            .toEqual(['pending', 'quiet'])
     })
 })
 

@@ -85,6 +85,7 @@ export default {
   'sessions.group.expand': '展开 {n} 个',
   'sessions.group.collapse': '收起 {n} 个',
   'sessions.runningSection': '进行中',
+  'sessions.pinnedSection': '置顶',
   'sessions.group.new': '在此目录新建会话',
   'sessions.machineFilter.label': '按机器筛选会话',
   'sessions.machineFilter.all': '全部',
