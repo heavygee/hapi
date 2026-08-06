@@ -243,6 +243,47 @@ describe('SessionHeader', () => {
         expect(screen.getByTestId('session-header-age')).toHaveTextContent(/5m ago|5分钟前/)
     })
 
+    it('shows sidebar-style project label from path by default', () => {
+        renderHeader(baseSession({
+            metadata: {
+                flavor: 'cursor',
+                path: '/home/heavygee/coding/hapi',
+                host: 'homelab',
+            }
+        }))
+
+        expect(screen.getByTestId('session-header-project')).toHaveTextContent(/coding\/hapi/)
+    })
+
+    it('uses worktree basePath for project and still shows the branch', () => {
+        renderHeader(baseSession({
+            metadata: {
+                flavor: 'cursor',
+                path: '/tmp/hapi-worktrees/feat-header',
+                host: 'homelab',
+                worktree: {
+                    basePath: '/home/heavygee/coding/hapi',
+                    branch: 'feat/session-header-project-path',
+                    name: 'feat-header',
+                    worktreePath: '/tmp/hapi-worktrees/feat-header',
+                },
+            }
+        }))
+
+        expect(screen.getByTestId('session-header-project')).toHaveTextContent(/coding\/hapi/)
+        expect(screen.getByTestId('session-header-project')).not.toHaveTextContent(/feat-header/)
+        expect(screen.getByTestId('session-header-worktree')).toHaveTextContent(/feat\/session-header-project-path/)
+    })
+
+    it('hides project when the header project setting is disabled', () => {
+        localStorage.setItem('hapi-session-header-metadata', JSON.stringify({ project: false }))
+        renderHeader(baseSession({
+            metadata: { flavor: 'cursor', path: '/home/heavygee/coding/hapi', host: 'homelab' }
+        }))
+
+        expect(screen.queryByTestId('session-header-project')).not.toBeInTheDocument()
+    })
+
     it('advances relative age on the minute tick without a session prop change', () => {
         vi.useFakeTimers()
         const now = new Date('2026-07-29T16:00:00.000Z')

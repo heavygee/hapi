@@ -781,6 +781,7 @@ export default {
   'settings.display.sessionHeader.reasoning': '推理强度',
   'settings.display.sessionHeader.fastMode': '快速模式',
   'settings.display.sessionHeader.machine': '机器',
+  'settings.display.sessionHeader.project': '项目',
   'settings.display.sessionHeader.lastActive': '活跃时间',
   'settings.display.sessionHeader.createdAt': '创建时间',
   'settings.display.sessionHeader.updatedAt': '更新时间',

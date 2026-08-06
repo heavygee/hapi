@@ -16,6 +16,7 @@ describe('parseSessionHeaderMetadata', () => {
             lastActive: true,
             createdAt: false,
             updatedAt: false,
+            project: true,
             worktree: true,
         })
     })

@@ -25,6 +25,7 @@ import { formatAbsoluteDateTime, formatRelativeTime } from '@/lib/relativeTime'
 import { useSessionHeaderMetadata } from '@/hooks/useSessionHeaderMetadata'
 import { formatSessionHeaderTimestamp } from '@/lib/sessionHeaderTimestamp'
 import { selectMobileSessionHeaderSecondary } from '@/lib/sessionHeaderMobileMetadata'
+import { resolveSessionProjectLabel } from '@/lib/sessionProjectLabel'
 import { useMinuteTick } from '@/hooks/useMinuteTick'
 
 /** Same preference order as session-list chips: display label → host → short id. */
@@ -156,6 +157,10 @@ export function SessionHeader(props: {
     const { session, api, onSessionDeleted, onSessionReopened } = props
     const title = useMemo(() => getSessionTitle(session), [session])
     const worktreeBranch = session.metadata?.worktree?.branch?.trim() || null
+    const projectLabel = useMemo(
+        () => resolveSessionProjectLabel(session.metadata ?? {}),
+        [session.metadata]
+    )
     const { preferences: headerMetadata } = useSessionHeaderMetadata()
     const modelLabel = getSessionModelLabel(session)
     const isModelChanging = useIsMutating({
@@ -201,6 +206,7 @@ export function SessionHeader(props: {
         model: headerMetadata.model && modelLabel !== null,
         reasoning: headerMetadata.reasoning && reasoningLabel !== null,
         machine: headerMetadata.machine && machineLabel !== null,
+        project: headerMetadata.project && projectLabel !== null,
         lastActive: ageLabel !== null,
         updatedAt: updatedAtLabel !== null,
         createdAt: createdAtLabel !== null,
@@ -390,6 +396,7 @@ export function SessionHeader(props: {
                                 {mobileSecondary === 'model' && modelLabel ? <span className="inline-flex truncate items-center gap-1.5">{headerMetadata.showLabels ? `${t(modelLabel.key)}: ` : ''}{modelLabel.value}{isModelChanging ? <ModelChangingStatus /> : null}</span> : null}
                                 {mobileSecondary === 'reasoning' && reasoningLabel ? <span className="truncate">{reasoningLabel}</span> : null}
                                 {mobileSecondary === 'machine' && machineLabel ? <span className="truncate">{headerMetadata.showLabels ? `${t('session.item.machine')}: ` : ''}{machineLabel}</span> : null}
+                                {mobileSecondary === 'project' && projectLabel ? <span className="truncate">{headerMetadata.showLabels ? `${t('session.item.path')}: ` : ''}{projectLabel}</span> : null}
                                 {mobileSecondary === 'lastActive' && ageLabel ? <span className="truncate" title={ageAbsolute ?? undefined}>{ageLabel}</span> : null}
                                 {mobileSecondary === 'updatedAt' && updatedAtLabel ? <span className="truncate">{headerMetadata.showLabels ? `${t('session.header.updatedAt')}: ` : ''}{updatedAtLabel}</span> : null}
                                 {mobileSecondary === 'createdAt' && createdAtLabel ? <span className="truncate">{headerMetadata.showLabels ? `${t('session.header.createdAt')}: ` : ''}{createdAtLabel}</span> : null}
@@ -407,6 +414,11 @@ export function SessionHeader(props: {
                             {headerMetadata.machine && machineLabel ? (
                                 <span data-testid="session-header-machine" className="max-w-[12rem] truncate" title={machineLabel}>
                                     {headerMetadata.showLabels ? `${t('session.item.machine')}: ` : ''}{machineLabel}
+                                </span>
+                            ) : null}
+                            {headerMetadata.project && projectLabel ? (
+                                <span data-testid="session-header-project" className="max-w-[14rem] truncate" title={projectLabel}>
+                                    {headerMetadata.showLabels ? `${t('session.item.path')}: ` : ''}{projectLabel}
                                 </span>
                             ) : null}
                             {ageLabel ? (
@@ -433,7 +445,7 @@ export function SessionHeader(props: {
                             {createdAtLabel ? <span>{headerMetadata.showLabels ? `${t('session.header.createdAt')}: ` : ''}{createdAtLabel}</span> : null}
                             {updatedAtLabel ? <span>{headerMetadata.showLabels ? `${t('session.header.updatedAt')}: ` : ''}{updatedAtLabel}</span> : null}
                             {headerMetadata.worktree && worktreeBranch ? (
-                                <span>{headerMetadata.showLabels ? `${t('session.item.worktree')}: ` : ''}{worktreeBranch}</span>
+                                <span data-testid="session-header-worktree">{headerMetadata.showLabels ? `${t('session.item.worktree')}: ` : ''}{worktreeBranch}</span>
                             ) : null}
                         </div>
                     </div>

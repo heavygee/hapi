@@ -28,6 +28,7 @@ import { useMachineLabels } from '@/hooks/useMachineLabels'
 import { resolveSessionHeaderMachineLabel } from '@/components/SessionHeader'
 import { formatRelativeTime } from '@/lib/relativeTime'
 import { formatSessionHeaderTimestamp } from '@/lib/sessionHeaderTimestamp'
+import { resolveSessionProjectLabel } from '@/lib/sessionProjectLabel'
 import { getShareTurnReasoningLabel, selectShareTurnMetadata } from '@/lib/shareTurnMetadata'
 import { useMinuteTick } from '@/hooks/useMinuteTick'
 
@@ -475,6 +476,7 @@ export function HappyThread(props: {
         const createdAtLabel = formatSessionHeaderTimestamp(props.session.createdAt, locale)
         const updatedAtLabel = formatSessionHeaderTimestamp(props.session.updatedAt, locale)
         const worktreeBranch = props.session.metadata?.worktree?.branch?.trim() || null
+        const projectLabel = resolveSessionProjectLabel(props.session.metadata ?? {})
         const showFastBadge = agentFlavor === 'codex'
             && isFastServiceTier(props.serviceTier ?? props.session.serviceTier)
 
@@ -482,6 +484,9 @@ export function HappyThread(props: {
             agent: agentLabel ? { text: agentLabel, flavor: agentFlavor } : undefined,
             machine: machineLabel ? {
                 text: `${headerMetadata.showLabels ? `${t('session.item.machine')}: ` : ''}${machineLabel}`,
+            } : undefined,
+            project: projectLabel ? {
+                text: `${headerMetadata.showLabels ? `${t('session.item.path')}: ` : ''}${projectLabel}`,
             } : undefined,
             lastActive: lastActiveLabel ? { text: lastActiveLabel } : undefined,
             model: modelLabel ? {
