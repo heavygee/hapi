@@ -1615,7 +1615,8 @@ function SessionChatInner(props: SessionChatProps) {
         onAbort: handleAbort,
         attachmentAdapter,
         allowSendWhenInactive: true,
-        pendingScheduleRef
+        pendingScheduleRef,
+        pendingSendIntentRef,
     })
 
     return (
