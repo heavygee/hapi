@@ -694,9 +694,8 @@ layers:
   - branch: feat/storage-usage-pie-chart
 
   # tiann/hapi#1394 — opt-in "Needs attention only" session-list filter (default OFF).
-  # permission/input/unread; exclude background-only. Sidebar + Settings → Display.
-  # Mirrors active-only (#903). Peer-stack Playwright green; upstream PR HOLD until
-  # operator dogfood OK on :3006 (intake §8).
+  # permission/input/unread; exclude background-only. Sidebar inbox toggle + Settings Display.
+  # Web-only. Peer-stack Playwright green 2026-08-06. Do NOT open upstream PR until dogfood OK.
   # Worktree: ~/coding/hapi/worktrees/session-attention-filter @ feat/session-attention-filter
   # Tip: ff01045d4 (origin/feat/session-attention-filter)
   - branch: feat/session-attention-filter
