@@ -46,9 +46,10 @@ No unmerged heavygee session owns this gap → **new issue + fix on this branch*
 | Step | Status |
 |------|--------|
 | Archaeology (#1267 merged, #1158 unrelated) | DONE |
-| Upstream issue | **YOU** |
-| Implement | **YOU** |
-| Proof + dogfood | **YOU** |
-| Upstream PR | **YOU** only after operator OK |
+| Upstream issue | DONE — [tiann/hapi#1395](https://github.com/tiann/hapi/issues/1395) |
+| Implement | DONE — `feat/session-header-project-path` @ `888b382ed` |
+| Peer-stack proof | DONE — PNG inlined; `e2e/peer/1395-session-header-project.spec.ts` |
+| Soup promote | BLOCKED — remat tip-forward conflict on `upstream/main` (unrelated files); hold active, Meta `05d9f0f2` pinged. Layer already in manifest. |
+| Upstream PR | HOLD until operator OK after `:3006` dogfood |
 
 Hard rules: product edits only in this worktree; no operator docs in upstream PR; never merge `tiann/hapi`.
