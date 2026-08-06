@@ -21,18 +21,17 @@ Blind merge of raw #1115 would drop usage migrations and/or never apply `pinned`
 
 Local ref: `techotaku39/feat/web-pinned-sessions` @ `41a0afa43`. Use a **local/origin branch** layer (`pr:` only fetches `origin/`).
 
-## Progress (2026-08-06 peer) — soup DONE; global pin band follow-up
+## Progress (2026-08-06 peer) — soup DONE (incl. global pin band)
 
 | Step | Status |
 |------|--------|
-| Union tip `driver/web-pinned-sessions` @ `9cb1e1bcd` | **DONE** — pin→**v22** on remat tip-forward; merge-tree clean |
-| Manifest layer (mirror + `~/.config`) | **DONE** |
-| Rebuild / absorb | **DONE** — Meta remat cleared hold; driver tip has SCHEMA 22 + pin; `hapi-verify-web-dist` OK |
+| Union tip `driver/web-pinned-sessions` @ `bf95aac56` | **DONE** — pin→**v22**; global top **Pinned** band (omit-from-tree) |
+| Manifest layer (mirror + `~/.config`) | **DONE** — tip comment bumped to `bf95aac56` |
+| Rebuild / absorb | **DONE** — Meta remat tip `7f48c5eb3`; `hapi-verify-web-dist` OK; web-only (no hub restart) |
 | Live DB | **DONE** — `PRAGMA user_version` = **22**; `PUT /api/sessions/:id/pin` OK |
-| UI proof | **DONE** — header More → **Unpin session** (session was pinned via API); PNGs inlined via `hapi-dogfood-shot` |
-| Global top Pinned band (omit-from-tree) | **IN PROGRESS** — operator + author blessing assumed; pins float above In progress + project groups |
+| UI proof | **DONE** — header Unpin + sidebar **Pinned** band above groups (dogfood-shot inline) |
 
-**Out of scope for this peer:** rebasing / resolving review threads on upstream `tiann/hapi#1115` (author @techotaku39; merge state DIRTY). Soup dogfood only. No rival PR. Public GitHub comments on others' PRs: operator-first (`docs/operator/AGENTS.md` § Public GitHub voice).
+**Out of scope for this peer:** rebasing / resolving review threads on upstream `tiann/hapi#1115` (author @techotaku39). No rival PR. Public GitHub comments on others' PRs: operator-first (`docs/operator/AGENTS.md` § Public GitHub voice).
 
 ## Intake ownership
 
