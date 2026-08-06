@@ -674,24 +674,29 @@ layers:
   - branch: fix/garden-voice-orb-routing
 
 
-  # tiann/hapi#1384 / PR #1392 — Settings UI onboard for hub transcription provider
-  # credentials. Upstream tip stays on feat/settings-provider-onboard (clean).
-  # Remat absorbs soup heal tip (union of remat @ 7f48c5eb3 + feat da0c6c258).
+  # tiann/hapi#1384 — Settings UI onboard for hub transcription provider credentials
+  # (dictation first; env still wins). Hub+web. Live reload via process.env merge.
+  # Rationale on issue: env-only was a shipping shortcut, not a design win.
+  # Upstream PR: tiann/hapi#1392 on feat/settings-provider-onboard (keep that tip
+  # upstream-clean). Remat tip-forward absorbs the soup heal tip below (union of
+  # remat @ 7f48c5eb3 + feat tip da0c6c258) so absorb is FF-clean.
   # Worktree: ~/coding/hapi/worktrees/settings-provider-onboard @ feat/settings-provider-onboard
   # Tip: cd2764527 (origin/driver/settings-provider-onboard-heal)
   - branch: driver/settings-provider-onboard-heal
 
-  # PARKED 2026-08-06 (Meta remat): tip moved vs soup tip; tip-forward NEED after
-  # #1368 absorb. Prior pie union remains on tip. Re-thin then unpark.
+  # tiann/hapi#1382 / PR #1383 — interactive Relative share donut on Settings → Storage
+  # (above Exact sizes table). Web-only; no API change. Peer-stack dogfood green
+  # 2026-08-05; remat-hold blocked morning promote — adding after hold cleared.
+  # Drop when upstream PR merges.
   # Worktree: ~/coding/hapi/worktrees/storage-pie @ feat/storage-usage-pie-chart
-  # Tip was: 0610cafca (origin/feat/storage-usage-pie-chart)
-  # - branch: feat/storage-usage-pie-chart
+  # Tip: 2f23e0d48 (origin/feat/storage-usage-pie-chart) — chart-first layout
+  - branch: feat/storage-usage-pie-chart
 
-  # tiann/hapi#1394 — opt-in unread-only sidebar lens (updatedAt > lastSeen; default OFF).
-  # Not needs-attention / Overseer. Transient session-list toggle (no Settings/localStorage).
-  # Peer-stack proof OK; upstream PR HOLD until operator dogfood on :3006 (intake §8).
+  # tiann/hapi#1394 — transient "Unread only" sidebar lens (updatedAt > lastSeen).
+  # Not Overseer / needs-attention. Sidebar button only; no Settings; no localStorage.
+  # Web-only. Peer-stack Playwright green. Do NOT open upstream PR until dogfood OK.
   # Worktree: ~/coding/hapi/worktrees/session-attention-filter @ feat/session-attention-filter
-  # Tip: ca27078f8 (origin/feat/session-attention-filter) — unread-only lens
+  # Tip: 95e6e9aa8 (origin/feat/session-attention-filter) — unread-dot toggle icon
   - branch: feat/session-attention-filter
 
   # tiann/hapi#1395 — session header project/path (sidebar-style display name; default on).
@@ -705,7 +710,7 @@ layers:
   # (soup v20=usage reindex #1359; upstream #1390 took v21 cache semantics).
   # Live DB user_version was 20 — migrates 20→21→22. No rival upstream PR.
   # Worktree: ~/coding/hapi/worktrees/web-pinned-sessions-soup @ driver/web-pinned-sessions
-  # Tip: bf95aac56 (origin/driver/web-pinned-sessions) — global top Pinned band (2026-08-06)
+  # Tip: 9cb1e1bcd (origin/driver/web-pinned-sessions) — union on remat tip-forward
   - branch: driver/web-pinned-sessions
 
   # tiann/hapi#1378 — preserve composer text+attachment drafts across inactive
