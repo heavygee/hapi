@@ -674,21 +674,18 @@ layers:
   - branch: fix/garden-voice-orb-routing
 
 
-  # tiann/hapi#1384 — Settings UI onboard for hub transcription provider credentials
-  # (dictation first; env still wins). Hub+web. Live reload via process.env merge.
-  # Rationale on issue: env-only was a shipping shortcut, not a design win.
-  # Do NOT open upstream PR until operator dogfood OK on :3006.
+  # PARKED 2026-08-06 (Meta remat): tip moved (37c898085+) conflicts tip-forward
+  # after #1368 / pin promote. Prior soup union content remains on tip.
+  # Re-thin onto current driver/integration tip, then unpark.
   # Worktree: ~/coding/hapi/worktrees/settings-provider-onboard @ feat/settings-provider-onboard
-  # Tip: fbf19aac4 (origin/feat/settings-provider-onboard)
-  - branch: feat/settings-provider-onboard
+  # Tip was: 37c898085 (origin/feat/settings-provider-onboard)
+  # - branch: feat/settings-provider-onboard
 
-  # tiann/hapi#1382 / PR #1383 — interactive Relative share donut on Settings → Storage
-  # (above Exact sizes table). Web-only; no API change. Peer-stack dogfood green
-  # 2026-08-05; remat-hold blocked morning promote — adding after hold cleared.
-  # Drop when upstream PR merges.
+  # PARKED 2026-08-06 (Meta remat): tip moved vs soup tip; tip-forward NEED after
+  # #1368 absorb. Prior pie union remains on tip. Re-thin then unpark.
   # Worktree: ~/coding/hapi/worktrees/storage-pie @ feat/storage-usage-pie-chart
-  # Tip: 2f23e0d48 (origin/feat/storage-usage-pie-chart) — chart-first layout
-  - branch: feat/storage-usage-pie-chart
+  # Tip was: 0610cafca (origin/feat/storage-usage-pie-chart)
+  # - branch: feat/storage-usage-pie-chart
 
   # tiann/hapi#1394 — opt-in unread-only sidebar lens (updatedAt > lastSeen; default OFF).
   # Not needs-attention / Overseer. Transient session-list toggle (no Settings/localStorage).
