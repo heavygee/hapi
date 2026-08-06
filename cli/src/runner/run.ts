@@ -28,6 +28,10 @@ import { validateWorkspaceDirectory } from './validateWorkspaceDirectory';
 import { join } from 'path';
 import { buildMachineMetadata } from '@/agent/sessionFactory';
 import { resolveWorkspaceRoots } from '@/utils/workspaceRoot';
+import {
+    isRunnerSelfUpgradeInFlight,
+    shouldAttemptInstalledCliMtimeHandoff,
+} from '@/upgrade/selfUpgrade'
 import { hashRunnerCliApiToken, hashRunnerExtraHeaders } from './runnerIdentity';
 import { scheduleCursorModelsPrewarm } from '@/modules/common/cursorModelsPrewarm';
 import { isLinkedGitWorktree } from '@/utils/isLinkedGitWorktree';
@@ -1284,10 +1288,14 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         }
       } else {
         const installedCliMtimeMs = getInstalledCliMtimeMs();
-        if (typeof installedCliMtimeMs === 'number' &&
-            typeof startedWithCliMtimeMs === 'number' &&
-            installedCliMtimeMs !== startedWithCliMtimeMs &&
-            Date.now() >= nextHandoffAttemptAt) {
+        if (shouldAttemptInstalledCliMtimeHandoff({
+            disableVersionHandoff: false,
+            selfUpgradeInFlight: isRunnerSelfUpgradeInFlight(),
+            installedCliMtimeMs,
+            startedWithCliMtimeMs,
+            now: Date.now(),
+            nextHandoffAttemptAt,
+        })) {
           logger.debug('[RUNNER RUN] Runner is outdated, triggering self-restart with latest version');
 
           // Hand off to a fresh runner that inherits our original argv (workspace

@@ -158,24 +158,21 @@ export async function updateSettings<T>(
 let settingsWriteTail: Promise<void> = Promise.resolve()
 
 /**
- * Read-modify-write settings under a process-wide serial queue.
- * Use this for any runtime writer (fleet policy, relay auth, …).
+ * Read-modify-write settings under a process-wide serial queue **and** the
+ * shared `${settingsFile}.lock` used by the CLI. The in-process queue alone
+ * does not serialize against concurrent `hapi auth login` / other CLI RMW on
+ * the same ~/.hapi/settings.json.
  */
 export async function updateSettingsFile(
     settingsFile: string,
     mutate: (settings: Settings) => void,
 ): Promise<Settings> {
-    const task = settingsWriteTail.then(async () => {
-        const settings = await readSettings(settingsFile)
-        if (settings === null) {
-            throw new Error(
-                `Cannot read ${settingsFile}; fix or remove it before updating settings`,
-            )
-        }
-        mutate(settings)
-        await writeSettings(settingsFile, settings)
-        return settings
-    })
+    const task = settingsWriteTail.then(() =>
+        updateSettings(settingsFile, (settings) => {
+            mutate(settings)
+            return settings
+        }),
+    )
     // Keep the chain alive after failures so later writers still serialize.
     settingsWriteTail = task.then(
         () => undefined,

@@ -584,6 +584,32 @@ export function isRunnerSelfUpgradeInFlight(): boolean {
 }
 
 /**
+ * Whether the runner heartbeat should attempt an installed-CLI mtime handoff.
+ * Skips while an RPC self-upgrade is still installing/handing off so npm
+ * channel mtime churn cannot spawn a second competing replacement.
+ */
+export function shouldAttemptInstalledCliMtimeHandoff(options: {
+    disableVersionHandoff: boolean
+    selfUpgradeInFlight: boolean
+    installedCliMtimeMs: number | null | undefined
+    startedWithCliMtimeMs: number | null | undefined
+    now: number
+    nextHandoffAttemptAt: number
+}): boolean {
+    if (options.disableVersionHandoff || options.selfUpgradeInFlight) {
+        return false
+    }
+    const installed = options.installedCliMtimeMs
+    const started = options.startedWithCliMtimeMs
+    return typeof installed === 'number'
+        && typeof started === 'number'
+        && Number.isFinite(installed)
+        && Number.isFinite(started)
+        && installed !== started
+        && options.now >= options.nextHandoffAttemptAt
+}
+
+/**
  * Apply a hub upgrade offer on this runner host.
  * `downloadBaseUrl` is the hub public/base URL for relative artifact paths.
  * `authToken` is the CLI API token for authenticated artifact download.

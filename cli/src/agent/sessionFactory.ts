@@ -1,4 +1,5 @@
 import os from 'node:os'
+import { existsSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 
@@ -49,7 +50,10 @@ export function buildMachineMetadata(options?: {
 }): MachineMetadata {
     const installedCliMtimeMs = getInstalledCliMtimeMs()
     const startedCliMtimeMs = options?.startedCliMtimeMs ?? installedCliMtimeMs
-    const cliArtifactGeneration = readUpgradeTarget()?.targetGeneration
+    const upgradeTarget = readUpgradeTarget()
+    const cliArtifactGeneration = upgradeTarget?.path && existsSync(upgradeTarget.path)
+        ? upgradeTarget.targetGeneration
+        : undefined
     return {
         host: process.env.HAPI_HOSTNAME || os.hostname(),
         platform: os.platform(),

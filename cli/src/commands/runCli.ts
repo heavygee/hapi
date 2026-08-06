@@ -15,6 +15,7 @@ import {
 import { waitForRunnerHandoff } from '@/runner/controlClient'
 import { killProcessByChildProcess } from '@/utils/process'
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import crossSpawn from 'cross-spawn'
 
 /** Wait for delegated child exit; reject on spawn error so caller can clear the marker. */
@@ -126,7 +127,17 @@ export async function runCli(): Promise<void> {
         : null
     // A later npm/binary install can leave an older hub-artifact marker behind.
     // Clear it so Restart=always does not keep launching the stale generation.
-    if (upgradeTarget && isUpgradeTargetStaleRelativeToCli(upgradeTarget)) {
+    // Also clear when the target path is gone: shouldDelegate returns false for
+    // missing paths, and falling through without clearing would leave
+    // targetGeneration advertised from a deleted binary (false-current skew).
+    const targetMissing = Boolean(upgradeTarget && (!upgradeTarget.path || !existsSync(upgradeTarget.path)))
+    if (targetMissing && upgradeTarget) {
+        clearUpgradeTarget()
+        logger.debug('[UPGRADE] Cleared durable target whose path is missing', {
+            markerVersion: upgradeTarget.targetVersion,
+            markerPath: upgradeTarget.path,
+        })
+    } else if (upgradeTarget && isUpgradeTargetStaleRelativeToCli(upgradeTarget)) {
         clearUpgradeTarget()
         logger.debug('[UPGRADE] Cleared durable target older than current CLI', {
             markerVersion: upgradeTarget.targetVersion,

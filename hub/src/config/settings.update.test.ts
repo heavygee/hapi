@@ -42,4 +42,14 @@ describe('updateSettingsFile', () => {
         // No leftover temp file after the queued renames.
         expect(() => readFileSync(`${file}.tmp`)).toThrow()
     })
+
+    it('releases the shared settings.lock after a queued write', async () => {
+        const file = getSettingsFile(dataDir)
+        writeFileSync(file, JSON.stringify({ listenPort: 3000 }))
+        await updateSettingsFile(file, (settings) => {
+            settings.fleetUpgradePolicy = 'alert'
+        })
+        expect(() => readFileSync(`${file}.lock`)).toThrow()
+        expect((await readSettings(file))?.fleetUpgradePolicy).toBe('alert')
+    })
 })

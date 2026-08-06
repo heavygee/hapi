@@ -19,6 +19,7 @@ import {
     remainingDeadlineMs,
     resolvePostNpmInstallExecutable,
     shouldApplyUpgradeOffer,
+    shouldAttemptInstalledCliMtimeHandoff,
     UPGRADE_STEP_TIMEOUT_MS,
     versionProbeCommand,
     waitForChildSpawn,
@@ -417,7 +418,7 @@ describe('applyRunnerSelfUpgrade concurrency gate', () => {
         __resetRunnerSelfUpgradeGateForTests()
     })
 
-    it('fails closed when another upgrade is already in flight', async () => {
+    it('fails closed when another upgrade is already in progress', async () => {
         __setRunnerSelfUpgradeInFlightForTests(true)
         expect(isRunnerSelfUpgradeInFlight()).toBe(true)
         const result = await applyRunnerSelfUpgrade({
@@ -432,6 +433,39 @@ describe('applyRunnerSelfUpgrade concurrency gate', () => {
             channel: 'npm',
         })
         expect(isRunnerSelfUpgradeInFlight()).toBe(true)
+    })
+})
+
+describe('shouldAttemptInstalledCliMtimeHandoff', () => {
+    const base = {
+        disableVersionHandoff: false,
+        selfUpgradeInFlight: false,
+        installedCliMtimeMs: 200,
+        startedWithCliMtimeMs: 100,
+        now: 1_000,
+        nextHandoffAttemptAt: 0,
+    }
+
+    it('allows mtime handoff when installed CLI drifted and the gate is idle', () => {
+        expect(shouldAttemptInstalledCliMtimeHandoff(base)).toBe(true)
+    })
+
+    it('blocks mtime handoff while an RPC self-upgrade is still in flight', () => {
+        expect(shouldAttemptInstalledCliMtimeHandoff({
+            ...base,
+            selfUpgradeInFlight: true,
+        })).toBe(false)
+    })
+
+    it('blocks when version handoff is disabled or backoff has not elapsed', () => {
+        expect(shouldAttemptInstalledCliMtimeHandoff({
+            ...base,
+            disableVersionHandoff: true,
+        })).toBe(false)
+        expect(shouldAttemptInstalledCliMtimeHandoff({
+            ...base,
+            nextHandoffAttemptAt: 5_000,
+        })).toBe(false)
     })
 })
 
