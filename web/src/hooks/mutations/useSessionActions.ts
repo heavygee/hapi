@@ -28,6 +28,7 @@ export function useSessionActions(
     setServiceTier: (serviceTier: string | null) => Promise<void>
     renameSession: (name: string) => Promise<void>
     setExternalRefs: (refs: import('@/types/api').ExternalRef[]) => Promise<void>
+    setPinned: (pinned: boolean) => Promise<void>
     deleteSession: () => Promise<void>
     isPending: boolean
 } {
@@ -238,6 +239,14 @@ export function useSessionActions(
         onSuccess: () => void invalidateSession(),
     })
 
+    const pinMutation = useMutation({
+        mutationFn: async (pinned: boolean) => {
+            if (!api || !sessionId) throw new Error('Session unavailable')
+            await api.setSessionPinned(sessionId, pinned)
+        },
+        onSuccess: () => void invalidateSession(),
+    })
+
     const deleteMutation = useMutation({
         mutationFn: async () => {
             if (!api || !sessionId) {
@@ -267,6 +276,7 @@ export function useSessionActions(
         setServiceTier: serviceTierMutation.mutateAsync,
         renameSession: renameMutation.mutateAsync,
         setExternalRefs: externalRefsMutation.mutateAsync,
+        setPinned: pinMutation.mutateAsync,
         deleteSession: deleteMutation.mutateAsync,
         isPending: abortMutation.isPending
             || archiveMutation.isPending
@@ -281,6 +291,7 @@ export function useSessionActions(
             || serviceTierMutation.isPending
             || renameMutation.isPending
             || externalRefsMutation.isPending
+            || pinMutation.isPending
             || deleteMutation.isPending,
     }
 }
