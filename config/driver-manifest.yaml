@@ -693,9 +693,9 @@ layers:
   # Tip: 2f23e0d48 (origin/feat/storage-usage-pie-chart) — chart-first layout
   - branch: feat/storage-usage-pie-chart
 
-  # tiann/hapi#1394 — transient "Unread only" sidebar lens (updatedAt > lastSeen).
-  # Not Overseer / needs-attention. Sidebar button only; no Settings; no localStorage.
-  # Web-only. Peer-stack Playwright green. Do NOT open upstream PR until dogfood OK.
+  # tiann/hapi#1394 — opt-in unread-only sidebar lens (updatedAt > lastSeen; default OFF).
+  # Not needs-attention / Overseer. Transient session-list toggle (no Settings/localStorage).
+  # Peer-stack proof OK; upstream PR HOLD until operator dogfood on :3006 (intake §8).
   # Worktree: ~/coding/hapi/worktrees/session-attention-filter @ feat/session-attention-filter
-  # Tip: ca27078f8 (origin/feat/session-attention-filter)
+  # Tip: ca27078f8 (origin/feat/session-attention-filter) — unread-only lens
   - branch: feat/session-attention-filter
