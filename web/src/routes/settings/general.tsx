@@ -119,10 +119,10 @@ export default function SettingsGeneralPage() {
                 </div>
             </SettingsSection>
             {showRunnerManagement ? (
-                <SettingsSection title={t('settings.runnerManagement.title')}>
+                <SettingsSection title={t('settings.runnerMgmt.title')}>
                     <SettingsLinkRow
-                        label={t('settings.runnerManagement.open')}
-                        description={t('settings.runnerManagement.desc')}
+                        label={t('settings.runnerMgmt.title')}
+                        description={t('settings.runnerMgmt.linkHint')}
                         onClick={() => navigate({ to: '/settings/general/runners' })}
                     />
                 </SettingsSection>
