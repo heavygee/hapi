@@ -6,20 +6,12 @@ export type SessionAttention =
     | { kind: 'background' }
     | { kind: 'unread' }
 
-/** Attention kinds that warrant the opt-in "needs review" sidebar filter. Background-only busy ≠ review. */
-export function isAttentionReviewKind(kind: SessionAttention['kind']): boolean {
-    return kind === 'permission' || kind === 'input' || kind === 'unread'
-}
-
-export function sessionNeedsAttentionReview(
+/** True when the session has activity newer than the operator's last-seen watermark. */
+export function sessionIsUnread(
     summary: SessionSummary,
     options: { lastSeenAt: number }
 ): boolean {
-    const attention = classifySessionAttention(summary, {
-        selected: false,
-        lastSeenAt: options.lastSeenAt,
-    })
-    return attention !== null && isAttentionReviewKind(attention.kind)
+    return summary.updatedAt > options.lastSeenAt
 }
 
 export function classifySessionAttention(
@@ -46,7 +38,7 @@ export function classifySessionAttention(
         return { kind: 'background' }
     }
 
-    if (summary.updatedAt > options.lastSeenAt) {
+    if (sessionIsUnread(summary, { lastSeenAt: options.lastSeenAt })) {
         return { kind: 'unread' }
     }
 
