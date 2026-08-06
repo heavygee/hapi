@@ -723,7 +723,6 @@ export function SessionListSearch(props: {
     const inputRef = useRef<HTMLInputElement>(null)
     const dateButtonRef = useRef<HTMLButtonElement>(null)
     const hasDateRange = Boolean(props.customStart && props.customEnd)
-    const hasActiveFilters = props.value.length > 0 || hasDateRange
 
     useEffect(() => {
         if (props.expanded) {
