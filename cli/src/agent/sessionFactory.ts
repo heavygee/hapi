@@ -1,5 +1,4 @@
 import os from 'node:os'
-import { existsSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 
@@ -16,7 +15,7 @@ import { readWorktreeEnv } from '@/utils/worktreeEnv'
 import { CURRENT_MACHINE_CAPABILITIES } from '@hapi/protocol/runnerCapabilities'
 import { exportHapiSessionEnv } from '@/agent/hapiSessionEnv'
 import packageJson from '../../package.json'
-import { readUpgradeTarget } from '@/upgrade/upgradeTarget'
+import { durableTargetGeneration, readUpgradeTarget } from '@/upgrade/upgradeTarget'
 
 export { HAPI_SESSION_ID_ENV, exportHapiSessionEnv, exportHapiHubAuthEnv } from '@/agent/hapiSessionEnv'
 
@@ -50,10 +49,7 @@ export function buildMachineMetadata(options?: {
 }): MachineMetadata {
     const installedCliMtimeMs = getInstalledCliMtimeMs()
     const startedCliMtimeMs = options?.startedCliMtimeMs ?? installedCliMtimeMs
-    const upgradeTarget = readUpgradeTarget()
-    const cliArtifactGeneration = upgradeTarget?.path && existsSync(upgradeTarget.path)
-        ? upgradeTarget.targetGeneration
-        : undefined
+    const cliArtifactGeneration = durableTargetGeneration(readUpgradeTarget()) ?? undefined
     return {
         host: process.env.HAPI_HOSTNAME || os.hostname(),
         platform: os.platform(),

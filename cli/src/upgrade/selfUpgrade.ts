@@ -22,7 +22,7 @@ import {
 } from '@/runner/handoffLock'
 import { readRunnerState, writeRunnerState, type RunnerLocallyPersistedState } from '@/persistence'
 import { buildHubRequestHeaders } from '@/api/hubExtraHeaders'
-import { writeUpgradeTarget, readUpgradeTarget } from '@/upgrade/upgradeTarget'
+import { writeUpgradeTarget, readUpgradeTarget, durableTargetGeneration } from '@/upgrade/upgradeTarget'
 
 export type ApplyDecision =
     | { apply: true; reason: 'upgrade' }
@@ -711,8 +711,7 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
 }): Promise<UpgradeOutcome> {
     const localVersion = options.localVersion ?? packageJson.version
     const localGeneration = options.localGeneration
-        ?? readUpgradeTarget()?.targetGeneration
-        ?? null
+        ?? durableTargetGeneration(readUpgradeTarget())
     const decision = shouldApplyUpgradeOffer(
         options.offer,
         localVersion,

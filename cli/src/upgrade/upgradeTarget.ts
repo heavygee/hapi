@@ -157,6 +157,17 @@ export function readUpgradeTarget(): UpgradeTarget | null {
     }
 }
 
+/**
+ * Generation to advertise / compare only when the durable target binary still
+ * exists. A marker pointing at a deleted path must not suppress reinstall.
+ */
+export function durableTargetGeneration(target: UpgradeTarget | null | undefined): string | null {
+    if (!target?.path || !existsSync(target.path)) {
+        return null
+    }
+    return target.targetGeneration ?? null
+}
+
 function samePath(left: string, right: string): boolean {
     try {
         return realpathSync(left) === realpathSync(right)

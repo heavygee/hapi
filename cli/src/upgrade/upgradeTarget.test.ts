@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import {
     __setUpgradeTargetBaseDirForTests,
     clearUpgradeTarget,
+    durableTargetGeneration,
     isAuthorizedRunnerHandoff,
     isRunnerStartCliArgs,
     isUpgradeTargetStaleRelativeToCli,
@@ -188,6 +189,19 @@ describe('upgradeTarget', () => {
         clearUpgradeTarget()
         expect(existsSync(upgradeTargetMarkerPath())).toBe(false)
         expect(readUpgradeTarget()).toBeNull()
+    })
+
+    it('ignores targetGeneration when the durable binary path is missing', () => {
+        const path = join(home, 'hapi-deleted-gen')
+        writeFileSync(path, 'x')
+        writeUpgradeTarget({
+            path,
+            targetVersion: '0.25.1',
+            targetGeneration: 'gen-stale',
+        })
+        expect(durableTargetGeneration(readUpgradeTarget())).toBe('gen-stale')
+        rmSync(path, { force: true })
+        expect(durableTargetGeneration(readUpgradeTarget())).toBeNull()
     })
 
     it('does not delegate during an authorized handoff even when a prior marker exists', () => {
