@@ -52,6 +52,9 @@ eq "extract pr#923" "$(pec_extract_pr_numbers "pr#923 thing" | tr '\n' ',')" "92
 eq "extract multi 941/923" "$(pec_extract_pr_numbers "PR #941/#923: foo" | tr '\n' ',')" "941,923,"
 eq "extract Peer #1100" "$(pec_extract_pr_numbers "📝Peer #1100: incubating" | tr '\n' ',')" "1100,"
 eq "extract PR: 941" "$(pec_extract_pr_numbers "PR: 941 stuff" | tr '\n' ',')" "941,"
+# HARD: bare #NNN must NEVER route Meta (Sparling "Module 02 … #395" incident 2026-08-06)
+eq "bare #395 Module title → empty" "$(pec_extract_pr_numbers "Module 02: support case schema #395" | tr '\n' ',')" ""
+eq "bare #1085 alone → empty" "$(pec_extract_pr_numbers "Dogfood: #1085 hang" | tr '\n' ',')" ""
 
 # Linked-PR extractor (chip backfill): Peer / bare # must not become PR chips
 eq "linked ignores Peer #1100" "$(pec_extract_linked_pr_numbers "📝Peer #1100: incubating" | tr '\n' ',')" ""
@@ -65,6 +68,12 @@ eq "linked no-match exit 0" "$(set -euo pipefail; pec_extract_linked_pr_numbers 
 # cross-wire overseer sessions to unrelated upstream PRs). See fn header.
 eq "ignore two-digit #22 (overseer W1.6)" "$(pec_extract_pr_numbers "Peer: W1.6 provenance (#22)" | tr '\n' ',')" ""
 eq "ignore two-digit PR #12" "$(pec_extract_pr_numbers "PR #12: small" | tr '\n' ',')" ""
+
+# ---- estate path gate ----
+eq "path hapi mirror" "$(pec_path_is_hapi_estate "/home/x/coding/hapi" && echo yes)" "yes"
+eq "path hapi worktree" "$(pec_path_is_hapi_estate "/home/x/coding/hapi/worktrees/foo" && echo yes)" "yes"
+eq "path sparling refuse" "$(pec_path_is_hapi_estate "/home/x/coding/sparling" && echo yes || echo no)" "no"
+eq "path empty refuse" "$(pec_path_is_hapi_estate "" && echo yes || echo no)" "no"
 
 # ---- title: build canonical titles ----
 eq "build open PR" "$(pec_build_title "✅" 941 "✅PR #941: android watch" 0)" "✅PR #941: android watch"

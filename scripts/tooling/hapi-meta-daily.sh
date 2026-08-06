@@ -3,7 +3,9 @@
 #
 # WHAT IT DOES (idempotent, safe by default):
 #   1. Discovers the union of: open heavygee PRs on tiann/hapi, recently-merged
-#      tracked PRs, and every PR-tagged HAPI session on the local hub.
+#      tracked PRs, and every hub session with a linked github_pr chip on
+#      tiann/hapi | heavygee/hapi. Session TITLES ARE IGNORED for routing
+#      (2026-08-06 Sparling: bare/Peer/PR title scrapes cross-wired foreign repos).
 #   2. Classifies each PR ONCE (hapi-pr-emoji-batch.sh → pr-emoji-core).
 #   3. For sessions with a PR chip (externalRefs): strips leading status emoji
 #      and "PR #N:" prefixes from the title (chip owns identity + health —
@@ -25,7 +27,8 @@
 #      title-scraped **PR #N** markers only (ADR D6 / F1). Peer #N / bare #N
 #      are issue/workstream titles and must never become github_pr chips.
 #      Dry by default; --apply writes. Resolve requires a real pulls API hit
-#      (HTTP 404 JSON on stdout is NOT success).
+#      (HTTP 404 JSON on stdout is NOT success). Backfill is the ONLY path that
+#      still reads titles — daily classify/ping never does.
 #
 # WHAT IT WILL NEVER DO (judgment / destructive / wave-scoped — surfaced only):
 #   merge upstream PRs · sync/push fork main · edit the soup manifest ·
@@ -456,7 +459,8 @@ gh_notifications() {
 # ---------------------------------------------------------------------------
 
 # md_session_prs <title> → space-joined PR/Peer numbers (dedup order preserved)
-# Includes Peer #N for Meta classify/ping routing (workstream tracking).
+# LEGACY helper for unit tests / --backfill-refs adjacent tooling.
+# Daily Meta discovery does NOT call this — chips only (2026-08-06).
 md_session_prs() {
     pec_extract_pr_numbers "$1" | awk '!seen[$0]++' | tr '\n' ' ' | sed 's/ *$//'
 }
@@ -514,7 +518,10 @@ main() {
     jwt="$(hub_jwt)"
     sessions_json="$(hub_sessions "$jwt")"
 
-    # --- discovery: PR numbers from sessions + open + merged ---
+    # --- discovery: PR numbers from session chips ONLY (never titles) ---
+    # HARD RULE (2026-08-06 Sparling): session titles are decorative. Meta tracks a
+    # session iff metadata.externalRefs has github_pr on tiann/hapi | heavygee/hapi.
+    # Linked → hapi or not. Unlinked → invisible to Meta. No Peer/PR/# title scrape.
     declare -A SESS_ID SESS_ACTIVE SESS_NAME SESS_PRS SESS_REFS SESS_PATH SESS_LIFECYCLE
     declare -A PR_SESSIONS      # pr -> "sid8,sid8"
     declare -A ALL_PR           # pr -> 1
@@ -523,22 +530,18 @@ main() {
     local row sid sid8 active name prs refs_json path lifecycle
     while IFS=$'\t' read -r sid active name refs_json path lifecycle; do
         [[ -z "$sid" ]] && continue
-        [[ "$name" =~ [Yy][Aa][Aa][Cc][Cc] ]] && continue
-        prs="$(md_session_prs "$name")"
-        # Chip authority (ADR D3/D8): github_pr externalRefs own PR tracking when
-        # present. Title-only Peer #N must not mask a linked PR (e.g. Peer #1085
-        # + chip #1087 used to orphan the open PR because title prs were non-empty).
-        if [[ -n "$refs_json" && "$refs_json" != "[]" && "$refs_json" != "null" ]]; then
-            local ref_prs
-            ref_prs="$(printf '%s' "$refs_json" | jq -r '
-                [.[] | select(.kind == "github_pr") | .number]
-                | unique | map(tostring) | join(" ")
-            ' 2>/dev/null || true)"
-            if [[ -n "$ref_prs" ]]; then
-                prs="$ref_prs"
-            fi
-        fi
-        [[ -z "$prs" ]] && continue
+
+        local hapi_refs=""
+        hapi_refs="$(printf '%s' "${refs_json:-[]}" | jq -r '
+            [.[]
+             | select(.kind == "github_pr")
+             | select((.repo // "") == "tiann/hapi" or (.repo // "") == "heavygee/hapi")
+             | .number]
+            | unique | map(tostring) | join(" ")
+        ' 2>/dev/null || true)"
+        [[ -z "$hapi_refs" ]] && continue
+
+        prs="$hapi_refs"
         sid8="${sid:0:8}"
         SESS_ID["$sid8"]="$sid"
         SESS_ACTIVE["$sid8"]="$active"
@@ -555,8 +558,11 @@ main() {
     done < <(printf '%s' "$sessions_json" | jq -r '
         .[]
         | select(
-            ((.metadata.name // "") | test("Peer #[0-9]{3,4}|PR #[0-9]{3,4}|pr#[0-9]{3,4}|#[0-9]{3,4}"; "i"))
-            or (((.metadata.externalRefs // []) | length) > 0)
+            ((.metadata.externalRefs // [])
+             | map(select(.kind == "github_pr"
+                          and ((.repo // "") == "tiann/hapi"
+                               or (.repo // "") == "heavygee/hapi")))
+             | length) > 0
           )
         | [
             .id,
@@ -1070,6 +1076,26 @@ Canon: docs/operator/AGENTS.md § Meta PR watcher + feature-work-lifecycle.md §
 
 _do_ping() {  # <sid8> <emoji> <prs> <acts>
     local sid8="$1" emoji="$2" prs="$3" acts="$4"
+    local sess_path="${SESS_PATH[$sid8]:-}"
+    # HARD refuse (2026-08-06 Sparling): never Meta-ping a foreign-path session
+    # unless it already carries a tiann/heavygee hapi github_pr chip (real HAPI work
+    # with a weird cwd, e.g. gate-A fixtures). Title-only scrapes on Sparling die
+    # earlier at classify; this is defense in depth for 🔧 cleanup pings.
+    if [[ -n "$sess_path" ]] && ! pec_path_is_hapi_estate "$sess_path"; then
+        local has_hapi_chip=0
+        if printf '%s' "${SESS_REFS[$sid8]:-[]}" | jq -e '
+            [.[]
+             | select(.kind == "github_pr")
+             | select((.repo // "") == "tiann/hapi" or (.repo // "") == "heavygee/hapi")]
+            | length > 0
+        ' >/dev/null 2>&1; then
+            has_hapi_chip=1
+        fi
+        if [[ "$has_hapi_chip" -eq 0 ]]; then
+            err "REFUSE ping $sid8: path outside HAPI estate and no hapi github_pr chip ($sess_path)"
+            return 0
+        fi
+    fi
     local state_desc rouse=""
     case "$emoji" in
         ✅)

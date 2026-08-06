@@ -63,7 +63,7 @@ pec_normalize_title_base() {
     printf '%s' "$s"
 }
 
-# Extract PR numbers (3-4 digits) from a session title. Prints one per line.
+# Extract PR / Peer numbers (3-4 digits) from a session title. Prints one per line.
 # Handles: "PR #941:", "pr#923", "PR #941/#923:", "PR: 941", "Peer #1100:".
 #
 # The 3-digit floor is DELIBERATE scope protection: peer/overseer sessions carry
@@ -72,9 +72,11 @@ pec_normalize_title_base() {
 # number. Upstream PRs relevant to this fork are all 3-4 digits. For a rare
 # low-numbered upstream PR (#48, #75) use `--pr <N>` explicitly.
 #
-# NOTE: Peer #N and bare #N are workstream/issue markers. Meta still extracts
-# them here for classify/ping routing. Do NOT use this for chip backfill —
-# use pec_extract_linked_pr_numbers instead.
+# HARD RULE (2026-08-06 Sparling incident): NEVER match bare `#NNN`.
+# Titles like "Module 02: support case schema #395" (non-HAPI monorepos) must
+# NOT latch Meta onto tiann/hapi PR 395. Daily Meta discovery ignores titles
+# entirely (github_pr chips only); this helper remains for tests / backfill /
+# strip helpers. Chip backfill: pec_extract_linked_pr_numbers.
 pec_extract_pr_numbers() {
     local name="$1"
     local re_multi re_peer
@@ -98,12 +100,20 @@ pec_extract_pr_numbers() {
     if [[ "$name" =~ $re_peer ]]; then
         echo "${BASH_REMATCH[1]}"; return
     fi
-    # No match is success (empty stdout). A bare `grep` exit 1 under
-    # `set -o pipefail` used to abort hapi-meta-daily mid-loop whenever a
-    # chipped session title lacked PR/Peer markers (e.g. "session external_refs
-    # + PR chip") — refresh died, statusCheckedAt went stale, chips showed `?`.
-    printf '%s' "$name" | grep -oiE 'pr[#: ]*#?[0-9]{3,4}|#[0-9]{3,4}' \
-        | grep -oE '[0-9]{3,4}' | head -1 || true
+    # No bare #NNN fallback. Empty stdout + exit 0 (pipefail-safe).
+    return 0
+}
+
+# True if session cwd is inside the HAPI estate (mirror / worktrees / driver).
+# Non-HAPI paths (Sparling, YAACC, server-setup, …) must never receive Meta
+# merge-wave cleanup pings from title scrapes.
+pec_path_is_hapi_estate() {
+    local path="${1:-}"
+    [[ -z "$path" ]] && return 1
+    case "$path" in
+        */coding/hapi|*/coding/hapi/*) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
 # Explicit pull-request markers only (ADR D6 backfill / chip identity).

@@ -141,7 +141,7 @@ Quiet chip-only refresh (45m) was retired 2026-08-04 — hourly London `:00` ref
 
 What it does, idempotently:
 
-1. **Discovers** the union of open `heavygee` PRs on `tiann/hapi`, recently-merged tracked PRs (last 7d), and every PR-tagged HAPI session on the local hub (`:3006`).
+1. **Discovers** the union of open `heavygee` PRs on `tiann/hapi`, recently-merged tracked PRs (last 7d), and every hub session with a linked `github_pr` chip on `tiann/hapi` | `heavygee/hapi` (**titles ignored**).
 2. **Classifies each PR once** via `hapi-pr-emoji-batch.sh` → `lib/pr-emoji-core.sh`.
 3. **Caches status on the chip** (`externalRefs.status` / `statusCheckedAt` / `statusAction`) for attached sessions.
 4. **Strips leading status emoji and `PR #N:` prefixes** from titles of chipped sessions (chip owns identity + health — ADR D8+). Keeps `Peer #N:` incubating titles. Does **not** write emoji or PR-number prefixes into titles. **Agents must not put ✅/🔁/⚠️/📝/🔧 or `PR #N:` back into titles** after a strip or ping.
@@ -166,7 +166,7 @@ Chip thread count excludes GraphQL `isOutdated` unresolved threads (#847: leftov
 
 **Ping policy (why it isn't spam for greens, but is a rouse for work):** on **hourly ping windows** (Europe/London :00), Meta **always** pings sticky ⚠️ / 🔧 sessions — "are you done yet?" — including **inactive** ones (`hapi-ping-peer` resumes them). ✅ / 🔁 / 📝 only ping on an emoji **transition** (first sight / state change), never on every window. 🧹 / `?` **never** ping (incl. 🔧→🧹). Manual `--no-ping` never pings. State lives at `${XDG_STATE_HOME:-~/.local/state}/hapi/meta-daily.json`.
 
-**Scope guard:** PR-number extraction requires **3-4 digits**. Peer/overseer sessions carrying internal workstream refs (`W1.6 provenance (#22)`) are intentionally *not* swept — those 1-2 digit numbers would cross-wire to unrelated upstream PRs. Use `--pr <N>` for a rare low-numbered upstream PR.
+**Scope guard (chips only):** Meta discovers sessions **only** via linked `metadata.externalRefs` `github_pr` chips on `tiann/hapi` | `heavygee/hapi`. Session titles are never scraped for classify/ping (2026-08-06 Sparling: `"Module 02 … #395"` title scrape destroyed foreign work). Unlinked sessions are invisible until `hapi link-pr` / MCP `link_pr`. `--backfill-refs` remains a one-shot title→chip migrator (`PR #N` markers only). Use `--pr <N>` for a rare low-numbered upstream PR in the open/merged union.
 
 **What it will NEVER do** (judgment/destructive — CLI never executes these): merge upstream PRs · sync/push fork `main` · edit the soup manifest · rebuild/restart the driver · delete branches/worktrees · archive sessions · reply on GitHub · mark notifications read. Wave-clear **unlocks** the Meta tooling session to rematerialize once; that bot (and any agent following soup rules) **may** run `hapi-sync-fork-main` + `hapi-driver-rebuild --build-web --verify` without further operator approval — after `hapi-driver-status --quiet` is idle. Manual soup rebuilds outside the hourly ping windows are expected and fine; unlock waits if a rebuild is already in progress.
 

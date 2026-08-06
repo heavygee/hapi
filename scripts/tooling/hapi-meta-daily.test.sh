@@ -71,10 +71,10 @@ if [[ "$args" == *"-X PATCH"* ]]; then echo '{"ok":true}'; exit 0; fi
 if [[ "$args" == *"/api/sessions?limit=500"* ]]; then
 cat <<'JSON'
 {"sessions":[
- {"id":"aaaaaaaa-1111","active":true,"metadata":{"name":"PR #100: needs work"}},
- {"id":"bbbbbbbb-2222","active":true,"metadata":{"name":"PR #200: green thing"}},
- {"id":"cccccccc-3333","active":true,"metadata":{"name":"PR #300: merged thing"}},
- {"id":"dddddddd-4444","active":false,"metadata":{"name":"PR #400: asleep warn"}}
+ {"id":"aaaaaaaa-1111","active":true,"metadata":{"name":"needs work","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":100,"url":"https://github.com/tiann/hapi/pull/100","role":"primary"}]}},
+ {"id":"bbbbbbbb-2222","active":true,"metadata":{"name":"green thing","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":200,"url":"https://github.com/tiann/hapi/pull/200","role":"primary"}]}},
+ {"id":"cccccccc-3333","active":true,"metadata":{"name":"merged thing","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":300,"url":"https://github.com/tiann/hapi/pull/300","role":"primary"}]}},
+ {"id":"dddddddd-4444","active":false,"metadata":{"name":"asleep warn","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":400,"url":"https://github.com/tiann/hapi/pull/400","role":"primary"}]}}
 ]}
 JSON
 exit 0
@@ -177,10 +177,10 @@ fi
 if [[ "\$args" == *"/api/sessions?limit=500"* ]]; then
 cat <<'JSON'
 {"sessions":[
- {"id":"aaaaaaaa-1111","active":true,"metadata":{"name":"PR #100: needs work"}},
- {"id":"bbbbbbbb-2222","active":true,"metadata":{"name":"PR #200: green thing"}},
- {"id":"cccccccc-3333","active":true,"metadata":{"name":"PR #300: merged thing"}},
- {"id":"dddddddd-4444","active":false,"metadata":{"name":"PR #400: asleep warn"}}
+ {"id":"aaaaaaaa-1111","active":true,"metadata":{"name":"needs work","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":100,"url":"https://github.com/tiann/hapi/pull/100","role":"primary"}]}},
+ {"id":"bbbbbbbb-2222","active":true,"metadata":{"name":"green thing","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":200,"url":"https://github.com/tiann/hapi/pull/200","role":"primary"}]}},
+ {"id":"cccccccc-3333","active":true,"metadata":{"name":"merged thing","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":300,"url":"https://github.com/tiann/hapi/pull/300","role":"primary"}]}},
+ {"id":"dddddddd-4444","active":false,"metadata":{"name":"asleep warn","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":400,"url":"https://github.com/tiann/hapi/pull/400","role":"primary"}]}}
 ]}
 JSON
 exit 0
@@ -253,10 +253,10 @@ fi
 if [[ "\$args" == *"/api/sessions?limit=500"* ]]; then
 cat <<'JSON'
 {"sessions":[
- {"id":"aaaaaaaa-1111","active":true,"metadata":{"name":"PR #100: needs work"}},
- {"id":"bbbbbbbb-2222","active":true,"metadata":{"name":"PR #200: green thing"}},
- {"id":"cccccccc-3333","active":true,"metadata":{"name":"PR #300: merged thing"}},
- {"id":"dddddddd-4444","active":false,"metadata":{"name":"PR #400: asleep warn"}}
+ {"id":"aaaaaaaa-1111","active":true,"metadata":{"name":"needs work","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":100,"url":"https://github.com/tiann/hapi/pull/100","role":"primary"}]}},
+ {"id":"bbbbbbbb-2222","active":true,"metadata":{"name":"green thing","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":200,"url":"https://github.com/tiann/hapi/pull/200","role":"primary"}]}},
+ {"id":"cccccccc-3333","active":true,"metadata":{"name":"merged thing","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":300,"url":"https://github.com/tiann/hapi/pull/300","role":"primary"}]}},
+ {"id":"dddddddd-4444","active":false,"metadata":{"name":"asleep warn","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":400,"url":"https://github.com/tiann/hapi/pull/400","role":"primary"}]}}
 ]}
 JSON
 exit 0
@@ -288,10 +288,10 @@ fi
 if [[ "\$args" == *"/api/sessions?limit=500"* ]]; then
 cat <<'JSON'
 {"sessions":[
- {"id":"aaaaaaaa-1111","active":true,"metadata":{"name":"PR #100: needs work"}},
- {"id":"bbbbbbbb-2222","active":true,"metadata":{"name":"PR #200: green thing"}},
- {"id":"cccccccc-3333","active":true,"metadata":{"name":"PR #300: merged thing"}},
- {"id":"dddddddd-4444","active":false,"metadata":{"name":"PR #400: asleep warn"}}
+ {"id":"aaaaaaaa-1111","active":true,"metadata":{"name":"needs work","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":100,"url":"https://github.com/tiann/hapi/pull/100","role":"primary"}]}},
+ {"id":"bbbbbbbb-2222","active":true,"metadata":{"name":"green thing","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":200,"url":"https://github.com/tiann/hapi/pull/200","role":"primary"}]}},
+ {"id":"cccccccc-3333","active":true,"metadata":{"name":"merged thing","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":300,"url":"https://github.com/tiann/hapi/pull/300","role":"primary"}]}},
+ {"id":"dddddddd-4444","active":false,"metadata":{"name":"asleep warn","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":400,"url":"https://github.com/tiann/hapi/pull/400","role":"primary"}]}}
 ]}
 JSON
 exit 0
@@ -331,10 +331,10 @@ fi
 if [[ "\$args" == *"/api/sessions?limit=500"* ]]; then
 cat <<'JSON'
 {"sessions":[
- {"id":"aaaaaaaa-1111","active":true,"metadata":{"name":"PR #100: needs work"}},
- {"id":"bbbbbbbb-2222","active":true,"metadata":{"name":"PR #200: green thing"}},
- {"id":"cccccccc-3333","active":true,"metadata":{"name":"PR #300: merged thing"}},
- {"id":"dddddddd-4444","active":false,"metadata":{"name":"PR #400: asleep warn"}}
+ {"id":"aaaaaaaa-1111","active":true,"metadata":{"name":"needs work","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":100,"url":"https://github.com/tiann/hapi/pull/100","role":"primary"}]}},
+ {"id":"bbbbbbbb-2222","active":true,"metadata":{"name":"green thing","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":200,"url":"https://github.com/tiann/hapi/pull/200","role":"primary"}]}},
+ {"id":"cccccccc-3333","active":true,"metadata":{"name":"merged thing","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":300,"url":"https://github.com/tiann/hapi/pull/300","role":"primary"}]}},
+ {"id":"dddddddd-4444","active":false,"metadata":{"name":"asleep warn","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":400,"url":"https://github.com/tiann/hapi/pull/400","role":"primary"}]}}
 ]}
 JSON
 exit 0
@@ -369,10 +369,10 @@ fi
 if [[ "\$args" == *"/api/sessions?limit=500"* ]]; then
 cat <<'JSON'
 {"sessions":[
- {"id":"aaaaaaaa-1111","active":true,"metadata":{"name":"PR #100: needs work"}},
- {"id":"bbbbbbbb-2222","active":true,"metadata":{"name":"PR #200: green thing"}},
- {"id":"cccccccc-3333","active":true,"metadata":{"name":"PR #300: merged thing"}},
- {"id":"dddddddd-4444","active":false,"metadata":{"name":"PR #400: asleep warn"}}
+ {"id":"aaaaaaaa-1111","active":true,"metadata":{"name":"needs work","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":100,"url":"https://github.com/tiann/hapi/pull/100","role":"primary"}]}},
+ {"id":"bbbbbbbb-2222","active":true,"metadata":{"name":"green thing","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":200,"url":"https://github.com/tiann/hapi/pull/200","role":"primary"}]}},
+ {"id":"cccccccc-3333","active":true,"metadata":{"name":"merged thing","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":300,"url":"https://github.com/tiann/hapi/pull/300","role":"primary"}]}},
+ {"id":"dddddddd-4444","active":false,"metadata":{"name":"asleep warn","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":400,"url":"https://github.com/tiann/hapi/pull/400","role":"primary"}]}}
 ]}
 JSON
 exit 0
@@ -410,10 +410,10 @@ fi
 if [[ "\$args" == *"/api/sessions?limit=500"* ]]; then
 cat <<'JSON'
 {"sessions":[
- {"id":"aaaaaaaa-1111","active":true,"metadata":{"name":"PR #100: needs work"}},
- {"id":"bbbbbbbb-2222","active":true,"metadata":{"name":"PR #200: green thing"}},
- {"id":"cccccccc-3333","active":true,"metadata":{"name":"PR #300: merged thing"}},
- {"id":"dddddddd-4444","active":false,"metadata":{"name":"PR #400: asleep warn"}}
+ {"id":"aaaaaaaa-1111","active":true,"metadata":{"name":"needs work","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":100,"url":"https://github.com/tiann/hapi/pull/100","role":"primary"}]}},
+ {"id":"bbbbbbbb-2222","active":true,"metadata":{"name":"green thing","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":200,"url":"https://github.com/tiann/hapi/pull/200","role":"primary"}]}},
+ {"id":"cccccccc-3333","active":true,"metadata":{"name":"merged thing","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":300,"url":"https://github.com/tiann/hapi/pull/300","role":"primary"}]}},
+ {"id":"dddddddd-4444","active":false,"metadata":{"name":"asleep warn","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":400,"url":"https://github.com/tiann/hapi/pull/400","role":"primary"}]}}
 ]}
 JSON
 exit 0
@@ -455,8 +455,8 @@ fi
 if [[ "\$args" == *"/api/sessions?limit=500"* ]]; then
 cat <<'JSON'
 {"sessions":[
- {"id":"3c141438-aaaa","active":true,"metadata":{"name":"PR #200: green thing"}},
- {"id":"136df8b7-bbbb","active":true,"metadata":{"name":"PR #200: green thing too"}}
+ {"id":"3c141438-aaaa","active":true,"metadata":{"name":"green thing","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":200,"url":"https://github.com/tiann/hapi/pull/200","role":"primary"}]}},
+ {"id":"136df8b7-bbbb","active":true,"metadata":{"name":"green thing too","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":200,"url":"https://github.com/tiann/hapi/pull/200","role":"primary"}]}}
 ]}
 JSON
 exit 0
@@ -771,6 +771,76 @@ pings_nt="$(cat "$WORK/pings.log" 2>/dev/null || true)"
 check "wave no-tooling-id: no unlock to tooling" "! grep -q '^meta-tool' <<<\"\$pings_nt\""
 check "wave no-tooling-id: stay ready" "jq -e '.wave.status == \"ready\"' '$WORK/state.json' >/dev/null"
 check "wave no-tooling-id: hints env var" "grep -q 'HAPI_META_TOOLING_SESSION_ID' <<<\"\$out\""
+
+# ============ 19. Sparling estate fence (2026-08-06) — bare #395 must not latch ============
+# Foreign path + bare #NNN title must NEVER classify as tiann/hapi PR or get 🔧 pings.
+rm -f "$WORK/state.json" "$WORK/pings.log"
+cat >"$WORK/batch" <<'EOF'
+#!/usr/bin/env bash
+j='{}'
+for a in "$@"; do
+    case "$a" in
+        395) j="$(echo "$j" | jq -c '. + {"395":{emoji:"🔧",action:"MERGED — clean up",prePr:false,merged:true}}')" ;;
+        *) j="$(echo "$j" | jq -c --arg p "$a" '. + {($p):{emoji:"📝",action:"pre-PR",prePr:true}}')" ;;
+    esac
+done
+echo "$j"
+EOF
+chmod +x "$WORK/batch"
+cat >"$WORK/gh" <<'EOF'
+#!/usr/bin/env bash
+# No open/merged PRs — discovery must come only from sessions (should be none).
+args="$*"
+exit 0
+EOF
+chmod +x "$WORK/gh"
+cat >"$WORK/curl" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+if [[ "$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
+if [[ "$args" == *"/api/sessions?limit=500"* ]]; then
+cat <<'JSON'
+{"sessions":[
+ {"id":"sparling1-3950","active":true,"metadata":{"name":"Module 02: support case schema #395","path":"/home/heavygee/coding/sparling"}},
+ {"id":"sparling2-3951","active":true,"metadata":{"name":"Peer #395: sparling trap","path":"/home/heavygee/coding/sparling"}},
+ {"id":"hapiok00-1100","active":true,"metadata":{"name":"Peer #1100: incubating","path":"/home/heavygee/coding/hapi/worktrees/peer-1100"}},
+ {"id":"titleonly-9999","active":true,"metadata":{"name":"PR #999: title only no chip","path":"/home/heavygee/coding/hapi/worktrees/x"}},
+ {"id":"foreignchip-888","active":true,"metadata":{"name":"linked elsewhere","path":"/home/heavygee/coding/sparling","externalRefs":[{"kind":"github_pr","repo":"other/sparling","number":395,"url":"https://github.com/other/sparling/pull/395","role":"primary"}]}},
+ {"id":"hapichip-1368","active":true,"metadata":{"name":"workstream only title","path":"/home/heavygee/coding/hapi/worktrees/y","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":200,"url":"https://github.com/tiann/hapi/pull/200","role":"primary"}]}}
+]}
+JSON
+exit 0
+fi
+echo '{}'; exit 0
+EOF
+chmod +x "$WORK/curl"
+out="$(run --dry-run 2>&1)" || true
+pings_s="$(cat "$WORK/pings.log" 2>/dev/null || true)"
+check "sparling fence: bare #395 never appears as tracked PR" "! grep -qE '(^|[^0-9])395([^0-9]|$)|#395' <<<\"\$out\""
+check "sparling fence: no sparling session id in output as tracked" "! grep -q 'sparling1\\|sparling2' <<<\"\$out\""
+check "sparling fence: Peer #395 on sparling path ignored" "! grep -q 'sparling2' <<<\"\$out\""
+check "sparling fence: title-only PR #999 ignored" "! grep -q 'titleonly' <<<\"\$out\""
+check "sparling fence: non-hapi github_pr chip ignored" "! grep -q 'foreignchip' <<<\"\$out\""
+check "sparling fence: hapi chip tracked despite workstream title" "grep -qE '#200|200' <<<\"\$out\""
+check "sparling fence: incubating Peer #1100 without chip ignored" "! grep -q 'hapiok00\\|1100' <<<\"\$out\""
+check "sparling fence: dry-run no pings" "[[ -z \"\$pings_s\" ]]"
+# Stronger: batch must never be asked to classify 395 from these sessions.
+# Re-run with batch that dies if 395 is passed.
+cat >"$WORK/batch" <<'EOF'
+#!/usr/bin/env bash
+for a in "$@"; do
+    if [[ "$a" == "395" ]]; then
+        echo "FAIL: classified Sparling #395 as hapi PR" >&2
+        exit 99
+    fi
+done
+echo '{}'
+EOF
+chmod +x "$WORK/batch"
+out="$(run --dry-run 2>&1)" || rc=$?
+rc=${rc:-0}
+check "sparling fence: batch never sees 395 (exit!=99)" "[[ \$rc -ne 99 ]]"
+check "sparling fence: no FAIL classify message" "! grep -q 'classified Sparling' <<<\"\$out\""
 
 echo ""
 echo "hapi-meta-daily.test.sh: $PASS passed, $FAIL failed"

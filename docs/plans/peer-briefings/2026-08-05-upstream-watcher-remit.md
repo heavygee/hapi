@@ -51,6 +51,26 @@ hapi-pr-emoji-batch --repo tiann/hapi <prs>
 - Issue taxonomy / `low-impact` slap-fest (labelling session `f3c41205` owns daily label sweep; this session may *recommend* promote).
 - Marking GitHub notifications read; replying on GitHub unless operator asks.
 
+## HARD FENCE — linked HAPI metadata only (2026-08-06 Sparling incident)
+
+**Session titles are noise for PR routing.** Meta and this watcher may only act on sessions that already have `metadata.externalRefs[]` with `kind=github_pr` and `repo` in `{tiann/hapi, heavygee/hapi}`.
+
+| Signal | Action |
+|--------|--------|
+| Linked `github_pr` on tiann/heavygee hapi | Track / chip / ping / cleanup policy |
+| Linked `github_pr` on any other repo | Ignore (not HAPI) |
+| Title has `PR #N` / `Peer #N` / bare `#N` | **Ignore** — not a link |
+| No chip | **Invisible** to Meta until `hapi link-pr` / MCP `link_pr` |
+
+Kill criteria (refuse + stop):
+
+1. Never interpret titles as PR identity. Never ack 🔧 cleanup because a title "looks like" a HAPI PR.
+2. Never ping / spawn / direct agents for sessions without a HAPI github_pr chip.
+3. Never run (or instruct) worktree/branch cleanup against non-HAPI repos.
+4. Cross-project destruction reports → escalate to operator; do **not** keep directing the victim session.
+
+Mechanical backstop: `hapi-meta-daily.sh` discovery selects only hapi `github_pr` chips. `--backfill-refs` is the sole title→chip migration tool (operator one-shot).
+
 ## Cursor
 
 Last brief: **2026-08-05T08:20Z** (remit adopted + first full brief).
