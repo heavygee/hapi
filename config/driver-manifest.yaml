@@ -711,3 +711,9 @@ layers:
   # Tip: bf95aac56 (origin/driver/web-pinned-sessions) — global top Pinned band (2026-08-06)
   - branch: driver/web-pinned-sessions
 
+  # tiann/hapi#1378 — preserve composer text+attachment drafts across inactive
+  # session archive/switch/reopen (techotaku39). Web-only. Conflict markers fixed
+  # on tip 629db29e8. Drop when upstream PR merges.
+  # Worktree: ~/coding/hapi/worktrees/inactive-drafts-1378 @ fix/inactive-session-drafts-1378
+  # Tip: 629db29e8 (origin/fix/inactive-session-drafts-1378)
+  - branch: fix/inactive-session-drafts-1378
