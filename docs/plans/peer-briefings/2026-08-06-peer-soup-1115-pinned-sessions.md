@@ -21,23 +21,17 @@ Blind merge of raw #1115 would drop usage migrations and/or never apply `pinned`
 
 Local ref: `techotaku39/feat/web-pinned-sessions` @ `41a0afa43`. Use a **local/origin branch** layer (`pr:` only fetches `origin/`).
 
-## Progress (2026-08-06 peer)
+## Progress (2026-08-06 peer) — soup DONE
 
 | Step | Status |
 |------|--------|
-| Union tip `driver/web-pinned-sessions` @ `9cb1e1bcd` | **DONE** — based on remat tip-forward `1964a3d67`; pin→**v22**; merge-tree clean vs driver |
-| Manifest layer (mirror + `~/.config`) | **DONE** — utensil commits `c04ae067a` / `8f2c1c964` |
-| `hapi-driver-rebuild --build-web --verify` | **BLOCKED** — remat-hold exit 76 (owner `05d9f0f2` / meta-soup-stabilize). Upstream/main conflict already resolved in remat WT; hold not cleared. Meta `hapi-restart-hub` pid 743518 patient-draining (WORKING=2). Pin layer not yet absorbed. |
-| Hub restart + DB 20→21→22 + Pin proof | **PENDING** hold clear + rebuild |
+| Union tip `driver/web-pinned-sessions` @ `9cb1e1bcd` | **DONE** — pin→**v22** on remat tip-forward; merge-tree clean |
+| Manifest layer (mirror + `~/.config`) | **DONE** |
+| Rebuild / absorb | **DONE** — Meta remat cleared hold; driver tip has SCHEMA 22 + pin; `hapi-verify-web-dist` OK |
+| Live DB | **DONE** — `PRAGMA user_version` = **22**; `PUT /api/sessions/:id/pin` OK |
+| UI proof | **DONE** — header More → **Unpin session** (session was pinned via API); PNGs inlined via `hapi-dogfood-shot` |
 
-**Pinged Meta twice** with tip SHA + deadlock note. Peer must not clear hold / steal remat-owner token.
-
-## Remaining after hold clear
-
-1. `hapi-driver-status --quiet` → `hapi-driver-rebuild --build-web --verify` → `hapi-verify-web-dist`
-2. Hub/cli changed → `hapi-restart-hub` (patient). Confirm `PRAGMA user_version` = 22 and Pin in session context menu on `:3006`.
-3. PNG / `display_image` proof: right-click → Pin; pinned session stays put.
-4. **Do not** open an upstream PR that races #1115. Optional comment on #1115: soup remapped pin to **v22** because soup v20=#1359 and upstream #1390 took v21.
+**Out of scope for this peer:** rebasing / resolving review threads on upstream `tiann/hapi#1115` (author @techotaku39; merge state DIRTY). Soup dogfood only. No rival PR.
 
 ## Intake ownership
 
@@ -46,7 +40,8 @@ Local ref: `techotaku39/feat/web-pinned-sessions` @ `41a0afa43`. Use a **local/o
 | Archaeology / conflict discovery | DONE (orchestrator) |
 | Union tip + schema remap (→v22) | **DONE** |
 | Manifest | **DONE** |
-| Rebuild + dogfood proof | **BLOCKED** on remat-hold / Meta |
+| Rebuild + dogfood proof | **DONE** |
 | Competing upstream PR | **NO** |
+| Upstream #1115 rebase/threads | **NOT THIS SESSION** (Meta ⚠️ chip = author PR health) |
 
 Hard rules: no agent stack-switch; no hand-edit inside `driver/` except via rebuild; commit tooling dirt same turn; never merge `tiann/hapi`.
