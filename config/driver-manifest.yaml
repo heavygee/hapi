@@ -704,10 +704,10 @@ layers:
   # Tip: 888b382ed (origin/feat/session-header-project-path)
   - branch: feat/session-header-project-path
 
-  # SOUP 2026-08-06: upstream #1115 pin sessions (@techotaku39). Schema pin→v21
-  # because soup already used v20 for usage reindex (#1359 lineage). Live DB is
-  # user_version=20. Do NOT open a rival upstream PR — #1115 owns upstream.
+  # SOUP 2026-08-06: upstream #1115 pin sessions (@techotaku39). Schema pin→v22
+  # (soup v20=usage reindex #1359; upstream #1390 took v21 cache semantics).
+  # Live DB user_version was 20 — migrates 20→21→22. No rival upstream PR.
   # Worktree: ~/coding/hapi/worktrees/web-pinned-sessions-soup @ driver/web-pinned-sessions
-  # Tip: 811a54f53 (origin/driver/web-pinned-sessions) — union tip on driver HEAD
+  # Tip: 9cb1e1bcd (origin/driver/web-pinned-sessions) — union on remat tip-forward
   - branch: driver/web-pinned-sessions
 
