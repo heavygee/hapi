@@ -39,6 +39,8 @@ Canon: `docs/plans/2026-08-03-a2a-control-plane-rfc.md` + [#1332](https://github
 
 **Friction:** temptation to "unify progress" into one object. Steelmans: one vocabulary for overseer. Kill: overseer needs collaboration claims + attention sidecar; Lidarr needs a dumb process meter that works when the agent is dead and has never heard of A2A. Cheapest falsification: keep stores separate; dogfood both; only bridge if a privileged reader actually needs a join.
 
+**ACK (2026-08-07):** Overseer / A2A substrate session confirmed **no divergence** with RFC v2 / P1. Ship Layer 0 jobs without waiting on A2A P1 (#1374). Deliberate ledger rows for a job milestone (if ever) = explicit `work_ad`/`handoff` write, never heartbeat promotion.
+
 ## UI options (reveal before lock)
 
 1. **Meter under title** — thin bar + `beets · 91%` / `823 left`; pulse when heartbeat fresh; amber when stale (>15m).
