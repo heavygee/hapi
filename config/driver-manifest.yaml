@@ -709,3 +709,11 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/composer-expand-enter-newline @ feat/composer-expand-enter-newline
   # Tip: 9011417f0 (origin/feat/composer-expand-enter-newline)
   - branch: feat/composer-expand-enter-newline
+
+  # tiann/hapi#1404 — session-attached long-running jobs (outlive agent; list chrome).
+  # SCHEMA: soup remumber V22→V23 (pin-sessions soup owns V22). Upstream feat tip
+  # keeps jobs at V21→V22 for clean PR vs upstream/main.
+  # Worktree: ~/coding/hapi/worktrees/session-attached-jobs @ driver/session-attached-jobs
+  # Tip: 21164becd (origin/driver/session-attached-jobs) — feat tip e5237f366
+  # Do NOT open upstream PR until operator dogfood OK (incl. Lidarr self-attach).
+  - branch: driver/session-attached-jobs
