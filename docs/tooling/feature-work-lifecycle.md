@@ -309,6 +309,11 @@ Peer stack and soup are **both** required for normal feature work. They solve di
 
 ## Proof tiers (images and video)
 
+**Estate default (all repos on this machine):** skill
+[`operator-visible-proof`](../../../skills/operator-visible-proof/SKILL.md) —
+inline into HAPI while developing, then `pr-attach-proof` at PR time. This
+section is the HAPI product-workflow deep dive of the same contract.
+
 Peers **must** assess tier before capture ([`peer-stack.md` § Evidence modality](../tooling/peer-stack.md#evidence-modality--agent-decides-png-vs-mp4)).
 
 - **§6.4b PNG** — static existence (label, layout, copy, icon). Always for visible UI change.
