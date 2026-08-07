@@ -7,6 +7,7 @@
 
 import { trimIdent } from '@/utils/trimIdent';
 import { buildSessionCitationSteerInstruction } from '@hapi/protocol/sessionCitation';
+import { withSessionJobInstruction } from '@/modules/common/sessionJobInstruction';
 import { withSessionSummaryInstruction } from '@/modules/common/sessionSummaryInstruction';
 
 /**
@@ -33,7 +34,7 @@ export const TITLE_INSTRUCTION = trimIdent(`
  * Session-summary contract is resolved at call time (hub toggle / env).
  */
 export function getCodexSystemPrompt(env: NodeJS.ProcessEnv = process.env): string {
-    return withSessionSummaryInstruction(TITLE_INSTRUCTION, env)
+    return withSessionSummaryInstruction(withSessionJobInstruction(TITLE_INSTRUCTION), env)
 }
 
 /** Alias kept for existing call sites / tests that expect a string constant name. */
