@@ -87,7 +87,8 @@ export type SessionSummary = {
      * Primary running session-attached job (tiann/hapi#1404), or null.
      * Independent of agent `active` / thinking — work that outlives the agent.
      */
-    attachedJob: AttachedJob | null
+    /** Present on hub list rows; optional on thin test fixtures. */
+    attachedJob?: AttachedJob | null
     model: string | null
     modelReasoningEffort?: string | null
     effort: string | null

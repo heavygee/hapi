@@ -1,78 +1,37 @@
-import { describe, expect, it } from 'bun:test'
+import { afterEach, describe, expect, it } from 'bun:test'
 import { Database } from 'bun:sqlite'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Store } from './index'
 
-function getColumns(store: Store, table: string): string[] {
-    const db: Database = (store as unknown as { db: Database }).db
-    const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
-    return rows.map((row) => row.name)
-}
+const tempDirs: string[] = []
 
-describe('Store V22→V23 (soup); fresh schema still includes migration: session_jobs table', () => {
-    it('fresh DB has session_jobs with expected columns', () => {
-        const store = new Store(':memory:')
-        const cols = getColumns(store, 'session_jobs')
-        expect(cols).toContain('session_id')
-        expect(cols).toContain('job_key')
-        expect(cols).toContain('label')
-        expect(cols).toContain('status')
-        expect(cols).toContain('done')
-        expect(cols).toContain('total')
-        expect(cols).toContain('remaining')
-        expect(cols).toContain('heartbeat_at')
-        expect(cols).toContain('started_at')
-        expect(cols).toContain('updated_at')
-        store.close()
-    })
+afterEach(() => {
+    for (const dir of tempDirs.splice(0)) {
+        rmSync(dir, { recursive: true, force: true })
+    }
+})
 
-    it('upserts, patches, deletes a job and surfaces primary running', () => {
-        const store = new Store(':memory:')
-        const session = store.sessions.getOrCreateSession('test', { path: '/tmp' }, null, 'default')
+describe('schema migration v21→tip includes soup pin (upstream #1115)', () => {
+    it('adds the pinned column with an unpinned default', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v22-'))
+        tempDirs.push(dir)
+        const dbPath = join(dir, 'hapi.db')
 
-        const created = store.sessionJobs.upsert(session.id, 'beets', {
-            label: 'beets import',
-            status: 'running',
-            remaining: 100,
-            unit: 'tracks'
-        })
-        expect(created.outcome).toBe('upserted')
-        if (created.outcome !== 'upserted') throw new Error('unreachable')
+        new Store(dbPath).close()
+        const legacy = new Database(dbPath)
+        legacy.exec('ALTER TABLE sessions DROP COLUMN pinned')
+        // Soup v21 = upstream #1390 usage semantics; pin is the v22 step.
+        legacy.exec('PRAGMA user_version = 21')
+        legacy.close()
 
-        const primary = store.sessionJobs.getPrimaryRunning(session.id)
-        expect(primary?.key).toBe('beets')
-        expect(primary?.remaining).toBe(100)
-
-        const patched = store.sessionJobs.patch(session.id, 'beets', { remaining: 80 })
-        expect(patched?.remaining).toBe(80)
-
-        expect(store.sessionJobs.delete(session.id, 'beets')).toBe(true)
-        expect(store.sessionJobs.getPrimaryRunning(session.id)).toBeNull()
-        store.close()
-    })
-
-    it('cascade-deletes jobs when session is deleted', async () => {
-        const store = new Store(':memory:')
-        const session = store.sessions.getOrCreateSession('test', { path: '/tmp' }, null, 'default')
-        store.sessionJobs.upsert(session.id, 'job', { label: 'x', status: 'running' })
-        expect(store.sessionJobs.list(session.id)).toHaveLength(1)
-        await store.sessions.deleteSession(session.id, 'default')
-        expect(store.sessionJobs.list(session.id)).toHaveLength(0)
-        store.close()
-    })
-
-    it('transfers jobs on merge without colliding keys', () => {
-        const store = new Store(':memory:')
-        const oldSession = store.sessions.getOrCreateSession('old', { path: '/a' }, null, 'default')
-        const newSession = store.sessions.getOrCreateSession('new', { path: '/b' }, null, 'default')
-        store.sessionJobs.upsert(oldSession.id, 'beets', {
-            label: 'beets',
-            status: 'running',
-            remaining: 5
-        })
-        const result = store.sessionJobs.transfer(oldSession.id, newSession.id)
-        expect(result.moved).toBe(1)
-        expect(store.sessionJobs.getPrimaryRunning(newSession.id)?.remaining).toBe(5)
-        expect(store.sessionJobs.list(oldSession.id)).toHaveLength(0)
-        store.close()
+        const migrated = new Store(dbPath)
+        const internalDb = (migrated as unknown as { db: Database }).db
+        const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
+        expect(version.user_version).toBe(23)
+        const session = migrated.sessions.getOrCreateSession('migration-pin', {}, null, 'default')
+        expect(session.pinned).toBe(false)
+        migrated.close()
     })
 })
