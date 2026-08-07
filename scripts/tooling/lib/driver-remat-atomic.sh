@@ -37,21 +37,52 @@ driver_remat_mode() {
 # Ensure remat worktree exists and is checked out to WIP @ start_ref (hard reset).
 # tip-forward: start_ref = PREV_TIP. full-recipe: start_ref = upstream/main (or manifest base).
 # Does not touch the live driver worktree.
+#
+# Resume (2026-08-07): after a tip-forward conflict, Meta resolves + commits on WIP.
+# Owner re-run must NOT hard-reset to PREV_TIP (that wiped the resolution). When
+# HAPI_REMAT_RESUME=1 or a remat-hold is active, and WIP is clean and a descendant
+# of start_ref, keep HEAD. Override wipe: HAPI_REMAT_RESUME=0.
 # stdout: absolute path to remat worktree only (status → stderr).
 driver_remat_prepare() {
     local primary="${1:?}"
     local wip_branch="${2:?}"
     local start_ref="${3:?}"
-    local remat_wt mode
+    local remat_wt mode resume=0 held_wt
     remat_wt="$(driver_remat_worktree_path "$primary")"
     mode="$(driver_remat_mode)"
+
+    if [[ "${HAPI_REMAT_RESUME:-}" == "1" ]]; then
+        resume=1
+    elif [[ "${HAPI_REMAT_RESUME:-}" == "0" ]]; then
+        resume=0
+    elif declare -F driver_remat_hold_active >/dev/null 2>&1 && driver_remat_hold_active; then
+        # Only auto-resume the held remat worktree (not unrelated unit-test WTs).
+        held_wt="$(jq -r '.remat_wt // empty' "${HAPI_REMAT_HOLD_FILE:-$HOME/.hapi/remat-hold.json}" 2>/dev/null || true)"
+        if [[ -n "$held_wt" && "$held_wt" == "$remat_wt" ]]; then
+            resume=1
+        fi
+    fi
 
     if [[ ! -d "$remat_wt" ]]; then
         echo "Creating remat worktree at $remat_wt (branch $wip_branch, mode=$mode)..." >&2
         # Canonical worktrees/<name> — guard allows this path.
         git -C "$primary" worktree add -B "$wip_branch" "$remat_wt" "$start_ref" >&2
+    elif [[ "$resume" -eq 1 ]] \
+        && ! git -C "$remat_wt" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1 \
+        && [[ -z "$(git -C "$remat_wt" status --porcelain 2>/dev/null)" ]] \
+        && git -C "$remat_wt" merge-base --is-ancestor "$start_ref" HEAD 2>/dev/null \
+        && [[ "$(git -C "$remat_wt" rev-parse HEAD)" != "$(git -C "$remat_wt" rev-parse "$start_ref^{commit}")" ]]; then
+        # Keep committed conflict resolution (or tip-forward progress) on WIP.
+        git -C "$remat_wt" checkout -f "$wip_branch" >/dev/null 2>&1 || \
+            git -C "$remat_wt" checkout -f -B "$wip_branch" HEAD >&2
+        echo "Remat prepare: RESUME $wip_branch @ $(git -C "$remat_wt" rev-parse --short HEAD) (kept WIP; skip reset to ${start_ref:0:12})" >&2
+        printf '%s\n' "$remat_wt"
+        return 0
     else
         # Re-enter WIP even if a prior failed remat left it conflicted/detached.
+        if [[ "$resume" -eq 1 ]]; then
+            echo "Remat prepare: resume requested but WIP not cleanly resumable — hard reset to ${start_ref:0:12}" >&2
+        fi
         git -C "$remat_wt" merge --abort >/dev/null 2>&1 || true
         git -C "$remat_wt" checkout -f -B "$wip_branch" "$start_ref" >&2
         git -C "$remat_wt" reset --hard "$start_ref" >&2
@@ -111,6 +142,7 @@ driver_remat_fail_leave_wip() {
     fi
     echo "       Resolve in remat worktree: $remat_wt (branch $wip_branch)" >&2
     echo "       ESCALATE to Meta remat owner — hold will block other remats." >&2
-    echo "       Owner re-run: HAPI_REMAT_OWNER=1 hapi-driver-rebuild --build-web --verify" >&2
+    echo "       Owner: resolve + commit on WIP, then HAPI_REMAT_OWNER=1 hapi-driver-rebuild --build-web --verify" >&2
+    echo "       (hold-active re-run RESUMES WIP — does not wipe your merge commit; HAPI_REMAT_RESUME=0 to force reset)" >&2
     echo "       Or abort WIP: git -C $remat_wt merge --abort && hapi-remat-hold clear" >&2
 }

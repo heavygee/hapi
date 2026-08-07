@@ -117,4 +117,22 @@ set -e
 [[ "$(git -C "$DRIVER" rev-parse HEAD)" == "$PREV" ]] || { echo "FAIL: conflict mutated driver tip"; exit 1; }
 echo "OK: conflict leaves live tip unchanged"
 
+# Resume keeps committed WIP progress (does not wipe back to start_ref)
+git -C "$REMAT" merge --abort >/dev/null 2>&1 || true
+git -C "$REMAT" checkout -q -B driver/integration-wip "$PREV"
+echo resume-me >"$REMAT/resume.txt"
+git -C "$REMAT" add resume.txt
+git -C "$REMAT" commit -q -m "conflict resolution progress"
+RESUME_SHA="$(git -C "$REMAT" rev-parse HEAD)"
+REMAT="$(HAPI_REMAT_RESUME=1 HAPI_REMAT_MODE=tip-forward driver_remat_prepare "$PRIMARY" "driver/integration-wip" "$PREV")"
+[[ "$(git -C "$REMAT" rev-parse HEAD)" == "$RESUME_SHA" ]] || { echo "FAIL: resume wiped WIP"; exit 1; }
+[[ -f "$REMAT/resume.txt" ]] || { echo "FAIL: resume lost resolution file"; exit 1; }
+echo "OK: HAPI_REMAT_RESUME=1 keeps WIP tip"
+
+# Force reset still works
+REMAT="$(HAPI_REMAT_RESUME=0 HAPI_REMAT_MODE=tip-forward driver_remat_prepare "$PRIMARY" "driver/integration-wip" "$PREV")"
+[[ "$(git -C "$REMAT" rev-parse HEAD)" == "$PREV" ]] || { echo "FAIL: RESUME=0 should reset to PREV"; exit 1; }
+[[ ! -f "$REMAT/resume.txt" ]] || { echo "FAIL: RESUME=0 left resolution file"; exit 1; }
+echo "OK: HAPI_REMAT_RESUME=0 hard-resets WIP"
+
 echo "driver-remat-atomic.test.sh: all cases OK"
