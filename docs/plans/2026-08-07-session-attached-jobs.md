@@ -22,6 +22,23 @@
 - **Kill criteria:** if list enrichment costs >5ms on 500 sessions, denormalize primary job onto `sessions` row.
 - **Not backgroundTaskCount:** that is in-agent Claude Ctrl+B style; dies with disconnect. Different feature.
 
+## A2A / overseer alignment (RFC v2, 2026-08-04)
+
+Canon: `docs/plans/2026-08-03-a2a-control-plane-rfc.md` + [#1332](https://github.com/tiann/hapi/discussions/1332). P1 ledger WIP: worktree `a2a-p1-ledger` / peer `e1ee1785` (`/work-graph/events`). Overseer prep (`a492a270`) inherits RFC v2 principal / Bounds / `expires_at` semantics - **no #1404 conflation in that thread yet**.
+
+| Concern | Decision |
+|---------|----------|
+| Same table as `work_ad`? | **No.** `session_jobs` vs work-graph `events`. Jobs are Layer 0 `SessionSummary.attachedJob` enrichment. |
+| Google A2A `Task`? | **No.** External interop protocol; HAPI A2A is hub-mediated control plane. |
+| Auto-emit `work_ad` from heartbeats? | **No (kill).** Floods ledger with mechanical progress; overseer contracts treat routine progress as captured-only; violates "notify optional indefinitely"; confuses status vocab. Privileged reader may *observe* `attachedJob` later. |
+| Staleness | Aligns: UI amber after 15m silence; status stays `running` until explicit completed/failed. Mirrors RFC: silence → stale presentation, not failure / not `incomplete` handoff timeout-as-fail. |
+| Status vocab | Jobs: hub-owned `running` \| `completed` \| `failed` only. UI "stale" is presentation. Do **not** add `stalled` as a stored status (plan sketch below was wrong). Map to work_ad only if a future projection exists: running→`in_progress`, completed→`done`, failed→`failed`, amber silence→`stale`. |
+| `AGENT_NOTIFY_SUMMARY` | Remains optional turn self-report for Layer 1 ads (P3). Jobs do not replace it. `job run` exit code ≈ receipt `checks[]` fact style for the **process meter**, not a ledger receipt. |
+| Principal on job rows | Not required for Layer 0 session enrichment (JWT like ping-peer). If projecting to `work_ad`, add structured principal then - do not pre-bake. |
+| One Boss / Bounds | Hub REST only; workers must not treat jobs or ledger as a self-service work queue. |
+
+**Friction:** temptation to "unify progress" into one object. Steelmans: one vocabulary for overseer. Kill: overseer needs collaboration claims + attention sidecar; Lidarr needs a dumb process meter that works when the agent is dead and has never heard of A2A. Cheapest falsification: keep stores separate; dogfood both; only bridge if a privileged reader actually needs a join.
+
 ## UI options (reveal before lock)
 
 1. **Meter under title** — thin bar + `beets · 91%` / `823 left`; pulse when heartbeat fresh; amber when stale (>15m).
@@ -41,7 +58,7 @@ Ship option 1 as default (fraction-first per UX research); option 2 if density c
 
 ```ts
 AttachedJobSchema = {
-  key, label, status: 'running'|'stalled'|'completed'|'failed',
+  key, label, status: 'running'|'completed'|'failed',  // UI amber = stale heartbeat, not a status
   done?: number, total?: number, remaining?: number, unit?: string,
   detail?: string, heartbeatAt, startedAt, updatedAt
 }
@@ -97,12 +114,13 @@ Soup promote + `hapi-ping-peer` Lidarr session with attach recipe. No upstream P
   - Majors: idle-agent heartbeat gap → `hapi job run` supervisor; post-merge `$HAPI_SESSION_ID` 404 → job-owner redirects; CLI test gap; steer only 4/10 flavors (no MCP yet)
   - Discoverability ~40% attach / ~20% sustained without coaching
 - Process: peer briefs must ping originator on completion (spawn-peer skill + intake §0)
-- **No upstream PR** until cold-review Majors addressed + operator OK
+- Cold-review Majors fixed on feat tip (incl. `job run`, post-merge redirects, CLI tests, steer scoping)
+- A2A alignment documented (Layer 0 meter ≠ Layer 1 `work_ad`); guide + AGENTS + estate skill updated
+- **No upstream PR** until operator OK after dogfood of `job run`
 
-### Post-review fix backlog (in flight)
+### Remaining backlog
 
-1. `hapi job run` supervisor (auto heartbeat + exit status)
-2. Job REST follows `jobsTransferredToSessionId` / `jobsAcceptedFromSessionIds` / `supersededBySessionId`
-3. CLI unit tests (`parseJobArgs`, resolve, exit codes, runSessionJob)
-4. Honest steer scoping + prefer `job run` in system prompt / guide / skill
-5. Later: MCP `hapi_job` tool; terminal-job TTL; widen flavor coverage
+1. MCP `hapi_job` tool (Cursor/ACP discoverability)
+2. Terminal-job TTL / reclaim
+3. Second cold pass after `job run` dogfood
+4. Optional later: privileged reader join of `attachedJob` → work-ad projection (not auto-heartbeat ingest)
