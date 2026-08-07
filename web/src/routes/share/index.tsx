@@ -21,8 +21,6 @@ import { setSharePendingTransfer } from '@/lib/sharePendingState'
 import { getSessionTitle } from '@/lib/sessionTitle'
 import type { SessionSummary } from '@/types/api'
 
-const SHARE_PICKER_ACTIVITY_DATES: ReadonlySet<string> = new Set()
-
 type LoadState =
     | { state: 'loading' }
     | { state: 'missing'; reason: 'not-found' | 'ingest-error' | 'no-id' }
@@ -294,7 +292,6 @@ export default function SharePage() {
                         <SessionListSearch
                             value={searchQuery}
                             onChange={setSearchQuery}
-                            sessionActivityDates={SHARE_PICKER_ACTIVITY_DATES}
                             customStart={customStart}
                             customEnd={customEnd}
                             sessionActivityDates={sessionActivityDates}
