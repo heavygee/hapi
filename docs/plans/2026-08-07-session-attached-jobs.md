@@ -86,3 +86,12 @@ Subcommands: `set`, `update`, `clear`, `list` — same auth as ping-peer.
 ### Task 6: Dogfood
 
 Soup promote + `hapi-ping-peer` Lidarr session with attach recipe. No upstream PR until operator OK.
+
+
+## Status (2026-08-07)
+
+- Upstream issue: https://github.com/tiann/hapi/issues/1404
+- Feat tip: `e5237f366` (`feat/session-attached-jobs`) — SCHEMA V22 for upstream
+- Soup tip: `driver/session-attached-jobs` @ V23 remumber; rematted to driver `b9fc58e41`
+- Lidarr peer pinged to self-attach beets job
+- **No upstream PR** until operator OK after Lidarr row is visibly truthful
