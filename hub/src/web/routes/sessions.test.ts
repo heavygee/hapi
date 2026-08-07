@@ -1475,6 +1475,7 @@ describe('sessions routes', () => {
                 return new Map(ids.map((id) => [id, 0]))
             },
             getNextScheduledAtBySessionIds: (_ids: string[]) => new Map<string, number>(),
+            getPrimaryAttachedJobsBySessionIds: (_ids: string[]) => new Map(),
             resolveSessionAccess: () => ({ ok: false, reason: 'not-found' as const })
         } as unknown as Partial<SyncEngine>
 
@@ -1507,6 +1508,7 @@ describe('sessions routes', () => {
             getSessionsByNamespace: () => sessions,
             getFutureScheduledMessageCounts: (ids: string[]) => new Map(ids.map((id) => [id, 0])),
             getNextScheduledAtBySessionIds: (_ids: string[]) => new Map<string, number>(),
+            getPrimaryAttachedJobsBySessionIds: (_ids: string[]) => new Map(),
             resolveSessionAccess: () => ({ ok: false, reason: 'not-found' as const })
         } as unknown as Partial<SyncEngine>
 

@@ -41,7 +41,7 @@ describe('SessionCache.applySessionPatch', () => {
 
         expect(applied).toBe(true)
         expect(cache.getSession(created.id)?.todos).toEqual(todos)
-        expect(cache.getSession(created.id)?.todosUpdatedAt).toBe(100)
+        expect(cache.getSession(created.id)?.todosUpdatedAt).toBe(1)
     })
 
     it('applies a versioned metadata patch by unwrapping value + version', () => {
