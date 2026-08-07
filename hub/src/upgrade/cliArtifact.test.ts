@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test'
+import { createHash } from 'node:crypto'
 import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -538,12 +539,13 @@ describe('fingerprintArtifactInputs / isArtifactCacheFresh', () => {
         try {
             const path = join(dir, 'hapi-0.25.1-linux-x64')
             writeFileSync(path, 'bytes')
+            const sha256 = createHash('sha256').update('bytes').digest('hex')
             const legacy = {
                 version: '0.25.1',
                 platform: 'linux',
                 arch: 'x64',
                 path,
-                sha256: 'abc',
+                sha256,
                 sizeBytes: 5,
             } as ArtifactMeta
             expect(isArtifactCacheFresh(legacy, 'deadbeef')).toBe(false)

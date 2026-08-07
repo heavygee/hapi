@@ -3135,7 +3135,9 @@ export class SyncEngine {
         const targetMachine = this.resolveOnlineMachineForSession(
             session,
             namespace,
-            { strictMachineId: flavor === 'cursor' }
+            // Cursor + native Pi bind to a recorded machineId; same-host
+            // siblings must not steal resume when the recorded runner is offline.
+            { strictMachineId: flavor === 'cursor' || flavor === 'pi' }
         )
         if (!targetMachine) {
             return { type: 'error', message: 'No machine online', code: 'no_machine_online' }

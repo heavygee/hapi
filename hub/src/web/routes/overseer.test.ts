@@ -29,7 +29,7 @@ describe('overseer routes', () => {
             systemPrompt: string
         }
         expect(body.identity.canDispatch).toBe(false)
-        expect(body.identity.tools.length).toBe(10)
+        expect(body.identity.tools.length).toBe(11)
         expect(body.systemPrompt).toContain('Overseer')
     })
 

@@ -98,7 +98,9 @@ type UpdateStateHandler = ClientToServerEvents['update-state']
 const messageSchema = z.object({
     sid: z.string(),
     message: z.union([z.string(), z.unknown()]),
-    localId: z.string().optional()
+    localId: z.string().optional(),
+    // Client-provided transcript timestamp (jsonl order). Prefer over hub receive time.
+    createdAt: z.number().optional()
 })
 
 const updateMetadataSchema = z.object({
@@ -154,7 +156,7 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             return
         }
 
-        const { sid, localId } = parsed.data
+        const { sid, localId, createdAt: clientCreatedAt } = parsed.data
         const raw = parsed.data.message
 
         const content = typeof raw === 'string'
@@ -178,7 +180,7 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             return
         }
 
-        const msg = store.messages.addMessage(sid, content, localId)
+        const msg = store.messages.addMessage(sid, content, localId, undefined, clientCreatedAt)
         if (shouldRecordSessionActivity(content)) {
             onSessionActivity?.(sid, msg.createdAt)
         }

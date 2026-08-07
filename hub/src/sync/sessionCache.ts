@@ -430,11 +430,17 @@ export class SessionCache {
         const requestedThinking = Boolean(payload.thinking)
         const hubNow = Date.now()
         const preserveQueuedThinking = !requestedThinking && pendingThinkingUntil > hubNow
+        const previousActiveTurnStartedAt = session.activeTurnStartedAt
 
         session.active = true
         session.activeAt = Math.max(session.activeAt, t)
         session.thinking = requestedThinking || preserveQueuedThinking
         session.thinkingAt = t
+        if (preserveQueuedThinking && t < (session.activeTurnStartedAt ?? 0)) {
+            // Client heartbeat time can lag the hub clock; keep the queued-turn
+            // boundary on hub time so grace expiry and UI stay coherent.
+            session.activeTurnStartedAt = hubNow
+        }
         if (requestedThinking || pendingThinkingUntil <= hubNow) {
             this.pendingThinkingUntilBySessionId.delete(session.id)
         }
@@ -493,6 +499,7 @@ export class SessionCache {
             || previousCopilotAgentMode !== session.copilotAgentMode
         const shouldBroadcast = (!wasActive && session.active)
             || (wasThinking !== session.thinking)
+            || (previousActiveTurnStartedAt !== session.activeTurnStartedAt)
             || modeChanged
             || (now - lastBroadcastAt > 10_000)
 
@@ -505,6 +512,7 @@ export class SessionCache {
                     active: true,
                     activeAt: session.activeAt,
                     thinking: session.thinking,
+                    activeTurnStartedAt: session.activeTurnStartedAt,
                     permissionMode: session.permissionMode,
                     model: session.model,
                     modelReasoningEffort: session.modelReasoningEffort,
@@ -1563,7 +1571,7 @@ export class SessionCache {
 
     private extractAgentSessionId(
         metadata: NonNullable<Session['metadata']>
-    ): { field: 'codexSessionId' | 'claudeSessionId' | 'geminiSessionId' | 'opencodeSessionId' | 'grokSessionId' | 'cursorSessionId' | 'piSessionId' | 'copilotSessionId'; value: string } | null {
+    ): { field: 'codexSessionId' | 'claudeSessionId' | 'geminiSessionId' | 'opencodeSessionId' | 'grokSessionId' | 'cursorSessionId' | 'piSessionId' | 'copilotSessionId' | 'agySessionId' | 'kimiSessionId'; value: string } | null {
         if (metadata.codexSessionId) return { field: 'codexSessionId', value: metadata.codexSessionId }
         if (metadata.claudeSessionId) return { field: 'claudeSessionId', value: metadata.claudeSessionId }
         if (metadata.geminiSessionId) return { field: 'geminiSessionId', value: metadata.geminiSessionId }
@@ -1572,6 +1580,8 @@ export class SessionCache {
         if (metadata.cursorSessionId) return { field: 'cursorSessionId', value: metadata.cursorSessionId }
         if (metadata.piSessionId) return { field: 'piSessionId', value: metadata.piSessionId }
         if (metadata.copilotSessionId) return { field: 'copilotSessionId', value: metadata.copilotSessionId }
+        if (metadata.agySessionId) return { field: 'agySessionId', value: metadata.agySessionId }
+        if (metadata.kimiSessionId) return { field: 'kimiSessionId', value: metadata.kimiSessionId }
         return null
     }
 
@@ -1607,6 +1617,12 @@ export class SessionCache {
                     if (existing.namespace !== session.namespace) continue
                     if (!existing.metadata) continue
                     if (existing.metadata[agentId.field] !== agentId.value) continue
+                    // Native Pi ids are machine-local; same id on another host is not a duplicate.
+                    if (agentId.field === 'piSessionId') {
+                        const a = session.metadata.machineId
+                        const b = existing.metadata.machineId
+                        if (a && b && a !== b) continue
+                    }
                     candidates.push({ id: existingId, session: existing })
                 }
 

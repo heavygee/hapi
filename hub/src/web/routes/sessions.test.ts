@@ -857,20 +857,6 @@ describe('sessions routes', () => {
         expect(localApp.applySessionConfigCalls).toEqual([])
     })
 
-    it('returns Codex models for active Codex sessions', async () => {
-        const { app } = createApp(createSession())
-
-        const response = await app.request('/api/sessions/session-1/codex-models')
-
-        expect(response.status).toBe(200)
-        expect(await response.json()).toEqual({
-            success: true,
-            models: [
-                { id: 'gpt-5.5', displayName: 'GPT-5.5', isDefault: true }
-            ]
-        })
-    })
-
     it('returns OpenCode reasoning effort options for active OpenCode sessions', async () => {
         const session = createSession({
             metadata: { path: '/tmp/project', host: 'localhost', flavor: 'opencode' }

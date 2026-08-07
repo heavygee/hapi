@@ -107,15 +107,40 @@ export function getOrCreateMachine(
                 stored.metadataVersion,
                 namespace,
             )
+            let current = stored
             if (result.result === 'success') {
                 const refreshed = getMachine(db, id)
                 if (refreshed) {
-                    return refreshed
+                    current = refreshed
                 }
+            } else {
+                // Version conflict or race: fall through to current row; connect
+                // path can still push identity via machine-update-metadata.
+                current = getMachine(db, id) ?? stored
             }
-            // Version conflict or race: fall through to current row; connect
-            // path can still push identity via machine-update-metadata.
-            return getMachine(db, id) ?? stored
+            // Still merge runner capabilities on the identity-refresh path —
+            // metadata + capability upgrades often arrive in the same register.
+            const mergedRunnerState = mergeRunnerCapabilities(current.runnerState, runnerState)
+            if (mergedRunnerState !== undefined) {
+                db.prepare(`
+                    UPDATE machines
+                    SET runner_state = @runner_state,
+                        runner_state_version = runner_state_version + 1,
+                        updated_at = @updated_at,
+                        seq = seq + 1
+                    WHERE id = @id
+                `).run({
+                    runner_state: JSON.stringify(mergedRunnerState),
+                    updated_at: Date.now(),
+                    id
+                })
+                const row = getMachine(db, id)
+                if (!row) {
+                    throw new Error('Failed to refresh machine runner state')
+                }
+                current = row
+            }
+            return current
         }
         // General merge: fill missing machine-owned fields (e.g. arch)
         // that are not covered by the identity refresh predicate above.

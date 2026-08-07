@@ -108,14 +108,17 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         try {
-            const result = runOverseerTool(engine.getOverseer(), tool, body ?? {})
+            const result = await runOverseerTool(engine.getOverseer(), tool, body ?? {})
             return c.json({ tool, result })
         } catch (error) {
-            if (error instanceof z.ZodError) {
-                return c.json({ error: 'Invalid tool arguments', issues: error.flatten() }, 400)
+            if (error instanceof z.ZodError || (error as { name?: string })?.name === 'ZodError') {
+                return c.json({ error: 'Invalid tool arguments', issues: (error as z.ZodError).flatten?.() ?? error }, 400)
             }
-            if (error instanceof OverseerWriteNotAllowedError) {
-                return c.json({ error: error.message }, 403)
+            if (
+                error instanceof OverseerWriteNotAllowedError
+                || (error as { name?: string })?.name === 'OverseerWriteNotAllowedError'
+            ) {
+                return c.json({ error: (error as Error).message }, 403)
             }
             throw error
         }

@@ -172,7 +172,11 @@ describe('runner capabilities backfill', () => {
             'ns'
         )
 
-        expect(refreshed.metadata).toEqual({ host: 'new-host', happyCliVersion: '0.28.0' })
+        expect(refreshed.metadata).toEqual({
+            host: 'new-host',
+            happyCliVersion: '0.28.0',
+            capabilities: [],
+        })
         expect(refreshed.metadataVersion).toBe(created.metadataVersion + 1)
         expect(refreshed.runnerState).toEqual({
             status: 'offline',
