@@ -47,13 +47,14 @@ function statusForProvider(
 ): { configured: boolean; hint: string | null; source: string; editable: boolean } | null {
     if (!status) return null
     if (provider === 'openai-compatible') {
+        const compatible = status.openaiCompatible
         return {
-            configured: status.openaiCompatible.configured,
-            hint: status.openaiCompatible.apiKey.hint,
-            source: status.openaiCompatible.source,
-            editable: status.openaiCompatible.baseUrlEditable
-                && status.openaiCompatible.modelEditable
-                && status.openaiCompatible.apiKey.editable,
+            configured: compatible.configured,
+            hint: compatible.apiKey.hint,
+            source: compatible.source,
+            editable: compatible.baseUrlEditable
+                || compatible.modelEditable
+                || compatible.apiKey.editable,
         }
     }
     if (provider === 'gemini-live') return status.voiceBackends.geminiLive
@@ -101,6 +102,13 @@ export function TranscriptionProviderOnboard(props: {
         try {
             const next = await props.api.fetchTranscriptionCredentials()
             setStatus(next)
+            // Seed editable endpoint fields so Save does not treat blanks as Clear.
+            if (next.openaiCompatible.baseUrlEditable && next.openaiCompatible.baseUrl) {
+                setBaseUrl(next.openaiCompatible.baseUrl)
+            }
+            if (next.openaiCompatible.modelEditable && next.openaiCompatible.model) {
+                setModel(next.openaiCompatible.model)
+            }
         } catch {
             setStatus(null)
         }
@@ -111,18 +119,32 @@ export function TranscriptionProviderOnboard(props: {
     }, [reload])
 
     const selected = statusForProvider(status, provider)
+    const compatible = status?.openaiCompatible
+    const baseUrlEditable = compatible?.baseUrlEditable !== false
+    const modelEditable = compatible?.modelEditable !== false
+    const apiKeyEditable = provider === 'openai-compatible'
+        ? compatible?.apiKey.editable !== false
+        : selected?.editable !== false
 
     const buildUpdate = (clear: boolean): TranscriptionCredentialsUpdate => {
-        const value = clear ? null : (apiKey.trim() || null)
+        // Empty password/fields mean "leave unchanged" (undefined). Only Clear sends null.
+        const value = clear ? null : (apiKey.trim() || undefined)
         if (provider === 'openai-compatible') {
-            return {
-                openaiCompatible: clear
-                    ? { baseUrl: null, model: null, apiKey: null }
-                    : {
-                        baseUrl: baseUrl.trim() || null,
-                        model: model.trim() || null,
-                        apiKey: value,
+            if (clear) {
+                return {
+                    openaiCompatible: {
+                        baseUrl: baseUrlEditable ? null : undefined,
+                        model: modelEditable ? null : undefined,
+                        apiKey: apiKeyEditable ? null : undefined,
                     },
+                }
+            }
+            return {
+                openaiCompatible: {
+                    baseUrl: baseUrlEditable ? (baseUrl.trim() || undefined) : undefined,
+                    model: modelEditable ? (model.trim() || undefined) : undefined,
+                    apiKey: apiKeyEditable ? value : undefined,
+                },
             }
         }
         if (provider === 'gemini-live') return { geminiLive: value }
@@ -133,6 +155,16 @@ export function TranscriptionProviderOnboard(props: {
         return { groq: value }
     }
 
+    const syncCompatibleFields = (next: TranscriptionCredentialStatus) => {
+        setApiKey('')
+        if (next.openaiCompatible.baseUrlEditable) {
+            setBaseUrl(next.openaiCompatible.baseUrl ?? '')
+        }
+        if (next.openaiCompatible.modelEditable) {
+            setModel(next.openaiCompatible.model ?? '')
+        }
+    }
+
     const save = async () => {
         setBusy(true)
         setError(null)
@@ -140,7 +172,7 @@ export function TranscriptionProviderOnboard(props: {
         try {
             const next = await props.api.updateTranscriptionCredentials(buildUpdate(false))
             setStatus(next)
-            setApiKey('')
+            syncCompatibleFields(next)
             setMessage(t('settings.voice.credentials.saved'))
             props.onConfigured()
         } catch (err) {
@@ -158,6 +190,7 @@ export function TranscriptionProviderOnboard(props: {
         try {
             const next = await props.api.updateTranscriptionCredentials(buildUpdate(true))
             setStatus(next)
+            syncCompatibleFields(next)
             setMessage(t('settings.voice.credentials.cleared'))
             props.onConfigured()
         } catch (err) {
@@ -212,7 +245,7 @@ export function TranscriptionProviderOnboard(props: {
                             value={baseUrl}
                             onChange={(event) => setBaseUrl(event.target.value)}
                             placeholder="http://127.0.0.1:8000/v1"
-                            disabled={busy || selected?.editable === false}
+                            disabled={busy || !baseUrlEditable}
                             className="w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1.5 text-sm text-[var(--app-fg)]"
                         />
                     </label>
@@ -223,7 +256,7 @@ export function TranscriptionProviderOnboard(props: {
                             value={model}
                             onChange={(event) => setModel(event.target.value)}
                             placeholder="whisper-large-v3"
-                            disabled={busy || selected?.editable === false}
+                            disabled={busy || !modelEditable}
                             className="w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1.5 text-sm text-[var(--app-fg)]"
                         />
                     </label>
@@ -239,7 +272,7 @@ export function TranscriptionProviderOnboard(props: {
                     value={apiKey}
                     onChange={(event) => setApiKey(event.target.value)}
                     placeholder={selected?.configured ? t('settings.voice.credentials.apiKeyReplace') : t('settings.voice.credentials.apiKeyPlaceholder')}
-                    disabled={busy || selected?.editable === false}
+                    disabled={busy || !apiKeyEditable}
                     className="w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1.5 text-sm text-[var(--app-fg)]"
                 />
             </label>
@@ -255,11 +288,21 @@ export function TranscriptionProviderOnboard(props: {
                 <Button type="button" size="sm" disabled={busy || selected?.editable === false} onClick={() => void save()}>
                     {t('settings.voice.credentials.save')}
                 </Button>
-                {selected?.configured && selected.editable ? (
-                    <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void clear()}>
-                        {t('settings.voice.credentials.clear')}
-                    </Button>
-                ) : null}
+                {(() => {
+                    const canClearCompatible = provider === 'openai-compatible' && Boolean(
+                        (baseUrlEditable && compatible?.baseUrl)
+                        || (modelEditable && compatible?.model)
+                        || (apiKeyEditable && compatible?.apiKey.configured)
+                    )
+                    const canClear = canClearCompatible || Boolean(
+                        provider !== 'openai-compatible' && selected?.configured && selected.editable
+                    )
+                    return canClear ? (
+                        <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void clear()}>
+                            {t('settings.voice.credentials.clear')}
+                        </Button>
+                    ) : null
+                })()}
             </div>
         </div>
     )

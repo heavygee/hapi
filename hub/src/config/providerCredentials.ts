@@ -3,11 +3,11 @@
  *
  * Priority: process env (ops bootstrap) > settings.json providerCredentials.
  * Env-locked keys cannot be overwritten or cleared from the Settings UI.
- * Settings-backed values are applied into process.env so existing discovery
- * helpers keep working without restart.
+ * Settings-backed values live in an in-memory overlay exposed via
+ * `getProviderEnvironment()` — they are never copied into `process.env`.
  */
 
-import { getSettingsFile, readSettings, writeSettings, type Settings } from './settings'
+import { getSettingsFile, readSettings, updateSettings, type Settings } from './settings'
 
 export const PROVIDER_CREDENTIAL_ENV_KEYS = [
     'OPENAI_API_KEY',
@@ -81,6 +81,7 @@ let envLockedKeys = new Set<ProviderCredentialEnvKey>()
 
 export function resetProviderCredentialEnvLocksForTests(): void {
     envLockedKeys = new Set()
+    settingsBackedCredentials = {}
 }
 
 export function maskSecret(value: string): string {
@@ -89,10 +90,44 @@ export function maskSecret(value: string): string {
     return `••••${trimmed.slice(-4)}`
 }
 
+let settingsBackedCredentials: ProviderCredentialsMap = {}
+
+function setSettingsBackedCredentials(stored: ProviderCredentialsMap): void {
+    const next: ProviderCredentialsMap = {}
+    for (const key of PROVIDER_CREDENTIAL_ENV_KEYS) {
+        if (isLogicallyEnvLocked(key)) continue
+        const value = stored[key]
+        if (value) next[key] = value
+    }
+    settingsBackedCredentials = next
+}
+
+/**
+ * Effective provider credential environment for voice/dictation paths only.
+ * Settings-backed secrets stay out of `process.env` so unrelated child processes
+ * (tunnel, Cursor ACP, Codex helpers) do not inherit them.
+ */
+export function getProviderEnvironment(
+    env: NodeJS.ProcessEnv = process.env
+): NodeJS.ProcessEnv {
+    return { ...env, ...settingsBackedCredentials }
+}
+
 function snapshotEnvLocks(env: NodeJS.ProcessEnv = process.env): void {
     envLockedKeys = new Set(
         PROVIDER_CREDENTIAL_ENV_KEYS.filter((key) => Boolean(env[key]?.trim()))
     )
+}
+
+/** Alias pairs share one logical lock so a saved GEMINI cannot shadow env GOOGLE (and vice versa). */
+function isLogicallyEnvLocked(key: ProviderCredentialEnvKey): boolean {
+    if (key === 'GEMINI_API_KEY' || key === 'GOOGLE_API_KEY') {
+        return envLockedKeys.has('GEMINI_API_KEY') || envLockedKeys.has('GOOGLE_API_KEY')
+    }
+    if (key === 'DASHSCOPE_API_KEY' || key === 'QWEN_API_KEY') {
+        return envLockedKeys.has('DASHSCOPE_API_KEY') || envLockedKeys.has('QWEN_API_KEY')
+    }
+    return envLockedKeys.has(key)
 }
 
 function readProviderCredentials(settings: Settings | null): ProviderCredentialsMap {
@@ -183,14 +218,11 @@ function compatibleSource(
 export async function applyProviderCredentialsFromSettings(dataDir: string): Promise<void> {
     snapshotEnvLocks()
     const settings = await readSettings(getSettingsFile(dataDir))
-    if (settings === null) return
-    const stored = readProviderCredentials(settings)
-    for (const key of PROVIDER_CREDENTIAL_ENV_KEYS) {
-        if (envLockedKeys.has(key)) continue
-        const value = stored[key]
-        if (value) process.env[key] = value
-        else delete process.env[key]
+    if (settings === null) {
+        setSettingsBackedCredentials({})
+        return
     }
+    setSettingsBackedCredentials(readProviderCredentials(settings))
 }
 
 function buildStatus(stored: ProviderCredentialsMap): TranscriptionCredentialStatus {
@@ -201,8 +233,9 @@ function buildStatus(stored: ProviderCredentialsMap): TranscriptionCredentialSta
     const baseUrl = statusForKey('TRANSCRIPTION_BASE_URL', stored)
     const model = statusForKey('TRANSCRIPTION_MODEL', stored)
     const apiKey = statusForKey('TRANSCRIPTION_API_KEY', stored)
-    const baseUrlValue = process.env.TRANSCRIPTION_BASE_URL?.trim() || null
-    const modelValue = process.env.TRANSCRIPTION_MODEL?.trim() || null
+    const env = getProviderEnvironment()
+    const baseUrlValue = env.TRANSCRIPTION_BASE_URL?.trim() || null
+    const modelValue = env.TRANSCRIPTION_MODEL?.trim() || null
     const geminiLive = statusForAliasPair('GEMINI_API_KEY', 'GOOGLE_API_KEY', stored)
     const qwenRealtime = statusForAliasPair('DASHSCOPE_API_KEY', 'QWEN_API_KEY', stored)
     return {
@@ -248,16 +281,14 @@ function applyPatchToStored(
     value: string | null | undefined
 ): void {
     if (value === undefined) return
-    if (envLockedKeys.has(key)) {
+    if (isLogicallyEnvLocked(key)) {
         throw new Error(`${key} is set by an environment variable and cannot be changed from Settings`)
     }
     if (value === null) {
         delete stored[key]
-        delete process.env[key]
         return
     }
     stored[key] = value
-    process.env[key] = value
 }
 
 function applyAliasPairPatch(
@@ -267,7 +298,7 @@ function applyAliasPairPatch(
     value: string | null | undefined
 ): void {
     if (value === undefined) return
-    if (envLockedKeys.has(primary) || envLockedKeys.has(secondary)) {
+    if (isLogicallyEnvLocked(primary) || isLogicallyEnvLocked(secondary)) {
         throw new Error(
             `${primary} (or ${secondary}) is set by an environment variable and cannot be changed from Settings`
         )
@@ -275,15 +306,16 @@ function applyAliasPairPatch(
     if (value === null) {
         delete stored[primary]
         delete stored[secondary]
-        delete process.env[primary]
-        delete process.env[secondary]
         return
     }
     // Canonical primary; drop secondary settings entry so one source of truth
     stored[primary] = value
     delete stored[secondary]
-    process.env[primary] = value
-    delete process.env[secondary]
+}
+
+/** Refresh the in-memory overlay after a successful persist (never touches process.env). */
+function syncSettingsCredentialsOverlay(stored: ProviderCredentialsMap): void {
+    setSettingsBackedCredentials(stored)
 }
 
 export async function updateTranscriptionCredentials(
@@ -291,50 +323,51 @@ export async function updateTranscriptionCredentials(
     update: TranscriptionCredentialsUpdate
 ): Promise<TranscriptionCredentialStatus> {
     const settingsFile = getSettingsFile(dataDir)
-    const settings = await readSettings(settingsFile)
-    if (settings === null) {
-        throw new Error(`Cannot read ${settingsFile}. Please fix or remove the file and retry.`)
-    }
+    return updateSettings(settingsFile, async (settings) => {
+        const nextStored: ProviderCredentialsMap = { ...readProviderCredentials(settings) }
 
-    const stored = readProviderCredentials(settings)
+        applyPatchToStored(nextStored, 'OPENAI_API_KEY', normalizeOptionalSecret(update.openai))
+        applyPatchToStored(nextStored, 'ELEVENLABS_API_KEY', normalizeOptionalSecret(update.elevenlabs))
+        applyPatchToStored(nextStored, 'DEEPGRAM_API_KEY', normalizeOptionalSecret(update.deepgram))
+        applyPatchToStored(nextStored, 'GROQ_API_KEY', normalizeOptionalSecret(update.groq))
 
-    applyPatchToStored(stored, 'OPENAI_API_KEY', normalizeOptionalSecret(update.openai))
-    applyPatchToStored(stored, 'ELEVENLABS_API_KEY', normalizeOptionalSecret(update.elevenlabs))
-    applyPatchToStored(stored, 'DEEPGRAM_API_KEY', normalizeOptionalSecret(update.deepgram))
-    applyPatchToStored(stored, 'GROQ_API_KEY', normalizeOptionalSecret(update.groq))
+        if (update.openaiCompatible) {
+            applyPatchToStored(
+                nextStored,
+                'TRANSCRIPTION_BASE_URL',
+                normalizeOptionalSecret(update.openaiCompatible.baseUrl)
+            )
+            applyPatchToStored(
+                nextStored,
+                'TRANSCRIPTION_MODEL',
+                normalizeOptionalSecret(update.openaiCompatible.model)
+            )
+            applyPatchToStored(
+                nextStored,
+                'TRANSCRIPTION_API_KEY',
+                normalizeOptionalSecret(update.openaiCompatible.apiKey)
+            )
+        }
 
-    if (update.openaiCompatible) {
-        applyPatchToStored(
-            stored,
-            'TRANSCRIPTION_BASE_URL',
-            normalizeOptionalSecret(update.openaiCompatible.baseUrl)
+        applyAliasPairPatch(
+            nextStored,
+            'GEMINI_API_KEY',
+            'GOOGLE_API_KEY',
+            normalizeOptionalSecret(update.geminiLive)
         )
-        applyPatchToStored(
-            stored,
-            'TRANSCRIPTION_MODEL',
-            normalizeOptionalSecret(update.openaiCompatible.model)
+        applyAliasPairPatch(
+            nextStored,
+            'DASHSCOPE_API_KEY',
+            'QWEN_API_KEY',
+            normalizeOptionalSecret(update.qwenRealtime)
         )
-        applyPatchToStored(
-            stored,
-            'TRANSCRIPTION_API_KEY',
-            normalizeOptionalSecret(update.openaiCompatible.apiKey)
-        )
-    }
 
-    applyAliasPairPatch(
-        stored,
-        'GEMINI_API_KEY',
-        'GOOGLE_API_KEY',
-        normalizeOptionalSecret(update.geminiLive)
-    )
-    applyAliasPairPatch(
-        stored,
-        'DASHSCOPE_API_KEY',
-        'QWEN_API_KEY',
-        normalizeOptionalSecret(update.qwenRealtime)
-    )
-
-    settings.providerCredentials = stored
-    await writeSettings(settingsFile, settings)
-    return buildStatus(stored)
+        return {
+            settings: { ...settings, providerCredentials: nextStored },
+            result: nextStored,
+            afterCommit: () => {
+                syncSettingsCredentialsOverlay(nextStored)
+            },
+        }
+    }).then((nextStored) => buildStatus(nextStored))
 }
