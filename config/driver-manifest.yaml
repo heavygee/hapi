@@ -674,17 +674,8 @@ layers:
   - branch: fix/garden-voice-orb-routing
 
 
-  # tiann/hapi#1384 — Settings UI onboard for hub transcription provider credentials
-  # (dictation first; env still wins). Hub+web. Live reload via process.env merge.
-  # Rationale on issue: env-only was a shipping shortcut, not a design win.
-  # Upstream PR: tiann/hapi#1392 on feat/settings-provider-onboard (keep that tip
-  # upstream-clean). Remat tip-forward absorbs the soup heal tip below (union of
-  # remat @ 7f48c5eb3 + feat tip da0c6c258) so absorb is FF-clean.
-  # Worktree: ~/coding/hapi/worktrees/settings-provider-onboard @ feat/settings-provider-onboard
-  # Tip: cd2764527 (origin/driver/settings-provider-onboard-heal)
-  # PARKED 2026-08-07 (Meta): tip-forward typecheck needs proper-lockfile in driver
-  # node_modules; re-enable after bun install / dep present on remat.
-  # - branch: driver/settings-provider-onboard-heal
+  # DROPPED 2026-08-07: driver/settings-provider-onboard-heal — MERGED as tiann/hapi#1392
+  # (Fixes #1384; was PARKED for tip-forward proper-lockfile; squash tip 28df974ed)
 
   # DROPPED 2026-08-07: feat/storage-usage-pie-chart — MERGED as tiann/hapi#1383
   # (was active soup layer; tip-forward would re-absorb squash tip incorrectly)
