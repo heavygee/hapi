@@ -1215,16 +1215,12 @@ export function SessionList(props: {
 
     const allSessions = useMemo(
         () => {
-            let prepared = prepareSidebarSessions(props.sessions, selectedSessionId)
-            if (showActiveSessionsOnly) {
-                prepared = filterActiveSessionsOnly(prepared, selectedSessionId)
-            }
-            if (showUnreadOnly) {
-                prepared = filterUnreadSessionsOnly(prepared, selectedSessionId, getSessionLastSeenAt)
-            }
-            return prepared
+            const prepared = prepareSidebarSessions(props.sessions, selectedSessionId)
+            return showActiveSessionsOnly
+                ? filterActiveSessionsOnly(prepared, selectedSessionId)
+                : prepared
         },
-        [props.sessions, selectedSessionId, showActiveSessionsOnly, showUnreadOnly]
+        [props.sessions, selectedSessionId, showActiveSessionsOnly]
     )
     const sessionActivityDates = useMemo(
         () => new Set(allSessions.map(session => formatDateValue(new Date(session.updatedAt)))),
@@ -1273,11 +1269,22 @@ export function SessionList(props: {
         && machineFilters.some(mg => (mg.machineId ?? UNKNOWN_MACHINE_ID) === machineFilter)
         ? machineFilter
         : null
+    // Unread after search/time, before machine scope — so machineFilters (from allSessions)
+    // stay stable. Filtering unread into allSessions would drop machines with zero unread
+    // and clear a persisted machine selection (showing other machines' unread instead).
+    const unreadFilteredSessions = useMemo(
+        () => showUnreadOnly
+            ? filterUnreadSessionsOnly(visibleSessions, selectedSessionId, getSessionLastSeenAt)
+            : visibleSessions,
+        [visibleSessions, selectedSessionId, showUnreadOnly]
+    )
     const machineFilteredSessions = useMemo(
         () => activeMachineFilter === null
-            ? visibleSessions
-            : visibleSessions.filter(session => (session.metadata?.machineId ?? UNKNOWN_MACHINE_ID) === activeMachineFilter),
-        [visibleSessions, activeMachineFilter]
+            ? unreadFilteredSessions
+            : unreadFilteredSessions.filter(session =>
+                (session.metadata?.machineId ?? UNKNOWN_MACHINE_ID) === activeMachineFilter
+            ),
+        [unreadFilteredSessions, activeMachineFilter]
     )
     const { pinned: pinnedSessions, unpinned: unpinnedMachineSessions } = useMemo(
         () => partitionGlobalPinnedSessions(machineFilteredSessions),
