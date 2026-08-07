@@ -200,70 +200,23 @@ hub_rename() {  # <jwt> <sid> <title>
         || err "rename failed for ${2:0:8}"
 }
 
-# Display title for a session object (mirrors web getSessionTitle):
+# Display title for a session object (mirrors web getSessionTitle / upstream #271):
 # metadata.name → summary.text → path basename → empty.
-# Used only when name is blank; we promote the fallback into metadata.name so
-# Meta ownership / chips / scripts never see a hollow title field again.
+# Empty metadata.name is upstream-normal (change_title writes summary only).
+# Meta must fall back here — never PATCH name to "heal" blanks (fork bandage; reverted).
 md_session_display_title() {
     jq -r '
-        (.metadata.name // "" | gsub("^\\s+|\\s+$";"")) as $n
+        . as $o
+        | ($o.metadata.name // "" | gsub("^\\s+|\\s+$";"")) as $n
         | if ($n | length) > 0 then $n
           else
-            (.metadata.summary.text // "" | gsub("^\\s+|\\s+$";"")) as $s
+            ($o.metadata.summary.text // "" | gsub("^\\s+|\\s+$";"")) as $s
             | if ($s | length) > 0 then $s
               else
-                (.metadata.path // "" | split("/") | map(select(length>0)) | last // "")
+                ($o.metadata.path // "" | split("/") | map(select(length>0)) | last // "")
               end
           end
     ' <<<"$1"
-}
-
-# hub_heal_blank_names <jwt> <sessions_json>
-# For every session with blank/whitespace metadata.name, PATCH name from the
-# display title (summary.text, else path basename). Prints heal count on stderr.
-# Echoes (possibly refreshed) sessions JSON on stdout when heals applied;
-# otherwise echoes the input unchanged.
-hub_heal_blank_names() {
-    local jwt="$1" sessions_json="$2"
-    local need_refresh=0 healed=0 skipped=0
-    local sid title row
-
-    while IFS= read -r row; do
-        [[ -z "$row" ]] && continue
-        sid="$(jq -r '.id // empty' <<<"$row")"
-        [[ -z "$sid" ]] && continue
-        title="$(md_session_display_title "$row")"
-        if [[ -z "$title" ]]; then
-            skipped=$((skipped + 1))
-            continue
-        fi
-        if [[ "$JSON_OUT" -eq 0 ]]; then
-            echo "  heal blank name ${sid:0:8}: → \"$title\"" >&2
-        fi
-        if [[ "$DRY_RUN" -eq 1 ]]; then
-            healed=$((healed + 1))
-            continue
-        fi
-        if hub_rename "$jwt" "$sid" "$title"; then
-            healed=$((healed + 1))
-            need_refresh=1
-        fi
-    done < <(printf '%s' "$sessions_json" | jq -c '
-        .[]
-        | select(
-            ((.metadata.name // "") | gsub("^\\s+|\\s+$";"") | length) == 0
-          )
-    ')
-
-    if [[ "$JSON_OUT" -eq 0 && ( "$healed" -gt 0 || "$skipped" -gt 0 ) ]]; then
-        echo "  blank-name heal: $healed promoted, $skipped no display title" >&2
-    fi
-
-    if [[ "$need_refresh" -eq 1 ]]; then
-        hub_sessions "$jwt"
-    else
-        printf '%s' "$sessions_json"
-    fi
 }
 
 # hub_put_external_refs <jwt> <sid> <refs-json-array>
@@ -583,11 +536,6 @@ main() {
     local jwt sessions_json
     jwt="$(hub_jwt)"
     sessions_json="$(hub_sessions "$jwt")"
-    # Promote blank metadata.name → display title (summary.text / path basename).
-    # Empty name is common (agent change_title writes summary only — see #271) but
-    # hollow name fields break Meta TSV-era ownership and confuse chip tooling.
-    # NDJSON discovery is fixed; this heal keeps name non-blank going forward.
-    sessions_json="$(hub_heal_blank_names "$jwt" "$sessions_json")"
 
     # --- discovery: PR numbers from session chips ONLY (never titles) ---
     # HARD RULE (2026-08-06 Sparling): session titles are decorative. Meta tracks a
@@ -601,6 +549,8 @@ main() {
     # NDJSON rows — NOT @tsv. Bash IFS=$'\t' collapses consecutive tabs, so an
     # empty metadata.name shifts fields and Meta drops ownership (estate: #1383
     # Storage Display sat orphan/`stale` while the chip was linked 2026-08-06..07).
+    # Label column is display title (name → summary.text → path), not raw name —
+    # empty name is upstream-normal (#271); do not PATCH-heal it.
     local row sid sid8 active name prs refs_json path lifecycle
     while IFS= read -r row; do
         [[ -z "$row" ]] && continue
@@ -645,13 +595,25 @@ main() {
                                or (.repo // "") == "heavygee/hapi")))
              | length) > 0
           )
+        | . as $o
+        | (
+            ($o.metadata.name // "" | gsub("^\\s+|\\s+$";"")) as $n
+            | if ($n | length) > 0 then $n
+              else
+                ($o.metadata.summary.text // "" | gsub("^\\s+|\\s+$";"")) as $s
+                | if ($s | length) > 0 then $s
+                  else
+                    ($o.metadata.path // "" | split("/") | map(select(length>0)) | last // "")
+                  end
+              end
+          ) as $title
         | [
-            .id,
-            (.active // false),
-            (.metadata.name // ""),
-            (.metadata.externalRefs // []),
-            (.metadata.path // ""),
-            (.metadata.lifecycleState // "")
+            $o.id,
+            ($o.active // false),
+            $title,
+            ($o.metadata.externalRefs // []),
+            ($o.metadata.path // ""),
+            ($o.metadata.lifecycleState // "")
           ]')
     if [[ -n "$PR_ONLY" ]]; then
         # Restrict to a single explicit PR (allows low-numbered upstream PRs).
@@ -884,8 +846,9 @@ main() {
         esac
 
         PLAN_ROWS+=("$(jq -cn --arg sid "$sid8" --arg emoji "$combined" --arg prs "$prs" \
-            --arg ping "$decision" --arg renamed "$([[ ${Q_RENAMED[*]:-} == *"$sid8"* ]] && echo yes || echo no)" \
-            '{sid:$sid,emoji:$emoji,prs:$prs,ping:$ping}')")
+            --arg ping "$decision" --arg title "$new_title" \
+            --arg renamed "$([[ ${Q_RENAMED[*]:-} == *"$sid8"* ]] && echo yes || echo no)" \
+            '{sid:$sid,emoji:$emoji,prs:$prs,ping:$ping,title:$title,renamed:$renamed}')")
     done
 
     # --- orphan PRs (tracked/open/merged but no session) ---

@@ -28,7 +28,8 @@ fi
 if [[ "$args" == *"notifications"* ]]; then
     # one upstream comms item; fork repo → none. Honor since= (ISO compare).
     if [[ "$args" == *"tiann/hapi/notifications"* ]]; then
-        notif_ts="2026-07-25T08:00:00Z"
+        # Keep inside the default 7-day Meta lookback (calendar-stable).
+        notif_ts="$(date -u -d '2 days ago' +%Y-%m-%dT08:00:00Z 2>/dev/null || date -u +%Y-%m-%dT08:00:00Z)"
         since=""
         if [[ "$args" =~ since=([^[:space:]\&\"\']+) ]]; then
             since="${BASH_REMATCH[1]}"
@@ -388,8 +389,10 @@ set -e
 check "notif cursor freeze: exit nonzero on emit fail" "[[ \$rc -ne 0 ]]"
 c_fail="$(jq -r '.notif_cursor["tiann/hapi"] // empty' "$WORK/state.json")"
 # Must remain at-or-before the notif timestamp so a since= query still returns it.
+# Bound is 2 days ago (matches initial gh mock notif_ts), not a hardcoded calendar day.
+notif_bound="$(date -u -d '2 days ago' +%Y-%m-%dT08:00:00Z 2>/dev/null || date -u +%Y-%m-%dT08:00:00Z)"
 check "notif cursor freeze: cursor not past failed notif" \
-    "[[ -n \"\$c_fail\" && ! \"\$c_fail\" > \"2026-07-25T08:00:00Z\" ]]"
+    "[[ -n \"\$c_fail\" && ! \"\$c_fail\" > \"\$notif_bound\" ]]"
 
 # Heal → next run must still see the notif (since-aware) and emit it once
 rm -f "$WORK/events.log"
@@ -426,7 +429,7 @@ check "notif cursor freeze: retry emits notif once" \
     "grep -q 'GitHub PullRequest/comment: Re: PR #100 please rebase' '$WORK/events.log'"
 c_ok="$(jq -r '.notif_cursor["tiann/hapi"] // empty' "$WORK/state.json")"
 check "notif cursor freeze: cursor advances after successful notif emit" \
-    "[[ -n \"\$c_ok\" && \"\$c_ok\" > \"2026-07-25T08:00:00Z\" ]]"
+    "[[ -n \"\$c_ok\" && \"\$c_ok\" > \"\$notif_bound\" ]]"
 # Third run: since past notif → zero notif POSTs for that subject
 rm -f "$WORK/events.log"
 out="$(run --emit-events 2>&1)"
@@ -845,6 +848,8 @@ check "sparling fence: no FAIL classify message" "! grep -q 'classified Sparling
 # ============ 20. Empty metadata.name must still own the PR (2026-08-07 #1383) ============
 # Bash IFS=$'\t' collapses consecutive tabs; @tsv with empty name used to shift
 # fields and drop ownership → Meta logged "NO HAPI session" / chip went stale.
+# Fix: NDJSON discovery + display-title label (summary/path). Do NOT PATCH-heal name
+# (empty name is upstream-normal — change_title → summary.text only).
 rm -f "$WORK/state.json" "$WORK/pings.log"
 cat >"$WORK/gh" <<'EOF'
 #!/usr/bin/env bash
@@ -874,6 +879,10 @@ cat >"$WORK/curl" <<'EOF'
 #!/usr/bin/env bash
 args="$*"
 if [[ "$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
+if [[ "$args" == *"-X PATCH"* ]]; then
+    echo "UNEXPECTED PATCH blank-name heal" >&2
+    exit 1
+fi
 if [[ "$args" == *"/api/sessions?limit=500"* ]]; then
 cat <<'JSON'
 {"sessions":[
@@ -885,27 +894,41 @@ fi
 echo '{}'; exit 0
 EOF
 chmod +x "$WORK/curl"
-out="$(run --dry-run --pr 1383 2>&1)" || true
+out="$(run --dry-run --json --pr 1383 2>&1)" || true
 check "empty-name chip: owns #1383 (not orphan)" "! grep -q 'NO HAPI session\\|no owning session' <<<\"\$out\""
-check "empty-name chip: session id appears in MERGED advise" "grep -q '18c0f3d5' <<<\"\$out\""
-check "empty-name chip: #1383 in MERGED section" "grep -q '#1383' <<<\"\$out\" && grep -q 'MERGED' <<<\"\$out\""
-check "empty-name chip: dry-run heal promotes summary → name" "grep -q 'heal blank name 18c0f3d5: → \"Storage Display\"' <<<\"\$out\""
-check "empty-name chip: dry-run heal summary count" "grep -q 'blank-name heal: 1 promoted' <<<\"\$out\""
+check "empty-name chip: session id appears in plan" "grep -q '18c0f3d5' <<<\"\$out\""
+check "empty-name chip: #1383 in plan prs" "grep -q '1383' <<<\"\$out\""
+check "empty-name chip: display title from summary" "grep -q 'Storage Display' <<<\"\$out\""
+check "empty-name chip: no blank-name PATCH heal" "! grep -qE 'heal blank name|blank-name heal|UNEXPECTED PATCH' <<<\"\$out\""
 
-# ============ 21. Blank-name heal prefers summary, else path basename ============
-# Source helpers without running main (extract via bash -c sourcing is heavy);
-# prove title picker + heal loop via dry-run on mixed fixtures.
+# ============ 21. Display-title fallback: summary → path; named kept; no heal ============
 rm -f "$WORK/state.json" "$WORK/pings.log"
 cat >"$WORK/gh" <<'EOF'
 #!/usr/bin/env bash
 args="$*"
-if [[ "$args" == *"pr list"* ]]; then exit 0; fi
+if [[ "$args" == *"pr list"* && "$args" == *"--state open"* ]]; then
+    exit 0
+fi
+if [[ "$args" == *"pr list"* && "$args" == *"merged"* ]]; then
+    printf '9001\tfrom summary\t2026-08-07T01:00:00Z\n'
+    printf '9002\tfrom path\t2026-08-07T01:00:00Z\n'
+    printf '9003\tnamed keep\t2026-08-07T01:00:00Z\n'
+    exit 0
+fi
 exit 0
 EOF
 chmod +x "$WORK/gh"
 cat >"$WORK/batch" <<'EOF'
 #!/usr/bin/env bash
-echo '{}'
+j='{}'
+for a in "$@"; do
+    case "$a" in
+        9001) j="$(echo "$j" | jq -c '. + {"9001":{emoji:"🔧",action:"MERGED — clean up",prePr:false,merged:true}}')" ;;
+        9002) j="$(echo "$j" | jq -c '. + {"9002":{emoji:"🔧",action:"MERGED — clean up",prePr:false,merged:true}}')" ;;
+        9003) j="$(echo "$j" | jq -c '. + {"9003":{emoji:"🔧",action:"MERGED — clean up",prePr:false,merged:true}}')" ;;
+    esac
+done
+echo "$j"
 EOF
 chmod +x "$WORK/batch"
 cat >"$WORK/curl" <<'EOF'
@@ -913,16 +936,15 @@ cat >"$WORK/curl" <<'EOF'
 args="$*"
 if [[ "$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
 if [[ "$args" == *"-X PATCH"* ]]; then
-    echo "UNEXPECTED PATCH in dry-run" >&2
+    echo "UNEXPECTED PATCH in display-title test" >&2
     exit 1
 fi
 if [[ "$args" == *"/api/sessions?limit=500"* ]]; then
 cat <<'JSON'
 {"sessions":[
- {"id":"aaaa-summary","active":true,"metadata":{"name":"  ","summary":{"text":"From Summary"},"path":"/tmp/proj"}},
- {"id":"bbbb-pathonly","active":true,"metadata":{"name":"","path":"/home/heavygee/coding/hapi/worktrees/foo"}},
- {"id":"cccc-named","active":true,"metadata":{"name":"Keep Me","summary":{"text":"ignored"},"path":"/tmp/x"}},
- {"id":"dddd-empty","active":true,"metadata":{"name":""}}
+ {"id":"aaaa-summary-0000-0000-000000000001","active":false,"metadata":{"name":"  ","summary":{"text":"From Summary"},"path":"/tmp/proj","lifecycleState":"running","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":9001,"url":"https://github.com/tiann/hapi/pull/9001","role":"primary"}]}},
+ {"id":"bbbb-pathonly-0000-0000-000000000002","active":false,"metadata":{"name":"","path":"/home/heavygee/coding/hapi/worktrees/foo","lifecycleState":"running","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":9002,"url":"https://github.com/tiann/hapi/pull/9002","role":"primary"}]}},
+ {"id":"cccc-named-0000-0000-000000000003","active":false,"metadata":{"name":"Keep Me","summary":{"text":"ignored"},"path":"/tmp/x","lifecycleState":"running","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":9003,"url":"https://github.com/tiann/hapi/pull/9003","role":"primary"}]}}
 ]}
 JSON
 exit 0
@@ -930,12 +952,12 @@ fi
 echo '{}'; exit 0
 EOF
 chmod +x "$WORK/curl"
-out="$(run --dry-run 2>&1)" || true
-check "blank heal: summary preferred over path" "grep -q 'heal blank name aaaa-sum: → \"From Summary\"' <<<\"\$out\""
-check "blank heal: path basename when no summary" "grep -q 'heal blank name bbbb-pat: → \"foo\"' <<<\"\$out\""
-check "blank heal: named session not touched" "! grep -q 'heal blank name cccc-nam' <<<\"\$out\""
-check "blank heal: no-title session skipped in count" "grep -q 'blank-name heal: 2 promoted, 1 no display title' <<<\"\$out\""
-check "blank heal: dry-run never PATCHes" "! grep -q 'UNEXPECTED PATCH' <<<\"\$out\""
+out="$(run --dry-run --json 2>&1)" || true
+check "display title: summary preferred over path" "grep -q 'From Summary' <<<\"\$out\""
+check "display title: path basename when no summary" "grep -qE '\"title\": ?\"foo\"' <<<\"\$out\""
+check "display title: named session kept" "grep -q 'Keep Me' <<<\"\$out\""
+check "display title: never blank-name heal" "! grep -qE 'heal blank name|blank-name heal' <<<\"\$out\""
+check "display title: dry-run never PATCHes" "! grep -q 'UNEXPECTED PATCH' <<<\"\$out\""
 
 echo ""
 echo "hapi-meta-daily.test.sh: $PASS passed, $FAIL failed"
