@@ -145,6 +145,15 @@ describe('assertArtifactDownloadAllowsBody', () => {
             body: {},
         })).not.toThrow()
     })
+
+    it('rejects HTML fallthrough so SPA index is not treated as an artifact', () => {
+        expect(() => assertArtifactDownloadAllowsBody({
+            status: 200,
+            ok: true,
+            body: {},
+            headers: { get: (name) => name.toLowerCase() === 'content-type' ? 'text/html; charset=utf-8' : null },
+        })).toThrow(/HTML instead of a binary/)
+    })
 })
 
 describe('shouldApplyUpgradeOffer', () => {

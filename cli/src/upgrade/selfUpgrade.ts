@@ -402,12 +402,27 @@ export function artifactDownloadRequestHeaders(options: {
 }
 
 /** Fail closed: never follow redirects that could carry hub headers off-origin. */
-export function assertArtifactDownloadAllowsBody(response: { status: number; ok: boolean; body: unknown }): void {
+export function assertArtifactDownloadAllowsBody(response: {
+    status: number
+    ok: boolean
+    body: unknown
+    headers?: { get(name: string): string | null }
+}): void {
     if (response.status >= 300 && response.status < 400) {
         throw new Error('artifact redirects are not allowed')
     }
     if (!response.ok || !response.body) {
         throw new Error(`artifact download failed: HTTP ${response.status}`)
+    }
+    // SPA / reverse-proxy fallthrough returns 200 text/html (e.g. web dist
+    // index.html) when /cli/upgrade/cli-artifact is not mounted. Reject before
+    // streaming so operators see a clear error instead of a size mismatch.
+    const contentType = response.headers?.get('content-type')?.toLowerCase() ?? ''
+    if (contentType.includes('text/html')) {
+        throw new Error(
+            'artifact download returned HTML instead of a binary '
+            + '(hub upgrade route missing or proxied to the web app)',
+        )
     }
 }
 
