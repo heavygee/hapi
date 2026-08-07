@@ -20,7 +20,7 @@ import { refreshRejectedRelayAuthKey, resolveRelayAuthKey } from './tunnel/relay
 import { waitForTunnelTlsReady } from './tunnel/tlsGate'
 import { ServerChanChannel } from './serverchan/channel'
 import { findMonorepoRoot, defaultHubPackageRoot, resolveUpgradeOffer, setConfiguredUpgradeTargetVersion } from './upgrade/resolveUpgradeOffer'
-import { ensureCliArtifact, resolveArtifactSourceFingerprint, retainArtifactOffer } from './upgrade/cliArtifact'
+import { ensureCliArtifact, isTransientArtifactBuildFailure, resolveArtifactSourceFingerprint, retainArtifactOffer } from './upgrade/cliArtifact'
 import { readSettings } from './config/settings'
 import { getFleetUpgradePolicy, initFleetUpgradePolicy } from './upgrade/fleetUpgradePolicy'
 import QRCode from 'qrcode'
@@ -132,7 +132,14 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         if (offer.channel === 'hub-artifact' && !offer.targetGeneration) {
             const monorepoRoot = findMonorepoRoot(defaultHubPackageRoot())
             if (monorepoRoot) {
-                offer.targetGeneration = resolveArtifactSourceFingerprint(monorepoRoot)
+                try {
+                    offer.targetGeneration = resolveArtifactSourceFingerprint(monorepoRoot)
+                } catch (error) {
+                    if (!isTransientArtifactBuildFailure(error)) {
+                        throw error
+                    }
+                    console.warn('[fleet-upgrade] source is changing; deferring generation fingerprint')
+                }
             }
         }
         cachedUpgradeOffer = { at: now, offer }

@@ -25,6 +25,14 @@ describe('waitForDelegatedRunner', () => {
         })
         await expect(pending).resolves.toBe(7)
     })
+
+    it('resolves immediately when the child has already exited', async () => {
+        const child = Object.assign(new EventEmitter(), {
+            exitCode: 0,
+            signalCode: null,
+        }) as EventEmitter & ChildProcess
+        await expect(waitForDelegatedRunner(child)).resolves.toBe(0)
+    })
 })
 
 describe('settleDurableDelegate', () => {

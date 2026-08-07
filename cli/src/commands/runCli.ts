@@ -20,6 +20,14 @@ import crossSpawn from 'cross-spawn'
 
 /** Wait for delegated child exit; reject on spawn error so caller can clear the marker. */
 export function waitForDelegatedRunner(child: ChildProcess): Promise<number> {
+    // Already-settled children (detached launcher exit already awaited) must not
+    // hang on a fresh 'exit' listener that will never fire again.
+    if (child.signalCode != null) {
+        return Promise.resolve(1)
+    }
+    if (child.exitCode != null) {
+        return Promise.resolve(child.exitCode)
+    }
     return new Promise<number>((resolve, reject) => {
         child.once('error', reject)
         child.once('exit', (status, signal) => {
