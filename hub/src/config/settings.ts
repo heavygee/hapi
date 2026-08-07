@@ -170,7 +170,10 @@ export async function updateSettingsFile(
     const task = settingsWriteTail.then(() =>
         updateSettings(settingsFile, (settings) => {
             mutate(settings)
-            return settings
+            return {
+                settings,
+                result: settings,
+            }
         }),
     )
     // Keep the chain alive after failures so later writers still serialize.
