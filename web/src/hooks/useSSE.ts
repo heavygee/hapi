@@ -575,16 +575,7 @@ export function useSSE(options: {
                     nextSummary.todoProgress = computeTodoProgress(patch.todos.value)
                     nextSummary.todosUpdatedAt = patch.todos.version
                 }
-<<<<<<< ours
                 if (patch.agentState !== undefined && patch.agentState.version >= current.agentStateVersion) {
-=======
-                const detailMetadataVersion = detailForVersion?.metadataVersion ?? 0
-                const detailAgentStateVersion = detailForVersion?.agentStateVersion ?? 0
-                if (patch.todos !== undefined) {
-                    nextSummary.todoProgress = computeTodoProgress(patch.todos.value)
-                }
-                if (patch.agentState !== undefined && patch.agentState.version >= detailAgentStateVersion) {
->>>>>>> theirs
                     nextSummary.pendingRequestsCount = computePendingRequestsCount(patch.agentState.value)
                     nextSummary.pendingRequestKinds = computePendingRequestKinds(patch.agentState.value)
                     nextSummary.pendingRequests = computePendingRequests(patch.agentState.value, nextSummary.updatedAt)
@@ -645,7 +636,6 @@ export function useSSE(options: {
                 if (patch.modelReasoningEffort !== undefined) assign('modelReasoningEffort', patch.modelReasoningEffort)
                 if (patch.effort !== undefined) assign('effort', patch.effort)
                 if (Object.prototype.hasOwnProperty.call(patch, 'serviceTier')) {
-<<<<<<< ours
                     assign('serviceTier', patch.serviceTier ?? null)
                 }
                 if (patch.permissionMode !== undefined) assign('permissionMode', patch.permissionMode)
@@ -664,38 +654,6 @@ export function useSSE(options: {
                     nextSession.teamStateUpdatedAt = patch.teamState.version
                     changed = true
                 }
-=======
-                    nextSession.serviceTier = patch.serviceTier ?? null
-                }
-                if (patch.permissionMode !== undefined) nextSession.permissionMode = patch.permissionMode
-                if (patch.collaborationMode !== undefined) nextSession.collaborationMode = patch.collaborationMode
-                if (patch.backgroundTaskCount !== undefined) nextSession.backgroundTaskCount = patch.backgroundTaskCount
-                if (patch.todos !== undefined) {
-                    nextSession.todos = patch.todos.value
-                    nextSession.todosUpdatedAt = patch.todos.version
-                }
-                // Versioned teamState: `{ version, value }`; value null is the
-                // explicit clear signal (TeamDelete events) → undefined to match
-                // the cached Session.teamState shape.
-                if (patch.teamState !== undefined) {
-                    nextSession.teamState = patch.teamState.value ?? undefined
-                    nextSession.teamStateUpdatedAt = patch.teamState.version
-                }
-                // Versioned fields arrive as { version, value } — unwrap into
-                // the Session's flat metadata/metadataVersion pair (same for
-                // agentState). Spreading the patch wholesale would corrupt
-                // session.metadata with a { version, value } object.
-                //
-                // Version-monotonicity gate (PR #897 review, HAPI Bot
-                // 2026-06-16 Major): on SSE reconnect the per-query
-                // invalidation path can repopulate the detail cache via a
-                // fresh REST refetch BEFORE a buffered older patch replays.
-                // Applying the older patch would regress resume / session-id
-                // / pending-requests state. Mirror the CLI room handler's
-                // `incoming.version > currentVersion` guard so the cache
-                // only moves forward. `nextSession.metadataVersion` is the
-                // pre-patch value because it was just spread from `previous`.
->>>>>>> theirs
                 if (patch.metadata !== undefined && isNewerVersionedPatch(patch.metadata.version, nextSession.metadataVersion)) {
                     nextSession.metadata = patch.metadata.value
                     nextSession.metadataVersion = patch.metadata.version
