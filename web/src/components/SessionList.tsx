@@ -18,7 +18,7 @@ import { useSessionListStatusMode } from '@/hooks/useSessionListStatusMode'
 import { useShowActiveSessionsOnly } from '@/hooks/useShowActiveSessionsOnly'
 import { usePinInProgressSessions } from '@/hooks/usePinInProgressSessions'
 import { classifySessionAttention, sessionIsUnread } from '@/lib/sessionAttention'
-import { getSessionLastSeenAt } from '@/lib/sessionLastSeen'
+import { getSessionLastSeenAt, getSessionLastSeenSnapshot } from '@/lib/sessionLastSeen'
 import { useSessionRowTooltipIds } from '@/components/HoverTooltip'
 import { subscribeCodexImportedSessions } from '@/lib/codexImportedSessions'
 import { formatReopenError } from '@/lib/reopenError'
@@ -1272,12 +1272,15 @@ export function SessionList(props: {
     // Unread after search/time, before machine scope — so machineFilters (from allSessions)
     // stay stable. Filtering unread into allSessions would drop machines with zero unread
     // and clear a persisted machine selection (showing other machines' unread instead).
-    const unreadFilteredSessions = useMemo(
-        () => showUnreadOnly
-            ? filterUnreadSessionsOnly(visibleSessions, selectedSessionId, getSessionLastSeenAt)
-            : visibleSessions,
-        [visibleSessions, selectedSessionId, showUnreadOnly]
-    )
+    const unreadFilteredSessions = useMemo(() => {
+        if (!showUnreadOnly) return visibleSessions
+        const lastSeenById = getSessionLastSeenSnapshot()
+        return filterUnreadSessionsOnly(
+            visibleSessions,
+            selectedSessionId,
+            id => lastSeenById[id] ?? 0
+        )
+    }, [visibleSessions, selectedSessionId, showUnreadOnly])
     const machineFilteredSessions = useMemo(
         () => activeMachineFilter === null
             ? unreadFilteredSessions
