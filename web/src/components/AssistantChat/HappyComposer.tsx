@@ -1163,24 +1163,9 @@ export function HappyComposer(props: {
             return
         }
 
-        // Alt/Option+Enter is an explicit Pi follow-up request. It is
-        // orthogonal to the normal Enter preference but never overrides IME,
-        // Shift+Enter, autocomplete, scheduling, or scratchlist routing.
-        if (
-            key === 'Enter'
-            && e.altKey
-            && !e.ctrlKey
-            && !e.metaKey
-            && canQueueSend
-        ) {
-            e.preventDefault()
-            flushAndSend('queue')
-            setShowContinueHint(false)
-            return
-        }
-
         // Collapsed: honor Settings Enter behavior. Expanded: always newline
         // (plain Enter inserts; Ctrl/Cmd+Enter or the send button submits).
+        // Soup tip lacks upstream Alt+Enter Pi-queue plumbing; do not import it here.
         if (key === 'Enter') {
             const action = resolveComposerEnterKeyAction({
                 composerEnterBehavior,
