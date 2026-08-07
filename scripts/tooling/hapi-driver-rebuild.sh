@@ -453,6 +453,14 @@ elif [[ -f "$VERIFY_SCRIPT" ]] && [[ -f "$DRIVER/web/dist/index.html" ]]; then
 fi
 
 if [[ "$VERIFY" -eq 1 ]]; then
+    # Tip-forward may land new workspace deps (e.g. #1392 proper-lockfile) that
+    # remat WT already installed while live driver/node_modules stayed stale.
+    # Typecheck/tests run against $DRIVER — refresh before gates (2026-08-07).
+    echo "Ensuring driver dependencies (post-promote)..."
+    if ! (cd "$DRIVER" && "$BUN" install); then
+        remat_rollback_live_tip "bun install failed"
+        exit 1
+    fi
     echo "Running typecheck..."
     if ! (cd "$DRIVER" && "$BUN" typecheck); then
         remat_rollback_live_tip "typecheck failed"
