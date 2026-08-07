@@ -553,10 +553,9 @@ describe('fingerprintArtifactInputs / isArtifactCacheFresh', () => {
             writeFileSync(join(root, 'shared', 'src', 'index.ts'), 'export {}\n')
 
             __resetArtifactFingerprintCacheForTests()
-            let n = 0
             __setFingerprintAttemptHookForTests(() => {
-                n += 1
-                writeFileSync(join(root, 'cli', 'src', 'bootstrap.ts'), `export const x = ${n}\n`)
+                // Simulate soup rematerialize deleting an input mid-walk.
+                throw Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' })
             })
             expect(() => resolveArtifactSourceFingerprint(root)).toThrow(TransientArtifactBuildError)
         } finally {
