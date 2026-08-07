@@ -692,12 +692,7 @@ layers:
   # Tip: 2f23e0d48 (origin/feat/storage-usage-pie-chart) — chart-first layout
   - branch: feat/storage-usage-pie-chart
 
-  # tiann/hapi#1394 — transient "Unread only" sidebar lens (updatedAt > lastSeen).
-  # Not Overseer / needs-attention. Sidebar button only; no Settings; no localStorage.
-  # Web-only. Peer-stack Playwright green. Do NOT open upstream PR until dogfood OK.
-  # Worktree: ~/coding/hapi/worktrees/session-attention-filter @ feat/session-attention-filter
-  # Tip: 01c300bd8 (origin/feat/session-attention-filter) — last-seen snapshot
-  - branch: feat/session-attention-filter
+  # DROPPED 2026-08-07: feat/session-attention-filter — MERGED as tiann/hapi#1400 (Fixes #1394)
 
   # tiann/hapi#1395 — session header project/path (sidebar-style display name; default on).
   # Extends #1267 configurable header metadata. Web-only. Peer-stack Playwright green.
