@@ -21,6 +21,7 @@ const IDENTITY_KEYS = [
     'happyHomeDir',
     'happyLibDir',
     'versionHandoffDisabled',
+    'supervisedRestart',
     'startedCliMtimeMs',
     'installedCliMtimeMs',
 ] as const

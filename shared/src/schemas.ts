@@ -437,6 +437,11 @@ export const MachineMetadataSchema = z.object({
     capabilities: z.array(z.string()).optional(),
     /** True when this runner process started with HAPI_DISABLE_VERSION_HANDOFF=1. */
     versionHandoffDisabled: z.boolean().optional(),
+    /**
+     * True when an external supervisor owns restart (systemd/pm2/etc.).
+     * Set only via HAPI_RUNNER_SUPERVISED=1 — never inferred from versionHandoffDisabled.
+     */
+    supervisedRestart: z.boolean().optional(),
     /** CLI binary/package mtime when this runner process started. */
     startedCliMtimeMs: z.number().optional(),
     /** Current on-disk CLI binary/package mtime (may differ after upgrade). */

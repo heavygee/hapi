@@ -382,14 +382,15 @@ export function RunnerVersionSkewBanner({
                     const version = machine.metadata?.happyCliVersion
                     const newerOnDisk = cliBinaryUpdatedOnDisk(machine.metadata)
                     const handoffDisabled = machine.metadata?.versionHandoffDisabled === true
+                    const supervisedRestart = machine.metadata?.supervisedRestart === true
                     const supportsSelfUpgrade = (machine.metadata?.capabilities ?? [])
                         .includes(MACHINE_CAPABILITIES.RunnerSelfUpgrade)
                     const busy = busyId === machine.id
                     // Upgrade owns package+handoff relaunch. Restart is stop-only and is
-                    // only safe when an external supervisor (soup/systemd) will relaunch.
+                    // only safe when an external supervisor (HAPI_RUNNER_SUPERVISED=1) will relaunch.
                     // Legacy runners without RunnerSelfUpgrade cannot receive the RPC.
                     const canUpgrade = !handoffDisabled && supportsSelfUpgrade
-                    const canRestart = handoffDisabled
+                    const canRestart = supervisedRestart
                     const upgradeDisabledTitle = handoffDisabled
                         ? t('runner.skew.banner.upgradeNeedsHandoff')
                         : !supportsSelfUpgrade

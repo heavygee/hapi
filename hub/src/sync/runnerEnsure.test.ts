@@ -28,7 +28,7 @@ describe('SyncEngine restartMachineRunner', () => {
             const result = await engine.restartMachineRunner('manual-runner', 'default')
             expect(result).toEqual({
                 type: 'error',
-                message: 'Restart requires an external runner supervisor; use Upgrade instead',
+                message: 'Restart requires an external runner supervisor (HAPI_RUNNER_SUPERVISED=1); use Upgrade instead',
                 code: 'restart_unavailable',
             })
             expect(stopRunner).not.toHaveBeenCalled()
@@ -37,7 +37,46 @@ describe('SyncEngine restartMachineRunner', () => {
         }
     })
 
-    it('stop-runners only when versionHandoffDisabled (supervised soup host)', async () => {
+    it('refuses Restart when only versionHandoffDisabled is set (no supervisor proof)', async () => {
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never
+        )
+
+        try {
+            const stopRunner = mock(async () => undefined)
+            ;(engine as any).rpcGateway.stopRunner = stopRunner
+
+            engine.getOrCreateMachine(
+                'detached-optout',
+                {
+                    host: 'laptop',
+                    platform: 'linux',
+                    happyCliVersion: '0.20.0',
+                    // Detached `hapi runner start` can set this without anything to relaunch.
+                    versionHandoffDisabled: true,
+                },
+                null,
+                'default'
+            )
+            engine.handleMachineAlive({ machineId: 'detached-optout', time: Date.now() })
+
+            const result = await engine.restartMachineRunner('detached-optout', 'default')
+            expect(result).toEqual({
+                type: 'error',
+                message: 'Restart requires an external runner supervisor (HAPI_RUNNER_SUPERVISED=1); use Upgrade instead',
+                code: 'restart_unavailable',
+            })
+            expect(stopRunner).not.toHaveBeenCalled()
+        } finally {
+            engine.stop()
+        }
+    })
+
+    it('stop-runners only when supervisedRestart is advertised', async () => {
         const store = new Store(':memory:')
         const engine = new SyncEngine(
             store,
@@ -57,6 +96,7 @@ describe('SyncEngine restartMachineRunner', () => {
                     platform: 'linux',
                     happyCliVersion: '0.20.0',
                     versionHandoffDisabled: true,
+                    supervisedRestart: true,
                 },
                 null,
                 'default'

@@ -61,6 +61,9 @@ export function buildMachineMetadata(options?: {
         workspaceRoots: options?.workspaceRoots,
         capabilities: [...CURRENT_MACHINE_CAPABILITIES],
         versionHandoffDisabled: process.env.HAPI_DISABLE_VERSION_HANDOFF === '1',
+        // Explicit supervisor opt-in only. HAPI_DISABLE_VERSION_HANDOFF is orthogonal
+        // (skips mtime/version self-restart) and must not imply Restart=always.
+        supervisedRestart: process.env.HAPI_RUNNER_SUPERVISED === '1',
         ...(typeof startedCliMtimeMs === 'number' ? { startedCliMtimeMs } : {}),
         ...(typeof installedCliMtimeMs === 'number' ? { installedCliMtimeMs } : {}),
         ...(cliArtifactGeneration ? { cliArtifactGeneration } : {}),

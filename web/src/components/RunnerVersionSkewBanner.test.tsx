@@ -308,13 +308,37 @@ describe('RunnerVersionSkewBanner', () => {
         vi.clearAllMocks()
     })
 
-    it('disables Upgrade and enables Restart for handoff-disabled hosts', () => {
+    it('disables Upgrade for handoff-disabled hosts and enables Restart only when supervised', () => {
         useMachinesMock.mockReturnValue({
             machines: [
                 makeMachine({
                     id: 'soup',
                     metadata: {
                         host: 'proxmox',
+                        platform: 'linux',
+                        happyCliVersion: '0.20.0',
+                        versionHandoffDisabled: true,
+                        supervisedRestart: true,
+                    },
+                }),
+            ],
+            isLoading: false,
+            error: null,
+        })
+
+        renderBanner()
+
+        expect(screen.getByTestId('runner-version-skew-upgrade-soup')).toBeDisabled()
+        expect(screen.getByTestId('runner-version-skew-restart-soup')).toBeEnabled()
+    })
+
+    it('keeps Restart disabled when handoff is disabled without supervisedRestart', () => {
+        useMachinesMock.mockReturnValue({
+            machines: [
+                makeMachine({
+                    id: 'detached',
+                    metadata: {
+                        host: 'laptop',
                         platform: 'linux',
                         happyCliVersion: '0.20.0',
                         versionHandoffDisabled: true,
@@ -327,8 +351,8 @@ describe('RunnerVersionSkewBanner', () => {
 
         renderBanner()
 
-        expect(screen.getByTestId('runner-version-skew-upgrade-soup')).toBeDisabled()
-        expect(screen.getByTestId('runner-version-skew-restart-soup')).toBeEnabled()
+        expect(screen.getByTestId('runner-version-skew-upgrade-detached')).toBeDisabled()
+        expect(screen.getByTestId('runner-version-skew-restart-detached')).toBeDisabled()
     })
 
     it('renders a compact banner with minimize and snooze actions', () => {
@@ -476,6 +500,7 @@ describe('RunnerVersionSkewBanner', () => {
                         platform: 'linux',
                         happyCliVersion: '0.20.0',
                         versionHandoffDisabled: true,
+                        supervisedRestart: true,
                     },
                 }),
             ],

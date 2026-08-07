@@ -102,6 +102,78 @@ describe('settleDurableDelegate', () => {
         await expect(pending).resolves.toEqual({ ready: true, exitCode: 0 })
         expect(child.kill).not.toHaveBeenCalled()
     })
+
+    it('for detached runner start, waits for launcher exit then grandchild hubReadyAt', async () => {
+        const child = Object.assign(new EventEmitter(), {
+            pid: 4242,
+            kill: vi.fn(),
+        }) as EventEmitter & ChildProcess & { kill: ReturnType<typeof vi.fn> }
+        const waitForExit = vi.fn(async () => 0)
+        const waitForReady = vi.fn(async () => true)
+        const killChild = vi.fn(async () => true)
+
+        const settled = await settleDurableDelegate({
+            child,
+            wrapperPid: 1,
+            useProcessGroup: true,
+            detachedLauncher: true,
+            waitForExit,
+            waitForReady,
+            killChild,
+            timeoutMs: 50,
+        })
+        expect(settled).toEqual({ ready: true, exitCode: 0 })
+        expect(waitForExit).toHaveBeenCalledTimes(1)
+        expect(waitForReady).toHaveBeenCalledWith(1, { timeoutMs: 50 })
+        expect(killChild).not.toHaveBeenCalled()
+    })
+
+    it('for detached runner start, does not treat clean launcher exit alone as ready', async () => {
+        const child = Object.assign(new EventEmitter(), {
+            pid: 4242,
+            kill: vi.fn(),
+        }) as EventEmitter & ChildProcess & { kill: ReturnType<typeof vi.fn> }
+        const waitForExit = vi.fn(async () => 0)
+        const waitForReady = vi.fn(async () => false)
+        const killChild = vi.fn(async () => true)
+
+        const settled = await settleDurableDelegate({
+            child,
+            wrapperPid: 1,
+            useProcessGroup: true,
+            detachedLauncher: true,
+            waitForExit,
+            waitForReady,
+            killChild,
+            timeoutMs: 10,
+        })
+        expect(settled).toEqual({ ready: false })
+        // Grandchild may still be connecting — do not kill the process group.
+        expect(killChild).not.toHaveBeenCalled()
+    })
+
+    it('for detached runner start, fails closed on non-zero launcher exit', async () => {
+        const child = Object.assign(new EventEmitter(), {
+            pid: 4242,
+            kill: vi.fn(),
+        }) as EventEmitter & ChildProcess & { kill: ReturnType<typeof vi.fn> }
+        const waitForExit = vi.fn(async () => 1)
+        const waitForReady = vi.fn(async () => true)
+        const killChild = vi.fn(async () => true)
+
+        const settled = await settleDurableDelegate({
+            child,
+            wrapperPid: 1,
+            useProcessGroup: true,
+            detachedLauncher: true,
+            waitForExit,
+            waitForReady,
+            killChild,
+        })
+        expect(settled).toEqual({ ready: false })
+        expect(waitForReady).not.toHaveBeenCalled()
+        expect(killChild).not.toHaveBeenCalled()
+    })
 })
 
 describe('spawnDurableUpgradeDelegate', () => {

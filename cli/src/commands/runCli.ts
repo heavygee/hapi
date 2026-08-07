@@ -39,11 +39,18 @@ export function waitForDelegatedRunner(child: ChildProcess): Promise<number> {
  *
  * Uses waitForRunnerHandoff(wrapperPid): Windows .cmd shims make child.pid the
  * cmd.exe wrapper, while the real runner PID is a grandchild.
+ *
+ * Detached `runner start` launches start-sync then exits; racing that launcher
+ * exit against hubReadyAt falsely clears the durable marker. For that path,
+ * wait for a clean launcher exit, then for the grandchild hubReadyAt — and do
+ * not force-kill the process group (grandchild may still be connecting).
  */
 export async function settleDurableDelegate(options: {
     child: ChildProcess
     wrapperPid: number
     useProcessGroup: boolean
+    /** True when argv is `runner start` (detached launcher, not start-sync). */
+    detachedLauncher?: boolean
     timeoutMs?: number
     waitForExit?: (child: ChildProcess) => Promise<number>
     waitForReady?: (
@@ -56,6 +63,16 @@ export async function settleDurableDelegate(options: {
     const waitForReady = options.waitForReady ?? waitForRunnerHandoff
     const killChild = options.killChild ?? killProcessByChildProcess
     const timeoutMs = options.timeoutMs ?? 30_000
+
+    if (options.detachedLauncher) {
+        const exitCode = await waitForExit(options.child)
+        if (exitCode !== 0) {
+            return { ready: false }
+        }
+        const ready = await waitForReady(options.wrapperPid, { timeoutMs })
+        return ready ? { ready: true, exitCode } : { ready: false }
+    }
+
     const exitPromise = waitForExit(options.child)
     const ready = await Promise.race([
         waitForReady(options.wrapperPid, { timeoutMs }),
@@ -166,6 +183,9 @@ export async function runCli(): Promise<void> {
                 child,
                 wrapperPid: process.pid,
                 useProcessGroup,
+                // `runner start` exits after spawning start-sync; do not treat
+                // that launcher exit as target failure (grandchild still connecting).
+                detachedLauncher: args[0] === 'runner' && args[1] === 'start',
             })
             if (!settled.ready) {
                 clearUpgradeTarget()

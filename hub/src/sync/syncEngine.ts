@@ -946,9 +946,10 @@ export class SyncEngine {
     }
 
     /**
-     * Manual stop-runner (banner Restart). Escape hatch for soup/rebuild-only
-     * hosts (`versionHandoffDisabled`): an external supervisor relaunches.
-     * Unsupervised hosts must use Upgrade (handoff relaunch), not this path.
+     * Manual stop-runner (banner Restart). Only safe when the runner advertised
+     * `supervisedRestart` (HAPI_RUNNER_SUPERVISED=1) — an external supervisor
+     * relaunches. `versionHandoffDisabled` alone is not proof of a supervisor
+     * (detached `hapi runner start` can set that flag with nothing to relaunch).
      */
     async restartMachineRunner(machineId: string, namespace: string): Promise<
         | { type: 'success'; message: string }
@@ -962,13 +963,12 @@ export class SyncEngine {
         if (!machine.active) {
             return { type: 'error', message: 'Machine is offline', code: 'machine_offline' }
         }
-        // Banner Restart is only for soup/rebuild-only (supervised) hosts. Enforce
-        // the same gate server-side so a direct/stale client cannot stop-runner an
-        // unsupervised host that has nothing to relaunch it.
-        if (machine.metadata?.versionHandoffDisabled !== true) {
+        // Banner Restart is stop-only. Gate on explicit supervisedRestart so a
+        // direct/stale client cannot stop-runner an unsupervised host.
+        if (machine.metadata?.supervisedRestart !== true) {
             return {
                 type: 'error',
-                message: 'Restart requires an external runner supervisor; use Upgrade instead',
+                message: 'Restart requires an external runner supervisor (HAPI_RUNNER_SUPERVISED=1); use Upgrade instead',
                 code: 'restart_unavailable',
             }
         }
