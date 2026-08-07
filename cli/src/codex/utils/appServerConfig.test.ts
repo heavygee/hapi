@@ -7,9 +7,10 @@ import {
     codexCollaborationSpawnAgentInstructions,
     supportsReasoningSummary
 } from './appServerConfig';
-import { codexSystemPrompt } from './systemPrompt';
+import { getCodexSystemPrompt } from './systemPrompt';
 
 describe('appServerConfig', () => {
+    const codexSystemPrompt = getCodexSystemPrompt();
     const mcpServers = { hapi: { command: 'node', args: ['mcp'] } };
     const withCollaborationInstructions = (developerInstructions: string): string => {
         return `${developerInstructions}\n\n${codexCollaborationSpawnAgentInstructions}`;
