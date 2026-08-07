@@ -61,6 +61,15 @@ Reply in this HAPI session with:
 3. **Discoverability score** — rough % that a typical HAPI-wrapped agent starting a long batch will correctly attach without operator coaching (and what would move that needle most)
 4. **Ready for upstream PR:** yes/no
 
-When done, end with AGENT_NOTIFY_SUMMARY status line.
+## Close the loop (mandatory when done or blocked)
 
-Ping the orchestrator (inspect peers / `hapi ping-peer` if you know parent) only if blocked.
+1. `hapi ping-peer` / MCP `ping_peer` the **orchestrator** (Parent above — Cursor feature peer on `session-attached-jobs`) with: verdict, Ready-for-PR yes/no, pointer to this session, note that full findings are in this chat.
+2. Then emit `AGENT_NOTIFY_SUMMARY` on your final turn.
+
+`AGENT_NOTIFY_SUMMARY` alone is not loop-closure. "Ping only if blocked" applies to mid-task escalation, not to signaling done.
+
+---
+
+## Process note (2026-08-07 operator feedback)
+
+This brief originally said "ping orchestrator only if blocked" + "end with AGENT_NOTIFY_SUMMARY." That caused a passive close. Standing rule for all future peer briefs: proactive originator ping on completion. Canon: `spawn-peer-agents` skill § Close the loop; `new-feature-intake.md` §0.

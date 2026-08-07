@@ -91,7 +91,18 @@ Soup promote + `hapi-ping-peer` Lidarr session with attach recipe. No upstream P
 ## Status (2026-08-07)
 
 - Upstream issue: https://github.com/tiann/hapi/issues/1404
-- Feat tip: `e5237f366` (`feat/session-attached-jobs`) — SCHEMA V22 for upstream
-- Soup tip: `driver/session-attached-jobs` @ V23 remumber; rematted to driver `b9fc58e41`
-- Lidarr peer pinged to self-attach beets job
-- **No upstream PR** until operator OK after Lidarr row is visibly truthful
+- Feat tip: `feat/session-attached-jobs` — SCHEMA V22 for upstream
+- Soup tip: rematted with guidance+elapsed; dogfood OK on `:3006`
+- Opus cold review (`eb1746db`, tip `266965f8a`): **ship with fixes — Ready-for-PR: NO**
+  - Majors: idle-agent heartbeat gap → `hapi job run` supervisor; post-merge `$HAPI_SESSION_ID` 404 → job-owner redirects; CLI test gap; steer only 4/10 flavors (no MCP yet)
+  - Discoverability ~40% attach / ~20% sustained without coaching
+- Process: peer briefs must ping originator on completion (spawn-peer skill + intake §0)
+- **No upstream PR** until cold-review Majors addressed + operator OK
+
+### Post-review fix backlog (in flight)
+
+1. `hapi job run` supervisor (auto heartbeat + exit status)
+2. Job REST follows `jobsTransferredToSessionId` / `jobsAcceptedFromSessionIds` / `supersededBySessionId`
+3. CLI unit tests (`parseJobArgs`, resolve, exit codes, runSessionJob)
+4. Honest steer scoping + prefer `job run` in system prompt / guide / skill
+5. Later: MCP `hapi_job` tool; terminal-job TTL; widen flavor coverage
