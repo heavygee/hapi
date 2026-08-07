@@ -696,7 +696,7 @@ layers:
   # Not Overseer / needs-attention. Sidebar button only; no Settings; no localStorage.
   # Web-only. Peer-stack Playwright green. Do NOT open upstream PR until dogfood OK.
   # Worktree: ~/coding/hapi/worktrees/session-attention-filter @ feat/session-attention-filter
-  # Tip: 8655f6261 (origin/feat/session-attention-filter) — unread-dot toggle; rebased upstream/main
+  # Tip: 89d2eca7e (origin/feat/session-attention-filter) — unread after machine scope
   - branch: feat/session-attention-filter
 
   # tiann/hapi#1395 — session header project/path (sidebar-style display name; default on).
