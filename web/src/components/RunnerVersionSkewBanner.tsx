@@ -86,8 +86,10 @@ export function listSkewedMachines(machines: Machine[], offer: HubUpgradeOffer |
 
 /**
  * Machines the banner should list for the current fleet policy.
- * Under `auto`, hide hosts the hub is already upgrading — only surface
- * hosts that need operator action (legacy / handoff-disabled).
+ * Under `auto`, still list every skewed host: the hub only toasts
+ * `upgrade_failed` and does not expose per-machine in-flight/failed state, so
+ * hiding self-upgrade-capable hosts would leave permanent failures with no
+ * recovery UI. `silent` still suppresses the banner entirely.
  */
 export function listBannerSkewMachines(
     machines: Machine[],
@@ -97,11 +99,7 @@ export function listBannerSkewMachines(
     if (policy === 'silent') {
         return []
     }
-    const skewed = listSkewedMachines(machines, offer)
-    if (policy === 'auto') {
-        return skewed.filter((machine) => !machineCanAutoUpgrade(machine))
-    }
-    return skewed
+    return listSkewedMachines(machines, offer)
 }
 
 /**
@@ -390,11 +388,16 @@ export function RunnerVersionSkewBanner({
                     // only safe when an external supervisor (HAPI_RUNNER_SUPERVISED=1) will relaunch.
                     // Legacy runners without RunnerSelfUpgrade cannot receive the RPC.
                     const canUpgrade = !handoffDisabled && supportsSelfUpgrade
-                    const canRestart = supervisedRestart
+                    const canRestart = supervisedRestart && newerOnDisk
                     const upgradeDisabledTitle = handoffDisabled
                         ? t('runner.skew.banner.upgradeNeedsHandoff')
                         : !supportsSelfUpgrade
                             ? t('runner.skew.banner.upgradeNeedsManual')
+                            : undefined
+                    const restartDisabledTitle = !supervisedRestart
+                        ? t('runner.skew.banner.restartNeedsSupervisor')
+                        : !newerOnDisk
+                            ? t('runner.skew.banner.restartNeedsNewerBinary')
                             : undefined
                     return (
                         <li
@@ -431,9 +434,7 @@ export function RunnerVersionSkewBanner({
                                         type="button"
                                         data-testid={`runner-version-skew-restart-${machine.id}`}
                                         disabled={!canRestart || busy}
-                                        title={canRestart
-                                            ? undefined
-                                            : t('runner.skew.banner.restartNeedsSupervisor')}
+                                        title={canRestart ? undefined : restartDisabledTitle}
                                         onClick={() => void onRestart(machine)}
                                         className="rounded border border-amber-700/50 px-2 py-1 text-xs font-medium text-amber-950 disabled:opacity-50 dark:border-amber-200/40 dark:text-amber-50"
                                     >

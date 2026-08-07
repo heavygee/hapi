@@ -964,11 +964,20 @@ export class SyncEngine {
             return { type: 'error', message: 'Machine is offline', code: 'machine_offline' }
         }
         // Banner Restart is stop-only. Gate on explicit supervisedRestart so a
-        // direct/stale client cannot stop-runner an unsupervised host.
+        // direct/stale client cannot stop-runner an unsupervised host. Also
+        // require a newer on-disk CLI — otherwise Restart just relaunches the
+        // same bytes and cannot clear skew.
         if (machine.metadata?.supervisedRestart !== true) {
             return {
                 type: 'error',
                 message: 'Restart requires an external runner supervisor (HAPI_RUNNER_SUPERVISED=1); use Upgrade instead',
+                code: 'restart_unavailable',
+            }
+        }
+        if (!cliBinaryUpdatedOnDisk(machine.metadata)) {
+            return {
+                type: 'error',
+                message: 'No newer CLI is installed; use Upgrade first',
                 code: 'restart_unavailable',
             }
         }

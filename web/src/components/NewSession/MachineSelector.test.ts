@@ -57,7 +57,7 @@ describe('machineNeedsUpdateLabel', () => {
         )).toBe(true)
     })
 
-    it('under auto, does not label self-upgradeable drift (hub handles it)', () => {
+    it('under auto, still labels self-upgradeable drift for failed-upgrade recovery', () => {
         expect(machineNeedsUpdateLabel(
             makeMachine({
                 metadata: {
@@ -69,7 +69,7 @@ describe('machineNeedsUpdateLabel', () => {
             }),
             OFFER,
             'auto',
-        )).toBe(false)
+        )).toBe(true)
         expect(machineNeedsUpdateLabel(
             makeMachine({
                 metadata: {

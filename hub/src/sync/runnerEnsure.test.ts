@@ -97,6 +97,8 @@ describe('SyncEngine restartMachineRunner', () => {
                     happyCliVersion: '0.20.0',
                     versionHandoffDisabled: true,
                     supervisedRestart: true,
+                    startedCliMtimeMs: 100,
+                    installedCliMtimeMs: 200,
                 },
                 null,
                 'default'
@@ -106,6 +108,46 @@ describe('SyncEngine restartMachineRunner', () => {
             const result = await engine.restartMachineRunner('soup-runner', 'default')
             expect(result).toEqual({ type: 'success', message: 'Runner restart requested' })
             expect(stopRunner).toHaveBeenCalledWith('soup-runner')
+        } finally {
+            engine.stop()
+        }
+    })
+
+    it('refuses Restart when supervised but on-disk CLI is not newer', async () => {
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never
+        )
+
+        try {
+            const stopRunner = mock(async () => undefined)
+            ;(engine as any).rpcGateway.stopRunner = stopRunner
+
+            engine.getOrCreateMachine(
+                'same-bytes',
+                {
+                    host: 'driver',
+                    platform: 'linux',
+                    happyCliVersion: '0.20.0',
+                    supervisedRestart: true,
+                    startedCliMtimeMs: 100,
+                    installedCliMtimeMs: 100,
+                },
+                null,
+                'default'
+            )
+            engine.handleMachineAlive({ machineId: 'same-bytes', time: Date.now() })
+
+            const result = await engine.restartMachineRunner('same-bytes', 'default')
+            expect(result).toEqual({
+                type: 'error',
+                message: 'No newer CLI is installed; use Upgrade first',
+                code: 'restart_unavailable',
+            })
+            expect(stopRunner).not.toHaveBeenCalled()
         } finally {
             engine.stop()
         }

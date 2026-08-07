@@ -158,7 +158,7 @@ describe('collectConfirmedAutoUpgradeToasts', () => {
 })
 
 describe('listBannerSkewMachines', () => {
-    it('under auto, drops self-upgradeable hosts from the banner list', () => {
+    it('under auto, keeps self-upgradeable hosts visible for failed-upgrade recovery', () => {
         const upgradeable = makeUpgradeableMachine({
             id: 'ok',
             metadata: { host: 'homelab', platform: 'linux', happyCliVersion: '0.20.0' },
@@ -174,8 +174,10 @@ describe('listBannerSkewMachines', () => {
         })
         expect(machineCanAutoUpgrade(upgradeable)).toBe(true)
         expect(machineCanAutoUpgrade(legacy)).toBe(false)
-        expect(listBannerSkewMachines([upgradeable, legacy], TEST_OFFER, 'auto').map((m) => m.id)).toEqual(['legacy'])
+        // Permanent upgrade_failed only toasts today — do not hide the recovery UI.
+        expect(listBannerSkewMachines([upgradeable, legacy], TEST_OFFER, 'auto').map((m) => m.id)).toEqual(['ok', 'legacy'])
         expect(listBannerSkewMachines([upgradeable, legacy], TEST_OFFER, 'alert').map((m) => m.id)).toEqual(['ok', 'legacy'])
+        expect(listBannerSkewMachines([upgradeable, legacy], TEST_OFFER, 'silent')).toEqual([])
     })
 })
 
@@ -308,7 +310,7 @@ describe('RunnerVersionSkewBanner', () => {
         vi.clearAllMocks()
     })
 
-    it('disables Upgrade for handoff-disabled hosts and enables Restart only when supervised', () => {
+    it('disables Upgrade for handoff-disabled hosts and enables Restart only when supervised with newer binary', () => {
         useMachinesMock.mockReturnValue({
             machines: [
                 makeMachine({
@@ -319,6 +321,8 @@ describe('RunnerVersionSkewBanner', () => {
                         happyCliVersion: '0.20.0',
                         versionHandoffDisabled: true,
                         supervisedRestart: true,
+                        startedCliMtimeMs: 100,
+                        installedCliMtimeMs: 200,
                     },
                 }),
             ],
@@ -342,6 +346,8 @@ describe('RunnerVersionSkewBanner', () => {
                         platform: 'linux',
                         happyCliVersion: '0.20.0',
                         versionHandoffDisabled: true,
+                        startedCliMtimeMs: 100,
+                        installedCliMtimeMs: 200,
                     },
                 }),
             ],
@@ -353,6 +359,31 @@ describe('RunnerVersionSkewBanner', () => {
 
         expect(screen.getByTestId('runner-version-skew-upgrade-detached')).toBeDisabled()
         expect(screen.getByTestId('runner-version-skew-restart-detached')).toBeDisabled()
+    })
+
+    it('keeps Restart disabled when supervised but on-disk CLI is not newer', () => {
+        useMachinesMock.mockReturnValue({
+            machines: [
+                makeMachine({
+                    id: 'same-bytes',
+                    metadata: {
+                        host: 'soup',
+                        platform: 'linux',
+                        happyCliVersion: '0.20.0',
+                        versionHandoffDisabled: true,
+                        supervisedRestart: true,
+                        startedCliMtimeMs: 100,
+                        installedCliMtimeMs: 100,
+                    },
+                }),
+            ],
+            isLoading: false,
+            error: null,
+        })
+
+        renderBanner()
+
+        expect(screen.getByTestId('runner-version-skew-restart-same-bytes')).toBeDisabled()
     })
 
     it('renders a compact banner with minimize and snooze actions', () => {
@@ -501,6 +532,8 @@ describe('RunnerVersionSkewBanner', () => {
                         happyCliVersion: '0.20.0',
                         versionHandoffDisabled: true,
                         supervisedRestart: true,
+                        startedCliMtimeMs: 100,
+                        installedCliMtimeMs: 200,
                     },
                 }),
             ],
@@ -553,7 +586,7 @@ describe('RunnerVersionSkewBanner', () => {
         })
     })
 
-    it('hides under auto when every skewed host can self-upgrade', async () => {
+    it('under auto, still banners self-upgradeable hosts so upgrade_failed stays recoverable', async () => {
         useUpgradeInfoMock.mockReturnValue({ info: { offer: TEST_OFFER, policy: 'auto' }, isLoading: false })
         useMachinesMock.mockReturnValue({
             machines: [
@@ -572,12 +605,13 @@ describe('RunnerVersionSkewBanner', () => {
 
         renderBanner()
 
-        await waitFor(() => {
-            expect(screen.queryByTestId('runner-version-skew-banner')).not.toBeInTheDocument()
-        })
+        expect(screen.getByTestId('runner-version-skew-banner')).toBeInTheDocument()
+        expect(screen.getByText(/2 runner\(s\) need attention/)).toBeInTheDocument()
+        expect(screen.getByTestId('runner-version-skew-banner-win')).toBeInTheDocument()
+        expect(screen.getByTestId('runner-version-skew-banner-lab')).toBeInTheDocument()
     })
 
-    it('under auto, only banners hosts that cannot self-upgrade', async () => {
+    it('under auto, banners both self-upgradeable and legacy skewed hosts', async () => {
         useUpgradeInfoMock.mockReturnValue({ info: { offer: TEST_OFFER, policy: 'auto' }, isLoading: false })
         useMachinesMock.mockReturnValue({
             machines: [
@@ -602,9 +636,9 @@ describe('RunnerVersionSkewBanner', () => {
         renderBanner()
 
         expect(screen.getByTestId('runner-version-skew-banner')).toBeInTheDocument()
-        expect(screen.getByText(/1 runner\(s\) need attention/)).toBeInTheDocument()
+        expect(screen.getByText(/2 runner\(s\) need attention/)).toBeInTheDocument()
         expect(screen.getByTestId('runner-version-skew-banner-legacy')).toBeInTheDocument()
-        expect(screen.queryByTestId('runner-version-skew-banner-ok')).not.toBeInTheDocument()
+        expect(screen.getByTestId('runner-version-skew-banner-ok')).toBeInTheDocument()
     })
 
     it('hides when all online machines advertise required capabilities', async () => {

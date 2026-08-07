@@ -1,5 +1,5 @@
 import type { Machine } from '@/types/api'
-import { cliBinaryUpdatedOnDisk, MACHINE_CAPABILITIES } from '@hapi/protocol/runnerCapabilities'
+import { cliBinaryUpdatedOnDisk } from '@hapi/protocol/runnerCapabilities'
 import {
     DEFAULT_FLEET_UPGRADE_POLICY,
     machineTrailsUpgradeOffer,
@@ -40,13 +40,9 @@ export function machineNeedsUpdateLabel(
     if (!trails) {
         return false
     }
-    // Under auto, only label hosts that need operator action (hub cannot RPC).
-    if (policy === 'auto') {
-        if (handoffDisabled) {
-            return true
-        }
-        return !(machine.metadata?.capabilities ?? []).includes(MACHINE_CAPABILITIES.RunnerSelfUpgrade)
-    }
+    // Keep labels under auto: hub only toasts upgrade_failed and does not expose
+    // per-machine in-flight/failed state, so hiding self-upgrade-capable hosts
+    // would leave permanent failures without a recovery cue.
     return true
 }
 
