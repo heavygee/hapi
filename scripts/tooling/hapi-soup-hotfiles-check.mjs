@@ -50,6 +50,11 @@ if (syncEngine.includes('listCodexSessionsForMachine')) {
 console.log(`hapi-soup-hotfiles-check: OK (${calls.length} rpcGateway call site(s) checked)`)
 
 const primary = process.env.HAPI_PRIMARY ?? join(process.env.HOME, 'coding/hapi')
+const routeMounts = join(primary, 'scripts/tooling/hapi-soup-route-mounts-check.mjs')
+if (existsSync(routeMounts)) {
+    const r = spawnSync('bun', ['run', routeMounts, driver], { stdio: 'inherit' })
+    if (r.status !== 0) process.exit(r.status ?? 1)
+}
 const bindings = join(primary, 'scripts/tooling/verify-sessionlist-bindings.mjs')
 if (existsSync(bindings)) {
     const r = spawnSync('bun', ['run', bindings, driver], { stdio: 'inherit' })

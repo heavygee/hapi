@@ -389,6 +389,17 @@ if [[ -d "$HEAL_DIR" ]]; then
     fi
 fi
 
+# Soup-critical hub route mounts (always — not only --verify). Tip-forward can
+# warn-skip remount heals and still promote a tip that serves SPA HTML as the
+# fleet CLI artifact (2026-08-07 toast storm). Fail closed before promote.
+MOUNT_CHECK="$PRIMARY/scripts/tooling/hapi-soup-route-mounts-check.mjs"
+if [[ -f "$MOUNT_CHECK" ]]; then
+    echo "Checking soup-critical hub route mounts..."
+    if ! "$BUN" run "$MOUNT_CHECK" "$REMAT"; then
+        heal_fail "soup-critical route mounts missing (hapi-soup-route-mounts-check)"
+    fi
+fi
+
 WIP_SHA="$(git -C "$REMAT" rev-parse HEAD)"
 echo "Promoting live tip $DRIVER_BRANCH → ${WIP_SHA:0:12} (layers+heals OK)..."
 driver_remat_promote "$DRIVER" "$DRIVER_BRANCH" "$WIP_SHA"

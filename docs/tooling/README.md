@@ -46,6 +46,7 @@ Feature agents should **read the relevant doc below at session start**; meta bot
 | `scripts/tooling/hapi-pr-create-fork.sh` | **Fork PR gate** — defaults `--repo heavygee/hapi`; use for tooling/docs (never bare `gh pr create`) |
 | `scripts/tooling/install-hapi-operator-lock.sh` | **One-shot operator lock** — all guards + local bin (see [operator-lock.md](./operator-lock.md)) |
 | `scripts/tooling/verify-hapi-operator-lock.sh` | Verify lock install (`--with-sudo` on hub hosts) |
+| `scripts/tooling/hapi-soup-route-mounts-check.mjs` | **Soup remat gate** — fail closed if soup-critical hub `create*Routes(` mounts missing from `server.ts` while the route module exists (upgrade/features/inbox/overseer class) |
 | `scripts/tooling/install-gh-wrapper.sh` | Install `~/.local/bin/gh` wrapper — blocks fork-only diffs targeting `tiann/hapi` (#971 class) |
 | `scripts/tooling/hapi-meta-daily.sh` | **Daily Meta PR watcher entrypoint** — discover → classify → chip status cache → strip title emoji (chipped) → policy-ping → wave-clear unlock → action queue; optional chatty contribution-state events (`--emit-events`, default off; also `--dry-run`, `--no-ping`, `--json`) |
 | `scripts/tooling/lib/meta-wave.sh` | **Wave-clear helpers (gate A)** — owned 🔧 only; layer+worktree clean; 30m collect; defer on `hapi-driver-status` busy |

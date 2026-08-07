@@ -487,6 +487,14 @@ Some files are merged by **every** layer that touches them; **last layer wins** 
 
 **Prevention:** `hapi-driver-rebuild --verify` runs `hapi-soup-hotfiles-check.mjs` (syncEngine calls ⊆ rpcGateway methods). When adding a layer that edits hot files, comment in the manifest which symbols must survive lower layers.
 
+### Soup-critical route mounts (server.ts remount loss)
+
+**Class:** tip-forward absorb / heal warn-skip drops soup-only `app.route(...)` mounts from `hub/src/web/server.ts` while the route module file remains. Observed casualties: `/api/features` (heal 99), system-events/inbox/overseer (heal 100 restore), `/cli/upgrade/cli-artifact` (heal 100 remount-upgrade — 2026-08-07 fleet toasts served SPA `index.html` as the binary).
+
+**Gate:** `hapi-driver-rebuild` always runs `hapi-soup-route-mounts-check.mjs` on the remat WIP **after heals, before promote**. If the route module exists, `server.ts` must call the matching `create*Routes(` factory. Fail closed + remat hold (same as heal_fail). Also chained from `hapi-soup-hotfiles-check` under `--verify`.
+
+**When you add a soup-only HTTP surface:** append a row to `REQUIRED_IF_MODULE_PRESENT` in that script and land a numbered `soup-heals/*.patch` remount. Do not rely on heals alone under tip-forward warn-skip.
+
 **Guest migration (oos-linux):** oos-linux is now the **canonical soup host**. Promote layers by editing manifest on the guest, then `hapi-driver-rebuild --build-web --verify` **on oos-linux** — do not `sync-oos-hapi-driver.sh` homelab→guest after a guest-only rebuild (overwrites composed soup). Homelab manifest is legacy reference only.
 
 **Bypass** (testing only): `HAPI_SKIP_DRIVER_LOCK=1`. Skips both flock and status writes; collisions corrupt the driver tree.
