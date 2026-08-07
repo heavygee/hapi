@@ -682,15 +682,12 @@ layers:
   # remat @ 7f48c5eb3 + feat tip da0c6c258) so absorb is FF-clean.
   # Worktree: ~/coding/hapi/worktrees/settings-provider-onboard @ feat/settings-provider-onboard
   # Tip: cd2764527 (origin/driver/settings-provider-onboard-heal)
-  - branch: driver/settings-provider-onboard-heal
+  # PARKED 2026-08-07 (Meta): tip-forward typecheck needs proper-lockfile in driver
+  # node_modules; re-enable after bun install / dep present on remat.
+  # - branch: driver/settings-provider-onboard-heal
 
-  # tiann/hapi#1382 / PR #1383 — interactive Relative share donut on Settings → Storage
-  # (above Exact sizes table). Web-only; no API change. Peer-stack dogfood green
-  # 2026-08-05; remat-hold blocked morning promote — adding after hold cleared.
-  # Drop when upstream PR merges.
-  # Worktree: ~/coding/hapi/worktrees/storage-pie @ feat/storage-usage-pie-chart
-  # Tip: 2f23e0d48 (origin/feat/storage-usage-pie-chart) — chart-first layout
-  - branch: feat/storage-usage-pie-chart
+  # DROPPED 2026-08-07: feat/storage-usage-pie-chart — MERGED as tiann/hapi#1383
+  # (was active soup layer; tip-forward would re-absorb squash tip incorrectly)
 
   # DROPPED 2026-08-07: feat/session-attention-filter — MERGED as tiann/hapi#1400 (Fixes #1394)
 
