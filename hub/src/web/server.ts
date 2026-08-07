@@ -30,6 +30,9 @@ import { createPiSessionRoutes } from './routes/piSessions'
 import { createPushRoutes } from './routes/push'
 import { createDevicesRoutes } from './routes/devices'
 import { createVoiceRoutes } from './routes/voice'
+import { createSystemEventsRoutes } from './routes/systemEvents'
+import { createInboxItemsRoutes } from './routes/inboxItems'
+import { createOverseerRoutes } from './routes/overseer'
 import { createHubSettingsRoutes } from './routes/hubSettings'
 import type { SSEManager } from '../sse/sseManager'
 import type { VisibilityTracker } from '../visibility/visibilityTracker'
@@ -297,6 +300,11 @@ function createWebApp(options: {
     app.route('/api', createPushRoutes(options.store, options.vapidPublicKey))
     app.route('/api', createDevicesRoutes(options.store))
     app.route('/api', createVoiceRoutes({ dataDir: configuration.dataDir }))
+    // Soup: Session Log / inbox / overseer (overseer-readonly-entity). Lost on
+    // tip-forward #1392 absorb — same class as features remount (heal 99).
+    app.route('/api', createSystemEventsRoutes(options.getSyncEngine))
+    app.route('/api', createInboxItemsRoutes(options.getSyncEngine))
+    app.route('/api', createOverseerRoutes(options.getSyncEngine))
 
     // Skip static serving in relay mode, show helpful message on root
     if (options.relayMode) {
