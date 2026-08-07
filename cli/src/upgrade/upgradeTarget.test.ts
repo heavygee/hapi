@@ -194,6 +194,31 @@ describe('upgradeTarget', () => {
         }
     })
 
+    it('does not treat Bun runtime mtime as a newer CLI for source invocations', () => {
+        const previous = process.env.HAPI_CLI_EXECUTABLE
+        delete process.env.HAPI_CLI_EXECUTABLE
+        try {
+            const path = join(home, 'hapi-0.25.1-source-marker')
+            writeFileSync(path, 'x')
+            // Age the marker older than Bun's execPath so a naive mtime compare
+            // would falsely mark it stale.
+            const past = new Date(Date.now() - 60_000)
+            utimesSync(path, past, past)
+            const target = {
+                path,
+                targetVersion: '0.25.1',
+                updatedAt: Date.now(),
+            }
+            expect(isUpgradeTargetStaleRelativeToCli(target, '0.25.1')).toBe(false)
+        } finally {
+            if (previous === undefined) {
+                delete process.env.HAPI_CLI_EXECUTABLE
+            } else {
+                process.env.HAPI_CLI_EXECUTABLE = previous
+            }
+        }
+    })
+
     it('does not delegate to an older same-semver marker when the entrypoint is newer on disk', () => {
         const previous = process.env.HAPI_CLI_EXECUTABLE
         const markerPath = join(home, 'hapi-0.25.1-old-gen')

@@ -12,6 +12,7 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { compareHapiVersions } from '@hapi/protocol/upgradeChannel'
 import { configuration } from '@/configuration'
+import { isBunCompiled } from '@/projectPath'
 import { resolveHappyCliExecutable } from '@/utils/spawnHappyCLI'
 import packageJson from '../../package.json'
 
@@ -204,8 +205,13 @@ export function isUpgradeTargetStaleRelativeToCli(
     }
     // Same semver: soup remats / same-version installs can replace the
     // entrypoint without bumping package.json. Prefer that newer binary over
-    // an older content-addressed marker.
+    // an older content-addressed marker. Skip for plain source `bun` runs —
+    // resolveHappyCliExecutable is the Bun runtime there, and a Bun upgrade
+    // must not clear a valid artifact marker.
     if (relation === 0) {
+        if (!isBunCompiled() && !process.env.HAPI_CLI_EXECUTABLE?.trim()) {
+            return false
+        }
         try {
             const currentPath = deps.currentPath ?? resolveHappyCliExecutable()
             if (samePath(currentPath, target.path)) {
