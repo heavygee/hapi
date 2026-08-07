@@ -323,6 +323,44 @@ eq "resolve: same-dir absent falls back to canonical" \
     "$RES_TMP/primary/scripts/tooling/hapi-ping-peer.sh"
 rm -rf "$RES_TMP"
 
+# ---- bot findings body (#1400 HAPI Bot "None at the current head") ----
+_clean_body_none_at_head='**Findings**
+- None at the current head.
+
+**Summary**
+- Residual risk: coverage remains helper-level.
+
+**Testing**
+- Suggested: add a component-level test.
+'
+_clean_body_none_dot='**Findings**
+- None.
+
+**Summary**
+- No issues found.
+'
+_dirty_body_major='**Findings**
+- [Major] Something broke.
+
+**Summary**
+- One major.
+'
+if pec_bot_body_findings_clean "$_clean_body_none_at_head"; then
+    eq "findings clean: None at the current head" "yes" "yes"
+else
+    eq "findings clean: None at the current head" "no" "yes"
+fi
+if pec_bot_body_findings_clean "$_clean_body_none_dot"; then
+    eq "findings clean: - None." "yes" "yes"
+else
+    eq "findings clean: - None." "no" "yes"
+fi
+if pec_bot_body_findings_clean "$_dirty_body_major"; then
+    eq "findings dirty: Major" "yes" "no"
+else
+    eq "findings dirty: Major" "no" "no"
+fi
+
 eq "status_from_emoji clean" "$(pec_status_from_emoji '✅')" "clean"
 eq "status_from_emoji needs_work" "$(pec_status_from_emoji '⚠️')" "needs_work"
 eq "status_from_emoji unknown" "$(pec_status_from_emoji '?')" "unknown"

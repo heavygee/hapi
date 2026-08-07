@@ -267,6 +267,33 @@ pec_status_from_emoji() {
 
 # pec_count_chip_unresolved_threads <json-array-of-thread-nodes>
 # Count threads that should block chip ✅: unresolved AND not outdated.
+# True when a bot review body indicates a clean **Findings** section.
+# Never match bare "- None." globally — Codex puts that under **Questions**
+# even when **Findings** still has [Major] (#1108 attach-time false ✅).
+# HAPI Bot clean variants include "- None.", "- None at the current head.",
+# and "No Blocker, Major, Minor, or Nit findings…" (#1400 false ⚠️).
+pec_bot_body_findings_clean() {
+    local body="$1" findings stripped
+    if printf '%s' "$body" | grep -qiE \
+        'No findings|No high-confidence|No issues found|No actionable|Didn.t find any|No new issues found|No Blocker, Major, Minor, or Nit findings|No Blocker[[:space:]].*findings|None at the current head'; then
+        return 0
+    fi
+    findings="$(printf '%s' "$body" | awk '
+        BEGIN { p = 0 }
+        /^\*\*Findings\*\*/ { p = 1; next }
+        /^\*\*[A-Za-z]/ { if (p) exit }
+        p { print }
+    ')"
+    stripped="$(printf '%s' "$findings" | sed '/^[[:space:]]*$/d')"
+    [[ -z "$stripped" ]] && return 0
+    # Findings block must be only clean None lines (no other bullets).
+    if printf '%s\n' "$stripped" | grep -qvE \
+        '^[[:space:]]*(-[[:space:]]*)?None(\.|[[:space:]]+at[[:space:]]+the[[:space:]]+current[[:space:]]+head\.?)?[[:space:]]*$'; then
+        return 1
+    fi
+    return 0
+}
+
 # Outdated unresolved bot Majors left open after tip fixes (#847) must not
 # force ⚠️ when Findings:None + CI green on current head.
 # Stdin or $1: JSON array like [{"isResolved":false,"isOutdated":true}, ...]

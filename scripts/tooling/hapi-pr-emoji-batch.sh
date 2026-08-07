@@ -237,32 +237,9 @@ query {
     printf '%s\t%s\n' "$unresolved" "$decision"
 }
 
-# True when the latest bot body indicates a clean findings section.
-# Never match bare "- None." globally — Codex puts that under **Questions**
-# even when **Findings** still has [Major] (#1108 attach-time false ✅).
+# Wrapper kept for export -f / classify_one; logic lives in pr-emoji-core.
 _bot_body_findings_clean() {
-    local body="$1" findings stripped
-    # HAPI Bot (upstream github-actions) uses:
-    #   "- No Blocker, Major, Minor, or Nit findings in the added or modified lines."
-    # That is clean — but it does NOT contain the literal substring "No findings"
-    # (false ⚠️ / "address latest bot review" on #1253 and kin).
-    if echo "$body" | grep -qiE \
-        'No findings|No high-confidence|No issues found|No actionable|Didn.t find any|No new issues found|No Blocker, Major, Minor, or Nit findings|No Blocker[[:space:]].*findings'; then
-        return 0
-    fi
-    findings="$(printf '%s' "$body" | awk '
-        BEGIN { p = 0 }
-        /^\*\*Findings\*\*/ { p = 1; next }
-        /^\*\*[A-Za-z]/ { if (p) exit }
-        p { print }
-    ')"
-    stripped="$(printf '%s' "$findings" | sed '/^[[:space:]]*$/d')"
-    [[ -z "$stripped" ]] && return 0
-    # Findings block must be only None / - None. lines (no other bullets).
-    if printf '%s\n' "$stripped" | grep -qvE '^[[:space:]]*(-[[:space:]]*)?None\.?[[:space:]]*$'; then
-        return 1
-    fi
-    return 0
+    pec_bot_body_findings_clean "$@"
 }
 
 classify_one() {
