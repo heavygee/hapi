@@ -36,7 +36,7 @@ export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
 export { UsageStore } from './usageStore'
 
-const SCHEMA_VERSION: number = 22
+const SCHEMA_VERSION: number = 23
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -296,6 +296,7 @@ export class Store {
             19: () => this.migrateFromV19ToV20(),
             20: () => this.migrateFromV20ToV21(),
             21: () => this.migrateFromV21ToV22(),
+            22: () => this.migrateFromV22ToV23(),
         })
 
         if (currentVersion === 0) {
@@ -866,7 +867,13 @@ export class Store {
     }
 
     private migrateFromV21ToV22(): void {
-        // tiann/hapi#1404 — session-attached long-running jobs.
+        // Soup remumber: pin-sessions soup layer already owns V21→V22.
+        // Upstream feat/session-attached-jobs keeps jobs at V22; this soup
+        // branch creates session_jobs at V22→V23 instead.
+    }
+
+    private migrateFromV22ToV23(): void {
+        // tiann/hapi#1404 — session-attached long-running jobs (soup V23).
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS session_jobs (
                 session_id TEXT NOT NULL,

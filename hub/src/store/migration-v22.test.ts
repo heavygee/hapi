@@ -8,7 +8,7 @@ function getColumns(store: Store, table: string): string[] {
     return rows.map((row) => row.name)
 }
 
-describe('Store V21→V22 migration: session_jobs table', () => {
+describe('Store V22→V23 (soup); fresh schema still includes migration: session_jobs table', () => {
     it('fresh DB has session_jobs with expected columns', () => {
         const store = new Store(':memory:')
         const cols = getColumns(store, 'session_jobs')
