@@ -49,19 +49,30 @@ import {
     type CursorNotifyRuleOverlay
 } from './utils/cursorNotifyRuleOverlay';
 import {
+<<<<<<< ours
+=======
+    RPC_METHODS,
+>>>>>>> theirs
     classifyAcpRpcRejection,
     classifyCursorAgentMessage,
     isCompletionClaim,
     mapAcpStderrToFailure,
     type CursorAgentStreamFailure
+<<<<<<< ours
 } from './cursorAgentMessageClassifier';
+=======
+} from '@hapi/protocol';
+>>>>>>> theirs
 import {
     buildModelErrorBridgePrompt,
     canBridgeModelError,
     truncateLastUserMessage
 } from './cursorModelErrorBridge';
 import { getAutoBridgeTransientModelErrors } from './cursorModelErrorBridgePrefs';
+<<<<<<< ours
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
+=======
+>>>>>>> theirs
 
 class CursorAcpRemoteLauncher extends RemoteLauncherBase {
     private readonly session: CursorSession;
@@ -539,7 +550,15 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                 session.sendAgentMessage(converted);
             }
             messageBuffer.addMessage(error.message, 'status');
+<<<<<<< ours
             // STRUCTURAL signal: route typed stderr into modelError pipeline.
+=======
+            // STRUCTURAL signal: route typed stderr into the modelError pipeline
+            // (rate_limited / quota_exhausted / auth_failed / model_not_found)
+            // without text matching. Generic `unknown` stderr stays status-only —
+            // ACP treats stderr as logging, and the transport labels any
+            // "error"/"failed"/"exception" line as unknown.
+>>>>>>> theirs
             const failure = mapAcpStderrToFailure(error);
             if (failure) {
                 this.recordModelError(failure);

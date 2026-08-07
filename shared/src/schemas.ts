@@ -367,12 +367,12 @@ export const SessionSchema = z.object({
     activeTurnStartedAt: z.number().nullable().optional(),
     backgroundTaskCount: z.number().optional(),
     todos: TodosSchema.optional(),
+    todosUpdatedAt: z.number().optional(),
     teamState: TeamStateSchema.optional(),
     // Watermarks for structured SSE patches (PR #897). Dual EventSource
     // connections can deliver todos/teamState out of order; caches reject
     // stale patches with version <= these fields. Optional so older
     // full-session payloads and hand-built Session literals stay valid.
-    todosUpdatedAt: z.number().optional(),
     teamStateUpdatedAt: z.number().optional(),
     model: z.string().nullable().optional().default(null),
     modelReasoningEffort: z.string().nullable().optional().default(null),

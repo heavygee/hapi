@@ -1,6 +1,7 @@
 import type { Session } from '../sync/syncEngine'
 import type {
     ModelErrorNotification,
+    ModelErrorSendOutcome,
     NotificationChannel,
     TaskNotification
 } from '../notifications/notificationTypes'
@@ -140,9 +141,17 @@ export class PushNotificationChannel implements NotificationChannel {
         await this.pushService.sendToNamespace(session.namespace, payload)
     }
 
-    async sendModelError(session: Session, notification: ModelErrorNotification): Promise<void> {
+    async sendModelError(
+        session: Session,
+        notification: ModelErrorNotification,
+        ctx?: NotificationSendContext
+    ): Promise<ModelErrorSendOutcome> {
+        // FCM already delivered this dispatch — don't double-ping via web push.
+        if (ctx?.nativeGate?.sent) {
+            return 'unavailable'
+        }
         if (!session.active) {
-            return
+            return 'unavailable'
         }
 
         const agentName = getAgentName(session)
@@ -172,6 +181,7 @@ export class PushNotificationChannel implements NotificationChannel {
         // a system-tray ping. The web banner + pulsing-dot already
         // cover the foreground case.
         await this.pushService.sendToNamespace(session.namespace, payload)
+        return 'delivered'
     }
 
     private buildSessionPath(sessionId: string): string {

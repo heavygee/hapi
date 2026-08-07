@@ -138,7 +138,6 @@ function CodexImportIcon(props: { className?: string }) {
         </svg>
     )
 }
-
 function FolderOpenIcon(props: { className?: string }) {
     return (
         <svg
@@ -757,7 +756,19 @@ function SessionsPage() {
                 className={`${isSessionsIndex ? 'flex' : 'hidden split:flex'} w-full shrink-0 flex-col bg-[var(--app-bg)]`}
                 style={{ '--sidebar-w': `${sidebar.width}px` } as React.CSSProperties}
             >
-                <div className="flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)]">
+                {/* Soup meta row only — tools live once in SessionList headerActions
+                    (upstream #collapse-search). Remat debris that keeps BOTH is the
+                    "double tools" regression; heal 89 must strip outer chrome. */}
+                <div className="session-list-scrollbar-offset shrink-0 bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
+                    <div className="mx-auto flex w-full max-w-content items-center gap-2 px-2 py-2">
+                        <div className="shrink-0 text-xs text-[var(--app-hint)]">
+                            {t('sessions.count', { n: sessions.length, m: projectCount })}
+                        </div>
+                        <GardenXrEntryChip />
+                    </div>
+                </div>
+
+                <div className="flex min-h-0 flex-1 flex-col">
                     {error ? (
                         <div className="mx-auto w-full max-w-content px-3 py-2">
                             <div className="text-sm text-red-600">{error}</div>
