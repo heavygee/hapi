@@ -877,7 +877,7 @@ if [[ "$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
 if [[ "$args" == *"/api/sessions?limit=500"* ]]; then
 cat <<'JSON'
 {"sessions":[
- {"id":"18c0f3d5-4763-4735-bb64-f5fe7ac7d35d","active":false,"metadata":{"name":"","path":"/home/heavygee/coding/hapi","lifecycleState":"running","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":1383,"url":"https://github.com/tiann/hapi/pull/1383","role":"primary"}]}}
+ {"id":"18c0f3d5-4763-4735-bb64-f5fe7ac7d35d","active":false,"metadata":{"name":"","summary":{"text":"Storage Display","updatedAt":1},"path":"/home/heavygee/coding/hapi","lifecycleState":"running","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":1383,"url":"https://github.com/tiann/hapi/pull/1383","role":"primary"}]}}
 ]}
 JSON
 exit 0
@@ -889,6 +889,53 @@ out="$(run --dry-run --pr 1383 2>&1)" || true
 check "empty-name chip: owns #1383 (not orphan)" "! grep -q 'NO HAPI session\\|no owning session' <<<\"\$out\""
 check "empty-name chip: session id appears in MERGED advise" "grep -q '18c0f3d5' <<<\"\$out\""
 check "empty-name chip: #1383 in MERGED section" "grep -q '#1383' <<<\"\$out\" && grep -q 'MERGED' <<<\"\$out\""
+check "empty-name chip: dry-run heal promotes summary → name" "grep -q 'heal blank name 18c0f3d5: → \"Storage Display\"' <<<\"\$out\""
+check "empty-name chip: dry-run heal summary count" "grep -q 'blank-name heal: 1 promoted' <<<\"\$out\""
+
+# ============ 21. Blank-name heal prefers summary, else path basename ============
+# Source helpers without running main (extract via bash -c sourcing is heavy);
+# prove title picker + heal loop via dry-run on mixed fixtures.
+rm -f "$WORK/state.json" "$WORK/pings.log"
+cat >"$WORK/gh" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+if [[ "$args" == *"pr list"* ]]; then exit 0; fi
+exit 0
+EOF
+chmod +x "$WORK/gh"
+cat >"$WORK/batch" <<'EOF'
+#!/usr/bin/env bash
+echo '{}'
+EOF
+chmod +x "$WORK/batch"
+cat >"$WORK/curl" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+if [[ "$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
+if [[ "$args" == *"-X PATCH"* ]]; then
+    echo "UNEXPECTED PATCH in dry-run" >&2
+    exit 1
+fi
+if [[ "$args" == *"/api/sessions?limit=500"* ]]; then
+cat <<'JSON'
+{"sessions":[
+ {"id":"aaaa-summary","active":true,"metadata":{"name":"  ","summary":{"text":"From Summary"},"path":"/tmp/proj"}},
+ {"id":"bbbb-pathonly","active":true,"metadata":{"name":"","path":"/home/heavygee/coding/hapi/worktrees/foo"}},
+ {"id":"cccc-named","active":true,"metadata":{"name":"Keep Me","summary":{"text":"ignored"},"path":"/tmp/x"}},
+ {"id":"dddd-empty","active":true,"metadata":{"name":""}}
+]}
+JSON
+exit 0
+fi
+echo '{}'; exit 0
+EOF
+chmod +x "$WORK/curl"
+out="$(run --dry-run 2>&1)" || true
+check "blank heal: summary preferred over path" "grep -q 'heal blank name aaaa-sum: → \"From Summary\"' <<<\"\$out\""
+check "blank heal: path basename when no summary" "grep -q 'heal blank name bbbb-pat: → \"foo\"' <<<\"\$out\""
+check "blank heal: named session not touched" "! grep -q 'heal blank name cccc-nam' <<<\"\$out\""
+check "blank heal: no-title session skipped in count" "grep -q 'blank-name heal: 2 promoted, 1 no display title' <<<\"\$out\""
+check "blank heal: dry-run never PATCHes" "! grep -q 'UNEXPECTED PATCH' <<<\"\$out\""
 
 echo ""
 echo "hapi-meta-daily.test.sh: $PASS passed, $FAIL failed"
