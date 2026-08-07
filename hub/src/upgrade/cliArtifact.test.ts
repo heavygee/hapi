@@ -17,8 +17,12 @@ import {
     normalizeCompiledArtifactPath,
     pruneRetainedArtifacts,
     resetArtifactOfferRetentionForTests,
+    resolveArtifactSourceFingerprint,
+    __resetArtifactFingerprintCacheForTests,
+    __setFingerprintAttemptHookForTests,
     retainArtifactOffer,
     runnerArtifactCompileFeatures,
+    TransientArtifactBuildError,
     type ArtifactMeta,
 } from './cliArtifact'
 import { TUNWG_DOWNLOAD_TIMEOUT_MS } from './tunwgPin'
@@ -530,6 +534,33 @@ describe('fingerprintArtifactInputs / isArtifactCacheFresh', () => {
             writeFileSync(join(root, 'shared', 'tools', 'tunwg', 'tunwg-windows-amd64.exe'), 'win-bytes')
             expect(fingerprintArtifactInputs(root)).toBe(before)
         } finally {
+            rmSync(root, { recursive: true, force: true })
+        }
+    })
+
+    it('surfaces mid-replace fingerprint races as TransientArtifactBuildError', () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-artifact-churn-'))
+        try {
+            mkdirSync(join(root, 'cli', 'src'), { recursive: true })
+            mkdirSync(join(root, 'hub', 'src'), { recursive: true })
+            mkdirSync(join(root, 'shared', 'src'), { recursive: true })
+            writeFileSync(join(root, 'cli', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'hub', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'shared', 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'package.json'), JSON.stringify({ version: '0.25.1' }))
+            writeFileSync(join(root, 'cli', 'src', 'bootstrap.ts'), 'export const x = 1\n')
+            writeFileSync(join(root, 'hub', 'src', 'startHub.ts'), 'export {}\n')
+            writeFileSync(join(root, 'shared', 'src', 'index.ts'), 'export {}\n')
+
+            __resetArtifactFingerprintCacheForTests()
+            let n = 0
+            __setFingerprintAttemptHookForTests(() => {
+                n += 1
+                writeFileSync(join(root, 'cli', 'src', 'bootstrap.ts'), `export const x = ${n}\n`)
+            })
+            expect(() => resolveArtifactSourceFingerprint(root)).toThrow(TransientArtifactBuildError)
+        } finally {
+            __setFingerprintAttemptHookForTests(null)
             rmSync(root, { recursive: true, force: true })
         }
     })

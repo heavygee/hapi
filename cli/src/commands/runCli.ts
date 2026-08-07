@@ -58,7 +58,10 @@ export async function settleDurableDelegate(options: {
         opts?: { timeoutMs?: number },
     ) => Promise<boolean>
     killChild?: (child: ChildProcess, force?: boolean) => Promise<boolean>
-}): Promise<{ ready: true; exitCode: number } | { ready: false }> {
+}): Promise<
+    | { ready: true; exitCode: number }
+    | { ready: false; safeToFallback: boolean }
+> {
     const waitForExit = options.waitForExit ?? waitForDelegatedRunner
     const waitForReady = options.waitForReady ?? waitForRunnerHandoff
     const killChild = options.killChild ?? killProcessByChildProcess
@@ -67,28 +70,37 @@ export async function settleDurableDelegate(options: {
     if (options.detachedLauncher) {
         const exitCode = await waitForExit(options.child)
         if (exitCode !== 0) {
-            return { ready: false }
+            return { ready: false, safeToFallback: true }
         }
         const ready = await waitForReady(options.wrapperPid, { timeoutMs })
-        return ready ? { ready: true, exitCode } : { ready: false }
+        // Launcher exited cleanly but grandchild never became hub-ready —
+        // do not start a second runner on the current CLI until that dies.
+        return ready
+            ? { ready: true, exitCode }
+            : { ready: false, safeToFallback: false }
     }
 
     const exitPromise = waitForExit(options.child)
-    const ready = await Promise.race([
-        waitForReady(options.wrapperPid, { timeoutMs }),
-        exitPromise.then(() => false),
+    const outcome = await Promise.race([
+        waitForReady(options.wrapperPid, { timeoutMs }).then(
+            (ready) => (ready ? 'ready' as const : 'timeout' as const),
+        ),
+        exitPromise.then(() => 'exited' as const),
     ])
-    if (!ready) {
-        // Force-kill tree; a wedged target that ignores SIGTERM must not keep
-        // this wrapper blocked forever (marker clear / fallback never runs).
-        await killChild(options.child, true).catch(() => false)
-        await Promise.race([
-            exitPromise.catch(() => undefined),
-            new Promise<void>((resolve) => setTimeout(resolve, 3_000)),
-        ])
-        return { ready: false }
+    if (outcome === 'ready') {
+        return { ready: true, exitCode: await exitPromise }
     }
-    return { ready: true, exitCode: await exitPromise }
+    if (outcome === 'exited') {
+        return { ready: false, safeToFallback: true }
+    }
+    // Timeout: force-kill tree. Only fall back to current CLI when the
+    // candidate is confirmed gone — otherwise it can still take the lock later.
+    const stopped = await killChild(options.child, true).catch(() => false)
+    await Promise.race([
+        exitPromise.catch(() => undefined),
+        new Promise<void>((resolve) => setTimeout(resolve, 3_000)),
+    ])
+    return { ready: false, safeToFallback: stopped }
 }
 
 /**
@@ -188,6 +200,13 @@ export async function runCli(): Promise<void> {
                 detachedLauncher: args[0] === 'runner' && args[1] === 'start',
             })
             if (!settled.ready) {
+                if (!settled.safeToFallback) {
+                    // Candidate may still hold or acquire the runner lock —
+                    // wait it out; do not clear the marker and start a second runner.
+                    logger.debug('[UPGRADE] Durable target still alive after failed handoff; waiting')
+                    await waitForDelegatedRunner(child).catch(() => undefined)
+                    return
+                }
                 clearUpgradeTarget()
                 logger.debug('[UPGRADE] Durable target never became ready; using current CLI')
                 // Fall through to the current CLI's normal command dispatch.

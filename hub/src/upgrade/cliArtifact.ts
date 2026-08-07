@@ -229,16 +229,36 @@ export function fingerprintArtifactInputStats(monorepoRoot: string): string {
 }
 
 let cachedContentFingerprint: { signature: string; value: string } | null = null
+let fingerprintAttemptHookForTests: (() => void) | null = null
+
+/** Test helper — mutate sources between stats/content passes. */
+export function __setFingerprintAttemptHookForTests(hook: (() => void) | null): void {
+    fingerprintAttemptHookForTests = hook
+}
 
 /** Content fingerprint with a stats-signature gate for hot offer resolution. */
 export function resolveArtifactSourceFingerprint(monorepoRoot: string): string {
-    const signature = fingerprintArtifactInputStats(monorepoRoot)
-    if (cachedContentFingerprint && cachedContentFingerprint.signature === signature) {
-        return cachedContentFingerprint.value
+    // Soup rematerialize can delete/replace inputs between enumerate and read.
+    // Retry a consistent before/after stats snapshot; fail as deferred, not crash.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+            const before = fingerprintArtifactInputStats(monorepoRoot)
+            if (cachedContentFingerprint && cachedContentFingerprint.signature === before) {
+                return cachedContentFingerprint.value
+            }
+            fingerprintAttemptHookForTests?.()
+            const value = fingerprintArtifactInputs(monorepoRoot)
+            const after = fingerprintArtifactInputStats(monorepoRoot)
+            if (before !== after) {
+                continue
+            }
+            cachedContentFingerprint = { signature: after, value }
+            return value
+        } catch {
+            // Source tree mid-replace (ENOENT etc.) — retry.
+        }
     }
-    const value = fingerprintArtifactInputs(monorepoRoot)
-    cachedContentFingerprint = { signature, value }
-    return value
+    throw new TransientArtifactBuildError('Artifact source changed during fingerprinting')
 }
 
 /** Test helper — drop the in-process content-fingerprint cache. */
