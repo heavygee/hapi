@@ -702,3 +702,10 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/inactive-drafts-1378-soup @ driver/inactive-session-drafts
   # Tip: b762c90b7 (origin/driver/inactive-session-drafts) — PR tip 629db29e8
   - branch: driver/inactive-session-drafts
+
+  # tiann/hapi#1403 — expanded composer: plain Enter = newline (Ctrl/Cmd+Enter sends).
+  # Web-only. Collapsed still honors composerEnterBehavior. Peer-stack Playwright green.
+  # Do NOT open upstream PR until operator dogfood OK on :3006.
+  # Worktree: ~/coding/hapi/worktrees/composer-expand-enter-newline @ feat/composer-expand-enter-newline
+  # Tip: 9011417f0 (origin/feat/composer-expand-enter-newline)
+  - branch: feat/composer-expand-enter-newline
