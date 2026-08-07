@@ -40,7 +40,8 @@ describe('schema migration v22 to v23', () => {
 
         expect(events?.name).toBe('events')
         expect(links?.name).toBe('event_links')
-        expect(version.user_version).toBe(23)
+        // Tip after #1404: V23 A2A + V24 session_jobs.
+        expect(version.user_version).toBe(24)
         migrated.close()
     })
 })
