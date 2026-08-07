@@ -93,6 +93,10 @@ In the session view, tap the "Files" tab to:
 
 Yes. Open any session and use the chat interface to send messages directly to the AI agent.
 
+### How do I show progress for a long batch that outlives the agent?
+
+Use session-attached jobs (`hapi job`). The agent (or a wrapper script) registers a job on the session, heartbeats while the process runs, and clears it when done. The session list shows remaining / fraction / or an indeterminate "running" meter even when the agent is idle. See [Session-attached jobs](./session-jobs.md).
+
 ### Can I access a terminal remotely?
 
 Yes. Open a session in the web app and tap the Terminal tab for a remote shell.
