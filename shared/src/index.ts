@@ -30,4 +30,16 @@ export * from './toolFileAccess'
 export * from './utils'
 export * from './usage'
 export * from './version'
+export {
+    AttachedJobSchema,
+    AttachedJobUpsertSchema,
+    AttachedJobPatchSchema,
+    AttachedJobStatusSchema
+} from './schemas'
+export type {
+    AttachedJob,
+    AttachedJobUpsert,
+    AttachedJobPatch,
+    AttachedJobStatus
+} from './schemas'
 export type * from './types'

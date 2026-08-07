@@ -14,6 +14,7 @@ import { InboxStore } from './inboxStore'
 import { SettingsStore, ensureOverseerSettingsSchema } from './settingsStore'
 import { ensureOverseerEventsSchema, ensureDeletedSessionsSchema } from './events'
 import { ensureOverseerInboxSchema } from './inboxItems'
+import { SessionJobsStore } from './sessionJobsStore'
 import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
 import { UsageStore } from './usageStore'
@@ -24,6 +25,7 @@ export type {
     StoredPushSubscription,
     StoredFcmDevice,
     StoredScratchlistEntry,
+    StoredSessionJob,
     StoredSession,
     StoredUser,
     VersionedUpdateResult
@@ -40,11 +42,12 @@ export { SettingsStore } from './settingsStore'
 export type { ActiveBrainSetting } from './settingsStore'
 export type { InsertSystemEventInput, ListSystemEventsOptions, StoredSystemEvent } from './eventStore'
 export type { ListInboxItemsOptions, StoredInboxItem } from './inboxStore'
+export { SessionJobsStore } from './sessionJobsStore'
 export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
 export { UsageStore } from './usageStore'
 
-const SCHEMA_VERSION: number = 22
+const SCHEMA_VERSION: number = 23
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -54,6 +57,7 @@ const REQUIRED_TABLES = [
     'push_subscriptions',
     'fcm_devices',
     'session_scratchlist',
+    'session_jobs',
     'usage_events',
     'usage_scan_state',
     'events',
@@ -79,6 +83,7 @@ export class Store {
     readonly events: EventStore
     readonly inbox: InboxStore
     readonly settings: SettingsStore
+    readonly sessionJobs: SessionJobsStore
     readonly usage: UsageStore
     /**
      * Filesystem path of the underlying SQLite database, or ':memory:' for
@@ -134,6 +139,7 @@ export class Store {
         this.events = new EventStore(this.db)
         this.inbox = new InboxStore(this.db)
         this.settings = new SettingsStore(this.db)
+        this.sessionJobs = new SessionJobsStore(this.db)
         this.usage = new UsageStore(this.db)
     }
 
@@ -312,7 +318,9 @@ export class Store {
             20: () => this.migrateFromV20ToV21(),
             // Soup remap: upstream #1115 pin was v19→v20; soup v20=usage reindex
             // (#1359), upstream #1390 took v20→v21 for cache semantics — pin is v22.
+            // session-attached-jobs (#1404) creates session_jobs at v22→v23.
             21: () => this.migrateFromV21ToV22(),
+            22: () => this.migrateFromV22ToV23(),
         })
 
         if (currentVersion === 0) {
@@ -496,6 +504,25 @@ export class Store {
             );
             CREATE INDEX IF NOT EXISTS idx_session_scratchlist_session_created
                 ON session_scratchlist(session_id, created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS session_jobs (
+                session_id TEXT NOT NULL,
+                job_key TEXT NOT NULL,
+                label TEXT NOT NULL,
+                status TEXT NOT NULL,
+                done REAL,
+                total REAL,
+                remaining REAL,
+                unit TEXT,
+                detail TEXT,
+                heartbeat_at INTEGER NOT NULL,
+                started_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (session_id, job_key),
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_session_jobs_session_status_updated
+                ON session_jobs(session_id, status, updated_at DESC);
 
             CREATE TABLE IF NOT EXISTS usage_events (
                 session_id TEXT NOT NULL,
@@ -893,6 +920,30 @@ export class Store {
         if (!columns.has('pinned')) {
             this.db.exec('ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0')
         }
+    }
+
+    private migrateFromV22ToV23(): void {
+        // tiann/hapi#1404 — session-attached long-running jobs (soup V23).
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS session_jobs (
+                session_id TEXT NOT NULL,
+                job_key TEXT NOT NULL,
+                label TEXT NOT NULL,
+                status TEXT NOT NULL,
+                done REAL,
+                total REAL,
+                remaining REAL,
+                unit TEXT,
+                detail TEXT,
+                heartbeat_at INTEGER NOT NULL,
+                started_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (session_id, job_key),
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_session_jobs_session_status_updated
+                ON session_jobs(session_id, status, updated_at DESC);
+        `)
     }
 
     private getSessionColumnNames(): Set<string> {
