@@ -582,12 +582,13 @@ async function scheduleRunnerRelaunch(cliExecutable: string): Promise<ChildProce
 /**
  * Force-kill a replacement that timed out before hubReadyAt so it cannot
  * acquire the runner lock later and perform a delayed takeover.
+ * Returns true only when the kill helper reports the tree is gone.
  */
 export async function terminateTimedOutUpgradeCandidate(
     candidate: ChildProcess,
     kill: (child: ChildProcess, force?: boolean) => Promise<boolean> = killProcessByChildProcess,
-): Promise<void> {
-    await kill(candidate, true).catch(() => false)
+): Promise<boolean> {
+    return await kill(candidate, true).catch(() => false)
 }
 
 /** Minimal event surface shared by ChildProcess and test doubles. */
@@ -797,7 +798,24 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
         if (!handoffOk) {
             // Child may still be retrying the runner lock (~885s budget). Kill it
             // before reclaiming so a later lock gap cannot produce a delayed takeover.
-            await terminateTimedOutUpgradeCandidate(candidate)
+            const stopped = await terminateTimedOutUpgradeCandidate(candidate)
+            if (!stopped) {
+                // Surviving candidate + reclaim would recreate the race. Exit so
+                // a supervisor can restart a known-good generation instead.
+                logger.debug('[SELF-UPGRADE] Could not stop timed-out replacement; exiting')
+                if (options.requestShutdown) {
+                    options.requestShutdown()
+                } else {
+                    setTimeout(() => {
+                        process.exit(1)
+                    }, 250)
+                }
+                return scheduleExit({
+                    status: 'failed',
+                    message: 'Replacement could not be stopped; current runner is exiting',
+                    channel: options.offer.channel,
+                })
+            }
             // Mirror run.ts mtime handoff: never stay alive without the lock.
             // Child may have written runner.state.json then died — reclaim PID.
             // Do NOT rewrite the durable marker — a failed target must not become

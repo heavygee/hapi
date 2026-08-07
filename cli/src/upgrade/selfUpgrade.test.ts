@@ -651,7 +651,21 @@ describe('terminateTimedOutUpgradeCandidate', () => {
     it('force-kills the candidate so a timed-out handoff cannot take over later', async () => {
         const child = { pid: 4242 } as import('node:child_process').ChildProcess
         const kill = vi.fn(async () => true)
-        await terminateTimedOutUpgradeCandidate(child, kill)
+        await expect(terminateTimedOutUpgradeCandidate(child, kill)).resolves.toBe(true)
         expect(kill).toHaveBeenCalledWith(child, true)
+    })
+
+    it('returns false when the kill helper reports the tree is still alive', async () => {
+        const child = { pid: 4242 } as import('node:child_process').ChildProcess
+        const kill = vi.fn(async () => false)
+        await expect(terminateTimedOutUpgradeCandidate(child, kill)).resolves.toBe(false)
+    })
+
+    it('returns false when the kill helper rejects', async () => {
+        const child = { pid: 4242 } as import('node:child_process').ChildProcess
+        const kill = vi.fn(async () => {
+            throw new Error('ESRCH')
+        })
+        await expect(terminateTimedOutUpgradeCandidate(child, kill)).resolves.toBe(false)
     })
 })
