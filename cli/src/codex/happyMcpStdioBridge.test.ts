@@ -130,9 +130,9 @@ describe('runHappyMcpStdioBridge tool forwarding', () => {
             'change_title',
             'display_image',
             'display_video',
-            'list_peers',
             'ping_peer',
-            'inspect_peer'
+            'inspect_peer',
+            'list_peers',
         ])
     })
 

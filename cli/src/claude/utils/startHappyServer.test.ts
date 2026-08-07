@@ -111,7 +111,8 @@ describe('startHappyServer skill_lookup', () => {
             'display_image',
             'display_video',
             'ping_peer',
-            'inspect_peer'
+            'inspect_peer',
+            'list_peers',
         ])
     })
 
@@ -135,7 +136,8 @@ describe('startHappyServer skill_lookup', () => {
             'display_image',
             'display_video',
             'ping_peer',
-            'inspect_peer'
+            'inspect_peer',
+            'list_peers',
         ])
     })
 
