@@ -307,7 +307,7 @@ export function ScratchlistDrawerHost(props: {
                 entry.attachments
             )
         }
-        const accepted = await props.onSend(entry.text, attachments)
+        const accepted = await props.onSend(entry.text, attachments, undefined, 'queue')
         if (accepted) {
             props.onExitScratchlistMode()
         }

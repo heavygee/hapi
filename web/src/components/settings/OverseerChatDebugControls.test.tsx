@@ -3,24 +3,20 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { OverseerChatDebugControls } from './OverseerChatDebugControls'
 
 const {
-    fetchOverseerConverseRecent,
     overseerConverse,
     fetchOverseerBrains,
     fetchOverseerBrainModels,
     mockApi
 } = vi.hoisted(() => {
-    const fetchOverseerConverseRecent = vi.fn()
     const overseerConverse = vi.fn()
     const fetchOverseerBrains = vi.fn()
     const fetchOverseerBrainModels = vi.fn()
     const mockApi = {
-        fetchOverseerConverseRecent,
         overseerConverse,
         fetchOverseerBrains,
         fetchOverseerBrainModels
     }
     return {
-        fetchOverseerConverseRecent,
         overseerConverse,
         fetchOverseerBrains,
         fetchOverseerBrainModels,
@@ -35,11 +31,9 @@ vi.mock('@/lib/app-context', () => ({
 describe('OverseerChatDebugControls', () => {
     beforeEach(() => {
         HTMLElement.prototype.scrollTo = vi.fn()
-        fetchOverseerConverseRecent.mockReset()
         overseerConverse.mockReset()
         fetchOverseerBrains.mockReset()
         fetchOverseerBrainModels.mockReset()
-        fetchOverseerConverseRecent.mockResolvedValue({ turns: [] })
         fetchOverseerBrains.mockResolvedValue({ profiles: [] })
         fetchOverseerBrainModels.mockResolvedValue({ models: [] })
     })
@@ -52,11 +46,6 @@ describe('OverseerChatDebugControls', () => {
         render(<OverseerChatDebugControls />)
         const toggle = screen.getByRole('button', { name: /Talk to the Overseer/ })
         fireEvent.click(toggle)
-        await waitFor(() => expect(fetchOverseerConverseRecent).toHaveBeenCalled())
-        await waitFor(() => {
-            expect(screen.queryByText('Loading hub thread…')).toBeNull()
-        }, { timeout: 3000 })
-        const hydrateCallsBeforeSend = fetchOverseerConverseRecent.mock.calls.length
 
         const input = screen.getByRole('textbox')
         fireEvent.change(input, { target: { value: 'hello fleet' } })
@@ -64,11 +53,10 @@ describe('OverseerChatDebugControls', () => {
 
         expect(screen.getByText('hello fleet')).toBeTruthy()
 
+        // Collapse + reopen while converse is in flight — local turns must survive.
         fireEvent.click(toggle)
         fireEvent.click(toggle)
 
-        // Hydrate is skipped while converse is in flight — hub fetch must not wipe local turns.
-        expect(fetchOverseerConverseRecent.mock.calls.length).toBe(hydrateCallsBeforeSend)
         expect(screen.getByText('hello fleet')).toBeTruthy()
 
         resolveConverse({
@@ -78,6 +66,5 @@ describe('OverseerChatDebugControls', () => {
             brainOnline: true
         })
         await waitFor(() => expect(screen.getByText('on it')).toBeTruthy())
-        await waitFor(() => expect(fetchOverseerConverseRecent.mock.calls.length).toBeGreaterThan(hydrateCallsBeforeSend))
     })
 })
