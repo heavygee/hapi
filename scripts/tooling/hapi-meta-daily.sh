@@ -192,6 +192,8 @@ hub_sessions() {  # <jwt> → sessions array json
 }
 
 hub_rename() {  # <jwt> <sid> <title>
+    # Writes metadata.name only (manual/Meta rename lane). Do not use this to
+    # "fill in" blank names from summary — see md_session_display_title.
     [[ "$DRY_RUN" -eq 1 ]] && { echo "    [dry-run] rename → \"$3\"" >&2; return 0; }
     "$CURL_BIN" -sS --max-time 10 -X PATCH -H "Authorization: Bearer $1" \
         -H 'Content-Type: application/json' \
@@ -200,10 +202,29 @@ hub_rename() {  # <jwt> <sid> <title>
         || err "rename failed for ${2:0:8}"
 }
 
-# Display title for a session object (mirrors web getSessionTitle / upstream #271):
-# metadata.name → summary.text → path basename → empty.
-# Empty metadata.name is upstream-normal (change_title writes summary only).
-# Meta must fall back here — never PATCH name to "heal" blanks (fork bandage; reverted).
+# ---------------------------------------------------------------------------
+# Session titles (upstream HAPI, not fork-local)
+#
+# Two fields, different jobs:
+#   metadata.name          — operator / Meta / UI rename (PATCH). Often EMPTY.
+#   metadata.summary.text  — agent title via change_title / native title sync.
+#
+# Agents call change_title → CLI emits a summary message → hub stores
+# summary.text only. That is intentional (#271). Empty name + filled summary
+# is normal, not data loss.
+#
+# UI (web/src/lib/sessionTitle.ts getSessionTitle):
+#   name → summary.text → path basename → id prefix
+#
+# Meta must mirror that for labels (SESS_NAME / --json plan.title / strip
+# prefixes). Ownership is NEVER by title — only metadata.externalRefs
+# github_pr chips (Sparling 2026-08-06).
+#
+# Anti-pattern (reverted 2026-08-07): hourly PATCH healing blank name ← summary.
+# That fought upstream design and hid the real bug (Meta @tsv + empty name
+# shifted columns; fixed by NDJSON). If you are tempted to "fix empty name"
+# again, fall back in the reader instead.
+# ---------------------------------------------------------------------------
 md_session_display_title() {
     jq -r '
         . as $o
@@ -547,10 +568,9 @@ main() {
     declare -A MERGED_TITLE
 
     # NDJSON rows — NOT @tsv. Bash IFS=$'\t' collapses consecutive tabs, so an
-    # empty metadata.name shifts fields and Meta drops ownership (estate: #1383
-    # Storage Display sat orphan/`stale` while the chip was linked 2026-08-06..07).
-    # Label column is display title (name → summary.text → path), not raw name —
-    # empty name is upstream-normal (#271); do not PATCH-heal it.
+    # empty metadata.name shifts fields and Meta drops ownership (estate: #1383).
+    # Column [2] is md_session_display_title (name → summary → path), not raw
+    # metadata.name — see comment block above that helper.
     local row sid sid8 active name prs refs_json path lifecycle
     while IFS= read -r row; do
         [[ -z "$row" ]] && continue
