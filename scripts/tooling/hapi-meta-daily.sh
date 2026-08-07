@@ -527,9 +527,19 @@ main() {
     declare -A ALL_PR           # pr -> 1
     declare -A MERGED_TITLE
 
+    # NDJSON rows — NOT @tsv. Bash IFS=$'\t' collapses consecutive tabs, so an
+    # empty metadata.name shifts fields and Meta drops ownership (estate: #1383
+    # Storage Display sat orphan/`stale` while the chip was linked 2026-08-06..07).
     local row sid sid8 active name prs refs_json path lifecycle
-    while IFS=$'\t' read -r sid active name refs_json path lifecycle; do
+    while IFS= read -r row; do
+        [[ -z "$row" ]] && continue
+        sid="$(jq -r '.[0] // empty' <<<"$row")"
         [[ -z "$sid" ]] && continue
+        active="$(jq -r '.[1] // false' <<<"$row")"
+        name="$(jq -r '.[2] // ""' <<<"$row")"
+        refs_json="$(jq -c '.[3] // []' <<<"$row")"
+        path="$(jq -r '.[4] // ""' <<<"$row")"
+        lifecycle="$(jq -r '.[5] // ""' <<<"$row")"
 
         local hapi_refs=""
         hapi_refs="$(printf '%s' "${refs_json:-[]}" | jq -r '
@@ -555,7 +565,7 @@ main() {
             ALL_PR["$p"]=1
             PR_SESSIONS["$p"]="${PR_SESSIONS[$p]:+${PR_SESSIONS[$p]},}$sid8"
         done
-    done < <(printf '%s' "$sessions_json" | jq -r '
+    done < <(printf '%s' "$sessions_json" | jq -c '
         .[]
         | select(
             ((.metadata.externalRefs // [])
@@ -568,12 +578,10 @@ main() {
             .id,
             (.active // false),
             (.metadata.name // ""),
-            ((.metadata.externalRefs // []) | tostring),
+            (.metadata.externalRefs // []),
             (.metadata.path // ""),
             (.metadata.lifecycleState // "")
-          ]
-        | @tsv')
-
+          ]')
     if [[ -n "$PR_ONLY" ]]; then
         # Restrict to a single explicit PR (allows low-numbered upstream PRs).
         ALL_PR=(["$PR_ONLY"]=1)

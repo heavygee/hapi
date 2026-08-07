@@ -842,6 +842,54 @@ rc=${rc:-0}
 check "sparling fence: batch never sees 395 (exit!=99)" "[[ \$rc -ne 99 ]]"
 check "sparling fence: no FAIL classify message" "! grep -q 'classified Sparling' <<<\"\$out\""
 
+# ============ 20. Empty metadata.name must still own the PR (2026-08-07 #1383) ============
+# Bash IFS=$'\t' collapses consecutive tabs; @tsv with empty name used to shift
+# fields and drop ownership → Meta logged "NO HAPI session" / chip went stale.
+rm -f "$WORK/state.json" "$WORK/pings.log"
+cat >"$WORK/gh" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+if [[ "$args" == *"pr list"* && "$args" == *"--state open"* ]]; then
+    exit 0
+fi
+if [[ "$args" == *"pr list"* && "$args" == *"merged"* ]]; then
+    printf '1383\tfeat(web): storage pie\t2026-08-07T01:48:45Z\n'
+    exit 0
+fi
+exit 0
+EOF
+chmod +x "$WORK/gh"
+cat >"$WORK/batch" <<'EOF'
+#!/usr/bin/env bash
+j='{}'
+for a in "$@"; do
+    case "$a" in
+        1383) j="$(echo "$j" | jq -c '. + {"1383":{emoji:"🔧",action:"MERGED — clean up",prePr:false,merged:true}}')" ;;
+    esac
+done
+echo "$j"
+EOF
+chmod +x "$WORK/batch"
+cat >"$WORK/curl" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+if [[ "$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
+if [[ "$args" == *"/api/sessions?limit=500"* ]]; then
+cat <<'JSON'
+{"sessions":[
+ {"id":"18c0f3d5-4763-4735-bb64-f5fe7ac7d35d","active":false,"metadata":{"name":"","path":"/home/heavygee/coding/hapi","lifecycleState":"running","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":1383,"url":"https://github.com/tiann/hapi/pull/1383","role":"primary"}]}}
+]}
+JSON
+exit 0
+fi
+echo '{}'; exit 0
+EOF
+chmod +x "$WORK/curl"
+out="$(run --dry-run --pr 1383 2>&1)" || true
+check "empty-name chip: owns #1383 (not orphan)" "! grep -q 'NO HAPI session\\|no owning session' <<<\"\$out\""
+check "empty-name chip: session id appears in MERGED advise" "grep -q '18c0f3d5' <<<\"\$out\""
+check "empty-name chip: #1383 in MERGED section" "grep -q '#1383' <<<\"\$out\" && grep -q 'MERGED' <<<\"\$out\""
+
 echo ""
 echo "hapi-meta-daily.test.sh: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]] || exit 1
