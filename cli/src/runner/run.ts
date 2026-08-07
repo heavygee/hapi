@@ -21,7 +21,7 @@ import { withRetry } from '@/utils/time';
 import { isRetryableConnectionError } from '@/utils/errorUtils';
 
 import { cleanupRunnerState, getInstalledCliMtimeMs, isRunnerRunningCurrentlyInstalledHappyVersion, stopRunner, waitForRunnerHandoff } from './controlClient';
-import { createRunnerHandoffLockHooks, registerRunnerHandoffLockHooks } from './handoffLock';
+import { createRunnerHandoffLockHooks, registerRunnerHandoffLockHooks, FAILED_HANDOFF_LOCK_DELAY_INCREMENT_MS, FAILED_HANDOFF_LOCK_MAX_ATTEMPTS } from './handoffLock';
 import { startRunnerControlServer } from './controlServer';
 import { createWorktree, removeWorktree, type WorktreeInfo } from './worktree';
 import { validateWorkspaceDirectory } from './validateWorkspaceDirectory';
@@ -1374,10 +1374,13 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           const handoffOk = await waitForRunnerHandoff(process.pid, { timeoutMs: 30_000 });
           if (!handoffOk) {
             logger.debug(`[RUNNER RUN] Replacement runner did not register within 30s; attempting to re-acquire lock and stay alive to avoid leaving the machine offline.`);
-            // Re-acquire the lock with a long window (the child has likely
-            // either succeeded and we're seeing a stale state, or it gave
-            // up - in either case the lock should be available shortly).
-            const reacquired = await acquireRunnerLock(60, 500);
+            // Bound reclaim to FAILED_HANDOFF_LOCK_* (~27.5s backoff). The old
+            // (60, 500) window (~885s) left the parent unlocked long enough for a
+            // late-connecting child to create dual machine sockets.
+            const reacquired = await acquireRunnerLock(
+              FAILED_HANDOFF_LOCK_MAX_ATTEMPTS,
+              FAILED_HANDOFF_LOCK_DELAY_INCREMENT_MS,
+            );
             if (!reacquired) {
               // Lock is held by someone else (third-party runner, or a
               // child that succeeded but state file hasn't reflected the

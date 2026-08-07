@@ -12,7 +12,6 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { compareHapiVersions } from '@hapi/protocol/upgradeChannel'
 import { configuration } from '@/configuration'
-import { isBunCompiled } from '@/projectPath'
 import { resolveHappyCliExecutable } from '@/utils/spawnHappyCLI'
 import packageJson from '../../package.json'
 
@@ -222,10 +221,11 @@ export function isUpgradeTargetStaleRelativeToCli(
 
 /**
  * True when this process should re-exec into the upgrade-target binary.
- * Skip for plain source `bun run` unless HAPI_CLI_EXECUTABLE is already set —
- * developers should not be silently redirected into a compiled soup artifact.
- * Also skip during an authorized handoff: the child is already the candidate.
- * Also skip when the current CLI is newer than the marker (do not pin backwards).
+ * Skip during an authorized handoff: the child is already the candidate.
+ * Skip when HAPI_DISABLE_VERSION_HANDOFF=1 (soup/rebuild-only supervisors).
+ * Skip when the current CLI is newer than the marker (do not pin backwards).
+ * Source `bun ... runner start` still honors a persisted marker so a completed
+ * hub-artifact upgrade does not regress after supervisor restart.
  */
 export function shouldDelegateToUpgradeTarget(
     target: UpgradeTarget,
@@ -240,9 +240,10 @@ export function shouldDelegateToUpgradeTarget(
     if (isUpgradeTargetStaleRelativeToCli(target, deps.currentVersion ?? packageJson.version)) {
         return false
     }
-    if (!isBunCompiled() && !process.env.HAPI_CLI_EXECUTABLE?.trim()) {
+    if (process.env.HAPI_DISABLE_VERSION_HANDOFF === '1') {
         return false
     }
+    // runCli already limits delegation to runner start/start-sync.
     const current = resolveHappyCliExecutable()
     return !samePath(current, target.path)
 }

@@ -105,11 +105,39 @@ describe('upgradeTarget', () => {
         })).toBe(false)
     })
 
-    it('does not delegate for source bun runs without HAPI_CLI_EXECUTABLE', () => {
+    it('delegates for source bun runner starts when a durable marker exists', () => {
         const previous = process.env.HAPI_CLI_EXECUTABLE
+        const previousHandoff = process.env.HAPI_DISABLE_VERSION_HANDOFF
         delete process.env.HAPI_CLI_EXECUTABLE
+        delete process.env.HAPI_DISABLE_VERSION_HANDOFF
         try {
             const path = join(home, 'hapi-other')
+            writeFileSync(path, 'x')
+            expect(shouldDelegateToUpgradeTarget({
+                path,
+                targetVersion: '0.25.1',
+                updatedAt: Date.now(),
+            }, { currentVersion: '0.25.1' })).toBe(true)
+        } finally {
+            if (previous === undefined) {
+                delete process.env.HAPI_CLI_EXECUTABLE
+            } else {
+                process.env.HAPI_CLI_EXECUTABLE = previous
+            }
+            if (previousHandoff === undefined) {
+                delete process.env.HAPI_DISABLE_VERSION_HANDOFF
+            } else {
+                process.env.HAPI_DISABLE_VERSION_HANDOFF = previousHandoff
+            }
+        }
+    })
+    it('does not delegate when HAPI_DISABLE_VERSION_HANDOFF=1', () => {
+        const previous = process.env.HAPI_DISABLE_VERSION_HANDOFF
+        const previousExe = process.env.HAPI_CLI_EXECUTABLE
+        process.env.HAPI_DISABLE_VERSION_HANDOFF = '1'
+        delete process.env.HAPI_CLI_EXECUTABLE
+        try {
+            const path = join(home, 'hapi-other-optout')
             writeFileSync(path, 'x')
             expect(shouldDelegateToUpgradeTarget({
                 path,
@@ -118,15 +146,22 @@ describe('upgradeTarget', () => {
             })).toBe(false)
         } finally {
             if (previous === undefined) {
+                delete process.env.HAPI_DISABLE_VERSION_HANDOFF
+            } else {
+                process.env.HAPI_DISABLE_VERSION_HANDOFF = previous
+            }
+            if (previousExe === undefined) {
                 delete process.env.HAPI_CLI_EXECUTABLE
             } else {
-                process.env.HAPI_CLI_EXECUTABLE = previous
+                process.env.HAPI_CLI_EXECUTABLE = previousExe
             }
         }
     })
 
     it('does not delegate when the current CLI is newer than the durable marker', () => {
         const previous = process.env.HAPI_CLI_EXECUTABLE
+        const previousHandoff = process.env.HAPI_DISABLE_VERSION_HANDOFF
+        delete process.env.HAPI_DISABLE_VERSION_HANDOFF
         const path = join(home, 'hapi-0.25.1-old')
         writeFileSync(path, 'x')
         process.env.HAPI_CLI_EXECUTABLE = join(home, 'hapi-current-shim')
@@ -150,6 +185,11 @@ describe('upgradeTarget', () => {
                 delete process.env.HAPI_CLI_EXECUTABLE
             } else {
                 process.env.HAPI_CLI_EXECUTABLE = previous
+            }
+            if (previousHandoff === undefined) {
+                delete process.env.HAPI_DISABLE_VERSION_HANDOFF
+            } else {
+                process.env.HAPI_DISABLE_VERSION_HANDOFF = previousHandoff
             }
         }
     })
