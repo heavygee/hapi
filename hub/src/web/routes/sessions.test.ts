@@ -163,7 +163,12 @@ function createApp(session: Session, opts?: {
             commands: []
         })),
         forkConversation: opts?.forkConversation ?? (async () => ({ type: 'success', sessionId: 'child-1' })),
-        rewindConversation: opts?.rewindConversation ?? (async () => ({ type: 'success' }))
+        rewindConversation: opts?.rewindConversation ?? (async () => ({ type: 'success' })),
+        getPrimaryAttachedJobsBySessionIds: (_ids: string[]) => new Map(),
+        getPrimaryAttachedJob: (_id: string) => null,
+        upsertAttachedJob: async () => ({ outcome: 'upserted' as const }),
+        patchAttachedJob: async () => null,
+        deleteAttachedJob: async () => false,
     } as Partial<SyncEngine>
 
     const app = new Hono<WebAppEnv>()
