@@ -13,7 +13,8 @@ import {
     shouldDelegateToUpgradeTarget,
 } from '@/upgrade/upgradeTarget'
 import { waitForRunnerHandoff } from '@/runner/controlClient'
-import { killProcessByChildProcess } from '@/utils/process'
+import { readRunnerState } from '@/persistence'
+import { isProcessAlive, killProcessByChildProcess } from '@/utils/process'
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import crossSpawn from 'cross-spawn'
@@ -66,6 +67,8 @@ export async function settleDurableDelegate(options: {
         opts?: { timeoutMs?: number },
     ) => Promise<boolean>
     killChild?: (child: ChildProcess, force?: boolean) => Promise<boolean>
+    readState?: () => Promise<{ pid?: number } | null>
+    isAlive?: (pid: number) => boolean
 }): Promise<
     | { ready: true; exitCode: number }
     | { ready: false; safeToFallback: boolean }
@@ -73,6 +76,8 @@ export async function settleDurableDelegate(options: {
     const waitForExit = options.waitForExit ?? waitForDelegatedRunner
     const waitForReady = options.waitForReady ?? waitForRunnerHandoff
     const killChild = options.killChild ?? killProcessByChildProcess
+    const readState = options.readState ?? readRunnerState
+    const isAlive = options.isAlive ?? isProcessAlive
     const timeoutMs = options.timeoutMs ?? 30_000
 
     if (options.detachedLauncher) {
@@ -81,11 +86,19 @@ export async function settleDurableDelegate(options: {
             return { ready: false, safeToFallback: true }
         }
         const ready = await waitForReady(options.wrapperPid, { timeoutMs })
-        // Launcher exited cleanly but grandchild never became hub-ready —
-        // do not start a second runner on the current CLI until that dies.
-        return ready
-            ? { ready: true, exitCode }
-            : { ready: false, safeToFallback: false }
+        if (ready) {
+            return { ready: true, exitCode }
+        }
+        // Launcher exited; only suppress fallback while a different live PID is
+        // still connecting. A dead grandchild must clear the marker and fall through.
+        const state = await readState()
+        const replacementAlive = Boolean(
+            state
+            && typeof state.pid === 'number'
+            && state.pid !== options.wrapperPid
+            && isAlive(state.pid),
+        )
+        return { ready: false, safeToFallback: !replacementAlive }
     }
 
     const exitPromise = waitForExit(options.child)

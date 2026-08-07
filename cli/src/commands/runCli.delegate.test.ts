@@ -179,10 +179,32 @@ describe('settleDurableDelegate', () => {
             waitForReady,
             killChild,
             timeoutMs: 10,
+            readState: async () => ({ pid: 999 }),
+            isAlive: () => true,
         })
         expect(settled).toEqual({ ready: false, safeToFallback: false })
         // Grandchild may still be connecting — do not kill the process group.
         expect(killChild).not.toHaveBeenCalled()
+    })
+
+    it('for detached runner start, falls back when grandchild never claimed a live PID', async () => {
+        const child = Object.assign(new EventEmitter(), {
+            pid: 4242,
+            kill: vi.fn(),
+        }) as EventEmitter & ChildProcess & { kill: ReturnType<typeof vi.fn> }
+        const settled = await settleDurableDelegate({
+            child,
+            wrapperPid: 1,
+            useProcessGroup: true,
+            detachedLauncher: true,
+            waitForExit: vi.fn(async () => 0),
+            waitForReady: vi.fn(async () => false),
+            killChild: vi.fn(async () => true),
+            timeoutMs: 10,
+            readState: async () => null,
+            isAlive: () => false,
+        })
+        expect(settled).toEqual({ ready: false, safeToFallback: true })
     })
 
     it('for detached runner start, fails closed on non-zero launcher exit', async () => {

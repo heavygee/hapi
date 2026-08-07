@@ -613,6 +613,17 @@ export async function ensureCliArtifact(options: {
             throw new Error(`bun compile failed: ${detail}`)
         }
 
+        // Successful exit can still be a mixed build if soup rematerialized mid-compile.
+        const fingerprintAfterSuccess = resolveArtifactSourceFingerprint(monorepo)
+        if (fingerprintAfterSuccess !== sourceFingerprint) {
+            try {
+                unlinkSync(produced)
+            } catch {
+                // best-effort cleanup of mixed/stale bytes
+            }
+            throw new TransientArtifactBuildError('Artifact source changed during compile')
+        }
+
         const buf = readFileSync(outPath)
         const sha256 = createHash('sha256').update(buf).digest('hex')
         const meta: ArtifactMeta = {
