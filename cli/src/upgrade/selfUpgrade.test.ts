@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { Readable, Writable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
     __resetRunnerSelfUpgradeGateForTests,
     __setRunnerSelfUpgradeInFlightForTests,
@@ -16,17 +16,19 @@ import {
     mergeParentRunnerStateForReclaim,
     pruneSupersededArtifacts,
     pruneSupersededArtifactsAfterDurableMarker,
+    publishCurrentCliEntrypoint,
     remainingDeadlineMs,
     resolvePostNpmInstallExecutable,
     shouldApplyUpgradeOffer,
     shouldAttemptInstalledCliMtimeHandoff,
+    terminateTimedOutUpgradeCandidate,
     UPGRADE_STEP_TIMEOUT_MS,
     versionProbeCommand,
     waitForChildSpawn,
 } from './selfUpgrade'
 import type { HubUpgradeOffer } from '@hapi/protocol/upgradeChannel'
 import { CURRENT_MACHINE_CAPABILITIES } from '@hapi/protocol/runnerCapabilities'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -589,5 +591,67 @@ describe('mergeParentRunnerStateForReclaim', () => {
         // Explicitly not the child's polluted values
         expect(restored.httpPort).not.toBe(childWrote.httpPort)
         expect(restored.startedWithCliMtimeMs).not.toBe(childWrote.startedWithCliMtimeMs)
+    })
+})
+
+describe('publishCurrentCliEntrypoint', () => {
+    it('restores the previous entrypoint when Unix link creation fails', async () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-entrypoint-'))
+        try {
+            const linkPath = join(dir, 'hapi')
+            const finalPath = join(dir, 'hapi-0.99.0')
+            writeFileSync(linkPath, 'old-entrypoint')
+            writeFileSync(finalPath, 'new-binary')
+
+            await expect(publishCurrentCliEntrypoint({
+                finalPath,
+                linkPath,
+                platform: 'linux',
+                run: async () => ({ ok: false, output: 'ln: failed' }),
+            })).rejects.toThrow(/Failed to update current CLI link|ln: failed/)
+
+            expect(existsSync(linkPath)).toBe(true)
+            expect(readFileSync(linkPath, 'utf8')).toBe('old-entrypoint')
+            expect(existsSync(`${linkPath}.prev`)).toBe(false)
+        } finally {
+            rmSync(dir, { recursive: true, force: true })
+        }
+    })
+
+    it('replaces the entrypoint when link creation succeeds', async () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-entrypoint-ok-'))
+        try {
+            const linkPath = join(dir, 'hapi')
+            const finalPath = join(dir, 'hapi-0.99.0')
+            writeFileSync(linkPath, 'old-entrypoint')
+            writeFileSync(finalPath, 'new-binary')
+
+            await publishCurrentCliEntrypoint({
+                finalPath,
+                linkPath,
+                platform: 'linux',
+                run: async (_command, args) => {
+                    // Mimic ln -sfn target linkPath
+                    const target = args[1]!
+                    const path = args[2]!
+                    writeFileSync(path, `symlink->${target}`)
+                    return { ok: true, output: '' }
+                },
+            })
+
+            expect(readFileSync(linkPath, 'utf8')).toBe(`symlink->${finalPath}`)
+            expect(existsSync(`${linkPath}.prev`)).toBe(false)
+        } finally {
+            rmSync(dir, { recursive: true, force: true })
+        }
+    })
+})
+
+describe('terminateTimedOutUpgradeCandidate', () => {
+    it('force-kills the candidate so a timed-out handoff cannot take over later', async () => {
+        const child = { pid: 4242 } as import('node:child_process').ChildProcess
+        const kill = vi.fn(async () => true)
+        await terminateTimedOutUpgradeCandidate(child, kill)
+        expect(kill).toHaveBeenCalledWith(child, true)
     })
 })

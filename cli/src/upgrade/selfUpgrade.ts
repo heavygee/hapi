@@ -23,6 +23,7 @@ import {
 import { readRunnerState, writeRunnerState, type RunnerLocallyPersistedState } from '@/persistence'
 import { buildHubRequestHeaders } from '@/api/hubExtraHeaders'
 import { writeUpgradeTarget, readUpgradeTarget, durableTargetGeneration } from '@/upgrade/upgradeTarget'
+import { killProcessByChildProcess } from '@/utils/process'
 
 export type ApplyDecision =
     | { apply: true; reason: 'upgrade' }
@@ -410,6 +411,51 @@ export function assertArtifactDownloadAllowsBody(response: { status: number; ok:
     }
 }
 
+/**
+ * Point ~/.hapi/bin/hapi(.exe) at the newly installed versioned binary.
+ * Parks the previous entrypoint at `.prev` and restores it if link/copy fails
+ * so supervisors do not lose the launch path mid-upgrade.
+ */
+export async function publishCurrentCliEntrypoint(options: {
+    finalPath: string
+    linkPath: string
+    platform?: NodeJS.Platform
+    run?: (command: string, args: string[]) => Promise<{ ok: boolean; output: string }>
+}): Promise<void> {
+    const isWin = (options.platform ?? process.platform) === 'win32'
+    const previousPath = `${options.linkPath}.prev`
+    const run = options.run ?? runCommand
+    try {
+        if (existsSync(options.linkPath)) {
+            renameSync(options.linkPath, previousPath)
+        }
+    } catch {
+        // best-effort park of the previous entrypoint
+    }
+    try {
+        if (isWin) {
+            copyFileSync(options.finalPath, options.linkPath)
+        } else {
+            const linked = await run('ln', ['-sfn', options.finalPath, options.linkPath])
+            if (!linked.ok) {
+                throw new Error(linked.output || 'Failed to update current CLI link')
+            }
+        }
+        try {
+            if (existsSync(previousPath)) {
+                unlinkSync(previousPath)
+            }
+        } catch {
+            // best-effort cleanup of previous current binary
+        }
+    } catch (error) {
+        if (!existsSync(options.linkPath) && existsSync(previousPath)) {
+            renameSync(previousPath, options.linkPath)
+        }
+        throw error
+    }
+}
+
 async function installFromArtifact(
     offer: HubUpgradeOffer,
     downloadBaseUrl: string,
@@ -489,36 +535,16 @@ async function installFromArtifact(
     } else {
         renameSync(tmpPath, finalPath)
     }
-    try {
-        if (existsSync(linkPath)) {
-            renameSync(linkPath, `${linkPath}.prev`)
-        }
-    } catch {
-        // best-effort
-    }
-    try {
-        if (isWin) {
-            // No ln -sfn on Windows; copy so `hapi.exe` is a real PE the
-            // scheduled task / start scripts can launch.
-            copyFileSync(finalPath, linkPath)
-            try {
-                if (existsSync(`${linkPath}.prev`)) {
-                    unlinkSync(`${linkPath}.prev`)
-                }
-            } catch {
-                // best-effort cleanup of previous current binary
-            }
-        } else {
-            await runCommand('ln', ['-sfn', finalPath, linkPath])
-        }
-    } catch (error) {
-        logger.debug('[SELF-UPGRADE] current-binary link failed; binary still at versioned path', error)
-    }
+    await publishCurrentCliEntrypoint({
+        finalPath,
+        linkPath,
+        platform: process.platform,
+    })
 
     return finalPath
 }
 
-async function scheduleRunnerRelaunch(cliExecutable: string): Promise<void> {
+async function scheduleRunnerRelaunch(cliExecutable: string): Promise<ChildProcess> {
     const state = await readRunnerState()
     const args = Array.isArray(state?.startedWithArgv) && state.startedWithArgv[0] === 'runner'
         ? state.startedWithArgv
@@ -550,6 +576,18 @@ async function scheduleRunnerRelaunch(cliExecutable: string): Promise<void> {
     // Do not process.exit here. ApiMachineClient delays requestShutdown by
     // ~500ms so runner lock/state cleanup can run; a hard exit races that and
     // skips cleanup. Caller invokes requestShutdown after handoff confirms.
+    return child
+}
+
+/**
+ * Force-kill a replacement that timed out before hubReadyAt so it cannot
+ * acquire the runner lock later and perform a delayed takeover.
+ */
+export async function terminateTimedOutUpgradeCandidate(
+    candidate: ChildProcess,
+    kill: (child: ChildProcess, force?: boolean) => Promise<boolean> = killProcessByChildProcess,
+): Promise<void> {
+    await kill(candidate, true).catch(() => false)
 }
 
 /** Minimal event surface shared by ChildProcess and test doubles. */
@@ -753,10 +791,13 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
         // Spawn replacement, release the runner lock so the child can register,
         // then wait for handoff before shutting down. Mirrors run.ts mtime handoff
         // so a failed child does not leave the machine offline after a "started" RPC.
-        await scheduleRunnerRelaunch(installedExecutable)
+        const candidate = await scheduleRunnerRelaunch(installedExecutable)
         await releaseRunnerLockForHandoff()
         const handoffOk = await waitForRunnerHandoff(process.pid, { timeoutMs: 30_000 })
         if (!handoffOk) {
+            // Child may still be retrying the runner lock (~885s budget). Kill it
+            // before reclaiming so a later lock gap cannot produce a delayed takeover.
+            await terminateTimedOutUpgradeCandidate(candidate)
             // Mirror run.ts mtime handoff: never stay alive without the lock.
             // Child may have written runner.state.json then died — reclaim PID.
             // Do NOT rewrite the durable marker — a failed target must not become
