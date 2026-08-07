@@ -7,7 +7,7 @@ alwaysApply: true
 
 Whenever you **create, generate, edit, or regenerate** an image or video for the operator while this session is under HAPI, show it **inline in the current HAPI chat** before claiming done.
 
-**Estate canon:** `~/coding/skills/operator-visible-proof/SKILL.md` (core skill).
+**Estate canon (doc, not a skill):** `~/coding/server-setup/docs/operator-visible-proof.md`.
 
 MCP: `display_image` / `display_video` with absolute `path`.  
 Fallback: `bun scripts/tooling/hapi-display-image.mjs <session-prefix> <absolute-path> [title]`.
