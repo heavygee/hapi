@@ -1,5 +1,5 @@
 /*
- * Peer-stack e2e for tiann/hapi#1412 — GET /share?url=&text=&title= deep-link ingest.
+ * Peer-stack e2e for tiann/hapi#1412 — /share#url=&text=&title= deep-link ingest.
  * Fork main only — run via run-e2e-on-peer-stack.mjs --worktree <product worktree>.
  */
 
@@ -37,19 +37,19 @@ test.describe('share native deep-link ingest — peer stack (#1412)', () => {
         requirePeerEnv()
     })
 
-    test('GET url+text opens picker and rewrites to ?id=', async ({ page }) => {
+    test('hash url+text opens picker and rewrites to ?id=', async ({ page }) => {
         await injectAuth(page)
         await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 60_000 })
 
         const sharedUrl = 'https://example.com/quest-relay-clip'
         const sharedText = 'Quest Audio Relay deep-link proof'
-        const qs = new URLSearchParams({
+        const hash = new URLSearchParams({
             url: sharedUrl,
             text: sharedText,
             title: 'Deep link title',
-        })
+        }).toString()
 
-        await page.goto(`/share?${qs.toString()}`, {
+        await page.goto(`/share#${hash}`, {
             waitUntil: 'domcontentloaded',
             timeout: 60_000,
         })
@@ -64,8 +64,7 @@ test.describe('share native deep-link ingest — peer stack (#1412)', () => {
 
         const id = new URL(page.url()).searchParams.get('id')
         expect(id).toBeTruthy()
-        expect(new URL(page.url()).searchParams.get('url')).toBeNull()
-        expect(new URL(page.url()).searchParams.get('text')).toBeNull()
+        expect(new URL(page.url()).hash).toBe('')
 
         mkdirSync(dirname(SCREENSHOT_PATH), { recursive: true })
         await page.screenshot({ path: SCREENSHOT_PATH, fullPage: true })
