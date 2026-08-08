@@ -696,12 +696,8 @@ layers:
   # Tip: 9cb1e1bcd (origin/driver/web-pinned-sessions) — union on remat tip-forward
   - branch: driver/web-pinned-sessions
 
-  # tiann/hapi#1378 — preserve composer text+attachment drafts across inactive
-  # session archive/switch/reopen (techotaku39). Web-only. Soup union tip because
-  # thin PR tip conflicts with live soup ShareSeed/cursor gates.
-  # Worktree: ~/coding/hapi/worktrees/inactive-drafts-1378-soup @ driver/inactive-session-drafts
-  # Tip: b762c90b7 (origin/driver/inactive-session-drafts) — PR tip 629db29e8
-  - branch: driver/inactive-session-drafts
+  # DROPPED 2026-08-08: driver/inactive-session-drafts MERGED as tiann/hapi#1378
+  # (bdf8da1d5a84). Was: preserve composer drafts across inactive resume.
 
   # tiann/hapi#1403 — expanded composer: plain Enter = newline (Ctrl/Cmd+Enter sends).
   # Web-only. Collapsed still honors composerEnterBehavior. Peer-stack Playwright green.
