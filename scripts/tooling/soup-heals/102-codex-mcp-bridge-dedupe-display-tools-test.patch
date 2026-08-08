@@ -1,0 +1,39 @@
+From: Meta remat <meta@local>
+Subject: [PATCH] fix(soup): dedupe Codex MCP bridge display_* test expectations
+
+Heal 61 prepended display_image/display_video after #1405 already added
+them (+ display_media). Duplicate object keys fail tsc TS1117 and block remat.
+
+---
+diff --git a/cli/src/codex/utils/buildHapiMcpBridge.test.ts b/cli/src/codex/utils/buildHapiMcpBridge.test.ts
+index cdda9af5a..3b98db23b 100644
+--- a/cli/src/codex/utils/buildHapiMcpBridge.test.ts
++++ b/cli/src/codex/utils/buildHapiMcpBridge.test.ts
+@@ -74,12 +74,10 @@ describe('buildHapiMcpBridge skill lookup config', () => {
+             'change_title,display_image,display_video,display_media,list_peers,ping_peer,inspect_peer,skill_lookup'
+         ])
+         expect(bridge.mcpServers.hapi.tools).toEqual({
+-            display_image: { approval_mode: 'prompt' },
+-            display_video: { approval_mode: 'prompt' },
+-            change_title: { approval_mode: 'approve' },
+             display_image: { approval_mode: 'prompt' },
+             display_video: { approval_mode: 'prompt' },
+             display_media: { approval_mode: 'prompt' },
++            change_title: { approval_mode: 'approve' },
+             list_peers: { approval_mode: 'approve' },
+             skill_lookup: { approval_mode: 'approve' }
+         })
+@@ -90,12 +88,10 @@ describe('buildHapiMcpBridge skill lookup config', () => {
+ 
+         expect(harness.cliArgs.at(-1)).toBe('change_title,display_image,display_video,display_media,list_peers,ping_peer,inspect_peer')
+         expect(bridge.mcpServers.hapi.tools).toEqual({
+-            display_image: { approval_mode: 'prompt' },
+-            display_video: { approval_mode: 'prompt' },
+-            change_title: { approval_mode: 'approve' },
+             display_image: { approval_mode: 'prompt' },
+             display_video: { approval_mode: 'prompt' },
+             display_media: { approval_mode: 'prompt' },
++            change_title: { approval_mode: 'approve' },
+             list_peers: { approval_mode: 'approve' }
+         })
+     })
