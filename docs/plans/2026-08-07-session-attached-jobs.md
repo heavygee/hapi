@@ -113,7 +113,7 @@ Soup promote + `hapi-ping-peer` Lidarr session with attach recipe. No upstream P
 
 - Upstream issue: https://github.com/tiann/hapi/issues/1404
 - Feat tip: `feat/session-attached-jobs` — SCHEMA V22 for upstream
-- Soup tip: `52093f896` on `driver/session-attached-jobs` (2026-08-08 remat — MCP `session_job`, MetadataSchema redirects, `--started-at`, SCHEMA 23); hub restart done
+- Soup tip: `801ac8983` on `driver/session-attached-jobs` (2026-08-08 remat — tri-state pin default `jobs` + prior MCP/startedAt tip); web-only tip-forward, hard-reload dogfood
 - Opus cold review (`eb1746db`, tip `266965f8a`): **ship with fixes — Ready-for-PR: NO**
   - Majors: idle-agent heartbeat gap → `hapi job run` supervisor; post-merge `$HAPI_SESSION_ID` 404 → job-owner redirects; CLI test gap; steer only 4/10 flavors (no MCP yet)
   - Discoverability ~40% attach / ~20% sustained without coaching
