@@ -74,7 +74,7 @@ vi.mock('@/claude/utils/startHappyServer', () => ({
         harness.startHappyServerOptions = options
         return {
             url: 'http://127.0.0.1:1234',
-            toolNames: ['change_title', 'display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer', 'skill_lookup'],
+            toolNames: ['change_title', 'display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer', 'session_job', 'skill_lookup'],
             stop: harness.stopServer
         }
     })
