@@ -1883,8 +1883,8 @@ const settingsUsageRoute = createRoute({
 // Web Share Target landing route. Service worker (`web/src/sw.ts`)
 // intercepts the manifest's `POST /share` and 303-redirects here with an
 // IDB transfer id. `error=ingest` is set when the SW failed to write IDB.
-// Native / deep-link clients may instead open GET `/share?url=&text=&title=`
-// (no `id`); SharePage synthesizes the same IDB transfer client-side.
+// Native / deep-link clients open `/share#url=&text=&title=` (fragment, not
+// query) so shared content is never part of the HTTP request line.
 const shareRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/share',
