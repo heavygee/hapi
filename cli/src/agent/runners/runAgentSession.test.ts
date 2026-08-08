@@ -167,7 +167,7 @@ describe('runAgentSession', () => {
             '--url',
             'http://127.0.0.1:1234',
             '--tools',
-            'change_title,display_image,display_video,display_media,list_peers,ping_peer,inspect_peer,skill_lookup'
+            'change_title,display_image,display_video,display_media,list_peers,ping_peer,inspect_peer,session_job,skill_lookup'
         ])
         expect(harness.newSessionOptions).toMatchObject({
             cwd: '/tmp/project',
