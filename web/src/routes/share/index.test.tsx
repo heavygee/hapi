@@ -28,6 +28,16 @@ vi.mock('@/hooks/useMachineLabels', () => ({
     useMachineLabels: () => ({}),
 }))
 
+vi.mock('@/hooks/useSessionPreviewLimit', () => ({
+    useSessionPreviewLimit: () => ({ sessionPreviewLimit: 50, setSessionPreviewLimit: () => {} }),
+    DEFAULT_SESSION_PREVIEW_LIMIT: 50,
+}))
+
+vi.mock('@/lib/sharePickerSessions', () => ({
+    countHiddenActiveSharePickerSessions: () => 0,
+    filterSharePickerSessions: (sessions: unknown[]) => sessions,
+}))
+
 vi.mock('@/lib/use-translation', () => ({
     useTranslation: () => ({ t: (key: string) => key }),
 }))

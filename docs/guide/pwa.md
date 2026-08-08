@@ -89,9 +89,8 @@ Companions that cannot use Web Share Target (for example a native app on a heads
 
 See [Web Share Target](https://developer.chrome.com/docs/capabilities/web-apis/web-share-target) for the POST vs GET distinction.
 
-## Caching Strategy
 
-HAPI uses intelligent caching:
+lligent caching:
 
 | Content | Strategy | Duration |
 |---------|----------|----------|
