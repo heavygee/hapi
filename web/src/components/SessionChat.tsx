@@ -2052,6 +2052,8 @@ function SessionChatInner(props: SessionChatProps) {
                         onSuppressSendErrorRestore={props.onSuppressSendErrorRestore}
                         />
                     </div>
+                    </div>
+                    </div>
                 </DragDropZone>
             </AssistantRuntimeProvider>
 
