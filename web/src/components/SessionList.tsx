@@ -32,7 +32,10 @@ import { useTranslation } from '@/lib/use-translation'
 import { DEFAULT_SESSION_PREVIEW_LIMIT, useSessionPreviewLimit } from '@/hooks/useSessionPreviewLimit'
 import { useSessionListStatusMode } from '@/hooks/useSessionListStatusMode'
 import { useShowActiveSessionsOnly } from '@/hooks/useShowActiveSessionsOnly'
-import { usePinInProgressSessions } from '@/hooks/usePinInProgressSessions'
+import {
+    usePinInProgressSessions,
+    type PinInProgressMode
+} from '@/hooks/usePinInProgressSessions'
 import { classifySessionAttention, sessionIsUnread } from '@/lib/sessionAttention'
 import {
     getSessionLastSeenAt,
@@ -82,14 +85,34 @@ const RUNNING_BUCKETS = [
 
 type RunningBucketKey = (typeof RUNNING_BUCKETS)[number]['key']
 
+function hasRunningAttachedJob(session: SessionSummary): boolean {
+    return session.attachedJob?.status === 'running'
+}
+
+function hasAgentInProgressActivity(session: SessionSummary): boolean {
+    if (!session.active) {
+        return false
+    }
+    return session.thinking
+        || (session.backgroundTaskCount ?? 0) > 0
+        || (session.pendingRequestsCount ?? 0) > 0
+}
+
 /**
- * Sessions that warrant the optional pinned top sections.
- * Any connected session floats — a session that just finished executing stays
- * visible at the top (Active tier) because the operator usually continues the
- * conversation; only disconnected sessions fall into directory groups.
+ * Sessions that float into the pinned In progress section.
+ * Mode is a degree: off → jobs (outliving attachedJob) → all (jobs + agent activity).
  */
-function isPinnedInProgressSession(session: SessionSummary): boolean {
-    return session.active
+export function isPinnedInProgressSession(
+    session: SessionSummary,
+    mode: PinInProgressMode
+): boolean {
+    if (mode === 'off') {
+        return false
+    }
+    if (mode === 'jobs') {
+        return hasRunningAttachedJob(session)
+    }
+    return hasRunningAttachedJob(session) || hasAgentInProgressActivity(session)
 }
 
 export type SessionTimeRange = {
@@ -1190,7 +1213,7 @@ export function SessionList(props: {
     const lastSeenVersion = useSessionLastSeenVersion()
     // Transient unread lens — not a Settings preference. Cleared on reload; rows drop as they're seen.
     const [showUnreadOnly, setShowUnreadOnly] = useState(false)
-    const { pinInProgressSessions } = usePinInProgressSessions()
+    const { pinInProgressMode } = usePinInProgressSessions()
     const { machineFilter, setMachineFilter } = useSessionListMachineFilter()
     const showDetailedStatus = sessionListStatusMode === 'detailed'
     const [searchQuery, setSearchQuery] = useState('')
@@ -1337,19 +1360,25 @@ export function SessionList(props: {
             pending: [],
             active: [],
         }
-        if (!pinInProgressSessions) {
+        if (pinInProgressMode === 'off') {
             return buckets
         }
         for (const session of machineFilteredSessions) {
+            // Durable pins stay in their own sections / project groups (#1115).
             if (session.globalPinned || session.pinned) {
                 continue
             }
-            if (!session.active) {
+            if (!isPinnedInProgressSession(session, pinInProgressMode)) {
                 continue
             }
-            if (session.thinking || (session.backgroundTaskCount ?? 0) > 0) {
+            const agentWorking = session.active
+                && (session.thinking || (session.backgroundTaskCount ?? 0) > 0)
+            const agentPending = session.active
+                && (session.pendingRequestsCount ?? 0) > 0
+                && !agentWorking
+            if (agentWorking || hasRunningAttachedJob(session)) {
                 buckets.working.push(session)
-            } else if ((session.pendingRequestsCount ?? 0) > 0) {
+            } else if (agentPending) {
                 buckets.pending.push(session)
             } else {
                 // Quiet but connected: finished executing, operator will continue.
@@ -1367,7 +1396,7 @@ export function SessionList(props: {
             buckets[key].sort(byRelevanceOrRecent)
         }
         return buckets
-    }, [machineFilteredSessions, pinInProgressSessions, searchScoreIndex, hasTextQuery])
+    }, [machineFilteredSessions, pinInProgressMode, searchScoreIndex, hasTextQuery])
     const runningSessionTotal = runningSessions.working.length
         + runningSessions.pending.length
     const activeSessionTotal = runningSessions.active.length
@@ -1376,7 +1405,15 @@ export function SessionList(props: {
             const grouped = groupSessionsByDirectory(
                 machineFilteredSessions.filter((session) => {
                     if (session.globalPinned) return false
-                    if (pinInProgressSessions && !session.pinned && isPinnedInProgressSession(session)) return false
+                    // Project-pinned stay in the project group; only unpinned
+                    // "in progress" sessions float to the In progress section.
+                    if (
+                        pinInProgressMode !== 'off'
+                        && !session.pinned
+                        && isPinnedInProgressSession(session, pinInProgressMode)
+                    ) {
+                        return false
+                    }
                     return true
                 })
             )
@@ -1385,7 +1422,7 @@ export function SessionList(props: {
             }
             return grouped
         },
-        [machineFilteredSessions, pinInProgressSessions, searchScoreIndex, hasTextQuery]
+        [machineFilteredSessions, pinInProgressMode, searchScoreIndex, hasTextQuery]
     )
     // Directory groups whose rows all floated to the pinned sections still
     // render an action-only header so copy-path / new-session-in-directory
@@ -1399,12 +1436,12 @@ export function SessionList(props: {
         [machineFilteredSessions]
     )
     const actionOnlyGroups = useMemo(() => {
-        if (!pinInProgressSessions) {
+        if (pinInProgressMode === 'off') {
             return []
         }
         const visibleKeys = new Set(groups.map((group) => group.key))
         return allDirectoryGroups.filter((group) => !visibleKeys.has(group.key))
-    }, [groups, allDirectoryGroups, pinInProgressSessions])
+    }, [groups, allDirectoryGroups, pinInProgressMode])
     const [collapseOverrides, setCollapseOverrides] = useState<Map<string, boolean>>(
         () => new Map()
     )
