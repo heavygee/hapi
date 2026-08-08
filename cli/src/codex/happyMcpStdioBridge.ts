@@ -1,7 +1,7 @@
 /**
  * HAPI MCP STDIO Bridge
  *
- * Minimal STDIO MCP server exposing HAPI tools such as `change_title`, `display_image`, `display_video`, `list_peers`, `ping_peer`, and `inspect_peer`.
+ * Minimal STDIO MCP server exposing HAPI tools such as `change_title`, `display_image`, `display_video`, `display_media`, `list_peers`, `ping_peer`, and `inspect_peer`.
  * On invocation it forwards the tool call to an existing HAPI HTTP MCP server
  * using the StreamableHTTPClientTransport.
  *
@@ -16,14 +16,14 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { z } from 'zod';
-import { DISPLAY_IMAGE_PROMPT_CURSOR, DISPLAY_VIDEO_PROMPT_CURSOR } from '@/modules/common/displayImagePrompt';
+import { DISPLAY_IMAGE_PROMPT_CURSOR, DISPLAY_MEDIA_PROMPT_CURSOR, DISPLAY_VIDEO_PROMPT_CURSOR } from '@/modules/common/displayImagePrompt';
 import {
   INSPECT_PEER_TOOL_DESCRIPTION,
   PING_PEER_TOOL_DESCRIPTION,
   SESSION_ID_PREFIX_PARAM_DESCRIPTION,
 } from '@hapi/protocol/sessionCitation';
 
-const DEFAULT_TOOL_NAMES = ['change_title', 'link_pr', 'display_image', 'display_video', 'list_peers', 'ping_peer', 'inspect_peer'];
+const DEFAULT_TOOL_NAMES = ['change_title', 'display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer'];
 
 function parseArgs(argv: string[]): { url: string | null; toolNames: Set<string> } {
   let url: string | null = null;
@@ -109,35 +109,6 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
 
 
 
-    const linkPrInputSchema: z.ZodTypeAny = z.object({
-      url: z.string().optional().describe('GitHub PR URL'),
-      repo: z.string().optional().describe('owner/repo'),
-      number: z.number().int().positive().optional().describe('PR number'),
-      role: z.enum(['primary', 'secondary']).optional(),
-    });
-
-    if (toolNames.has('link_pr')) {
-      server.registerTool<any, any>(
-        'link_pr',
-        {
-          description: 'Attach the current HAPI session to a GitHub pull request',
-          title: 'Link Pull Request',
-          inputSchema: linkPrInputSchema,
-        },
-        async (args: Record<string, unknown>) => {
-          try {
-            const client = await ensureHttpClient();
-            return await client.callTool({ name: 'link_pr', arguments: args }) as any;
-          } catch (error) {
-            return {
-              content: [{ type: 'text' as const, text: `Failed to link PR: ${error instanceof Error ? error.message : String(error)}` }],
-              isError: true,
-            };
-          }
-        }
-      );
-    }
-
     const displayImageInputSchema: z.ZodTypeAny = z.object({
       path: z.string().describe('Local filesystem path of the image to display to the user'),
       title: z.string().optional().describe('Optional display title or filename for the image'),
@@ -191,6 +162,33 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
               content: [
                 { type: 'text' as const, text: `Failed to display video: ${error instanceof Error ? error.message : String(error)}` },
               ],
+              isError: true,
+            };
+          }
+        }
+      );
+    }
+
+    const displayMediaInputSchema: z.ZodTypeAny = z.object({
+      path: z.string().describe('Local filesystem path of the media or file to send to the user'),
+      title: z.string().trim().min(1).max(255).optional().describe('Optional display title or filename'),
+    });
+
+    if (toolNames.has('display_media')) {
+      server.registerTool<any, any>(
+        'display_media',
+        {
+          description: `Send a local image, video, audio, or other file to the current HAPI chat session. ${DISPLAY_MEDIA_PROMPT_CURSOR}`,
+          title: 'Display Media',
+          inputSchema: displayMediaInputSchema,
+        },
+        async (args: Record<string, unknown>) => {
+          try {
+            const client = await ensureHttpClient();
+            return await client.callTool({ name: 'display_media', arguments: args }) as any;
+          } catch (error) {
+            return {
+              content: [{ type: 'text' as const, text: `Failed to display media: ${error instanceof Error ? error.message : String(error)}` }],
               isError: true,
             };
           }
@@ -260,11 +258,6 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
       );
     }
 
-    const skillLookupInputSchema: z.ZodTypeAny = z.object({
-      name: z.string().trim().min(1).max(128).describe('Exact skill name shown by HAPI skill autocomplete'),
-    });
-
-
     const listPeersInputSchema: z.ZodTypeAny = z.object({
       limit: z.number().int().min(1).max(100).optional().describe(
         'Max sessions to return (default 30, max 100). Newest updatedAt first.'
@@ -295,6 +288,10 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
         }
       );
     }
+
+    const skillLookupInputSchema: z.ZodTypeAny = z.object({
+      name: z.string().trim().min(1).max(128).describe('Exact skill name shown by HAPI skill autocomplete'),
+    });
 
     if (toolNames.has('skill_lookup')) {
       server.registerTool<any, any>(

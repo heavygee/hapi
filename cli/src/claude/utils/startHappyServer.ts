@@ -5,16 +5,21 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createServer, type IncomingMessage } from "node:http";
-import { lstat, readFile } from "node:fs/promises";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { AddressInfo } from "node:net";
 import { z } from "zod";
 import { logger } from "@/ui/logger";
 import { ApiSessionClient } from "@/api/apiSession";
 import { randomUUID } from "node:crypto";
-import { detectImageMimeType, detectVideoMimeType, registerGeneratedImage } from "@/modules/common/generatedImages";
+import {
+    detectDisplayMediaMimeType,
+    detectImageMimeType,
+    detectVideoMimeType,
+    readBoundedRegularFile,
+    registerGeneratedImage,
+} from "@/modules/common/generatedImages";
 import type { InlineMediaSource } from "@/modules/common/inlineMediaSource";
-import { DISPLAY_IMAGE_PROMPT_CURSOR, DISPLAY_VIDEO_PROMPT_CURSOR } from "@/modules/common/displayImagePrompt";
+import { DISPLAY_IMAGE_PROMPT_CURSOR, DISPLAY_MEDIA_PROMPT_CURSOR, DISPLAY_VIDEO_PROMPT_CURSOR } from "@/modules/common/displayImagePrompt";
 import { resolveSkill } from "@/modules/common/skills";
 import {
     INSPECT_PEER_TOOL_DESCRIPTION,
@@ -22,14 +27,10 @@ import {
     SESSION_ID_PREFIX_PARAM_DESCRIPTION,
 } from '@hapi/protocol/sessionCitation'
 import { PingPeerError, formatInspectPeerReport, formatPeerSessionsList, inspectPeer, listPeerSessions, peerListFetchLimit, pingPeer } from "@/modules/pingPeer/pingPeer";
-import { parseGithubPrInput } from "@hapi/protocol";
-import { buildAttachedGithubPrRefs } from "@hapi/protocol/attachGithubPrRef";
-import type { ExternalRef } from "@hapi/protocol";
 
 type StartHappyServerOptions = {
     emitTitleSummary?: boolean;
     enableChangeTitle?: boolean;
-    enableLinkPr?: boolean;
     skillLookup?: {
         workingDirectory: string;
         flavor: string;
@@ -38,6 +39,7 @@ type StartHappyServerOptions = {
 
 /** Registered on the MCP server, but never pre-approved via Claude --allowedTools. */
 const CLAUDE_MANUAL_APPROVAL_HAPI_TOOLS = new Set([
+    'display_media',
     'display_video',
     'ping_peer',
     'inspect_peer'
@@ -45,7 +47,7 @@ const CLAUDE_MANUAL_APPROVAL_HAPI_TOOLS = new Set([
 
 /**
  * Map HAPI MCP tool names to Claude `--allowedTools` entries.
- * Keeps `display_video` (arbitrary local-path reader), `ping_peer`, and
+ * Keeps `display_media` / `display_video` (arbitrary local-path readers), `ping_peer`, and
  * `inspect_peer` off the auto-allow list so they still prompt.
  * `list_peers` stays allowed (discovery shortlist only).
  */
@@ -59,7 +61,6 @@ function createHapiMcpServer(
     client: ApiSessionClient,
     emitTitleSummary: boolean,
     enableChangeTitle: boolean,
-    enableLinkPr: boolean,
     skillLookup: StartHappyServerOptions['skillLookup']
 ): McpServer {
     const handler = async (title: string) => {
@@ -102,16 +103,15 @@ function createHapiMcpServer(
         title: z.string().optional().describe('Optional display title or filename for the video'),
     });
 
+    const displayMediaInputSchema: z.ZodTypeAny = z.object({
+        path: z.string().describe('Local filesystem path of the media or file to send to the user'),
+        title: z.string().trim().min(1).max(255).optional().describe('Optional display title or filename'),
+    });
+
     const pingPeerInputSchema: z.ZodTypeAny = z.object({
         sessionIdPrefix: z.string().trim().min(1).describe(SESSION_ID_PREFIX_PARAM_DESCRIPTION),
         message: z.string().min(1).describe('Message text to deliver to the target session'),
     });
-    const listPeersInputSchema: z.ZodTypeAny = z.object({
-        limit: z.number().int().min(1).max(100).optional().describe(
-            'Max sessions to return (default 30, max 100). Newest updatedAt first.'
-        ),
-    });
-
 
     const maxInlineMediaBytes = 25 * 1024 * 1024;
 
@@ -122,24 +122,23 @@ function createHapiMcpServer(
         ),
     });
 
+    const listPeersInputSchema: z.ZodTypeAny = z.object({
+        limit: z.number().int().min(1).max(100).optional().describe(
+            'Max sessions to return (default 30, max 100). Newest updatedAt first.'
+        ),
+    });
+
     async function displayInlineMedia(
         args: { path: string; title?: string },
-        mediaKind: 'image' | 'video',
-        toolName: 'display_image' | 'display_video'
+        mediaKind: 'image' | 'video' | 'media',
+        toolName: 'display_image' | 'display_video' | 'display_media'
     ) {
-        const info = await lstat(args.path);
-        if (!info.isFile()) {
-            throw new Error('Path is not a regular file');
-        }
-
-        if (info.size > maxInlineMediaBytes) {
-            throw new Error('File is too large to display inline');
-        }
-
-        const bytes = await readFile(args.path);
+        const bytes = await readBoundedRegularFile(args.path, maxInlineMediaBytes);
         const mimeType = mediaKind === 'video'
             ? detectVideoMimeType(bytes)
-            : detectImageMimeType(bytes);
+            : mediaKind === 'image'
+                ? detectImageMimeType(bytes)
+                : detectDisplayMediaMimeType(bytes);
         if (!mimeType) {
             throw new Error(mediaKind === 'video' ? 'Unsupported video content' : 'Unsupported image content');
         }
@@ -165,7 +164,6 @@ function createHapiMcpServer(
             id: randomUUID(),
             source,
         });
-
 
         return media;
     }
@@ -199,52 +197,6 @@ function createHapiMcpServer(
                 ],
                 isError: true,
             };
-        });
-    }
-
-    if (enableLinkPr) {
-        const linkPrInputSchema: z.ZodTypeAny = z.object({
-            url: z.string().optional().describe('GitHub PR URL (https://github.com/owner/repo/pull/N)'),
-            repo: z.string().optional().describe('owner/repo slug when not passing url'),
-            number: z.number().int().positive().optional().describe('PR number when not passing url'),
-            role: z.enum(['primary', 'secondary']).optional().describe('Defaults to primary'),
-        });
-
-        mcp.registerTool<any, any>('link_pr', {
-            description: 'Attach the current HAPI session to a GitHub pull request. Requires hub githubPrAwareness. Self-session only.',
-            title: 'Link Pull Request',
-            inputSchema: linkPrInputSchema,
-        }, async (args: { url?: string; repo?: string; number?: number; role?: 'primary' | 'secondary' }) => {
-            const raw = args.url?.trim() || (args.repo && args.number ? `${args.repo}#${args.number}` : '')
-            const parsed = parseGithubPrInput(raw)
-            if (!parsed.ok) {
-                return {
-                    content: [{ type: 'text' as const, text: `Failed to link PR: ${parsed.error}` }],
-                    isError: true,
-                }
-            }
-
-            try {
-                const externalRefs = await buildAttachedGithubPrRefs({
-                    repo: parsed.repo,
-                    number: parsed.number,
-                    role: args.role ?? 'primary',
-                    source: 'agent',
-                    linkedAt: Date.now(),
-                    existingRefs: [] as ExternalRef[],
-                })
-                client.updateMetadata((metadata) => ({ ...metadata, externalRefs }))
-                await client.flushMetadata(5_000)
-                return {
-                    content: [{ type: 'text' as const, text: `Linked ${parsed.repo}#${parsed.number} to this session` }],
-                    isError: false,
-                }
-            } catch (error) {
-                return {
-                    content: [{ type: 'text' as const, text: `Failed to link PR: ${error instanceof Error ? error.message : String(error)}` }],
-                    isError: true,
-                }
-            }
         });
     }
 
@@ -311,6 +263,29 @@ function createHapiMcpServer(
                         text: `Failed to display video: ${message}`,
                     },
                 ],
+                isError: true,
+            };
+        }
+    });
+
+    mcp.registerTool<any, any>('display_media', {
+        description: `Send a local image, video, audio, or other file to the current HAPI chat session. Recognized media is shown inline; other files use a download card. ${DISPLAY_MEDIA_PROMPT_CURSOR}`,
+        title: 'Display Media',
+        inputSchema: displayMediaInputSchema,
+    }, async (args: { path: string; title?: string }) => {
+        logger.debug('[hapiMCP] Display media:', args.path);
+
+        try {
+            const media = await displayInlineMedia(args, 'media', 'display_media');
+            return {
+                content: [{ type: 'text' as const, text: `Displayed media: ${media.fileName}` }],
+                isError: false,
+            };
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            logger.debug('[hapiMCP] Failed to display media:', message);
+            return {
+                content: [{ type: 'text' as const, text: `Failed to display media: ${message}` }],
                 isError: true,
             };
         }
@@ -438,6 +413,7 @@ function createHapiMcpServer(
         }
     });
 
+
     if (skillLookup) {
         mcp.registerTool<any, any>('skill_lookup', {
             description: 'Load a HAPI skill by exact name. When a user message starts with $name, call this tool with that name before acting.',
@@ -499,12 +475,11 @@ function readMcpSessionId(req: IncomingMessage): string | undefined {
 export async function startHappyServer(client: ApiSessionClient, options: StartHappyServerOptions = {}) {
     const emitTitleSummary = options.emitTitleSummary ?? true;
     const enableChangeTitle = options.enableChangeTitle ?? true;
-    const enableLinkPr = options.enableLinkPr ?? true;
     const transports = new Map<string, StreamableHTTPServerTransport>();
     const mcps = new Map<string, McpServer>();
 
     const createMcpTransport = () => {
-        const mcp = createHapiMcpServer(client, emitTitleSummary, enableChangeTitle, enableLinkPr, options.skillLookup);
+        const mcp = createHapiMcpServer(client, emitTitleSummary, enableChangeTitle, options.skillLookup);
         const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomUUID(),
             onsessioninitialized: (sessionId) => {
@@ -559,11 +534,8 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
     }));
 
     const toolNames = enableChangeTitle
-        ? ['change_title', 'display_image', 'display_video', 'list_peers', 'ping_peer', 'inspect_peer']
-        : ['display_image', 'display_video', 'list_peers', 'ping_peer', 'inspect_peer'];
-    if (enableLinkPr) {
-        toolNames.splice(enableChangeTitle ? 1 : 0, 0, 'link_pr')
-    }
+        ? ['change_title', 'display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer']
+        : ['display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer'];
     if (options.skillLookup) {
         toolNames.push('skill_lookup');
     }

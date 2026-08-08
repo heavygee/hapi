@@ -64,6 +64,9 @@ import {
 } from '@/lib/scratchlistAttachmentFlow'
 import type { ScratchlistEntry } from '@/lib/scratchlist'
 import { isHubScratchlistAttachmentPath, type MessageDeliveryMode } from '@hapi/protocol'
+import { consumeSharePendingTransfer } from '@/lib/sharePendingState'
+import { deleteShareTransfer, getShareTransfer } from '@/lib/shareTransfer'
+import { getDraft } from '@/lib/composer-drafts'
 import {
     type AttachmentDraftInput,
 } from '@/lib/composer-attachment-drafts'
@@ -74,7 +77,7 @@ import {
     resolveMessageDeliveryMode,
     type ComposerSendIntent,
 } from '@/lib/messageDelivery'
-import { handoffComposerDraft, transferComposerDraft } from '@/lib/composer-draft-transfer'
+import { handoffComposerDraft, transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 import { SessionHeader } from '@/components/SessionHeader'
 import { SessionFlowPanel } from '@/components/SessionFlowPanel'
 import { CursorMigrationBanner } from '@/components/CursorMigrationBanner'
@@ -1607,13 +1610,27 @@ function SessionChatInner(props: SessionChatProps) {
         if (!inactiveCanResume || !props.resolveSessionIdForUpload) {
             return undefined
         }
+        // Keep one resume promise for every generator created by this adapter
+        // instance. Preview generation can outlive navigation; a remount clears
+        // the router cache, so a second file must reuse this closure's promise
+        // instead of starting a fresh resume against the retired source id.
+        let uploadResolution: Promise<string> | undefined
+        const resolveUploadSession = () => {
+            uploadResolution ??= props.resolveSessionIdForUpload!(props.session.id).catch((error) => {
+                uploadResolution = undefined
+                throw error
+            })
+            return uploadResolution
+        }
         return createAttachmentAdapter(
             props.api,
             props.session.id,
-            () => props.resolveSessionIdForUpload!(props.session.id),
+            resolveUploadSession,
             async (resolvedSessionId, pending) => {
                 // Include the in-flight file and coalesce multi-file drops into
                 // one transfer + navigation before the source composer unmounts.
+                // isCancelled is sampled at save time so a mid-handoff remove
+                // still drops the file (and any prior inactive persist of it).
                 await handoffComposerDraft(
                     props.session.id,
                     resolvedSessionId,
@@ -1662,12 +1679,15 @@ function SessionChatInner(props: SessionChatProps) {
                 reopenHint={props.reopenHint}
                 onSessionDeleted={props.onBack}
                 onSessionReopened={async (newSessionId) => {
-                    await transferComposerDraft(props.session.id, newSessionId)
-                    navigate({
-                        to: '/sessions/$sessionId',
-                        params: { sessionId: newSessionId },
-                        replace: true
-                    })
+                    await transferComposerDraftThenNavigate(
+                        props.session.id,
+                        newSessionId,
+                        () => navigate({
+                            to: '/sessions/$sessionId',
+                            params: { sessionId: newSessionId },
+                            replace: true
+                        }),
+                    )
                 }}
             />
 
@@ -1695,7 +1715,18 @@ function SessionChatInner(props: SessionChatProps) {
 
             <AssistantRuntimeProvider runtime={runtime}>
                 <ShareSeedConsumer sessionId={props.session.id} sessionActive={props.session.active} />
+                <AbortRestoreConsumer messages={normalizedMessages} onAbortRestore={props.onAbortRestore ?? (() => {})} />
                 <DragDropZone disabled={(!props.session.active && !inactiveCanResume) || props.isSending || pendingSchedule != null || isScratchlistParking}>
+                    <div className="relative flex min-h-0 flex-1 flex-col">
+                        {canViewAgentTerminal && (
+                            // SessionChatInner is keyed by session.id, so switching sessions remounts this subtree.
+                            <AgentTerminalView
+                                sessionId={props.session.id}
+                                visible={terminalVisible}
+                                className={terminalVisible ? 'flex-1 min-h-0' : 'hidden'}
+                            />
+                        )}
+                        <div className={(terminalVisible && canViewAgentTerminal) ? 'hidden' : 'flex min-h-0 flex-1 flex-col'}>
 
                     <HappyThread
                         // Key with prefix: different components under the same session
@@ -1851,6 +1882,7 @@ function SessionChatInner(props: SessionChatProps) {
                         }
                         active={props.session.active}
                         allowSendWhenInactive
+                        onResumeStoredDraft={() => handleSend('', undefined, null)}
                         thinking={props.session.thinking}
                         agentState={props.session.agentState}
                         backgroundTaskCount={props.session.backgroundTaskCount}

@@ -14,7 +14,7 @@ import {
     writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import {
     CURSOR_HAPI_MCP_SERVER_ID,
@@ -23,6 +23,7 @@ import {
     installCursorMcpOverlay,
     isProcessAlive,
     readLockOwner,
+    resolveCursorMcpConfigDir,
     withMcpJsonLock,
     writeMcpJsonAtomic,
 } from './cursorMcpOverlay';
@@ -49,6 +50,11 @@ describe('installCursorMcpOverlay', () => {
         return root;
     }
 
+    it('defaults MCP config dir to ~/.cursor (outside the project tree)', () => {
+        expect(resolveCursorMcpConfigDir()).toBe(join(homedir(), '.cursor'));
+        expect(resolveCursorMcpConfigDir(' /tmp/custom-cursor ')).toBe('/tmp/custom-cursor');
+    });
+
     it('writes per-session bridge into .cursor/mcp.json and removes only that id on cleanup', () => {
         const cwd = makeProjectDir(JSON.stringify({
             mcpServers: {
@@ -62,7 +68,7 @@ describe('installCursorMcpOverlay', () => {
         const handle = installCursorMcpOverlay(cwd, {
             command: '/bin/hapi',
             args: ['mcp', '--url', 'http://127.0.0.1:12345/'],
-        }, { serverId, enableCursorMcp: noopEnable });
+        }, { serverId, enableCursorMcp: noopEnable, mcpConfigDir: join(cwd, '.cursor') });
 
         const merged = JSON.parse(readFileSync(mcpPath, 'utf-8')) as {
             mcpServers: Record<string, { command: string; args: string[] }>;
@@ -96,12 +102,12 @@ describe('installCursorMcpOverlay', () => {
         const handleA = installCursorMcpOverlay(cwd, {
             command: '/bin/hapi',
             args: ['mcp', '--url', 'http://127.0.0.1:1111/'],
-        }, { serverId: idA, enableCursorMcp: noopEnable });
+        }, { serverId: idA, enableCursorMcp: noopEnable, mcpConfigDir: join(cwd, '.cursor') });
 
         const handleB = installCursorMcpOverlay(cwd, {
             command: '/bin/hapi',
             args: ['mcp', '--url', 'http://127.0.0.1:2222/'],
-        }, { serverId: idB, enableCursorMcp: noopEnable });
+        }, { serverId: idB, enableCursorMcp: noopEnable, mcpConfigDir: join(cwd, '.cursor') });
 
         handleA.cleanup();
 
@@ -136,7 +142,7 @@ describe('installCursorMcpOverlay', () => {
         const handle = installCursorMcpOverlay(cwd, {
             command: '/bin/hapi',
             args: ['mcp', '--url', 'http://127.0.0.1:12345/'],
-        }, { serverId, enableCursorMcp: noopEnable });
+        }, { serverId, enableCursorMcp: noopEnable, mcpConfigDir: join(cwd, '.cursor') });
 
         writeFileSync(mcpPath, JSON.stringify({
             mcpServers: {
@@ -159,6 +165,48 @@ describe('installCursorMcpOverlay', () => {
         expect(after.mcpServers[serverId]).toBeUndefined();
     });
 
+    it('preserves env-only concurrent edits on the overlay entry during cleanup', () => {
+        const cwd = makeProjectDir(JSON.stringify({
+            mcpServers: {
+                other: { command: 'echo', args: ['x'] },
+            },
+        }, null, 2));
+        const serverId = cursorHapiMcpServerId('session-env');
+        const mcpPath = join(cwd, '.cursor', 'mcp.json');
+        const handle = installCursorMcpOverlay(cwd, {
+            command: '/bin/hapi',
+            args: ['mcp', '--url', 'http://127.0.0.1:12345/'],
+        }, { serverId, enableCursorMcp: noopEnable, mcpConfigDir: join(cwd, '.cursor') });
+
+        writeFileSync(mcpPath, JSON.stringify({
+            mcpServers: {
+                other: { command: 'echo', args: ['x'] },
+                [serverId]: {
+                    command: '/bin/hapi',
+                    args: ['mcp', '--url', 'http://127.0.0.1:12345/'],
+                    env: {
+                        [HAPI_MCP_OVERLAY_PID_ENV]: String(process.pid),
+                        USER_TOKEN: 'keep-me',
+                    },
+                },
+            },
+        }, null, 2) + '\n', 'utf-8');
+
+        handle.cleanup();
+
+        const after = JSON.parse(readFileSync(mcpPath, 'utf-8')) as {
+            mcpServers: Record<string, { command: string; args: string[]; env?: Record<string, string> }>;
+        };
+        expect(after.mcpServers[serverId]).toEqual({
+            command: '/bin/hapi',
+            args: ['mcp', '--url', 'http://127.0.0.1:12345/'],
+            env: {
+                [HAPI_MCP_OVERLAY_PID_ENV]: String(process.pid),
+                USER_TOKEN: 'keep-me',
+            },
+        });
+    });
+
     it('restores a pre-existing entry for the same server id instead of deleting it', () => {
         const serverId = cursorHapiMcpServerId('session-a');
         const prior = { command: 'old-hapi', args: ['mcp'] };
@@ -172,7 +220,7 @@ describe('installCursorMcpOverlay', () => {
         const handle = installCursorMcpOverlay(cwd, {
             command: '/bin/hapi',
             args: ['mcp', '--url', 'http://127.0.0.1:12345/'],
-        }, { serverId, enableCursorMcp: noopEnable });
+        }, { serverId, enableCursorMcp: noopEnable, mcpConfigDir: join(cwd, '.cursor') });
 
         handle.cleanup();
 
@@ -195,7 +243,7 @@ describe('installCursorMcpOverlay', () => {
         const handle = installCursorMcpOverlay(cwd, {
             command: '/bin/hapi',
             args: ['mcp', '--url', 'http://127.0.0.1:12345/'],
-        }, { serverId, enableCursorMcp: noopEnable });
+        }, { serverId, enableCursorMcp: noopEnable, mcpConfigDir: join(cwd, '.cursor') });
 
         handle.cleanup();
 
@@ -218,7 +266,7 @@ describe('installCursorMcpOverlay', () => {
         const handle = installCursorMcpOverlay(cwd, {
             command: '/bin/hapi',
             args: ['mcp', '--url', 'http://127.0.0.1:12345/'],
-        }, { serverId, enableCursorMcp: noopEnable });
+        }, { serverId, enableCursorMcp: noopEnable, mcpConfigDir: join(cwd, '.cursor') });
 
         const userOwned = { command: 'user-hapi', args: ['mcp', '--custom'] };
         writeFileSync(mcpPath, JSON.stringify({
@@ -245,7 +293,7 @@ describe('installCursorMcpOverlay', () => {
         const handle = installCursorMcpOverlay(cwd, {
             command: 'hapi',
             args: ['mcp', '--url', 'http://127.0.0.1:9999/'],
-        }, { serverId, enableCursorMcp: noopEnable });
+        }, { serverId, enableCursorMcp: noopEnable, mcpConfigDir: join(cwd, '.cursor') });
 
         const mcpPath = join(cwd, '.cursor', 'mcp.json');
         expect(existsSync(mcpPath)).toBe(true);
@@ -259,7 +307,7 @@ describe('installCursorMcpOverlay', () => {
         expect(() => installCursorMcpOverlay(cwd, {
             command: 'hapi',
             args: ['mcp', '--url', 'http://127.0.0.1:9999/'],
-        }, { serverId: cursorHapiMcpServerId('session-a'), enableCursorMcp: noopEnable })).toThrow();
+        }, { serverId: cursorHapiMcpServerId('session-a'), enableCursorMcp: noopEnable, mcpConfigDir: join(cwd, '.cursor') })).toThrow();
         // Malformed project config must stay untouched for the launcher try/catch path.
         expect(readFileSync(join(cwd, '.cursor', 'mcp.json'), 'utf-8')).toBe('{ not-json');
     });
@@ -296,7 +344,7 @@ describe('installCursorMcpOverlay', () => {
         const handle = installCursorMcpOverlay(cwd, {
             command: '/bin/hapi',
             args: ['mcp', '--url', 'http://127.0.0.1:3333/'],
-        }, { serverId, enableCursorMcp: noopEnable });
+        }, { serverId, enableCursorMcp: noopEnable, mcpConfigDir: join(cwd, '.cursor') });
 
         const merged = JSON.parse(readFileSync(mcpPath, 'utf-8')) as {
             mcpServers: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
@@ -327,7 +375,7 @@ describe('installCursorMcpOverlay', () => {
         expect(() => installCursorMcpOverlay(cwd, {
             command: '/bin/hapi',
             args: ['mcp', '--url', 'http://127.0.0.1:12345/'],
-        }, { serverId: cursorHapiMcpServerId('session-a'), enableCursorMcp: noopEnable })).toThrow(
+        }, { serverId: cursorHapiMcpServerId('session-a'), enableCursorMcp: noopEnable, mcpConfigDir: join(cwd, '.cursor') })).toThrow(
             /Refusing to write a symlinked Cursor MCP config/
         );
 
@@ -347,7 +395,7 @@ describe('installCursorMcpOverlay', () => {
         expect(() => installCursorMcpOverlay(cwd, {
             command: '/bin/hapi',
             args: ['mcp', '--url', 'http://127.0.0.1:12345/'],
-        }, { serverId: cursorHapiMcpServerId('session-a'), enableCursorMcp: noopEnable })).toThrow(
+        }, { serverId: cursorHapiMcpServerId('session-a'), enableCursorMcp: noopEnable, mcpConfigDir: join(cwd, '.cursor') })).toThrow(
             /Refusing to use a symlinked Cursor config directory/
         );
 
@@ -430,7 +478,7 @@ describe('installCursorMcpOverlay', () => {
         const handle = installCursorMcpOverlay(cwd, {
             command: '/bin/hapi',
             args: ['mcp', '--url', 'http://127.0.0.1:12345/'],
-        }, { serverId, enableCursorMcp: noopEnable });
+        }, { serverId, enableCursorMcp: noopEnable, mcpConfigDir: join(cwd, '.cursor') });
 
         writeFileSync(mcpPath, JSON.stringify({
             mcpServers: {
@@ -485,6 +533,7 @@ describe('installCursorMcpOverlay', () => {
         }, {
             serverId,
             enableCursorMcp: () => ({ status: 1, stderr: 'enable denied' }),
+            mcpConfigDir: join(cwd, '.cursor'),
         })).toThrow(/agent mcp enable/);
 
         const after = JSON.parse(readFileSync(mcpPath, 'utf-8')) as {

@@ -87,7 +87,7 @@ vi.mock('@assistant-ui/react', async () => {
 
 vi.mock('@/lib/composerSegments', () => ({ isRichComposerMentionsEnabled: () => false }))
 vi.mock('@/hooks/useComposerDraft', () => ({
-    useComposerDraft: (sessionId: string | undefined) => ({ sessionId, complete: true, restoredAny: false }),
+    useComposerDraft: (sessionId: string | undefined) => ({ sessionId, complete: true, restoredAny: false, hasStoredAttachments: false }),
 }))
 vi.mock('@/hooks/useComposerEnterBehavior', () => ({ useComposerEnterBehavior: () => ({ composerEnterBehavior: 'send' }) }))
 vi.mock('@/hooks/usePlatform', () => ({ usePlatform: () => ({ haptic: { impact: () => {}, notification: () => {} }, isTouch: false }) }))

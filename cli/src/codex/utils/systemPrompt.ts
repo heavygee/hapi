@@ -7,7 +7,7 @@
 
 import { trimIdent } from '@/utils/trimIdent';
 import { buildSessionCitationSteerInstruction } from '@hapi/protocol/sessionCitation';
-import { withSessionJobInstruction } from '@/modules/common/sessionJobInstruction';
+import { DISPLAY_IMAGE_PROMPT_CODEX, DISPLAY_MEDIA_PROMPT_CODEX, DISPLAY_VIDEO_PROMPT_CODEX } from '@/modules/common/displayImagePrompt';
 import { withSessionSummaryInstruction } from '@/modules/common/sessionSummaryInstruction';
 
 /**
@@ -21,7 +21,9 @@ export const TITLE_INSTRUCTION = trimIdent(`
     If that exact tool name is unavailable, call an equivalent alias such as hapi__change_title, mcp__hapi__change_title, or hapi_change_title.
     Do not rename the chat for routine progress, substeps, implementation details, or a slightly better wording.
     Rename only when the user's primary objective changes substantially and the existing title would be misleading.
-    When you create or find a local image file that the user should see, call functions.hapi__display_image with the image path. If that exact tool name is unavailable, use an equivalent alias such as hapi__display_image, mcp__hapi__display_image, or hapi_display_image.
+    ${DISPLAY_IMAGE_PROMPT_CODEX}
+    ${DISPLAY_VIDEO_PROMPT_CODEX}
+    ${DISPLAY_MEDIA_PROMPT_CODEX}
     ${buildSessionCitationSteerInstruction({
         inspectTool: 'functions.hapi__inspect_peer',
         pingTool: 'functions.hapi__ping_peer',
@@ -34,7 +36,7 @@ export const TITLE_INSTRUCTION = trimIdent(`
  * Session-summary contract is resolved at call time (hub toggle / env).
  */
 export function getCodexSystemPrompt(env: NodeJS.ProcessEnv = process.env): string {
-    return withSessionSummaryInstruction(withSessionJobInstruction(TITLE_INSTRUCTION), env)
+    return withSessionSummaryInstruction(TITLE_INSTRUCTION, env)
 }
 
 /** Alias kept for existing call sites / tests that expect a string constant name. */

@@ -47,7 +47,9 @@ import { useToast } from '@/lib/toast-context'
 import { useTranslation } from '@/lib/use-translation'
 import { seedMessageWindowFromSession, syncTailMessages } from '@/lib/message-window-store'
 import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
-import { transferComposerDraft } from '@/lib/composer-draft-transfer'
+import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
+import { getDraftAttachments } from '@/lib/composer-attachment-drafts'
+import { refreshSessionDetailPreservingActive } from '@/lib/session-detail-optimistic'
 import { inactiveSessionCanResume, resolveCursorReopenGate } from '@/lib/sessionResume'
 import { initializeSessionLastSeen, markSessionSeen } from '@/lib/sessionLastSeen'
 import { useSessionBrowserTitle } from '@/hooks/useSessionBrowserTitle'
@@ -1062,12 +1064,15 @@ function SessionPage() {
                 await queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
                 if (result.sessionId && result.sessionId !== errorSessionId) {
                     retargetSharePendingTransfer(errorSessionId, result.sessionId)
-                    await transferComposerDraft(errorSessionId, result.sessionId)
-                    navigate({
-                        to: '/sessions/$sessionId',
-                        params: { sessionId: result.sessionId },
-                        replace: true
-                    })
+                    await transferComposerDraftThenNavigate(
+                        errorSessionId,
+                        result.sessionId,
+                        () => navigate({
+                            to: '/sessions/$sessionId',
+                            params: { sessionId: result.sessionId },
+                            replace: true
+                        }),
+                    )
                 }
             } catch (err) {
                 const message = err instanceof Error ? err.message : t('dialog.error.default')
@@ -1128,11 +1133,11 @@ function SessionPage() {
     }, [session?.id, session?.active])
     const resolveSessionId = useCallback(async (currentSessionId: string) => {
         if (!api || !session || session.active) {
-            return currentSessionId
+            return { sessionId: currentSessionId, resumed: false }
         }
         const cached = resolvedSessionRef.current
         if (cached?.source === currentSessionId) {
-            return await cached.target
+            return { sessionId: await cached.target, resumed: true }
         }
         if (!inactiveSessionCanResume(session, messages.length, cursorChatStoreStatus?.onDisk)) {
             throw new ApiError(
@@ -1144,7 +1149,7 @@ function SessionPage() {
         try {
             const target = api.resumeSession(currentSessionId, { permissionMode: session.permissionMode ?? undefined })
             resolvedSessionRef.current = { source: currentSessionId, target }
-            return await target
+            return { sessionId: await target, resumed: true }
         } catch (error) {
             if (resolvedSessionRef.current?.source === currentSessionId) {
                 resolvedSessionRef.current = null
@@ -1180,11 +1185,11 @@ function SessionPage() {
             replace: true
         })
         if (api) {
-            void queryClient.fetchQuery({
-                queryKey: queryKeys.session(resolvedSessionId),
-                queryFn: () => api.getSession(resolvedSessionId),
-                staleTime: 0,
-            }).catch(() => {})
+            void refreshSessionDetailPreservingActive(
+                queryClient,
+                resolvedSessionId,
+                () => api.getSession(resolvedSessionId),
+            )
             void syncTailMessages(api, resolvedSessionId).catch(() => {})
         }
     }, [api, navigate, queryClient, session])
@@ -1229,17 +1234,29 @@ function SessionPage() {
             }))
         },
         resolveSessionId,
-        onSessionResolved: (resolvedSessionId) => {
-            // A direct retry retains its old alert with restoreSuppressed=true.
-            // Move it to the target session before navigation so the mutation's
-            // onSuccess/onError can clear or replace the same record.
-            if (sessionId) {
-                setSendErrors((prev) => migrateSuppressedSendError(prev, sessionId, resolvedSessionId))
-            }
+        onSessionResolved: async (resolvedSessionId, context) => {
+            if (!sessionId) return undefined
+            setSendErrors((prev) => migrateSuppressedSendError(prev, sessionId, resolvedSessionId))
             if (session && resolvedSessionId !== session.id) {
                 retargetSharePendingTransfer(session.id, resolvedSessionId)
             }
-            handleSessionResolved(resolvedSessionId)
+            await transferComposerDraftThenNavigate(
+                sessionId,
+                resolvedSessionId,
+                () => handleSessionResolved(resolvedSessionId),
+                [],
+                // assistant-ui clears composer text without awaiting this path;
+                // keep the submitted snapshot so deferred hydration still has it.
+                { textOverride: context.text },
+            )
+            // Cross-session resume: visible metadata may still carry source-scoped
+            // upload paths, and inactive remounts hide stored files entirely.
+            // Always defer so the active target can hydrate/re-upload before POST.
+            const stored = await getDraftAttachments(resolvedSessionId)
+            if ((context.attachments?.length ?? 0) > 0 || stored.length > 0) {
+                return { deferUntilDraftHydrated: true }
+            }
+            return undefined
         },
 
         onBlocked: (reason) => {
@@ -1415,7 +1432,7 @@ function SessionPage() {
             onLoadMore={loadMoreMessages}
             onCancelLoadMore={cancelLoadMoreMessages}
             onSend={sendMessage}
-            resolveSessionIdForUpload={resolveSessionId}
+            resolveSessionIdForUpload={async (id) => (await resolveSessionId(id)).sessionId}
             onUploadSessionResolved={handleSessionResolved}
             onViewModeChange={setViewMode}
             onRetryMessage={retryMessage}
@@ -1438,6 +1455,7 @@ function SessionPage() {
                         message: t('chat.sendError.aborted'),
                         code: 'abort',
                         scheduledAt: null,
+                        deliveryMode: 'queue',
                         mutationStarted: true,
                         restoreSuppressed: false,
                         deliveryMode: 'queue'

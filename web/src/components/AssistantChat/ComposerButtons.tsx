@@ -6,7 +6,7 @@ import { ScheduleTimePicker } from './ScheduleTimePicker'
 import type { PendingSchedule } from './ScheduleTimePicker'
 import { disableAllFue, useFue } from '@/lib/use-fue'
 import { FueCallout, FueDot } from '@/components/Fue'
-import { Children, isValidElement, useRef, useState, type ReactElement, type ReactNode } from 'react'
+import { Children, isValidElement, useRef, useState, type ReactElement, type ReactNode, type Ref } from 'react'
 import { useComposerToolbarLayout, type ComposerToolbarItemId, type ComposerToolbarLayout } from '@/hooks/useComposerToolbarLayout'
 
 function ToolbarItemSlot(props: { item: ComposerToolbarItemId; children: ReactNode }) {
@@ -429,7 +429,7 @@ function ScratchlistToggleButton(props: {
                     onDismiss={fue.dismiss}
                     dismissLabel={t('fue.gotIt')}
                     closeAriaLabel={t('fue.closeAriaLabel')}
-                    anchorRef={buttonRef}
+                    anchorRef={localRef}
                     onSecondaryAction={disableAllFue}
                     secondaryActionLabel={t('fue.dontShowAgain')}
                 />
@@ -515,15 +515,22 @@ function TerminalButton(props: {
 function PerSessionSettingsButton(props: {
     onToggle: () => void
     disabled: boolean
+    buttonRef?: Ref<HTMLButtonElement>
 }) {
     const { t } = useTranslation()
     const fue = useFue('composer-per-session-settings')
-    const buttonRef = useRef<HTMLButtonElement>(null)
+    const localRef = useRef<HTMLButtonElement>(null)
+    const setButtonRef = (el: HTMLButtonElement | null) => {
+        localRef.current = el
+        const ext = props.buttonRef
+        if (typeof ext === 'function') ext(el)
+        else if (ext && typeof ext === 'object') (ext as { current: HTMLButtonElement | null }).current = el
+    }
 
     return (
         <>
             <button
-                ref={buttonRef}
+                ref={setButtonRef}
                 type="button"
                 aria-label={t('composer.settings')}
                 title={t('composer.settings')}
@@ -907,6 +914,7 @@ export function ComposerButtons(props: {
     canSend: boolean
     controlsDisabled: boolean
     showSettingsButton: boolean
+    settingsButtonRef?: Ref<HTMLButtonElement>
     onSettingsToggle: () => void
     expanded: boolean
     onExpandedToggle: () => void
@@ -985,6 +993,7 @@ export function ComposerButtons(props: {
                 {props.showSettingsButton ? (
                     <PerSessionSettingsButton
                         onToggle={props.onSettingsToggle}
+                        buttonRef={props.settingsButtonRef}
                         disabled={props.controlsDisabled}
                     />
                 ) : null}

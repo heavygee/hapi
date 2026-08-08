@@ -3,7 +3,8 @@ import type { ApiClient } from '@/api/client'
 import type { AttachmentMetadata } from '@/types/api'
 import { isImageMimeType } from '@/lib/fileAttachments'
 import { randomId } from '@/lib/randomId'
-import { getRestoredUploadMetadata, type AttachmentDraftInput } from '@/lib/composer-attachment-drafts'
+import { getRestoredUploadMetadata } from '@/lib/composer-attachment-drafts'
+import type { AttachmentDraftHandoff } from '@/lib/composer-draft-transfer'
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 const MAX_PREVIEW_BYTES = 5 * 1024 * 1024
@@ -18,7 +19,10 @@ export function createAttachmentAdapter(
     api: ApiClient,
     sessionId: string,
     resolveSessionId?: () => Promise<string>,
-    onSessionResolved?: (sessionId: string, pending: AttachmentDraftInput) => Promise<void>,
+    // Always hand off after resume merges into a new session id — even when
+    // the pick is cancelled — so the caller can navigate off a deleted source.
+    // Cancellation is re-checked at transfer save time via isCancelled().
+    onSessionResolved?: (sessionId: string, pending: AttachmentDraftHandoff) => Promise<void>,
 ): AttachmentAdapter {
     const cancelledAttachmentIds = new Set<string>()
 
@@ -41,9 +45,11 @@ export function createAttachmentAdapter(
             // Upload paths are scoped to the session that created them. An
             // inactive composer may resume into a different session id, so its
             // persisted file must follow the normal resolve/transfer flow and
-            // be uploaded again by the resumed composer.
-            const restored = resolveSessionId ? undefined : getRestoredUploadMetadata(file)
-            if (restored) {
+            // be uploaded again by the resumed composer. Pathless restored
+            // metadata still supplies a stable id so draft merge cannot
+            // duplicate the same File across persistence passes.
+            const restored = getRestoredUploadMetadata(file)
+            if (!resolveSessionId && restored?.path) {
                 yield {
                     id: restored.id,
                     type: 'file',
@@ -58,7 +64,7 @@ export function createAttachmentAdapter(
                 return
             }
 
-            const id = randomId()
+            const id = restored?.id ?? randomId()
             const contentType = file.type || 'application/octet-stream'
 
             try {
@@ -98,13 +104,19 @@ export function createAttachmentAdapter(
                 }
 
                 const uploadSessionId = resolveSessionId ? await resolveSessionId() : sessionId
-                if (cancelledAttachmentIds.has(id)) {
+                // Resume may already have merged the source session away. Always
+                // hand off with a live cancellation predicate so transfer can
+                // drop this id (even if already persisted on the source draft).
+                if (uploadSessionId !== sessionId && onSessionResolved) {
+                    await onSessionResolved(uploadSessionId, {
+                        id,
+                        file,
+                        previewUrl,
+                        isCancelled: () => cancelledAttachmentIds.has(id),
+                    })
                     return
                 }
-                if (uploadSessionId !== sessionId && onSessionResolved) {
-                    // Pass the in-flight file so handoff does not depend on a
-                    // composer effect that may not have published yet.
-                    await onSessionResolved(uploadSessionId, { id, file, previewUrl })
+                if (cancelledAttachmentIds.has(id)) {
                     return
                 }
 

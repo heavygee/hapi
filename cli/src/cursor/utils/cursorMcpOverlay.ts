@@ -1,6 +1,8 @@
 /**
  * Cursor ACP does not connect MCP servers passed on session/new (upstream limitation).
- * The working path is project .cursor/mcp.json + `agent mcp enable <id>`.
+ * The working path is user-level `~/.cursor/mcp.json` + `agent mcp enable <id>` (spawned
+ * with the session cwd). Project `.cursor/mcp.json` is intentionally avoided so ephemeral
+ * `hapi-<sessionId>` bridges cannot be `git add`ed from the checked-out tree.
  * See https://forum.cursor.com/t/acp-agent-silently-ignores-mcpservers-in-session-new/153623
  */
 
@@ -16,6 +18,7 @@ import {
     unlinkSync,
     writeFileSync,
 } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -25,8 +28,8 @@ import { logger } from '@/ui/logger';
 export const CURSOR_HAPI_MCP_SERVER_ID = 'hapi';
 
 /**
- * Per-session MCP server id for `.cursor/mcp.json`.
- * Concurrent sessions in the same cwd must not share a single `hapi` key — cleanup of an
+ * Per-session MCP server id for user-level `~/.cursor/mcp.json`.
+ * Concurrent sessions must not share a single `hapi` key — cleanup of an
  * older session would otherwise restore a dead loopback URL over a newer live bridge.
  */
 export function cursorHapiMcpServerId(sessionId: string): string {
@@ -35,6 +38,12 @@ export function cursorHapiMcpServerId(sessionId: string): string {
         throw new Error('sessionId is required for Cursor HAPI MCP overlay');
     }
     return `hapi-${trimmed}`;
+}
+
+/** Resolve the Cursor MCP config directory (override for tests; default `~/.cursor`). */
+export function resolveCursorMcpConfigDir(override?: string): string {
+    const trimmed = override?.trim();
+    return trimmed && trimmed.length > 0 ? trimmed : join(homedir(), '.cursor');
 }
 
 type McpServerEntry = {
@@ -231,37 +240,52 @@ export function withMcpJsonLock(lockPath: string, fn: () => void): void {
     }
 }
 
+function comparableMcpEnv(env?: Record<string, string>): string {
+    // Ignore the HAPI PID stamp (rewritten on install / crash-recovery), but
+    // treat any other env edit as a concurrent user change that must survive cleanup.
+    return JSON.stringify(
+        Object.entries(env ?? {})
+            .filter(([key]) => key !== HAPI_MCP_OVERLAY_PID_ENV)
+            .sort(([left], [right]) => left.localeCompare(right)),
+    );
+}
+
 function sameMcpEntry(a: McpServerEntry | undefined, b: McpServerEntry | undefined): boolean {
-    // Ownership is command+args. Env (PID stamp) may be rewritten or omitted by
-    // concurrent edits and must not block cleanup of our overlay entry.
     if (!a || !b) {
         return a === b;
     }
-    return a.command === b.command && JSON.stringify(a.args) === JSON.stringify(b.args);
+    return a.command === b.command
+        && JSON.stringify(a.args) === JSON.stringify(b.args)
+        && comparableMcpEnv(a.env) === comparableMcpEnv(b.env);
 }
 
 /**
- * Merge the per-session HAPI stdio bridge into `<cwd>/.cursor/mcp.json` and approve it
- * for Cursor's native MCP loader.
+ * Merge the per-session HAPI stdio bridge into `~/.cursor/mcp.json` (or
+ * `options.mcpConfigDir`) and approve it for Cursor's native MCP loader.
  *
  * Cleanup undoes only the exact entry this session installed under `serverId` (or restores a
  * pre-existing value for that same id). Concurrent edits to other mcpServers keys — and to
  * this id when it no longer matches the installed overlay — survive the session.
  *
  * Install and cleanup serialize via a lockfile and write mcp.json atomically so concurrent
- * CLI processes in the same cwd cannot clobber each other's `hapi-*` entries.
+ * CLI processes cannot clobber each other's `hapi-*` entries.
  */
 export function installCursorMcpOverlay(
     cwd: string,
     bridge: { command: string; args: string[] },
-    options: { serverId: string; enableCursorMcp?: EnableCursorMcp },
+    options: {
+        serverId: string;
+        enableCursorMcp?: EnableCursorMcp;
+        /** Override config dir (tests). Production uses `~/.cursor`. */
+        mcpConfigDir?: string;
+    },
 ): CursorMcpOverlayHandle {
     const serverId = options.serverId.trim();
     if (!serverId) {
         throw new Error('serverId is required for Cursor HAPI MCP overlay');
     }
 
-    const cursorDir = join(cwd, '.cursor');
+    const cursorDir = resolveCursorMcpConfigDir(options.mcpConfigDir);
     const mcpJsonPath = join(cursorDir, 'mcp.json');
     const lockPath = `${mcpJsonPath}.hapi.lock`;
     const cursorDirEntry = lstatSync(cursorDir, { throwIfNoEntry: false });
@@ -367,6 +391,6 @@ export function installCursorMcpOverlay(
         );
     }
 
-    logger.debug(`[cursor-acp] enabled native MCP server ${serverId} via .cursor/mcp.json`);
+    logger.debug(`[cursor-acp] enabled native MCP server ${serverId} via ${mcpJsonPath}`);
     return { cleanup };
 }

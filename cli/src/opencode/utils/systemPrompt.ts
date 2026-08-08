@@ -1,27 +1,25 @@
 /**
- * OpenCode-specific system prompt for hapi MCP tools (change_title, display_image, display_video).
+ * OpenCode-specific system prompt for hapi MCP tools (change_title, display_image, display_video, display_media).
  *
  * OpenCode exposes MCP tools with the naming pattern: <server-name>_<tool-name>
- * The hapi MCP server exposes `change_title`, `display_image`, and `display_video`.
+ * The hapi MCP server exposes `change_title`, `display_image`, `display_video`, and `display_media`.
  */
 
 import { trimIdent } from '@/utils/trimIdent';
+import { buildSessionCitationSteerInstruction } from '@hapi/protocol/sessionCitation';
 import { HAPI_MCP_BRIDGE_PROMPT } from '@/modules/common/hapiMcpBridgePrompt';
 import {
     DISPLAY_IMAGE_PROMPT_HAPI_MCP,
+    DISPLAY_MEDIA_PROMPT_HAPI_MCP,
     DISPLAY_VIDEO_PROMPT_HAPI_MCP,
 } from '@/modules/common/displayImagePrompt';
-import { buildSessionCitationSteerInstruction } from '@hapi/protocol/sessionCitation';
 import { SKILL_LOOKUP_INSTRUCTION } from '@/modules/common/skillLookupInstruction';
-import { withSessionJobInstruction } from '@/modules/common/sessionJobInstruction';
 import { withSessionSummaryInstruction } from '@/modules/common/sessionSummaryInstruction';
 
 /**
- * Title and display_image / display_video instructions for OpenCode to call the hapi MCP tools.
- * Keeps upstream skill-lookup; session-status summary contract rides when enabled
- * (local instructions file + one-shot remote first-turn inject via instructionsSent).
+ * Title and display_image / display_video / display_media instructions for OpenCode to call the hapi MCP tools.
  */
-export const TITLE_INSTRUCTION = withSessionSummaryInstruction(trimIdent(`
+export const TITLE_INSTRUCTION = trimIdent(`
     ${HAPI_MCP_BRIDGE_PROMPT}
     ${buildSessionCitationSteerInstruction({
         inspectTool: 'hapi_inspect_peer',
@@ -29,20 +27,20 @@ export const TITLE_INSTRUCTION = withSessionSummaryInstruction(trimIdent(`
         listPeersTool: 'hapi_list_peers',
     })}
     ${SKILL_LOOKUP_INSTRUCTION}
-`));
+`);
 
 export function getTitleInstruction(env: NodeJS.ProcessEnv = process.env): string {
-    return withSessionSummaryInstruction(withSessionJobInstruction(TITLE_INSTRUCTION), env)
+    return withSessionSummaryInstruction(TITLE_INSTRUCTION, env)
 }
 
 /**
  * Tool instructions for native ACP sessions. Title updates come from ACP, so
  * advertise only the MCP tools that remain available to the model.
- * (Generic-ACP summary coverage is #89 — not wrapped here yet.)
  */
 export const OPENCODE_NATIVE_TOOL_INSTRUCTION = trimIdent(`
     ${DISPLAY_IMAGE_PROMPT_HAPI_MCP}
     ${DISPLAY_VIDEO_PROMPT_HAPI_MCP}
+    ${DISPLAY_MEDIA_PROMPT_HAPI_MCP}
     ${buildSessionCitationSteerInstruction({
         inspectTool: 'hapi_inspect_peer',
         pingTool: 'hapi_ping_peer',
@@ -52,7 +50,7 @@ export const OPENCODE_NATIVE_TOOL_INSTRUCTION = trimIdent(`
 `);
 
 export function getOpencodeNativeToolInstruction(env: NodeJS.ProcessEnv = process.env): string {
-    return withSessionSummaryInstruction(withSessionJobInstruction(OPENCODE_NATIVE_TOOL_INSTRUCTION), env)
+    return withSessionSummaryInstruction(OPENCODE_NATIVE_TOOL_INSTRUCTION, env)
 }
 
 /**
