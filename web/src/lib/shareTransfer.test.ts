@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+    buildSharePayloadFromDeepLink,
     buildSharePayloadFromFormData,
     buildSharePayloadFromSearchFields,
     hasShareDeepLinkContent,
@@ -151,6 +152,12 @@ describe('hasShareDeepLinkContent', () => {
     it('is false when empty', () => {
         expect(hasShareDeepLinkContent({})).toBe(false)
     })
+
+    it('is true when fileUrl is present', () => {
+        expect(hasShareDeepLinkContent({
+            fileUrl: 'http://127.0.0.1:9/s',
+        })).toBe(true)
+    })
 })
 
 describe('buildSharePayloadFromSearchFields', () => {
@@ -192,6 +199,44 @@ describe('buildSharePayloadFromSearchFields', () => {
             files: [],
             createdAt: 99,
         })
+    })
+})
+
+describe('buildSharePayloadFromDeepLink', () => {
+    it('fetches fileUrl into files[]', async () => {
+        const bytes = new Uint8Array([1, 2, 3, 4])
+        const fetchMock = vi.fn(async () => new Response(bytes, {
+            status: 200,
+            headers: { 'content-type': 'image/jpeg' },
+        }))
+        const payload = await buildSharePayloadFromDeepLink(
+            {
+                title: 'Shot',
+                fileUrl: 'http://127.0.0.1:9/once',
+                fileName: 'shot.jpg',
+                fileType: 'image/jpeg',
+            },
+            55,
+            { fetch: fetchMock as unknown as typeof fetch },
+        )
+        expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:9/once')
+        expect(payload.title).toBe('Shot')
+        expect(payload.files).toHaveLength(1)
+        expect(payload.files[0]).toMatchObject({
+            name: 'shot.jpg',
+            type: 'image/jpeg',
+        })
+        expect(payload.files[0].blob.size).toBe(4)
+        expect(payload.createdAt).toBe(55)
+    })
+
+    it('throws when fileUrl fetch fails', async () => {
+        const fetchMock = vi.fn(async () => new Response(null, { status: 404 }))
+        await expect(buildSharePayloadFromDeepLink(
+            { fileUrl: 'http://127.0.0.1:9/missing' },
+            1,
+            { fetch: fetchMock as unknown as typeof fetch },
+        )).rejects.toThrow(/fileUrl fetch failed/)
     })
 })
 
