@@ -293,7 +293,14 @@ classify_one() {
         return
     fi
     if [[ "$closed" -eq 1 ]]; then
-        decided="$(pec_decide_emoji 1 0 1 0 0 0 0 0 0 0 0 0)"
+        # Empty-vs-main → superseded exit (#958→#1405): suggest chip retarget, not rebase.
+        local superseded=0 ahead_by=""
+        if ahead_by="$(gh api "repos/${REPO}/compare/main...pull/${n}/head" \
+            --jq '.ahead_by // empty' 2>/dev/null)" \
+            && [[ "$ahead_by" == "0" ]]; then
+            superseded=1
+        fi
+        decided="$(pec_decide_emoji 1 0 1 0 0 0 0 0 0 0 0 0 0 "$superseded")"
         _emit_pr_json "$out" "${decided%%$'\t'*}" "${decided#*$'\t'}" 1 0 1 0 0 -1 0 0 0 0 0 "$merge_state" "" "$head_ref"
         return
     fi

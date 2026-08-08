@@ -120,6 +120,11 @@ eq "no PR exists → 📝" "$(emoji_of "$r")" "📝"
 
 r="$(pec_decide_emoji 1 0 1 1 0 1 0 1 0 0 0 0)"
 eq "closed unmerged → ⚠️ (not green)" "$(emoji_of "$r")" "⚠️"
+eq "closed unmerged mentions superseded exit" "$(action_of "$r" | grep -c 'retarget chip to absorber')" "1"
+
+r="$(pec_decide_emoji 1 0 1 0 0 0 0 0 0 0 0 0 0 1)"
+eq "closed superseded hint → ⚠️" "$(emoji_of "$r")" "⚠️"
+eq "closed superseded hint action" "$(action_of "$r" | grep -c 'closed superseded')" "1"
 
 r="$(pec_decide_emoji 1 0 0 1 0 0 0 1 0 0 0 0)"
 eq "no CI checks seen → NOT ✅" "$(emoji_of "$r")" "🔁"

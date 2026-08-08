@@ -198,9 +198,22 @@ Daily classify + chip cache + pings: `./scripts/tooling/hapi-meta-daily.sh` (see
 
 ---
 
+## Absorbed / empty-vs-main (superseded close — first-class babysit exit)
+
+When a long-lived fork PR is **merge-dirty** against `upstream/main` because another upstream PR already shipped a **superset** of the same work:
+
+1. Merge `upstream/main` into the PR branch (or rebase once) and **diff the result tree against `upstream/main`**.
+2. If the tree is empty / identical → **close as superseded**. Do **not** keep resolving conflicts forever.
+3. **Retarget the session chip** (`hapi link-pr` / MCP `link_pr`) to the **absorbing merged PR** (e.g. `#958` → `#1405`). Leaving the closed PR as the chip sticky-pings ⚠️ "closed WITHOUT merge."
+4. Drop soup layer + clean worktree/branch against the **absorber** cleanup path (🔧 → Gate A → Meta archive → 🧹).
+
+Classifier hint: closed + compare `main...pull/N/head` with `ahead_by == 0` → superseded action text (see `pec_decide_emoji` / `hapi-pr-emoji-batch.sh`). Retro: [`docs/plans/2026-08-08-cross-flavor-inline-images-babysit-retro.md`](../plans/2026-08-08-cross-flavor-inline-images-babysit-retro.md).
+
 ## After upstream merge (fleet cleanup — meta sweep MUST advise this)
 
 When a PR merges on `tiann/hapi`, do **not** stop at "congrats, archive yourself." The estate still carries a soup layer and a worktree until someone removes them — and self-archive mid-turn leaves untidy tool UI.
+
+**🔧 after Gate A is already clean** (layer DROPPED + worktree gone): chip `statusAction` softens to **ack + idle; archive pending** — peers must not rematerialize or self-archive mid-turn. Meta archives from outside when `thinking=false`, then the chip can go 🧹.
 
 ### Sequence (accurate)
 

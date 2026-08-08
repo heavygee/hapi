@@ -344,18 +344,19 @@ pec_leading_emoji() {
 # Usage:
 #   pec_decide_emoji EXISTS MERGED CLOSED CHECKS_OK CHECKS_PENDING CHECKS_SEEN \
 #                    THREADS_N BOT_CLEAN BOT_MAJOR BOT_HAS_BODY MERGE_BAD DATA_UNAVAILABLE \
-#                    [REVIEW_CHANGES_REQUESTED]
+#                    [REVIEW_CHANGES_REQUESTED] [SUPERSEDED_HINT]
 #   → prints "<emoji>\t<action>"
 #
 # THREADS_N: >=0 actionable unresolved count (caller excludes isOutdated — #847), -1 = unavailable.
 # REVIEW_CHANGES_REQUESTED: 1 when GraphQL reviewDecision == CHANGES_REQUESTED.
+# SUPERSEDED_HINT: 1 when caller detected empty-vs-main / absorber merge (close as superseded).
 # ---------------------------------------------------------------------------
 
 pec_decide_emoji() {
     local exists="$1" merged="$2" closed="$3" checks_ok="$4" checks_pending="$5" \
         checks_seen="$6" threads_n="$7" bot_clean="$8" bot_major="$9" \
         bot_has_body="${10}" merge_bad="${11}" data_unavailable="${12}" \
-        review_changes="${13:-0}"
+        review_changes="${13:-0}" superseded_hint="${14:-0}"
 
     if [[ "$data_unavailable" == "1" ]]; then
         printf '%s\t%s' "?" "GitHub data unavailable this run — retry sweep (title unchanged)"
@@ -371,7 +372,13 @@ pec_decide_emoji() {
         return
     fi
     if [[ "$closed" == "1" ]]; then
-        printf '%s\t%s' "⚠️" "PR closed WITHOUT merge — reopen if still wanted, or drop the tracking/session"
+        if [[ "$superseded_hint" == "1" ]]; then
+            printf '%s\t%s' "⚠️" "PR closed superseded (empty-vs-main / absorbed) — retarget chip to absorbing merged PR; drop layer/worktree; do not rebase forever"
+            return
+        fi
+        # Default closed-unmerged: first-class exit is retarget-to-absorber when
+        # another upstream PR already shipped the same work (#958→#1405).
+        printf '%s\t%s' "⚠️" "PR closed WITHOUT merge — if empty-vs-main after an absorbing upstream merge: close superseded + retarget chip to absorber (not endless rebase); else reopen or drop session"
         return
     fi
 

@@ -704,7 +704,7 @@ main() {
             local emoji_sess="${PR_EMOJI[$p]:-?}"
             local action_sess="${PR_ACTION[$p]:-}"
             if [[ "$emoji_sess" == "🔧" ]]; then
-                local complete_reason=""
+                local complete_reason="" gate_a_reason=""
                 if complete_reason="$(mw_member_complete \
                     "$manifest_text_early" \
                     "${SESS_PATH[$sid8]:-}" \
@@ -716,6 +716,16 @@ main() {
                     action_sess="fully cleaned — babysit ended"
                 else
                     vlog "complete? #$p [$sid8] → $complete_reason"
+                    # Gate A already clean (layer+worktree gone) but archive/branch
+                    # still owed — stop nagging "drop soup layer" (#958→#1405 retro).
+                    if gate_a_reason="$(mw_wave_member_clean \
+                        "$manifest_text_early" \
+                        "${SESS_PATH[$sid8]:-}" \
+                        "$p")"; then
+                        action_sess="Gate A clean — ack + idle; archive pending (Meta archives from outside; do not rematerialize / self-archive mid-turn)"
+                    else
+                        vlog "gate A dirty #$p [$sid8] → $gate_a_reason"
+                    fi
                 fi
             fi
             emojis+=("$emoji_sess")
@@ -853,7 +863,13 @@ main() {
         # action queue rows
         case "$combined" in
             ⚠️) Q_WARN+=("#$(echo "$prs" | tr ' ' ',') [$sid8] $(echo "$acts" | tr '\n' ' ' | sed 's/ *$//')") ;;
-            🔧) Q_MERGED+=("#$(echo "$prs" | tr ' ' ',') [$sid8] MERGED - peer: drop soup layer, clean worktree/branch, archive") ;;
+            🔧)
+                if printf '%s' "$acts" | grep -q 'Gate A clean'; then
+                    Q_MERGED+=("#$(echo "$prs" | tr ' ' ',') [$sid8] MERGED - Gate A clean; ack + idle; archive pending")
+                else
+                    Q_MERGED+=("#$(echo "$prs" | tr ' ' ',') [$sid8] MERGED - peer: drop soup layer, clean worktree/branch, archive")
+                fi
+                ;;
             🧹) Q_COMPLETE+=("#$(echo "$prs" | tr ' ' ',') [$sid8] COMPLETE - babysit ended (no ping)") ;;
             ✅)
                 # Lane overlay: self-merge eligible vs wait on tiann (chip stays ✅).
@@ -1170,7 +1186,15 @@ _do_ping() {  # <sid8> <emoji> <prs> <acts>
         🔁) state_desc="CI/rebase in flight" ;;
         ⚠️) state_desc="needs work"; rouse=$'\n\n**Meta ping window — are you done yet?** Resume work or reply with the blocker.' ;;
         📝) state_desc="pre-PR - not filed upstream yet" ;;
-        🔧) state_desc="MERGED - clean up soup/worktree/branch, archive when idle"; rouse=$'\n\n**Meta ping window — are you done yet?** Drop soup layer + clean worktree/branch, then ack. Do not rematerialize mid-wave. Do not mid-turn self-archive.' ;;
+        🔧)
+            if printf '%s' "$acts" | grep -q 'Gate A clean'; then
+                state_desc="MERGED - Gate A clean; ack + idle; archive pending"
+                rouse=$'\n\n**Meta ping window — Gate A already clean.** Ack + idle. Do not rematerialize. Do not mid-turn self-archive — Meta archives from outside when idle.'
+            else
+                state_desc="MERGED - clean up soup/worktree/branch, archive when idle"
+                rouse=$'\n\n**Meta ping window — are you done yet?** Drop soup layer + clean worktree/branch, then ack. Do not rematerialize mid-wave. Do not mid-turn self-archive.'
+            fi
+            ;;
         🧹) state_desc="COMPLETE - fully cleaned; babysit ended"; rouse="" ;;
         *) state_desc="see title" ;;
     esac
