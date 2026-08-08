@@ -368,7 +368,7 @@ pec_decide_emoji() {
     fi
     if [[ "$merged" == "1" ]]; then
         # Keep in sync with docs/tooling/feature-work-lifecycle.md § After upstream merge.
-        printf '%s\t%s' "🔧" "MERGED — notify peer: (1) drop soup layer(s) (2) remove worktree+branch (3) ack; do NOT self-archive mid-turn (orphans tool UI); meta rematerializes soup once wave cleanup done, then archives when idle"
+        printf '%s\t%s' "🔧" "MERGED — notify peer: (1) drop soup layer(s) (2) remove worktree+branch (3) exit reflection docs/plans/retros/TEMPLATE-exit-reflection.md or skip: (4) ack; do NOT self-archive mid-turn (orphans tool UI); meta rematerializes soup once wave cleanup done, then archives when idle"
         return
     fi
     if [[ "$closed" == "1" ]]; then

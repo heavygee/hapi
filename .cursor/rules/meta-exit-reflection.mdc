@@ -1,0 +1,15 @@
+---
+description: Meta MERGED briefs must include Gate A' exit reflection before archive
+alwaysApply: true
+---
+
+# Meta: exit reflection (Gate A') before archive
+
+When Meta advises a peer after upstream merge / chip `merged` / 🔧:
+
+1. Use the pasteable **MERGED cleanup brief** in `docs/operator/AGENTS.md` § Meta PR watcher (Gate A soup/wt + **Gate A' exit reflection**).
+2. Do **not** say bare "stand down / archive now" — say **ack cleanup + exit reflection, then idle**; Meta archives from outside when idle.
+3. Template: `docs/plans/retros/TEMPLATE-exit-reflection.md`. Honest `skip:` / `skip: timebox` OK — do not block 🧹 forever for a missing retro.
+4. After wave acks: skim `docs/plans/retros/*-exit.md`; apply **only** explicit **Promote?** rows (no essay merges into AGENTS).
+
+Canon: `docs/tooling/feature-work-lifecycle.md` § Exit reflection. Overseer typed emit is next slice (`docs/plans/2026-08-08-peer-exit-reflection-events.md`).

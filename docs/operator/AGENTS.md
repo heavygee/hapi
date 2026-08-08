@@ -27,8 +27,10 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 | Upstream PR “babysit / merge-ready” | **Prepare only** (agents); lane B self-merge is operator/Meta | § Upstream relationship - lanes A/B/C; #1096; #1268 blessing |
 | Public speech on others' PRs/issues | **Operator first**; no estate jargon; do not police other contributors | § Public GitHub voice |
 | **Daily PR sweep / "the dance"** | Run **`hapi-meta-daily.sh`** — classify → chip status cache → strip title emoji (chipped) → policy-ping → action queue. Don't reinvent it each morning. | § Meta PR watcher (below) |
-| Upstream PR **merged** (Meta daily / chip `merged`) | Notify peer → drop soup layer → clean worktree/branch → rematerialize **once** after the wave → archive when idle (peers: no mid-turn self-archive; **no** `🔧` title rewrite) | Lifecycle [§ After upstream merge](../tooling/feature-work-lifecycle.md#after-upstream-merge-fleet-cleanup--meta-sweep-must-advise-this) |
-| Long babysit PR **empty vs main** after upstream lands a superseding merge | Close as superseded; retarget chip to absorber; drop soup; idle — do not keep resolving forever | [`2026-08-08-cross-flavor-inline-images-babysit-retro.md`](../plans/2026-08-08-cross-flavor-inline-images-babysit-retro.md) (#958 → #1405) |
+| Upstream PR **merged** (Meta daily / chip `merged`) | Notify peer with **MERGED cleanup brief** (Gate A + **Gate A' exit reflection**) → peer cleans → rematerialize **once** after the wave → archive when idle (peers: no mid-turn self-archive; **no** `🔧` title rewrite) | Lifecycle [§ After upstream merge](../tooling/feature-work-lifecycle.md#after-upstream-merge-fleet-cleanup--meta-sweep-must-advise-this) + [§ Exit reflection](../tooling/feature-work-lifecycle.md#exit-reflection-gate-a--knowledge-cleanup); paste brief in § Meta PR watcher |
+| Peer about to be archived after cleanup | **Exit reflection** before idle — harvest non-code lessons; Overseer event emit next | Template [`retros/TEMPLATE-exit-reflection.md`](../plans/retros/TEMPLATE-exit-reflection.md); events plan [`2026-08-08-peer-exit-reflection-events.md`](../plans/2026-08-08-peer-exit-reflection-events.md) |
+| Meta wave after peers ack cleanup | **Skim** `docs/plans/retros/*-exit.md`; apply only explicit **Promote?** rows; `skip: timebox` OK — do not block 🧹 forever | Lifecycle § Exit reflection **Meta wave job** |
+| Long babysit PR **empty vs main** after upstream lands a superseding merge | Close as superseded; retarget chip to absorber; drop soup; exit reflection; idle — do not keep resolving forever | [`2026-08-08-cross-flavor-inline-images-babysit-retro.md`](../plans/2026-08-08-cross-flavor-inline-images-babysit-retro.md) (#958 → #1405) |
 | Session title / PR health | Title = workstream only (no `PR #N:` once chipped); identity+health on **chip**; attach via `hapi link-pr` / MCP `link_pr` | Lifecycle [§ Session titles and PR chips](../tooling/feature-work-lifecycle.md#session-titles-and-pr-chips) |
 | Local Pi coding agent (5090 / oos-linux) | New Session → **Pi**; backend `oos-llm` VIP | [`pi-local-coding-agent.md`](./pi-local-coding-agent.md) |
 | Agent mangles `tiann`/`oos-linux`/MagicDNS doubles | Free-recall / tokenization hazard - not HAPI pipe. **Outside-Cursor control done (2026-07-24): native claude+codex 0/27 drops** | [`2026-07-22-doubled-character-free-recall.md`](../plans/2026-07-22-doubled-character-free-recall.md) + [outside-cursor results](../plans/2026-07-22-doubled-character-free-recall-outside-cursor-results.md) |
@@ -160,13 +162,31 @@ What it does, idempotently:
 | 🔁 `pending` | CI/bot in flight, or thread/CI data momentarily unavailable | wait / retry |
 | ⚠️ `needs_work` | failing CI, **current** open threads, bot findings, rebase, or **closed-unmerged** | fix per action string |
 | 📝 `pre_pr` | tracked number, no open PR upstream yet | file when ready |
-| 🔧 `merged` | merged; cleanup still owed | drop soup layer → clean worktree/branch → archive (peers: **no mid-turn self-archive**) |
+| 🔧 `merged` | merged; cleanup still owed (or Gate A clean, archive pending) | drop soup/wt/branch → **exit reflection** (or `skip:`) → ack + idle; Meta archives (peers: **no mid-turn self-archive**) |
 | 🧹 `complete` | fully cleaned (layer DROPPED, no worktree/branch, session archived) | **never** (babysit ended) |
 | `?` `unknown` | GitHub data unavailable this run | **chip left at last good status; never pinged** |
 
 Chip thread count excludes GraphQL `isOutdated` unresolved threads (#847: leftover bot Majors on old lines must not keep ⚠️ after Findings:None + green CI on tip).
 
-**Ping policy (why it isn't spam for greens, but is a rouse for work):** on **hourly ping windows** (Europe/London :00), Meta **always** pings sticky ⚠️ / 🔧 sessions — "are you done yet?" — including **inactive** ones (`hapi-ping-peer` resumes them). ✅ / 🔁 / 📝 only ping on an emoji **transition** (first sight / state change), never on every window. 🧹 / `?` **never** ping (incl. 🔧→🧹). Manual `--no-ping` never pings. State lives at `${XDG_STATE_HOME:-~/.local/state}/hapi/meta-daily.json`.
+**Ping policy (why it isn't spam for greens, but is a rouse for work):** on **hourly ping windows** (Europe/London :00), Meta **always** pings sticky ⚠️ / 🔧 sessions — "are you done yet?" — including **inactive** ones (`hapi-ping-peer` resumes them). ✅ / 🔁 / 📝 only ping on an emoji **transition** (first sight / state change), never on every window. 🧹 / `?` **never** ping (incl. 🔧→🧹). Manual `--no-ping` never pings. State lives at `${XDG_STATE_HOME:-~/.local/state}/hapi/meta-daily.json`. Classifier / sticky 🔧 pings already mention exit reflection; **human Meta briefs must too** — use the paste block below (do not invent "stand down / archive now").
+
+**MERGED cleanup brief (paste to peer — Gate A + Gate A'):**
+
+```text
+PR #<N> merged (<tip SHA if known>). Chip shows merged / 🔧 — leave the workstream title alone.
+
+Please:
+1. Drop your soup layer(s) from ~/.config/hapi/driver-manifest.yaml (# DROPPED comment OK)
+2. Remove worktree + delete local/remote branch (hapi-branch-audit until clean)
+3. Exit reflection: copy docs/plans/retros/TEMPLATE-exit-reflection.md →
+   docs/plans/retros/YYYY-MM-DD-<slug>-exit.md (or honest skip: <reason> / skip: timebox)
+4. Ack: "Gate A clean + exit reflection: <path|skip:> — idle for archive."
+5. Idle cleanly — do NOT self-archive mid-turn (orphans tool UI). Meta archives when idle.
+
+Do not rematerialize mid-wave; Meta rebuilds once when the wave is clear.
+```
+
+**Meta wave job (after acks):** skim new `docs/plans/retros/*-exit.md`; apply **only** checked **Promote?** rows (High-signal index line, tiny lifecycle/tooling patch, or file issue). Ignore essays. `skip: timebox` → archive anyway; do not hold 🧹 for a missing retro forever. Typed Overseer emit for reflections is next slice (`2026-08-08-peer-exit-reflection-events.md`) — until then, ack path/`skip:` *is* the durable signal.
 
 **Scope guard (chips only):** Meta discovers sessions **only** via linked `metadata.externalRefs` `github_pr` chips on `tiann/hapi` | `heavygee/hapi`. Session titles are never scraped for classify/ping (2026-08-06 Sparling: `"Module 02 … #395"` title scrape destroyed foreign work). Unlinked sessions are invisible until `hapi link-pr` / MCP `link_pr`. `--backfill-refs` remains a one-shot title→chip migrator (`PR #N` markers only). Use `--pr <N>` for a rare low-numbered upstream PR in the open/merged union.
 

@@ -74,9 +74,11 @@ Remove worktree/branch from **mirror**, not from inside the doomed worktree. One
 
 ## Suggested Meta / tooling follow-ups (optional)
 
-1. Classifier: if PR `closed` && tree empty vs base && another merged PR owns same paths → suggest **superseded close + chip retarget**, not endless rebase.
-2. Soften 🔧 `statusAction` when Gate A predicates are already clean → “ack + idle; archive pending”.
-3. Document closed-without-merge → retarget-to-absorber as a first-class babysit exit.
+Status 2026-08-08 (Meta skim — not a Promote? checkbox retro; applied where already shipped):
+
+1. Classifier: if PR `closed` && tree empty vs base && another merged PR owns same paths → suggest **superseded close + chip retarget**, not endless rebase. — **partial:** `ahead_by == 0` superseded action text in classifier; full path-overlap heuristic still open.
+2. Soften 🔧 `statusAction` when Gate A predicates are already clean → “ack + idle; archive pending”. — **done** (`hapi-meta-daily.sh` Gate A clean action + exit reflection).
+3. Document closed-without-merge → retarget-to-absorber as a first-class babysit exit. — **done** (lifecycle § Absorbed / empty-vs-main).
 
 ---
 

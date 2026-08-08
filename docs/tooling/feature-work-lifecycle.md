@@ -205,7 +205,7 @@ When a long-lived fork PR is **merge-dirty** against `upstream/main` because ano
 1. Merge `upstream/main` into the PR branch (or rebase once) and **diff the result tree against `upstream/main`**.
 2. If the tree is empty / identical → **close as superseded**. Do **not** keep resolving conflicts forever.
 3. **Retarget the session chip** (`hapi link-pr` / MCP `link_pr`) to the **absorbing merged PR** (e.g. `#958` → `#1405`). Leaving the closed PR as the chip sticky-pings ⚠️ "closed WITHOUT merge."
-4. Drop soup layer + clean worktree/branch against the **absorber** cleanup path (🔧 → Gate A → Meta archive → 🧹).
+4. Drop soup layer + clean worktree/branch against the **absorber** cleanup path (🔧 → Gate A → exit reflection → Meta archive → 🧹).
 
 Classifier hint: closed + compare `main...pull/N/head` with `ahead_by == 0` → superseded action text (see `pec_decide_emoji` / `hapi-pr-emoji-batch.sh`). Retro: [`docs/plans/2026-08-08-cross-flavor-inline-images-babysit-retro.md`](../plans/2026-08-08-cross-flavor-inline-images-babysit-retro.md).
 
@@ -230,7 +230,55 @@ When a PR merges on `tiann/hapi`, do **not** stop at "congrats, archive yourself
 | **2. Drop soup layer(s)** | **Feature peer** (owner of the layer) | Edit `~/.config/hapi/driver-manifest.yaml`: remove the `- branch:` entry (leave a `# DROPPED YYYY-MM-DD: … MERGED as #N` comment). Do **not** hand-edit `~/coding/hapi/driver`. Do **not** each fire a full rebuild during a multi-PR merge wave. |
 | **3. Clean worktree + branch** | **Feature peer** | From mirror: `git worktree remove ~/coding/hapi/worktrees/<name>` (or `--force` if dirty junk only); delete local branch; `git push origin --delete <branch>` when the remote tip is fully in `upstream/main`. Confirm with `hapi-branch-audit --quiet` (expect no `MERGED` row for that branch). |
 | **4. Rematerialize soup** | Meta tooling bot (unlocked by Meta daily) **or** operator — **once per wave** | Gate A: owned peers only (layer gone + worktree gone). Orphans never block. Meta daily collects ~30m then unlock-pings Meta tooling on the hourly Europe/London ping windows. Manual mid-window rebuilds are fine — unlock defers while `hapi-driver-status --quiet` is busy (75). Then: `hapi-sync-fork-main` + `git push origin main` → `hapi-driver-status --quiet` → `hapi-driver-rebuild --build-web --verify` → `hapi-verify-web-dist` → `hapi-restart-hub` if hub/cli changed. Meta CLI never rebuilds itself. |
-| **5. Archive / idle the peer session** | Prefer **meta** after peer acks idle; peer only if turn is already done | See **Stand down without self-immolation** below. |
+| **5. Exit reflection** | **Feature peer** (while context still hot) | See **§ Exit reflection** below — write retro (or honest `skip:`), then ack. |
+| **6. Archive / idle the peer session** | Prefer **meta** after peer acks idle; peer only if turn is already done | See **Stand down without self-immolation** below. |
+
+### Exit reflection (Gate A' — knowledge cleanup)
+
+Code estate cleanup (soup layer, worktree, branch) is not enough. Session judgment dies on archive unless you extract it. Same discipline as soup: **extract, then delete.**
+
+Insert **after** Gate A predicates (layer DROPPED + worktree/branch gone) and **before** idle-for-outside-archive:
+
+```text
+1. Notify 🔧
+2. Drop soup + clean wt/branch     ← code estate
+3. EXIT REFLECTION                 ← knowledge estate (this section)
+4. Ack Meta: cleanup + reflection done (+ path or skip:)
+5. Idle → Meta archives → 🧹
+```
+
+**Peer writes** (one turn, bullets only):
+
+```bash
+# Copy template → dated file on fork mirror (not in upstream PR diff)
+cp docs/plans/retros/TEMPLATE-exit-reflection.md \
+   docs/plans/retros/YYYY-MM-DD-<slug>-exit.md
+# Fill sections; commit on fork main when promoting docs
+```
+
+Template: [`docs/plans/retros/TEMPLATE-exit-reflection.md`](../plans/retros/TEMPLATE-exit-reflection.md).
+
+| Section | Purpose |
+|---------|---------|
+| **Shipped as** | PR #(s), absorber if superseded |
+| **Non-code residue** | Ops / Meta / review / dogfood lessons (max ~8 bullets) |
+| **Promote?** | `none` \| High-signal index row \| lifecycle/tooling doc patch \| tooling issue |
+| **Open questions / landmines** | For the next agent in this area |
+| **Skip** | Honest `skip: <reason>` for trivial PRs — still ack |
+
+**Ack shape** (to Meta / orchestrator):
+
+> Gate A clean + exit reflection: `docs/plans/retros/YYYY-MM-DD-<slug>-exit.md` (promote: …) — idle for archive.
+
+Or: `Gate A clean + exit reflection: skip: typo-only — idle for archive.`
+
+**Meta wave job:** skim the wave's retros; apply only explicit **Promote?** rows (index line, tiny doc patch, or file issue). Do not auto-merge essays into `AGENTS.md`.
+
+**Timebox:** best-effort ≤1 turn. If stuck → `skip: timebox` + archive anyway (do not block 🧹 forever).
+
+**Overseer:** exit reflections are a first-class improvement signal — see [`2026-08-08-peer-exit-reflection-events.md`](../plans/2026-08-08-peer-exit-reflection-events.md). Until emit lands, the markdown file + Meta ack *are* the durable record.
+
+Example that earned the ritual: [`2026-08-08-cross-flavor-inline-images-babysit-retro.md`](../plans/2026-08-08-cross-flavor-inline-images-babysit-retro.md) (#958 → #1405).
 
 ### Stand down without self-immolation
 
@@ -240,12 +288,14 @@ Self-archive mid-turn yanks the runner while a tool call is still on the chat su
 
 Correct stand-down:
 
-1. Finish cleanup tools (manifest drop, worktree/branch delete) and reply to meta that steps 1–3 are done.
-2. **End the turn cleanly** — no further tool calls that mutate this session's lifecycle.
-3. Let the session go idle / inactive naturally (`thinking` / WORKING clear).
-4. **Meta** (or the operator) archives from **outside** when the session is idle. Peer may archive themselves only in a follow-up turn that does **nothing else** — no Shell/tool chrome after the archive call.
+1. Finish cleanup tools (manifest drop, worktree/branch delete).
+2. Write **exit reflection** (or honest `skip:`) — § Exit reflection above.
+3. Reply to meta that Gate A + reflection are done (path or skip line).
+4. **End the turn cleanly** — no further tool calls that mutate this session's lifecycle.
+5. Let the session go idle / inactive naturally (`thinking` / WORKING clear).
+6. **Meta** (or the operator) archives from **outside** when the session is idle. Peer may archive themselves only in a follow-up turn that does **nothing else** — no Shell/tool chrome after the archive call.
 
-Hard rule for meta briefs: say **"ack cleanup, then idle — do not self-archive mid-turn; meta will archive when idle"** — not bare "stand down / archive this session."
+Hard rule for meta briefs: say **"ack cleanup + exit reflection, then idle — do not self-archive mid-turn; meta will archive when idle"** — not bare "stand down / archive this session."
 
 ### Why not "each peer rebuilds after drop"?
 
@@ -253,15 +303,18 @@ Manifest edits during a merge wave must settle first. Parallel peer rebuilds thr
 
 ### Meta sweep checklist (when YOU see chip `merged` / 🔧 / `merged: true`)
 
-Advise the peer session with all five beats — not just "stand down":
+Advise the peer session with all six beats — not just "stand down". Prefer the pasteable **MERGED cleanup brief** in [`docs/operator/AGENTS.md` § Meta PR watcher](../operator/AGENTS.md) (keep in sync with this list):
 
 1. Congrats + link to merged PR / tip SHA if known (chip already carries merged status — leave the title alone)
 2. **Drop your soup layer(s)** now (paths/branch names if known from manifest)
 3. **Remove worktree + delete branch** (`hapi-branch-audit` until clean)
-4. Reply here when done — **do not** rematerialize yourself if other merges in this wave are still cleaning; meta will rebuild once the wave is clear
-5. **Idle cleanly** — do **not** self-archive mid-turn (orphans tool-call UI). Meta archives after ack when the session is idle.
+4. **Exit reflection (Gate A')** — `docs/plans/retros/TEMPLATE-exit-reflection.md` → dated file (or honest `skip:` / `skip: timebox`)
+5. Reply here when Gate A + reflection done — **do not** rematerialize yourself if other merges in this wave are still cleaning; meta will rebuild once the wave is clear
+6. **Idle cleanly** — do **not** self-archive mid-turn (orphans tool-call UI). Meta archives after ack when the session is idle.
 
-If the peer has **no** soup layer (never promoted): skip step 2; still do worktree/branch cleanup + idle rule.
+If the peer has **no** soup layer (never promoted): skip step 2; still do worktree/branch cleanup + exit reflection + idle rule.
+
+After the wave acks: **Meta wave job** — skim retros; apply only explicit **Promote?** rows (§ Exit reflection above).
 
 Hard rules unchanged: never merge on `tiann/hapi`; never `cp`/`rsync` into `driver/web/dist`; never stack-switch from agent shell; never self-archive mid-turn.
 

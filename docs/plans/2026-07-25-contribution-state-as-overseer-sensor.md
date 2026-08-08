@@ -22,6 +22,8 @@ What it does today:
 
 The "sensor for Overseer" idea is **aspirational**: the same classification that drives today's renames/pings *should later* also write typed events so a fleet Overseer can answer "what's blocking our contribs to `tiann/hapi`?" without Meta reinventing the sweep in prose every morning.
 
+**Related (2026-08-08):** peer **exit reflections** are a *second* channel class — not PR babysit state, but improvement substrate ("what should we change next?"). Process lives in lifecycle § Exit reflection; typed emit plan: [`2026-08-08-peer-exit-reflection-events.md`](./2026-08-08-peer-exit-reflection-events.md).
+
 Until that land, Meta *is* the stand-in arm/brain - a human-invoked CLI doing both "move agents forward" and "tell the operator the state." Those two jobs will split:
 
 ```

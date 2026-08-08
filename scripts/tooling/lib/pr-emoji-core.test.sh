@@ -114,6 +114,8 @@ eq "bot major → ⚠️" "$(emoji_of "$r")" "⚠️"
 
 r="$(pec_decide_emoji 1 1 0 1 0 1 0 1 0 0 0 0)"
 eq "merged → 🔧 (ignores checks)" "$(emoji_of "$r")" "🔧"
+[[ "$(action_of "$r")" == *"exit reflection"* ]] && PASS=$((PASS + 1)) \
+    || { echo "FAIL: merged action should mention exit reflection (got: $(action_of "$r"))" >&2; FAIL=$((FAIL + 1)); }
 
 r="$(pec_decide_emoji 0 0 0 1 0 0 0 1 0 0 0 0)"
 eq "no PR exists → 📝" "$(emoji_of "$r")" "📝"
