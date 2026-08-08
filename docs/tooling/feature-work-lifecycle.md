@@ -276,7 +276,15 @@ Or: `Gate A clean + exit reflection: skip: typo-only — idle for archive.`
 
 **Timebox:** best-effort ≤1 turn. If stuck → `skip: timebox` + archive anyway (do not block 🧹 forever).
 
-**Overseer:** exit reflections are a first-class improvement signal — see [`2026-08-08-peer-exit-reflection-events.md`](../plans/2026-08-08-peer-exit-reflection-events.md). Until emit lands, the markdown file + Meta ack *are* the durable record.
+**Overseer (fork soup, not upstream):** exit reflections are a first-class improvement signal — see [`2026-08-08-peer-exit-reflection-events.md`](../plans/2026-08-08-peer-exit-reflection-events.md). Meta **emits** on Gate A' close:
+
+```bash
+hapi-emit-exit-reflection --session <peerId> --retro docs/plans/retros/… \
+  --pr <N> --judgment applied|none|pending --promote tooling-doc|high-signal|issue|none
+# or: hapi-emit-exit-reflection --session <peerId> --skip 'timebox|typo-only|…'
+```
+
+Markdown + ack without the channel event is **incomplete** for Overseer prep. Query: `GET /api/system-events?sourceKind=channel` filter `sourceRef^=peer-exit-reflection`.
 
 Example that earned the ritual: [`2026-08-08-cross-flavor-inline-images-babysit-retro.md`](../plans/2026-08-08-cross-flavor-inline-images-babysit-retro.md) (#958 → #1405).
 

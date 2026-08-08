@@ -415,6 +415,8 @@ Defaults for first build: voice convo enabled, voice dispatch **opt-in per devic
 
 ## §10 Channel priority policy
 
+**Fork estate note (2026-08-08):** peer **exit reflections** use channel ingest with `source_ref = peer-exit-reflection:<sessionId>` and `provenance = peer-exit-reflection@meta` (helper: `hapi-emit-exit-reflection`). This is operator-fork / soup prep for Overseer continuous improvement — not an upstream `tiann/hapi` product surface. Payload carries `metaJudgment`, `promote`, `retroPath` / `skip`. No new `source_kind` required; extend payload + provenance namespace under existing `channel` policy.
+
 External channels (issue #19) emit into events as `source_kind=channel`. They must NOT bypass the Overseer unless explicitly configured.
 
 For each channel type, the operator configures:

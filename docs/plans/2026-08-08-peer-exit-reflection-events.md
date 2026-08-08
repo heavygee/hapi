@@ -1,6 +1,6 @@
 # Peer exit reflection → Overseer SystemEvent
 
-> **Status:** process SHIPPED in lifecycle 2026-08-08; **event emit = next slice** (not wired yet).
+> **Status:** process SHIPPED 2026-08-08; **emit SHIPPED (fork tooling)** same day — `hapi-emit-exit-reflection` POSTs channel `SystemEvent` on soup (`feat/contrib-state-channel-ingest`). Not upstream `tiann/hapi`. Meta must emit on Gate A' close; markdown alone is not the Overseer record.
 > **Companions:** [`feature-work-lifecycle.md` § Exit reflection](../tooling/feature-work-lifecycle.md#exit-reflection-gate-a--knowledge-cleanup), [`2026-07-25-contribution-state-as-overseer-sensor.md`](./2026-07-25-contribution-state-as-overseer-sensor.md), [`2026-07-25-contrib-state-event-ingest-spec.md`](./2026-07-25-contrib-state-event-ingest-spec.md), contracts §1 events.
 
 ---
@@ -44,10 +44,11 @@ Link to the markdown file is mandatory in summary when not skip. Overseer later 
 ## Emit path (build order)
 
 1. **Process (done):** Meta 🔧 ping + lifecycle require reflection before idle.
-2. **Manual emit (cheap):** Meta tooling, on cleanup ack that includes `docs/plans/retros/…` or `skip:`, POSTs the channel event (`hapi-meta-daily` helper or one-shot script).
-3. **Peer emit (later):** optional MCP/CLI `record_exit_reflection` so the peer fires the event in the same turn as the file write — still Meta archives.
+2. **Emit helper (done 2026-08-08):** `hapi-emit-exit-reflection` → `POST /api/system-events` (`sourceKind: channel`, `sourceRef: peer-exit-reflection:<sessionId>`, `provenance: peer-exit-reflection@meta`). Install via `install-hapi-local-bin.sh`. Meta **must** run this on Gate A' judgment (applied / none / skip) **before** archive. Dogfood: event `#7217` for `eb94db45` / #1115.
+3. **Still open — expand scope:** intentional archives beyond MERGED Gate A' (short ops sessions, crash archives) — prefer `skip:` captured-only events, not inbox spam. Optional later: peer MCP `record_exit_reflection` in the same turn as the file write.
+4. **Not required for start:** upstream blessing, new SCHEMA_VERSION, or Overseer inbox consumer — channel rows are queryable corpus for prep.
 
-Kill-criterion: if emit creates inbox spam on every typo `skip:`, ratchet `attentionCandidate=0` for skip/none and only promote rows hit the inbox (matches chatty→trainable corpus policy).
+Kill-criterion: if emit creates inbox spam on every typo `skip:`, ratchet `attentionCandidate=0` for skip/none and only promote rows hit the inbox (matches chatty→trainable corpus policy). Helper already sets attention=0 for skip/none.
 
 ---
 
