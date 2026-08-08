@@ -705,8 +705,8 @@ layers:
   # SCHEMA: soup remumber V22→V23 (#1115 pin dual-columns now on upstream at V22).
   # Upstream feat tip keeps jobs at V21→V22 for clean PR vs upstream/main.
   # Worktree: ~/coding/hapi/worktrees/session-jobs-soup-refresh @ driver/session-attached-jobs
-  # Soup tip: 801ac8983 — tri-state pin (default jobs) on prior MCP/startedAt tip
-  # Feat tip: 228e5f779 — same pin stand on clean upstreamable branch
+  # Soup tip: 4a32f9607 — pass-3 Majors/minors tip-forward
+  # Feat tip: 968ff8b0a — same on upstreamable branch
   # Do NOT open upstream PR until operator dogfood OK (incl. Lidarr self-attach).
   - branch: driver/session-attached-jobs
 
