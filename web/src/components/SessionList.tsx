@@ -78,6 +78,7 @@ type SessionGroup = {
 }
 
 const RUNNING_BUCKETS = [
+    { key: 'jobs', labelKey: 'session.item.attachedJob', colorClass: 'text-[var(--app-badge-success-text)]', pulse: true },
     { key: 'working', labelKey: 'session.item.running', colorClass: 'text-[var(--app-badge-success-text)]', pulse: true },
     { key: 'pending', labelKey: 'session.item.pending', colorClass: 'text-[var(--app-badge-warning-text)]', pulse: true },
     { key: 'active', labelKey: 'session.item.active', colorClass: 'text-[var(--app-hint)]', pulse: false },
@@ -1361,6 +1362,7 @@ export function SessionList(props: {
     }, [machineFilteredSessions, searchScoreIndex, hasTextQuery])
     const runningSessions = useMemo(() => {
         const buckets: Record<RunningBucketKey, SessionSummary[]> = {
+            jobs: [],
             working: [],
             pending: [],
             active: [],
@@ -1381,8 +1383,11 @@ export function SessionList(props: {
             const agentPending = session.active
                 && (session.pendingRequestsCount ?? 0) > 0
                 && !agentWorking
-            if (agentWorking || hasRunningAttachedJob(session)) {
+            if (agentWorking) {
                 buckets.working.push(session)
+            } else if (hasRunningAttachedJob(session)) {
+                // Idle outliving work — not "Running" agent activity.
+                buckets.jobs.push(session)
             } else if (agentPending) {
                 buckets.pending.push(session)
             } else {
@@ -1402,7 +1407,8 @@ export function SessionList(props: {
         }
         return buckets
     }, [machineFilteredSessions, pinInProgressMode, searchScoreIndex, hasTextQuery])
-    const runningSessionTotal = runningSessions.working.length
+    const runningSessionTotal = runningSessions.jobs.length
+        + runningSessions.working.length
         + runningSessions.pending.length
     const activeSessionTotal = runningSessions.active.length
     const groups = useMemo(
