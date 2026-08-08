@@ -113,15 +113,15 @@ Soup promote + `hapi-ping-peer` Lidarr session with attach recipe. No upstream P
 
 - Upstream issue: https://github.com/tiann/hapi/issues/1404
 - Feat tip: `feat/session-attached-jobs` — SCHEMA V22 for upstream
-- Soup tip: `508ead4a2` on `driver/session-attached-jobs` (2026-08-08 remat — tri-state pin default `jobs` + prior MCP/startedAt tip); web-only tip-forward, hard-reload dogfood
+- Soup tip: `b0434aa98` on `driver/session-attached-jobs` (2026-08-08 remat — tri-state pin default `jobs` + prior MCP/startedAt tip); web-only tip-forward, hard-reload dogfood
 - Opus cold review (`eb1746db`, tip `266965f8a`): **ship with fixes — Ready-for-PR: NO**
   - Majors: idle-agent heartbeat gap → `hapi job run` supervisor; post-merge `$HAPI_SESSION_ID` 404 → job-owner redirects; CLI test gap; steer only 4/10 flavors (no MCP yet)
   - Discoverability ~40% attach / ~20% sustained without coaching
 - Process: peer briefs must ping originator on completion (spawn-peer skill + intake §0)
 - Cold-review Majors fixed on feat tip (incl. `job run`, post-merge redirects, CLI tests, steer scoping)
 - A2A alignment documented (Layer 0 meter ≠ Layer 1 `work_ad`); guide + AGENTS + estate skill updated
-- Pass 3 Cursor Opus (`d3184c43` @ `228e5f779`): Ready-for-PR NO — Blocker CI fixtures + Major redirect clobber + Major MCP cross-session auto-approve. Fixes on feat tip `6fb81a39f`; soup remat `508ead4a2`. Focused recheck pinged to `d3184c43`.
-- **No upstream PR** until pass-3 fixes verified + operator OK
+- Pass 3 Cursor Opus (`d3184c43` @ `228e5f779`): Ready-for-PR NO — Blocker CI fixtures + Major redirect clobber + Major MCP cross-session auto-approve. Fixes on feat tip `371df3868`; soup remat `b0434aa98`. Focused recheck pinged to `d3184c43`.
+- **Upstream PR:** https://github.com/tiann/hapi/pull/1424 (Cursor Opus pass-3 YES; fork stage #117)
 
 ### Remaining backlog
 
