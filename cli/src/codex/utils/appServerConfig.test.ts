@@ -10,7 +10,6 @@ import {
 import { getCodexSystemPrompt } from './systemPrompt';
 
 describe('appServerConfig', () => {
-    const codexSystemPrompt = getCodexSystemPrompt();
     const mcpServers = { hapi: { command: 'node', args: ['mcp'] } };
     const withCollaborationInstructions = (developerInstructions: string): string => {
         return `${developerInstructions}\n\n${codexCollaborationSpawnAgentInstructions}`;
@@ -27,14 +26,14 @@ describe('appServerConfig', () => {
         expect(params.cwd).toBe('/workspace/project');
         expect(params.sandbox).toBe('danger-full-access');
         expect(params.approvalPolicy).toBe('never');
-        expect(params.baseInstructions).toBe(codexSystemPrompt);
-        expect(params.developerInstructions).toBe(codexSystemPrompt);
+        expect(params.baseInstructions).toBe(getCodexSystemPrompt());
+        expect(params.developerInstructions).toBe(getCodexSystemPrompt());
         expect(params.config).toEqual({
             'mcp_servers.hapi': {
                 command: 'node',
                 args: ['mcp']
             },
-            developer_instructions: codexSystemPrompt
+            developer_instructions: getCodexSystemPrompt()
         });
     });
 
@@ -76,7 +75,7 @@ describe('appServerConfig', () => {
                     }
                 }
             },
-            developer_instructions: codexSystemPrompt
+            developer_instructions: getCodexSystemPrompt()
         });
     });
 
@@ -138,14 +137,14 @@ describe('appServerConfig', () => {
             developerInstructions: 'Only respond in Chinese.'
         });
 
-        expect(params.baseInstructions).toBe(codexSystemPrompt);
-        expect(params.developerInstructions).toBe(`${codexSystemPrompt}\n\nOnly respond in Chinese.`);
+        expect(params.baseInstructions).toBe(getCodexSystemPrompt());
+        expect(params.developerInstructions).toBe(`${getCodexSystemPrompt()}\n\nOnly respond in Chinese.`);
         expect(params.config).toEqual({
             'mcp_servers.hapi': {
                 command: 'node',
                 args: ['mcp']
             },
-            developer_instructions: `${codexSystemPrompt}\n\nOnly respond in Chinese.`
+            developer_instructions: `${getCodexSystemPrompt()}\n\nOnly respond in Chinese.`
         });
     });
 
@@ -161,7 +160,7 @@ describe('appServerConfig', () => {
                 command: 'node',
                 args: ['mcp']
             },
-            developer_instructions: codexSystemPrompt,
+            developer_instructions: getCodexSystemPrompt(),
             model_reasoning_effort: 'ultra'
         });
     });
@@ -310,7 +309,7 @@ describe('appServerConfig', () => {
             settings: {
                 model: 'o3',
                 reasoning_effort: 'high',
-                developer_instructions: withCollaborationInstructions(codexSystemPrompt)
+                developer_instructions: withCollaborationInstructions(getCodexSystemPrompt())
             }
         });
         expect(params.model).toBeUndefined();
@@ -336,7 +335,7 @@ describe('appServerConfig', () => {
             settings: {
                 model: 'gpt-5.3-codex-spark',
                 reasoning_effort: 'high',
-                developer_instructions: withCollaborationInstructions(codexSystemPrompt)
+                developer_instructions: withCollaborationInstructions(getCodexSystemPrompt())
             }
         });
     });
@@ -418,7 +417,7 @@ describe('appServerConfig', () => {
             settings: {
                 model: 'o3',
                 reasoning_effort: 'high',
-                developer_instructions: withCollaborationInstructions(codexSystemPrompt)
+                developer_instructions: withCollaborationInstructions(getCodexSystemPrompt())
             }
         });
         expect(params.model).toBeUndefined();
@@ -437,7 +436,7 @@ describe('appServerConfig', () => {
             mode: 'plan',
             settings: {
                 model: 'o3',
-                developer_instructions: withCollaborationInstructions(`${codexSystemPrompt}\n\nOnly respond in Chinese.`)
+                developer_instructions: withCollaborationInstructions(`${getCodexSystemPrompt()}\n\nOnly respond in Chinese.`)
             }
         });
         expect(params.collaborationMode?.settings).not.toHaveProperty('reasoning_effort');
@@ -499,7 +498,7 @@ describe('appServerConfig', () => {
             mode: 'default',
             settings: {
                 model: 'o3',
-                developer_instructions: withCollaborationInstructions(codexSystemPrompt)
+                developer_instructions: withCollaborationInstructions(getCodexSystemPrompt())
             }
         });
     });
@@ -519,7 +518,7 @@ describe('appServerConfig', () => {
             mode: 'default',
             settings: {
                 model: 'o3',
-                developer_instructions: withCollaborationInstructions(codexSystemPrompt)
+                developer_instructions: withCollaborationInstructions(getCodexSystemPrompt())
             }
         });
     });
@@ -538,7 +537,7 @@ describe('appServerConfig', () => {
             mode: 'default',
             settings: {
                 model: 'gpt-5',
-                developer_instructions: withCollaborationInstructions(codexSystemPrompt)
+                developer_instructions: withCollaborationInstructions(getCodexSystemPrompt())
             }
         });
         expect(params.model).toBeUndefined();

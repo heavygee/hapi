@@ -42,6 +42,16 @@ describe('Store V22→V23 (soup); fresh schema still includes migration: session
         expect(primary?.key).toBe('beets')
         expect(primary?.remaining).toBe(100)
 
+        store.sessionJobs.upsert(session.id, 'newer', {
+            label: 'sidecar',
+            status: 'running',
+            remaining: 1,
+            startedAt: (primary!.startedAt) + 60_000
+        })
+        store.sessionJobs.patch(session.id, 'newer', { remaining: 0 })
+        expect(store.sessionJobs.getPrimaryRunning(session.id)?.key).toBe('beets')
+        expect(store.sessionJobs.delete(session.id, 'newer')).toBe(true)
+
         const patched = store.sessionJobs.patch(session.id, 'beets', { remaining: 80 })
         expect(patched?.remaining).toBe(80)
 

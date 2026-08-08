@@ -66,6 +66,7 @@ type SessionGroup = {
 }
 
 const RUNNING_BUCKETS = [
+    { key: 'jobs', labelKey: 'session.item.attachedJob', colorClass: 'text-[var(--app-badge-success-text)]', pulse: true },
     { key: 'working', labelKey: 'session.item.running', colorClass: 'text-[var(--app-badge-success-text)]', pulse: true },
     { key: 'pending', labelKey: 'session.item.pending', colorClass: 'text-[var(--app-badge-warning-text)]', pulse: true },
 ] as const
@@ -311,9 +312,14 @@ export function prepareSidebarSessions(sessions: SessionSummary[], selectedSessi
 
 // "Active sessions only" view: hide inactive sessions, but never hide the one the
 // operator currently has open — otherwise toggling the filter would yank the
-// selected session out from under them.
+// selected session out from under them. Idle sessions with a running attached
+// job stay visible too — that is the headline use case for session jobs.
 export function filterActiveSessionsOnly(sessions: SessionSummary[], selectedSessionId?: string | null): SessionSummary[] {
-    return sessions.filter(session => session.active || session.id === selectedSessionId)
+    return sessions.filter(session =>
+        session.active
+        || session.id === selectedSessionId
+        || hasRunningAttachedJob(session)
+    )
 }
 
 // Transient unread lens: hide sessions the operator has already seen.
@@ -1335,7 +1341,8 @@ export function SessionList(props: {
         [machineFilteredSessions]
     )
     const runningSessions = useMemo(() => {
-        const buckets: Record<'working' | 'pending', SessionSummary[]> = {
+        const buckets: Record<'jobs' | 'working' | 'pending', SessionSummary[]> = {
+            jobs: [],
             working: [],
             pending: [],
         }
@@ -1351,8 +1358,10 @@ export function SessionList(props: {
             const agentPending = session.active
                 && (session.pendingRequestsCount ?? 0) > 0
                 && !agentWorking
-            if (agentWorking || hasRunningAttachedJob(session)) {
+            if (agentWorking) {
                 buckets.working.push(session)
+            } else if (hasRunningAttachedJob(session)) {
+                buckets.jobs.push(session)
             } else if (agentPending) {
                 buckets.pending.push(session)
             }
@@ -1363,7 +1372,8 @@ export function SessionList(props: {
         }
         return buckets
     }, [unpinnedMachineSessions, pinInProgressMode])
-    const runningSessionTotal = runningSessions.working.length
+    const runningSessionTotal = runningSessions.jobs.length
+        + runningSessions.working.length
         + runningSessions.pending.length
     const groups = useMemo(
         () => groupSessionsByDirectory(

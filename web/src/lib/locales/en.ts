@@ -244,6 +244,7 @@ export default {
   'session.item.prChip': 'PR #{number}',
   'session.item.thinking': 'thinking',
   'session.item.running': 'Running',
+  'session.item.attachedJob': 'Jobs',
   'session.item.permission': 'Permission required',
   'session.item.needsInput': 'Needs input',
   'session.item.background': 'Background tasks running',
