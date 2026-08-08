@@ -126,7 +126,5 @@ Soup promote + `hapi-ping-peer` Lidarr session with attach recipe. No upstream P
 
 1. MCP `hapi_job` tool (Cursor/ACP discoverability)
 2. Terminal-job TTL / reclaim
-3. Second cold pass after `job run` dogfood — **in flight** (brief `docs/plans/peer-briefings/2026-08-08-peer-cold-review-session-jobs-pass2.md`, tip `954279b8a`)
+3. Second cold pass after `job run` dogfood — **in flight** peer `1a710632` (brief `docs/plans/peer-briefings/2026-08-08-peer-cold-review-session-jobs-pass2.md`, tip `954279b8a`)
 4. Optional later: privileged reader join of `attachedJob` → work-ad projection (not auto-heartbeat ingest)
-
-**Dogfood (2026-08-08, music `ec8d1d4e` / beets):** UI confirmed for unit counts + elapsed from `startedAt`. Gotcha: PATCH rejects `startedAt`; old PUT ignored corrections on existing rows → clear+PUT with true epoch ms fixed elapsed (`9d 6h` vs ~1h attach). Fix landed: PUT honors explicit `startedAt`; CLI `--started-at`; docs recipe for clear+set. Drain ALL_DONE 1787/1787.
