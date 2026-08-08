@@ -43,6 +43,8 @@ export type SessionSummaryMetadata = {
     lifecycleState?: string
     /** Structured contribution links (GitHub PRs, …). tiann/hapi#1160. */
     externalRefs?: ExternalRef[]
+    /** Loopback MCP URL when session CLI happy server is running (#956). */
+    hapiMcpUrl?: string
 }
 
 export type SessionSummary = {
@@ -195,7 +197,8 @@ export function toSessionSummaryMetadata(metadata: Metadata | null | undefined):
         worktree: metadata.worktree,
         agentSessionId: getSummaryAgentSessionId(metadata),
         lifecycleState: metadata.lifecycleState,
-        externalRefs: metadata.externalRefs
+        externalRefs: metadata.externalRefs,
+        hapiMcpUrl: metadata.hapiMcpUrl ?? undefined
     }
 }
 
