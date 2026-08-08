@@ -406,12 +406,11 @@ layers:
   # DROPPED 2026-07-14: feat/file-markdown-preview MERGED UPSTREAM as PR #957
   # (a82dd490, 2026-07-11). Product files identical to upstream/main.
 
-  # #956 - cross-flavor inline image display (MCP display_image + ACP blocks).
-  # 2026-06-19 peer 4971055d. CLI-only: shared prompt for Cursor/Gemini/Kimi/
-  # Codex/Claude/OpenCode, buildHapiMcpBridge auto-approve display_image,
-  # AcpMessageHandler image block → generated-image. Requires hapi-use-driver
-  # (hub+runner restart). Drop when upstream PR merges.
-  - branch: feat/cross-flavor-inline-images
+  # DROPPED 2026-08-08: feat/cross-flavor-inline-images absorbed by upstream
+  # #1405 (b7f52f58c feat(media): add audio and file display). Fork #958 closed
+  # empty-vs-main. Product media path now on upstream/main (display_image /
+  # display_video / display_media + ~/.cursor MCP overlay).
+  # - branch: feat/cross-flavor-inline-images
 
   # DROPPED 2026-07-27: fix/scratchlist-exit-after-queue-send MERGED as
   # tiann/hapi#960 (squash 311e0cef5 "exit scratchlist mode after successful
