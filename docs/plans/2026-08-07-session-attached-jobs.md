@@ -126,5 +126,5 @@ Soup promote + `hapi-ping-peer` Lidarr session with attach recipe. No upstream P
 
 1. MCP `hapi_job` tool (Cursor/ACP discoverability)
 2. Terminal-job TTL / reclaim
-3. Second cold pass after `job run` dogfood — **in flight** peer `1a710632` (brief `docs/plans/peer-briefings/2026-08-08-peer-cold-review-session-jobs-pass2.md`, tip `954279b8a`)
-4. Optional later: privileged reader join of `attachedJob` → work-ad projection (not auto-heartbeat ingest)
+3. Second cold pass (`1a710632`): **ship with fixes / Ready-for-PR NO** — Major: MetadataSchema stripped job redirect keys (fixed: declare fields + SessionCache merge integration test + CLI UUID passthrough for deleted sources). Discoverability ~55/~45; MCP = explicit follow-up OK. A2A boundary clean.
+4. Optional later: privileged reader join of `attachedJob` → work-ad projection (not auto-heartbeat ingest); MCP `hapi_job`
