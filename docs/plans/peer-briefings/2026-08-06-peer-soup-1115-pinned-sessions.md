@@ -15,7 +15,7 @@
 | Thread hygiene / CLEAN | DONE |
 | Upstream merge | **DONE** — squash `3da9f7780` |
 | Drop manifest layer | **DONE** |
-| Remat / `global_pinned` on live DB | in progress this turn |
+| Remat / `global_pinned` on live DB | **HOLD** — conflicts resolved on `driver/integration-wip` @ `9a834e181`; Meta `05d9f0f2` pinged to finish `HAPI_REMAT_OWNER=1` rebuild + hub restart |
 
 ## Notes
 
