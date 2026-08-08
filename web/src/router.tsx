@@ -1172,6 +1172,7 @@ function SessionPage() {
     const handleSessionResolved = useCallback((resolvedSessionId: string) => {
         if (session) {
             if (resolvedSessionId !== session.id) {
+                retargetSharePendingTransfer(session.id, resolvedSessionId)
                 seedMessageWindowFromSession(session.id, resolvedSessionId)
             }
             queryClient.setQueryData(queryKeys.session(resolvedSessionId), (previous: { session?: typeof session } | undefined) => ({
