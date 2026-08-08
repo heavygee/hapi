@@ -84,7 +84,13 @@ export function SettingsChoiceGroup<T extends string | number>(props: {
     onChange: (value: T) => void
     columns?: 2 | 3 | 4 | 5
 }) {
-    const columns = props.columns === 5 ? 'grid-cols-5' : props.columns === 4 ? 'grid-cols-2 sm:grid-cols-4' : props.columns === 3 ? 'grid-cols-3' : 'grid-cols-2'
+    const columns = props.columns === 5
+        ? 'grid-cols-5'
+        : props.columns === 4
+            ? 'grid-cols-2 sm:grid-cols-4'
+            : props.columns === 3
+                ? 'grid-cols-3'
+                : 'grid-cols-2'
     return (
         <div className="px-3 py-3">
             <SettingsFieldLabel hidden={props.hideLabel} description={props.description}>{props.label}</SettingsFieldLabel>
