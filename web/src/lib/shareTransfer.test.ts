@@ -106,6 +106,18 @@ describe('parseShareSearch', () => {
         expect(parseShareSearch({ url: '', text: '  ', title: '' })).toEqual({})
     })
 
+    it('preserves surrounding whitespace on non-empty content fields', () => {
+        expect(parseShareSearch({
+            title: '  Title  ',
+            text: '    indented\n',
+            url: ' https://example.com/path ',
+        })).toEqual({
+            title: '  Title  ',
+            text: '    indented\n',
+            url: ' https://example.com/path ',
+        })
+    })
+
     it('preserves id alongside content fields (id path wins at ingest)', () => {
         expect(parseShareSearch({
             id: 'xfer-1',

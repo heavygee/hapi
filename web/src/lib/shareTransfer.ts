@@ -57,8 +57,9 @@ export type ShareSearch = {
 
 function nonEmptyString(value: unknown): string | undefined {
     if (typeof value !== 'string') return undefined
-    const trimmed = value.trim()
-    return trimmed ? trimmed : undefined
+    // Emptiness uses trim, but return the original string so GET ingest
+    // matches POST form-data (which preserves surrounding whitespace).
+    return value.trim().length > 0 ? value : undefined
 }
 
 /** Router `validateSearch` for `/share`. Omits empty content fields. */

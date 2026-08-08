@@ -122,6 +122,18 @@ export default function SharePage() {
             return
         }
         if (transferId) {
+            // id path wins for ingest; strip any leftover GET content fields
+            // from the address bar so secrets don't linger next to id.
+            if (hasShareDeepLinkContent(search)) {
+                navigate({
+                    to: '/share',
+                    search: ingestError
+                        ? { id: transferId, error: 'ingest' }
+                        : { id: transferId },
+                    replace: true,
+                })
+                return
+            }
             getShareTransfer(transferId).then((payload) => {
                 if (cancelled) return
                 if (!payload) {

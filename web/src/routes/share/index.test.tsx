@@ -137,6 +137,32 @@ describe('SharePage', () => {
 
         render(<SharePage />)
 
+        await waitFor(() => {
+            expect(navigateMock).toHaveBeenCalledWith({
+                to: '/share',
+                search: { id: 'xfer-existing' },
+                replace: true,
+            })
+        })
+        expect(putShareTransferMock).not.toHaveBeenCalled()
+        // After scrub navigate, search still has content in this mock (useSearch
+        // is static); get is deferred until content fields are gone. Scrub is
+        // the contract under test here.
+        expect(getShareTransferMock).not.toHaveBeenCalled()
+    })
+
+    it('id-only loads IndexedDB transfer without scrub navigate', async () => {
+        searchMock.mockReturnValue({ id: 'xfer-existing' })
+        getShareTransferMock.mockResolvedValue({
+            title: 'from-idb',
+            text: 'payload',
+            url: 'https://idb.example',
+            files: [],
+            createdAt: 1,
+        })
+
+        render(<SharePage />)
+
         expect(await screen.findByText('share.title')).toBeInTheDocument()
         expect(putShareTransferMock).not.toHaveBeenCalled()
         expect(getShareTransferMock).toHaveBeenCalledWith('xfer-existing')
