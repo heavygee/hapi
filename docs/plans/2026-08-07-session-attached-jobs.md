@@ -120,7 +120,8 @@ Soup promote + `hapi-ping-peer` Lidarr session with attach recipe. No upstream P
 - Process: peer briefs must ping originator on completion (spawn-peer skill + intake §0)
 - Cold-review Majors fixed on feat tip (incl. `job run`, post-merge redirects, CLI tests, steer scoping)
 - A2A alignment documented (Layer 0 meter ≠ Layer 1 `work_ad`); guide + AGENTS + estate skill updated
-- **No upstream PR** until operator OK after dogfood of `job run`
+- Pass 3 Cursor Opus (`d3184c43` @ `228e5f779`): Ready-for-PR NO — Blocker CI fixtures + Major redirect clobber + Major MCP cross-session auto-approve. Fixes on tip after `228e5f779`.
+- **No upstream PR** until pass-3 fixes verified + operator OK
 
 ### Remaining backlog
 
