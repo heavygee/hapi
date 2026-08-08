@@ -59,6 +59,7 @@ type SessionGroup = {
     sessions: SessionSummary[]
     latestUpdatedAt: number
     hasActiveSession: boolean
+    hasPinnedSession: boolean
 }
 
 const RUNNING_BUCKETS = [
@@ -69,6 +70,10 @@ const RUNNING_BUCKETS = [
 /** Active sessions that warrant the optional pinned In progress section. Quiet actives stay in directory groups. */
 function isPinnedInProgressSession(session: SessionSummary): boolean {
     if (!session.active) {
+        return false
+    }
+    // Durable project/global pins stay in project groups / top band (#1115).
+    if (session.pinned || session.globalPinned) {
         return false
     }
     return session.thinking
@@ -338,6 +343,7 @@ function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGroup[] {
                 -Infinity
             )
             const hasActiveSession = group.sessions.some(s => s.active)
+            const hasPinnedSession = group.sessions.some(s => s.pinned || s.globalPinned)
             const displayName = getGroupDisplayName(group.directory)
 
             return {
@@ -347,10 +353,14 @@ function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGroup[] {
                 machineId: group.machineId,
                 sessions: sortedSessions,
                 latestUpdatedAt,
-                hasActiveSession
+                hasActiveSession,
+                hasPinnedSession
             }
         })
         .sort((a, b) => {
+            if (a.hasPinnedSession !== b.hasPinnedSession) {
+                return a.hasPinnedSession ? -1 : 1
+            }
             if (a.hasActiveSession !== b.hasActiveSession) {
                 return a.hasActiveSession ? -1 : 1
             }
@@ -1306,7 +1316,7 @@ export function SessionList(props: {
             return buckets
         }
         for (const session of unpinnedMachineSessions) {
-            if (!session.active) {
+            if (!isPinnedInProgressSession(session)) {
                 continue
             }
             if (session.thinking || (session.backgroundTaskCount ?? 0) > 0) {
@@ -1345,7 +1355,8 @@ export function SessionList(props: {
         const hasSelectedSession = selectedSessionId
             ? group.sessions.some(session => session.id === selectedSessionId)
             : false
-        return !group.hasActiveSession && !hasSelectedSession
+        // Project pins should stay findable after reload (upstream #1115).
+        return !group.hasActiveSession && !group.hasPinnedSession && !hasSelectedSession
     }
 
     const toggleGroup = (groupKey: string, isCollapsed: boolean) => {

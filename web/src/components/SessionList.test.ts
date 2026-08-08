@@ -100,8 +100,8 @@ describe('partitionGlobalPinnedSessions', () => {
     it('lifts pinned sessions into a flat top band and omits them from the remainder', () => {
         const sessions = [
             makeSession({ id: 'proj-a', metadata: { path: '/a' }, updatedAt: 50 }),
-            makeSession({ id: 'pinned-old', pinned: true, metadata: { path: '/b' }, updatedAt: 10 }),
-            makeSession({ id: 'pinned-new', pinned: true, active: true, metadata: { path: '/c' }, updatedAt: 20 }),
+            makeSession({ id: 'pinned-old', globalPinned: true, metadata: { path: '/b' }, updatedAt: 10 }),
+            makeSession({ id: 'pinned-new', globalPinned: true, active: true, metadata: { path: '/c' }, updatedAt: 20 }),
             makeSession({ id: 'proj-b', metadata: { path: '/b' }, updatedAt: 40 })
         ]
 
@@ -112,8 +112,8 @@ describe('partitionGlobalPinnedSessions', () => {
 
     it('sorts pending pinned sessions ahead of quiet active pins', () => {
         const sessions = [
-            makeSession({ id: 'quiet', pinned: true, active: true, pendingRequestsCount: 0, updatedAt: 100 }),
-            makeSession({ id: 'pending', pinned: true, active: true, pendingRequestsCount: 2, updatedAt: 50 })
+            makeSession({ id: 'quiet', globalPinned: true, active: true, pendingRequestsCount: 0, updatedAt: 100 }),
+            makeSession({ id: 'pending', globalPinned: true, active: true, pendingRequestsCount: 2, updatedAt: 50 })
         ]
         expect(sortGlobalPinnedSessions(sessions).map(session => session.id))
             .toEqual(['pending', 'quiet'])

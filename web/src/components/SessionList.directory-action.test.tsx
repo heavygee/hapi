@@ -492,23 +492,17 @@ describe('SessionList collapse behavior', () => {
         ]
         render(renderSessionList(sessions, null))
 
-        expect(screen.getByTitle('Pinned')).toBeInTheDocument()
-        expect(screen.getByRole('button', { name: /Pinned task/ })).toBeInTheDocument()
-        expect(screen.getByTitle('/work/hapi')).toBeInTheDocument()
-        expect(screen.queryByTitle('/work/other')).toBeNull()
-        const pinnedHeader = screen.getByTitle('Pinned')
-        const idleHeader = screen.getByTitle('/work/hapi')
-        expect(
-            pinnedHeader.compareDocumentPosition(idleHeader) & Node.DOCUMENT_POSITION_FOLLOWING
-        ).toBeTruthy()
+        expect(screen.queryByTitle('In progress')).toBeNull()
+        expect(getProjectPanel().getAttribute('data-open')).toBe('true')
+        expect(screen.getByRole('button', { name: /Pinned running task/ })).toBeInTheDocument()
     })
 
-    it('keeps durable pins above In progress when both are present', () => {
+    it('keeps durable global pins above In progress when both are present', () => {
         localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
         const sessions = [
             makeSession({
                 id: 'session-pinned',
-                pinned: true,
+                globalPinned: true,
                 updatedAt: 100,
                 metadata: { path: '/work/other', name: 'Pinned task', flavor: 'codex' },
             }),
@@ -522,7 +516,7 @@ describe('SessionList collapse behavior', () => {
         ]
         render(renderSessionList(sessions, null))
 
-        const pinnedHeader = screen.getByTitle('Pinned')
+        const pinnedHeader = screen.getByTitle('Pinned sessions')
         const runningHeader = screen.getByTitle('In progress')
         expect(
             pinnedHeader.compareDocumentPosition(runningHeader) & Node.DOCUMENT_POSITION_FOLLOWING
