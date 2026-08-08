@@ -1,4 +1,5 @@
 import React from 'react';
+import { basename } from 'node:path';
 import { logger } from '@/ui/logger';
 import { buildHapiMcpBridge } from '@/codex/utils/buildHapiMcpBridge';
 import { convertAgentMessage } from '@/agent/messageConverter';
@@ -11,7 +12,7 @@ import {
 } from '@/modules/common/remote/RemoteLauncherBase';
 import { OpencodeDisplay } from '@/ui/ink/OpencodeDisplay';
 import type { CursorSession } from './session';
-import type { PermissionMode } from './loop';
+import type { EnhancedMode, PermissionMode } from './loop';
 import {
     createCursorAcpBackend,
     CURSOR_ACP_REQUIRED_MESSAGE,
@@ -43,6 +44,24 @@ import {
     resolveCursorSpawnModel,
     tryRemapCursorSpawnModelFromConnectError
 } from './utils/cursorStaleModelRemap';
+import {
+    installCursorNotifyRuleOverlay,
+    type CursorNotifyRuleOverlay
+} from './utils/cursorNotifyRuleOverlay';
+import {
+    classifyAcpRpcRejection,
+    classifyCursorAgentMessage,
+    isCompletionClaim,
+    mapAcpStderrToFailure,
+    type CursorAgentStreamFailure
+} from './cursorAgentMessageClassifier';
+import {
+    buildModelErrorBridgePrompt,
+    canBridgeModelError,
+    truncateLastUserMessage
+} from './cursorModelErrorBridge';
+import { getAutoBridgeTransientModelErrors } from './cursorModelErrorBridgePrefs';
+import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
 
 class CursorAcpRemoteLauncher extends RemoteLauncherBase {
     private readonly session: CursorSession;
@@ -51,6 +70,8 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
     private permissionAdapter: PermissionAdapter | null = null;
     private extensionAdapter: CursorExtensionAdapter | null = null;
     private happyServer: { stop: () => void } | null = null;
+    /** Transient workspace `.cursor/rules` overlay for session status summaries. */
+    private notifyRuleOverlay: CursorNotifyRuleOverlay | null = null;
     private abortController = new AbortController();
     private displayPermissionMode: PermissionMode | null = null;
     private currentBackendModel: string | null = null;
@@ -62,6 +83,21 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
     /** Avoid re-queueing `/auto-review` on every mid-session mode sync. */
     private autoReviewSlashQueued = false;
     private cursorMcpOverlay: CursorMcpOverlayHandle | null = null;
+    private lastAssistantText: string | null = null;
+    private turnHasModelError = false;
+    private lastUserMessage: string | null = null;
+    private lastTurnMode: EnhancedMode | null = null;
+    private bridgingForAtTs: number | null = null;
+    private lastRecordedModelError: {
+        atTs: number;
+        kind: string;
+        rawSnippet: string;
+        priorAssistantClaimsDone: boolean;
+        lastUserMessage: string;
+        transient: boolean;
+        bridgedForAtTs?: number;
+        retriedAndFailed?: boolean;
+    } | null = null;
 
     constructor(session: CursorSession) {
         super(process.env.DEBUG ? session.logPath : undefined);
@@ -89,6 +125,13 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         });
         this.happyServer = happyServer;
 
+        // Install the workspace session-summary rule before the backend spawns
+        // cursor-agent, so the `.cursor/rules` file is on disk when it reads
+        // workspace rules. Restored/removed in cleanup().
+        this.notifyRuleOverlay = installCursorNotifyRuleOverlay({
+            cwd: session.path,
+            project: basename(session.path) || null
+        });
         const hapiBridge = mcpServers.hapi;
         if (hapiBridge) {
             try {
@@ -331,7 +374,16 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             onSwitch: () => this.handleSwitchRequest()
         });
 
+        session.client.rpcHandlerManager.registerHandler(
+            RPC_METHODS.BridgeModelError,
+            async (payload: unknown) => this.handleBridgeModelErrorRpc(payload)
+        );
+
         const sendReady = () => {
+            if (this.turnHasModelError) {
+                // Don't clear the error state with a 'ready' — banner stays visible.
+                return;
+            }
             session.sendSessionEvent({ type: 'ready' });
         };
 
@@ -366,6 +418,9 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             await applyCursorAcpMode(backend, acpSessionId, batch.mode.permissionMode as PermissionMode);
             this.applyDisplayMode(batch.mode.permissionMode as PermissionMode);
 
+            this.lastUserMessage = batch.message;
+            this.lastTurnMode = batch.mode;
+
             const specialCommand = parseCursorSpecialCommand(batch.message);
             if (specialCommand.type === 'pass-through') {
                 messageBuffer.addMessage(cursorPassThroughStatusMessage(specialCommand.command), 'status');
@@ -380,6 +435,8 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             }];
 
             session.onThinkingChange(true);
+            this.turnHasModelError = false;
+            this.lastAssistantText = null;
 
             try {
                 await backend.prompt(acpSessionId, promptContent, (message) => {
@@ -395,10 +452,23 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                     session.sendAgentMessage(converted);
                 }
                 messageBuffer.addMessage(message, 'status');
+                // STRUCTURAL signal: classify the RPC rejection. This catches
+                // transport_closed (WritableIterable / ACP closed), agent_crashed
+                // (process exit during prompt), rpc_timeout, and gRPC status
+                // strings that cursor-agent returned as JSON-RPC error.message
+                // (rather than stringifying as a text message). Returns null
+                // for user cancellations / aborts -- those are NOT model errors.
+                const failure = classifyAcpRpcRejection(error);
+                if (failure) {
+                    this.recordModelError(failure);
+                }
             } finally {
                 session.onThinkingChange(false);
                 await this.permissionAdapter?.cancelAll('Prompt finished');
                 await this.extensionAdapter?.cancelAll('Prompt finished');
+                if (!this.turnHasModelError && this.bridgingForAtTs !== null) {
+                    this.bridgingForAtTs = null;
+                }
                 if (session.queue.size() === 0 && !this.shouldExit) {
                     sendReady();
                 }
@@ -414,6 +484,10 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
 
         try {
             this.clearAbortHandlers(this.session.client.rpcHandlerManager);
+            this.session.client.rpcHandlerManager.registerHandler(
+                RPC_METHODS.BridgeModelError,
+                async () => ({ ok: false, reason: 'session_ended' })
+            );
             this.unregisterModelApplyHandler?.();
             this.unregisterModelApplyHandler = null;
 
@@ -435,6 +509,11 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             if (this.happyServer) {
                 this.happyServer.stop();
                 this.happyServer = null;
+            }
+
+            if (this.notifyRuleOverlay) {
+                this.notifyRuleOverlay.cleanup();
+                this.notifyRuleOverlay = null;
             }
         } finally {
             overlay?.cleanup();
@@ -460,6 +539,11 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                 session.sendAgentMessage(converted);
             }
             messageBuffer.addMessage(error.message, 'status');
+            // STRUCTURAL signal: route typed stderr into modelError pipeline.
+            const failure = mapAcpStderrToFailure(error);
+            if (failure) {
+                this.recordModelError(failure);
+            }
         });
     }
 
@@ -501,6 +585,7 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         switch (message.type) {
             case 'text':
                 this.messageBuffer.addMessage(message.text, 'assistant');
+                this.handleTextMessageClassification(message.text);
                 break;
             case 'reasoning':
                 break;
@@ -526,6 +611,214 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             default:
                 break;
         }
+    }
+
+    private handleTextMessageClassification(text: string): void {
+        // FALLBACK PATH ONLY. If a structural signal (stderr / RPC) already
+        // classified this turn, do not re-classify the agent's text -- the
+        // text is often the agent's own stringified version of the same
+        // error we already caught structurally, and re-classifying produces
+        // duplicate banners. We still record lastAssistantText so the
+        // priorAssistantClaimsDone heuristic works for any subsequent
+        // structural signal in this turn.
+        if (this.turnHasModelError) {
+            this.lastAssistantText = text;
+            return;
+        }
+        const failure = classifyCursorAgentMessage(text);
+        if (failure) {
+            this.recordModelError(failure);
+        } else {
+            this.lastAssistantText = text;
+        }
+    }
+
+    /**
+     * Single source of truth for emitting modelError. All signal paths
+     * (RPC catch / stderr subscriber / text fallback) route through here.
+     * First signal wins: subsequent signals in the same turn are dropped
+     * to avoid banner-flapping when the agent emits both an RPC rejection
+     * AND a stringified text version of the same failure.
+     */
+    private recordModelError(failure: CursorAgentStreamFailure): void {
+        if (this.turnHasModelError) {
+            logger.debug(
+                `[cursor-acp] modelError already recorded for this turn, dropping ${failure.source}/${failure.kind}`
+            );
+            return;
+        }
+        this.turnHasModelError = true;
+
+        const bridgedFailure = this.bridgingForAtTs !== null;
+        if (bridgedFailure) {
+            this.bridgingForAtTs = null;
+        }
+
+        // Same-message case: Cursor often appends `Error: T: ...` onto the
+        // assistant block that already claimed "Done." — lastAssistantText is
+        // still null because we classify before storing. Check failure.raw too.
+        const priorAssistantClaimsDone = (this.lastAssistantText !== null
+            && isCompletionClaim(this.lastAssistantText))
+            || (failure.source === 'text' && isCompletionClaim(failure.raw));
+        const rawSnippet = failure.raw.slice(0, 400);
+        const atTs = Date.now();
+        const lastUserMessage = truncateLastUserMessage(this.lastUserMessage ?? '');
+
+        logger.debug(
+            `[cursor-acp] modelError recorded source=${failure.source} kind=${failure.kind} transient=${failure.transient}${bridgedFailure ? ' (bridge failed)' : ''}`
+        );
+
+        this.lastRecordedModelError = {
+            atTs,
+            kind: failure.kind,
+            transient: failure.transient,
+            rawSnippet,
+            priorAssistantClaimsDone,
+            lastUserMessage,
+            ...(bridgedFailure ? { retriedAndFailed: true } : {})
+        };
+
+        this.session.client.updateMetadata((metadata) => ({
+            ...metadata,
+            lastModelError: this.lastRecordedModelError!
+        }));
+
+        this.session.sendSessionEvent({
+            type: 'modelError',
+            kind: failure.kind,
+            transient: failure.transient,
+            rawSnippet,
+            priorAssistantClaimsDone
+        });
+
+        if (!bridgedFailure && failure.transient && getAutoBridgeTransientModelErrors()) {
+            this.tryEnqueueModelErrorBridge('auto');
+        }
+    }
+
+    private async handleBridgeModelErrorRpc(payload: unknown): Promise<{ ok: boolean; reason?: string }> {
+        if (!payload || typeof payload !== 'object') {
+            return this.tryEnqueueModelErrorBridge('manual');
+        }
+
+        const record = payload as Record<string, unknown>;
+        const snapshot = {
+            atTs: typeof record.atTs === 'number' ? record.atTs : undefined,
+            kind: typeof record.kind === 'string' ? record.kind : undefined,
+            rawSnippet: typeof record.rawSnippet === 'string' ? record.rawSnippet : undefined,
+            lastUserMessage: typeof record.lastUserMessage === 'string' ? record.lastUserMessage : undefined,
+            priorAssistantClaimsDone: record.priorAssistantClaimsDone === true,
+            transient: typeof record.transient === 'boolean'
+                ? record.transient
+                : (this.lastRecordedModelError?.transient ?? false),
+            bridgedForAtTs: typeof record.bridgedForAtTs === 'number' ? record.bridgedForAtTs : undefined,
+            retriedAndFailed: record.retriedAndFailed === true
+        };
+
+        if (snapshot.atTs !== undefined) {
+            this.lastRecordedModelError = {
+                atTs: snapshot.atTs,
+                kind: snapshot.kind ?? this.lastRecordedModelError?.kind ?? 'unknown',
+                rawSnippet: snapshot.rawSnippet ?? this.lastRecordedModelError?.rawSnippet ?? '',
+                priorAssistantClaimsDone: snapshot.priorAssistantClaimsDone,
+                lastUserMessage: snapshot.lastUserMessage
+                    ?? this.lastRecordedModelError?.lastUserMessage
+                    ?? this.lastUserMessage
+                    ?? '',
+                transient: snapshot.transient,
+                bridgedForAtTs: snapshot.bridgedForAtTs,
+                retriedAndFailed: snapshot.retriedAndFailed
+            };
+        }
+
+        return this.tryEnqueueModelErrorBridge('manual');
+    }
+
+    private tryEnqueueModelErrorBridge(source: 'auto' | 'manual'): { ok: boolean; reason?: string } {
+        const metadataError = this.lastRecordedModelError;
+
+        if (!metadataError) {
+            return { ok: false, reason: 'no_model_error' };
+        }
+
+        const bridgeInput = {
+            atTs: metadataError.atTs,
+            kind: metadataError.kind,
+            rawSnippet: metadataError.rawSnippet,
+            priorAssistantClaimsDone: metadataError.priorAssistantClaimsDone,
+            lastUserMessage: metadataError.lastUserMessage ?? this.lastUserMessage ?? ''
+        };
+
+        if (!bridgeInput.lastUserMessage.trim()) {
+            return { ok: false, reason: 'missing_last_user_message' };
+        }
+
+        if (!canBridgeModelError({
+            transient: metadataError.transient,
+            atTs: metadataError.atTs,
+            bridgedForAtTs: metadataError.bridgedForAtTs,
+            retriedAndFailed: metadataError.retriedAndFailed
+        })) {
+            return { ok: false, reason: 'not_bridgeable' };
+        }
+
+        const prompt = buildModelErrorBridgePrompt({
+            kind: bridgeInput.kind,
+            rawSnippet: bridgeInput.rawSnippet,
+            lastUserMessage: bridgeInput.lastUserMessage,
+            priorAssistantClaimsDone: bridgeInput.priorAssistantClaimsDone
+        });
+
+        const bridgedAtTs = metadataError.atTs;
+        this.bridgingForAtTs = bridgedAtTs;
+
+        this.lastRecordedModelError = {
+            ...metadataError,
+            bridgedForAtTs: bridgedAtTs
+        };
+
+        this.session.client.updateMetadata((metadata) => {
+            const current = metadata.lastModelError;
+            const nextError = current?.atTs === bridgedAtTs
+                ? {
+                    ...current,
+                    bridgedForAtTs: bridgedAtTs
+                }
+                : {
+                    kind: metadataError.kind,
+                    transient: metadataError.transient,
+                    rawSnippet: metadataError.rawSnippet,
+                    atTs: metadataError.atTs,
+                    priorAssistantClaimsDone: metadataError.priorAssistantClaimsDone,
+                    ...(metadataError.lastUserMessage
+                        ? { lastUserMessage: metadataError.lastUserMessage }
+                        : {}),
+                    bridgedForAtTs: bridgedAtTs
+                };
+
+            return {
+                ...metadata,
+                lastModelError: nextError
+            };
+        });
+
+        const mode = this.lastTurnMode ?? {
+            permissionMode: this.session.getPermissionMode() as PermissionMode,
+            model: this.currentBackendModel ?? this.session.model ?? undefined
+        };
+
+        this.session.queue.pushIsolated(prompt, mode);
+        // Chat-visible recovery marker only. Not an AGENT_NOTIFY_SUMMARY — overseer/inbox
+        // must not treat successful bridges as attention candidates.
+        this.session.sendSessionEvent({
+            type: 'modelErrorBridged',
+            kind: metadataError.kind,
+            auto: source === 'auto',
+            atTs: bridgedAtTs
+        });
+        logger.debug(`[cursor-acp] modelError bridge enqueued for atTs=${bridgedAtTs} source=${source}`);
+
+        return { ok: true };
     }
 
     private installLiveSessionConfigSync(
