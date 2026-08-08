@@ -43,13 +43,18 @@ export type ShareTransferPayload = {
 }
 
 /**
- * Typed `/share` search params. `id` / `error` come from the Web Share Target
- * POST → SW → 303 path. `url` / `text` / `title` are the native / deep-link
- * GET ingest contract (same field names as Web Share Target Level 2 GET).
+ * Router search for `/share`: only SW redirect fields. Native deep-link
+ * content must NOT live in the query string — it is logged by hub request
+ * middleware (Hono `logger()`) and any upstream access log. Companions open
+ * `/share#url=&text=&title=` instead; see `parseShareHash`.
  */
 export type ShareSearch = {
     id?: string
     error?: string
+}
+
+/** Deep-link content fields (hash fragment only). */
+export type ShareDeepLinkFields = {
     url?: string
     text?: string
     title?: string
@@ -62,7 +67,7 @@ function nonEmptyString(value: unknown): string | undefined {
     return value.trim().length > 0 ? value : undefined
 }
 
-/** Router `validateSearch` for `/share`. Omits empty content fields. */
+/** Router `validateSearch` for `/share` — id/error only. */
 export function parseShareSearch(search: Record<string, unknown>): ShareSearch {
     const result: ShareSearch = {}
     if (typeof search.id === 'string' && search.id) {
@@ -71,27 +76,59 @@ export function parseShareSearch(search: Record<string, unknown>): ShareSearch {
     if (typeof search.error === 'string' && search.error) {
         result.error = search.error
     }
-    const url = nonEmptyString(search.url)
+    return result
+}
+
+/** Parse url/text/title from a flat record (hash params or tests). */
+export function parseShareDeepLinkFields(
+    fields: Record<string, unknown>
+): ShareDeepLinkFields {
+    const result: ShareDeepLinkFields = {}
+    const url = nonEmptyString(fields.url)
     if (url) result.url = url
-    const text = nonEmptyString(search.text)
+    const text = nonEmptyString(fields.text)
     if (text) result.text = text
-    const title = nonEmptyString(search.title)
+    const title = nonEmptyString(fields.title)
     if (title) result.title = title
     return result
 }
 
-/** True when GET deep-link content is present (id path is decided separately). */
-export function hasShareDeepLinkContent(search: ShareSearch): boolean {
-    return Boolean(search.url || search.text || search.title)
+/**
+ * Read native deep-link content from the URL fragment.
+ * Fragments are not sent on the HTTP request, so shared text never reaches
+ * hub access logs. `hash` may include a leading `#`.
+ */
+export function parseShareHash(hash: string): ShareDeepLinkFields {
+    const raw = hash.startsWith('#') ? hash.slice(1) : hash
+    if (!raw) return {}
+    return parseShareDeepLinkFields(
+        Object.fromEntries(new URLSearchParams(raw).entries())
+    )
+}
+
+/** Drop the fragment from the address bar after reading (no navigation). */
+export function scrubShareHashFromLocation(): void {
+    if (typeof window === 'undefined') return
+    if (!window.location.hash) return
+    window.history.replaceState(
+        null,
+        '',
+        `${window.location.pathname}${window.location.search}`
+    )
+}
+
+/** True when deep-link content is present (id path is decided separately). */
+export function hasShareDeepLinkContent(fields: ShareDeepLinkFields): boolean {
+    return Boolean(fields.url || fields.text || fields.title)
 }
 
 /**
  * Same payload shape as `buildSharePayloadFromFormData` for text/url shares
- * (no files — GET cannot carry binaries). Used by native companions that open
- * `/share?url=&text=&title=` instead of POSTing through Web Share Target.
+ * (no files — deep links cannot carry binaries). Used by native companions
+ * that open `/share#url=&text=&title=` instead of POSTing Web Share Target.
  */
 export function buildSharePayloadFromSearchFields(
-    fields: { url?: string; text?: string; title?: string },
+    fields: ShareDeepLinkFields,
     now: number = Date.now()
 ): ShareTransferPayload {
     return {

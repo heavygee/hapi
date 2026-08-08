@@ -4,6 +4,8 @@ import {
     buildSharePayloadFromSearchFields,
     hasShareDeepLinkContent,
     ingestShareRequest,
+    parseShareDeepLinkFields,
+    parseShareHash,
     parseShareSearch,
     type ShareTransferPayload,
 } from './shareTransfer'
@@ -90,24 +92,35 @@ describe('parseShareSearch', () => {
         })
     })
 
-    it('accepts url, text, and title when non-empty', () => {
+    it('ignores url/text/title in the query (content belongs in the fragment)', () => {
         expect(parseShareSearch({
+            id: 'xfer-1',
             url: 'https://example.com',
             text: 'hello',
             title: 'Title',
-        })).toEqual({
+        })).toEqual({ id: 'xfer-1' })
+    })
+})
+
+describe('parseShareHash / parseShareDeepLinkFields', () => {
+    it('parses url, text, and title from a fragment', () => {
+        expect(parseShareHash('#url=https%3A%2F%2Fexample.com&text=hello&title=Title')).toEqual({
             url: 'https://example.com',
             text: 'hello',
             title: 'Title',
         })
+    })
+
+    it('accepts a hash without a leading #', () => {
+        expect(parseShareHash('text=note')).toEqual({ text: 'note' })
     })
 
     it('omits empty content fields', () => {
-        expect(parseShareSearch({ url: '', text: '  ', title: '' })).toEqual({})
+        expect(parseShareDeepLinkFields({ url: '', text: '  ', title: '' })).toEqual({})
     })
 
     it('preserves surrounding whitespace on non-empty content fields', () => {
-        expect(parseShareSearch({
+        expect(parseShareDeepLinkFields({
             title: '  Title  ',
             text: '    indented\n',
             url: ' https://example.com/path ',
@@ -115,18 +128,6 @@ describe('parseShareSearch', () => {
             title: '  Title  ',
             text: '    indented\n',
             url: ' https://example.com/path ',
-        })
-    })
-
-    it('preserves id alongside content fields (id path wins at ingest)', () => {
-        expect(parseShareSearch({
-            id: 'xfer-1',
-            url: 'https://example.com',
-            text: 'ignored-at-ingest',
-        })).toEqual({
-            id: 'xfer-1',
-            url: 'https://example.com',
-            text: 'ignored-at-ingest',
         })
     })
 })
@@ -147,9 +148,8 @@ describe('hasShareDeepLinkContent', () => {
         })).toBe(true)
     })
 
-    it('is false when empty / no-id', () => {
+    it('is false when empty', () => {
         expect(hasShareDeepLinkContent({})).toBe(false)
-        expect(hasShareDeepLinkContent({ id: 'xfer-1' })).toBe(false)
     })
 })
 

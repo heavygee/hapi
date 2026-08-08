@@ -9,7 +9,9 @@ import {
     deleteShareTransfer,
     getShareTransfer,
     hasShareDeepLinkContent,
+    parseShareHash,
     putShareTransfer,
+    scrubShareHashFromLocation,
     type ShareSearch,
     type ShareTransferPayload,
 } from '@/lib/shareTransfer'
@@ -110,7 +112,8 @@ export default function SharePage() {
 
     // Pulled via the typed validateSearch in router.tsx; reading
     // `window.location.search` directly would diverge from the rest of the
-    // codebase and miss future schema tightening.
+    // codebase and miss future schema tightening. Deep-link *content* is
+    // intentionally read from the hash (not query) so it never hits hub logs.
     const search = useSearch({ from: '/share' }) as ShareSearch
     const transferId = search.id ?? null
     const ingestError = search.error === 'ingest'
@@ -122,18 +125,9 @@ export default function SharePage() {
             return
         }
         if (transferId) {
-            // id path wins for ingest; strip any leftover GET content fields
-            // from the address bar so secrets don't linger next to id.
-            if (hasShareDeepLinkContent(search)) {
-                navigate({
-                    to: '/share',
-                    search: ingestError
-                        ? { id: transferId, error: 'ingest' }
-                        : { id: transferId },
-                    replace: true,
-                })
-                return
-            }
+            // id path wins; drop any leftover fragment so content is not left
+            // beside the transfer id in the address bar.
+            scrubShareHashFromLocation()
             getShareTransfer(transferId).then((payload) => {
                 if (cancelled) return
                 if (!payload) {
@@ -147,18 +141,17 @@ export default function SharePage() {
             })
             return () => { cancelled = true }
         }
-        // Native / deep-link GET ingest: synthesize the same IDB transfer the
-        // SW would create from POST, then replace to ?id= so picker / create-new
-        // reuse the existing path. When `id` is present, content fields are
-        // ignored above.
-        if (hasShareDeepLinkContent(search)) {
+        // Native / deep-link ingest via URL fragment (not query): synthesize
+        // the same IDB transfer the SW would create from POST, scrub the
+        // fragment, then replace to ?id= for picker / create-new.
+        const deepLink = parseShareHash(
+            typeof window !== 'undefined' ? window.location.hash : ''
+        )
+        scrubShareHashFromLocation()
+        if (hasShareDeepLinkContent(deepLink)) {
             void (async () => {
                 try {
-                    const payload = buildSharePayloadFromSearchFields({
-                        url: search.url,
-                        text: search.text,
-                        title: search.title,
-                    })
+                    const payload = buildSharePayloadFromSearchFields(deepLink)
                     const id = await putShareTransfer(payload)
                     if (cancelled) return
                     navigate({ to: '/share', search: { id }, replace: true })
@@ -171,7 +164,7 @@ export default function SharePage() {
         }
         setLoad({ state: 'missing', reason: 'no-id' })
         return () => { cancelled = true }
-    }, [transferId, ingestError, search.url, search.text, search.title, navigate])
+    }, [transferId, ingestError, navigate])
 
     // Snapshot the active session list once when sessions finish loading so
     // the picker doesn't re-shuffle under the operator's finger as SSE

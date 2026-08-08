@@ -34,6 +34,11 @@ vi.mock('@/lib/shareTransfer', async () => {
     }
 })
 
+function setShareHash(hash: string): void {
+    const path = `/share${hash ? (hash.startsWith('#') ? hash : `#${hash}`) : ''}`
+    window.history.replaceState(null, '', path)
+}
+
 describe('SharePage', () => {
     beforeEach(() => {
         navigateMock.mockReset()
@@ -41,6 +46,7 @@ describe('SharePage', () => {
         searchMock.mockReturnValue({})
         putShareTransferMock.mockReset()
         getShareTransferMock.mockReset()
+        setShareHash('')
     })
 
     it('uses paired button theme colors for the missing-share action', async () => {
@@ -52,16 +58,18 @@ describe('SharePage', () => {
         expect(backButton).not.toHaveClass('text-white')
     })
 
-    it('empty search → no-id UX and does not put a transfer', async () => {
+    it('empty hash → no-id UX and does not put a transfer', async () => {
         searchMock.mockReturnValue({})
+        setShareHash('')
         render(<SharePage />)
 
         expect(await screen.findByText('share.error.noId')).toBeInTheDocument()
         expect(putShareTransferMock).not.toHaveBeenCalled()
     })
 
-    it('url-only GET deep-link synthesizes a transfer then replaces to ?id=', async () => {
-        searchMock.mockReturnValue({ url: 'https://example.com/clip' })
+    it('url-only hash deep-link synthesizes a transfer then replaces to ?id=', async () => {
+        searchMock.mockReturnValue({})
+        setShareHash('#url=https%3A%2F%2Fexample.com%2Fclip')
         putShareTransferMock.mockResolvedValue('xfer-url')
 
         render(<SharePage />)
@@ -80,10 +88,12 @@ describe('SharePage', () => {
             search: { id: 'xfer-url' },
             replace: true,
         })
+        expect(window.location.hash).toBe('')
     })
 
-    it('text-only GET deep-link synthesizes a transfer', async () => {
-        searchMock.mockReturnValue({ text: 'shared note' })
+    it('text-only hash deep-link synthesizes a transfer', async () => {
+        searchMock.mockReturnValue({})
+        setShareHash('#text=shared%20note')
         putShareTransferMock.mockResolvedValue('xfer-text')
 
         render(<SharePage />)
@@ -100,12 +110,14 @@ describe('SharePage', () => {
         })
     })
 
-    it('url+text GET deep-link synthesizes both fields', async () => {
-        searchMock.mockReturnValue({
+    it('url+text hash deep-link synthesizes both fields', async () => {
+        searchMock.mockReturnValue({})
+        const hash = new URLSearchParams({
             url: 'https://example.com',
             text: 'caption',
             title: 'Title',
-        })
+        }).toString()
+        setShareHash(`#${hash}`)
         putShareTransferMock.mockResolvedValue('xfer-both')
 
         render(<SharePage />)
@@ -121,38 +133,9 @@ describe('SharePage', () => {
         })
     })
 
-    it('id present wins: loads IndexedDB transfer and ignores GET content fields', async () => {
-        searchMock.mockReturnValue({
-            id: 'xfer-existing',
-            url: 'https://should-not-ingest.example',
-            text: 'ignored',
-        })
-        getShareTransferMock.mockResolvedValue({
-            title: 'from-idb',
-            text: 'payload',
-            url: 'https://idb.example',
-            files: [],
-            createdAt: 1,
-        })
-
-        render(<SharePage />)
-
-        await waitFor(() => {
-            expect(navigateMock).toHaveBeenCalledWith({
-                to: '/share',
-                search: { id: 'xfer-existing' },
-                replace: true,
-            })
-        })
-        expect(putShareTransferMock).not.toHaveBeenCalled()
-        // After scrub navigate, search still has content in this mock (useSearch
-        // is static); get is deferred until content fields are gone. Scrub is
-        // the contract under test here.
-        expect(getShareTransferMock).not.toHaveBeenCalled()
-    })
-
-    it('id-only loads IndexedDB transfer without scrub navigate', async () => {
+    it('id present wins: loads IndexedDB and ignores hash content', async () => {
         searchMock.mockReturnValue({ id: 'xfer-existing' })
+        setShareHash('#url=https%3A%2F%2Fshould-not-ingest.example&text=ignored')
         getShareTransferMock.mockResolvedValue({
             title: 'from-idb',
             text: 'payload',
@@ -167,5 +150,6 @@ describe('SharePage', () => {
         expect(putShareTransferMock).not.toHaveBeenCalled()
         expect(getShareTransferMock).toHaveBeenCalledWith('xfer-existing')
         expect(navigateMock).not.toHaveBeenCalled()
+        expect(window.location.hash).toBe('')
     })
 })
