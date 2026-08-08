@@ -501,6 +501,11 @@ function SessionChatInner(props: SessionChatProps) {
         props.cursorChatOnDisk
     )
     const terminalSupported = isRemoteTerminalSupported(props.session.metadata)
+    // Agent PTY terminal overlay (upstream #1407). Inactive sessions have no
+    // buffer once the runner exits, so gate on active + pty startingMode.
+    const canViewAgentTerminal =
+        props.session.metadata?.startingMode === 'pty' && props.session.active
+    const [terminalVisible, setTerminalVisible] = useState(false)
     const normalizedCacheRef = useRef<Map<string, { source: DecryptedMessage; normalized: NormalizedMessage | null }>>(new Map())
     const blocksByIdRef = useRef<Map<string, ChatBlock>>(new Map())
     const visibleGroupsRef = useRef<ToolGroupBlock[]>([])
@@ -1718,6 +1723,8 @@ function SessionChatInner(props: SessionChatProps) {
                 sessionLogActive={sessionLogOpen}
                 onToggleFlow={handleToggleFlow}
                 flowActive={flowOpen}
+                onToggleTerminal={canViewAgentTerminal ? () => setTerminalVisible(v => !v) : undefined}
+                terminalActive={terminalVisible}
                 api={props.api}
                 canReopen={inactiveCanResume}
                 reopenDisabledReason={props.reopenDisabledReason}
