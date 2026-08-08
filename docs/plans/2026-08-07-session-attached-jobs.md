@@ -41,6 +41,8 @@ Canon: `docs/plans/2026-08-03-a2a-control-plane-rfc.md` + [#1332](https://github
 
 **ACK (2026-08-07):** Overseer / A2A substrate session confirmed **no divergence** with RFC v2 / P1. Ship Layer 0 jobs without waiting on A2A P1 (#1374). Deliberate ledger rows for a job milestone (if ever) = explicit `work_ad`/`handoff` write, never heartbeat promotion.
 
+**Dogfood (2026-08-08, music `ec8d1d4e` / beets):** UI confirmed for unit counts + elapsed from `startedAt`. Gotcha: PATCH rejects `startedAt`; old PUT ignored corrections on existing rows → clear+PUT with true epoch ms fixed elapsed (`9d 6h` vs ~1h attach). Fix landed: PUT honors explicit `startedAt`; CLI `--started-at`; docs recipe for clear+set. Drain ALL_DONE 1787/1787.
+
 ## UI options (reveal before lock)
 
 1. **Meter under title** — thin bar + `beets · 91%` / `823 left`; pulse when heartbeat fresh; amber when stale (>15m).
