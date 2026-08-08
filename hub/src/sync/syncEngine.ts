@@ -301,6 +301,14 @@ export class SyncEngine {
         return this.sessionCache.getSessionsByNamespace(namespace)
     }
 
+    setSessionPinned(sessionId: string, pinned: boolean): void {
+        this.sessionCache.setSessionPinned(sessionId, pinned)
+    }
+
+    setSessionPinMode(sessionId: string, mode: 'none' | 'project' | 'global'): void {
+        this.sessionCache.setSessionPinMode(sessionId, mode)
+    }
+
     getFutureScheduledMessageCounts(sessionIds: string[], now: number = Date.now()): Map<string, number> {
         return this.store.messages.countFutureScheduledBySessionIds(sessionIds, now)
     }

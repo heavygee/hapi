@@ -916,6 +916,13 @@ export class ApiClient {
         })
     }
 
+    async setSessionPinMode(sessionId: string, mode: 'none' | 'project' | 'global'): Promise<void> {
+        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/pin`, {
+            method: 'PUT',
+            body: JSON.stringify({ mode })
+        })
+    }
+
     async deleteSession(sessionId: string): Promise<void> {
         await this.request(`/api/sessions/${encodeURIComponent(sessionId)}`, {
             method: 'DELETE'
