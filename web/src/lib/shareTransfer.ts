@@ -42,6 +42,66 @@ export type ShareTransferPayload = {
     createdAt: number
 }
 
+/**
+ * Typed `/share` search params. `id` / `error` come from the Web Share Target
+ * POST → SW → 303 path. `url` / `text` / `title` are the native / deep-link
+ * GET ingest contract (same field names as Web Share Target Level 2 GET).
+ */
+export type ShareSearch = {
+    id?: string
+    error?: string
+    url?: string
+    text?: string
+    title?: string
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+    if (typeof value !== 'string') return undefined
+    const trimmed = value.trim()
+    return trimmed ? trimmed : undefined
+}
+
+/** Router `validateSearch` for `/share`. Omits empty content fields. */
+export function parseShareSearch(search: Record<string, unknown>): ShareSearch {
+    const result: ShareSearch = {}
+    if (typeof search.id === 'string' && search.id) {
+        result.id = search.id
+    }
+    if (typeof search.error === 'string' && search.error) {
+        result.error = search.error
+    }
+    const url = nonEmptyString(search.url)
+    if (url) result.url = url
+    const text = nonEmptyString(search.text)
+    if (text) result.text = text
+    const title = nonEmptyString(search.title)
+    if (title) result.title = title
+    return result
+}
+
+/** True when GET deep-link content is present (id path is decided separately). */
+export function hasShareDeepLinkContent(search: ShareSearch): boolean {
+    return Boolean(search.url || search.text || search.title)
+}
+
+/**
+ * Same payload shape as `buildSharePayloadFromFormData` for text/url shares
+ * (no files — GET cannot carry binaries). Used by native companions that open
+ * `/share?url=&text=&title=` instead of POSTing through Web Share Target.
+ */
+export function buildSharePayloadFromSearchFields(
+    fields: { url?: string; text?: string; title?: string },
+    now: number = Date.now()
+): ShareTransferPayload {
+    return {
+        title: fields.title ?? '',
+        text: fields.text ?? '',
+        url: fields.url ?? '',
+        files: [],
+        createdAt: now,
+    }
+}
+
 type StoredRecord = ShareTransferPayload & { id: string }
 
 function openDb(): Promise<IDBDatabase> {

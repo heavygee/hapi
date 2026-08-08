@@ -5,8 +5,12 @@ import { useSessions } from '@/hooks/queries/useSessions'
 import { useTranslation } from '@/lib/use-translation'
 import { LoadingState } from '@/components/LoadingState'
 import {
+    buildSharePayloadFromSearchFields,
     deleteShareTransfer,
     getShareTransfer,
+    hasShareDeepLinkContent,
+    putShareTransfer,
+    type ShareSearch,
     type ShareTransferPayload,
 } from '@/lib/shareTransfer'
 import { setSharePendingTransfer } from '@/lib/sharePendingState'
@@ -107,7 +111,7 @@ export default function SharePage() {
     // Pulled via the typed validateSearch in router.tsx; reading
     // `window.location.search` directly would diverge from the rest of the
     // codebase and miss future schema tightening.
-    const search = useSearch({ from: '/share' }) as { id?: string; error?: string }
+    const search = useSearch({ from: '/share' }) as ShareSearch
     const transferId = search.id ?? null
     const ingestError = search.error === 'ingest'
 
@@ -117,23 +121,45 @@ export default function SharePage() {
             setLoad({ state: 'missing', reason: 'ingest-error' })
             return
         }
-        if (!transferId) {
-            setLoad({ state: 'missing', reason: 'no-id' })
-            return
-        }
-        getShareTransfer(transferId).then((payload) => {
-            if (cancelled) return
-            if (!payload) {
+        if (transferId) {
+            getShareTransfer(transferId).then((payload) => {
+                if (cancelled) return
+                if (!payload) {
+                    setLoad({ state: 'missing', reason: 'not-found' })
+                    return
+                }
+                setLoad({ state: 'ready', payload })
+            }).catch(() => {
+                if (cancelled) return
                 setLoad({ state: 'missing', reason: 'not-found' })
-                return
-            }
-            setLoad({ state: 'ready', payload })
-        }).catch(() => {
-            if (cancelled) return
-            setLoad({ state: 'missing', reason: 'not-found' })
-        })
+            })
+            return () => { cancelled = true }
+        }
+        // Native / deep-link GET ingest: synthesize the same IDB transfer the
+        // SW would create from POST, then replace to ?id= so picker / create-new
+        // reuse the existing path. When `id` is present, content fields are
+        // ignored above.
+        if (hasShareDeepLinkContent(search)) {
+            void (async () => {
+                try {
+                    const payload = buildSharePayloadFromSearchFields({
+                        url: search.url,
+                        text: search.text,
+                        title: search.title,
+                    })
+                    const id = await putShareTransfer(payload)
+                    if (cancelled) return
+                    navigate({ to: '/share', search: { id }, replace: true })
+                } catch {
+                    if (cancelled) return
+                    setLoad({ state: 'missing', reason: 'ingest-error' })
+                }
+            })()
+            return () => { cancelled = true }
+        }
+        setLoad({ state: 'missing', reason: 'no-id' })
         return () => { cancelled = true }
-    }, [transferId, ingestError])
+    }, [transferId, ingestError, search.url, search.text, search.title, navigate])
 
     // Snapshot the active session list once when sessions finish loading so
     // the picker doesn't re-shuffle under the operator's finger as SSE
