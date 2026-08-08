@@ -128,4 +128,5 @@ Soup promote + `hapi-ping-peer` Lidarr session with attach recipe. No upstream P
 2. Terminal-job TTL / reclaim
 3. Second cold pass (`1a710632`): Major MetadataSchema redirect strip fixed (`23a6d836c`). A2A boundary clean.
 4. **MCP `session_job`** landed (same catalog as ping_peer) — discoverability follow-up pulled into tip so Cursor/ACP see the tool like other HAPI tooling.
-5. Optional later: privileged reader join of `attachedJob` → work-ad projection (not auto-heartbeat ingest); terminal-job TTL
+5. **Tri-state pin** (Settings → Display): off / long-running jobs / all activity — **default `jobs` when unset**. Part of #1404 capability, not a follow-up.
+6. Optional later: privileged reader join of `attachedJob` → work-ad projection (not auto-heartbeat ingest); terminal-job TTL
