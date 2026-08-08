@@ -7,7 +7,7 @@ import {
     codexCollaborationSpawnAgentInstructions,
     supportsReasoningSummary
 } from './appServerConfig';
-import { codexSystemPrompt } from './systemPrompt';
+import { getCodexSystemPrompt } from './systemPrompt';
 
 describe('appServerConfig', () => {
     const mcpServers = { hapi: { command: 'node', args: ['mcp'] } };
@@ -56,7 +56,7 @@ describe('appServerConfig', () => {
                 command: 'node',
                 args: ['mcp']
             },
-            developer_instructions: codexSystemPrompt
+            developer_instructions: getCodexSystemPrompt()
         });
     });
 
@@ -98,7 +98,7 @@ describe('appServerConfig', () => {
                     }
                 }
             },
-            developer_instructions: codexSystemPrompt
+            developer_instructions: getCodexSystemPrompt()
         });
     });
 
@@ -201,7 +201,7 @@ describe('appServerConfig', () => {
                 command: 'node',
                 args: ['mcp']
             },
-            developer_instructions: `${codexSystemPrompt}\n\nOnly respond in Chinese.`
+            developer_instructions: `${getCodexSystemPrompt()}\n\nOnly respond in Chinese.`
         });
     });
 
@@ -217,7 +217,7 @@ describe('appServerConfig', () => {
                 command: 'node',
                 args: ['mcp']
             },
-            developer_instructions: codexSystemPrompt,
+            developer_instructions: getCodexSystemPrompt(),
             model_reasoning_effort: 'ultra'
         });
     });
@@ -383,7 +383,7 @@ describe('appServerConfig', () => {
             settings: {
                 model: 'o3',
                 reasoning_effort: 'high',
-                developer_instructions: withCollaborationInstructions(codexSystemPrompt)
+                developer_instructions: withCollaborationInstructions(getCodexSystemPrompt())
             }
         });
         expect(params.model).toBeUndefined();
@@ -409,7 +409,7 @@ describe('appServerConfig', () => {
             settings: {
                 model: 'gpt-5.3-codex-spark',
                 reasoning_effort: 'high',
-                developer_instructions: withCollaborationInstructions(codexSystemPrompt)
+                developer_instructions: withCollaborationInstructions(getCodexSystemPrompt())
             }
         });
     });
@@ -573,7 +573,7 @@ describe('appServerConfig', () => {
             mode: 'default',
             settings: {
                 model: 'o3',
-                developer_instructions: withCollaborationInstructions(codexSystemPrompt)
+                developer_instructions: withCollaborationInstructions(getCodexSystemPrompt())
             }
         });
     });
@@ -593,7 +593,7 @@ describe('appServerConfig', () => {
             mode: 'default',
             settings: {
                 model: 'o3',
-                developer_instructions: withCollaborationInstructions(codexSystemPrompt)
+                developer_instructions: withCollaborationInstructions(getCodexSystemPrompt())
             }
         });
     });
@@ -612,7 +612,7 @@ describe('appServerConfig', () => {
             mode: 'default',
             settings: {
                 model: 'gpt-5',
-                developer_instructions: withCollaborationInstructions(codexSystemPrompt)
+                developer_instructions: withCollaborationInstructions(getCodexSystemPrompt())
             }
         });
         expect(params.model).toBeUndefined();
