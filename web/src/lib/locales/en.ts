@@ -189,6 +189,7 @@ export default {
   'session.item.running': 'Running',
   'session.item.active': 'Active',
   'session.item.idle': 'Idle (keepalive only)',
+  'session.item.attachedJob': 'Jobs',
   'session.item.permission': 'Permission required',
   'session.item.needsInput': 'Needs input',
   'session.item.background': 'Background tasks running',
