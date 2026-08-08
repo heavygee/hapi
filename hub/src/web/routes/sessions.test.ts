@@ -68,6 +68,8 @@ function createApp(session: Session, opts?: {
     githubPrAwarenessEnabled?: boolean
     forkConversation?: SyncEngine['forkConversation']
     rewindConversation?: SyncEngine['rewindConversation']
+    setSessionPinned?: (sessionId: string, pinned: boolean) => void
+    setSessionPinMode?: (sessionId: string, mode: 'none' | 'project' | 'global') => void
 }) {
     const applySessionConfigCalls: Array<[string, Record<string, unknown>]> = []
     const applySessionConfig = async (sessionId: string, config: Record<string, unknown>) => {
@@ -139,6 +141,8 @@ function createApp(session: Session, opts?: {
         })),
         archiveSession: archiveSessionMock,
         setSessionExternalRefs: opts?.setSessionExternalRefs ?? (async () => {}),
+        setSessionPinned: opts?.setSessionPinned ?? (() => {}),
+        setSessionPinMode: opts?.setSessionPinMode ?? (() => {}),
         getSessionExport: opts?.getSessionExport ?? (() => ({
             type: 'success',
             payload: {
@@ -267,6 +271,33 @@ describe('sessions routes', () => {
 
         expect(response.status).toBe(200)
         expect(calls).toEqual([[]])
+    })
+
+    it('updates the persisted pin mode', async () => {
+        const calls: Array<[string, 'none' | 'project' | 'global']> = []
+        const { app } = createApp(createSession(), {
+            setSessionPinMode: (sessionId, mode) => calls.push([sessionId, mode])
+        })
+
+        const response = await app.request('/api/sessions/session-1/pin', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: 'global' })
+        })
+
+        expect(response.status).toBe(200)
+        expect(calls).toEqual([['session-1', 'global']])
+    })
+
+    it('rejects an invalid pin body', async () => {
+        const { app } = createApp(createSession())
+        const response = await app.request('/api/sessions/session-1/pin', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: 'yes' })
+        })
+
+        expect(response.status).toBe(400)
     })
 
     it('returns the machine-scoped Cursor chat store status', async () => {
