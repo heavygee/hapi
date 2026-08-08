@@ -1457,8 +1457,7 @@ function SessionPage() {
                         scheduledAt: null,
                         deliveryMode: 'queue',
                         mutationStarted: true,
-                        restoreSuppressed: false,
-                        deliveryMode: 'queue'
+                        restoreSuppressed: false
                     }
                 }))
             }}
