@@ -429,7 +429,7 @@ function ScratchlistToggleButton(props: {
                     onDismiss={fue.dismiss}
                     dismissLabel={t('fue.gotIt')}
                     closeAriaLabel={t('fue.closeAriaLabel')}
-                    anchorRef={localRef}
+                    anchorRef={buttonRef}
                     onSecondaryAction={disableAllFue}
                     secondaryActionLabel={t('fue.dontShowAgain')}
                 />
@@ -556,7 +556,7 @@ function PerSessionSettingsButton(props: {
                     onDismiss={fue.dismiss}
                     dismissLabel={t('fue.gotIt')}
                     closeAriaLabel={t('fue.closeAriaLabel')}
-                    anchorRef={buttonRef}
+                    anchorRef={localRef}
                     onSecondaryAction={disableAllFue}
                     secondaryActionLabel={t('fue.dontShowAgain')}
                 />

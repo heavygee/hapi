@@ -3,6 +3,7 @@ import { flushSync } from 'react-dom'
 import { useNavigate } from '@tanstack/react-router'
 import { AssistantRuntimeProvider, useAui, useAuiState } from '@assistant-ui/react'
 import { DragDropZone } from '@/components/AssistantChat/DragDropZone'
+import { AgentTerminalView } from '@/components/AgentTerminal/AgentTerminalView'
 import type { ApiClient } from '@/api/client'
 import type {
     AttachmentMetadata,
