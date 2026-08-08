@@ -6,7 +6,12 @@
 # web/dist.prev (+ optional live tip) on failure so soup remat cannot leave
 # dogfood broken.
 #
-# Skip: HAPI_SKIP_SESSION_OPEN_SMOKE=1 (operator emergency only).
+# After open smoke, runs hapi-session-send-smoke (type + Send/Enter). Mount-only
+# smoke missed restoredIntent ReferenceError (2026-08-08) — send is how the
+# operator tells agents anything is wrong.
+#
+# Skip: HAPI_SKIP_SESSION_OPEN_SMOKE=1 (skips both; operator emergency only).
+#       HAPI_SKIP_SESSION_SEND_SMOKE=1 (skips send probe only — not recommended).
 # shellcheck shell=bash
 
 driver_rollback_web_dist() {
@@ -52,11 +57,30 @@ driver_session_open_smoke_gate() {
     local out rc=0
     out="$("$bun" run "$smoke" --hub "$hub" 2>&1)" || rc=$?
     printf '%s\n' "$out"
-    if [[ "$rc" -eq 0 ]]; then
-        return 0
+    if [[ "$rc" -ne 0 ]]; then
+        echo "ERROR: session-open-smoke failed (exit $rc) — rolling back dogfood web/dist" >&2
+        driver_rollback_web_dist "$driver" || true
+        return 1
     fi
 
-    echo "ERROR: session-open-smoke failed (exit $rc) — rolling back dogfood web/dist" >&2
-    driver_rollback_web_dist "$driver" || true
-    return 1
+    # Mount ≠ send. Tip-forward absorb shipped composer Enter no-op while open-smoke stayed green.
+    if [[ "${HAPI_SKIP_SESSION_SEND_SMOKE:-}" == "1" ]]; then
+        echo "session-send-smoke: SKIP (HAPI_SKIP_SESSION_SEND_SMOKE=1)"
+        return 0
+    fi
+    local send_smoke="${HAPI_SESSION_SEND_SMOKE:-$primary/scripts/tooling/hapi-session-send-smoke.mjs}"
+    if [[ ! -f "$send_smoke" ]]; then
+        echo "ERROR: session-send-smoke script missing ($send_smoke) — refuse unverified send path" >&2
+        driver_rollback_web_dist "$driver" || true
+        return 1
+    fi
+    echo "Dogfood gate: hapi-session-send-smoke against $hub ..."
+    out="$("$bun" run "$send_smoke" --hub "$hub" 2>&1)" || rc=$?
+    printf '%s\n' "$out"
+    if [[ "$rc" -ne 0 ]]; then
+        echo "ERROR: session-send-smoke failed (exit $rc) — rolling back dogfood web/dist" >&2
+        driver_rollback_web_dist "$driver" || true
+        return 1
+    fi
+    return 0
 }

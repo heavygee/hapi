@@ -314,6 +314,11 @@ Peer stack and soup are **both** required for normal feature work. They solve di
 then `pr-attach-proof` at PR time. This section is the HAPI product-workflow
 deep dive of the same contract.
 
+**Soup dogfood after web remat:** `hapi-session-open-smoke` (mount) **and**
+`hapi-session-send-smoke` (type + Send/Enter; message POSTs aborted). Mount-only
+is not enough — 2026-08-08 tip-forward shipped send-dead composer while open-smoke
+stayed green. See [`driver-soup.md`](./driver-soup.md) § HappyComposer send-intent.
+
 Peers **must** assess tier before capture ([`peer-stack.md` § Evidence modality](../tooling/peer-stack.md#evidence-modality--agent-decides-png-vs-mp4)).
 
 - **§6.4b PNG** — static existence (label, layout, copy, icon). Always for visible UI change.
