@@ -33,6 +33,7 @@ export function annotatedVideoUseOption(mode = 'on', size) {
         show: {
             actions: {
                 position: ANNOTATED_SHOW_ACTIONS.position,
+                cursor: ANNOTATED_SHOW_ACTIONS.cursor,
                 duration: ANNOTATED_SHOW_ACTIONS.duration,
                 fontSize: ANNOTATED_SHOW_ACTIONS.fontSize,
             },
