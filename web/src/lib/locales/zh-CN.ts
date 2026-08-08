@@ -189,6 +189,7 @@ export default {
   'session.item.running': '运行中',
   'session.item.active': '活跃',
   'session.item.idle': '空闲（仅心跳）',
+  'session.item.attachedJob': '长时间任务',
   'session.item.permission': '需要权限',
   'session.item.needsInput': '需要输入',
   'session.item.background': '后台任务运行中',
