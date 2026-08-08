@@ -48,8 +48,8 @@ After dogfood-ready on a reachable hub URL, optionally ping the Quest Audio Rela
 | Step | Status |
 |------|--------|
 | Discovery + issue #1412 | DONE |
-| Implement | **YOU** |
-| Proof + soup dogfood | **YOU** |
+| Implement | DONE (`feat/share-native-deeplink` @ fb4a292dc) |
+| Proof + soup dogfood | Peer-stack green; soup tip has union (Meta remat-hold for :3006 rebuild) |
 | Upstream PR | **YOU** only after operator OK |
 
 Hard rules: product edits only in this worktree; never merge `tiann/hapi`; no agent stack-switch.
