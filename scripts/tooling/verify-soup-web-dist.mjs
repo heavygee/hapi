@@ -289,13 +289,22 @@ export { collectSoupMarkersFromSource, featureTopLevelDirs, STANDARD_TOP_DIRS }
 
 function runVerify() {
     // Fail closed before dist checks: SessionList unbound helpers (2026-07-29 double outage).
-    const bindings = join(
-        process.env.HAPI_PRIMARY ?? `${process.env.HOME}/coding/hapi`,
-        'scripts/tooling/verify-sessionlist-bindings.mjs',
-    )
+    const primary = process.env.HAPI_PRIMARY ?? `${process.env.HOME}/coding/hapi`
+    const bindings = join(primary, 'scripts/tooling/verify-sessionlist-bindings.mjs')
     if (existsSync(bindings)) {
         try {
             execSync(`bun run ${JSON.stringify(bindings)} ${JSON.stringify(driver)}`, {
+                stdio: 'inherit',
+            })
+        } catch {
+            process.exit(1)
+        }
+    }
+    // HappyComposer restoredIntent / SessionChat canViewAgentTerminal (2026-08-08).
+    const composerBindings = join(primary, 'scripts/tooling/verify-happycomposer-bindings.mjs')
+    if (existsSync(composerBindings)) {
+        try {
+            execSync(`bun run ${JSON.stringify(composerBindings)} ${JSON.stringify(driver)}`, {
                 stdio: 'inherit',
             })
         } catch {

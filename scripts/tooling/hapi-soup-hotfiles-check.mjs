@@ -61,6 +61,12 @@ if (existsSync(bindings)) {
     if (r.status !== 0) process.exit(r.status ?? 1)
 }
 
+const composerBindings = join(primary, 'scripts/tooling/verify-happycomposer-bindings.mjs')
+if (existsSync(composerBindings)) {
+    const r = spawnSync('bun', ['run', composerBindings, driver], { stdio: 'inherit' })
+    if (r.status !== 0) process.exit(r.status ?? 1)
+}
+
 const externalRefsPreserve = join(primary, 'scripts/tooling/verify-externalrefs-preserve.mjs')
 if (existsSync(externalRefsPreserve)) {
     const r = spawnSync('bun', ['run', externalRefsPreserve, driver], { stdio: 'inherit' })

@@ -424,6 +424,22 @@ Parking your **own** layer briefly while you re-thin is fine. Parking a peer's l
 3. Soup-heal `scripts/tooling/soup-heals/62-sessionlist-row-helpers.patch` re-applies the shared module + imports if a layer drops them again.
 4. After any SessionList soup merge: smoke `/sessions` past the error boundary (not only unit tests).
 
+### HappyComposer send-intent / SessionChat terminal — tip-forward heal-required (2026-08-08)
+
+Tip-forward absorb of upstream into soup WIP repeatedly left **call sites without declarations** in hot chat files. Session-open smoke only checks mount (no error boundary + composer textbox present) — it does **not** exercise Enter/send.
+
+| Incident | Broken identifier | Symptom |
+|---|---|---|
+| Same-day tip-forward `#1407` union | `canViewAgentTerminal` in `SessionChat.tsx` | Every session route error-boundary |
+| Tip-forward absorb `64a116f47` | `restoredIntent` / `resetPendingSendIntent` in `HappyComposer.tsx` | Composer Enter/send no-op; `ReferenceError` in dist (`index-CtoMYV9e.js`). Fix: `de78a3650` |
+
+**Rules:**
+
+1. **Heal-required unions:** any tip-forward / layer merge that touches `HappyComposer.tsx` send path (`pendingSendIntentRef`, `restoredIntent`, `flushAndSend`) or `SessionChat.tsx` terminal overlay (`canViewAgentTerminal`, `DragDropZone` nesting) must keep **both** the consume site and the declaration. Prefer taking the fuller upstream send-intent block over a partial HEAD stub.
+2. **Rebuild fails closed:** `verify-happycomposer-bindings.mjs` runs from `hapi-driver-build-web`, `verify-soup-web-dist`, and `hapi-soup-hotfiles-check` — unbound `restoredIntent` / `resetPendingSendIntent` / `canViewAgentTerminal` → rebuild exits non-zero before dogfood ships.
+3. Soup-heal `scripts/tooling/soup-heals/101-happycomposer-restored-intent.patch` re-applies the send-intent declaration block if a later absorb drops it again.
+4. Session-open smoke remaining gap: mount ≠ send. Extending smoke to a synthetic send (or Playwright click) is desirable; until then the source binding check is the kill-criterion that would have caught this under "wave clear no-op remat".
+
 ### Re-thin bases (2026-07-29 — awareness remat)
 
 Remat does **not** merge onto `origin/driver/integration`. It builds on **`driver/integration-wip`** in the remat worktree from `upstream/main` + layers, then promotes the live tip only on success. A tip that `merge-tree`s clean vs yesterday’s published `driver/integration` can still explode (100+ files) against today’s intermediate.

@@ -58,6 +58,12 @@ if [[ -f "$BINDINGS" ]]; then
     "$BUN" run "$BINDINGS" "$DRIVER"
 fi
 
+COMPOSER_BINDINGS="$PRIMARY/scripts/tooling/verify-happycomposer-bindings.mjs"
+if [[ -f "$COMPOSER_BINDINGS" ]]; then
+    echo "Checking HappyComposer/SessionChat tip-forward bindings (fail-closed)..."
+    "$BUN" run "$COMPOSER_BINDINGS" "$DRIVER"
+fi
+
 echo "Building web only (no manifest merge) on $(git -C "$DRIVER" log -1 --oneline)..."
 build_web_atomic "$DRIVER"
 
