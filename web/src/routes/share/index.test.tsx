@@ -1,3 +1,4 @@
+import { StrictMode } from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import SharePage from './index'
@@ -149,6 +150,31 @@ describe('SharePage', () => {
                 }),
             )
         })
+    })
+
+    it('StrictMode remount still ingests once and navigates to ?id=', async () => {
+        searchMock.mockReturnValue({})
+        setShareHash('#text=strict-mode-proof')
+        putShareTransferMock.mockResolvedValue('xfer-strict')
+
+        render(
+            <StrictMode>
+                <SharePage />
+            </StrictMode>,
+        )
+
+        await waitFor(() => {
+            expect(navigateMock).toHaveBeenCalledWith({
+                to: '/share',
+                search: { id: 'xfer-strict' },
+                replace: true,
+            })
+        })
+        expect(putShareTransferMock).toHaveBeenCalledTimes(1)
+        expect(putShareTransferMock).toHaveBeenCalledWith(
+            expect.objectContaining({ text: 'strict-mode-proof' }),
+        )
+        expect(window.location.hash).toBe('')
     })
 
     it('id present wins: loads IndexedDB and ignores hash content', async () => {

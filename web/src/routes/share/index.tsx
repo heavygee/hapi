@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useAppContext } from '@/lib/app-context'
 import { useSessions } from '@/hooks/queries/useSessions'
@@ -143,9 +143,15 @@ export default function SharePage() {
     // `window.location.search` directly would diverge from the rest of the
     // codebase and miss future schema tightening. Deep-link *content* is
     // intentionally read from the hash (not query) so it never hits hub logs.
+    // Capture the fragment once in state so StrictMode's effect remount does
+    // not lose it after the first pass scrubs the address bar.
     const search = useSearch({ from: '/share' }) as ShareSearch
     const transferId = search.id ?? null
     const ingestError = search.error === 'ingest'
+    const [deepLink] = useState(() =>
+        parseShareHash(typeof window === 'undefined' ? '' : window.location.hash)
+    )
+    const ingestPromiseRef = useRef<Promise<string> | null>(null)
 
     useEffect(() => {
         let cancelled = false
@@ -171,27 +177,26 @@ export default function SharePage() {
         // Native / deep-link ingest via URL fragment (not query): synthesize
         // the same IDB transfer the SW would create from POST, scrub the
         // fragment, then replace to ?id= for picker / create-new.
-        const deepLink = parseShareHash(
-            typeof window !== 'undefined' ? window.location.hash : ''
-        )
         scrubShareHashFromLocation()
         if (hasShareDeepLinkContent(deepLink)) {
-            void (async () => {
-                try {
-                    const payload = buildSharePayloadFromSearchFields(deepLink)
-                    const id = await putShareTransfer(payload)
+            ingestPromiseRef.current ??= putShareTransfer(
+                buildSharePayloadFromSearchFields(deepLink)
+            )
+            void ingestPromiseRef.current.then(
+                (id) => {
                     if (cancelled) return
                     navigate({ to: '/share', search: { id }, replace: true })
-                } catch {
+                },
+                () => {
                     if (cancelled) return
                     setLoad({ state: 'missing', reason: 'ingest-error' })
-                }
-            })()
+                },
+            )
             return () => { cancelled = true }
         }
         setLoad({ state: 'missing', reason: 'no-id' })
         return () => { cancelled = true }
-    }, [transferId, ingestError, navigate])
+    }, [transferId, ingestError, navigate, deepLink])
 
     // Snapshot the session list once when sessions finish loading so the
     // picker doesn't re-shuffle under the operator's finger as SSE updates
