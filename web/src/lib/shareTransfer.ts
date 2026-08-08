@@ -58,6 +58,14 @@ export type ShareDeepLinkFields = {
     url?: string
     text?: string
     title?: string
+    /**
+     * Companion-hosted one-shot HTTP(S) URL for a shared file (image/video).
+     * Fragment stays text-sized; the share page fetches bytes into IDB.
+     * Not logged on the hub request line (fragment-only).
+     */
+    fileUrl?: string
+    fileName?: string
+    fileType?: string
 }
 
 function nonEmptyString(value: unknown): string | undefined {
@@ -79,7 +87,7 @@ export function parseShareSearch(search: Record<string, unknown>): ShareSearch {
     return result
 }
 
-/** Parse url/text/title from a flat record (hash params or tests). */
+/** Parse url/text/title(/file*) from a flat record (hash params or tests). */
 export function parseShareDeepLinkFields(
     fields: Record<string, unknown>
 ): ShareDeepLinkFields {
@@ -90,6 +98,12 @@ export function parseShareDeepLinkFields(
     if (text) result.text = text
     const title = nonEmptyString(fields.title)
     if (title) result.title = title
+    const fileUrl = nonEmptyString(fields.fileUrl)
+    if (fileUrl) result.fileUrl = fileUrl
+    const fileName = nonEmptyString(fields.fileName)
+    if (fileName) result.fileName = fileName
+    const fileType = nonEmptyString(fields.fileType)
+    if (fileType) result.fileType = fileType
     return result
 }
 
@@ -119,13 +133,12 @@ export function scrubShareHashFromLocation(): void {
 
 /** True when deep-link content is present (id path is decided separately). */
 export function hasShareDeepLinkContent(fields: ShareDeepLinkFields): boolean {
-    return Boolean(fields.url || fields.text || fields.title)
+    return Boolean(fields.url || fields.text || fields.title || fields.fileUrl)
 }
 
 /**
- * Same payload shape as `buildSharePayloadFromFormData` for text/url shares
- * (no files — deep links cannot carry binaries). Used by native companions
- * that open `/share#url=&text=&title=` instead of POSTing Web Share Target.
+ * Text/url/title payload (no fetch). Prefer {@link buildSharePayloadFromDeepLink}
+ * when `fileUrl` may be present.
  */
 export function buildSharePayloadFromSearchFields(
     fields: ShareDeepLinkFields,
@@ -138,6 +151,50 @@ export function buildSharePayloadFromSearchFields(
         files: [],
         createdAt: now,
     }
+}
+
+/**
+ * Native companion ingest: text fields plus optional `fileUrl` fetch into
+ * `files[]` (same shape as Web Share Target POST). `fileUrl` must be
+ * CORS-readable from the HAPI origin (companions send ACAO *).
+ */
+export async function buildSharePayloadFromDeepLink(
+    fields: ShareDeepLinkFields,
+    now: number = Date.now(),
+    deps: { fetch?: typeof fetch } = {}
+): Promise<ShareTransferPayload> {
+    const base = buildSharePayloadFromSearchFields(fields, now)
+    const fileUrl = fields.fileUrl?.trim()
+    if (!fileUrl) return base
+
+    const doFetch = deps.fetch ?? fetch
+    const response = await doFetch(fileUrl)
+    if (!response.ok) {
+        throw new Error(`share fileUrl fetch failed: ${response.status}`)
+    }
+    const blob = await response.blob()
+    const headerType = response.headers.get('content-type')?.split(';')[0]?.trim()
+    const type = fields.fileType?.trim()
+        || headerType
+        || blob.type
+        || 'application/octet-stream'
+    const name = fields.fileName?.trim() || guessFileName(fileUrl, type)
+    return {
+        ...base,
+        files: [{ name, type, blob }],
+    }
+}
+
+function guessFileName(fileUrl: string, type: string): string {
+    try {
+        const path = new URL(fileUrl).pathname
+        const leaf = path.split('/').filter(Boolean).pop()
+        if (leaf && leaf.includes('.')) return leaf
+    } catch {
+        // ignore invalid URL
+    }
+    const subtype = type.split('/')[1]?.replace(/[^a-z0-9]/gi, '') || 'bin'
+    return `shared.${subtype}`
 }
 
 type StoredRecord = ShareTransferPayload & { id: string }

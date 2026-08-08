@@ -82,7 +82,7 @@ Companions that cannot use Web Share Target (for example a native app on a heads
 {hapiOrigin}/share#url=…&text=…&title=…
 ```
 
-- Fragment params: `url`, `text`, `title` (all optional; omit empty). The fragment is **not** sent on the HTTP request, so shared content does not appear in hub access logs.
+- Fragment params: `url`, `text`, `title` (all optional; omit empty). Optional companion file hand-off: `fileUrl`, `fileName`, `fileType` — the page fetches `fileUrl` (CORS) into the same IndexedDB `files[]` as Web Share Target. The fragment is **not** sent on the HTTP request, so shared content does not appear in hub access logs.
 - When any are present and query `id` is absent, the web app synthesizes the same IndexedDB transfer used by the POST path, scrubs the fragment, then continues with the session picker / create-new flow (`?id=`).
 - When query `id` is present (Web Share Target redirect), that path wins; fragment content is ignored for ingest.
 - Files still require the POST `share_target` path — deep links cannot carry binaries.

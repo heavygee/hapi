@@ -5,7 +5,7 @@ import { useSessions } from '@/hooks/queries/useSessions'
 import { useTranslation } from '@/lib/use-translation'
 import { LoadingState } from '@/components/LoadingState'
 import {
-    buildSharePayloadFromSearchFields,
+    buildSharePayloadFromDeepLink,
     deleteShareTransfer,
     getShareTransfer,
     hasShareDeepLinkContent,
@@ -152,9 +152,8 @@ export default function SharePage() {
         // fragment, then replace to ?id= for picker / create-new.
         scrubShareHashFromLocation()
         if (hasShareDeepLinkContent(deepLink)) {
-            ingestPromiseRef.current ??= putShareTransfer(
-                buildSharePayloadFromSearchFields(deepLink)
-            )
+            ingestPromiseRef.current ??= buildSharePayloadFromDeepLink(deepLink)
+                .then((payload) => putShareTransfer(payload))
             void ingestPromiseRef.current.then(
                 (id) => {
                     if (cancelled) return
