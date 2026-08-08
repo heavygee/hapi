@@ -2,25 +2,25 @@
 
 **Spawned:** 2026-08-06  
 **Worktree:** `/home/heavygee/coding/hapi/worktrees/web-pinned-sessions-soup`  
-**Branch:** `driver/web-pinned-sessions` (soup union tip; layer **DROPPED** after merge)  
+**Branch:** `driver/web-pinned-sessions` (layer **DROPPED** after merge)  
 **Upstream PR:** https://github.com/tiann/hapi/pull/1115 — **MERGED** `3da9f7780` (2026-08-08, heavygee squash)  
-**Issue:** https://github.com/tiann/hapi/issues/532 — should close with merge  
+**Issue:** https://github.com/tiann/hapi/issues/532 — **CLOSED**
 
-## Final status (2026-08-08)
+## Final status (2026-08-08) — DONE
 
 | Step | Status |
 |------|--------|
 | Soup dogfood (single-mode then global band) | DONE |
-| Author dual-mode + v22 rebase | DONE (`c9712bbc`) |
+| Author dual-mode + v22 rebase | DONE |
 | Thread hygiene / CLEAN | DONE |
 | Upstream merge | **DONE** — squash `3da9f7780` |
 | Drop manifest layer | **DONE** |
-| Remat / `global_pinned` on live DB | **HOLD** — conflicts resolved on `driver/integration-wip` @ `9a834e181`; Meta `05d9f0f2` pinged to finish `HAPI_REMAT_OWNER=1` rebuild + hub restart |
+| Remat / `global_pinned` on live DB | **DONE** — live tip `0c6b0f874`; hold idle; hub restarted; verify green |
 
 ## Notes
 
 - Upstream pin = SCHEMA **v22** with `pinned` + `global_pinned`.
-- Soup had earlier single-column pin at v22; live DB was **user_version=23** with `pinned` only (session-jobs owns v23). Remat must ensure `global_pinned` exists even when version is already 23.
+- Soup keeps SCHEMA **23** (session-jobs #1404) + `ensureSessionPinColumns` heal for DBs that already passed v22 with `pinned` only.
 - Public GitHub voice: no estate jargon on others' PRs; operator-first.
 
 Hard rules: no agent stack-switch; no hand-edit inside `driver/` except via rebuild.
