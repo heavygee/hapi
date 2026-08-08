@@ -462,6 +462,7 @@ export function HappyComposer(props: {
         sendError = null,
         onClearSendError,
         onSuppressSendErrorRestore,
+        pendingSendIntentRef,
         resolveSessionMentionTooltip,
     } = props
 
@@ -1120,7 +1121,26 @@ export function HappyComposer(props: {
         ? undefined
         : handleUserClearSchedule
 
-    const handleSend = useCallback(async () => {
+    const resetPendingSendIntent = useCallback(() => {
+        if (pendingSendIntentRef) pendingSendIntentRef.current = 'default'
+    }, [pendingSendIntentRef])
+
+    const handleSend = useCallback(async (intent: ComposerSendIntent = 'default') => {
+        // SessionChat preloads the ref only when restoring a rejected send:
+        // queue retries remain queue, while an ordinary fresh send always
+        // starts from the explicit/default argument. Capture it before the
+        // mandatory early-path reset below, then consume it at send time.
+        // Tip-forward absorb 64a116f47 kept the consume site but dropped this
+        // declaration — that shipped as restoredIntent ReferenceError in dist.
+        const restoredIntent = intent === 'default'
+            ? (pendingSendIntentRef?.current ?? 'default')
+            : intent
+        // The runtime consumes this ref from assistant-ui's onNew callback.
+        // Clear any prior one-shot value before paths that do not call send(),
+        // so a rejected park/schedule path can never leak a stale queue intent
+        // into the next normal submission.
+        resetPendingSendIntent()
+
         // Rich chips must be serialized into composer.text before any send or
         // scratchlist park snapshot (RichComposerInput contract).
         if (richMentionsEnabled && richInputRef.current) {
@@ -1211,15 +1231,17 @@ export function HappyComposer(props: {
         hasText,
         onSuppressSendErrorRestore,
         pendingSchedule,
+        pendingSendIntentRef,
         props.onParkScratchlist,
         props.onResumeStoredDraft,
         props.scratchlistMode,
+        resetPendingSendIntent,
         richMentionsEnabled,
         sendError,
     ])
 
-    const flushAndSend = useCallback(() => {
-        void handleSend()
+    const flushAndSend = useCallback((intent: ComposerSendIntent = 'default') => {
+        void handleSend(intent)
     }, [handleSend])
 
     const handleKeyDown = useCallback((e: ReactKeyboardEvent<HTMLTextAreaElement | HTMLDivElement>) => {
