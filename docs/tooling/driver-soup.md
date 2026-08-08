@@ -198,6 +198,16 @@ Mechanical rebuild steps (after layers are dropped and fork `main` is synced):
 
 Do **not** leave merged feature branches as live soup layers — they bitrot against `upstream/main` and break rebuild when the remote tip is deleted.
 
+### Absorbing a merged community schema PR (tip-forward)
+
+When upstream lands a schema-touching PR that soup already dogfooded (or remumbered past):
+
+1. **Drop** the soup layer (peer Gate A) — do not leave a stale union tip on the manifest.
+2. **Tip-forward remat:** prefer **upstream product surfaces** (API/UI/column names); keep soup-only schema owners that already advanced `SCHEMA_VERSION` (e.g. jobs at v23 while upstream pin is v22).
+3. **Column ensure, not version bump alone:** live DBs whose `user_version` already passed the step that *should* have added columns will skip that migration. Run idempotent `PRAGMA table_info` + `ALTER TABLE … ADD COLUMN` in `finishSchemaInit` (or equivalent boot heal) for every new column the absorb needs. SQLite has no `ADD COLUMN IF NOT EXISTS` — check first. Example: `#1115` `global_pinned` via `ensureSessionPinColumns` after soup was already at v23 with `pinned` only.
+
+Exit reflection source: [`2026-08-08-pinned-sessions-soup-exit.md`](../plans/retros/2026-08-08-pinned-sessions-soup-exit.md).
+
 ### Keeping fork `main` truthful
 
 Fork `main` = **`upstream/main` + fork-only docs/plans**. After upstream merges: run `hapi-sync-fork-main`. Meta bot: weekly `--check-only` even if idle.

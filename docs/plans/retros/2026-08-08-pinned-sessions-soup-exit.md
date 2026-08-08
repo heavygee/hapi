@@ -23,6 +23,8 @@
 - [x] `lifecycle / tooling doc` — `docs/tooling/driver-soup.md` (or lifecycle § After upstream merge): one short note that absorbing a merged community schema PR may require (1) drop soup layer, (2) tip-forward prefer upstream product surfaces, (3) **column ensure** when live `user_version` already past the migration that added columns.
 - [ ] `High-signal index` — optional second: only if Meta wants a one-liner pointing at Public GitHub voice (already shipped 2026-08-06); otherwise leave.
 
+**Meta promote bar (05d9f0f2, 2026-08-08):** applied → `driver-soup.md` § Absorbing a merged community schema PR. High-signal **none** (Public GitHub voice already indexed).
+
 ## Open questions / landmines
 
 - Soup session-jobs (#1404) still owns v23 while upstream pin owns v22 — next schema PR must not invent a second v22 for product on soup without remumber.
