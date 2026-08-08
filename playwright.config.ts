@@ -13,8 +13,9 @@ const baseURL = peerWebUrl ?? FIXTURE_BASE_URL
 
 export default defineConfig({
     testDir: './e2e',
-    // Peer-stack specs need HAPI_PEER_* + mirror tooling; run via playwright.peer.config.ts only.
-    testIgnore: ['**/peer/**'],
+    // Peer-stack specs need HAPI_PEER_* (set by run-e2e-on-peer-stack.mjs).
+    // Fixture-only runs must not pick them up accidentally.
+    testIgnore: usePeerStack ? [] : ['**/peer/**'],
     timeout: usePeerStack ? 60_000 : 30_000,
     expect: { timeout: usePeerStack ? 10_000 : 5_000 },
     fullyParallel: false,
