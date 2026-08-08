@@ -59,6 +59,7 @@ type SessionGroup = {
 }
 
 const RUNNING_BUCKETS = [
+    { key: 'jobs', labelKey: 'session.item.attachedJob', colorClass: 'text-[var(--app-badge-success-text)]', pulse: true },
     { key: 'working', labelKey: 'session.item.running', colorClass: 'text-[var(--app-badge-success-text)]', pulse: true },
     { key: 'pending', labelKey: 'session.item.pending', colorClass: 'text-[var(--app-badge-warning-text)]', pulse: true },
 ] as const
@@ -1272,7 +1273,8 @@ export function SessionList(props: {
             .sort((a, b) => b.updatedAt - a.updatedAt)
     }, [machineFilteredSessions])
     const runningSessions = useMemo(() => {
-        const buckets: Record<'working' | 'pending', SessionSummary[]> = {
+        const buckets: Record<'jobs' | 'working' | 'pending', SessionSummary[]> = {
+            jobs: [],
             working: [],
             pending: [],
         }
@@ -1292,8 +1294,11 @@ export function SessionList(props: {
             const agentPending = session.active
                 && (session.pendingRequestsCount ?? 0) > 0
                 && !agentWorking
-            if (agentWorking || hasRunningAttachedJob(session)) {
+            if (agentWorking) {
                 buckets.working.push(session)
+            } else if (hasRunningAttachedJob(session)) {
+                // Idle outliving work — not "Running" agent activity.
+                buckets.jobs.push(session)
             } else if (agentPending) {
                 buckets.pending.push(session)
             }
@@ -1304,7 +1309,8 @@ export function SessionList(props: {
         }
         return buckets
     }, [machineFilteredSessions, pinInProgressMode])
-    const runningSessionTotal = runningSessions.working.length
+    const runningSessionTotal = runningSessions.jobs.length
+        + runningSessions.working.length
         + runningSessions.pending.length
     const groups = useMemo(
         () => groupSessionsByDirectory(
