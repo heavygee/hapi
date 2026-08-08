@@ -4,11 +4,6 @@ import { randomUUID } from 'node:crypto'
 import type { StoredSession, VersionedUpdateResult } from './types'
 import { safeJsonParse } from './json'
 import { updateVersionedField } from './versionedUpdates'
-import { buildOverseerSessionIdentity, preserveGithubPrStatusCache } from '@hapi/protocol'
-import type { ExternalRef } from '@hapi/protocol'
-import type { Metadata } from '@hapi/protocol/types'
-import { detachSessionEvents, tombstoneDeletedSession } from './events'
-import { detachSessionInboxItems } from './inboxItems'
 
 // Carry-forward fields that the hub preserves across any metadata
 // replacement when the incoming write omits them.
@@ -41,11 +36,6 @@ import { detachSessionInboxItems } from './inboxItems'
 //     write-once-keep semantics. Mirror of pickExistingSessionMetadata
 //     in cli/src/agent/sessionFactory.ts.
 //
-//   - ALERT_STATE_FIELDS: durable operator-facing alert state that must
-//     survive sparse metadata writes (e.g. archive). Without this,
-//     lastModelError (banner / amber dot / ack) vanishes when a write
-//     omits it — the user never dismissed the error.
-//
 // `cursorSessionProtocol` is paired with `cursorSessionId`: protocol is
 // tied to a specific chat id, so a write that explicitly sets a new
 // `cursorSessionId` must drop a stale prior protocol. Handled in
@@ -74,10 +64,6 @@ const SIMPLE_RESUME_TOKENS = [
     'copilotSessionId',
     'piSessionId'
 ] as const
-
-const ALERT_STATE_FIELDS = ['lastModelError'] as const
-
-const CONTRIBUTION_FIELDS = ['externalRefs'] as const
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -134,27 +120,6 @@ function preserveCursorProtocolPair(
     return merged
 }
 
-function preserveExternalRefsStatusCache(
-    prior: Record<string, unknown>,
-    next: Record<string, unknown>,
-    merged: Record<string, unknown> | null
-): Record<string, unknown> | null {
-    if (!Object.prototype.hasOwnProperty.call(next, 'externalRefs')) {
-        return merged
-    }
-    if (!Array.isArray(next.externalRefs) || !Array.isArray(prior.externalRefs)) {
-        return merged
-    }
-
-    const base = merged ?? { ...next }
-    const incoming = (base.externalRefs ?? next.externalRefs) as ExternalRef[]
-    base.externalRefs = preserveGithubPrStatusCache(
-        prior.externalRefs as ExternalRef[],
-        incoming
-    )
-    return base
-}
-
 export function mergeSessionMetadata(prior: unknown, next: unknown): unknown {
     if (!isPlainObject(prior) || !isPlainObject(next)) {
         return next
@@ -163,9 +128,6 @@ export function mergeSessionMetadata(prior: unknown, next: unknown): unknown {
     merged = carryForwardIfMissing(prior, next, merged, PARSE_IDENTITY_FIELDS)
     merged = carryForwardIfMissing(prior, next, merged, ROUTING_FIELDS)
     merged = carryForwardIfMissing(prior, next, merged, SIMPLE_RESUME_TOKENS)
-    merged = carryForwardIfMissing(prior, next, merged, ALERT_STATE_FIELDS)
-    merged = carryForwardIfMissing(prior, next, merged, CONTRIBUTION_FIELDS)
-    merged = preserveExternalRefsStatusCache(prior, next, merged)
     merged = preserveCursorProtocolPair(prior, next, merged)
     return merged ?? next
 }
@@ -178,6 +140,7 @@ type DbSessionRow = {
     created_at: number
     updated_at: number
     pinned: number
+    global_pinned: number
     metadata: string | null
     metadata_version: number
     agent_state: string | null
@@ -204,6 +167,7 @@ function toStoredSession(row: DbSessionRow): StoredSession {
         createdAt: row.created_at,
         updatedAt: row.updated_at,
         pinned: row.pinned === 1,
+        globalPinned: row.global_pinned === 1,
         metadata: safeJsonParse(row.metadata),
         metadataVersion: row.metadata_version,
         agentState: safeJsonParse(row.agent_state),
@@ -657,13 +621,25 @@ export function setSessionActive(
     }
 }
 
-export function setSessionPinned(db: Database, id: string, pinned: boolean, namespace: string): boolean {
+export type SessionPinMode = 'none' | 'project' | 'global'
+
+export function setSessionPinMode(db: Database, id: string, mode: SessionPinMode, namespace: string): boolean {
+    const pinned = mode === 'project' ? 1 : 0
+    const globalPinned = mode === 'global' ? 1 : 0
     const result = db.prepare(`
         UPDATE sessions
-        SET pinned = @pinned
-        WHERE id = @id AND namespace = @namespace AND pinned != @pinned
-    `).run({ id, namespace, pinned: pinned ? 1 : 0 })
+        SET pinned = @pinned,
+            global_pinned = @global_pinned
+        WHERE id = @id
+          AND namespace = @namespace
+          AND (pinned != @pinned OR global_pinned != @global_pinned)
+    `).run({ id, namespace, pinned, global_pinned: globalPinned })
     return result.changes === 1
+}
+
+/** @deprecated Prefer setSessionPinMode — kept for project-pin merge helpers. */
+export function setSessionPinned(db: Database, id: string, pinned: boolean, namespace: string): boolean {
+    return setSessionPinMode(db, id, pinned ? 'project' : 'none', namespace)
 }
 
 export function touchSessionUpdatedAt(
@@ -680,38 +656,6 @@ export function touchSessionUpdatedAt(
             WHERE id = @id
               AND namespace = @namespace
               AND updated_at < @updated_at
-        `).run({
-            id,
-            namespace,
-            updated_at: updatedAt
-        })
-
-        return result.changes === 1
-    } catch {
-        return false
-    }
-}
-
-// 中文注释：transcript 导入新建会话时，会话出生时间是 Date.now()（今天），而真实最后活动在历史里。
-// touchSessionUpdatedAt 是“只前进不后退”的活跃刷新，保护在线会话不被陈旧事件拉回过去，因此无法把
-// 导入会话的 updated_at 调回历史。这里提供一个仅供导入路径使用的无条件 setter，把刚建好的导入会话
-// 的 updated_at 设成真实最后活动时间，避免历史会话在列表里被排成“今天刚活跃”。
-export function setImportedSessionActivity(
-    db: Database,
-    id: string,
-    updatedAt: number,
-    namespace: string
-): boolean {
-    if (!Number.isFinite(updatedAt)) {
-        return false
-    }
-    try {
-        const result = db.prepare(`
-            UPDATE sessions
-            SET updated_at = @updated_at,
-                seq = seq + 1
-            WHERE id = @id
-              AND namespace = @namespace
         `).run({
             id,
             namespace,
@@ -749,24 +693,6 @@ export function getSessionsByNamespace(db: Database, namespace: string): StoredS
 }
 
 export function deleteSession(db: Database, id: string, namespace: string): boolean {
-    const row = getSessionByNamespace(db, id, namespace)
-    if (!row) {
-        return false
-    }
-
-    const metadata = row.metadata as Metadata | null
-    tombstoneDeletedSession(
-        db,
-        buildOverseerSessionIdentity({
-            id: row.id,
-            flavor: metadata?.flavor ?? 'claude',
-            tag: row.tag,
-            metadata
-        }),
-        Date.now()
-    )
-    detachSessionEvents(db, id)
-    detachSessionInboxItems(db, id)
     const result = db.prepare(
         'DELETE FROM sessions WHERE id = ? AND namespace = ?'
     ).run(id, namespace)

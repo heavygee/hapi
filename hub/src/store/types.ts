@@ -6,6 +6,7 @@ export type StoredSession = {
     createdAt: number
     updatedAt: number
     pinned: boolean
+    globalPinned: boolean
     metadata: unknown | null
     metadataVersion: number
     agentState: unknown | null
@@ -82,21 +83,6 @@ export type StoredScratchlistEntry = {
     createdAt: number
     updatedAt: number
     attachments: import('@hapi/protocol').ScratchlistAttachmentMetadata[]
-}
-
-export type StoredSessionJob = {
-    sessionId: string
-    key: string
-    label: string
-    status: import('@hapi/protocol').AttachedJobStatus
-    done?: number
-    total?: number
-    remaining?: number
-    unit?: string
-    detail?: string
-    heartbeatAt: number
-    startedAt: number
-    updatedAt: number
 }
 
 export type VersionedUpdateResult<T> =

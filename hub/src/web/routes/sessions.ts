@@ -1,7 +1,4 @@
 import {
-    AcknowledgeModelErrorRequestSchema,
-    AttachedJobPatchSchema,
-    AttachedJobUpsertSchema,
     CursorMigrateToAcpRequestSchema,
     DeleteUploadRequestSchema,
     ForkConversationRequestSchema,
@@ -21,7 +18,6 @@ import {
     SessionServiceTierRequestSchema,
     SessionModelRequestSchema,
     SessionPermissionModeRequestSchema,
-    SetExternalRefsRequestSchema,
     supportsModelChange,
     supportsEffort,
     toSessionSummary,
@@ -30,7 +26,6 @@ import {
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type { SlashCommand } from '@hapi/protocol/apiTypes'
 import { Hono, type Context } from 'hono'
-import { getConfiguration } from '../../configuration'
 import type { SyncEngine, Session } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { loadScratchlistAttachmentLimitsFromEnv } from '../../config/scratchlistAttachmentLimits'
@@ -38,18 +33,6 @@ import { validateScratchlistAttachmentsForWrite, scratchlistSessionBytesBeforeFo
 import { requireSessionFromParam, requireSyncEngine } from './guards'
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
-
-export type SessionsRouteOptions = {
-    isGithubPrAwarenessEnabled?: () => boolean
-}
-
-function defaultGithubPrAwarenessEnabled(): boolean {
-    try {
-        return getConfiguration().githubPrAwareness
-    } catch {
-        return false
-    }
-}
 
 function commandsFromMetadataSlashCommands(names: readonly string[] | undefined): SlashCommand[] {
     if (!names?.length) {
@@ -82,12 +65,8 @@ function estimateBase64Bytes(base64: string): number {
     return Math.floor((len * 3) / 4) - padding
 }
 
-export function createSessionsRoutes(
-    getSyncEngine: () => SyncEngine | null,
-    options: SessionsRouteOptions = {}
-): Hono<WebAppEnv> {
+export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
-    const isGithubPrAwarenessEnabled = options.isGithubPrAwarenessEnabled ?? defaultGithubPrAwarenessEnabled
 
     app.get('/sessions', (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)
@@ -111,6 +90,9 @@ export function createSessionsRoutes(
                 if (order === 'updatedAt') {
                     return b.updatedAt - a.updatedAt
                 }
+                if (Boolean(a.globalPinned) !== Boolean(b.globalPinned)) {
+                    return a.globalPinned ? -1 : 1
+                }
                 if (Boolean(a.pinned) !== Boolean(b.pinned)) {
                     return a.pinned ? -1 : 1
                 }
@@ -132,11 +114,8 @@ export function createSessionsRoutes(
         }
         const scheduledCounts = engine.getFutureScheduledMessageCounts(sessionRecords.map((session) => session.id))
         const nextScheduledAt = engine.getNextScheduledAtBySessionIds(sessionRecords.map((session) => session.id))
-        const attachedJobs = engine.getPrimaryAttachedJobsBySessionIds(sessionRecords.map((session) => session.id))
         const sessions = sessionRecords.map((session) => {
-            const summary = toSessionSummary(session, {
-                attachedJob: attachedJobs.get(session.id) ?? null
-            })
+            const summary = toSessionSummary(session)
             return {
                 ...summary,
                 futureScheduledMessageCount: scheduledCounts.get(session.id) ?? 0,
@@ -182,52 +161,6 @@ export function createSessionsRoutes(
         }
 
         return c.json({ session: sessionResult.session })
-    })
-
-    app.get('/sessions/:id/external-refs', (c) => {
-        const engine = requireSyncEngine(c, getSyncEngine)
-        if (engine instanceof Response) {
-            return engine
-        }
-
-        const sessionResult = requireSessionFromParam(c, engine)
-        if (sessionResult instanceof Response) {
-            return sessionResult
-        }
-
-        return c.json({ externalRefs: sessionResult.session.metadata?.externalRefs ?? [] })
-    })
-
-    app.put('/sessions/:id/external-refs', async (c) => {
-        if (!isGithubPrAwarenessEnabled()) {
-            return c.json({
-                error: 'GitHub PR awareness is disabled',
-                code: 'github_pr_awareness_disabled'
-            }, 403)
-        }
-
-        const engine = requireSyncEngine(c, getSyncEngine)
-        if (engine instanceof Response) {
-            return engine
-        }
-
-        const sessionResult = requireSessionFromParam(c, engine)
-        if (sessionResult instanceof Response) {
-            return sessionResult
-        }
-
-        const parsed = SetExternalRefsRequestSchema.safeParse(await c.req.json().catch(() => null))
-        if (!parsed.success) {
-            return c.json({ error: 'Invalid body: externalRefs is required' }, 400)
-        }
-
-        try {
-            await engine.setSessionExternalRefs(sessionResult.sessionId, parsed.data.externalRefs)
-            return c.json({ ok: true, externalRefs: parsed.data.externalRefs })
-        } catch (error) {
-            const message = error instanceof Error ? error.message : 'Failed to update external refs'
-            return c.json({ error: message }, message.includes('concurrently') || message.includes('version') ? 409 : 500)
-        }
     })
 
     app.get('/sessions/:id/cursor-chat-store', async (c) => {
@@ -512,102 +445,6 @@ export function createSessionsRoutes(
 
         await engine.archiveSession(sessionResult.sessionId)
         return c.json({ ok: true })
-    })
-
-    app.post('/sessions/:id/model-error/acknowledge', async (c) => {
-        const engine = requireSyncEngine(c, getSyncEngine)
-        if (engine instanceof Response) {
-            return engine
-        }
-
-        const sessionResult = requireSessionFromParam(c, engine)
-        if (sessionResult instanceof Response) {
-            return sessionResult
-        }
-
-        const body = await c.req.json().catch(() => null)
-        const parsed = AcknowledgeModelErrorRequestSchema.safeParse(body)
-        if (!parsed.success) {
-            return c.json({ error: 'Invalid body', issues: parsed.error.issues }, 400)
-        }
-
-        try {
-            await engine.acknowledgeModelError(sessionResult.sessionId, parsed.data.atTs)
-            return c.json({ ok: true })
-        } catch (error) {
-            const message = error instanceof Error ? error.message : 'Failed to acknowledge model error'
-            if (
-                message.includes('concurrently')
-                || message.includes('version')
-                || message.includes('changed')
-            ) {
-                return c.json({ error: message }, 409)
-            }
-            return c.json({ error: message }, 500)
-        }
-    })
-
-    app.post('/sessions/:id/model-error/bridge', async (c) => {
-        const engine = requireSyncEngine(c, getSyncEngine)
-        if (engine instanceof Response) {
-            return engine
-        }
-
-        const sessionResult = requireSessionFromParam(c, engine)
-        if (sessionResult instanceof Response) {
-            return sessionResult
-        }
-
-        const flavor = sessionResult.session.metadata?.flavor ?? 'claude'
-        if (flavor !== 'cursor') {
-            return c.json({ error: 'Model error bridge is only supported for Cursor sessions' }, 400)
-        }
-
-        try {
-            const result = await engine.bridgeModelError(sessionResult.sessionId)
-            if (!result.ok) {
-                return c.json({ ok: false, reason: result.reason ?? 'not_bridgeable' }, 409)
-            }
-            return c.json({ ok: true })
-        } catch (error) {
-            const message = error instanceof Error ? error.message : 'Failed to bridge model error'
-            if (message.includes('not active') || message.includes('not transient') || message.includes('already bridged') || message.includes('already failed')) {
-                return c.json({ error: message }, 409)
-            }
-            return c.json({ error: message }, 500)
-        }
-    })
-
-    app.post('/sessions/:id/model-error/auto-bridge-setting', async (c) => {
-        const engine = requireSyncEngine(c, getSyncEngine)
-        if (engine instanceof Response) {
-            return engine
-        }
-
-        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
-        if (sessionResult instanceof Response) {
-            return sessionResult
-        }
-
-        const flavor = sessionResult.session.metadata?.flavor ?? 'claude'
-        if (flavor !== 'cursor') {
-            return c.json({ error: 'Model error auto-bridge is only supported for Cursor sessions' }, 400)
-        }
-
-        const body = await c.req.json().catch(() => null)
-        if (!body || typeof body !== 'object' || typeof body.enabled !== 'boolean') {
-            return c.json({ error: 'Invalid body' }, 400)
-        }
-
-        try {
-            await engine.applySessionConfig(sessionResult.sessionId, {
-                autoBridgeTransientModelErrors: body.enabled
-            })
-            return c.json({ ok: true })
-        } catch (error) {
-            const message = error instanceof Error ? error.message : 'Failed to apply auto-bridge setting'
-            return c.json({ error: message }, 409)
-        }
     })
 
     app.post('/sessions/:id/migrate-to-acp', async (c) => {
@@ -970,10 +807,10 @@ export function createSessionsRoutes(
         const body = await c.req.json().catch(() => null)
         const parsed = SetSessionPinnedRequestSchema.safeParse(body)
         if (!parsed.success) {
-            return c.json({ error: 'Invalid body: pinned is required' }, 400)
+            return c.json({ error: 'Invalid body: mode must be none, project, or global' }, 400)
         }
 
-        engine.setSessionPinned(sessionResult.sessionId, parsed.data.pinned)
+        engine.setSessionPinMode(sessionResult.sessionId, parsed.data.mode)
         return c.json({ ok: true })
     })
 
@@ -1341,124 +1178,6 @@ export function createSessionsRoutes(
         const removed = engine.deleteScratchlistEntry(sessionResult.sessionId, entryId)
         if (!removed) {
             return c.json({ error: 'Scratchlist entry not found' }, 404)
-        }
-        return c.json({ ok: true })
-    })
-
-    // tiann/hapi#1404 — session-attached long-running jobs (works while agent idle).
-    const JOB_KEY_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
-
-    function resolveJobOwnerSession(
-        c: Context<WebAppEnv>,
-        engine: SyncEngine
-    ): { sessionId: string; session: Session } | Response {
-        const sessionResult = requireSessionFromParam(c, engine)
-        if (sessionResult instanceof Response) {
-            // Session may already be deleted after merge — still try acceptor redirect.
-            const rawId = c.req.param('id') ?? ''
-            const namespace = c.get('namespace')
-            const redirected = engine.resolveAttachedJobSessionId(rawId, namespace)
-            if (redirected !== rawId) {
-                const access = engine.resolveSessionAccess(redirected, namespace)
-                if (access.ok) {
-                    return { sessionId: access.sessionId, session: access.session }
-                }
-            }
-            return sessionResult
-        }
-        const namespace = c.get('namespace')
-        const ownerId = engine.resolveAttachedJobSessionId(sessionResult.sessionId, namespace)
-        if (ownerId === sessionResult.sessionId) {
-            return sessionResult
-        }
-        const access = engine.resolveSessionAccess(ownerId, namespace)
-        if (!access.ok) {
-            return sessionResult
-        }
-        return { sessionId: access.sessionId, session: access.session }
-    }
-
-    app.get('/sessions/:id/jobs', (c) => {
-        const engine = requireSyncEngine(c, getSyncEngine)
-        if (engine instanceof Response) {
-            return engine
-        }
-        const sessionResult = resolveJobOwnerSession(c, engine)
-        if (sessionResult instanceof Response) {
-            return sessionResult
-        }
-        return c.json({
-            jobs: engine.listSessionJobs(sessionResult.sessionId),
-            primary: engine.getPrimaryAttachedJob(sessionResult.sessionId)
-        })
-    })
-
-    app.put('/sessions/:id/jobs/:jobKey', async (c) => {
-        const engine = requireSyncEngine(c, getSyncEngine)
-        if (engine instanceof Response) {
-            return engine
-        }
-        const sessionResult = resolveJobOwnerSession(c, engine)
-        if (sessionResult instanceof Response) {
-            return sessionResult
-        }
-        const jobKey = c.req.param('jobKey')
-        if (!jobKey || !JOB_KEY_RE.test(jobKey)) {
-            return c.json({ error: 'Invalid jobKey (1-128 chars: alnum, . _ -)' }, 400)
-        }
-        const body = await c.req.json().catch(() => null)
-        const parsed = AttachedJobUpsertSchema.safeParse(body)
-        if (!parsed.success) {
-            return c.json({ error: 'Invalid body', issues: parsed.error.issues }, 400)
-        }
-        const result = engine.upsertSessionJob(sessionResult.sessionId, jobKey, parsed.data)
-        if (result.outcome === 'session-not-found') {
-            return c.json({ error: 'Session not found' }, 404)
-        }
-        return c.json({ job: result.job })
-    })
-
-    app.patch('/sessions/:id/jobs/:jobKey', async (c) => {
-        const engine = requireSyncEngine(c, getSyncEngine)
-        if (engine instanceof Response) {
-            return engine
-        }
-        const sessionResult = resolveJobOwnerSession(c, engine)
-        if (sessionResult instanceof Response) {
-            return sessionResult
-        }
-        const jobKey = c.req.param('jobKey')
-        if (!jobKey || !JOB_KEY_RE.test(jobKey)) {
-            return c.json({ error: 'Invalid jobKey (1-128 chars: alnum, . _ -)' }, 400)
-        }
-        const body = await c.req.json().catch(() => null)
-        const parsed = AttachedJobPatchSchema.safeParse(body)
-        if (!parsed.success) {
-            return c.json({ error: 'Invalid body', issues: parsed.error.issues }, 400)
-        }
-        const job = engine.patchSessionJob(sessionResult.sessionId, jobKey, parsed.data)
-        if (!job) {
-            return c.json({ error: 'Job not found' }, 404)
-        }
-        return c.json({ job })
-    })
-
-    app.delete('/sessions/:id/jobs/:jobKey', (c) => {
-        const engine = requireSyncEngine(c, getSyncEngine)
-        if (engine instanceof Response) {
-            return engine
-        }
-        const sessionResult = resolveJobOwnerSession(c, engine)
-        if (sessionResult instanceof Response) {
-            return sessionResult
-        }
-        const jobKey = c.req.param('jobKey')
-        if (!jobKey || !JOB_KEY_RE.test(jobKey)) {
-            return c.json({ error: 'Invalid jobKey (1-128 chars: alnum, . _ -)' }, 400)
-        }
-        const removed = engine.deleteSessionJob(sessionResult.sessionId, jobKey)
-        if (!removed) {
-            return c.json({ error: 'Job not found' }, 404)
         }
         return c.json({ ok: true })
     })

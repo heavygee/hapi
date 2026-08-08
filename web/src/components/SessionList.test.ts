@@ -18,13 +18,10 @@ import {
     isSidebarEmptySessionStub,
     normalizeSearch,
     prepareSidebarSessions,
-    sessionListItemButtonClassName,
-    sessionListItemWrapperClassName,
     sessionMatchesQuery,
     sessionMatchesTimeRange,
-    shouldShowSessionInSidebar,
-    partitionGlobalPinnedSessions,
-    sortGlobalPinnedSessions
+    shouldShowPinnedDivider,
+    shouldShowSessionInSidebar
 } from './SessionList'
 
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
@@ -44,7 +41,6 @@ function makeSession(overrides: Partial<SessionSummary> & { id: string }): Sessi
         backgroundTaskCount: 0,
         futureScheduledMessageCount: 0,
         nextScheduledAt: null,
-        attachedJob: null,
         model: null,
         effort: null,
         ...overrides
@@ -96,27 +92,24 @@ describe('getWorktreeSessionLabel', () => {
     })
 })
 
-describe('partitionGlobalPinnedSessions', () => {
-    it('lifts pinned sessions into a flat top band and omits them from the remainder', () => {
+describe('shouldShowPinnedDivider', () => {
+    it('shows one divider at the visible pinned-to-unpinned boundary', () => {
         const sessions = [
-            makeSession({ id: 'proj-a', metadata: { path: '/a' }, updatedAt: 50 }),
-            makeSession({ id: 'pinned-old', pinned: true, metadata: { path: '/b' }, updatedAt: 10 }),
-            makeSession({ id: 'pinned-new', pinned: true, active: true, metadata: { path: '/c' }, updatedAt: 20 }),
-            makeSession({ id: 'proj-b', metadata: { path: '/b' }, updatedAt: 40 })
+            makeSession({ id: 'pinned-a', pinned: true }),
+            makeSession({ id: 'pinned-b', pinned: true }),
+            makeSession({ id: 'regular-a' }),
+            makeSession({ id: 'regular-b' })
         ]
 
-        const { pinned, unpinned } = partitionGlobalPinnedSessions(sessions)
-        expect(pinned.map(session => session.id)).toEqual(['pinned-new', 'pinned-old'])
-        expect(unpinned.map(session => session.id)).toEqual(['proj-a', 'proj-b'])
+        expect(sessions.map((_, index) => shouldShowPinnedDivider(sessions, index)))
+            .toEqual([false, false, true, false])
     })
 
-    it('sorts pending pinned sessions ahead of quiet active pins', () => {
-        const sessions = [
-            makeSession({ id: 'quiet', pinned: true, active: true, pendingRequestsCount: 0, updatedAt: 100 }),
-            makeSession({ id: 'pending', pinned: true, active: true, pendingRequestsCount: 2, updatedAt: 50 })
-        ]
-        expect(sortGlobalPinnedSessions(sessions).map(session => session.id))
-            .toEqual(['pending', 'quiet'])
+    it('does not show a divider when all visible sessions have the same pin state', () => {
+        expect(shouldShowPinnedDivider([
+            makeSession({ id: 'a' }),
+            makeSession({ id: 'b' })
+        ], 1)).toBe(false)
     })
 })
 
@@ -603,22 +596,18 @@ describe('getPreviousSessionVisibleCount', () => {
 })
 
 describe('expandSelectedSessionCollapseOverrides', () => {
-    it('expands collapsed project and machine, but preserves session preview folding', () => {
+    it('expands the collapsed project group, but preserves session preview folding', () => {
         const overrides = new Map<string, boolean>([
             ['machine-1::/work/hapi', true],
-            ['sessions::machine-1::/work/hapi', true],
-            ['machine::machine-1', true]
+            ['sessions::machine-1::/work/hapi', true]
         ])
 
         const result = expandSelectedSessionCollapseOverrides(overrides, {
             key: 'machine-1::/work/hapi'
         })
 
-        // Only the selected project path is forced open; session-preview and
-        // machine collapses stay under operator control (unread/pin soup).
         expect(result.get('machine-1::/work/hapi')).toBe(false)
         expect(result.get('sessions::machine-1::/work/hapi')).toBe(true)
-        expect(result.get('machine::machine-1')).toBe(true)
     })
 
     it('leaves missing session preview override unset', () => {
@@ -645,14 +634,5 @@ describe('getPullRefreshIndicatorRotation', () => {
     it('turns the pull indicator upward once refresh is ready', () => {
         expect(getPullRefreshIndicatorRotation('pulling')).toBe(0)
         expect(getPullRefreshIndicatorRotation('ready')).toBe(180)
-    })
-})
-
-describe('session list row focus group classes', () => {
-    it('puts group/session-row on the focusable button, not the wrapper', () => {
-        expect(sessionListItemButtonClassName()).toContain('group/session-row')
-        expect(sessionListItemWrapperClassName(false)).not.toContain('group/session-row')
-        expect(sessionListItemWrapperClassName(true)).toContain('bg-[var(--app-secondary-bg)]')
-        expect(sessionListItemWrapperClassName(true)).not.toContain('group/session-row')
     })
 })

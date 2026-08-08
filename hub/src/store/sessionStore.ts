@@ -11,10 +11,11 @@ import {
     setSessionEffort,
     setSessionModel,
     setSessionModelReasoningEffort,
-    setImportedSessionActivity,
     setSessionServiceTier,
     setSessionActive,
     setSessionPinned,
+    setSessionPinMode,
+    type SessionPinMode,
     setSessionTeamState,
     setSessionTodos,
     replaceSessionTodos,
@@ -107,12 +108,12 @@ export class SessionStore {
         return setSessionPinned(this.db, id, pinned, namespace)
     }
 
-    touchSessionUpdatedAt(id: string, updatedAt: number, namespace: string): boolean {
-        return touchSessionUpdatedAt(this.db, id, updatedAt, namespace)
+    setSessionPinMode(id: string, mode: SessionPinMode, namespace: string): boolean {
+        return setSessionPinMode(this.db, id, mode, namespace)
     }
 
-    setImportedSessionActivity(id: string, updatedAt: number, namespace: string): boolean {
-        return setImportedSessionActivity(this.db, id, updatedAt, namespace)
+    touchSessionUpdatedAt(id: string, updatedAt: number, namespace: string): boolean {
+        return touchSessionUpdatedAt(this.db, id, updatedAt, namespace)
     }
 
     getSession(id: string): StoredSession | null {

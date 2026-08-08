@@ -41,12 +41,15 @@ beforeEach(() => {
 })
 
 describe('SessionActionMenu - Pin action', () => {
-    it('renders pin and unpin labels and invokes the action', () => {
-        const onTogglePin = vi.fn()
-        const { rerender } = renderMenu({ onTogglePin, sessionPinned: false })
+    it('renders project and global pin actions', () => {
+        const onSetPinMode = vi.fn()
+        const { rerender } = renderMenu({ onSetPinMode, sessionPinned: false, sessionGlobalPinned: false })
 
-        fireEvent.click(screen.getByRole('menuitem', { name: 'Pin session' }))
-        expect(onTogglePin).toHaveBeenCalledOnce()
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Pin in project' }))
+        expect(onSetPinMode).toHaveBeenCalledWith('project')
+
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Pin globally' }))
+        expect(onSetPinMode).toHaveBeenCalledWith('global')
 
         rerender(
             <I18nProvider>
@@ -57,7 +60,8 @@ describe('SessionActionMenu - Pin action', () => {
                     sessionTitle="Session 1"
                     sessionActive={false}
                     sessionPinned={true}
-                    onTogglePin={onTogglePin}
+                    sessionGlobalPinned={true}
+                    onSetPinMode={onSetPinMode}
                     onRename={vi.fn()}
                     onArchive={vi.fn()}
                     onDelete={vi.fn()}
@@ -65,7 +69,8 @@ describe('SessionActionMenu - Pin action', () => {
                 />
             </I18nProvider>
         )
-        expect(screen.getByRole('menuitem', { name: 'Unpin session' })).toBeInTheDocument()
+        expect(screen.getByRole('menuitem', { name: 'Unpin from project' })).toBeInTheDocument()
+        expect(screen.getByRole('menuitem', { name: 'Unpin globally' })).toBeInTheDocument()
     })
 })
 
@@ -105,22 +110,6 @@ describe('SessionActionMenu - Reopen action', () => {
 
         fireEvent.click(reopen)
         expect(onClose).not.toHaveBeenCalled()
-    })
-
-    it('keeps Reopen enabled with a soft-fail hint when probe is unverified', () => {
-        const onReopen = vi.fn()
-        renderMenu({
-            sessionActive: false,
-            onReopen,
-            reopenHint: 'Could not verify Cursor chat data (runner may be outdated).',
-        })
-
-        const reopen = screen.getByRole('menuitem', { name: /Reopen/ })
-        expect(reopen).not.toHaveAttribute('aria-disabled', 'true')
-        expect(screen.getByRole('tooltip')).toHaveTextContent('Could not verify Cursor chat data')
-
-        fireEvent.click(reopen)
-        expect(onReopen).toHaveBeenCalledTimes(1)
     })
 
     it('fires onReopen and closes the menu when the Reopen item is clicked', () => {
@@ -231,31 +220,5 @@ describe('SessionActionMenu - Copy reference action', () => {
                 `See session "upstream issue/pr discovery" (/sessions/abc-def) for context.${SESSION_REFERENCE_STEER_SUFFIX}`
             )
         })
-    })
-})
-
-describe('SessionActionMenu - Linked PR header', () => {
-    it('shows linked PR detail above More actions when linkedPr is set', () => {
-        renderMenu({
-            linkedPr: {
-                glyph: '⚠️',
-                detail: 'tiann/hapi#1163 · clean',
-                href: 'https://github.com/tiann/hapi/pull/1163',
-            },
-        })
-
-        const block = screen.getByTestId('session-action-menu-linked-pr')
-        expect(block).toHaveTextContent('Linked pull request')
-        expect(block).toHaveTextContent('⚠️')
-        expect(block).toHaveTextContent('tiann/hapi#1163 · clean')
-        expect(screen.getByRole('link', { name: /tiann\/hapi#1163/ })).toHaveAttribute(
-            'href',
-            'https://github.com/tiann/hapi/pull/1163'
-        )
-    })
-
-    it('omits the linked PR block when linkedPr is absent', () => {
-        renderMenu()
-        expect(screen.queryByTestId('session-action-menu-linked-pr')).not.toBeInTheDocument()
     })
 })

@@ -30,7 +30,6 @@ function makeSession(overrides: Partial<SessionSummary> & { id: string }): Sessi
         backgroundTaskCount: 0,
         futureScheduledMessageCount: 0,
         nextScheduledAt: null,
-        attachedJob: null,
         model: null,
         effort: null,
         ...overrides
@@ -119,8 +118,8 @@ describe('SessionList directory action', () => {
 
         const projectHeader = screen.getByTitle('/home/ubuntu')
         expect(projectHeader).toHaveClass('bg-[var(--app-bg)]')
-        expect(projectHeader).toHaveClass('hover:bg-[var(--app-subtle-bg)]')
-        expect(projectHeader).not.toHaveClass('hover:bg-[var(--app-secondary-bg)]')
+        expect(projectHeader).toHaveClass('hover:bg-[var(--app-secondary-bg)]')
+        expect(projectHeader).not.toHaveClass('hover:bg-[var(--app-subtle-bg)]')
 
         const listContent = projectHeader.parentElement?.parentElement
         expect(listContent).not.toHaveClass('pt-1')
@@ -473,13 +472,16 @@ describe('SessionList collapse behavior', () => {
         expect(getProjectPanel().getAttribute('data-open')).toBeNull()
     })
 
-    it('lifts durable pins into a top Pinned section above project groups', () => {
+    it('keeps project-pinned active sessions in their project group when the preference is on', () => {
+        localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
         const sessions = [
             makeSession({
-                id: 'session-pinned',
+                id: 'session-pinned-running',
+                active: true,
+                thinking: true,
                 pinned: true,
                 updatedAt: 100,
-                metadata: { path: '/work/other', name: 'Pinned task', flavor: 'codex' },
+                metadata: { path: '/work/hapi', name: 'Pinned running task', flavor: 'codex' },
             }),
             makeSession({
                 id: 'session-idle',
@@ -489,42 +491,9 @@ describe('SessionList collapse behavior', () => {
         ]
         render(renderSessionList(sessions, null))
 
-        expect(screen.getByTitle('Pinned')).toBeInTheDocument()
-        expect(screen.getByRole('button', { name: /Pinned task/ })).toBeInTheDocument()
-        expect(screen.getByTitle('/work/hapi')).toBeInTheDocument()
-        expect(screen.queryByTitle('/work/other')).toBeNull()
-        const pinnedHeader = screen.getByTitle('Pinned')
-        const idleHeader = screen.getByTitle('/work/hapi')
-        expect(
-            pinnedHeader.compareDocumentPosition(idleHeader) & Node.DOCUMENT_POSITION_FOLLOWING
-        ).toBeTruthy()
-    })
-
-    it('keeps durable pins above In progress when both are present', () => {
-        localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
-        const sessions = [
-            makeSession({
-                id: 'session-pinned',
-                pinned: true,
-                updatedAt: 100,
-                metadata: { path: '/work/other', name: 'Pinned task', flavor: 'codex' },
-            }),
-            makeSession({
-                id: 'session-running',
-                active: true,
-                thinking: true,
-                updatedAt: 90,
-                metadata: { path: '/work/hapi', name: 'Running task', flavor: 'codex' },
-            }),
-        ]
-        render(renderSessionList(sessions, null))
-
-        const pinnedHeader = screen.getByTitle('Pinned')
-        const runningHeader = screen.getByTitle('In progress')
-        expect(
-            pinnedHeader.compareDocumentPosition(runningHeader) & Node.DOCUMENT_POSITION_FOLLOWING
-        ).toBeTruthy()
-        expect(screen.queryByTitle('/work/other')).toBeNull()
+        expect(screen.queryByTitle('In progress')).toBeNull()
+        expect(getProjectPanel().getAttribute('data-open')).toBe('true')
+        expect(screen.getByRole('button', { name: /Pinned running task/ })).toBeInTheDocument()
     })
 
     it('does not label quiet active sessions as Idle', () => {
@@ -612,6 +581,27 @@ describe('SessionList collapse behavior', () => {
         await waitFor(() => {
             expect(getProjectPanel().getAttribute('data-open')).toBe('true')
         })
+    })
+
+    it('keeps an inactive project-pinned group expanded with no selection', () => {
+        const sessions = [
+            makeSession({
+                id: 'session-pinned',
+                pinned: true,
+                updatedAt: 100,
+                metadata: { path: '/work/hapi', name: 'Pinned task', flavor: 'codex' },
+            }),
+            makeSession({
+                id: 'session-idle',
+                updatedAt: 50,
+                metadata: { path: '/work/hapi', name: 'Idle task', flavor: 'codex' },
+            }),
+        ]
+        render(renderSessionList(sessions, null))
+
+        expect(getProjectPanel().getAttribute('data-open')).toBe('true')
+        expect(screen.getByRole('button', { name: /Pinned task/ })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /Idle task/ })).toBeInTheDocument()
     })
 
     it('keeps the running section open while searching even when collapsed', () => {

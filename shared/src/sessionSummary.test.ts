@@ -71,7 +71,9 @@ describe('getPendingRequestKinds', () => {
 describe('toSessionSummary', () => {
     it('includes the pinned state', () => {
         expect(toSessionSummary(makeSession({ pinned: true })).pinned).toBe(true)
+        expect(toSessionSummary(makeSession({ globalPinned: true })).globalPinned).toBe(true)
         expect(toSessionSummary(makeSession()).pinned).toBe(false)
+        expect(toSessionSummary(makeSession()).globalPinned).toBe(false)
     })
 
     it('uses grokSessionId as the native resume token', () => {
@@ -181,25 +183,6 @@ describe('toSessionSummary', () => {
         }))
 
         expect(summary.metadata?.hapiMcpUrl).toBe('http://127.0.0.1:42133/')
-    })
-
-    it('includes externalRefs in summary metadata', () => {
-        const externalRefs = [{
-            kind: 'github_pr' as const,
-            repo: 'tiann/hapi',
-            number: 1160,
-            url: 'https://github.com/tiann/hapi/pull/1160',
-            role: 'primary' as const
-        }]
-        const summary = toSessionSummary(makeSession({
-            metadata: {
-                path: '/proj',
-                host: 'local',
-                externalRefs
-            }
-        }))
-
-        expect(summary.metadata?.externalRefs).toEqual(externalRefs)
     })
 
     it('includes structured pendingRequests for hover-tooltip copy', () => {
@@ -332,25 +315,6 @@ describe('summary derivation helpers', () => {
     it('computePendingRequestsCount handles null agentState', () => {
         expect(computePendingRequestsCount(null)).toBe(0)
         expect(computePendingRequestsCount(undefined)).toBe(0)
-    })
-
-    it('includes attachedJob when provided via extras', () => {
-        const job = {
-            key: 'beets',
-            label: 'beets import',
-            status: 'running' as const,
-            remaining: 120,
-            unit: 'tracks',
-            heartbeatAt: 9_000,
-            startedAt: 1_000,
-            updatedAt: 9_000
-        }
-        const summary = toSessionSummary(makeSession(), { attachedJob: job })
-        expect(summary.attachedJob).toEqual(job)
-    })
-
-    it('defaults attachedJob to null', () => {
-        expect(toSessionSummary(makeSession()).attachedJob).toBeNull()
     })
 
     it('toSessionSummaryMetadata returns null for null metadata', () => {

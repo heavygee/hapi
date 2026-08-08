@@ -317,9 +317,7 @@ export class Store {
             18: () => this.migrateFromV18ToV19(),
             19: () => this.migrateFromV19ToV20(),
             20: () => this.migrateFromV20ToV21(),
-            // Soup remap: upstream #1115 pin was v19→v20; soup v20=usage reindex
-            // (#1359), upstream #1390 took v20→v21 for cache semantics — pin is v22.
-            // session-attached-jobs (#1404) creates session_jobs at v22→v23.
+            // Upstream #1115: pin dual-columns at v21→v22. Soup #1404 jobs at v22→v23.
             21: () => this.migrateFromV21ToV22(),
             22: () => this.migrateFromV22ToV23(),
         })
@@ -382,11 +380,25 @@ export class Store {
 
     /** Idempotent Overseer self-heal + loud missing-table check on every boot path. */
     private finishSchemaInit(): void {
+        // Soup DBs that already passed v22 with single-column pin (pre-#1115 merge)
+        // still need global_pinned even when user_version is already at tip.
+        this.ensureSessionPinColumns()
         ensureOverseerEventsSchema(this.db)
         ensureDeletedSessionsSchema(this.db)
         ensureOverseerInboxSchema(this.db)
         ensureOverseerSettingsSchema(this.db)
         this.assertRequiredTablesPresent()
+    }
+
+    private ensureSessionPinColumns(): void {
+        const columns = this.getSessionColumnNames()
+        if (columns.size === 0) return
+        if (!columns.has('pinned')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0')
+        }
+        if (!columns.has('global_pinned')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN global_pinned INTEGER NOT NULL DEFAULT 0')
+        }
     }
 
     private createSchema(): void {
@@ -411,6 +423,7 @@ export class Store {
                 team_state TEXT,
                 team_state_updated_at INTEGER,
                 pinned INTEGER NOT NULL DEFAULT 0,
+                global_pinned INTEGER NOT NULL DEFAULT 0,
                 active INTEGER DEFAULT 0,
                 active_at INTEGER,
                 seq INTEGER DEFAULT 0
@@ -915,11 +928,14 @@ export class Store {
     }
 
     private migrateFromV21ToV22(): void {
-        // Soup-only renumber of upstream #1115 pin migration (their v19→v20).
+        // Upstream #1115 — project + global pin columns (v21→v22 on main).
         const columns = this.getSessionColumnNames()
         if (columns.size === 0) return
         if (!columns.has('pinned')) {
             this.db.exec('ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0')
+        }
+        if (!columns.has('global_pinned')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN global_pinned INTEGER NOT NULL DEFAULT 0')
         }
     }
 

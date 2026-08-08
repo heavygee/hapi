@@ -1,4 +1,4 @@
-import { useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useIsMutating, useQueryClient } from '@tanstack/react-query'
 import type { Session } from '@/types/api'
 import type { ApiClient } from '@/api/client'
@@ -7,17 +7,10 @@ import { sessionModelMutationKey, useSessionActions } from '@/hooks/mutations/us
 import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { SessionExportDialog } from '@/components/SessionExportDialog'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
-import { LinkPrDialog } from '@/components/LinkPrDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useScratchlistCount } from '@/lib/use-scratchlist-count'
 import { formatReopenError } from '@/lib/reopenError'
-import {
-    formatCodexReasoningLabel,
-    formatReasoningLabel,
-    getReasoningEffortForFlavor,
-    shouldShowCodexReasoningLabel,
-} from '@/lib/codexStatusLabels'
-import { retargetSharePendingTransfer } from '@/lib/sharePendingState'
+import { formatReasoningLabel, getReasoningEffortForFlavor } from '@/lib/codexStatusLabels'
 import { getSessionModelLabel } from '@/lib/sessionModelLabel'
 import { useTranslation } from '@/lib/use-translation'
 import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
@@ -32,10 +25,7 @@ import { formatAbsoluteDateTime, formatRelativeTime } from '@/lib/relativeTime'
 import { useSessionHeaderMetadata } from '@/hooks/useSessionHeaderMetadata'
 import { formatSessionHeaderTimestamp } from '@/lib/sessionHeaderTimestamp'
 import { selectMobileSessionHeaderSecondary } from '@/lib/sessionHeaderMobileMetadata'
-import { resolveSessionProjectLabel } from '@/lib/sessionProjectLabel'
 import { useMinuteTick } from '@/hooks/useMinuteTick'
-import { disableAllFue, useFue } from '@/lib/use-fue'
-import { FueCallout, FueDot } from '@/components/Fue'
 
 /** Same preference order as session-list chips: display label → host → short id. */
 export function resolveSessionHeaderMachineLabel(
@@ -55,9 +45,6 @@ export function resolveSessionHeaderMachineLabel(
     }
     return null
 }
-import { useFeatures } from '@/hooks/queries/useFeatures'
-import { getPrimaryGithubPrRef } from '@hapi/protocol'
-import { formatGithubPrChipDetailParts, resolveGithubPrChipDisplay } from '@/components/SessionPrChip'
 
 function FilesIcon(props: { className?: string }) {
     return (
@@ -103,8 +90,14 @@ function OutlineIcon(props: { className?: string }) {
     )
 }
 
+function headerToggleClass(active: boolean): string {
+    return `flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
+        active
+            ? 'bg-[var(--app-button)] text-[var(--app-button-text)] hover:opacity-90'
+            : 'text-[var(--app-hint)] hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]'
+    }`
+}
 
-/** Scroll/log glyph — distinct from Outline's TOC list. */
 function TerminalIcon(props: { className?: string }) {
     return (
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={props.className}>
@@ -112,59 +105,6 @@ function TerminalIcon(props: { className?: string }) {
             <line x1="12" y1="19" x2="20" y2="19" />
         </svg>
     )
-}
-
-function SessionLogIcon(props: { className?: string }) {
-    return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={props.className}
-        >
-            <path d="M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z" />
-            <path d="M10 7h4" />
-            <path d="M10 11h4" />
-            <path d="M10 15h2" />
-        </svg>
-    )
-}
-
-function FlowIcon(props: { className?: string }) {
-    return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={props.className}
-        >
-            <circle cx="18" cy="5" r="3" />
-            <circle cx="6" cy="12" r="3" />
-            <circle cx="18" cy="19" r="3" />
-            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
-            <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
-        </svg>
-    )
-}
-
-function headerToggleClass(active: boolean): string {
-    return `flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
-        active
-            ? 'bg-[var(--app-button)] text-[var(--app-button-text)] hover:opacity-90'
-            : 'text-[var(--app-hint)] hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]'
-    }`
 }
 
 function MoreVerticalIcon(props: { className?: string }) {
@@ -183,7 +123,6 @@ function MoreVerticalIcon(props: { className?: string }) {
         </svg>
     )
 }
-
 
 function ModelChangingStatus() {
     const { t } = useTranslation()
@@ -205,14 +144,9 @@ export function SessionHeader(props: {
     outlineActive?: boolean
     onToggleTerminal?: () => void
     terminalActive?: boolean
-    onToggleSessionLog?: () => void
-    sessionLogActive?: boolean
-    onToggleFlow?: () => void
-    flowActive?: boolean
     api: ApiClient | null
     canReopen?: boolean
     reopenDisabledReason?: string
-    reopenHint?: string
     onSessionDeleted?: () => void
     onSessionReopened?: (newSessionId: string) => void | Promise<void>
 }) {
@@ -220,19 +154,8 @@ export function SessionHeader(props: {
     const queryClient = useQueryClient()
     const { addToast } = useToast()
     const { session, api, onSessionDeleted, onSessionReopened } = props
-    // Just-in-time FUE: the outline icon has no text label until hover, and
-    // "jump to a message" isn't guessable from a table-of-contents glyph
-    // alone. Same useFue + FueDot + FueCallout wiring as the composer FUEs
-    // (see use-fue.ts) — toggling outline is a local boolean flip, so
-    // there's no unmount-on-click risk to guard against here.
-    const outlineFue = useFue('session-outline-toggle')
-    const outlineButtonRef = useRef<HTMLButtonElement>(null)
     const title = useMemo(() => getSessionTitle(session), [session])
     const worktreeBranch = session.metadata?.worktree?.branch?.trim() || null
-    const projectLabel = useMemo(
-        () => resolveSessionProjectLabel(session.metadata ?? {}),
-        [session.metadata]
-    )
     const { preferences: headerMetadata } = useSessionHeaderMetadata()
     const modelLabel = getSessionModelLabel(session)
     const isModelChanging = useIsMutating({
@@ -278,7 +201,6 @@ export function SessionHeader(props: {
         model: headerMetadata.model && modelLabel !== null,
         reasoning: headerMetadata.reasoning && reasoningLabel !== null,
         machine: headerMetadata.machine && machineLabel !== null,
-        project: headerMetadata.project && projectLabel !== null,
         lastActive: ageLabel !== null,
         updatedAt: updatedAtLabel !== null,
         createdAt: createdAtLabel !== null,
@@ -292,37 +214,22 @@ export function SessionHeader(props: {
     const menuId = useId()
     const menuAnchorRef = useRef<HTMLButtonElement | null>(null)
     const [renameOpen, setRenameOpen] = useState(false)
-    const [linkPrOpen, setLinkPrOpen] = useState(false)
     const [exportOpen, setExportOpen] = useState(false)
     const [archiveOpen, setArchiveOpen] = useState(false)
     const [deleteOpen, setDeleteOpen] = useState(false)
     const [isSyncingCodex, setIsSyncingCodex] = useState(false)
     const [isSyncingPi, setIsSyncingPi] = useState(false)
-    const { features } = useFeatures(api)
-    const githubPrAwarenessEnabled = Boolean(features?.githubPrAwareness.enabled)
-    const primaryPrRef = getPrimaryGithubPrRef(session.metadata?.externalRefs)
-    const linkedPr = useMemo(() => {
-        if (!githubPrAwarenessEnabled || !primaryPrRef) return null
-        const nowMs = Date.now()
-        const display = resolveGithubPrChipDisplay(primaryPrRef, nowMs)
-        const parts = formatGithubPrChipDetailParts(primaryPrRef, display, t, nowMs)
-        return {
-            glyph: parts.glyph,
-            detail: parts.detail,
-            href: primaryPrRef.url
-        }
-    }, [githubPrAwarenessEnabled, primaryPrRef, t])
 
-    const { archiveSession, reopenSession, renameSession, setExternalRefs, setPinned, deleteSession, isPending } = useSessionActions(
+    const { archiveSession, reopenSession, renameSession, setPinMode, deleteSession, isPending } = useSessionActions(
         api,
         session.id,
         session.metadata?.flavor ?? null
     )
     const [reopenError, setReopenError] = useState<string | null>(null)
 
-    const handleTogglePin = async () => {
+    const handleSetPinMode = async (mode: 'none' | 'project' | 'global') => {
         try {
-            await setPinned(!session.pinned)
+            await setPinMode(mode)
         } catch (error) {
             addToast({
                 title: t('session.action.pinFailed'),
@@ -348,7 +255,6 @@ export function SessionHeader(props: {
         try {
             const result = await reopenSession()
             if (result.sessionId && result.sessionId !== session.id) {
-                retargetSharePendingTransfer(session.id, result.sessionId)
                 await onSessionReopened?.(result.sessionId)
             }
         } catch (error) {
@@ -396,7 +302,6 @@ export function SessionHeader(props: {
             setIsSyncingCodex(false)
         }
     }
-
 
     const handleSyncPi = async () => {
         if (!api || !piSessionId || session.active || isSyncingPi) return
@@ -498,7 +403,6 @@ export function SessionHeader(props: {
                                 {mobileSecondary === 'model' && modelLabel ? <span className="inline-flex truncate items-center gap-1.5">{headerMetadata.showLabels ? `${t(modelLabel.key)}: ` : ''}{modelLabel.value}{isModelChanging ? <ModelChangingStatus /> : null}</span> : null}
                                 {mobileSecondary === 'reasoning' && reasoningLabel ? <span className="truncate">{reasoningLabel}</span> : null}
                                 {mobileSecondary === 'machine' && machineLabel ? <span className="truncate">{headerMetadata.showLabels ? `${t('session.item.machine')}: ` : ''}{machineLabel}</span> : null}
-                                {mobileSecondary === 'project' && projectLabel ? <span className="truncate">{headerMetadata.showLabels ? `${t('session.item.path')}: ` : ''}{projectLabel}</span> : null}
                                 {mobileSecondary === 'lastActive' && ageLabel ? <span className="truncate" title={ageAbsolute ?? undefined}>{ageLabel}</span> : null}
                                 {mobileSecondary === 'updatedAt' && updatedAtLabel ? <span className="truncate">{headerMetadata.showLabels ? `${t('session.header.updatedAt')}: ` : ''}{updatedAtLabel}</span> : null}
                                 {mobileSecondary === 'createdAt' && createdAtLabel ? <span className="truncate">{headerMetadata.showLabels ? `${t('session.header.createdAt')}: ` : ''}{createdAtLabel}</span> : null}
@@ -516,11 +420,6 @@ export function SessionHeader(props: {
                             {headerMetadata.machine && machineLabel ? (
                                 <span data-testid="session-header-machine" className="max-w-[12rem] truncate" title={machineLabel}>
                                     {headerMetadata.showLabels ? `${t('session.item.machine')}: ` : ''}{machineLabel}
-                                </span>
-                            ) : null}
-                            {headerMetadata.project && projectLabel ? (
-                                <span data-testid="session-header-project" className="max-w-[14rem] truncate" title={projectLabel}>
-                                    {headerMetadata.showLabels ? `${t('session.item.path')}: ` : ''}{projectLabel}
                                 </span>
                             ) : null}
                             {ageLabel ? (
@@ -547,7 +446,7 @@ export function SessionHeader(props: {
                             {createdAtLabel ? <span>{headerMetadata.showLabels ? `${t('session.header.createdAt')}: ` : ''}{createdAtLabel}</span> : null}
                             {updatedAtLabel ? <span>{headerMetadata.showLabels ? `${t('session.header.updatedAt')}: ` : ''}{updatedAtLabel}</span> : null}
                             {headerMetadata.worktree && worktreeBranch ? (
-                                <span data-testid="session-header-worktree">{headerMetadata.showLabels ? `${t('session.item.worktree')}: ` : ''}{worktreeBranch}</span>
+                                <span>{headerMetadata.showLabels ? `${t('session.item.worktree')}: ` : ''}{worktreeBranch}</span>
                             ) : null}
                         </div>
                     </div>
@@ -567,37 +466,15 @@ export function SessionHeader(props: {
 
                     {props.onToggleOutline ? (
                         <button
-                            ref={outlineButtonRef}
                             type="button"
-                            onClick={() => {
-                                outlineFue.engage()
-                                props.onToggleOutline?.()
-                            }}
-                            className={`relative ${headerToggleClass(props.outlineActive ?? false)}`}
+                            onClick={props.onToggleOutline}
+                            className={headerToggleClass(props.outlineActive ?? false)}
                             title={props.outlineActive ? t('session.outline.close') : t('session.outline.open')}
                             aria-label={props.outlineActive ? t('session.outline.close') : t('session.outline.open')}
                             aria-pressed={props.outlineActive ?? false}
                         >
                             <OutlineIcon />
-                            {outlineFue.status !== 'acknowledged' ? (
-                                <FueDot
-                                    pulsing={outlineFue.status === 'unseen'}
-                                    ariaLabel={t('fue.newFeatureDot')}
-                                />
-                            ) : null}
                         </button>
-                    ) : null}
-                    {outlineFue.status === 'engaging' ? (
-                        <FueCallout
-                            title={t('sessionOutline.fueTitle')}
-                            body={t('sessionOutline.fueBody')}
-                            onDismiss={outlineFue.dismiss}
-                            dismissLabel={t('fue.gotIt')}
-                            closeAriaLabel={t('fue.closeAriaLabel')}
-                            anchorRef={outlineButtonRef}
-                            onSecondaryAction={disableAllFue}
-                            secondaryActionLabel={t('fue.dontShowAgain')}
-                        />
                     ) : null}
 
                     {props.onToggleTerminal ? (
@@ -610,32 +487,6 @@ export function SessionHeader(props: {
                             aria-pressed={props.terminalActive ?? false}
                         >
                             <TerminalIcon />
-                        </button>
-                    ) : null}
-
-                    {props.onToggleSessionLog ? (
-                        <button
-                            type="button"
-                            onClick={props.onToggleSessionLog}
-                            className={headerToggleClass(props.sessionLogActive ?? false)}
-                            title={props.sessionLogActive ? t('session.log.close') : t('session.log.open')}
-                            aria-label={props.sessionLogActive ? t('session.log.close') : t('session.log.open')}
-                            aria-pressed={props.sessionLogActive ?? false}
-                        >
-                            <SessionLogIcon />
-                        </button>
-                    ) : null}
-
-                    {props.onToggleFlow ? (
-                        <button
-                            type="button"
-                            onClick={props.onToggleFlow}
-                            className={headerToggleClass(props.flowActive ?? false)}
-                            title={props.flowActive ? t('session.flow.close') : t('session.flow.open')}
-                            aria-label={props.flowActive ? t('session.flow.close') : t('session.flow.open')}
-                            aria-pressed={props.flowActive ?? false}
-                        >
-                            <FlowIcon />
                         </button>
                     ) : null}
 
@@ -661,18 +512,16 @@ export function SessionHeader(props: {
                 sessionId={session.id}
                 sessionTitle={title}
                 sessionActive={session.active}
-                sessionPinned={session.pinned}
+                sessionPinned={Boolean(session.pinned)}
+                sessionGlobalPinned={Boolean(session.globalPinned)}
                 onRename={() => setRenameOpen(true)}
-                onLinkPr={githubPrAwarenessEnabled ? () => setLinkPrOpen(true) : undefined}
-                linkedPr={linkedPr}
-                onTogglePin={api ? () => void handleTogglePin() : undefined}
+                onSetPinMode={api ? (mode) => void handleSetPinMode(mode) : undefined}
                 onExport={() => setExportOpen(true)}
                 onSyncCodex={api && codexSessionId ? handleSyncCodex : undefined}
                 onSyncPi={api && piSessionId && !session.active ? handleSyncPi : undefined}
                 onArchive={() => setArchiveOpen(true)}
                 onReopen={props.canReopen === false ? undefined : handleReopen}
                 reopenDisabledReason={props.reopenDisabledReason}
-                reopenHint={props.reopenHint}
                 onDelete={() => setDeleteOpen(true)}
                 anchorPoint={menuAnchorPoint}
                 menuId={menuId}
@@ -697,15 +546,6 @@ export function SessionHeader(props: {
                 onClose={() => setRenameOpen(false)}
                 currentName={title}
                 onRename={renameSession}
-                isPending={isPending}
-            />
-
-            <LinkPrDialog
-                isOpen={linkPrOpen}
-                onClose={() => setLinkPrOpen(false)}
-                currentPrimaryLabel={primaryPrRef ? `${primaryPrRef.repo}#${primaryPrRef.number}` : null}
-                onLink={setExternalRefs}
-                onUnlink={primaryPrRef ? () => setExternalRefs([]) : undefined}
                 isPending={isPending}
             />
 

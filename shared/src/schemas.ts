@@ -50,49 +50,6 @@ export const WorktreeMetadataSchema = z.object({
 
 export type WorktreeMetadata = z.infer<typeof WorktreeMetadataSchema>
 
-
-export const GithubRepoSlugSchema = z.string().regex(
-    /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/,
-    'expected owner/name'
-)
-
-export const GithubPrStatusSchema = z.enum([
-    'clean',
-    'pending',
-    'needs_work',
-    'pre_pr',
-    'merged',
-    'complete',
-    'unknown'
-])
-export type GithubPrStatus = z.infer<typeof GithubPrStatusSchema>
-
-export const GithubPrExternalRefSchema = z.object({
-    kind: z.literal('github_pr'),
-    repo: GithubRepoSlugSchema,
-    number: z.number().int().positive(),
-    url: z.string().url(),
-    role: z.enum(['primary', 'secondary']),
-    source: z.enum(['agent', 'user', 'inferred']).optional(),
-    linkedAt: z.number().int().positive().optional(),
-    status: GithubPrStatusSchema.optional(),
-    statusCheckedAt: z.number().int().positive().optional(),
-    statusAction: z.string().max(400).optional()
-}).superRefine((ref, ctx) => {
-    const expectedUrl = `https://github.com/${ref.repo}/pull/${ref.number}`
-    if (ref.url !== expectedUrl) {
-        ctx.addIssue({
-            code: 'custom',
-            path: ['url'],
-            message: 'expected GitHub PR URL matching repo and number'
-        })
-    }
-})
-
-export type GithubPrExternalRef = z.infer<typeof GithubPrExternalRefSchema>
-export const ExternalRefSchema = GithubPrExternalRefSchema
-export type ExternalRef = z.infer<typeof ExternalRefSchema>
-
 export const MetadataSchema = z.object({
     path: z.string(),
     host: z.string(),
@@ -201,19 +158,7 @@ export const MetadataSchema = z.object({
     // field stores only modelId (shared across all flavors); this preserves
     // the provider so web can resolve the exact model when two providers
     // share a modelId.
-    piSelectedModel: z.object({ provider: z.string(), modelId: z.string() }).nullable().optional(),
-    lastModelError: z.object({
-        kind: z.string(),
-        transient: z.boolean(),
-        rawSnippet: z.string(),
-        atTs: z.number(),
-        priorAssistantClaimsDone: z.boolean(),
-        lastUserMessage: z.string().optional(),
-        bridgedForAtTs: z.number().optional(),
-        retriedAndFailed: z.boolean().optional(),
-        acknowledgedAt: z.number().optional()
-    }).optional(),
-    externalRefs: z.array(ExternalRefSchema).optional()
+    piSelectedModel: z.object({ provider: z.string(), modelId: z.string() }).nullable().optional()
 })
 
 export type Metadata = z.infer<typeof MetadataSchema>
@@ -355,6 +300,7 @@ export const SessionSchema = z.object({
     createdAt: z.number(),
     updatedAt: z.number(),
     pinned: z.boolean().optional(),
+    globalPinned: z.boolean().optional(),
     active: z.boolean(),
     // Hub may still emit null for legacy SQLite rows; keep output type number.
     activeAt: z.number().nullish().transform((value) => value ?? 0),
@@ -367,12 +313,12 @@ export const SessionSchema = z.object({
     activeTurnStartedAt: z.number().nullable().optional(),
     backgroundTaskCount: z.number().optional(),
     todos: TodosSchema.optional(),
-    todosUpdatedAt: z.number().optional(),
     teamState: TeamStateSchema.optional(),
     // Watermarks for structured SSE patches (PR #897). Dual EventSource
     // connections can deliver todos/teamState out of order; caches reject
     // stale patches with version <= these fields. Optional so older
     // full-session payloads and hand-built Session literals stay valid.
+    todosUpdatedAt: z.number().optional(),
     teamStateUpdatedAt: z.number().optional(),
     model: z.string().nullable().optional().default(null),
     modelReasoningEffort: z.string().nullable().optional().default(null),
@@ -414,53 +360,6 @@ const VersionedTeamStatePatchSchema = z.object({
     value: TeamStateSchema.nullable()
 })
 
-/** Opt-in long-running work owned by a session (tiann/hapi#1404). */
-export const AttachedJobStatusSchema = z.enum(['running', 'completed', 'failed'])
-
-export const AttachedJobSchema = z.object({
-    key: z.string().min(1).max(128),
-    label: z.string().min(1).max(200),
-    status: AttachedJobStatusSchema,
-    done: z.number().nonnegative().optional(),
-    total: z.number().positive().optional(),
-    remaining: z.number().nonnegative().optional(),
-    unit: z.string().min(1).max(64).optional(),
-    detail: z.string().max(500).optional(),
-    heartbeatAt: z.number(),
-    startedAt: z.number(),
-    updatedAt: z.number()
-}).strict()
-
-export type AttachedJob = z.infer<typeof AttachedJobSchema>
-export type AttachedJobStatus = z.infer<typeof AttachedJobStatusSchema>
-
-export const AttachedJobUpsertSchema = z.object({
-    label: z.string().min(1).max(200),
-    status: AttachedJobStatusSchema.optional().default('running'),
-    done: z.number().nonnegative().optional(),
-    total: z.number().positive().optional(),
-    remaining: z.number().nonnegative().optional(),
-    unit: z.string().min(1).max(64).optional(),
-    detail: z.string().max(500).optional(),
-    heartbeatAt: z.number().optional(),
-    startedAt: z.number().optional()
-}).strict()
-
-export type AttachedJobUpsert = z.infer<typeof AttachedJobUpsertSchema>
-
-export const AttachedJobPatchSchema = z.object({
-    label: z.string().min(1).max(200).optional(),
-    status: AttachedJobStatusSchema.optional(),
-    done: z.number().nonnegative().nullable().optional(),
-    total: z.number().positive().nullable().optional(),
-    remaining: z.number().nonnegative().nullable().optional(),
-    unit: z.string().min(1).max(64).nullable().optional(),
-    detail: z.string().max(500).nullable().optional(),
-    heartbeatAt: z.number().optional()
-}).strict()
-
-export type AttachedJobPatch = z.infer<typeof AttachedJobPatchSchema>
-
 export const SessionPatchSchema = z.object({
     active: z.boolean().optional(),
     thinking: z.boolean().optional(),
@@ -493,12 +392,7 @@ export const SessionPatchSchema = z.object({
     // signal, not the payload. Keep this minimal: per the operator's 80/20
     // ruling, scratchlist mutations are rare relative to keep-alive
     // patches, so a fresh event type would be overkill.
-    scratchlistUpdatedAt: z.number().optional(),
-    // tiann/hapi#1404 — session-attached long-running jobs. Unlike
-    // scratchlist (watermark → refetch), the list row needs the progress
-    // payload inline, so patches carry the primary running job (or null
-    // when cleared / none remain).
-    attachedJob: AttachedJobSchema.nullable().optional()
+    scratchlistUpdatedAt: z.number().optional()
 }).strict()
 
 export type SessionPatch = z.infer<typeof SessionPatchSchema>
@@ -535,25 +429,10 @@ export const MachineMetadataSchema = z.object({
     platform: z.string(),
     happyCliVersion: z.string(),
     displayName: z.string().optional(),
-    /** process.arch when the runner last registered (x64, arm64, …). */
-    arch: z.string().optional(),
     homeDir: z.string().optional(),
     happyHomeDir: z.string().optional(),
     happyLibDir: z.string().optional(),
-    workspaceRoots: z.array(z.string()).optional(),
-    /** Machine-scoped RPC capability ids this runner registers (see runnerCapabilities). */
-    capabilities: z.array(z.string()).optional(),
-    /** True when this runner process started with HAPI_DISABLE_VERSION_HANDOFF=1. */
-    versionHandoffDisabled: z.boolean().optional(),
-    /** CLI binary/package mtime when this runner process started. */
-    startedCliMtimeMs: z.number().optional(),
-    /** Current on-disk CLI binary/package mtime (may differ after upgrade). */
-    installedCliMtimeMs: z.number().optional(),
-    /**
-     * Hub-artifact build generation this runner last applied (source fingerprint).
-     * Used to detect same-semver soup rebuilds that still need fleet upgrade.
-     */
-    cliArtifactGeneration: z.string().optional(),
+    workspaceRoots: z.array(z.string()).optional()
 })
 
 export type MachineMetadata = z.infer<typeof MachineMetadataSchema>

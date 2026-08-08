@@ -249,47 +249,6 @@ describe('SessionHeader', () => {
         expect(screen.getByTestId('session-header-age')).toHaveTextContent(/5m ago|5分钟前/)
     })
 
-    it('shows sidebar-style project label from path by default', () => {
-        renderHeader(baseSession({
-            metadata: {
-                flavor: 'cursor',
-                path: '/home/heavygee/coding/hapi',
-                host: 'homelab',
-            }
-        }))
-
-        expect(screen.getByTestId('session-header-project')).toHaveTextContent(/coding\/hapi/)
-    })
-
-    it('uses worktree basePath for project and still shows the branch', () => {
-        renderHeader(baseSession({
-            metadata: {
-                flavor: 'cursor',
-                path: '/tmp/hapi-worktrees/feat-header',
-                host: 'homelab',
-                worktree: {
-                    basePath: '/home/heavygee/coding/hapi',
-                    branch: 'feat/session-header-project-path',
-                    name: 'feat-header',
-                    worktreePath: '/tmp/hapi-worktrees/feat-header',
-                },
-            }
-        }))
-
-        expect(screen.getByTestId('session-header-project')).toHaveTextContent(/coding\/hapi/)
-        expect(screen.getByTestId('session-header-project')).not.toHaveTextContent(/feat-header/)
-        expect(screen.getByTestId('session-header-worktree')).toHaveTextContent(/feat\/session-header-project-path/)
-    })
-
-    it('hides project when the header project setting is disabled', () => {
-        localStorage.setItem('hapi-session-header-metadata', JSON.stringify({ project: false }))
-        renderHeader(baseSession({
-            metadata: { flavor: 'cursor', path: '/home/heavygee/coding/hapi', host: 'homelab' }
-        }))
-
-        expect(screen.queryByTestId('session-header-project')).not.toBeInTheDocument()
-    })
-
     it('advances relative age on the minute tick without a session prop change', () => {
         vi.useFakeTimers()
         const now = new Date('2026-07-29T16:00:00.000Z')
@@ -315,10 +274,10 @@ describe('SessionHeader', () => {
     })
 
     it('toggles pin state from the header action menu', async () => {
-        const setSessionPinned = vi.fn().mockResolvedValue(undefined)
+        const setSessionPinMode = vi.fn().mockResolvedValue(undefined)
         const api = {
             getScratchlist: vi.fn().mockResolvedValue({ entries: [] }),
-            setSessionPinned
+            setSessionPinMode
         } as unknown as ApiClient
         const session: Session = {
             id: 'session-pin',
@@ -338,7 +297,8 @@ describe('SessionHeader', () => {
             modelReasoningEffort: null,
             effort: null,
             serviceTier: null,
-            pinned: false
+            pinned: false,
+            globalPinned: false
         }
 
         render(
@@ -352,15 +312,15 @@ describe('SessionHeader', () => {
         )
 
         fireEvent.click(screen.getByTitle('More actions'))
-        fireEvent.click(screen.getByRole('menuitem', { name: 'Pin session' }))
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Pin globally' }))
 
-        await waitFor(() => expect(setSessionPinned).toHaveBeenCalledWith('session-pin', true))
+        await waitFor(() => expect(setSessionPinMode).toHaveBeenCalledWith('session-pin', 'global'))
     })
 
     it('shows an error toast when toggling the pin fails', async () => {
         const api = {
             getScratchlist: vi.fn().mockResolvedValue({ entries: [] }),
-            setSessionPinned: vi.fn().mockRejectedValue(new Error('Network unavailable'))
+            setSessionPinMode: vi.fn().mockRejectedValue(new Error('Network unavailable'))
         } as unknown as ApiClient
 
         render(
@@ -375,7 +335,7 @@ describe('SessionHeader', () => {
         )
 
         fireEvent.click(screen.getByTitle('More actions'))
-        fireEvent.click(screen.getByRole('menuitem', { name: 'Pin session' }))
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Pin in project' }))
 
         expect(await screen.findByText('Could not update pin: Network unavailable')).toBeInTheDocument()
     })

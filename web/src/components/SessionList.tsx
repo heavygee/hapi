@@ -7,10 +7,18 @@ import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { SessionExportDialog } from '@/components/SessionExportDialog'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
-import { LinkPrDialog } from '@/components/LinkPrDialog'
-import { SessionPrChip, formatGithubPrChipDetailParts, resolveGithubPrChipDisplay } from '@/components/SessionPrChip'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { CopyIcon, CheckIcon } from '@/components/icons'
+
+function PinnedSectionIcon(props: { className?: string }) {
+    return (
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className={props.className} aria-hidden="true">
+            <path d="M12 17v5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
+            <path d="M5 17h14" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
+            <path d="M7 4V2h10v2l-2 5v4l2 2H7l2-2V9Z" />
+        </svg>
+    )
+}
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
 import { DEFAULT_SESSION_PREVIEW_LIMIT, useSessionPreviewLimit } from '@/hooks/useSessionPreviewLimit'
@@ -22,34 +30,19 @@ import { getSessionLastSeenAt, getSessionLastSeenSnapshot } from '@/lib/sessionL
 import { useSessionRowTooltipIds } from '@/components/HoverTooltip'
 import { subscribeCodexImportedSessions } from '@/lib/codexImportedSessions'
 import { formatReopenError } from '@/lib/reopenError'
-import { resolveCursorReopenGate } from '@/lib/sessionResume'
 import { getSessionTitle } from '@/lib/sessionTitle'
 import { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
-import { retargetSharePendingTransfer } from '@/lib/sharePendingState'
-import { getGroupDisplayName } from '@/lib/sessionProjectLabel'
 import type { Machine } from '@/types/api'
 import { getMachinePlatform, presentMachineHealth } from '@/lib/machineHealth'
 import { MachineFilterBar, MachineFilterMenu } from '@/components/MachineFilterBar'
 import { useSessionListMachineFilter } from '@/hooks/useSessionListMachineFilter'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
-import { useFeatures } from '@/hooks/queries/useFeatures'
-import { getPrimaryGithubPrRef } from '@hapi/protocol'
 import { SessionRowSummary } from '@/components/SessionRowSummary'
 import { Spinner } from '@/components/Spinner'
-import { useToast } from '@/lib/toast-context'
 import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
+import { useToast } from '@/lib/toast-context'
 
 export { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
-
-/** Outer row chrome — selected background lives here, not on the button. */
-export function sessionListItemWrapperClassName(selected: boolean): string {
-    return `session-list-item flex w-full items-stretch rounded-lg transition-colors${selected ? ' bg-[var(--app-secondary-bg)]' : ''}`
-}
-
-/** Focusable row control — owns `group/session-row` for keyboard tooltip reveal. */
-export function sessionListItemButtonClassName(): string {
-    return 'group/session-row flex min-w-0 flex-1 flex-col gap-1 px-2.5 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg'
-}
 
 type SessionGroup = {
     key: string
@@ -59,6 +52,7 @@ type SessionGroup = {
     sessions: SessionSummary[]
     latestUpdatedAt: number
     hasActiveSession: boolean
+    hasPinnedSession: boolean
 }
 
 const RUNNING_BUCKETS = [
@@ -165,7 +159,16 @@ type MachineGroup = {
     projectGroups: SessionGroup[]
     totalSessions: number
     hasActiveSession: boolean
+    hasPinnedSession: boolean
     latestUpdatedAt: number
+}
+
+function getGroupDisplayName(directory: string): string {
+    if (directory === 'Other') return directory
+    const parts = directory.split(/[\\/]+/).filter(Boolean)
+    if (parts.length === 0) return directory
+    if (parts.length === 1) return parts[0]
+    return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`
 }
 
 export const UNKNOWN_MACHINE_ID = '__unknown__'
@@ -205,6 +208,7 @@ export function deduplicateSessionsByAgentId(sessions: SessionSummary[], selecte
             if (a.id === selectedSessionId) return -1
             if (b.id === selectedSessionId) return 1
             // Preserve an explicit pin when otherwise choosing by recency
+            if (Boolean(a.globalPinned) !== Boolean(b.globalPinned)) return a.globalPinned ? -1 : 1
             if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1
             return b.updatedAt - a.updatedAt
         })
@@ -233,43 +237,8 @@ export function isSidebarEmptySessionStub(session: SessionSummary): boolean {
 
 export function shouldShowSessionInSidebar(session: SessionSummary, selectedSessionId?: string | null): boolean {
     if (session.id === selectedSessionId) return true
-    if (session.active || session.pinned) return true
+    if (session.active || session.pinned || session.globalPinned) return true
     return !isSidebarEmptySessionStub(session)
-}
-
-/** Durable Pin/Unpin (session.pinned) — not Settings "Pin in-progress sessions". */
-export function isExplicitlyPinnedSession(session: SessionSummary): boolean {
-    return Boolean(session.pinned)
-}
-
-/** Sort for the global top Pinned band: pending/active first, then recency. */
-export function sortGlobalPinnedSessions(sessions: SessionSummary[]): SessionSummary[] {
-    return [...sessions].sort((a, b) => {
-        const rankA = a.active ? (a.pendingRequestsCount > 0 ? 0 : 1) : 2
-        const rankB = b.active ? (b.pendingRequestsCount > 0 ? 0 : 1) : 2
-        if (rankA !== rankB) return rankA - rankB
-        return b.updatedAt - a.updatedAt
-    })
-}
-
-/**
- * Lift durable pins into a flat top band; omit them from project groups.
- * In-progress preference still applies only to the unpinned remainder.
- */
-export function partitionGlobalPinnedSessions(sessions: SessionSummary[]): {
-    pinned: SessionSummary[]
-    unpinned: SessionSummary[]
-} {
-    const pinned: SessionSummary[] = []
-    const unpinned: SessionSummary[] = []
-    for (const session of sessions) {
-        if (isExplicitlyPinnedSession(session)) {
-            pinned.push(session)
-        } else {
-            unpinned.push(session)
-        }
-    }
-    return { pinned: sortGlobalPinnedSessions(pinned), unpinned }
 }
 
 export function prepareSidebarSessions(sessions: SessionSummary[], selectedSessionId?: string | null): SessionSummary[] {
@@ -328,6 +297,7 @@ function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGroup[] {
     return Array.from(groups.entries())
         .map(([key, group]) => {
             const sortedSessions = [...group.sessions].sort((a, b) => {
+                if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1
                 const rankA = a.active ? (a.pendingRequestsCount > 0 ? 0 : 1) : 2
                 const rankB = b.active ? (b.pendingRequestsCount > 0 ? 0 : 1) : 2
                 if (rankA !== rankB) return rankA - rankB
@@ -338,6 +308,7 @@ function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGroup[] {
                 -Infinity
             )
             const hasActiveSession = group.sessions.some(s => s.active)
+            const hasPinnedSession = group.sessions.some(s => s.pinned)
             const displayName = getGroupDisplayName(group.directory)
 
             return {
@@ -347,10 +318,14 @@ function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGroup[] {
                 machineId: group.machineId,
                 sessions: sortedSessions,
                 latestUpdatedAt,
-                hasActiveSession
+                hasActiveSession,
+                hasPinnedSession
             }
         })
         .sort((a, b) => {
+            if (a.hasPinnedSession !== b.hasPinnedSession) {
+                return a.hasPinnedSession ? -1 : 1
+            }
             if (a.hasActiveSession !== b.hasActiveSession) {
                 return a.hasActiveSession ? -1 : 1
             }
@@ -389,6 +364,7 @@ function groupByMachine(
                 projectGroups: [],
                 totalSessions: 0,
                 hasActiveSession: false,
+                hasPinnedSession: false,
                 latestUpdatedAt: 0,
             }
             map.set(key, mg)
@@ -396,9 +372,11 @@ function groupByMachine(
         mg.projectGroups.push(g)
         mg.totalSessions += g.sessions.length
         if (g.hasActiveSession) mg.hasActiveSession = true
+        if (g.hasPinnedSession) mg.hasPinnedSession = true
         if (g.latestUpdatedAt > mg.latestUpdatedAt) mg.latestUpdatedAt = g.latestUpdatedAt
     }
     return [...map.values()].sort((a, b) => {
+        if (a.hasPinnedSession !== b.hasPinnedSession) return a.hasPinnedSession ? -1 : 1
         if (a.hasActiveSession !== b.hasActiveSession) return a.hasActiveSession ? -1 : 1
         return b.latestUpdatedAt - a.latestUpdatedAt
     })
@@ -493,7 +471,6 @@ function PlusIcon(props: { className?: string }) {
         </svg>
     )
 }
-
 
 function ChevronIcon(props: { className?: string; collapsed?: boolean }) {
     return (
@@ -593,6 +570,11 @@ export function getVisibleSessionPreview(
     }
 
     return visible
+}
+
+export function shouldShowPinnedDivider(sessions: SessionSummary[], index: number): boolean {
+    if (index <= 0 || index >= sessions.length) return false
+    return Boolean(sessions[index - 1]?.pinned) && !sessions[index]?.pinned
 }
 
 function CalendarIcon(props: { className?: string }) {
@@ -721,7 +703,7 @@ function SessionDateRangePicker(props: {
     )
 }
 
-export function SessionListSearch(props: {
+function SessionListSearch(props: {
     value: string
     onChange: (value: string) => void
     customStart: string
@@ -901,48 +883,36 @@ function SessionItem(props: {
     const [menuOpen, setMenuOpen] = useState(false)
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
     const [renameOpen, setRenameOpen] = useState(false)
-    const [linkPrOpen, setLinkPrOpen] = useState(false)
     const [exportOpen, setExportOpen] = useState(false)
     const [archiveOpen, setArchiveOpen] = useState(false)
     const [deleteOpen, setDeleteOpen] = useState(false)
-    const { features } = useFeatures(api)
-    const githubPrAwarenessEnabled = Boolean(features?.githubPrAwareness.enabled)
-    const primaryPrRef = getPrimaryGithubPrRef(s.metadata?.externalRefs)
     const {
         status: cursorChatStoreStatus,
         isApplicable: cursorChatStoreApplicable,
         error: cursorChatStoreError,
-        isLoading: cursorChatStoreLoading,
     } = useCursorChatStoreStatus({
         api,
         session: s,
         enabled: menuOpen
     })
-    const cursorReopenGate = resolveCursorReopenGate({
-        applicable: cursorChatStoreApplicable,
-        onDisk: cursorChatStoreStatus?.onDisk,
-        error: cursorChatStoreError,
-        isLoading: cursorChatStoreLoading,
-    })
-    const cursorReopenDisabledReason = cursorReopenGate.disabledReason === 'missing'
-        ? t('session.action.reopenCursorMissing')
-        : cursorReopenGate.disabledReason === 'checking'
-            ? t('session.action.reopenCursorChecking')
-            : undefined
-    const cursorReopenUnverifiedHint = cursorReopenGate.probeUnverified
-        ? t('session.action.reopenCursorUnverified')
+    const cursorReopenDisabledReason = cursorChatStoreApplicable && cursorChatStoreStatus?.onDisk !== true
+        ? cursorChatStoreError
+            ? t('session.action.reopenCursorCheckFailed')
+            : cursorChatStoreStatus?.onDisk === false
+                ? t('session.action.reopenCursorMissing')
+                : t('session.action.reopenCursorChecking')
         : undefined
 
-    const { archiveSession, reopenSession, renameSession, setExternalRefs, deleteSession, setPinned, isPending } = useSessionActions(
+    const { archiveSession, reopenSession, renameSession, deleteSession, setPinMode, isPending } = useSessionActions(
         api,
         s.id,
         s.metadata?.flavor ?? null
     )
     const [reopenError, setReopenError] = useState<string | null>(null)
 
-    const handleTogglePin = async () => {
+    const handleSetPinMode = async (mode: 'none' | 'project' | 'global') => {
         try {
-            await setPinned(!s.pinned)
+            await setPinMode(mode)
         } catch (error) {
             addToast({
                 title: t('session.action.pinFailed'),
@@ -960,7 +930,6 @@ function SessionItem(props: {
             // resumeSession may merge the row into a freshly-spawned sessionId.
             // Follow it so the operator lands on the live session.
             if (result.sessionId && result.sessionId !== s.id) {
-                retargetSharePendingTransfer(s.id, result.sessionId)
                 await transferComposerDraftThenNavigate(
                     s.id,
                     result.sessionId,
@@ -987,17 +956,6 @@ function SessionItem(props: {
     })
 
     const sessionName = getSessionTitle(s)
-    const linkedPr = useMemo(() => {
-        if (!githubPrAwarenessEnabled || !primaryPrRef) return null
-        const nowMs = Date.now()
-        const display = resolveGithubPrChipDisplay(primaryPrRef, nowMs)
-        const parts = formatGithubPrChipDetailParts(primaryPrRef, display, t, nowMs)
-        return {
-            glyph: parts.glyph,
-            detail: parts.detail,
-            href: primaryPrRef.url
-        }
-    }, [githubPrAwarenessEnabled, primaryPrRef, t])
     const attention = useMemo(
         () => showDetailedStatus
             ? classifySessionAttention(s, {
@@ -1033,9 +991,6 @@ function SessionItem(props: {
                     inRunningSection={inRunningSection}
                     projectLabel={projectLabel}
                     machineLabel={machineLabel}
-                    trailing={githubPrAwarenessEnabled && primaryPrRef ? (
-                        <SessionPrChip refs={s.metadata?.externalRefs} />
-                    ) : null}
                 />
             </button>
 
@@ -1045,16 +1000,14 @@ function SessionItem(props: {
                 sessionId={s.id}
                 sessionTitle={sessionName}
                 sessionActive={s.active}
-                sessionPinned={s.pinned}
-                onTogglePin={() => void handleTogglePin()}
+                sessionPinned={Boolean(s.pinned)}
+                sessionGlobalPinned={Boolean(s.globalPinned)}
+                onSetPinMode={(mode) => void handleSetPinMode(mode)}
                 onRename={() => setRenameOpen(true)}
-                onLinkPr={githubPrAwarenessEnabled ? () => setLinkPrOpen(true) : undefined}
-                linkedPr={linkedPr}
                 onExport={() => setExportOpen(true)}
                 onArchive={() => setArchiveOpen(true)}
                 onReopen={cursorReopenDisabledReason ? undefined : handleReopen}
                 reopenDisabledReason={cursorReopenDisabledReason}
-                reopenHint={cursorReopenUnverifiedHint}
                 onDelete={() => setDeleteOpen(true)}
                 anchorPoint={menuAnchorPoint}
             />
@@ -1073,22 +1026,15 @@ function SessionItem(props: {
                 />
             ) : null}
 
-            <RenameSessionDialog
-                isOpen={renameOpen}
-                onClose={() => setRenameOpen(false)}
-                currentName={sessionName}
-                onRename={renameSession}
-                isPending={isPending}
-            />
-
-            <LinkPrDialog
-                isOpen={linkPrOpen}
-                onClose={() => setLinkPrOpen(false)}
-                currentPrimaryLabel={primaryPrRef ? `${primaryPrRef.repo}#${primaryPrRef.number}` : null}
-                onLink={setExternalRefs}
-                onUnlink={primaryPrRef ? () => setExternalRefs([]) : undefined}
-                isPending={isPending}
-            />
+            {renameOpen ? (
+                <RenameSessionDialog
+                    isOpen={true}
+                    onClose={() => setRenameOpen(false)}
+                    currentName={sessionName}
+                    onRename={renameSession}
+                    isPending={isPending}
+                />
+            ) : null}
 
             {exportOpen ? (
                 <SessionExportDialog
@@ -1292,10 +1238,11 @@ export function SessionList(props: {
             ),
         [unreadFilteredSessions, activeMachineFilter]
     )
-    const { pinned: pinnedSessions, unpinned: unpinnedMachineSessions } = useMemo(
-        () => partitionGlobalPinnedSessions(machineFilteredSessions),
-        [machineFilteredSessions]
-    )
+    const globalPinnedSessions = useMemo(() => {
+        return machineFilteredSessions
+            .filter((session) => Boolean(session.globalPinned))
+            .sort((a, b) => b.updatedAt - a.updatedAt)
+    }, [machineFilteredSessions])
     const runningSessions = useMemo(() => {
         const buckets: Record<'working' | 'pending', SessionSummary[]> = {
             working: [],
@@ -1304,7 +1251,10 @@ export function SessionList(props: {
         if (!pinInProgressSessions) {
             return buckets
         }
-        for (const session of unpinnedMachineSessions) {
+        for (const session of machineFilteredSessions) {
+            if (session.globalPinned || session.pinned) {
+                continue
+            }
             if (!session.active) {
                 continue
             }
@@ -1320,16 +1270,18 @@ export function SessionList(props: {
             buckets[key].sort(byRecent)
         }
         return buckets
-    }, [unpinnedMachineSessions, pinInProgressSessions])
+    }, [machineFilteredSessions, pinInProgressSessions])
     const runningSessionTotal = runningSessions.working.length
         + runningSessions.pending.length
     const groups = useMemo(
         () => groupSessionsByDirectory(
-            pinInProgressSessions
-                ? unpinnedMachineSessions.filter((session) => !isPinnedInProgressSession(session))
-                : unpinnedMachineSessions
+            machineFilteredSessions.filter((session) => {
+                if (session.globalPinned) return false
+                if (pinInProgressSessions && !session.pinned && isPinnedInProgressSession(session)) return false
+                return true
+            })
         ),
-        [unpinnedMachineSessions, pinInProgressSessions]
+        [machineFilteredSessions, pinInProgressSessions]
     )
     const [collapseOverrides, setCollapseOverrides] = useState<Map<string, boolean>>(
         () => new Map()
@@ -1344,7 +1296,7 @@ export function SessionList(props: {
         const hasSelectedSession = selectedSessionId
             ? group.sessions.some(session => session.id === selectedSessionId)
             : false
-        return !group.hasActiveSession && !hasSelectedSession
+        return !group.hasActiveSession && !group.hasPinnedSession && !hasSelectedSession
     }
 
     const toggleGroup = (groupKey: string, isCollapsed: boolean) => {
@@ -1693,13 +1645,13 @@ export function SessionList(props: {
                     />
                 ) : null}
 
-                {props.sessions.length > 0 && (isFiltering || activeMachineFilter !== null || showUnreadOnly) && groups.length === 0 && runningSessionTotal === 0 && pinnedSessions.length === 0 ? (
+                {props.sessions.length > 0 && (isFiltering || activeMachineFilter !== null || showUnreadOnly) && groups.length === 0 && runningSessionTotal === 0 && globalPinnedSessions.length === 0 ? (
                     <div className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
                         {t('sessions.search.noResults')}
                     </div>
                 ) : null}
 
-                {pinnedSessions.length > 0 ? (
+                {globalPinnedSessions.length > 0 ? (
                     <div key="pinned-section">
                         <div
                             className="group/pinned flex min-w-0 w-full select-none cursor-pointer items-center gap-2 rounded-lg py-1.5 pl-2 pr-2 transition-colors hover:bg-[var(--app-secondary-bg)]"
@@ -1716,31 +1668,35 @@ export function SessionList(props: {
                             title={t('sessions.pinnedSection')}
                         >
                             <ChevronIcon className="h-3.5 w-3.5 text-[var(--app-hint)] shrink-0" collapsed={pinnedSectionCollapsed && !isFiltering} />
-                            <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                                {t('sessions.pinnedSection')}
+                            <span className="inline-flex min-w-0 items-center gap-1">
+                                <span className="min-w-0 truncate text-sm font-medium">
+                                    {t('sessions.pinnedSection')}
+                                </span>
+                                <PinnedSectionIcon className="h-3.5 w-3.5 shrink-0 -translate-y-px text-[var(--app-hint)]" />
                             </span>
+                            <span className="min-w-0 flex-1" aria-hidden="true" />
                             <span className="shrink-0 text-[11px] tabular-nums text-[var(--app-hint)]">
-                                ({pinnedSessions.length})
+                                ({globalPinnedSessions.length})
                             </span>
                         </div>
                         <div className="collapsible-panel" data-open={(!pinnedSectionCollapsed || isFiltering) || undefined}>
                             <div className="collapsible-inner">
-                            <div className="flex flex-col gap-0.5 ml-3 pl-1 py-1">
-                                {pinnedSessions.map((s) => (
-                                    <SessionItem
-                                        key={s.id}
-                                        session={s}
-                                        onSelect={props.onSelect}
-                                        showPath={false}
-                                        api={api}
-                                        selected={s.id === selectedSessionId}
-                                        showDetailedStatus={showDetailedStatus}
-                                        inRunningSection
-                                        projectLabel={getGroupDisplayName(s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')}
-                                        machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
-                                    />
-                                ))}
-                            </div>
+                                <div className="flex flex-col gap-0.5 ml-3 pl-1 py-1">
+                                    {globalPinnedSessions.map((s) => (
+                                        <SessionItem
+                                            key={s.id}
+                                            session={s}
+                                            onSelect={props.onSelect}
+                                            showPath={false}
+                                            api={api}
+                                            selected={s.id === selectedSessionId}
+                                            showDetailedStatus={showDetailedStatus}
+                                            inRunningSection
+                                            projectLabel={getGroupDisplayName(s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')}
+                                            machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
+                                        />
+                                    ))}
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1834,7 +1790,7 @@ export function SessionList(props: {
                     return (
                         <div key={group.key}>
                             <div
-                                className="group/project sticky top-0 z-10 flex items-center gap-2 bg-[var(--app-bg)] py-1.5 pl-2 pr-2 text-left rounded-lg transition-colors hover:bg-[var(--app-subtle-bg)] cursor-pointer min-w-0 w-full select-none"
+                                className="group/project sticky top-0 z-10 flex items-center gap-2 bg-[var(--app-bg)] py-1.5 pl-2 pr-2 text-left rounded-lg transition-colors hover:bg-[var(--app-secondary-bg)] cursor-pointer min-w-0 w-full select-none"
                                 onClick={() => toggleGroup(group.key, isCollapsed)}
                                 title={group.directory}
                             >
@@ -1869,8 +1825,14 @@ export function SessionList(props: {
                             <div className="collapsible-panel" data-open={!isCollapsed || undefined}>
                                 <div className="collapsible-inner">
                                 <div className="flex flex-col gap-0.5 ml-3 pl-1 py-1">
-                                    {visibleGroupSessions.map((s) => (
+                                    {visibleGroupSessions.map((s, index) => (
                                         <div key={s.id} className="contents">
+                                            {shouldShowPinnedDivider(visibleGroupSessions, index) ? (
+                                                <div
+                                                    className="ml-2.5 mr-2 my-1 border-t border-[var(--app-border)]"
+                                                    aria-hidden="true"
+                                                />
+                                            ) : null}
                                             <SessionItem
                                                 session={s}
                                                 onSelect={props.onSelect}

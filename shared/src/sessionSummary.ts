@@ -1,4 +1,4 @@
-import type { AgentState, AttachedJob, ExternalRef, Metadata, Session, TodoItem, WorktreeMetadata } from './schemas'
+import type { AgentState, Metadata, Session, TodoItem, WorktreeMetadata } from './schemas'
 import { isKnownFlavor } from './flavors'
 import type { AgentFlavor } from './modes'
 
@@ -40,22 +40,9 @@ export type SessionSummaryMetadata = {
     flavor?: string | null
     worktree?: WorktreeMetadata
     agentSessionId?: string
-    /** Native Claude transcript id when flavor is claude (not the flattened agentSessionId). */
-    claudeSessionId?: string
     lifecycleState?: string
     /** Loopback MCP URL when session CLI happy server is running (#956). */
     hapiMcpUrl?: string
-    lastModelError?: {
-        kind: string
-        transient: boolean
-        rawSnippet: string
-        atTs: number
-        priorAssistantClaimsDone: boolean
-        retriedAndFailed?: boolean
-        acknowledgedAt?: number
-    }
-    /** Structured contribution links (GitHub PRs, …). tiann/hapi#1160. */
-    externalRefs?: ExternalRef[]
 }
 
 export type SessionSummary = {
@@ -65,6 +52,7 @@ export type SessionSummary = {
     activeAt: number
     updatedAt: number
     pinned?: boolean
+    globalPinned?: boolean
     metadata: SessionSummaryMetadata | null
     /** Watermarks for structured SSE patches (PR #897). List cache must gate
      *  without requiring a detail query — otherwise global SSE forces O(N)
@@ -83,12 +71,6 @@ export type SessionSummary = {
     futureScheduledMessageCount: number
     /** Epoch ms of the soonest uninvoked future scheduled message, or null. */
     nextScheduledAt: number | null
-    /**
-     * Primary running session-attached job (tiann/hapi#1404), or null.
-     * Independent of agent `active` / thinking — work that outlives the agent.
-     */
-    /** Present on hub list rows; optional on thin test fixtures. */
-    attachedJob?: AttachedJob | null
     model: string | null
     modelReasoningEffort?: string | null
     effort: string | null
@@ -195,6 +177,7 @@ function getSummaryAgentSessionId(metadata: Metadata): string | undefined {
         ?? metadata.geminiSessionId
         ?? metadata.opencodeSessionId
         ?? metadata.grokSessionId
+        ?? metadata.agySessionId
         ?? metadata.cursorSessionId
         ?? metadata.kimiSessionId
         ?? metadata.copilotSessionId
@@ -213,20 +196,12 @@ export function toSessionSummaryMetadata(metadata: Metadata | null | undefined):
         flavor: metadata.flavor ?? null,
         worktree: metadata.worktree,
         agentSessionId: getSummaryAgentSessionId(metadata),
-        // Native Claude id kept distinct from flattened agentSessionId (import picker).
-        claudeSessionId: metadata.claudeSessionId ?? undefined,
         lifecycleState: metadata.lifecycleState,
-        // Loopback MCP URL when session CLI happy server is running (#956).
-        hapiMcpUrl: metadata.hapiMcpUrl ?? undefined,
-        lastModelError: metadata.lastModelError,
-        externalRefs: metadata.externalRefs
+        hapiMcpUrl: metadata.hapiMcpUrl ?? undefined
     }
 }
 
-export function toSessionSummary(
-    session: Session,
-    extras?: { attachedJob?: AttachedJob | null }
-): SessionSummary {
+export function toSessionSummary(session: Session): SessionSummary {
     return {
         id: session.id,
         active: session.active,
@@ -234,6 +209,7 @@ export function toSessionSummary(
         activeAt: session.activeAt,
         updatedAt: session.updatedAt,
         pinned: session.pinned ?? false,
+        globalPinned: session.globalPinned ?? false,
         metadata: toSessionSummaryMetadata(session.metadata),
         metadataVersion: session.metadataVersion,
         agentStateVersion: session.agentStateVersion,
@@ -245,7 +221,6 @@ export function toSessionSummary(
         backgroundTaskCount: session.backgroundTaskCount ?? 0,
         futureScheduledMessageCount: 0,
         nextScheduledAt: null,
-        attachedJob: extras?.attachedJob ?? null,
         model: session.model,
         modelReasoningEffort: session.modelReasoningEffort,
         effort: session.effort

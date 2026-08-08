@@ -93,6 +93,9 @@ const RECONNECT_SLOW_MAX_DELAY_MS = 300_000
 const INVALIDATION_BATCH_MS = 16
 
 function sortSessionSummaries(left: SessionSummary, right: SessionSummary): number {
+    if (Boolean(left.globalPinned) !== Boolean(right.globalPinned)) {
+        return left.globalPinned ? -1 : 1
+    }
     if (Boolean(left.pinned) !== Boolean(right.pinned)) {
         return left.pinned ? -1 : 1
     }
@@ -133,6 +136,69 @@ export function isRenderIrrelevantSessionPatch(session: Session, patch: SessionP
         }
     }
     return true
+}
+
+/**
+ * Apply a validated SessionPatch onto a detail Session. Returns null when
+ * nothing render-relevant changed (keep prior object identity). Field-by-field
+ * only — never wholesale-spread versioned `{ version, value }` wrappers.
+ * Exported for unit tests (Copilot mode keep-alive must not be dropped).
+ */
+export function applySessionDetailPatch(session: Session, patch: SessionPatch): Session | null {
+    if (isRenderIrrelevantSessionPatch(session, patch)) {
+        return null
+    }
+    let changed = false
+    const nextSession: Session = { ...session }
+    const assign = <K extends keyof Session>(key: K, value: Session[K]) => {
+        if (nextSession[key] !== value) {
+            nextSession[key] = value
+            changed = true
+        }
+    }
+    if (patch.active !== undefined) assign('active', patch.active)
+    if (patch.thinking !== undefined) assign('thinking', patch.thinking)
+    if (patch.activeAt !== undefined) assign('activeAt', patch.activeAt)
+    // Monotonic with hub applySessionPatch: a rejected stale
+    // metadata/agentState replay must not rewind updatedAt.
+    if (patch.updatedAt !== undefined) {
+        const nextUpdatedAt = Math.max(nextSession.updatedAt, patch.updatedAt)
+        assign('updatedAt', nextUpdatedAt)
+    }
+    if (patch.model !== undefined) assign('model', patch.model)
+    if (patch.modelReasoningEffort !== undefined) assign('modelReasoningEffort', patch.modelReasoningEffort)
+    if (patch.effort !== undefined) assign('effort', patch.effort)
+    if (Object.prototype.hasOwnProperty.call(patch, 'serviceTier')) {
+        assign('serviceTier', patch.serviceTier ?? null)
+    }
+    if (patch.permissionMode !== undefined) assign('permissionMode', patch.permissionMode)
+    if (patch.collaborationMode !== undefined) assign('collaborationMode', patch.collaborationMode)
+    if (patch.copilotAgentMode !== undefined) assign('copilotAgentMode', patch.copilotAgentMode)
+    if (patch.backgroundTaskCount !== undefined) assign('backgroundTaskCount', patch.backgroundTaskCount)
+    // Version gates: dual SSE can deliver duplicates out of order.
+    // Only mark changed when a strictly newer version lands —
+    // otherwise keep previous object identity (no redundant render).
+    if (patch.todos !== undefined && isNewerVersionedPatch(patch.todos.version, nextSession.todosUpdatedAt ?? 0)) {
+        nextSession.todos = patch.todos.value
+        nextSession.todosUpdatedAt = patch.todos.version
+        changed = true
+    }
+    if (patch.teamState !== undefined && isNewerVersionedPatch(patch.teamState.version, nextSession.teamStateUpdatedAt ?? 0)) {
+        nextSession.teamState = patch.teamState.value ?? undefined
+        nextSession.teamStateUpdatedAt = patch.teamState.version
+        changed = true
+    }
+    if (patch.metadata !== undefined && isNewerVersionedPatch(patch.metadata.version, nextSession.metadataVersion)) {
+        nextSession.metadata = patch.metadata.value
+        nextSession.metadataVersion = patch.metadata.version
+        changed = true
+    }
+    if (patch.agentState !== undefined && isNewerVersionedPatch(patch.agentState.version, nextSession.agentStateVersion)) {
+        nextSession.agentState = patch.agentState.value
+        nextSession.agentStateVersion = patch.agentState.version
+        changed = true
+    }
+    return changed ? nextSession : null
 }
 
 function isSessionRecord(value: unknown): value is Session {
@@ -177,16 +243,6 @@ export function isRenderIrrelevantPatch(current: SessionSummary, next: SessionSu
         && current.thinking === next.thinking
         && current.updatedAt === next.updatedAt
         && current.backgroundTaskCount === next.backgroundTaskCount
-        && current.attachedJob?.key === next.attachedJob?.key
-        && current.attachedJob?.label === next.attachedJob?.label
-        && current.attachedJob?.status === next.attachedJob?.status
-        && current.attachedJob?.done === next.attachedJob?.done
-        && current.attachedJob?.total === next.attachedJob?.total
-        && current.attachedJob?.remaining === next.attachedJob?.remaining
-        && current.attachedJob?.unit === next.attachedJob?.unit
-        && current.attachedJob?.detail === next.attachedJob?.detail
-        && current.attachedJob?.heartbeatAt === next.attachedJob?.heartbeatAt
-        && (current.attachedJob == null) === (next.attachedJob == null)
         && current.model === next.model
         && current.modelReasoningEffort === next.modelReasoningEffort
         && current.effort === next.effort
@@ -511,7 +567,6 @@ export function useSSE(options: {
                 const existing = existingIndex >= 0 ? previous.sessions[existingIndex] : undefined
                 const summary = {
                     ...toSessionSummary(session),
-                    attachedJob: existing?.attachedJob ?? null,
                     futureScheduledMessageCount: existing?.futureScheduledMessageCount ?? 0,
                     nextScheduledAt: existing?.nextScheduledAt ?? null
                 }
@@ -557,9 +612,6 @@ export function useSSE(options: {
                     backgroundTaskCount: Object.prototype.hasOwnProperty.call(patch, 'backgroundTaskCount')
                         ? patch.backgroundTaskCount ?? 0
                         : current.backgroundTaskCount,
-                    attachedJob: Object.prototype.hasOwnProperty.call(patch, 'attachedJob')
-                        ? patch.attachedJob ?? null
-                        : current.attachedJob ?? null,
                     model: Object.prototype.hasOwnProperty.call(patch, 'model') ? patch.model ?? null : current.model,
                     modelReasoningEffort: Object.prototype.hasOwnProperty.call(patch, 'modelReasoningEffort')
                         ? patch.modelReasoningEffort ?? null
@@ -608,63 +660,8 @@ export function useSSE(options: {
                     return previous
                 }
                 patched = true
-                // Keep-alive patches repeat every field every ~10s; if nothing
-                // render-relevant moved (ignore activeAt), keep the existing
-                // object identity. Still field-by-field below for structured
-                // patches — never wholesale-spread { version, value } wrappers.
-                if (isRenderIrrelevantSessionPatch(previous.session, patch)) {
-                    return previous
-                }
-                let changed = false
-                const nextSession: Session = { ...previous.session }
-                const assign = <K extends keyof Session>(key: K, value: Session[K]) => {
-                    if (nextSession[key] !== value) {
-                        nextSession[key] = value
-                        changed = true
-                    }
-                }
-                if (patch.active !== undefined) assign('active', patch.active)
-                if (patch.thinking !== undefined) assign('thinking', patch.thinking)
-                if (patch.activeAt !== undefined) assign('activeAt', patch.activeAt)
-                // Monotonic with hub applySessionPatch: a rejected stale
-                // metadata/agentState replay must not rewind updatedAt.
-                if (patch.updatedAt !== undefined) {
-                    const nextUpdatedAt = Math.max(nextSession.updatedAt, patch.updatedAt)
-                    assign('updatedAt', nextUpdatedAt)
-                }
-                if (patch.model !== undefined) assign('model', patch.model)
-                if (patch.modelReasoningEffort !== undefined) assign('modelReasoningEffort', patch.modelReasoningEffort)
-                if (patch.effort !== undefined) assign('effort', patch.effort)
-                if (Object.prototype.hasOwnProperty.call(patch, 'serviceTier')) {
-                    assign('serviceTier', patch.serviceTier ?? null)
-                }
-                if (patch.permissionMode !== undefined) assign('permissionMode', patch.permissionMode)
-                if (patch.collaborationMode !== undefined) assign('collaborationMode', patch.collaborationMode)
-                if (patch.backgroundTaskCount !== undefined) assign('backgroundTaskCount', patch.backgroundTaskCount)
-                // Version gates: dual SSE can deliver duplicates out of order.
-                // Only mark changed when a strictly newer version lands —
-                // otherwise keep previous object identity (no redundant render).
-                if (patch.todos !== undefined && isNewerVersionedPatch(patch.todos.version, nextSession.todosUpdatedAt ?? 0)) {
-                    nextSession.todos = patch.todos.value
-                    nextSession.todosUpdatedAt = patch.todos.version
-                    changed = true
-                }
-                if (patch.teamState !== undefined && isNewerVersionedPatch(patch.teamState.version, nextSession.teamStateUpdatedAt ?? 0)) {
-                    nextSession.teamState = patch.teamState.value ?? undefined
-                    nextSession.teamStateUpdatedAt = patch.teamState.version
-                    changed = true
-                }
-                if (patch.metadata !== undefined && isNewerVersionedPatch(patch.metadata.version, nextSession.metadataVersion)) {
-                    nextSession.metadata = patch.metadata.value
-                    nextSession.metadataVersion = patch.metadata.version
-                    changed = true
-                }
-                if (patch.agentState !== undefined && isNewerVersionedPatch(patch.agentState.version, nextSession.agentStateVersion)) {
-                    nextSession.agentState = patch.agentState.value
-                    nextSession.agentStateVersion = patch.agentState.version
-                    changed = true
-                }
-                if (!changed) {
+                const nextSession = applySessionDetailPatch(previous.session, patch)
+                if (!nextSession) {
                     return previous
                 }
                 return {
