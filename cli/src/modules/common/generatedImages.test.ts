@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { clearGeneratedImages, decodeGeneratedImageBase64, detectImageMimeType, detectVideoMimeType, getGeneratedImage, MAX_GENERATED_IMAGE_BASE64_CHARS, MAX_GENERATED_IMAGE_BYTES, readBoundedRegularFile, registerGeneratedImage, registerGeneratedImageFromAcpBlock, registerGeneratedImageFromPath, safeAcpFileName } from './generatedImages'
+import { clearGeneratedImages, decodeGeneratedImageBase64, detectAudioMimeType, detectDisplayMediaMimeType, detectImageMimeType, detectVideoMimeType, getGeneratedImage, MAX_GENERATED_IMAGE_BASE64_CHARS, MAX_GENERATED_IMAGE_BYTES, readBoundedRegularFile, registerGeneratedImage, registerGeneratedImageFromAcpBlock, registerGeneratedImageFromPath, safeAcpFileName } from './generatedImages'
 
 describe('generatedImages', () => {
     it('detects supported image MIME types from file bytes', () => {
@@ -34,6 +34,53 @@ describe('generatedImages', () => {
         expect(detectVideoMimeType(Buffer.from([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x6d, 0x69, 0x66, 0x31]))).toBeNull()
     })
 
+    it('detects supported audio MIME types from file bytes', () => {
+        expect(detectAudioMimeType(Buffer.from('RIFFxxxxWAVE'))).toBe('audio/wav')
+        expect(detectAudioMimeType(Buffer.from('fLaC'))).toBe('audio/flac')
+        expect(detectAudioMimeType(Buffer.concat([Buffer.from('OggS'), Buffer.alloc(24), Buffer.from('OpusHead')]))).toBe('audio/ogg')
+        expect(detectAudioMimeType(Buffer.from('ID3'))).toBe('audio/mpeg')
+        expect(detectAudioMimeType(Buffer.from([0xff, 0xfb, 0x90]))).toBe('audio/mpeg')
+        expect(detectAudioMimeType(Buffer.from([0xff, 0xe0, 0x00]))).toBeNull()
+        expect(detectAudioMimeType(Buffer.from([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x4d, 0x34, 0x41, 0x20]))).toBe('audio/mp4')
+    })
+
+    it('falls back to a download-safe MIME type for unknown files', () => {
+        expect(detectDisplayMediaMimeType(Buffer.from('arbitrary file bytes'))).toBe('application/octet-stream')
+    })
+
+    it('uses ISO-BMFF track handlers to distinguish audio-only and video files', () => {
+        const box = (type: string, payload: Buffer) => {
+            const header = Buffer.alloc(8)
+            header.writeUInt32BE(header.length + payload.length)
+            header.write(type, 4, 4, 'ascii')
+            return Buffer.concat([header, payload])
+        }
+        const ftypIsom = box('ftyp', Buffer.from('isom0000'))
+        const track = (handler: 'soun' | 'vide') => box('moov', box('trak', box('mdia', box('hdlr', Buffer.concat([
+            Buffer.alloc(8),
+            Buffer.from(handler),
+            Buffer.alloc(4)
+        ])))))
+
+        expect(detectDisplayMediaMimeType(Buffer.concat([ftypIsom, track('soun')]))).toBe('audio/mp4')
+        expect(detectDisplayMediaMimeType(Buffer.concat([ftypIsom, track('vide')]))).toBe('video/mp4')
+        expect(detectDisplayMediaMimeType(ftypIsom)).toBe('application/octet-stream')
+        expect(detectDisplayMediaMimeType(Buffer.concat([
+            ftypIsom,
+            box('mdat', Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('hdlr'), Buffer.alloc(8), Buffer.from('soun')]))
+        ]))).toBe('application/octet-stream')
+        expect(detectDisplayMediaMimeType(Buffer.concat([ftypIsom, track('soun').subarray(0, -1)]))).toBe('application/octet-stream')
+        expect(detectDisplayMediaMimeType(Buffer.concat([ftypIsom, track('soun'), Buffer.alloc(1)]))).toBe('application/octet-stream')
+        expect(detectDisplayMediaMimeType(Buffer.concat([
+            ftypIsom,
+            box('moov', Buffer.concat([box('trak', box('mdia', box('hdlr', Buffer.concat([
+                Buffer.alloc(8),
+                Buffer.from('soun'),
+                Buffer.alloc(4)
+            ])))), Buffer.alloc(1)]))
+        ]))).toBe('application/octet-stream')
+    })
+
     it('rejects non-image bytes even if the path has an image extension', () => {
         expect(detectImageMimeType(Buffer.from('not really a png'))).toBeNull()
     })
@@ -47,6 +94,25 @@ describe('generatedImages', () => {
         })
 
         expect(image.mimeType).toBe('image/png')
+        clearGeneratedImages()
+    })
+
+    it('stores audio and generic download media', () => {
+        const audio = registerGeneratedImage({
+            id: 'test-audio',
+            path: '/tmp/example.wav',
+            mimeType: 'audio/wav',
+            bytes: Buffer.from('RIFFxxxxWAVE')
+        })
+        const file = registerGeneratedImage({
+            id: 'test-file',
+            path: '/tmp/example.bin',
+            mimeType: 'application/octet-stream',
+            bytes: Buffer.from('file')
+        })
+
+        expect(audio.mimeType).toBe('audio/wav')
+        expect(file.mimeType).toBe('application/octet-stream')
         clearGeneratedImages()
     })
 

@@ -15,7 +15,8 @@ import { useHappyChatContext } from '@/components/AssistantChat/context'
 import { CliOutputBlock } from '@/components/CliOutputBlock'
 import { UserBubbleContent, getUserBubbleClassName, shouldShowMessageStatus } from '@/components/AssistantChat/messages/user-bubble'
 import { ImagePreview } from '@/components/ImagePreview'
-import { generatedInlineMediaLabel, isInlineVideoMimeType } from '@/lib/generatedInlineMedia'
+import { FileIcon } from '@/components/FileIcon'
+import { generatedInlineMediaLabel, isInlineAudioMimeType, isInlineImageMimeType, isInlineVideoMimeType } from '@/lib/generatedInlineMedia'
 
 function isToolCallBlock(value: unknown): value is ToolCallBlock {
     if (!isObject(value)) return false
@@ -61,18 +62,21 @@ export function computeTinyImageScale(width: number, height: number): number {
     return Math.min(MIN_INLINE_IMAGE_DIMENSION / maxDim, 16)
 }
 
-/** Exported for lazy-video fetch tests; images still fetch on mount. */
+/** Exported for generated-media fetch and renderer tests. */
 export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
     const ctx = useHappyChatContext()
     const [objectUrl, setObjectUrl] = useState<string | null>(null)
     const [error, setError] = useState<string | null>(null)
     const [imageStyle, setImageStyle] = useState<CSSProperties | undefined>(undefined)
-    const [loadVideo, setLoadVideo] = useState(false)
+    const [loadMedia, setLoadMedia] = useState(false)
     const objectUrlRef = useRef<string | null>(null)
     const isVideo = isInlineVideoMimeType(props.block.mimeType)
+    const isAudio = isInlineAudioMimeType(props.block.mimeType)
+    const isImage = isInlineImageMimeType(props.block.mimeType)
+    const isFile = !isVideo && !isAudio && !isImage
     const mediaLabel = generatedInlineMediaLabel(props.block.mimeType)
-    // Videos can be tens of MB; wait for explicit user intent before downloading.
-    const shouldFetch = !isVideo || loadVideo
+    // Non-image media can be tens of MB; wait for explicit user intent before downloading.
+    const shouldFetch = isImage || loadMedia
 
     useEffect(() => {
         return () => {
@@ -107,7 +111,7 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
                 }
                 objectUrlRef.current = nextObjectUrl
                 setObjectUrl(nextObjectUrl)
-                if (!isVideo) {
+                if (isImage) {
                     setImageStyle(undefined)
                     const probe = new Image()
                     probe.onload = () => {
@@ -126,7 +130,7 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
         return () => {
             disposed = true
         }
-    }, [ctx.api, ctx.sessionId, props.block.imageId, isVideo, shouldFetch])
+    }, [ctx.api, ctx.sessionId, props.block.imageId, isImage, shouldFetch])
 
     return (
         <div className="max-w-[92%] rounded-2xl border border-[var(--app-border)] bg-[var(--app-tool-card-bg)] p-3">
@@ -143,6 +147,22 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
                             className="max-h-[min(28rem,60vh)] max-w-full rounded-xl"
                         />
                     </div>
+                ) : isAudio ? (
+                    <audio
+                        src={objectUrl}
+                        controls
+                        preload="metadata"
+                        className="w-full min-w-[12rem]"
+                    />
+                ) : isFile ? (
+                    <a
+                        href={objectUrl}
+                        download={props.block.fileName}
+                        className="flex items-center gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-4 py-3 text-sm font-medium text-[var(--app-fg)]"
+                    >
+                        <FileIcon fileName={props.block.fileName} size={24} />
+                        <span className="min-w-0 truncate">Download {props.block.fileName}</span>
+                    </a>
                 ) : (
                     <div className="flex min-h-32 min-w-[12rem] items-center justify-center rounded-xl bg-[var(--app-subtle-bg)]">
                         <ImagePreview
@@ -159,13 +179,13 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
                 <div className="text-sm text-[var(--app-hint)]">
                     {mediaLabel} is unavailable. {error}
                 </div>
-            ) : isVideo && !loadVideo ? (
+            ) : !isImage && !loadMedia ? (
                 <button
                     type="button"
-                    onClick={() => setLoadVideo(true)}
+                    onClick={() => setLoadMedia(true)}
                     className="flex h-48 w-72 max-w-full items-center justify-center rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] text-sm font-medium text-[var(--app-fg)]"
                 >
-                    Load video
+                    {isVideo ? 'Load video' : isAudio ? 'Load audio' : 'Prepare download'}
                 </button>
             ) : (
                 <div className="h-48 w-72 max-w-full animate-pulse rounded-xl bg-[var(--app-subtle-bg)]" />

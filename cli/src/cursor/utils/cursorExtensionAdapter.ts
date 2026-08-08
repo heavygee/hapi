@@ -304,7 +304,7 @@ async function registerCursorGeneratedImage(params: Record<string, unknown>) {
         ?? asString(params.data);
 
     // Only inline bytes are safe here. Path-only reads would bypass the
-    // permission-gated display_image / display_video MCP tools (same class as
+    // permission-gated display_image / display_video / display_media MCP tools (same class as
     // URI-only ACP image blocks). Path support needs an explicit approval flow.
     if (imageData) {
         try {

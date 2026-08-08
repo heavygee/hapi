@@ -69,4 +69,24 @@ describe('GeneratedImageCard video fetch', () => {
             expect(getGeneratedImageBlob).toHaveBeenCalledWith('session-1', 'img-1')
         })
     })
+
+    it('loads audio on demand and renders controls', async () => {
+        renderCard({ mimeType: 'audio/wav' })
+
+        fireEvent.click(screen.getByRole('button', { name: 'Load audio' }))
+
+        await waitFor(() => {
+            expect(document.querySelector('audio[controls]')).toBeInTheDocument()
+        })
+    })
+
+    it('loads unknown files on demand and renders a download link', async () => {
+        renderCard({ mimeType: 'application/octet-stream' })
+
+        fireEvent.click(screen.getByRole('button', { name: 'Prepare download' }))
+
+        await waitFor(() => {
+            expect(screen.getByRole('link', { name: /Download clip\.mp4/ })).toHaveAttribute('download', 'clip.mp4')
+        })
+    })
 })

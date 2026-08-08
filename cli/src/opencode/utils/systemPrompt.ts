@@ -1,8 +1,8 @@
 /**
- * OpenCode-specific system prompt for hapi MCP tools (change_title, display_image, display_video).
+ * OpenCode-specific system prompt for hapi MCP tools (change_title, display_image, display_video, display_media).
  *
  * OpenCode exposes MCP tools with the naming pattern: <server-name>_<tool-name>
- * The hapi MCP server exposes `change_title`, `display_image`, and `display_video`.
+ * The hapi MCP server exposes `change_title`, `display_image`, `display_video`, and `display_media`.
  */
 
 import { trimIdent } from '@/utils/trimIdent';
@@ -10,13 +10,14 @@ import { buildSessionCitationSteerInstruction } from '@hapi/protocol/sessionCita
 import { HAPI_MCP_BRIDGE_PROMPT } from '@/modules/common/hapiMcpBridgePrompt';
 import {
     DISPLAY_IMAGE_PROMPT_HAPI_MCP,
+    DISPLAY_MEDIA_PROMPT_HAPI_MCP,
     DISPLAY_VIDEO_PROMPT_HAPI_MCP,
 } from '@/modules/common/displayImagePrompt';
 import { SKILL_LOOKUP_INSTRUCTION } from '@/modules/common/skillLookupInstruction';
 import { withSessionSummaryInstruction } from '@/modules/common/sessionSummaryInstruction';
 
 /**
- * Title and display_image / display_video instructions for OpenCode to call the hapi MCP tools.
+ * Title and display_image / display_video / display_media instructions for OpenCode to call the hapi MCP tools.
  */
 export const TITLE_INSTRUCTION = trimIdent(`
     ${HAPI_MCP_BRIDGE_PROMPT}
@@ -39,6 +40,7 @@ export function getTitleInstruction(env: NodeJS.ProcessEnv = process.env): strin
 export const OPENCODE_NATIVE_TOOL_INSTRUCTION = trimIdent(`
     ${DISPLAY_IMAGE_PROMPT_HAPI_MCP}
     ${DISPLAY_VIDEO_PROMPT_HAPI_MCP}
+    ${DISPLAY_MEDIA_PROMPT_HAPI_MCP}
     ${buildSessionCitationSteerInstruction({
         inspectTool: 'hapi_inspect_peer',
         pingTool: 'hapi_ping_peer',

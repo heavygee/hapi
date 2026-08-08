@@ -181,8 +181,116 @@ export function detectVideoMimeType(bytes: Uint8Array): string | null {
     return null
 }
 
+export function detectAudioMimeType(bytes: Uint8Array): string | null {
+    if (bytes.length >= 12 && ascii(bytes, 0, 4) === 'RIFF' && ascii(bytes, 8, 12) === 'WAVE') {
+        return 'audio/wav'
+    }
+
+    if (bytes.length >= 4 && ascii(bytes, 0, 4) === 'fLaC') {
+        return 'audio/flac'
+    }
+
+    if (bytes.length >= 32 && ascii(bytes, 0, 4) === 'OggS') {
+        const probe = ascii(bytes, 0, Math.min(bytes.length, 96))
+        if (probe.includes('OpusHead') || probe.includes('vorbis') || probe.includes('Speex')) {
+            return 'audio/ogg'
+        }
+    }
+
+    if (bytes.length >= 3 && ascii(bytes, 0, 3) === 'ID3') {
+        return 'audio/mpeg'
+    }
+
+    if (bytes.length >= 3
+        && bytes[0] === 0xff
+        && (bytes[1] & 0xe0) === 0xe0
+        && (bytes[1] & 0x18) !== 0x08
+        && (bytes[1] & 0x06) !== 0
+        && (bytes[2] & 0xf0) !== 0
+        && (bytes[2] & 0xf0) !== 0xf0
+        && (bytes[2] & 0x0c) !== 0x0c) {
+        return 'audio/mpeg'
+    }
+
+    if (bytes.length >= 12 && ascii(bytes, 4, 8) === 'ftyp') {
+        const brand = ascii(bytes, 8, 12)
+        if (brand === 'M4A ' || brand === 'M4B ' || brand === 'M4P ') {
+            return 'audio/mp4'
+        }
+    }
+
+    return null
+}
+
+function detectIsoBmffTrackKind(bytes: Uint8Array): 'audio' | 'video' | null {
+    const buffer = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    let hasAudio = false
+    let hasVideo = false
+
+    function visitBoxes(start: number, end: number, parent: 'root' | 'moov' | 'trak' | 'mdia'): boolean {
+        let offset = start
+        for (; offset + 8 <= end;) {
+            const size32 = buffer.readUInt32BE(offset)
+            const type = ascii(bytes, offset + 4, offset + 8)
+            let headerSize = 8
+            let boxSize: number
+            if (size32 === 0) {
+                boxSize = end - offset
+            } else if (size32 === 1) {
+                if (offset + 16 > end) return false
+                const extendedSize = buffer.readBigUInt64BE(offset + 8)
+                if (extendedSize > BigInt(Number.MAX_SAFE_INTEGER)) return false
+                headerSize = 16
+                boxSize = Number(extendedSize)
+            } else {
+                boxSize = size32
+            }
+            if (boxSize < headerSize || boxSize > end - offset) return false
+
+            const payloadStart = offset + headerSize
+            const boxEnd = offset + boxSize
+            if (parent === 'root' && type === 'moov') {
+                if (!visitBoxes(payloadStart, boxEnd, 'moov')) return false
+            } else if (parent === 'moov' && type === 'trak') {
+                if (!visitBoxes(payloadStart, boxEnd, 'trak')) return false
+            } else if (parent === 'trak' && type === 'mdia') {
+                if (!visitBoxes(payloadStart, boxEnd, 'mdia')) return false
+            } else if (parent === 'mdia' && type === 'hdlr') {
+                if (boxSize < headerSize + 12) return false
+                const handlerType = ascii(bytes, payloadStart + 8, payloadStart + 12)
+                if (handlerType === 'soun') hasAudio = true
+                if (handlerType === 'vide') hasVideo = true
+            }
+
+            offset = boxEnd
+        }
+        return offset === end
+    }
+
+    if (!visitBoxes(0, bytes.length, 'root')) return null
+    if (hasVideo) return 'video'
+    if (hasAudio) return 'audio'
+    return null
+}
+
 export function isInlineMediaMimeType(mimeType: string): boolean {
-    return mimeType.startsWith('image/') || mimeType.startsWith('video/')
+    return mimeType.startsWith('image/') || mimeType.startsWith('video/') || mimeType.startsWith('audio/')
+}
+
+export function detectDisplayMediaMimeType(bytes: Uint8Array): string {
+    const imageMimeType = detectImageMimeType(bytes)
+    if (imageMimeType) return imageMimeType
+
+    if (bytes.length >= 12 && ascii(bytes, 4, 8) === 'ftyp') {
+        const trackKind = detectIsoBmffTrackKind(bytes)
+        if (trackKind === 'video') return 'video/mp4'
+        if (trackKind === 'audio') return 'audio/mp4'
+        return detectAudioMimeType(bytes) ?? 'application/octet-stream'
+    }
+
+    return detectVideoMimeType(bytes)
+        ?? detectAudioMimeType(bytes)
+        ?? 'application/octet-stream'
 }
 
 function ascii(bytes: Uint8Array, start: number, end: number): string {
@@ -195,8 +303,8 @@ export function registerGeneratedImage(args: { id: string; path: string; mimeTyp
         throw new Error('File is too large to display inline')
     }
 
-    if (!isInlineMediaMimeType(args.mimeType)) {
-        throw new Error('Unsupported inline media MIME type')
+    if (!isInlineMediaMimeType(args.mimeType) && args.mimeType !== 'application/octet-stream') {
+        throw new Error('Unsupported generated media MIME type')
     }
 
     const previous = generatedImages.get(args.id)
@@ -331,6 +439,6 @@ export async function registerGeneratedImageFromAcpBlock(block: unknown): Promis
     }
 
     // URI-only ACP image blocks are not permission-gated. Local-path display must
-    // go through display_image / display_video MCP tools (approval_mode: prompt).
+    // go through display_image / display_video / display_media MCP tools (approval_mode: prompt).
     return null
 }

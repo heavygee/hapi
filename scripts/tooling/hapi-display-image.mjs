@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Post a local image or video inline to a HAPI session via display_image / display_video MCP.
+ * Post a local file to a HAPI session via display_image / display_video / display_media MCP.
  *
  * Uses session.metadata.hapiMcpUrl (published at MCP server start) so we hit the MCP
  * endpoint, not the session hook server on another loopback port in the same process.
@@ -14,7 +14,7 @@
  *   bun scripts/tooling/hapi-display-image.mjs <session-id-prefix> <media-path> [title]
  *
  * Self-resolution (tiann/hapi#1119): $HAPI_SESSION_ID → GET /api/sessions/:id directly.
- * Picks display_video for mp4/webm (ftyp / webm magic), else display_image.
+ * Picks the strict image/video tool when recognized, else display_media.
  * Prefer the MCP tools when available; this script is the shell fallback.
  */
 
@@ -68,7 +68,8 @@ function detectMediaTool(path) {
     const head = readHeader(path, 128)
     if (head.length >= 12 && head.subarray(4, 8).toString('ascii') === 'ftyp') {
         const brand = head.subarray(8, 12).toString('ascii')
-        return brand === 'avif' || brand === 'avis' ? 'display_image' : 'display_video'
+        if (brand === 'avif' || brand === 'avis') return 'display_image'
+        return 'display_media'
     }
     if (head.length >= 4 && head[0] === 0x1a && head[1] === 0x45 && head[2] === 0xdf && head[3] === 0xa3) {
         // EBML is shared by WebM and Matroska — only route DocType "webm" to video.
@@ -83,9 +84,13 @@ function detectMediaTool(path) {
             if (docType === 'webm') return 'display_video'
             break
         }
-        return 'display_image'
+        return 'display_media'
     }
-    return 'display_image'
+    if (head.length >= 8 && head.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'display_image'
+    if (head.length >= 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return 'display_image'
+    if (head.length >= 6 && ['GIF87a', 'GIF89a'].includes(head.subarray(0, 6).toString('ascii'))) return 'display_image'
+    if (head.length >= 12 && head.subarray(0, 4).toString('ascii') === 'RIFF' && head.subarray(8, 12).toString('ascii') === 'WEBP') return 'display_image'
+    return 'display_media'
 }
 
 // Arg shapes (backward compatible):

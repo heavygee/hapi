@@ -95,6 +95,9 @@ export async function buildHapiMcpBridge(
         },
         display_video: {
             approval_mode: 'prompt'
+        },
+        display_media: {
+            approval_mode: 'prompt'
         }
     };
     if (options.enableChangeTitle !== false) {
