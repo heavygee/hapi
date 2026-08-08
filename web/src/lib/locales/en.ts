@@ -85,7 +85,7 @@ export default {
   'sessions.group.expand': 'Expand {n}',
   'sessions.group.collapse': 'Collapse {n}',
   'sessions.runningSection': 'In progress',
-  'sessions.pinnedSection': 'Pinned',
+  'sessions.pinnedSection': 'Pinned sessions',
   'sessions.group.new': 'New session in this directory',
   'sessions.machineFilter.label': 'Filter sessions by machine',
   'sessions.machineFilter.all': 'All',
@@ -351,9 +351,13 @@ export default {
 
   // Session actions
   'session.action.rename': 'Rename',
+  'session.action.pinProject': 'Pin in project',
+  'session.action.unpinProject': 'Unpin from project',
+  'session.action.pinGlobal': 'Pin globally',
+  'session.action.unpinGlobal': 'Unpin globally',
+  'session.action.pinFailed': 'Could not update pin',
   'session.action.pin': 'Pin session',
   'session.action.unpin': 'Unpin session',
-  'session.action.pinFailed': 'Could not update pin',
   'session.action.export': 'Export conversation',
   'session.action.syncCodex': 'Sync from Codex',
   'session.action.syncPi': 'Sync Pi history',

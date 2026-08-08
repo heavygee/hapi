@@ -85,7 +85,7 @@ export default {
   'sessions.group.expand': '展开 {n} 个',
   'sessions.group.collapse': '收起 {n} 个',
   'sessions.runningSection': '进行中',
-  'sessions.pinnedSection': '置顶',
+  'sessions.pinnedSection': '置顶会话',
   'sessions.group.new': '在此目录新建会话',
   'sessions.machineFilter.label': '按机器筛选会话',
   'sessions.machineFilter.all': '全部',
@@ -329,9 +329,11 @@ export default {
 
   // Session actions
   'session.action.rename': '重命名',
-  'session.action.pin': '置顶会话',
-  'session.action.unpin': '取消置顶',
-  'session.action.pinFailed': '无法更新置顶状态',
+  'session.action.pinProject': '置顶到项目',
+  'session.action.unpinProject': '取消项目置顶',
+  'session.action.pinGlobal': '全局置顶',
+  'session.action.unpinGlobal': '取消全局置顶',
+  'session.action.pinFailed': '无法更新置顶',
   'session.action.export': '导出对话',
   'session.action.syncCodex': '从 Codex 同步',
   'session.action.syncPi': '同步 Pi 历史',

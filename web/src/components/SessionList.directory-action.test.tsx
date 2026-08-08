@@ -473,13 +473,16 @@ describe('SessionList collapse behavior', () => {
         expect(getProjectPanel().getAttribute('data-open')).toBeNull()
     })
 
-    it('lifts durable pins into a top Pinned section above project groups', () => {
+    it('keeps project-pinned active sessions in their project group when the preference is on', () => {
+        localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
         const sessions = [
             makeSession({
-                id: 'session-pinned',
+                id: 'session-pinned-running',
+                active: true,
+                thinking: true,
                 pinned: true,
                 updatedAt: 100,
-                metadata: { path: '/work/other', name: 'Pinned task', flavor: 'codex' },
+                metadata: { path: '/work/hapi', name: 'Pinned running task', flavor: 'codex' },
             }),
             makeSession({
                 id: 'session-idle',
@@ -612,6 +615,27 @@ describe('SessionList collapse behavior', () => {
         await waitFor(() => {
             expect(getProjectPanel().getAttribute('data-open')).toBe('true')
         })
+    })
+
+    it('keeps an inactive project-pinned group expanded with no selection', () => {
+        const sessions = [
+            makeSession({
+                id: 'session-pinned',
+                pinned: true,
+                updatedAt: 100,
+                metadata: { path: '/work/hapi', name: 'Pinned task', flavor: 'codex' },
+            }),
+            makeSession({
+                id: 'session-idle',
+                updatedAt: 50,
+                metadata: { path: '/work/hapi', name: 'Idle task', flavor: 'codex' },
+            }),
+        ]
+        render(renderSessionList(sessions, null))
+
+        expect(getProjectPanel().getAttribute('data-open')).toBe('true')
+        expect(screen.getByRole('button', { name: /Pinned task/ })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /Idle task/ })).toBeInTheDocument()
     })
 
     it('keeps the running section open while searching even when collapsed', () => {

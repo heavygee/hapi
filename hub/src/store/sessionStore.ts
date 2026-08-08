@@ -15,6 +15,8 @@ import {
     setSessionServiceTier,
     setSessionActive,
     setSessionPinned,
+    setSessionPinMode,
+    type SessionPinMode,
     setSessionTeamState,
     setSessionTodos,
     replaceSessionTodos,
@@ -105,6 +107,10 @@ export class SessionStore {
 
     setSessionPinned(id: string, pinned: boolean, namespace: string): boolean {
         return setSessionPinned(this.db, id, pinned, namespace)
+    }
+
+    setSessionPinMode(id: string, mode: SessionPinMode, namespace: string): boolean {
+        return setSessionPinMode(this.db, id, mode, namespace)
     }
 
     touchSessionUpdatedAt(id: string, updatedAt: number, namespace: string): boolean {

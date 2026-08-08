@@ -111,6 +111,9 @@ export function createSessionsRoutes(
                 if (order === 'updatedAt') {
                     return b.updatedAt - a.updatedAt
                 }
+                if (Boolean(a.globalPinned) !== Boolean(b.globalPinned)) {
+                    return a.globalPinned ? -1 : 1
+                }
                 if (Boolean(a.pinned) !== Boolean(b.pinned)) {
                     return a.pinned ? -1 : 1
                 }
@@ -970,10 +973,10 @@ export function createSessionsRoutes(
         const body = await c.req.json().catch(() => null)
         const parsed = SetSessionPinnedRequestSchema.safeParse(body)
         if (!parsed.success) {
-            return c.json({ error: 'Invalid body: pinned is required' }, 400)
+            return c.json({ error: 'Invalid body: mode must be none, project, or global' }, 400)
         }
 
-        engine.setSessionPinned(sessionResult.sessionId, parsed.data.pinned)
+        engine.setSessionPinMode(sessionResult.sessionId, parsed.data.mode)
         return c.json({ ok: true })
     })
 

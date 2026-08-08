@@ -233,13 +233,13 @@ export function isSidebarEmptySessionStub(session: SessionSummary): boolean {
 
 export function shouldShowSessionInSidebar(session: SessionSummary, selectedSessionId?: string | null): boolean {
     if (session.id === selectedSessionId) return true
-    if (session.active || session.pinned) return true
+    if (session.active || session.pinned || session.globalPinned) return true
     return !isSidebarEmptySessionStub(session)
 }
 
-/** Durable Pin/Unpin (session.pinned) — not Settings "Pin in-progress sessions". */
+/** Global durable pin — floats into the top Pinned sessions band. */
 export function isExplicitlyPinnedSession(session: SessionSummary): boolean {
-    return Boolean(session.pinned)
+    return Boolean(session.globalPinned)
 }
 
 /** Sort for the global top Pinned band: pending/active first, then recency. */
@@ -933,16 +933,16 @@ function SessionItem(props: {
         ? t('session.action.reopenCursorUnverified')
         : undefined
 
-    const { archiveSession, reopenSession, renameSession, setExternalRefs, deleteSession, setPinned, isPending } = useSessionActions(
+    const { archiveSession, reopenSession, renameSession, setExternalRefs, deleteSession, setPinMode, isPending } = useSessionActions(
         api,
         s.id,
         s.metadata?.flavor ?? null
     )
     const [reopenError, setReopenError] = useState<string | null>(null)
 
-    const handleTogglePin = async () => {
+    const handleSetPinMode = async (mode: 'none' | 'project' | 'global') => {
         try {
-            await setPinned(!s.pinned)
+            await setPinMode(mode)
         } catch (error) {
             addToast({
                 title: t('session.action.pinFailed'),
@@ -1045,8 +1045,9 @@ function SessionItem(props: {
                 sessionId={s.id}
                 sessionTitle={sessionName}
                 sessionActive={s.active}
-                sessionPinned={s.pinned}
-                onTogglePin={() => void handleTogglePin()}
+                sessionPinned={Boolean(s.pinned) && !Boolean(s.globalPinned)}
+                sessionGlobalPinned={Boolean(s.globalPinned)}
+                onSetPinMode={(mode) => void handleSetPinMode(mode)}
                 onRename={() => setRenameOpen(true)}
                 onLinkPr={githubPrAwarenessEnabled ? () => setLinkPrOpen(true) : undefined}
                 linkedPr={linkedPr}
