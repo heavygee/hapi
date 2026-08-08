@@ -714,8 +714,10 @@ layers:
   - branch: driver/session-attached-jobs
 
   # tiann/hapi#1412 — GET /share?url=&text=&title= native/deep-link ingest.
+  # Soup union tip (on top of #980 searchable picker already in soup).
+  # Upstreamable tip remains feat/share-native-deeplink (clean vs upstream/main).
   # Web-only. Peer-stack Playwright green (share-native-deeplink.png).
   # Do NOT open upstream PR until operator dogfood OK on :3006.
-  # Worktree: ~/coding/hapi/worktrees/share-native-deeplink @ feat/share-native-deeplink
-  # Tip: fb4a292dc
-  - branch: feat/share-native-deeplink
+  # Worktree: ~/coding/hapi/worktrees/share-native-deeplink-soup @ driver/share-native-deeplink
+  # Tip: 98a6602a3
+  - branch: driver/share-native-deeplink
