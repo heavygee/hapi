@@ -77,7 +77,7 @@ import SettingsUsagePage from '@/routes/settings/usage'
 import SharePage from '@/routes/share'
 import OverseerConsolePage from '@/routes/overseer'
 import { retargetSharePendingTransfer, setSharePendingTransfer } from '@/lib/sharePendingState'
-import { deleteShareTransfer } from '@/lib/shareTransfer'
+import { deleteShareTransfer, parseShareSearch } from '@/lib/shareTransfer'
 import { GardenXrEntryChip } from '@/garden/components/GardenXrEntryChip'
 
 
@@ -1883,19 +1883,12 @@ const settingsUsageRoute = createRoute({
 // Web Share Target landing route. Service worker (`web/src/sw.ts`)
 // intercepts the manifest's `POST /share` and 303-redirects here with an
 // IDB transfer id. `error=ingest` is set when the SW failed to write IDB.
+// Native / deep-link clients may instead open GET `/share?url=&text=&title=`
+// (no `id`); SharePage synthesizes the same IDB transfer client-side.
 const shareRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/share',
-    validateSearch: (search: Record<string, unknown>): { id?: string; error?: string } => {
-        const result: { id?: string; error?: string } = {}
-        if (typeof search.id === 'string' && search.id) {
-            result.id = search.id
-        }
-        if (typeof search.error === 'string' && search.error) {
-            result.error = search.error
-        }
-        return result
-    },
+    validateSearch: (search: Record<string, unknown>) => parseShareSearch(search),
     component: SharePage,
 })
 

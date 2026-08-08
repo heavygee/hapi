@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
     buildSharePayloadFromFormData,
+    buildSharePayloadFromSearchFields,
+    hasShareDeepLinkContent,
     ingestShareRequest,
+    parseShareSearch,
     type ShareTransferPayload,
 } from './shareTransfer'
 
@@ -76,6 +79,107 @@ describe('buildSharePayloadFromFormData', () => {
 
         expect(payload.files).toHaveLength(1)
         expect(payload.files[0].name).toBe('real.txt')
+    })
+})
+
+describe('parseShareSearch', () => {
+    it('keeps id and error as today', () => {
+        expect(parseShareSearch({ id: 'xfer-1', error: 'ingest' })).toEqual({
+            id: 'xfer-1',
+            error: 'ingest',
+        })
+    })
+
+    it('accepts url, text, and title when non-empty', () => {
+        expect(parseShareSearch({
+            url: 'https://example.com',
+            text: 'hello',
+            title: 'Title',
+        })).toEqual({
+            url: 'https://example.com',
+            text: 'hello',
+            title: 'Title',
+        })
+    })
+
+    it('omits empty content fields', () => {
+        expect(parseShareSearch({ url: '', text: '  ', title: '' })).toEqual({})
+    })
+
+    it('preserves id alongside content fields (id path wins at ingest)', () => {
+        expect(parseShareSearch({
+            id: 'xfer-1',
+            url: 'https://example.com',
+            text: 'ignored-at-ingest',
+        })).toEqual({
+            id: 'xfer-1',
+            url: 'https://example.com',
+            text: 'ignored-at-ingest',
+        })
+    })
+})
+
+describe('hasShareDeepLinkContent', () => {
+    it('is true for url-only', () => {
+        expect(hasShareDeepLinkContent({ url: 'https://a.example' })).toBe(true)
+    })
+
+    it('is true for text-only', () => {
+        expect(hasShareDeepLinkContent({ text: 'note' })).toBe(true)
+    })
+
+    it('is true when both url and text are set', () => {
+        expect(hasShareDeepLinkContent({
+            url: 'https://a.example',
+            text: 'note',
+        })).toBe(true)
+    })
+
+    it('is false when empty / no-id', () => {
+        expect(hasShareDeepLinkContent({})).toBe(false)
+        expect(hasShareDeepLinkContent({ id: 'xfer-1' })).toBe(false)
+    })
+})
+
+describe('buildSharePayloadFromSearchFields', () => {
+    it('builds the same text payload shape as form-data (url-only)', () => {
+        expect(buildSharePayloadFromSearchFields(
+            { url: 'https://example.com/page' },
+            1700000000000,
+        )).toEqual({
+            title: '',
+            text: '',
+            url: 'https://example.com/page',
+            files: [],
+            createdAt: 1700000000000,
+        })
+    })
+
+    it('builds text-only payload', () => {
+        expect(buildSharePayloadFromSearchFields(
+            { text: 'Hello world' },
+            42,
+        )).toEqual({
+            title: '',
+            text: 'Hello world',
+            url: '',
+            files: [],
+            createdAt: 42,
+        })
+    })
+
+    it('builds combined title+text+url payload', () => {
+        expect(buildSharePayloadFromSearchFields({
+            title: 'My note',
+            text: 'Hello world',
+            url: 'https://example.com/page',
+        }, 99)).toEqual({
+            title: 'My note',
+            text: 'Hello world',
+            url: 'https://example.com/page',
+            files: [],
+            createdAt: 99,
+        })
     })
 })
 
