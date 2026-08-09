@@ -723,3 +723,11 @@ layers:
 
   # DROPPED 2026-08-09: driver/notify-summary-glued-line MERGED as tiann/hapi#1426
   # (df958ae34 — glued last-line AGENT_NOTIFY_SUMMARY parse; Fixes #1425)
+
+  # tiann/hapi#1452 — fail-closed scheme-less markdown file links (defense in <A>).
+  # Web-only. Fixture proof: 1452-failclosed-fixture.png. Extends #1142.
+  # Do NOT open upstream PR until operator dogfood OK on :3006.
+  # Worktree: ~/coding/hapi/worktrees/markdown-file-link-failclosed @ fix/markdown-file-link-failclosed
+  # Tip: 35d59fee2 (origin/fix/markdown-file-link-failclosed)
+  - branch: fix/markdown-file-link-failclosed
+
