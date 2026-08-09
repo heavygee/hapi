@@ -8,7 +8,7 @@
 
 ## Discovery (orchestrator)
 
-No upstream/fork issue found that matches **harness wake → hub session wake**. Nearby but **different**:
+No upstream/fork issue found that matches **harness wake → hub session wake** (at spawn). **Filed:** [#1470](https://github.com/tiann/hapi/issues/1470). Spike: `docs/plans/2026-08-09-agent-harness-session-wake-spike.md`. Nearby but **different**:
 
 - [#929](https://github.com/tiann/hapi/issues/929) / [#915](https://github.com/tiann/hapi/issues/915) — runner/hub restart orphan / archive resilience  
 - [#826](https://github.com/tiann/hapi/pull/826) — reopen archived sessions  
