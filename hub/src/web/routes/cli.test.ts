@@ -1,13 +1,17 @@
 import { beforeAll, describe, expect, it, mock } from 'bun:test'
 import { Hono } from 'hono'
+import { HAPI_SESSION_CAPABILITY_HEADER } from '@hapi/protocol'
 import type { SyncEngine } from '../../sync/syncEngine'
 import { createConfiguration } from '../../configuration'
 import { createCliRoutes } from './cli'
+import { mintPeerSessionCapability } from '../peerCapability'
 import { SessionIdentityConflictError } from '../../store/sessions'
+
+const CLI_JWT_SECRET = new TextEncoder().encode('cli-route-test-secret')
 
 function createApp(engine: Partial<SyncEngine>) {
     const app = new Hono()
-    app.route('/cli', createCliRoutes(() => engine as SyncEngine))
+    app.route('/cli', createCliRoutes(() => engine as SyncEngine, CLI_JWT_SECRET))
     return app
 }
 
@@ -293,11 +297,14 @@ describe('cli lazy session creation', () => {
 describe('POST /cli/sessions/:id/peer-messages', () => {
     const sourceId = '6212dae5-8a60-4284-b7a5-c09aa3571ce4'
     const targetId = '05d9f0f2-9273-4137-933c-07459a1146a2'
+    const sourceCapability = mintPeerSessionCapability(sourceId, CLI_JWT_SECRET)
 
-    it('attributes peer delivery from the path source session id', async () => {
-        const sentMessages: Array<{ sessionId: string; payload: unknown }> = []
-        const app = createApp({
-            resolveSessionAccess: (id: string, _namespace: string) => {
+    function peerSessionsEngine(opts: {
+        targetActive?: boolean
+        sendMessage?: (sessionId: string, payload: unknown) => Promise<void>
+    } = {}) {
+        return {
+            resolveSessionAccess: (id: string) => {
                 if (id === sourceId) {
                     return {
                         ok: true as const,
@@ -309,26 +316,39 @@ describe('POST /cli/sessions/:id/peer-messages', () => {
                     return {
                         ok: true as const,
                         sessionId: targetId,
-                        session: { id: targetId, active: true, metadata: { name: 'Target' } }
+                        session: {
+                            id: targetId,
+                            active: opts.targetActive !== false,
+                            metadata: { name: 'Target' }
+                        }
                     }
                 }
                 return { ok: false as const, reason: 'not-found' as const }
             },
-            sendMessage: async (sessionId: string, payload: unknown) => {
+            sendMessage: opts.sendMessage ?? (async () => {
+                throw new Error('should not send')
+            })
+        } as never
+    }
+
+    it('attributes peer delivery when path id matches session capability', async () => {
+        const sentMessages: Array<{ sessionId: string; payload: unknown }> = []
+        const app = createApp(peerSessionsEngine({
+            sendMessage: async (sessionId, payload) => {
                 sentMessages.push({ sessionId, payload })
             }
-        } as never)
+        }))
 
         const response = await app.request(`/cli/sessions/${sourceId}/peer-messages`, {
             method: 'POST',
             headers: {
                 ...authHeaders(),
-                'content-type': 'application/json'
+                'content-type': 'application/json',
+                [HAPI_SESSION_CAPABILITY_HEADER]: sourceCapability
             },
             body: JSON.stringify({
                 targetSessionId: targetId,
                 text: 'handoff',
-                // Body source claims must not override the path id.
                 peer: { sourceSessionId: targetId, sourceName: 'forged' }
             })
         })
@@ -346,35 +366,58 @@ describe('POST /cli/sessions/:id/peer-messages', () => {
         }])
     })
 
-    it('rejects delivery when the target is inactive', async () => {
-        const app = createApp({
-            resolveSessionAccess: (id: string) => {
-                if (id === sourceId) {
-                    return {
-                        ok: true as const,
-                        sessionId: sourceId,
-                        session: { id: sourceId, active: true, metadata: { name: 'Source' } }
-                    }
-                }
-                if (id === targetId) {
-                    return {
-                        ok: true as const,
-                        sessionId: targetId,
-                        session: { id: targetId, active: false, metadata: { name: 'Target' } }
-                    }
-                }
-                return { ok: false as const, reason: 'not-found' as const }
+    it('rejects path source B when credential is for session A', async () => {
+        const sentMessages: unknown[] = []
+        const app = createApp(peerSessionsEngine({
+            sendMessage: async (_sessionId, payload) => {
+                sentMessages.push(payload)
+            }
+        }))
+        const capabilityA = mintPeerSessionCapability(sourceId, CLI_JWT_SECRET)
+
+        const response = await app.request(`/cli/sessions/${targetId}/peer-messages`, {
+            method: 'POST',
+            headers: {
+                ...authHeaders(),
+                'content-type': 'application/json',
+                // Capability for A presented against path B — forge attempt.
+                [HAPI_SESSION_CAPABILITY_HEADER]: capabilityA
             },
+            body: JSON.stringify({ targetSessionId: sourceId, text: 'forged as B' })
+        })
+
+        expect(response.status).toBe(403)
+        expect(sentMessages).toEqual([])
+    })
+
+    it('rejects attributed delivery without a session capability', async () => {
+        const app = createApp(peerSessionsEngine({
             sendMessage: async () => {
                 throw new Error('should not send')
             }
-        } as never)
+        }))
 
         const response = await app.request(`/cli/sessions/${sourceId}/peer-messages`, {
             method: 'POST',
             headers: {
                 ...authHeaders(),
                 'content-type': 'application/json'
+            },
+            body: JSON.stringify({ targetSessionId: targetId, text: 'handoff' })
+        })
+
+        expect(response.status).toBe(403)
+    })
+
+    it('rejects delivery when the target is inactive', async () => {
+        const app = createApp(peerSessionsEngine({ targetActive: false }))
+
+        const response = await app.request(`/cli/sessions/${sourceId}/peer-messages`, {
+            method: 'POST',
+            headers: {
+                ...authHeaders(),
+                'content-type': 'application/json',
+                [HAPI_SESSION_CAPABILITY_HEADER]: sourceCapability
             },
             body: JSON.stringify({ targetSessionId: targetId, text: 'handoff' })
         })

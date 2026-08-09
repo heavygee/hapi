@@ -6,9 +6,11 @@ import {
     CreateOrLoadSessionRequestSchema,
     ClearOpencodeSessionCallbackRequestSchema,
     CursorMigrateToAcpRequestSchema,
+    HAPI_SESSION_CAPABILITY_HEADER,
     PROTOCOL_VERSION
 } from '@hapi/protocol'
 import { resolvePeerMetaFromSourceSession } from './messages'
+import { mintPeerSessionCapability, verifyPeerSessionCapability } from '../peerCapability'
 import { getConfiguration } from '../../configuration'
 import { readSessionSummaryContractEnabled } from '../../config/sessionSummaryContract'
 import { constantTimeEquals } from '../../utils/crypto'
@@ -67,7 +69,10 @@ function clearErrorStatus(code: string): 403 | 404 | 409 | 500 {
                 : 500
 }
 
-export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<CliEnv> {
+export function createCliRoutes(
+    getSyncEngine: () => SyncEngine | null,
+    jwtSecret: Uint8Array = new TextEncoder().encode('test-secret')
+): Hono<CliEnv> {
     const app = new Hono<CliEnv>()
 
     app.use('*', async (c, next) => {
@@ -134,7 +139,8 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
             const sessionSummaryContract = await readSessionSummaryContractEnabled(
                 getConfiguration().dataDir
             )
-            return c.json({ session, sessionSummaryContract })
+            const sessionCapability = mintPeerSessionCapability(session.id, jwtSecret)
+            return c.json({ session, sessionSummaryContract, sessionCapability })
         } catch (error) {
             if (error instanceof SessionIdentityConflictError) {
                 return c.json({ error: error.message }, 409)
@@ -288,8 +294,9 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
     })
 
     /**
-     * Attributed peer delivery (#1203). Source id is this path param — the
-     * calling session's CLI identity — not a web JWT body field.
+     * Attributed peer delivery (#1203). Source id is this path param, accepted
+     * only with a matching session capability (HMAC over hub JWT secret).
+     * Shared CLI token + path claim alone is rejected.
      */
     app.post('/sessions/:id/peer-messages', async (c) => {
         const engine = getSyncEngine()
@@ -301,6 +308,11 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
         const source = resolveSessionForNamespace(engine, sourceSessionId, namespace)
         if (!source.ok) {
             return c.json({ error: source.error }, source.status)
+        }
+
+        const capability = c.req.header(HAPI_SESSION_CAPABILITY_HEADER)
+        if (!verifyPeerSessionCapability(source.sessionId, capability, jwtSecret)) {
+            return c.json({ error: 'Invalid session capability' }, 403)
         }
 
         const body = await c.req.json().catch(() => null)

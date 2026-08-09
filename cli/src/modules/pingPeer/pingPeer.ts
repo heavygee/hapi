@@ -13,6 +13,7 @@ import {
     extractAssistantPlainText,
     HAPI_PEER_DELIVERY_HEADER,
     HAPI_PEER_DELIVERY_HEADER_VALUE,
+    HAPI_SESSION_CAPABILITY_HEADER,
     isObject,
     isSessionId
 } from '@hapi/protocol'
@@ -63,11 +64,14 @@ export type PingPeerOptions = {
     accessToken?: string
     /**
      * Calling session id from ApiSessionClient (MCP inside a wrapped session).
-     * When set, delivery uses `POST /cli/sessions/:source/peer-messages` so the
-     * hub binds provenance to the CLI path — never a web JWT body field (#1203).
-     * Bare `hapi ping-peer` omits this and sends unattributed peer rows.
+     * When set with {@link sessionCapability}, delivery uses
+     * `POST /cli/sessions/:source/peer-messages` so the hub binds provenance to
+     * that session's capability — never a web JWT body field (#1203).
+     * Bare `hapi ping-peer` omits these and sends unattributed peer rows.
      */
     authenticatedSourceSessionId?: string
+    /** Hub-minted HMAC from CLI create/load; required for attributed delivery. */
+    sessionCapability?: string
     http?: AxiosInstance
     sleep?: (ms: number) => Promise<void>
     now?: () => number
@@ -392,6 +396,7 @@ async function sendAttributedPeerMessage(
     apiUrl: string,
     cliToken: string,
     sourceSessionId: string,
+    sessionCapability: string,
     targetSessionId: string,
     message: string,
     http: AxiosInstance
@@ -402,7 +407,8 @@ async function sendAttributedPeerMessage(
         {
             headers: buildHubRequestHeaders({
                 Authorization: `Bearer ${cliToken}`,
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                [HAPI_SESSION_CAPABILITY_HEADER]: sessionCapability
             }),
             timeout: 30_000,
             validateStatus: () => true
@@ -568,14 +574,16 @@ export async function pingPeer(options: PingPeerOptions): Promise<PingPeerResult
     }
 
     const sourceId = options.authenticatedSourceSessionId?.trim() ?? ''
-    const attributed = Boolean(sourceId && isSessionId(sourceId))
+    const capability = options.sessionCapability?.trim() ?? ''
+    const attributed = Boolean(sourceId && isSessionId(sourceId) && capability)
     onProgress?.(`sending message (${message.length} chars${attributed ? ', attributed' : ', unattributed'})...`)
     if (attributed) {
-        // CLI token (same credential as ApiSessionClient), not the web JWT.
+        // CLI token + session capability (not the web JWT / not path-id alone).
         await sendAttributedPeerMessage(
             apiUrl,
             accessToken,
             sourceId,
+            capability,
             matched.id,
             message,
             http

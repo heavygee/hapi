@@ -51,7 +51,7 @@ export class ApiClient {
         }
         timeoutMs?: number
         signal?: AbortSignal
-    }): Promise<Session> {
+    }): Promise<Session & { sessionCapability?: string }> {
         const response = await axios.post<CreateSessionResponse>(
             `${configuration.apiUrl}/cli/sessions`,
             {
@@ -123,7 +123,11 @@ export class ApiClient {
             effort: raw.effort,
             serviceTier: raw.serviceTier,
             permissionMode: raw.permissionMode,
-            collaborationMode: raw.collaborationMode
+            collaborationMode: raw.collaborationMode,
+            // Hub-minted HMAC capability for attributed peer delivery (#1203).
+            ...(typeof parsed.data.sessionCapability === 'string' && parsed.data.sessionCapability
+                ? { sessionCapability: parsed.data.sessionCapability }
+                : {})
         }
     }
 
@@ -330,8 +334,14 @@ export class ApiClient {
         return parsed.data.sessionId
     }
 
-    sessionSyncClient(session: Session, options?: ApiSessionClientOptions): ApiSessionClient {
-        return new ApiSessionClient(this.token, session, options)
+    sessionSyncClient(
+        session: Session & { sessionCapability?: string },
+        options?: ApiSessionClientOptions
+    ): ApiSessionClient {
+        return new ApiSessionClient(this.token, session, {
+            ...options,
+            sessionCapability: options?.sessionCapability ?? session.sessionCapability
+        })
     }
 
     machineSyncClient(machine: Machine, options?: { workspaceRoots?: string[] }): ApiMachineClient {

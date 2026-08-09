@@ -52,7 +52,13 @@ export type CliMessagesResponse = z.infer<typeof CliMessagesResponseSchema>
 export const CreateSessionResponseSchema = z.object({
     session: SessionSchema,
     /** Hub opt-in for AGENT_NOTIFY_SUMMARY prompt injection (default off when omitted). */
-    sessionSummaryContract: z.boolean().optional()
+    sessionSummaryContract: z.boolean().optional(),
+    /**
+     * Session-scoped peer-delivery capability (#1203). HMAC over hub JWT secret;
+     * required for attributed `POST /cli/sessions/:id/peer-messages`. Never an
+     * agent/env/tool argument — only the creating ApiSessionClient holds it.
+     */
+    sessionCapability: z.string().min(1).optional()
 })
 
 export type CreateSessionResponse = z.infer<typeof CreateSessionResponseSchema>
@@ -501,7 +507,9 @@ export type MessageDeliveryMode = z.infer<typeof MessageDeliveryModeSchema>
  *
  * Authoritative `sourceSessionId` is never taken from the web JWT send body.
  * Attributed delivery uses {@link CliPeerDeliverRequestSchema} on
- * `POST /cli/sessions/:sourceSessionId/peer-messages` (CLI token + path id).
+ * `POST /cli/sessions/:sourceSessionId/peer-messages` with
+ * {@link HAPI_SESSION_CAPABILITY_HEADER} (HMAC capability minted at CLI
+ * create/load). Path id alone + shared CLI token is not sufficient.
  * The web path may still set `sentFrom: peer` via {@link HAPI_PEER_DELIVERY_HEADER}
  * for unattributed outside-session CLI sends; any body `peer` field is ignored.
  *
@@ -518,9 +526,12 @@ export type PeerDeliveryMeta = z.infer<typeof PeerDeliveryMetaSchema>
 export const HAPI_PEER_DELIVERY_HEADER = 'x-hapi-peer-delivery'
 export const HAPI_PEER_DELIVERY_HEADER_VALUE = '1'
 
+/** Session-scoped capability for attributed peer delivery (CLI create/load mint). */
+export const HAPI_SESSION_CAPABILITY_HEADER = 'x-hapi-session-capability'
+
 /**
- * Attributed peer deliver: source id is the CLI route path param (the calling
- * session's ApiSessionClient identity), never a tool argument or web body field.
+ * Attributed peer deliver: source id is the CLI route path param, accepted only
+ * with a matching session capability header (never a tool argument / web body).
  */
 export const CliPeerDeliverRequestSchema = z.object({
     targetSessionId: z.string().trim().min(1).max(128),

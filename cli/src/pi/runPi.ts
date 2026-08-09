@@ -16,7 +16,8 @@ import { PiSteerDispatcher } from './steerDispatcher';
 import type { ListPiModelsResponse, PiCommandSummary, SlashCommand, SlashCommandsResponse } from '@hapi/protocol/apiTypes';
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
 import type { ListSkillsResponse, SkillSummary } from '@/modules/common/skills';
-import type { AttachmentMetadata } from '@/api/types';
+import type { AttachmentMetadata, MessageMeta } from '@/api/types';
+import { annotatePeerDeliveryForAgent } from '@/utils/attachmentFormatter';
 import { readBoundedAttachmentFile } from '@/modules/common/attachmentFile';
 import { MAX_UPLOAD_BYTES } from '@/modules/common/attachmentLimits';
 import { isAuthorizedUploadFile, isPathWithinUploadDir, type UploadFileIdentity } from '@/modules/common/handlers/uploads';
@@ -107,9 +108,15 @@ export async function preparePiUserMessage(
     options: {
         authorizeImagePath: (path: string) => boolean;
         authorizeOpenedImage: (path: string, identity: UploadFileIdentity) => boolean;
+        /** Peer provenance meta (#1203); annotated as a suffix so slash/skills stay first-line. */
+        meta?: MessageMeta | null;
     },
 ): Promise<PiPromptPreparation> {
-    const formattedMessage = formatPiUserMessage(message, attachments, commands);
+    const formattedMessage = annotatePeerDeliveryForAgent(
+        formatPiUserMessage(message, attachments, commands),
+        options.meta ?? undefined,
+        'suffix',
+    );
     const images: PiImageContent[] = [];
     const imageReadErrors: string[] = [];
     let totalImageBytes = 0;
@@ -764,6 +771,7 @@ export async function runPi(opts: {
                 {
                     authorizeImagePath: (path) => isPathWithinUploadDir(path, apiSession.sessionId),
                     authorizeOpenedImage: (path, identity) => isAuthorizedUploadFile(path, apiSession.sessionId, identity),
+                    meta: message.meta,
                 },
             );
             if (localId) {

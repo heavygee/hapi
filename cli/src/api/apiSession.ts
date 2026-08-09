@@ -172,8 +172,12 @@ export type PendingSessionSnapshot = {
 }
 
 export type ApiSessionClientOptions = {
-    materialize?: (snapshot: PendingSessionSnapshot, signal: AbortSignal) => Promise<Session>
+    materialize?: (snapshot: PendingSessionSnapshot, signal: AbortSignal) => Promise<
+        Session & { sessionCapability?: string }
+    >
     onMaterialized?: (session: Session, snapshot: PendingSessionSnapshot) => void
+    /** Hub-minted HMAC for attributed peer delivery (#1203). Not agent-visible. */
+    sessionCapability?: string
 }
 
 type PendingOutboundEvent = {
@@ -233,6 +237,8 @@ function hasSameJsonValue(left: unknown, right: unknown): boolean {
 export class ApiSessionClient extends EventEmitter {
     private readonly token: string
     readonly sessionId: string
+    /** Session-scoped peer capability from hub create/load; never exported to agent env. */
+    private sessionCapability: string | null
     private metadata: Metadata | null
     private metadataVersion: number
     private agentState: AgentState | null
@@ -277,10 +283,16 @@ export class ApiSessionClient extends EventEmitter {
     private readonly pendingOutboundEvents: PendingOutboundEvent[] = []
     private didWarnPendingQueueFull = false
 
+    /** Capability for attributed peer delivery; null outside a hub-minted session. */
+    getPeerSessionCapability(): string | null {
+        return this.sessionCapability
+    }
+
     constructor(token: string, session: Session, options: ApiSessionClientOptions = {}) {
         super()
         this.token = token
         this.sessionId = session.id
+        this.sessionCapability = options.sessionCapability?.trim() || null
         this.metadata = session.metadata
         this.metadataVersion = session.metadataVersion
         this.agentState = session.agentState
@@ -544,6 +556,9 @@ export class ApiSessionClient extends EventEmitter {
                 this.metadataVersion = materialized.metadataVersion
                 this.agentState = materialized.agentState
                 this.agentStateVersion = materialized.agentStateVersion
+                if (typeof materialized.sessionCapability === 'string' && materialized.sessionCapability.trim()) {
+                    this.sessionCapability = materialized.sessionCapability.trim()
+                }
                 this.state = 'active'
 
                 if (shouldSyncMetadata && latestMetadata) {
