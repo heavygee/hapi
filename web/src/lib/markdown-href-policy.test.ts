@@ -1,0 +1,144 @@
+import { describe, expect, it } from 'vitest'
+import {
+    classifyNoSchemeHref,
+    expandTildePath,
+    isKnownSpaHref,
+    splitHrefMeta,
+} from '@/lib/markdown-href-policy'
+
+describe('splitHrefMeta', () => {
+    it('strips #fragment for file targets', () => {
+        expect(splitHrefMeta('docs/foo.md#section')).toEqual({
+            path: 'docs/foo.md',
+            suffix: '#section',
+        })
+    })
+
+    it('strips query before fragment when both present', () => {
+        expect(splitHrefMeta('docs/foo.md?x=1#y')).toEqual({
+            path: 'docs/foo.md',
+            suffix: '?x=1#y',
+        })
+    })
+})
+
+describe('isKnownSpaHref', () => {
+    it.each([
+        '/settings',
+        '/settings/general',
+        '/sessions',
+        '/sessions/abc-def',
+        '/sessions/abc/file',
+        '/browse',
+        '/share',
+        '#section',
+        '?q=1',
+        '/',
+    ])('treats %s as SPA', (href) => {
+        expect(isKnownSpaHref(href)).toBe(true)
+    })
+
+    it.each([
+        '/home/user/proj/docs/a.md',
+        '~/proj/docs/a.md',
+        'docs/foo.md',
+        './foo',
+        '../escape.md',
+        '//example.com/path',
+    ])('does not treat %s as SPA', (href) => {
+        expect(isKnownSpaHref(href)).toBe(false)
+    })
+})
+
+describe('expandTildePath', () => {
+    it('expands ~/ against /home/<user> workspace', () => {
+        expect(expandTildePath('~/coding/hapi/docs/a.md', '/home/ada/coding/hapi')).toBe(
+            '/home/ada/coding/hapi/docs/a.md'
+        )
+    })
+
+    it('returns null without workspace metadata', () => {
+        expect(expandTildePath('~/docs/a.md', null)).toBeNull()
+    })
+})
+
+describe('classifyNoSchemeHref — fail-closed (#1452)', () => {
+    const workspace = '/home/ada/coding/hapi'
+
+    it('keeps allowlisted relative file targets as file preview', () => {
+        expect(classifyNoSchemeHref('docs/foo.md')).toEqual({
+            action: 'file',
+            path: 'docs/foo.md',
+        })
+    })
+
+    it('opens ./prefixed allowlisted files in preview', () => {
+        expect(classifyNoSchemeHref('./diagram.mmd')).toEqual({
+            action: 'file',
+            path: './diagram.mmd',
+        })
+    })
+
+    it('strips #fragment and still opens allowlisted relative files', () => {
+        expect(classifyNoSchemeHref('docs/foo.md#section')).toEqual({
+            action: 'file',
+            path: 'docs/foo.md',
+        })
+    })
+
+    it('routes in-workspace absolute paths to file preview', () => {
+        expect(classifyNoSchemeHref('/home/ada/coding/hapi/docs/a.md', { workspacePath: workspace })).toEqual({
+            action: 'file',
+            path: '/home/ada/coding/hapi/docs/a.md',
+        })
+    })
+
+    it('expands in-workspace ~/ paths to absolute file preview targets', () => {
+        expect(classifyNoSchemeHref('~/coding/hapi/docs/a.md', { workspacePath: workspace })).toEqual({
+            action: 'file',
+            path: '/home/ada/coding/hapi/docs/a.md',
+        })
+    })
+
+    it('renders absolute paths outside the workspace as inert', () => {
+        expect(classifyNoSchemeHref('/etc/passwd.sh', { workspacePath: workspace })).toEqual({
+            action: 'inert',
+        })
+    })
+
+    it('renders unresolvable ~/ without workspace as inert (never SPA)', () => {
+        expect(classifyNoSchemeHref('~/coding/hapi/docs/a.md')).toEqual({ action: 'inert' })
+    })
+
+    it('renders no-extension path-like hrefs as inert', () => {
+        expect(classifyNoSchemeHref('docs/foo')).toEqual({ action: 'inert' })
+        expect(classifyNoSchemeHref('README')).toEqual({ action: 'inert' })
+        expect(classifyNoSchemeHref('./relative-route')).toEqual({ action: 'inert' })
+    })
+
+    it('renders parent-relative escape attempts as inert', () => {
+        expect(classifyNoSchemeHref('../escape.md')).toEqual({ action: 'inert' })
+    })
+
+    it('keeps real app routes navigable', () => {
+        expect(classifyNoSchemeHref('/settings')).toEqual({ action: 'navigate' })
+        expect(classifyNoSchemeHref('/settings/general')).toEqual({ action: 'navigate' })
+        expect(classifyNoSchemeHref('#section')).toEqual({ action: 'navigate' })
+        expect(classifyNoSchemeHref('?q=1')).toEqual({ action: 'navigate' })
+    })
+
+    it('keeps protocol-relative URLs navigable', () => {
+        expect(classifyNoSchemeHref('//example.com/path')).toEqual({ action: 'navigate' })
+    })
+
+    it('never classifies /home/... absolute file hrefs as SPA navigate', () => {
+        const decision = classifyNoSchemeHref('/home/ada/coding/hapi/docs/a.md', {
+            workspacePath: workspace,
+        })
+        expect(decision.action).not.toBe('navigate')
+        expect(decision).toEqual({
+            action: 'file',
+            path: '/home/ada/coding/hapi/docs/a.md',
+        })
+    })
+})

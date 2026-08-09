@@ -26,6 +26,7 @@ import { CopyIcon, CheckIcon, WrapIcon } from '@/components/icons'
 import { useTranslation } from '@/lib/use-translation'
 import { useOptionalHappyChatContext } from '@/components/AssistantChat/context'
 import { decodeFilePathHref, remarkFilePathLinks } from '@/lib/remark-file-path-links'
+import { classifyNoSchemeHref } from '@/lib/markdown-href-policy'
 import { remarkSessionPathLinks } from '@/lib/remark-session-path-links'
 import { buildSessionReferencePath, parseSessionPathHref } from '@/lib/sessionReference'
 import { UriConfirmDialog } from '@/components/UriConfirmDialog'
@@ -494,25 +495,23 @@ function Code(props: ComponentPropsWithoutRef<'code'>) {
 }
 
 function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & { filePath: string; sessionId: string }) {
+    const { filePath, sessionId, ...anchorProps } = props
     const navigate = useNavigate()
-    const rel = props.target === '_blank' ? (props.rel ?? 'noreferrer') : props.rel
-    const search = new URLSearchParams({
-        path: encodeBase64(props.filePath),
-        origin: 'chat',
-    }).toString()
-    const href = `/sessions/${encodeURIComponent(props.sessionId)}/file?${search}`
+    const rel = anchorProps.target === '_blank' ? (anchorProps.rel ?? 'noreferrer') : anchorProps.rel
+    const search = new URLSearchParams({ path: encodeBase64(filePath), origin: 'chat' }).toString()
+    const href = `/sessions/${encodeURIComponent(sessionId)}/file?${search}`
 
     const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
-        props.onClick?.(event)
+        anchorProps.onClick?.(event)
         if (event.defaultPrevented) return
         if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
 
         event.preventDefault()
         void navigate({
             to: '/sessions/$sessionId/file',
-            params: { sessionId: props.sessionId },
+            params: { sessionId },
             search: {
-                path: encodeBase64(props.filePath),
+                path: encodeBase64(filePath),
                 origin: 'chat',
             }
         })
@@ -520,11 +519,11 @@ function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & { filePath: strin
 
     return (
         <a
-            {...props}
+            {...anchorProps}
             href={href}
             rel={rel}
             onClick={handleClick}
-            className={cn('aui-md-a font-medium text-[var(--app-link)] underline decoration-[color:var(--app-link-muted)] underline-offset-3', props.className)}
+            className={cn('aui-md-a font-medium text-[var(--app-link)] underline decoration-[color:var(--app-link-muted)] underline-offset-3', anchorProps.className)}
         />
     )
 }
@@ -561,8 +560,10 @@ function SessionPathAnchor(props: ComponentPropsWithoutRef<'a'> & { targetSessio
 /**
  * Anchor component with URI scheme policy enforcement.
  *
- * - Relative / no-scheme hrefs (/settings, ./foo, #section, ?q=1): passed through
- *   without interception so the browser or SPA router can navigate normally.
+ * - Scheme-less hrefs (#1452 fail-closed): known app routes (`/settings`, `#`,
+ *   `?`, `/sessions/…`) stay SPA-navigable; workspace file targets open via
+ *   FilePathAnchor; any other path-like href renders as inert (non-clickable)
+ *   text so we never paint a blue link that SPA-404s.
  * - IANA safe schemes (https/http/mailto/irc/ircs/xmpp): navigate directly.
  * - Deny schemes (javascript/data/vbscript/file): silently block. denyOnlyTransform
  *   already strips the href to "", so href="" in DOM (belt-and-suspenders onClick
@@ -575,6 +576,19 @@ function SessionPathAnchor(props: ComponentPropsWithoutRef<'a'> & { targetSessio
  *   which uses useNavigate for SPA routing.
  * - Session citation paths (`/sessions/<id>`): SessionPathAnchor SPA navigation.
  */
+function InertMarkdownHref(props: { href: string; children?: ReactNode; className?: string }) {
+    // Plain/muted — intentionally not an <a>, so middle-click / copy-link can't
+    // invent a dead SPA route either.
+    return (
+        <span
+            title={props.href}
+            className={cn('aui-md-a-inert text-[var(--app-hint)]', props.className)}
+        >
+            {props.children}
+        </span>
+    )
+}
+
 function A(props: ComponentPropsWithoutRef<'a'>) {
     const chat = useOptionalHappyChatContext()
     // useContext must be called unconditionally before any early return so that
@@ -603,10 +617,29 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
         return <SessionPathAnchor {...props} targetSessionId={targetSessionId} />
     }
 
+    const { onClick, href, ...rest } = props
+
+    // Defense in depth for scheme-less hrefs that remark did not rewrite to
+    // hapi-file: (absolute / ~/ / no-ext / fragment leftovers, etc.).
+    if (href && !hasScheme(href)) {
+        const decision = classifyNoSchemeHref(href, {
+            workspacePath: chat?.metadata?.path ?? null,
+        })
+        if (decision.action === 'file') {
+            if (!chat) {
+                return <InertMarkdownHref href={href} className={props.className}>{props.children}</InertMarkdownHref>
+            }
+            return <FilePathAnchor {...props} filePath={decision.path} sessionId={chat.sessionId} />
+        }
+        if (decision.action === 'inert') {
+            return <InertMarkdownHref href={href} className={props.className}>{props.children}</InertMarkdownHref>
+        }
+        // action === 'navigate' → fall through to normal relative handling
+    }
+
     const isAllowed = ctx?.isAllowed ?? (() => false)
 
-    const { onClick, href, ...rest } = props
-    // Relative / no-scheme hrefs (/settings, ./foo, #section, ?q=1) must not be
+    // Relative / no-scheme hrefs that passed fail-closed as SPA-safe must not be
     // classified via classifyScheme — it returns 'deny' for inputs with no valid
     // scheme, which previously caused the onClick handler to preventDefault and
     // silently break all relative markdown links. Treat them as 'iana' so the

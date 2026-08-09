@@ -175,6 +175,16 @@ describe('remarkFilePathLinks — explicit markdown links', () => {
         expect(linkedPath(nodes.find((n) => n.type === 'link')!)).toBe('./diagram.mmd')
     })
 
+    it('rewrites a relative link with a #fragment, stripping it from the target', () => {
+        const nodes = transformNodes([linkNode('docs/foo.md#section')])
+        expect(linkedPath(nodes.find((n) => n.type === 'link')!)).toBe('docs/foo.md')
+    })
+
+    it('rewrites an in-workspace-shaped absolute POSIX file link', () => {
+        const nodes = transformNodes([linkNode('/home/ada/coding/hapi/docs/a.md')])
+        expect(linkedPath(nodes.find((n) => n.type === 'link')!)).toBe('/home/ada/coding/hapi/docs/a.md')
+    })
+
     it.each([
         'C:\\Users\\dev\\project\\handoff.md',
         'D:/work/app/src/main.ts:12'
@@ -189,7 +199,6 @@ describe('remarkFilePathLinks — explicit markdown links', () => {
         'https://example.com/a.md',
         'mailto:dev@example.com',
         'obsidian://open?file=a.md',
-        '/abs/path.md',
         '~/home.md',
         '../escape.md',
         'foo:bar.md',
