@@ -9,8 +9,9 @@
 
 | Field | Value |
 |-------|-------|
-| Tip (pass2i freeze) | `5db7695d57607f958dd25ca68065640b2befa638` |
-| Pass 2i | LIVE — `6a2159d9` Cold #1203 pass2i: Grok high (cold → implementer only) |
+| Tip (pass2j freeze) | `6444d0ab3085df0f49183d700b31589106e66861` |
+| Pass 2j | LIVE — spawn Cold #1203 pass2j: Grok high (cold → implementer only) |
+| Pass 2i | DONE — `6a2159d9` → `2026-08-09-cold-pass2i-1203.md` — Ready NO (Vitest bun:test) |
 | Pass 2h | DONE — `cb9b144b` → `2026-08-09-cold-pass2h-1203.md` — Ready NO (first-connector TOCTOU) |
 | Pass 2g | DONE — `a3cb7e56` → `2026-08-09-cold-pass2g-1203.md` — Ready NO (pidfd_getfd) |
 | Pass 2f | DONE — `eb551767` → `2026-08-09-cold-pass2f-1203.md` — Ready NO (/proc/fd race) |
