@@ -6,7 +6,7 @@ import type { TerminalRegistry } from '../../terminalRegistry'
 import type { CliSocketWithData, SocketServer } from '../../socketTypes'
 import type { AccessErrorReason, AccessResult } from './types'
 import { constantTimeEquals } from '../../../utils/crypto'
-import { mintPeerSessionCapability } from '../../../web/peerCapability'
+import { mintPeerSessionCapability, verifyPeerSessionCapability } from '../../../web/peerCapability'
 import { registerMachineHandlers } from './machineHandlers'
 import { registerRpcHandlers } from './rpcHandlers'
 import { registerSessionHandlers } from './sessionHandlers'
@@ -96,17 +96,30 @@ export function registerCliHandlers(socket: CliSocketWithData, deps: CliHandlers
         const access = resolveSessionAccess(sessionId)
         if (access.ok) {
             socket.join(`session:${sessionId}`)
-            // Session-scoped RPC uses `${sessionId}:method` — authorize the
-            // namespace-resolved session id so colon methods are not treated as
-            // machine-only (#1473 Major).
-            socket.data.sessionRpcAuthorizedId = sessionId
+            // Session-scoped RPC requires possession proof (create-time tag or
+            // HMAC capability). Namespace token + sessionId alone must not own
+            // `${sessionId}:*` (#1473 Major — first-owner-wins registry squat).
+            const presentedTag = typeof auth?.sessionTag === 'string' ? auth.sessionTag : ''
+            const storedTag = typeof access.value.tag === 'string' ? access.value.tag : ''
+            const presentedCapability = typeof auth?.sessionCapability === 'string'
+                ? auth.sessionCapability
+                : ''
+            const hasTagProof = Boolean(
+                presentedTag && storedTag && constantTimeEquals(presentedTag, storedTag)
+            )
+            const hasCapabilityProof = verifyPeerSessionCapability(
+                sessionId,
+                presentedCapability,
+                jwtSecret
+            )
+            if (hasTagProof || hasCapabilityProof) {
+                socket.data.sessionRpcAuthorizedId = sessionId
+            }
             // Capability mint requires the create-time session tag — unavailable
             // to sibling sessions that share only the namespace CLI token.
             // Resume mints are redeemed by the runner with a spawn-RPC nonce
             // (pass 2h B1) — never on first /cli connect (TOCTOU).
-            const presentedTag = typeof auth?.sessionTag === 'string' ? auth.sessionTag : ''
-            const storedTag = typeof access.value.tag === 'string' ? access.value.tag : ''
-            if (presentedTag && storedTag && constantTimeEquals(presentedTag, storedTag)) {
+            if (hasTagProof) {
                 socket.emit('peer-capability', {
                     sessionId,
                     sessionCapability: mintPeerSessionCapability(sessionId, jwtSecret)

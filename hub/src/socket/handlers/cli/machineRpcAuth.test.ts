@@ -97,10 +97,11 @@ describe('machine RPC auth (#1473 B1)', () => {
         expect(register).toHaveBeenCalled()
     })
 
-    it('authorizes session-scoped RPC when session access resolves', () => {
+    it('authorizes session-scoped RPC when create-time session tag matches', () => {
         const register = mock(() => true)
         const { socket, handlers } = createSocketHarness({
             sessionId: 'session-1',
+            sessionTag: 'session-tag',
             clientType: 'session-scoped',
         })
         registerCliHandlers(socket as never, {
@@ -135,5 +136,45 @@ describe('machine RPC auth (#1473 B1)', () => {
         })
         expect(ackResult).toEqual({ registered: true })
         expect(register).toHaveBeenCalled()
+    })
+
+    it('rejects session-scoped RPC when only sessionId is presented (namespace squat)', () => {
+        const register = mock(() => true)
+        const { socket, handlers } = createSocketHarness({
+            sessionId: 'session-1',
+            clientType: 'session-scoped',
+        })
+        registerCliHandlers(socket as never, {
+            io: { of: () => ({}) },
+            store: {
+                sessions: {
+                    getSessionByNamespace: () => ({
+                        id: 'session-1',
+                        namespace: 'test-ns',
+                        tag: 'session-tag',
+                    }),
+                    getSession: () => null,
+                },
+                machines: {
+                    getMachineByNamespace: () => null,
+                    getMachine: () => null,
+                },
+            },
+            rpcRegistry: {
+                register,
+                unregister: mock(() => {}),
+                unregisterAll: mock(() => {}),
+            },
+            terminalRegistry: {},
+            jwtSecret: JWT_SECRET,
+        } as never)
+
+        expect(socket.data.sessionRpcAuthorizedId).toBeUndefined()
+        let ackResult: { registered?: boolean } | undefined
+        handlers.get('rpc-register')?.({ method: 'session-1:permission' }, (response: { registered: boolean }) => {
+            ackResult = response
+        })
+        expect(ackResult).toEqual({ registered: false })
+        expect(register).not.toHaveBeenCalled()
     })
 })

@@ -77,7 +77,7 @@ export class ApiClient {
             if (!opts.machine || !isLegacyMachineReenrollError(error)) {
                 throw error
             }
-            const rotated = await rotateMachineIdForLegacyReenroll()
+            const rotated = await rotateMachineIdForLegacyReenroll(opts.machine.id)
             opts.onMachineReenrolled?.(rotated.machineId, rotated.machineTag)
             const metadata = opts.metadata && typeof opts.metadata === 'object'
                 ? { ...opts.metadata, machineId: rotated.machineId }
@@ -257,7 +257,7 @@ export class ApiClient {
             if (!isLegacyMachineReenrollError(error)) {
                 throw error
             }
-            const rotated = await rotateMachineIdForLegacyReenroll()
+            const rotated = await rotateMachineIdForLegacyReenroll(opts.machineId)
             return await this.postMachine({
                 ...opts,
                 machineId: rotated.machineId,

@@ -325,6 +325,7 @@ export class ApiSessionClient extends EventEmitter {
     private applyPeerSessionCapability(capability: string, source: 'options' | 'materialize' | 'socket'): void {
         const trimmed = capability.trim()
         if (!trimmed) return
+        const wasUnset = !this.sessionCapability
         this.sessionCapability = trimmed
         // Never persist tag/capability under shared HAPI_HOME — same-UID siblings
         // can read mode-0600 files (pass 2d B3). Keep bearer in parent memory only
@@ -332,6 +333,18 @@ export class ApiSessionClient extends EventEmitter {
         this.ensurePeerDeliverBroker(trimmed)
         if (source === 'socket') {
             logger.debug(`[API] Peer session capability recovered for ${this.sessionId}`)
+        }
+        // Resume inject lands after the first connect; refresh socket auth and
+        // reconnect so hub grants sessionRpcAuthorizedId (#1473 Major).
+        if (wasUnset && this.socket) {
+            const auth = this.socket.auth
+            if (auth && typeof auth === 'object') {
+                this.socket.auth = { ...auth, sessionCapability: trimmed }
+            }
+            if (this.socket.connected) {
+                this.socket.disconnect()
+                this.socket.connect()
+            }
         }
         const waiters = this.peerCapabilityWaiters.splice(0)
         for (const waiter of waiters) {
@@ -387,7 +400,8 @@ export class ApiSessionClient extends EventEmitter {
                 token: this.token,
                 clientType: 'session-scoped' as const,
                 sessionId: this.sessionId,
-                ...(this.sessionTag ? { sessionTag: this.sessionTag } : {})
+                ...(this.sessionTag ? { sessionTag: this.sessionTag } : {}),
+                ...(this.sessionCapability ? { sessionCapability: this.sessionCapability } : {}),
             },
             path: '/socket.io/',
             reconnection: true,

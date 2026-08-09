@@ -34,6 +34,30 @@ describe('machine tag enrollment (#1473)', () => {
         )
         expect(again.tag).toBe('create-tag')
     })
+
+    it('rejects tagless re-registration against an already tagged machine', () => {
+        const store = new Store(':memory:')
+        store.machines.getOrCreateMachine(
+            'machine-tagged',
+            { host: 'alpha' },
+            { capabilities: { piExistingSessionResume: true } },
+            'ns',
+            'secret-tag'
+        )
+
+        expect(() =>
+            store.machines.getOrCreateMachine(
+                'machine-tagged',
+                { host: 'attacker' },
+                { capabilities: { piExistingSessionResume: false } },
+                'ns'
+            )
+        ).toThrow(MachineTagConflictError)
+
+        const row = store.machines.getMachine('machine-tagged')
+        expect(row?.metadata).toEqual({ host: 'alpha' })
+        expect(row?.runnerState).toEqual({ capabilities: { piExistingSessionResume: true } })
+    })
 })
 
 describe('machine metadata backfill', () => {

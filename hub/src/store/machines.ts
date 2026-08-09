@@ -95,18 +95,17 @@ export function getOrCreateMachine(
             throw new Error('Machine namespace mismatch')
         }
         let current = stored
-        if (presentedTag) {
-            // Fail closed on upgrade: never first-claim-bind a secret onto a
-            // pre-tag row. Shared namespace token + machine list would otherwise
-            // let a sibling steal spawn-happy-session (#1473 B1).
-            if (!current.tag) {
-                throw new MachineTagConflictError(
-                    'Legacy machine must be re-enrolled with a new machine id'
-                )
-            }
-            if (!constantTimeEquals(current.tag, presentedTag)) {
+        // Tagged rows require the create-time secret on every registration;
+        // omitting tag must not refresh metadata/capabilities (#1473 Major).
+        // Untagged legacy rows refuse first-claim bind — re-enroll with a new id.
+        if (current.tag) {
+            if (!presentedTag || !constantTimeEquals(current.tag, presentedTag)) {
                 throw new MachineTagConflictError()
             }
+        } else if (presentedTag) {
+            throw new MachineTagConflictError(
+                'Legacy machine must be re-enrolled with a new machine id'
+            )
         }
         const merged = mergeMachineMetadata(current.metadata, metadata)
         if (merged !== undefined) {

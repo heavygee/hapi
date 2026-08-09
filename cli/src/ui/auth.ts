@@ -40,12 +40,20 @@ export async function authAndSetupMachineIfNeeded(): Promise<{
     }
 }
 
-/** Mint a new machine id (keep tag) after hub refuses legacy tag bind. */
-export async function rotateMachineIdForLegacyReenroll(): Promise<{
+/**
+ * Mint a new machine id after hub refuses legacy tag bind.
+ * Idempotent across processes: if settings already left `expectedMachineId`,
+ * reuse the rotated identity instead of minting a second one (#1473 Major).
+ */
+export async function rotateMachineIdForLegacyReenroll(expectedMachineId: string): Promise<{
     machineId: string
     machineTag: string
 }> {
+    const rejectedId = expectedMachineId.trim()
     const settings = await updateSettings((current) => {
+        if (current.machineId && rejectedId && current.machineId !== rejectedId) {
+            return current
+        }
         const machineTag = current.machineTag?.trim() || randomUUID()
         return {
             ...current,
