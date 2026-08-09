@@ -322,6 +322,9 @@ export async function bootstrapExistingSession(options: {
         metadata: buildMachineMetadata()
     })
 
+    // GET omits sessionCapability by design (#1203) — namespace-token GET of
+    // any same-ns session would reopen forge. ApiSessionClient recovers it from
+    // hub socket event `peer-capability` after session-scoped connect.
     const sessionInfo = await api.getSession(options.sessionId)
     const baseMetadata = buildSessionMetadata({
         flavor: options.flavor,

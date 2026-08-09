@@ -163,6 +163,30 @@ function triggerIncomingUserMessage(
     })
 }
 
+describe('ApiSessionClient peer-capability resume (#1203)', () => {
+    it('recovers sessionCapability from socket and ignores foreign session ids', () => {
+        socketHarness.sockets.length = 0
+        const session = createSession()
+        const client = new ApiSessionClient('token', session)
+
+        expect(client.getPeerSessionCapability()).toBeNull()
+        expect(socketHarness.sockets).toHaveLength(1)
+        const socket = socketHarness.sockets[0]!
+
+        socket.trigger('peer-capability', {
+            sessionId: '99999999-9999-4999-8999-999999999999',
+            sessionCapability: 'foreign-capability',
+        })
+        expect(client.getPeerSessionCapability()).toBeNull()
+
+        socket.trigger('peer-capability', {
+            sessionId: session.id,
+            sessionCapability: '  resumed-capability  ',
+        })
+        expect(client.getPeerSessionCapability()).toBe('resumed-capability')
+    })
+})
+
 describe('ApiSessionClient lazy materialization', () => {
     it('does not connect or materialize without a real user message', async () => {
         socketHarness.sockets.length = 0

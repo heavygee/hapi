@@ -432,6 +432,19 @@ export class ApiSessionClient extends EventEmitter {
             this.agentTerminalActive = false
         }))
 
+        // Resume recovery (#1203): GET /cli/sessions/:id omits capability by design.
+        // Hub mints on session-scoped socket join; accept only our sessionId.
+        this.socket.on('peer-capability', (data) => {
+            if (!data || typeof data !== 'object') return
+            if (data.sessionId !== this.sessionId) return
+            const capability = typeof data.sessionCapability === 'string'
+                ? data.sessionCapability.trim()
+                : ''
+            if (!capability) return
+            this.sessionCapability = capability
+            logger.debug(`[API] Peer session capability recovered for ${this.sessionId}`)
+        })
+
         this.socket.on('update', (data: Update, ack?: (response: { removed: boolean }) => void) => {
             try {
                 if (!data.body) return

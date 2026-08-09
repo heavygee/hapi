@@ -5,6 +5,7 @@ import type { SyncEvent } from '../../../sync/syncEngine'
 import type { TerminalRegistry } from '../../terminalRegistry'
 import type { CliSocketWithData, SocketServer } from '../../socketTypes'
 import type { AccessErrorReason, AccessResult } from './types'
+import { mintPeerSessionCapability } from '../../../web/peerCapability'
 import { registerMachineHandlers } from './machineHandlers'
 import { registerRpcHandlers } from './rpcHandlers'
 import { registerSessionHandlers } from './sessionHandlers'
@@ -42,6 +43,8 @@ export type CliHandlersDeps = {
     store: Store
     rpcRegistry: RpcRegistry
     terminalRegistry: TerminalRegistry
+    /** Hub JWT secret — mints session-scoped peer-delivery capabilities on connect. */
+    jwtSecret: Uint8Array
     onSessionAlive?: (payload: SessionAlivePayload) => void
     onSessionReady?: (payload: SessionReadyPayload) => void
     onSessionEnd?: (payload: SessionEndPayload) => void
@@ -54,7 +57,7 @@ export type CliHandlersDeps = {
 }
 
 export function registerCliHandlers(socket: CliSocketWithData, deps: CliHandlersDeps): void {
-    const { io, store, rpcRegistry, terminalRegistry, onSessionAlive, onSessionReady, onSessionEnd, onMachineAlive, onWebappEvent, onBackgroundTaskDelta, onSessionActivity, onSweepImmediateQueued, onMessagesConsumed } = deps
+    const { io, store, rpcRegistry, terminalRegistry, jwtSecret, onSessionAlive, onSessionReady, onSessionEnd, onMachineAlive, onWebappEvent, onBackgroundTaskDelta, onSessionActivity, onSweepImmediateQueued, onMessagesConsumed } = deps
     const terminalNamespace = io.of('/terminal')
     const namespace = typeof socket.data.namespace === 'string' ? socket.data.namespace : null
 
@@ -90,6 +93,12 @@ export function registerCliHandlers(socket: CliSocketWithData, deps: CliHandlers
     const sessionId = typeof auth?.sessionId === 'string' ? auth.sessionId : null
     if (sessionId && resolveSessionAccess(sessionId).ok) {
         socket.join(`session:${sessionId}`)
+        // Resume path: GET /cli/sessions/:id never returns capability (would
+        // reopen namespace-token forge). Deliver it only on the live session socket.
+        socket.emit('peer-capability', {
+            sessionId,
+            sessionCapability: mintPeerSessionCapability(sessionId, jwtSecret)
+        })
     }
 
     const machineId = typeof auth?.machineId === 'string' ? auth.machineId : null

@@ -294,6 +294,31 @@ describe('cli lazy session creation', () => {
     })
 })
 
+describe('GET /cli/sessions/:id peer capability surface', () => {
+    it('does not return sessionCapability (resume must use socket peer-capability)', async () => {
+        const session = {
+            id: '6212dae5-8a60-4284-b7a5-c09aa3571ce4',
+            active: true,
+            metadata: { name: 'Resumed' },
+        }
+        const app = createApp({
+            resolveSessionAccess: (id: string, _namespace: string) => (
+                id === session.id
+                    ? { ok: true as const, sessionId: session.id, session }
+                    : { ok: false as const, reason: 'not-found' as const }
+            ),
+        } as never)
+
+        const response = await app.request(`/cli/sessions/${session.id}`, {
+            headers: authHeaders(),
+        })
+        expect(response.status).toBe(200)
+        const body = await response.json() as Record<string, unknown>
+        expect(body.session).toEqual(session)
+        expect(body).not.toHaveProperty('sessionCapability')
+    })
+})
+
 describe('POST /cli/sessions/:id/peer-messages', () => {
     const sourceId = '6212dae5-8a60-4284-b7a5-c09aa3571ce4'
     const targetId = '05d9f0f2-9273-4137-933c-07459a1146a2'
