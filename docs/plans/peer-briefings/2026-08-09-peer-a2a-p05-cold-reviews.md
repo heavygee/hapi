@@ -9,8 +9,11 @@
 
 | Field | Value |
 |-------|-------|
-| Tip (pass2f freeze) | `ac731000d1e4214f9243821132360e99d704c062` |
-| Pass 2f | LIVE — `eb551767` Cold #1203 pass2f: Grok high (dispatched once; cold → implementer only) |
+| Tip (pass2i freeze) | `5db7695d57607f958dd25ca68065640b2befa638` |
+| Pass 2i | LIVE — spawn Cold #1203 pass2i: Grok high (cold → implementer only) |
+| Pass 2h | DONE — `cb9b144b` → `2026-08-09-cold-pass2h-1203.md` — Ready NO (first-connector TOCTOU) |
+| Pass 2g | DONE — `a3cb7e56` → `2026-08-09-cold-pass2g-1203.md` — Ready NO (pidfd_getfd) |
+| Pass 2f | DONE — `eb551767` → `2026-08-09-cold-pass2f-1203.md` — Ready NO (/proc/fd race) |
 | Pass 1 | DONE — `75a86204` → `2026-08-09-cold-pass1-1203.md` |
 | Orchestrator B1 decision | **Exit 1** — bind to authenticated source channel; kill criterion stands |
 | Pass 2–2d | DONE — Ready NO each time (forge ladder → broker) |
