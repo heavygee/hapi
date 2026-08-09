@@ -1877,7 +1877,7 @@ export class SyncEngine {
         await this.sessionCache.markModelErrorNotified(sessionId, eventId)
     }
 
-    async bridgeModelError(sessionId: string): Promise<{ ok: boolean; reason?: string }> {
+    async bridgeModelError(sessionId: string, eventId: string): Promise<{ ok: boolean; reason?: string }> {
         const session = this.sessionCache.refreshSession(sessionId)
             ?? this.sessionCache.getSession(sessionId)
         if (!session) {
@@ -1887,6 +1887,9 @@ export class SyncEngine {
         const err = session.metadata?.lastModelError
         if (!err) {
             throw new Error('No model error to bridge')
+        }
+        if (err.eventId !== eventId) {
+            throw new Error('Model error changed; refresh before bridging.')
         }
         if (!err.transient) {
             throw new Error('Model error is not transient')
@@ -1898,7 +1901,9 @@ export class SyncEngine {
             throw new Error('Bridge already failed for this error')
         }
 
-        const result = await this.rpcGateway.bridgeModelError(sessionId, {
+        // Do not mark bridgedForEventId here — CLI persists recovery only after
+        // the bridge prompt actually succeeds.
+        return await this.rpcGateway.bridgeModelError(sessionId, {
             eventId: err.eventId,
             atTs: err.atTs,
             kind: err.kind,
@@ -1909,12 +1914,6 @@ export class SyncEngine {
             bridgedForEventId: err.bridgedForEventId,
             retriedAndFailed: err.retriedAndFailed
         })
-
-        if (result.ok) {
-            await this.sessionCache.markModelErrorBridged(sessionId, err.eventId)
-        }
-
-        return result
     }
 
     async deleteSession(sessionId: string): Promise<void> {
