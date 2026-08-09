@@ -14,6 +14,71 @@ Rubric: [cold-pr-review-rubric.md](./cold-pr-review-rubric.md)
 
 ---
 
+## Full court press (escalate when bot thrash must die)
+
+**Name:** *full court press* — keep it. Alternatives ("dual-model cold", "bot-thrash kill") describe the mechanism; this name signals **intensity + rarity**. Do not rename without operator OK.
+
+**What it is:** above the normal pre-PR / fork-stage cold path, run **two sequential cold code reads by separate Cursor agent peers** on the feature worktree tip. Goal: **minimize HAPI Bot / Codex review back-and-forth** on `tiann/hapi`.
+
+**Why it exists:** the moment an upstream PR is opened (or undrafted), **HAPI Bot / Codex attacks the tip**. Full court press is the estate paying for two high-effort colds *before that trigger*, so the first bot pass sees a tip that already survived Claude + Sol. Opening the PR early defeats the entire pattern — you paid for the press and still get public bot thrash on the uncooked tip.
+
+**Hard order (do not reorder):**
+
+```text
+Claude cold → FIX Blocker/Major → Sol cold → FIX Blocker/Major → THEN open PR
+                                                                    (bot sees it here)
+```
+
+| Step | Who | Model / action |
+|------|-----|----------------|
+| 1 | Cold peer | `claude-opus-5-thinking-high` — full-diff cold on private tip |
+| 2 | Implementer | Fix **all** Blocker / Major; tip SHA advances; **freeze**; **stop** |
+| 3 | Cold peer | `gpt-5.6-sol-high` — full-diff cold on that frozen post-fix tip only |
+| 4 | Implementer | Fix residual Blocker / Major from Sol; freeze again |
+| 5 | Implementer / orchestrator | **`gh pr create` / undraft** — first time upstream bot is allowed to see this work |
+
+**Forbidden (kill the press if you do these):**
+- **`gh pr create` / undraft / force-push-to-open-PR before step 5** — including "just so we have a URL for a comment". Bot does not care about your sequencing story.
+- Spawning Sol before pass-1 fixes are on the tip Sol will read
+- Tip moving during a cold peer's run (freeze tip → cold → fix → next cold; no mid-flight retargets as a habit)
+- Public human asks (#1462 notes, etc.) that require a PR URL **before** step 5 — if you need a URL for continuum narrative, wait or use the issue (#1465) until the PR exists post-press
+
+**Incident (2026-08-09):** #1467 was opened at pre-cold tip `e2aa7f901` so continuum/#1462 could link a URL. Bot saw uncooked tip within minutes (Majors filed). Full court press then ran anyway — Claude + Sol + retargets + bot threads = **token burn for no sequencing win**. That is recovery theater, not the pattern. Do not repeat. If you need a public handle before press-complete, use the **issue** (#1465), never the PR.
+
+**Who spawns:** orchestrator (or Meta), **not** the implementer session. Same worktree directory; different sessions; models set on machine spawn (`model` slug matching `agent models`). Rubric: [cold-pr-review-rubric.md](./cold-pr-review-rubric.md). Example brief: [`docs/plans/peer-briefings/2026-08-09-peer-a2a-p3-cold-reviews.md`](../plans/peer-briefings/2026-08-09-peer-a2a-p3-cold-reviews.md) (A2A P3 #1465 dogfood of the pattern).
+
+### When to invoke
+
+Operator says "full court press", or the work is in this class:
+
+- Cross-cutting hub/schema / A2A ledger / sync contracts
+- Recovery from a public fuckup (emit-without-capture class)
+- First landing of a multi-phase RFC slice where bot churn would muddy the continuum story
+- Anything where a second public push cycle is politically or socially expensive
+
+### When NOT to invoke
+
+Default remains: verification + one cold + fork-stage `cold-review-clean` ([below](#what-cold-review-clean-means-and-what-it-doesnt)). Full court press is **expensive** (two high-effort peers + fix loops). Kill criteria for *skipping* it:
+
+- Typo / docs / single-file low-blast tip
+- Already bot-clean upstream tip with no substantive delta
+- Operator explicitly wants speed over polish
+
+**Friction:** two models still share blind spots (same rubric, same tip). Full court press reduces thrash; it does not replace CI, dogfood, or reading the bot when it does fire. If pass 2 finds nothing but pass 1 was shallow, you paid for theater — require both passes to run `bun typecheck && bun run test` before verdict.
+
+### Provider cyber-flag recovery (standing)
+
+If a cold peer dies with OpenAI / Cursor **"flagged … high-risk cybersecurity activity"** / "less sensitive prompt" (or Anthropic cyber-policy equivalent that hard-stops the session):
+
+1. **Do not** retry the same model with the same brief. Tip stays frozen; archive the spent cold.
+2. **Default alt:** spawn the replacement cold on **`cursor-grok-4.5-high`** (Grok). Operator standing preference (2026-08-09): Grok does not trip the same cyber filter; use it for the recovery pass.
+3. Prefer a **defensive authz / correctness** brief (provenance holds? client-claimable source id?) over threat-model word salad when the tip itself is auth-boundary work — but still use Grok as the model, not Claude-by-default and not Sol-retry.
+4. Verdict from the Grok alt gates the press the same as Sol would have. Ready YES → proceed to PR step; Ready NO → implementer fixes → freeze → next cold (Grok again if OpenAI still radioactive on that tip).
+
+**Incident (2026-08-09):** #1203 pass2e Sol (`f61a4617`) cyber-flagged mid-review after the forge-ladder tip. Recovery should have been Grok; that wave used Claude alt before this rule landed. Do not invent a third Sol pass.
+
+---
+
 ## Part 1 — Pre-PR Gate
 
 ### Purpose
