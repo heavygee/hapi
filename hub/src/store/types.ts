@@ -27,6 +27,8 @@ export type StoredSession = {
 export type StoredMachine = {
     id: string
     namespace: string
+    /** Create-time secret for machine-scoped socket/RPC auth (#1203). */
+    tag: string | null
     createdAt: number
     updatedAt: number
     metadata: unknown | null

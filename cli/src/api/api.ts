@@ -46,6 +46,7 @@ export class ApiClient {
         effort?: string
         machine?: {
             id: string
+            tag?: string
             metadata: MachineMetadata
             runnerState?: RunnerState
         }
@@ -65,6 +66,7 @@ export class ApiClient {
                 machine: opts.machine
                     ? {
                         id: opts.machine.id,
+                        tag: opts.machine.tag,
                         metadata: opts.machine.metadata,
                         runnerState: opts.machine.runnerState ?? null
                     }
@@ -189,11 +191,13 @@ export class ApiClient {
         machineId: string
         metadata: MachineMetadata
         runnerState?: RunnerState
+        machineTag?: string
     }): Promise<Machine> {
         const response = await axios.post<CreateMachineResponse>(
             `${configuration.apiUrl}/cli/machines`,
             {
                 id: opts.machineId,
+                tag: opts.machineTag,
                 metadata: opts.metadata,
                 runnerState: opts.runnerState ?? null
             },
@@ -345,7 +349,10 @@ export class ApiClient {
         })
     }
 
-    machineSyncClient(machine: Machine, options?: { workspaceRoots?: string[] }): ApiMachineClient {
-        return new ApiMachineClient(this.token, machine, options?.workspaceRoots)
+    machineSyncClient(
+        machine: Machine,
+        options?: { workspaceRoots?: string[]; machineTag?: string }
+    ): ApiMachineClient {
+        return new ApiMachineClient(this.token, machine, options?.workspaceRoots, options?.machineTag)
     }
 }

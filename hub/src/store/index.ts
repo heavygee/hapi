@@ -40,7 +40,7 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 23
+const SCHEMA_VERSION: number = 24
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -302,6 +302,7 @@ export class Store {
             20: () => this.migrateFromV20ToV21(),
             21: () => this.migrateFromV21ToV22(),
             22: () => this.migrateFromV22ToV23(),
+            23: () => this.migrateFromV23ToV24(),
         })
 
         if (currentVersion === 0) {
@@ -380,6 +381,7 @@ export class Store {
             CREATE TABLE IF NOT EXISTS machines (
                 id TEXT PRIMARY KEY,
                 namespace TEXT NOT NULL DEFAULT 'default',
+                tag TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
                 metadata TEXT,
@@ -970,6 +972,15 @@ export class Store {
             CREATE INDEX IF NOT EXISTS idx_event_links_namespace_to
                 ON event_links(namespace, to_event_id);
         `)
+    }
+
+    /** Machine tag for RPC auth (#1473). Upstream v23 is work-graph; tag is v24. */
+    private migrateFromV23ToV24(): void {
+        const columns = this.getMachineColumnNames()
+        if (columns.size === 0) return
+        if (!columns.has('tag')) {
+            this.db.exec('ALTER TABLE machines ADD COLUMN tag TEXT')
+        }
     }
 
     private getSessionColumnNames(): Set<string> {

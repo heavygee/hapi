@@ -18,6 +18,7 @@ import { constantTimeEquals } from '../../utils/crypto'
 import { parseAccessToken } from '../../utils/accessToken'
 import type { Machine, Session, SyncEngine } from '../../sync/syncEngine'
 import { SessionIdentityConflictError } from '../../store/sessions'
+import { MachineTagConflictError } from '../../store/machines'
 
 const bearerSchema = z.string().regex(/^Bearer\s+(.+)$/i)
 
@@ -118,12 +119,20 @@ export function createCliRoutes(
             if (existingMachine && existingMachine.namespace !== namespace) {
                 return c.json({ error: 'Machine access denied' }, 403)
             }
-            engine.getOrCreateMachine(
-                machineInput.id,
-                machineInput.metadata,
-                machineInput.runnerState ?? null,
-                namespace
-            )
+            try {
+                engine.getOrCreateMachine(
+                    machineInput.id,
+                    machineInput.metadata,
+                    machineInput.runnerState ?? null,
+                    namespace,
+                    machineInput.tag
+                )
+            } catch (error) {
+                if (error instanceof MachineTagConflictError) {
+                    return c.json({ error: error.message }, 409)
+                }
+                throw error
+            }
         }
 
         try {
@@ -422,8 +431,21 @@ export function createCliRoutes(
         if (existing && existing.namespace !== namespace) {
             return c.json({ error: 'Machine access denied' }, 403)
         }
-        const machine = engine.getOrCreateMachine(parsed.data.id, parsed.data.metadata, parsed.data.runnerState ?? null, namespace)
-        return c.json({ machine })
+        try {
+            const machine = engine.getOrCreateMachine(
+                parsed.data.id,
+                parsed.data.metadata,
+                parsed.data.runnerState ?? null,
+                namespace,
+                parsed.data.tag
+            )
+            return c.json({ machine })
+        } catch (error) {
+            if (error instanceof MachineTagConflictError) {
+                return c.json({ error: error.message }, 409)
+            }
+            throw error
+        }
     })
 
     app.get('/machines/:id', (c) => {

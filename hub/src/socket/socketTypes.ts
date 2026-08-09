@@ -4,6 +4,8 @@ import type { DefaultEventsMap, Server, Socket } from 'socket.io'
 export type SocketData = {
     namespace?: string
     userId?: number
+    /** Set when handshake proved create-time machine tag (#1203). */
+    machineRpcAuthorizedId?: string
 }
 
 export type SocketServer = Server<DefaultEventsMap, DefaultEventsMap, DefaultEventsMap, SocketData>

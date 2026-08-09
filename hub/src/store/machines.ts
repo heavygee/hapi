@@ -3,10 +3,12 @@ import type { Database } from 'bun:sqlite'
 import type { StoredMachine, VersionedUpdateResult } from './types'
 import { safeJsonParse } from './json'
 import { updateVersionedField } from './versionedUpdates'
+import { constantTimeEquals } from '../utils/crypto'
 
 type DbMachineRow = {
     id: string
     namespace: string
+    tag: string | null
     created_at: number
     updated_at: number
     metadata: string | null
@@ -22,6 +24,7 @@ function toStoredMachine(row: DbMachineRow): StoredMachine {
     return {
         id: row.id,
         namespace: row.namespace,
+        tag: typeof row.tag === 'string' && row.tag.trim() ? row.tag.trim() : null,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
         metadata: safeJsonParse(row.metadata),
@@ -69,21 +72,52 @@ function mergeRunnerCapabilities(stored: unknown, incoming: unknown): Record<str
     return JSON.stringify(mergedCaps) === JSON.stringify(currentCaps) ? undefined : { ...base, capabilities: mergedCaps }
 }
 
+export class MachineTagConflictError extends Error {
+    constructor(message = 'Machine tag mismatch') {
+        super(message)
+        this.name = 'MachineTagConflictError'
+    }
+}
+
 export function getOrCreateMachine(
     db: Database,
     id: string,
     metadata: unknown,
     runnerState: unknown,
-    namespace: string
+    namespace: string,
+    tag?: string
 ): StoredMachine {
+    const presentedTag = typeof tag === 'string' ? tag.trim() : ''
     const existing = db.prepare('SELECT * FROM machines WHERE id = ?').get(id) as DbMachineRow | undefined
     if (existing) {
         const stored = toStoredMachine(existing)
         if (stored.namespace !== namespace) {
             throw new Error('Machine namespace mismatch')
         }
-        const merged = mergeMachineMetadata(stored.metadata, metadata)
         let current = stored
+        if (presentedTag) {
+            if (!current.tag) {
+                db.prepare(`
+                    UPDATE machines
+                    SET tag = @tag,
+                        updated_at = @updated_at,
+                        seq = seq + 1
+                    WHERE id = @id AND (tag IS NULL OR tag = '')
+                `).run({
+                    tag: presentedTag,
+                    updated_at: Date.now(),
+                    id,
+                })
+                const bound = getMachine(db, id)
+                if (!bound) {
+                    throw new Error('Failed to bind machine tag')
+                }
+                current = bound
+            } else if (!constantTimeEquals(current.tag, presentedTag)) {
+                throw new MachineTagConflictError()
+            }
+        }
+        const merged = mergeMachineMetadata(current.metadata, metadata)
         if (merged !== undefined) {
             db.prepare(`
                 UPDATE machines
@@ -132,12 +166,12 @@ export function getOrCreateMachine(
 
     db.prepare(`
         INSERT INTO machines (
-            id, namespace, created_at, updated_at,
+            id, namespace, tag, created_at, updated_at,
             metadata, metadata_version,
             runner_state, runner_state_version,
             active, active_at, seq
         ) VALUES (
-            @id, @namespace, @created_at, @updated_at,
+            @id, @namespace, @tag, @created_at, @updated_at,
             @metadata, 1,
             @runner_state, 1,
             0, NULL, 0
@@ -145,6 +179,7 @@ export function getOrCreateMachine(
     `).run({
         id,
         namespace,
+        tag: presentedTag || null,
         created_at: now,
         updated_at: now,
         metadata: metadataJson,

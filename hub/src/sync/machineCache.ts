@@ -77,8 +77,14 @@ export class MachineCache {
         return this.getMachinesByNamespace(namespace).filter((machine) => machine.active)
     }
 
-    getOrCreateMachine(id: string, metadata: unknown, runnerState: unknown, namespace: string): Machine {
-        const stored = this.store.machines.getOrCreateMachine(id, metadata, runnerState, namespace)
+    getOrCreateMachine(
+        id: string,
+        metadata: unknown,
+        runnerState: unknown,
+        namespace: string,
+        tag?: string
+    ): Machine {
+        const stored = this.store.machines.getOrCreateMachine(id, metadata, runnerState, namespace, tag)
         return this.refreshMachine(stored.id) ?? (() => { throw new Error('Failed to load machine') })()
     }
 

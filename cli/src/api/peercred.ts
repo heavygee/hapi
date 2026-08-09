@@ -8,9 +8,19 @@ export type PeerCredentials = {
 
 export type PeerCredReader = (socket: Socket) => PeerCredentials | null
 
+const GETSOCKOPT_FFI = {
+    args: ['i32', 'i32', 'i32', 'ptr', 'ptr'] as const,
+    returns: 'i32',
+} as const
+
+const GETPEEREID_FFI = {
+    args: ['i32', 'ptr', 'ptr'] as const,
+    returns: 'i32',
+} as const
+
 /**
  * Read AF_UNIX peer credentials (pid/uid/gid).
- * Linux: SO_PEERCRED. macOS/iOS: getpeereid + LOCAL_PEERPID.
+ * Linux: SO_PEERCRED via libc.so.6. macOS: getpeereid + LOCAL_PEERPID.
  * Returns null on unsupported platforms or when the fd is unavailable.
  */
 export const readUnixPeerCredentials: PeerCredReader = (socket) => {
@@ -23,18 +33,14 @@ export const readUnixPeerCredentials: PeerCredReader = (socket) => {
         // bun:ffi is available in the CLI runtime; vitest may stub this module.
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const { dlopen, suffix, ptr } = require('bun:ffi') as typeof import('bun:ffi')
-        const libc = dlopen(`libc.${suffix}`, {
-            getsockopt: {
-                args: ['i32', 'i32', 'i32', 'ptr', 'ptr'] as const,
-                returns: 'i32',
-            },
-            getpeereid: {
-                args: ['i32', 'ptr', 'ptr'] as const,
-                returns: 'i32',
-            },
-        })
 
         if (process.platform === 'linux') {
+            // Load only Linux symbols — bundling Darwin getpeereid fails dlopen
+            // on glibc (Codex #1473 Major). Prefer SONAME libc.so.6 over libc.so
+            // (bun resolves the latter relative to cwd).
+            const libc = dlopen('libc.so.6', {
+                getsockopt: GETSOCKOPT_FFI,
+            })
             // SOL_SOCKET=1 / SO_PEERCRED=17 on x86_64 and aarch64 Linux.
             const SOL_SOCKET = 1
             const SO_PEERCRED = 17
@@ -54,6 +60,10 @@ export const readUnixPeerCredentials: PeerCredReader = (socket) => {
         }
 
         if (process.platform === 'darwin') {
+            const libc = dlopen(`libc.${suffix}`, {
+                getsockopt: GETSOCKOPT_FFI,
+                getpeereid: GETPEEREID_FFI,
+            })
             // SOL_LOCAL=0, LOCAL_PEERPID=2 (Apple); uid/gid via getpeereid.
             const SOL_LOCAL = 0
             const LOCAL_PEERPID = 2

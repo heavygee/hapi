@@ -18,6 +18,12 @@ import type { SessionSummary } from './sessionSummary'
 
 export const CreateOrLoadMachineRequestSchema = z.object({
     id: z.string().min(1),
+    /**
+     * Create-time machine secret (#1203). Required to bind machine-scoped RPC
+     * (including resume peer-mint nonce delivery). Client-generated; hub stores
+     * on first bind and requires a match thereafter. Never echoed on GET.
+     */
+    tag: z.string().min(1).optional(),
     metadata: z.unknown(),
     runnerState: z.unknown().nullable().optional()
 })

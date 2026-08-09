@@ -112,8 +112,18 @@ export function registerCliHandlers(socket: CliSocketWithData, deps: CliHandlers
     }
 
     const machineId = typeof auth?.machineId === 'string' ? auth.machineId : null
-    if (machineId && resolveMachineAccess(machineId).ok) {
-        socket.join(`machine:${machineId}`)
+    if (machineId) {
+        const access = resolveMachineAccess(machineId)
+        if (access.ok) {
+            // Machine room + RPC require create-time machine tag (#1203 / #1473 B1).
+            // Namespace token + machineId alone must not own spawn-happy-session.
+            const presentedTag = typeof auth?.machineTag === 'string' ? auth.machineTag : ''
+            const storedTag = typeof access.value.tag === 'string' ? access.value.tag : ''
+            if (presentedTag && storedTag && constantTimeEquals(presentedTag, storedTag)) {
+                socket.data.machineRpcAuthorizedId = machineId
+                socket.join(`machine:${machineId}`)
+            }
+        }
     }
 
     const emitAccessError = (scope: 'session' | 'machine', id: string, reason: AccessErrorReason) => {

@@ -123,7 +123,8 @@ export class ApiMachineClient {
     constructor(
         private readonly token: string,
         private readonly machine: Machine,
-        private readonly workspaceRoots?: string[]
+        private readonly workspaceRoots?: string[],
+        private readonly machineTag?: string
     ) {
         // Realpath roots once so all subsequent comparisons are against
         // canonical, symlink-resolved locations. Falls back to lexical
@@ -543,7 +544,8 @@ export class ApiMachineClient {
             auth: {
                 token: this.token,
                 clientType: 'machine-scoped' as const,
-                machineId: this.machine.id
+                machineId: this.machine.id,
+                ...(this.machineTag ? { machineTag: this.machineTag } : {}),
             },
             path: '/socket.io/',
             reconnection: true,
