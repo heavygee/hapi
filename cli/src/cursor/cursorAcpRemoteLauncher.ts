@@ -13,7 +13,7 @@ import {
 } from '@/modules/common/remote/RemoteLauncherBase';
 import { OpencodeDisplay } from '@/ui/ink/OpencodeDisplay';
 import type { CursorSession } from './session';
-import type { PermissionMode } from './loop';
+import type { EnhancedMode, PermissionMode } from './loop';
 import {
     createCursorAcpBackend,
     CURSOR_ACP_REQUIRED_MESSAGE,
@@ -61,6 +61,13 @@ import {
     rawSnippetForFailure,
     type CursorAgentStreamFailure
 } from './cursorAgentMessageClassifier';
+import {
+    buildModelErrorBridgePrompt,
+    canBridgeModelError,
+    truncateLastUserMessage
+} from './cursorModelErrorBridge';
+import { getAutoBridgeTransientModelErrors } from './cursorModelErrorBridgePrefs';
+import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
 
 const CURSOR_ABORT_DRAIN_TIMEOUT_MS = 5_000;
 
@@ -119,6 +126,20 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
      * keeps deliberate Abort/Exit/Switch out of the emergency model-error path.
      */
     private userAbortRequested = false;
+    private lastUserMessage: string | null = null;
+    private lastTurnMode: EnhancedMode | null = null;
+    private bridgingForEventId: string | null = null;
+    private lastRecordedModelError: {
+        eventId: string;
+        atTs: number;
+        kind: string;
+        rawSnippet: string;
+        priorAssistantClaimsDone: boolean;
+        lastUserMessage: string;
+        transient: boolean;
+        bridgedForEventId?: string;
+        retriedAndFailed?: boolean;
+    } | null = null;
 
     constructor(session: CursorSession) {
         super(process.env.DEBUG ? session.logPath : undefined);
@@ -461,10 +482,12 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             onSwitch: () => this.handleSwitchRequest()
         });
 
+        session.client.rpcHandlerManager.registerHandler(
+            RPC_METHODS.BridgeModelError,
+            async (payload: unknown) => this.handleBridgeModelErrorRpc(payload)
         // Soft steer = Cursor GUI "Send" (next-opportune / soft inject): fire a
         // concurrent session/prompt without canceling the in-flight turn. Abort
         // remains the hard stop path (GUI "Stop & send").
-        session.client.rpcHandlerManager.registerHandler(
             RPC_METHODS.SteerQueuedMessage,
             async (payload: unknown) => {
                 const localId = typeof (payload as { localId?: unknown } | null)?.localId === 'string'
@@ -477,22 +500,17 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                 const acpSessionId = this.acpSessionId;
                 if (!this.promptInFlight || !acpSessionId || !backend) {
                     return { steered: false, error: 'No active steerable turn' };
-                }
                 const targetPromptGeneration = backend.getPromptGeneration();
                 const taken = session.queue.takeByLocalId(localId);
                 if (!taken) {
                     return { steered: false, error: 'Message not in queue' };
-                }
                 const isControlCommand = Boolean(taken.item.isolate)
                     || parseCursorSpecialCommand(taken.item.message).type !== null;
                 if (isControlCommand) {
                     session.queue.restoreReservation(taken);
                     return { steered: false, error: 'Control commands cannot be steered' };
-                }
                 if (this.activePromptModeHash !== taken.item.modeHash) {
-                    session.queue.restoreReservation(taken);
                     return { steered: false, error: 'Queued message mode differs from the active turn' };
-                }
 
                 // Ack the hub once the soft-steer request is kicked off — not when
                 // the concurrent session/prompt finishes. ACP treats that response as
@@ -502,13 +520,11 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                 // do not emit ready / start the next backend.prompt() while it runs.
                 if (!session.queue.beginReservationDispatch(taken)) {
                     return { steered: false, error: 'Steer cancelled' };
-                }
                 const dispatchStatePersisted = await session.client.setSteerDeliveryState([localId], 'dispatching');
                 if (!dispatchStatePersisted) {
                     session.queue.markReservationIndeterminate(taken);
                     session.client.emitSteerIndeterminate([localId]);
                     return { steered: false, error: 'Steer state is indeterminate' };
-                }
                 const restoreQueuedReservation = async (): Promise<boolean> => {
                     if (!taken.originIndeterminate) {
                         const persisted = await session.client.setSteerDeliveryState([localId], 'queued');
@@ -521,20 +537,15 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                     if (taken.state !== 'dispatching' || !session.queue.restoreReservation(taken)) {
                         session.client.emitSteerIndeterminate([localId]);
                         return false;
-                    }
                     return true;
                 };
                 if (taken.state !== 'dispatching') {
-                    session.client.emitSteerIndeterminate([localId]);
-                    return { steered: false, error: 'Steer cancelled' };
-                }
                 if (!this.promptInFlight
                     || this.backend !== backend
                     || this.acpSessionId !== acpSessionId
                     || backend.getPromptGeneration() !== targetPromptGeneration) {
                     await restoreQueuedReservation();
                     return { steered: false, error: 'Active turn changed' };
-                }
                 let steer: { dispatched: Promise<void>; completed: Promise<void> };
                 try {
                     steer = backend.beginSoftSteerPrompt(acpSessionId, [{
@@ -544,15 +555,10 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                 } catch (error) {
                     if (isAcpIndeterminateError(error)) {
                         if (session.queue.markReservationIndeterminate(taken)) {
-                            session.client.emitSteerIndeterminate([localId]);
-                        }
                         logger.debug('[cursor-acp] soft-steer dispatch outcome unknown', error);
                         return { steered: false, error: 'Steer outcome is being reconciled' };
-                    }
                     logger.debug('[cursor-acp] soft-steer failed to start', error);
-                    await restoreQueuedReservation();
                     return { steered: false, error: 'Failed to soft-steer into active turn' };
-                }
                 // Completion still gates the next prompt (handler swap safety);
                 // register the waiter before awaiting dispatch so the main loop's
                 // finally cannot slip a prompt in between.
@@ -562,22 +568,8 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                 this.softSteerWaiters.push(steerDone);
                 const removeWaiter = () => {
                     this.softSteerWaiters = this.softSteerWaiters.filter((p) => p !== steerDone);
-                };
                 void steerDone.then(removeWaiter);
-                try {
                     await steer.dispatched;
-                } catch (error) {
-                    if (isAcpIndeterminateError(error)) {
-                        if (session.queue.markReservationIndeterminate(taken)) {
-                            session.client.emitSteerIndeterminate([localId]);
-                        }
-                        logger.debug('[cursor-acp] soft-steer dispatch outcome unknown', error);
-                        return { steered: false, error: 'Steer outcome is being reconciled' };
-                    }
-                    await restoreQueuedReservation();
-                    logger.debug('[cursor-acp] soft-steer failed to start', error);
-                    return { steered: false, error: 'Failed to soft-steer into active turn' };
-                }
                 // The RPC acks once stdin accepted the inject. The queue row is
                 // committed only when the concurrent prompt settles: an explicit
                 // JSON-RPC rejection means ACP never accepted the instruction
@@ -591,22 +583,15 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                     messageBuffer.addMessage(taken.item.message, 'user');
                     session.client.emitMessagesConsumed([localId], { steered: true });
                 }, (error) => {
-                    if (isAcpIndeterminateError(error)) {
                         // Do not leave the reservation dispatching forever. Hold
                         // it outside automatic replay and persist the ambiguous
                         // outcome; a later explicit Steer retries this same row.
-                        if (session.queue.markReservationIndeterminate(taken)) {
-                            session.client.emitSteerIndeterminate([localId]);
-                        }
                         logger.debug('[cursor-acp] soft-steer outcome unknown after dispatch; row held for explicit resolution', error);
                         return;
-                    }
                     void restoreQueuedReservation().then((restored) => {
                         if (restored) {
                             logger.debug('[cursor-acp] soft-steer rejected by ACP; row restored', error);
-                        }
                     });
-                });
                 return { steered: true };
             }
         );
@@ -651,6 +636,9 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
 
             await applyCursorAcpMode(backend, acpSessionId, batch.mode.permissionMode as PermissionMode);
             this.applyDisplayMode(batch.mode.permissionMode as PermissionMode);
+
+            this.lastUserMessage = batch.message;
+            this.lastTurnMode = batch.mode;
 
             const specialCommand = parseCursorSpecialCommand(batch.message);
             if (specialCommand.type === 'pass-through') {
@@ -779,6 +767,9 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                 session.onThinkingChange(false);
                 await this.permissionAdapter?.cancelAll('Prompt finished');
                 await this.extensionAdapter?.cancelAll('Prompt finished');
+                if (!this.turnHasModelError && this.bridgingForEventId !== null) {
+                    this.bridgingForEventId = null;
+                }
                 if (session.queue.size() === 0 && !this.shouldExit) {
                     sendReady();
                 }
@@ -799,6 +790,10 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
 
         try {
             this.clearAbortHandlers(this.session.client.rpcHandlerManager);
+            this.session.client.rpcHandlerManager.registerHandler(
+                RPC_METHODS.BridgeModelError,
+                async () => ({ ok: false, reason: 'session_ended' })
+            );
             this.session.client.rpcHandlerManager.registerHandler(RPC_METHODS.SteerQueuedMessage, async () => ({
                 steered: false,
                 error: 'Session ending'
@@ -1046,6 +1041,11 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         this.pendingTextFailure = null;
         this.pendingStderrFailure = null;
 
+        const bridgedFailure = this.bridgingForEventId !== null;
+        if (bridgedFailure) {
+            this.bridgingForEventId = null;
+        }
+
         // Same-message case: Cursor often appends `Error: T: ...` onto the
         // assistant block that already claimed "Done." — lastAssistantText is
         // still null because we classify before storing. Check failure.raw too.
@@ -1055,21 +1055,26 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         const rawSnippet = rawSnippetForFailure(failure);
         const eventId = randomUUID();
         const atTs = Date.now();
+        const lastUserMessage = truncateLastUserMessage(this.lastUserMessage ?? '');
 
         logger.debug(
-            `[cursor-acp] modelError recorded source=${failure.source} kind=${failure.kind} transient=${failure.transient}`
+            `[cursor-acp] modelError recorded source=${failure.source} kind=${failure.kind} transient=${failure.transient}${bridgedFailure ? ' (bridge failed)' : ''}`
         );
+
+        this.lastRecordedModelError = {
+            eventId,
+            atTs,
+            kind: failure.kind,
+            transient: failure.transient,
+            rawSnippet,
+            priorAssistantClaimsDone,
+            lastUserMessage,
+            ...(bridgedFailure ? { retriedAndFailed: true } : {})
+        };
 
         this.session.client.updateMetadata((metadata) => ({
             ...metadata,
-            lastModelError: {
-                eventId,
-                kind: failure.kind,
-                transient: failure.transient,
-                rawSnippet,
-                atTs,
-                priorAssistantClaimsDone
-            }
+            lastModelError: this.lastRecordedModelError!
         }));
 
         this.session.sendSessionEvent({
@@ -1079,6 +1084,139 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             rawSnippet,
             priorAssistantClaimsDone
         });
+
+        if (!bridgedFailure && failure.transient && getAutoBridgeTransientModelErrors()) {
+            this.tryEnqueueModelErrorBridge('auto');
+        }
+    }
+
+    private async handleBridgeModelErrorRpc(payload: unknown): Promise<{ ok: boolean; reason?: string }> {
+        if (!payload || typeof payload !== 'object') {
+            return this.tryEnqueueModelErrorBridge('manual');
+        }
+
+        const record = payload as Record<string, unknown>;
+        const snapshot = {
+            eventId: typeof record.eventId === 'string' ? record.eventId : undefined,
+            atTs: typeof record.atTs === 'number' ? record.atTs : undefined,
+            kind: typeof record.kind === 'string' ? record.kind : undefined,
+            rawSnippet: typeof record.rawSnippet === 'string' ? record.rawSnippet : undefined,
+            lastUserMessage: typeof record.lastUserMessage === 'string' ? record.lastUserMessage : undefined,
+            priorAssistantClaimsDone: record.priorAssistantClaimsDone === true,
+            transient: typeof record.transient === 'boolean'
+                ? record.transient
+                : (this.lastRecordedModelError?.transient ?? false),
+            bridgedForEventId: typeof record.bridgedForEventId === 'string'
+                ? record.bridgedForEventId
+                : undefined,
+            retriedAndFailed: record.retriedAndFailed === true
+        };
+
+        if (snapshot.eventId !== undefined) {
+            this.lastRecordedModelError = {
+                eventId: snapshot.eventId,
+                atTs: snapshot.atTs ?? this.lastRecordedModelError?.atTs ?? Date.now(),
+                kind: snapshot.kind ?? this.lastRecordedModelError?.kind ?? 'unknown',
+                rawSnippet: snapshot.rawSnippet ?? this.lastRecordedModelError?.rawSnippet ?? '',
+                priorAssistantClaimsDone: snapshot.priorAssistantClaimsDone,
+                lastUserMessage: snapshot.lastUserMessage
+                    ?? this.lastRecordedModelError?.lastUserMessage
+                    ?? this.lastUserMessage
+                    ?? '',
+                transient: snapshot.transient,
+                bridgedForEventId: snapshot.bridgedForEventId,
+                retriedAndFailed: snapshot.retriedAndFailed
+            };
+        }
+
+        return this.tryEnqueueModelErrorBridge('manual');
+    }
+
+    private tryEnqueueModelErrorBridge(source: 'auto' | 'manual'): { ok: boolean; reason?: string } {
+        const metadataError = this.lastRecordedModelError;
+
+        if (!metadataError) {
+            return { ok: false, reason: 'no_model_error' };
+        }
+
+        const bridgeInput = {
+            kind: metadataError.kind,
+            rawSnippet: metadataError.rawSnippet,
+            priorAssistantClaimsDone: metadataError.priorAssistantClaimsDone,
+            lastUserMessage: metadataError.lastUserMessage ?? this.lastUserMessage ?? ''
+        };
+
+        if (!bridgeInput.lastUserMessage.trim()) {
+            return { ok: false, reason: 'missing_last_user_message' };
+        }
+
+        if (!canBridgeModelError({
+            transient: metadataError.transient,
+            eventId: metadataError.eventId,
+            bridgedForEventId: metadataError.bridgedForEventId,
+            retriedAndFailed: metadataError.retriedAndFailed
+        })) {
+            return { ok: false, reason: 'not_bridgeable' };
+        }
+
+        const prompt = buildModelErrorBridgePrompt({
+            kind: bridgeInput.kind,
+            rawSnippet: bridgeInput.rawSnippet,
+            lastUserMessage: bridgeInput.lastUserMessage,
+            priorAssistantClaimsDone: bridgeInput.priorAssistantClaimsDone
+        });
+
+        const bridgedEventId = metadataError.eventId;
+        this.bridgingForEventId = bridgedEventId;
+
+        this.lastRecordedModelError = {
+            ...metadataError,
+            bridgedForEventId: bridgedEventId
+        };
+
+        this.session.client.updateMetadata((metadata) => {
+            const current = metadata.lastModelError;
+            const nextError = current?.eventId === bridgedEventId
+                ? {
+                    ...current,
+                    bridgedForEventId: bridgedEventId
+                }
+                : {
+                    eventId: metadataError.eventId,
+                    kind: metadataError.kind,
+                    transient: metadataError.transient,
+                    rawSnippet: metadataError.rawSnippet,
+                    atTs: metadataError.atTs,
+                    priorAssistantClaimsDone: metadataError.priorAssistantClaimsDone,
+                    ...(metadataError.lastUserMessage
+                        ? { lastUserMessage: metadataError.lastUserMessage }
+                        : {}),
+                    bridgedForEventId: bridgedEventId
+                };
+
+            return {
+                ...metadata,
+                lastModelError: nextError
+            };
+        });
+
+        const mode = this.lastTurnMode ?? {
+            permissionMode: this.session.getPermissionMode() as PermissionMode,
+            model: this.currentBackendModel ?? this.session.model ?? undefined
+        };
+
+        this.session.queue.pushIsolated(prompt, mode);
+        // Chat-visible recovery marker only. Not an AGENT_NOTIFY_SUMMARY — overseer/inbox
+        // must not treat successful bridges as attention candidates.
+        this.session.sendSessionEvent({
+            type: 'modelErrorBridged',
+            kind: metadataError.kind,
+            auto: source === 'auto',
+            eventId: bridgedEventId
+        });
+        logger.debug(`[cursor-acp] modelError bridge enqueued for eventId=${bridgedEventId} source=${source}`);
+
+        return { ok: true };
     }
 
     private installLiveSessionConfigSync(
