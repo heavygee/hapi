@@ -135,6 +135,65 @@ describe('bootstrapExistingSession', () => {
         )
     })
 
+    it('takes fd mint-proof before any await so /proc/fd cannot race (pass 2f B1)', async () => {
+        const session = createSession()
+        const sessionClient = {
+            updateMetadata: vi.fn()
+        }
+        getSessionMock.mockResolvedValue(session)
+        getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
+        sessionSyncClientMock.mockReturnValue(sessionClient)
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
+
+        const { writeFileSync, openSync, unlinkSync } = await import('node:fs')
+        const { join } = await import('node:path')
+        const { tmpdir } = await import('node:os')
+        const path = join(tmpdir(), `hapi-b1-race-${process.pid}`)
+        writeFileSync(path, 'tag-race-proof\n', { mode: 0o600 })
+        const fd = openSync(path, 'r')
+        process.env.HAPI_PEER_SESSION_TAG_FD = String(fd)
+
+        // Reset the peerSessionTagFd module so drain runs against this fd.
+        vi.resetModules()
+        const { bootstrapExistingSession: bootstrapFresh } = await import('./sessionFactory')
+        // Re-apply mocks after resetModules (sessionFactory re-imports api).
+        // The existing vi.mock factories from this file still apply.
+
+        getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
+        getSessionMock.mockResolvedValue(session)
+        sessionSyncClientMock.mockReturnValue(sessionClient)
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
+
+        let sawEnvDuringCreate = 'unset'
+        const { ApiClient } = await import('@/api/api')
+        const originalCreate = ApiClient.create
+        ApiClient.create = async () => {
+            sawEnvDuringCreate = process.env.HAPI_PEER_SESSION_TAG_FD ?? 'cleared'
+            return {
+                getSession: getSessionMock,
+                getOrCreateSession: getOrCreateSessionMock,
+                getOrCreateMachine: getOrCreateMachineMock,
+                sessionSyncClient: sessionSyncClientMock
+            } as any
+        }
+
+        try {
+            await bootstrapFresh({
+                sessionId: 'hapi-session-1',
+                flavor: 'codex',
+                workingDirectory: '/tmp/project',
+            })
+            expect(sawEnvDuringCreate).toBe('cleared')
+            expect(sessionSyncClientMock).toHaveBeenCalledWith(session, {
+                sessionTag: 'tag-race-proof',
+            })
+        } finally {
+            ApiClient.create = originalCreate
+            delete process.env.HAPI_PEER_SESSION_TAG_FD
+            try { unlinkSync(path) } catch { /* ignore */ }
+        }
+    })
+
     it('uses in-process sessionTag for resume mint (runner uses fd 3, not env/disk)', async () => {
         const session = createSession()
         const sessionClient = {

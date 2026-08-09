@@ -317,6 +317,11 @@ export async function bootstrapExistingSession(options: {
     /** In-process resume only (e.g. tests). Runner uses peerSessionTagFd. */
     sessionTag?: string
 }): Promise<SessionBootstrapResult> {
+    // Sync, before any await: take mint-proof out of the inherited pipe so a
+    // same-UID sibling cannot race /proc/<pid>/fd/N during ApiClient/getSession
+    // (pass 2f B1). Module import also drains; this is belt-and-braces.
+    const sessionTag = options.sessionTag?.trim() || consumePeerSessionTagFromFd()
+
     const startedBy = options.startedBy ?? 'terminal'
     const api = await ApiClient.create()
     const machineId = await getMachineIdOrExit()
@@ -327,12 +332,9 @@ export async function bootstrapExistingSession(options: {
     })
 
     // GET omits sessionCapability by design (#1203). Runner resume hands the
-    // create-time tag on an inherited pipe (stdio fd 3) — not process.env —
-    // because Linux /proc/<pid>/environ retains execve strings after unsetenv
-    // (pass 2e-alt B1). Terminal resume has no fd; mint is skipped and peer
-    // delivery falls back to unattributed (M2).
+    // create-time tag on an inherited pipe (not process.env — pass 2e-alt B1).
+    // Terminal resume has no fd; mint is skipped → unattributed (M2).
     const sessionInfo = await api.getSession(options.sessionId)
-    const sessionTag = options.sessionTag?.trim() || consumePeerSessionTagFromFd()
     const baseMetadata = buildSessionMetadata({
         flavor: options.flavor,
         startedBy,
