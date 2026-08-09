@@ -13,16 +13,8 @@ import { runtimePath } from '@/projectPath'
 import { getInvokedCwd } from '@/utils/invokedCwd'
 import { readWorktreeEnv } from '@/utils/worktreeEnv'
 import { exportHapiSessionEnv } from '@/agent/hapiSessionEnv'
+import { consumePeerSessionTagFromFd } from '@/agent/peerSessionTagFd'
 import packageJson from '../../package.json'
-
-/** Runner injects create-time tag for resume socket mint; never persist under HAPI_HOME. */
-export const HAPI_PEER_SESSION_TAG_ENV = 'HAPI_PEER_SESSION_TAG'
-
-function consumePeerSessionTagFromEnv(): string | undefined {
-    const tag = process.env[HAPI_PEER_SESSION_TAG_ENV]?.trim()
-    delete process.env[HAPI_PEER_SESSION_TAG_ENV]
-    return tag || undefined
-}
 
 export { HAPI_SESSION_ID_ENV, exportHapiSessionEnv, exportHapiHubAuthEnv } from '@/agent/hapiSessionEnv'
 
@@ -322,6 +314,8 @@ export async function bootstrapExistingSession(options: {
     startedBy?: SessionStartedBy
     workingDirectory: string
     metadataOverrides?: Partial<Metadata>
+    /** In-process resume only (e.g. tests). Runner uses peerSessionTagFd. */
+    sessionTag?: string
 }): Promise<SessionBootstrapResult> {
     const startedBy = options.startedBy ?? 'terminal'
     const api = await ApiClient.create()
@@ -332,11 +326,13 @@ export async function bootstrapExistingSession(options: {
         metadata: buildMachineMetadata()
     })
 
-    // GET omits sessionCapability by design (#1203). Resume receives the
-    // create-time tag via runner-injected env (cleared before agent spawn) and
-    // re-mints capability on the tag-gated CLI socket — never from shared disk.
+    // GET omits sessionCapability by design (#1203). Runner resume hands the
+    // create-time tag on an inherited pipe (stdio fd 3) — not process.env —
+    // because Linux /proc/<pid>/environ retains execve strings after unsetenv
+    // (pass 2e-alt B1). Terminal resume has no fd; mint is skipped and peer
+    // delivery falls back to unattributed (M2).
     const sessionInfo = await api.getSession(options.sessionId)
-    const sessionTag = consumePeerSessionTagFromEnv()
+    const sessionTag = options.sessionTag?.trim() || consumePeerSessionTagFromFd()
     const baseMetadata = buildSessionMetadata({
         flavor: options.flavor,
         startedBy,

@@ -25,6 +25,7 @@ import { buildHubRequestHeaders } from '@/api/hubExtraHeaders'
 export type PingPeerErrorCode =
     | 'bad_args'
     | 'auth_failed'
+    | 'broker_unavailable'
     | 'not_found'
     | 'ambiguous'
     | 'resume_failed'
@@ -613,6 +614,7 @@ export function exitCodeForPingPeerError(error: PingPeerError): number {
     switch (error.code) {
         case 'bad_args':
         case 'auth_failed':
+        case 'broker_unavailable':
         case 'not_found':
         case 'ambiguous':
             return 2

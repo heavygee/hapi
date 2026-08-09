@@ -52,7 +52,6 @@ vi.mock('@/ui/logger', () => ({
 
 import {
     HAPI_SESSION_ID_ENV,
-    HAPI_PEER_SESSION_TAG_ENV,
     bootstrapExistingSession,
     bootstrapLazySession,
     bootstrapSession,
@@ -99,7 +98,6 @@ describe('bootstrapExistingSession', () => {
         notifyRunnerSessionStartedMock.mockClear()
         readSettingsMock.mockReset()
         delete process.env[HAPI_SESSION_ID_ENV]
-        delete process.env[HAPI_PEER_SESSION_TAG_ENV]
     })
 
     it('loads an existing HAPI session and reports it to the runner', async () => {
@@ -137,7 +135,7 @@ describe('bootstrapExistingSession', () => {
         )
     })
 
-    it('consumes runner-injected peer session tag for resume mint (not disk)', async () => {
+    it('uses in-process sessionTag for resume mint (runner uses fd 3, not env/disk)', async () => {
         const session = createSession()
         const sessionClient = {
             updateMetadata: vi.fn()
@@ -146,17 +144,38 @@ describe('bootstrapExistingSession', () => {
         getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
         sessionSyncClientMock.mockReturnValue(sessionClient)
         readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
-        process.env[HAPI_PEER_SESSION_TAG_ENV] = 'tag-owner'
 
         await bootstrapExistingSession({
             sessionId: 'hapi-session-1',
             flavor: 'codex',
-            workingDirectory: '/tmp/project'
+            workingDirectory: '/tmp/project',
+            sessionTag: 'tag-owner',
         })
 
-        expect(process.env[HAPI_PEER_SESSION_TAG_ENV]).toBeUndefined()
         expect(sessionSyncClientMock).toHaveBeenCalledWith(session, {
             sessionTag: 'tag-owner',
+        })
+    })
+
+    it('omits sessionTag when resume has no fd/tag (terminal path)', async () => {
+        const session = createSession()
+        const sessionClient = {
+            updateMetadata: vi.fn()
+        }
+        getSessionMock.mockResolvedValue(session)
+        getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
+        sessionSyncClientMock.mockReturnValue(sessionClient)
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
+
+        await bootstrapExistingSession({
+            sessionId: 'hapi-session-1',
+            flavor: 'codex',
+            workingDirectory: '/tmp/project',
+            startedBy: 'terminal',
+        })
+
+        expect(sessionSyncClientMock).toHaveBeenCalledWith(session, {
+            sessionTag: undefined,
         })
     })
 

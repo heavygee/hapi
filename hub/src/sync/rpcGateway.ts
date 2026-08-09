@@ -180,7 +180,12 @@ export class RpcGateway {
         // CLI with `--hapi-session-id`, so the child reuses the existing hub
         // session row (same id) instead of minting a new one.
         forkSession?: boolean,
-        /** Create-time tag so resumed CLI can mint peer-capability (not on GET). */
+        /**
+         * Create-time tag so resumed CLI can mint peer-capability (not on GET).
+         * Travels only to the machine spawn handler; runner forwards via stdio
+         * fd 3 (not env). RpcRegistry refuses method shadowing so a second
+         * same-namespace socket cannot steal this payload (pass 2e-alt M4).
+         */
         peerSessionTag?: string
     ): Promise<{ type: 'success'; sessionId: string } | { type: 'error'; message: string }> {
         try {

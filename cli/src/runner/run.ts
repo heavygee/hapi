@@ -641,16 +641,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           };
         }
 
-        // Resume peer provenance (#1203): inject create-time tag for socket mint.
-        // CLI consumes + deletes this env before spawning the agent so it is not
-        // a durable shared-disk secret. Not written under HAPI_HOME.
+        // Resume peer provenance (#1203): hand create-time tag on stdio fd 3.
+        // Never process.env — Linux /proc/<pid>/environ retains execve strings
+        // after unsetenv (pass 2e-alt B1). Not written under HAPI_HOME.
         const peerSessionTag = options.peerSessionTag?.trim()
-        if (peerSessionTag) {
-          extraEnv = {
-            ...extraEnv,
-            HAPI_PEER_SESSION_TAG: peerSessionTag
-          }
-        }
 
         const args = buildCliArgs(agent, options, yolo);
 
@@ -676,12 +670,28 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         happyProcess = spawnHappyCLI(args, {
           cwd: spawnDirectory,
           detached: true,  // Sessions stay alive when runner stops
-          stdio: ['ignore', 'pipe', 'pipe'],  // Capture stdout/stderr for debugging
+          // fd 3 = peer session tag pipe when resuming with provenance proof
+          stdio: peerSessionTag
+            ? ['ignore', 'pipe', 'pipe', 'pipe']
+            : ['ignore', 'pipe', 'pipe'],
           env: {
             ...process.env,
-            ...extraEnv
+            ...extraEnv,
+            // fd number only — not the secret (see peerSessionTagFd.ts)
+            ...(peerSessionTag ? { HAPI_PEER_SESSION_TAG_FD: '3' } : {}),
           }
         });
+
+        if (peerSessionTag) {
+          const tagFd = happyProcess.stdio[3]
+          if (tagFd && typeof (tagFd as NodeJS.WritableStream).write === 'function') {
+            const stream = tagFd as NodeJS.WritableStream
+            stream.write(`${peerSessionTag}\n`)
+            stream.end()
+          } else {
+            logger.debug('[RUNNER RUN] peer session tag fd unavailable; resume mint will be skipped')
+          }
+        }
 
         happyProcess.stderr?.on('data', (data) => {
           stderrTail = appendTail(stderrTail, data);

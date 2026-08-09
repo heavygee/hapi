@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createConnection } from 'node:net'
-import { PeerDeliverBroker } from './peerDeliverBroker'
+import { PeerDeliverBroker, requestParentPeerDeliver } from './peerDeliverBroker'
+import { HAPI_SESSION_ID_ENV } from '@/agent/hapiSessionEnv'
 
 const pingPeerMock = vi.hoisted(() => vi.fn())
 
@@ -127,5 +128,38 @@ describe('PeerDeliverBroker', () => {
             sessionCapability: 'cap-secret',
             message: 'handoff',
         }))
+    })
+
+    it('client rejects a listener that is not an ancestor (M3)', async () => {
+        process.env[HAPI_SESSION_ID_ENV] = '6212dae5-8a60-4284-b7a5-c09aa3571ce4'
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-peer-broker-'))
+        dirs.push(dir)
+        const socketPath = join(dir, 'hijack.sock')
+        // Minimal listener that accepts connections (simulates sibling rebind).
+        const { createServer } = await import('node:net')
+        const server = createServer((socket) => {
+            socket.on('error', () => {
+                // client may hang up after ancestor check fails
+            })
+            socket.end(`${JSON.stringify({ ok: true, result: { sessionId: 'x', name: 'x', resumed: false } })}\n`)
+        })
+        await new Promise<void>((resolve, reject) => {
+            server.once('error', reject)
+            server.listen(socketPath, resolve)
+        })
+        try {
+            await expect(requestParentPeerDeliver({
+                sessionIdPrefix: '05d9f0f2',
+                message: 'intercept-me',
+                socketPath,
+                // Unrelated pid (not init/1 — every process descends from 1).
+                readPeerCred: () => ({ pid: process.pid + 99999, uid: 0, gid: 0 }),
+            })).rejects.toMatchObject({ code: 'auth_failed' })
+        } finally {
+            await new Promise<void>((resolve) => {
+                server.close(() => resolve())
+            })
+            delete process.env[HAPI_SESSION_ID_ENV]
+        }
     })
 })

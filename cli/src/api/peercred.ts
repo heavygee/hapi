@@ -9,7 +9,8 @@ export type PeerCredentials = {
 export type PeerCredReader = (socket: Socket) => PeerCredentials | null
 
 /**
- * Read Linux SO_PEERCRED (pid/uid/gid) for an AF_UNIX peer.
+ * Read AF_UNIX peer credentials (pid/uid/gid).
+ * Linux: SO_PEERCRED. macOS/iOS: getpeereid + LOCAL_PEERPID.
  * Returns null on unsupported platforms or when the fd is unavailable.
  */
 export const readUnixPeerCredentials: PeerCredReader = (socket) => {
@@ -27,22 +28,54 @@ export const readUnixPeerCredentials: PeerCredReader = (socket) => {
                 args: ['i32', 'i32', 'i32', 'ptr', 'ptr'] as const,
                 returns: 'i32',
             },
+            getpeereid: {
+                args: ['i32', 'ptr', 'ptr'] as const,
+                returns: 'i32',
+            },
         })
-        const SOL_SOCKET = 1
-        const SO_PEERCRED = 17
-        const cred = new Int32Array(3) // pid, uid, gid
-        const len = new Uint32Array([12])
-        const rc = libc.symbols.getsockopt(fd, SOL_SOCKET, SO_PEERCRED, ptr(cred), ptr(len))
-        if (rc !== 0) {
-            return null
+
+        if (process.platform === 'linux') {
+            // SOL_SOCKET=1 / SO_PEERCRED=17 on x86_64 and aarch64 Linux.
+            const SOL_SOCKET = 1
+            const SO_PEERCRED = 17
+            const cred = new Int32Array(3) // pid, uid, gid
+            const len = new Uint32Array([12])
+            const rc = libc.symbols.getsockopt(fd, SOL_SOCKET, SO_PEERCRED, ptr(cred), ptr(len))
+            if (rc !== 0) {
+                return null
+            }
+            const pid = cred[0]!
+            const uid = cred[1]!
+            const gid = cred[2]!
+            if (!Number.isInteger(pid) || pid <= 0) {
+                return null
+            }
+            return { pid, uid, gid }
         }
-        const pid = cred[0]!
-        const uid = cred[1]!
-        const gid = cred[2]!
-        if (!Number.isInteger(pid) || pid <= 0) {
-            return null
+
+        if (process.platform === 'darwin') {
+            // SOL_LOCAL=0, LOCAL_PEERPID=2 (Apple); uid/gid via getpeereid.
+            const SOL_LOCAL = 0
+            const LOCAL_PEERPID = 2
+            const uidBuf = new Uint32Array(1)
+            const gidBuf = new Uint32Array(1)
+            if (libc.symbols.getpeereid(fd, ptr(uidBuf), ptr(gidBuf)) !== 0) {
+                return null
+            }
+            const pidBuf = new Int32Array(1)
+            const len = new Uint32Array([4])
+            const rc = libc.symbols.getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID, ptr(pidBuf), ptr(len))
+            if (rc !== 0) {
+                return null
+            }
+            const pid = pidBuf[0]!
+            if (!Number.isInteger(pid) || pid <= 0) {
+                return null
+            }
+            return { pid, uid: uidBuf[0]!, gid: gidBuf[0]! }
         }
-        return { pid, uid, gid }
+
+        return null
     } catch {
         return null
     }

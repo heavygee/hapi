@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { createServer, createConnection, type Server, type Socket } from 'node:net'
 import { mkdirSync, unlinkSync, chmodSync, existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -37,8 +38,9 @@ export type PeerDeliverBrokerOptions = {
  * Session-parent broker (#1203 pass 2d).
  *
  * Child `hapi ping-peer` asks this parent to deliver — the bearer capability
- * never leaves parent memory. Auth is SO_PEERCRED + descendant-of-owner so a
- * same-UID sibling session cannot drive another session's provenance.
+ * never leaves parent memory. Auth is SO_PEERCRED / LOCAL_PEERPID +
+ * descendant-of-owner so a same-UID sibling session cannot drive another
+ * session's provenance. Client also verifies the listener is an ancestor (M3).
  */
 export class PeerDeliverBroker {
     readonly socketPath: string
@@ -158,7 +160,9 @@ export class PeerDeliverBroker {
 function defaultBrokerSocketPath(sessionId: string): string {
     const runtime = process.env.XDG_RUNTIME_DIR?.trim()
         || join(configuration.happyHomeDir, 'run')
-    return join(runtime, 'hapi-peer-deliver', `${sessionId}.sock`)
+    // Unpredictable suffix: sessionId alone is listable; still verify ancestor (M3).
+    const nonce = randomBytes(16).toString('hex')
+    return join(runtime, 'hapi-peer-deliver', `${sessionId}-${nonce}.sock`)
 }
 
 function readSocketLine(socket: Socket): Promise<string> {
@@ -198,18 +202,21 @@ export async function requestParentPeerDeliver(options: {
     message: string
     waitActiveSecs?: number
     socketPath?: string
+    readPeerCred?: PeerCredReader
 }): Promise<PingPeerResult> {
     const socketPath = options.socketPath
         ?? process.env[HAPI_PEER_DELIVER_BROKER_ENV]?.trim()
     if (!socketPath) {
         throw new PingPeerError(
-            'auth_failed',
+            'broker_unavailable',
             'inside a wrapped session but peer deliver broker is unavailable; use MCP ping_peer or retry after session parent is ready'
         )
     }
     if (!process.env[HAPI_SESSION_ID_ENV]?.trim()) {
         throw new PingPeerError('auth_failed', 'HAPI_SESSION_ID missing for attributed peer delivery')
     }
+
+    const readPeerCred = options.readPeerCred ?? readUnixPeerCredentials
 
     const response = await new Promise<BrokerResponse>((resolve, reject) => {
         const chunks: Buffer[] = []
@@ -220,7 +227,12 @@ export async function requestParentPeerDeliver(options: {
                 socket.end()
             }
         })
-        socket.on('error', reject)
+        socket.on('error', (error) => {
+            reject(new PingPeerError(
+                'broker_unavailable',
+                `peer deliver broker connect failed: ${error.message}`
+            ))
+        })
         socket.on('end', () => {
             try {
                 resolve(JSON.parse(Buffer.concat(chunks).toString('utf8').trim()) as BrokerResponse)
@@ -229,6 +241,23 @@ export async function requestParentPeerDeliver(options: {
             }
         })
         socket.on('connect', () => {
+            // M3: verify the listener is an ancestor of this process so a
+            // same-UID sibling cannot unlink+rebind the socket path and
+            // silently intercept outgoing peer text.
+            const cred = readPeerCred(socket)
+            if (!cred || !isProcessDescendant(process.pid, cred.pid)) {
+                const err = new PingPeerError(
+                    'auth_failed',
+                    'peer deliver broker: listener is not an ancestor of this process'
+                )
+                socket.removeAllListeners()
+                socket.on('error', () => {
+                    // ignore follow-on reset after we drop a forged listener
+                })
+                socket.end()
+                reject(err)
+                return
+            }
             const body: BrokerRequest = {
                 op: 'ping-peer',
                 sessionIdPrefix: options.sessionIdPrefix,
@@ -242,6 +271,7 @@ export async function requestParentPeerDeliver(options: {
     if (!response.ok) {
         const code = response.code === 'bad_args'
             || response.code === 'auth_failed'
+            || response.code === 'broker_unavailable'
             || response.code === 'not_found'
             || response.code === 'ambiguous'
             || response.code === 'resume_failed'
