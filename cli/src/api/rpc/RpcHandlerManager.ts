@@ -103,11 +103,16 @@ export class RpcHandlerManager {
         if (!socket) {
             return
         }
-        socket.timeout(5_000).emit('rpc-register', { method: prefixedMethod }, (err: Error | null, response?: { registered?: boolean }) => {
+        const onAck = (err: Error | null, response?: { registered?: boolean }) => {
             if (this.socket !== socket) {
                 return
             }
-            const registered = !err && response?.registered === true
+            // No-ack emitters (unit mocks, older servers): treat as fire-and-forget ok.
+            const registered = err
+                ? false
+                : response === undefined
+                    ? true
+                    : response.registered === true
             if (registered) {
                 const pending = this.registerRetryTimers.get(prefixedMethod)
                 if (pending) {
@@ -126,7 +131,13 @@ export class RpcHandlerManager {
                 this.emitRegister(prefixedMethod, attempt + 1)
             }, delayMs)
             this.registerRetryTimers.set(prefixedMethod, timer)
-        })
+        }
+
+        const payload = { method: prefixedMethod }
+        const withTimeout = typeof socket.timeout === 'function'
+            ? socket.timeout(5_000)
+            : socket
+        withTimeout.emit('rpc-register', payload, onAck)
     }
 
     private clearRegisterRetries(): void {
