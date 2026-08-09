@@ -154,6 +154,16 @@ PRAGMA user_version = 10;
 COMMIT;
 SQL
             ;;
+        24_to_23)
+            # session_jobs.run_id is ignored by V23 readers (explicit column lists).
+            # Leave the column in place; only rewind user_version.
+            echo "  applying v24 -> v23 downgrade: rewind user_version (keep run_id column)"
+            sqlite3 "$DB_PATH" <<'SQL'
+BEGIN IMMEDIATE;
+PRAGMA user_version = 23;
+COMMIT;
+SQL
+            ;;
         *)
             echo "ERROR: no known downgrade for v${from} -> v${to}" >&2
             echo "       Add a case to apply_downgrade_step() in $0" >&2
