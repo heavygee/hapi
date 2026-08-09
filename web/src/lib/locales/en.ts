@@ -1000,7 +1000,7 @@ export default {
   'settings.display.activeSessionsOnly': 'Active sessions only',
   'settings.display.activeSessionsOnly.desc': 'Hide inactive sessions in the sidebar. The session you have open stays visible.',
   'settings.display.pinInProgressSessions': 'Pin in-progress sessions',
-  'settings.display.pinInProgressSessions.desc': 'How loudly sessions float to the top In progress section. Default is long-running jobs (outliving batch work with a session job meter). Quiet active agents stay in project folders unless you choose All activity.',
+  'settings.display.pinInProgressSessions.desc': 'How loudly sessions float to the top In progress section. Default is long-running jobs (outliving batch work with a session job meter). Quiet active agents stay in project folders unless you choose All activity. Global pins and projects with a project pin stay above that section; Off keeps everything in directory groups.',
   'settings.display.pinInProgressMode.off': 'Off',
   'settings.display.pinInProgressMode.jobs': 'Long-running jobs',
   'settings.display.pinInProgressMode.all': 'All activity',

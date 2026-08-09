@@ -499,31 +499,46 @@ describe('SessionList collapse behavior', () => {
         expect(screen.getByRole('button', { name: /Pinned running task/ })).toBeInTheDocument()
     })
 
-    it('keeps durable global pins above In progress when both are present', () => {
-        localStorage.setItem('hapi-pin-in-progress-sessions', 'all')
+    it('renders project-pin groups above In progress when pin-in-progress is on', () => {
+        localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
         const sessions = [
             makeSession({
-                id: 'session-pinned',
+                id: 'session-global',
                 globalPinned: true,
-                updatedAt: 100,
-                metadata: { path: '/work/other', name: 'Pinned task', flavor: 'codex' },
+                updatedAt: 300,
+                metadata: { path: '/work/global', name: 'Global pin', flavor: 'codex' },
             }),
             makeSession({
-                id: 'session-running',
+                id: 'session-project-pin',
+                pinned: true,
+                updatedAt: 200,
+                metadata: { path: '/work/pinned-project', name: 'Project pin', flavor: 'codex' },
+            }),
+            makeSession({
+                id: 'session-floater',
                 active: true,
                 thinking: true,
-                updatedAt: 90,
-                metadata: { path: '/work/hapi', name: 'Running task', flavor: 'codex' },
+                updatedAt: 250,
+                metadata: { path: '/work/other', name: 'Unpinned floater', flavor: 'codex' },
+            }),
+            makeSession({
+                id: 'session-idle-other',
+                updatedAt: 50,
+                metadata: { path: '/work/other', name: 'Other idle', flavor: 'codex' },
             }),
         ]
         render(renderSessionList(sessions, null))
 
-        const pinnedHeader = screen.getByTitle('Pinned sessions')
-        const runningHeader = screen.getByTitle('In progress')
-        expect(
-            pinnedHeader.compareDocumentPosition(runningHeader) & Node.DOCUMENT_POSITION_FOLLOWING
-        ).toBeTruthy()
-        expect(screen.queryByTitle('/work/other')).toBeNull()
+        const globalSection = screen.getByTitle('Pinned sessions')
+        const projectPinGroup = screen.getByTitle('/work/pinned-project')
+        const inProgress = screen.getByTitle('In progress')
+        const otherGroup = screen.getByTitle('/work/other')
+
+        expect(globalSection).toAppearBefore(projectPinGroup)
+        expect(projectPinGroup).toAppearBefore(inProgress)
+        expect(inProgress).toAppearBefore(otherGroup)
+        expect(screen.getByRole('button', { name: /Project pin/ })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /Unpinned floater/ })).toBeInTheDocument()
     })
 
     it('pins idle sessions with a running attachedJob when mode is jobs (default)', () => {
