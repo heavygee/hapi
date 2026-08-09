@@ -32,45 +32,27 @@ export function formatMessageWithAttachments(
     return `${attachmentText}\n\n${text}`
 }
 
-export type PeerAnnotationPlacement = 'prefix' | 'suffix'
-
-function peerProvenanceLine(meta: MessageMeta): string {
-    const id = meta.peer?.sourceSessionId?.trim() ?? ''
-    if (!id) {
-        return 'From: peer (unattributed)'
-    }
-    const name = meta.peer?.sourceName
-        ?.replace(/[\r\n\u2028\u2029]+/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim() ?? ''
-    return name
-        ? `From: /sessions/${id}\nName: ${name}`
-        : `From: /sessions/${id}`
-}
-
 /**
- * Add a machine-parseable peer provenance line for the receiving agent
+ * Prepend a machine-parseable peer provenance line for the receiving agent
  * (#1203 / contract item 5). Kept separate from {@link formatMessageWithAttachments}
  * so agy's attachment-prefix matcher stays exact.
- *
- * Default placement is prefix. Pi uses suffix so slash/skill commands remain
- * the first line (`formatPiUserMessage` contract).
  */
 export function annotatePeerDeliveryForAgent(
     text: string,
-    meta: MessageMeta | undefined | null,
-    placement: PeerAnnotationPlacement = 'prefix'
+    meta: MessageMeta | undefined | null
 ): string {
     if (meta?.sentFrom !== 'peer') {
         return text
     }
-    const line = peerProvenanceLine(meta)
-    if (!text) {
-        return line
+    const id = meta.peer?.sourceSessionId?.trim() ?? ''
+    if (!id) {
+        return `From: peer (unattributed)\n\n${text}`
     }
-    return placement === 'suffix'
-        ? `${text}\n\n${line}`
-        : `${line}\n\n${text}`
+    const name = meta.peer?.sourceName?.trim() ?? ''
+    const header = name
+        ? `From: /sessions/${id} (${name})`
+        : `From: /sessions/${id}`
+    return `${header}\n\n${text}`
 }
 
 /** Attachment formatting + peer provenance for agent-facing user prompts. */

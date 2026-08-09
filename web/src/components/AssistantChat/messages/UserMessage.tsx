@@ -9,33 +9,6 @@ import { CliOutputBlock } from '@/components/CliOutputBlock'
 import { getConversationMessageAnchorId } from '@/chat/outline'
 import { MessageActions } from '@/components/AssistantChat/messages/MessageActions'
 
-type AuiMessageSnapshot = {
-    message: {
-        role: string
-        metadata: { custom?: Partial<HappyChatMessageMetadata> }
-    }
-}
-
-/** Exported for Object.is stability tests (useSyncExternalStore / useAuiState). */
-export function selectIsPeerDelivery(s: AuiMessageSnapshot): boolean {
-    if (s.message.role !== 'user') return false
-    return s.message.metadata.custom?.sentFrom === 'peer'
-}
-
-export function selectPeerSourceId(s: AuiMessageSnapshot): string | null {
-    if (s.message.role !== 'user') return null
-    if (s.message.metadata.custom?.sentFrom !== 'peer') return null
-    const id = s.message.metadata.custom?.peer?.sourceSessionId
-    return typeof id === 'string' && id.trim() ? id.trim() : null
-}
-
-export function selectPeerSourceName(s: AuiMessageSnapshot): string | null {
-    if (s.message.role !== 'user') return null
-    if (s.message.metadata.custom?.sentFrom !== 'peer') return null
-    const name = s.message.metadata.custom?.peer?.sourceName
-    return typeof name === 'string' && name.trim() ? name.trim() : null
-}
-
 export function HappyUserMessage() {
     const ctx = useHappyChatContext()
     const role = useAuiState((s) => s.message.role)
@@ -60,11 +33,25 @@ export function HappyUserMessage() {
         const custom = s.message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
         return custom?.attachments
     })
-    // Primitives only — object literals from useAuiState break useSyncExternalStore
-    // Object.is caching (assistant-ui store contract).
-    const isPeerDelivery = useAuiState((s) => selectIsPeerDelivery(s))
-    const peerSourceId = useAuiState((s) => selectPeerSourceId(s))
-    const peerSourceName = useAuiState((s) => selectPeerSourceName(s))
+    const peerDelivery = useAuiState((s) => {
+        if (s.message.role !== 'user') {
+            return { isPeer: false, sourceId: null as string | null, sourceName: null as string | null }
+        }
+        const custom = s.message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
+        if (custom?.sentFrom !== 'peer') {
+            return { isPeer: false, sourceId: null, sourceName: null }
+        }
+        const id = custom.peer?.sourceSessionId
+        const name = custom.peer?.sourceName
+        return {
+            isPeer: true,
+            sourceId: typeof id === 'string' && id.trim() ? id.trim() : null,
+            sourceName: typeof name === 'string' && name.trim() ? name.trim() : null
+        }
+    })
+    const isPeerDelivery = peerDelivery.isPeer
+    const peerSourceId = peerDelivery.sourceId
+    const peerSourceName = peerDelivery.sourceName
     const isCliOutput = useAuiState((s) => {
         const custom = s.message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
         return custom?.kind === 'cli-output'

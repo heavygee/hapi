@@ -22,7 +22,7 @@ describe('annotatePeerDeliveryForAgent', () => {
                 sourceName: 'Orchestrator'
             }
         })).toBe(
-            'From: /sessions/6212dae5-8a60-4284-b7a5-c09aa3571ce4\nName: Orchestrator\n\nhandoff body'
+            'From: /sessions/6212dae5-8a60-4284-b7a5-c09aa3571ce4 (Orchestrator)\n\nhandoff body'
         )
     })
 
@@ -34,15 +34,6 @@ describe('annotatePeerDeliveryForAgent', () => {
     it('leaves non-peer messages unchanged', () => {
         expect(annotatePeerDeliveryForAgent('typed', { sentFrom: 'webapp' })).toBe('typed')
         expect(annotatePeerDeliveryForAgent('typed', undefined)).toBe('typed')
-    })
-
-    it('can append provenance so Pi slash/skill first lines stay intact', () => {
-        expect(annotatePeerDeliveryForAgent('$brave-search explain', {
-            sentFrom: 'peer',
-            peer: { sourceSessionId: '6212dae5-8a60-4284-b7a5-c09aa3571ce4' }
-        }, 'suffix')).toBe(
-            '$brave-search explain\n\nFrom: /sessions/6212dae5-8a60-4284-b7a5-c09aa3571ce4'
-        )
     })
 })
 

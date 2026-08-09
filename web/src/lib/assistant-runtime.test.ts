@@ -7,7 +7,6 @@ import {
     findLatestCompletedBoundaryId,
     getBlockPresentationTimestamp,
     getResponseGroupTimestamps,
-    textForHumanRender,
     toThreadMessageLike
 } from './assistant-runtime'
 import type { AgentEventBlock, AgentTextBlock, CliOutputBlock, ToolCallBlock, UserTextBlock } from '@/chat/types'
@@ -135,14 +134,6 @@ describe('assignThreadMessageIds', () => {
         expect(second[0]).toBe(first[0])
         expect(second[0].threadMessageId).toBe('agent-text:a')
         expect(second[1].threadMessageId).toBe('user-text:u')
-    })
-
-    it('a fresh WeakMap yields new wrappers so converter caches can bust', () => {
-        const block = agentText('a')
-        const first = assignThreadMessageIdsWithStableWrappers([block], new WeakMap())
-        const second = assignThreadMessageIdsWithStableWrappers([block], new WeakMap())
-        expect(second[0]).not.toBe(first[0])
-        expect(second[0].threadMessageId).toBe(first[0].threadMessageId)
     })
 })
 
@@ -856,18 +847,6 @@ describe('aggregateResponseGroups', () => {
     })
 })
 
-describe('textForHumanRender', () => {
-    const raw = 'Answer body.\n\nAGENT_NOTIFY_SUMMARY {"version":1,"agent":"a","project":"p","status":"done","action":"none","summary":"ok"}'
-
-    it('strips by default', () => {
-        expect(textForHumanRender(raw, false)).toBe('Answer body.')
-    })
-
-    it('keeps the notify line when showAgentContract is true', () => {
-        expect(textForHumanRender(raw, true)).toBe(raw)
-    })
-})
-
 describe('toThreadMessageLike peer provenance', () => {
     it('maps user-text peer meta into custom.sentFrom / custom.peer', () => {
         const message = toThreadMessageLike(
@@ -882,8 +861,7 @@ describe('toThreadMessageLike peer provenance', () => {
                 }
             }),
             'user-text:u-peer',
-            1_000,
-            false
+            1_000
         )
         expect(message.metadata?.custom).toMatchObject({
             kind: 'user',
