@@ -65,13 +65,13 @@ Chip status stays **PR health only** (`✅` / `🔁` / `⚠️` / …). Merge au
 
 | Lane | Who merges | How you get there | Agents |
 |------|------------|-------------------|--------|
-| **A** maintainer | **@tiann** | Default for product / large PRs | Prepare only - never `gh pr merge` |
-| **B** self-merge | Operator / Meta tooling (not agents) | Auto: tests/docs-only + size caps; **or** human promote via GitHub label `low-impact` **or** `allow_pr_numbers` in policy | Prepare only - no auto merge yet |
+| **A** maintainer | **@tiann** | Default when over size caps and not promoted | Prepare only - never `gh pr merge` |
+| **B** self-merge | Operator / Meta tooling (not agents) | Auto: size caps (≤8 files, ≤120 delta) - **product paths OK**; **or** human promote via GitHub label `low-impact` **or** `allow_pr_numbers` in policy | Prepare only - no auto merge yet |
 | **C** forbidden | Nobody here | Others' PRs, direct push to `main`, settings, force-push | Hard no |
 
 **Blessing:** after heavygee self-merged test-only [#1268](https://github.com/tiann/hapi/pull/1268), @tiann replied ([comment](https://github.com/tiann/hapi/pull/1268#issuecomment-5141575753)): *"Sounds great! Thanks for helping out."* That authorizes taking **low-impact** PRs off tiann's plate - not a blank check for every green PR.
 
-**"Small enough" is not deterministic from size alone.** Open-PR audit (2026-07-31): every open heavygee PR classified **lane A** under auto-B (all touch product paths). Local tip for issue [#1270](https://github.com/tiann/hapi/issues/1270) (stale Cursor model remap; PR not filed at audit) is ~8 files / +511 - *feels* small but still product (`cli/` + `shared/` SKU) → auto-B **no**; promote with `low-impact` / allowlist if you want lane B. Recently merged #1268/#1269 were true auto-B (tests only). Salience: `docs/plans/2026-07-31-pr-merge-lanes.md`.
+**Path kind is not a lane reject.** "Because product" was retired 2026-08-09 - touching `cli/`/`hub/`/`web/`/`shared/` does **not** force lane A. Auto-B is size-capped; oversized focused fixes promote with `low-impact` / allowlist. Salience + history: `docs/plans/2026-07-31-pr-merge-lanes.md`.
 
 **Incident #1096** (2026-07-20): first accidental heavygee upstream merge - do not treat write access as "merge anything green."
 

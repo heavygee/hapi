@@ -5,9 +5,9 @@
 # This lib answers: given a *clean* PR, is it lane A (wait maintainer) or
 # lane B (collaborator self-merge eligible)?
 #
-# Deterministic size/"small enough" is intentionally NOT the sole signal —
-# auto-B is strict (no product paths). Human promote via GitHub label or
-# allowlisted PR number covers focused runtime fixes (e.g. stale model remap).
+# Auto-B is size-capped only (files + delta). Path kind (product vs tests)
+# is NOT a hard reject — "because product" was retired 2026-08-09. Oversized
+# or judgment-call PRs still need human promote via GitHub label or allowlist.
 #
 # Config: ~/.hapi/pr-merge-policy.json (see pr-merge-policy.example.json)
 # Sourced by hapi-meta-daily.sh. Unit tests: pr-merge-policy.test.sh
@@ -21,8 +21,6 @@ pmp_default_policy_json() {
     "github_labels": ["low-impact"],
     "allow_pr_numbers": [],
     "auto": {
-      "product_path_prefixes": ["cli/src/", "hub/src/", "web/src/", "shared/src/"],
-      "test_path_substrings": [".test.", ".spec.", "__tests__", "/tests/", "e2e/"],
       "max_changed_files": 8,
       "max_delta_lines": 120
     }
@@ -41,41 +39,6 @@ pmp_load_policy() {
     fi
 }
 
-# pmp_path_is_test PATH POLICY_JSON → 0 if test-ish
-pmp_path_is_test() {
-    local path="$1" policy="$2" sub
-    while IFS= read -r sub; do
-        [[ -z "$sub" ]] && continue
-        [[ "$path" == *"$sub"* ]] && return 0
-    done < <(printf '%s' "$policy" | jq -r '.self_merge.auto.test_path_substrings[]?')
-    return 1
-}
-
-# pmp_path_is_product PATH POLICY_JSON → 0 if product (non-test under prefixes)
-pmp_path_is_product() {
-    local path="$1" policy="$2" pref
-    if pmp_path_is_test "$path" "$policy"; then
-        return 1
-    fi
-    while IFS= read -r pref; do
-        [[ -z "$pref" ]] && continue
-        [[ "$path" == "$pref"* ]] && return 0
-    done < <(printf '%s' "$policy" | jq -r '.self_merge.auto.product_path_prefixes[]?')
-    return 1
-}
-
-# pmp_files_have_product FILES_NL POLICY_JSON → 0 if any product file
-pmp_files_have_product() {
-    local files="$1" policy="$2" f
-    while IFS= read -r f; do
-        [[ -z "$f" ]] && continue
-        if pmp_path_is_product "$f" "$policy"; then
-            return 0
-        fi
-    done <<<"$files"
-    return 1
-}
-
 # pmp_classify POLICY_JSON PR_NUMBER FILES_NL ADDITIONS DELETIONS LABELS_CSV
 # Prints: lane<TAB>reason
 #   lane: maintainer | self_merge
@@ -85,7 +48,7 @@ pmp_classify() {
     local default_lane
     default_lane="$(printf '%s' "$policy" | jq -r '.default_lane // "maintainer"')"
 
-    # Human promote: label or allowlist (covers "small enough" product fixes)
+    # Human promote: label or allowlist (covers oversized / judgment-call PRs)
     local lab allow labels_lc
     labels_lc="$(printf '%s' "$labels" | tr '[:upper:]' '[:lower:]')"
     while IFS= read -r lab; do
@@ -106,7 +69,7 @@ pmp_classify() {
         fi
     done < <(printf '%s' "$policy" | jq -r '.self_merge.allow_pr_numbers[]?')
 
-    # Auto-B: no product paths + size caps
+    # Auto-B: size caps only (product paths OK when under caps)
     local nfiles delta max_files max_delta
     nfiles="$(printf '%s' "$files" | grep -c . || true)"
     [[ -z "$nfiles" ]] && nfiles=0
@@ -114,10 +77,6 @@ pmp_classify() {
     max_files="$(printf '%s' "$policy" | jq -r '.self_merge.auto.max_changed_files // 8')"
     max_delta="$(printf '%s' "$policy" | jq -r '.self_merge.auto.max_delta_lines // 120')"
 
-    if pmp_files_have_product "$files" "$policy"; then
-        echo -e "${default_lane}\tproduct_paths"
-        return 0
-    fi
     if [[ "$nfiles" -gt "$max_files" ]]; then
         echo -e "${default_lane}\ttoo_many_files:${nfiles}>${max_files}"
         return 0
@@ -130,7 +89,7 @@ pmp_classify() {
         echo -e "${default_lane}\tno_files"
         return 0
     fi
-    echo -e "self_merge\tauto_nonproduct"
+    echo -e "self_merge\tauto_size"
     return 0
 }
 

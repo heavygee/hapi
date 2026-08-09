@@ -2,25 +2,35 @@
 
 Chip = health. Lane = local policy. Build order: (1) policy lib + tests (2) Meta queue sections (3) AGENTS A/B/C (4) optional merge automation later - **not yet**.
 
-## Why size heuristics suck (salience)
+## Amendment 2026-08-09 - drop path-kind reject
 
-Deterministic "small enough" by file/line count alone fails both ways:
+**Retired:** auto-B short-circuit `product_paths` ("because product" → lane A). Touching `cli/src|hub/src|web/src|shared/src` is no longer a hard reject.
 
-| Example | Size | Paths | Auto-B? | Reality |
-|---------|------|-------|---------|---------|
+**Current auto-B:** size caps only (≤8 files, ≤120 delta). Product under caps → lane B. Oversized / judgment-call → still needs **promote** (`low-impact` / allowlist).
+
+**Why:** Meta was teaching "wait on tiann (product_paths)" for every runtime PR, which contradicted the label table ("product OK if scoped") and the #1268 blessing scope. Path kind is a weak proxy for blast radius; size + human promote is enough.
+
+**Kill criterion:** first wrong auto-merge of a sneaky under-cap product change → restore a tighter gate or lower caps. Do not reintroduce path-kind as the sole Meta "wait tiann" reason without revisiting this amendment.
+
+## Why size heuristics suck (salience) - historical 2026-07-31
+
+Deterministic "small enough" by file/line count alone fails both ways. Original audit used a **path-kind** auto-B gate (since removed):
+
+| Example | Size | Paths | Auto-B then | Reality |
+|---------|------|-------|-------------|---------|
 | #1268 / #1269 (merged) | tiny | tests only | **yes** | True lane B; tiann blessed taking these off his plate |
-| #1270 issue tip (session e5d00bb1, not filed/pushed yet at audit) | 8 files, +511/-63 | `cli/` launcher + `shared/` SKU + tests | **no** (`product_paths`) | Feels "small enough" to humans; still runtime behavior - needs **promote** (`low-impact` / allowlist) |
-| #1087 | 7 files, +293 | `cli/` ACP + docs | **no** | Focused Cursor worktree fix - still product |
-| #1227 | 8 files, +792 | `web/` scratchlist park | **no** | Small file count, large delta, product |
+| #1270 issue tip (session e5d00bb1, not filed/pushed yet at audit) | 8 files, +511/-63 | `cli/` launcher + `shared/` SKU + tests | **no** (`product_paths`) | Oversized - still needs **promote** under 2026-08-09 rules (`too_large_delta`) |
+| #1087 | 7 files, +293 | `cli/` ACP + docs | **no** | Oversized |
+| #1227 | 8 files, +792 | `web/` scratchlist park | **no** | Oversized |
 | #1163 / #1108 / #945 / … | huge | product | **no** | Obvious lane A |
 
-**Open heavygee PRs on `tiann/hapi` (2026-07-31 audit):** all classified **maintainer / product_paths** under auto-B - zero auto-B candidates among opens. Numbers seen: 847, 897, 945, 947, 958, 986, 987, 1087, 1108, 1163, 1227, 1228, 1271.
+**Open heavygee PRs on `tiann/hapi` (2026-07-31 audit):** all classified **maintainer / product_paths** under the old auto-B - zero auto-B candidates among opens. Numbers seen: 847, 897, 945, 947, 958, 986, 987, 1087, 1108, 1163, 1227, 1228, 1271.
 
-So salience for policy design:
+Salience for policy design (updated):
 
-1. Auto-B stays **strict** (no product under `cli/src|hub/src|web/src|shared/src` except tests; size caps as backstop).
-2. Human **promote** is the escape hatch for focused runtime fixes (#1270-class).
-3. Do not teach agents "if lines < N then merge."
+1. Auto-B is **size-capped** (product paths OK under caps).
+2. Human **promote** is the escape hatch for oversized focused fixes (#1270 / #1430-class).
+3. Do not teach agents "if lines < N then merge" without chip green + policy lane B.
 
 ## Blessing
 

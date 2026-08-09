@@ -5,11 +5,9 @@
     "github_labels": ["low-impact"],
     "allow_pr_numbers": [],
     "auto": {
-      "product_path_prefixes": ["cli/src/", "hub/src/", "web/src/", "shared/src/"],
-      "test_path_substrings": [".test.", ".spec.", "__tests__", "/tests/", "e2e/"],
       "max_changed_files": 8,
       "max_delta_lines": 120
     }
   },
-  "_comment": "Copy to ~/.hapi/pr-merge-policy.json. Chip status stays health-only; this overlay picks lane A (maintainer) vs B (self-merge). Auto-B requires zero product paths + size caps. Promote focused runtime fixes via low-impact label or allow_pr_numbers. self-merge-ok was retired as redundant with chip green."
+  "_comment": "Copy to ~/.hapi/pr-merge-policy.json. Chip status stays health-only; this overlay picks lane A (maintainer) vs B (self-merge). Auto-B = size caps only (product paths OK). Oversized / judgment-call PRs promote via low-impact label or allow_pr_numbers. Path-kind reject (product_paths) retired 2026-08-09."
 }

@@ -13,15 +13,19 @@ eq() {
 
 POL="$(pmp_default_policy_json | jq -c .)"
 
-# test-only auto-B
+# test-only auto-B (size under caps)
 files=$'cli/src/modules/common/cursorModels.test.ts\ncli/src/modules/common/cursorModelsSharedCache.test.ts'
 got="$(pmp_classify "$POL" 1268 "$files" 16 0 "")"
-eq "1268-like auto self_merge" "$got" $'self_merge\tauto_nonproduct'
+eq "1268-like auto self_merge" "$got" $'self_merge\tauto_size'
 
-# product path → maintainer
+# small product under caps → auto-B (product path is NOT a reject)
 files=$'shared/src/cursorCliSku.ts\nshared/src/cursorCliSku.test.ts'
+got="$(pmp_classify "$POL" 99 "$files" 40 5 "")"
+eq "small product under caps → self_merge" "$got" $'self_merge\tauto_size'
+
+# oversized product → maintainer on delta (not product_paths)
 got="$(pmp_classify "$POL" 1270 "$files" 136 10 "")"
-eq "1270-like product → maintainer" "$got" $'maintainer\tproduct_paths'
+eq "1270-like oversized → too_large_delta" "$got" $'maintainer\ttoo_large_delta:146>120'
 
 # promote by label
 got="$(pmp_classify "$POL" 1270 "$files" 136 10 "low-impact,needs-review")"
