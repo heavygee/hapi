@@ -63,7 +63,7 @@ describe('getEventPresentation — modelError', () => {
         })
 
         expect(result.icon).toBe('⚠️')
-        expect(result.text).toBe('Model error: quota_exhausted')
+        expect(result.text).toBe('Model error (quota_exhausted, transient)')
         expect(result.text).not.toContain('RetriableError')
     })
 })
