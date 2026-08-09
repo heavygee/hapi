@@ -7,6 +7,7 @@ import type { CliSocketWithData, SocketServer } from '../../socketTypes'
 import type { AccessErrorReason, AccessResult } from './types'
 import { constantTimeEquals } from '../../../utils/crypto'
 import { mintPeerSessionCapability, verifyPeerSessionCapability } from '../../../web/peerCapability'
+import { releaseRunnerLeaseSocket, tryClaimRunnerLease } from '../../runnerLease'
 import { registerMachineHandlers } from './machineHandlers'
 import { registerRpcHandlers } from './rpcHandlers'
 import { registerSessionHandlers } from './sessionHandlers'
@@ -132,11 +133,24 @@ export function registerCliHandlers(socket: CliSocketWithData, deps: CliHandlers
     if (machineId) {
         const access = resolveMachineAccess(machineId)
         if (access.ok) {
-            // Machine room + RPC require create-time machine tag (#1203 / #1473 B1).
-            // Namespace token + machineId alone must not own spawn-happy-session.
+            // Machine room + RPC require create-time machine tag AND a memory-only
+            // runner-generation proof (#1473 Blocker). machineTag alone is in
+            // shared settings — siblings must not capture spawn-happy-session /
+            // resume mint after the legitimate runner socket drops.
             const presentedTag = typeof auth?.machineTag === 'string' ? auth.machineTag : ''
             const storedTag = typeof access.value.tag === 'string' ? access.value.tag : ''
-            if (presentedTag && storedTag && constantTimeEquals(presentedTag, storedTag)) {
+            const runnerProof = typeof auth?.runnerProof === 'string' ? auth.runnerProof : ''
+            const tagOk = Boolean(
+                presentedTag && storedTag && constantTimeEquals(presentedTag, storedTag)
+            )
+            if (
+                tagOk
+                && tryClaimRunnerLease({
+                    machineId,
+                    proof: runnerProof,
+                    socketId: socket.id,
+                })
+            ) {
                 socket.data.machineRpcAuthorizedId = machineId
                 socket.join(`machine:${machineId}`)
             }
@@ -185,6 +199,12 @@ export function registerCliHandlers(socket: CliSocketWithData, deps: CliHandlers
     })
 
     socket.on('disconnect', () => {
+        const authorizedMachineId = typeof socket.data.machineRpcAuthorizedId === 'string'
+            ? socket.data.machineRpcAuthorizedId
+            : ''
+        if (authorizedMachineId) {
+            releaseRunnerLeaseSocket(authorizedMachineId, socket.id)
+        }
         rpcRegistry.unregisterAll(socket)
         cleanupTerminalHandlers(socket, { terminalRegistry, terminalNamespace })
     })

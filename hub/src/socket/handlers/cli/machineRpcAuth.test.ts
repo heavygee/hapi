@@ -1,12 +1,13 @@
-import { describe, expect, it, mock } from 'bun:test'
+import { beforeEach, describe, expect, it, mock } from 'bun:test'
+import { clearRunnerLeasesForTests } from '../../runnerLease'
 import { registerCliHandlers } from './index'
 
 const JWT_SECRET = new TextEncoder().encode('machine-rpc-auth-test')
 
-function createSocketHarness(auth: Record<string, unknown>) {
-    const registered: Array<{ method: string; ack?: { registered: boolean } }> = []
+function createSocketHarness(auth: Record<string, unknown>, socketId = 'sock-1') {
     const handlers = new Map<string, (...args: unknown[]) => void>()
     const socket = {
+        id: socketId,
         data: { namespace: 'test-ns' } as {
             namespace: string
             machineRpcAuthorizedId?: string
@@ -20,13 +21,18 @@ function createSocketHarness(auth: Record<string, unknown>) {
             return socket
         },
     }
-    return { socket, handlers, registered }
+    return { socket, handlers }
 }
 
 describe('machine RPC auth (#1473 B1)', () => {
+    beforeEach(() => {
+        clearRunnerLeasesForTests()
+    })
+
     it('does not authorize machine RPC when machineId is presented without tag', () => {
         const { socket, handlers } = createSocketHarness({
             machineId: 'machine-1',
+            runnerProof: 'proof-1',
             clientType: 'machine-scoped',
         })
         registerCliHandlers(socket as never, {
@@ -59,11 +65,48 @@ describe('machine RPC auth (#1473 B1)', () => {
         expect(ackResult).toEqual({ registered: false })
     })
 
-    it('authorizes machine RPC when handshake machineTag matches stored tag', () => {
+    it('does not authorize machine RPC with machineTag but no runnerProof', () => {
+        const { socket, handlers } = createSocketHarness({
+            machineId: 'machine-1',
+            machineTag: 'secret-tag',
+            clientType: 'machine-scoped',
+        })
+        registerCliHandlers(socket as never, {
+            io: { of: () => ({}) },
+            store: {
+                sessions: { getSessionByNamespace: () => null, getSession: () => null },
+                machines: {
+                    getMachineByNamespace: () => ({
+                        id: 'machine-1',
+                        namespace: 'test-ns',
+                        tag: 'secret-tag',
+                    }),
+                    getMachine: () => null,
+                },
+            },
+            rpcRegistry: {
+                register: mock(() => true),
+                unregister: mock(() => {}),
+                unregisterAll: mock(() => {}),
+            },
+            terminalRegistry: {},
+            jwtSecret: JWT_SECRET,
+        } as never)
+
+        expect(socket.data.machineRpcAuthorizedId).toBeUndefined()
+        let ackResult: { registered?: boolean } | undefined
+        handlers.get('rpc-register')?.({ method: 'machine-1:spawn-happy-session' }, (response: { registered: boolean }) => {
+            ackResult = response
+        })
+        expect(ackResult).toEqual({ registered: false })
+    })
+
+    it('authorizes machine RPC when machineTag matches and runnerProof claims the lease', () => {
         const register = mock(() => true)
         const { socket, handlers } = createSocketHarness({
             machineId: 'machine-1',
             machineTag: 'secret-tag',
+            runnerProof: 'proof-1',
             clientType: 'machine-scoped',
         })
         registerCliHandlers(socket as never, {
@@ -95,6 +138,66 @@ describe('machine RPC auth (#1473 B1)', () => {
         })
         expect(ackResult).toEqual({ registered: true })
         expect(register).toHaveBeenCalled()
+    })
+
+    it('rejects a sibling inventing a different runnerProof while the lease is live', () => {
+        const first = createSocketHarness({
+            machineId: 'machine-1',
+            machineTag: 'secret-tag',
+            runnerProof: 'proof-runner',
+            clientType: 'machine-scoped',
+        }, 'sock-runner')
+        registerCliHandlers(first.socket as never, {
+            io: { of: () => ({}) },
+            store: {
+                sessions: { getSessionByNamespace: () => null, getSession: () => null },
+                machines: {
+                    getMachineByNamespace: () => ({
+                        id: 'machine-1',
+                        namespace: 'test-ns',
+                        tag: 'secret-tag',
+                    }),
+                    getMachine: () => null,
+                },
+            },
+            rpcRegistry: {
+                register: mock(() => true),
+                unregister: mock(() => {}),
+                unregisterAll: mock(() => {}),
+            },
+            terminalRegistry: {},
+            jwtSecret: JWT_SECRET,
+        } as never)
+        expect(first.socket.data.machineRpcAuthorizedId).toBe('machine-1')
+
+        const sibling = createSocketHarness({
+            machineId: 'machine-1',
+            machineTag: 'secret-tag',
+            runnerProof: 'proof-sibling',
+            clientType: 'machine-scoped',
+        }, 'sock-sibling')
+        registerCliHandlers(sibling.socket as never, {
+            io: { of: () => ({}) },
+            store: {
+                sessions: { getSessionByNamespace: () => null, getSession: () => null },
+                machines: {
+                    getMachineByNamespace: () => ({
+                        id: 'machine-1',
+                        namespace: 'test-ns',
+                        tag: 'secret-tag',
+                    }),
+                    getMachine: () => null,
+                },
+            },
+            rpcRegistry: {
+                register: mock(() => true),
+                unregister: mock(() => {}),
+                unregisterAll: mock(() => {}),
+            },
+            terminalRegistry: {},
+            jwtSecret: JWT_SECRET,
+        } as never)
+        expect(sibling.socket.data.machineRpcAuthorizedId).toBeUndefined()
     })
 
     it('authorizes session-scoped RPC when create-time session tag matches', () => {

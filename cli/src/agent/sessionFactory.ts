@@ -346,7 +346,8 @@ export async function bootstrapExistingSession(options: {
     // GET omits sessionCapability by design (#1203). Runner resume does not
     // receive the create-time tag (pass 2g/2h — no child fd/env mint-proof);
     // hub arms a spawn-RPC nonce; runner redeems + PID-injects capability.
-    // Terminal resume without that path → unattributed peer delivery (M2).
+    // Direct `hapi resume` has no inject path — session still launches, but
+    // peer delivery stays unattributed and session RPC stays unregistered.
     const sessionInfo = await api.getSession(options.sessionId)
     const baseMetadata = buildSessionMetadata({
         flavor: options.flavor,
@@ -372,23 +373,17 @@ export async function bootstrapExistingSession(options: {
     // Capture before ApiSession constructor drains HAPI_PEER_CAP_INJECT (#1473).
     const { HAPI_PEER_CAP_INJECT_ENV } = await import('@/api/peerCapabilityInject')
     const expectsInjectedCapability = Boolean(process.env[HAPI_PEER_CAP_INJECT_ENV]?.trim())
-    // machineTag lives in shared settings — not session-scoped possession proof.
-    // Only the runner one-shot nonce + PID inject path may mint (#1473 Blocker).
-    if (!expectsInjectedCapability) {
-        throw new Error(
-            'Secure resume requires runner-issued one-shot capability '
-            + '(hub resume / spawn inject). Direct terminal attach cannot prove session ownership.'
-        )
-    }
 
     const session = api.sessionSyncClient(sessionInfo)
     session.updateMetadata(buildUpdatedMetadata)
 
-    // Wait for runner inject before exporting broker env / returning — otherwise
+    // Runner inject path: wait before exporting broker env / returning — otherwise
     // the wrapped agent can spawn and snapshot an empty env (#1473 Major).
-    const injected = await session.waitForPeerSessionCapability({ timeoutMs: 16_000 })
-    if (!injected) {
-        throw new Error('Cannot resume: runner peer capability inject failed')
+    if (expectsInjectedCapability) {
+        const injected = await session.waitForPeerSessionCapability({ timeoutMs: 16_000 })
+        if (!injected) {
+            throw new Error('Cannot resume: runner peer capability inject failed')
+        }
     }
 
     exportHapiSessionEnv(sessionInfo.id)

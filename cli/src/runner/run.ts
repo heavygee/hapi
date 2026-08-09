@@ -1,4 +1,5 @@
 import fs from 'fs/promises';
+import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import os from 'os';
 
@@ -1193,8 +1194,12 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     }
     logger.debug(`[RUNNER RUN] Machine registered: ${machine.id}`);
 
+    // Memory-only runner-generation proof for machine RPC / resume mint (#1473).
+    // Never persist to settings or child env — siblings can read those.
+    const runnerProof = randomBytes(32).toString('base64url')
+
     // Create realtime machine session
-    const apiMachine = api.machineSyncClient(machine, { workspaceRoots, machineTag });
+    const apiMachine = api.machineSyncClient(machine, { workspaceRoots, machineTag, runnerProof });
 
     // Set RPC handlers
     apiMachine.setRPCHandlers({

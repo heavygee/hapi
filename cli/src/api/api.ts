@@ -430,8 +430,14 @@ export class ApiClient {
 
     machineSyncClient(
         machine: Machine,
-        options?: { workspaceRoots?: string[]; machineTag?: string }
+        options?: { workspaceRoots?: string[]; machineTag?: string; runnerProof?: string }
     ): ApiMachineClient {
-        return new ApiMachineClient(this.token, machine, options?.workspaceRoots, options?.machineTag)
+        return new ApiMachineClient(
+            this.token,
+            machine,
+            options?.workspaceRoots,
+            options?.machineTag,
+            options?.runnerProof
+        )
     }
 }

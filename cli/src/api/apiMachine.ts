@@ -124,7 +124,9 @@ export class ApiMachineClient {
         private readonly token: string,
         private readonly machine: Machine,
         private readonly workspaceRoots?: string[],
-        private readonly machineTag?: string
+        private readonly machineTag?: string,
+        /** Memory-only runner-generation proof — never settings / child env (#1473). */
+        private readonly runnerProof?: string
     ) {
         // Realpath roots once so all subsequent comparisons are against
         // canonical, symlink-resolved locations. Falls back to lexical
@@ -546,6 +548,7 @@ export class ApiMachineClient {
                 clientType: 'machine-scoped' as const,
                 machineId: this.machine.id,
                 ...(this.machineTag ? { machineTag: this.machineTag } : {}),
+                ...(this.runnerProof ? { runnerProof: this.runnerProof } : {}),
             },
             path: '/socket.io/',
             reconnection: true,

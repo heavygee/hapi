@@ -110,20 +110,23 @@ describe('bootstrapExistingSession', () => {
         delete process.env.HAPI_PEER_CAP_INJECT
     })
 
-    it('refuses terminal resume without runner one-shot inject env (#1473)', async () => {
+    it('allows direct terminal resume without inject (unattributed peer path) (#1473)', async () => {
         const session = createSession()
+        const sessionClient = mockInjectReadySessionClient()
         getSessionMock.mockResolvedValue(session)
         getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
         readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
 
-        await expect(bootstrapExistingSession({
+        const result = await bootstrapExistingSession({
             sessionId: 'hapi-session-1',
             flavor: 'codex',
             workingDirectory: '/tmp/project'
-        })).rejects.toThrow(/runner-issued one-shot capability/)
+        })
 
-        expect(sessionSyncClientMock).not.toHaveBeenCalled()
-        expect(notifyRunnerSessionStartedMock).not.toHaveBeenCalled()
+        expect(result.sessionInfo.id).toBe('hapi-session-1')
+        expect(process.env[HAPI_SESSION_ID_ENV]).toBe('hapi-session-1')
+        expect(sessionClient.waitForPeerSessionCapability).not.toHaveBeenCalled()
+        expect(notifyRunnerSessionStartedMock).toHaveBeenCalled()
     })
 
     it('awaits runner inject before exporting session env (#1473)', async () => {
