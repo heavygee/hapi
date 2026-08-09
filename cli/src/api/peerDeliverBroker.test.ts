@@ -3,7 +3,12 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createConnection } from 'node:net'
-import { PeerDeliverBroker, requestParentPeerDeliver } from './peerDeliverBroker'
+import {
+    MAX_UNIX_SOCKET_PATH_BYTES,
+    PeerDeliverBroker,
+    defaultBrokerSocketPath,
+    requestParentPeerDeliver,
+} from './peerDeliverBroker'
 import { HAPI_SESSION_ID_ENV } from '@/agent/hapiSessionEnv'
 
 const pingPeerMock = vi.hoisted(() => vi.fn())
@@ -30,12 +35,24 @@ vi.mock('@/ui/logger', () => ({
 
 describe('PeerDeliverBroker', () => {
     const dirs: string[] = []
+    const previousXdg = process.env.XDG_RUNTIME_DIR
 
     afterEach(() => {
         for (const dir of dirs.splice(0)) {
             rmSync(dir, { recursive: true, force: true })
         }
         pingPeerMock.mockReset()
+        if (previousXdg === undefined) {
+            delete process.env.XDG_RUNTIME_DIR
+        } else {
+            process.env.XDG_RUNTIME_DIR = previousXdg
+        }
+    })
+
+    it('keeps the default socket path within the portable unix pathname budget', () => {
+        delete process.env.XDG_RUNTIME_DIR
+        const path = defaultBrokerSocketPath('11111111-1111-4111-8111-111111111111')
+        expect(Buffer.byteLength(path, 'utf8')).toBeLessThanOrEqual(MAX_UNIX_SOCKET_PATH_BYTES)
     })
 
     it('rejects same-UID sibling callers that are not descendants of the owner', async () => {

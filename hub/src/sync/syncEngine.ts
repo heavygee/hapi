@@ -2840,7 +2840,19 @@ async uploadScratchlistAttachment(
         try {
             // Arm nonce for runner redeem only — never mint on first /cli connect
             // (pass 2h B1 TOCTOU). Nonce travels on machine spawn RPC.
-            const resumePeerMintNonce = armResumePeerMint(access.sessionId)
+            // Fail closed on host-fallback routing: metadata.host is
+            // self-reported, so a same-namespace tagged machine can spoof the
+            // victim host and steal the mint (#1473 Blocker). Exact machineId
+            // match only; host-fallback resume stays unattributed.
+            const recordedMachineId = typeof metadata.machineId === 'string'
+                ? metadata.machineId.trim()
+                : ''
+            const resumePeerMintNonce = (
+                recordedMachineId
+                && targetMachine.id === recordedMachineId
+            )
+                ? armResumePeerMint(access.sessionId)
+                : undefined
             const spawnResult = await this.rpcGateway.spawnSession(
                 targetMachine.id,
                 directory,

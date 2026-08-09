@@ -1467,6 +1467,58 @@ describe('session model', () => {
         }
     })
 
+    it('does not arm resume peer mint when routing via host-spoofed machine (#1473)', async () => {
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never
+        )
+
+        try {
+            const session = engine.getOrCreateSession(
+                'session-claude-host-spoof',
+                {
+                    path: '/tmp/project',
+                    host: 'victim-host',
+                    machineId: 'machine-victim',
+                    flavor: 'claude',
+                    claudeSessionId: 'claude-session-spoof'
+                },
+                null,
+                'default',
+                'sonnet'
+            )
+            // Victim machine stays offline; attacker advertises the same host.
+            engine.getOrCreateMachine(
+                'machine-attacker',
+                { host: 'victim-host', platform: 'linux', happyCliVersion: '0.1.0' },
+                null,
+                'default',
+                'attacker-tag'
+            )
+            engine.handleMachineAlive({ machineId: 'machine-attacker', time: Date.now() })
+
+            let capturedMint: string | undefined
+            let capturedMachineId: string | undefined
+            ;(engine as any).rpcGateway.spawnSession = async (...args: unknown[]) => {
+                capturedMachineId = args[0] as string
+                capturedMint = args[17] as string | undefined
+                return { type: 'success', sessionId: session.id }
+            }
+            ;(engine as any).waitForSessionActive = async () => true
+
+            const result = await engine.resumeSession(session.id, 'default')
+
+            expect(result).toEqual({ type: 'success', sessionId: session.id })
+            expect(capturedMachineId).toBe('machine-attacker')
+            expect(capturedMint).toBeUndefined()
+        } finally {
+            engine.stop()
+        }
+    })
+
     it('recovers claude resume session ID from stored messages when metadata is missing it', async () => {
         const store = new Store(':memory:')
         const engine = new SyncEngine(

@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto'
 import { createServer, createConnection, type Server, type Socket } from 'node:net'
 import { mkdirSync, unlinkSync, chmodSync, existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { configuration } from '@/configuration'
 import { logger } from '@/ui/logger'
 import { isProcessDescendant } from './processDescendant'
 import { readUnixPeerCredentials, type PeerCredReader } from './peercred'
@@ -73,14 +73,22 @@ export class PeerDeliverBroker {
         this.server = createServer((socket) => {
             void this.handleConnection(socket)
         })
-        this.server.listen(this.socketPath)
-        try {
-            chmodSync(this.socketPath, 0o600)
-        } catch {
-            // best-effort
-        }
-        process.env[HAPI_PEER_DELIVER_BROKER_ENV] = this.socketPath
-        logger.debug(`[peer-broker] listening on ${this.socketPath}`)
+        this.server.once('error', (error) => {
+            logger.debug(`[peer-broker] listen failed on ${this.socketPath}`, error)
+            this.server = null
+            if (process.env[HAPI_PEER_DELIVER_BROKER_ENV] === this.socketPath) {
+                delete process.env[HAPI_PEER_DELIVER_BROKER_ENV]
+            }
+        })
+        this.server.listen(this.socketPath, () => {
+            try {
+                chmodSync(this.socketPath, 0o600)
+            } catch {
+                // best-effort
+            }
+            process.env[HAPI_PEER_DELIVER_BROKER_ENV] = this.socketPath
+            logger.debug(`[peer-broker] listening on ${this.socketPath}`)
+        })
     }
 
     stop(): void {
@@ -157,12 +165,17 @@ export class PeerDeliverBroker {
     }
 }
 
-function defaultBrokerSocketPath(sessionId: string): string {
+/** Portable pathname budget (macOS ~104 incl NUL; Linux 108). */
+export const MAX_UNIX_SOCKET_PATH_BYTES = 103
+
+/**
+ * Short opaque path under a private runtime root (#1473 Major).
+ * Session id is not embedded — path is exported via env; peercred auth is PID-based.
+ */
+export function defaultBrokerSocketPath(_sessionId?: string): string {
     const runtime = process.env.XDG_RUNTIME_DIR?.trim()
-        || join(configuration.happyHomeDir, 'run')
-    // Unpredictable suffix: sessionId alone is listable; still verify ancestor (M3).
-    const nonce = randomBytes(16).toString('hex')
-    return join(runtime, 'hapi-peer-deliver', `${sessionId}-${nonce}.sock`)
+        || join(tmpdir(), `hapi-${process.getuid?.() ?? process.pid}`)
+    return join(runtime, 'pd', `${randomBytes(12).toString('hex')}.sock`)
 }
 
 function readSocketLine(socket: Socket): Promise<string> {
