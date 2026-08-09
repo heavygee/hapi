@@ -324,9 +324,9 @@ export async function bootstrapExistingSession(options: {
     })
 
     // GET omits sessionCapability by design (#1203). Runner resume does not
-    // receive the create-time tag (pass 2g B1 — no child fd/env mint-proof);
-    // the hub arms a one-shot mint consumed on CLI socket connect. Terminal
-    // resume has no arm → unattributed peer delivery (M2).
+    // receive the create-time tag (pass 2g/2h — no child fd/env mint-proof);
+    // hub arms a spawn-RPC nonce; runner redeems + PID-injects capability.
+    // Terminal resume without that path → unattributed peer delivery (M2).
     const sessionInfo = await api.getSession(options.sessionId)
     const baseMetadata = buildSessionMetadata({
         flavor: options.flavor,
