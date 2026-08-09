@@ -66,18 +66,61 @@ for (const command of COMMANDS) {
     commandMap.set(command.name, command)
 }
 
+/**
+ * Lowercase kebab tokens look like HAPI subcommands (`auth`, `job`, `ping-peer`).
+ * Flags (`--yolo`) and free-form Claude prompts stay on the default launcher.
+ */
+export function looksLikeCliSubcommand(token: string): boolean {
+    return /^[a-z][a-z0-9-]*$/.test(token)
+}
+
+function unknownSubcommandCommand(name: string): CommandDefinition {
+    return {
+        name,
+        requiresRuntimeAssets: false,
+        run: async () => {
+            console.error(chalk.red('Error:'), `Unknown hapi command '${name}'.`)
+            console.error(`Run ${chalk.bold('hapi --help')} for supported commands.`)
+            console.error(
+                'If you expected this command after a hub upgrade, update the CLI (npm / Homebrew / GitHub release). A stale binary used to fall through to Claude and look like success.'
+            )
+            process.exit(1)
+        }
+    }
+}
+
 export function resolveCommand(args: string[]): { command: CommandDefinition; context: CommandContext } {
     const subcommand = args[0]
     const command = subcommand ? commandMap.get(subcommand) : undefined
-    const resolvedCommand = command ?? claudeCommand
-    const commandArgs = command ? args.slice(1) : args
+    if (command) {
+        return {
+            command,
+            context: {
+                args,
+                subcommand,
+                commandArgs: args.slice(1)
+            }
+        }
+    }
+
+    // Do not Claude-passthrough unknown subcommand-shaped tokens (stale CLI footgun).
+    if (subcommand && looksLikeCliSubcommand(subcommand)) {
+        return {
+            command: unknownSubcommandCommand(subcommand),
+            context: {
+                args,
+                subcommand,
+                commandArgs: args.slice(1)
+            }
+        }
+    }
 
     return {
-        command: resolvedCommand,
+        command: claudeCommand,
         context: {
             args,
             subcommand,
-            commandArgs
+            commandArgs: args
         }
     }
 }
