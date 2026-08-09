@@ -1,6 +1,8 @@
 import { readFile } from 'node:fs/promises'
 import chalk from 'chalk'
 import { initializeToken } from '@/ui/tokenInit'
+import { HAPI_SESSION_ID_ENV } from '@/agent/hapiSessionEnv'
+import { requestParentPeerDeliver } from '@/api/peerDeliverBroker'
 import {
     PingPeerError,
     exitCodeForPingPeerError,
@@ -177,12 +179,22 @@ export async function handlePingPeerCommand(args: string[]): Promise<void> {
         )
     }
 
-    const result = await pingPeer({
-        sessionIdPrefix: parsed.sessionIdPrefix,
-        message,
-        waitActiveSecs: parsed.waitActiveSecs ?? envWaitActiveSecs(),
-        onProgress: (line) => console.log(`hapi ping-peer: ${line}`)
-    })
+    const waitActiveSecs = parsed.waitActiveSecs ?? envWaitActiveSecs()
+    const wrappedSessionId = process.env[HAPI_SESSION_ID_ENV]?.trim()
+    // Inside a wrapped session the parent broker delivers with in-memory
+    // capability — never read a shared HAPI_HOME bearer (pass 2d B3/M4).
+    const result = wrappedSessionId
+        ? await requestParentPeerDeliver({
+            sessionIdPrefix: parsed.sessionIdPrefix,
+            message,
+            waitActiveSecs,
+        })
+        : await pingPeer({
+            sessionIdPrefix: parsed.sessionIdPrefix,
+            message,
+            waitActiveSecs,
+            onProgress: (line) => console.log(`hapi ping-peer: ${line}`)
+        })
 
     console.log(chalk.green(`hapi ping-peer: OK - delivered to ${result.sessionId}`))
 }

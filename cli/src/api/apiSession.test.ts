@@ -94,9 +94,11 @@ vi.mock('axios', () => ({
     }
 }))
 
-vi.mock('./peerSessionCredentialStore', () => ({
-    savePeerSessionCredentials: vi.fn(),
-    loadPeerSessionCredentials: vi.fn(() => null),
+vi.mock('./peerDeliverBroker', () => ({
+    PeerDeliverBroker: class {
+        start() {}
+        stop() {}
+    },
 }))
 
 import { ApiSessionClient, isExternalUserMessage, IncomingMessageFilter } from './apiSession'

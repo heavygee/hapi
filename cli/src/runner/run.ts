@@ -641,6 +641,17 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           };
         }
 
+        // Resume peer provenance (#1203): inject create-time tag for socket mint.
+        // CLI consumes + deletes this env before spawning the agent so it is not
+        // a durable shared-disk secret. Not written under HAPI_HOME.
+        const peerSessionTag = options.peerSessionTag?.trim()
+        if (peerSessionTag) {
+          extraEnv = {
+            ...extraEnv,
+            HAPI_PEER_SESSION_TAG: peerSessionTag
+          }
+        }
+
         const args = buildCliArgs(agent, options, yolo);
 
         // sessionId reserved for future use

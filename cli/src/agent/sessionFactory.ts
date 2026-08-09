@@ -13,8 +13,16 @@ import { runtimePath } from '@/projectPath'
 import { getInvokedCwd } from '@/utils/invokedCwd'
 import { readWorktreeEnv } from '@/utils/worktreeEnv'
 import { exportHapiSessionEnv } from '@/agent/hapiSessionEnv'
-import { savePeerSessionCredentials, loadPeerSessionCredentials } from '@/api/peerSessionCredentialStore'
 import packageJson from '../../package.json'
+
+/** Runner injects create-time tag for resume socket mint; never persist under HAPI_HOME. */
+export const HAPI_PEER_SESSION_TAG_ENV = 'HAPI_PEER_SESSION_TAG'
+
+function consumePeerSessionTagFromEnv(): string | undefined {
+    const tag = process.env[HAPI_PEER_SESSION_TAG_ENV]?.trim()
+    delete process.env[HAPI_PEER_SESSION_TAG_ENV]
+    return tag || undefined
+}
 
 export { HAPI_SESSION_ID_ENV, exportHapiSessionEnv, exportHapiHubAuthEnv } from '@/agent/hapiSessionEnv'
 
@@ -204,14 +212,6 @@ export async function bootstrapSession(options: SessionBootstrapOptions): Promis
         effort: options.effort
     })
 
-    if (sessionInfo.sessionCapability) {
-        savePeerSessionCredentials({
-            sessionId: sessionInfo.id,
-            sessionTag,
-            sessionCapability: sessionInfo.sessionCapability,
-        })
-    }
-
     const session = api.sessionSyncClient(sessionInfo, { sessionTag })
 
     exportHapiSessionEnv(sessionInfo.id)
@@ -293,13 +293,6 @@ export async function bootstrapLazySession(options: SessionBootstrapOptions): Pr
             if (materialized.id !== requestedId) {
                 throw new Error(`Hub returned unexpected session id ${materialized.id}`)
             }
-            if (materialized.sessionCapability) {
-                savePeerSessionCredentials({
-                    sessionId: materialized.id,
-                    sessionTag,
-                    sessionCapability: materialized.sessionCapability,
-                })
-            }
             return materialized
         },
         sessionTag,
@@ -339,11 +332,11 @@ export async function bootstrapExistingSession(options: {
         metadata: buildMachineMetadata()
     })
 
-    // GET omits sessionCapability by design (#1203). Resume loads create-time
-    // tag + capability from local HAPI_HOME store; the CLI socket may re-mint
-    // only when handshake presents that tag (sibling namespace-token holders cannot).
+    // GET omits sessionCapability by design (#1203). Resume receives the
+    // create-time tag via runner-injected env (cleared before agent spawn) and
+    // re-mints capability on the tag-gated CLI socket — never from shared disk.
     const sessionInfo = await api.getSession(options.sessionId)
-    const peerCreds = loadPeerSessionCredentials(options.sessionId)
+    const sessionTag = consumePeerSessionTagFromEnv()
     const baseMetadata = buildSessionMetadata({
         flavor: options.flavor,
         startedBy,
@@ -366,8 +359,7 @@ export async function bootstrapExistingSession(options: {
     const metadata = buildUpdatedMetadata(sessionInfo.metadata)
 
     const session = api.sessionSyncClient(sessionInfo, {
-        sessionCapability: peerCreds?.sessionCapability,
-        sessionTag: peerCreds?.sessionTag,
+        sessionTag,
     })
     session.updateMetadata(buildUpdatedMetadata)
 

@@ -2831,6 +2831,7 @@ async uploadScratchlistAttachment(
         }
         let piResumeSucceeded = false
         try {
+            const peerSessionTag = this.store.sessions.getSession(access.sessionId)?.tag ?? undefined
             const spawnResult = await this.rpcGateway.spawnSession(
                 targetMachine.id,
                 directory,
@@ -2847,7 +2848,9 @@ async uploadScratchlistAttachment(
                 access.sessionId,
                 session.collaborationMode ?? undefined,
                 session.copilotAgentMode ?? undefined,
-                resumedStartingMode
+                resumedStartingMode,
+                undefined,
+                peerSessionTag || undefined
             )
 
             if (spawnResult.type !== 'success') {

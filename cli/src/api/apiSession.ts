@@ -40,7 +40,7 @@ import { cleanupUploadDir } from '../modules/common/handlers/uploads'
 import { TerminalManager } from '@/terminal/TerminalManager'
 import { applyVersionedAck } from './versionedUpdate'
 import { buildHubRequestHeaders, buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
-import { savePeerSessionCredentials } from './peerSessionCredentialStore'
+import { PeerDeliverBroker } from './peerDeliverBroker'
 
 /**
  * XML tags that Claude Code injects as `type:'user'` messages.
@@ -251,6 +251,8 @@ export class ApiSessionClient extends EventEmitter {
         resolve: (capability: string | null) => void
         timer: ReturnType<typeof setTimeout>
     }> = []
+    /** Parent-only broker so child `hapi ping-peer` never handles the bearer. */
+    private peerDeliverBroker: PeerDeliverBroker | null = null
     private metadata: Metadata | null
     private metadataVersion: number
     private agentState: AgentState | null
@@ -323,13 +325,10 @@ export class ApiSessionClient extends EventEmitter {
         const trimmed = capability.trim()
         if (!trimmed) return
         this.sessionCapability = trimmed
-        if (this.sessionTag) {
-            savePeerSessionCredentials({
-                sessionId: this.sessionId,
-                sessionTag: this.sessionTag,
-                sessionCapability: trimmed,
-            })
-        }
+        // Never persist tag/capability under shared HAPI_HOME — same-UID siblings
+        // can read mode-0600 files (pass 2d B3). Keep bearer in parent memory only
+        // and expose delivery via PeerDeliverBroker.
+        this.ensurePeerDeliverBroker(trimmed)
         if (source === 'socket') {
             logger.debug(`[API] Peer session capability recovered for ${this.sessionId}`)
         }
@@ -337,6 +336,22 @@ export class ApiSessionClient extends EventEmitter {
         for (const waiter of waiters) {
             clearTimeout(waiter.timer)
             waiter.resolve(trimmed)
+        }
+    }
+
+    private ensurePeerDeliverBroker(capability: string): void {
+        if (this.peerDeliverBroker) {
+            return
+        }
+        try {
+            this.peerDeliverBroker = new PeerDeliverBroker({
+                sessionId: this.sessionId,
+                sessionCapability: capability,
+            })
+            this.peerDeliverBroker.start()
+        } catch (error) {
+            this.peerDeliverBroker = null
+            logger.debug(`[API] Peer deliver broker failed to start for ${this.sessionId}`, error)
         }
     }
 
@@ -1466,6 +1481,8 @@ export class ApiSessionClient extends EventEmitter {
         this.materializationRetryAbortController = null
         this.awaitingMaterializedConnection = false
         this.pendingOutboundEvents.length = 0
+        this.peerDeliverBroker?.stop()
+        this.peerDeliverBroker = null
         this.rpcHandlerManager.onSocketDisconnect()
         this.terminalManager.closeAll()
         this.socket.disconnect()
