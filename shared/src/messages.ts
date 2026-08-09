@@ -193,7 +193,11 @@ export function matchNotifySummaryLine(line: string): string | null {
         if (!before || !hasNotifyTokenSuffix(before)) continue
         const jsonPart = trimmed.slice(braceIdx).trim()
         if (!jsonPart.startsWith('{') || !jsonPart.endsWith('}')) continue
-        matched = jsonPart
+        try {
+            if (isObject(JSON.parse(jsonPart))) matched = jsonPart
+        } catch {
+            // Try an earlier `{` (e.g. nested braces / truncated payload).
+        }
     }
     return matched
 }
@@ -202,10 +206,11 @@ export function matchNotifySummaryLine(line: string): string | null {
  * Look for an `AGENT_NOTIFY_SUMMARY {...json...}` footer as the **last
  * non-empty line** of an agent's plain-text message.
  *
- * End-anchor: trailing whitespace-only lines are fine, but prose on a later
- * non-empty line is non-compliant. Mid-body quotes of the token are ignored
- * for the same reason. An optional prose prefix on the last line itself is
- * tolerated when the line still ends with a well-formed payload.
+ * End-anchor: trailing blank lines are fine, but prose on a later
+ * non-empty line is non-compliant and returns null. Mid-body quotes of
+ * the token are ignored for the same reason. An optional prose prefix on
+ * the last line itself is tolerated when the line still ends with a
+ * well-formed payload (corruption-tolerant token match; see #1426 glued prose).
  *
  * The token match is corruption-tolerant (see `matchNotifySummaryLine`).
  * Returns the parsed object on success, `null` on any deviation.
@@ -218,8 +223,8 @@ export function extractNotifySummary(text: unknown): NotifySummary | null {
     while (lastIdx >= 0 && lines[lastIdx].trim() === '') lastIdx -= 1
     if (lastIdx < 0) return null
 
-    const jsonPart = matchNotifySummaryLine(lines[lastIdx])
-    if (!jsonPart) return null
+    const jsonPart = matchNotifySummaryLine(lines[lastIdx].trim())
+    if (jsonPart === null) return null
 
     try {
         const parsed: unknown = JSON.parse(jsonPart)
