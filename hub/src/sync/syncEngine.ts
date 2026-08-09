@@ -949,9 +949,17 @@ async uploadScratchlistAttachment(
         metadata: unknown,
         runnerState: unknown,
         namespace: string,
-        tag?: string
+        tag?: string,
+        runnerProof?: string
     ): Machine {
-        return this.machineCache.getOrCreateMachine(id, metadata, runnerState, namespace, tag)
+        return this.machineCache.getOrCreateMachine(
+            id,
+            metadata,
+            runnerState,
+            namespace,
+            tag,
+            runnerProof
+        )
     }
 
     async sendMessage(

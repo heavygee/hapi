@@ -55,10 +55,17 @@ export async function rotateMachineIdForLegacyReenroll(expectedMachineId: string
             return current
         }
         const machineTag = current.machineTag?.trim() || randomUUID()
+        const previousMachineIds = [
+            ...new Set([
+                ...(current.previousMachineIds ?? []),
+                ...(rejectedId ? [rejectedId] : []),
+            ]),
+        ]
         return {
             ...current,
             machineId: randomUUID(),
             machineTag,
+            previousMachineIds,
         }
     })
     if (!settings.machineId || !settings.machineTag?.trim()) {

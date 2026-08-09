@@ -1131,6 +1131,14 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     // (Codex review #814 [Major] - controlClient.ts:192 fix).
     const startedWithVersionHandoffDisabled = process.env.HAPI_DISABLE_VERSION_HANDOFF === '1';
 
+    // Runner-generation proof (#1473): reuse from prior runner.state when present
+    // so hub-bound sha256(proof) still verifies after daemon restart. Never put
+    // this in settings.json or child env.
+    const priorRunnerState = await readRunnerState()
+    let runnerProof = typeof priorRunnerState?.runnerProof === 'string' && priorRunnerState.runnerProof.trim()
+      ? priorRunnerState.runnerProof.trim()
+      : randomBytes(32).toString('base64url')
+
     // Write initial runner state (no lock needed for state file)
     const fileState: RunnerLocallyPersistedState = {
       pid: process.pid,
@@ -1144,6 +1152,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       startedWithExtraHeadersHash: hashRunnerExtraHeaders(configuration.extraHeaders),
       startedWithArgv,
       startedWithVersionHandoffDisabled,
+      runnerProof,
       runnerLogPath: logger.logFilePath
     };
     writeRunnerState(fileState);
@@ -1169,6 +1178,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       () => api.getOrCreateMachine({
         machineId,
         machineTag,
+        runnerProof,
         metadata: buildMachineMetadata({ workspaceRoots }),
         runnerState: initialRunnerState
       }),
@@ -1193,10 +1203,6 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       logger.debug(`[RUNNER RUN] Re-enrolled legacy machine as ${machineId}`);
     }
     logger.debug(`[RUNNER RUN] Machine registered: ${machine.id}`);
-
-    // Memory-only runner-generation proof for machine RPC / resume mint (#1473).
-    // Never persist to settings or child env — siblings can read those.
-    const runnerProof = randomBytes(32).toString('base64url')
 
     // Create realtime machine session
     const apiMachine = api.machineSyncClient(machine, { workspaceRoots, machineTag, runnerProof });

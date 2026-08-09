@@ -20,6 +20,8 @@ interface Settings {
    * Analogous to session tag — namespace token + machineId alone is not binding.
    */
   machineTag?: string
+  /** Prior machine ids after legacy re-enroll (#1473) — keep local resume working. */
+  previousMachineIds?: string[]
   machineIdConfirmedByServer?: boolean
   runnerAutoStartWhenRunningHappy?: boolean
   cliApiToken?: string
@@ -69,6 +71,12 @@ export interface RunnerLocallyPersistedState {
    * mid-rebuild stop. Persisting this fixes that.
    */
   startedWithVersionHandoffDisabled?: boolean;
+  /**
+   * Runner-generation proof for hub machine RPC (#1473). Stored in runner
+   * state (not settings / not child env) so the daemon can re-prove after
+   * restart; hub keeps only sha256(proof).
+   */
+  runnerProof?: string;
 }
 
 export async function readSettings(): Promise<Settings> {

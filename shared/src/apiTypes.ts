@@ -24,6 +24,12 @@ export const CreateOrLoadMachineRequestSchema = z.object({
      * on first bind and requires a match thereafter. Never echoed on GET.
      */
     tag: z.string().min(1).optional(),
+    /**
+     * Memory/runner-local generation proof (#1473). Hub stores only sha256(proof)
+     * on first bind; websocket auth proves it and never first-claims a new hash.
+     * Never echoed on GET.
+     */
+    runnerProof: z.string().min(1).optional(),
     metadata: z.unknown(),
     runnerState: z.unknown().nullable().optional()
 })

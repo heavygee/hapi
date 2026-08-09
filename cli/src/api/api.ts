@@ -250,6 +250,7 @@ export class ApiClient {
         metadata: MachineMetadata
         runnerState?: RunnerState
         machineTag?: string
+        runnerProof?: string
     }): Promise<Machine> {
         try {
             return await this.postMachine(opts)
@@ -271,12 +272,14 @@ export class ApiClient {
         metadata: MachineMetadata
         runnerState?: RunnerState
         machineTag?: string
+        runnerProof?: string
     }): Promise<Machine> {
         const response = await axios.post<CreateMachineResponse>(
             `${configuration.apiUrl}/cli/machines`,
             {
                 id: opts.machineId,
                 tag: opts.machineTag,
+                runnerProof: opts.runnerProof,
                 metadata: opts.metadata,
                 runnerState: opts.runnerState ?? null
             },

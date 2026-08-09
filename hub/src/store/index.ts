@@ -382,6 +382,7 @@ export class Store {
                 id TEXT PRIMARY KEY,
                 namespace TEXT NOT NULL DEFAULT 'default',
                 tag TEXT,
+                runner_proof_hash TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
                 metadata TEXT,
@@ -980,6 +981,14 @@ export class Store {
         if (columns.size === 0) return
         if (!columns.has('tag')) {
             this.db.exec('ALTER TABLE machines ADD COLUMN tag TEXT')
+        }
+    }
+
+    private migrateFromV23ToV24(): void {
+        const columns = this.getMachineColumnNames()
+        if (columns.size === 0) return
+        if (!columns.has('runner_proof_hash')) {
+            this.db.exec('ALTER TABLE machines ADD COLUMN runner_proof_hash TEXT')
         }
     }
 

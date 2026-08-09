@@ -15,6 +15,7 @@ import type {
 } from '@hapi/protocol/types'
 import { ApiClient } from '@/api/api'
 import type { ReasoningEffort } from '@/codex/appServerTypes'
+import { readSettings } from '@/persistence'
 import { authAndSetupMachineIfNeeded } from '@/ui/auth'
 import { initializeToken } from '@/ui/tokenInit'
 import { maybeAutoStartServer } from '@/utils/autoStartServer'
@@ -50,11 +51,14 @@ async function selectSession(sessions: ResumableSession[]): Promise<string> {
     })
 }
 
-function assertTargetMachine(target: LocalResumeTarget, machineId: string): void {
+function assertTargetMachine(
+    target: LocalResumeTarget,
+    ownedMachineIds: ReadonlySet<string>
+): void {
     if (!target.machineId) {
         throw new Error('Session metadata missing machine id')
     }
-    if (target.machineId !== machineId) {
+    if (!ownedMachineIds.has(target.machineId)) {
         throw new Error(`Session belongs to another machine (${target.machineId})`)
     }
 }
@@ -210,13 +214,18 @@ async function dispatchLocalResume(target: LocalResumeTarget): Promise<void> {
     })
 }
 
-async function resolveSessionId(api: ApiClient, machineId: string, args: string[]): Promise<string> {
+async function resolveSessionId(
+    api: ApiClient,
+    ownedMachineIds: ReadonlySet<string>,
+    args: string[]
+): Promise<string> {
     const explicit = args[0]
     if (explicit) {
         return explicit
     }
 
-    const sessions = await api.listResumableSessions(machineId)
+    const sessions = (await api.listResumableSessions())
+        .filter((session) => session.machineId && ownedMachineIds.has(session.machineId))
     if (sessions.length === 0) {
         throw new Error('No resumable sessions found for this machine')
     }
@@ -239,11 +248,16 @@ export const resumeCommand: CommandDefinition = {
             await initializeToken()
             await maybeAutoStartServer()
             const { machineId } = await authAndSetupMachineIfNeeded()
+            const settings = await readSettings()
+            const ownedMachineIds = new Set<string>([
+                machineId,
+                ...(settings.previousMachineIds ?? []),
+            ])
             const api = await ApiClient.create()
-            const sessionId = await resolveSessionId(api, machineId, commandArgs)
+            const sessionId = await resolveSessionId(api, ownedMachineIds, commandArgs)
             const target = await api.getLocalResumeTarget(sessionId)
 
-            assertTargetMachine(target, machineId)
+            assertTargetMachine(target, ownedMachineIds)
             assertDirectoryExists(target)
 
             // Gemini CLI is no longer launchable (Google sunset the consumer

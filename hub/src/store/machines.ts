@@ -4,11 +4,13 @@ import type { StoredMachine, VersionedUpdateResult } from './types'
 import { safeJsonParse } from './json'
 import { updateVersionedField } from './versionedUpdates'
 import { constantTimeEquals } from '../utils/crypto'
+import { hashRunnerProof } from '../utils/runnerProof'
 
 type DbMachineRow = {
     id: string
     namespace: string
     tag: string | null
+    runner_proof_hash: string | null
     created_at: number
     updated_at: number
     metadata: string | null
@@ -25,6 +27,9 @@ function toStoredMachine(row: DbMachineRow): StoredMachine {
         id: row.id,
         namespace: row.namespace,
         tag: typeof row.tag === 'string' && row.tag.trim() ? row.tag.trim() : null,
+        runnerProofHash: typeof row.runner_proof_hash === 'string' && row.runner_proof_hash.trim()
+            ? row.runner_proof_hash.trim()
+            : null,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
         metadata: safeJsonParse(row.metadata),
@@ -85,9 +90,11 @@ export function getOrCreateMachine(
     metadata: unknown,
     runnerState: unknown,
     namespace: string,
-    tag?: string
+    tag?: string,
+    runnerProof?: string
 ): StoredMachine {
     const presentedTag = typeof tag === 'string' ? tag.trim() : ''
+    const presentedProof = typeof runnerProof === 'string' ? runnerProof.trim() : ''
     const existing = db.prepare('SELECT * FROM machines WHERE id = ?').get(id) as DbMachineRow | undefined
     if (existing) {
         const stored = toStoredMachine(existing)
@@ -106,6 +113,28 @@ export function getOrCreateMachine(
             throw new MachineTagConflictError(
                 'Legacy machine must be re-enrolled with a new machine id'
             )
+        }
+        // One-time bind of runner proof hash when absent; never overwrite via
+        // first-claim after a hash exists (#1473 Blocker).
+        if (presentedProof && !current.runnerProofHash) {
+            const result = db.prepare(`
+                UPDATE machines
+                SET runner_proof_hash = @runner_proof_hash,
+                    updated_at = @updated_at,
+                    seq = seq + 1
+                WHERE id = @id AND (runner_proof_hash IS NULL OR runner_proof_hash = '')
+            `).run({
+                runner_proof_hash: hashRunnerProof(presentedProof),
+                updated_at: Date.now(),
+                id,
+            })
+            if (result.changes > 0) {
+                const row = getMachine(db, id)
+                if (!row) {
+                    throw new Error('Failed to bind machine runner proof hash')
+                }
+                current = row
+            }
         }
         const merged = mergeMachineMetadata(current.metadata, metadata)
         if (merged !== undefined) {
@@ -156,12 +185,12 @@ export function getOrCreateMachine(
 
     db.prepare(`
         INSERT INTO machines (
-            id, namespace, tag, created_at, updated_at,
+            id, namespace, tag, runner_proof_hash, created_at, updated_at,
             metadata, metadata_version,
             runner_state, runner_state_version,
             active, active_at, seq
         ) VALUES (
-            @id, @namespace, @tag, @created_at, @updated_at,
+            @id, @namespace, @tag, @runner_proof_hash, @created_at, @updated_at,
             @metadata, 1,
             @runner_state, 1,
             0, NULL, 0
@@ -170,6 +199,7 @@ export function getOrCreateMachine(
         id,
         namespace,
         tag: presentedTag || null,
+        runner_proof_hash: presentedProof ? hashRunnerProof(presentedProof) : null,
         created_at: now,
         updated_at: now,
         metadata: metadataJson,

@@ -23,9 +23,10 @@ export class MachineStore {
         metadata: unknown,
         runnerState: unknown,
         namespace: string,
-        tag?: string
+        tag?: string,
+        runnerProof?: string
     ): StoredMachine {
-        return getOrCreateMachine(this.db, id, metadata, runnerState, namespace, tag)
+        return getOrCreateMachine(this.db, id, metadata, runnerState, namespace, tag, runnerProof)
     }
 
     updateMachineMetadata(

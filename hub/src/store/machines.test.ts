@@ -1,8 +1,32 @@
 import { describe, expect, it } from 'bun:test'
 import { Store } from './index'
 import { MachineTagConflictError, mergeMachineMetadata } from './machines'
+import { hashRunnerProof } from '../utils/runnerProof'
 
 describe('machine tag enrollment (#1473)', () => {
+    it('binds runnerProofHash once and refuses overwrite via re-register', () => {
+        const store = new Store(':memory:')
+        const first = store.machines.getOrCreateMachine(
+            'machine-proof',
+            { host: 'h' },
+            null,
+            'ns',
+            'secret-tag',
+            'proof-a'
+        )
+        expect(first.runnerProofHash).toBe(hashRunnerProof('proof-a'))
+        const again = store.machines.getOrCreateMachine(
+            'machine-proof',
+            { host: 'h2' },
+            null,
+            'ns',
+            'secret-tag',
+            'proof-b'
+        )
+        expect(again.runnerProofHash).toBe(hashRunnerProof('proof-a'))
+        store.close()
+    })
+
     it('refuses first-claim bind on legacy untagged rows', () => {
         const store = new Store(':memory:')
         store.machines.getOrCreateMachine('machine-1', { host: 'old' }, null, 'ns')

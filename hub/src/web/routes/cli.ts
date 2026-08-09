@@ -125,7 +125,8 @@ export function createCliRoutes(
                     machineInput.metadata,
                     machineInput.runnerState ?? null,
                     namespace,
-                    machineInput.tag
+                    machineInput.tag,
+                    machineInput.runnerProof
                 )
             } catch (error) {
                 if (error instanceof MachineTagConflictError) {
@@ -439,7 +440,8 @@ export function createCliRoutes(
                 parsed.data.metadata,
                 parsed.data.runnerState ?? null,
                 namespace,
-                parsed.data.tag
+                parsed.data.tag,
+                parsed.data.runnerProof
             )
             return c.json({ machine })
         } catch (error) {
