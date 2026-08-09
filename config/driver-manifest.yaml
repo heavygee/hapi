@@ -706,7 +706,7 @@ layers:
   # Upstream feat tip keeps jobs at V21→V22 for clean PR vs upstream/main.
   # Worktree: ~/coding/hapi/worktrees/session-jobs-soup-refresh @ driver/session-attached-jobs
   # Soup tip: 4bbb04d69 — thin on 18f7e8965: JWT test + hard-refuse MCP set + stale UI
-  # Feat tip: eb63e98c8 — upstreamable (hard-refuse + redirects)
+  # Feat tip: 015e256da — PR #1424 tip (redirects/sidebar/delete/Codex transfer); cherry-pick onto live soup — NEVER hard-reset
   # Do NOT open upstream PR until operator dogfood OK (incl. Lidarr self-attach).
   - branch: driver/session-attached-jobs
 
