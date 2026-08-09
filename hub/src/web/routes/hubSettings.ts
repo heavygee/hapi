@@ -1,6 +1,10 @@
 import { Hono } from 'hono'
 import { UpdateHubSettingsRequestSchema, type HubSettingsResponse } from '@hapi/protocol'
 import {
+    readAutoBridgeTransientModelErrorsEnabled,
+    writeAutoBridgeTransientModelErrorsEnabled
+} from '../../config/autoBridgeTransientModelErrors'
+import {
     readSessionSummaryContractEnabled,
     writeSessionSummaryContractEnabled
 } from '../../config/sessionSummaryContract'
@@ -16,8 +20,14 @@ export function createHubSettingsRoutes(dataDir: string): Hono<WebAppEnv> {
             return c.json({ error: OWNER_ONLY_ERROR }, 403)
         }
         c.header('Cache-Control', 'no-store')
-        const enabled = await readSessionSummaryContractEnabled(dataDir)
-        const response: HubSettingsResponse = { sessionSummaryContract: enabled }
+        const [sessionSummaryContract, autoBridgeTransientModelErrors] = await Promise.all([
+            readSessionSummaryContractEnabled(dataDir),
+            readAutoBridgeTransientModelErrorsEnabled(dataDir)
+        ])
+        const response: HubSettingsResponse = {
+            sessionSummaryContract,
+            autoBridgeTransientModelErrors
+        }
         return c.json(response)
     })
 
@@ -30,12 +40,27 @@ export function createHubSettingsRoutes(dataDir: string): Hono<WebAppEnv> {
         if (!parsed.success) {
             return c.json({ error: 'Invalid body' }, 400)
         }
-        const enabled = await writeSessionSummaryContractEnabled(
-            dataDir,
-            parsed.data.sessionSummaryContract
-        )
+        if (parsed.data.sessionSummaryContract !== undefined) {
+            await writeSessionSummaryContractEnabled(
+                dataDir,
+                parsed.data.sessionSummaryContract
+            )
+        }
+        if (parsed.data.autoBridgeTransientModelErrors !== undefined) {
+            await writeAutoBridgeTransientModelErrorsEnabled(
+                dataDir,
+                parsed.data.autoBridgeTransientModelErrors
+            )
+        }
         c.header('Cache-Control', 'no-store')
-        const response: HubSettingsResponse = { sessionSummaryContract: enabled }
+        const [sessionSummaryContract, autoBridgeTransientModelErrors] = await Promise.all([
+            readSessionSummaryContractEnabled(dataDir),
+            readAutoBridgeTransientModelErrorsEnabled(dataDir)
+        ])
+        const response: HubSettingsResponse = {
+            sessionSummaryContract,
+            autoBridgeTransientModelErrors
+        }
         return c.json(response)
     })
 

@@ -52,20 +52,28 @@ export type CliMessagesResponse = z.infer<typeof CliMessagesResponseSchema>
 export const CreateSessionResponseSchema = z.object({
     session: SessionSchema,
     /** Hub opt-in for AGENT_NOTIFY_SUMMARY prompt injection (default off when omitted). */
-    sessionSummaryContract: z.boolean().optional()
+    sessionSummaryContract: z.boolean().optional(),
+    /** Hub opt-in: Cursor auto-bridge after transient model errors (default off). */
+    autoBridgeTransientModelErrors: z.boolean().optional()
 })
 
 export type CreateSessionResponse = z.infer<typeof CreateSessionResponseSchema>
 
 export const HubSettingsResponseSchema = z.object({
-    sessionSummaryContract: z.boolean()
+    sessionSummaryContract: z.boolean(),
+    autoBridgeTransientModelErrors: z.boolean()
 })
 
 export type HubSettingsResponse = z.infer<typeof HubSettingsResponseSchema>
 
 export const UpdateHubSettingsRequestSchema = z.object({
-    sessionSummaryContract: z.boolean()
-})
+    sessionSummaryContract: z.boolean().optional(),
+    autoBridgeTransientModelErrors: z.boolean().optional()
+}).refine(
+    (body) => body.sessionSummaryContract !== undefined
+        || body.autoBridgeTransientModelErrors !== undefined,
+    { message: 'At least one hub setting is required' }
+)
 
 export type UpdateHubSettingsRequest = z.infer<typeof UpdateHubSettingsRequestSchema>
 
@@ -412,6 +420,13 @@ export const AcknowledgeModelErrorRequestSchema = z.object({
 })
 
 export type AcknowledgeModelErrorRequest = z.infer<typeof AcknowledgeModelErrorRequestSchema>
+
+/** Bridge & retry for the specific displayed model error (by eventId). */
+export const BridgeModelErrorRequestSchema = z.object({
+    eventId: z.string().min(1)
+})
+
+export type BridgeModelErrorRequest = z.infer<typeof BridgeModelErrorRequestSchema>
 
 /** Per-session legacy stream-json → ACP migrator request. See tiann/hapi#824. */
 export const CursorMigrateToAcpRequestSchema = z.object({

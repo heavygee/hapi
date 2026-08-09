@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { Hono } from 'hono'
 import type { WebAppEnv } from '../middleware/auth'
 import { createHubSettingsRoutes } from './hubSettings'
+import { writeAutoBridgeTransientModelErrorsEnabled } from '../../config/autoBridgeTransientModelErrors'
 import { writeSessionSummaryContractEnabled } from '../../config/sessionSummaryContract'
 
 const directories: string[] = []
@@ -31,10 +32,13 @@ describe('GET/PUT /api/hub-settings', () => {
         const response = await app.request('/api/hub-settings')
         expect(response.status).toBe(200)
         expect(response.headers.get('cache-control')).toBe('no-store')
-        expect(await response.json()).toEqual({ sessionSummaryContract: false })
+        expect(await response.json()).toEqual({
+            sessionSummaryContract: false,
+            autoBridgeTransientModelErrors: false
+        })
     })
 
-    it('persists toggle for owner', async () => {
+    it('persists sessionSummaryContract toggle for owner', async () => {
         const { app } = await createApp()
         const put = await app.request('/api/hub-settings', {
             method: 'PUT',
@@ -42,10 +46,30 @@ describe('GET/PUT /api/hub-settings', () => {
             body: JSON.stringify({ sessionSummaryContract: true })
         })
         expect(put.status).toBe(200)
-        expect(await put.json()).toEqual({ sessionSummaryContract: true })
+        expect(await put.json()).toEqual({
+            sessionSummaryContract: true,
+            autoBridgeTransientModelErrors: false
+        })
 
         const get = await app.request('/api/hub-settings')
-        expect(await get.json()).toEqual({ sessionSummaryContract: true })
+        expect(await get.json()).toEqual({
+            sessionSummaryContract: true,
+            autoBridgeTransientModelErrors: false
+        })
+    })
+
+    it('persists autoBridgeTransientModelErrors toggle for owner', async () => {
+        const { app } = await createApp()
+        const put = await app.request('/api/hub-settings', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ autoBridgeTransientModelErrors: true })
+        })
+        expect(put.status).toBe(200)
+        expect(await put.json()).toEqual({
+            sessionSummaryContract: false,
+            autoBridgeTransientModelErrors: true
+        })
     })
 
     it('rejects invalid body', async () => {
@@ -54,6 +78,16 @@ describe('GET/PUT /api/hub-settings', () => {
             method: 'PUT',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ sessionSummaryContract: 'yes' })
+        })
+        expect(response.status).toBe(400)
+    })
+
+    it('rejects empty update body', async () => {
+        const { app } = await createApp()
+        const response = await app.request('/api/hub-settings', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({})
         })
         expect(response.status).toBe(400)
     })
@@ -71,10 +105,14 @@ describe('GET/PUT /api/hub-settings', () => {
         expect(put.status).toBe(403)
     })
 
-    it('survives a prior write via settings helper', async () => {
+    it('survives a prior write via settings helpers', async () => {
         const { app, dataDir } = await createApp()
         await writeSessionSummaryContractEnabled(dataDir, true)
+        await writeAutoBridgeTransientModelErrorsEnabled(dataDir, true)
         const response = await app.request('/api/hub-settings')
-        expect(await response.json()).toEqual({ sessionSummaryContract: true })
+        expect(await response.json()).toEqual({
+            sessionSummaryContract: true,
+            autoBridgeTransientModelErrors: true
+        })
     })
 })

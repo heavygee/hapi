@@ -30,6 +30,11 @@ export interface Settings {
      */
     sessionSummaryContract?: boolean
     /**
+     * When true, Cursor CLI sessions auto-enqueue a one-shot bridge after a
+     * transient model error. Default off. Survives hub/CLI restarts.
+     */
+    autoBridgeTransientModelErrors?: boolean
+    /**
      * Hub-side provider API keys / endpoints managed from Settings.
      * Env vars still win when set at process start (ops override).
      */
