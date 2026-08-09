@@ -720,9 +720,6 @@ layers:
   # #1412/#1413 + companion fileUrl fetch (replaces driver/share-native-deeplink tip)
   - branch: feat/share-native-fileurl
 
-  # tiann/hapi#1425 / PR #1426 — AGENT_NOTIFY_SUMMARY glued prose on last line.
-  # Soup union keeps collapseRepeats (Cursor SUMARY) + optional prose prefix.
-  # Upstreamable tip: fix/notify-summary-glued-last-line (clean vs upstream/main).
-  # Worktree: ~/coding/hapi/worktrees/notify-summary-glued-soup @ driver/notify-summary-glued-line
-  # Tip: 9a43d0de6
-  - branch: driver/notify-summary-glued-line
+
+  # DROPPED 2026-08-09: driver/notify-summary-glued-line MERGED as tiann/hapi#1426
+  # (df958ae34 — glued last-line AGENT_NOTIFY_SUMMARY parse; Fixes #1425)
