@@ -1077,9 +1077,12 @@ function SessionItem(props: {
                     nestedTooltips
                     attentionTooltipId={attentionId}
                     scheduleTooltipId={scheduleId}
+<<<<<<< ours
                     inRunningSection={inRunningSection}
                     projectLabel={projectLabel}
                     machineLabel={machineLabel}
+=======
+>>>>>>> theirs
                     trailing={githubPrAwarenessEnabled && primaryPrRef ? (
                         <SessionPrChip refs={s.metadata?.externalRefs} />
                     ) : null}
@@ -1506,7 +1509,7 @@ export function SessionList(props: {
         return (
             <div key={group.key}>
                 <div
-                    className="group/project sticky top-0 z-10 flex items-center gap-2 bg-[var(--app-bg)] py-1.5 pl-2 pr-2 text-left rounded-lg transition-colors hover:bg-[var(--app-secondary-bg)] cursor-pointer min-w-0 w-full select-none"
+                    className="group/project sticky top-0 z-10 flex items-center gap-2 bg-[var(--app-bg)] py-1.5 pl-2 pr-2 text-left rounded-lg transition-colors hover:bg-[var(--app-subtle-bg)] cursor-pointer min-w-0 w-full select-none"
                     onClick={() => toggleGroup(group.key, isCollapsed)}
                     title={group.directory}
                 >
