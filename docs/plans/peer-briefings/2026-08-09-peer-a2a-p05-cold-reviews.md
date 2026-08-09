@@ -1,20 +1,23 @@
 # Full court press — A2A P0.5 / #1203 peer delivery provenance
 
 > **Pattern:** [`docs/tooling/pr-review-loop.md`](../../tooling/pr-review-loop.md#full-court-press-escalate-when-bot-thrash-must-die)  
-> Feature peer: `6212dae5` — implements / fixes.  
-> Orchestrator (Meta `9f5f7e1d`): spawns cold peers. **Do not** open/undraft upstream PR until step 5.
+> Feature peer: `6212dae5` — implements / fixes **and owns cold spawns after pass 1** (quieter Meta 2026-08-09).  
+> Meta `9f5f7e1d`: dispatch only; **not** CC on every cold. Ping Meta once at Ready YES or hard block.  
+> Cold peers ping **implementer only**. **Do not** open/undraft upstream PR until Ready YES.
 
 ## Tip under review (freeze)
 
 | Field | Value |
 |-------|-------|
-| Tip (Sol 2e freeze) | `2316b403a1ee3b2dd4fdc7db3c384fe501fc3735` |
+| Tip (pass2f freeze) | `ac731000d1e4214f9243821132360e99d704c062` |
+| Pass 2f | LIVE — `eb551767` Cold #1203 pass2f: Grok high (dispatched once; cold → implementer only) |
 | Pass 1 | DONE — `75a86204` → `2026-08-09-cold-pass1-1203.md` |
 | Orchestrator B1 decision | **Exit 1** — bind to authenticated source channel; kill criterion stands |
 | Pass 2–2d | DONE — Ready NO each time (forge ladder → broker) |
 | Pass 2e | DEAD — `f61a4617` OpenAI cyber-flag mid-review (provider policy, not a code finding) |
-| Pass 2e-alt | LIVE — `e104b6ec` Cold #1203 pass2e-alt: Claude high @ `2316b403a` (defensive authz framing; spawned before standing rule) |
-| **Standing recovery** | Next cyber-flag → **`cursor-grok-4.5-high`**, not Sol retry / not Claude default — see `pr-review-loop.md` § Provider cyber-flag recovery |
+| Pass 2e-alt | DONE — `e104b6ec` → `2026-08-09-cold-pass2e-alt-1203.md` — **Ready NO** (B1 /proc environ tag; M1 macOS; M2 terminal resume; M3 sock rebind; M4 spawn RPC) |
+| Next cold after fixes | Prefer **`cursor-grok-4.5-high`** if OpenAI still radioactive; see `pr-review-loop.md` § Provider cyber-flag recovery |
+| **Standing recovery** | Cyber-flag → archive → **`cursor-grok-4.5-high`**. No Sol retry. Claude not default alt. |
 | Branch | `feat/a2a-p05-peer-provenance` |
 | Worktree | `/home/heavygee/coding/hapi/worktrees/a2a-p05-peer-provenance` |
 | Fork cold draft | https://github.com/heavygee/hapi/pull/118 (not merge; not upstream) |
