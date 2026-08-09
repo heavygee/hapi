@@ -4,7 +4,7 @@ import type { StoredMachine, VersionedUpdateResult } from './types'
 import { safeJsonParse } from './json'
 import { updateVersionedField } from './versionedUpdates'
 import { constantTimeEquals } from '../utils/crypto'
-import { hashRunnerProof } from '../utils/runnerProof'
+import { hashRunnerProof, verifyRunnerProof } from '../utils/runnerProof'
 
 type DbMachineRow = {
     id: string
@@ -114,26 +114,18 @@ export function getOrCreateMachine(
                 'Legacy machine must be re-enrolled with a new machine id'
             )
         }
-        // One-time bind of runner proof hash when absent; never overwrite via
-        // first-claim after a hash exists (#1473 Blocker).
-        if (presentedProof && !current.runnerProofHash) {
-            const result = db.prepare(`
-                UPDATE machines
-                SET runner_proof_hash = @runner_proof_hash,
-                    updated_at = @updated_at,
-                    seq = seq + 1
-                WHERE id = @id AND (runner_proof_hash IS NULL OR runner_proof_hash = '')
-            `).run({
-                runner_proof_hash: hashRunnerProof(presentedProof),
-                updated_at: Date.now(),
-                id,
-            })
-            if (result.changes > 0) {
-                const row = getMachine(db, id)
-                if (!row) {
-                    throw new Error('Failed to bind machine runner proof hash')
-                }
-                current = row
+        // Existing rows must not first-claim a runner proof hash (#1473 Blocker).
+        // Null-hash machines re-enroll with a new machine id (INSERT binds hash).
+        if (presentedProof) {
+            if (!current.runnerProofHash) {
+                throw new MachineTagConflictError(
+                    'Machine runner proof missing; re-enroll with a new machine id'
+                )
+            }
+            if (!verifyRunnerProof(presentedProof, current.runnerProofHash)) {
+                throw new MachineTagConflictError(
+                    'Machine runner proof mismatch; re-enroll with a new machine id'
+                )
             }
         }
         const merged = mergeMachineMetadata(current.metadata, metadata)

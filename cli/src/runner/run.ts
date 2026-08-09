@@ -1131,13 +1131,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     // (Codex review #814 [Major] - controlClient.ts:192 fix).
     const startedWithVersionHandoffDisabled = process.env.HAPI_DISABLE_VERSION_HANDOFF === '1';
 
-    // Runner-generation proof (#1473): reuse from prior runner.state when present
-    // so hub-bound sha256(proof) still verifies after daemon restart. Never put
-    // this in settings.json or child env.
-    const priorRunnerState = await readRunnerState()
-    let runnerProof = typeof priorRunnerState?.runnerProof === 'string' && priorRunnerState.runnerProof.trim()
-      ? priorRunnerState.runnerProof.trim()
-      : randomBytes(32).toString('base64url')
+    // Memory-only runner-generation proof (#1473). Never settings, runner.state,
+    // or child env — same-UID siblings can read those. Ungraceful restart
+    // without a handoff pipe rotates machine id via hub 409 re-enroll.
+    const runnerProof = randomBytes(32).toString('base64url')
 
     // Write initial runner state (no lock needed for state file)
     const fileState: RunnerLocallyPersistedState = {
@@ -1152,7 +1149,6 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       startedWithExtraHeadersHash: hashRunnerExtraHeaders(configuration.extraHeaders),
       startedWithArgv,
       startedWithVersionHandoffDisabled,
-      runnerProof,
       runnerLogPath: logger.logFilePath
     };
     writeRunnerState(fileState);

@@ -233,6 +233,7 @@ describe('cli lazy session creation', () => {
             { host: 'localhost' },
             null,
             'default',
+            undefined,
             undefined
         )
         expect(getOrCreateSession).toHaveBeenCalledWith(

@@ -35,7 +35,13 @@ function isLegacyMachineReenrollError(error: unknown): boolean {
         return false
     }
     const message = (body as { error?: unknown }).error
-    return typeof message === 'string' && message === LEGACY_MACHINE_REENROLL_MESSAGE
+    if (typeof message !== 'string') {
+        return false
+    }
+    // Legacy tag bind, null runner-proof hash, or proof mismatch all force a
+    // new machine id (#1473).
+    return message.includes('re-enroll with a new machine id')
+        || message === LEGACY_MACHINE_REENROLL_MESSAGE
 }
 
 export class ApiClient {

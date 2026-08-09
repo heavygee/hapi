@@ -71,12 +71,6 @@ export interface RunnerLocallyPersistedState {
    * mid-rebuild stop. Persisting this fixes that.
    */
   startedWithVersionHandoffDisabled?: boolean;
-  /**
-   * Runner-generation proof for hub machine RPC (#1473). Stored in runner
-   * state (not settings / not child env) so the daemon can re-prove after
-   * restart; hub keeps only sha256(proof).
-   */
-  runnerProof?: string;
 }
 
 export async function readSettings(): Promise<Settings> {

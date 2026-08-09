@@ -4,7 +4,7 @@ import { MachineTagConflictError, mergeMachineMetadata } from './machines'
 import { hashRunnerProof } from '../utils/runnerProof'
 
 describe('machine tag enrollment (#1473)', () => {
-    it('binds runnerProofHash once and refuses overwrite via re-register', () => {
+    it('binds runnerProofHash on create and refuses null-hash first-claim', () => {
         const store = new Store(':memory:')
         const first = store.machines.getOrCreateMachine(
             'machine-proof',
@@ -15,15 +15,31 @@ describe('machine tag enrollment (#1473)', () => {
             'proof-a'
         )
         expect(first.runnerProofHash).toBe(hashRunnerProof('proof-a'))
-        const again = store.machines.getOrCreateMachine(
+        expect(() => store.machines.getOrCreateMachine(
             'machine-proof',
             { host: 'h2' },
             null,
             'ns',
             'secret-tag',
             'proof-b'
+        )).toThrow(MachineTagConflictError)
+
+        const unbound = store.machines.getOrCreateMachine(
+            'machine-unbound',
+            { host: 'h' },
+            null,
+            'ns',
+            'secret-tag'
         )
-        expect(again.runnerProofHash).toBe(hashRunnerProof('proof-a'))
+        expect(unbound.runnerProofHash).toBeNull()
+        expect(() => store.machines.getOrCreateMachine(
+            'machine-unbound',
+            { host: 'h' },
+            null,
+            'ns',
+            'secret-tag',
+            'proof-late'
+        )).toThrow(/runner proof missing/)
         store.close()
     })
 
