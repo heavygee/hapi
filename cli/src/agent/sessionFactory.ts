@@ -181,12 +181,14 @@ export async function bootstrapSession(options: SessionBootstrapOptions): Promis
 
     const api = await ApiClient.create()
 
-    const { machineId, machineTag } = await getMachineCredentialsOrExit()
-    await api.getOrCreateMachine({
-        machineId,
-        machineTag,
+    const credentials = await getMachineCredentialsOrExit()
+    const registered = await api.getOrCreateMachine({
+        machineId: credentials.machineId,
+        machineTag: credentials.machineTag,
         metadata: buildMachineMetadata()
     })
+    // getOrCreateMachine may rotate machineId on legacy hub re-enroll (#1473).
+    const machineId = registered.id
 
     const metadata = buildSessionMetadata({
         flavor: options.flavor,
@@ -319,13 +321,14 @@ export async function bootstrapExistingSession(options: {
 }): Promise<SessionBootstrapResult> {
     const startedBy = options.startedBy ?? 'terminal'
     const api = await ApiClient.create()
-    const { machineId, machineTag } = await getMachineCredentialsOrExit()
+    const credentials = await getMachineCredentialsOrExit()
 
-    await api.getOrCreateMachine({
-        machineId,
-        machineTag,
+    const registered = await api.getOrCreateMachine({
+        machineId: credentials.machineId,
+        machineTag: credentials.machineTag,
         metadata: buildMachineMetadata()
     })
+    const machineId = registered.id
 
     // GET omits sessionCapability by design (#1203). Runner resume does not
     // receive the create-time tag (pass 2g/2h — no child fd/env mint-proof);

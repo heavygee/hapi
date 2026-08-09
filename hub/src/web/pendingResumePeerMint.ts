@@ -29,6 +29,13 @@ export function armResumePeerMint(
     if (!id) {
         return undefined
     }
+    // Idempotent while unexpired: concurrent /resume can dedupe the runner
+    // spawn, so a second arm must not invalidate the nonce the first child
+    // will redeem (#1473 Major).
+    const existing = pendingBySessionId.get(id)
+    if (existing && existing.expiresAt >= nowMs) {
+        return existing.nonce
+    }
     const nonce = randomBytes(32).toString('base64url')
     pendingBySessionId.set(id, { nonce, expiresAt: nowMs + ttlMs })
     return nonce

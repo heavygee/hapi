@@ -31,4 +31,11 @@ describe('pendingResumePeerMint', () => {
         const nonce = armResumePeerMint('session-a', 1_000, 30_000)
         expect(redeemResumePeerMint('session-a', nonce, 1_000 + 30_001)).toBe(false)
     })
+
+    it('keeps the first unexpired nonce across concurrent arms', () => {
+        const first = armResumePeerMint('session-a', 1_000, 30_000)
+        const second = armResumePeerMint('session-a', 1_500, 30_000)
+        expect(second).toBe(first)
+        expect(redeemResumePeerMint('session-a', first, 1_600)).toBe(true)
+    })
 })

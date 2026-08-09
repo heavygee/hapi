@@ -2,6 +2,10 @@ import { randomUUID } from 'node:crypto'
 import { configuration } from '@/configuration'
 import { updateSettings } from '@/persistence'
 
+/** Hub 409 body when a pre-tag machine row cannot be first-claim bound (#1473). */
+export const LEGACY_MACHINE_REENROLL_MESSAGE =
+    'Legacy machine must be re-enrolled with a new machine id'
+
 export async function authAndSetupMachineIfNeeded(): Promise<{
     token: string
     machineId: string
@@ -31,6 +35,28 @@ export async function authAndSetupMachineIfNeeded(): Promise<{
 
     return {
         token: configuration.cliApiToken,
+        machineId: settings.machineId,
+        machineTag: settings.machineTag.trim(),
+    }
+}
+
+/** Mint a new machine id (keep tag) after hub refuses legacy tag bind. */
+export async function rotateMachineIdForLegacyReenroll(): Promise<{
+    machineId: string
+    machineTag: string
+}> {
+    const settings = await updateSettings((current) => {
+        const machineTag = current.machineTag?.trim() || randomUUID()
+        return {
+            ...current,
+            machineId: randomUUID(),
+            machineTag,
+        }
+    })
+    if (!settings.machineId || !settings.machineTag?.trim()) {
+        throw new Error('Failed to rotate machine identity for legacy re-enroll')
+    }
+    return {
         machineId: settings.machineId,
         machineTag: settings.machineTag.trim(),
     }

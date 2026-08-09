@@ -96,24 +96,15 @@ export function getOrCreateMachine(
         }
         let current = stored
         if (presentedTag) {
+            // Fail closed on upgrade: never first-claim-bind a secret onto a
+            // pre-tag row. Shared namespace token + machine list would otherwise
+            // let a sibling steal spawn-happy-session (#1473 B1).
             if (!current.tag) {
-                db.prepare(`
-                    UPDATE machines
-                    SET tag = @tag,
-                        updated_at = @updated_at,
-                        seq = seq + 1
-                    WHERE id = @id AND (tag IS NULL OR tag = '')
-                `).run({
-                    tag: presentedTag,
-                    updated_at: Date.now(),
-                    id,
-                })
-                const bound = getMachine(db, id)
-                if (!bound) {
-                    throw new Error('Failed to bind machine tag')
-                }
-                current = bound
-            } else if (!constantTimeEquals(current.tag, presentedTag)) {
+                throw new MachineTagConflictError(
+                    'Legacy machine must be re-enrolled with a new machine id'
+                )
+            }
+            if (!constantTimeEquals(current.tag, presentedTag)) {
                 throw new MachineTagConflictError()
             }
         }

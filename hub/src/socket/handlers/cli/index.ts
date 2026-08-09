@@ -96,6 +96,10 @@ export function registerCliHandlers(socket: CliSocketWithData, deps: CliHandlers
         const access = resolveSessionAccess(sessionId)
         if (access.ok) {
             socket.join(`session:${sessionId}`)
+            // Session-scoped RPC uses `${sessionId}:method` — authorize the
+            // namespace-resolved session id so colon methods are not treated as
+            // machine-only (#1473 Major).
+            socket.data.sessionRpcAuthorizedId = sessionId
             // Capability mint requires the create-time session tag — unavailable
             // to sibling sessions that share only the namespace CLI token.
             // Resume mints are redeemed by the runner with a spawn-RPC nonce

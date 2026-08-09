@@ -6,6 +6,8 @@ export type SocketData = {
     userId?: number
     /** Set when handshake proved create-time machine tag (#1203). */
     machineRpcAuthorizedId?: string
+    /** Set when handshake resolved namespace session access (#1473). */
+    sessionRpcAuthorizedId?: string
 }
 
 export type SocketServer = Server<DefaultEventsMap, DefaultEventsMap, DefaultEventsMap, SocketData>

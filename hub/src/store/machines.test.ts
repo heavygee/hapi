@@ -1,6 +1,40 @@
 import { describe, expect, it } from 'bun:test'
 import { Store } from './index'
-import { mergeMachineMetadata } from './machines'
+import { MachineTagConflictError, mergeMachineMetadata } from './machines'
+
+describe('machine tag enrollment (#1473)', () => {
+    it('refuses first-claim bind on legacy untagged rows', () => {
+        const store = new Store(':memory:')
+        store.machines.getOrCreateMachine('machine-1', { host: 'old' }, null, 'ns')
+        expect(store.machines.getMachine('machine-1')?.tag).toBeNull()
+
+        expect(() =>
+            store.machines.getOrCreateMachine('machine-1', { host: 'old' }, null, 'ns', 'attacker-tag')
+        ).toThrow(MachineTagConflictError)
+
+        expect(store.machines.getMachine('machine-1')?.tag).toBeNull()
+    })
+
+    it('allows create-time tag on new machine rows', () => {
+        const store = new Store(':memory:')
+        const created = store.machines.getOrCreateMachine(
+            'machine-new',
+            { host: 'fresh' },
+            null,
+            'ns',
+            'create-tag'
+        )
+        expect(created.tag).toBe('create-tag')
+        const again = store.machines.getOrCreateMachine(
+            'machine-new',
+            { host: 'fresh' },
+            null,
+            'ns',
+            'create-tag'
+        )
+        expect(again.tag).toBe('create-tag')
+    })
+})
 
 describe('machine metadata backfill', () => {
     it('merges incoming metadata over stored fields on re-registration', () => {

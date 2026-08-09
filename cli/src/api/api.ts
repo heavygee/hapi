@@ -17,10 +17,26 @@ import {
 } from '@/api/types'
 import { configuration } from '@/configuration'
 import { getAuthToken } from '@/api/auth'
+import {
+    LEGACY_MACHINE_REENROLL_MESSAGE,
+    rotateMachineIdForLegacyReenroll,
+} from '@/ui/auth'
 import { apiValidationError } from '@/utils/errorUtils'
 import { ApiMachineClient } from './apiMachine'
 import { ApiSessionClient, type ApiSessionClientOptions } from './apiSession'
 import { buildHubRequestHeaders } from './hubExtraHeaders'
+
+function isLegacyMachineReenrollError(error: unknown): boolean {
+    if (!axios.isAxiosError(error) || error.response?.status !== 409) {
+        return false
+    }
+    const body = error.response.data
+    if (!body || typeof body !== 'object') {
+        return false
+    }
+    const message = (body as { error?: unknown }).error
+    return typeof message === 'string' && message === LEGACY_MACHINE_REENROLL_MESSAGE
+}
 
 export class ApiClient {
     static async create(): Promise<ApiClient> {
@@ -37,6 +53,45 @@ export class ApiClient {
     }
 
     async getOrCreateSession(opts: {
+        id?: string
+        tag: string
+        metadata: Metadata
+        state: AgentState | null
+        model?: string
+        modelReasoningEffort?: string
+        effort?: string
+        machine?: {
+            id: string
+            tag?: string
+            metadata: MachineMetadata
+            runnerState?: RunnerState
+        }
+        timeoutMs?: number
+        signal?: AbortSignal
+    }): Promise<Session & { sessionCapability?: string }> {
+        try {
+            return await this.postSession(opts)
+        } catch (error) {
+            if (!opts.machine || !isLegacyMachineReenrollError(error)) {
+                throw error
+            }
+            const rotated = await rotateMachineIdForLegacyReenroll()
+            const metadata = opts.metadata && typeof opts.metadata === 'object'
+                ? { ...opts.metadata, machineId: rotated.machineId }
+                : opts.metadata
+            return await this.postSession({
+                ...opts,
+                metadata,
+                machine: {
+                    ...opts.machine,
+                    id: rotated.machineId,
+                    tag: rotated.machineTag,
+                },
+            })
+        }
+    }
+
+    private async postSession(opts: {
         id?: string
         tag: string
         metadata: Metadata
@@ -188,6 +243,27 @@ export class ApiClient {
     }
 
     async getOrCreateMachine(opts: {
+        machineId: string
+        metadata: MachineMetadata
+        runnerState?: RunnerState
+        machineTag?: string
+    }): Promise<Machine> {
+        try {
+            return await this.postMachine(opts)
+        } catch (error) {
+            if (!isLegacyMachineReenrollError(error)) {
+                throw error
+            }
+            const rotated = await rotateMachineIdForLegacyReenroll()
+            return await this.postMachine({
+                ...opts,
+                machineId: rotated.machineId,
+                machineTag: rotated.machineTag,
+            })
+        }
+    }
+
+    private async postMachine(opts: {
         machineId: string
         metadata: MachineMetadata
         runnerState?: RunnerState

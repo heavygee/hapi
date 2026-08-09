@@ -268,7 +268,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
 
   try {
     // Ensure auth and machine registration BEFORE anything else
-    const { machineId, machineTag } = await authAndSetupMachineIfNeeded();
+    let { machineId, machineTag } = await authAndSetupMachineIfNeeded();
     logger.debug('[RUNNER RUN] Auth and machine setup complete');
 
     // Setup state - key by PID
@@ -1180,6 +1180,13 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         }
       }
     );
+    // Legacy re-enroll may rotate machineId inside getOrCreateMachine (#1473).
+    if (machine.id !== machineId) {
+      machineId = machine.id;
+      const rotated = await authAndSetupMachineIfNeeded();
+      machineTag = rotated.machineTag;
+      logger.debug(`[RUNNER RUN] Re-enrolled legacy machine as ${machineId}`);
+    }
     logger.debug(`[RUNNER RUN] Machine registered: ${machine.id}`);
 
     // Create realtime machine session
