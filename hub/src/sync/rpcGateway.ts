@@ -179,14 +179,7 @@ export class RpcGateway {
         // Hub session id to reuse for this spawn. When set, the runner boots the
         // CLI with `--hapi-session-id`, so the child reuses the existing hub
         // session row (same id) instead of minting a new one.
-        forkSession?: boolean,
-        /**
-         * Create-time tag so resumed CLI can mint peer-capability (not on GET).
-         * Travels only to the machine spawn handler; runner forwards via stdio
-         * fd 3 (not env). RpcRegistry refuses method shadowing so a second
-         * same-namespace socket cannot steal this payload (pass 2e-alt M4).
-         */
-        peerSessionTag?: string
+        forkSession?: boolean
     ): Promise<{ type: 'success'; sessionId: string } | { type: 'error'; message: string }> {
         try {
             const result = await this.machineRpc(
@@ -210,8 +203,7 @@ export class RpcGateway {
                     collaborationMode,
                     copilotAgentMode,
                     startingMode,
-                    forkSession: forkSession === true,
-                    peerSessionTag
+                    forkSession: forkSession === true
                 }
             )
             if (result && typeof result === 'object') {

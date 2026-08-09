@@ -1,5 +1,9 @@
-import { describe, expect, it, mock } from 'bun:test'
+import { beforeEach, describe, expect, it, mock } from 'bun:test'
 import { mintPeerSessionCapability } from '../../../web/peerCapability'
+import {
+    armResumePeerMint,
+    clearResumePeerMintsForTests,
+} from '../../../web/pendingResumePeerMint'
 import { registerCliHandlers } from './index'
 
 const JWT_SECRET = new TextEncoder().encode('peer-cap-socket-test-secret')
@@ -48,6 +52,10 @@ function createDeps(sessions: Array<{ id: string; tag: string }>) {
 }
 
 describe('registerCliHandlers peer-capability (#1203 resume / B3)', () => {
+    beforeEach(() => {
+        clearResumePeerMintsForTests()
+    })
+
     it('emits a capability only when handshake sessionTag matches the stored tag', () => {
         const { socket, emitted, joined } = createSocketHarness({
             sessionId: SESSION_A,
@@ -112,6 +120,47 @@ describe('registerCliHandlers peer-capability (#1203 resume / B3)', () => {
         registerCliHandlers(socket as never, createDeps([{ id: SESSION_A, tag: TAG_A }]))
 
         expect(joined).not.toContain(`session:${SESSION_B}`)
+        expect(emitted.filter((entry) => entry.event === 'peer-capability')).toEqual([])
+    })
+
+    it('emits a capability once for a hub-armed resume mint without a sessionTag (pass 2g)', () => {
+        armResumePeerMint(SESSION_B)
+        const first = createSocketHarness({
+            sessionId: SESSION_B,
+            clientType: 'session-scoped',
+        })
+        registerCliHandlers(first.socket as never, createDeps([
+            { id: SESSION_A, tag: TAG_A },
+            { id: SESSION_B, tag: TAG_B },
+        ]))
+        expect(first.emitted).toContainEqual({
+            event: 'peer-capability',
+            data: {
+                sessionId: SESSION_B,
+                sessionCapability: mintPeerSessionCapability(SESSION_B, JWT_SECRET),
+            },
+        })
+
+        const second = createSocketHarness({
+            sessionId: SESSION_B,
+            clientType: 'session-scoped',
+        })
+        registerCliHandlers(second.socket as never, createDeps([
+            { id: SESSION_A, tag: TAG_A },
+            { id: SESSION_B, tag: TAG_B },
+        ]))
+        expect(second.emitted.filter((entry) => entry.event === 'peer-capability')).toEqual([])
+    })
+
+    it('does not mint from namespace token alone when resume mint was never armed', () => {
+        const { socket, emitted } = createSocketHarness({
+            sessionId: SESSION_B,
+            clientType: 'session-scoped',
+        })
+        registerCliHandlers(socket as never, createDeps([
+            { id: SESSION_A, tag: TAG_A },
+            { id: SESSION_B, tag: TAG_B },
+        ]))
         expect(emitted.filter((entry) => entry.event === 'peer-capability')).toEqual([])
     })
 })

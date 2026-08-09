@@ -52,6 +52,7 @@ import {
 } from './rpcGateway'
 import { SessionCache } from './sessionCache'
 import { ingestNotifySummaryFromMessage } from './workGraphNotifyIngest'
+import { armResumePeerMint } from '../web/pendingResumePeerMint'
 
 type PiResumeAttempt = NonNullable<NonNullable<Session['metadata']>['piResumeAttempt']>
 type PtyResumeAttempt = NonNullable<NonNullable<Session['metadata']>['ptyResumeAttempt']>
@@ -2831,7 +2832,9 @@ async uploadScratchlistAttachment(
         }
         let piResumeSucceeded = false
         try {
-            const peerSessionTag = this.store.sessions.getSession(access.sessionId)?.tag ?? undefined
+            // Arm one-shot peer mint on the hub — do not send create-time tag to
+            // the runner/CLI (pass 2g B1: pidfd_getfd steals inherited fds).
+            armResumePeerMint(access.sessionId)
             const spawnResult = await this.rpcGateway.spawnSession(
                 targetMachine.id,
                 directory,
@@ -2849,8 +2852,7 @@ async uploadScratchlistAttachment(
                 session.collaborationMode ?? undefined,
                 session.copilotAgentMode ?? undefined,
                 resumedStartingMode,
-                undefined,
-                peerSessionTag || undefined
+                undefined
             )
 
             if (spawnResult.type !== 'success') {

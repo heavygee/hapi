@@ -10,11 +10,6 @@ export interface SpawnSessionOptions {
     // with `--hapi-session-id` so the child reuses the existing hub row (stable
     // id) instead of minting a new one. Set only by the hub reopen/resume path.
     existingSessionId?: string
-    /**
-     * Create-time session tag for peer-capability mint on resume (#1203).
-     * Runner injects into the CLI child env only; never agent-durable disk.
-     */
-    peerSessionTag?: string
     resumeSessionId?: string
     approvedNewDirectoryCreation?: boolean
     agent?: AgentFlavor

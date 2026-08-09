@@ -13,7 +13,6 @@ import { runtimePath } from '@/projectPath'
 import { getInvokedCwd } from '@/utils/invokedCwd'
 import { readWorktreeEnv } from '@/utils/worktreeEnv'
 import { exportHapiSessionEnv } from '@/agent/hapiSessionEnv'
-import { consumePeerSessionTagFromFd } from '@/agent/peerSessionTagFd'
 import packageJson from '../../package.json'
 
 export { HAPI_SESSION_ID_ENV, exportHapiSessionEnv, exportHapiHubAuthEnv } from '@/agent/hapiSessionEnv'
@@ -314,14 +313,7 @@ export async function bootstrapExistingSession(options: {
     startedBy?: SessionStartedBy
     workingDirectory: string
     metadataOverrides?: Partial<Metadata>
-    /** In-process resume only (e.g. tests). Runner uses peerSessionTagFd. */
-    sessionTag?: string
 }): Promise<SessionBootstrapResult> {
-    // Sync, before any await: take mint-proof out of the inherited pipe so a
-    // same-UID sibling cannot race /proc/<pid>/fd/N during ApiClient/getSession
-    // (pass 2f B1). Module import also drains; this is belt-and-braces.
-    const sessionTag = options.sessionTag?.trim() || consumePeerSessionTagFromFd()
-
     const startedBy = options.startedBy ?? 'terminal'
     const api = await ApiClient.create()
     const machineId = await getMachineIdOrExit()
@@ -331,9 +323,10 @@ export async function bootstrapExistingSession(options: {
         metadata: buildMachineMetadata()
     })
 
-    // GET omits sessionCapability by design (#1203). Runner resume hands the
-    // create-time tag on an inherited pipe (not process.env — pass 2e-alt B1).
-    // Terminal resume has no fd; mint is skipped → unattributed (M2).
+    // GET omits sessionCapability by design (#1203). Runner resume does not
+    // receive the create-time tag (pass 2g B1 — no child fd/env mint-proof);
+    // the hub arms a one-shot mint consumed on CLI socket connect. Terminal
+    // resume has no arm → unattributed peer delivery (M2).
     const sessionInfo = await api.getSession(options.sessionId)
     const baseMetadata = buildSessionMetadata({
         flavor: options.flavor,
@@ -356,9 +349,7 @@ export async function bootstrapExistingSession(options: {
     }
     const metadata = buildUpdatedMetadata(sessionInfo.metadata)
 
-    const session = api.sessionSyncClient(sessionInfo, {
-        sessionTag,
-    })
+    const session = api.sessionSyncClient(sessionInfo)
     session.updateMetadata(buildUpdatedMetadata)
 
     exportHapiSessionEnv(sessionInfo.id)

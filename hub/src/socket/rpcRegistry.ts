@@ -4,8 +4,8 @@ import type { Socket } from 'socket.io'
  * Maps RPC method names → owning socket.
  *
  * Last-writer-wins would let a second same-namespace machine socket steal
- * `spawn-happy-session` (and any peerSessionTag in the payload). Refuse
- * overwrite while another socket still owns the method (#1203 pass 2e-alt M4).
+ * `spawn-happy-session`. Refuse overwrite while another socket still owns the
+ * method (#1203 pass 2e-alt M4).
  */
 export class RpcRegistry {
     private readonly methodToSocketId: Map<string, string> = new Map()
