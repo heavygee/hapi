@@ -867,6 +867,7 @@ export class SyncEngine {
                 ...(job.remaining !== undefined ? { remaining: job.remaining } : {}),
                 ...(job.unit !== undefined ? { unit: job.unit } : {}),
                 ...(job.detail !== undefined ? { detail: job.detail } : {}),
+                ...(job.runId !== undefined ? { runId: job.runId } : {}),
                 heartbeatAt: job.heartbeatAt,
                 startedAt: job.startedAt,
                 updatedAt: job.updatedAt
@@ -900,6 +901,7 @@ export class SyncEngine {
                 ...(updated.remaining !== undefined ? { remaining: updated.remaining } : {}),
                 ...(updated.unit !== undefined ? { unit: updated.unit } : {}),
                 ...(updated.detail !== undefined ? { detail: updated.detail } : {}),
+                ...(updated.runId !== undefined ? { runId: updated.runId } : {}),
                 heartbeatAt: updated.heartbeatAt,
                 startedAt: updated.startedAt,
                 updatedAt: updated.updatedAt
