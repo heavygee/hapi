@@ -373,13 +373,36 @@ export async function bootstrapExistingSession(options: {
     const { HAPI_PEER_CAP_INJECT_ENV } = await import('@/api/peerCapabilityInject')
     const expectsInjectedCapability = Boolean(process.env[HAPI_PEER_CAP_INJECT_ENV]?.trim())
 
-    const session = api.sessionSyncClient(sessionInfo)
+    let sessionCapability: string | undefined
+    if (!expectsInjectedCapability) {
+        // Terminal resume: no spawn-RPC nonce. Prove machine tag for the
+        // session's recorded machine so `${sessionId}:*` RPC can register.
+        const machineTag = credentials.machineTag?.trim()
+        if (!machineTag) {
+            throw new Error('Cannot resume: machineTag unavailable for session RPC proof')
+        }
+        sessionCapability = await api.requestSessionRpcCapability({
+            sessionId: options.sessionId,
+            machineId,
+            machineTag,
+        })
+        if (!sessionCapability) {
+            throw new Error('Cannot resume: session RPC ownership proof unavailable')
+        }
+    }
+
+    const session = api.sessionSyncClient(sessionInfo, {
+        ...(sessionCapability ? { sessionCapability } : {}),
+    })
     session.updateMetadata(buildUpdatedMetadata)
 
     // Wait for runner inject before exporting broker env / returning — otherwise
     // the wrapped agent can spawn and snapshot an empty env (#1473 Major).
     if (expectsInjectedCapability) {
-        await session.waitForPeerSessionCapability({ timeoutMs: 16_000 })
+        const injected = await session.waitForPeerSessionCapability({ timeoutMs: 16_000 })
+        if (!injected) {
+            throw new Error('Cannot resume: runner peer capability inject failed')
+        }
     }
 
     exportHapiSessionEnv(sessionInfo.id)

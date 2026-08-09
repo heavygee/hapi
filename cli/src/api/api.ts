@@ -323,6 +323,36 @@ export class ApiClient {
         }
     }
 
+    /**
+     * Terminal resume: mint sessionCapability by proving machine tag ownership
+     * of the session's recorded machineId (#1473).
+     */
+    async requestSessionRpcCapability(opts: {
+        sessionId: string
+        machineId: string
+        machineTag: string
+    }): Promise<string | undefined> {
+        try {
+            const response = await axios.post<{ sessionCapability?: string }>(
+                `${configuration.apiUrl}/cli/sessions/${encodeURIComponent(opts.sessionId)}/session-rpc-capability`,
+                {
+                    machineId: opts.machineId,
+                    machineTag: opts.machineTag,
+                },
+                {
+                    headers: this.authHeaders(),
+                    timeout: 60_000,
+                }
+            )
+            const capability = response.data?.sessionCapability
+            return typeof capability === 'string' && capability.trim()
+                ? capability.trim()
+                : undefined
+        } catch {
+            return undefined
+        }
+    }
+
     async listResumableSessions(machineId?: string): Promise<ResumableSession[]> {
         const qs = machineId ? `?machineId=${encodeURIComponent(machineId)}` : ''
         const response = await axios.get(

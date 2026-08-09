@@ -207,16 +207,19 @@ export async function runCodex(opts: {
                 let text = message.content.text;
                 let isolatedCommandText: string | null = null;
                 const commands = await listSlashCommands('codex', workingDirectory).catch(() => []);
-                const slash = resolveCodexSlashCommand(text, {
-                    commands,
-                    permissionMode: currentPermissionMode,
-                    collaborationMode: currentCollaborationMode,
-                    model: currentModel,
-                    modelReasoningEffort: currentModelReasoningEffort ?? undefined,
-                    serviceTier: currentServiceTier,
-                    proactiveMultiAgent: currentProactiveMultiAgent,
-                    personality: currentPersonality
-                });
+                // Peer delivery must stay literal text — never receiver control syntax (#1473).
+                const slash = message.meta?.sentFrom === 'peer'
+                    ? ({ kind: 'passthrough' } as const)
+                    : resolveCodexSlashCommand(text, {
+                        commands,
+                        permissionMode: currentPermissionMode,
+                        collaborationMode: currentCollaborationMode,
+                        model: currentModel,
+                        modelReasoningEffort: currentModelReasoningEffort ?? undefined,
+                        serviceTier: currentServiceTier,
+                        proactiveMultiAgent: currentProactiveMultiAgent,
+                        personality: currentPersonality
+                    });
                 if (slash.kind === 'goal') {
                     if (slash.message) {
                         session.sendAgentMessage({

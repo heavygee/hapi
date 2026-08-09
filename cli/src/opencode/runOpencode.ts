@@ -258,12 +258,15 @@ export async function runOpencode(opts: {
                 let text = message.content.text;
                 const commands = await listSlashCommands('opencode', workingDirectory).catch(() => []);
                 if (wasCancelled()) return;
-                const slash = resolveOpencodeSlashCommand(text, {
-                    commands,
-                    permissionMode: currentPermissionMode,
-                    model: sessionModel,
-                    modelReasoningEffort: sessionModelReasoningEffort
-                });
+                // Peer delivery must stay literal text — never receiver control syntax (#1473).
+                const slash = message.meta?.sentFrom === 'peer'
+                    ? ({ kind: 'passthrough' } as const)
+                    : resolveOpencodeSlashCommand(text, {
+                        commands,
+                        permissionMode: currentPermissionMode,
+                        model: sessionModel,
+                        modelReasoningEffort: sessionModelReasoningEffort
+                    });
 
                 if (slash.kind === 'clear') {
                     if (startedBy !== 'runner') {

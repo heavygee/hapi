@@ -108,14 +108,14 @@ export async function preparePiUserMessage(
     options: {
         authorizeImagePath: (path: string) => boolean;
         authorizeOpenedImage: (path: string, identity: UploadFileIdentity) => boolean;
-        /** Peer provenance meta (#1203); annotated as a suffix so slash/skills stay first-line. */
+        /** Peer provenance meta (#1203); prefix so peer cannot trigger first-line slash/skills (#1473). */
         meta?: MessageMeta | null;
     },
 ): Promise<PiPromptPreparation> {
     const formattedMessage = annotatePeerDeliveryForAgent(
         formatPiUserMessage(message, attachments, commands),
         options.meta ?? undefined,
-        'suffix',
+        options.meta?.sentFrom === 'peer' ? 'prefix' : 'suffix',
     );
     const images: PiImageContent[] = [];
     const imageReadErrors: string[] = [];

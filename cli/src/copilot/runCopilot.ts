@@ -153,12 +153,15 @@ export async function runCopilot(opts: {
                 let text = message.content.text;
                 const commands = await listSlashCommands('copilot', workingDirectory).catch(() => []);
                 if (wasCancelled()) return;
-                const slash = resolveCopilotSlashCommand(text, {
-                    commands,
-                    permissionMode: currentPermissionMode,
-                    model: sessionModel,
-                    agentMode: currentAgentMode
-                });
+                // Peer delivery must stay literal text — never receiver control syntax (#1473).
+                const slash = message.meta?.sentFrom === 'peer'
+                    ? ({ kind: 'passthrough' } as const)
+                    : resolveCopilotSlashCommand(text, {
+                        commands,
+                        permissionMode: currentPermissionMode,
+                        model: sessionModel,
+                        agentMode: currentAgentMode
+                    });
 
                 if (slash.kind !== 'passthrough') {
                     recognizedSlash = true;

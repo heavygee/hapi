@@ -5,6 +5,7 @@ const {
     getSessionMock,
     getOrCreateSessionMock,
     getOrCreateMachineMock,
+    requestSessionRpcCapabilityMock,
     sessionSyncClientMock,
     notifyRunnerSessionStartedMock,
     readSettingsMock
@@ -12,6 +13,7 @@ const {
     getSessionMock: vi.fn(),
     getOrCreateSessionMock: vi.fn(),
     getOrCreateMachineMock: vi.fn(),
+    requestSessionRpcCapabilityMock: vi.fn(async () => 'cap-from-machine-proof'),
     sessionSyncClientMock: vi.fn(),
     notifyRunnerSessionStartedMock: vi.fn(async () => ({})),
     readSettingsMock: vi.fn()
@@ -23,6 +25,7 @@ vi.mock('@/api/api', () => ({
             getSession: getSessionMock,
             getOrCreateSession: getOrCreateSessionMock,
             getOrCreateMachine: getOrCreateMachineMock,
+            requestSessionRpcCapability: requestSessionRpcCapabilityMock,
             sessionSyncClient: sessionSyncClientMock
         })
     }
@@ -94,10 +97,13 @@ describe('bootstrapExistingSession', () => {
         getSessionMock.mockReset()
         getOrCreateSessionMock.mockReset()
         getOrCreateMachineMock.mockReset()
+        requestSessionRpcCapabilityMock.mockReset()
+        requestSessionRpcCapabilityMock.mockResolvedValue('cap-from-machine-proof')
         sessionSyncClientMock.mockReset()
         notifyRunnerSessionStartedMock.mockClear()
         readSettingsMock.mockReset()
         delete process.env[HAPI_SESSION_ID_ENV]
+        delete process.env.HAPI_PEER_CAP_INJECT
     })
 
     it('loads an existing HAPI session and reports it to the runner', async () => {
@@ -108,7 +114,7 @@ describe('bootstrapExistingSession', () => {
         getSessionMock.mockResolvedValue(session)
         getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
         sessionSyncClientMock.mockReturnValue(sessionClient)
-        readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
 
         const result = await bootstrapExistingSession({
             sessionId: 'hapi-session-1',
@@ -119,7 +125,14 @@ describe('bootstrapExistingSession', () => {
         expect(result.sessionInfo.id).toBe('hapi-session-1')
         expect(process.env[HAPI_SESSION_ID_ENV]).toBe('hapi-session-1')
         expect(result.workingDirectory).toBe('/tmp/project')
-        expect(sessionSyncClientMock).toHaveBeenCalledWith(session)
+        expect(requestSessionRpcCapabilityMock).toHaveBeenCalledWith({
+            sessionId: 'hapi-session-1',
+            machineId: 'machine-1',
+            machineTag: 'machine-tag-1',
+        })
+        expect(sessionSyncClientMock).toHaveBeenCalledWith(session, {
+            sessionCapability: 'cap-from-machine-proof',
+        })
         expect(sessionClient.updateMetadata).toHaveBeenCalledOnce()
         expect(notifyRunnerSessionStartedMock).toHaveBeenCalledWith(
             'hapi-session-1',
@@ -133,7 +146,7 @@ describe('bootstrapExistingSession', () => {
         )
     })
 
-    it('does not pass sessionTag on resume (hub one-shot mint; pass 2g B1)', async () => {
+    it('does not pass sessionTag on resume; uses machine-tag capability proof (#1473)', async () => {
         const session = createSession()
         const sessionClient = {
             updateMetadata: vi.fn()
@@ -141,7 +154,7 @@ describe('bootstrapExistingSession', () => {
         getSessionMock.mockResolvedValue(session)
         getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
         sessionSyncClientMock.mockReturnValue(sessionClient)
-        readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
 
         await bootstrapExistingSession({
             sessionId: 'hapi-session-1',
@@ -150,7 +163,10 @@ describe('bootstrapExistingSession', () => {
             startedBy: 'terminal',
         })
 
-        expect(sessionSyncClientMock).toHaveBeenCalledWith(session)
+        expect(sessionSyncClientMock).toHaveBeenCalledWith(session, {
+            sessionCapability: 'cap-from-machine-proof',
+        })
+        expect(sessionSyncClientMock.mock.calls[0]?.[1]).not.toHaveProperty('sessionTag')
     })
 
     it('preserves existing native resume metadata when reactivating a session', async () => {
@@ -197,7 +213,7 @@ describe('bootstrapExistingSession', () => {
         getSessionMock.mockResolvedValue(session)
         getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
         sessionSyncClientMock.mockReturnValue(sessionClient)
-        readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
 
         const result = await bootstrapExistingSession({
             sessionId: 'hapi-session-1',
@@ -280,7 +296,7 @@ describe('bootstrapLazySession', () => {
     it('does not export HAPI_SESSION_ID until the hub row is materialized', async () => {
         const pendingClient = { isPending: () => true }
         sessionSyncClientMock.mockReturnValue(pendingClient)
-        readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
 
         const result = await bootstrapLazySession({
             flavor: 'codex',
@@ -306,7 +322,7 @@ describe('bootstrapLazySession', () => {
     it('does not persist a machine or session until materialization', async () => {
         const pendingClient = { isPending: () => true }
         sessionSyncClientMock.mockReturnValue(pendingClient)
-        readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
 
         const result = await bootstrapLazySession({
             flavor: 'codex',
@@ -372,7 +388,7 @@ describe('bootstrapSession HAPI_SESSION_ID export', () => {
         getOrCreateSessionMock.mockResolvedValue(session)
         getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
         sessionSyncClientMock.mockReturnValue({ isPending: () => false })
-        readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
 
         const result = await bootstrapSession({
             flavor: 'claude',

@@ -304,6 +304,56 @@ export function createCliRoutes(
     })
 
     /**
+     * Terminal resume possession proof (#1473): mint session RPC / peer
+     * capability when the caller proves the create-time machine tag for the
+     * session's recorded machineId. Narrower than namespace-token squat;
+     * runner path still prefers spawn-RPC nonce redeem.
+     */
+    app.post('/sessions/:id/session-rpc-capability', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not ready' }, 503)
+        }
+        const sessionId = c.req.param('id')
+        const namespace = c.get('namespace')
+        const source = resolveSessionForNamespace(engine, sessionId, namespace)
+        if (!source.ok) {
+            return c.json({ error: source.error }, source.status)
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const machineId = body && typeof body === 'object' && typeof (body as { machineId?: unknown }).machineId === 'string'
+            ? (body as { machineId: string }).machineId.trim()
+            : ''
+        const machineTag = body && typeof body === 'object' && typeof (body as { machineTag?: unknown }).machineTag === 'string'
+            ? (body as { machineTag: string }).machineTag.trim()
+            : ''
+        if (!machineId || !machineTag) {
+            return c.json({ error: 'machineId and machineTag required' }, 400)
+        }
+
+        const recordedMachineId = typeof source.session.metadata?.machineId === 'string'
+            ? source.session.metadata.machineId.trim()
+            : ''
+        if (!recordedMachineId || recordedMachineId !== machineId) {
+            return c.json({ error: 'Machine does not own this session' }, 403)
+        }
+
+        const machine = resolveMachineForNamespace(engine, machineId, namespace)
+        if (!machine.ok) {
+            return c.json({ error: machine.error }, machine.status)
+        }
+        const storedTag = engine.getMachineTagByNamespace(machineId, namespace)
+        if (!storedTag || !constantTimeEquals(storedTag, machineTag)) {
+            return c.json({ error: 'Machine tag mismatch' }, 403)
+        }
+
+        return c.json({
+            sessionCapability: mintPeerSessionCapability(source.sessionId, jwtSecret),
+        })
+    })
+
+    /**
      * Runner redeems a resume peer-mint nonce from the machine spawn RPC
      * (#1203 pass 2h). Not available on anonymous /cli socket connect.
      */
