@@ -37,18 +37,7 @@ If the operator would reopen the chat only to ask "how's it doing?", it belongs 
 
 Treat this like `ping_peer` / `inspect_peer`: it is first-class HAPI tooling, not a docs footnote.
 
-### MCP (preferred for agents)
-
-Tool name: `session_job` (Claude: `mcp__hapi__session_job`; Codex: `functions.hapi__session_job`; OpenCode/ACP: `hapi_session_job`).
-
-```json
-{ "action": "set", "jobKey": "beets", "label": "beets import",
-  "remaining": 150, "done": 1637, "total": 1787, "unit": "units" }
-```
-
-Then `action=update` every ~10 minutes; finish with `status=completed|failed` or `action=clear`. Omit `sessionId` to target this chat.
-
-### CLI supervisor (preferred for shell children)
+### CLI supervisor (required for process-shaped work)
 
 ```bash
 hapi job run "$HAPI_SESSION_ID" beets \
@@ -58,9 +47,26 @@ hapi job run "$HAPI_SESSION_ID" beets \
   -- ./beets-import.sh
 ```
 
-`hapi job run` registers the job, heartbeats on a timer while the child runs, then marks `completed`/`failed` from the exit code. An idle agent **cannot** heartbeat - set-once + manual update decays to amber.
+`hapi job run` registers the job, heartbeats on a timer while the child runs, then marks `completed`/`failed` from the exit code. An idle agent **cannot** heartbeat - set-once + nohup freezes the bar (counts stuck, UI goes stale after ~15m).
 
-### CLI manual path
+Do **not** start long work with MCP `session_job` `set` or a one-shot CLI `set` and then background the process. That is the wardrobe failure mode.
+
+### MCP (update / clear / list only)
+
+Tool name: `session_job` (Claude: `mcp__hapi__session_job`; Codex: `functions.hapi__session_job`; OpenCode/ACP: `hapi_session_job`).
+
+**`action=set` is refused** over MCP. Start the meter with Shell + `hapi job run` (above). Then you may:
+
+```json
+{ "action": "update", "jobKey": "beets", "done": 1638, "total": 1787 }
+{ "action": "update", "jobKey": "beets", "status": "completed" }
+{ "action": "clear", "jobKey": "beets" }
+{ "action": "list" }
+```
+
+### CLI manual path (self-heartbeating wrapper only)
+
+Only when you own a wrapper that calls `update` at least every ~10 minutes (not an idle agent):
 
 ```bash
 hapi job set "$HAPI_SESSION_ID" beets \
