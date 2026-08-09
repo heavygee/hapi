@@ -66,6 +66,8 @@ export class ApiClient {
             metadata: MachineMetadata
             runnerState?: RunnerState
         }
+        /** Fired when hub forces legacy machine re-enroll before the create succeeds. */
+        onMachineReenrolled?: (machineId: string, machineTag: string) => void
         timeoutMs?: number
         signal?: AbortSignal
     }): Promise<Session & { sessionCapability?: string }> {
@@ -76,6 +78,7 @@ export class ApiClient {
                 throw error
             }
             const rotated = await rotateMachineIdForLegacyReenroll()
+            opts.onMachineReenrolled?.(rotated.machineId, rotated.machineTag)
             const metadata = opts.metadata && typeof opts.metadata === 'object'
                 ? { ...opts.metadata, machineId: rotated.machineId }
                 : opts.metadata

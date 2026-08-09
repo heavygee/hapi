@@ -71,7 +71,10 @@ export class PeerDeliverBroker {
             }
         }
         this.server = createServer((socket) => {
-            void this.handleConnection(socket)
+            void this.handleConnection(socket).catch((error) => {
+                logger.debug('[peer-broker] connection failed', error)
+                socket.destroy()
+            })
         })
         this.server.once('error', (error) => {
             logger.debug(`[peer-broker] listen failed on ${this.socketPath}`, error)

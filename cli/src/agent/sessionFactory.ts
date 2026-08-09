@@ -232,7 +232,9 @@ export async function bootstrapLazySession(options: SessionBootstrapOptions): Pr
     }
 
     const api = await ApiClient.create()
-    const { machineId, machineTag } = await getMachineCredentialsOrExit()
+    const credentials = await getMachineCredentialsOrExit()
+    let machineId = credentials.machineId
+    let machineTag = credentials.machineTag
     const machineMetadata = buildMachineMetadata()
     const metadata = buildSessionMetadata({
         flavor: options.flavor,
@@ -268,7 +270,10 @@ export async function bootstrapLazySession(options: SessionBootstrapOptions): Pr
         collaborationMode: undefined
     }
 
-    const session = api.sessionSyncClient(sessionInfo, {
+    // Declared before materialize so legacy re-enroll can refresh the pending
+    // snapshot before runMaterializationLoop compares hub vs local metadata.
+    let session!: ApiSessionClient
+    session = api.sessionSyncClient(sessionInfo, {
         materialize: async (snapshot, signal) => {
             const materialized = await api.getOrCreateSession({
                 id: requestedId,
@@ -282,6 +287,14 @@ export async function bootstrapLazySession(options: SessionBootstrapOptions): Pr
                     id: machineId,
                     tag: machineTag,
                     metadata: machineMetadata
+                },
+                onMachineReenrolled: (rotatedId, rotatedTag) => {
+                    machineId = rotatedId
+                    machineTag = rotatedTag
+                    session.updateMetadata((current) => ({
+                        ...current,
+                        machineId: rotatedId,
+                    }))
                 },
                 timeoutMs: 10_000,
                 signal

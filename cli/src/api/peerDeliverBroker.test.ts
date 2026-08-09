@@ -147,6 +147,42 @@ describe('PeerDeliverBroker', () => {
         }))
     })
 
+    it('does not reject the connection handler when a client disconnects mid-request', async () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-peer-broker-'))
+        dirs.push(dir)
+        const socketPath = join(dir, 'drop.sock')
+        const unhandled: unknown[] = []
+        const onUnhandled = (reason: unknown) => {
+            unhandled.push(reason)
+        }
+        process.on('unhandledRejection', onUnhandled)
+        const broker = new PeerDeliverBroker({
+            sessionId: 'session-drop',
+            sessionCapability: 'cap',
+            ownerPid: process.pid,
+            socketPath,
+            readPeerCred: () => ({ pid: process.pid, uid: process.getuid?.() ?? 0, gid: 0 }),
+        })
+        broker.start()
+        try {
+            await new Promise<void>((resolve, reject) => {
+                const socket = createConnection(socketPath)
+                socket.on('connect', () => {
+                    socket.write('{"op":"ping-peer"')
+                    socket.destroy()
+                })
+                socket.on('close', () => resolve())
+                socket.on('error', () => resolve())
+                setTimeout(() => reject(new Error('timed out waiting for disconnect')), 2_000)
+            })
+            await new Promise((resolve) => setTimeout(resolve, 50))
+            expect(unhandled).toEqual([])
+        } finally {
+            process.off('unhandledRejection', onUnhandled)
+            broker.stop()
+        }
+    })
+
     it('client rejects a listener that is not an ancestor (M3)', async () => {
         process.env[HAPI_SESSION_ID_ENV] = '6212dae5-8a60-4284-b7a5-c09aa3571ce4'
         const dir = mkdtempSync(join(tmpdir(), 'hapi-peer-broker-'))
