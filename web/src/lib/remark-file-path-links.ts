@@ -10,7 +10,7 @@ const TRAILING_PUNCTUATION = new Set(['.', ',', ';', ':', '!', '?'])
 // tabular data (csv/tsv), config/schema (ini/conf/env/proto/graphql/prisma),
 // and common languages not already covered. TLD-lookalikes (org/com/io/dev/co)
 // are deliberately excluded so URLs like "example.org" don't autolink.
-const COMMON_FILE_EXTENSIONS = new Set([
+export const COMMON_FILE_EXTENSIONS = new Set([
     'adoc', 'astro', 'avif', 'bat', 'bmp', 'c', 'cfg', 'cjs', 'conf', 'cpp', 'css', 'csv',
     'env', 'gif', 'go', 'gql', 'gradle', 'graphql', 'h', 'hpp', 'html', 'ico', 'ini', 'java',
     'jpeg', 'jpg', 'js', 'json', 'jsx', 'kt', 'lock', 'md', 'mdx', 'mjs', 'mmd', 'php', 'png',
@@ -163,24 +163,40 @@ function linkInlineCodeNode(node: MarkdownNode): MarkdownNode | null {
     }
 }
 
-// Rewrite an explicit markdown link `[label](relative/file.ext)` whose target is
-// a repo-relative allowlisted file path into a `hapi-file:` href so it opens the
-// session file viewer instead of dead-ending in the SPA router.
+// Rewrite an explicit markdown link `[label](…file.ext)` into a `hapi-file:` href
+// so it opens the session file viewer instead of dead-ending in the SPA router.
 //
-// Security: reuses shouldLinkPath (rejects POSIX abs / `~/` / `../` / `scheme://`)
-// and rejects residual colons for non-Windows targets after the line-suffix strip,
-// so scheme-bearing urls (mailto:, obsidian://, foo:bar.md) are left for the
-// deny-scheme layer. Windows absolute paths are routed through the session file
-// viewer; the CLI still enforces that they stay inside the session workspace.
+// Accepts:
+// - repo-relative allowlisted paths (including `./` and `#fragment` / `:line` stripped)
+// - POSIX / Windows absolute paths with allowlisted extensions (CLI validatePath
+//   still enforces workspace containment at read time)
+//
+// Still rejects: `~/` (needs session cwd to expand — handled in <A>), `../`,
+// scheme-bearing URLs, and non-file targets (`/settings`, `#section`).
 function rewriteFileLinkNode(node: MarkdownNode): void {
     if (node.type !== 'link') return
     const url = node.url
     if (!url) return
     if (url.startsWith(FILE_PATH_HREF_PREFIX)) return
 
-    const target = stripLineSuffix(url)
+    // Strip #fragment / ?query so `file.md#section` can still rewrite.
+    const hashIdx = url.indexOf('#')
+    const queryIdx = url.indexOf('?')
+    let cut = -1
+    if (hashIdx >= 0 && queryIdx >= 0) cut = Math.min(hashIdx, queryIdx)
+    else if (hashIdx >= 0) cut = hashIdx
+    else if (queryIdx >= 0) cut = queryIdx
+    const withoutMeta = cut >= 0 ? url.slice(0, cut) : url
+
+    const target = stripLineSuffix(withoutMeta)
     if (!isWindowsAbsolutePath(target) && target.includes(':')) return
-    if (!shouldLinkPath(target)) return
+
+    // Absolute file paths: allow when extension is known. Relative: shouldLinkPath.
+    const isAbsFile =
+        (target.startsWith('/') || isWindowsAbsolutePath(target)) &&
+        hasKnownFileExtension(target) &&
+        !target.startsWith('//')
+    if (!isAbsFile && !shouldLinkPath(target)) return
 
     node.url = createFileHref(target)
 }
