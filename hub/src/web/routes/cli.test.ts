@@ -1,10 +1,14 @@
-import { beforeAll, describe, expect, it, mock } from 'bun:test'
+import { beforeAll, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { Hono } from 'hono'
 import { HAPI_SESSION_CAPABILITY_HEADER } from '@hapi/protocol'
 import type { SyncEngine } from '../../sync/syncEngine'
 import { createConfiguration } from '../../configuration'
 import { createCliRoutes } from './cli'
 import { mintPeerSessionCapability } from '../peerCapability'
+import {
+    armResumePeerMint,
+    clearResumePeerMintsForTests,
+} from '../pendingResumePeerMint'
 import { SessionIdentityConflictError } from '../../store/sessions'
 
 const CLI_JWT_SECRET = new TextEncoder().encode('cli-route-test-secret')
@@ -294,8 +298,69 @@ describe('cli lazy session creation', () => {
     })
 })
 
+describe('POST /cli/sessions/:id/resume-peer-capability', () => {
+    const sessionId = '6212dae5-8a60-4284-b7a5-c09aa3571ce4'
+
+    beforeEach(() => {
+        clearResumePeerMintsForTests()
+    })
+
+    it('redeems an armed nonce into a capability (runner path)', async () => {
+        const nonce = armResumePeerMint(sessionId)
+        expect(nonce).toBeTruthy()
+        const app = createApp({
+            resolveSessionAccess: (id: string, _namespace: string) => (
+                id === sessionId
+                    ? {
+                        ok: true as const,
+                        sessionId,
+                        session: { id: sessionId, active: false, metadata: { name: 'Resumed' } },
+                    }
+                    : { ok: false as const, reason: 'not-found' as const }
+            ),
+        } as never)
+
+        const response = await app.request(`/cli/sessions/${sessionId}/resume-peer-capability`, {
+            method: 'POST',
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nonce }),
+        })
+        expect(response.status).toBe(200)
+        const body = await response.json() as { sessionCapability?: string }
+        expect(body.sessionCapability).toBe(mintPeerSessionCapability(sessionId, CLI_JWT_SECRET))
+
+        const replay = await app.request(`/cli/sessions/${sessionId}/resume-peer-capability`, {
+            method: 'POST',
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nonce }),
+        })
+        expect(replay.status).toBe(403)
+    })
+
+    it('rejects wrong nonce even while a mint is armed', async () => {
+        armResumePeerMint(sessionId)
+        const app = createApp({
+            resolveSessionAccess: (id: string) => (
+                id === sessionId
+                    ? {
+                        ok: true as const,
+                        sessionId,
+                        session: { id: sessionId, active: false, metadata: { name: 'Resumed' } },
+                    }
+                    : { ok: false as const, reason: 'not-found' as const }
+            ),
+        } as never)
+        const response = await app.request(`/cli/sessions/${sessionId}/resume-peer-capability`, {
+            method: 'POST',
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nonce: 'not-the-armed-nonce' }),
+        })
+        expect(response.status).toBe(403)
+    })
+})
+
 describe('GET /cli/sessions/:id peer capability surface', () => {
-    it('does not return sessionCapability (resume must use socket peer-capability)', async () => {
+    it('does not return sessionCapability (resume uses runner nonce redeem)', async () => {
         const session = {
             id: '6212dae5-8a60-4284-b7a5-c09aa3571ce4',
             active: true,

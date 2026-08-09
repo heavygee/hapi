@@ -41,6 +41,7 @@ import { TerminalManager } from '@/terminal/TerminalManager'
 import { applyVersionedAck } from './versionedUpdate'
 import { buildHubRequestHeaders, buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
 import { PeerDeliverBroker } from './peerDeliverBroker'
+import { receivePeerCapabilityFromRunner } from './peerCapabilityInject'
 
 /**
  * XML tags that Claude Code injects as `type:'user'` messages.
@@ -504,8 +505,15 @@ export class ApiSessionClient extends EventEmitter {
             this.agentTerminalActive = false
         }))
 
-        // Resume recovery (#1203): GET omits capability; hub mints only when
-        // handshake carries the create-time sessionTag (sibling-proof).
+        // Resume recovery (#1203 pass 2h): runner redeems spawn nonce and
+        // injects capability over a PID-checked unix socket — not /cli connect.
+        void receivePeerCapabilityFromRunner().then((capability) => {
+            if (capability) {
+                this.applyPeerSessionCapability(capability, 'options')
+            }
+        })
+
+        // Create-path recovery: hub mints when handshake carries create-time tag.
         this.socket.on('peer-capability', (data) => {
             if (!data || typeof data !== 'object') return
             if (data.sessionId !== this.sessionId) return

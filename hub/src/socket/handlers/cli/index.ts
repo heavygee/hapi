@@ -7,7 +7,6 @@ import type { CliSocketWithData, SocketServer } from '../../socketTypes'
 import type { AccessErrorReason, AccessResult } from './types'
 import { constantTimeEquals } from '../../../utils/crypto'
 import { mintPeerSessionCapability } from '../../../web/peerCapability'
-import { consumeResumePeerMint } from '../../../web/pendingResumePeerMint'
 import { registerMachineHandlers } from './machineHandlers'
 import { registerRpcHandlers } from './rpcHandlers'
 import { registerSessionHandlers } from './sessionHandlers'
@@ -97,18 +96,13 @@ export function registerCliHandlers(socket: CliSocketWithData, deps: CliHandlers
         const access = resolveSessionAccess(sessionId)
         if (access.ok) {
             socket.join(`session:${sessionId}`)
-            // Mint paths (#1203):
-            // 1) Create-time session tag in handshake (never from GET / sibling).
-            // 2) One-shot hub-armed resume mint — tag never enters the resumed
-            //    CLI process (pass 2g B1: pidfd_getfd on inherited fd).
-            // Namespace-token + caller-selected sessionId alone must NOT mint.
+            // Capability mint requires the create-time session tag — unavailable
+            // to sibling sessions that share only the namespace CLI token.
+            // Resume mints are redeemed by the runner with a spawn-RPC nonce
+            // (pass 2h B1) — never on first /cli connect (TOCTOU).
             const presentedTag = typeof auth?.sessionTag === 'string' ? auth.sessionTag : ''
             const storedTag = typeof access.value.tag === 'string' ? access.value.tag : ''
-            const tagOk = Boolean(
-                presentedTag && storedTag && constantTimeEquals(presentedTag, storedTag)
-            )
-            const resumeMintOk = !tagOk && consumeResumePeerMint(sessionId)
-            if (tagOk || resumeMintOk) {
+            if (presentedTag && storedTag && constantTimeEquals(presentedTag, storedTag)) {
                 socket.emit('peer-capability', {
                     sessionId,
                     sessionCapability: mintPeerSessionCapability(sessionId, jwtSecret)

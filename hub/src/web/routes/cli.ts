@@ -11,6 +11,7 @@ import {
 } from '@hapi/protocol'
 import { resolvePeerMetaFromSourceSession } from './messages'
 import { mintPeerSessionCapability, verifyPeerSessionCapability } from '../peerCapability'
+import { redeemResumePeerMint } from '../pendingResumePeerMint'
 import { getConfiguration } from '../../configuration'
 import { readSessionSummaryContractEnabled } from '../../config/sessionSummaryContract'
 import { constantTimeEquals } from '../../utils/crypto'
@@ -291,6 +292,33 @@ export function createCliRoutes(
             now: Date.now()
         })
         return c.json({ messages })
+    })
+
+    /**
+     * Runner redeems a resume peer-mint nonce from the machine spawn RPC
+     * (#1203 pass 2h). Not available on anonymous /cli socket connect.
+     */
+    app.post('/sessions/:id/resume-peer-capability', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not ready' }, 503)
+        }
+        const sessionId = c.req.param('id')
+        const namespace = c.get('namespace')
+        const source = resolveSessionForNamespace(engine, sessionId, namespace)
+        if (!source.ok) {
+            return c.json({ error: source.error }, source.status)
+        }
+        const body = await c.req.json().catch(() => null)
+        const nonce = body && typeof body === 'object' && typeof (body as { nonce?: unknown }).nonce === 'string'
+            ? (body as { nonce: string }).nonce
+            : undefined
+        if (!redeemResumePeerMint(source.sessionId, nonce)) {
+            return c.json({ error: 'Invalid or expired resume peer mint' }, 403)
+        }
+        return c.json({
+            sessionCapability: mintPeerSessionCapability(source.sessionId, jwtSecret),
+        })
     })
 
     /**

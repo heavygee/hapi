@@ -79,11 +79,9 @@ describe('registerCliHandlers peer-capability (#1203 resume / B3)', () => {
     })
 
     it('does not mint when a sibling presents another existing sessionId without its tag', () => {
-        // Adversarial: namespace-token holder opens a socket naming victim B.
         const { socket, emitted, joined } = createSocketHarness({
             sessionId: SESSION_B,
             clientType: 'session-scoped',
-            // No sessionTag — or wrong tag below in sibling case.
         })
 
         registerCliHandlers(socket as never, createDeps([
@@ -123,36 +121,8 @@ describe('registerCliHandlers peer-capability (#1203 resume / B3)', () => {
         expect(emitted.filter((entry) => entry.event === 'peer-capability')).toEqual([])
     })
 
-    it('emits a capability once for a hub-armed resume mint without a sessionTag (pass 2g)', () => {
+    it('does not mint on /cli connect even when a resume mint is armed (pass 2h B1)', () => {
         armResumePeerMint(SESSION_B)
-        const first = createSocketHarness({
-            sessionId: SESSION_B,
-            clientType: 'session-scoped',
-        })
-        registerCliHandlers(first.socket as never, createDeps([
-            { id: SESSION_A, tag: TAG_A },
-            { id: SESSION_B, tag: TAG_B },
-        ]))
-        expect(first.emitted).toContainEqual({
-            event: 'peer-capability',
-            data: {
-                sessionId: SESSION_B,
-                sessionCapability: mintPeerSessionCapability(SESSION_B, JWT_SECRET),
-            },
-        })
-
-        const second = createSocketHarness({
-            sessionId: SESSION_B,
-            clientType: 'session-scoped',
-        })
-        registerCliHandlers(second.socket as never, createDeps([
-            { id: SESSION_A, tag: TAG_A },
-            { id: SESSION_B, tag: TAG_B },
-        ]))
-        expect(second.emitted.filter((entry) => entry.event === 'peer-capability')).toEqual([])
-    })
-
-    it('does not mint from namespace token alone when resume mint was never armed', () => {
         const { socket, emitted } = createSocketHarness({
             sessionId: SESSION_B,
             clientType: 'session-scoped',

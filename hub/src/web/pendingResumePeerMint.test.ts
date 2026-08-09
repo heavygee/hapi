@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
 import {
     armResumePeerMint,
+    clearResumePeerMint,
     clearResumePeerMintsForTests,
     consumeResumePeerMint,
+    redeemResumePeerMint,
 } from './pendingResumePeerMint'
 
 describe('pendingResumePeerMint', () => {
@@ -10,18 +12,23 @@ describe('pendingResumePeerMint', () => {
         clearResumePeerMintsForTests()
     })
 
-    it('arms a one-shot mint that is consumed on first use', () => {
-        armResumePeerMint('session-a', 1_000, 30_000)
-        expect(consumeResumePeerMint('session-a', 1_001)).toBe(true)
-        expect(consumeResumePeerMint('session-a', 1_002)).toBe(false)
+    it('redeems only with the matching nonce (not first-connector)', () => {
+        const nonce = armResumePeerMint('session-a', 1_000, 30_000)
+        expect(nonce).toBeTruthy()
+        expect(consumeResumePeerMint('session-a', 1_001)).toBe(false)
+        expect(redeemResumePeerMint('session-a', 'wrong', 1_001)).toBe(false)
+        expect(redeemResumePeerMint('session-a', nonce, 1_001)).toBe(true)
+        expect(redeemResumePeerMint('session-a', nonce, 1_002)).toBe(false)
+    })
+
+    it('clears on explicit disarm (spawn failure)', () => {
+        const nonce = armResumePeerMint('session-a', 1_000, 30_000)
+        clearResumePeerMint('session-a')
+        expect(redeemResumePeerMint('session-a', nonce, 1_001)).toBe(false)
     })
 
     it('rejects expired mints', () => {
-        armResumePeerMint('session-a', 1_000, 30_000)
-        expect(consumeResumePeerMint('session-a', 1_000 + 30_001)).toBe(false)
-    })
-
-    it('does not mint for sessions that were never armed', () => {
-        expect(consumeResumePeerMint('nope')).toBe(false)
+        const nonce = armResumePeerMint('session-a', 1_000, 30_000)
+        expect(redeemResumePeerMint('session-a', nonce, 1_000 + 30_001)).toBe(false)
     })
 })

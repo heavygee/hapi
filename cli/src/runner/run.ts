@@ -30,6 +30,12 @@ import { resolveWorkspaceRoots } from '@/utils/workspaceRoot';
 import { hashRunnerCliApiToken, hashRunnerExtraHeaders } from './runnerIdentity';
 import { scheduleCursorModelsPrewarm } from '@/modules/common/cursorModelsPrewarm';
 import { isLinkedGitWorktree } from '@/utils/isLinkedGitWorktree';
+import {
+  HAPI_PEER_CAP_INJECT_ENV,
+  startPeerCapabilityInjectServer,
+  type PeerCapabilityInjectServer,
+} from '@/api/peerCapabilityInject';
+import { buildHubRequestHeaders } from '@/api/hubExtraHeaders';
 
 /**
  * Deduplicates a preallocated HAPI-row spawn only while its child is alive.
@@ -641,8 +647,19 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           };
         }
 
-        // Resume peer provenance (#1203 pass 2g): hub arms a one-shot mint —
-        // do not put create-time tag on child fds/env (pidfd_getfd / environ).
+        // Resume peer provenance (#1203 pass 2h): hub sends a spawn-RPC nonce;
+        // runner redeems capability and injects via PID-checked unix socket.
+        // Never put mint-proof on child fds/env (pidfd_getfd / environ / TOCTOU).
+        const resumePeerMintNonce = options.resumePeerMintNonce?.trim()
+        const resumeSessionId = (options.existingSessionId || options.sessionId)?.trim()
+        let peerCapInject: PeerCapabilityInjectServer | null = null
+        if (resumePeerMintNonce && resumeSessionId) {
+          peerCapInject = startPeerCapabilityInjectServer()
+          extraEnv = {
+            ...extraEnv,
+            [HAPI_PEER_CAP_INJECT_ENV]: peerCapInject.path,
+          }
+        }
 
         const args = buildCliArgs(agent, options, yolo);
 
@@ -674,6 +691,30 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             ...extraEnv
           }
         });
+
+        if (peerCapInject && happyProcess.pid && resumePeerMintNonce && resumeSessionId) {
+          const inject = peerCapInject
+          const childPid = happyProcess.pid
+          void (async () => {
+            try {
+              const capability = await redeemResumePeerCapabilityFromHub(
+                resumeSessionId,
+                resumePeerMintNonce
+              )
+              if (!capability) {
+                logger.debug('[RUNNER RUN] resume peer capability redeem returned empty')
+                return
+              }
+              await inject.deliverTo(childPid, capability)
+            } catch (error) {
+              logger.debug('[RUNNER RUN] resume peer capability inject failed', error)
+            } finally {
+              inject.close()
+            }
+          })()
+        } else {
+          peerCapInject?.close()
+        }
 
         happyProcess.stderr?.on('data', (data) => {
           stderrTail = appendTail(stderrTail, data);
@@ -1564,4 +1605,35 @@ export function buildCliArgs(
     }
   }
   return args;
+}
+
+async function redeemResumePeerCapabilityFromHub(
+  sessionId: string,
+  nonce: string
+): Promise<string | undefined> {
+  const apiUrl = configuration.apiUrl
+  const accessToken = configuration.cliApiToken
+  if (!apiUrl || !accessToken) {
+    return undefined
+  }
+  // /cli routes authenticate with the namespace CLI token (not a web JWT).
+  const redeemResponse = await fetch(
+    `${apiUrl}/cli/sessions/${encodeURIComponent(sessionId)}/resume-peer-capability`,
+    {
+      method: 'POST',
+      headers: buildHubRequestHeaders({
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      }),
+      body: JSON.stringify({ nonce }),
+    }
+  )
+  if (!redeemResponse.ok) {
+    return undefined
+  }
+  const redeemBody = await redeemResponse.json() as { sessionCapability?: string }
+  const capability = typeof redeemBody.sessionCapability === 'string'
+    ? redeemBody.sessionCapability.trim()
+    : ''
+  return capability || undefined
 }

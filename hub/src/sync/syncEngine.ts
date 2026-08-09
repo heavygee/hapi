@@ -52,7 +52,7 @@ import {
 } from './rpcGateway'
 import { SessionCache } from './sessionCache'
 import { ingestNotifySummaryFromMessage } from './workGraphNotifyIngest'
-import { armResumePeerMint } from '../web/pendingResumePeerMint'
+import { armResumePeerMint, clearResumePeerMint } from '../web/pendingResumePeerMint'
 
 type PiResumeAttempt = NonNullable<NonNullable<Session['metadata']>['piResumeAttempt']>
 type PtyResumeAttempt = NonNullable<NonNullable<Session['metadata']>['ptyResumeAttempt']>
@@ -2832,9 +2832,9 @@ async uploadScratchlistAttachment(
         }
         let piResumeSucceeded = false
         try {
-            // Arm one-shot peer mint on the hub — do not send create-time tag to
-            // the runner/CLI (pass 2g B1: pidfd_getfd steals inherited fds).
-            armResumePeerMint(access.sessionId)
+            // Arm nonce for runner redeem only — never mint on first /cli connect
+            // (pass 2h B1 TOCTOU). Nonce travels on machine spawn RPC.
+            const resumePeerMintNonce = armResumePeerMint(access.sessionId)
             const spawnResult = await this.rpcGateway.spawnSession(
                 targetMachine.id,
                 directory,
@@ -2852,10 +2852,12 @@ async uploadScratchlistAttachment(
                 session.collaborationMode ?? undefined,
                 session.copilotAgentMode ?? undefined,
                 resumedStartingMode,
-                undefined
+                undefined,
+                resumePeerMintNonce
             )
 
             if (spawnResult.type !== 'success') {
+                clearResumePeerMint(access.sessionId)
                 if (requiresPiNativeReady) {
                     const stopped = await this.terminateInPlacePiResume(
                         targetMachine.id,

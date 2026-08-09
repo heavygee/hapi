@@ -1,54 +1,77 @@
+import { randomBytes } from 'node:crypto'
+import { constantTimeEquals } from '../utils/crypto'
+
 /**
- * One-time peer-capability mint for runner-resumed sessions (#1203 pass 2g B1).
+ * One-time resume peer-mint nonce (#1203 pass 2h B1).
  *
- * The create-time session tag must never enter the resumed CLI process
- * (environ / inherited fd / pidfd_getfd). Instead the hub arms a short-lived
- * single-use mint when it asks the runner to spawn the resume; the next CLI
- * socket that joins that sessionId consumes it.
- *
- * Residual: a same-namespace peer that connects as the victim sessionId during
- * the arm window can win the one-shot. There is no durable mint-proof to steal
- * from the child afterward.
+ * Armed when the hub asks the runner to spawn a resume. The nonce travels only
+ * on the machine spawn RPC (RpcRegistry refuses method shadowing). The runner
+ * redeems it over HTTP for a capability and injects into the child — the CLI
+ * socket connect path must NOT consume this (first-connector TOCTOU).
  */
 
 export const RESUME_PEER_MINT_TTL_MS = 30_000
 
 type PendingMint = {
+    nonce: string
     expiresAt: number
 }
 
 const pendingBySessionId = new Map<string, PendingMint>()
 
+/** Arm a mint and return the nonce to send on the machine spawn RPC only. */
 export function armResumePeerMint(
     sessionId: string,
     nowMs: number = Date.now(),
     ttlMs: number = RESUME_PEER_MINT_TTL_MS
-): void {
+): string | undefined {
     const id = sessionId.trim()
     if (!id) {
-        return
+        return undefined
     }
-    pendingBySessionId.set(id, { expiresAt: nowMs + ttlMs })
+    const nonce = randomBytes(32).toString('base64url')
+    pendingBySessionId.set(id, { nonce, expiresAt: nowMs + ttlMs })
+    return nonce
 }
 
-/** Returns true once if a non-expired mint was armed; consumes it. */
-export function consumeResumePeerMint(
+export function clearResumePeerMint(sessionId: string): void {
+    pendingBySessionId.delete(sessionId.trim())
+}
+
+/**
+ * Consume a mint only when the caller presents the matching nonce.
+ * Used by the runner redeem HTTP route — not by anonymous /cli connect.
+ */
+export function redeemResumePeerMint(
     sessionId: string,
+    nonce: string | undefined,
     nowMs: number = Date.now()
 ): boolean {
     const id = sessionId.trim()
-    if (!id) {
+    const presented = typeof nonce === 'string' ? nonce.trim() : ''
+    if (!id || !presented) {
         return false
     }
     const entry = pendingBySessionId.get(id)
     if (!entry) {
         return false
     }
+    if (entry.expiresAt < nowMs) {
+        pendingBySessionId.delete(id)
+        return false
+    }
+    if (!constantTimeEquals(presented, entry.nonce)) {
+        return false
+    }
     pendingBySessionId.delete(id)
-    return entry.expiresAt >= nowMs
+    return true
 }
 
-/** Test helper — clear all armed mints. */
+/** @deprecated Removed — first-connector consume was the pass2h Blocker. */
+export function consumeResumePeerMint(_sessionId: string, _nowMs?: number): boolean {
+    return false
+}
+
 export function clearResumePeerMintsForTests(): void {
     pendingBySessionId.clear()
 }
