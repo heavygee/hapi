@@ -55,6 +55,7 @@ import {
 import {
     buildModelErrorBridgePrompt,
     canBridgeModelError,
+    mergeBridgeGateFields,
     truncateLastUserMessage
 } from './cursorModelErrorBridge';
 import { getAutoBridgeTransientModelErrors } from './cursorModelErrorBridgePrefs';
@@ -837,6 +838,13 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         };
 
         if (snapshot.eventId !== undefined) {
+            // Merge hub snapshot into local gate state — never clobber
+            // bridgedForEventId / retriedAndFailed with undefined/false from a
+            // stale hub payload (would allow a second pushIsolated for same event).
+            const gates = mergeBridgeGateFields(this.lastRecordedModelError, {
+                bridgedForEventId: snapshot.bridgedForEventId,
+                retriedAndFailed: snapshot.retriedAndFailed
+            });
             this.lastRecordedModelError = {
                 eventId: snapshot.eventId,
                 atTs: snapshot.atTs ?? this.lastRecordedModelError?.atTs ?? Date.now(),
@@ -848,8 +856,8 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                     ?? this.lastUserMessage
                     ?? '',
                 transient: snapshot.transient,
-                bridgedForEventId: snapshot.bridgedForEventId,
-                retriedAndFailed: snapshot.retriedAndFailed
+                bridgedForEventId: gates.bridgedForEventId,
+                retriedAndFailed: gates.retriedAndFailed
             };
         }
 
@@ -861,6 +869,11 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
 
         if (!metadataError) {
             return { ok: false, reason: 'no_model_error' };
+        }
+
+        // Fail closed while a bridge for this eventId is already in flight.
+        if (this.bridgingForEventId === metadataError.eventId) {
+            return { ok: false, reason: 'not_bridgeable' };
         }
 
         const bridgeInput = {
