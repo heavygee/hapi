@@ -173,7 +173,13 @@ export function SessionRowSummary(props: {
     }, [attachedJob?.key, attachedJob?.startedAt])
     const jobStale = attachedJob ? isAttachedJobStale(attachedJob, nowMs) : false
     const jobFraction = attachedJob ? attachedJobFraction(attachedJob) : null
-    const jobProgressLabel = attachedJob ? formatAttachedJobProgress(attachedJob, nowMs) : null
+    const jobProgressLabel = attachedJob
+        ? formatAttachedJobProgress(attachedJob, nowMs, {
+            left: t('session.item.attachedJob.left'),
+            running: t('session.item.attachedJob.running'),
+            noHeartbeat: t('session.item.attachedJob.noHeartbeat'),
+        })
+        : null
 
     return (
         <div className={`flex w-full min-w-0 flex-col gap-1 ${className ?? ''}`}>
@@ -296,7 +302,9 @@ export function SessionRowSummary(props: {
                     }`}
                     title={
                         jobStale
-                            ? `${attachedJob.detail ?? attachedJob.label} — progress may be frozen (no heartbeat)`
+                            ? t('session.item.attachedJob.staleTitle', {
+                                detail: attachedJob.detail ?? attachedJob.label,
+                            })
                             : (attachedJob.detail ?? attachedJob.label)
                     }
                 >
@@ -307,7 +315,7 @@ export function SessionRowSummary(props: {
                     <span className="min-w-0 truncate font-medium">
                         {attachedJob.label}
                         {jobStale ? (
-                            <span className="font-semibold"> · stale</span>
+                            <span className="font-semibold"> · {t('session.item.attachedJob.stale')}</span>
                         ) : null}
                         <span className="font-normal opacity-80"> · {jobProgressLabel}</span>
                     </span>
