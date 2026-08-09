@@ -1552,6 +1552,9 @@ export class SessionCache {
                 retriedAndFailed: newError.retriedAndFailed === true || oldError.retriedAndFailed === true,
                 supersededByUserTurn: newError.supersededByUserTurn === true
                     || oldError.supersededByUserTurn === true,
+                bridgeable: newError.bridgeable === false || oldError.bridgeable === false
+                    ? false
+                    : (newError.bridgeable ?? oldError.bridgeable),
                 lastUserMessage: newError.lastUserMessage ?? oldError.lastUserMessage
             }
             changed = true
