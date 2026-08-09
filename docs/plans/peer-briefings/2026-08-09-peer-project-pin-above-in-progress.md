@@ -34,4 +34,9 @@ Also tighten Settings/FUE copy if needed: project pin ≠ global top; after this
 3. Ping parent `6e70f97b` when dogfoodable.  
 4. **No upstream PR until operator OK.**
 
-Hard rules: product edits only in this worktree; never merge `tiann/hapi`.
+## Status (peer)
+
+- Tip: `fd4dec890` on `fix/project-pin-above-in-progress`
+- Peer e2e: `e2e/peer/1431-project-pin-above-in-progress.spec.ts` (mirror)
+- Parent pinged: `6e70f97b` — dogfoodable; **no upstream PR until operator OK**
+- Peer stack may still be up: `project-pin-above-in-progress` @ `:3103`
