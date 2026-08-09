@@ -36,6 +36,8 @@ Feature agents should **read the relevant doc below at session start**; meta bot
 | [git-stash-policy.md](./git-stash-policy.md) | **Multi-agent repo** - do not stash other agents' work; commit instead |
 | [worktree-testing.md](./worktree-testing.md) | `hapi-active` symlink, `hapi-use-worktree`, service swing |
 | [driver-soup.md](./driver-soup.md) | Daily driver manifest, merge-train PR worktrees, garden vs soup |
+| [cursor-auth-fleet-sync.md](./cursor-auth-fleet-sync.md) | **Cursor Agent auth** — oos `auth.json` source of truth; sync to proxmox runner envs + pin/`chattr`; account switch |
+| [cursor-hapi-mcp.md](./cursor-hapi-mcp.md) | Cursor ↔ HAPI MCP sidecar wiring (not login) |
 | [operator-lock.md](./operator-lock.md) | **Portable install** — `install-hapi-operator-lock.sh` (all guards) |
 | [watch-activate-driver.md](./watch-activate-driver.md) | `hapi-watch-activate-driver` - external-only watch; ouroboros guard + excludes |
 | `~/coding/server-setup/config/logrotate/hapi-logs` | **Machine:** rotate `~/.hapi/logs/*.log` (CLI/runner/agent nohup hubs). Prod hub → `journalctl -u hapi-hub`. Install: `sudo cp …/hapi-logs /etc/logrotate.d/hapi-logs` |
