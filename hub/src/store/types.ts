@@ -95,6 +95,7 @@ export type StoredSessionJob = {
     remaining?: number
     unit?: string
     detail?: string
+    runId?: string
     heartbeatAt: number
     startedAt: number
     updatedAt: number

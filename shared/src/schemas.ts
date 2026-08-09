@@ -384,6 +384,8 @@ export const AttachedJobSchema = z.object({
     remaining: z.number().nonnegative().optional(),
     unit: z.string().min(1).max(64).optional(),
     detail: z.string().max(500).optional(),
+    /** Opaque run generation — supervisors CAS against this on PATCH. */
+    runId: z.string().min(1).max(64).optional(),
     heartbeatAt: z.number(),
     startedAt: z.number(),
     updatedAt: z.number()
@@ -401,7 +403,9 @@ export const AttachedJobUpsertSchema = z.object({
     unit: z.string().min(1).max(64).optional(),
     detail: z.string().max(500).optional(),
     heartbeatAt: z.number().optional(),
-    startedAt: z.number().optional()
+    startedAt: z.number().optional(),
+    /** Supervisor-owned generation; hub mints one when omitted. */
+    runId: z.string().min(1).max(64).optional()
 }).strict()
 
 export type AttachedJobUpsert = z.infer<typeof AttachedJobUpsertSchema>
@@ -417,11 +421,11 @@ export const AttachedJobPatchSchema = z.object({
     detail: z.string().max(500).nullable().optional(),
     heartbeatAt: z.number().optional(),
     /**
-     * Run generation fence (compare-and-swap on startedAt). Supervisors that
-     * stamped startedAt on PUT should send the same value on every PATCH so a
-     * stale process cannot mutate a newer run that reused the job key.
+     * Run generation fence. Supervisors that stamped runId on PUT must send the
+     * same value so a stale process cannot mutate a newer key-reuse run.
+     * Date.now()/startedAt is not unique enough for concurrent supervisors.
      */
-    expectedStartedAt: z.number().optional()
+    expectedRunId: z.string().min(1).max(64).optional()
 }).strict()
 
 export type AttachedJobPatch = z.infer<typeof AttachedJobPatchSchema>
