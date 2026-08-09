@@ -157,35 +157,55 @@ export function collapseRepeats(value: string): string {
 const NOTIFY_SUMMARY_TOKEN_NORM = collapseRepeats(NOTIFY_SUMMARY_TOKEN)
 
 /**
+ * True when `before` ends with a contiguous collapse-tolerant
+ * `AGENT_NOTIFY_SUMMARY` token (optional prose may precede it).
+ */
+function hasNotifyTokenSuffix(before: string): boolean {
+    for (let i = 0; i < before.length; i++) {
+        const candidate = before.slice(i)
+        if (/\s/.test(candidate)) continue
+        if (collapseRepeats(candidate) === NOTIFY_SUMMARY_TOKEN_NORM) return true
+    }
+    return false
+}
+
+/**
  * If `line` is a notify-summary line, return the raw JSON substring `{...}`;
  * otherwise `null`. `line` is expected to already be the last non-empty line
  * of a message (callers enforce the end-anchor).
  *
- * Corruption-tolerant: the leading token is matched by collapse-normalized
- * equality (see `collapseRepeats`), so Cursor's `SUMMARY`->`SUMARY` dup-drop
- * still matches. The JSON must start with `{` and end with `}`; a token that
- * is embedded in prose (`"see the AGENT_NOTIFY_SUMMARY {..}"`) fails because
- * its collapse-normalized prefix will not equal the bare token.
+ * Corruption-tolerant: the token is matched by collapse-normalized equality
+ * (see `collapseRepeats`), so Cursor's `SUMMARY`->`SUMARY` dup-drop still
+ * matches. Optional prose before the token on the same line is allowed when
+ * the line still ends with a well-formed `{…}` payload (agents sometimes
+ * glue trailing text and the footer without a newline).
  */
 export function matchNotifySummaryLine(line: string): string | null {
     const trimmed = line.trim()
-    const braceIdx = trimmed.indexOf('{')
-    if (braceIdx <= 0) return null
-    const token = trimmed.slice(0, braceIdx).trim()
-    if (!token || collapseRepeats(token) !== NOTIFY_SUMMARY_TOKEN_NORM) return null
-    const jsonPart = trimmed.slice(braceIdx).trim()
-    if (!jsonPart.startsWith('{') || !jsonPart.endsWith('}')) return null
-    return jsonPart
+    if (!trimmed.endsWith('}')) return null
+
+    // Prefer the rightmost `{…}`-through-EOL candidate whose preceding text
+    // ends with a collapse-tolerant token (allows glued prose prefix).
+    let matched: string | null = null
+    for (let braceIdx = 0; braceIdx < trimmed.length; braceIdx++) {
+        if (trimmed[braceIdx] !== '{') continue
+        const before = trimmed.slice(0, braceIdx).replace(/\s+$/, '')
+        if (!before || !hasNotifyTokenSuffix(before)) continue
+        const jsonPart = trimmed.slice(braceIdx).trim()
+        if (!jsonPart.startsWith('{') || !jsonPart.endsWith('}')) continue
+        matched = jsonPart
+    }
+    return matched
 }
 
 /**
- * Look for an `AGENT_NOTIFY_SUMMARY {...json...}` line as the **last
+ * Look for an `AGENT_NOTIFY_SUMMARY {...json...}` footer as the **last
  * non-empty line** of an agent's plain-text message.
  *
- * Strict end-anchor: trailing whitespace-only lines are fine, but prose
- * AFTER the JSON line is treated as non-compliant. This also makes a
- * `AGENT_NOTIFY_SUMMARY` quoted inside an earlier paragraph harmless,
- * because such a quote is never the last line.
+ * End-anchor: trailing whitespace-only lines are fine, but prose on a later
+ * non-empty line is non-compliant. Mid-body quotes of the token are ignored
+ * for the same reason. An optional prose prefix on the last line itself is
+ * tolerated when the line still ends with a well-formed payload.
  *
  * The token match is corruption-tolerant (see `matchNotifySummaryLine`).
  * Returns the parsed object on success, `null` on any deviation.

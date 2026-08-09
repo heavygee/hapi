@@ -238,8 +238,15 @@ describe('matchNotifySummaryLine (corruption-tolerant detector)', () => {
         expect(matchNotifySummaryLine('  AGENT_NOTIFY_SUMMARY {"a":1}  ')).toBe('{"a":1}')
     })
 
-    test('rejects a token embedded in prose (not a bare token)', () => {
-        expect(matchNotifySummaryLine('see the AGENT_NOTIFY_SUMMARY {"x":1}')).toBeNull()
+    test('allows optional prose prefix before the token on the same line', () => {
+        // Agents sometimes omit the newline before the footer (#1425).
+        expect(matchNotifySummaryLine('see the AGENT_NOTIFY_SUMMARY {"x":1}')).toBe('{"x":1}')
+        expect(matchNotifySummaryLine('Ownership session pinged.AGENT_NOTIFY_SUMMARY {"version":1,"status":"done","summary":"ok"}'))
+            .toBe('{"version":1,"status":"done","summary":"ok"}')
+    })
+
+    test('allows glued prose before a corrupted (SUMARY) token', () => {
+        expect(matchNotifySummaryLine('pinged.AGENT_NOTIFY_SUMARY {"status":"done"}')).toBe('{"status":"done"}')
     })
 
     test('rejects lines with no JSON or no leading token', () => {
@@ -261,6 +268,22 @@ describe('extractNotifySummary (corruption-tolerant end-to-end)', () => {
         const r = extractNotifySummary(text)
         expect(r?.status).toBe('blocked')
         expect(r?.summary).toBe('needs key')
+    })
+
+    test('parses glued prose + footer on the last line', () => {
+        const glued = 'Ownership session pinged.AGENT_NOTIFY_SUMMARY {"version":1,"status":"done","summary":"ok"}'
+        const r = extractNotifySummary(glued)
+        expect(r?.version).toBe(1)
+        expect(r?.status).toBe('done')
+        expect(r?.summary).toBe('ok')
+    })
+
+    test('ignores mid-message token that is not on the last non-empty line', () => {
+        const text = [
+            'See AGENT_NOTIFY_SUMMARY {"version":1,"status":"done","summary":"mid"} for the contract.',
+            'More prose after that quote.',
+        ].join('\n')
+        expect(extractNotifySummary(text)).toBeNull()
     })
 })
 
