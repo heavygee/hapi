@@ -731,3 +731,10 @@ layers:
   # Tip: 35d59fee2 (origin/fix/markdown-file-link-failclosed)
   - branch: fix/markdown-file-link-failclosed
 
+  # tiann/hapi#1457 — restore Pin in project = intra-group only (revert #1432 folder lift).
+  # Web-only. Peer-stack Playwright green (1457-project-pin-intra-group-only.png).
+  # Upstream PR: https://github.com/tiann/hapi/pull/1458 (Fixes #1457). Lane B after green.
+  # Worktree: ~/coding/hapi/worktrees/project-pin-intra-group-only @ fix/project-pin-intra-group-only
+  # Tip: 5167c2f55 (origin/fix/project-pin-intra-group-only)
+  - branch: fix/project-pin-intra-group-only
+
