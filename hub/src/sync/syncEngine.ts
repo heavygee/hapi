@@ -1900,6 +1900,9 @@ export class SyncEngine {
         if (err.retriedAndFailed) {
             throw new Error('Bridge already failed for this error')
         }
+        if (err.supersededByUserTurn) {
+            throw new Error('Model error was superseded by a newer turn')
+        }
 
         // Do not mark bridgedForEventId here — CLI persists recovery only after
         // the bridge prompt actually succeeds.
@@ -1912,7 +1915,8 @@ export class SyncEngine {
             priorAssistantClaimsDone: err.priorAssistantClaimsDone,
             transient: err.transient,
             bridgedForEventId: err.bridgedForEventId,
-            retriedAndFailed: err.retriedAndFailed
+            retriedAndFailed: err.retriedAndFailed,
+            supersededByUserTurn: err.supersededByUserTurn
         })
     }
 
