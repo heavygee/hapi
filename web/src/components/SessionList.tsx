@@ -1077,12 +1077,9 @@ function SessionItem(props: {
                     nestedTooltips
                     attentionTooltipId={attentionId}
                     scheduleTooltipId={scheduleId}
-<<<<<<< ours
                     inRunningSection={inRunningSection}
                     projectLabel={projectLabel}
                     machineLabel={machineLabel}
-=======
->>>>>>> theirs
                     trailing={githubPrAwarenessEnabled && primaryPrRef ? (
                         <SessionPrChip refs={s.metadata?.externalRefs} />
                     ) : null}
