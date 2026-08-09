@@ -3740,6 +3740,10 @@ async uploadScratchlistAttachment(
         return await this.rpcGateway.listCodexModelsForMachine(machineId)
     }
 
+    async listCodexModelsForSession(sessionId: string): Promise<RpcListCodexModelsResponse> {
+        return await this.rpcGateway.listCodexModelsForSession(sessionId)
+    }
+
     async listCodexSessionsForMachine(machineId: string, cwd?: string | null, sessionIds?: string[]) {
         return await this.rpcGateway.listCodexSessionsForMachine(machineId, cwd, sessionIds)
     }
