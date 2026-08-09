@@ -64,13 +64,13 @@ export type PingPeerOptions = {
     accessToken?: string
     /**
      * Calling session id from ApiSessionClient (MCP inside a wrapped session).
-     * When set with {@link sessionCapability}, delivery uses
-     * `POST /cli/sessions/:source/peer-messages` so the hub binds provenance to
-     * that session's capability — never a web JWT body field (#1203).
-     * Bare `hapi ping-peer` omits these and sends unattributed peer rows.
+     * When set, delivery MUST be attributed via {@link sessionCapability} and
+     * `POST /cli/sessions/:source/peer-messages` — never silently fall back to
+     * unattributed web JWT (pass 2c M3). Bare `hapi ping-peer` omits this and
+     * sends unattributed peer rows.
      */
     authenticatedSourceSessionId?: string
-    /** Hub-minted HMAC from CLI create/load; required for attributed delivery. */
+    /** Hub-minted HMAC from CLI create/load; required when attributing. */
     sessionCapability?: string
     http?: AxiosInstance
     sleep?: (ms: number) => Promise<void>
@@ -575,10 +575,19 @@ export async function pingPeer(options: PingPeerOptions): Promise<PingPeerResult
 
     const sourceId = options.authenticatedSourceSessionId?.trim() ?? ''
     const capability = options.sessionCapability?.trim() ?? ''
-    const attributed = Boolean(sourceId && isSessionId(sourceId) && capability)
-    onProgress?.(`sending message (${message.length} chars${attributed ? ', attributed' : ', unattributed'})...`)
-    if (attributed) {
-        // CLI token + session capability (not the web JWT / not path-id alone).
+    if (sourceId) {
+        if (!isSessionId(sourceId)) {
+            throw new PingPeerError('bad_args', 'authenticatedSourceSessionId must be a full session UUID')
+        }
+        if (!capability) {
+            // Fail closed: wrapping sessions must not silently downgrade to
+            // unattributed while claiming a source id (pass 2c M3).
+            throw new PingPeerError(
+                'auth_failed',
+                'session capability not ready for attributed peer delivery; retry after hub peer-capability'
+            )
+        }
+        onProgress?.(`sending message (${message.length} chars, attributed)...`)
         await sendAttributedPeerMessage(
             apiUrl,
             accessToken,
@@ -589,6 +598,7 @@ export async function pingPeer(options: PingPeerOptions): Promise<PingPeerResult
             http
         )
     } else {
+        onProgress?.(`sending message (${message.length} chars, unattributed)...`)
         await sendUnattributedPeerMessage(apiUrl, jwt, matched.id, message, http)
     }
 

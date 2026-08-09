@@ -94,6 +94,11 @@ vi.mock('axios', () => ({
     }
 }))
 
+vi.mock('./peerSessionCredentialStore', () => ({
+    savePeerSessionCredentials: vi.fn(),
+    loadPeerSessionCredentials: vi.fn(() => null),
+}))
+
 import { ApiSessionClient, isExternalUserMessage, IncomingMessageFilter } from './apiSession'
 
 function createSession(overrides: Partial<Session> = {}): Session {
@@ -167,7 +172,9 @@ describe('ApiSessionClient peer-capability resume (#1203)', () => {
     it('recovers sessionCapability from socket and ignores foreign session ids', () => {
         socketHarness.sockets.length = 0
         const session = createSession()
-        const client = new ApiSessionClient('token', session)
+        const client = new ApiSessionClient('token', session, {
+            sessionTag: 'tag-local-proof',
+        })
 
         expect(client.getPeerSessionCapability()).toBeNull()
         expect(socketHarness.sockets).toHaveLength(1)
@@ -184,6 +191,28 @@ describe('ApiSessionClient peer-capability resume (#1203)', () => {
             sessionCapability: '  resumed-capability  ',
         })
         expect(client.getPeerSessionCapability()).toBe('resumed-capability')
+    })
+
+    it('waitForPeerSessionCapability resolves when a delayed peer-capability arrives', async () => {
+        socketHarness.sockets.length = 0
+        const session = createSession()
+        const client = new ApiSessionClient('token', session, {
+            sessionTag: 'tag-local-proof',
+        })
+        const socket = socketHarness.sockets[0]!
+
+        const pending = client.waitForPeerSessionCapability({ timeoutMs: 1_000 })
+        expect(client.getPeerSessionCapability()).toBeNull()
+
+        queueMicrotask(() => {
+            socket.trigger('peer-capability', {
+                sessionId: session.id,
+                sessionCapability: 'late-capability',
+            })
+        })
+
+        await expect(pending).resolves.toBe('late-capability')
+        expect(client.getPeerSessionCapability()).toBe('late-capability')
     })
 })
 

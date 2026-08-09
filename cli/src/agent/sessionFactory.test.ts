@@ -50,6 +50,23 @@ vi.mock('@/ui/logger', () => ({
     }
 }))
 
+const {
+    savePeerSessionCredentialsMock,
+    loadPeerSessionCredentialsMock,
+} = vi.hoisted(() => ({
+    savePeerSessionCredentialsMock: vi.fn(),
+    loadPeerSessionCredentialsMock: vi.fn((): {
+        sessionId: string
+        sessionTag: string
+        sessionCapability: string
+    } | null => null),
+}))
+
+vi.mock('@/api/peerSessionCredentialStore', () => ({
+    savePeerSessionCredentials: savePeerSessionCredentialsMock,
+    loadPeerSessionCredentials: loadPeerSessionCredentialsMock,
+}))
+
 import {
     HAPI_SESSION_ID_ENV,
     bootstrapExistingSession,
@@ -97,6 +114,9 @@ describe('bootstrapExistingSession', () => {
         sessionSyncClientMock.mockReset()
         notifyRunnerSessionStartedMock.mockClear()
         readSettingsMock.mockReset()
+        savePeerSessionCredentialsMock.mockReset()
+        loadPeerSessionCredentialsMock.mockReset()
+        loadPeerSessionCredentialsMock.mockReturnValue(null)
         delete process.env[HAPI_SESSION_ID_ENV]
     })
 
@@ -119,7 +139,10 @@ describe('bootstrapExistingSession', () => {
         expect(result.sessionInfo.id).toBe('hapi-session-1')
         expect(process.env[HAPI_SESSION_ID_ENV]).toBe('hapi-session-1')
         expect(result.workingDirectory).toBe('/tmp/project')
-        expect(sessionSyncClientMock).toHaveBeenCalledWith(session)
+        expect(sessionSyncClientMock).toHaveBeenCalledWith(session, {
+            sessionCapability: undefined,
+            sessionTag: undefined,
+        })
         expect(sessionClient.updateMetadata).toHaveBeenCalledOnce()
         expect(notifyRunnerSessionStartedMock).toHaveBeenCalledWith(
             'hapi-session-1',
@@ -131,6 +154,33 @@ describe('bootstrapExistingSession', () => {
                 machineId: 'machine-1'
             })
         )
+    })
+
+    it('restores local peer credentials so resume can attribute as itself', async () => {
+        const session = createSession()
+        const sessionClient = {
+            updateMetadata: vi.fn()
+        }
+        getSessionMock.mockResolvedValue(session)
+        getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
+        sessionSyncClientMock.mockReturnValue(sessionClient)
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
+        loadPeerSessionCredentialsMock.mockReturnValue({
+            sessionId: 'hapi-session-1',
+            sessionTag: 'tag-owner',
+            sessionCapability: 'cap-owner',
+        })
+
+        await bootstrapExistingSession({
+            sessionId: 'hapi-session-1',
+            flavor: 'codex',
+            workingDirectory: '/tmp/project'
+        })
+
+        expect(sessionSyncClientMock).toHaveBeenCalledWith(session, {
+            sessionCapability: 'cap-owner',
+            sessionTag: 'tag-owner',
+        })
     })
 
     it('preserves existing native resume metadata when reactivating a session', async () => {

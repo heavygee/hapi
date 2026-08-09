@@ -5,6 +5,7 @@ import type { SyncEvent } from '../../../sync/syncEngine'
 import type { TerminalRegistry } from '../../terminalRegistry'
 import type { CliSocketWithData, SocketServer } from '../../socketTypes'
 import type { AccessErrorReason, AccessResult } from './types'
+import { constantTimeEquals } from '../../../utils/crypto'
 import { mintPeerSessionCapability } from '../../../web/peerCapability'
 import { registerMachineHandlers } from './machineHandlers'
 import { registerRpcHandlers } from './rpcHandlers'
@@ -91,14 +92,22 @@ export function registerCliHandlers(socket: CliSocketWithData, deps: CliHandlers
 
     const auth = socket.handshake.auth as Record<string, unknown> | undefined
     const sessionId = typeof auth?.sessionId === 'string' ? auth.sessionId : null
-    if (sessionId && resolveSessionAccess(sessionId).ok) {
-        socket.join(`session:${sessionId}`)
-        // Resume path: GET /cli/sessions/:id never returns capability (would
-        // reopen namespace-token forge). Deliver it only on the live session socket.
-        socket.emit('peer-capability', {
-            sessionId,
-            sessionCapability: mintPeerSessionCapability(sessionId, jwtSecret)
-        })
+    if (sessionId) {
+        const access = resolveSessionAccess(sessionId)
+        if (access.ok) {
+            socket.join(`session:${sessionId}`)
+            // Capability mint requires the create-time session tag — unavailable
+            // to sibling sessions that share only the namespace CLI token (B3).
+            // Namespace-token + caller-selected sessionId alone must NOT mint.
+            const presentedTag = typeof auth?.sessionTag === 'string' ? auth.sessionTag : ''
+            const storedTag = typeof access.value.tag === 'string' ? access.value.tag : ''
+            if (presentedTag && storedTag && constantTimeEquals(presentedTag, storedTag)) {
+                socket.emit('peer-capability', {
+                    sessionId,
+                    sessionCapability: mintPeerSessionCapability(sessionId, jwtSecret)
+                })
+            }
+        }
     }
 
     const machineId = typeof auth?.machineId === 'string' ? auth.machineId : null

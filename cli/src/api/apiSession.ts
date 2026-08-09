@@ -40,6 +40,7 @@ import { cleanupUploadDir } from '../modules/common/handlers/uploads'
 import { TerminalManager } from '@/terminal/TerminalManager'
 import { applyVersionedAck } from './versionedUpdate'
 import { buildHubRequestHeaders, buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
+import { savePeerSessionCredentials } from './peerSessionCredentialStore'
 
 /**
  * XML tags that Claude Code injects as `type:'user'` messages.
@@ -178,6 +179,11 @@ export type ApiSessionClientOptions = {
     onMaterialized?: (session: Session, snapshot: PendingSessionSnapshot) => void
     /** Hub-minted HMAC for attributed peer delivery (#1203). Not agent-visible. */
     sessionCapability?: string
+    /**
+     * Create-time session tag (not in public Session schema). Required for hub
+     * to re-mint peer-capability on the CLI socket — siblings cannot guess it.
+     */
+    sessionTag?: string
 }
 
 type PendingOutboundEvent = {
@@ -239,6 +245,12 @@ export class ApiSessionClient extends EventEmitter {
     readonly sessionId: string
     /** Session-scoped peer capability from hub create/load; never exported to agent env. */
     private sessionCapability: string | null
+    /** Create-time tag for tag-gated peer-capability mint on the CLI socket. */
+    private sessionTag: string | null
+    private peerCapabilityWaiters: Array<{
+        resolve: (capability: string | null) => void
+        timer: ReturnType<typeof setTimeout>
+    }> = []
     private metadata: Metadata | null
     private metadataVersion: number
     private agentState: AgentState | null
@@ -288,11 +300,55 @@ export class ApiSessionClient extends EventEmitter {
         return this.sessionCapability
     }
 
+    /**
+     * Wait until a peer-delivery capability is available (create/load/socket),
+     * or until timeout. Used so resumed MCP ping_peer does not snapshot null
+     * and silently send unattributed (pass 2c M3).
+     */
+    async waitForPeerSessionCapability(options?: { timeoutMs?: number }): Promise<string | null> {
+        if (this.sessionCapability) {
+            return this.sessionCapability
+        }
+        const timeoutMs = options?.timeoutMs ?? 5_000
+        return await new Promise<string | null>((resolve) => {
+            const timer = setTimeout(() => {
+                this.peerCapabilityWaiters = this.peerCapabilityWaiters.filter((waiter) => waiter.timer !== timer)
+                resolve(this.sessionCapability)
+            }, timeoutMs)
+            this.peerCapabilityWaiters.push({ resolve, timer })
+        })
+    }
+
+    private applyPeerSessionCapability(capability: string, source: 'options' | 'materialize' | 'socket'): void {
+        const trimmed = capability.trim()
+        if (!trimmed) return
+        this.sessionCapability = trimmed
+        if (this.sessionTag) {
+            savePeerSessionCredentials({
+                sessionId: this.sessionId,
+                sessionTag: this.sessionTag,
+                sessionCapability: trimmed,
+            })
+        }
+        if (source === 'socket') {
+            logger.debug(`[API] Peer session capability recovered for ${this.sessionId}`)
+        }
+        const waiters = this.peerCapabilityWaiters.splice(0)
+        for (const waiter of waiters) {
+            clearTimeout(waiter.timer)
+            waiter.resolve(trimmed)
+        }
+    }
+
     constructor(token: string, session: Session, options: ApiSessionClientOptions = {}) {
         super()
         this.token = token
         this.sessionId = session.id
-        this.sessionCapability = options.sessionCapability?.trim() || null
+        this.sessionTag = options.sessionTag?.trim() || null
+        this.sessionCapability = null
+        if (options.sessionCapability?.trim()) {
+            this.applyPeerSessionCapability(options.sessionCapability, 'options')
+        }
         this.metadata = session.metadata
         this.metadataVersion = session.metadataVersion
         this.agentState = session.agentState
@@ -314,7 +370,8 @@ export class ApiSessionClient extends EventEmitter {
             auth: {
                 token: this.token,
                 clientType: 'session-scoped' as const,
-                sessionId: this.sessionId
+                sessionId: this.sessionId,
+                ...(this.sessionTag ? { sessionTag: this.sessionTag } : {})
             },
             path: '/socket.io/',
             reconnection: true,
@@ -432,8 +489,8 @@ export class ApiSessionClient extends EventEmitter {
             this.agentTerminalActive = false
         }))
 
-        // Resume recovery (#1203): GET /cli/sessions/:id omits capability by design.
-        // Hub mints on session-scoped socket join; accept only our sessionId.
+        // Resume recovery (#1203): GET omits capability; hub mints only when
+        // handshake carries the create-time sessionTag (sibling-proof).
         this.socket.on('peer-capability', (data) => {
             if (!data || typeof data !== 'object') return
             if (data.sessionId !== this.sessionId) return
@@ -441,8 +498,7 @@ export class ApiSessionClient extends EventEmitter {
                 ? data.sessionCapability.trim()
                 : ''
             if (!capability) return
-            this.sessionCapability = capability
-            logger.debug(`[API] Peer session capability recovered for ${this.sessionId}`)
+            this.applyPeerSessionCapability(capability, 'socket')
         })
 
         this.socket.on('update', (data: Update, ack?: (response: { removed: boolean }) => void) => {
@@ -570,7 +626,7 @@ export class ApiSessionClient extends EventEmitter {
                 this.agentState = materialized.agentState
                 this.agentStateVersion = materialized.agentStateVersion
                 if (typeof materialized.sessionCapability === 'string' && materialized.sessionCapability.trim()) {
-                    this.sessionCapability = materialized.sessionCapability.trim()
+                    this.applyPeerSessionCapability(materialized.sessionCapability, 'materialize')
                 }
                 this.state = 'active'
 

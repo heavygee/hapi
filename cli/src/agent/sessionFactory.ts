@@ -13,6 +13,7 @@ import { runtimePath } from '@/projectPath'
 import { getInvokedCwd } from '@/utils/invokedCwd'
 import { readWorktreeEnv } from '@/utils/worktreeEnv'
 import { exportHapiSessionEnv } from '@/agent/hapiSessionEnv'
+import { savePeerSessionCredentials, loadPeerSessionCredentials } from '@/api/peerSessionCredentialStore'
 import packageJson from '../../package.json'
 
 export { HAPI_SESSION_ID_ENV, exportHapiSessionEnv, exportHapiHubAuthEnv } from '@/agent/hapiSessionEnv'
@@ -203,7 +204,15 @@ export async function bootstrapSession(options: SessionBootstrapOptions): Promis
         effort: options.effort
     })
 
-    const session = api.sessionSyncClient(sessionInfo)
+    if (sessionInfo.sessionCapability) {
+        savePeerSessionCredentials({
+            sessionId: sessionInfo.id,
+            sessionTag,
+            sessionCapability: sessionInfo.sessionCapability,
+        })
+    }
+
+    const session = api.sessionSyncClient(sessionInfo, { sessionTag })
 
     exportHapiSessionEnv(sessionInfo.id)
 
@@ -284,8 +293,16 @@ export async function bootstrapLazySession(options: SessionBootstrapOptions): Pr
             if (materialized.id !== requestedId) {
                 throw new Error(`Hub returned unexpected session id ${materialized.id}`)
             }
+            if (materialized.sessionCapability) {
+                savePeerSessionCredentials({
+                    sessionId: materialized.id,
+                    sessionTag,
+                    sessionCapability: materialized.sessionCapability,
+                })
+            }
             return materialized
         },
+        sessionTag,
         onMaterialized: (materialized, snapshot) => {
             // Export only after the hub row exists. Exporting the provisional id at
             // bootstrap lets agents inherit HAPI_SESSION_ID before GET /api/sessions/:id
@@ -322,10 +339,11 @@ export async function bootstrapExistingSession(options: {
         metadata: buildMachineMetadata()
     })
 
-    // GET omits sessionCapability by design (#1203) — namespace-token GET of
-    // any same-ns session would reopen forge. ApiSessionClient recovers it from
-    // hub socket event `peer-capability` after session-scoped connect.
+    // GET omits sessionCapability by design (#1203). Resume loads create-time
+    // tag + capability from local HAPI_HOME store; the CLI socket may re-mint
+    // only when handshake presents that tag (sibling namespace-token holders cannot).
     const sessionInfo = await api.getSession(options.sessionId)
+    const peerCreds = loadPeerSessionCredentials(options.sessionId)
     const baseMetadata = buildSessionMetadata({
         flavor: options.flavor,
         startedBy,
@@ -347,7 +365,10 @@ export async function bootstrapExistingSession(options: {
     }
     const metadata = buildUpdatedMetadata(sessionInfo.metadata)
 
-    const session = api.sessionSyncClient(sessionInfo)
+    const session = api.sessionSyncClient(sessionInfo, {
+        sessionCapability: peerCreds?.sessionCapability,
+        sessionTag: peerCreds?.sessionTag,
+    })
     session.updateMetadata(buildUpdatedMetadata)
 
     exportHapiSessionEnv(sessionInfo.id)

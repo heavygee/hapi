@@ -298,12 +298,21 @@ function createHapiMcpServer(
     }, async (args: { sessionIdPrefix: string; message: string }) => {
         logger.debug('[hapiMCP] ping_peer:', args.sessionIdPrefix);
         try {
+            // Await capability so resume does not snapshot null and silently
+            // send unattributed (pass 2c M3). Fail closed if still missing.
+            const sessionCapability = await client.waitForPeerSessionCapability({ timeoutMs: 5_000 })
+            if (!sessionCapability) {
+                throw new PingPeerError(
+                    'auth_failed',
+                    'session capability not ready for attributed peer delivery; retry after hub peer-capability'
+                )
+            }
             const result = await pingPeer({
                 sessionIdPrefix: args.sessionIdPrefix,
                 message: args.message,
                 // Hub binds provenance to this session via capability-gated CLI route.
                 authenticatedSourceSessionId: client.sessionId,
-                sessionCapability: client.getPeerSessionCapability() ?? undefined,
+                sessionCapability,
             });
             return {
                 content: [

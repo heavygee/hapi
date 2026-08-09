@@ -340,7 +340,8 @@ export class ApiClient {
     ): ApiSessionClient {
         return new ApiSessionClient(this.token, session, {
             ...options,
-            sessionCapability: options?.sessionCapability ?? session.sessionCapability
+            sessionCapability: options?.sessionCapability ?? session.sessionCapability,
+            sessionTag: options?.sessionTag
         })
     }
 

@@ -750,20 +750,14 @@ describe('listSessions query params', () => {
         })
     })
 
-    it('falls back to unattributed when source id is set without capability', async () => {
+    it('fails closed when source id is set without capability (no silent unattributed)', async () => {
         const targetId = '05d9f0f2-9273-4137-933c-07459a1146a2'
         const sourceId = '6212dae5-8a60-4284-b7a5-c09aa3571ce4'
 
         const http = createHttpMock({
-            post: (url, body, config) => {
+            post: (url) => {
                 if (url.endsWith('/api/auth')) {
                     return { status: 200, data: { token: 'jwt' } }
-                }
-                if (url.endsWith(`/api/sessions/${targetId}/messages`)) {
-                    expect(body).toEqual({ text: 'handoff' })
-                    expect(config?.headers?.[HAPI_PEER_DELIVERY_HEADER])
-                        .toBe(HAPI_PEER_DELIVERY_HEADER_VALUE)
-                    return { status: 200, data: { ok: true } }
                 }
                 throw new Error(`unexpected POST ${url}`)
             },
@@ -796,13 +790,16 @@ describe('listSessions query params', () => {
             }
         })
 
-        await pingPeer({
+        await expect(pingPeer({
             sessionIdPrefix: '05d9f0f2',
             message: 'handoff',
             accessToken: 'tok',
             authenticatedSourceSessionId: sourceId,
             apiUrl: 'http://127.0.0.1:3006',
             http: http as never
+        })).rejects.toMatchObject({
+            name: 'PingPeerError',
+            code: 'auth_failed',
         })
     })
 })
