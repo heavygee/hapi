@@ -38,5 +38,6 @@ Also tighten Settings/FUE copy if needed: project pin ≠ global top; after this
 
 - Tip: `fd4dec890` on `fix/project-pin-above-in-progress`
 - Peer e2e: `e2e/peer/1431-project-pin-above-in-progress.spec.ts` (mirror)
-- Parent pinged: `6e70f97b` — dogfoodable; **no upstream PR until operator OK**
+- Parent pinged: `6e70f97b` — dogfoodable
+- **Upstream PR:** https://github.com/tiann/hapi/pull/1432 (opened; proof PNG attached)
 - Peer stack may still be up: `project-pin-above-in-progress` @ `:3103`
