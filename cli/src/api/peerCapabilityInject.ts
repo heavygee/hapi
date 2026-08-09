@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto'
-import { createServer, createConnection, type Server, type Socket } from 'node:net'
+import { createServer, createConnection, type Server } from 'node:net'
 import { mkdirSync, unlinkSync, chmodSync, existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { configuration } from '@/configuration'
 import { logger } from '@/ui/logger'
 import { isProcessDescendant } from './processDescendant'
 import { readUnixPeerCredentials, type PeerCredReader } from './peercred'
@@ -24,53 +24,78 @@ export type PeerCapabilityInjectServer = {
     close: () => void
 }
 
-export function startPeerCapabilityInjectServer(options?: {
+export async function startPeerCapabilityInjectServer(options?: {
     readPeerCred?: PeerCredReader
     socketPath?: string
-}): PeerCapabilityInjectServer {
+}): Promise<PeerCapabilityInjectServer | null> {
+    // peercred is Linux/macOS only; fail soft so resume stays unattributed (#1473).
+    if (process.platform !== 'linux' && process.platform !== 'darwin') {
+        return null
+    }
+
     const readPeerCred = options?.readPeerCred ?? readUnixPeerCredentials
     const socketPath = options?.socketPath ?? defaultInjectSocketPath()
-    mkdirSync(dirname(socketPath), { recursive: true, mode: 0o700 })
-    if (existsSync(socketPath)) {
-        try {
-            unlinkSync(socketPath)
-        } catch {
-            // replace
-        }
-    }
 
     let expectedChildPid: number | null = null
     let pendingCapability: string | null = null
     let deliverResolve: (() => void) | null = null
     let deliverReject: ((error: Error) => void) | null = null
     let deliverTimer: ReturnType<typeof setTimeout> | null = null
+    let server: Server | null = null
 
-    const server: Server = createServer((socket) => {
-        const cred = readPeerCred(socket)
-        const childPid = expectedChildPid
-        const capability = pendingCapability
-        if (
-            !cred
-            || childPid === null
-            || !capability
-            || !isProcessDescendant(cred.pid, childPid)
-        ) {
-            socket.end(`${JSON.stringify({ ok: false, code: 'auth_failed' })}\n`)
-            return
-        }
-        socket.end(`${JSON.stringify({ ok: true, sessionCapability: capability })}\n`)
-        if (deliverResolve) {
-            if (deliverTimer) {
-                clearTimeout(deliverTimer)
-                deliverTimer = null
+    try {
+        mkdirSync(dirname(socketPath), { recursive: true, mode: 0o700 })
+        if (existsSync(socketPath)) {
+            try {
+                unlinkSync(socketPath)
+            } catch {
+                // replace
             }
-            const resolve = deliverResolve
-            deliverResolve = null
-            deliverReject = null
-            resolve()
         }
-    })
-    server.listen(socketPath)
+
+        server = createServer((socket) => {
+            const cred = readPeerCred(socket)
+            const childPid = expectedChildPid
+            const capability = pendingCapability
+            if (
+                !cred
+                || childPid === null
+                || !capability
+                || !isProcessDescendant(cred.pid, childPid)
+            ) {
+                socket.end(`${JSON.stringify({ ok: false, code: 'auth_failed' })}\n`)
+                return
+            }
+            socket.end(`${JSON.stringify({ ok: true, sessionCapability: capability })}\n`)
+            if (deliverResolve) {
+                if (deliverTimer) {
+                    clearTimeout(deliverTimer)
+                    deliverTimer = null
+                }
+                const resolve = deliverResolve
+                deliverResolve = null
+                deliverReject = null
+                resolve()
+            }
+        })
+
+        await new Promise<void>((resolve, reject) => {
+            server!.once('error', reject)
+            server!.listen(socketPath, resolve)
+        })
+    } catch (error) {
+        logger.debug('[peer-cap-inject] listen failed; resume will be unattributed', error)
+        server?.close()
+        try {
+            unlinkSync(socketPath)
+        } catch {
+            // ignore
+        }
+        return null
+    }
+
+    const listening = server
+
     try {
         chmodSync(socketPath, 0o600)
     } catch {
@@ -98,7 +123,7 @@ export function startPeerCapabilityInjectServer(options?: {
                 clearTimeout(deliverTimer)
                 deliverTimer = null
             }
-            server.close()
+            listening.close()
             try {
                 unlinkSync(socketPath)
             } catch {
@@ -192,6 +217,6 @@ function tryReceiveOnce(
 
 function defaultInjectSocketPath(): string {
     const runtime = process.env.XDG_RUNTIME_DIR?.trim()
-        || join(configuration.happyHomeDir, 'run')
-    return join(runtime, 'hapi-peer-cap-inject', `${randomBytes(16).toString('hex')}.sock`)
+        || join(tmpdir(), `hapi-${process.getuid?.() ?? process.pid}`)
+    return join(runtime, 'pci', `${randomBytes(12).toString('hex')}.sock`)
 }

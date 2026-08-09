@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -9,6 +9,7 @@ import {
 
 describe('peerCapabilityInject (#1203 pass 2h)', () => {
     const temps: string[] = []
+    const originalPlatform = process.platform
 
     afterEach(() => {
         for (const dir of temps.splice(0)) {
@@ -18,6 +19,10 @@ describe('peerCapabilityInject (#1203 pass 2h)', () => {
                 // ignore
             }
         }
+        Object.defineProperty(process, 'platform', {
+            value: originalPlatform,
+            configurable: true,
+        })
     })
 
     function tempSock(): string {
@@ -28,12 +33,13 @@ describe('peerCapabilityInject (#1203 pass 2h)', () => {
 
     it('delivers capability only to the expected child pid', async () => {
         const socketPath = tempSock()
-        const server = startPeerCapabilityInjectServer({
+        const server = await startPeerCapabilityInjectServer({
             socketPath,
             readPeerCred: () => ({ pid: process.pid, uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 }),
         })
+        expect(server).not.toBeNull()
         try {
-            const deliver = server.deliverTo(process.pid, 'cap-for-child')
+            const deliver = server!.deliverTo(process.pid, 'cap-for-child')
             const capability = await receivePeerCapabilityFromRunner({
                 socketPath,
                 ownerPid: process.pid,
@@ -43,20 +49,21 @@ describe('peerCapabilityInject (#1203 pass 2h)', () => {
             await deliver
             expect(capability).toBe('cap-for-child')
         } finally {
-            server.close()
+            server!.close()
         }
     })
 
     it('rejects a sibling pid that is not the expected child', async () => {
         const socketPath = tempSock()
         const siblingPid = process.pid + 10_000_000
-        const server = startPeerCapabilityInjectServer({
+        const server = await startPeerCapabilityInjectServer({
             socketPath,
             readPeerCred: () => ({ pid: siblingPid, uid: 0, gid: 0 }),
         })
+        expect(server).not.toBeNull()
         try {
             let delivered = false
-            const deliver = server.deliverTo(process.pid, 'cap-secret').then(() => {
+            const deliver = server!.deliverTo(process.pid, 'cap-secret').then(() => {
                 delivered = true
             }).catch(() => {
                 // timeout / close expected when no authorized child connects
@@ -69,14 +76,33 @@ describe('peerCapabilityInject (#1203 pass 2h)', () => {
             })
             expect(capability).toBeUndefined()
             expect(delivered).toBe(false)
-            server.close()
+            server!.close()
             await deliver
         } finally {
             try {
-                server.close()
+                server!.close()
             } catch {
                 // ignore
             }
         }
+    })
+
+    it('returns null on unsupported platforms without throwing', async () => {
+        Object.defineProperty(process, 'platform', {
+            value: 'win32',
+            configurable: true,
+        })
+        const server = await startPeerCapabilityInjectServer({ socketPath: tempSock() })
+        expect(server).toBeNull()
+    })
+
+    it('returns null when listen fails without taking down the process', async () => {
+        const blocker = tempSock()
+        writeFileSync(blocker, 'not-a-directory')
+        const server = await startPeerCapabilityInjectServer({
+            // Parent path is a file, so mkdir/bind cannot create the socket.
+            socketPath: join(blocker, 'nested.sock'),
+        })
+        expect(server).toBeNull()
     })
 })

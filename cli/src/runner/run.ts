@@ -654,10 +654,12 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         const resumeSessionId = (options.existingSessionId || options.sessionId)?.trim()
         let peerCapInject: PeerCapabilityInjectServer | null = null
         if (resumePeerMintNonce && resumeSessionId) {
-          peerCapInject = startPeerCapabilityInjectServer()
-          extraEnv = {
-            ...extraEnv,
-            [HAPI_PEER_CAP_INJECT_ENV]: peerCapInject.path,
+          peerCapInject = await startPeerCapabilityInjectServer()
+          if (peerCapInject) {
+            extraEnv = {
+              ...extraEnv,
+              [HAPI_PEER_CAP_INJECT_ENV]: peerCapInject.path,
+            }
           }
         }
 
@@ -1185,6 +1187,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       machineId = machine.id;
       const rotated = await authAndSetupMachineIfNeeded();
       machineTag = rotated.machineTag;
+      fileState.startedWithMachineId = machineId;
+      writeRunnerState(fileState);
       logger.debug(`[RUNNER RUN] Re-enrolled legacy machine as ${machineId}`);
     }
     logger.debug(`[RUNNER RUN] Machine registered: ${machine.id}`);
