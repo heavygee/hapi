@@ -43,7 +43,7 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 24
+const SCHEMA_VERSION: number = 25
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -307,10 +307,11 @@ export class Store {
             19: () => this.migrateFromV19ToV20(),
             20: () => this.migrateFromV20ToV21(),
             // Upstream #1115 dual-pin at v21→v22; #1467 A2A events at v22→v23;
-            // #1404 session_jobs at v23→v24.
+            // #1404 session_jobs at v23→v24; run_id fence at v24→v25.
             21: () => this.migrateFromV21ToV22(),
             22: () => this.migrateFromV22ToV23(),
             23: () => this.migrateFromV23ToV24(),
+            24: () => this.migrateFromV24ToV25(),
         })
 
         if (currentVersion === 0) {
@@ -484,6 +485,7 @@ export class Store {
                 remaining REAL,
                 unit TEXT,
                 detail TEXT,
+                run_id TEXT,
                 heartbeat_at INTEGER NOT NULL,
                 started_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
@@ -1023,6 +1025,14 @@ export class Store {
             CREATE INDEX IF NOT EXISTS idx_session_jobs_session_status_updated
                 ON session_jobs(session_id, status, updated_at DESC);
         `)
+    }
+
+    private migrateFromV24ToV25(): void {
+        // Supervisor run generation — CAS fence for key reuse (#1424).
+        const cols = this.db.prepare('PRAGMA table_info(session_jobs)').all() as Array<{ name: string }>
+        if (!cols.some((c) => c.name === 'run_id')) {
+            this.db.exec('ALTER TABLE session_jobs ADD COLUMN run_id TEXT')
+        }
     }
 
     private getSessionColumnNames(): Set<string> {
