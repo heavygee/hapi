@@ -605,6 +605,10 @@ export function sessionMatchesQuery(session: SessionSummary, query: string, mach
     return searchable.includes(query)
 }
 
+export function shouldShowPinnedDivider(sessions: SessionSummary[], index: number): boolean {
+    if (index <= 0 || index >= sessions.length) return false
+    return Boolean(sessions[index - 1]?.pinned) && !sessions[index]?.pinned
+}
 
 export function getVisibleSessionPreview(
     sessions: SessionSummary[],
