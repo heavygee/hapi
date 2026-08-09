@@ -145,6 +145,7 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         transient: boolean;
         bridgedForEventId?: string;
         retriedAndFailed?: boolean;
+        supersededByUserTurn?: boolean;
     } | null = null;
 
     constructor(session: CursorSession) {
@@ -635,6 +636,9 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                     this.pendingBridgeEventId = null;
                     this.pendingBridgeSource = null;
                 }
+            } else if (this.lastRecordedModelError && !this.lastRecordedModelError.supersededByUserTurn) {
+                // A newer normal turn owns the conversation — stale Bridge must not replay the failed prompt.
+                this.markModelErrorSupersededByUserTurn();
             }
 
             const requestedModel = batch.mode.model === null
@@ -1146,7 +1150,8 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             bridgedForEventId: typeof record.bridgedForEventId === 'string'
                 ? record.bridgedForEventId
                 : undefined,
-            retriedAndFailed: record.retriedAndFailed === true
+            retriedAndFailed: record.retriedAndFailed === true,
+            supersededByUserTurn: record.supersededByUserTurn === true
         };
 
         if (snapshot.eventId !== undefined) {
@@ -1158,11 +1163,12 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                 return { ok: false, reason: 'model_error_changed' };
             }
             // Merge hub snapshot into local gate state — never clobber
-            // bridgedForEventId / retriedAndFailed with undefined/false from a
-            // stale hub payload (would allow a second enqueue for same event).
+            // bridgedForEventId / retriedAndFailed / supersededByUserTurn with
+            // undefined/false from a stale hub payload.
             const gates = mergeBridgeGateFields(this.lastRecordedModelError, {
                 bridgedForEventId: snapshot.bridgedForEventId,
-                retriedAndFailed: snapshot.retriedAndFailed
+                retriedAndFailed: snapshot.retriedAndFailed,
+                supersededByUserTurn: snapshot.supersededByUserTurn
             });
             this.lastRecordedModelError = {
                 eventId: snapshot.eventId,
@@ -1176,7 +1182,8 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                     ?? '',
                 transient: snapshot.transient,
                 bridgedForEventId: gates.bridgedForEventId,
-                retriedAndFailed: gates.retriedAndFailed
+                retriedAndFailed: gates.retriedAndFailed,
+                supersededByUserTurn: gates.supersededByUserTurn
             };
         }
 
@@ -1195,6 +1202,10 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         // Auto-bridge may still fire while settling the failed turn itself.
         if (source === 'manual' && this.promptInFlight) {
             return { ok: false, reason: 'prompt_in_flight' };
+        }
+
+        if (metadataError.supersededByUserTurn) {
+            return { ok: false, reason: 'superseded_by_newer_turn' };
         }
 
         // Fail closed while a bridge for this eventId is pending or active.
@@ -1220,7 +1231,8 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             transient: metadataError.transient,
             eventId: metadataError.eventId,
             bridgedForEventId: metadataError.bridgedForEventId,
-            retriedAndFailed: metadataError.retriedAndFailed
+            retriedAndFailed: metadataError.retriedAndFailed,
+            supersededByUserTurn: metadataError.supersededByUserTurn
         })) {
             return { ok: false, reason: 'not_bridgeable' };
         }
@@ -1299,6 +1311,31 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             kind: current.kind,
             auto: source === 'auto',
             eventId
+        });
+    }
+
+    /** Durable invalidation after a newer normal (non-bridge) turn starts. */
+    private markModelErrorSupersededByUserTurn(): void {
+        const current = this.lastRecordedModelError;
+        if (!current || current.supersededByUserTurn) {
+            return;
+        }
+        this.lastRecordedModelError = {
+            ...current,
+            supersededByUserTurn: true
+        };
+        this.session.client.updateMetadata((metadata) => {
+            const err = metadata.lastModelError;
+            if (!err || err.eventId !== current.eventId) {
+                return metadata;
+            }
+            return {
+                ...metadata,
+                lastModelError: {
+                    ...err,
+                    supersededByUserTurn: true
+                }
+            };
         });
     }
 
