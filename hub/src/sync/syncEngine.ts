@@ -4127,10 +4127,6 @@ export class SyncEngine {
         return result
     }
 
-    async listCodexModelsForSession(sessionId: string): Promise<RpcListCodexModelsResponse> {
-        return await this.rpcGateway.listCodexModelsForSession(sessionId)
-    }
-
     private async writePtyResumeAttempt(
         sessionId: string,
         namespace: string,

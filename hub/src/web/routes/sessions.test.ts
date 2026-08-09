@@ -135,7 +135,6 @@ function createApp(session: Session, opts?: {
             ? { ok: true, sessionId: session.id, session }
             : { ok: false, reason: 'not-found' },
         applySessionConfig,
-        listCodexModelsForSession,
         listCursorModelsForSession,
         listCodexModelsForSession: opts?.listCodexModelsForSession ?? (async () => ({
             success: true,
