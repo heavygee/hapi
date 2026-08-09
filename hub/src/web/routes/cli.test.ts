@@ -232,7 +232,8 @@ describe('cli lazy session creation', () => {
             'machine-1',
             { host: 'localhost' },
             null,
-            'default'
+            'default',
+            undefined
         )
         expect(getOrCreateSession).toHaveBeenCalledWith(
             'lazy-tag',
