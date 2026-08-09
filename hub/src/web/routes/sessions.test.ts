@@ -165,7 +165,8 @@ function createApp(session: Session, opts?: {
         rewindConversation: opts?.rewindConversation ?? (async () => ({ type: 'success' })),
         suggestSessionTitle: opts?.suggestSessionTitle ?? (async () => 'Generated title'),
         updateSessionSummary: opts?.updateSessionSummary ?? (async () => {}),
-        getPrimaryAttachedJobsBySessionIds: opts?.getPrimaryAttachedJobsBySessionIds ?? (() => new Map())
+        getPrimaryAttachedJobsBySessionIds: opts?.getPrimaryAttachedJobsBySessionIds ?? (() => new Map()),
+        allocateAttachedJobVersion: opts?.allocateAttachedJobVersion ?? (() => Date.now())
     } as Partial<SyncEngine>
 
     const app = new Hono<WebAppEnv>()
@@ -1549,6 +1550,7 @@ describe('sessions routes', () => {
             },
             getNextScheduledAtBySessionIds: (_ids: string[]) => new Map<string, number>(),
             getPrimaryAttachedJobsBySessionIds: () => new Map(),
+            allocateAttachedJobVersion: () => Date.now(),
             resolveSessionAccess: () => ({ ok: false, reason: 'not-found' as const })
         } as unknown as Partial<SyncEngine>
 
@@ -1582,6 +1584,7 @@ describe('sessions routes', () => {
             getFutureScheduledMessageCounts: (ids: string[]) => new Map(ids.map((id) => [id, 0])),
             getNextScheduledAtBySessionIds: (_ids: string[]) => new Map<string, number>(),
             getPrimaryAttachedJobsBySessionIds: () => new Map(),
+            allocateAttachedJobVersion: () => Date.now(),
             resolveSessionAccess: () => ({ ok: false, reason: 'not-found' as const })
         } as unknown as Partial<SyncEngine>
 
