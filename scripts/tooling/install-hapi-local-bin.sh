@@ -15,10 +15,15 @@ for s in "$TOOLING"/hapi-*.sh "$TOOLING"/hapi-worktree-create.sh "$TOOLING"/hapi
 done
 
 # Soup-aware `hapi` must win over ~/.bun/bin/hapi (stale npm global, often
-# missing ping-peer). ~/.local/bin is earlier on PATH on this host.
+# missing ping-peer / job). ~/.local/bin is earlier on PATH on this host.
 if [[ -f "$TOOLING/hapi-from-active.sh" ]]; then
   ln -sf "$TOOLING/hapi-from-active.sh" "$BIN/hapi"
   ln -sf "$TOOLING/hapi-from-active.sh" "$BIN/hapi-from-active"
+fi
+# Also install the hygiene entrypoint (does not auto-run — call explicitly
+# or from operator bootstrap). Removes bun/npm global shadows.
+if [[ -f "$TOOLING/hapi-cli-path-hygiene.sh" ]]; then
+  ln -sf "$TOOLING/hapi-cli-path-hygiene.sh" "$BIN/hapi-cli-path-hygiene"
 fi
 
 # Optional cross-repo helper when server-setup is present.
