@@ -1389,16 +1389,6 @@ export function SessionList(props: {
         ),
         [unpinnedMachineSessions, pinInProgressMode]
     )
-    // Durable project pins beat ephemeral In progress floaters: pin-containing
-    // groups render above the running section; unpinned groups stay below.
-    const pinnedProjectGroups = useMemo(
-        () => groups.filter((group) => group.hasPinnedSession),
-        [groups]
-    )
-    const otherProjectGroups = useMemo(
-        () => groups.filter((group) => !group.hasPinnedSession),
-        [groups]
-    )
     const [collapseOverrides, setCollapseOverrides] = useState<Map<string, boolean>>(
         () => new Map()
     )
@@ -1924,8 +1914,6 @@ export function SessionList(props: {
                     </div>
                 ) : null}
 
-                {pinnedProjectGroups.map(renderDirectoryGroup)}
-
                 {runningSessionTotal > 0 ? (
                     <div key="running-section">
                         <div
@@ -1989,7 +1977,7 @@ export function SessionList(props: {
                         </div>
                     </div>
                 ) : null}
-                {otherProjectGroups.map(renderDirectoryGroup)}
+                {groups.map(renderDirectoryGroup)}
             </div>
             </div>
             </div>
