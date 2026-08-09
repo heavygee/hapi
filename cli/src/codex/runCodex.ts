@@ -206,9 +206,10 @@ export async function runCodex(opts: {
                 syncCurrentConfigFromSession();
                 let text = message.content.text;
                 let isolatedCommandText: string | null = null;
+                const isPeerDelivery = message.meta?.sentFrom === 'peer'
                 const commands = await listSlashCommands('codex', workingDirectory).catch(() => []);
                 // Peer delivery must stay literal text — never receiver control syntax (#1473).
-                const slash = message.meta?.sentFrom === 'peer'
+                const slash = isPeerDelivery
                     ? ({ kind: 'passthrough' } as const)
                     : resolveCodexSlashCommand(text, {
                         commands,
@@ -257,7 +258,7 @@ export async function runCodex(opts: {
                         return;
                     }
                     text = slash.text;
-                } else {
+                } else if (!isPeerDelivery) {
                     const specialCommand = parseCodexSpecialCommand(message.content.text);
                     if (specialCommand.type) {
                         logger.debug(`[Codex] Detected special command: ${specialCommand.type}`);

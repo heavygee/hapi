@@ -5,7 +5,6 @@ const {
     getSessionMock,
     getOrCreateSessionMock,
     getOrCreateMachineMock,
-    requestSessionRpcCapabilityMock,
     sessionSyncClientMock,
     notifyRunnerSessionStartedMock,
     readSettingsMock
@@ -13,7 +12,6 @@ const {
     getSessionMock: vi.fn(),
     getOrCreateSessionMock: vi.fn(),
     getOrCreateMachineMock: vi.fn(),
-    requestSessionRpcCapabilityMock: vi.fn(async () => 'cap-from-machine-proof'),
     sessionSyncClientMock: vi.fn(),
     notifyRunnerSessionStartedMock: vi.fn(async () => ({})),
     readSettingsMock: vi.fn()
@@ -25,7 +23,6 @@ vi.mock('@/api/api', () => ({
             getSession: getSessionMock,
             getOrCreateSession: getOrCreateSessionMock,
             getOrCreateMachine: getOrCreateMachineMock,
-            requestSessionRpcCapability: requestSessionRpcCapabilityMock,
             sessionSyncClient: sessionSyncClientMock
         })
     }
@@ -92,13 +89,20 @@ function createSession(): Session {
     }
 }
 
+function mockInjectReadySessionClient() {
+    const sessionClient = {
+        updateMetadata: vi.fn(),
+        waitForPeerSessionCapability: vi.fn(async () => 'injected-cap'),
+    }
+    sessionSyncClientMock.mockReturnValue(sessionClient)
+    return sessionClient
+}
+
 describe('bootstrapExistingSession', () => {
     beforeEach(() => {
         getSessionMock.mockReset()
         getOrCreateSessionMock.mockReset()
         getOrCreateMachineMock.mockReset()
-        requestSessionRpcCapabilityMock.mockReset()
-        requestSessionRpcCapabilityMock.mockResolvedValue('cap-from-machine-proof')
         sessionSyncClientMock.mockReset()
         notifyRunnerSessionStartedMock.mockClear()
         readSettingsMock.mockReset()
@@ -106,15 +110,29 @@ describe('bootstrapExistingSession', () => {
         delete process.env.HAPI_PEER_CAP_INJECT
     })
 
-    it('loads an existing HAPI session and reports it to the runner', async () => {
+    it('refuses terminal resume without runner one-shot inject env (#1473)', async () => {
         const session = createSession()
-        const sessionClient = {
-            updateMetadata: vi.fn()
-        }
         getSessionMock.mockResolvedValue(session)
         getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
-        sessionSyncClientMock.mockReturnValue(sessionClient)
         readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
+
+        await expect(bootstrapExistingSession({
+            sessionId: 'hapi-session-1',
+            flavor: 'codex',
+            workingDirectory: '/tmp/project'
+        })).rejects.toThrow(/runner-issued one-shot capability/)
+
+        expect(sessionSyncClientMock).not.toHaveBeenCalled()
+        expect(notifyRunnerSessionStartedMock).not.toHaveBeenCalled()
+    })
+
+    it('awaits runner inject before exporting session env (#1473)', async () => {
+        const session = createSession()
+        const sessionClient = mockInjectReadySessionClient()
+        getSessionMock.mockResolvedValue(session)
+        getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
+        process.env.HAPI_PEER_CAP_INJECT = 'unix:/tmp/peer-cap.sock'
 
         const result = await bootstrapExistingSession({
             sessionId: 'hapi-session-1',
@@ -125,14 +143,9 @@ describe('bootstrapExistingSession', () => {
         expect(result.sessionInfo.id).toBe('hapi-session-1')
         expect(process.env[HAPI_SESSION_ID_ENV]).toBe('hapi-session-1')
         expect(result.workingDirectory).toBe('/tmp/project')
-        expect(requestSessionRpcCapabilityMock).toHaveBeenCalledWith({
-            sessionId: 'hapi-session-1',
-            machineId: 'machine-1',
-            machineTag: 'machine-tag-1',
-        })
-        expect(sessionSyncClientMock).toHaveBeenCalledWith(session, {
-            sessionCapability: 'cap-from-machine-proof',
-        })
+        expect(sessionSyncClientMock).toHaveBeenCalledWith(session)
+        expect(sessionSyncClientMock.mock.calls[0]?.[1]).toBeUndefined()
+        expect(sessionClient.waitForPeerSessionCapability).toHaveBeenCalledWith({ timeoutMs: 16_000 })
         expect(sessionClient.updateMetadata).toHaveBeenCalledOnce()
         expect(notifyRunnerSessionStartedMock).toHaveBeenCalledWith(
             'hapi-session-1',
@@ -146,27 +159,25 @@ describe('bootstrapExistingSession', () => {
         )
     })
 
-    it('does not pass sessionTag on resume; uses machine-tag capability proof (#1473)', async () => {
+    it('fails closed when runner inject times out (#1473)', async () => {
         const session = createSession()
-        const sessionClient = {
-            updateMetadata: vi.fn()
-        }
         getSessionMock.mockResolvedValue(session)
         getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
-        sessionSyncClientMock.mockReturnValue(sessionClient)
         readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
+        process.env.HAPI_PEER_CAP_INJECT = 'unix:/tmp/peer-cap.sock'
+        sessionSyncClientMock.mockReturnValue({
+            updateMetadata: vi.fn(),
+            waitForPeerSessionCapability: vi.fn(async () => null),
+        })
 
-        await bootstrapExistingSession({
+        await expect(bootstrapExistingSession({
             sessionId: 'hapi-session-1',
             flavor: 'codex',
-            workingDirectory: '/tmp/project',
-            startedBy: 'terminal',
-        })
+            workingDirectory: '/tmp/project'
+        })).rejects.toThrow(/peer capability inject failed/)
 
-        expect(sessionSyncClientMock).toHaveBeenCalledWith(session, {
-            sessionCapability: 'cap-from-machine-proof',
-        })
-        expect(sessionSyncClientMock.mock.calls[0]?.[1]).not.toHaveProperty('sessionTag')
+        expect(process.env[HAPI_SESSION_ID_ENV]).toBeUndefined()
+        expect(notifyRunnerSessionStartedMock).not.toHaveBeenCalled()
     })
 
     it('preserves existing native resume metadata when reactivating a session', async () => {
@@ -207,13 +218,11 @@ describe('bootstrapExistingSession', () => {
                 conversationHistory: { forkCurrent: true }
             }
         }
-        const sessionClient = {
-            updateMetadata: vi.fn()
-        }
+        const sessionClient = mockInjectReadySessionClient()
         getSessionMock.mockResolvedValue(session)
         getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
-        sessionSyncClientMock.mockReturnValue(sessionClient)
         readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
+        process.env.HAPI_PEER_CAP_INJECT = 'unix:/tmp/peer-cap.sock'
 
         const result = await bootstrapExistingSession({
             sessionId: 'hapi-session-1',

@@ -368,13 +368,6 @@ export class SyncEngine {
         return this.machineCache.getMachineByNamespace(machineId, namespace)
     }
 
-    /** Create-time machine secret from store (not on the public Machine DTO). */
-    getMachineTagByNamespace(machineId: string, namespace: string): string | null {
-        const stored = this.store.machines.getMachineByNamespace(machineId, namespace)
-        const tag = typeof stored?.tag === 'string' ? stored.tag.trim() : ''
-        return tag || null
-    }
-
     getOnlineMachines(): Machine[] {
         return this.machineCache.getOnlineMachines()
     }
