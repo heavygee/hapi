@@ -736,3 +736,8 @@ layers:
   # Was: revert #1432 folder lift. Tip 3b838ed86. Soup tip-forward absorbed + Meta
   # re-landed pinned-first intra-group sort (d6f634f30) the merge had dropped.
 
+  # tiann/hapi#1459 — mobile Control pad Ctrl+X / Ctrl+S (Jed Emacs save).
+  # Web-only. Peer-stack PNG: 1459-ctrl-xs-control-pad.png. Keeps Ctrl+L.
+  # Worktree: ~/coding/hapi/worktrees/terminal-ctrl-xs-jed @ fix/terminal-ctrl-xs-jed
+  # Tip: fd8af28ce (origin/fix/terminal-ctrl-xs-jed)
+  - branch: fix/terminal-ctrl-xs-jed
