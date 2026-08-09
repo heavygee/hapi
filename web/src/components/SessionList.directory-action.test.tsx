@@ -496,7 +496,7 @@ describe('SessionList collapse behavior', () => {
         expect(screen.getByRole('button', { name: /Pinned running task/ })).toBeInTheDocument()
     })
 
-    it('renders project-pin groups above In progress when pin-in-progress is on', () => {
+    it('keeps In progress above project-pin groups; project pin stays first inside its group', () => {
         localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
         const sessions = [
             makeSession({
@@ -508,8 +508,13 @@ describe('SessionList collapse behavior', () => {
             makeSession({
                 id: 'session-project-pin',
                 pinned: true,
-                updatedAt: 200,
+                updatedAt: 100,
                 metadata: { path: '/work/pinned-project', name: 'Project pin', flavor: 'codex' },
+            }),
+            makeSession({
+                id: 'session-project-idle',
+                updatedAt: 200,
+                metadata: { path: '/work/pinned-project', name: 'Project idle', flavor: 'codex' },
             }),
             makeSession({
                 id: 'session-floater',
@@ -527,14 +532,19 @@ describe('SessionList collapse behavior', () => {
         render(renderSessionList(sessions, null))
 
         const globalSection = screen.getByTitle('Pinned sessions')
-        const projectPinGroup = screen.getByTitle('/work/pinned-project')
         const inProgress = screen.getByTitle('In progress')
+        const projectPinGroup = screen.getByTitle('/work/pinned-project')
         const otherGroup = screen.getByTitle('/work/other')
+        const projectPinRow = screen.getByRole('button', { name: /Project pin/ })
+        const projectIdleRow = screen.getByRole('button', { name: /Project idle/ })
 
-        expect(globalSection).toAppearBefore(projectPinGroup)
-        expect(projectPinGroup).toAppearBefore(inProgress)
-        expect(inProgress).toAppearBefore(otherGroup)
-        expect(screen.getByRole('button', { name: /Project pin/ })).toBeInTheDocument()
+        // Section order: global pin band → In progress → directory groups
+        // (project-pin groups may sort first among groups, but never above In progress).
+        expect(globalSection).toAppearBefore(inProgress)
+        expect(inProgress).toAppearBefore(projectPinGroup)
+        expect(projectPinGroup).toAppearBefore(otherGroup)
+        // Intra-group: project pin stays first inside its folder.
+        expect(projectPinRow).toAppearBefore(projectIdleRow)
         expect(screen.getByRole('button', { name: /Unpinned floater/ })).toBeInTheDocument()
     })
 
