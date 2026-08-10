@@ -768,3 +768,10 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/a2a-p05-peer-provenance @ feat/a2a-p05-peer-provenance
   # Tip: 905c7e5f8 (origin/feat/a2a-p05-peer-provenance) — cold proof rebind + unverified peer chip UX
   - branch: feat/a2a-p05-peer-provenance
+
+  # #1473 estate upload blindness — peer-cap inject early-connect hold +
+  # webhook default 25s + redeem settings-token fallback.
+  # Soup tip on feat/a2a-p05-peer-provenance (inject lives in that stack).
+  # Worktree: ~/coding/hapi/worktrees/peer-cap-inject-early-connect
+  # Tip: 4ff262ba6 — early-connect not_armed hold; deliverTo 20s; webhook 25s
+  - branch: fix/peer-cap-inject-early-connect
