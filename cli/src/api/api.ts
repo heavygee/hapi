@@ -271,12 +271,38 @@ export class ApiClient {
             if (!isLegacyMachineReenrollError(error) || opts.allowLegacyReenroll === false) {
                 throw error
             }
+            const fromMachineId = opts.machineId
             const rotated = await rotateMachineIdForLegacyReenroll(opts.machineId)
-            return await this.postMachine({
+            const machine = await this.postMachine({
                 ...opts,
                 machineId: rotated.machineId,
                 machineTag: rotated.machineTag,
             })
+            // Tagged cold path should rebind in place (no rotate). If we still
+            // rotated (untagged legacy / tag conflict), pull sessions onto the
+            // new id without the dead machine's proof (#1473 merge gate).
+            if (
+                opts.runnerProof
+                && rotated.machineTag
+                && machine.id !== fromMachineId
+            ) {
+                try {
+                    await this.migrateSessionsAfterReenroll({
+                        fromMachineId,
+                        toMachineId: machine.id,
+                        machineTag: rotated.machineTag,
+                        runnerProof: opts.runnerProof,
+                    })
+                } catch (migrateError) {
+                    const message = migrateError instanceof Error
+                        ? migrateError.message
+                        : String(migrateError)
+                    throw new Error(
+                        `Re-enrolled as ${machine.id} but session migrate failed: ${message}`
+                    )
+                }
+            }
+            return machine
         }
     }
 
@@ -465,7 +491,6 @@ export class ApiClient {
         toMachineId: string
         machineTag: string
         runnerProof: string
-        reenrollGrant: string
     }): Promise<number> {
         const response = await axios.post(
             `${configuration.apiUrl}/cli/machines/${encodeURIComponent(opts.toMachineId)}/migrate-sessions`,
@@ -473,7 +498,6 @@ export class ApiClient {
                 fromMachineId: opts.fromMachineId,
                 machineTag: opts.machineTag,
                 runnerProof: opts.runnerProof,
-                reenrollGrant: opts.reenrollGrant,
             },
             {
                 headers: this.authHeaders(),
