@@ -330,6 +330,8 @@ For running the hub and runner as persistent background services (pm2, launchd, 
 
 You can run **one hub** and **runners on many machines** (each machine installs its own CLI). When you upgrade the hub, connected runners that are missing required capabilities are offered a **fleet upgrade**: the hub detects whether it is a published install (`npm`) or a source/soup tree (`hub-artifact`), then asks each skewed runner to install the matching CLI and restart. The web UI shows a dismissible **Runner out of date** banner with per-host **Upgrade**. Set `HAPI_UPGRADE_CHANNEL=off` to disable. Soft-fail reopen remains the safety net while upgrades are in flight.
 
+**First rollout caveat:** a machine that looks online can still have an empty live RPC registry after a hub restart. Upgrade/spawn then fail with `RPC handler not registered` until that runner reconnects cleanly (or the current CLI re-registers on keepalive). See [Deployment → Fleet upgrade after a hub update](./deployment.md#fleet-upgrade-after-a-hub-update) for the checklist.
+
 ## Security notes
 
 - Keep tokens secret and rotate if needed

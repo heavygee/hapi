@@ -6,6 +6,13 @@ import { TransientArtifactBuildError } from '../upgrade/cliArtifact'
 import { SyncEngine } from './syncEngine'
 import type { HubUpgradeOffer } from '@hapi/protocol/upgradeChannel'
 
+function registerLiveSelfUpgrade(registry: RpcRegistry, machineId: string): void {
+    registry.register(
+        { id: `sock-${machineId}` } as never,
+        `${machineId}:${MACHINE_CAPABILITIES.RunnerSelfUpgrade}`,
+    )
+}
+
 describe('SyncEngine fleet upgrade', () => {
     it('upgradeMachineRunner sends runner-self-upgrade RPC for npm channel', async () => {
         const offer: HubUpgradeOffer = {
@@ -15,10 +22,11 @@ describe('SyncEngine fleet upgrade', () => {
             npmPackage: '@twsxtd/hapi',
         }
         const store = new Store(':memory:')
+        const registry = new RpcRegistry()
         const engine = new SyncEngine(
             store,
             {} as never,
-            new RpcRegistry(),
+            registry,
             { broadcast() {} } as never,
             { getUpgradeOffer: () => offer },
         )
@@ -42,6 +50,7 @@ describe('SyncEngine fleet upgrade', () => {
                 null,
                 'default',
             )
+            registerLiveSelfUpgrade(registry, 'stale')
             engine.handleMachineAlive({ machineId: 'stale', time: Date.now() })
 
             const result = await engine.upgradeMachineRunner('stale', 'default')
@@ -65,10 +74,11 @@ describe('SyncEngine fleet upgrade', () => {
             targetGeneration: 'gen-1',
         }
         const store = new Store(':memory:')
+        const registry = new RpcRegistry()
         const engine = new SyncEngine(
             store,
             {} as never,
-            new RpcRegistry(),
+            registry,
             { broadcast() {} } as never,
             {
                 getUpgradeOffer: () => offer,
@@ -107,6 +117,7 @@ describe('SyncEngine fleet upgrade', () => {
                 null,
                 'default',
             )
+            registerLiveSelfUpgrade(registry, 'stale')
             engine.handleMachineAlive({ machineId: 'stale', time: Date.now() })
 
             const first = engine.upgradeMachineRunner('stale', 'default')
@@ -160,11 +171,8 @@ describe('SyncEngine fleet upgrade', () => {
                 { status: 'running', pid: 1, startedAt: Date.now() },
                 'default',
             )
+            registerLiveSelfUpgrade(registry, 'cold')
             engine.handleMachineAlive({ machineId: 'cold', time: Date.now() })
-            registry.register(
-                { id: 'sock-cold' } as never,
-                `cold:${MACHINE_CAPABILITIES.RunnerSelfUpgrade}`,
-            )
 
             // Force the getMachineByNamespace miss → refreshMachine fallback path.
             // Persist active so the cold reload does not look offline (alive only
@@ -187,10 +195,11 @@ describe('SyncEngine fleet upgrade', () => {
 
     it('refuses upgrade when channel is off', async () => {
         const store = new Store(':memory:')
+        const registry = new RpcRegistry()
         const engine = new SyncEngine(
             store,
             {} as never,
-            new RpcRegistry(),
+            registry,
             { broadcast() {} } as never,
             {
                 getUpgradeOffer: () => ({
@@ -208,6 +217,7 @@ describe('SyncEngine fleet upgrade', () => {
                 null,
                 'default',
             )
+            registerLiveSelfUpgrade(registry, 'stale')
             engine.handleMachineAlive({ machineId: 'stale', time: Date.now() })
             const result = await engine.upgradeMachineRunner('stale', 'default')
             expect(result).toEqual({
@@ -228,10 +238,11 @@ describe('SyncEngine fleet upgrade', () => {
         }
         const store = new Store(':memory:')
         const prepareArtifactOffer = mock(async () => offer)
+        const registry = new RpcRegistry()
         const engine = new SyncEngine(
             store,
             {} as never,
-            new RpcRegistry(),
+            registry,
             { broadcast() {} } as never,
             { getUpgradeOffer: () => offer, prepareArtifactOffer },
         )
@@ -248,6 +259,7 @@ describe('SyncEngine fleet upgrade', () => {
                 null,
                 'default',
             )
+            registerLiveSelfUpgrade(registry, 'no-arch')
             engine.handleMachineAlive({ machineId: 'no-arch', time: Date.now() })
             const result = await engine.upgradeMachineRunner('no-arch', 'default')
             expect(result).toEqual({
@@ -285,10 +297,11 @@ describe('SyncEngine fleet upgrade', () => {
             targetGeneration: 'post-build-fingerprint',
             artifact: prepared.artifact,
         }))
+        const registry = new RpcRegistry()
         const engine = new SyncEngine(
             store,
             {} as never,
-            new RpcRegistry(),
+            registry,
             { broadcast() {} } as never,
             {
                 getUpgradeOffer: () => ({ ...baseOffer, targetGeneration: 'pre-build-fingerprint' }),
@@ -316,6 +329,7 @@ describe('SyncEngine fleet upgrade', () => {
                 null,
                 'default',
             )
+            registerLiveSelfUpgrade(registry, 'mac')
             engine.handleMachineAlive({ machineId: 'mac', time: Date.now() })
             const result = await engine.upgradeMachineRunner('mac', 'default')
             expect(result.type).toBe('success')
@@ -337,10 +351,11 @@ describe('SyncEngine fleet upgrade', () => {
             npmPackage: '@twsxtd/hapi',
         }
         const store = new Store(':memory:')
+        const registry = new RpcRegistry()
         const engine = new SyncEngine(
             store,
             {} as never,
-            new RpcRegistry(),
+            registry,
             { broadcast() {} } as never,
             { getUpgradeOffer: () => offer },
         )
@@ -373,6 +388,58 @@ describe('SyncEngine fleet upgrade', () => {
         }
     })
 
+
+    it('refuses upgrade when self-upgrade is advertised but not live-registered', async () => {
+        const offer: HubUpgradeOffer = {
+            channel: 'npm',
+            targetVersion: '0.24.0',
+            targetCapabilities: ['cursor-chat-store-status'],
+            npmPackage: '@twsxtd/hapi',
+        }
+        const store = new Store(':memory:')
+        const registry = new RpcRegistry()
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            registry,
+            { broadcast() {} } as never,
+            { getUpgradeOffer: () => offer },
+        )
+
+        try {
+            const runnerSelfUpgrade = mock(async () => ({
+                status: 'started',
+                message: 'ok',
+                channel: 'npm',
+            }))
+            ;(engine as any).rpcGateway.runnerSelfUpgrade = runnerSelfUpgrade
+
+            engine.getOrCreateMachine(
+                'ghost-rpc',
+                {
+                    host: 'Teemo',
+                    platform: 'win32',
+                    happyCliVersion: '0.27.2',
+                    capabilities: ['runner-self-upgrade', 'stop-runner'],
+                },
+                null,
+                'default',
+            )
+            engine.handleMachineAlive({ machineId: 'ghost-rpc', time: Date.now() })
+
+            const result = await engine.upgradeMachineRunner('ghost-rpc', 'default')
+            expect(result.type).toBe('error')
+            if (result.type === 'error') {
+                expect(result.code).toBe('upgrade_unavailable')
+                expect(result.message).toMatch(/not registered on the live socket/i)
+            }
+            expect(runnerSelfUpgrade).not.toHaveBeenCalled()
+        } finally {
+            engine.stop()
+        }
+    })
+
+
     it('auto fleet upgrade fires on pure semver drift (set and forget)', async () => {
         const offer: HubUpgradeOffer = {
             channel: 'npm',
@@ -381,10 +448,11 @@ describe('SyncEngine fleet upgrade', () => {
             npmPackage: '@twsxtd/hapi',
         }
         const store = new Store(':memory:')
+        const registry = new RpcRegistry()
         const engine = new SyncEngine(
             store,
             {} as never,
-            new RpcRegistry(),
+            registry,
             { broadcast() {} } as never,
             { getUpgradeOffer: () => offer, getFleetUpgradePolicy: () => 'auto' },
         )
@@ -409,6 +477,7 @@ describe('SyncEngine fleet upgrade', () => {
                 null,
                 'default',
             )
+            registerLiveSelfUpgrade(registry, 'behind')
             engine.handleMachineAlive({ machineId: 'behind', time: Date.now() })
             await Promise.resolve()
             await new Promise((resolve) => setTimeout(resolve, 10))
@@ -426,10 +495,11 @@ describe('SyncEngine fleet upgrade', () => {
             npmPackage: '@twsxtd/hapi',
         }
         const store = new Store(':memory:')
+        const registry = new RpcRegistry()
         const engine = new SyncEngine(
             store,
             {} as never,
-            new RpcRegistry(),
+            registry,
             { broadcast() {} } as never,
             { getUpgradeOffer: () => offer, getFleetUpgradePolicy: () => 'auto' },
         )
@@ -470,10 +540,11 @@ describe('SyncEngine fleet upgrade', () => {
             npmPackage: '@twsxtd/hapi',
         }
         const store = new Store(':memory:')
+        const registry = new RpcRegistry()
         const engine = new SyncEngine(
             store,
             {} as never,
-            new RpcRegistry(),
+            registry,
             { broadcast() {} } as never,
             { getUpgradeOffer: () => offer, getFleetUpgradePolicy: () => 'auto' },
         )
@@ -515,10 +586,11 @@ describe('SyncEngine fleet upgrade', () => {
         }
         const getUpgradeOffer = mock(() => offer)
         const store = new Store(':memory:')
+        const registry = new RpcRegistry()
         const engine = new SyncEngine(
             store,
             {} as never,
-            new RpcRegistry(),
+            registry,
             { broadcast() {} } as never,
             { getUpgradeOffer, getFleetUpgradePolicy: () => 'alert' },
         )
@@ -542,6 +614,7 @@ describe('SyncEngine fleet upgrade', () => {
                 null,
                 'default',
             )
+            registerLiveSelfUpgrade(registry, 'behind')
             engine.handleMachineAlive({ machineId: 'behind', time: Date.now() })
             await Promise.resolve()
             await new Promise((resolve) => setTimeout(resolve, 10))
@@ -575,10 +648,11 @@ describe('SyncEngine fleet upgrade', () => {
             },
         }
         const store = new Store(':memory:')
+        const registry = new RpcRegistry()
         const engine = new SyncEngine(
             store,
             {} as never,
-            new RpcRegistry(),
+            registry,
             { broadcast() {} } as never,
             {
                 getUpgradeOffer: () => offer,
@@ -607,6 +681,7 @@ describe('SyncEngine fleet upgrade', () => {
                 null,
                 'default',
             )
+            registerLiveSelfUpgrade(registry, 'stale-gen')
             engine.handleMachineAlive({ machineId: 'stale-gen', time: Date.now() })
 
             const result = await engine.upgradeMachineRunner('stale-gen', 'default')
@@ -629,10 +704,11 @@ describe('SyncEngine fleet upgrade', () => {
             npmPackage: '@twsxtd/hapi',
         }
         const store = new Store(':memory:')
+        const registry = new RpcRegistry()
         const engine = new SyncEngine(
             store,
             {} as never,
-            new RpcRegistry(),
+            registry,
             { broadcast() {} } as never,
             { getUpgradeOffer: () => offer },
         )
@@ -679,10 +755,11 @@ describe('SyncEngine fleet upgrade', () => {
             npmPackage: '@twsxtd/hapi',
         }
         const store = new Store(':memory:')
+        const registry = new RpcRegistry()
         const engine = new SyncEngine(
             store,
             {} as never,
-            new RpcRegistry(),
+            registry,
             { broadcast() {} } as never,
             { getUpgradeOffer: () => offer, getFleetUpgradePolicy: () => 'auto' },
         )
@@ -725,10 +802,11 @@ describe('SyncEngine fleet upgrade', () => {
         }
         const store = new Store(':memory:')
         const sendToast = mock(async () => {})
+        const registry = new RpcRegistry()
         const engine = new SyncEngine(
             store,
             {} as never,
-            new RpcRegistry(),
+            registry,
             { broadcast() {}, sendToast } as never,
             {
                 getUpgradeOffer: () => offer,
@@ -762,6 +840,7 @@ describe('SyncEngine fleet upgrade', () => {
                 null,
                 'default',
             )
+            registerLiveSelfUpgrade(registry, 'teemo')
             engine.handleMachineAlive({ machineId: 'teemo', time: Date.now() })
             await Promise.resolve()
             await new Promise((resolve) => setTimeout(resolve, 20))
@@ -781,10 +860,11 @@ describe('SyncEngine fleet upgrade', () => {
         }
         const store = new Store(':memory:')
         const sendToast = mock(async () => {})
+        const registry = new RpcRegistry()
         const engine = new SyncEngine(
             store,
             {} as never,
-            new RpcRegistry(),
+            registry,
             { broadcast() {}, sendToast } as never,
             {
                 getUpgradeOffer: () => offer,
@@ -816,6 +896,7 @@ describe('SyncEngine fleet upgrade', () => {
                 null,
                 'default',
             )
+            registerLiveSelfUpgrade(registry, 'teemo-stable')
             engine.handleMachineAlive({ machineId: 'teemo-stable', time: Date.now() })
             await Promise.resolve()
             await new Promise((resolve) => setTimeout(resolve, 20))
@@ -843,10 +924,11 @@ describe('SyncEngine fleet upgrade', () => {
         }
         const store = new Store(':memory:')
         const sendToast = mock(async () => {})
+        const registry = new RpcRegistry()
         const engine = new SyncEngine(
             store,
             {} as never,
-            new RpcRegistry(),
+            registry,
             { broadcast() {}, sendToast } as never,
             {
                 getUpgradeOffer: () => offer,
@@ -877,6 +959,7 @@ describe('SyncEngine fleet upgrade', () => {
                 null,
                 'default',
             )
+            registerLiveSelfUpgrade(registry, 'teemo')
             engine.handleMachineAlive({ machineId: 'teemo', time: Date.now() })
             await Promise.resolve()
             await new Promise((resolve) => setTimeout(resolve, 20))

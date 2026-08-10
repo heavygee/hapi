@@ -204,6 +204,19 @@ export class MachineCache {
         return withLive
     }
 
+    /**
+     * True when the machine socket currently has `method` registered in the
+     * live RpcRegistry (e.g. `Teemo:runner-self-upgrade`). Metadata
+     * advertisements alone are not enough - hub restarts can drop fire-and-
+     * forget `rpc-register` while `machine-alive` keeps the row "active".
+     */
+    hasLiveRpc(machineId: string, method: string): boolean {
+        if (!this.rpcRegistry) {
+            return false
+        }
+        return this.rpcRegistry.hasMethod(`${machineId}:${method}`)
+    }
+
     /** Overlay live RPC registrations onto advertised metadata capabilities for API/SSE consumers. */
     private withLiveCapabilities(machine: Machine): Machine {
         if (!machine.metadata || !this.rpcRegistry) {

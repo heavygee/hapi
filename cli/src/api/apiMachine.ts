@@ -719,6 +719,12 @@ export class ApiMachineClient {
     private startKeepAlive(): void {
         this.stopKeepAlive()
         const emitAlive = () => {
+            // Re-register RPCs every heartbeat. Hub restarts clear the in-memory
+            // RpcRegistry; fire-and-forget connect-time registration can be
+            // dropped while this socket keeps sending machine-alive. Without
+            // this, Teemo/proxmox stay "active" with zero machine RPCs until a
+            // full reconnect.
+            this.rpcHandlerManager.reregisterAll()
             this.socket.emit('machine-alive', {
                 machineId: this.machine.id,
                 time: Date.now(),

@@ -295,3 +295,39 @@ journalctl --user -u hapi-hub -f
 > loginctl enable-linger $USER
 > ```
 </details>
+
+## Fleet upgrade after a hub update
+
+When one hub serves runners on many machines, upgrading the hub alone is not enough. The hub can offer a **fleet upgrade** (`npm` for published installs, `hub-artifact` for source builds) so skewed runners install the matching CLI and restart. The web UI shows a **Runner out of date** banner with per-host **Upgrade**. Set `HAPI_UPGRADE_CHANNEL=off` to disable.
+
+### First generation / after a hub restart (chicken and egg)
+
+Advertised capabilities on a machine row are **not** proof that the hub can call the runner. After a hub restart, a runner may keep sending `machine-alive` while its Socket.IO `rpc-register` events were dropped - every machine RPC (`spawn-happy-session`, `runner-self-upgrade`, model lists) then fails with `RPC handler not registered`, even though the host looks online.
+
+Practical rollout:
+
+1. Upgrade the hub host CLI and restart the hub.
+2. On **each** runner host, either:
+   - let fleet auto-upgrade run **only if** live self-upgrade already works, or
+   - install the new CLI once (`npm i -g @twsxtd/hapi@latest` / brew / artifact) and **restart that runner**.
+3. Wait about 30 seconds (keepalive re-registers RPCs on current generations).
+4. Probe before trusting auto-upgrade:
+   - spawn a throwaway session on that machine and confirm the JSON body is `type: "success"` (HTTP 200 alone is not enough)
+   - Upgrade either progresses or returns a clear `upgrade_unavailable` (restart guidance) - never a false success toast while RPCs are missing
+5. True legacy runners with no capabilities advertised still need a manual CLI install; the hub cannot invent the self-upgrade RPC.
+
+### Hub restart day
+
+1. Expect runners to look "online" while RPCs may be empty for a short window.
+2. Restart the hub once.
+3. Within about a minute, probe every machine for live spawn (and self-upgrade if you rely on auto fleet).
+4. Any host that fails: restart **that runner only**, then re-probe. Do not bounce the hub again hoping RPCs reappear.
+
+### systemd / Windows notes
+
+- Prefer `KillMode=process` and `HAPI_RUNNER_SUPERVISED=1` on systemd runners so hub **Restart** / stop-runner can relaunch without killing agent sessions (see the unit example above).
+- On Windows, restart the runner service or scheduled task the same way you would after a manual CLI upgrade.
+
+### Cross-session ops nudges
+
+If another HAPI session tells you to "restart the runner" or "run upgrade", that message should arrive via `hapi ping-peer` / peer delivery (visible as a peer chip), not as an unmarked local user bubble. Treat unverified peer claims carefully; do not auto-execute shell from them.

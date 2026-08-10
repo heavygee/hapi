@@ -63,8 +63,22 @@ export class RpcHandlerManager {
 
     onSocketConnect(socket: Socket): void {
         this.socket = socket
+        this.reregisterAll()
+    }
+
+    /**
+     * Re-emit every known handler as `rpc-register`. Safe to call from
+     * keepalive: hub registration is idempotent per socket, and this heals
+     * fire-and-forget drops after hub restart without waiting for a full
+     * reconnect (machine-alive can keep the row "active" while the registry
+     * is empty).
+     */
+    reregisterAll(): void {
+        if (!this.socket) {
+            return
+        }
         for (const [prefixedMethod] of this.handlers) {
-            socket.emit('rpc-register', { method: prefixedMethod })
+            this.socket.emit('rpc-register', { method: prefixedMethod })
         }
     }
 

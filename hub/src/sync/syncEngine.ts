@@ -1108,8 +1108,25 @@ export class SyncEngine {
         // Live-RPC overlay is already applied by MachineCache.getMachineByNamespace.
         // Skewed runners that predate this RPC cannot self-upgrade remotely — fail
         // closed with a clear code so the UI can steer operators to a manual path.
+        //
+        // Also require the *live* RpcRegistry entry. Advertised metadata alone is
+        // a lie after hub restart when fire-and-forget `rpc-register` is dropped
+        // but `machine-alive` keeps the row active (Teemo/proxmox 2026-08-10).
         const capabilities = machine.metadata?.capabilities ?? []
-        if (!capabilities.includes(MACHINE_CAPABILITIES.RunnerSelfUpgrade)) {
+        const liveSelfUpgrade = this.machineCache.hasLiveRpc(
+            machineId,
+            MACHINE_CAPABILITIES.RunnerSelfUpgrade,
+        )
+        if (!liveSelfUpgrade) {
+            if (capabilities.includes(MACHINE_CAPABILITIES.RunnerSelfUpgrade)) {
+                return {
+                    type: 'error',
+                    message:
+                        'Runner advertises self-upgrade but the RPC is not registered on the live socket; '
+                        + 'restart the runner (or wait for keepalive re-register) then retry',
+                    code: 'upgrade_unavailable',
+                }
+            }
             return {
                 type: 'error',
                 message: 'Runner does not support self-upgrade; upgrade the CLI manually and restart the runner',
@@ -1188,6 +1205,16 @@ export class SyncEngine {
                 response,
             }
         } catch (error) {
+            // Belt-and-suspenders: registry can race-clear between the live
+            // gate and the emit. Treat missing handler as unavailable (no auto
+            // toast) rather than a hard upgrade_failed.
+            if (error instanceof RpcTargetMissingError) {
+                return {
+                    type: 'error',
+                    message: error.message,
+                    code: 'upgrade_unavailable',
+                }
+            }
             return {
                 type: 'error',
                 message: error instanceof Error ? error.message : 'Fleet upgrade RPC failed',

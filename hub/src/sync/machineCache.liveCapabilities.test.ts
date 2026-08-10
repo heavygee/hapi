@@ -65,5 +65,7 @@ describe('MachineCache live capabilities', () => {
         expect(refreshed?.metadata?.capabilities).toEqual([
             MACHINE_CAPABILITIES.RunnerSelfUpgrade,
         ])
+        expect(cache.hasLiveRpc('cold', MACHINE_CAPABILITIES.RunnerSelfUpgrade)).toBe(true)
+        expect(cache.hasLiveRpc('cold', MACHINE_CAPABILITIES.StopRunner)).toBe(false)
     })
 })
