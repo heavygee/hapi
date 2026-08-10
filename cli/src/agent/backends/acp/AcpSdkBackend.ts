@@ -4,6 +4,7 @@ import { asString, isObject } from '@hapi/protocol';
 import { AcpStdioTransport, type AcpStderrError } from './AcpStdioTransport';
 import { AcpMessageHandler, type AcpTextChunkMode } from './AcpMessageHandler';
 import { ACP_SESSION_UPDATE_TYPES } from './constants';
+import { shouldBumpThinkingFromSessionUpdate } from './shouldBumpThinkingFromSessionUpdate';
 import { logger } from '@/ui/logger';
 import { withRetry } from '@/utils/time';
 import packageJson from '../../../../package.json';
@@ -82,6 +83,8 @@ export class AcpSdkBackend implements AgentBackend {
     private promptUsageCallback: ((msg: AgentMessage) => void) | null = null;
     private usageUpdateListener: ((msg: AgentMessage) => void) | null = null;
     private sessionInfoUpdateListener: ((update: AcpSessionInfoUpdate) => void) | null = null;
+    /** Fired on real agent activity so launchers can bump hub thinking (#1470). */
+    private agentActivityListener: (() => void) | null = null;
     private lastForwardedUsageUpdate: AcpUsageUpdate | null = null;
     private sessionUpdateQueue: Promise<void> = Promise.resolve();
 
@@ -440,6 +443,15 @@ export class AcpSdkBackend implements AgentBackend {
         this.sessionInfoUpdateListener = listener;
     }
 
+    /**
+     * Called when ACP reports real agent work (message/tool/thought/running).
+     * Launchers use this to bump `thinking` after harness resume without a new
+     * hub user message (#1470). Usage/title noise does not fire.
+     */
+    setAgentActivityListener(listener: (() => void) | null): void {
+        this.agentActivityListener = listener;
+    }
+
     /** Reads the agent's persisted native title through stable ACP session/list. */
     async refreshSessionInfo(sessionId: string, cwd: string): Promise<void> {
         const existingTimer = this.sessionInfoRefreshTimers.get(sessionId);
@@ -771,6 +783,7 @@ export class AcpSdkBackend implements AgentBackend {
         }
         this.forwardSessionInfoUpdate(sessionId, update);
         this.captureUsageUpdate(update);
+        this.notifyAgentActivity(update);
         // Capture the handler at enqueue time. Looking up `this.messageHandler`
         // when the queued microtask runs can leak a suppressUpdatesDuring
         // update into the restored handler if earlier async image work kept
@@ -786,6 +799,19 @@ export class AcpSdkBackend implements AgentBackend {
                     error instanceof Error ? error.message : String(error)
                 );
             });
+    }
+
+    private notifyAgentActivity(update: unknown): void {
+        if (!this.agentActivityListener) {
+            return;
+        }
+        if (!isObject(update)) {
+            return;
+        }
+        if (!shouldBumpThinkingFromSessionUpdate(update)) {
+            return;
+        }
+        this.agentActivityListener();
     }
 
     private forwardSessionInfoUpdate(sessionId: string | null, update: unknown): void {
@@ -963,6 +989,8 @@ export class AcpSdkBackend implements AgentBackend {
 
         if (this.permissionHandler) {
             try {
+                // Permission prompts imply the agent is awake (#1470).
+                this.agentActivityListener?.();
                 this.permissionHandler(request);
             } catch (error) {
                 this.pendingPermissions.delete(toolCallId);

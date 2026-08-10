@@ -135,6 +135,7 @@ vi.mock('./utils/cursorAcpBackend', () => ({
                 harness.stderrErrorHandler = handler ?? null;
             }),
             setUsageUpdateListener: vi.fn(),
+            setAgentActivityListener: vi.fn(),
             setSessionInfoUpdateListener: vi.fn(),
             refreshSessionInfo: vi.fn(async () => {}),
             onPermissionRequest: vi.fn(),
