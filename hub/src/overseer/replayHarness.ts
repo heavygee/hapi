@@ -408,7 +408,7 @@ export function findRootCauseEventId(
     relation = 'blocked_by'
 ): number {
     const stmt = db.prepare(
-        'SELECT from_event_id, to_event_id FROM event_links WHERE from_event_id = ? AND relation_type = ?'
+        'SELECT from_event_id, to_event_id FROM overseer_event_links WHERE from_event_id = ? AND relation_type = ?'
     )
     const seen = new Set<number>([fromEventId])
     let current = fromEventId
@@ -436,8 +436,8 @@ export type Contradiction = {
 export function detectContradictions(db: Database): Contradiction[] {
     const rows = db.prepare(`
         SELECT f.related_session_id AS sid, f.id AS failing, c.id AS passing
-        FROM events f
-        JOIN events c
+        FROM overseer_events f
+        JOIN overseer_events c
           ON c.related_session_id = f.related_session_id
         WHERE f.related_session_id IS NOT NULL
           AND f.event_type IN ('failed', 'blocked')

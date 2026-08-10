@@ -128,7 +128,7 @@ function mapRow(row: SystemEventRow): StoredSystemEvent {
 /** Clear session FK refs so DELETE FROM sessions succeeds (events are audit-retained). */
 export function detachSessionEvents(db: Database, sessionId: string): number {
     const result = db.prepare(
-        'UPDATE events SET related_session_id = NULL WHERE related_session_id = ?'
+        'UPDATE overseer_events SET related_session_id = NULL WHERE related_session_id = ?'
     ).run(sessionId)
     return result.changes
 }
@@ -139,14 +139,14 @@ export function repointSessionEvents(db: Database, fromSessionId: string, toSess
         return 0
     }
     const countRow = db.prepare(
-        'SELECT COUNT(*) as count FROM events WHERE related_session_id = ?'
+        'SELECT COUNT(*) as count FROM overseer_events WHERE related_session_id = ?'
     ).get(fromSessionId) as { count: number }
     const pending = countRow.count
     if (pending === 0) {
         return 0
     }
     db.prepare(
-        'UPDATE events SET related_session_id = ? WHERE related_session_id = ?'
+        'UPDATE overseer_events SET related_session_id = ? WHERE related_session_id = ?'
     ).run(toSessionId, fromSessionId)
     return pending
 }
@@ -154,7 +154,7 @@ export function repointSessionEvents(db: Database, fromSessionId: string, toSess
 export function insertSystemEvent(db: Database, input: InsertSystemEventInput): StoredSystemEvent | null {
     if (input.idempotencyKey) {
         const existing = db.prepare(
-            'SELECT id FROM events WHERE idempotency_key = ? LIMIT 1'
+            'SELECT id FROM overseer_events WHERE idempotency_key = ? LIMIT 1'
         ).get(input.idempotencyKey) as { id: number } | undefined
         if (existing) {
             return getSystemEventById(db, existing.id)
@@ -162,7 +162,7 @@ export function insertSystemEvent(db: Database, input: InsertSystemEventInput): 
     }
 
     const stmt = db.prepare(`
-        INSERT INTO events (
+        INSERT INTO overseer_events (
             ts, source_kind, source_ref, sink_kind, sink_ref,
             event_type, attention_candidate, operator_action_required, risk_detected,
             summary, payload_json, artifact_refs, tags,
@@ -206,7 +206,7 @@ export function insertSystemEvent(db: Database, input: InsertSystemEventInput): 
 }
 
 export function getSystemEventById(db: Database, id: number): StoredSystemEvent | null {
-    const row = db.prepare('SELECT * FROM events WHERE id = ?').get(id) as SystemEventRow | undefined
+    const row = db.prepare('SELECT * FROM overseer_events WHERE id = ?').get(id) as SystemEventRow | undefined
     return row ? mapRow(row) : null
 }
 
@@ -218,9 +218,9 @@ export function updateSystemEventPayload(
     summary?: string
 ): StoredSystemEvent | null {
     if (summary !== undefined) {
-        db.prepare('UPDATE events SET payload_json = ?, summary = ? WHERE id = ?').run(payloadJson, summary, id)
+        db.prepare('UPDATE overseer_events SET payload_json = ?, summary = ? WHERE id = ?').run(payloadJson, summary, id)
     } else {
-        db.prepare('UPDATE events SET payload_json = ? WHERE id = ?').run(payloadJson, id)
+        db.prepare('UPDATE overseer_events SET payload_json = ? WHERE id = ?').run(payloadJson, id)
     }
     return getSystemEventById(db, id)
 }
@@ -253,7 +253,7 @@ export function listSystemEvents(db: Database, options: ListSystemEventsOptions 
 
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''
     const rows = db.prepare(
-        `SELECT * FROM events ${where} ORDER BY id DESC LIMIT ?`
+        `SELECT * FROM overseer_events ${where} ORDER BY id DESC LIMIT ?`
     ).all(...params, limit) as SystemEventRow[]
 
     return rows.map(mapRow)
@@ -261,7 +261,7 @@ export function listSystemEvents(db: Database, options: ListSystemEventsOptions 
 
 export function getSystemEventByIdempotencyKey(db: Database, idempotencyKey: string): StoredSystemEvent | null {
     const row = db.prepare(
-        'SELECT * FROM events WHERE idempotency_key = ? LIMIT 1'
+        'SELECT * FROM overseer_events WHERE idempotency_key = ? LIMIT 1'
     ).get(idempotencyKey) as SystemEventRow | undefined
     return row ? mapRow(row) : null
 }
@@ -315,7 +315,7 @@ export function queryEvents(db: Database, options: QueryEventsOptions = {}): Sto
 
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''
     const rows = db.prepare(
-        `SELECT * FROM events ${where} ORDER BY id DESC LIMIT ?`
+        `SELECT * FROM overseer_events ${where} ORDER BY id DESC LIMIT ?`
     ).all(...params, limit) as SystemEventRow[]
 
     return rows.map(mapRow)
@@ -332,10 +332,10 @@ export function queryEvents(db: Database, options: QueryEventsOptions = {}): Sto
 export function queryLatestWorkerStatusPerSession(db: Database, limit = 500): StoredSystemEvent[] {
     const cap = Math.min(Math.max(limit, 1), 2000)
     const rows = db.prepare(`
-        SELECT e.* FROM events e
+        SELECT e.* FROM overseer_events e
         JOIN (
             SELECT related_session_id AS sid, MAX(id) AS max_id
-            FROM events
+            FROM overseer_events
             WHERE source_kind = 'worker'
               AND related_session_id IS NOT NULL
               AND event_type IN (
@@ -361,7 +361,7 @@ export function insertEventLink(
 ): string {
     const id = randomUUID()
     db.prepare(`
-        INSERT INTO event_links (id, from_event_id, to_event_id, relation_type, created_at, metadata_json)
+        INSERT INTO overseer_event_links (id, from_event_id, to_event_id, relation_type, created_at, metadata_json)
         VALUES (?, ?, ?, ?, ?, ?)
     `).run(
         id,
@@ -375,17 +375,69 @@ export function insertEventLink(
 }
 
 export function countSystemEvents(db: Database): number {
-    const row = db.prepare('SELECT COUNT(*) AS count FROM events').get() as { count: number }
+    const row = db.prepare('SELECT COUNT(*) AS count FROM overseer_events').get() as { count: number }
     return row.count
+}
+
+function tableExists(db: Database, name: string): boolean {
+    const row = db.prepare(
+        "SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1"
+    ).get(name) as { ok: number } | undefined
+    return Boolean(row)
+}
+
+function tableColumns(db: Database, name: string): Set<string> {
+    if (!tableExists(db, name)) return new Set()
+    const rows = db.prepare(`PRAGMA table_info(${name})`).all() as Array<{ name: string }>
+    return new Set(rows.map((row) => row.name))
+}
+
+/**
+ * Upstream work-graph (#1467 / #1374) owns the `events` / `event_links` names.
+ * Soup Overseer previously used those names with an incompatible INTEGER-PK shape.
+ * Rehome any leftover Overseer-shaped `events` table before work-graph DDL runs.
+ */
+export function rehomeOverseerEventsAwayFromWorkGraphCollision(db: Database): void {
+    if (tableExists(db, 'overseer_events')) {
+        return
+    }
+    const cols = tableColumns(db, 'events')
+    if (!cols.has('attention_candidate')) {
+        return
+    }
+
+    // Drop FTS/triggers bound to the old name before RENAME (SQLite FTS is picky).
+    db.exec(`
+        DROP TRIGGER IF EXISTS events_fts_insert;
+        DROP TRIGGER IF EXISTS events_fts_delete;
+        DROP TRIGGER IF EXISTS events_fts_update;
+        DROP TRIGGER IF EXISTS overseer_events_fts_insert;
+        DROP TRIGGER IF EXISTS overseer_events_fts_delete;
+        DROP TRIGGER IF EXISTS overseer_events_fts_update;
+        DROP TABLE IF EXISTS events_fts;
+        DROP TABLE IF EXISTS overseer_events_fts;
+    `)
+
+    db.exec('ALTER TABLE events RENAME TO overseer_events')
+
+    if (tableExists(db, 'event_links') && !tableExists(db, 'overseer_event_links')) {
+        const linkCols = tableColumns(db, 'event_links')
+        // Work-graph links carry namespace; Overseer links do not.
+        if (!linkCols.has('namespace')) {
+            db.exec('ALTER TABLE event_links RENAME TO overseer_event_links')
+        }
+    }
 }
 
 /**
  * Idempotent Overseer events DDL — runs on every Store init, NOT gated on SCHEMA_VERSION.
  * Additive Overseer tables must never own a version step (soup composability).
+ * Table names are `overseer_events*` so they do not collide with upstream work-graph `events`.
  */
 export function ensureOverseerEventsSchema(db: Database): void {
+    rehomeOverseerEventsAwayFromWorkGraphCollision(db)
     db.exec(`
-        CREATE TABLE IF NOT EXISTS events (
+        CREATE TABLE IF NOT EXISTS overseer_events (
             id INTEGER PRIMARY KEY,
             ts INTEGER NOT NULL,
             source_kind TEXT NOT NULL,
@@ -401,7 +453,7 @@ export function ensureOverseerEventsSchema(db: Database): void {
             artifact_refs TEXT,
             tags TEXT,
             related_session_id TEXT REFERENCES sessions(id),
-            related_event_id INTEGER REFERENCES events(id),
+            related_event_id INTEGER REFERENCES overseer_events(id),
             dedupe_key TEXT,
             expires_at INTEGER,
             provenance TEXT,
@@ -409,23 +461,23 @@ export function ensureOverseerEventsSchema(db: Database): void {
             confidence REAL,
             severity INTEGER
         );
-        CREATE INDEX IF NOT EXISTS idx_events_session_ts ON events(related_session_id, ts DESC);
-        CREATE INDEX IF NOT EXISTS idx_events_type_ts ON events(event_type, ts DESC);
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_events_dedupe_key ON events(dedupe_key) WHERE dedupe_key IS NOT NULL;
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_events_idempotency_key ON events(idempotency_key) WHERE idempotency_key IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_overseer_events_session_ts ON overseer_events(related_session_id, ts DESC);
+        CREATE INDEX IF NOT EXISTS idx_overseer_events_type_ts ON overseer_events(event_type, ts DESC);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_overseer_events_dedupe_key ON overseer_events(dedupe_key) WHERE dedupe_key IS NOT NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_overseer_events_idempotency_key ON overseer_events(idempotency_key) WHERE idempotency_key IS NOT NULL;
 
-        CREATE TABLE IF NOT EXISTS event_links (
+        CREATE TABLE IF NOT EXISTS overseer_event_links (
             id TEXT PRIMARY KEY,
-            from_event_id INTEGER NOT NULL REFERENCES events(id),
-            to_event_id INTEGER NOT NULL REFERENCES events(id),
+            from_event_id INTEGER NOT NULL REFERENCES overseer_events(id),
+            to_event_id INTEGER NOT NULL REFERENCES overseer_events(id),
             relation_type TEXT NOT NULL,
             created_at INTEGER NOT NULL,
             metadata_json TEXT
         );
-        CREATE INDEX IF NOT EXISTS idx_event_links_from ON event_links(from_event_id);
-        CREATE INDEX IF NOT EXISTS idx_event_links_to ON event_links(to_event_id);
+        CREATE INDEX IF NOT EXISTS idx_overseer_event_links_from ON overseer_event_links(from_event_id);
+        CREATE INDEX IF NOT EXISTS idx_overseer_event_links_to ON overseer_event_links(to_event_id);
 
-        CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
+        CREATE VIRTUAL TABLE IF NOT EXISTS overseer_events_fts USING fts5(
             summary,
             tags,
             payload_json,
@@ -435,22 +487,22 @@ export function ensureOverseerEventsSchema(db: Database): void {
 
     // Recreate triggers every boot so a live DB with dropped/broken triggers self-heals.
     db.exec(`
-        DROP TRIGGER IF EXISTS events_fts_insert;
-        DROP TRIGGER IF EXISTS events_fts_delete;
-        DROP TRIGGER IF EXISTS events_fts_update;
+        DROP TRIGGER IF EXISTS overseer_events_fts_insert;
+        DROP TRIGGER IF EXISTS overseer_events_fts_delete;
+        DROP TRIGGER IF EXISTS overseer_events_fts_update;
 
-        CREATE TRIGGER events_fts_insert AFTER INSERT ON events BEGIN
-            INSERT INTO events_fts(rowid, summary, tags, payload_json)
+        CREATE TRIGGER overseer_events_fts_insert AFTER INSERT ON overseer_events BEGIN
+            INSERT INTO overseer_events_fts(rowid, summary, tags, payload_json)
             VALUES (new.id, new.summary, COALESCE(new.tags, ''), COALESCE(new.payload_json, ''));
         END;
 
-        CREATE TRIGGER events_fts_delete AFTER DELETE ON events BEGIN
-            DELETE FROM events_fts WHERE rowid = old.id;
+        CREATE TRIGGER overseer_events_fts_delete AFTER DELETE ON overseer_events BEGIN
+            DELETE FROM overseer_events_fts WHERE rowid = old.id;
         END;
 
-        CREATE TRIGGER events_fts_update AFTER UPDATE ON events BEGIN
-            DELETE FROM events_fts WHERE rowid = old.id;
-            INSERT INTO events_fts(rowid, summary, tags, payload_json)
+        CREATE TRIGGER overseer_events_fts_update AFTER UPDATE ON overseer_events BEGIN
+            DELETE FROM overseer_events_fts WHERE rowid = old.id;
+            INSERT INTO overseer_events_fts(rowid, summary, tags, payload_json)
             VALUES (new.id, new.summary, COALESCE(new.tags, ''), COALESCE(new.payload_json, ''));
         END;
     `)
@@ -501,18 +553,18 @@ export function tombstoneDeletedSession(
 /** Drop Overseer events tables (db-prep / layer removal). Does NOT change user_version. */
 export function dropOverseerEventsSchema(db: Database): void {
     db.exec(`
-        DROP TRIGGER IF EXISTS events_fts_delete;
-        DROP TRIGGER IF EXISTS events_fts_update;
-        DROP TRIGGER IF EXISTS events_fts_insert;
-        DROP TABLE IF EXISTS events_fts;
-        DROP INDEX IF EXISTS idx_events_idempotency_key;
-        DROP INDEX IF EXISTS idx_event_links_to;
-        DROP INDEX IF EXISTS idx_event_links_from;
-        DROP TABLE IF EXISTS event_links;
-        DROP INDEX IF EXISTS idx_events_dedupe_key;
-        DROP INDEX IF EXISTS idx_events_type_ts;
-        DROP INDEX IF EXISTS idx_events_session_ts;
-        DROP TABLE IF EXISTS events;
+        DROP TRIGGER IF EXISTS overseer_events_fts_delete;
+        DROP TRIGGER IF EXISTS overseer_events_fts_update;
+        DROP TRIGGER IF EXISTS overseer_events_fts_insert;
+        DROP TABLE IF EXISTS overseer_events_fts;
+        DROP INDEX IF EXISTS idx_overseer_events_idempotency_key;
+        DROP INDEX IF EXISTS idx_overseer_event_links_to;
+        DROP INDEX IF EXISTS idx_overseer_event_links_from;
+        DROP TABLE IF EXISTS overseer_event_links;
+        DROP INDEX IF EXISTS idx_overseer_events_dedupe_key;
+        DROP INDEX IF EXISTS idx_overseer_events_type_ts;
+        DROP INDEX IF EXISTS idx_overseer_events_session_ts;
+        DROP TABLE IF EXISTS overseer_events;
         DROP TABLE IF EXISTS deleted_sessions;
     `)
 }

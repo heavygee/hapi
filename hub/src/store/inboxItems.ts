@@ -734,7 +734,7 @@ export function ensureOverseerInboxSchema(db: Database): void {
 
         CREATE TABLE IF NOT EXISTS inbox_item_source_events (
             inbox_item_id INTEGER NOT NULL REFERENCES inbox_items(id) ON DELETE CASCADE,
-            event_id INTEGER NOT NULL REFERENCES events(id),
+            event_id INTEGER NOT NULL REFERENCES overseer_events(id),
             PRIMARY KEY (inbox_item_id, event_id)
         );
         CREATE INDEX IF NOT EXISTS idx_inbox_item_source_events_event ON inbox_item_source_events(event_id);

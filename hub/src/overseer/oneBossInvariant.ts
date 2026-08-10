@@ -102,7 +102,7 @@ type DispatchedEventRow = { id: number; idempotency_key: string | null }
 export function checkOneBossInvariant(ctx: ReplayContext): OneBossResult {
     const db: Database = ctx.db
     const dispatched = db.prepare(
-        "SELECT id, idempotency_key FROM events WHERE event_type = 'dispatched'"
+        "SELECT id, idempotency_key FROM overseer_events WHERE event_type = 'dispatched'"
     ).all() as DispatchedEventRow[]
 
     const envelopeByKey = new Map<string, SnapshotDispatchEnvelope>()

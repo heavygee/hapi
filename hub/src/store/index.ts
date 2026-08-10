@@ -12,7 +12,11 @@ import { ScratchlistStore } from './scratchlistStore'
 import { EventStore } from './eventStore'
 import { InboxStore } from './inboxStore'
 import { SettingsStore, ensureOverseerSettingsSchema } from './settingsStore'
-import { ensureOverseerEventsSchema, ensureDeletedSessionsSchema } from './events'
+import {
+    ensureOverseerEventsSchema,
+    ensureDeletedSessionsSchema,
+    rehomeOverseerEventsAwayFromWorkGraphCollision,
+} from './events'
 import { ensureOverseerInboxSchema } from './inboxItems'
 import { SessionJobsStore } from './sessionJobsStore'
 import { SessionStore } from './sessionStore'
@@ -1059,8 +1063,10 @@ export class Store {
     /**
      * V23 was independently used by the soup job table and upstream work graph.
      * Upgrade either historical shape to their additive union.
+     * Also rehomes soup Overseer ledger off the `events` name (work-graph owns it).
      */
     private migrateFromV23ToV24(): void {
+        rehomeOverseerEventsAwayFromWorkGraphCollision(this.db)
         this.migrateFromV22ToV23()
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS session_jobs (

@@ -169,3 +169,88 @@ describe('schema migration v22 to v23', () => {
         migrated.close()
     })
 })
+
+describe('dual ledger: work-graph events + overseer_events', () => {
+    it('fresh DB keeps both ledgers under distinct table names', () => {
+        const store = new Store(':memory:')
+        const db = (store as unknown as { db: Database }).db
+        const colsEvents = getColumns(store, 'events')
+        const colsOverseer = getColumns(store, 'overseer_events')
+        expect(colsEvents).toContain('principal_json')
+        expect(colsEvents).toContain('namespace')
+        expect(colsEvents).not.toContain('attention_candidate')
+        expect(colsOverseer).toContain('attention_candidate')
+        expect(colsOverseer).not.toContain('principal_json')
+        const version = db.prepare('PRAGMA user_version').get() as { user_version: number }
+        expect(version.user_version).toBe(24)
+        store.close()
+    })
+
+    it('rehomes soup Overseer-shaped events off the work-graph name on V23→V24', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-overseer-rehome-'))
+        tempDirs.push(dir)
+        const dbPath = join(dir, 'hapi.db')
+
+        // Build a soup-shaped V23 DB (Overseer owns `events`), then open with V24 code.
+        new Store(dbPath).close()
+        const legacy = new Database(dbPath)
+        legacy.exec(`
+            DROP TABLE IF EXISTS event_links;
+            DROP TABLE IF EXISTS events;
+            DROP TABLE IF EXISTS overseer_event_links;
+            DROP TABLE IF EXISTS overseer_events;
+            DROP TABLE IF EXISTS events_fts;
+            DROP TABLE IF EXISTS overseer_events_fts;
+            CREATE TABLE events (
+                id INTEGER PRIMARY KEY,
+                ts INTEGER NOT NULL,
+                source_kind TEXT NOT NULL,
+                source_ref TEXT,
+                sink_kind TEXT,
+                sink_ref TEXT,
+                event_type TEXT NOT NULL,
+                attention_candidate INTEGER NOT NULL DEFAULT 0,
+                operator_action_required INTEGER NOT NULL DEFAULT 0,
+                risk_detected INTEGER NOT NULL DEFAULT 0,
+                summary TEXT NOT NULL,
+                payload_json TEXT,
+                artifact_refs TEXT,
+                tags TEXT,
+                related_session_id TEXT,
+                related_event_id INTEGER,
+                dedupe_key TEXT,
+                expires_at INTEGER,
+                provenance TEXT,
+                idempotency_key TEXT,
+                confidence REAL,
+                severity INTEGER
+            );
+            INSERT INTO events (ts, source_kind, event_type, attention_candidate, summary)
+            VALUES (1, 'system', 'progress', 0, 'keep-me');
+            CREATE TABLE event_links (
+                id TEXT PRIMARY KEY,
+                from_event_id INTEGER NOT NULL,
+                to_event_id INTEGER NOT NULL,
+                relation_type TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                metadata_json TEXT
+            );
+            PRAGMA user_version = 23;
+        `)
+        legacy.close()
+
+        const migrated = new Store(dbPath)
+        const db = (migrated as unknown as { db: Database }).db
+        const overseerCols = getColumns(migrated, 'overseer_events')
+        const workGraphCols = getColumns(migrated, 'events')
+        expect(overseerCols).toContain('attention_candidate')
+        expect(workGraphCols).toContain('principal_json')
+        const kept = db.prepare(
+            "SELECT summary FROM overseer_events WHERE summary = 'keep-me'"
+        ).get() as { summary: string } | undefined
+        expect(kept?.summary).toBe('keep-me')
+        const version = db.prepare('PRAGMA user_version').get() as { user_version: number }
+        expect(version.user_version).toBe(24)
+        migrated.close()
+    })
+})
