@@ -35,7 +35,7 @@ Session upload RPC blindness after hub restart (CLI reconnect without `sessionTa
 
 `fix/hub-runner-version-governance` (#1108) is fleet upgrade/skew — **does not** close session `machineId` orphaning.
 
-Peer tip (2026-08-10): `4f65f30f9` on `feat/a2a-p05-peer-provenance` — in-place proof rebind + migrate-without-dead-proof. Remat + estate kill-test still required before calling the gate closed.
+Peer tip (2026-08-10): `4f65f30f9` on `feat/a2a-p05-peer-provenance` — in-place proof rebind + migrate-without-dead-proof. **Estate kill-test PASS** 2026-08-10 (~12:22Z): machineId stayed `5f5a87e8…` across hub+runner restart; governance upload green. Chip UX tip `905c7e5f8` rematted to soup `28bfaf564`. Full narrative: [`2026-08-10-1473-provenance-dogfood-machine-id-postmortem.md`](../plans/2026-08-10-1473-provenance-dogfood-machine-id-postmortem.md).
 
 ## Estate policy (do this first)
 
@@ -92,7 +92,17 @@ Kill-criteria before bulk remap: operator approval; confirm `$LIVE` has `spawn-h
 3. Wire or delete `migrateSessionsAfterReenroll`; stop claiming migrate exists if cold path never calls it.
 4. Mark stale machine rows offline when PID is dead (estate still shows `e4a08a64` shutting-down with dead pid).
 
+## CLI recycle kill-criteria (upload / skills blind)
+
+Do **not** trust `POST …/resume` success alone.
+
+1. `pgrep -af "existing-session-id ${SID}"` must show a live CLI (orphan processes may omit the flag — check `metadata.hostPid`).
+2. If cache says `active=true` with no matching CLI: `POST …/archive` then `POST …/reopen` (or resume).
+3. Probe `POST …/upload` until `.success==true`.
+4. Detached recycle scripts must export full `PATH` (include `~/.local/bin`).
+
 ## Related
 
+- Postmortem: [`2026-08-10-1473-provenance-dogfood-machine-id-postmortem.md`](../plans/2026-08-10-1473-provenance-dogfood-machine-id-postmortem.md)
 - Upstream: [tiann/hapi#1473](https://github.com/tiann/hapi/pull/1473), [tiann/hapi#1108](https://github.com/tiann/hapi/pull/1108), [tiann/hapi#929](https://github.com/tiann/hapi/issues/929)
 - Soup comments: `driver/cli/src/runner/run.ts` (cold rotate residual), `hub/src/sync/syncEngine.ts` `migrateSessionsMachineId`, `resolveOnlineMachineForSession` + Cursor `strictMachineId`
