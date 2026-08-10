@@ -258,8 +258,10 @@ export class ApiClient {
         machineTag?: string
         runnerProof?: string
         /**
-         * When false, proof/tag 409s surface instead of silently rotating
-         * machine identity (#1473 Blocker — no unbound same-UID recovery).
+         * When false, proof/tag 409s surface instead of rotating machine
+         * identity. Handoff keeps this false so a bad proof cannot escape
+         * into a fresh machine binding (#1473). Cold start leaves it true:
+         * rotate is re-enroll, not unbound mint on the old hash.
          */
         allowLegacyReenroll?: boolean
     }): Promise<Machine> {

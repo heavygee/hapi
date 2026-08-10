@@ -1143,9 +1143,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     const startedWithVersionHandoffDisabled = process.env.HAPI_DISABLE_VERSION_HANDOFF === '1';
 
     // Memory-only runner-generation proof (#1473 Blocker). Same-UID keyrings
-    // are exportable bearers — do not persist the proof. Accept only live
-    // PID-checked handoff; otherwise mint for fresh enrollment and fail closed
-    // on hub proof mismatch (no silent rotate / unbound mint).
+    // are exportable bearers — do not persist the proof. Version handoff keeps
+    // the same machine via PID-checked socket; cold start (kill/restart, CI
+    // beforeEach, systemd without handoff) mints a new proof and, on hub 409,
+    // rotates to a new machine id. That is re-enroll, not unbound mint against
+    // the prior hash (hub still refuses wrong proof on the old row).
     if (isAuthorizedHandoff && !handoffRunnerProof) {
       throw new Error(
         'Authorized runner handoff missing runnerProof from PID-checked socket'
@@ -1186,8 +1188,9 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     const workspaceRoots = resolveWorkspaceRoots(options.workspaceRoots);
     logger.debug(`[RUNNER RUN] Workspace roots: ${workspaceRoots?.join(', ') ?? '(not set)'}`);
 
-    // Register machine without silent rotate-on-409 (#1473 Blocker).
-    // getOrCreateMachine auto-rotates; use post path that surfaces mismatch.
+    // Register machine. Cold start may 409 (lost memory-only proof) — rotate
+    // to a new machine id. Handoff must keep the same binding; refuse rotate
+    // if the delivered proof is rejected (#1473).
     let machine
     try {
       machine = await withRetry(
@@ -1197,8 +1200,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           runnerProof,
           metadata: buildMachineMetadata({ workspaceRoots }),
           runnerState: initialRunnerState,
-          // Cold start without handoff: 409 must not silent-rotate (#1473).
-          allowLegacyReenroll: Boolean(handoffRunnerProof),
+          allowLegacyReenroll: !handoffRunnerProof,
         }),
         {
           maxAttempts: 60,
@@ -1213,11 +1215,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      if (/runner proof|re-enroll|tag mismatch/i.test(message) && !handoffRunnerProof) {
+      if (handoffRunnerProof && /runner proof|re-enroll|tag mismatch/i.test(message)) {
         throw new Error(
-          'Trusted runner re-enrollment required: cold start lost the memory-only '
-          + 'runnerProof (no PID-checked handoff). Restart via version handoff or '
-          + 'explicit re-enroll; refusing unbound same-UID proof recovery.'
+          'Handoff runnerProof rejected by hub; refusing silent machine re-enroll '
+          + 'that would break the PID-checked generation binding.'
         )
       }
       throw error
