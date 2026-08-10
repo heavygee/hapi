@@ -15,6 +15,7 @@ import { SettingsStore, ensureOverseerSettingsSchema } from './settingsStore'
 import { ensureOverseerEventsSchema, ensureDeletedSessionsSchema } from './events'
 import { ensureOverseerInboxSchema } from './inboxItems'
 import { SessionJobsStore } from './sessionJobsStore'
+import { ensureSessionJobWakeColumns } from './sessionJobs'
 import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
 import { UsageStore } from './usageStore'
@@ -119,6 +120,10 @@ export class Store {
         this.db.exec('PRAGMA foreign_keys = ON')
         this.db.exec('PRAGMA busy_timeout = 5000')
         this.initSchema()
+
+        // Soup tip keeps SCHEMA_VERSION=23 (tolerate-ahead). Wake columns for
+        // #1489 are additive and must exist even when user_version is already ahead.
+        ensureSessionJobWakeColumns(this.db)
 
         if (dbPath !== ':memory:' && !dbPath.startsWith('file::memory:')) {
             for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
@@ -528,6 +533,9 @@ export class Store {
                 remaining REAL,
                 unit TEXT,
                 detail TEXT,
+                wake_on_terminal INTEGER NOT NULL DEFAULT 0,
+                wake_prompt TEXT,
+                wake_emitted_run_id TEXT,
                 heartbeat_at INTEGER NOT NULL,
                 started_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
@@ -951,6 +959,9 @@ export class Store {
                 remaining REAL,
                 unit TEXT,
                 detail TEXT,
+                wake_on_terminal INTEGER NOT NULL DEFAULT 0,
+                wake_prompt TEXT,
+                wake_emitted_run_id TEXT,
                 heartbeat_at INTEGER NOT NULL,
                 started_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,

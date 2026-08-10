@@ -31,6 +31,12 @@ import type { RpcRegistry } from '../socket/rpcRegistry'
 import { clearAgentTerminalBuffer } from '../socket/agentTerminalBuffer'
 import type { SSEManager } from '../sse/sseManager'
 import { CursorLegacyMigrator, type CursorLegacyMigratorOptions } from '../cursor/cursorLegacyMigrator'
+import { toAttachedJob } from '../store/sessionJobs'
+import {
+    buildJobTerminalWakePrompt,
+    isTerminalJobStatus,
+    waitUntilSessionActive,
+} from './sessionJobWake'
 import { isTransientArtifactBuildFailure } from '../upgrade/cliArtifact'
 
 import { executeSessionRelay } from './sessionRelay'
@@ -905,19 +911,7 @@ export class SyncEngine {
     }
 
     listSessionJobs(sessionId: string) {
-        return this.store.sessionJobs.list(sessionId).map((job) => ({
-            key: job.key,
-            label: job.label,
-            status: job.status,
-            ...(job.done !== undefined ? { done: job.done } : {}),
-            ...(job.total !== undefined ? { total: job.total } : {}),
-            ...(job.remaining !== undefined ? { remaining: job.remaining } : {}),
-            ...(job.unit !== undefined ? { unit: job.unit } : {}),
-            ...(job.detail !== undefined ? { detail: job.detail } : {}),
-            heartbeatAt: job.heartbeatAt,
-            startedAt: job.startedAt,
-            updatedAt: job.updatedAt
-        }))
+        return this.store.sessionJobs.list(sessionId).map((job) => toAttachedJob(job))
     }
 
     getPrimaryAttachedJob(sessionId: string) {
@@ -941,22 +935,10 @@ export class SyncEngine {
         }
         const primary = this.store.sessionJobs.getPrimaryRunning(sessionId)
         this.sessionCache.emitAttachedJobChanged(sessionId, primary)
-        const job = result.job
+        this.maybeScheduleJobTerminalWake(sessionId, jobKey)
         return {
             outcome: 'upserted',
-            job: {
-                key: job.key,
-                label: job.label,
-                status: job.status,
-                ...(job.done !== undefined ? { done: job.done } : {}),
-                ...(job.total !== undefined ? { total: job.total } : {}),
-                ...(job.remaining !== undefined ? { remaining: job.remaining } : {}),
-                ...(job.unit !== undefined ? { unit: job.unit } : {}),
-                ...(job.detail !== undefined ? { detail: job.detail } : {}),
-                heartbeatAt: job.heartbeatAt,
-                startedAt: job.startedAt,
-                updatedAt: job.updatedAt
-            }
+            job: toAttachedJob(result.job)
         }
     }
 
@@ -969,19 +951,8 @@ export class SyncEngine {
         if (!updated) return null
         const primary = this.store.sessionJobs.getPrimaryRunning(sessionId)
         this.sessionCache.emitAttachedJobChanged(sessionId, primary)
-        return {
-            key: updated.key,
-            label: updated.label,
-            status: updated.status,
-            ...(updated.done !== undefined ? { done: updated.done } : {}),
-            ...(updated.total !== undefined ? { total: updated.total } : {}),
-            ...(updated.remaining !== undefined ? { remaining: updated.remaining } : {}),
-            ...(updated.unit !== undefined ? { unit: updated.unit } : {}),
-            ...(updated.detail !== undefined ? { detail: updated.detail } : {}),
-            heartbeatAt: updated.heartbeatAt,
-            startedAt: updated.startedAt,
-            updatedAt: updated.updatedAt
-        }
+        this.maybeScheduleJobTerminalWake(sessionId, jobKey)
+        return toAttachedJob(updated)
     }
 
     deleteSessionJob(sessionId: string, jobKey: string): boolean {
@@ -991,6 +962,105 @@ export class SyncEngine {
             this.sessionCache.emitAttachedJobChanged(sessionId, primary)
         }
         return removed
+    }
+
+    private maybeScheduleJobTerminalWake(sessionId: string, jobKey: string): void {
+        const claimed = this.store.sessionJobs.claimTerminalWake(sessionId, jobKey)
+        if (!claimed || !isTerminalJobStatus(claimed.status)) {
+            return
+        }
+        void this.deliverJobTerminalWake(sessionId, claimed).catch((error) => {
+            console.warn('[session-job-wake] deliver failed', {
+                sessionId,
+                jobKey,
+                status: claimed.status,
+                error: error instanceof Error ? error.message : String(error),
+            })
+        })
+    }
+
+    private async deliverJobTerminalWake(
+        sessionId: string,
+        job: import('../store/types').StoredSessionJob
+    ): Promise<void> {
+        const session = this.sessionCache.getSession(sessionId)
+        if (!session) {
+            console.warn('[session-job-wake] session missing after claim', { sessionId, jobKey: job.key })
+            return
+        }
+        const namespace = session.namespace
+        let targetId = sessionId
+
+        if (!session.active) {
+            const resume = await this.resumeSession(sessionId, namespace)
+            if (resume.type !== 'success') {
+                console.warn('[session-job-wake] resume failed', {
+                    sessionId,
+                    jobKey: job.key,
+                    code: resume.code,
+                    message: resume.message,
+                })
+                return
+            }
+            targetId = resume.sessionId
+            const becameActive = await waitUntilSessionActive({
+                getActive: () => this.sessionCache.getSession(targetId)?.active === true,
+                sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+                now: Date.now,
+                timeoutMs: 30_000,
+                pollMs: 250,
+            })
+            if (!becameActive) {
+                console.warn('[session-job-wake] session did not become active', {
+                    sessionId: targetId,
+                    jobKey: job.key,
+                })
+                return
+            }
+        }
+
+        const live = this.sessionCache.getSession(targetId)
+        if (live?.metadata?.flavor === 'pi') {
+            const piReady = await waitUntilSessionActive({
+                getActive: () => {
+                    const s = this.sessionCache.getSession(targetId)
+                    const id = s?.metadata?.piSessionId
+                    return typeof id === 'string' && id.length > 0
+                },
+                sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+                now: Date.now,
+                timeoutMs: 30_000,
+                pollMs: 250,
+            })
+            if (!piReady) {
+                console.warn('[session-job-wake] piSessionId missing; refusing send', {
+                    sessionId: targetId,
+                    jobKey: job.key,
+                })
+                return
+            }
+            if (this.sessionCache.getSession(targetId)?.active !== true) {
+                const resume = await this.resumeSession(targetId, namespace)
+                if (resume.type !== 'success') {
+                    console.warn('[session-job-wake] re-resume failed', {
+                        sessionId: targetId,
+                        jobKey: job.key,
+                        code: resume.code,
+                    })
+                    return
+                }
+                targetId = resume.sessionId
+            }
+        }
+
+        const text = buildJobTerminalWakePrompt({
+            key: job.key,
+            label: job.label,
+            status: job.status,
+            ...(job.detail !== undefined ? { detail: job.detail } : {}),
+            ...(job.wakePrompt !== undefined ? { wakePrompt: job.wakePrompt } : {}),
+        })
+        await this.sendMessage(targetId, { text, sentFrom: 'webapp' })
     }
 
     private async withScratchlistUploadLock<T>(

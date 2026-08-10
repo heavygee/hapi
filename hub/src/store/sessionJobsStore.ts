@@ -9,6 +9,7 @@ import {
     getSessionJob,
     listSessionJobs,
     patchSessionJob,
+    claimSessionJobTerminalWake,
     toAttachedJob,
     transferSessionJobs,
     upsertSessionJob,
@@ -55,6 +56,10 @@ export class SessionJobsStore {
         now?: number
     ): StoredSessionJob | null {
         return patchSessionJob(this.db, sessionId, jobKey, patch, now)
+    }
+
+    claimTerminalWake(sessionId: string, jobKey: string): StoredSessionJob | null {
+        return claimSessionJobTerminalWake(this.db, sessionId, jobKey)
     }
 
     delete(sessionId: string, jobKey: string): boolean {
