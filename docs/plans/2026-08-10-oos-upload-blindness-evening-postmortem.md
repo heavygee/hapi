@@ -291,4 +291,13 @@ New session/resume 500s still firing (`472632df…` resume/reopen 500 @16s, inje
 - Live `driver/integration` still at `624327f11` — remat escalation HOLD active, owner session `05d9f0f2`. Pinged to finish rebuild.
 - Until promote completes: kitchen still on manual clean `hapi-0.27.2-inject-fix` runner; systemd `hapi-runner-oos` failed.
 
+
+### 2026-08-10T20:14Z — Meta remat succeeded; soup live
+
+- Live soup tip **`ab2eab462`** with `not_armed` early-connect + webhook 25s in driver CLI.
+- Hold cleared; Meta ran patient `hapi-restart-hub` (hub+runner).
+- systemd runner briefly crash-looped after bounce; kitchen brought up on clean `env -i` soup bun runner; Meta upload still green; machineId `5f5a87e8…` stable.
+- Drop-in `40-upload-heal.conf` slimmed (webhook 25s only; removed obsolete `HAPI_CLI_EXECUTABLE`).
+- Remaining: durable systemd runner health; heal leftover upload-blind sessions; Teemo/proxmox not bounced.
+
 ### (next entry goes here)
