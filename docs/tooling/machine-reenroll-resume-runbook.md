@@ -14,13 +14,28 @@ Estate runbook after dogfooding **#1473** machine/session RPC auth + peer proven
 
 | Finding | Bucket | Merge gate? |
 |---------|--------|-------------|
-| Cold re-enroll mints new machine UUID **without** migrating sessions | **(A)** product gap on #1473 | **Yes** for #1473 (or explicit follow-up issue + kill-criteria before merge) |
-| Multiple concurrent runners / orphan worktree runners | **(B)** estate | No |
+| Cold re-enroll mints new machine UUID **without** migrating sessions | **(A)** product gap on #1473 — hits **every** upgrade, not estate-only | **Yes** for #1473 |
+| Multiple concurrent runners / orphan worktree runners | **(B)** estate amplifier | No |
 | Bare `agent` on PATH for ACP | **(B)** estate contract; optional hardening | No for provenance PRs |
 
-Evidence: soup `cli/src/runner/run.ts` documents the residual ("cold rotate can leave Cursor/Pi exact-id sessions… until operator remap"). Hub has `migrateSessionsMachineId` + `POST …/migrate-sessions`, but cold `getOrCreateMachine(allowLegacyReenroll)` **never calls migrate**; CLI `migrateSessionsAfterReenroll` is **dead code** and still posts removed `reenrollGrant` (route wants live `fromRunnerProof`). After rotate, source proof is gone → migrate API is unusable for the cold path. Manual SQL was the only recovery.
+### Estate vs everyone
+
+This is **not** "only our kitchen." Anyone who upgrades hub/cli to #1473-era machine auth (tags + memory-only `runnerProof`) and cold-restarts the runner loses the in-memory proof, hits legacy re-enroll, mints a **new machine UUID**, and strands Cursor/Pi sessions on the old id (`strictMachineId` → `spawn-happy-session` / `No machine online`). Our multi-runner soup made it louder and faster; it did not invent the hole.
+
+Session upload RPC blindness after hub restart (CLI reconnect without `sessionTag` / capability) is the same release family (#1473 session RPC auth) — long-lived CLIs look "active" but cannot register `uploadFile` until recycled.
+
+### Upgrade path for all existing users (with tip `4f65f30f9`+)
+
+**Do not invent a separate forced migration product.** Coordinated hub+cli upgrade + the tip's in-place proof rebind is the path:
+
+1. **Tagged machines (post-first-enroll):** cold runner restart **keeps machineId**; hub rebinds `runnerProofHash` when tag matches. Kill-test: Cursor resume with zero SQL.
+2. **Leftover rotate** (untagged legacy / true tag conflict): CLI rotate must call migrate-sessions **without** dead `fromRunnerProof` (tip). Sessions move in-band.
+3. **Untagged live machines** (Teemo / proxmox still empty tag on this estate): first register that presents a new tag still **refuses first-claim bind** and forces re-enroll with a **new** id — then (2) must migrate. Operators should expect **one** UUID change on first #1473-capable runner start per host unless they pre-seed tags carefully.
+4. **Hub-only upgrade ahead of CLI:** still painful — fail-closed RPC auth with old CLIs. Ship hub+cli together; recycle long-lived session processes once after upgrade (uploads/skills).
 
 `fix/hub-runner-version-governance` (#1108) is fleet upgrade/skew — **does not** close session `machineId` orphaning.
+
+Peer tip (2026-08-10): `4f65f30f9` on `feat/a2a-p05-peer-provenance` — in-place proof rebind + migrate-without-dead-proof. Remat + estate kill-test still required before calling the gate closed.
 
 ## Estate policy (do this first)
 
