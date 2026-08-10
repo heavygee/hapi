@@ -13,7 +13,7 @@ import { resolvePeerMetaFromSourceSession } from './messages'
 import { mintPeerSessionCapability, verifyPeerSessionCapability } from '../peerCapability'
 import { redeemResumePeerMint } from '../pendingResumePeerMint'
 import { verifyRunnerProof } from '../../utils/runnerProof'
-import { consumeReenrollGrant, issueReenrollGrant, verifyReenrollGrant, ackReenrollGrant } from '../../utils/reenrollGrant'
+import { issueReenrollGrant, verifyReenrollGrant, ackReenrollGrant } from '../../utils/reenrollGrant'
 import { getConfiguration } from '../../configuration'
 import { readSessionSummaryContractEnabled } from '../../config/sessionSummaryContract'
 import { constantTimeEquals } from '../../utils/crypto'
@@ -448,21 +448,21 @@ export function createCliRoutes(
             return c.json({ error: 'Source machine proof required' }, 403)
         }
         try {
-            const migrated = engine.migrateSessionsMachineId(fromMachineId, newMachineId, namespace)
-            if (usingGrant) {
-                // Consume only after migrate succeeds so retries keep working
-                // when metadata remaps conflict (#1473 Major).
-                consumeReenrollGrant({
-                    machineId: fromMachineId,
+            const migrated = usingGrant
+                ? engine.migrateSessionsMachineIdWithGrant({
+                    fromMachineId,
+                    toMachineId: newMachineId,
                     namespace,
                     grant: reenrollGrant,
                 })
-            }
+                : engine.migrateSessionsMachineId(fromMachineId, newMachineId, namespace)
             return c.json({ migrated })
         } catch (error) {
-            return c.json({
-                error: error instanceof Error ? error.message : 'Session migration failed',
-            }, 409)
+            const message = error instanceof Error ? error.message : 'Session migration failed'
+            if (message === 'Source machine proof required') {
+                return c.json({ error: message }, 403)
+            }
+            return c.json({ error: message }, 409)
         }
     })
 

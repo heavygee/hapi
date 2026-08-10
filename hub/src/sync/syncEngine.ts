@@ -53,6 +53,7 @@ import {
 import { SessionCache } from './sessionCache'
 import { ingestNotifySummaryFromMessage } from './workGraphNotifyIngest'
 import { armResumePeerMint, clearResumePeerMint } from '../web/pendingResumePeerMint'
+import { consumeReenrollGrant, verifyReenrollGrant } from '../utils/reenrollGrant'
 
 type PiResumeAttempt = NonNullable<NonNullable<Session['metadata']>['piResumeAttempt']>
 type PtyResumeAttempt = NonNullable<NonNullable<Session['metadata']>['ptyResumeAttempt']>
@@ -1052,6 +1053,41 @@ async uploadScratchlistAttachment(
             this.sessionCache.refreshSession(id)
         }
         return migratedIds.length
+    }
+
+    /**
+     * Remap + consume grant in one SQLite transaction so a hub crash cannot
+     * leave sessions on the new machine while the grant is already spent
+     * (or the inverse) (#1473 Major).
+     */
+    migrateSessionsMachineIdWithGrant(options: {
+        fromMachineId: string
+        toMachineId: string
+        namespace: string
+        grant: string
+    }): number {
+        return this.store.runInTransaction(() => {
+            if (!verifyReenrollGrant({
+                machineId: options.fromMachineId,
+                namespace: options.namespace,
+                grant: options.grant,
+            })) {
+                throw new Error('Source machine proof required')
+            }
+            const migrated = this.migrateSessionsMachineId(
+                options.fromMachineId,
+                options.toMachineId,
+                options.namespace
+            )
+            if (!consumeReenrollGrant({
+                machineId: options.fromMachineId,
+                namespace: options.namespace,
+                grant: options.grant,
+            })) {
+                throw new Error('Failed to consume reenroll grant after migration')
+            }
+            return migrated
+        })
     }
 
     async sendMessage(

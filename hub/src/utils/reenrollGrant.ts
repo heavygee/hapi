@@ -17,7 +17,7 @@ type GrantRecord = {
 const grantsByHash = new Map<string, GrantRecord>()
 let grantDb: Database | null = null
 
-const DEFAULT_TTL_MS = 24 * 60 * 60_000
+const DEFAULT_TTL_MS = 365 * 24 * 60 * 60_000
 
 function hashGrant(grant: string): string {
     return createHash('sha256').update(grant.trim(), 'utf8').digest('base64url')
@@ -39,8 +39,10 @@ function purgeExpired(now = Date.now()): void {
     }
 }
 
-function loadRecord(hash: string): GrantRecord | undefined {
-    purgeExpired()
+function loadRecord(hash: string, options?: { purgeExpired?: boolean }): GrantRecord | undefined {
+    if (options?.purgeExpired !== false) {
+        purgeExpired()
+    }
     let record = grantsByHash.get(hash)
     if (record || !grantDb) {
         return record
@@ -158,11 +160,6 @@ export function ackReenrollGrant(options: {
     if (record.machineId !== options.machineId || record.namespace !== options.namespace) {
         return false
     }
-    if (record.expiresAt < Date.now()) {
-        grantsByHash.delete(hash)
-        grantDb?.prepare('DELETE FROM machine_reenroll_grants WHERE grant_hash = ?').run(hash)
-        return false
-    }
     for (const [otherHash, other] of [...grantsByHash.entries()]) {
         if (other.machineId === options.machineId && otherHash !== hash) {
             grantsByHash.delete(otherHash)
@@ -187,16 +184,13 @@ export function verifyReenrollGrant(options: {
     if (!presented) {
         return false
     }
-    const record = loadRecord(hashGrant(presented))
+    // Do not purge by wall-clock here — offline machines may sit longer than
+    // any fixed TTL before cold start; consume/ack are the real invalidators.
+    const record = loadRecord(hashGrant(presented), { purgeExpired: false })
     if (!record) {
         return false
     }
     if (record.machineId !== options.machineId || record.namespace !== options.namespace) {
-        return false
-    }
-    if (record.expiresAt < Date.now()) {
-        grantsByHash.delete(record.hash)
-        grantDb?.prepare('DELETE FROM machine_reenroll_grants WHERE grant_hash = ?').run(record.hash)
         return false
     }
     return constantTimeEquals(record.hash, hashGrant(presented))

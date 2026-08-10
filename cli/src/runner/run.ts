@@ -1282,16 +1282,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     // without depending on graceful cleanup (#1473 Blocker).
     // Issue keeps prior hashes valid until we persist + ack the replacement.
     // Serialize refreshes so interval + shutdown acks cannot revoke each other.
-    let reenrollRefreshInFlight: Promise<void> | null = null
-    const persistFreshReenrollGrant = async (options?: { required?: boolean }) => {
+    let reenrollRefreshChain: Promise<void> = Promise.resolve()
+    const persistFreshReenrollGrant = (options?: { required?: boolean }): Promise<void> => {
       const required = options?.required === true
-      if (reenrollRefreshInFlight) {
-        await reenrollRefreshInFlight
-        if (!required) {
-          return
-        }
-      }
-      const task = (async () => {
+      const next = reenrollRefreshChain.then(async () => {
         try {
           const issued = await api.issueMachineReenrollGrant({
             machineId,
@@ -1318,13 +1312,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           }
           logger.debug('[RUNNER RUN] Failed to refresh reenroll grant', error)
         }
-      })()
-      reenrollRefreshInFlight = task.finally(() => {
-        if (reenrollRefreshInFlight === task) {
-          reenrollRefreshInFlight = null
-        }
       })
-      await reenrollRefreshInFlight
+      // Keep the chain alive even when a refresh fails.
+      reenrollRefreshChain = next.then(() => undefined, () => undefined)
+      return next
     }
     await persistFreshReenrollGrant({ required: true })
     const reenrollRefresh = setInterval(() => {
