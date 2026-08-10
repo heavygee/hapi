@@ -13,7 +13,7 @@ import { configuration } from '@/configuration';
 import packageJson from '../../package.json';
 import { getEnvironmentInfo } from '@/ui/doctor';
 import { spawnHappyCLI } from '@/utils/spawnHappyCLI';
-import { writeRunnerState, RunnerLocallyPersistedState, readRunnerState, acquireRunnerLock, releaseRunnerLock } from '@/persistence';
+import { writeRunnerState, RunnerLocallyPersistedState, readRunnerState, readSettings, acquireRunnerLock, releaseRunnerLock } from '@/persistence';
 import { getCliArgs } from '@/utils/cliArgs';
 import { getProcessStartMarker, isProcessAlive, isWindows, killProcess, killProcessByChildProcess, killProcessTreeByPid } from '@/utils/process';
 import { PERMISSION_MODES } from '@hapi/protocol/modes';
@@ -402,16 +402,16 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     persistResumeProcesses();
 
     // Webhook timeout tolerance. Opus 1M + --resume can legitimately take
-    // longer than the default 15s to reach the "Session started" webhook
+    // longer than the default to reach the "Session started" webhook
     // (observed real-world durations of 30s – 60min under rate-limit /
-    // heavy session restore). Allow advanced users to raise this ceiling
-    // so that slow starts no longer leave orphaned child processes which
-    // later report back as ghost sessions.
+    // heavy session restore). Peer-cap inject wait is ~16–20s — a 15s
+    // default races resume (#1473 upload blindness). Override via
+    // HAPI_RUNNER_WEBHOOK_TIMEOUT_MS for slower starts.
     const envWebhookTimeout = Number(process.env.HAPI_RUNNER_WEBHOOK_TIMEOUT_MS);
     const webhookTimeoutMs =
       Number.isFinite(envWebhookTimeout) && envWebhookTimeout > 0
         ? envWebhookTimeout
-        : 15_000;
+        : 25_000;
 
     // Session spawning awaiter system
     const pidToAwaiter = new Map<number, (session: TrackedSession) => void>();
@@ -1721,8 +1721,23 @@ async function redeemResumePeerCapabilityFromHub(
   nonce: string
 ): Promise<string | undefined> {
   const apiUrl = configuration.apiUrl
-  const accessToken = configuration.cliApiToken
+  // Prefer in-memory token (env / tokenInit). Fall back to settings like
+  // controlClient — empty configuration.cliApiToken after a partial init
+  // silently breaks resume peer inject (#1473 upload blindness).
+  let accessToken = configuration.cliApiToken.trim()
+  if (!accessToken) {
+    try {
+      const settings = await readSettings()
+      accessToken = typeof settings.cliApiToken === 'string' ? settings.cliApiToken.trim() : ''
+      if (accessToken) {
+        configuration._setCliApiToken(accessToken)
+      }
+    } catch (error) {
+      logger.debug('[RUNNER RUN] resume peer redeem: settings token read failed', error)
+    }
+  }
   if (!apiUrl || !accessToken) {
+    logger.debug('[RUNNER RUN] resume peer redeem skipped: missing apiUrl or cliApiToken')
     return undefined
   }
   // /cli routes authenticate with the namespace CLI token (not a web JWT).
@@ -1738,6 +1753,9 @@ async function redeemResumePeerCapabilityFromHub(
     }
   )
   if (!redeemResponse.ok) {
+    logger.debug(
+      `[RUNNER RUN] resume peer redeem HTTP ${redeemResponse.status} for ${sessionId}`
+    )
     return undefined
   }
   const redeemBody = await redeemResponse.json() as { sessionCapability?: string }
