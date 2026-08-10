@@ -3,7 +3,10 @@ import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
 import type { CopilotAgentMode } from '@hapi/protocol'
 import type { AgentState, CodexCollaborationMode, Metadata, PermissionMode } from '@hapi/protocol/types'
-import { isRedundantGoalStatusEventContent } from '@hapi/protocol/messages'
+import {
+    isRedundantGoalStatusEventContent,
+    unwrapRoleWrappedRecordEnvelope,
+} from '@hapi/protocol/messages'
 import type { Store, StoredSession } from '../../../store'
 import type { SyncEvent } from '../../../sync/syncEngine'
 import { extractTodoWriteTodosFromMessageContent } from '../../../sync/todos'
@@ -135,15 +138,16 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
 
         // Trusted peer provenance is minted only via the capability HTTP route.
         // Generic CLI `message` must not forge meta.sentFrom === 'peer' (#1473).
+        // Unwrap envelopes the web path accepts (`message` / `data.message` /
+        // `payload.message`) before the check — top-level-only was bypassable.
+        const peerProvenanceRecord = unwrapRoleWrappedRecordEnvelope(content)
+        const peerMeta = peerProvenanceRecord?.meta
         if (
-            content
-            && typeof content === 'object'
-            && !Array.isArray(content)
-            && (content as { role?: unknown }).role === 'user'
-            && (content as { meta?: unknown }).meta
-            && typeof (content as { meta?: unknown }).meta === 'object'
-            && !Array.isArray((content as { meta: unknown }).meta)
-            && (content as { meta: { sentFrom?: unknown } }).meta.sentFrom === 'peer'
+            peerProvenanceRecord?.role === 'user'
+            && peerMeta
+            && typeof peerMeta === 'object'
+            && !Array.isArray(peerMeta)
+            && (peerMeta as { sentFrom?: unknown }).sentFrom === 'peer'
         ) {
             socket.emit('error', {
                 message: 'Peer provenance requires the capability route',

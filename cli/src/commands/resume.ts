@@ -14,8 +14,10 @@ import type {
     OpencodePermissionMode
 } from '@hapi/protocol/types'
 import { ApiClient } from '@/api/api'
+import { HAPI_PEER_CAP_INJECT_ENV } from '@/api/peerCapabilityInject'
 import type { ReasoningEffort } from '@/codex/appServerTypes'
 import { readSettings } from '@/persistence'
+import { prepareLocalResumeInject } from '@/runner/controlClient'
 import { authAndSetupMachineIfNeeded } from '@/ui/auth'
 import { initializeToken } from '@/ui/tokenInit'
 import { maybeAutoStartServer } from '@/utils/autoStartServer'
@@ -272,11 +274,29 @@ export const resumeCommand: CommandDefinition = {
                 throw new Error('Session is already controlled by a local terminal')
             }
 
-            if (target.active) {
-                await api.handoffSessionToLocal(target.sessionId)
+            // Acquire runner-proven inject BEFORE stopping a remote session
+            // (#1473 Major). Failure must leave the remote session running.
+            const prepared = await prepareLocalResumeInject(target.sessionId, process.pid)
+            if (!prepared.injectPath) {
+                throw new Error(
+                    prepared.error
+                        ?? 'Cannot securely resume: runner inject unavailable (is hapi runner running?)'
+                )
             }
-
-            await dispatchLocalResume(target)
+            const previousInject = process.env[HAPI_PEER_CAP_INJECT_ENV]
+            process.env[HAPI_PEER_CAP_INJECT_ENV] = prepared.injectPath
+            try {
+                if (target.active) {
+                    await api.handoffSessionToLocal(target.sessionId)
+                }
+                await dispatchLocalResume(target)
+            } finally {
+                if (previousInject === undefined) {
+                    delete process.env[HAPI_PEER_CAP_INJECT_ENV]
+                } else {
+                    process.env[HAPI_PEER_CAP_INJECT_ENV] = previousInject
+                }
+            }
         } catch (error) {
             console.error(chalk.red('Error:'), error instanceof Error ? error.message : 'Unknown error')
             if (process.env.DEBUG) {

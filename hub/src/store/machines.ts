@@ -114,19 +114,19 @@ export function getOrCreateMachine(
                 'Legacy machine must be re-enrolled with a new machine id'
             )
         }
-        // Existing rows must not first-claim a runner proof hash (#1473 Blocker).
-        // Null-hash machines re-enroll with a new machine id (INSERT binds hash).
-        if (presentedProof) {
-            if (!current.runnerProofHash) {
-                throw new MachineTagConflictError(
-                    'Machine runner proof missing; re-enroll with a new machine id'
-                )
-            }
-            if (!verifyRunnerProof(presentedProof, current.runnerProofHash)) {
+        // Bound rows require the runner proof on every registration (#1473 Major).
+        // Omitting proof must not refresh metadata/capabilities. Null-hash rows
+        // refuse late bind — re-enroll with a new machine id (INSERT binds hash).
+        if (current.runnerProofHash) {
+            if (!presentedProof || !verifyRunnerProof(presentedProof, current.runnerProofHash)) {
                 throw new MachineTagConflictError(
                     'Machine runner proof mismatch; re-enroll with a new machine id'
                 )
             }
+        } else if (presentedProof) {
+            throw new MachineTagConflictError(
+                'Machine runner proof missing; re-enroll with a new machine id'
+            )
         }
         const merged = mergeMachineMetadata(current.metadata, metadata)
         if (merged !== undefined) {

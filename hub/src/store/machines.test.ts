@@ -40,6 +40,16 @@ describe('machine tag enrollment (#1473)', () => {
             'secret-tag',
             'proof-late'
         )).toThrow(/runner proof missing/)
+
+        // Bound rows reject omitted proof (#1473 Major) — must not refresh metadata.
+        expect(() => store.machines.getOrCreateMachine(
+            'machine-proof',
+            { host: 'hijack' },
+            null,
+            'ns',
+            'secret-tag'
+        )).toThrow(/runner proof mismatch/)
+        expect(store.machines.getMachine('machine-proof')?.metadata).toEqual({ host: 'h' })
         store.close()
     })
 

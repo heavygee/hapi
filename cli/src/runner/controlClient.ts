@@ -108,6 +108,21 @@ export async function spawnRunnerSession(directory: string, sessionId?: string):
   return result;
 }
 
+/** Ask the live runner to mint + PID-inject a session capability for local resume. */
+export async function prepareLocalResumeInject(
+  sessionId: string,
+  clientPid: number = process.pid
+): Promise<{ injectPath?: string; error?: string }> {
+  const result = await runnerPost('/prepare-local-resume', { sessionId, clientPid })
+  if (result?.error && !result?.injectPath) {
+    return { error: typeof result.error === 'string' ? result.error : 'prepare-local-resume failed' }
+  }
+  if (typeof result?.injectPath === 'string' && result.injectPath.trim()) {
+    return { injectPath: result.injectPath.trim() }
+  }
+  return { error: typeof result?.error === 'string' ? result.error : 'No inject path from runner' }
+}
+
 export async function stopRunnerHttp(): Promise<void> {
   await runnerPost('/stop');
 }

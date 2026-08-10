@@ -39,6 +39,11 @@ import {
   type PeerCapabilityInjectServer,
 } from '@/api/peerCapabilityInject';
 import { buildHubRequestHeaders } from '@/api/hubExtraHeaders';
+import {
+  clearSecureRunnerProof,
+  loadSecureRunnerProof,
+  saveSecureRunnerProof,
+} from './secureRunnerProofStore';
 
 /**
  * Deduplicates a preallocated HAPI-row spawn only while its child is alive.
@@ -1097,13 +1102,43 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       if (persistedResumeProcesses.delete(pid)) persistResumeProcesses();
     };
 
+    // Filled after machine registration — local resume inject needs live proof.
+    let liveRunnerAuth: {
+      machineId: string
+      machineTag: string
+      runnerProof: string
+    } | null = null
+
     // Start control server
     const { port: controlPort, stop: stopControlServer } = await startRunnerControlServer({
       getChildren: getCurrentChildren,
       stopSession,
       spawnSession,
       requestShutdown: () => requestShutdown('hapi-cli'),
-      onHappySessionWebhook
+      onHappySessionWebhook,
+      prepareLocalResumeInject: async ({ sessionId, clientPid }) => {
+        const auth = liveRunnerAuth
+        if (!auth) {
+          return { error: 'Runner machine auth not ready' }
+        }
+        const inject = await startPeerCapabilityInjectServer()
+        if (!inject) {
+          return { error: 'Inject transport unavailable on this platform' }
+        }
+        const capability = await fetchLocalResumeCapabilityFromHub(
+          sessionId,
+          auth
+        )
+        if (!capability) {
+          inject.close()
+          return { error: 'Hub refused local resume capability' }
+        }
+        // Arm delivery; resume CLI connects as clientPid (self).
+        void inject.deliverTo(clientPid, { sessionCapability: capability }).finally(() => {
+          inject.close()
+        })
+        return { injectPath: inject.path }
+      },
     });
 
     // Baseline mtime at runner-process start. Immutable: per Codex review #814
@@ -1140,16 +1175,18 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     // (Codex review #814 [Major] - controlClient.ts:192 fix).
     const startedWithVersionHandoffDisabled = process.env.HAPI_DISABLE_VERSION_HANDOFF === '1';
 
-    // Memory-only runner-generation proof (#1473). Prefer the one-shot handoff
-    // bearer from an authorized parent restart; otherwise mint fresh (hub will
-    // 409-rotate machine id when the prior generation hash no longer matches).
-    // Never settings, runner.state, or wrapped-agent env.
+    // Memory-only runner-generation proof (#1473). Prefer authorized handoff,
+    // then OS keyring recovery (survives reboot/crash without stranding
+    // sessions), else mint fresh. Never settings, runner.state, or child env.
     if (isAuthorizedHandoff && !handoffRunnerProof) {
       throw new Error(
         'Authorized runner handoff missing runnerProof from PID-checked socket'
       )
     }
-    const runnerProof = handoffRunnerProof ?? randomBytes(32).toString('base64url')
+    const recoveredRunnerProof = handoffRunnerProof
+      ?? await loadSecureRunnerProof(machineId)
+    const runnerProof = recoveredRunnerProof ?? randomBytes(32).toString('base64url')
+    const mintedFreshRunnerProof = !recoveredRunnerProof
 
     // Write initial runner state (no lock needed for state file)
     const fileState: RunnerLocallyPersistedState = {
@@ -1205,14 +1242,28 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       }
     );
     // Legacy re-enroll may rotate machineId inside getOrCreateMachine (#1473).
+    const previousMachineId = machineId
     if (machine.id !== machineId) {
+      await clearSecureRunnerProof(previousMachineId)
       machineId = machine.id;
       const rotated = await authAndSetupMachineIfNeeded();
       machineTag = rotated.machineTag;
       fileState.startedWithMachineId = machineId;
       writeRunnerState(fileState);
+      // Remap sessions so remote resume does not strand on the retired id.
+      await migrateSessionsMachineIdOnHub({
+        fromMachineId: previousMachineId,
+        toMachineId: machineId,
+        machineTag,
+        runnerProof,
+      })
       logger.debug(`[RUNNER RUN] Re-enrolled legacy machine as ${machineId}`);
     }
+    await saveSecureRunnerProof(machineId, runnerProof)
+    if (mintedFreshRunnerProof && machine.id === previousMachineId) {
+      logger.debug('[RUNNER RUN] Minted fresh runnerProof and bound to OS keyring')
+    }
+    liveRunnerAuth = { machineId, machineTag, runnerProof }
     logger.debug(`[RUNNER RUN] Machine registered: ${machine.id}`);
 
     // Create realtime machine session
@@ -1684,4 +1735,69 @@ async function redeemResumePeerCapabilityFromHub(
     ? redeemBody.sessionCapability.trim()
     : ''
   return capability || undefined
+}
+
+async function fetchLocalResumeCapabilityFromHub(
+  sessionId: string,
+  auth: { machineId: string; machineTag: string; runnerProof: string }
+): Promise<string | undefined> {
+  const apiUrl = configuration.apiUrl
+  const accessToken = configuration.cliApiToken
+  if (!apiUrl || !accessToken) {
+    return undefined
+  }
+  const response = await fetch(
+    `${apiUrl}/cli/sessions/${encodeURIComponent(sessionId)}/local-resume-capability`,
+    {
+      method: 'POST',
+      headers: buildHubRequestHeaders({
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      }),
+      body: JSON.stringify(auth),
+    }
+  )
+  if (!response.ok) {
+    return undefined
+  }
+  const body = await response.json() as { sessionCapability?: string }
+  const capability = typeof body.sessionCapability === 'string'
+    ? body.sessionCapability.trim()
+    : ''
+  return capability || undefined
+}
+
+async function migrateSessionsMachineIdOnHub(opts: {
+  fromMachineId: string
+  toMachineId: string
+  machineTag: string
+  runnerProof: string
+}): Promise<void> {
+  const apiUrl = configuration.apiUrl
+  const accessToken = configuration.cliApiToken
+  if (!apiUrl || !accessToken) {
+    return
+  }
+  try {
+    const response = await fetch(
+      `${apiUrl}/cli/machines/${encodeURIComponent(opts.toMachineId)}/migrate-sessions`,
+      {
+        method: 'POST',
+        headers: buildHubRequestHeaders({
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        }),
+        body: JSON.stringify({
+          fromMachineId: opts.fromMachineId,
+          machineTag: opts.machineTag,
+          runnerProof: opts.runnerProof,
+        }),
+      }
+    )
+    if (!response.ok) {
+      logger.debug(`[RUNNER RUN] session machineId migrate failed: HTTP ${response.status}`)
+    }
+  } catch (error) {
+    logger.debug('[RUNNER RUN] session machineId migrate failed', error)
+  }
 }

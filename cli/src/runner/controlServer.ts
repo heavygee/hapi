@@ -16,13 +16,18 @@ export function startRunnerControlServer({
   stopSession,
   spawnSession,
   requestShutdown,
-  onHappySessionWebhook
+  onHappySessionWebhook,
+  prepareLocalResumeInject,
 }: {
   getChildren: () => TrackedSession[];
   stopSession: (sessionId: string) => Promise<'stopped' | 'already_gone' | 'still_alive'>;
   spawnSession: (options: SpawnSessionOptions) => Promise<SpawnSessionResult>;
   requestShutdown: () => void;
   onHappySessionWebhook: (sessionId: string, metadata: Metadata) => void;
+  prepareLocalResumeInject?: (opts: {
+    sessionId: string
+    clientPid: number
+  }) => Promise<{ injectPath?: string; error?: string }>;
 }): Promise<{ port: number; stop: () => Promise<void> }> {
   return new Promise((resolve) => {
     const app = fastify({
@@ -167,6 +172,31 @@ export function startRunnerControlServer({
             success: false,
             error: result.errorMessage
           };
+      }
+    });
+
+    // Prepare PID-checked capability inject for direct `hapi resume` (#1473).
+    typed.post('/prepare-local-resume', {
+      schema: {
+        body: z.object({
+          sessionId: z.string().min(1),
+          clientPid: z.number().int().positive(),
+        }),
+        response: {
+          200: z.object({
+            injectPath: z.string().optional(),
+            error: z.string().optional(),
+          }),
+        },
+      },
+    }, async (request) => {
+      if (!prepareLocalResumeInject) {
+        return { error: 'Local resume inject not configured' }
+      }
+      const result = await prepareLocalResumeInject(request.body)
+      return {
+        injectPath: result.injectPath,
+        error: result.error,
       }
     });
 

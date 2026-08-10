@@ -34,12 +34,17 @@ export async function startPeerCapabilityInjectServer(options?: {
     readPeerCred?: PeerCredReader
     socketPath?: string
 }): Promise<PeerCapabilityInjectServer | null> {
-    // peercred is Linux/macOS only; fail soft so resume stays unattributed (#1473).
-    if (process.platform !== 'linux' && process.platform !== 'darwin') {
+    // Linux/macOS: SO_PEERCRED / getpeereid. Windows: named pipe + GetNamedPipeClientProcessId.
+    if (
+        process.platform !== 'linux'
+        && process.platform !== 'darwin'
+        && process.platform !== 'win32'
+    ) {
         return null
     }
 
-    const readPeerCred = options?.readPeerCred ?? readUnixPeerCredentials
+    const readPeerCred = options?.readPeerCred
+        ?? (process.platform === 'win32' ? readWindowsNamedPipeClientCredentials : readUnixPeerCredentials)
     const socketPath = options?.socketPath ?? defaultInjectSocketPath()
 
     let expectedChildPid: number | null = null
@@ -50,12 +55,14 @@ export async function startPeerCapabilityInjectServer(options?: {
     let server: Server | null = null
 
     try {
-        mkdirSync(dirname(socketPath), { recursive: true, mode: 0o700 })
-        if (existsSync(socketPath)) {
-            try {
-                unlinkSync(socketPath)
-            } catch {
-                // replace
+        if (process.platform !== 'win32') {
+            mkdirSync(dirname(socketPath), { recursive: true, mode: 0o700 })
+            if (existsSync(socketPath)) {
+                try {
+                    unlinkSync(socketPath)
+                } catch {
+                    // replace
+                }
             }
         }
 
@@ -102,10 +109,12 @@ export async function startPeerCapabilityInjectServer(options?: {
 
     const listening = server
 
-    try {
-        chmodSync(socketPath, 0o600)
-    } catch {
-        // best-effort
+    if (process.platform !== 'win32') {
+        try {
+            chmodSync(socketPath, 0o600)
+        } catch {
+            // best-effort
+        }
     }
 
     return {
@@ -130,10 +139,12 @@ export async function startPeerCapabilityInjectServer(options?: {
                 deliverTimer = null
             }
             listening.close()
-            try {
-                unlinkSync(socketPath)
-            } catch {
-                // ignore
+            if (process.platform !== 'win32') {
+                try {
+                    unlinkSync(socketPath)
+                } catch {
+                    // ignore
+                }
             }
             if (deliverReject) {
                 const rej = deliverReject
@@ -263,7 +274,48 @@ function tryReceiveOnce(
 }
 
 function defaultInjectSocketPath(): string {
+    if (process.platform === 'win32') {
+        // Bun/Node named-pipe path; random suffix defeats squatting (#1473).
+        return `\\\\.\\pipe\\hapi-pci-${randomBytes(12).toString('hex')}`
+    }
     const runtime = process.env.XDG_RUNTIME_DIR?.trim()
         || join(tmpdir(), `hapi-${process.getuid?.() ?? process.pid}`)
     return join(runtime, 'pci', `${randomBytes(12).toString('hex')}.sock`)
+}
+
+/** Windows named-pipe peer pid via GetNamedPipeClientProcessId (#1473 Major). */
+export const readWindowsNamedPipeClientCredentials: PeerCredReader = (socket) => {
+    try {
+        const handleObj = (socket as unknown as {
+            _handle?: { fd?: number | bigint; handle?: number | bigint }
+        })._handle
+        const raw = handleObj?.fd ?? handleObj?.handle
+        if (raw === undefined || raw === null) {
+            return null
+        }
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { dlopen, ptr } = require('bun:ffi') as typeof import('bun:ffi')
+        const kernel32 = dlopen('kernel32.dll', {
+            GetNamedPipeClientProcessId: {
+                // HANDLE is pointer-sized; pass the handle value as ptr.
+                args: ['ptr', 'ptr'] as const,
+                returns: 'i32',
+            },
+        })
+        const pidBuf = new Uint32Array(1)
+        const handleValue = typeof raw === 'bigint' ? raw : BigInt(Number(raw))
+        const handleBuf = Buffer.alloc(8)
+        handleBuf.writeBigUInt64LE(handleValue)
+        const ok = kernel32.symbols.GetNamedPipeClientProcessId(ptr(handleBuf), ptr(pidBuf))
+        if (!ok) {
+            return null
+        }
+        const pid = pidBuf[0]!
+        if (!Number.isInteger(pid) || pid <= 0) {
+            return null
+        }
+        return { pid, uid: 0, gid: 0 }
+    } catch {
+        return null
+    }
 }

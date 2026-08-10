@@ -12,6 +12,7 @@ import {
 import { resolvePeerMetaFromSourceSession } from './messages'
 import { mintPeerSessionCapability, verifyPeerSessionCapability } from '../peerCapability'
 import { redeemResumePeerMint } from '../pendingResumePeerMint'
+import { verifyRunnerProof } from '../../utils/runnerProof'
 import { getConfiguration } from '../../configuration'
 import { readSessionSummaryContractEnabled } from '../../config/sessionSummaryContract'
 import { constantTimeEquals } from '../../utils/crypto'
@@ -302,6 +303,93 @@ export function createCliRoutes(
             now: Date.now()
         })
         return c.json({ messages })
+    })
+
+    /**
+     * Runner-proven local resume capability (#1473 Major).
+     * Requires the memory-only runnerProof bound to the session's machine —
+     * terminal CLI alone (machineTag from settings) cannot mint.
+     */
+    app.post('/sessions/:id/local-resume-capability', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not ready' }, 503)
+        }
+        const sessionId = c.req.param('id')
+        const namespace = c.get('namespace')
+        const source = resolveSessionForNamespace(engine, sessionId, namespace)
+        if (!source.ok) {
+            return c.json({ error: source.error }, source.status)
+        }
+        const body = await c.req.json().catch(() => null)
+        const machineId = body && typeof body === 'object' && typeof (body as { machineId?: unknown }).machineId === 'string'
+            ? (body as { machineId: string }).machineId.trim()
+            : ''
+        const machineTag = body && typeof body === 'object' && typeof (body as { machineTag?: unknown }).machineTag === 'string'
+            ? (body as { machineTag: string }).machineTag.trim()
+            : ''
+        const runnerProof = body && typeof body === 'object' && typeof (body as { runnerProof?: unknown }).runnerProof === 'string'
+            ? (body as { runnerProof: string }).runnerProof.trim()
+            : ''
+        const sessionMachineId = typeof source.session.metadata?.machineId === 'string'
+            ? source.session.metadata.machineId.trim()
+            : ''
+        if (!machineId || !machineTag || !runnerProof || !sessionMachineId || machineId !== sessionMachineId) {
+            return c.json({ error: 'Machine proof required for local resume capability' }, 403)
+        }
+        const authMaterial = engine.getMachineAuthMaterial(machineId)
+        if (!authMaterial || authMaterial.namespace !== namespace) {
+            return c.json({ error: 'Machine access denied' }, 403)
+        }
+        const storedTag = typeof authMaterial.tag === 'string' ? authMaterial.tag : ''
+        if (!storedTag || !constantTimeEquals(storedTag, machineTag)) {
+            return c.json({ error: 'Machine tag mismatch' }, 403)
+        }
+        if (!verifyRunnerProof(runnerProof, authMaterial.runnerProofHash)) {
+            return c.json({ error: 'Machine runner proof mismatch' }, 403)
+        }
+        return c.json({
+            sessionCapability: mintPeerSessionCapability(source.sessionId, jwtSecret),
+        })
+    })
+
+    /**
+     * Remap session metadata.machineId after forced machine re-enroll (#1473).
+     * Requires runner proof for the new machine so siblings cannot mass-migrate.
+     */
+    app.post('/machines/:id/migrate-sessions', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not ready' }, 503)
+        }
+        const newMachineId = c.req.param('id')
+        const namespace = c.get('namespace')
+        const body = await c.req.json().catch(() => null)
+        const fromMachineId = body && typeof body === 'object' && typeof (body as { fromMachineId?: unknown }).fromMachineId === 'string'
+            ? (body as { fromMachineId: string }).fromMachineId.trim()
+            : ''
+        const machineTag = body && typeof body === 'object' && typeof (body as { machineTag?: unknown }).machineTag === 'string'
+            ? (body as { machineTag: string }).machineTag.trim()
+            : ''
+        const runnerProof = body && typeof body === 'object' && typeof (body as { runnerProof?: unknown }).runnerProof === 'string'
+            ? (body as { runnerProof: string }).runnerProof.trim()
+            : ''
+        if (!fromMachineId || !machineTag || !runnerProof) {
+            return c.json({ error: 'fromMachineId, machineTag, and runnerProof required' }, 400)
+        }
+        const authMaterial = engine.getMachineAuthMaterial(newMachineId)
+        if (!authMaterial || authMaterial.namespace !== namespace) {
+            return c.json({ error: 'Machine access denied' }, 403)
+        }
+        const storedTag = typeof authMaterial.tag === 'string' ? authMaterial.tag : ''
+        if (!storedTag || !constantTimeEquals(storedTag, machineTag)) {
+            return c.json({ error: 'Machine tag mismatch' }, 403)
+        }
+        if (!verifyRunnerProof(runnerProof, authMaterial.runnerProofHash)) {
+            return c.json({ error: 'Machine runner proof mismatch' }, 403)
+        }
+        const migrated = engine.migrateSessionsMachineId(fromMachineId, newMachineId, namespace)
+        return c.json({ migrated })
     })
 
     /**

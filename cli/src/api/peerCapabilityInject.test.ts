@@ -112,7 +112,7 @@ describe('peerCapabilityInject (#1203 pass 2h)', () => {
 
     it('returns null on unsupported platforms without throwing', async () => {
         Object.defineProperty(process, 'platform', {
-            value: 'win32',
+            value: 'aix',
             configurable: true,
         })
         const server = await startPeerCapabilityInjectServer({ socketPath: tempSock() })
