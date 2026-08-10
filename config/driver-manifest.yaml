@@ -739,3 +739,11 @@ layers:
   # DROPPED 2026-08-09: fix/terminal-ctrl-xs-jed MERGED as tiann/hapi#1460
   # (06e2507ad — mobile Control pad Ctrl+X/Ctrl+S for Jed; Fixes #1459)
   # Was: tip fd8af28ce. Worktree terminal-ctrl-xs-jed.
+
+  # tiann/hapi#1472 — residual ACP exit 143 / false transport_closed after #835.
+  # CLI: guard before spawn, hold until close, child PID + ~/.hapi lock home.
+  # Do NOT open upstream PR until operator dogfood OK on :3006 (Cursor ACP).
+  # Worktree: ~/coding/hapi/worktrees/acp-143-false-exit @ fix/acp-143-false-transport-closed
+  # Tip: 110b766e6 (origin/fix/acp-143-false-transport-closed)
+  - branch: fix/acp-143-false-transport-closed
+
