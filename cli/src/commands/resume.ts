@@ -14,10 +14,8 @@ import type {
     OpencodePermissionMode
 } from '@hapi/protocol/types'
 import { ApiClient } from '@/api/api'
-import { armDirectResumeCapability } from '@/api/peerCapabilityInject'
 import type { ReasoningEffort } from '@/codex/appServerTypes'
 import { readSettings } from '@/persistence'
-import { acquireLocalResumeCapability } from '@/runner/controlClient'
 import { authAndSetupMachineIfNeeded } from '@/ui/auth'
 import { initializeToken } from '@/ui/tokenInit'
 import { maybeAutoStartServer } from '@/utils/autoStartServer'
@@ -274,17 +272,19 @@ export const resumeCommand: CommandDefinition = {
                 throw new Error('Session is already controlled by a local terminal')
             }
 
-            // Acquire runner-proven capability BEFORE stopping a remote session
-            // (#1473 Blocker/Major). Peercred grant returns the secret in-process;
-            // failure must leave the remote session running.
-            const granted = await acquireLocalResumeCapability(target.sessionId)
-            if (!granted.sessionCapability) {
+            // Same-UID siblings can read runner.state + connect to any AF_UNIX
+            // grant socket. Direct terminal resume cannot be bound to a
+            // user-authorized client without an unbound mint channel (#1473
+            // Blocker). Secure resume remains hub/web → runner spawn + inject.
+            // Fail before handoff so an active remote session stays running.
+            if (!process.env.HAPI_PEER_CAP_INJECT?.trim()) {
                 throw new Error(
-                    granted.error
-                        ?? 'Cannot securely resume: runner grant unavailable (is hapi runner running?)'
+                    'Secure resume requires hub/web runner inject '
+                    + '(direct terminal hapi resume cannot prove user authorization '
+                    + 'against same-UID siblings). Resume from the web UI, or keep '
+                    + 'the session local.'
                 )
             }
-            armDirectResumeCapability(granted.sessionCapability)
             if (target.active) {
                 await api.handoffSessionToLocal(target.sessionId)
             }

@@ -42,8 +42,6 @@ const defaultSettings: Settings = {}
 export interface RunnerLocallyPersistedState {
   pid: number;
   httpPort: number;
-  /** AF_UNIX / named-pipe path for peercred local-resume grants (#1473). */
-  localResumeGrantPath?: string;
   startTime: string;
   startedWithCliVersion: string;
   startedWithCliMtimeMs?: number;

@@ -10,6 +10,8 @@ import { readUnixPeerCredentials, type PeerCredentials, type PeerCredReader } fr
 export const HAPI_PEER_CAP_INJECT_ENV = 'HAPI_PEER_CAP_INJECT'
 /** Opaque socket path only — never put the proof itself in env (#1473). */
 export const HAPI_RUNNER_HANDOFF_SOCKET_ENV = 'HAPI_RUNNER_HANDOFF_SOCKET'
+/** Runner PID for Windows named-pipe server verification (#1473 Major). */
+export const HAPI_PEER_CAP_INJECT_SERVER_PID_ENV = 'HAPI_PEER_CAP_INJECT_SERVER_PID'
 
 /** In-process capability from peercred local-resume grant (never env). */
 let pendingDirectResumeCapability: string | undefined
@@ -183,9 +185,15 @@ export async function receivePeerCapabilityFromRunner(options?: {
         return undefined
     }
     delete process.env[HAPI_PEER_CAP_INJECT_ENV]
+    const serverPidRaw = process.env[HAPI_PEER_CAP_INJECT_SERVER_PID_ENV]?.trim()
+    delete process.env[HAPI_PEER_CAP_INJECT_SERVER_PID_ENV]
+    const expectedServerPid = serverPidRaw && /^\d+$/.test(serverPidRaw)
+        ? Number(serverPidRaw)
+        : undefined
     return await receiveInjectedField('sessionCapability', {
         ...options,
         socketPath,
+        expectedServerPid,
     })
 }
 
@@ -205,11 +213,16 @@ export async function receiveRunnerProofFromHandoff(options?: {
         return undefined
     }
     delete process.env[HAPI_RUNNER_HANDOFF_SOCKET_ENV]
+    const handoffFromPidRaw = process.env.HAPI_RUNNER_HANDOFF_FROM_PID?.trim()
+    const expectedServerPid = handoffFromPidRaw && /^\d+$/.test(handoffFromPidRaw)
+        ? Number(handoffFromPidRaw)
+        : undefined
     return await receiveInjectedField('runnerProof', {
         ...options,
         socketPath,
         // Handoff is brief; fewer retries than resume inject.
         attempts: options?.attempts ?? 50,
+        expectedServerPid,
     })
 }
 

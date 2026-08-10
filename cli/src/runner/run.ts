@@ -33,18 +33,13 @@ import { scheduleCursorModelsPrewarm } from '@/modules/common/cursorModelsPrewar
 import { isLinkedGitWorktree } from '@/utils/isLinkedGitWorktree';
 import {
   HAPI_PEER_CAP_INJECT_ENV,
+  HAPI_PEER_CAP_INJECT_SERVER_PID_ENV,
   HAPI_RUNNER_HANDOFF_SOCKET_ENV,
   receiveRunnerProofFromHandoff,
   startPeerCapabilityInjectServer,
   type PeerCapabilityInjectServer,
 } from '@/api/peerCapabilityInject';
 import { buildHubRequestHeaders } from '@/api/hubExtraHeaders';
-import {
-  clearSecureRunnerProof,
-  loadSecureRunnerProof,
-  saveSecureRunnerProof,
-} from './secureRunnerProofStore';
-import { startLocalResumeGrantServer } from './localResumeGrant';
 
 /**
  * Deduplicates a preallocated HAPI-row spawn only while its child is alive.
@@ -675,6 +670,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             extraEnv = {
               ...extraEnv,
               [HAPI_PEER_CAP_INJECT_ENV]: peerCapInject.path,
+              [HAPI_PEER_CAP_INJECT_SERVER_PID_ENV]: String(process.pid),
             }
           }
         }
@@ -1103,26 +1099,6 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       if (persistedResumeProcesses.delete(pid)) persistResumeProcesses();
     };
 
-    // Filled after machine registration — local resume grant needs live proof.
-    let liveRunnerAuth: {
-      machineId: string
-      machineTag: string
-      runnerProof: string
-    } | null = null
-
-    // Peercred AF_UNIX / named-pipe grant — never trust clientPid from HTTP JSON.
-    const localResumeGrant = await startLocalResumeGrantServer(async ({ sessionId }) => {
-      const auth = liveRunnerAuth
-      if (!auth) {
-        return { error: 'Runner machine auth not ready' }
-      }
-      const capability = await fetchLocalResumeCapabilityFromHub(sessionId, auth)
-      if (!capability) {
-        return { error: 'Hub refused local resume capability' }
-      }
-      return { sessionCapability: capability }
-    })
-
     // Start control server
     const { port: controlPort, stop: stopControlServer } = await startRunnerControlServer({
       getChildren: getCurrentChildren,
@@ -1166,24 +1142,21 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     // (Codex review #814 [Major] - controlClient.ts:192 fix).
     const startedWithVersionHandoffDisabled = process.env.HAPI_DISABLE_VERSION_HANDOFF === '1';
 
-    // Memory-only runner-generation proof (#1473). Prefer authorized handoff,
-    // then OS keyring recovery (survives reboot/crash without stranding
-    // sessions), else mint fresh. Never settings, runner.state, or child env.
+    // Memory-only runner-generation proof (#1473 Blocker). Same-UID keyrings
+    // are exportable bearers — do not persist the proof. Accept only live
+    // PID-checked handoff; otherwise mint for fresh enrollment and fail closed
+    // on hub proof mismatch (no silent rotate / unbound mint).
     if (isAuthorizedHandoff && !handoffRunnerProof) {
       throw new Error(
         'Authorized runner handoff missing runnerProof from PID-checked socket'
       )
     }
-    const recoveredRunnerProof = handoffRunnerProof
-      ?? await loadSecureRunnerProof(machineId)
-    const runnerProof = recoveredRunnerProof ?? randomBytes(32).toString('base64url')
-    const mintedFreshRunnerProof = !recoveredRunnerProof
+    const runnerProof = handoffRunnerProof ?? randomBytes(32).toString('base64url')
 
     // Write initial runner state (no lock needed for state file)
     const fileState: RunnerLocallyPersistedState = {
       pid: process.pid,
       httpPort: controlPort,
-      localResumeGrantPath: localResumeGrant?.path,
       startTime: new Date().toLocaleString(),
       startedWithCliVersion: packageJson.version,
       startedWithCliMtimeMs,
@@ -1213,44 +1186,50 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     const workspaceRoots = resolveWorkspaceRoots(options.workspaceRoots);
     logger.debug(`[RUNNER RUN] Workspace roots: ${workspaceRoots?.join(', ') ?? '(not set)'}`);
 
-    // Get or create machine (with retry for transient connection errors)
-    const machine = await withRetry(
-      () => api.getOrCreateMachine({
-        machineId,
-        machineTag,
-        runnerProof,
-        metadata: buildMachineMetadata({ workspaceRoots }),
-        runnerState: initialRunnerState
-      }),
-      {
-        maxAttempts: 60,
-        minDelay: 1000,
-        maxDelay: 30000,
-        shouldRetry: isRetryableConnectionError,
-        onRetry: (error, attempt, nextDelayMs) => {
-          const errorMsg = error instanceof Error ? error.message : String(error)
-          logger.debug(`[RUNNER RUN] Failed to register machine (attempt ${attempt}), retrying in ${nextDelayMs}ms: ${errorMsg}`)
+    // Register machine without silent rotate-on-409 (#1473 Blocker).
+    // getOrCreateMachine auto-rotates; use post path that surfaces mismatch.
+    let machine
+    try {
+      machine = await withRetry(
+        () => api.getOrCreateMachine({
+          machineId,
+          machineTag,
+          runnerProof,
+          metadata: buildMachineMetadata({ workspaceRoots }),
+          runnerState: initialRunnerState,
+          // Cold start without handoff: 409 must not silent-rotate (#1473).
+          allowLegacyReenroll: Boolean(handoffRunnerProof),
+        }),
+        {
+          maxAttempts: 60,
+          minDelay: 1000,
+          maxDelay: 30000,
+          shouldRetry: isRetryableConnectionError,
+          onRetry: (error, attempt, nextDelayMs) => {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            logger.debug(`[RUNNER RUN] Failed to register machine (attempt ${attempt}), retrying in ${nextDelayMs}ms: ${errorMsg}`)
+          }
         }
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (/runner proof|re-enroll|tag mismatch/i.test(message) && !handoffRunnerProof) {
+        throw new Error(
+          'Trusted runner re-enrollment required: cold start lost the memory-only '
+          + 'runnerProof (no PID-checked handoff). Restart via version handoff or '
+          + 'explicit re-enroll; refusing unbound same-UID proof recovery.'
+        )
       }
-    );
-    // Legacy re-enroll may rotate machineId inside getOrCreateMachine (#1473).
-    // Do NOT auto-migrate sessions without the old machine's runnerProof
-    // (that would let any fresh machine steal victim sessions — #1473 Blocker).
-    const previousMachineId = machineId
+      throw error
+    }
     if (machine.id !== machineId) {
-      await clearSecureRunnerProof(previousMachineId)
       machineId = machine.id;
       const rotated = await authAndSetupMachineIfNeeded();
       machineTag = rotated.machineTag;
       fileState.startedWithMachineId = machineId;
       writeRunnerState(fileState);
-      logger.debug(`[RUNNER RUN] Re-enrolled legacy machine as ${machineId} (sessions keep previousMachineIds aliases)`);
+      logger.debug(`[RUNNER RUN] Re-enrolled machine as ${machineId}`);
     }
-    await saveSecureRunnerProof(machineId, runnerProof)
-    if (mintedFreshRunnerProof && machine.id === previousMachineId) {
-      logger.debug('[RUNNER RUN] Minted fresh runnerProof and bound to OS keyring')
-    }
-    liveRunnerAuth = { machineId, machineTag, runnerProof }
     logger.debug(`[RUNNER RUN] Machine registered: ${machine.id}`);
 
     // Create realtime machine session
@@ -1524,7 +1503,6 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           pid: process.pid,
           httpPort: controlPort,
           startTime: fileState.startTime,
-          localResumeGrantPath: fileState.localResumeGrantPath,
           startedWithCliVersion: packageJson.version,
           startedWithCliMtimeMs,
           startedWithApiUrl: fileState.startedWithApiUrl,
@@ -1569,7 +1547,6 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       await new Promise(resolve => setTimeout(resolve, 100));
 
       apiMachine.shutdown();
-      localResumeGrant?.close()
       await stopControlServer();
       await cleanupRunnerState();
       await releaseRunnerLock(runnerLockHandle);
@@ -1722,36 +1699,6 @@ async function redeemResumePeerCapabilityFromHub(
   const redeemBody = await redeemResponse.json() as { sessionCapability?: string }
   const capability = typeof redeemBody.sessionCapability === 'string'
     ? redeemBody.sessionCapability.trim()
-    : ''
-  return capability || undefined
-}
-
-async function fetchLocalResumeCapabilityFromHub(
-  sessionId: string,
-  auth: { machineId: string; machineTag: string; runnerProof: string }
-): Promise<string | undefined> {
-  const apiUrl = configuration.apiUrl
-  const accessToken = configuration.cliApiToken
-  if (!apiUrl || !accessToken) {
-    return undefined
-  }
-  const response = await fetch(
-    `${apiUrl}/cli/sessions/${encodeURIComponent(sessionId)}/local-resume-capability`,
-    {
-      method: 'POST',
-      headers: buildHubRequestHeaders({
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      }),
-      body: JSON.stringify(auth),
-    }
-  )
-  if (!response.ok) {
-    return undefined
-  }
-  const body = await response.json() as { sessionCapability?: string }
-  const capability = typeof body.sessionCapability === 'string'
-    ? body.sessionCapability.trim()
     : ''
   return capability || undefined
 }

@@ -257,11 +257,16 @@ export class ApiClient {
         runnerState?: RunnerState
         machineTag?: string
         runnerProof?: string
+        /**
+         * When false, proof/tag 409s surface instead of silently rotating
+         * machine identity (#1473 Blocker — no unbound same-UID recovery).
+         */
+        allowLegacyReenroll?: boolean
     }): Promise<Machine> {
         try {
             return await this.postMachine(opts)
         } catch (error) {
-            if (!isLegacyMachineReenrollError(error)) {
+            if (!isLegacyMachineReenrollError(error) || opts.allowLegacyReenroll === false) {
                 throw error
             }
             const rotated = await rotateMachineIdForLegacyReenroll(opts.machineId)
