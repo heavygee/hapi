@@ -300,4 +300,11 @@ New session/resume 500s still firing (`472632df…` resume/reopen 500 @16s, inje
 - Drop-in `40-upload-heal.conf` slimmed (webhook 25s only; removed obsolete `HAPI_CLI_EXECUTABLE`).
 - Remaining: durable systemd runner health; heal leftover upload-blind sessions; Teemo/proxmox not bounced.
 
+
+### 2026-08-10T20:16Z — Meta handoff ack; soup inject kill-criteria PASS
+
+- Meta: remat hold clear; runner on soup bun; machineId stable `5f5a87e8…`.
+- Kill-criteria on `2bd956ae`: resume 0.31s, cmdline **soup bun** (`driver/cli`), upload `success:true`, `lastSpawnError` null.
+- #1108 ownership accepted from here; bulk heal of remaining blinds in progress under soup runner.
+
 ### (next entry goes here)
