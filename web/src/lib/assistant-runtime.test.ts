@@ -833,7 +833,8 @@ describe('toThreadMessageLike peer provenance', () => {
                 }
             }),
             'user-text:u-peer',
-            1_000
+            1_000,
+            false
         )
         expect(message.metadata?.custom).toMatchObject({
             kind: 'user',
