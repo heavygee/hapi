@@ -118,14 +118,43 @@ export function getOrCreateMachine(
         // Omitting proof must not refresh metadata/capabilities. Null-hash rows
         // refuse late bind — re-enroll with a new machine id (INSERT binds hash).
         //
-        // Do not auto-rebind via machineTag: that tag lives in shared settings.json
-        // and same-UID siblings can read it (#1473 Blocker). Cold recovery that
-        // preserves machineId needs hub-held operator approval (follow-up).
+        // Cold proof rebind (#1473 merge gate): when create-time machineTag matches,
+        // accept a new memory-only proof and replace the hash in place. Keeps
+        // machineId stable so Cursor/Pi exact-id resume survives runner restart
+        // without SQL remap. Do not gate on DB active/activeAt — heartbeats only
+        // refresh the in-memory cache, so sticky active=1 would force rotate on
+        // fast stop/start. Live runners present the matching proof and never hit
+        // this branch; tag-theft rebind is accepted under best-effort provenance.
         if (current.runnerProofHash) {
             if (!presentedProof || !verifyRunnerProof(presentedProof, current.runnerProofHash)) {
-                throw new MachineTagConflictError(
-                    'Machine runner proof mismatch; re-enroll with a new machine id'
+                const tagOk = Boolean(
+                    presentedTag
+                    && current.tag
+                    && constantTimeEquals(current.tag, presentedTag)
                 )
+                if (presentedProof && tagOk) {
+                    const now = Date.now()
+                    db.prepare(`
+                        UPDATE machines
+                        SET runner_proof_hash = @runner_proof_hash,
+                            updated_at = @updated_at,
+                            seq = seq + 1
+                        WHERE id = @id
+                    `).run({
+                        runner_proof_hash: hashRunnerProof(presentedProof),
+                        updated_at: now,
+                        id,
+                    })
+                    const rebound = getMachine(db, id)
+                    if (!rebound) {
+                        throw new Error('Failed to rebind machine runner proof')
+                    }
+                    current = rebound
+                } else {
+                    throw new MachineTagConflictError(
+                        'Machine runner proof mismatch; re-enroll with a new machine id'
+                    )
+                }
             }
         } else if (presentedProof) {
             throw new MachineTagConflictError(

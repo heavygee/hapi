@@ -307,24 +307,27 @@ export function createCliRoutes(
 
     /**
      * Removed: file-backed reenroll grants break same-UID isolation (#1473 Blocker).
-     * Session migrate requires a live fromRunnerProof instead.
+     * Cold recovery uses in-place proof rebind (same machineId) or migrate-sessions
+     * after rotate without the dead machine's proof.
      */
     app.post('/machines/:id/reenroll-grant', async (c) => {
         return c.json({
-            error: 'Reenroll grants removed; cold migrate requires live fromRunnerProof',
+            error: 'Reenroll grants removed; use proof rebind or migrate-sessions',
         }, 410)
     })
 
     app.post('/machines/:id/reenroll-grant/ack', async (c) => {
         return c.json({
-            error: 'Reenroll grants removed; cold migrate requires live fromRunnerProof',
+            error: 'Reenroll grants removed; use proof rebind or migrate-sessions',
         }, 410)
     })
 
     /**
      * Remap session metadata.machineId after forced machine re-enroll (#1473).
-     * Requires live runnerProof for both destination and source machines.
-     * File-backed reenroll grants are not accepted (same-UID readable).
+     * Destination must present live runnerProof + machineTag. Source proof is
+     * not required: cold rotate already discarded the memory-only proof, and
+     * file grants are gone. Same-namespace ownership of the destination bind
+     * is the gate (best-effort provenance).
      */
     app.post('/machines/:id/migrate-sessions', async (c) => {
         const engine = getSyncEngine()
@@ -343,12 +346,9 @@ export function createCliRoutes(
         const runnerProof = body && typeof body === 'object' && typeof (body as { runnerProof?: unknown }).runnerProof === 'string'
             ? (body as { runnerProof: string }).runnerProof.trim()
             : ''
-        const fromRunnerProof = body && typeof body === 'object' && typeof (body as { fromRunnerProof?: unknown }).fromRunnerProof === 'string'
-            ? (body as { fromRunnerProof: string }).fromRunnerProof.trim()
-            : ''
-        if (!fromMachineId || !machineTag || !runnerProof || !fromRunnerProof) {
+        if (!fromMachineId || !machineTag || !runnerProof) {
             return c.json({
-                error: 'fromMachineId, machineTag, runnerProof, and fromRunnerProof required',
+                error: 'fromMachineId, machineTag, and runnerProof required',
             }, 400)
         }
         const authMaterial = engine.getMachineAuthMaterial(newMachineId)
@@ -362,15 +362,9 @@ export function createCliRoutes(
         if (!verifyRunnerProof(runnerProof, authMaterial.runnerProofHash)) {
             return c.json({ error: 'Machine runner proof mismatch' }, 403)
         }
-        // Source machine must present its live runnerProof. File-backed
-        // reenroll grants are rejected: same-UID siblings can read HAPI_HOME
-        // and mass-migrate sessions (#1473 Blocker).
         const fromAuth = engine.getMachineAuthMaterial(fromMachineId)
-        if (!fromAuth || fromAuth.namespace !== namespace || !fromAuth.runnerProofHash) {
-            return c.json({ error: 'Source machine proof required' }, 403)
-        }
-        if (!verifyRunnerProof(fromRunnerProof, fromAuth.runnerProofHash)) {
-            return c.json({ error: 'Source machine proof required' }, 403)
+        if (!fromAuth || fromAuth.namespace !== namespace) {
+            return c.json({ error: 'Source machine not found' }, 404)
         }
         try {
             const migrated = engine.migrateSessionsMachineId(fromMachineId, newMachineId, namespace)
