@@ -8,19 +8,25 @@ import { isProcessDescendant } from './processDescendant'
 import { readUnixPeerCredentials, type PeerCredReader } from './peercred'
 
 export const HAPI_PEER_CAP_INJECT_ENV = 'HAPI_PEER_CAP_INJECT'
+/** Opaque socket path only — never put the proof itself in env (#1473). */
+export const HAPI_RUNNER_HANDOFF_SOCKET_ENV = 'HAPI_RUNNER_HANDOFF_SOCKET'
 
 /**
- * Runner → session-CLI capability handoff (#1203 pass 2h).
+ * Runner → child secret handoff (#1203 pass 2h / #1473).
  *
  * Runner listens; child connects. Auth = peer credentials and the peer pid
- * must be the spawned session CLI (or a descendant). Sibling session CLIs are
- * cousins under the runner — not descendants of each other.
+ * must be the spawned child (or a descendant). Sibling processes are cousins
+ * under a common parent — not descendants of each other.
  */
+
+export type InjectSecretPayload =
+    | { sessionCapability: string }
+    | { runnerProof: string }
 
 export type PeerCapabilityInjectServer = {
     path: string
     /** Arm delivery for a specific child pid, then wait until that child connects. */
-    deliverTo: (childPid: number, capability: string) => Promise<void>
+    deliverTo: (childPid: number, payload: InjectSecretPayload) => Promise<void>
     close: () => void
 }
 
@@ -37,7 +43,7 @@ export async function startPeerCapabilityInjectServer(options?: {
     const socketPath = options?.socketPath ?? defaultInjectSocketPath()
 
     let expectedChildPid: number | null = null
-    let pendingCapability: string | null = null
+    let pendingPayload: InjectSecretPayload | null = null
     let deliverResolve: (() => void) | null = null
     let deliverReject: ((error: Error) => void) | null = null
     let deliverTimer: ReturnType<typeof setTimeout> | null = null
@@ -56,17 +62,17 @@ export async function startPeerCapabilityInjectServer(options?: {
         server = createServer((socket) => {
             const cred = readPeerCred(socket)
             const childPid = expectedChildPid
-            const capability = pendingCapability
+            const payload = pendingPayload
             if (
                 !cred
                 || childPid === null
-                || !capability
+                || !payload
                 || !isProcessDescendant(cred.pid, childPid)
             ) {
                 socket.end(`${JSON.stringify({ ok: false, code: 'auth_failed' })}\n`)
                 return
             }
-            socket.end(`${JSON.stringify({ ok: true, sessionCapability: capability })}\n`)
+            socket.end(`${JSON.stringify({ ok: true, ...payload })}\n`)
             if (deliverResolve) {
                 if (deliverTimer) {
                     clearTimeout(deliverTimer)
@@ -104,9 +110,9 @@ export async function startPeerCapabilityInjectServer(options?: {
 
     return {
         path: socketPath,
-        deliverTo: (childPid, capability) => new Promise<void>((resolve, reject) => {
+        deliverTo: (childPid, payload) => new Promise<void>((resolve, reject) => {
             expectedChildPid = childPid
-            pendingCapability = capability
+            pendingPayload = payload
             deliverResolve = resolve
             deliverReject = reject
             deliverTimer = setTimeout(() => {
@@ -152,26 +158,65 @@ export async function receivePeerCapabilityFromRunner(options?: {
         return undefined
     }
     delete process.env[HAPI_PEER_CAP_INJECT_ENV]
-    const readPeerCred = options?.readPeerCred ?? readUnixPeerCredentials
-    const ownerPid = options?.ownerPid ?? process.pid
-    // Align with runner deliverTo timeout (15s) plus redeem latency.
-    const attempts = options?.attempts ?? 160
+    return await receiveInjectedField('sessionCapability', {
+        ...options,
+        socketPath,
+    })
+}
+
+/**
+ * Child-side runner handoff: pull memory-only runnerProof from a PID-checked
+ * socket. Only the socket path may appear in env (#1473 Major).
+ */
+export async function receiveRunnerProofFromHandoff(options?: {
+    socketPath?: string
+    readPeerCred?: PeerCredReader
+    ownerPid?: number
+    attempts?: number
+}): Promise<string | undefined> {
+    const socketPath = options?.socketPath
+        ?? process.env[HAPI_RUNNER_HANDOFF_SOCKET_ENV]?.trim()
+    if (!socketPath) {
+        return undefined
+    }
+    delete process.env[HAPI_RUNNER_HANDOFF_SOCKET_ENV]
+    return await receiveInjectedField('runnerProof', {
+        ...options,
+        socketPath,
+        // Handoff is brief; fewer retries than resume inject.
+        attempts: options?.attempts ?? 50,
+    })
+}
+
+async function receiveInjectedField(
+    field: 'sessionCapability' | 'runnerProof',
+    options: {
+        socketPath: string
+        readPeerCred?: PeerCredReader
+        ownerPid?: number
+        attempts?: number
+    }
+): Promise<string | undefined> {
+    const readPeerCred = options.readPeerCred ?? readUnixPeerCredentials
+    const ownerPid = options.ownerPid ?? process.pid
+    const attempts = options.attempts ?? 160
 
     for (let i = 0; i < attempts; i++) {
-        const capability = await tryReceiveOnce(socketPath, readPeerCred, ownerPid)
-        if (capability) {
-            return capability
+        const value = await tryReceiveOnce(options.socketPath, readPeerCred, ownerPid, field)
+        if (value) {
+            return value
         }
         await new Promise((r) => setTimeout(r, 100))
     }
-    logger.debug('[peer-cap-inject] no capability received from runner')
+    logger.debug(`[peer-cap-inject] no ${field} received from handoff socket`)
     return undefined
 }
 
 function tryReceiveOnce(
     socketPath: string,
     readPeerCred: PeerCredReader,
-    ownerPid: number
+    ownerPid: number,
+    field: 'sessionCapability' | 'runnerProof'
 ): Promise<string | undefined> {
     return new Promise<string | undefined>((resolve) => {
         const chunks: Buffer[] = []
@@ -194,10 +239,12 @@ function tryReceiveOnce(
                     const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8').trim()) as {
                         ok?: boolean
                         sessionCapability?: string
+                        runnerProof?: string
                     }
+                    const value = parsed[field]
                     finish(
-                        parsed.ok && typeof parsed.sessionCapability === 'string'
-                            ? parsed.sessionCapability.trim() || undefined
+                        parsed.ok && typeof value === 'string'
+                            ? value.trim() || undefined
                             : undefined
                     )
                 } catch {
@@ -210,7 +257,7 @@ function tryReceiveOnce(
             if (!cred || !isProcessDescendant(ownerPid, cred.pid)) {
                 finish(undefined)
             }
-            // Server pushes capability on accept when armed.
+            // Server pushes secret on accept when armed.
         })
     })
 }

@@ -110,30 +110,27 @@ describe('bootstrapExistingSession', () => {
         delete process.env.HAPI_PEER_CAP_INJECT
     })
 
-    it('allows direct terminal resume without inject (unattributed peer path) (#1473)', async () => {
+    it('fails closed on direct terminal resume without inject (#1473)', async () => {
         const session = createSession()
-        const sessionClient = mockInjectReadySessionClient()
         getSessionMock.mockResolvedValue(session)
-        getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
         readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
 
-        const result = await bootstrapExistingSession({
+        await expect(bootstrapExistingSession({
             sessionId: 'hapi-session-1',
             flavor: 'codex',
             workingDirectory: '/tmp/project'
-        })
+        })).rejects.toThrow(/Secure resume requires runner-issued/)
 
-        expect(result.sessionInfo.id).toBe('hapi-session-1')
-        expect(process.env[HAPI_SESSION_ID_ENV]).toBe('hapi-session-1')
-        expect(sessionClient.waitForPeerSessionCapability).not.toHaveBeenCalled()
-        expect(notifyRunnerSessionStartedMock).toHaveBeenCalled()
+        expect(getOrCreateMachineMock).not.toHaveBeenCalled()
+        expect(sessionSyncClientMock).not.toHaveBeenCalled()
+        expect(process.env[HAPI_SESSION_ID_ENV]).toBeUndefined()
+        expect(notifyRunnerSessionStartedMock).not.toHaveBeenCalled()
     })
 
     it('awaits runner inject before exporting session env (#1473)', async () => {
         const session = createSession()
         const sessionClient = mockInjectReadySessionClient()
         getSessionMock.mockResolvedValue(session)
-        getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
         readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
         process.env.HAPI_PEER_CAP_INJECT = 'unix:/tmp/peer-cap.sock'
 
@@ -146,6 +143,7 @@ describe('bootstrapExistingSession', () => {
         expect(result.sessionInfo.id).toBe('hapi-session-1')
         expect(process.env[HAPI_SESSION_ID_ENV]).toBe('hapi-session-1')
         expect(result.workingDirectory).toBe('/tmp/project')
+        expect(getOrCreateMachineMock).not.toHaveBeenCalled()
         expect(sessionSyncClientMock).toHaveBeenCalledWith(session)
         expect(sessionSyncClientMock.mock.calls[0]?.[1]).toBeUndefined()
         expect(sessionClient.waitForPeerSessionCapability).toHaveBeenCalledWith({ timeoutMs: 16_000 })
@@ -165,7 +163,6 @@ describe('bootstrapExistingSession', () => {
     it('fails closed when runner inject times out (#1473)', async () => {
         const session = createSession()
         getSessionMock.mockResolvedValue(session)
-        getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
         readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
         process.env.HAPI_PEER_CAP_INJECT = 'unix:/tmp/peer-cap.sock'
         sessionSyncClientMock.mockReturnValue({
@@ -223,7 +220,6 @@ describe('bootstrapExistingSession', () => {
         }
         const sessionClient = mockInjectReadySessionClient()
         getSessionMock.mockResolvedValue(session)
-        getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
         readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
         process.env.HAPI_PEER_CAP_INJECT = 'unix:/tmp/peer-cap.sock'
 
@@ -233,6 +229,7 @@ describe('bootstrapExistingSession', () => {
             workingDirectory: '/tmp/project'
         })
 
+        expect(getOrCreateMachineMock).not.toHaveBeenCalled()
         expect(result.metadata).toEqual(expect.objectContaining({
             claudeSessionId: 'claude-thread-1',
             codexSessionId: 'codex-thread-1',
@@ -373,8 +370,8 @@ describe('bootstrapLazySession', () => {
             metadata: snapshot.metadata,
             state: snapshot.agentState,
             timeoutMs: 10_000,
-            machine: expect.objectContaining({ id: 'machine-1' })
         }))
+        expect(getOrCreateSessionMock.mock.calls[0]?.[0]?.machine).toBeUndefined()
 
         options.onMaterialized(materialized, snapshot)
         expect(notifyRunnerSessionStartedMock).toHaveBeenCalledWith(
@@ -398,7 +395,6 @@ describe('bootstrapSession HAPI_SESSION_ID export', () => {
         const session = createSession()
         session.id = 'hub-session-42'
         getOrCreateSessionMock.mockResolvedValue(session)
-        getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
         sessionSyncClientMock.mockReturnValue({ isPending: () => false })
         readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
 
@@ -409,5 +405,6 @@ describe('bootstrapSession HAPI_SESSION_ID export', () => {
 
         expect(result.sessionInfo.id).toBe('hub-session-42')
         expect(process.env[HAPI_SESSION_ID_ENV]).toBe('hub-session-42')
+        expect(getOrCreateMachineMock).not.toHaveBeenCalled()
     })
 })

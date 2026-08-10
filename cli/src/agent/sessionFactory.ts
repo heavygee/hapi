@@ -182,13 +182,10 @@ export async function bootstrapSession(options: SessionBootstrapOptions): Promis
     const api = await ApiClient.create()
 
     const credentials = await getMachineCredentialsOrExit()
-    const registered = await api.getOrCreateMachine({
-        machineId: credentials.machineId,
-        machineTag: credentials.machineTag,
-        metadata: buildMachineMetadata()
-    })
-    // getOrCreateMachine may rotate machineId on legacy hub re-enroll (#1473).
-    const machineId = registered.id
+    // Terminal/session processes must not create the machine row (#1473 Major).
+    // Only the runner INSERTs with runnerProof so the first runner start does
+    // not rotate away from sessions that already recorded machineId.
+    const machineId = credentials.machineId
 
     const metadata = buildSessionMetadata({
         flavor: options.flavor,
@@ -233,9 +230,8 @@ export async function bootstrapLazySession(options: SessionBootstrapOptions): Pr
 
     const api = await ApiClient.create()
     const credentials = await getMachineCredentialsOrExit()
-    let machineId = credentials.machineId
-    let machineTag = credentials.machineTag
-    const machineMetadata = buildMachineMetadata()
+    // Do not POST /cli/machines from terminal/lazy bootstrap (#1473 Major).
+    const machineId = credentials.machineId
     const metadata = buildSessionMetadata({
         flavor: options.flavor,
         startedBy,
@@ -270,10 +266,7 @@ export async function bootstrapLazySession(options: SessionBootstrapOptions): Pr
         collaborationMode: undefined
     }
 
-    // Declared before materialize so legacy re-enroll can refresh the pending
-    // snapshot before runMaterializationLoop compares hub vs local metadata.
-    let session!: ApiSessionClient
-    session = api.sessionSyncClient(sessionInfo, {
+    const session = api.sessionSyncClient(sessionInfo, {
         materialize: async (snapshot, signal) => {
             const materialized = await api.getOrCreateSession({
                 id: requestedId,
@@ -283,19 +276,6 @@ export async function bootstrapLazySession(options: SessionBootstrapOptions): Pr
                 model: options.model,
                 modelReasoningEffort: options.modelReasoningEffort,
                 effort: options.effort,
-                machine: {
-                    id: machineId,
-                    tag: machineTag,
-                    metadata: machineMetadata
-                },
-                onMachineReenrolled: (rotatedId, rotatedTag) => {
-                    machineId = rotatedId
-                    machineTag = rotatedTag
-                    session.updateMetadata((current) => ({
-                        ...current,
-                        machineId: rotatedId,
-                    }))
-                },
                 timeoutMs: 10_000,
                 signal
             })
@@ -335,19 +315,13 @@ export async function bootstrapExistingSession(options: {
     const startedBy = options.startedBy ?? 'terminal'
     const api = await ApiClient.create()
     const credentials = await getMachineCredentialsOrExit()
-
-    const registered = await api.getOrCreateMachine({
-        machineId: credentials.machineId,
-        machineTag: credentials.machineTag,
-        metadata: buildMachineMetadata()
-    })
-    const machineId = registered.id
+    // Do not POST /cli/machines from resume either (#1473 Major) — runner owns INSERT.
+    const machineId = credentials.machineId
 
     // GET omits sessionCapability by design (#1203). Runner resume does not
     // receive the create-time tag (pass 2g/2h — no child fd/env mint-proof);
     // hub arms a spawn-RPC nonce; runner redeems + PID-injects capability.
-    // Direct `hapi resume` has no inject path — session still launches, but
-    // peer delivery stays unattributed and session RPC stays unregistered.
+    // Direct terminal resume without inject cannot register session RPC (#1473).
     const sessionInfo = await api.getSession(options.sessionId)
     const baseMetadata = buildSessionMetadata({
         flavor: options.flavor,
@@ -373,17 +347,20 @@ export async function bootstrapExistingSession(options: {
     // Capture before ApiSession constructor drains HAPI_PEER_CAP_INJECT (#1473).
     const { HAPI_PEER_CAP_INJECT_ENV } = await import('@/api/peerCapabilityInject')
     const expectsInjectedCapability = Boolean(process.env[HAPI_PEER_CAP_INJECT_ENV]?.trim())
+    if (!expectsInjectedCapability) {
+        throw new Error(
+            'Secure resume requires runner-issued one-shot capability inject '
+            + '(hub/web resume). Direct terminal attach cannot register session RPC.'
+        )
+    }
 
     const session = api.sessionSyncClient(sessionInfo)
     session.updateMetadata(buildUpdatedMetadata)
 
-    // Runner inject path: wait before exporting broker env / returning — otherwise
-    // the wrapped agent can spawn and snapshot an empty env (#1473 Major).
-    if (expectsInjectedCapability) {
-        const injected = await session.waitForPeerSessionCapability({ timeoutMs: 16_000 })
-        if (!injected) {
-            throw new Error('Cannot resume: runner peer capability inject failed')
-        }
+    // Wait for inject + broker readiness before exporting env / returning.
+    const injected = await session.waitForPeerSessionCapability({ timeoutMs: 16_000 })
+    if (!injected) {
+        throw new Error('Cannot resume: runner peer capability inject failed')
     }
 
     exportHapiSessionEnv(sessionInfo.id)

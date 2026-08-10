@@ -33,6 +33,8 @@ import { scheduleCursorModelsPrewarm } from '@/modules/common/cursorModelsPrewar
 import { isLinkedGitWorktree } from '@/utils/isLinkedGitWorktree';
 import {
   HAPI_PEER_CAP_INJECT_ENV,
+  HAPI_RUNNER_HANDOFF_SOCKET_ENV,
+  receiveRunnerProofFromHandoff,
   startPeerCapabilityInjectServer,
   type PeerCapabilityInjectServer,
 } from '@/api/peerCapabilityInject';
@@ -218,9 +220,6 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
   //   - Child: detect env, skip stopRunner(), skip the version-match
   //     early-exit, acquire the lock with a longer retry window (parent
   //     releases asynchronously, so we may need to wait).
-  // Ephemeral handoff bearer for machine RPC generation proof (#1473).
-  // Consumed immediately; never written to runner.state / settings / child agents.
-  const HAPI_RUNNER_HANDOFF_PROOF_ENV = 'HAPI_RUNNER_HANDOFF_PROOF'
   const handoffFromPidRaw = process.env.HAPI_RUNNER_HANDOFF_FROM_PID;
   const handoffFromPid = handoffFromPidRaw ? Number(handoffFromPidRaw) : NaN;
   let isAuthorizedHandoff = false;
@@ -233,11 +232,13 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       logger.debug(`[RUNNER RUN] HAPI_RUNNER_HANDOFF_FROM_PID=${handoffFromPidRaw} set but no matching live parent in state (state.pid=${existingState?.pid ?? 'none'}); ignoring handoff signal`);
     }
   }
-  const handoffProofRaw = process.env[HAPI_RUNNER_HANDOFF_PROOF_ENV]
-  delete process.env[HAPI_RUNNER_HANDOFF_PROOF_ENV]
-  const handoffRunnerProof = isAuthorizedHandoff && typeof handoffProofRaw === 'string'
-    ? handoffProofRaw.trim() || undefined
-    : undefined
+  // PID-checked socket handoff only — never put runnerProof in env (#1473).
+  let handoffRunnerProof: string | undefined
+  if (isAuthorizedHandoff) {
+    handoffRunnerProof = await receiveRunnerProofFromHandoff()
+  } else {
+    delete process.env[HAPI_RUNNER_HANDOFF_SOCKET_ENV]
+  }
 
   if (!isAuthorizedHandoff) {
     // Check if already running
@@ -716,7 +717,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
                 logger.debug('[RUNNER RUN] resume peer capability redeem returned empty')
                 return
               }
-              await inject.deliverTo(childPid, capability)
+              await inject.deliverTo(childPid, { sessionCapability: capability })
             } catch (error) {
               logger.debug('[RUNNER RUN] resume peer capability inject failed', error)
             } finally {
@@ -1143,6 +1144,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     // bearer from an authorized parent restart; otherwise mint fresh (hub will
     // 409-rotate machine id when the prior generation hash no longer matches).
     // Never settings, runner.state, or wrapped-agent env.
+    if (isAuthorizedHandoff && !handoffRunnerProof) {
+      throw new Error(
+        'Authorized runner handoff missing runnerProof from PID-checked socket'
+      )
+    }
     const runnerProof = handoffRunnerProof ?? randomBytes(32).toString('base64url')
 
     // Write initial runner state (no lock needed for state file)
@@ -1390,22 +1396,33 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           // the child knows it is an authorized handoff and must NOT call
           // stopRunner() against us before writing its own state.
           // Codex review #814 [Major] on run.ts:892.
-          // Pass runnerProof only for this authorized handoff (#1473 Major) —
-          // child drains HAPI_RUNNER_HANDOFF_PROOF immediately and never persists it.
+          // runnerProof travels on a PID-checked unix socket (path in env only).
+          // Never put the proof in child environ — same-UID siblings can read it (#1473).
+          let proofHandoff: PeerCapabilityInjectServer | null = null
           try {
-            spawnHappyCLI(handoffArgv, {
+            proofHandoff = await startPeerCapabilityInjectServer()
+            if (!proofHandoff) {
+              throw new Error('runner proof handoff socket unavailable')
+            }
+            const child = spawnHappyCLI(handoffArgv, {
               detached: true,
               stdio: 'ignore',
               env: {
                 ...process.env,
                 HAPI_RUNNER_HANDOFF_FROM_PID: String(process.pid),
-                [HAPI_RUNNER_HANDOFF_PROOF_ENV]: runnerProof,
+                [HAPI_RUNNER_HANDOFF_SOCKET_ENV]: proofHandoff.path,
               }
             });
+            if (!child.pid) {
+              throw new Error('replacement runner spawn returned no pid')
+            }
+            await proofHandoff.deliverTo(child.pid, { runnerProof })
           } catch (error) {
             logger.debug(`[RUNNER RUN] Failed to spawn replacement runner; staying alive to avoid an offline machine. Next handoff attempt in ${Math.round(HANDOFF_RETRY_BACKOFF_MS / 1000)}s.`, error);
             deferHandoffRetry();
             return;
+          } finally {
+            proofHandoff?.close()
           }
 
           // Release the lock so the child can acquire it. The child is

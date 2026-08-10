@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
     receivePeerCapabilityFromRunner,
+    receiveRunnerProofFromHandoff,
     startPeerCapabilityInjectServer,
 } from './peerCapabilityInject'
 
@@ -39,7 +40,7 @@ describe('peerCapabilityInject (#1203 pass 2h)', () => {
         })
         expect(server).not.toBeNull()
         try {
-            const deliver = server!.deliverTo(process.pid, 'cap-for-child')
+            const deliver = server!.deliverTo(process.pid, { sessionCapability: 'cap-for-child' })
             const capability = await receivePeerCapabilityFromRunner({
                 socketPath,
                 ownerPid: process.pid,
@@ -48,6 +49,28 @@ describe('peerCapabilityInject (#1203 pass 2h)', () => {
             })
             await deliver
             expect(capability).toBe('cap-for-child')
+        } finally {
+            server!.close()
+        }
+    })
+
+    it('delivers runnerProof without putting the secret in env', async () => {
+        const socketPath = tempSock()
+        const server = await startPeerCapabilityInjectServer({
+            socketPath,
+            readPeerCred: () => ({ pid: process.pid, uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 }),
+        })
+        expect(server).not.toBeNull()
+        try {
+            const deliver = server!.deliverTo(process.pid, { runnerProof: 'proof-handoff' })
+            const proof = await receiveRunnerProofFromHandoff({
+                socketPath,
+                ownerPid: process.pid,
+                attempts: 20,
+                readPeerCred: () => ({ pid: process.pid, uid: 0, gid: 0 }),
+            })
+            await deliver
+            expect(proof).toBe('proof-handoff')
         } finally {
             server!.close()
         }
@@ -63,7 +86,7 @@ describe('peerCapabilityInject (#1203 pass 2h)', () => {
         expect(server).not.toBeNull()
         try {
             let delivered = false
-            const deliver = server!.deliverTo(process.pid, 'cap-secret').then(() => {
+            const deliver = server!.deliverTo(process.pid, { sessionCapability: 'cap-secret' }).then(() => {
                 delivered = true
             }).catch(() => {
                 // timeout / close expected when no authorized child connects
