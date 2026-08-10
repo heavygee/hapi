@@ -15,14 +15,18 @@ describe('machine tag enrollment (#1473)', () => {
             'proof-a'
         )
         expect(first.runnerProofHash).toBe(hashRunnerProof('proof-a'))
-        expect(() => store.machines.getOrCreateMachine(
+
+        // Offline (inactive) rebind with matching tag replaces the hash in place.
+        const rebound = store.machines.getOrCreateMachine(
             'machine-proof',
             { host: 'h2' },
             null,
             'ns',
             'secret-tag',
             'proof-b'
-        )).toThrow(MachineTagConflictError)
+        )
+        expect(rebound.runnerProofHash).toBe(hashRunnerProof('proof-b'))
+        expect(rebound.metadata).toEqual({ host: 'h2' })
 
         const unbound = store.machines.getOrCreateMachine(
             'machine-unbound',
@@ -49,7 +53,40 @@ describe('machine tag enrollment (#1473)', () => {
             'ns',
             'secret-tag'
         )).toThrow(/runner proof mismatch/)
-        expect(store.machines.getMachine('machine-proof')?.metadata).toEqual({ host: 'h' })
+        expect(store.machines.getMachine('machine-proof')?.metadata).toEqual({ host: 'h2' })
+        store.close()
+    })
+
+    it('refuses offline proof rebind while the machine is freshly active', () => {
+        const store = new Store(':memory:')
+        store.machines.getOrCreateMachine(
+            'machine-live',
+            { host: 'h' },
+            { status: 'online', pid: 1 },
+            'ns',
+            'secret-tag',
+            'proof-a'
+        )
+        // Heartbeat path marks active=1 via updateMachineRunnerState; simulate live.
+        const live = store.machines.getMachine('machine-live')
+        expect(live).toBeTruthy()
+        store.machines.updateMachineRunnerState(
+            'machine-live',
+            { status: 'online', pid: 1 },
+            live!.runnerStateVersion,
+            'ns'
+        )
+        expect(store.machines.getMachine('machine-live')?.active).toBe(true)
+        expect(() => store.machines.getOrCreateMachine(
+            'machine-live',
+            { host: 'h' },
+            null,
+            'ns',
+            'secret-tag',
+            'proof-thief'
+        )).toThrow(/runner proof mismatch/)
+        expect(store.machines.getMachine('machine-live')?.runnerProofHash)
+            .toBe(hashRunnerProof('proof-a'))
         store.close()
     })
 

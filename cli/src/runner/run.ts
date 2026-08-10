@@ -1197,12 +1197,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     const workspaceRoots = resolveWorkspaceRoots(options.workspaceRoots);
     logger.debug(`[RUNNER RUN] Workspace roots: ${workspaceRoots?.join(', ') ?? '(not set)'}`);
 
-    // Register machine. Cold start may 409 (lost memory-only proof).
-    // Do NOT rotate to a new machine id without a secure remap path: Cursor /
-    // Pi-with-token require an exact machineId match, and file-backed reenroll
-    // grants are forbidden under the same-UID threat model (#1473 Major).
-    // Graceful handoff keeps the binding via memory-only runnerProof.
-    // Same-UID isolation: scrub any leftover grant files from older tips.
+    // Register machine. Cold start mints a fresh memory-only proof; hub may
+    // offline-rebind the hash on the same machineId when the prior runner is
+    // inactive (keeps Cursor/Pi exact-id resume). Do NOT rotate machine id —
+    // that strands sessions without a secure remap (#1473 Major).
+    // Scrub leftover file grants from older tips (same-UID readable).
     clearReenrollGrant()
     let machine
     try {
@@ -1236,10 +1235,9 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       }
       if (/runner proof|re-enroll|tag mismatch/i.test(message)) {
         throw new Error(
-          'Cold runner start cannot re-bind this machine id without the live '
-          + 'memory-only runnerProof (no file-backed grant under same-UID threat model). '
-          + 'Use a graceful runner handoff/restart that delivers the proof, or wait for '
-          + 'a secure remap recovery. Hub said: '
+          'Runner could not bind this machine id (proof mismatch while prior runner '
+          + 'still looks live, or tag mismatch). Wait for the old runner heartbeat to '
+          + 'expire (~45s), stop the other runner, or use a graceful handoff. Hub said: '
           + message
         )
       }
