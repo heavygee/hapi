@@ -108,19 +108,26 @@ export async function spawnRunnerSession(directory: string, sessionId?: string):
   return result;
 }
 
-/** Ask the live runner to mint + PID-inject a session capability for local resume. */
-export async function prepareLocalResumeInject(
-  sessionId: string,
-  clientPid: number = process.pid
-): Promise<{ injectPath?: string; error?: string }> {
-  const result = await runnerPost('/prepare-local-resume', { sessionId, clientPid })
-  if (result?.error && !result?.injectPath) {
-    return { error: typeof result.error === 'string' ? result.error : 'prepare-local-resume failed' }
+/**
+ * Peercred AF_UNIX / named-pipe grant: returns a session capability in-process
+ * before any remote handoff stop (#1473 Blocker/Major).
+ */
+export async function acquireLocalResumeCapability(
+  sessionId: string
+): Promise<{ sessionCapability?: string; error?: string }> {
+  const state = await readRunnerState()
+  if (!state?.localResumeGrantPath?.trim()) {
+    return { error: 'No runner local-resume grant socket (is hapi runner running?)' }
   }
-  if (typeof result?.injectPath === 'string' && result.injectPath.trim()) {
-    return { injectPath: result.injectPath.trim() }
+  if (!isProcessAlive(state.pid)) {
+    return { error: 'Runner is not running, file is stale' }
   }
-  return { error: typeof result?.error === 'string' ? result.error : 'No inject path from runner' }
+  const { requestLocalResumeGrant } = await import('./localResumeGrant')
+  return await requestLocalResumeGrant({
+    socketPath: state.localResumeGrantPath.trim(),
+    sessionId,
+    expectedServerPid: state.pid,
+  })
 }
 
 export async function stopRunnerHttp(): Promise<void> {

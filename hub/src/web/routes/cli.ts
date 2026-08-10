@@ -374,8 +374,13 @@ export function createCliRoutes(
         const runnerProof = body && typeof body === 'object' && typeof (body as { runnerProof?: unknown }).runnerProof === 'string'
             ? (body as { runnerProof: string }).runnerProof.trim()
             : ''
-        if (!fromMachineId || !machineTag || !runnerProof) {
-            return c.json({ error: 'fromMachineId, machineTag, and runnerProof required' }, 400)
+        const fromRunnerProof = body && typeof body === 'object' && typeof (body as { fromRunnerProof?: unknown }).fromRunnerProof === 'string'
+            ? (body as { fromRunnerProof: string }).fromRunnerProof.trim()
+            : ''
+        if (!fromMachineId || !machineTag || !runnerProof || !fromRunnerProof) {
+            return c.json({
+                error: 'fromMachineId, machineTag, runnerProof, and fromRunnerProof required',
+            }, 400)
         }
         const authMaterial = engine.getMachineAuthMaterial(newMachineId)
         if (!authMaterial || authMaterial.namespace !== namespace) {
@@ -387,6 +392,17 @@ export function createCliRoutes(
         }
         if (!verifyRunnerProof(runnerProof, authMaterial.runnerProofHash)) {
             return c.json({ error: 'Machine runner proof mismatch' }, 403)
+        }
+        // Source machine must also present its bound proof — destination-only
+        // auth would let a fresh machine steal victim sessions (#1473 Blocker).
+        const fromAuth = engine.getMachineAuthMaterial(fromMachineId)
+        if (
+            !fromAuth
+            || fromAuth.namespace !== namespace
+            || !fromAuth.runnerProofHash
+            || !verifyRunnerProof(fromRunnerProof, fromAuth.runnerProofHash)
+        ) {
+            return c.json({ error: 'Source machine proof required' }, 403)
         }
         const migrated = engine.migrateSessionsMachineId(fromMachineId, newMachineId, namespace)
         return c.json({ migrated })

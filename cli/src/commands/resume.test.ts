@@ -7,7 +7,7 @@ const {
     listResumableSessionsMock,
     getLocalResumeTargetMock,
     handoffSessionToLocalMock,
-    prepareLocalResumeInjectMock,
+    acquireLocalResumeCapabilityMock,
     readSettingsMock,
     renderMock,
     runCodexMock,
@@ -24,8 +24,8 @@ const {
     listResumableSessionsMock: vi.fn(),
     getLocalResumeTargetMock: vi.fn(),
     handoffSessionToLocalMock: vi.fn(async () => {}),
-    prepareLocalResumeInjectMock: vi.fn(async (): Promise<{ injectPath?: string; error?: string }> => ({
-        injectPath: 'unix:/tmp/peer-cap.sock',
+    acquireLocalResumeCapabilityMock: vi.fn(async (): Promise<{ sessionCapability?: string; error?: string }> => ({
+        sessionCapability: 'cap-from-runner-grant',
     })),
     readSettingsMock: vi.fn(async () => ({ machineId: 'machine-1', previousMachineIds: [] })),
     renderMock: vi.fn(),
@@ -43,7 +43,7 @@ vi.mock('@/utils/autoStartServer', () => ({ maybeAutoStartServer: maybeAutoStart
 vi.mock('@/ui/auth', () => ({ authAndSetupMachineIfNeeded: authAndSetupMachineIfNeededMock }))
 vi.mock('@/persistence', () => ({ readSettings: readSettingsMock }))
 vi.mock('@/runner/controlClient', () => ({
-    prepareLocalResumeInject: prepareLocalResumeInjectMock,
+    acquireLocalResumeCapability: acquireLocalResumeCapabilityMock,
 }))
 vi.mock('@/api/api', () => ({
     ApiClient: {
@@ -84,8 +84,8 @@ describe('resumeCommand', () => {
         listResumableSessionsMock.mockReset()
         getLocalResumeTargetMock.mockReset()
         handoffSessionToLocalMock.mockClear()
-        prepareLocalResumeInjectMock.mockClear()
-        prepareLocalResumeInjectMock.mockResolvedValue({ injectPath: 'unix:/tmp/peer-cap.sock' })
+        acquireLocalResumeCapabilityMock.mockClear()
+        acquireLocalResumeCapabilityMock.mockResolvedValue({ sessionCapability: 'cap-from-runner-grant' })
         readSettingsMock.mockClear()
         renderMock.mockReset()
         renderMock.mockImplementation((element: { props?: { onSelect?: (sessionId: string) => void } }) => {
@@ -119,7 +119,7 @@ describe('resumeCommand', () => {
 
         await resumeCommand.run(createContext(['hapi-session-1']))
 
-        expect(prepareLocalResumeInjectMock).toHaveBeenCalledWith('hapi-session-1', process.pid)
+        expect(acquireLocalResumeCapabilityMock).toHaveBeenCalledWith('hapi-session-1')
         expect(handoffSessionToLocalMock).toHaveBeenCalledWith('hapi-session-1')
         expect(assertCodexLocalSupportedMock).toHaveBeenCalledOnce()
         expect(runCodexMock).toHaveBeenCalledWith({
@@ -134,8 +134,8 @@ describe('resumeCommand', () => {
         })
     })
 
-    it('does not stop a remote session when local resume inject fails (#1473)', async () => {
-        prepareLocalResumeInjectMock.mockResolvedValue({ error: 'Runner is not running, file is stale' })
+    it('does not stop a remote session when local resume grant fails (#1473)', async () => {
+        acquireLocalResumeCapabilityMock.mockResolvedValue({ error: 'Runner is not running, file is stale' })
         getLocalResumeTargetMock.mockResolvedValue({
             sessionId: 'hapi-session-active',
             flavor: 'codex',
@@ -155,7 +155,7 @@ describe('resumeCommand', () => {
 
         await expect(resumeCommand.run(createContext(['hapi-session-active']))).rejects.toThrow(/process\.exit/)
 
-        expect(prepareLocalResumeInjectMock).toHaveBeenCalled()
+        expect(acquireLocalResumeCapabilityMock).toHaveBeenCalled()
         expect(handoffSessionToLocalMock).not.toHaveBeenCalled()
         expect(runCodexMock).not.toHaveBeenCalled()
         exitSpy.mockRestore()

@@ -44,6 +44,7 @@ import {
   loadSecureRunnerProof,
   saveSecureRunnerProof,
 } from './secureRunnerProofStore';
+import { startLocalResumeGrantServer } from './localResumeGrant';
 
 /**
  * Deduplicates a preallocated HAPI-row spawn only while its child is alive.
@@ -1102,12 +1103,25 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       if (persistedResumeProcesses.delete(pid)) persistResumeProcesses();
     };
 
-    // Filled after machine registration — local resume inject needs live proof.
+    // Filled after machine registration — local resume grant needs live proof.
     let liveRunnerAuth: {
       machineId: string
       machineTag: string
       runnerProof: string
     } | null = null
+
+    // Peercred AF_UNIX / named-pipe grant — never trust clientPid from HTTP JSON.
+    const localResumeGrant = await startLocalResumeGrantServer(async ({ sessionId }) => {
+      const auth = liveRunnerAuth
+      if (!auth) {
+        return { error: 'Runner machine auth not ready' }
+      }
+      const capability = await fetchLocalResumeCapabilityFromHub(sessionId, auth)
+      if (!capability) {
+        return { error: 'Hub refused local resume capability' }
+      }
+      return { sessionCapability: capability }
+    })
 
     // Start control server
     const { port: controlPort, stop: stopControlServer } = await startRunnerControlServer({
@@ -1116,29 +1130,6 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       spawnSession,
       requestShutdown: () => requestShutdown('hapi-cli'),
       onHappySessionWebhook,
-      prepareLocalResumeInject: async ({ sessionId, clientPid }) => {
-        const auth = liveRunnerAuth
-        if (!auth) {
-          return { error: 'Runner machine auth not ready' }
-        }
-        const inject = await startPeerCapabilityInjectServer()
-        if (!inject) {
-          return { error: 'Inject transport unavailable on this platform' }
-        }
-        const capability = await fetchLocalResumeCapabilityFromHub(
-          sessionId,
-          auth
-        )
-        if (!capability) {
-          inject.close()
-          return { error: 'Hub refused local resume capability' }
-        }
-        // Arm delivery; resume CLI connects as clientPid (self).
-        void inject.deliverTo(clientPid, { sessionCapability: capability }).finally(() => {
-          inject.close()
-        })
-        return { injectPath: inject.path }
-      },
     });
 
     // Baseline mtime at runner-process start. Immutable: per Codex review #814
@@ -1192,6 +1183,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     const fileState: RunnerLocallyPersistedState = {
       pid: process.pid,
       httpPort: controlPort,
+      localResumeGrantPath: localResumeGrant?.path,
       startTime: new Date().toLocaleString(),
       startedWithCliVersion: packageJson.version,
       startedWithCliMtimeMs,
@@ -1242,6 +1234,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       }
     );
     // Legacy re-enroll may rotate machineId inside getOrCreateMachine (#1473).
+    // Do NOT auto-migrate sessions without the old machine's runnerProof
+    // (that would let any fresh machine steal victim sessions — #1473 Blocker).
     const previousMachineId = machineId
     if (machine.id !== machineId) {
       await clearSecureRunnerProof(previousMachineId)
@@ -1250,14 +1244,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       machineTag = rotated.machineTag;
       fileState.startedWithMachineId = machineId;
       writeRunnerState(fileState);
-      // Remap sessions so remote resume does not strand on the retired id.
-      await migrateSessionsMachineIdOnHub({
-        fromMachineId: previousMachineId,
-        toMachineId: machineId,
-        machineTag,
-        runnerProof,
-      })
-      logger.debug(`[RUNNER RUN] Re-enrolled legacy machine as ${machineId}`);
+      logger.debug(`[RUNNER RUN] Re-enrolled legacy machine as ${machineId} (sessions keep previousMachineIds aliases)`);
     }
     await saveSecureRunnerProof(machineId, runnerProof)
     if (mintedFreshRunnerProof && machine.id === previousMachineId) {
@@ -1537,6 +1524,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           pid: process.pid,
           httpPort: controlPort,
           startTime: fileState.startTime,
+          localResumeGrantPath: fileState.localResumeGrantPath,
           startedWithCliVersion: packageJson.version,
           startedWithCliMtimeMs,
           startedWithApiUrl: fileState.startedWithApiUrl,
@@ -1581,6 +1569,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       await new Promise(resolve => setTimeout(resolve, 100));
 
       apiMachine.shutdown();
+      localResumeGrant?.close()
       await stopControlServer();
       await cleanupRunnerState();
       await releaseRunnerLock(runnerLockHandle);
@@ -1767,37 +1756,3 @@ async function fetchLocalResumeCapabilityFromHub(
   return capability || undefined
 }
 
-async function migrateSessionsMachineIdOnHub(opts: {
-  fromMachineId: string
-  toMachineId: string
-  machineTag: string
-  runnerProof: string
-}): Promise<void> {
-  const apiUrl = configuration.apiUrl
-  const accessToken = configuration.cliApiToken
-  if (!apiUrl || !accessToken) {
-    return
-  }
-  try {
-    const response = await fetch(
-      `${apiUrl}/cli/machines/${encodeURIComponent(opts.toMachineId)}/migrate-sessions`,
-      {
-        method: 'POST',
-        headers: buildHubRequestHeaders({
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        }),
-        body: JSON.stringify({
-          fromMachineId: opts.fromMachineId,
-          machineTag: opts.machineTag,
-          runnerProof: opts.runnerProof,
-        }),
-      }
-    )
-    if (!response.ok) {
-      logger.debug(`[RUNNER RUN] session machineId migrate failed: HTTP ${response.status}`)
-    }
-  } catch (error) {
-    logger.debug('[RUNNER RUN] session machineId migrate failed', error)
-  }
-}

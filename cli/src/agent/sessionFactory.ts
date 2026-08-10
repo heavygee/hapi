@@ -345,16 +345,23 @@ export async function bootstrapExistingSession(options: {
     const metadata = buildUpdatedMetadata(sessionInfo.metadata)
 
     // Capture before ApiSession constructor drains HAPI_PEER_CAP_INJECT (#1473).
-    const { HAPI_PEER_CAP_INJECT_ENV } = await import('@/api/peerCapabilityInject')
+    const {
+        HAPI_PEER_CAP_INJECT_ENV,
+        takeDirectResumeCapability,
+    } = await import('@/api/peerCapabilityInject')
+    const directCapability = takeDirectResumeCapability()
     const expectsInjectedCapability = Boolean(process.env[HAPI_PEER_CAP_INJECT_ENV]?.trim())
-    if (!expectsInjectedCapability) {
+    if (!directCapability && !expectsInjectedCapability) {
         throw new Error(
-            'Secure resume requires runner-issued one-shot capability inject '
-            + '(hub/web resume). Direct terminal attach cannot register session RPC.'
+            'Secure resume requires runner-issued capability '
+            + '(hub/web resume inject or peercred local-resume grant).'
         )
     }
 
-    const session = api.sessionSyncClient(sessionInfo)
+    const session = api.sessionSyncClient(
+        sessionInfo,
+        directCapability ? { sessionCapability: directCapability } : undefined
+    )
     session.updateMetadata(buildUpdatedMetadata)
 
     // Wait for inject + broker readiness before exporting env / returning.

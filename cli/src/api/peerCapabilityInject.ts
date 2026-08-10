@@ -5,11 +5,25 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { logger } from '@/ui/logger'
 import { isProcessDescendant } from './processDescendant'
-import { readUnixPeerCredentials, type PeerCredReader } from './peercred'
+import { readUnixPeerCredentials, type PeerCredentials, type PeerCredReader } from './peercred'
 
 export const HAPI_PEER_CAP_INJECT_ENV = 'HAPI_PEER_CAP_INJECT'
 /** Opaque socket path only — never put the proof itself in env (#1473). */
 export const HAPI_RUNNER_HANDOFF_SOCKET_ENV = 'HAPI_RUNNER_HANDOFF_SOCKET'
+
+/** In-process capability from peercred local-resume grant (never env). */
+let pendingDirectResumeCapability: string | undefined
+
+export function armDirectResumeCapability(capability: string): void {
+    const trimmed = capability.trim()
+    pendingDirectResumeCapability = trimmed || undefined
+}
+
+export function takeDirectResumeCapability(): string | undefined {
+    const value = pendingDirectResumeCapability
+    pendingDirectResumeCapability = undefined
+    return value
+}
 
 /**
  * Runner → child secret handoff (#1203 pass 2h / #1473).
@@ -205,15 +219,25 @@ async function receiveInjectedField(
         socketPath: string
         readPeerCred?: PeerCredReader
         ownerPid?: number
+        expectedServerPid?: number
         attempts?: number
     }
 ): Promise<string | undefined> {
-    const readPeerCred = options.readPeerCred ?? readUnixPeerCredentials
+    const readPeerCred = options.readPeerCred
+        ?? (process.platform === 'win32'
+            ? readWindowsNamedPipeServerCredentials
+            : readUnixPeerCredentials)
     const ownerPid = options.ownerPid ?? process.pid
     const attempts = options.attempts ?? 160
 
     for (let i = 0; i < attempts; i++) {
-        const value = await tryReceiveOnce(options.socketPath, readPeerCred, ownerPid, field)
+        const value = await tryReceiveOnce(
+            options.socketPath,
+            readPeerCred,
+            ownerPid,
+            field,
+            options.expectedServerPid
+        )
         if (value) {
             return value
         }
@@ -227,7 +251,8 @@ function tryReceiveOnce(
     socketPath: string,
     readPeerCred: PeerCredReader,
     ownerPid: number,
-    field: 'sessionCapability' | 'runnerProof'
+    field: 'sessionCapability' | 'runnerProof',
+    expectedServerPid?: number
 ): Promise<string | undefined> {
     return new Promise<string | undefined>((resolve) => {
         const chunks: Buffer[] = []
@@ -265,12 +290,51 @@ function tryReceiveOnce(
         })
         socket.on('connect', () => {
             const cred = readPeerCred(socket)
-            if (!cred || !isProcessDescendant(ownerPid, cred.pid)) {
+            const authorized = expectedServerPid !== undefined
+                ? cred?.pid === expectedServerPid
+                : Boolean(cred && isProcessDescendant(ownerPid, cred.pid))
+            if (!authorized) {
                 finish(undefined)
             }
             // Server pushes secret on accept when armed.
         })
     })
+}
+
+/** Windows client → verify named-pipe server PID (#1473 Major). */
+export const readWindowsNamedPipeServerCredentials: PeerCredReader = (socket) => {
+    try {
+        const handleObj = (socket as unknown as {
+            _handle?: { fd?: number | bigint; handle?: number | bigint }
+        })._handle
+        const raw = handleObj?.fd ?? handleObj?.handle
+        if (raw === undefined || raw === null) {
+            return null
+        }
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { dlopen, ptr } = require('bun:ffi') as typeof import('bun:ffi')
+        const kernel32 = dlopen('kernel32.dll', {
+            GetNamedPipeServerProcessId: {
+                args: ['ptr', 'ptr'] as const,
+                returns: 'i32',
+            },
+        })
+        const pidBuf = new Uint32Array(1)
+        const handleValue = typeof raw === 'bigint' ? raw : BigInt(Number(raw))
+        const handleBuf = Buffer.alloc(8)
+        handleBuf.writeBigUInt64LE(handleValue)
+        const ok = kernel32.symbols.GetNamedPipeServerProcessId(ptr(handleBuf), ptr(pidBuf))
+        if (!ok) {
+            return null
+        }
+        const pid = pidBuf[0]!
+        if (!Number.isInteger(pid) || pid <= 0) {
+            return null
+        }
+        return { pid, uid: 0, gid: 0 } satisfies PeerCredentials
+    } catch {
+        return null
+    }
 }
 
 function defaultInjectSocketPath(): string {

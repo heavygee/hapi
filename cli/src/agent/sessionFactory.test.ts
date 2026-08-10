@@ -108,6 +108,8 @@ describe('bootstrapExistingSession', () => {
         readSettingsMock.mockReset()
         delete process.env[HAPI_SESSION_ID_ENV]
         delete process.env.HAPI_PEER_CAP_INJECT
+        const { takeDirectResumeCapability } = await import('@/api/peerCapabilityInject')
+        takeDirectResumeCapability()
     })
 
     it('fails closed on direct terminal resume without inject (#1473)', async () => {
@@ -127,6 +129,28 @@ describe('bootstrapExistingSession', () => {
         expect(notifyRunnerSessionStartedMock).not.toHaveBeenCalled()
     })
 
+    it('accepts in-process capability from peercred local-resume grant (#1473)', async () => {
+        const { armDirectResumeCapability } = await import('@/api/peerCapabilityInject')
+        armDirectResumeCapability('cap-direct-grant')
+        const session = createSession()
+        const sessionClient = mockInjectReadySessionClient()
+        getSessionMock.mockResolvedValue(session)
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
+
+        const result = await bootstrapExistingSession({
+            sessionId: 'hapi-session-1',
+            flavor: 'codex',
+            workingDirectory: '/tmp/project'
+        })
+
+        expect(result.sessionInfo.id).toBe('hapi-session-1')
+        expect(sessionSyncClientMock).toHaveBeenCalledWith(
+            session,
+            { sessionCapability: 'cap-direct-grant' }
+        )
+        expect(sessionClient.waitForPeerSessionCapability).toHaveBeenCalled()
+    })
+
     it('awaits runner inject before exporting session env (#1473)', async () => {
         const session = createSession()
         const sessionClient = mockInjectReadySessionClient()
@@ -144,8 +168,7 @@ describe('bootstrapExistingSession', () => {
         expect(process.env[HAPI_SESSION_ID_ENV]).toBe('hapi-session-1')
         expect(result.workingDirectory).toBe('/tmp/project')
         expect(getOrCreateMachineMock).not.toHaveBeenCalled()
-        expect(sessionSyncClientMock).toHaveBeenCalledWith(session)
-        expect(sessionSyncClientMock.mock.calls[0]?.[1]).toBeUndefined()
+        expect(sessionSyncClientMock).toHaveBeenCalledWith(session, undefined)
         expect(sessionClient.waitForPeerSessionCapability).toHaveBeenCalledWith({ timeoutMs: 16_000 })
         expect(sessionClient.updateMetadata).toHaveBeenCalledOnce()
         expect(notifyRunnerSessionStartedMock).toHaveBeenCalledWith(

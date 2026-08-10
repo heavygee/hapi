@@ -14,10 +14,10 @@ import type {
     OpencodePermissionMode
 } from '@hapi/protocol/types'
 import { ApiClient } from '@/api/api'
-import { HAPI_PEER_CAP_INJECT_ENV } from '@/api/peerCapabilityInject'
+import { armDirectResumeCapability } from '@/api/peerCapabilityInject'
 import type { ReasoningEffort } from '@/codex/appServerTypes'
 import { readSettings } from '@/persistence'
-import { prepareLocalResumeInject } from '@/runner/controlClient'
+import { acquireLocalResumeCapability } from '@/runner/controlClient'
 import { authAndSetupMachineIfNeeded } from '@/ui/auth'
 import { initializeToken } from '@/ui/tokenInit'
 import { maybeAutoStartServer } from '@/utils/autoStartServer'
@@ -274,29 +274,21 @@ export const resumeCommand: CommandDefinition = {
                 throw new Error('Session is already controlled by a local terminal')
             }
 
-            // Acquire runner-proven inject BEFORE stopping a remote session
-            // (#1473 Major). Failure must leave the remote session running.
-            const prepared = await prepareLocalResumeInject(target.sessionId, process.pid)
-            if (!prepared.injectPath) {
+            // Acquire runner-proven capability BEFORE stopping a remote session
+            // (#1473 Blocker/Major). Peercred grant returns the secret in-process;
+            // failure must leave the remote session running.
+            const granted = await acquireLocalResumeCapability(target.sessionId)
+            if (!granted.sessionCapability) {
                 throw new Error(
-                    prepared.error
-                        ?? 'Cannot securely resume: runner inject unavailable (is hapi runner running?)'
+                    granted.error
+                        ?? 'Cannot securely resume: runner grant unavailable (is hapi runner running?)'
                 )
             }
-            const previousInject = process.env[HAPI_PEER_CAP_INJECT_ENV]
-            process.env[HAPI_PEER_CAP_INJECT_ENV] = prepared.injectPath
-            try {
-                if (target.active) {
-                    await api.handoffSessionToLocal(target.sessionId)
-                }
-                await dispatchLocalResume(target)
-            } finally {
-                if (previousInject === undefined) {
-                    delete process.env[HAPI_PEER_CAP_INJECT_ENV]
-                } else {
-                    process.env[HAPI_PEER_CAP_INJECT_ENV] = previousInject
-                }
+            armDirectResumeCapability(granted.sessionCapability)
+            if (target.active) {
+                await api.handoffSessionToLocal(target.sessionId)
             }
+            await dispatchLocalResume(target)
         } catch (error) {
             console.error(chalk.red('Error:'), error instanceof Error ? error.message : 'Unknown error')
             if (process.env.DEBUG) {
