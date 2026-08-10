@@ -24,7 +24,10 @@ import { useTranslation } from '@/lib/use-translation'
 import { DEFAULT_SESSION_PREVIEW_LIMIT, useSessionPreviewLimit } from '@/hooks/useSessionPreviewLimit'
 import { useSessionListStatusMode } from '@/hooks/useSessionListStatusMode'
 import { useShowActiveSessionsOnly } from '@/hooks/useShowActiveSessionsOnly'
-import { usePinInProgressSessions } from '@/hooks/usePinInProgressSessions'
+import {
+    usePinInProgressSessions,
+    type PinInProgressMode
+} from '@/hooks/usePinInProgressSessions'
 import { classifySessionAttention, sessionIsUnread } from '@/lib/sessionAttention'
 import { getSessionLastSeenAt, getSessionLastSeenSnapshot } from '@/lib/sessionLastSeen'
 import { useSessionRowTooltipIds } from '@/components/HoverTooltip'
@@ -56,18 +59,39 @@ type SessionGroup = {
 }
 
 const RUNNING_BUCKETS = [
+    { key: 'jobs', labelKey: 'session.item.attachedJob', colorClass: 'text-[var(--app-badge-success-text)]', pulse: true },
     { key: 'working', labelKey: 'session.item.running', colorClass: 'text-[var(--app-badge-success-text)]', pulse: true },
     { key: 'pending', labelKey: 'session.item.pending', colorClass: 'text-[var(--app-badge-warning-text)]', pulse: true },
 ] as const
 
-/** Active sessions that warrant the optional pinned In progress section. Quiet actives stay in directory groups. */
-function isPinnedInProgressSession(session: SessionSummary): boolean {
+function hasRunningAttachedJob(session: SessionSummary): boolean {
+    return session.attachedJob?.status === 'running'
+}
+
+function hasAgentInProgressActivity(session: SessionSummary): boolean {
     if (!session.active) {
         return false
     }
     return session.thinking
         || (session.backgroundTaskCount ?? 0) > 0
         || (session.pendingRequestsCount ?? 0) > 0
+}
+
+/**
+ * Sessions that float into the pinned In progress section.
+ * Mode is a degree: off → jobs (outliving attachedJob) → all (jobs + agent activity).
+ */
+export function isPinnedInProgressSession(
+    session: SessionSummary,
+    mode: PinInProgressMode
+): boolean {
+    if (mode === 'off') {
+        return false
+    }
+    if (mode === 'jobs') {
+        return hasRunningAttachedJob(session)
+    }
+    return hasRunningAttachedJob(session) || hasAgentInProgressActivity(session)
 }
 
 export type SessionTimeRange = {
@@ -212,7 +236,15 @@ export function deduplicateSessionsByAgentId(sessions: SessionSummary[], selecte
             if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1
             return b.updatedAt - a.updatedAt
         })
-        result.push(group[0])
+        const winner = group[0]!
+        result.push(winner)
+        // Hub skips merge when two rows stay active — keep job-bearing losers so the
+        // outliving meter is not hidden behind a jobless duplicate winner.
+        for (const duplicate of group.slice(1)) {
+            if (hasRunningAttachedJob(duplicate)) {
+                result.push(duplicate)
+            }
+        }
     }
 
     return result
@@ -237,7 +269,17 @@ export function isSidebarEmptySessionStub(session: SessionSummary): boolean {
 
 export function shouldShowSessionInSidebar(session: SessionSummary, selectedSessionId?: string | null): boolean {
     if (session.id === selectedSessionId) return true
-    if (session.active || session.pinned || session.globalPinned) return true
+    // Running attached jobs must survive before the empty-stub filter — a job can
+    // register before agentSessionId/name/summary land, and idle agents still
+    // need the outliving meter visible in the list.
+    if (
+        session.active
+        || session.pinned
+        || session.globalPinned
+        || hasRunningAttachedJob(session)
+    ) {
+        return true
+    }
     return !isSidebarEmptySessionStub(session)
 }
 
@@ -248,9 +290,14 @@ export function prepareSidebarSessions(sessions: SessionSummary[], selectedSessi
 
 // "Active sessions only" view: hide inactive sessions, but never hide the one the
 // operator currently has open — otherwise toggling the filter would yank the
-// selected session out from under them.
+// selected session out from under them. Idle sessions with a running attached
+// job stay visible too — that is the headline use case for session jobs.
 export function filterActiveSessionsOnly(sessions: SessionSummary[], selectedSessionId?: string | null): SessionSummary[] {
-    return sessions.filter(session => session.active || session.id === selectedSessionId)
+    return sessions.filter(session =>
+        session.active
+        || session.id === selectedSessionId
+        || hasRunningAttachedJob(session)
+    )
 }
 
 // Transient unread lens: hide sessions the operator has already seen.
@@ -1133,7 +1180,7 @@ export function SessionList(props: {
     const { showActiveSessionsOnly } = useShowActiveSessionsOnly()
     // Transient unread lens — not a Settings preference. Cleared on reload; rows drop as they're seen.
     const [showUnreadOnly, setShowUnreadOnly] = useState(false)
-    const { pinInProgressSessions } = usePinInProgressSessions()
+    const { pinInProgressMode } = usePinInProgressSessions()
     const { machineFilter, setMachineFilter } = useSessionListMachineFilter()
     const showDetailedStatus = sessionListStatusMode === 'detailed'
     const [searchQuery, setSearchQuery] = useState('')
@@ -1244,44 +1291,63 @@ export function SessionList(props: {
             .sort((a, b) => b.updatedAt - a.updatedAt)
     }, [machineFilteredSessions])
     const runningSessions = useMemo(() => {
-        const buckets: Record<'working' | 'pending', SessionSummary[]> = {
+        const buckets: Record<'jobs' | 'working' | 'pending', SessionSummary[]> = {
+            jobs: [],
             working: [],
             pending: [],
         }
-        if (!pinInProgressSessions) {
+        if (pinInProgressMode === 'off') {
             return buckets
         }
         for (const session of machineFilteredSessions) {
+            // Durable pins stay in their own sections / project groups (#1115).
             if (session.globalPinned || session.pinned) {
                 continue
             }
-            if (!session.active) {
+            if (!isPinnedInProgressSession(session, pinInProgressMode)) {
                 continue
             }
-            if (session.thinking || (session.backgroundTaskCount ?? 0) > 0) {
+            const agentWorking = session.active
+                && (session.thinking || (session.backgroundTaskCount ?? 0) > 0)
+            const agentPending = session.active
+                && (session.pendingRequestsCount ?? 0) > 0
+                && !agentWorking
+            if (agentWorking) {
                 buckets.working.push(session)
-            } else if ((session.pendingRequestsCount ?? 0) > 0) {
+            } else if (agentPending) {
+                // Operator action outranks the Jobs meter when both apply.
                 buckets.pending.push(session)
+            } else if (hasRunningAttachedJob(session)) {
+                // Idle outliving work — not "Running" agent activity.
+                buckets.jobs.push(session)
             }
-            // Quiet active sessions stay in directory groups (no Idle pin bucket).
         }
         const byRecent = (a: SessionSummary, b: SessionSummary) => b.updatedAt - a.updatedAt
         for (const key of Object.keys(buckets) as Array<keyof typeof buckets>) {
             buckets[key].sort(byRecent)
         }
         return buckets
-    }, [machineFilteredSessions, pinInProgressSessions])
-    const runningSessionTotal = runningSessions.working.length
+    }, [machineFilteredSessions, pinInProgressMode])
+    const runningSessionTotal = runningSessions.jobs.length
+        + runningSessions.working.length
         + runningSessions.pending.length
     const groups = useMemo(
         () => groupSessionsByDirectory(
             machineFilteredSessions.filter((session) => {
                 if (session.globalPinned) return false
-                if (pinInProgressSessions && !session.pinned && isPinnedInProgressSession(session)) return false
+                // Project-pinned stay in the project group; only unpinned
+                // "in progress" sessions float to the In progress section.
+                if (
+                    pinInProgressMode !== 'off'
+                    && !session.pinned
+                    && isPinnedInProgressSession(session, pinInProgressMode)
+                ) {
+                    return false
+                }
                 return true
             })
         ),
-        [machineFilteredSessions, pinInProgressSessions]
+        [machineFilteredSessions, pinInProgressMode]
     )
     const [collapseOverrides, setCollapseOverrides] = useState<Map<string, boolean>>(
         () => new Map()
