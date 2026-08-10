@@ -278,4 +278,8 @@ Continuity dump of evening disaster. Meta upload green. 7/8 OOS split. Manual cl
 - `/tmp/oos-runner-inject.log`
 - `/tmp/oos-postmortem-snapshot.txt`
 
+### 2026-08-10T19:58Z — operator: why patch / upgrade system / what now
+
+New session/resume 500s still firing (`472632df…` resume/reopen 500 @16s, inject timeout). systemd runner still `failed`; manual clean inject-fix PID 2810162; Meta upload still green.
+
 ### (next entry goes here)
