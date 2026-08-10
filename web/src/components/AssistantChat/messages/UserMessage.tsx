@@ -129,7 +129,9 @@ export function HappyUserMessage() {
     const claimedPeer = isPeerDelivery && !peerSourceId
         ? parseClaimedPeerFromText(text)
         : null
-    const displayText = isPeerDelivery
+    // Only strip client From:/Name: stamps on unverified rows. Trusted
+    // deliveries keep hub-stamped agent provenance lines in the bubble.
+    const displayText = isPeerDelivery && !peerSourceId
         ? stripClaimedPeerHeaderForDisplay(text)
         : text
     const displayHasText = displayText.length > 0
