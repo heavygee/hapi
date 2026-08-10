@@ -58,7 +58,12 @@ export class PeerDeliverBroker {
         this.socketPath = options.socketPath ?? defaultBrokerSocketPath(options.sessionId)
     }
 
-    start(): void {
+    /**
+     * Bind the unix socket and export HAPI_PEER_DELIVER_BROKER only after
+     * listen succeeds (#1473 Major). Callers must await before spawning agents
+     * that snapshot process.env.
+     */
+    async start(): Promise<void> {
         if (this.server) {
             return
         }
@@ -76,22 +81,32 @@ export class PeerDeliverBroker {
                 socket.destroy()
             })
         })
-        this.server.once('error', (error) => {
+        try {
+            await new Promise<void>((resolve, reject) => {
+                this.server!.once('error', reject)
+                this.server!.listen(this.socketPath, () => {
+                    this.server!.off('error', reject)
+                    resolve()
+                })
+            })
+        } catch (error) {
             logger.debug(`[peer-broker] listen failed on ${this.socketPath}`, error)
             this.server = null
+            throw error
+        }
+        this.server.on('error', (error) => {
+            logger.debug(`[peer-broker] server error on ${this.socketPath}`, error)
             if (process.env[HAPI_PEER_DELIVER_BROKER_ENV] === this.socketPath) {
                 delete process.env[HAPI_PEER_DELIVER_BROKER_ENV]
             }
         })
-        this.server.listen(this.socketPath, () => {
-            try {
-                chmodSync(this.socketPath, 0o600)
-            } catch {
-                // best-effort
-            }
-            process.env[HAPI_PEER_DELIVER_BROKER_ENV] = this.socketPath
-            logger.debug(`[peer-broker] listening on ${this.socketPath}`)
-        })
+        try {
+            chmodSync(this.socketPath, 0o600)
+        } catch {
+            // best-effort
+        }
+        process.env[HAPI_PEER_DELIVER_BROKER_ENV] = this.socketPath
+        logger.debug(`[peer-broker] listening on ${this.socketPath}`)
     }
 
     stop(): void {

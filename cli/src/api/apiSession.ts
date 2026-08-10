@@ -254,6 +254,7 @@ export class ApiSessionClient extends EventEmitter {
     }> = []
     /** Parent-only broker so child `hapi ping-peer` never handles the bearer. */
     private peerDeliverBroker: PeerDeliverBroker | null = null
+    private peerBrokerReady: Promise<void> | null = null
     private metadata: Metadata | null
     private metadataVersion: number
     private agentState: AgentState | null
@@ -309,17 +310,23 @@ export class ApiSessionClient extends EventEmitter {
      * and silently send unattributed (pass 2c M3).
      */
     async waitForPeerSessionCapability(options?: { timeoutMs?: number }): Promise<string | null> {
-        if (this.sessionCapability) {
-            return this.sessionCapability
+        let capability = this.sessionCapability
+        if (!capability) {
+            const timeoutMs = options?.timeoutMs ?? 5_000
+            capability = await new Promise<string | null>((resolve) => {
+                const timer = setTimeout(() => {
+                    this.peerCapabilityWaiters = this.peerCapabilityWaiters.filter((waiter) => waiter.timer !== timer)
+                    resolve(this.sessionCapability)
+                }, timeoutMs)
+                this.peerCapabilityWaiters.push({ resolve, timer })
+            })
         }
-        const timeoutMs = options?.timeoutMs ?? 5_000
-        return await new Promise<string | null>((resolve) => {
-            const timer = setTimeout(() => {
-                this.peerCapabilityWaiters = this.peerCapabilityWaiters.filter((waiter) => waiter.timer !== timer)
-                resolve(this.sessionCapability)
-            }, timeoutMs)
-            this.peerCapabilityWaiters.push({ resolve, timer })
-        })
+        if (!capability) {
+            return null
+        }
+        // Broker env must be exported before agents snapshot process.env (#1473).
+        await this.ensurePeerDeliverBrokerReady()
+        return capability
     }
 
     private applyPeerSessionCapability(capability: string, source: 'options' | 'materialize' | 'socket'): void {
@@ -330,7 +337,7 @@ export class ApiSessionClient extends EventEmitter {
         // Never persist tag/capability under shared HAPI_HOME — same-UID siblings
         // can read mode-0600 files (pass 2d B3). Keep bearer in parent memory only
         // and expose delivery via PeerDeliverBroker.
-        this.ensurePeerDeliverBroker(trimmed)
+        void this.ensurePeerDeliverBrokerReady()
         if (source === 'socket') {
             logger.debug(`[API] Peer session capability recovered for ${this.sessionId}`)
         }
@@ -353,20 +360,30 @@ export class ApiSessionClient extends EventEmitter {
         }
     }
 
-    private ensurePeerDeliverBroker(capability: string): void {
-        if (this.peerDeliverBroker) {
-            return
+    private ensurePeerDeliverBrokerReady(): Promise<void> {
+        if (this.peerBrokerReady) {
+            return this.peerBrokerReady
         }
-        try {
-            this.peerDeliverBroker = new PeerDeliverBroker({
-                sessionId: this.sessionId,
-                sessionCapability: capability,
-            })
-            this.peerDeliverBroker.start()
-        } catch (error) {
-            this.peerDeliverBroker = null
-            logger.debug(`[API] Peer deliver broker failed to start for ${this.sessionId}`, error)
+        const capability = this.sessionCapability
+        if (!capability) {
+            return Promise.resolve()
         }
+        this.peerBrokerReady = (async () => {
+            try {
+                if (!this.peerDeliverBroker) {
+                    this.peerDeliverBroker = new PeerDeliverBroker({
+                        sessionId: this.sessionId,
+                        sessionCapability: capability,
+                    })
+                }
+                await this.peerDeliverBroker.start()
+            } catch (error) {
+                this.peerDeliverBroker = null
+                this.peerBrokerReady = null
+                logger.debug(`[API] Peer deliver broker failed to start for ${this.sessionId}`, error)
+            }
+        })()
+        return this.peerBrokerReady
     }
 
     constructor(token: string, session: Session, options: ApiSessionClientOptions = {}) {

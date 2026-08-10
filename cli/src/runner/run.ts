@@ -218,6 +218,9 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
   //   - Child: detect env, skip stopRunner(), skip the version-match
   //     early-exit, acquire the lock with a longer retry window (parent
   //     releases asynchronously, so we may need to wait).
+  // Ephemeral handoff bearer for machine RPC generation proof (#1473).
+  // Consumed immediately; never written to runner.state / settings / child agents.
+  const HAPI_RUNNER_HANDOFF_PROOF_ENV = 'HAPI_RUNNER_HANDOFF_PROOF'
   const handoffFromPidRaw = process.env.HAPI_RUNNER_HANDOFF_FROM_PID;
   const handoffFromPid = handoffFromPidRaw ? Number(handoffFromPidRaw) : NaN;
   let isAuthorizedHandoff = false;
@@ -230,6 +233,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       logger.debug(`[RUNNER RUN] HAPI_RUNNER_HANDOFF_FROM_PID=${handoffFromPidRaw} set but no matching live parent in state (state.pid=${existingState?.pid ?? 'none'}); ignoring handoff signal`);
     }
   }
+  const handoffProofRaw = process.env[HAPI_RUNNER_HANDOFF_PROOF_ENV]
+  delete process.env[HAPI_RUNNER_HANDOFF_PROOF_ENV]
+  const handoffRunnerProof = isAuthorizedHandoff && typeof handoffProofRaw === 'string'
+    ? handoffProofRaw.trim() || undefined
+    : undefined
 
   if (!isAuthorizedHandoff) {
     // Check if already running
@@ -1131,10 +1139,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     // (Codex review #814 [Major] - controlClient.ts:192 fix).
     const startedWithVersionHandoffDisabled = process.env.HAPI_DISABLE_VERSION_HANDOFF === '1';
 
-    // Memory-only runner-generation proof (#1473). Never settings, runner.state,
-    // or child env — same-UID siblings can read those. Ungraceful restart
-    // without a handoff pipe rotates machine id via hub 409 re-enroll.
-    const runnerProof = randomBytes(32).toString('base64url')
+    // Memory-only runner-generation proof (#1473). Prefer the one-shot handoff
+    // bearer from an authorized parent restart; otherwise mint fresh (hub will
+    // 409-rotate machine id when the prior generation hash no longer matches).
+    // Never settings, runner.state, or wrapped-agent env.
+    const runnerProof = handoffRunnerProof ?? randomBytes(32).toString('base64url')
 
     // Write initial runner state (no lock needed for state file)
     const fileState: RunnerLocallyPersistedState = {
@@ -1381,13 +1390,16 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           // the child knows it is an authorized handoff and must NOT call
           // stopRunner() against us before writing its own state.
           // Codex review #814 [Major] on run.ts:892.
+          // Pass runnerProof only for this authorized handoff (#1473 Major) —
+          // child drains HAPI_RUNNER_HANDOFF_PROOF immediately and never persists it.
           try {
             spawnHappyCLI(handoffArgv, {
               detached: true,
               stdio: 'ignore',
               env: {
                 ...process.env,
-                HAPI_RUNNER_HANDOFF_FROM_PID: String(process.pid)
+                HAPI_RUNNER_HANDOFF_FROM_PID: String(process.pid),
+                [HAPI_RUNNER_HANDOFF_PROOF_ENV]: runnerProof,
               }
             });
           } catch (error) {

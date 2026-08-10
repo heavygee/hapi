@@ -96,7 +96,7 @@ vi.mock('axios', () => ({
 
 vi.mock('./peerDeliverBroker', () => ({
     PeerDeliverBroker: class {
-        start() {}
+        async start() {}
         stop() {}
     },
 }))

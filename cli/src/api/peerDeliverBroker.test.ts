@@ -67,7 +67,7 @@ describe('PeerDeliverBroker', () => {
             // Simulate a non-descendant peer pid (sibling session A).
             readPeerCred: () => ({ pid: 1, uid: process.getuid?.() ?? 0, gid: 0 }),
         })
-        broker.start()
+        await broker.start()
 
         const response = await new Promise<string>((resolve, reject) => {
             const chunks: Buffer[] = []
@@ -113,7 +113,7 @@ describe('PeerDeliverBroker', () => {
             socketPath,
             readPeerCred: () => ({ pid: process.pid, uid: 0, gid: 0 }),
         })
-        broker.start()
+        await broker.start()
 
         const response = await new Promise<string>((resolve, reject) => {
             const chunks: Buffer[] = []
@@ -163,7 +163,7 @@ describe('PeerDeliverBroker', () => {
             socketPath,
             readPeerCred: () => ({ pid: process.pid, uid: process.getuid?.() ?? 0, gid: 0 }),
         })
-        broker.start()
+        await broker.start()
         try {
             await new Promise<void>((resolve, reject) => {
                 const socket = createConnection(socketPath)
