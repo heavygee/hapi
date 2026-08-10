@@ -27,15 +27,9 @@ export async function startLocalResumeGrantServer(options: {
     mintCapability: (sessionId: string) => Promise<string>
     /**
      * If the peer PID belongs to a tracked session process tree, return that
-     * session id — minting is restricted to it. Return null when the peer is
-     * not under a tracked child.
+     * session id — minting is restricted to it.
      */
     resolveTrackedSessionId?: (peerPid: number) => string | null
-    /**
-     * Operator terminals (e.g. `hapi resume`) must prove they are the hapi CLI
-     * binary — reparented session helpers share the runner UID (#1473 Blocker).
-     */
-    isTrustedOperatorPeer?: (peerPid: number) => boolean
     readPeerCred?: PeerCredReader
     socketPath?: string
 }): Promise<LocalResumeGrantServer | null> {
@@ -90,14 +84,11 @@ export async function startLocalResumeGrantServer(options: {
                             return
                         }
                         const tracked = options.resolveTrackedSessionId?.(cred.pid) ?? null
-                        if (tracked) {
-                            if (tracked !== sessionId) {
-                                socket.end(`${JSON.stringify({ ok: false, code: 'auth_failed' })}\n`)
-                                return
-                            }
-                        } else if (!options.isTrustedOperatorPeer?.(cred.pid)) {
-                            // Untracked peer without resume-CLI proof (reparented
-                            // helpers, random same-UID processes).
+                        // Only a process in the target session's tracked tree may
+                        // mint that session's capability. Operator terminals use
+                        // the runner HTTP control path when no sessions are
+                        // tracked (#1473 Blocker — cmdline is forgeable).
+                        if (tracked !== sessionId) {
                             socket.end(`${JSON.stringify({ ok: false, code: 'auth_failed' })}\n`)
                             return
                         }

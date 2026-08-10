@@ -70,17 +70,16 @@ describe('localResumeGrant (#1473)', () => {
         server!.close()
     })
 
-    it('allows an operator terminal (untracked) to mint any session', async () => {
+    it('allows a tracked session to mint its own capability', async () => {
         if (process.platform !== 'linux' && process.platform !== 'darwin') {
             return
         }
-        const socketPath = testLocalResumeSocketPath('hapi-local-resume-allow')
+        const socketPath = testLocalResumeSocketPath('hapi-local-resume-self')
         sockets.push(socketPath)
         const server = await startLocalResumeGrantServer({
             socketPath,
             mintCapability: async (sessionId) => `cap-for-${sessionId}`,
-            resolveTrackedSessionId: () => null,
-            isTrustedOperatorPeer: () => true,
+            resolveTrackedSessionId: () => 'session-a',
             readPeerCred: () => ({
                 pid: process.pid,
                 uid: process.getuid?.() ?? 0,
@@ -88,23 +87,22 @@ describe('localResumeGrant (#1473)', () => {
             }),
         })
         expect(server).not.toBeNull()
-        const response = await requestCapability(socketPath, 'session-b')
+        const response = await requestCapability(socketPath, 'session-a')
         expect(response.ok).toBe(true)
-        expect(response.sessionCapability).toBe('cap-for-session-b')
+        expect(response.sessionCapability).toBe('cap-for-session-a')
         server!.close()
     })
 
-    it('refuses an untracked peer that is not a trusted operator', async () => {
+    it('refuses an untracked peer on the unix grant socket', async () => {
         if (process.platform !== 'linux' && process.platform !== 'darwin') {
             return
         }
-        const socketPath = testLocalResumeSocketPath('hapi-local-resume-untrusted')
+        const socketPath = testLocalResumeSocketPath('hapi-local-resume-untracked')
         sockets.push(socketPath)
         const server = await startLocalResumeGrantServer({
             socketPath,
             mintCapability: async () => 'cap-should-not-issue',
             resolveTrackedSessionId: () => null,
-            isTrustedOperatorPeer: () => false,
             readPeerCred: () => ({
                 pid: process.pid,
                 uid: process.getuid?.() ?? 0,

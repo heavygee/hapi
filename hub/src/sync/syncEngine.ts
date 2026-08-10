@@ -1100,6 +1100,7 @@ async uploadScratchlistAttachment(
                 machineId: options.fromMachineId,
                 namespace: options.namespace,
                 grant: options.grant,
+                toMachineId: options.toMachineId,
             })) {
                 throw new Error('Failed to consume reenroll grant after migration')
             }

@@ -50,6 +50,19 @@ function parseGrant(raw: string): PersistedReenrollGrant | null {
     }
 }
 
+function fsyncPath(path: string): void {
+    const fd = openSync(path, 'r')
+    try {
+        fsyncSync(fd)
+    } finally {
+        closeSync(fd)
+    }
+}
+
+function fsyncParent(path: string): void {
+    fsyncPath(dirname(path))
+}
+
 /**
  * Stage a replacement grant without destroying the durable token.
  * Call {@link commitReenrollGrant} only after hub ack (#1473 Major).
@@ -61,12 +74,8 @@ export function writeReenrollGrantPending(grant: PersistedReenrollGrant): void {
     chmodSync(path, 0o600)
     // Durability before hub ack — power loss must not drop the only token
     // that still matches a newly issued hash (#1473 Major).
-    const fd = openSync(path, 'r')
-    try {
-        fsyncSync(fd)
-    } finally {
-        closeSync(fd)
-    }
+    fsyncPath(path)
+    fsyncParent(path)
 }
 
 /** Promote the staged grant after hub ack. */
@@ -79,12 +88,8 @@ export function commitReenrollGrant(): void {
     mkdirSync(dirname(finalPath), { recursive: true, mode: 0o700 })
     renameSync(pending, finalPath)
     chmodSync(finalPath, 0o600)
-    const fd = openSync(finalPath, 'r')
-    try {
-        fsyncSync(fd)
-    } finally {
-        closeSync(fd)
-    }
+    fsyncPath(finalPath)
+    fsyncParent(finalPath)
 }
 
 /** @deprecated Prefer writeReenrollGrantPending + commitReenrollGrant. */

@@ -13,7 +13,7 @@ import { resolvePeerMetaFromSourceSession } from './messages'
 import { mintPeerSessionCapability, verifyPeerSessionCapability } from '../peerCapability'
 import { redeemResumePeerMint } from '../pendingResumePeerMint'
 import { verifyRunnerProof } from '../../utils/runnerProof'
-import { issueReenrollGrant, verifyReenrollGrant, ackReenrollGrant } from '../../utils/reenrollGrant'
+import { issueReenrollGrant, verifyReenrollGrant, ackReenrollGrant, getConsumedReenrollReplay } from '../../utils/reenrollGrant'
 import { getConfiguration } from '../../configuration'
 import { readSessionSummaryContractEnabled } from '../../config/sessionSummaryContract'
 import { constantTimeEquals } from '../../utils/crypto'
@@ -445,15 +445,26 @@ export function createCliRoutes(
             namespace,
             grant: reenrollGrant,
         })) {
-            // Lost-response replay: grant already consumed. Only succeed when
-            // the destination already owns every former source session and the
-            // source is empty (#1473 Major).
-            const remainingOnSource = engine.countSessionsOnMachine(fromMachineId, namespace)
-            const ownedByDestination = engine.countSessionsOnMachine(newMachineId, namespace)
-            if (remainingOnSource === 0 && ownedByDestination > 0) {
+            // Lost-response replay after the grant was consumed (#1473 Major).
+            const replay = getConsumedReenrollReplay(reenrollGrant)
+            if (!replay || replay.namespace !== namespace || replay.fromMachineId !== fromMachineId) {
+                return c.json({ error: 'Source machine proof required' }, 403)
+            }
+            if (replay.toMachineId === newMachineId) {
                 return c.json({ migrated: 0, alreadyComplete: true })
             }
-            return c.json({ error: 'Source machine proof required' }, 403)
+            try {
+                const migrated = engine.migrateSessionsMachineId(
+                    replay.toMachineId,
+                    newMachineId,
+                    namespace
+                )
+                return c.json({ migrated, alreadyComplete: true })
+            } catch (error) {
+                return c.json({
+                    error: error instanceof Error ? error.message : 'Session migration failed',
+                }, 409)
+            }
         }
         try {
             const migrated = usingGrant

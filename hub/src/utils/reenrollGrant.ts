@@ -9,12 +9,21 @@ type GrantRecord = {
     expiresAt: number
 }
 
+export type ConsumedReenrollReplay = {
+    grantHash: string
+    fromMachineId: string
+    toMachineId: string
+    namespace: string
+}
+
 /**
  * In-memory cache keyed by grant hash. SQLite may hold multiple hashes per
  * machine so a refresh can keep the previous grant valid until the runner
  * persists the replacement and acks (#1473 Blocker).
  */
 const grantsByHash = new Map<string, GrantRecord>()
+/** Spent grants remembered so a lost HTTP response can replay migrate (#1473). */
+const consumedReplaysByHash = new Map<string, ConsumedReenrollReplay>()
 let grantDb: Database | null = null
 
 const DEFAULT_TTL_MS = 365 * 24 * 60 * 60_000
@@ -183,15 +192,24 @@ export function verifyReenrollGrant(options: {
 /**
  * Consume a one-time reenroll grant after migrate succeeded.
  * Deletes every grant for the source machine (old generation is done).
+ * Records a replay tip so a lost HTTP response can finish / continue migrate.
  */
 export function consumeReenrollGrant(options: {
     machineId: string
     namespace: string
     grant: string
+    toMachineId: string
 }): boolean {
     if (!verifyReenrollGrant(options)) {
         return false
     }
+    const grantHash = hashGrant(options.grant)
+    consumedReplaysByHash.set(grantHash, {
+        grantHash,
+        fromMachineId: options.machineId,
+        toMachineId: options.toMachineId.trim(),
+        namespace: options.namespace,
+    })
     for (const [hash, record] of [...grantsByHash.entries()]) {
         if (record.machineId === options.machineId) {
             grantsByHash.delete(hash)
@@ -201,9 +219,15 @@ export function consumeReenrollGrant(options: {
     return true
 }
 
+export function getConsumedReenrollReplay(grant: string): ConsumedReenrollReplay | null {
+    const hash = hashGrant(grant.trim())
+    return consumedReplaysByHash.get(hash) ?? null
+}
+
 /** Test helper — clear in-memory grants between cases. */
 export function clearReenrollGrantsForTests(): void {
     grantsByHash.clear()
+    consumedReplaysByHash.clear()
     if (grantDb) {
         try {
             grantDb.prepare('DELETE FROM machine_reenroll_grants').run()

@@ -21,11 +21,13 @@ describe('reenrollGrant (#1473)', () => {
             machineId: 'machine-old',
             namespace: 'default',
             grant,
+            toMachineId: 'machine-new',
         })).toBe(true)
         expect(consumeReenrollGrant({
             machineId: 'machine-old',
             namespace: 'default',
             grant,
+            toMachineId: 'machine-new',
         })).toBe(false)
     })
 
@@ -38,11 +40,13 @@ describe('reenrollGrant (#1473)', () => {
             machineId: 'machine-old',
             namespace: 'other',
             grant,
+            toMachineId: 'machine-new',
         })).toBe(false)
         expect(consumeReenrollGrant({
             machineId: 'machine-other',
             namespace: 'default',
             grant,
+            toMachineId: 'machine-new',
         })).toBe(false)
     })
 
@@ -101,6 +105,7 @@ describe('reenrollGrant (#1473)', () => {
             machineId: 'machine-old',
             namespace: 'default',
             grant,
+            toMachineId: 'machine-new',
         })).toBe(true)
         expect(verifyReenrollGrant({
             machineId: 'machine-old',

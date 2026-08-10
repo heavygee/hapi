@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync, renameSync, writeFileSync, readlinkSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import os from 'os';
 
 import { ApiClient } from '@/api/api';
@@ -25,8 +25,7 @@ import { cleanupRunnerState, getInstalledCliMtimeMs, isRunnerRunningCurrentlyIns
 import { startRunnerControlServer } from './controlServer';
 import { startLocalResumeGrantServer } from './localResumeGrant';
 import { isProcessDescendant } from '@/api/processDescendant'
-import { basename, join } from 'node:path'
-import { execFileSync } from 'node:child_process'
+import { join } from 'node:path'
 import { createWorktree, removeWorktree, type WorktreeInfo } from './worktree';
 import { validateWorkspaceDirectory } from './validateWorkspaceDirectory';
 import { buildMachineMetadata } from '@/agent/sessionFactory';
@@ -1344,44 +1343,9 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       }
       return null
     }
-    const isTrustedOperatorPeer = (peerPid: number): boolean => {
-      // Agents are often the same hapi binary as the runner, so exe alone is
-      // not auth. Require an untracked peer whose cmdline is clearly
-      // `hapi resume` (#1473 Blocker).
-      if (process.platform === 'linux') {
-        try {
-          const exe = readlinkSync(`/proc/${peerPid}/exe`).replace(/ \(deleted\)$/, '')
-          const sameBinary = exe === process.execPath
-            || basename(exe) === basename(process.execPath)
-          if (!sameBinary) {
-            return false
-          }
-          const cmdline = readFileSync(`/proc/${peerPid}/cmdline`, 'utf8')
-          const args = cmdline.split('\0').filter(Boolean)
-          return args.includes('resume')
-        } catch {
-          return false
-        }
-      }
-      if (process.platform === 'darwin') {
-        try {
-          const out = execFileSync('ps', ['-p', String(peerPid), '-o', 'args='], {
-            encoding: 'utf8',
-            timeout: 1_000,
-          }).trim()
-          const runnerBase = basename(process.execPath)
-          const looksLikeHapi = out.includes(runnerBase) || /\bhapi\b/.test(out)
-          return looksLikeHapi && /\bresume\b/.test(out)
-        } catch {
-          return false
-        }
-      }
-      return false
-    }
     const localResumeGrant = await startLocalResumeGrantServer({
       mintCapability: (sessionId) => mintLocalResumeCapability!(sessionId),
       resolveTrackedSessionId: resolveTrackedSessionIdForPeer,
-      isTrustedOperatorPeer,
     })
     if (localResumeGrant) {
       stopLocalResumeGrantServer = localResumeGrant.close
