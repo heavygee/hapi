@@ -92,6 +92,27 @@ Kill-criteria before bulk remap: operator approval; confirm `$LIVE` has `spawn-h
 3. Wire or delete `migrateSessionsAfterReenroll`; stop claiming migrate exists if cold path never calls it.
 4. Mark stale machine rows offline when PID is dead (estate still shows `e4a08a64` shutting-down with dead pid).
 
+## Zombie fleet runner RPCs (proxmox / Teemo — 2026-08-10)
+
+**Incident:** Netgear Agent (`849004cc`) tried to spawn WiFi-mesh peer on proxmox; hub returned HTTP **200** with body `{"type":"error","message":"RPC handler not registered: f9bb3c9e…:spawn-happy-session"}`. Fallback spawn on oos succeeded → peer [`99585d61`](https://hapi.tail9944ee.ts.net/sessions/99585d61-5119-4e65-9d03-1f91ec067d4f) on oos-linux. Teemo same window: `Teemo:spawn-happy-session` missing.
+
+**Symptoms (still true while systemd says active):**
+
+| Probe | oos (`5f5a87e8`) | proxmox (`f9bb3c9e`) / Teemo |
+|-------|------------------|------------------------------|
+| `GET /api/machines` list row | present, `runnerState=running` | present, `runnerState=running` |
+| `GET /api/machines/:id` | **404 always** — **no such route** (only list + PATCH + action POSTs). Do not treat 404 as "machine gone." | same |
+| `GET …/cursor-models` | 200 | 500 `listCursorModels` not registered |
+| `POST …/spawn` | real session | HTTP 200 + `type:error` spawn-happy-session missing |
+
+**Kill-criteria:** always parse spawn **JSON body**. HTTP 200 ≠ success. Prefer `type=="success" && sessionId`.
+
+**Heal (operator-approved — do not panic-bounce):**
+
+1. Leave non-homelab-critical peers on oos when path exists there (WiFi mesh peer: leave-on-oos; Netgear scp'd missing untracked docs).
+2. Proxmox/Teemo are still **untagged**. Blind `systemctl restart hapi-runner` can mint a new `machineId` under #1473. Prefer: pre-seed matching `machines.tag` + host `settings.machineTag`, then runner-only restart so tip rebind keeps id — or schedule a tagged first-claim with planned session remap.
+3. After hub restart, confirm **each** fleet host re-registers `spawn-happy-session` + `listCursorModels` (oos recovered; proxmox/Teemo did not in this window).
+
 ## CLI recycle kill-criteria (upload / skills blind)
 
 Do **not** trust `POST …/resume` success alone.
