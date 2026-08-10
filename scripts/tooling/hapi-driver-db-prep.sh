@@ -154,6 +154,15 @@ PRAGMA user_version = 10;
 COMMIT;
 SQL
             ;;
+        25_to_24)
+            # session_jobs.run_id is ignored by V24 readers (explicit column lists).
+            echo "  applying v25 -> v24 downgrade: rewind user_version (keep run_id column)"
+            sqlite3 "$DB_PATH" <<'SQL'
+BEGIN IMMEDIATE;
+PRAGMA user_version = 24;
+COMMIT;
+SQL
+            ;;
         24_to_23)
             # session_jobs.run_id is ignored by V23 readers (explicit column lists).
             # Leave the column in place; only rewind user_version.
