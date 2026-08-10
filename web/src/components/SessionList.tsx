@@ -137,11 +137,12 @@ export function bucketRunningSessions(
             && !agentWorking
         if (agentWorking) {
             buckets.working.push(session)
+        } else if (agentPending) {
+            // Operator action outranks the Jobs meter when both apply.
+            buckets.pending.push(session)
         } else if (hasRunningAttachedJob(session)) {
             // Idle outliving work — not "Running" agent activity.
             buckets.jobs.push(session)
-        } else if (agentPending) {
-            buckets.pending.push(session)
         } else if (session.metadata?.lifecycleState === SESSION_LIFECYCLE_IDLE) {
             buckets.idle.push(session)
         } else {
