@@ -107,6 +107,13 @@ export async function startPeerCapabilityInjectServer(options?: {
                     socket.end(`${JSON.stringify({ ok: false, code: 'auth_failed' })}\n`)
                     return
                 }
+                // Do not resolve deliverTo if the client already abandoned this
+                // socket (null peercred race → client finish(undefined) while we
+                // still held). Resolving here unlinks the sock and the real
+                // retry hits ENOENT (#1473 estate).
+                if (socket.destroyed) {
+                    return
+                }
                 socket.end(`${JSON.stringify({ ok: true, ...payload })}\n`)
                 if (deliverResolve) {
                     if (deliverTimer) {
@@ -319,10 +326,17 @@ function tryReceiveOnce(
         })
         socket.on('connect', () => {
             const cred = readPeerCred(socket)
-            const authorized = expectedServerPid !== undefined
-                ? cred?.pid === expectedServerPid
-                : Boolean(cred && isProcessDescendant(ownerPid, cred.pid))
-            if (!authorized) {
+            // Bun/Linux: SO_PEERCRED can be briefly unavailable on connect.
+            // Treat missing cred as "wait for server push", not hard fail —
+            // aborting here lets the server still mark deliverTo complete and
+            // unlink the socket while we retry into ENOENT (#1473).
+            if (expectedServerPid !== undefined) {
+                if (cred && cred.pid !== expectedServerPid) {
+                    finish(undefined)
+                }
+                return
+            }
+            if (cred && !isProcessDescendant(ownerPid, cred.pid)) {
                 finish(undefined)
             }
             // Server pushes secret on accept when armed.

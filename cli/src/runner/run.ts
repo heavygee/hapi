@@ -721,10 +721,19 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
                 resumePeerMintNonce
               )
               if (!capability) {
-                logger.debug('[RUNNER RUN] resume peer capability redeem returned empty')
+                // Keep the inject socket up for the child receive window so the
+                // failure mode is not_armed (actionable) instead of ENOENT from
+                // an early finally-close (#1473).
+                logger.debug('[RUNNER RUN] resume peer capability redeem returned empty; holding inject socket')
+                await new Promise((r) => setTimeout(r, 16_000))
                 return
               }
               await inject.deliverTo(childPid, { sessionCapability: capability })
+              // deliverTo resolves when the server writes ok:true, which can race
+              // the child's receive loop (client abandoned socket / next attempt).
+              // Keep listening briefly so retries still see the armed payload
+              // instead of ENOENT (#1473 estate).
+              await new Promise((r) => setTimeout(r, 3_000))
             } catch (error) {
               logger.debug('[RUNNER RUN] resume peer capability inject failed', error)
             } finally {
@@ -1740,28 +1749,55 @@ async function redeemResumePeerCapabilityFromHub(
     logger.debug('[RUNNER RUN] resume peer redeem skipped: missing apiUrl or cliApiToken')
     return undefined
   }
-  // /cli routes authenticate with the namespace CLI token (not a web JWT).
-  const redeemResponse = await fetch(
-    `${apiUrl}/cli/sessions/${encodeURIComponent(sessionId)}/resume-peer-capability`,
-    {
+  // Bun fetch has historically returned empty bodies / null json() on some
+  // keep-alive responses (#1473 estate: hub logs HTTP 200, runner closes the
+  // inject socket in finally → child ECONNREFUSED/ENOENT). Read text + parse,
+  // retry once on empty.
+  const redeemUrl =
+    `${apiUrl}/cli/sessions/${encodeURIComponent(sessionId)}/resume-peer-capability`
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const redeemResponse = await fetch(redeemUrl, {
       method: 'POST',
       headers: buildHubRequestHeaders({
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       }),
       body: JSON.stringify({ nonce }),
+    })
+    const rawBody = await redeemResponse.text()
+    if (!redeemResponse.ok) {
+      logger.debug(
+        `[RUNNER RUN] resume peer redeem HTTP ${redeemResponse.status} for ${sessionId} body=${rawBody.slice(0, 120)}`
+      )
+      return undefined
     }
-  )
-  if (!redeemResponse.ok) {
+    if (!rawBody.trim()) {
+      logger.debug(
+        `[RUNNER RUN] resume peer redeem empty body for ${sessionId} attempt=${attempt}`
+      )
+      continue
+    }
+    let redeemBody: { sessionCapability?: unknown }
+    try {
+      redeemBody = JSON.parse(rawBody) as { sessionCapability?: unknown }
+    } catch (error) {
+      logger.debug(
+        `[RUNNER RUN] resume peer redeem JSON parse failed for ${sessionId}`,
+        error
+      )
+      return undefined
+    }
+    const capability = typeof redeemBody.sessionCapability === 'string'
+      ? redeemBody.sessionCapability.trim()
+      : ''
+    if (capability) {
+      return capability
+    }
     logger.debug(
-      `[RUNNER RUN] resume peer redeem HTTP ${redeemResponse.status} for ${sessionId}`
+      `[RUNNER RUN] resume peer redeem missing sessionCapability for ${sessionId} body=${rawBody.slice(0, 120)}`
     )
     return undefined
   }
-  const redeemBody = await redeemResponse.json() as { sessionCapability?: string }
-  const capability = typeof redeemBody.sessionCapability === 'string'
-    ? redeemBody.sessionCapability.trim()
-    : ''
-  return capability || undefined
+  return undefined
 }
 
