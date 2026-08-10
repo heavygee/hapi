@@ -126,7 +126,7 @@ describe('resumeCommand', () => {
         })
     })
 
-    it('does not stop a remote session when direct resume has no inject (#1473)', async () => {
+    it('allows direct terminal resume without inject (unattributed) (#1473)', async () => {
         delete process.env.HAPI_PEER_CAP_INJECT
         getLocalResumeTargetMock.mockResolvedValue({
             sessionId: 'hapi-session-active',
@@ -140,17 +140,14 @@ describe('resumeCommand', () => {
             permissionMode: 'default',
             collaborationMode: 'default'
         })
-        const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
-            throw new Error('process.exit')
-        }) as never)
-        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-        await expect(resumeCommand.run(createContext(['hapi-session-active']))).rejects.toThrow(/process\.exit/)
+        await resumeCommand.run(createContext(['hapi-session-active']))
 
-        expect(handoffSessionToLocalMock).not.toHaveBeenCalled()
-        expect(runCodexMock).not.toHaveBeenCalled()
-        exitSpy.mockRestore()
-        errorSpy.mockRestore()
+        expect(handoffSessionToLocalMock).toHaveBeenCalledWith('hapi-session-active')
+        expect(runCodexMock).toHaveBeenCalledWith(expect.objectContaining({
+            existingSessionId: 'hapi-session-active',
+            startedBy: 'terminal',
+        }))
     })
 
     it('resumes an AGY target in PTY mode instead of falling through to Cursor', async () => {

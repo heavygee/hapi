@@ -115,21 +115,28 @@ describe('bootstrapExistingSession', () => {
         takeDirectResumeCapability()
     })
 
-    it('fails closed on direct terminal resume without inject (#1473)', async () => {
+    it('allows unattributed direct terminal resume without inject (#1473)', async () => {
         const session = createSession()
+        const sessionClient = {
+            updateMetadata: vi.fn(),
+            waitForPeerSessionCapability: vi.fn(async () => null),
+        }
         getSessionMock.mockResolvedValue(session)
         readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
+        sessionSyncClientMock.mockReturnValue(sessionClient)
 
-        await expect(bootstrapExistingSession({
+        const result = await bootstrapExistingSession({
             sessionId: 'hapi-session-1',
             flavor: 'codex',
             workingDirectory: '/tmp/project'
-        })).rejects.toThrow(/Secure resume requires runner-issued/)
+        })
 
+        expect(result.sessionInfo.id).toBe('hapi-session-1')
         expect(getOrCreateMachineMock).not.toHaveBeenCalled()
-        expect(sessionSyncClientMock).not.toHaveBeenCalled()
-        expect(process.env[HAPI_SESSION_ID_ENV]).toBeUndefined()
-        expect(notifyRunnerSessionStartedMock).not.toHaveBeenCalled()
+        expect(sessionSyncClientMock).toHaveBeenCalledWith(session, undefined)
+        expect(sessionClient.waitForPeerSessionCapability).not.toHaveBeenCalled()
+        expect(process.env[HAPI_SESSION_ID_ENV]).toBe('hapi-session-1')
+        expect(notifyRunnerSessionStartedMock).toHaveBeenCalled()
     })
 
     it('accepts in-process capability from peercred local-resume grant (#1473)', async () => {
@@ -420,7 +427,10 @@ describe('bootstrapSession HAPI_SESSION_ID export', () => {
         const session = createSession()
         session.id = 'hub-session-42'
         getOrCreateSessionMock.mockResolvedValue(session)
-        sessionSyncClientMock.mockReturnValue({ isPending: () => false })
+        sessionSyncClientMock.mockReturnValue({
+            isPending: () => false,
+            waitForPeerSessionCapability: vi.fn(async () => 'cap-create'),
+        })
         readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
 
         const result = await bootstrapSession({
@@ -431,5 +441,7 @@ describe('bootstrapSession HAPI_SESSION_ID export', () => {
         expect(result.sessionInfo.id).toBe('hub-session-42')
         expect(process.env[HAPI_SESSION_ID_ENV]).toBe('hub-session-42')
         expect(getOrCreateMachineMock).not.toHaveBeenCalled()
+        expect(sessionSyncClientMock.mock.results[0]?.value.waitForPeerSessionCapability)
+            .toHaveBeenCalledWith({ timeoutMs: 16_000 })
     })
 })

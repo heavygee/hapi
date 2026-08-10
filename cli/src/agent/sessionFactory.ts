@@ -206,6 +206,9 @@ export async function bootstrapSession(options: SessionBootstrapOptions): Promis
 
     const session = api.sessionSyncClient(sessionInfo, { sessionTag })
 
+    // Broker env must land before wrapped agents snapshot process.env (#1473).
+    await session.waitForPeerSessionCapability({ timeoutMs: 16_000 })
+
     exportHapiSessionEnv(sessionInfo.id)
 
     await reportSessionStarted(sessionInfo.id, metadata)
@@ -351,12 +354,6 @@ export async function bootstrapExistingSession(options: {
     } = await import('@/api/peerCapabilityInject')
     const directCapability = takeDirectResumeCapability()
     const expectsInjectedCapability = Boolean(process.env[HAPI_PEER_CAP_INJECT_ENV]?.trim())
-    if (!directCapability && !expectsInjectedCapability) {
-        throw new Error(
-            'Secure resume requires runner-issued capability '
-            + '(hub/web resume inject or peercred local-resume grant).'
-        )
-    }
 
     const session = api.sessionSyncClient(
         sessionInfo,
@@ -364,10 +361,13 @@ export async function bootstrapExistingSession(options: {
     )
     session.updateMetadata(buildUpdatedMetadata)
 
-    // Wait for inject + broker readiness before exporting env / returning.
-    const injected = await session.waitForPeerSessionCapability({ timeoutMs: 16_000 })
-    if (!injected) {
-        throw new Error('Cannot resume: runner peer capability inject failed')
+    // Attributed path: wait for inject + broker before children snapshot env.
+    // Direct terminal resume without inject continues unattributed (#1473 Major).
+    if (directCapability || expectsInjectedCapability) {
+        const injected = await session.waitForPeerSessionCapability({ timeoutMs: 16_000 })
+        if (!injected) {
+            throw new Error('Cannot resume: runner peer capability inject failed')
+        }
     }
 
     exportHapiSessionEnv(sessionInfo.id)

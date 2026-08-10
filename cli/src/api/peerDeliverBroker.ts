@@ -6,6 +6,10 @@ import { dirname, join } from 'node:path'
 import { logger } from '@/ui/logger'
 import { isProcessDescendant } from './processDescendant'
 import { readUnixPeerCredentials, type PeerCredReader } from './peercred'
+import {
+    readWindowsNamedPipeClientCredentials,
+    readWindowsNamedPipeServerCredentials,
+} from './peerCapabilityInject'
 import { HAPI_SESSION_ID_ENV } from '@/agent/hapiSessionEnv'
 import {
     PingPeerError,
@@ -14,6 +18,8 @@ import {
 } from '@/modules/pingPeer/pingPeer'
 
 export const HAPI_PEER_DELIVER_BROKER_ENV = 'HAPI_PEER_DELIVER_BROKER'
+/** Windows client verifies named-pipe server PID (ancestry walk is Unix-only). */
+export const HAPI_PEER_DELIVER_BROKER_SERVER_PID_ENV = 'HAPI_PEER_DELIVER_BROKER_SERVER_PID'
 
 type BrokerRequest = {
     op: 'ping-peer'
@@ -54,25 +60,31 @@ export class PeerDeliverBroker {
         this.sessionId = options.sessionId
         this.sessionCapability = options.sessionCapability
         this.ownerPid = options.ownerPid ?? process.pid
-        this.readPeerCred = options.readPeerCred ?? readUnixPeerCredentials
+        this.readPeerCred = options.readPeerCred
+            ?? (process.platform === 'win32'
+                ? readWindowsNamedPipeClientCredentials
+                : readUnixPeerCredentials)
         this.socketPath = options.socketPath ?? defaultBrokerSocketPath(options.sessionId)
     }
 
     /**
-     * Bind the unix socket and export HAPI_PEER_DELIVER_BROKER only after
-     * listen succeeds (#1473 Major). Callers must await before spawning agents
-     * that snapshot process.env.
+     * Bind the unix socket / Windows named pipe and export
+     * HAPI_PEER_DELIVER_BROKER only after listen succeeds (#1473 Major).
+     * Callers must await before spawning agents that snapshot process.env.
      */
     async start(): Promise<void> {
         if (this.server) {
             return
         }
-        mkdirSync(dirname(this.socketPath), { recursive: true, mode: 0o700 })
-        if (existsSync(this.socketPath)) {
-            try {
-                unlinkSync(this.socketPath)
-            } catch {
-                // replace stale socket
+        const isWindowsPipe = process.platform === 'win32'
+        if (!isWindowsPipe) {
+            mkdirSync(dirname(this.socketPath), { recursive: true, mode: 0o700 })
+            if (existsSync(this.socketPath)) {
+                try {
+                    unlinkSync(this.socketPath)
+                } catch {
+                    // replace stale socket
+                }
             }
         }
         this.server = createServer((socket) => {
@@ -99,13 +111,17 @@ export class PeerDeliverBroker {
             if (process.env[HAPI_PEER_DELIVER_BROKER_ENV] === this.socketPath) {
                 delete process.env[HAPI_PEER_DELIVER_BROKER_ENV]
             }
+            delete process.env[HAPI_PEER_DELIVER_BROKER_SERVER_PID_ENV]
         })
-        try {
-            chmodSync(this.socketPath, 0o600)
-        } catch {
-            // best-effort
+        if (!isWindowsPipe) {
+            try {
+                chmodSync(this.socketPath, 0o600)
+            } catch {
+                // best-effort
+            }
         }
         process.env[HAPI_PEER_DELIVER_BROKER_ENV] = this.socketPath
+        process.env[HAPI_PEER_DELIVER_BROKER_SERVER_PID_ENV] = String(this.ownerPid)
         logger.debug(`[peer-broker] listening on ${this.socketPath}`)
     }
 
@@ -115,11 +131,14 @@ export class PeerDeliverBroker {
         if (process.env[HAPI_PEER_DELIVER_BROKER_ENV] === this.socketPath) {
             delete process.env[HAPI_PEER_DELIVER_BROKER_ENV]
         }
+        delete process.env[HAPI_PEER_DELIVER_BROKER_SERVER_PID_ENV]
         server?.close()
-        try {
-            unlinkSync(this.socketPath)
-        } catch {
-            // ignore
+        if (process.platform !== 'win32') {
+            try {
+                unlinkSync(this.socketPath)
+            } catch {
+                // ignore
+            }
         }
     }
 
@@ -191,6 +210,10 @@ export const MAX_UNIX_SOCKET_PATH_BYTES = 103
  * Session id is not embedded — path is exported via env; peercred auth is PID-based.
  */
 export function defaultBrokerSocketPath(_sessionId?: string): string {
+    if (process.platform === 'win32') {
+        // Bun/Node named-pipe path; random suffix defeats squatting (#1473).
+        return `\\\\.\\pipe\\hapi-pd-${randomBytes(12).toString('hex')}`
+    }
     const runtime = process.env.XDG_RUNTIME_DIR?.trim()
         || join(tmpdir(), `hapi-${process.getuid?.() ?? process.pid}`)
     return join(runtime, 'pd', `${randomBytes(12).toString('hex')}.sock`)
@@ -247,7 +270,14 @@ export async function requestParentPeerDeliver(options: {
         throw new PingPeerError('auth_failed', 'HAPI_SESSION_ID missing for attributed peer delivery')
     }
 
-    const readPeerCred = options.readPeerCred ?? readUnixPeerCredentials
+    const readPeerCred = options.readPeerCred
+        ?? (process.platform === 'win32'
+            ? readWindowsNamedPipeServerCredentials
+            : readUnixPeerCredentials)
+    const expectedServerPidRaw = process.env[HAPI_PEER_DELIVER_BROKER_SERVER_PID_ENV]?.trim()
+    const expectedServerPid = expectedServerPidRaw && /^\d+$/.test(expectedServerPidRaw)
+        ? Number(expectedServerPidRaw)
+        : undefined
 
     const response = await new Promise<BrokerResponse>((resolve, reject) => {
         const chunks: Buffer[] = []
@@ -272,11 +302,13 @@ export async function requestParentPeerDeliver(options: {
             }
         })
         socket.on('connect', () => {
-            // M3: verify the listener is an ancestor of this process so a
-            // same-UID sibling cannot unlink+rebind the socket path and
-            // silently intercept outgoing peer text.
+            // M3: verify the listener is an ancestor (Unix) or the exported
+            // server PID (Windows — ancestry walk is unavailable).
             const cred = readPeerCred(socket)
-            if (!cred || !isProcessDescendant(process.pid, cred.pid)) {
+            const authorized = expectedServerPid !== undefined
+                ? cred?.pid === expectedServerPid
+                : Boolean(cred && isProcessDescendant(process.pid, cred.pid))
+            if (!authorized) {
                 const err = new PingPeerError(
                     'auth_failed',
                     'peer deliver broker: listener is not an ancestor of this process'

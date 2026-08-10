@@ -55,6 +55,17 @@ describe('PeerDeliverBroker', () => {
         expect(Buffer.byteLength(path, 'utf8')).toBeLessThanOrEqual(MAX_UNIX_SOCKET_PATH_BYTES)
     })
 
+    it('uses a Windows named-pipe path on win32 (#1473)', () => {
+        const original = process.platform
+        Object.defineProperty(process, 'platform', { value: 'win32', configurable: true })
+        try {
+            const path = defaultBrokerSocketPath('11111111-1111-4111-8111-111111111111')
+            expect(path.startsWith('\\\\.\\pipe\\hapi-pd-')).toBe(true)
+        } finally {
+            Object.defineProperty(process, 'platform', { value: original, configurable: true })
+        }
+    })
+
     it('rejects same-UID sibling callers that are not descendants of the owner', async () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-peer-broker-'))
         dirs.push(dir)

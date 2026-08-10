@@ -272,19 +272,10 @@ export const resumeCommand: CommandDefinition = {
                 throw new Error('Session is already controlled by a local terminal')
             }
 
-            // Same-UID siblings can read runner.state + connect to any AF_UNIX
-            // grant socket. Direct terminal resume cannot be bound to a
-            // user-authorized client without an unbound mint channel (#1473
-            // Blocker). Secure resume remains hub/web → runner spawn + inject.
-            // Fail before handoff so an active remote session stays running.
-            if (!process.env.HAPI_PEER_CAP_INJECT?.trim()) {
-                throw new Error(
-                    'Secure resume requires hub/web runner inject '
-                    + '(direct terminal hapi resume cannot prove user authorization '
-                    + 'against same-UID siblings). Resume from the web UI, or keep '
-                    + 'the session local.'
-                )
-            }
+            // Direct terminal resume is allowed without inject: peer delivery
+            // stays unattributed. Attributed resume remains hub/web → runner
+            // spawn + HAPI_PEER_CAP_INJECT (#1473 Major — do not disable the
+            // documented `hapi resume` command).
             if (target.active) {
                 await api.handoffSessionToLocal(target.sessionId)
             }
