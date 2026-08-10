@@ -24,7 +24,9 @@ const {
     listResumableSessionsMock: vi.fn(),
     getLocalResumeTargetMock: vi.fn(),
     handoffSessionToLocalMock: vi.fn(async () => {}),
-    prepareLocalResumeInjectMock: vi.fn(async () => ({ injectPath: 'unix:/tmp/peer-cap.sock' })),
+    prepareLocalResumeInjectMock: vi.fn(async (): Promise<{ injectPath?: string; error?: string }> => ({
+        injectPath: 'unix:/tmp/peer-cap.sock',
+    })),
     readSettingsMock: vi.fn(async () => ({ machineId: 'machine-1', previousMachineIds: [] })),
     renderMock: vi.fn(),
     runCodexMock: vi.fn(async () => {}),
