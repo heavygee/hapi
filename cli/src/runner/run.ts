@@ -1197,11 +1197,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     const workspaceRoots = resolveWorkspaceRoots(options.workspaceRoots);
     logger.debug(`[RUNNER RUN] Workspace roots: ${workspaceRoots?.join(', ') ?? '(not set)'}`);
 
-    // Register machine. Cold start mints a fresh memory-only proof; hub may
-    // offline-rebind the hash on the same machineId when the prior runner is
-    // inactive (keeps Cursor/Pi exact-id resume). Do NOT rotate machine id —
-    // that strands sessions without a secure remap (#1473 Major).
-    // Scrub leftover file grants from older tips (same-UID readable).
+    // Register machine. Cold start may 409 (lost memory-only proof) — rotate
+    // to a new machine id when not a handoff. File-backed reenroll grants are
+    // forbidden (same-UID readable). Handoff must keep the same binding.
+    // Residual: cold rotate can leave Cursor/Pi exact-id sessions on the retired
+    // machine until a hub-held operator remap lands (#1473 product follow-up).
     clearReenrollGrant()
     let machine
     try {
@@ -1212,7 +1212,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           runnerProof,
           metadata: buildMachineMetadata({ workspaceRoots }),
           runnerState: initialRunnerState,
-          allowLegacyReenroll: false,
+          allowLegacyReenroll: !handoffRunnerProof,
         }),
         {
           maxAttempts: 60,
@@ -1233,18 +1233,9 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           + 'that would break the PID-checked generation binding.'
         )
       }
-      if (/runner proof|re-enroll|tag mismatch/i.test(message)) {
-        throw new Error(
-          'Runner could not bind this machine id (proof mismatch while prior runner '
-          + 'still looks live, or tag mismatch). Wait for the old runner heartbeat to '
-          + 'expire (~45s), stop the other runner, or use a graceful handoff. Hub said: '
-          + message
-        )
-      }
       throw error
     }
     if (machine.id !== machineId) {
-      // Should not happen with allowLegacyReenroll: false; keep defensive path.
       machineId = machine.id;
       const rotated = await authAndSetupMachineIfNeeded();
       machineTag = rotated.machineTag;
