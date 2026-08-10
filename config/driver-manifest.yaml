@@ -754,3 +754,10 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/agent-harness-session-wake @ feat/agent-harness-session-wake
   # Tip: 2d7039b93 (origin/feat/agent-harness-session-wake)
   - branch: feat/agent-harness-session-wake
+
+  # tiann/hapi#1473 / Peer #1203 — A2A P0.5 peer delivery provenance UI.
+  # Web PeerSenderChip + hub peer attribution; schema ladder tip 27 on branch
+  # (soup remat unions with current dual-ledger V24+). Chip ✅ lane A wait.
+  # Worktree: ~/coding/hapi/worktrees/a2a-p05-peer-provenance @ feat/a2a-p05-peer-provenance
+  # Tip: 07e775cd6 (origin/feat/a2a-p05-peer-provenance)
+  - branch: feat/a2a-p05-peer-provenance
