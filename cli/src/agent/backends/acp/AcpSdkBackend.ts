@@ -4,7 +4,7 @@ import { asString, isObject } from '@hapi/protocol';
 import { AcpStdioTransport, type AcpStderrError } from './AcpStdioTransport';
 import { AcpMessageHandler, type AcpTextChunkMode } from './AcpMessageHandler';
 import { ACP_SESSION_UPDATE_TYPES } from './constants';
-import { shouldBumpThinkingFromSessionUpdate } from './shouldBumpThinkingFromSessionUpdate';
+import { thinkingHintFromSessionUpdate } from './shouldBumpThinkingFromSessionUpdate';
 import { logger } from '@/ui/logger';
 import { withRetry } from '@/utils/time';
 import packageJson from '../../../../package.json';
@@ -84,7 +84,7 @@ export class AcpSdkBackend implements AgentBackend {
     private usageUpdateListener: ((msg: AgentMessage) => void) | null = null;
     private sessionInfoUpdateListener: ((update: AcpSessionInfoUpdate) => void) | null = null;
     /** Fired on real agent activity so launchers can bump hub thinking (#1470). */
-    private agentActivityListener: (() => void) | null = null;
+    private agentActivityListener: ((thinking: boolean) => void) | null = null;
     private lastForwardedUsageUpdate: AcpUsageUpdate | null = null;
     private sessionUpdateQueue: Promise<void> = Promise.resolve();
 
@@ -444,11 +444,12 @@ export class AcpSdkBackend implements AgentBackend {
     }
 
     /**
-     * Called when ACP reports real agent work (message/tool/thought/running).
-     * Launchers use this to bump `thinking` after harness resume without a new
-     * hub user message (#1470). Usage/title noise does not fire.
+     * Called when ACP reports thinking transitions for harness wake (#1470).
+     * `true` = activity / running / permission; `false` = state_update idle.
+     * Usage/title noise does not fire. Launchers should ignore no-ops when
+     * session.thinking already matches.
      */
-    setAgentActivityListener(listener: (() => void) | null): void {
+    setAgentActivityListener(listener: ((thinking: boolean) => void) | null): void {
         this.agentActivityListener = listener;
     }
 
@@ -808,10 +809,11 @@ export class AcpSdkBackend implements AgentBackend {
         if (!isObject(update)) {
             return;
         }
-        if (!shouldBumpThinkingFromSessionUpdate(update)) {
+        const hint = thinkingHintFromSessionUpdate(update);
+        if (hint === null) {
             return;
         }
-        this.agentActivityListener();
+        this.agentActivityListener(hint);
     }
 
     private forwardSessionInfoUpdate(sessionId: string | null, update: unknown): void {
@@ -990,7 +992,7 @@ export class AcpSdkBackend implements AgentBackend {
         if (this.permissionHandler) {
             try {
                 // Permission prompts imply the agent is awake (#1470).
-                this.agentActivityListener?.();
+                this.agentActivityListener?.(true);
                 this.permissionHandler(request);
             } catch (error) {
                 this.pendingPermissions.delete(toolCallId);

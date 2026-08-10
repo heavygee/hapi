@@ -1415,9 +1415,9 @@ describe('AcpSdkBackend', () => {
 
     it('notifies agent-activity listener for harness-wake activity, not usage noise (#1470)', () => {
         const backend = new AcpSdkBackend({ command: 'agent' });
-        const activity: string[] = [];
-        backend.setAgentActivityListener(() => {
-            activity.push('bump');
+        const activity: boolean[] = [];
+        backend.setAgentActivityListener((thinking) => {
+            activity.push(thinking);
         });
 
         const backendInternal = backend as unknown as {
@@ -1451,14 +1451,14 @@ describe('AcpSdkBackend', () => {
             update: { sessionUpdate: 'state_update', state: 'idle' }
         });
 
-        expect(activity).toEqual(['bump', 'bump']);
+        expect(activity).toEqual([true, true, false]);
     });
 
     it('notifies agent-activity listener when a permission request arrives (#1470)', async () => {
         const backend = new AcpSdkBackend({ command: 'agent' });
-        const activity: string[] = [];
-        backend.setAgentActivityListener(() => {
-            activity.push('bump');
+        const activity: boolean[] = [];
+        backend.setAgentActivityListener((thinking) => {
+            activity.push(thinking);
         });
         backend.onPermissionRequest(() => {
             // leave pending; we only care that activity fired first
@@ -1479,7 +1479,7 @@ describe('AcpSdkBackend', () => {
             options: [{ optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' }]
         }, 'req-1');
 
-        expect(activity).toEqual(['bump']);
+        expect(activity).toEqual([true]);
         // Cancel so the promise does not hang the suite.
         await backend.respondToPermission('session-1', {
             id: 'tc-1',

@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { shouldBumpThinkingFromSessionUpdate } from './shouldBumpThinkingFromSessionUpdate'
+import {
+    shouldBumpThinkingFromSessionUpdate,
+    thinkingHintFromSessionUpdate,
+} from './shouldBumpThinkingFromSessionUpdate'
 import { ACP_SESSION_UPDATE_TYPES } from './constants'
 
-describe('shouldBumpThinkingFromSessionUpdate', () => {
+describe('thinkingHintFromSessionUpdate', () => {
     it.each([
         ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
         ACP_SESSION_UPDATE_TYPES.agentThoughtChunk,
@@ -14,22 +17,31 @@ describe('shouldBumpThinkingFromSessionUpdate', () => {
         'user_message',
         'user_message_chunk',
         'tool_call_content_chunk',
-    ] as const)('bumps for activity type %s', (sessionUpdate) => {
+    ] as const)('returns true for activity type %s', (sessionUpdate) => {
+        expect(thinkingHintFromSessionUpdate({ sessionUpdate })).toBe(true)
         expect(shouldBumpThinkingFromSessionUpdate({ sessionUpdate })).toBe(true)
     })
 
-    it('bumps for ACP v2 state_update running', () => {
-        expect(shouldBumpThinkingFromSessionUpdate({
+    it('returns true for ACP v2 state_update running / requires_action', () => {
+        expect(thinkingHintFromSessionUpdate({
             sessionUpdate: 'state_update',
             state: 'running',
         })).toBe(true)
-    })
-
-    it('bumps for ACP v2 state_update requires_action', () => {
-        expect(shouldBumpThinkingFromSessionUpdate({
+        expect(thinkingHintFromSessionUpdate({
             sessionUpdate: 'state_update',
             state: 'requires_action',
         })).toBe(true)
+    })
+
+    it('returns false for ACP v2 state_update idle', () => {
+        expect(thinkingHintFromSessionUpdate({
+            sessionUpdate: 'state_update',
+            state: 'idle',
+        })).toBe(false)
+        expect(shouldBumpThinkingFromSessionUpdate({
+            sessionUpdate: 'state_update',
+            state: 'idle',
+        })).toBe(false)
     })
 
     it.each([
@@ -38,21 +50,15 @@ describe('shouldBumpThinkingFromSessionUpdate', () => {
         'available_commands_update',
         'current_mode_update',
         'config_option_update',
-    ] as const)('does not bump for noise type %s', (sessionUpdate) => {
+    ] as const)('returns null for noise type %s', (sessionUpdate) => {
+        expect(thinkingHintFromSessionUpdate({ sessionUpdate })).toBeNull()
         expect(shouldBumpThinkingFromSessionUpdate({ sessionUpdate })).toBe(false)
     })
 
-    it('does not bump for state_update idle', () => {
-        expect(shouldBumpThinkingFromSessionUpdate({
-            sessionUpdate: 'state_update',
-            state: 'idle',
-        })).toBe(false)
-    })
-
-    it('does not bump for missing or non-string sessionUpdate', () => {
-        expect(shouldBumpThinkingFromSessionUpdate(null)).toBe(false)
-        expect(shouldBumpThinkingFromSessionUpdate(undefined)).toBe(false)
-        expect(shouldBumpThinkingFromSessionUpdate({})).toBe(false)
-        expect(shouldBumpThinkingFromSessionUpdate({ sessionUpdate: 12 })).toBe(false)
+    it('returns null for missing or non-string sessionUpdate', () => {
+        expect(thinkingHintFromSessionUpdate(null)).toBeNull()
+        expect(thinkingHintFromSessionUpdate(undefined)).toBeNull()
+        expect(thinkingHintFromSessionUpdate({})).toBeNull()
+        expect(thinkingHintFromSessionUpdate({ sessionUpdate: 12 })).toBeNull()
     })
 })

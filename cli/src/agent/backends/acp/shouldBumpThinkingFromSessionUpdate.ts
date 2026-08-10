@@ -1,14 +1,18 @@
 /**
  * Gate for harness/ACP resume → hub thinking (#1470).
  *
- * Keepalive noise (usage / session title) must not flip thinking true.
- * Activity and ACP v2 foreground `state_update: running|requires_action` do.
+ * Returns:
+ * - `true` — real agent activity / foreground running (bump thinking)
+ * - `false` — ACP v2 `state_update: idle` (clear thinking)
+ * - `null` — noise / unknown (do not touch thinking)
  */
-export function shouldBumpThinkingFromSessionUpdate(
+export type SessionUpdateThinkingHint = boolean | null
+
+export function thinkingHintFromSessionUpdate(
     update: { sessionUpdate?: unknown; state?: unknown } | null | undefined
-): boolean {
+): SessionUpdateThinkingHint {
     if (!update || typeof update.sessionUpdate !== 'string') {
-        return false
+        return null
     }
 
     switch (update.sessionUpdate) {
@@ -24,8 +28,21 @@ export function shouldBumpThinkingFromSessionUpdate(
         case 'user_message_chunk':
             return true
         case 'state_update':
-            return update.state === 'running' || update.state === 'requires_action'
+            if (update.state === 'running' || update.state === 'requires_action') {
+                return true
+            }
+            if (update.state === 'idle') {
+                return false
+            }
+            return null
         default:
-            return false
+            return null
     }
+}
+
+/** @deprecated Prefer thinkingHintFromSessionUpdate; kept for call-site clarity in tests. */
+export function shouldBumpThinkingFromSessionUpdate(
+    update: { sessionUpdate?: unknown; state?: unknown } | null | undefined
+): boolean {
+    return thinkingHintFromSessionUpdate(update) === true
 }

@@ -564,8 +564,10 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
 
     /** #1470: ACP activity after idle → hub thinking via existing keepalive. */
     private wireAgentActivityThinking(backend: AcpSdkBackend, session: CursorSession): void {
-        backend.setAgentActivityListener(() => {
-            session.onThinkingChange(true);
+        backend.setAgentActivityListener((thinking) => {
+            if (session.thinking !== thinking) {
+                session.onThinkingChange(thinking);
+            }
         });
     }
 
