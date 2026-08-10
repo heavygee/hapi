@@ -113,6 +113,8 @@ Kill-criteria before bulk remap: operator approval; confirm `$LIVE` has `spawn-h
 2. Proxmox/Teemo are still **untagged**. Blind `systemctl restart hapi-runner` can mint a new `machineId` under #1473. Prefer: pre-seed matching `machines.tag` + host `settings.machineTag`, then runner-only restart so tip rebind keeps id — or schedule a tagged first-claim with planned session remap.
 3. After hub restart, confirm **each** fleet host re-registers `spawn-happy-session` + `listCursorModels` (oos recovered; proxmox/Teemo did not in this window).
 
+Rollout implications when #1108 lands: [`2026-08-10-1108-fleet-upgrade-rollout-checklist.md`](../plans/2026-08-10-1108-fleet-upgrade-rollout-checklist.md).
+
 ## CLI recycle kill-criteria (upload / skills blind)
 
 Do **not** trust `POST …/resume` success alone.
