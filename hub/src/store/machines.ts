@@ -105,19 +105,13 @@ export function getOrCreateMachine(
         if (stored.namespace !== namespace) {
             throw new Error('Machine namespace mismatch')
         }
-        // Identity refresh is runner-registration only. Terminal session
-        // bootstrap hits the same machine id with runnerState=null and current
-        // CLI metadata — refreshing there would mask a still-old live runner
-        // (banner/auto-upgrade disappear while the runner socket is stale).
-        const isRunnerRegistration = runnerState !== null && runnerState !== undefined
-        if (!isRunnerRegistration) {
-            return stored
-        }
 
         let current = stored
         // Tagged rows require the create-time secret on every registration;
         // omitting tag must not refresh metadata/capabilities (#1473 Major).
         // Untagged legacy rows refuse first-claim bind — re-enroll with a new id.
+        // Run BEFORE the non-runner early return so enrollment conflicts still fire
+        // when terminal/bootstrap paths pass runnerState=null.
         if (current.tag) {
             if (!presentedTag || !constantTimeEquals(current.tag, presentedTag)) {
                 throw new MachineTagConflictError()
@@ -128,12 +122,6 @@ export function getOrCreateMachine(
             )
         }
         // Bound rows require the runner proof on every registration (#1473 Major).
-        // Omitting proof must not refresh metadata/capabilities. Null-hash rows
-        // refuse late bind — re-enroll with a new machine id (INSERT binds hash).
-        //
-        // Do not auto-rebind via machineTag: that tag lives in shared settings.json
-        // and same-UID siblings can read it (#1473 Blocker). Cold recovery that
-        // preserves machineId needs hub-held operator approval (follow-up).
         if (current.runnerProofHash) {
             if (!presentedProof || !verifyRunnerProof(presentedProof, current.runnerProofHash)) {
                 throw new MachineTagConflictError(
@@ -144,6 +132,15 @@ export function getOrCreateMachine(
             throw new MachineTagConflictError(
                 'Machine runner proof missing; re-enroll with a new machine id'
             )
+        }
+
+        // Identity refresh is runner-registration only. Terminal session
+        // bootstrap hits the same machine id with runnerState=null and current
+        // CLI metadata — refreshing there would mask a still-old live runner
+        // (banner/auto-upgrade disappear while the runner socket is stale).
+        const isRunnerRegistration = runnerState !== null && runnerState !== undefined
+        if (!isRunnerRegistration) {
+            return current
         }
 
         // Re-registering runners used to keep stale hub metadata forever
