@@ -8,6 +8,10 @@ import { PeerSenderChip } from '@/components/AssistantChat/messages/PeerSenderCh
 import { CliOutputBlock } from '@/components/CliOutputBlock'
 import { getConversationMessageAnchorId } from '@/chat/outline'
 import { MessageActions } from '@/components/AssistantChat/messages/MessageActions'
+import {
+    parseClaimedPeerFromText,
+    stripClaimedPeerHeaderForDisplay,
+} from '@/chat/peerDelivery'
 
 type AuiMessageSnapshot = {
     message: {
@@ -122,6 +126,15 @@ export function HappyUserMessage() {
 
     const hasText = text.length > 0
     const hasAttachments = attachments && attachments.length > 0
+    const claimedPeer = isPeerDelivery && !peerSourceId
+        ? parseClaimedPeerFromText(text)
+        : null
+    // Only strip client From:/Name: stamps on unverified rows. Trusted
+    // deliveries keep hub-stamped agent provenance lines in the bubble.
+    const displayText = isPeerDelivery && !peerSourceId
+        ? stripClaimedPeerHeaderForDisplay(text)
+        : text
+    const displayHasText = displayText.length > 0
 
     return (
         <MessagePrimitive.Root
@@ -137,10 +150,12 @@ export function HappyUserMessage() {
                                 <PeerSenderChip
                                     sourceSessionId={peerSourceId}
                                     sourceName={peerSourceName}
+                                    claimedSessionId={claimedPeer?.sessionId}
+                                    claimedName={claimedPeer?.name}
                                 />
                             </div>
                         ) : null}
-                        {hasText ? <UserBubbleContent text={text} /> : null}
+                        {displayHasText ? <UserBubbleContent text={displayText} /> : null}
                         {hasAttachments ? <MessageAttachments attachments={attachments} /> : null}
                     </div>
                     {showStatus && (
