@@ -4,7 +4,7 @@
 **Upstream issue:** https://github.com/tiann/hapi/issues/1470  
 **Worktree:** `~/coding/hapi/worktrees/agent-harness-session-wake` @ `feat/agent-harness-session-wake`  
 **Peer:** spawned from #1464 continuum (`7fd700b2`); Meta `9f5f7e1d`  
-**Status:** Path A implemented in worktree `feat/agent-harness-session-wake` (upstream PR pending). Path B still deferred pending dogfood if ACP emits no activity on harness wake.
+**Status:** Path A shipped in upstream PR #1487. **Peer dogfood 2026-08-10 FAIL** (kill-test): Cursor ACP `2026.08.04` printed `HAPI_WAKE_SENTINEL` after turn-end but emitted **no** post-idle `session/update` / no new NAL request - Path A had nothing to bridge. Path B now required for real harness wakes. Details: worktree `localdocs/dogfood-harness-wake-RESULT.md`.
 
 ## Verdict
 
@@ -82,19 +82,19 @@ Kill-test for A: instrument a Cursor ACP session, arm short notify wake after tu
 
 Copied from #1470:
 
-- [ ] HAPI-wrapped Cursor ACP resume without new hub user message → `thinking: true` via SSE within ~2s
+- [ ] HAPI-wrapped Cursor ACP resume without new hub user message → `thinking: true` via SSE within ~2s — **blocked on Cursor ACP wake** (2026-08-10 peer FAIL)
 - [ ] List/attention match normal in-turn thinking chrome
-- [ ] Turn end clears thinking (no stuck spinner)
-- [ ] usage/title-only updates do not wake
-- [ ] Docs distinguish wake vs jobs
-- [ ] Unit tests on bump gate
+- [x] Turn end clears thinking (no stuck spinner) — unit + Codex babysit fixes
+- [x] usage/title-only updates do not wake — unit tests
+- [x] Docs distinguish wake vs jobs
+- [x] Unit tests on bump gate
 
 ## Friction mode
 
 - **Steelmanning "just document a curl wake":** cheap, but operators will not wire it; hub stays lying by default. Prefer A in-process.
 - **Steelmanning "new REST /wake":** duplicates `session-alive`, auth surface, and encourages scripts that fight CLI keepalive. Kill unless A+B fail.
-- **Falsification:** one dogfood Cursor ACP session with a 30–60s notify sentinel after turn-end; watch hub SSE for `thinking` flip without composer send. If no ACP traffic on wake → B required; if traffic but no flip → A bug.
+- **Falsification (done 2026-08-10):** peer-stack Cursor ACP, 20s sentinel after turn-end. Shell succeeded; **no ACP traffic on wake → B required.** Path A not buggy for missing events.
 
 ## Next
 
-Operator OK → implement A (+ tests) in this worktree → peer-stack proof → soup only if dogfood on `:3006` requested → upstream PR linking `Fixes #1470`.
+Path B design (hook / terminal watch → `onThinkingChange(true)`). Keep Path A in #1487 as opportunistic bridge for future ACP v2 agent-initiated `state_update: running`. Soup layer already queued for remat; `:3006` dogfood cannot pass harness wake until B or Cursor fixes ACP notify resume.
