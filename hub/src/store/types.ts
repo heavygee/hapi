@@ -102,6 +102,9 @@ export type StoredSessionJob = {
     remaining?: number
     unit?: string
     detail?: string
+    wakeOnTerminal: boolean
+    wakePrompt?: string
+    wakeEmittedRunId?: string
     heartbeatAt: number
     startedAt: number
     updatedAt: number

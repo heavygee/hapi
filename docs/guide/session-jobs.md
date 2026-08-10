@@ -83,7 +83,22 @@ hapi job clear "$HAPI_SESSION_ID" beets
 
 Same auth as `hapi ping-peer` (`HAPI_API_URL` / `CLI_API_TOKEN` or `hapi auth login`).
 
+## Wake owning session on terminal (opt-in, #1489)
+
+By default jobs are **meter-only**. Opt in so terminal status resumes the owning agent:
+
+```bash
+hapi job run "$HAPI_SESSION_ID" beets \
+  --label 'beets import' \
+  --wake-on-terminal \
+  --wake-prompt 'If exit looked clean, start the next album batch.' \
+  -- ./beets-import.sh
+```
+
+Hub claims a one-shot wake, resumes if inactive (same ordering as `ping-peer`), and posts a user message with job key + status + detail.
+
 ## Progress honesty (tiers)
+
 
 | What you know | What to send | What the list shows |
 |---------------|--------------|---------------------|

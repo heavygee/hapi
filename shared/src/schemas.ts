@@ -434,6 +434,9 @@ export const AttachedJobSchema = z.object({
     remaining: z.number().nonnegative().optional(),
     unit: z.string().min(1).max(64).optional(),
     detail: z.string().max(500).optional(),
+    /** Opt-in terminal wake (#1489). */
+    wakeOnTerminal: z.boolean().optional(),
+    wakePrompt: z.string().max(2000).optional(),
     heartbeatAt: z.number(),
     startedAt: z.number(),
     updatedAt: z.number()
@@ -451,7 +454,9 @@ export const AttachedJobUpsertSchema = z.object({
     unit: z.string().min(1).max(64).optional(),
     detail: z.string().max(500).optional(),
     heartbeatAt: z.number().optional(),
-    startedAt: z.number().optional()
+    startedAt: z.number().optional(),
+    wakeOnTerminal: z.boolean().optional(),
+    wakePrompt: z.string().max(2000).optional()
 }).strict()
 
 export type AttachedJobUpsert = z.infer<typeof AttachedJobUpsertSchema>
@@ -465,7 +470,9 @@ export const AttachedJobPatchSchema = z.object({
     remaining: z.number().nonnegative().nullable().optional(),
     unit: z.string().min(1).max(64).nullable().optional(),
     detail: z.string().max(500).nullable().optional(),
-    heartbeatAt: z.number().optional()
+    heartbeatAt: z.number().optional(),
+    wakeOnTerminal: z.boolean().optional(),
+    wakePrompt: z.string().max(2000).nullable().optional()
 }).strict()
 
 export type AttachedJobPatch = z.infer<typeof AttachedJobPatchSchema>
