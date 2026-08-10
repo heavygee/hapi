@@ -13,7 +13,7 @@ afterEach(() => {
     }
 })
 
-describe('schema migration v25 to v26', () => {
+describe('schema migration v26 to v27', () => {
     it('adds machine_reenroll_replays and advances user_version', () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v26-'))
         tempDirs.push(dir)
@@ -22,13 +22,13 @@ describe('schema migration v25 to v26', () => {
         new Store(dbPath).close()
         const legacy = new Database(dbPath)
         legacy.exec('DROP TABLE IF EXISTS machine_reenroll_replays')
-        legacy.exec('PRAGMA user_version = 25')
+        legacy.exec('PRAGMA user_version = 26')
         legacy.close()
 
         const migrated = new Store(dbPath)
         const internalDb = (migrated as unknown as { db: Database }).db
         const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
-        expect(version.user_version).toBe(26)
+        expect(version.user_version).toBe(27)
         const table = internalDb.prepare(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'machine_reenroll_replays'"
         ).get() as { name: string } | undefined

@@ -41,7 +41,7 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 26
+const SCHEMA_VERSION: number = 27
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -314,6 +314,7 @@ export class Store {
             23: () => this.migrateFromV23ToV24(),
             24: () => this.migrateFromV24ToV25(),
             25: () => this.migrateFromV25ToV26(),
+            26: () => this.migrateFromV26ToV27(),
         })
 
         if (currentVersion === 0) {
@@ -1011,7 +1012,7 @@ export class Store {
         }
     }
 
-    private migrateFromV23ToV24(): void {
+    private migrateFromV24ToV25(): void {
         const columns = this.getMachineColumnNames()
         if (columns.size === 0) return
         if (!columns.has('runner_proof_hash')) {
@@ -1019,7 +1020,7 @@ export class Store {
         }
     }
 
-    private migrateFromV24ToV25(): void {
+    private migrateFromV25ToV26(): void {
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS machine_reenroll_grants (
                 grant_hash TEXT PRIMARY KEY,
@@ -1032,7 +1033,7 @@ export class Store {
         `)
     }
 
-    private migrateFromV25ToV26(): void {
+    private migrateFromV26ToV27(): void {
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS machine_reenroll_replays (
                 grant_hash TEXT PRIMARY KEY,

@@ -13,7 +13,7 @@ afterEach(() => {
     }
 })
 
-describe('schema migration v24 to v26 (via v25)', () => {
+describe('schema migration v24 to v27 (via grants/replays)', () => {
     it('adds machine_reenroll_grants and advances user_version', () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v25-'))
         tempDirs.push(dir)
@@ -28,7 +28,7 @@ describe('schema migration v24 to v26 (via v25)', () => {
         const migrated = new Store(dbPath)
         const internalDb = (migrated as unknown as { db: Database }).db
         const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
-        expect(version.user_version).toBe(26)
+        expect(version.user_version).toBe(27)
         const table = internalDb.prepare(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'machine_reenroll_grants'"
         ).get() as { name: string } | undefined
