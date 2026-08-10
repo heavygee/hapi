@@ -47,4 +47,6 @@ export const RPC_METHODS = {
     RunnerSelfUpgrade: 'runner-self-upgrade',
 } as const
 
+export const RPC_TARGET_MISSING_ERROR_CODE = 'rpc_target_missing' as const
+
 export type RpcMethod = typeof RPC_METHODS[keyof typeof RPC_METHODS]

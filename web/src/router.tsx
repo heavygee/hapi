@@ -1069,6 +1069,7 @@ type SessionFileSearch = {
     staged?: boolean
     tab?: 'changes' | 'directories'
     query?: string
+    origin?: 'chat'
 }
 
 const sessionFileRoute = createRoute({
@@ -1091,6 +1092,7 @@ const sessionFileRoute = createRoute({
         const query = typeof search.query === 'string' && search.query.length > 0
             ? search.query
             : undefined
+        const origin = search.origin === 'chat' ? 'chat' : undefined
 
         const result: SessionFileSearch = { path }
         if (staged !== undefined) {
@@ -1101,6 +1103,9 @@ const sessionFileRoute = createRoute({
         }
         if (query !== undefined) {
             result.query = query
+        }
+        if (origin !== undefined) {
+            result.origin = origin
         }
         return result
     },
