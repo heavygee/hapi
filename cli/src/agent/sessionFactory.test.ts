@@ -57,6 +57,10 @@ import {
     bootstrapSession,
     buildSessionMetadata
 } from './sessionFactory'
+import {
+    armDirectResumeCapability,
+    takeDirectResumeCapability,
+} from '@/api/peerCapabilityInject'
 
 function createSession(): Session {
     return {
@@ -108,7 +112,6 @@ describe('bootstrapExistingSession', () => {
         readSettingsMock.mockReset()
         delete process.env[HAPI_SESSION_ID_ENV]
         delete process.env.HAPI_PEER_CAP_INJECT
-        const { takeDirectResumeCapability } = await import('@/api/peerCapabilityInject')
         takeDirectResumeCapability()
     })
 
@@ -130,7 +133,6 @@ describe('bootstrapExistingSession', () => {
     })
 
     it('accepts in-process capability from peercred local-resume grant (#1473)', async () => {
-        const { armDirectResumeCapability } = await import('@/api/peerCapabilityInject')
         armDirectResumeCapability('cap-direct-grant')
         const session = createSession()
         const sessionClient = mockInjectReadySessionClient()
