@@ -13,7 +13,6 @@ import { resolvePeerMetaFromSourceSession } from './messages'
 import { mintPeerSessionCapability, verifyPeerSessionCapability } from '../peerCapability'
 import { redeemResumePeerMint } from '../pendingResumePeerMint'
 import { verifyRunnerProof } from '../../utils/runnerProof'
-import { issueReenrollGrant, verifyReenrollGrant, ackReenrollGrant, getConsumedReenrollReplay } from '../../utils/reenrollGrant'
 import { getConfiguration } from '../../configuration'
 import { readSessionSummaryContractEnabled } from '../../config/sessionSummaryContract'
 import { constantTimeEquals } from '../../utils/crypto'
@@ -307,87 +306,25 @@ export function createCliRoutes(
     })
 
     /**
-     * Mint a short-lived one-time grant while the runner still holds
-     * runnerProof — used for cold-restart session migrate (#1473 Blocker).
+     * Removed: file-backed reenroll grants break same-UID isolation (#1473 Blocker).
+     * Session migrate requires a live fromRunnerProof instead.
      */
     app.post('/machines/:id/reenroll-grant', async (c) => {
-        const engine = getSyncEngine()
-        if (!engine) {
-            return c.json({ error: 'Not ready' }, 503)
-        }
-        const machineId = c.req.param('id')
-        const namespace = c.get('namespace')
-        const body = await c.req.json().catch(() => null)
-        const machineTag = body && typeof body === 'object' && typeof (body as { machineTag?: unknown }).machineTag === 'string'
-            ? (body as { machineTag: string }).machineTag.trim()
-            : ''
-        const runnerProof = body && typeof body === 'object' && typeof (body as { runnerProof?: unknown }).runnerProof === 'string'
-            ? (body as { runnerProof: string }).runnerProof.trim()
-            : ''
-        if (!machineTag || !runnerProof) {
-            return c.json({ error: 'machineTag and runnerProof required' }, 400)
-        }
-        const authMaterial = engine.getMachineAuthMaterial(machineId)
-        if (!authMaterial || authMaterial.namespace !== namespace) {
-            return c.json({ error: 'Machine access denied' }, 403)
-        }
-        const storedTag = typeof authMaterial.tag === 'string' ? authMaterial.tag : ''
-        if (!storedTag || !constantTimeEquals(storedTag, machineTag)) {
-            return c.json({ error: 'Machine tag mismatch' }, 403)
-        }
-        if (!verifyRunnerProof(runnerProof, authMaterial.runnerProofHash)) {
-            return c.json({ error: 'Machine runner proof mismatch' }, 403)
-        }
-        const issued = issueReenrollGrant({ machineId, namespace })
-        return c.json(issued)
+        return c.json({
+            error: 'Reenroll grants removed; cold migrate requires live fromRunnerProof',
+        }, 410)
     })
 
-    /**
-     * Confirm the runner persisted a freshly issued grant. Until ack, prior
-     * hashes for the machine remain valid (#1473 Blocker).
-     */
     app.post('/machines/:id/reenroll-grant/ack', async (c) => {
-        const engine = getSyncEngine()
-        if (!engine) {
-            return c.json({ error: 'Not ready' }, 503)
-        }
-        const machineId = c.req.param('id')
-        const namespace = c.get('namespace')
-        const body = await c.req.json().catch(() => null)
-        const machineTag = body && typeof body === 'object' && typeof (body as { machineTag?: unknown }).machineTag === 'string'
-            ? (body as { machineTag: string }).machineTag.trim()
-            : ''
-        const runnerProof = body && typeof body === 'object' && typeof (body as { runnerProof?: unknown }).runnerProof === 'string'
-            ? (body as { runnerProof: string }).runnerProof.trim()
-            : ''
-        const grant = body && typeof body === 'object' && typeof (body as { grant?: unknown }).grant === 'string'
-            ? (body as { grant: string }).grant.trim()
-            : ''
-        if (!machineTag || !runnerProof || !grant) {
-            return c.json({ error: 'machineTag, runnerProof, and grant required' }, 400)
-        }
-        const authMaterial = engine.getMachineAuthMaterial(machineId)
-        if (!authMaterial || authMaterial.namespace !== namespace) {
-            return c.json({ error: 'Machine access denied' }, 403)
-        }
-        const storedTag = typeof authMaterial.tag === 'string' ? authMaterial.tag : ''
-        if (!storedTag || !constantTimeEquals(storedTag, machineTag)) {
-            return c.json({ error: 'Machine tag mismatch' }, 403)
-        }
-        if (!verifyRunnerProof(runnerProof, authMaterial.runnerProofHash)) {
-            return c.json({ error: 'Machine runner proof mismatch' }, 403)
-        }
-        if (!ackReenrollGrant({ machineId, namespace, grant })) {
-            return c.json({ error: 'Unknown or expired grant' }, 403)
-        }
-        return c.json({ ok: true })
+        return c.json({
+            error: 'Reenroll grants removed; cold migrate requires live fromRunnerProof',
+        }, 410)
     })
 
     /**
      * Remap session metadata.machineId after forced machine re-enroll (#1473).
-     * Requires runner proof for the new machine so siblings cannot mass-migrate.
-     * Source ownership: fromRunnerProof, or a one-time reenrollGrant minted
-     * while the old runner still held its proof (graceful cold restart).
+     * Requires live runnerProof for both destination and source machines.
+     * File-backed reenroll grants are not accepted (same-UID readable).
      */
     app.post('/machines/:id/migrate-sessions', async (c) => {
         const engine = getSyncEngine()
@@ -409,12 +346,9 @@ export function createCliRoutes(
         const fromRunnerProof = body && typeof body === 'object' && typeof (body as { fromRunnerProof?: unknown }).fromRunnerProof === 'string'
             ? (body as { fromRunnerProof: string }).fromRunnerProof.trim()
             : ''
-        const reenrollGrant = body && typeof body === 'object' && typeof (body as { reenrollGrant?: unknown }).reenrollGrant === 'string'
-            ? (body as { reenrollGrant: string }).reenrollGrant.trim()
-            : ''
-        if (!fromMachineId || !machineTag || !runnerProof || (!fromRunnerProof && !reenrollGrant)) {
+        if (!fromMachineId || !machineTag || !runnerProof || !fromRunnerProof) {
             return c.json({
-                error: 'fromMachineId, machineTag, runnerProof, and fromRunnerProof or reenrollGrant required',
+                error: 'fromMachineId, machineTag, runnerProof, and fromRunnerProof required',
             }, 400)
         }
         const authMaterial = engine.getMachineAuthMaterial(newMachineId)
@@ -428,59 +362,21 @@ export function createCliRoutes(
         if (!verifyRunnerProof(runnerProof, authMaterial.runnerProofHash)) {
             return c.json({ error: 'Machine runner proof mismatch' }, 403)
         }
-        // Source machine must also present its bound proof — destination-only
-        // auth would let a fresh machine steal victim sessions (#1473 Blocker).
-        // Cold restart may present a one-time grant minted under the old proof.
+        // Source machine must present its live runnerProof. File-backed
+        // reenroll grants are rejected: same-UID siblings can read HAPI_HOME
+        // and mass-migrate sessions (#1473 Blocker).
         const fromAuth = engine.getMachineAuthMaterial(fromMachineId)
         if (!fromAuth || fromAuth.namespace !== namespace || !fromAuth.runnerProofHash) {
             return c.json({ error: 'Source machine proof required' }, 403)
         }
-        const usingGrant = !fromRunnerProof
-        if (fromRunnerProof) {
-            if (!verifyRunnerProof(fromRunnerProof, fromAuth.runnerProofHash)) {
-                return c.json({ error: 'Source machine proof required' }, 403)
-            }
-        } else if (!verifyReenrollGrant({
-            machineId: fromMachineId,
-            namespace,
-            grant: reenrollGrant,
-        })) {
-            // Lost-response replay after the grant was consumed (#1473 Major).
-            const replay = getConsumedReenrollReplay(reenrollGrant)
-            if (!replay || replay.namespace !== namespace || replay.fromMachineId !== fromMachineId) {
-                return c.json({ error: 'Source machine proof required' }, 403)
-            }
-            if (replay.toMachineId === newMachineId) {
-                return c.json({ migrated: 0, alreadyComplete: true })
-            }
-            try {
-                const migrated = engine.migrateSessionsMachineId(
-                    replay.toMachineId,
-                    newMachineId,
-                    namespace
-                )
-                return c.json({ migrated, alreadyComplete: true })
-            } catch (error) {
-                return c.json({
-                    error: error instanceof Error ? error.message : 'Session migration failed',
-                }, 409)
-            }
+        if (!verifyRunnerProof(fromRunnerProof, fromAuth.runnerProofHash)) {
+            return c.json({ error: 'Source machine proof required' }, 403)
         }
         try {
-            const migrated = usingGrant
-                ? engine.migrateSessionsMachineIdWithGrant({
-                    fromMachineId,
-                    toMachineId: newMachineId,
-                    namespace,
-                    grant: reenrollGrant,
-                })
-                : engine.migrateSessionsMachineId(fromMachineId, newMachineId, namespace)
+            const migrated = engine.migrateSessionsMachineId(fromMachineId, newMachineId, namespace)
             return c.json({ migrated })
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Session migration failed'
-            if (message === 'Source machine proof required') {
-                return c.json({ error: message }, 403)
-            }
             return c.json({ error: message }, 409)
         }
     })

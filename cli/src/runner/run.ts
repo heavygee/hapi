@@ -44,9 +44,6 @@ import {
 import { buildHubRequestHeaders } from '@/api/hubExtraHeaders';
 import {
   clearReenrollGrant,
-  readReenrollGrant,
-  writeReenrollGrantPending,
-  commitReenrollGrant,
 } from './reenrollGrantStore';
 
 /**
@@ -1203,8 +1200,13 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     // Register machine. Cold start may 409 (lost memory-only proof) — rotate
     // to a new machine id. Handoff must keep the same binding; refuse rotate
     // if the delivered proof is rejected (#1473).
-    const pendingReenroll = !handoffRunnerProof ? readReenrollGrant() : null
-    const previousMachineIdForMigrate = pendingReenroll?.fromMachineId ?? machineId
+    //
+    // Same-UID isolation: never persist a reenroll bearer under HAPI_HOME.
+    // A wrapped agent can read mode-0600 files + the CLI token and mass-migrate
+    // sessions (#1473 Blocker). Scrub any leftover grant files from older tips.
+    // Cold crash without handoff therefore strands sessions on the retired
+    // machine id until an operator remaps with a live fromRunnerProof.
+    clearReenrollGrant()
     let machine
     try {
       machine = await withRetry(
@@ -1245,78 +1247,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       writeRunnerState(fileState);
       logger.debug(`[RUNNER RUN] Re-enrolled machine as ${machineId}`);
     }
-    // Cold restart: migrate sessions with the grant minted under the old proof
-    // before reporting the runner online (#1473 Blocker).
-    if (pendingReenroll && machine.id !== previousMachineIdForMigrate) {
-      try {
-        const migrated = await api.migrateSessionsAfterReenroll({
-          fromMachineId: pendingReenroll.fromMachineId,
-          toMachineId: machine.id,
-          machineTag,
-          runnerProof,
-          reenrollGrant: pendingReenroll.grant,
-        })
-        logger.debug(`[RUNNER RUN] Migrated ${migrated} session(s) after cold re-enroll`)
-        clearReenrollGrant()
-      } catch (error) {
-        // Keep the grant file so a retry can finish migrate; do not come online
-        // with stranded sessions (#1473 Major).
-        throw new Error(
-          'Cold re-enroll succeeded but session migrate failed; refusing to come online '
-          + 'with stranded sessions. '
-          + (error instanceof Error ? error.message : String(error))
-        )
-      }
-    } else if (pendingReenroll && machine.id === previousMachineIdForMigrate) {
-      // Same machine id recovered somehow — grant unused.
-      clearReenrollGrant()
-    }
     logger.debug(`[RUNNER RUN] Machine registered: ${machine.id}`);
-
-    // Keep a reenroll grant fresh so crash/reboot can still migrate sessions
-    // without depending on graceful cleanup (#1473 Blocker).
-    // Issue keeps prior hashes valid until we persist + ack the replacement.
-    // Serialize refreshes so interval + shutdown acks cannot revoke each other.
-    let reenrollRefreshChain: Promise<void> = Promise.resolve()
-    const persistFreshReenrollGrant = (options?: { required?: boolean }): Promise<void> => {
-      const required = options?.required === true
-      const next = reenrollRefreshChain.then(async () => {
-        try {
-          const issued = await api.issueMachineReenrollGrant({
-            machineId,
-            machineTag,
-            runnerProof,
-          })
-          writeReenrollGrantPending({
-            fromMachineId: machineId,
-            machineTag,
-            grant: issued.grant,
-            expiresAt: issued.expiresAt,
-          })
-          await api.ackMachineReenrollGrant({
-            machineId,
-            machineTag,
-            runnerProof,
-            grant: issued.grant,
-          })
-          commitReenrollGrant()
-        } catch (error) {
-          if (required) {
-            throw error instanceof Error
-              ? error
-              : new Error(String(error))
-          }
-          logger.debug('[RUNNER RUN] Failed to refresh reenroll grant', error)
-        }
-      })
-      // Keep the chain alive even when a refresh fails.
-      reenrollRefreshChain = next.then(() => undefined, () => undefined)
-      return next
-    }
-    await persistFreshReenrollGrant({ required: true })
-    const reenrollRefresh = setInterval(() => {
-      void persistFreshReenrollGrant()
-    }, 60_000)
 
     mintLocalResumeCapability = async (sessionId: string) => {
       return await api.mintLocalResumeCapability({
@@ -1650,10 +1581,6 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         clearInterval(restartOnStaleVersionAndHeartbeat);
         logger.debug('[RUNNER RUN] Health check interval cleared');
       }
-      clearInterval(reenrollRefresh)
-
-      // Refresh grant one last time while runnerProof is still valid.
-      await persistFreshReenrollGrant()
 
       // Update runner state before shutting down
       await apiMachine.updateRunnerState((state: RunnerState | null) => ({
