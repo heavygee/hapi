@@ -83,29 +83,43 @@ export async function startPeerCapabilityInjectServer(options?: {
         }
 
         server = createServer((socket) => {
-            const cred = readPeerCred(socket)
-            const childPid = expectedChildPid
-            const payload = pendingPayload
-            if (
-                !cred
-                || childPid === null
-                || !payload
-                || !isProcessDescendant(cred.pid, childPid)
-            ) {
-                socket.end(`${JSON.stringify({ ok: false, code: 'auth_failed' })}\n`)
-                return
-            }
-            socket.end(`${JSON.stringify({ ok: true, ...payload })}\n`)
-            if (deliverResolve) {
-                if (deliverTimer) {
-                    clearTimeout(deliverTimer)
-                    deliverTimer = null
+            // Child often connects before redeem+deliverTo arms payload
+            // (#1473 estate: early auth_failed exhausts retries → inject failed
+            // even when redeem HTTP 200). Hold the socket until armed or timeout.
+            const startedAt = Date.now()
+            const maxWaitMs = 16_000
+            const tryDeliver = () => {
+                if (socket.destroyed) {
+                    return
                 }
-                const resolve = deliverResolve
-                deliverResolve = null
-                deliverReject = null
-                resolve()
+                const childPid = expectedChildPid
+                const payload = pendingPayload
+                if (childPid === null || !payload) {
+                    if (Date.now() - startedAt >= maxWaitMs) {
+                        socket.end(`${JSON.stringify({ ok: false, code: 'not_armed' })}\n`)
+                        return
+                    }
+                    setTimeout(tryDeliver, 20)
+                    return
+                }
+                const cred = readPeerCred(socket)
+                if (!cred || !isProcessDescendant(cred.pid, childPid)) {
+                    socket.end(`${JSON.stringify({ ok: false, code: 'auth_failed' })}\n`)
+                    return
+                }
+                socket.end(`${JSON.stringify({ ok: true, ...payload })}\n`)
+                if (deliverResolve) {
+                    if (deliverTimer) {
+                        clearTimeout(deliverTimer)
+                        deliverTimer = null
+                    }
+                    const resolve = deliverResolve
+                    deliverResolve = null
+                    deliverReject = null
+                    resolve()
+                }
             }
+            tryDeliver()
         })
 
         await new Promise<void>((resolve, reject) => {
@@ -140,6 +154,8 @@ export async function startPeerCapabilityInjectServer(options?: {
             pendingPayload = payload
             deliverResolve = resolve
             deliverReject = reject
+            // Keep above child receivePeerCapabilityFromRunner attempts (~16s)
+            // and aligned with runner webhook default (25s).
             deliverTimer = setTimeout(() => {
                 if (deliverReject) {
                     const rej = deliverReject
@@ -147,7 +163,7 @@ export async function startPeerCapabilityInjectServer(options?: {
                     deliverReject = null
                     rej(new Error('peer capability inject timed out waiting for session CLI'))
                 }
-            }, 15_000)
+            }, 20_000)
         }),
         close: () => {
             if (deliverTimer) {

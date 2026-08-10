@@ -76,6 +76,31 @@ describe('peerCapabilityInject (#1203 pass 2h)', () => {
         }
     })
 
+    it('delivers capability when child connects before deliverTo arms payload', async () => {
+        const socketPath = tempSock()
+        const server = await startPeerCapabilityInjectServer({
+            socketPath,
+            readPeerCred: () => ({ pid: process.pid, uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 }),
+        })
+        expect(server).not.toBeNull()
+        try {
+            // Child connects first (resume race).
+            const capabilityPromise = receivePeerCapabilityFromRunner({
+                socketPath,
+                ownerPid: process.pid,
+                attempts: 100,
+                readPeerCred: () => ({ pid: process.pid, uid: 0, gid: 0 }),
+            })
+            await new Promise((r) => setTimeout(r, 50))
+            const deliver = server!.deliverTo(process.pid, { sessionCapability: 'cap-after-connect' })
+            const capability = await capabilityPromise
+            await deliver
+            expect(capability).toBe('cap-after-connect')
+        } finally {
+            server!.close()
+        }
+    })
+
     it('rejects a sibling pid that is not the expected child', async () => {
         const socketPath = tempSock()
         const siblingPid = process.pid + 10_000_000
