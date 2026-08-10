@@ -343,7 +343,7 @@ describe('RunnerVersionSkewBanner', () => {
         renderBanner()
 
         expect(screen.getByTestId('runner-version-skew-banner')).toHaveAttribute('data-state', 'expanded')
-        expect(screen.getByText(/1 machine\(s\) with outdated runners/)).toBeInTheDocument()
+        expect(screen.getByText(/1 runner\(s\) out of date/)).toBeInTheDocument()
         expect(screen.getByTestId('runner-version-skew-minimize')).toBeInTheDocument()
         expect(screen.getByTestId('runner-version-skew-dismiss')).toBeInTheDocument()
         expect(screen.getByTestId('runner-version-skew-restart-old')).toBeInTheDocument()
