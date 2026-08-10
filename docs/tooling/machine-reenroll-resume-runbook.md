@@ -120,9 +120,20 @@ Rollout implications when #1108 lands: [`2026-08-10-1108-fleet-upgrade-rollout-c
 Do **not** trust `POST …/resume` success alone.
 
 1. `pgrep -af "existing-session-id ${SID}"` must show a live CLI (orphan processes may omit the flag — check `metadata.hostPid`).
-2. If cache says `active=true` with no matching CLI: `POST …/archive` then `POST …/reopen` (or resume).
+2. If cache says `active=true` with no matching CLI: `POST …/archive` then `POST …/reopen` (or resume). Hub may short-circuit resume when `active=true` even if `uploadFile` is missing (#1473 tagless reconnect zombies).
 3. Probe `POST …/upload` until `.success==true`.
 4. Detached recycle scripts must export full `PATH` (include `~/.local/bin`).
+
+### Proxmox / fleet resume inject (2026-08-10)
+
+Upload blindness after hub restart is usually **tagless long-lived CLIs** (look alive, no `uploadFile`). Heal = kill zombie CLI (prefer `existing-session-id` match) then `POST …/resume`, then upload probe.
+
+Two runner bugs that make resume itself fail closed:
+
+1. **Webhook 15s vs peer-cap wait 16s** - child waits for inject before `reportSessionStarted`; runner SIGTERMs at 15s. Estate: `HAPI_RUNNER_WEBHOOK_TIMEOUT_MS=25000` (systemd drop-in). Product default should be ≥25s.
+2. **Inject early-connect race** - redeem HTTP can be 200 while child connects before `deliverTo` arms payload; old server replied `auth_failed` and burned retries → `Cannot resume: runner peer capability inject failed`. Fix: hold the socket until armed (`not_armed` only after timeout). Belt: `EnvironmentFile` with `CLI_API_TOKEN` for redeem.
+
+Do **not** bulk-parallel resume; serialize with upload kill-criteria. `cursor-models` 200 ≠ uploads work.
 
 ## Related
 
