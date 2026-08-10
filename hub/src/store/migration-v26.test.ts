@@ -13,16 +13,16 @@ afterEach(() => {
     }
 })
 
-describe('schema migration v24 to v26 (via v25)', () => {
-    it('adds machine_reenroll_grants and advances user_version', () => {
-        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v25-'))
+describe('schema migration v25 to v26', () => {
+    it('adds machine_reenroll_replays and advances user_version', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v26-'))
         tempDirs.push(dir)
         const dbPath = join(dir, 'hapi.db')
 
         new Store(dbPath).close()
         const legacy = new Database(dbPath)
-        legacy.exec('DROP TABLE IF EXISTS machine_reenroll_grants')
-        legacy.exec('PRAGMA user_version = 24')
+        legacy.exec('DROP TABLE IF EXISTS machine_reenroll_replays')
+        legacy.exec('PRAGMA user_version = 25')
         legacy.close()
 
         const migrated = new Store(dbPath)
@@ -30,13 +30,15 @@ describe('schema migration v24 to v26 (via v25)', () => {
         const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
         expect(version.user_version).toBe(26)
         const table = internalDb.prepare(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'machine_reenroll_grants'"
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'machine_reenroll_replays'"
         ).get() as { name: string } | undefined
-        expect(table?.name).toBe('machine_reenroll_grants')
-        const columns = (internalDb.prepare('PRAGMA table_info(machine_reenroll_grants)').all() as Array<{ name: string }>)
+        expect(table?.name).toBe('machine_reenroll_replays')
+        const columns = (internalDb.prepare('PRAGMA table_info(machine_reenroll_replays)').all() as Array<{ name: string }>)
             .map((row) => row.name)
         expect(columns).toContain('grant_hash')
-        expect(columns).toContain('machine_id')
+        expect(columns).toContain('from_machine_id')
+        expect(columns).toContain('to_machine_id')
+        expect(columns).toContain('namespace')
         migrated.close()
     })
 })

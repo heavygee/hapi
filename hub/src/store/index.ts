@@ -41,11 +41,12 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 25
+const SCHEMA_VERSION: number = 26
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
     'machine_reenroll_grants',
+    'machine_reenroll_replays',
     'messages',
     'message_epochs',
     'users',
@@ -312,6 +313,7 @@ export class Store {
             22: () => this.migrateFromV22ToV23(),
             23: () => this.migrateFromV23ToV24(),
             24: () => this.migrateFromV24ToV25(),
+            25: () => this.migrateFromV25ToV26(),
         })
 
         if (currentVersion === 0) {
@@ -412,6 +414,13 @@ export class Store {
             );
             CREATE INDEX IF NOT EXISTS idx_machine_reenroll_grants_machine
                 ON machine_reenroll_grants(machine_id);
+
+            CREATE TABLE IF NOT EXISTS machine_reenroll_replays (
+                grant_hash TEXT PRIMARY KEY,
+                from_machine_id TEXT NOT NULL,
+                to_machine_id TEXT NOT NULL,
+                namespace TEXT NOT NULL
+            );
 
             CREATE TABLE IF NOT EXISTS messages (
                 id TEXT PRIMARY KEY,
@@ -1020,6 +1029,17 @@ export class Store {
             );
             CREATE INDEX IF NOT EXISTS idx_machine_reenroll_grants_machine
                 ON machine_reenroll_grants(machine_id);
+        `)
+    }
+
+    private migrateFromV25ToV26(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS machine_reenroll_replays (
+                grant_hash TEXT PRIMARY KEY,
+                from_machine_id TEXT NOT NULL,
+                to_machine_id TEXT NOT NULL,
+                namespace TEXT NOT NULL
+            );
         `)
     }
 

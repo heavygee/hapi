@@ -1,14 +1,20 @@
 import { describe, expect, it, beforeEach } from 'vitest'
+import { Database } from 'bun:sqlite'
 import {
     ackReenrollGrant,
+    bindReenrollGrantDb,
+    clearReenrollGrantMemoryForTests,
     clearReenrollGrantsForTests,
     consumeReenrollGrant,
+    getConsumedReenrollReplay,
     issueReenrollGrant,
+    unbindReenrollGrantDbForTests,
     verifyReenrollGrant,
 } from './reenrollGrant'
 
 describe('reenrollGrant (#1473)', () => {
     beforeEach(() => {
+        unbindReenrollGrantDbForTests()
         clearReenrollGrantsForTests()
     })
 
@@ -112,5 +118,47 @@ describe('reenrollGrant (#1473)', () => {
             namespace: 'default',
             grant,
         })).toBe(false)
+    })
+
+    it('persists consumed replay across bind/reload (#1473 Major)', () => {
+        const db = new Database(':memory:')
+        db.exec(`
+            CREATE TABLE machine_reenroll_grants (
+                grant_hash TEXT PRIMARY KEY,
+                machine_id TEXT NOT NULL,
+                namespace TEXT NOT NULL,
+                expires_at INTEGER NOT NULL
+            );
+            CREATE TABLE machine_reenroll_replays (
+                grant_hash TEXT PRIMARY KEY,
+                from_machine_id TEXT NOT NULL,
+                to_machine_id TEXT NOT NULL,
+                namespace TEXT NOT NULL
+            );
+        `)
+        bindReenrollGrantDb(db)
+        const { grant } = issueReenrollGrant({
+            machineId: 'machine-old',
+            namespace: 'default',
+        })
+        expect(consumeReenrollGrant({
+            machineId: 'machine-old',
+            namespace: 'default',
+            grant,
+            toMachineId: 'machine-mid',
+        })).toBe(true)
+
+        // Simulate Hub restart: clear process Maps, rebind same SQLite.
+        clearReenrollGrantMemoryForTests()
+        bindReenrollGrantDb(db)
+        const replay = getConsumedReenrollReplay(grant)
+        expect(replay).toEqual({
+            grantHash: expect.any(String),
+            fromMachineId: 'machine-old',
+            toMachineId: 'machine-mid',
+            namespace: 'default',
+        })
+        unbindReenrollGrantDbForTests()
+        db.close()
     })
 })

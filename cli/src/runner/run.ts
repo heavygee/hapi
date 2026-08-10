@@ -1118,12 +1118,6 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       spawnSession,
       requestShutdown: () => requestShutdown('hapi-cli'),
       onHappySessionWebhook,
-      prepareLocalResume: async (sessionId) => {
-        if (!mintLocalResumeCapability) {
-          throw new Error('Runner not ready for local resume grants')
-        }
-        return mintLocalResumeCapability(sessionId)
-      },
     });
 
     // Baseline mtime at runner-process start. Immutable: per Codex review #814

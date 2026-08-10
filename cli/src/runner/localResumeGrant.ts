@@ -1,9 +1,9 @@
 /**
  * Peercred-authenticated local resume grant socket (#1473 Major).
  *
- * Terminal `hapi resume` has no HAPI_PEER_CAP_INJECT. It connects here; the
- * runner verifies same-UID peer credentials, then mints a session capability
- * via the hub using its live runnerProof.
+ * Terminal `hapi resume` has no HAPI_PEER_CAP_INJECT. Tracked session
+ * children may redeem a peercred grant here; operator/Windows resume
+ * continues unattributed (no forgeable HTTP mint — #1473 Blocker).
  */
 
 import { createServer, createConnection, type Server } from 'node:net'
@@ -153,36 +153,11 @@ export async function requestRunnerLocalResumeCapability(sessionId: string): Pro
             return capability
         }
     }
-    // Windows / missing peercred socket: HTTP control on loopback.
-    if (state?.httpPort) {
-        const { isProcessAlive } = await import('@/utils/process')
-        if (!isProcessAlive(state.pid)) {
-            throw new Error('Runner is not running')
-        }
-        const timeout = process.env.HAPI_RUNNER_HTTP_TIMEOUT
-            ? parseInt(process.env.HAPI_RUNNER_HTTP_TIMEOUT, 10)
-            : 10_000
-        const response = await fetch(`http://127.0.0.1:${state.httpPort}/prepare-local-resume`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sessionId }),
-            signal: AbortSignal.timeout(timeout),
-        })
-        if (!response.ok) {
-            throw new Error(`Runner local-resume grant failed: HTTP ${response.status}`)
-        }
-        const body = await response.json() as { sessionCapability?: string; error?: string }
-        const capability = typeof body.sessionCapability === 'string'
-            ? body.sessionCapability.trim()
-            : ''
-        if (!capability) {
-            throw new Error(body.error?.trim() || 'Runner local-resume grant returned no capability')
-        }
-        return capability
-    }
+    // No HTTP loopback mint (#1473 Blocker): same-UID helpers could forge it.
+    // Operator / Windows terminal resume continues unattributed instead.
     throw new Error(
-        'No live runner for secure local resume '
-        + '(start `hapi runner start`, or resume from the web UI)'
+        'No peercred local-resume grant '
+        + '(tracked session trees only; terminal resume stays unattributed)'
     )
 }
 

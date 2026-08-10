@@ -354,24 +354,21 @@ export async function bootstrapExistingSession(options: {
     } = await import('@/api/peerCapabilityInject')
     const directCapability = takeDirectResumeCapability()
     const expectsInjectedCapability = Boolean(process.env[HAPI_PEER_CAP_INJECT_ENV]?.trim())
-    if (!directCapability && !expectsInjectedCapability) {
-        throw new Error(
-            'Secure resume requires runner-issued capability '
-            + '(hub/web resume inject). Direct terminal resume without inject '
-            + 'cannot authorize session RPC.'
-        )
-    }
 
+    // Host-fallback / terminal resume may be intentionally unattributed when
+    // the hub omitted resumePeerMintNonce (#1473 Major). Only fail closed when
+    // an attributed path was actually armed.
     const session = api.sessionSyncClient(
         sessionInfo,
         directCapability ? { sessionCapability: directCapability } : undefined
     )
     session.updateMetadata(buildUpdatedMetadata)
 
-    // Attributed path: wait for inject + broker before children snapshot env.
-    const injected = await session.waitForPeerSessionCapability({ timeoutMs: 16_000 })
-    if (!injected) {
-        throw new Error('Cannot resume: runner peer capability inject failed')
+    if (directCapability || expectsInjectedCapability) {
+        const injected = await session.waitForPeerSessionCapability({ timeoutMs: 16_000 })
+        if (!injected) {
+            throw new Error('Cannot resume: runner peer capability inject failed')
+        }
     }
 
     exportHapiSessionEnv(sessionInfo.id)

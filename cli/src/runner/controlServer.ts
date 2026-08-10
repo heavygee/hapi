@@ -17,14 +17,12 @@ export function startRunnerControlServer({
   spawnSession,
   requestShutdown,
   onHappySessionWebhook,
-  prepareLocalResume,
 }: {
   getChildren: () => TrackedSession[];
   stopSession: (sessionId: string) => Promise<'stopped' | 'already_gone' | 'still_alive'>;
   spawnSession: (options: SpawnSessionOptions) => Promise<SpawnSessionResult>;
   requestShutdown: () => void;
   onHappySessionWebhook: (sessionId: string, metadata: Metadata) => void;
-  prepareLocalResume?: (sessionId: string) => Promise<string>;
 }): Promise<{ port: number; stop: () => Promise<void> }> {
   return new Promise((resolve) => {
     const app = fastify({
@@ -193,50 +191,24 @@ export function startRunnerControlServer({
       return { status: 'stopping' };
     });
 
-    // Terminal `hapi resume` capability mint (Windows / loopback fallback).
-    // Unauthenticated loopback cannot tell session A from the operator, so
-    // refuse while any tracked session exists (#1473 Blocker).
+    // Loopback HTTP cannot authenticate a caller as the operator vs a
+    // reparented helper (#1473 Blocker). Capability mint stays on the
+    // peercred unix socket (tracked session trees only). Keep a hard 403
+    // so older clients fail closed instead of minting.
     typed.post('/prepare-local-resume', {
       schema: {
         body: z.object({
           sessionId: z.string()
         }),
         response: {
-          200: z.object({
-            sessionCapability: z.string()
-          }),
           403: z.object({
-            error: z.string()
-          }),
-          500: z.object({
             error: z.string()
           })
         }
       }
-    }, async (request, reply) => {
-      const { sessionId } = request.body;
-      if (!prepareLocalResume) {
-        reply.code(500);
-        return { error: 'Local resume grants unavailable' };
-      }
-      const tracked = getChildren().filter((child) =>
-        Boolean(child.happySessionId?.trim() || child.requestedHappySessionId?.trim())
-      )
-      if (tracked.length > 0) {
-        reply.code(403);
-        return {
-          error: 'HTTP local-resume refused while sessions are tracked; use peercred socket'
-        };
-      }
-      try {
-        const sessionCapability = await prepareLocalResume(sessionId);
-        return { sessionCapability };
-      } catch (error) {
-        reply.code(500);
-        return {
-          error: error instanceof Error ? error.message : 'Local resume grant failed'
-        };
-      }
+    }, async (_request, reply) => {
+      reply.code(403);
+      return { error: 'Unauthenticated loopback cannot mint session capabilities' };
     });
 
     app.listen({ port: 0, host: '127.0.0.1' }, (err, address) => {

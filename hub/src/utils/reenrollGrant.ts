@@ -92,6 +92,28 @@ export function bindReenrollGrantDb(db: Database): void {
     } catch {
         // Table may not exist yet during early boot; migration creates it.
     }
+    try {
+        const replays = db.prepare(`
+            SELECT grant_hash, from_machine_id, to_machine_id, namespace
+            FROM machine_reenroll_replays
+        `).all() as Array<{
+            grant_hash: string
+            from_machine_id: string
+            to_machine_id: string
+            namespace: string
+        }>
+        consumedReplaysByHash.clear()
+        for (const row of replays) {
+            consumedReplaysByHash.set(row.grant_hash, {
+                grantHash: row.grant_hash,
+                fromMachineId: row.from_machine_id,
+                toMachineId: row.to_machine_id,
+                namespace: row.namespace,
+            })
+        }
+    } catch {
+        // Table may not exist yet during early boot; migration creates it.
+    }
 }
 
 /**
@@ -117,17 +139,12 @@ export function issueReenrollGrant(options: {
     if (grantDb) {
         grantDb.prepare(`
             INSERT INTO machine_reenroll_grants (grant_hash, machine_id, namespace, expires_at)
-            VALUES (@grant_hash, @machine_id, @namespace, @expires_at)
+            VALUES (?, ?, ?, ?)
             ON CONFLICT(grant_hash) DO UPDATE SET
                 machine_id = excluded.machine_id,
                 namespace = excluded.namespace,
                 expires_at = excluded.expires_at
-        `).run({
-            grant_hash: hash,
-            machine_id: options.machineId,
-            namespace: options.namespace,
-            expires_at: expiresAt,
-        })
+        `).run(hash, options.machineId, options.namespace, expiresAt)
     }
     return { grant, expiresAt }
 }
@@ -204,24 +221,71 @@ export function consumeReenrollGrant(options: {
         return false
     }
     const grantHash = hashGrant(options.grant)
-    consumedReplaysByHash.set(grantHash, {
+    const toMachineId = options.toMachineId.trim()
+    const replay: ConsumedReenrollReplay = {
         grantHash,
         fromMachineId: options.machineId,
-        toMachineId: options.toMachineId.trim(),
+        toMachineId,
         namespace: options.namespace,
-    })
+    }
+    // Persist replay before deleting the durable grant so a Hub restart can
+    // still authorize lost-response retries (#1473 Major).
+    if (grantDb) {
+        grantDb.prepare(`
+            INSERT INTO machine_reenroll_replays
+                (grant_hash, from_machine_id, to_machine_id, namespace)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(grant_hash) DO UPDATE SET
+                from_machine_id = excluded.from_machine_id,
+                to_machine_id = excluded.to_machine_id,
+                namespace = excluded.namespace
+        `).run(grantHash, options.machineId, toMachineId, options.namespace)
+        grantDb.prepare('DELETE FROM machine_reenroll_grants WHERE machine_id = ?')
+            .run(options.machineId)
+    }
+    consumedReplaysByHash.set(grantHash, replay)
     for (const [hash, record] of [...grantsByHash.entries()]) {
         if (record.machineId === options.machineId) {
             grantsByHash.delete(hash)
         }
     }
-    grantDb?.prepare('DELETE FROM machine_reenroll_grants WHERE machine_id = ?').run(options.machineId)
     return true
 }
 
 export function getConsumedReenrollReplay(grant: string): ConsumedReenrollReplay | null {
     const hash = hashGrant(grant.trim())
-    return consumedReplaysByHash.get(hash) ?? null
+    const cached = consumedReplaysByHash.get(hash)
+    if (cached) {
+        return cached
+    }
+    if (!grantDb) {
+        return null
+    }
+    try {
+        const row = grantDb.prepare(`
+            SELECT grant_hash, from_machine_id, to_machine_id, namespace
+            FROM machine_reenroll_replays
+            WHERE grant_hash = ?
+        `).get(hash) as {
+            grant_hash: string
+            from_machine_id: string
+            to_machine_id: string
+            namespace: string
+        } | undefined
+        if (!row) {
+            return null
+        }
+        const replay: ConsumedReenrollReplay = {
+            grantHash: row.grant_hash,
+            fromMachineId: row.from_machine_id,
+            toMachineId: row.to_machine_id,
+            namespace: row.namespace,
+        }
+        consumedReplaysByHash.set(hash, replay)
+        return replay
+    } catch {
+        return null
+    }
 }
 
 /** Test helper — clear in-memory grants between cases. */
@@ -234,5 +298,23 @@ export function clearReenrollGrantsForTests(): void {
         } catch {
             // ignore
         }
+        try {
+            grantDb.prepare('DELETE FROM machine_reenroll_replays').run()
+        } catch {
+            // ignore
+        }
     }
+}
+
+/** Test helper — drop process Maps without deleting durable rows. */
+export function clearReenrollGrantMemoryForTests(): void {
+    grantsByHash.clear()
+    consumedReplaysByHash.clear()
+}
+
+/** Test helper — detach DB after in-memory suite cases. */
+export function unbindReenrollGrantDbForTests(): void {
+    grantsByHash.clear()
+    consumedReplaysByHash.clear()
+    grantDb = null
 }

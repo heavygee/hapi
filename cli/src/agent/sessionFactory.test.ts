@@ -115,21 +115,22 @@ describe('bootstrapExistingSession', () => {
         takeDirectResumeCapability()
     })
 
-    it('fails closed on direct terminal resume without inject (#1473)', async () => {
+    it('allows unattributed terminal resume without inject (#1473 Major)', async () => {
         const session = createSession()
+        const sessionClient = mockInjectReadySessionClient()
         getSessionMock.mockResolvedValue(session)
         readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
 
-        await expect(bootstrapExistingSession({
+        const result = await bootstrapExistingSession({
             sessionId: 'hapi-session-1',
             flavor: 'codex',
             workingDirectory: '/tmp/project'
-        })).rejects.toThrow(/Secure resume requires runner-issued/)
+        })
 
-        expect(getOrCreateMachineMock).not.toHaveBeenCalled()
-        expect(sessionSyncClientMock).not.toHaveBeenCalled()
-        expect(process.env[HAPI_SESSION_ID_ENV]).toBeUndefined()
-        expect(notifyRunnerSessionStartedMock).not.toHaveBeenCalled()
+        expect(result.sessionInfo.id).toBe('hapi-session-1')
+        expect(sessionSyncClientMock).toHaveBeenCalledWith(session, undefined)
+        expect(sessionClient.waitForPeerSessionCapability).not.toHaveBeenCalled()
+        expect(notifyRunnerSessionStartedMock).toHaveBeenCalled()
     })
 
     it('accepts in-process capability from peercred local-resume grant (#1473)', async () => {
