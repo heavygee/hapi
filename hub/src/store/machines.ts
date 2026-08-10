@@ -157,6 +157,29 @@ export function getOrCreateMachine(
                         throw new Error('Failed to rebind machine runner proof')
                     }
                     current = rebound
+                    // Tip path refreshes metadata after rebind; soup's non-runner
+                    // early return would otherwise leave stale host/version fields
+                    // (#1473 cold-rebind soup union).
+                    const reboundMerged = mergeMachineMetadata(current.metadata, metadata)
+                    if (reboundMerged !== undefined) {
+                        db.prepare(`
+                            UPDATE machines
+                            SET metadata = @metadata,
+                                metadata_version = metadata_version + 1,
+                                updated_at = @updated_at,
+                                seq = seq + 1
+                            WHERE id = @id
+                        `).run({
+                            metadata: JSON.stringify(reboundMerged),
+                            updated_at: Date.now(),
+                            id,
+                        })
+                        const row = getMachine(db, id)
+                        if (!row) {
+                            throw new Error('Failed to refresh machine metadata after proof rebind')
+                        }
+                        current = row
+                    }
                 } else {
                     throw new MachineTagConflictError(
                         'Machine runner proof mismatch; re-enroll with a new machine id'
