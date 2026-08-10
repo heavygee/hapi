@@ -272,15 +272,14 @@ export const resumeCommand: CommandDefinition = {
                 throw new Error('Session is already controlled by a local terminal')
             }
 
-            // Attributed resume needs inject/capability for session RPC auth.
-            // Direct terminal resume without inject would come up with broken
-            // web abort/config/permission RPCs (#1473 Major) — fail closed.
+            // Attributed resume needs a session capability for RPC auth.
+            // Runner-spawned children get inject env; terminal `hapi resume`
+            // redeems a peercred (or loopback) grant from the live runner.
             if (!process.env.HAPI_PEER_CAP_INJECT?.trim()) {
-                throw new Error(
-                    'Secure resume requires hub/web runner inject '
-                    + '(direct terminal hapi resume cannot authorize session RPC '
-                    + 'without a capability). Resume from the web UI.'
-                )
+                const { requestRunnerLocalResumeCapability } = await import('@/runner/localResumeGrant')
+                const { armDirectResumeCapability } = await import('@/api/peerCapabilityInject')
+                const capability = await requestRunnerLocalResumeCapability(target.sessionId)
+                armDirectResumeCapability(capability)
             }
             if (target.active) {
                 await api.handoffSessionToLocal(target.sessionId)

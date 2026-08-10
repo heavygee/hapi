@@ -33,6 +33,10 @@ describe('schema migration v24 to v25', () => {
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'machine_reenroll_grants'"
         ).get() as { name: string } | undefined
         expect(table?.name).toBe('machine_reenroll_grants')
+        const columns = (internalDb.prepare('PRAGMA table_info(machine_reenroll_grants)').all() as Array<{ name: string }>)
+            .map((row) => row.name)
+        expect(columns).toContain('grant_hash')
+        expect(columns).toContain('machine_id')
         migrated.close()
     })
 })

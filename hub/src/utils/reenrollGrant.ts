@@ -9,8 +9,12 @@ type GrantRecord = {
     expiresAt: number
 }
 
-/** In-memory cache; SQLite is source of truth across hub restarts (#1473). */
-const grantsById = new Map<string, GrantRecord>()
+/**
+ * In-memory cache keyed by grant hash. SQLite may hold multiple hashes per
+ * machine so a refresh can keep the previous grant valid until the runner
+ * persists the replacement and acks (#1473 Blocker).
+ */
+const grantsByHash = new Map<string, GrantRecord>()
 let grantDb: Database | null = null
 
 const DEFAULT_TTL_MS = 5 * 60_000
@@ -19,9 +23,53 @@ function hashGrant(grant: string): string {
     return createHash('sha256').update(grant.trim(), 'utf8').digest('base64url')
 }
 
+function purgeExpired(now = Date.now()): void {
+    for (const [hash, record] of grantsByHash) {
+        if (record.expiresAt < now) {
+            grantsByHash.delete(hash)
+        }
+    }
+    if (!grantDb) {
+        return
+    }
+    try {
+        grantDb.prepare('DELETE FROM machine_reenroll_grants WHERE expires_at < ?').run(now)
+    } catch {
+        // Table may not exist yet during early boot.
+    }
+}
+
+function loadRecord(hash: string): GrantRecord | undefined {
+    purgeExpired()
+    let record = grantsByHash.get(hash)
+    if (record || !grantDb) {
+        return record
+    }
+    const row = grantDb.prepare(`
+        SELECT machine_id, namespace, grant_hash, expires_at
+        FROM machine_reenroll_grants
+        WHERE grant_hash = ?
+    `).get(hash) as {
+        machine_id: string
+        namespace: string
+        grant_hash: string
+        expires_at: number
+    } | undefined
+    if (!row) {
+        return undefined
+    }
+    record = {
+        hash: row.grant_hash,
+        machineId: row.machine_id,
+        namespace: row.namespace,
+        expiresAt: row.expires_at,
+    }
+    grantsByHash.set(hash, record)
+    return record
+}
+
 export function bindReenrollGrantDb(db: Database): void {
     grantDb = db
-    // Warm cache from durable rows.
     try {
         const rows = db.prepare(`
             SELECT machine_id, namespace, grant_hash, expires_at
@@ -32,14 +80,14 @@ export function bindReenrollGrantDb(db: Database): void {
             grant_hash: string
             expires_at: number
         }>
-        grantsById.clear()
+        grantsByHash.clear()
         const now = Date.now()
         for (const row of rows) {
             if (row.expires_at < now) {
-                db.prepare('DELETE FROM machine_reenroll_grants WHERE machine_id = ?').run(row.machine_id)
+                db.prepare('DELETE FROM machine_reenroll_grants WHERE grant_hash = ?').run(row.grant_hash)
                 continue
             }
-            grantsById.set(row.machine_id, {
+            grantsByHash.set(row.grant_hash, {
                 hash: row.grant_hash,
                 machineId: row.machine_id,
                 namespace: row.namespace,
@@ -51,32 +99,38 @@ export function bindReenrollGrantDb(db: Database): void {
     }
 }
 
+/**
+ * Issue a new grant without invalidating prior hashes for the machine.
+ * Runner must persist the token then call {@link ackReenrollGrant}.
+ */
 export function issueReenrollGrant(options: {
     machineId: string
     namespace: string
     ttlMs?: number
 }): { grant: string; expiresAt: number } {
+    purgeExpired()
     const grant = randomBytes(32).toString('base64url')
     const expiresAt = Date.now() + (options.ttlMs ?? DEFAULT_TTL_MS)
     const hash = hashGrant(grant)
-    grantsById.set(options.machineId, {
+    const record: GrantRecord = {
         hash,
         machineId: options.machineId,
         namespace: options.namespace,
         expiresAt,
-    })
+    }
+    grantsByHash.set(hash, record)
     if (grantDb) {
         grantDb.prepare(`
-            INSERT INTO machine_reenroll_grants (machine_id, namespace, grant_hash, expires_at)
-            VALUES (@machine_id, @namespace, @grant_hash, @expires_at)
-            ON CONFLICT(machine_id) DO UPDATE SET
+            INSERT INTO machine_reenroll_grants (grant_hash, machine_id, namespace, expires_at)
+            VALUES (@grant_hash, @machine_id, @namespace, @expires_at)
+            ON CONFLICT(grant_hash) DO UPDATE SET
+                machine_id = excluded.machine_id,
                 namespace = excluded.namespace,
-                grant_hash = excluded.grant_hash,
                 expires_at = excluded.expires_at
         `).run({
+            grant_hash: hash,
             machine_id: options.machineId,
             namespace: options.namespace,
-            grant_hash: hash,
             expires_at: expiresAt,
         })
     }
@@ -84,10 +138,10 @@ export function issueReenrollGrant(options: {
 }
 
 /**
- * Consume a one-time reenroll grant for the source machine.
- * Returns true only once per issued grant before expiry.
+ * After the runner writes the grant to disk, drop every other hash for the
+ * machine so only the durable token remains valid.
  */
-export function consumeReenrollGrant(options: {
+export function ackReenrollGrant(options: {
     machineId: string
     namespace: string
     grant: string
@@ -96,50 +150,82 @@ export function consumeReenrollGrant(options: {
     if (!presented) {
         return false
     }
-    let record = grantsById.get(options.machineId)
-    if (!record && grantDb) {
-        const row = grantDb.prepare(`
-            SELECT machine_id, namespace, grant_hash, expires_at
-            FROM machine_reenroll_grants
-            WHERE machine_id = ?
-        `).get(options.machineId) as {
-            machine_id: string
-            namespace: string
-            grant_hash: string
-            expires_at: number
-        } | undefined
-        if (row) {
-            record = {
-                hash: row.grant_hash,
-                machineId: row.machine_id,
-                namespace: row.namespace,
-                expiresAt: row.expires_at,
-            }
-            grantsById.set(options.machineId, record)
-        }
-    }
+    const hash = hashGrant(presented)
+    const record = loadRecord(hash)
     if (!record) {
         return false
     }
-    if (record.namespace !== options.namespace) {
+    if (record.machineId !== options.machineId || record.namespace !== options.namespace) {
         return false
     }
     if (record.expiresAt < Date.now()) {
-        grantsById.delete(options.machineId)
-        grantDb?.prepare('DELETE FROM machine_reenroll_grants WHERE machine_id = ?').run(options.machineId)
+        grantsByHash.delete(hash)
+        grantDb?.prepare('DELETE FROM machine_reenroll_grants WHERE grant_hash = ?').run(hash)
         return false
     }
-    if (!constantTimeEquals(record.hash, hashGrant(presented))) {
+    for (const [otherHash, other] of [...grantsByHash.entries()]) {
+        if (other.machineId === options.machineId && otherHash !== hash) {
+            grantsByHash.delete(otherHash)
+        }
+    }
+    if (grantDb) {
+        grantDb.prepare(`
+            DELETE FROM machine_reenroll_grants
+            WHERE machine_id = ? AND grant_hash != ?
+        `).run(options.machineId, hash)
+    }
+    return true
+}
+
+/** Check a grant without consuming it (migrate may still fail). */
+export function verifyReenrollGrant(options: {
+    machineId: string
+    namespace: string
+    grant: string
+}): boolean {
+    const presented = options.grant.trim()
+    if (!presented) {
         return false
     }
-    grantsById.delete(options.machineId)
+    const record = loadRecord(hashGrant(presented))
+    if (!record) {
+        return false
+    }
+    if (record.machineId !== options.machineId || record.namespace !== options.namespace) {
+        return false
+    }
+    if (record.expiresAt < Date.now()) {
+        grantsByHash.delete(record.hash)
+        grantDb?.prepare('DELETE FROM machine_reenroll_grants WHERE grant_hash = ?').run(record.hash)
+        return false
+    }
+    return constantTimeEquals(record.hash, hashGrant(presented))
+}
+
+/**
+ * Consume a one-time reenroll grant after migrate succeeded.
+ * Deletes every grant for the source machine (old generation is done).
+ */
+export function consumeReenrollGrant(options: {
+    machineId: string
+    namespace: string
+    grant: string
+}): boolean {
+    if (!verifyReenrollGrant(options)) {
+        return false
+    }
+    for (const [hash, record] of [...grantsByHash.entries()]) {
+        if (record.machineId === options.machineId) {
+            grantsByHash.delete(hash)
+        }
+    }
     grantDb?.prepare('DELETE FROM machine_reenroll_grants WHERE machine_id = ?').run(options.machineId)
     return true
 }
 
 /** Test helper — clear in-memory grants between cases. */
 export function clearReenrollGrantsForTests(): void {
-    grantsById.clear()
+    grantsByHash.clear()
     if (grantDb) {
         try {
             grantDb.prepare('DELETE FROM machine_reenroll_grants').run()

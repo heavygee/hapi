@@ -7,6 +7,8 @@ const {
     listResumableSessionsMock,
     getLocalResumeTargetMock,
     handoffSessionToLocalMock,
+    requestRunnerLocalResumeCapabilityMock,
+    armDirectResumeCapabilityMock,
     readSettingsMock,
     renderMock,
     runCodexMock,
@@ -23,6 +25,8 @@ const {
     listResumableSessionsMock: vi.fn(),
     getLocalResumeTargetMock: vi.fn(),
     handoffSessionToLocalMock: vi.fn(async () => {}),
+    requestRunnerLocalResumeCapabilityMock: vi.fn(async () => 'cap-from-runner'),
+    armDirectResumeCapabilityMock: vi.fn(),
     readSettingsMock: vi.fn(async () => ({ machineId: 'machine-1', previousMachineIds: [] })),
     renderMock: vi.fn(),
     runCodexMock: vi.fn(async () => {}),
@@ -46,6 +50,12 @@ vi.mock('@/api/api', () => ({
             handoffSessionToLocal: handoffSessionToLocalMock
         })
     }
+}))
+vi.mock('@/runner/localResumeGrant', () => ({
+    requestRunnerLocalResumeCapability: requestRunnerLocalResumeCapabilityMock
+}))
+vi.mock('@/api/peerCapabilityInject', () => ({
+    armDirectResumeCapability: armDirectResumeCapabilityMock
 }))
 vi.mock('ink', () => ({ render: renderMock }))
 vi.mock('@/ui/ink/ResumeSessionPicker', () => ({
@@ -77,6 +87,9 @@ describe('resumeCommand', () => {
         listResumableSessionsMock.mockReset()
         getLocalResumeTargetMock.mockReset()
         handoffSessionToLocalMock.mockClear()
+        requestRunnerLocalResumeCapabilityMock.mockReset()
+        requestRunnerLocalResumeCapabilityMock.mockResolvedValue('cap-from-runner')
+        armDirectResumeCapabilityMock.mockClear()
         readSettingsMock.mockClear()
         renderMock.mockReset()
         renderMock.mockImplementation((element: { props?: { onSelect?: (sessionId: string) => void } }) => {
@@ -126,8 +139,9 @@ describe('resumeCommand', () => {
         })
     })
 
-    it('does not stop a remote session when direct resume has no inject (#1473)', async () => {
+    it('does not stop a remote session when runner local-resume grant fails (#1473)', async () => {
         delete process.env.HAPI_PEER_CAP_INJECT
+        requestRunnerLocalResumeCapabilityMock.mockRejectedValue(new Error('No live runner'))
         getLocalResumeTargetMock.mockResolvedValue({
             sessionId: 'hapi-session-active',
             flavor: 'codex',
@@ -147,10 +161,32 @@ describe('resumeCommand', () => {
 
         await expect(resumeCommand.run(createContext(['hapi-session-active']))).rejects.toThrow(/process\.exit/)
 
+        expect(requestRunnerLocalResumeCapabilityMock).toHaveBeenCalledWith('hapi-session-active')
         expect(handoffSessionToLocalMock).not.toHaveBeenCalled()
         expect(runCodexMock).not.toHaveBeenCalled()
         exitSpy.mockRestore()
         errorSpy.mockRestore()
+    })
+
+    it('redeems a runner local-resume grant for terminal resume without inject (#1473)', async () => {
+        delete process.env.HAPI_PEER_CAP_INJECT
+        getLocalResumeTargetMock.mockResolvedValue({
+            sessionId: 'hapi-session-term',
+            flavor: 'codex',
+            directory: '/tmp/project',
+            machineId: 'machine-1',
+            active: false,
+            thinking: false,
+            controlledByUser: false,
+            agentSessionId: 'codex-thread-1',
+            permissionMode: 'default'
+        })
+
+        await resumeCommand.run(createContext(['hapi-session-term']))
+
+        expect(requestRunnerLocalResumeCapabilityMock).toHaveBeenCalledWith('hapi-session-term')
+        expect(armDirectResumeCapabilityMock).toHaveBeenCalledWith('cap-from-runner')
+        expect(runCodexMock).toHaveBeenCalled()
     })
 
     it('resumes an AGY target in PTY mode instead of falling through to Cursor', async () => {

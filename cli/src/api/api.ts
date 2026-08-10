@@ -410,6 +410,56 @@ export class ApiClient {
         return { grant, expiresAt }
     }
 
+    /** Confirm grant file was written so hub can drop superseded hashes (#1473). */
+    async ackMachineReenrollGrant(opts: {
+        machineId: string
+        machineTag: string
+        runnerProof: string
+        grant: string
+    }): Promise<void> {
+        const response = await axios.post(
+            `${configuration.apiUrl}/cli/machines/${encodeURIComponent(opts.machineId)}/reenroll-grant/ack`,
+            {
+                machineTag: opts.machineTag,
+                runnerProof: opts.runnerProof,
+                grant: opts.grant,
+            },
+            {
+                headers: this.authHeaders(),
+                timeout: 30_000,
+            }
+        )
+        if (!response.data?.ok) {
+            throw apiValidationError('Invalid /cli/machines/:id/reenroll-grant/ack response', response)
+        }
+    }
+
+    /** Runner-authenticated mint for terminal `hapi resume` (#1473). */
+    async mintLocalResumeCapability(opts: {
+        sessionId: string
+        machineTag: string
+        runnerProof: string
+    }): Promise<string> {
+        const response = await axios.post(
+            `${configuration.apiUrl}/cli/sessions/${encodeURIComponent(opts.sessionId)}/local-resume-capability`,
+            {
+                machineTag: opts.machineTag,
+                runnerProof: opts.runnerProof,
+            },
+            {
+                headers: this.authHeaders(),
+                timeout: 30_000,
+            }
+        )
+        const capability = typeof response.data?.sessionCapability === 'string'
+            ? response.data.sessionCapability.trim()
+            : ''
+        if (!capability) {
+            throw apiValidationError('Invalid /cli/sessions/:id/local-resume-capability response', response)
+        }
+        return capability
+    }
+
     async migrateSessionsAfterReenroll(opts: {
         fromMachineId: string
         toMachineId: string

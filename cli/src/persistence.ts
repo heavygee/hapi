@@ -71,6 +71,8 @@ export interface RunnerLocallyPersistedState {
    * mid-rebuild stop. Persisting this fixes that.
    */
   startedWithVersionHandoffDisabled?: boolean;
+  /** Unix socket for peercred terminal local-resume grants (#1473). */
+  localResumeSocket?: string;
 }
 
 export async function readSettings(): Promise<Settings> {

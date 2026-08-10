@@ -13,7 +13,7 @@ import { resolvePeerMetaFromSourceSession } from './messages'
 import { mintPeerSessionCapability, verifyPeerSessionCapability } from '../peerCapability'
 import { redeemResumePeerMint } from '../pendingResumePeerMint'
 import { verifyRunnerProof } from '../../utils/runnerProof'
-import { consumeReenrollGrant, issueReenrollGrant } from '../../utils/reenrollGrant'
+import { consumeReenrollGrant, issueReenrollGrant, verifyReenrollGrant, ackReenrollGrant } from '../../utils/reenrollGrant'
 import { getConfiguration } from '../../configuration'
 import { readSessionSummaryContractEnabled } from '../../config/sessionSummaryContract'
 import { constantTimeEquals } from '../../utils/crypto'
@@ -343,6 +343,47 @@ export function createCliRoutes(
     })
 
     /**
+     * Confirm the runner persisted a freshly issued grant. Until ack, prior
+     * hashes for the machine remain valid (#1473 Blocker).
+     */
+    app.post('/machines/:id/reenroll-grant/ack', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not ready' }, 503)
+        }
+        const machineId = c.req.param('id')
+        const namespace = c.get('namespace')
+        const body = await c.req.json().catch(() => null)
+        const machineTag = body && typeof body === 'object' && typeof (body as { machineTag?: unknown }).machineTag === 'string'
+            ? (body as { machineTag: string }).machineTag.trim()
+            : ''
+        const runnerProof = body && typeof body === 'object' && typeof (body as { runnerProof?: unknown }).runnerProof === 'string'
+            ? (body as { runnerProof: string }).runnerProof.trim()
+            : ''
+        const grant = body && typeof body === 'object' && typeof (body as { grant?: unknown }).grant === 'string'
+            ? (body as { grant: string }).grant.trim()
+            : ''
+        if (!machineTag || !runnerProof || !grant) {
+            return c.json({ error: 'machineTag, runnerProof, and grant required' }, 400)
+        }
+        const authMaterial = engine.getMachineAuthMaterial(machineId)
+        if (!authMaterial || authMaterial.namespace !== namespace) {
+            return c.json({ error: 'Machine access denied' }, 403)
+        }
+        const storedTag = typeof authMaterial.tag === 'string' ? authMaterial.tag : ''
+        if (!storedTag || !constantTimeEquals(storedTag, machineTag)) {
+            return c.json({ error: 'Machine tag mismatch' }, 403)
+        }
+        if (!verifyRunnerProof(runnerProof, authMaterial.runnerProofHash)) {
+            return c.json({ error: 'Machine runner proof mismatch' }, 403)
+        }
+        if (!ackReenrollGrant({ machineId, namespace, grant })) {
+            return c.json({ error: 'Unknown or expired grant' }, 403)
+        }
+        return c.json({ ok: true })
+    })
+
+    /**
      * Remap session metadata.machineId after forced machine re-enroll (#1473).
      * Requires runner proof for the new machine so siblings cannot mass-migrate.
      * Source ownership: fromRunnerProof, or a one-time reenrollGrant minted
@@ -394,18 +435,82 @@ export function createCliRoutes(
         if (!fromAuth || fromAuth.namespace !== namespace || !fromAuth.runnerProofHash) {
             return c.json({ error: 'Source machine proof required' }, 403)
         }
-        const sourceOk = fromRunnerProof
-            ? verifyRunnerProof(fromRunnerProof, fromAuth.runnerProofHash)
-            : consumeReenrollGrant({
-                machineId: fromMachineId,
-                namespace,
-                grant: reenrollGrant,
-            })
-        if (!sourceOk) {
+        const usingGrant = !fromRunnerProof
+        if (fromRunnerProof) {
+            if (!verifyRunnerProof(fromRunnerProof, fromAuth.runnerProofHash)) {
+                return c.json({ error: 'Source machine proof required' }, 403)
+            }
+        } else if (!verifyReenrollGrant({
+            machineId: fromMachineId,
+            namespace,
+            grant: reenrollGrant,
+        })) {
             return c.json({ error: 'Source machine proof required' }, 403)
         }
-        const migrated = engine.migrateSessionsMachineId(fromMachineId, newMachineId, namespace)
-        return c.json({ migrated })
+        try {
+            const migrated = engine.migrateSessionsMachineId(fromMachineId, newMachineId, namespace)
+            if (usingGrant) {
+                // Consume only after migrate succeeds so retries keep working
+                // when metadata remaps conflict (#1473 Major).
+                consumeReenrollGrant({
+                    machineId: fromMachineId,
+                    namespace,
+                    grant: reenrollGrant,
+                })
+            }
+            return c.json({ migrated })
+        } catch (error) {
+            return c.json({
+                error: error instanceof Error ? error.message : 'Session migration failed',
+            }, 409)
+        }
+    })
+
+    /**
+     * Live runner mints a session capability for terminal `hapi resume`.
+     * Requires the session's recorded machineId + live runnerProof (#1473).
+     */
+    app.post('/sessions/:id/local-resume-capability', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not ready' }, 503)
+        }
+        const sessionId = c.req.param('id')
+        const namespace = c.get('namespace')
+        const source = resolveSessionForNamespace(engine, sessionId, namespace)
+        if (!source.ok) {
+            return c.json({ error: source.error }, source.status)
+        }
+        const body = await c.req.json().catch(() => null)
+        const machineTag = body && typeof body === 'object' && typeof (body as { machineTag?: unknown }).machineTag === 'string'
+            ? (body as { machineTag: string }).machineTag.trim()
+            : ''
+        const runnerProof = body && typeof body === 'object' && typeof (body as { runnerProof?: unknown }).runnerProof === 'string'
+            ? (body as { runnerProof: string }).runnerProof.trim()
+            : ''
+        if (!machineTag || !runnerProof) {
+            return c.json({ error: 'machineTag and runnerProof required' }, 400)
+        }
+        const recordedMachineId = typeof source.session.metadata?.machineId === 'string'
+            ? source.session.metadata.machineId.trim()
+            : ''
+        if (!recordedMachineId) {
+            return c.json({ error: 'Session has no recorded machine' }, 403)
+        }
+        const authMaterial = engine.getMachineAuthMaterial(recordedMachineId)
+        if (!authMaterial || authMaterial.namespace !== namespace) {
+            return c.json({ error: 'Machine access denied' }, 403)
+        }
+        const storedTag = typeof authMaterial.tag === 'string' ? authMaterial.tag : ''
+        if (!storedTag || !constantTimeEquals(storedTag, machineTag)) {
+            return c.json({ error: 'Machine tag mismatch' }, 403)
+        }
+        if (!verifyRunnerProof(runnerProof, authMaterial.runnerProofHash)) {
+            return c.json({ error: 'Machine runner proof mismatch' }, 403)
+        }
+        return c.json({
+            sessionCapability: mintPeerSessionCapability(source.sessionId, jwtSecret),
+        })
     })
 
     /**

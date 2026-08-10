@@ -400,11 +400,13 @@ export class Store {
             CREATE INDEX IF NOT EXISTS idx_machines_namespace ON machines(namespace);
 
             CREATE TABLE IF NOT EXISTS machine_reenroll_grants (
-                machine_id TEXT PRIMARY KEY,
+                grant_hash TEXT PRIMARY KEY,
+                machine_id TEXT NOT NULL,
                 namespace TEXT NOT NULL,
-                grant_hash TEXT NOT NULL,
                 expires_at INTEGER NOT NULL
             );
+            CREATE INDEX IF NOT EXISTS idx_machine_reenroll_grants_machine
+                ON machine_reenroll_grants(machine_id);
 
             CREATE TABLE IF NOT EXISTS messages (
                 id TEXT PRIMARY KEY,
@@ -1006,11 +1008,13 @@ export class Store {
     private migrateFromV24ToV25(): void {
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS machine_reenroll_grants (
-                machine_id TEXT PRIMARY KEY,
+                grant_hash TEXT PRIMARY KEY,
+                machine_id TEXT NOT NULL,
                 namespace TEXT NOT NULL,
-                grant_hash TEXT NOT NULL,
                 expires_at INTEGER NOT NULL
             );
+            CREATE INDEX IF NOT EXISTS idx_machine_reenroll_grants_machine
+                ON machine_reenroll_grants(machine_id);
         `)
     }
 

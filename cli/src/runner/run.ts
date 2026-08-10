@@ -23,6 +23,7 @@ import { isRetryableConnectionError } from '@/utils/errorUtils';
 
 import { cleanupRunnerState, getInstalledCliMtimeMs, isRunnerRunningCurrentlyInstalledHappyVersion, stopRunner, waitForRunnerHandoff } from './controlClient';
 import { startRunnerControlServer } from './controlServer';
+import { startLocalResumeGrantServer } from './localResumeGrant';
 import { createWorktree, removeWorktree, type WorktreeInfo } from './worktree';
 import { validateWorkspaceDirectory } from './validateWorkspaceDirectory';
 import { join } from 'path';
@@ -1105,12 +1106,22 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     };
 
     // Start control server
+    let mintLocalResumeCapability:
+      | ((sessionId: string) => Promise<string>)
+      | null = null
+    let stopLocalResumeGrantServer: (() => void) | null = null
     const { port: controlPort, stop: stopControlServer } = await startRunnerControlServer({
       getChildren: getCurrentChildren,
       stopSession,
       spawnSession,
       requestShutdown: () => requestShutdown('hapi-cli'),
       onHappySessionWebhook,
+      prepareLocalResume: async (sessionId) => {
+        if (!mintLocalResumeCapability) {
+          throw new Error('Runner not ready for local resume grants')
+        }
+        return mintLocalResumeCapability(sessionId)
+      },
     });
 
     // Baseline mtime at runner-process start. Immutable: per Codex review #814
@@ -1268,7 +1279,9 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
 
     // Keep a short-lived reenroll grant fresh so crash/reboot can still migrate
     // sessions without depending on graceful cleanup (#1473 Blocker).
-    const persistFreshReenrollGrant = async () => {
+    // Issue keeps prior hashes valid until we persist + ack the replacement.
+    const persistFreshReenrollGrant = async (options?: { required?: boolean }) => {
+      const required = options?.required === true
       try {
         const issued = await api.issueMachineReenrollGrant({
           machineId,
@@ -1281,14 +1294,41 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           grant: issued.grant,
           expiresAt: issued.expiresAt,
         })
+        await api.ackMachineReenrollGrant({
+          machineId,
+          machineTag,
+          runnerProof,
+          grant: issued.grant,
+        })
       } catch (error) {
+        if (required) {
+          throw error instanceof Error
+            ? error
+            : new Error(String(error))
+        }
         logger.debug('[RUNNER RUN] Failed to refresh reenroll grant', error)
       }
     }
-    await persistFreshReenrollGrant()
+    await persistFreshReenrollGrant({ required: true })
     const reenrollRefresh = setInterval(() => {
       void persistFreshReenrollGrant()
     }, 60_000)
+
+    mintLocalResumeCapability = async (sessionId: string) => {
+      return await api.mintLocalResumeCapability({
+        sessionId,
+        machineTag,
+        runnerProof,
+      })
+    }
+    const localResumeGrant = await startLocalResumeGrantServer({
+      mintCapability: (sessionId) => mintLocalResumeCapability!(sessionId),
+    })
+    if (localResumeGrant) {
+      stopLocalResumeGrantServer = localResumeGrant.close
+      fileState.localResumeSocket = localResumeGrant.path
+      writeRunnerState(fileState)
+    }
 
     // Create realtime machine session
     const apiMachine = api.machineSyncClient(machine, { workspaceRoots, machineTag, runnerProof });
@@ -1569,6 +1609,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           startedWithExtraHeadersHash: fileState.startedWithExtraHeadersHash,
           startedWithArgv,
           startedWithVersionHandoffDisabled,
+          localResumeSocket: fileState.localResumeSocket,
           lastHeartbeat: new Date().toLocaleString(),
           runnerLogPath: fileState.runnerLogPath
         };
@@ -1609,6 +1650,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       await new Promise(resolve => setTimeout(resolve, 100));
 
       apiMachine.shutdown();
+      stopLocalResumeGrantServer?.()
       await stopControlServer();
       await cleanupRunnerState();
       await releaseRunnerLock(runnerLockHandle);

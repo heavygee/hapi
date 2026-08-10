@@ -17,12 +17,14 @@ export function startRunnerControlServer({
   spawnSession,
   requestShutdown,
   onHappySessionWebhook,
+  prepareLocalResume,
 }: {
   getChildren: () => TrackedSession[];
   stopSession: (sessionId: string) => Promise<'stopped' | 'already_gone' | 'still_alive'>;
   spawnSession: (options: SpawnSessionOptions) => Promise<SpawnSessionResult>;
   requestShutdown: () => void;
   onHappySessionWebhook: (sessionId: string, metadata: Metadata) => void;
+  prepareLocalResume?: (sessionId: string) => Promise<string>;
 }): Promise<{ port: number; stop: () => Promise<void> }> {
   return new Promise((resolve) => {
     const app = fastify({
@@ -189,6 +191,38 @@ export function startRunnerControlServer({
       }, 50);
 
       return { status: 'stopping' };
+    });
+
+    // Terminal `hapi resume` capability mint (Windows / loopback fallback).
+    typed.post('/prepare-local-resume', {
+      schema: {
+        body: z.object({
+          sessionId: z.string()
+        }),
+        response: {
+          200: z.object({
+            sessionCapability: z.string()
+          }),
+          500: z.object({
+            error: z.string()
+          })
+        }
+      }
+    }, async (request, reply) => {
+      const { sessionId } = request.body;
+      if (!prepareLocalResume) {
+        reply.code(500);
+        return { error: 'Local resume grants unavailable' };
+      }
+      try {
+        const sessionCapability = await prepareLocalResume(sessionId);
+        return { sessionCapability };
+      } catch (error) {
+        reply.code(500);
+        return {
+          error: error instanceof Error ? error.message : 'Local resume grant failed'
+        };
+      }
     });
 
     app.listen({ port: 0, host: '127.0.0.1' }, (err, address) => {
