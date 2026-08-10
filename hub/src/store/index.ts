@@ -45,6 +45,7 @@ const SCHEMA_VERSION: number = 25
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
+    'machine_reenroll_grants',
     'messages',
     'message_epochs',
     'users',
