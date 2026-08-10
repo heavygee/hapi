@@ -1055,6 +1055,23 @@ async uploadScratchlistAttachment(
         return migratedIds.length
     }
 
+    /** Count namespace sessions whose metadata.machineId still equals machineId. */
+    countSessionsOnMachine(machineId: string, namespace: string): number {
+        const target = machineId.trim()
+        if (!target) {
+            return 0
+        }
+        return this.store.sessions.getSessionsByNamespace(namespace).filter((session) => {
+            const metadata = (session.metadata && typeof session.metadata === 'object')
+                ? session.metadata as Record<string, unknown>
+                : {}
+            const currentId = typeof metadata.machineId === 'string'
+                ? metadata.machineId.trim()
+                : ''
+            return currentId === target
+        }).length
+    }
+
     /**
      * Remap + consume grant in one SQLite transaction so a hub crash cannot
      * leave sessions on the new machine while the grant is already spent

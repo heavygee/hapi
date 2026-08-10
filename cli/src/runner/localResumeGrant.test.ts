@@ -80,6 +80,7 @@ describe('localResumeGrant (#1473)', () => {
             socketPath,
             mintCapability: async (sessionId) => `cap-for-${sessionId}`,
             resolveTrackedSessionId: () => null,
+            isTrustedOperatorPeer: () => true,
             readPeerCred: () => ({
                 pid: process.pid,
                 uid: process.getuid?.() ?? 0,
@@ -90,6 +91,30 @@ describe('localResumeGrant (#1473)', () => {
         const response = await requestCapability(socketPath, 'session-b')
         expect(response.ok).toBe(true)
         expect(response.sessionCapability).toBe('cap-for-session-b')
+        server!.close()
+    })
+
+    it('refuses an untracked peer that is not a trusted operator', async () => {
+        if (process.platform !== 'linux' && process.platform !== 'darwin') {
+            return
+        }
+        const socketPath = testLocalResumeSocketPath('hapi-local-resume-untrusted')
+        sockets.push(socketPath)
+        const server = await startLocalResumeGrantServer({
+            socketPath,
+            mintCapability: async () => 'cap-should-not-issue',
+            resolveTrackedSessionId: () => null,
+            isTrustedOperatorPeer: () => false,
+            readPeerCred: () => ({
+                pid: process.pid,
+                uid: process.getuid?.() ?? 0,
+                gid: process.getgid?.() ?? 0,
+            }),
+        })
+        expect(server).not.toBeNull()
+        const response = await requestCapability(socketPath, 'session-b')
+        expect(response.ok).toBe(false)
+        expect(response.code).toBe('auth_failed')
         server!.close()
     })
 })

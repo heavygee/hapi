@@ -1,4 +1,12 @@
-import { existsSync, readFileSync, unlinkSync, writeFileSync, chmodSync, mkdirSync } from 'node:fs'
+import {
+    existsSync,
+    readFileSync,
+    unlinkSync,
+    writeFileSync,
+    chmodSync,
+    mkdirSync,
+    renameSync,
+} from 'node:fs'
 import { dirname, join } from 'node:path'
 import { configuration } from '@/configuration'
 
@@ -13,25 +21,13 @@ function grantPath(): string {
     return join(configuration.happyHomeDir, 'runner-reenroll.grant.json')
 }
 
-/** Persist a hub reenroll grant across runner restart (#1473). */
-export function writeReenrollGrant(grant: PersistedReenrollGrant): void {
-    const path = grantPath()
-    mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
-    writeFileSync(path, JSON.stringify(grant), { mode: 0o600 })
-    chmodSync(path, 0o600)
+function pendingGrantPath(): string {
+    return `${grantPath()}.pending`
 }
 
-/**
- * Read the on-disk grant even if past expiresAt — hub verify is authoritative.
- * Clearing on local expiry would skip migrate and strand sessions (#1473 Major).
- */
-export function readReenrollGrant(): PersistedReenrollGrant | null {
-    const path = grantPath()
-    if (!existsSync(path)) {
-        return null
-    }
+function parseGrant(raw: string): PersistedReenrollGrant | null {
     try {
-        const parsed = JSON.parse(readFileSync(path, 'utf8')) as PersistedReenrollGrant
+        const parsed = JSON.parse(raw) as PersistedReenrollGrant
         if (
             typeof parsed.fromMachineId !== 'string'
             || typeof parsed.machineTag !== 'string'
@@ -51,13 +47,64 @@ export function readReenrollGrant(): PersistedReenrollGrant | null {
     }
 }
 
-export function clearReenrollGrant(): void {
-    const path = grantPath()
-    if (existsSync(path)) {
+/**
+ * Stage a replacement grant without destroying the durable token.
+ * Call {@link commitReenrollGrant} only after hub ack (#1473 Major).
+ */
+export function writeReenrollGrantPending(grant: PersistedReenrollGrant): void {
+    const path = pendingGrantPath()
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
+    writeFileSync(path, JSON.stringify(grant), { mode: 0o600 })
+    chmodSync(path, 0o600)
+}
+
+/** Promote the staged grant after hub ack. */
+export function commitReenrollGrant(): void {
+    const pending = pendingGrantPath()
+    const finalPath = grantPath()
+    if (!existsSync(pending)) {
+        return
+    }
+    mkdirSync(dirname(finalPath), { recursive: true, mode: 0o700 })
+    renameSync(pending, finalPath)
+    chmodSync(finalPath, 0o600)
+}
+
+/** @deprecated Prefer writeReenrollGrantPending + commitReenrollGrant. */
+export function writeReenrollGrant(grant: PersistedReenrollGrant): void {
+    writeReenrollGrantPending(grant)
+    commitReenrollGrant()
+}
+
+/**
+ * Prefer a staged pending grant (post-ack / pre-rename), else the durable file.
+ * Do not discard on local expiry — hub verify is authoritative (#1473 Major).
+ */
+export function readReenrollGrant(): PersistedReenrollGrant | null {
+    for (const path of [pendingGrantPath(), grantPath()]) {
+        if (!existsSync(path)) {
+            continue
+        }
         try {
-            unlinkSync(path)
+            const parsed = parseGrant(readFileSync(path, 'utf8'))
+            if (parsed) {
+                return parsed
+            }
         } catch {
-            // ignore
+            // try next
+        }
+    }
+    return null
+}
+
+export function clearReenrollGrant(): void {
+    for (const path of [pendingGrantPath(), grantPath()]) {
+        if (existsSync(path)) {
+            try {
+                unlinkSync(path)
+            } catch {
+                // ignore
+            }
         }
     }
 }

@@ -445,6 +445,11 @@ export function createCliRoutes(
             namespace,
             grant: reenrollGrant,
         })) {
+            // Lost-response replay: grant already consumed, sessions already on
+            // the destination machine — treat as success (#1473 Major).
+            if (engine.countSessionsOnMachine(fromMachineId, namespace) === 0) {
+                return c.json({ migrated: 0, alreadyComplete: true })
+            }
             return c.json({ error: 'Source machine proof required' }, 403)
         }
         try {

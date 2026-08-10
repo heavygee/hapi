@@ -23,20 +23,9 @@ function hashGrant(grant: string): string {
     return createHash('sha256').update(grant.trim(), 'utf8').digest('base64url')
 }
 
-function purgeExpired(now = Date.now()): void {
-    for (const [hash, record] of grantsByHash) {
-        if (record.expiresAt < now) {
-            grantsByHash.delete(hash)
-        }
-    }
-    if (!grantDb) {
-        return
-    }
-    try {
-        grantDb.prepare('DELETE FROM machine_reenroll_grants WHERE expires_at < ?').run(now)
-    } catch {
-        // Table may not exist yet during early boot.
-    }
+function purgeExpired(_now = Date.now()): void {
+    // Intentionally a no-op for recovery grants: wall-clock TTL must not strand
+    // offline machines. Grants are invalidated by consume/ack only (#1473).
 }
 
 function loadRecord(hash: string, options?: { purgeExpired?: boolean }): GrantRecord | undefined {

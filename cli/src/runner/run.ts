@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, writeFileSync, readlinkSync } from 'node:fs';
 import os from 'os';
 
 import { ApiClient } from '@/api/api';
@@ -24,10 +24,11 @@ import { isRetryableConnectionError } from '@/utils/errorUtils';
 import { cleanupRunnerState, getInstalledCliMtimeMs, isRunnerRunningCurrentlyInstalledHappyVersion, stopRunner, waitForRunnerHandoff } from './controlClient';
 import { startRunnerControlServer } from './controlServer';
 import { startLocalResumeGrantServer } from './localResumeGrant';
-import { isProcessDescendant } from '@/api/processDescendant';
+import { isProcessDescendant } from '@/api/processDescendant'
+import { basename, join } from 'node:path'
+import { execFileSync } from 'node:child_process'
 import { createWorktree, removeWorktree, type WorktreeInfo } from './worktree';
 import { validateWorkspaceDirectory } from './validateWorkspaceDirectory';
-import { join } from 'path';
 import { buildMachineMetadata } from '@/agent/sessionFactory';
 import { resolveWorkspaceRoots } from '@/utils/workspaceRoot';
 import { hashRunnerCliApiToken, hashRunnerExtraHeaders } from './runnerIdentity';
@@ -45,7 +46,8 @@ import { buildHubRequestHeaders } from '@/api/hubExtraHeaders';
 import {
   clearReenrollGrant,
   readReenrollGrant,
-  writeReenrollGrant,
+  writeReenrollGrantPending,
+  commitReenrollGrant,
 } from './reenrollGrantStore';
 
 /**
@@ -1292,7 +1294,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             machineTag,
             runnerProof,
           })
-          writeReenrollGrant({
+          writeReenrollGrantPending({
             fromMachineId: machineId,
             machineTag,
             grant: issued.grant,
@@ -1304,6 +1306,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             runnerProof,
             grant: issued.grant,
           })
+          commitReenrollGrant()
         } catch (error) {
           if (required) {
             throw error instanceof Error
@@ -1341,9 +1344,36 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       }
       return null
     }
+    const isTrustedOperatorPeer = (peerPid: number): boolean => {
+      // Same binary as this runner — `hapi resume` from the CLI. Reparented
+      // agent helpers are bun/node/agent binaries, not process.execPath.
+      if (process.platform === 'linux') {
+        try {
+          const exe = readlinkSync(`/proc/${peerPid}/exe`).replace(/ \(deleted\)$/, '')
+          return exe === process.execPath
+            || basename(exe) === basename(process.execPath)
+        } catch {
+          return false
+        }
+      }
+      if (process.platform === 'darwin') {
+        try {
+          const out = execFileSync('ps', ['-p', String(peerPid), '-o', 'comm='], {
+            encoding: 'utf8',
+            timeout: 1_000,
+          }).trim()
+          const runnerBase = basename(process.execPath)
+          return out === runnerBase || out.endsWith(`/${runnerBase}`) || out.includes('hapi')
+        } catch {
+          return false
+        }
+      }
+      return false
+    }
     const localResumeGrant = await startLocalResumeGrantServer({
       mintCapability: (sessionId) => mintLocalResumeCapability!(sessionId),
       resolveTrackedSessionId: resolveTrackedSessionIdForPeer,
+      isTrustedOperatorPeer,
     })
     if (localResumeGrant) {
       stopLocalResumeGrantServer = localResumeGrant.close
