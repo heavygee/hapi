@@ -53,12 +53,15 @@ WHERE machine_id = '$OLD'
 jq --arg id "$LIVE" '.machineId=$id' /var/lib/hapi/settings.json > /tmp/settings.json \
   && mv /tmp/settings.json /var/lib/hapi/settings.json
 
-# Flush hub session/machine cache (patient)
-hapi-restart-hub
+# Flush hub session/machine cache WITHOUT bouncing the runner
+# (default hapi-restart-hub also restarts runner → another cold re-enroll UUID)
+hapi-restart-hub --no-runner
 # Then resume the session from web / API
 ```
 
 Kill-criteria before bulk remap: operator approval; confirm `$LIVE` has `spawn-happy-session` registered (not a shutting-down ghost row).
+
+**Gotcha (2026-08-10):** remapping then running plain `hapi-restart-hub` restarts `hapi-runner-oos` too, which can mint yet another machine id and orphan the remap again. Always `--no-runner` after SQL remap unless you intentionally want a runner bounce.
 
 ## ACP `agent` PATH
 
