@@ -759,5 +759,5 @@ layers:
   # Web PeerSenderChip + hub peer attribution; schema ladder tip 27 on branch
   # (soup remat unions with current dual-ledger V24+). Chip ✅ lane A wait.
   # Worktree: ~/coding/hapi/worktrees/a2a-p05-peer-provenance @ feat/a2a-p05-peer-provenance
-  # Tip: 07e775cd6 (origin/feat/a2a-p05-peer-provenance)
+  # Tip: 4f65f30f9 (origin/feat/a2a-p05-peer-provenance) — cold proof rebind / machineId stable
   - branch: feat/a2a-p05-peer-provenance
