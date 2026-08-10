@@ -316,4 +316,11 @@ New session/resume 500s still firing (`472632df…` resume/reopen 500 @16s, inje
 - Live dogfood: soup runner restarted with fix; **FINAL ok=15 blind=0** (all OOS active sessions upload `success:true`). Meta + `2bd956ae` still green.
 - Still open for #1108 hub side: resume short-circuit on zombie `active`; failed resume leaving `active=true`; archive/cache desync; multi-child inject queue.
 
+
+### 2026-08-10T20:35Z — Meta: no second remat; tip vs close-race hot-patch
+
+- Meta 05d9f0f2: remat-hold IDLE; tip `ab2eab462` (ancestor `e52658f80` early-connect / `not_armed`); runner soup bun; inject drop-in parked. Will not re-remat.
+- Close-race fix `1a9cbcc26` (`fix/peer-cap-inject-early-connect`) is **not** in tip — it is live as **dirty driver working-tree** + running soup bun. Next clean remat without promoting that commit will wipe delayed-close / text-redeem / null-peercred.
+- Census now: OOS upload ok=15 blind=0. #1108 continues from here (hub zombie-active / version governance).
+
 ### (next entry goes here)
