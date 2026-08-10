@@ -7,7 +7,7 @@ import {
     writeFileSync
 } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { resolveHapiHomeDir } from '@/configuration';
 
 /**
  * Cursor's `agent` CLI appears to allow only one active process at a time.
@@ -16,12 +16,32 @@ import { tmpdir } from 'node:os';
  *
  * In-process ref counting covers RPC handlers in the same process; a HAPI_HOME
  * lock directory covers runner vs session child processes.
+ *
+ * Prefer recording the ACP child PID (not only the HAPI host PID) so stale
+ * cleanup and logs attribute the real `agent` process. Register the lock
+ * before spawn, and keep it held until stdio `close` — releasing on bare
+ * `exit` opens a window where list-models can start another `agent`.
  */
 let activeAcpTransportCount = 0;
 
+export type AgentAcpGuardPidOptions = {
+    /** Spawned `agent` child PID when known. */
+    childPid?: number;
+};
+
+function normalizePid(pid: number | undefined): number | null {
+    if (pid === undefined || !Number.isInteger(pid) || pid <= 0) {
+        return null;
+    }
+    return pid;
+}
+
+export function getAgentAcpLockDir(): string {
+    return join(resolveHapiHomeDir(), 'locks', 'agent-acp-active');
+}
+
 function getAcpLockDir(): string {
-    const home = process.env.HAPI_HOME?.trim() || join(tmpdir(), 'hapi');
-    return join(home, 'locks', 'agent-acp-active');
+    return getAgentAcpLockDir();
 }
 
 function getPidsDir(lockDir: string): string {
@@ -66,6 +86,18 @@ function readLockCount(lockDir: string): number {
 
 function writeLockCount(lockDir: string, count: number): void {
     writeFileSync(join(lockDir, 'count'), String(Math.max(0, count)), 'utf8');
+}
+
+function writeChildPidHint(lockDir: string, childPid: number): void {
+    writeFileSync(join(lockDir, 'child-pid'), String(childPid), 'utf8');
+}
+
+function clearChildPidHint(lockDir: string): void {
+    try {
+        rmSync(join(lockDir, 'child-pid'), { force: true });
+    } catch {
+        // Best effort.
+    }
 }
 
 function addLockPid(lockDir: string, pid: number): void {
@@ -167,19 +199,49 @@ function clearStaleAcpLockIfNeeded(): void {
     reconcileRefcountLock(lockDir);
 }
 
-export function registerActiveAcpTransport(): void {
+/**
+ * Reserve / register the ACP lock. Call before spawn (no childPid) so
+ * list-models cannot race the new `agent` process, then call
+ * {@link recordActiveAcpChildPid} once the child PID is known.
+ */
+export function registerActiveAcpTransport(options?: AgentAcpGuardPidOptions): void {
     activeAcpTransportCount += 1;
     const lockDir = getAcpLockDir();
+    const childPid = normalizePid(options?.childPid);
     try {
         mkdirSync(lockDir, { recursive: true });
         writeLockCount(lockDir, readLockCount(lockDir) + 1);
+        // Always keep the HAPI host PID for crash/stale cleanup of the session
+        // process; also record the ACP child when known.
         addLockPid(lockDir, process.pid);
+        if (childPid !== null) {
+            addLockPid(lockDir, childPid);
+            writeChildPidHint(lockDir, childPid);
+        }
     } catch {
         // Another process may have created the lock; in-process guard still applies.
     }
 }
 
-export function unregisterActiveAcpTransport(): void {
+/** Upgrade a pre-spawn reservation with the real ACP child PID. */
+export function recordActiveAcpChildPid(childPid: number): void {
+    const pid = normalizePid(childPid);
+    if (pid === null) {
+        return;
+    }
+    const lockDir = getAcpLockDir();
+    if (!existsSync(lockDir)) {
+        return;
+    }
+    try {
+        addLockPid(lockDir, pid);
+        writeChildPidHint(lockDir, pid);
+    } catch {
+        // Best effort.
+    }
+}
+
+export function unregisterActiveAcpTransport(options?: AgentAcpGuardPidOptions): void {
     activeAcpTransportCount = Math.max(0, activeAcpTransportCount - 1);
 
     const lockDir = getAcpLockDir();
@@ -195,8 +257,13 @@ export function unregisterActiveAcpTransport(): void {
     }
 
     try {
+        const childPid = normalizePid(options?.childPid);
+        if (childPid !== null) {
+            removeLockPid(lockDir, childPid);
+        }
         if (activeAcpTransportCount <= 0) {
             removeLockPid(lockDir, process.pid);
+            clearChildPidHint(lockDir);
         }
         reconcileRefcountLock(lockDir);
     } catch {
@@ -220,6 +287,24 @@ export function isAgentAcpTransportActive(): boolean {
     }
 
     return readLockCount(lockDir) > 0;
+}
+
+/** Debug attribution for exit / list-models races (PID, lock dir, activity). */
+export function describeAgentAcpGuardState(childPid?: number | null): {
+    lockDir: string;
+    inProcessCount: number;
+    childPid: number | null;
+    childAlive: boolean | null;
+    guardActive: boolean;
+} {
+    const pid = normalizePid(childPid ?? undefined);
+    return {
+        lockDir: getAgentAcpLockDir(),
+        inProcessCount: activeAcpTransportCount,
+        childPid: pid,
+        childAlive: pid === null ? null : isProcessAlive(pid),
+        guardActive: isAgentAcpTransportActive()
+    };
 }
 
 export function _resetAgentCliGuardForTests(): void {

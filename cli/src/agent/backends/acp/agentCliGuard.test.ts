@@ -1,10 +1,12 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { afterEach, describe, expect, test } from 'vitest';
 import {
     _resetAgentCliGuardForTests,
+    getAgentAcpLockDir,
     isAgentAcpTransportActive,
+    recordActiveAcpChildPid,
     registerActiveAcpTransport,
     unregisterActiveAcpTransport
 } from './agentCliGuard';
@@ -117,5 +119,40 @@ describe('agentCliGuard', () => {
 
         expect(isAgentAcpTransportActive()).toBe(true);
         expect(existsSync(lockDir())).toBe(true);
+    });
+
+    test('records the ACP child PID when provided, not only the HAPI host PID', () => {
+        process.env.HAPI_HOME = testHome;
+        const childPid = process.pid;
+        registerActiveAcpTransport({ childPid });
+
+        const dir = lockDir();
+        expect(existsSync(join(dir, 'pids', String(childPid)))).toBe(true);
+        expect(readFileSync(join(dir, 'child-pid'), 'utf8').trim()).toBe(String(childPid));
+
+        unregisterActiveAcpTransport({ childPid });
+        expect(existsSync(dir)).toBe(false);
+    });
+
+    test('recordActiveAcpChildPid upgrades a pre-spawn reservation to the real child PID', () => {
+        process.env.HAPI_HOME = testHome;
+        registerActiveAcpTransport();
+        const childPid = process.pid;
+        recordActiveAcpChildPid(childPid);
+
+        const dir = lockDir();
+        expect(existsSync(join(dir, 'pids', String(childPid)))).toBe(true);
+        expect(readFileSync(join(dir, 'child-pid'), 'utf8').trim()).toBe(String(childPid));
+        expect(isAgentAcpTransportActive()).toBe(true);
+
+        unregisterActiveAcpTransport({ childPid });
+        expect(isAgentAcpTransportActive()).toBe(false);
+    });
+
+    test('uses ~/.hapi lock home when HAPI_HOME is unset (not /tmp/hapi)', () => {
+        delete process.env.HAPI_HOME;
+        const expected = join(homedir(), '.hapi', 'locks', 'agent-acp-active');
+        expect(getAgentAcpLockDir()).toBe(expected);
+        expect(getAgentAcpLockDir()).not.toContain(join(tmpdir(), 'hapi'));
     });
 });
