@@ -747,3 +747,10 @@ layers:
   # Tip: 110b766e6 (origin/fix/acp-143-false-transport-closed)
   - branch: fix/acp-143-false-transport-closed
 
+
+  # tiann/hapi#1470 / PR #1487 — harness wake → hub thinking (Cursor ACP).
+  # CLI: activity/idle edges + permission bump; launcher transition keepalive.
+  # Dogfood: Cursor ACP notify_on_output / mid-idle activity → list thinking.
+  # Worktree: ~/coding/hapi/worktrees/agent-harness-session-wake @ feat/agent-harness-session-wake
+  # Tip: 2d7039b93 (origin/feat/agent-harness-session-wake)
+  - branch: feat/agent-harness-session-wake
