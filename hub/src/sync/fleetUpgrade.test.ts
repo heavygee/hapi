@@ -52,6 +52,76 @@ describe('SyncEngine fleet upgrade', () => {
         }
     })
 
+    it('coalesces concurrent upgradeMachineRunner calls into one prepare/RPC', async () => {
+        let prepareCalls = 0
+        let releaseRpc!: () => void
+        const rpcGate = new Promise<void>((resolve) => {
+            releaseRpc = resolve
+        })
+        const offer: HubUpgradeOffer = {
+            channel: 'hub-artifact',
+            targetVersion: '0.24.0',
+            targetCapabilities: ['cursor-chat-store-status', 'runner-self-upgrade'],
+            targetGeneration: 'gen-1',
+        }
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never,
+            {
+                getUpgradeOffer: () => offer,
+                prepareArtifactOffer: async (base) => {
+                    prepareCalls += 1
+                    return {
+                        ...base,
+                        artifact: {
+                            url: '/cli/upgrade/cli-artifact',
+                            sha256: 'a'.repeat(64),
+                            platform: 'linux',
+                            arch: 'x64',
+                            sizeBytes: 12,
+                        },
+                    }
+                },
+            },
+        )
+
+        try {
+            const runnerSelfUpgrade = mock(async () => {
+                await rpcGate
+                return { status: 'started', message: 'ok', channel: 'hub-artifact' }
+            })
+            ;(engine as any).rpcGateway.runnerSelfUpgrade = runnerSelfUpgrade
+
+            engine.getOrCreateMachine(
+                'stale',
+                {
+                    host: 'proxmox',
+                    platform: 'linux',
+                    arch: 'x64',
+                    happyCliVersion: '0.20.0',
+                    capabilities: ['runner-self-upgrade'],
+                },
+                null,
+                'default',
+            )
+            engine.handleMachineAlive({ machineId: 'stale', time: Date.now() })
+
+            const first = engine.upgradeMachineRunner('stale', 'default')
+            const second = engine.upgradeMachineRunner('stale', 'default')
+            releaseRpc()
+            const [a, b] = await Promise.all([first, second])
+            expect(a.type).toBe('success')
+            expect(b.type).toBe('success')
+            expect(prepareCalls).toBe(1)
+            expect(runnerSelfUpgrade).toHaveBeenCalledTimes(1)
+        } finally {
+            engine.stop()
+        }
+    })
+
     it('upgradeMachineRunner cold-cache fallback honors live RPC capabilities', async () => {
         const offer: HubUpgradeOffer = {
             channel: 'npm',
