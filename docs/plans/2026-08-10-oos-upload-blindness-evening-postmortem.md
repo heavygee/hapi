@@ -282,4 +282,13 @@ Continuity dump of evening disaster. Meta upload green. 7/8 OOS split. Manual cl
 
 New session/resume 500s still firing (`472632df…` resume/reopen 500 @16s, inject timeout). systemd runner still `failed`; manual clean inject-fix PID 2810162; Meta upload still green.
 
+
+### 2026-08-10T20:05Z — soup promote in flight; remat hold
+
+- Thin tip `fix/peer-cap-inject-early-connect` @ `4ff262ba6` pushed (early-connect + webhook 25s + redeem fallback). Unit tests green (incl. early-connect case).
+- Manifest layer added (`config/driver-manifest.yaml` + `~/.config/hapi/...`).
+- Remat merge conflict on `run.ts` (versionHandoff import) **resolved** on `driver/integration-wip` as `e52658f80`.
+- Live `driver/integration` still at `624327f11` — remat escalation HOLD active, owner session `05d9f0f2`. Pinged to finish rebuild.
+- Until promote completes: kitchen still on manual clean `hapi-0.27.2-inject-fix` runner; systemd `hapi-runner-oos` failed.
+
 ### (next entry goes here)
