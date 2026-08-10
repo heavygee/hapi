@@ -42,7 +42,7 @@ describe('schema migration v22 to v28', () => {
         expect(links?.name).toBe('event_links')
         const columns = internalDb.prepare('PRAGMA table_info(messages)').all() as Array<{ name: string }>
         expect(columns.map((column) => column.name)).toContain('delivery_state')
-        // Tip after upstream V26 heartbeat index + #1404: V27 session_jobs.
+        // Tip: upstream V26 heartbeat index + #1404 V27 session_jobs + V28 run_id.
         expect(version.user_version).toBe(28)
         migrated.close()
     })
