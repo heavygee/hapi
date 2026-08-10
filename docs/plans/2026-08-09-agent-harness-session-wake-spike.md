@@ -4,7 +4,7 @@
 **Upstream issue:** https://github.com/tiann/hapi/issues/1470  
 **Worktree:** `~/coding/hapi/worktrees/agent-harness-session-wake` @ `feat/agent-harness-session-wake`  
 **Peer:** spawned from #1464 continuum (`7fd700b2`); Meta `9f5f7e1d`  
-**Status:** spike complete - **no upstream PR until operator OK**
+**Status:** Path A implemented in worktree `feat/agent-harness-session-wake` (upstream PR pending). Path B still deferred pending dogfood if ACP emits no activity on harness wake.
 
 ## Verdict
 
