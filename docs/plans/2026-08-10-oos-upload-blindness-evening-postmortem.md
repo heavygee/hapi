@@ -307,4 +307,13 @@ New session/resume 500s still firing (`472632df…` resume/reopen 500 @16s, inje
 - Kill-criteria on `2bd956ae`: resume 0.31s, cmdline **soup bun** (`driver/cli`), upload `success:true`, `lastSpawnError` null.
 - #1108 ownership accepted from here; bulk heal of remaining blinds in progress under soup runner.
 
+
+### 2026-08-10T20:34Z — #1108 kill-criteria: inject race fixed; OOS blinds 0
+
+- Meta handoff accepted. Kill-criteria on soup bun: child cmdline `driver/cli` (not inject-fix).
+- Root cause (post early-connect): redeem HTTP 200 + server `deliver OK` to correct child PID, then `finally inject.close()` unlinked the sock before the child receive loop finished → retries ENOENT → `Cannot resume: runner peer capability inject failed`. `lastSpawnError` often null (hub not persisting).
+- Fix (branch `fix/peer-cap-inject-early-connect`): redeem via `text()`+parse/retry; hold socket on empty redeem; client tolerates null peercred on connect; **3s delayed close after deliver**; server skips resolve on destroyed socket.
+- Live dogfood: soup runner restarted with fix; **FINAL ok=15 blind=0** (all OOS active sessions upload `success:true`). Meta + `2bd956ae` still green.
+- Still open for #1108 hub side: resume short-circuit on zombie `active`; failed resume leaving `active=true`; archive/cache desync; multi-child inject queue.
+
 ### (next entry goes here)
