@@ -89,8 +89,22 @@ export class MachineCache {
         )
     }
 
-    getOrCreateMachine(id: string, metadata: unknown, runnerState: unknown, namespace: string): Machine {
-        const stored = this.store.machines.getOrCreateMachine(id, metadata, runnerState, namespace)
+    getOrCreateMachine(
+        id: string,
+        metadata: unknown,
+        runnerState: unknown,
+        namespace: string,
+        tag?: string,
+        runnerProof?: string
+    ): Machine {
+        const stored = this.store.machines.getOrCreateMachine(
+            id,
+            metadata,
+            runnerState,
+            namespace,
+            tag,
+            runnerProof
+        )
         return this.refreshMachine(stored.id) ?? (() => { throw new Error('Failed to load machine') })()
     }
 

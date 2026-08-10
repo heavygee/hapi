@@ -165,7 +165,7 @@ describe('schema migration v22 to v23', () => {
 
         expect(events?.name).toBe('events')
         expect(links?.name).toBe('event_links')
-        expect(version.user_version).toBe(24)
+        expect(version.user_version).toBe(28)
         migrated.close()
     })
 })
@@ -182,7 +182,7 @@ describe('dual ledger: work-graph events + overseer_events', () => {
         expect(colsOverseer).toContain('attention_candidate')
         expect(colsOverseer).not.toContain('principal_json')
         const version = db.prepare('PRAGMA user_version').get() as { user_version: number }
-        expect(version.user_version).toBe(24)
+        expect(version.user_version).toBe(28)
         store.close()
     })
 
@@ -250,7 +250,7 @@ describe('dual ledger: work-graph events + overseer_events', () => {
         ).get() as { summary: string } | undefined
         expect(kept?.summary).toBe('keep-me')
         const version = db.prepare('PRAGMA user_version').get() as { user_version: number }
-        expect(version.user_version).toBe(24)
+        expect(version.user_version).toBe(28)
         migrated.close()
     })
 })

@@ -12,7 +12,7 @@ import { registerLocalHandoffHandler } from '@/agent/localHandoff';
 import { createModeChangeHandler, createRunnerLifecycle, setControlledByUser } from '@/agent/runnerLifecycle';
 import { registerSessionConfigRpc } from '@/agent/sessionConfigRpc';
 import { startOpencodeHookServer } from './utils/startOpencodeHookServer';
-import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
+import { formatUserMessageForAgent } from '@/utils/attachmentFormatter';
 import { getInvokedCwd } from '@/utils/invokedCwd';
 import { listSlashCommands } from '@/modules/common/slashCommands';
 import { resolveOpencodeSlashCommand } from './utils/slashCommands';
@@ -241,7 +241,11 @@ export async function runOpencode(opts: {
                 modelReasoningEffort: sessionModelReasoningEffort
             });
             const pushPlain = () => {
-                const formattedText = formatMessageWithAttachments(message.content.text, message.content.attachments);
+                const formattedText = formatUserMessageForAgent(
+                    message.content.text,
+                    message.content.attachments,
+                    message.meta
+                );
                 messageQueue.push(formattedText, buildMode(), localId);
             };
             try {
@@ -254,12 +258,15 @@ export async function runOpencode(opts: {
                 let text = message.content.text;
                 const commands = await listSlashCommands('opencode', workingDirectory).catch(() => []);
                 if (wasCancelled()) return;
-                const slash = resolveOpencodeSlashCommand(text, {
-                    commands,
-                    permissionMode: currentPermissionMode,
-                    model: sessionModel,
-                    modelReasoningEffort: sessionModelReasoningEffort
-                });
+                // Peer delivery must stay literal text — never receiver control syntax (#1473).
+                const slash = message.meta?.sentFrom === 'peer'
+                    ? ({ kind: 'passthrough' } as const)
+                    : resolveOpencodeSlashCommand(text, {
+                        commands,
+                        permissionMode: currentPermissionMode,
+                        model: sessionModel,
+                        modelReasoningEffort: sessionModelReasoningEffort
+                    });
 
                 if (slash.kind === 'clear') {
                     if (startedBy !== 'runner') {
@@ -417,7 +424,11 @@ export async function runOpencode(opts: {
                     text = slash.text;
                 }
 
-                const formattedText = formatMessageWithAttachments(text, message.content.attachments);
+                const formattedText = formatUserMessageForAgent(
+                    text,
+                    message.content.attachments,
+                    message.meta
+                );
                 messageQueue.push(formattedText, buildMode(), localId);
             } catch (error) {
                 logger.debug('[opencode] Failed to handle user message', error);
@@ -442,7 +453,11 @@ export async function runOpencode(opts: {
                 queuedClearLocalId = null;
                 clearTransitionLatched = false;
                 for (const held of heldDuringClear) {
-                    const formattedText = formatMessageWithAttachments(held.message.content.text, held.message.content.attachments);
+                    const formattedText = formatUserMessageForAgent(
+                        held.message.content.text,
+                        held.message.content.attachments,
+                        held.message.meta
+                    );
                     messageQueue.push(formattedText, {
                         permissionMode: currentPermissionMode,
                         model: sessionModel,

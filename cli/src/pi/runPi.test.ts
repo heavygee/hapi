@@ -1031,6 +1031,37 @@ describe('Pi prompt preparation', () => {
                 expect(symlinkEscape).toMatchObject({ message: '', images: [] });
                 expect(symlinkEscape.imageReadErrors[0]).toContain('Could not attach image escape.png');
             }
+
+            const peerAttributed = await preparePiUserMessage('handoff body', [], [], {
+                authorizeImagePath: () => true,
+                authorizeOpenedImage: () => true,
+                meta: {
+                    sentFrom: 'peer',
+                    peer: { sourceSessionId: '6212dae5-8a60-4284-b7a5-c09aa3571ce4', sourceName: 'Orchestrator' },
+                },
+            });
+            expect(peerAttributed.message).toBe(
+                'From: /sessions/6212dae5-8a60-4284-b7a5-c09aa3571ce4 (Orchestrator)\n\nhandoff body'
+            );
+
+            const peerSkill = await preparePiUserMessage('$brave-search explain', [], [{ name: 'skill:brave-search', source: 'skill' }], {
+                authorizeImagePath: () => true,
+                authorizeOpenedImage: () => true,
+                meta: {
+                    sentFrom: 'peer',
+                    peer: { sourceSessionId: '6212dae5-8a60-4284-b7a5-c09aa3571ce4' },
+                },
+            });
+            // Provenance prefix disables Pi first-line slash/skill parsing for peers.
+            expect(peerSkill.message.startsWith('From: /sessions/')).toBe(true);
+            expect(peerSkill.message).toContain('/skill:brave-search');
+
+            const peerUnattributed = await preparePiUserMessage('cli ping', [], [], {
+                authorizeImagePath: () => true,
+                authorizeOpenedImage: () => true,
+                meta: { sentFrom: 'peer' },
+            });
+            expect(peerUnattributed.message).toBe('From: peer (unattributed)\n\ncli ping');
         } finally {
             await rm(imagePath, { force: true });
             if (outsidePath) await rm(outsidePath, { force: true });

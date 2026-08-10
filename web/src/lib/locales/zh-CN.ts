@@ -11,6 +11,8 @@ export default {
   'message.copy': '复制',
   'message.copied': '已复制',
   'message.info': '消息详情',
+  'message.peerFromUnknown': '来自对等会话（未知会话）',
+  'message.peerUnknownChip': '@peer',
   'message.fork': 'Fork',
   'message.rewind': 'Rewind',
   'message.fork.confirmTitle': '分叉对话',

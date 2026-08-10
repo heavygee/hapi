@@ -7,8 +7,8 @@ import {
     findLatestCompletedBoundaryId,
     getBlockPresentationTimestamp,
     getResponseGroupTimestamps,
-    textForHumanRender
-
+    textForHumanRender,
+    toThreadMessageLike
 } from './assistant-runtime'
 import type { AgentEventBlock, AgentTextBlock, CliOutputBlock, ToolCallBlock, UserTextBlock } from '@/chat/types'
 import type { ToolGroupBlock, VisibleChatBlock } from '@/chat/toolGroups'
@@ -816,5 +816,32 @@ describe('textForHumanRender', () => {
 
     it('keeps the notify line when showAgentContract is true', () => {
         expect(textForHumanRender(raw, true)).toBe(raw)
+    })
+})
+
+describe('toThreadMessageLike peer provenance', () => {
+    it('maps user-text peer meta into custom.sentFrom / custom.peer', () => {
+        const message = toThreadMessageLike(
+            userText('u-peer', {
+                text: 'handoff',
+                meta: {
+                    sentFrom: 'peer',
+                    peer: {
+                        sourceSessionId: '6212dae5-8a60-4284-b7a5-c09aa3571ce4',
+                        sourceName: 'Orchestrator'
+                    }
+                }
+            }),
+            'user-text:u-peer',
+            1_000
+        )
+        expect(message.metadata?.custom).toMatchObject({
+            kind: 'user',
+            sentFrom: 'peer',
+            peer: {
+                sourceSessionId: '6212dae5-8a60-4284-b7a5-c09aa3571ce4',
+                sourceName: 'Orchestrator'
+            }
+        })
     })
 })

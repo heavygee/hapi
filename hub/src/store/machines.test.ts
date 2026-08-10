@@ -1,6 +1,114 @@
 import { describe, expect, it } from 'bun:test'
 import { Store } from './index'
-import { mergeMachineMetadata } from './machines'
+import { MachineTagConflictError, mergeMachineMetadata } from './machines'
+import { hashRunnerProof } from '../utils/runnerProof'
+
+describe('machine tag enrollment (#1473)', () => {
+    it('binds runnerProofHash on create and refuses null-hash first-claim', () => {
+        const store = new Store(':memory:')
+        const first = store.machines.getOrCreateMachine(
+            'machine-proof',
+            { host: 'h' },
+            null,
+            'ns',
+            'secret-tag',
+            'proof-a'
+        )
+        expect(first.runnerProofHash).toBe(hashRunnerProof('proof-a'))
+        expect(() => store.machines.getOrCreateMachine(
+            'machine-proof',
+            { host: 'h2' },
+            null,
+            'ns',
+            'secret-tag',
+            'proof-b'
+        )).toThrow(MachineTagConflictError)
+
+        const unbound = store.machines.getOrCreateMachine(
+            'machine-unbound',
+            { host: 'h' },
+            null,
+            'ns',
+            'secret-tag'
+        )
+        expect(unbound.runnerProofHash).toBeNull()
+        expect(() => store.machines.getOrCreateMachine(
+            'machine-unbound',
+            { host: 'h' },
+            null,
+            'ns',
+            'secret-tag',
+            'proof-late'
+        )).toThrow(/runner proof missing/)
+
+        // Bound rows reject omitted proof (#1473 Major) — must not refresh metadata.
+        expect(() => store.machines.getOrCreateMachine(
+            'machine-proof',
+            { host: 'hijack' },
+            null,
+            'ns',
+            'secret-tag'
+        )).toThrow(/runner proof mismatch/)
+        expect(store.machines.getMachine('machine-proof')?.metadata).toEqual({ host: 'h' })
+        store.close()
+    })
+
+    it('refuses first-claim bind on legacy untagged rows', () => {
+        const store = new Store(':memory:')
+        store.machines.getOrCreateMachine('machine-1', { host: 'old' }, null, 'ns')
+        expect(store.machines.getMachine('machine-1')?.tag).toBeNull()
+
+        expect(() =>
+            store.machines.getOrCreateMachine('machine-1', { host: 'old' }, null, 'ns', 'attacker-tag')
+        ).toThrow(MachineTagConflictError)
+
+        expect(store.machines.getMachine('machine-1')?.tag).toBeNull()
+    })
+
+    it('allows create-time tag on new machine rows', () => {
+        const store = new Store(':memory:')
+        const created = store.machines.getOrCreateMachine(
+            'machine-new',
+            { host: 'fresh' },
+            null,
+            'ns',
+            'create-tag'
+        )
+        expect(created.tag).toBe('create-tag')
+        const again = store.machines.getOrCreateMachine(
+            'machine-new',
+            { host: 'fresh' },
+            null,
+            'ns',
+            'create-tag'
+        )
+        expect(again.tag).toBe('create-tag')
+    })
+
+    it('rejects tagless re-registration against an already tagged machine', () => {
+        const store = new Store(':memory:')
+        store.machines.getOrCreateMachine(
+            'machine-tagged',
+            { host: 'alpha' },
+            { capabilities: { piExistingSessionResume: true } },
+            'ns',
+            'secret-tag'
+        )
+
+        expect(() =>
+            store.machines.getOrCreateMachine(
+                'machine-tagged',
+                { host: 'attacker' },
+                { capabilities: { piExistingSessionResume: false } },
+                'ns'
+            )
+        ).toThrow(MachineTagConflictError)
+
+        const row = store.machines.getMachine('machine-tagged')
+        expect(row?.metadata).toEqual({ host: 'alpha' })
+        expect(row?.runnerState).toEqual({ capabilities: { piExistingSessionResume: true } })
+    })
+})
 
 const runnerAlive = { status: 'running' as const }
 

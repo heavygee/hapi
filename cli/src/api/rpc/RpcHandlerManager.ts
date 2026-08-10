@@ -20,6 +20,7 @@ export class RpcHandlerManager {
     private readonly scopePrefix: string
     private readonly logger: (message: string, data?: any) => void
     private socket: Socket | null = null
+    private registerRetryTimers: Map<string, ReturnType<typeof setTimeout>> = new Map()
 
     constructor(config: RpcHandlerConfig) {
         this.scopePrefix = config.scopePrefix
@@ -35,7 +36,7 @@ export class RpcHandlerManager {
         this.handlers.set(prefixedMethod, handler)
 
         if (this.socket) {
-            this.socket.emit('rpc-register', { method: prefixedMethod })
+            this.emitRegister(prefixedMethod)
         }
     }
 
@@ -63,13 +64,15 @@ export class RpcHandlerManager {
 
     onSocketConnect(socket: Socket): void {
         this.socket = socket
+        this.clearRegisterRetries()
         for (const [prefixedMethod] of this.handlers) {
-            socket.emit('rpc-register', { method: prefixedMethod })
+            this.emitRegister(prefixedMethod)
         }
     }
 
     onSocketDisconnect(): void {
         this.socket = null
+        this.clearRegisterRetries()
     }
 
     getHandlerCount(): number {
@@ -83,11 +86,65 @@ export class RpcHandlerManager {
 
     clearHandlers(): void {
         this.handlers.clear()
+        this.clearRegisterRetries()
         this.logger('Cleared all RPC handlers')
     }
 
     private getPrefixedMethod(method: string): string {
         return `${this.scopePrefix}:${method}`
+    }
+
+    /**
+     * Register with hub ack. If another socket still owns the method (reconnect
+     * overlap), retry until accepted or this socket disconnects (#1473 Major).
+     */
+    private emitRegister(prefixedMethod: string, attempt = 0): void {
+        const socket = this.socket
+        if (!socket) {
+            return
+        }
+        const onAck = (err: Error | null, response?: { registered?: boolean }) => {
+            if (this.socket !== socket) {
+                return
+            }
+            // No-ack emitters (unit mocks, older servers): treat as fire-and-forget ok.
+            const registered = err
+                ? false
+                : response === undefined
+                    ? true
+                    : response.registered === true
+            if (registered) {
+                const pending = this.registerRetryTimers.get(prefixedMethod)
+                if (pending) {
+                    clearTimeout(pending)
+                    this.registerRetryTimers.delete(prefixedMethod)
+                }
+                return
+            }
+            if (attempt >= 40) {
+                this.logger('[RPC] register still busy after retries', { method: prefixedMethod })
+                return
+            }
+            const delayMs = Math.min(250 * (attempt + 1), 2_000)
+            const timer = setTimeout(() => {
+                this.registerRetryTimers.delete(prefixedMethod)
+                this.emitRegister(prefixedMethod, attempt + 1)
+            }, delayMs)
+            this.registerRetryTimers.set(prefixedMethod, timer)
+        }
+
+        const payload = { method: prefixedMethod }
+        const withTimeout = typeof socket.timeout === 'function'
+            ? socket.timeout(5_000)
+            : socket
+        withTimeout.emit('rpc-register', payload, onAck)
+    }
+
+    private clearRegisterRetries(): void {
+        for (const timer of this.registerRetryTimers.values()) {
+            clearTimeout(timer)
+        }
+        this.registerRetryTimers.clear()
     }
 }
 

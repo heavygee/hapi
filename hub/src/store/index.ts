@@ -23,6 +23,7 @@ import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
 import { UsageStore } from './usageStore'
 import { WorkGraphStore } from './workGraphStore'
+import { bindReenrollGrantDb } from '../utils/reenrollGrant'
 
 export type {
     StoredMachine,
@@ -58,10 +59,12 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 24
+const SCHEMA_VERSION: number = 28
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
+    'machine_reenroll_grants',
+    'machine_reenroll_replays',
     'messages',
     'message_epochs',
     'users',
@@ -132,6 +135,7 @@ export class Store {
         this.db.exec('PRAGMA foreign_keys = ON')
         this.db.exec('PRAGMA busy_timeout = 5000')
         this.initSchema()
+        bindReenrollGrantDb(this.db)
 
         if (dbPath !== ':memory:' && !dbPath.startsWith('file::memory:')) {
             for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
@@ -155,6 +159,11 @@ export class Store {
         this.sessionJobs = new SessionJobsStore(this.db)
         this.usage = new UsageStore(this.db)
         this.workGraph = new WorkGraphStore(this.db)
+    }
+
+    /** Run `fn` inside a single SQLite transaction (nested calls become savepoints). */
+    runInTransaction<T>(fn: () => T): T {
+        return this.db.transaction(fn)()
     }
 
     /**
@@ -336,6 +345,11 @@ export class Store {
             21: () => this.migrateFromV21ToV22(),
             22: () => this.migrateFromV22ToV23(),
             23: () => this.migrateFromV23ToV24(),
+            // #1473 peer provenance machine auth — remapped past soup dual-ledger V24
+            24: () => this.migrateFromV24ToV25(),
+            25: () => this.migrateFromV25ToV26(),
+            26: () => this.migrateFromV26ToV27(),
+            27: () => this.migrateFromV27ToV28(),
         })
 
         if (currentVersion === 0) {
@@ -449,6 +463,8 @@ export class Store {
             CREATE TABLE IF NOT EXISTS machines (
                 id TEXT PRIMARY KEY,
                 namespace TEXT NOT NULL DEFAULT 'default',
+                tag TEXT,
+                runner_proof_hash TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
                 metadata TEXT,
@@ -460,6 +476,22 @@ export class Store {
                 seq INTEGER DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_machines_namespace ON machines(namespace);
+
+            CREATE TABLE IF NOT EXISTS machine_reenroll_grants (
+                grant_hash TEXT PRIMARY KEY,
+                machine_id TEXT NOT NULL,
+                namespace TEXT NOT NULL,
+                expires_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_machine_reenroll_grants_machine
+                ON machine_reenroll_grants(machine_id);
+
+            CREATE TABLE IF NOT EXISTS machine_reenroll_replays (
+                grant_hash TEXT PRIMARY KEY,
+                from_machine_id TEXT NOT NULL,
+                to_machine_id TEXT NOT NULL,
+                namespace TEXT NOT NULL
+            );
 
             CREATE TABLE IF NOT EXISTS messages (
                 id TEXT PRIMARY KEY,
@@ -1087,6 +1119,47 @@ export class Store {
             );
             CREATE INDEX IF NOT EXISTS idx_session_jobs_session_status_updated
                 ON session_jobs(session_id, status, updated_at DESC);
+        `)
+    }
+
+    /** #1473 machine tag for RPC auth — remapped past soup dual-ledger V24. */
+    private migrateFromV24ToV25(): void {
+        const columns = this.getMachineColumnNames()
+        if (columns.size === 0) return
+        if (!columns.has('tag')) {
+            this.db.exec('ALTER TABLE machines ADD COLUMN tag TEXT')
+        }
+    }
+
+    private migrateFromV25ToV26(): void {
+        const columns = this.getMachineColumnNames()
+        if (columns.size === 0) return
+        if (!columns.has('runner_proof_hash')) {
+            this.db.exec('ALTER TABLE machines ADD COLUMN runner_proof_hash TEXT')
+        }
+    }
+
+    private migrateFromV26ToV27(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS machine_reenroll_grants (
+                grant_hash TEXT PRIMARY KEY,
+                machine_id TEXT NOT NULL,
+                namespace TEXT NOT NULL,
+                expires_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_machine_reenroll_grants_machine
+                ON machine_reenroll_grants(machine_id);
+        `)
+    }
+
+    private migrateFromV27ToV28(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS machine_reenroll_replays (
+                grant_hash TEXT PRIMARY KEY,
+                from_machine_id TEXT NOT NULL,
+                to_machine_id TEXT NOT NULL,
+                namespace TEXT NOT NULL
+            );
         `)
     }
 

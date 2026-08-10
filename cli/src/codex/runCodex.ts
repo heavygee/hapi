@@ -13,7 +13,7 @@ import { createModeChangeHandler, createRunnerLifecycle, setControlledByUser } f
 import { isPermissionModeAllowedForFlavor } from '@hapi/protocol';
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
 import { CodexCollaborationModeSchema, PermissionModeSchema } from '@hapi/protocol/schemas';
-import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
+import { formatUserMessageForAgent } from '@/utils/attachmentFormatter';
 import { getInvokedCwd } from '@/utils/invokedCwd';
 import type { ReasoningEffort } from './appServerTypes';
 import { parseCodexSpecialCommand } from './codexSpecialCommands';
@@ -206,17 +206,21 @@ export async function runCodex(opts: {
                 syncCurrentConfigFromSession();
                 let text = message.content.text;
                 let isolatedCommandText: string | null = null;
+                const isPeerDelivery = message.meta?.sentFrom === 'peer'
                 const commands = await listSlashCommands('codex', workingDirectory).catch(() => []);
-                const slash = resolveCodexSlashCommand(text, {
-                    commands,
-                    permissionMode: currentPermissionMode,
-                    collaborationMode: currentCollaborationMode,
-                    model: currentModel,
-                    modelReasoningEffort: currentModelReasoningEffort ?? undefined,
-                    serviceTier: currentServiceTier,
-                    proactiveMultiAgent: currentProactiveMultiAgent,
-                    personality: currentPersonality
-                });
+                // Peer delivery must stay literal text — never receiver control syntax (#1473).
+                const slash = isPeerDelivery
+                    ? ({ kind: 'passthrough' } as const)
+                    : resolveCodexSlashCommand(text, {
+                        commands,
+                        permissionMode: currentPermissionMode,
+                        collaborationMode: currentCollaborationMode,
+                        model: currentModel,
+                        modelReasoningEffort: currentModelReasoningEffort ?? undefined,
+                        serviceTier: currentServiceTier,
+                        proactiveMultiAgent: currentProactiveMultiAgent,
+                        personality: currentPersonality
+                    });
                 if (slash.kind === 'goal') {
                     if (slash.message) {
                         session.sendAgentMessage({
@@ -254,14 +258,14 @@ export async function runCodex(opts: {
                         return;
                     }
                     text = slash.text;
-                } else {
+                } else if (!isPeerDelivery) {
                     const specialCommand = parseCodexSpecialCommand(message.content.text);
                     if (specialCommand.type) {
                         logger.debug(`[Codex] Detected special command: ${specialCommand.type}`);
                         isolatedCommandText = message.content.text.trim();
                     }
                 }
-                text = formatMessageWithAttachments(text, message.content.attachments);
+                text = formatUserMessageForAgent(text, message.content.attachments, message.meta);
 
                 const messagePermissionMode = currentPermissionMode;
                 logger.debug(
@@ -295,7 +299,15 @@ export async function runCodex(opts: {
                     serviceTier: currentServiceTier,
                     personality: currentPersonality
                 };
-                messageQueue.push(formatMessageWithAttachments(message.content.text, message.content.attachments), enhancedMode, localId);
+                messageQueue.push(
+                    formatUserMessageForAgent(
+                        message.content.text,
+                        message.content.attachments,
+                        message.meta
+                    ),
+                    enhancedMode,
+                    localId
+                );
             }
         }).catch((error) => {
             logger.debug('[Codex] User message handler chain failed', error);

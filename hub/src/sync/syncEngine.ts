@@ -73,6 +73,8 @@ import type { InboxOperatorAction } from '@hapi/protocol'
 import type { ListSystemEventsOptions, StoredSystemEvent, InsertSystemEventInput } from '../store'
 import type { ListInboxItemsOptions, StoredInboxItem } from '../store/inboxItems'
 import { ingestNotifySummaryFromMessage } from './workGraphNotifyIngest'
+import { armResumePeerMint, clearResumePeerMint } from '../web/pendingResumePeerMint'
+import { consumeReenrollGrant, verifyReenrollGrant } from '../utils/reenrollGrant'
 
 type PiResumeAttempt = NonNullable<NonNullable<Session['metadata']>['piResumeAttempt']>
 type PtyResumeAttempt = NonNullable<NonNullable<Session['metadata']>['ptyResumeAttempt']>
@@ -1471,8 +1473,167 @@ export class SyncEngine {
         )
     }
 
-    getOrCreateMachine(id: string, metadata: unknown, runnerState: unknown, namespace: string): Machine {
-        return this.machineCache.getOrCreateMachine(id, metadata, runnerState, namespace)
+    getOrCreateMachine(
+        id: string,
+        metadata: unknown,
+        runnerState: unknown,
+        namespace: string,
+        tag?: string,
+        runnerProof?: string
+    ): Machine {
+        return this.machineCache.getOrCreateMachine(
+            id,
+            metadata,
+            runnerState,
+            namespace,
+            tag,
+            runnerProof
+        )
+    }
+
+    /** Hub-private machine auth fields (tag + proof hash) not on the API Machine DTO. */
+    getMachineAuthMaterial(machineId: string): {
+        namespace: string
+        tag: string | null
+        runnerProofHash: string | null
+    } | null {
+        const stored = this.store.machines.getMachine(machineId)
+        if (!stored) {
+            return null
+        }
+        return {
+            namespace: stored.namespace,
+            tag: stored.tag,
+            runnerProofHash: stored.runnerProofHash,
+        }
+    }
+
+    /**
+     * After machine-id re-enroll, rewrite session metadata.machineId so remote
+     * resume / provenance routing stay attached (#1473 Major).
+     * All remaps commit in one SQLite transaction so a hub crash cannot leave
+     * a partial move onto an abandoned intermediate machine id.
+     */
+    migrateSessionsMachineId(
+        fromMachineId: string,
+        toMachineId: string,
+        namespace: string
+    ): number {
+        const from = fromMachineId.trim()
+        const to = toMachineId.trim()
+        if (!from || !to || from === to) {
+            return 0
+        }
+        const migratedIds: string[] = []
+        this.store.runInTransaction(() => {
+            for (const stored of this.store.sessions.getSessionsByNamespace(namespace)) {
+                let attempts = 0
+                while (attempts < 5) {
+                    attempts += 1
+                    const current = this.store.sessions.getSessionByNamespace(stored.id, namespace)
+                    if (!current) {
+                        break
+                    }
+                    const metadata = (current.metadata && typeof current.metadata === 'object')
+                        ? current.metadata as Record<string, unknown>
+                        : {}
+                    const currentId = typeof metadata.machineId === 'string'
+                        ? metadata.machineId.trim()
+                        : ''
+                    if (currentId !== from) {
+                        break
+                    }
+                    const result = this.store.sessions.updateSessionMetadata(
+                        current.id,
+                        { ...metadata, machineId: to },
+                        current.metadataVersion,
+                        namespace,
+                        { touchUpdatedAt: false }
+                    )
+                    if (result.result === 'success') {
+                        migratedIds.push(current.id)
+                        break
+                    }
+                    if (result.result === 'error' || attempts >= 5) {
+                        throw new Error(
+                            `session migration conflicted for ${current.id} `
+                            + `(${from} → ${to})`
+                        )
+                    }
+                }
+            }
+            const remaining = this.store.sessions.getSessionsByNamespace(namespace).filter((session) => {
+                const metadata = (session.metadata && typeof session.metadata === 'object')
+                    ? session.metadata as Record<string, unknown>
+                    : {}
+                const currentId = typeof metadata.machineId === 'string'
+                    ? metadata.machineId.trim()
+                    : ''
+                return currentId === from
+            })
+            if (remaining.length > 0) {
+                throw new Error(
+                    `session migration incomplete: ${remaining.length} session(s) still on ${from}`
+                )
+            }
+        })
+        for (const id of migratedIds) {
+            this.sessionCache.refreshSession(id)
+        }
+        return migratedIds.length
+    }
+
+    /** Count namespace sessions whose metadata.machineId still equals machineId. */
+    countSessionsOnMachine(machineId: string, namespace: string): number {
+        const target = machineId.trim()
+        if (!target) {
+            return 0
+        }
+        return this.store.sessions.getSessionsByNamespace(namespace).filter((session) => {
+            const metadata = (session.metadata && typeof session.metadata === 'object')
+                ? session.metadata as Record<string, unknown>
+                : {}
+            const currentId = typeof metadata.machineId === 'string'
+                ? metadata.machineId.trim()
+                : ''
+            return currentId === target
+        }).length
+    }
+
+    /**
+     * Remap + consume grant in one SQLite transaction so a hub crash cannot
+     * leave sessions on the new machine while the grant is already spent
+     * (or the inverse) (#1473 Major).
+     */
+    migrateSessionsMachineIdWithGrant(options: {
+        fromMachineId: string
+        toMachineId: string
+        namespace: string
+        grant: string
+    }): number {
+        return this.store.runInTransaction(() => {
+            if (!verifyReenrollGrant({
+                machineId: options.fromMachineId,
+                namespace: options.namespace,
+                grant: options.grant,
+            })) {
+                throw new Error('Source machine proof required')
+            }
+            const migrated = this.migrateSessionsMachineId(
+                options.fromMachineId,
+                options.toMachineId,
+                options.namespace
+            )
+            if (!consumeReenrollGrant({
+                machineId: options.fromMachineId,
+                namespace: options.namespace,
+                grant: options.grant,
+                toMachineId: options.toMachineId,
+            })) {
+                throw new Error('Failed to consume reenroll grant after migration')
+            }
+            return migrated
+        })
     }
 
     async sendMessage(
@@ -1488,7 +1649,11 @@ export class SyncEngine {
                 path: string
                 previewUrl?: string
             }>
-            sentFrom?: 'telegram-bot' | 'webapp'
+            sentFrom?: 'telegram-bot' | 'webapp' | 'peer'
+            peer?: {
+                sourceSessionId?: string
+                sourceName?: string
+            }
             scheduledAt?: number | null
             deliveryMode?: MessageDeliveryMode
         }
@@ -3366,6 +3531,21 @@ export class SyncEngine {
         }
         let piResumeSucceeded = false
         try {
+            // Arm nonce for runner redeem only — never mint on first /cli connect
+            // (pass 2h B1 TOCTOU). Nonce travels on machine spawn RPC.
+            // Fail closed on host-fallback routing: metadata.host is
+            // self-reported, so a same-namespace tagged machine can spoof the
+            // victim host and steal the mint (#1473 Blocker). Exact machineId
+            // match only; host-fallback resume stays unattributed.
+            const recordedMachineId = typeof metadata.machineId === 'string'
+                ? metadata.machineId.trim()
+                : ''
+            const resumePeerMintNonce = (
+                recordedMachineId
+                && targetMachine.id === recordedMachineId
+            )
+                ? armResumePeerMint(access.sessionId)
+                : undefined
             const spawnResult = await this.rpcGateway.spawnSession(
                 targetMachine.id,
                 directory,
@@ -3382,10 +3562,13 @@ export class SyncEngine {
                 access.sessionId,
                 session.collaborationMode ?? undefined,
                 session.copilotAgentMode ?? undefined,
-                resumedStartingMode
+                resumedStartingMode,
+                undefined,
+                resumePeerMintNonce
             )
 
             if (spawnResult.type !== 'success') {
+                clearResumePeerMint(access.sessionId)
                 if (requiresPiNativeReady) {
                     const stopped = await this.terminateInPlacePiResume(
                         targetMachine.id,
