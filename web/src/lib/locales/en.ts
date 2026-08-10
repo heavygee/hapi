@@ -13,6 +13,7 @@ export default {
   'message.info': 'Message details',
   'message.peerFromUnknown': 'From peer (unknown session)',
   'message.peerUnknownChip': '@peer',
+  'message.peerUnverifiedTooltip': 'Unverified sender — hub did not mint a session capability for this delivery. Resume or re-spawn the source session under the runner, then ping again.',
   'message.fork': 'Fork',
   'message.rewind': 'Rewind',
   'message.fork.confirmTitle': 'Fork conversation',

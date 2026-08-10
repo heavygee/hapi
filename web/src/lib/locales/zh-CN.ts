@@ -13,6 +13,7 @@ export default {
   'message.info': '消息详情',
   'message.peerFromUnknown': '来自对等会话（未知会话）',
   'message.peerUnknownChip': '@peer',
+  'message.peerUnverifiedTooltip': '未验证的发送方 — 枢纽未为本次投递签发会话能力。请在 runner 下恢复或重新拉起源会话后再 ping。',
   'message.fork': 'Fork',
   'message.rewind': 'Rewind',
   'message.fork.confirmTitle': '分叉对话',
