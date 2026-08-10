@@ -710,6 +710,13 @@ layers:
   # Do NOT open upstream PR until operator dogfood OK (incl. Lidarr self-attach).
   - branch: driver/session-attached-jobs
 
+  # tiann/hapi#1489 — wake owning session when attached job completes/fails (opt-in).
+  # Thin tip on driver/session-attached-jobs. Upstream PR tip: feat/job-complete-wake
+  # (stacked on feat/session-attached-jobs with runId claim fence).
+  # Worktree: ~/coding/hapi/worktrees/job-complete-wake @ driver/job-complete-wake
+  # Tip: 17c109fd9 — wakeOnTerminal + resume→send; SCHEMA 23 tolerate-ahead column ensure
+  - branch: driver/job-complete-wake
+
   # tiann/hapi#1412 — /share#url=&text=&title= native/deep-link ingest (fragment).
   # Soup union tip (on top of #980 searchable picker already in soup).
   # Upstreamable tip remains feat/share-native-deeplink (clean vs upstream/main).
