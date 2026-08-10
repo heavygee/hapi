@@ -45,6 +45,22 @@ describe('parseJobArgs', () => {
         expect(parsed.command).toEqual(['bash', '-c', 'echo hi'])
     })
 
+    it('parses wake-on-terminal flags', () => {
+        const parsed = parseJobArgs([
+            'run',
+            'sid',
+            'drain',
+            '--label=rsync',
+            '--wake-on-terminal',
+            '--wake-prompt=Next chunk',
+            '--',
+            'true'
+        ])
+        expect(parsed.wakeOnTerminal).toBe(true)
+        expect(parsed.wakePrompt).toBe('Next chunk')
+        expect(parsed.command).toEqual(['true'])
+    })
+
     it('rejects bad status', () => {
         expect(() => parseJobArgs(['update', 's', 'k', '--status', 'nope'])).toThrow(SessionJobError)
     })

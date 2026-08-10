@@ -96,6 +96,11 @@ export type StoredSessionJob = {
     unit?: string
     detail?: string
     runId?: string
+    /** Opt-in terminal wake (#1489). */
+    wakeOnTerminal: boolean
+    wakePrompt?: string
+    /** Dedup: runId for which a wake was already claimed. */
+    wakeEmittedRunId?: string
     heartbeatAt: number
     startedAt: number
     updatedAt: number

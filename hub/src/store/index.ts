@@ -43,7 +43,7 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 25
+const SCHEMA_VERSION: number = 26
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -307,11 +307,13 @@ export class Store {
             19: () => this.migrateFromV19ToV20(),
             20: () => this.migrateFromV20ToV21(),
             // Upstream #1115 dual-pin at v21→v22; #1467 A2A events at v22→v23;
-            // #1404 session_jobs at v23→v24; run_id fence at v24→v25.
+            // #1404 session_jobs at v23→v24; run_id fence at v24→v25;
+            // #1489 wake-on-terminal at v25→v26.
             21: () => this.migrateFromV21ToV22(),
             22: () => this.migrateFromV22ToV23(),
             23: () => this.migrateFromV23ToV24(),
             24: () => this.migrateFromV24ToV25(),
+            25: () => this.migrateFromV25ToV26(),
         })
 
         if (currentVersion === 0) {
@@ -486,6 +488,9 @@ export class Store {
                 unit TEXT,
                 detail TEXT,
                 run_id TEXT,
+                wake_on_terminal INTEGER NOT NULL DEFAULT 0,
+                wake_prompt TEXT,
+                wake_emitted_run_id TEXT,
                 heartbeat_at INTEGER NOT NULL,
                 started_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
@@ -1032,6 +1037,21 @@ export class Store {
         const cols = this.db.prepare('PRAGMA table_info(session_jobs)').all() as Array<{ name: string }>
         if (!cols.some((c) => c.name === 'run_id')) {
             this.db.exec('ALTER TABLE session_jobs ADD COLUMN run_id TEXT')
+        }
+    }
+
+    private migrateFromV25ToV26(): void {
+        // tiann/hapi#1489 — opt-in terminal wake + one-shot claim marker.
+        const cols = this.db.prepare('PRAGMA table_info(session_jobs)').all() as Array<{ name: string }>
+        const names = new Set(cols.map((c) => c.name))
+        if (!names.has('wake_on_terminal')) {
+            this.db.exec('ALTER TABLE session_jobs ADD COLUMN wake_on_terminal INTEGER NOT NULL DEFAULT 0')
+        }
+        if (!names.has('wake_prompt')) {
+            this.db.exec('ALTER TABLE session_jobs ADD COLUMN wake_prompt TEXT')
+        }
+        if (!names.has('wake_emitted_run_id')) {
+            this.db.exec('ALTER TABLE session_jobs ADD COLUMN wake_emitted_run_id TEXT')
         }
     }
 
