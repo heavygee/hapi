@@ -4,7 +4,7 @@
 **Upstream issue:** https://github.com/tiann/hapi/issues/1470  
 **Worktree:** `~/coding/hapi/worktrees/agent-harness-session-wake` @ `feat/agent-harness-session-wake`  
 **Peer:** spawned from #1464 continuum (`7fd700b2`); Meta `9f5f7e1d`  
-**Status:** Path A shipped in upstream PR #1487. **Peer dogfood 2026-08-10 FAIL** (kill-test): Cursor ACP `2026.08.04` printed `HAPI_WAKE_SENTINEL` after turn-end but emitted **no** post-idle `session/update` / no new NAL request - Path A had nothing to bridge. Path B now required for real harness wakes. Details: worktree `localdocs/dogfood-harness-wake-RESULT.md`.
+**Status:** Path A shipped in upstream PR #1487 tip `2d7039b93` (Meta Ready YES, lane A prepare-only). **Peer dogfood 2026-08-10 FAIL** (kill-test ×3): Cursor ACP printed `HAPI_WAKE_SENTINEL` after turn-end but no post-idle ACP updates. Round-3 Path B probe: user `afterShellExecution` **never fired** for background complete after `turnEnded` (only `beforeShellExecution`/`postToolUse`). Path B needs terminal-watch or synthetic prompt, not shell hooks alone. Details: worktree `localdocs/dogfood-harness-wake-RESULT.md`.
 
 ## Verdict
 
@@ -97,4 +97,4 @@ Copied from #1470:
 
 ## Next
 
-Path B design (hook / terminal watch → `onThinkingChange(true)`). Keep Path A in #1487 as opportunistic bridge for future ACP v2 agent-initiated `state_update: running`. Soup layer already queued for remat; `:3006` dogfood cannot pass harness wake until B or Cursor fixes ACP notify resume.
+Stand by for Meta `:3006` soup click-test (same harness FAIL expected). Path B design: **not** `afterShellExecution` (proven absent post-idle on ACP 2026.08.04); prefer terminal-file watch or synthetic `session/prompt` if product wants forced wake. Do not bump #1487 tip until Path B lands + re-Ready.
