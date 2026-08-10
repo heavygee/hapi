@@ -1197,15 +1197,12 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     const workspaceRoots = resolveWorkspaceRoots(options.workspaceRoots);
     logger.debug(`[RUNNER RUN] Workspace roots: ${workspaceRoots?.join(', ') ?? '(not set)'}`);
 
-    // Register machine. Cold start may 409 (lost memory-only proof) — rotate
-    // to a new machine id. Handoff must keep the same binding; refuse rotate
-    // if the delivered proof is rejected (#1473).
-    //
-    // Same-UID isolation: never persist a reenroll bearer under HAPI_HOME.
-    // A wrapped agent can read mode-0600 files + the CLI token and mass-migrate
-    // sessions (#1473 Blocker). Scrub any leftover grant files from older tips.
-    // Cold crash without handoff therefore strands sessions on the retired
-    // machine id until an operator remaps with a live fromRunnerProof.
+    // Register machine. Cold start may 409 (lost memory-only proof).
+    // Do NOT rotate to a new machine id without a secure remap path: Cursor /
+    // Pi-with-token require an exact machineId match, and file-backed reenroll
+    // grants are forbidden under the same-UID threat model (#1473 Major).
+    // Graceful handoff keeps the binding via memory-only runnerProof.
+    // Same-UID isolation: scrub any leftover grant files from older tips.
     clearReenrollGrant()
     let machine
     try {
@@ -1216,7 +1213,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           runnerProof,
           metadata: buildMachineMetadata({ workspaceRoots }),
           runnerState: initialRunnerState,
-          allowLegacyReenroll: !handoffRunnerProof,
+          allowLegacyReenroll: false,
         }),
         {
           maxAttempts: 60,
@@ -1237,9 +1234,19 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           + 'that would break the PID-checked generation binding.'
         )
       }
+      if (/runner proof|re-enroll|tag mismatch/i.test(message)) {
+        throw new Error(
+          'Cold runner start cannot re-bind this machine id without the live '
+          + 'memory-only runnerProof (no file-backed grant under same-UID threat model). '
+          + 'Use a graceful runner handoff/restart that delivers the proof, or wait for '
+          + 'a secure remap recovery. Hub said: '
+          + message
+        )
+      }
       throw error
     }
     if (machine.id !== machineId) {
+      // Should not happen with allowLegacyReenroll: false; keep defensive path.
       machineId = machine.id;
       const rotated = await authAndSetupMachineIfNeeded();
       machineTag = rotated.machineTag;
