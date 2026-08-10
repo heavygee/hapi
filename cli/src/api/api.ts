@@ -385,6 +385,55 @@ export class ApiClient {
         }
     }
 
+    /** Mint a short-lived cold-restart migrate grant while runnerProof is live (#1473). */
+    async issueMachineReenrollGrant(opts: {
+        machineId: string
+        machineTag: string
+        runnerProof: string
+    }): Promise<{ grant: string; expiresAt: number }> {
+        const response = await axios.post(
+            `${configuration.apiUrl}/cli/machines/${encodeURIComponent(opts.machineId)}/reenroll-grant`,
+            {
+                machineTag: opts.machineTag,
+                runnerProof: opts.runnerProof,
+            },
+            {
+                headers: this.authHeaders(),
+                timeout: 30_000,
+            }
+        )
+        const grant = typeof response.data?.grant === 'string' ? response.data.grant.trim() : ''
+        const expiresAt = typeof response.data?.expiresAt === 'number' ? response.data.expiresAt : 0
+        if (!grant || !expiresAt) {
+            throw apiValidationError('Invalid /cli/machines/:id/reenroll-grant response', response)
+        }
+        return { grant, expiresAt }
+    }
+
+    async migrateSessionsAfterReenroll(opts: {
+        fromMachineId: string
+        toMachineId: string
+        machineTag: string
+        runnerProof: string
+        reenrollGrant: string
+    }): Promise<number> {
+        const response = await axios.post(
+            `${configuration.apiUrl}/cli/machines/${encodeURIComponent(opts.toMachineId)}/migrate-sessions`,
+            {
+                fromMachineId: opts.fromMachineId,
+                machineTag: opts.machineTag,
+                runnerProof: opts.runnerProof,
+                reenrollGrant: opts.reenrollGrant,
+            },
+            {
+                headers: this.authHeaders(),
+                timeout: 60_000,
+            }
+        )
+        const migrated = typeof response.data?.migrated === 'number' ? response.data.migrated : 0
+        return migrated
+    }
+
     async clearOpenCodeSession(sessionId: string): Promise<string> {
         const response = await axios.post<ClearOpencodeSessionResponse>(
             `${configuration.apiUrl}/cli/sessions/${encodeURIComponent(sessionId)}/clear-opencode`,

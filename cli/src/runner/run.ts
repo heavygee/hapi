@@ -40,6 +40,11 @@ import {
   type PeerCapabilityInjectServer,
 } from '@/api/peerCapabilityInject';
 import { buildHubRequestHeaders } from '@/api/hubExtraHeaders';
+import {
+  clearReenrollGrant,
+  readReenrollGrant,
+  writeReenrollGrant,
+} from './reenrollGrantStore';
 
 /**
  * Deduplicates a preallocated HAPI-row spawn only while its child is alive.
@@ -1191,6 +1196,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     // Register machine. Cold start may 409 (lost memory-only proof) — rotate
     // to a new machine id. Handoff must keep the same binding; refuse rotate
     // if the delivered proof is rejected (#1473).
+    const pendingReenroll = !handoffRunnerProof ? readReenrollGrant() : null
+    const previousMachineIdForMigrate = pendingReenroll?.fromMachineId ?? machineId
     let machine
     try {
       machine = await withRetry(
@@ -1230,6 +1237,30 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       fileState.startedWithMachineId = machineId;
       writeRunnerState(fileState);
       logger.debug(`[RUNNER RUN] Re-enrolled machine as ${machineId}`);
+    }
+    // Cold restart: migrate sessions with the grant minted under the old proof
+    // before reporting the runner online (#1473 Blocker).
+    if (pendingReenroll && machine.id !== previousMachineIdForMigrate) {
+      try {
+        const migrated = await api.migrateSessionsAfterReenroll({
+          fromMachineId: pendingReenroll.fromMachineId,
+          toMachineId: machine.id,
+          machineTag,
+          runnerProof,
+          reenrollGrant: pendingReenroll.grant,
+        })
+        logger.debug(`[RUNNER RUN] Migrated ${migrated} session(s) after cold re-enroll`)
+        clearReenrollGrant()
+      } catch (error) {
+        clearReenrollGrant()
+        throw new Error(
+          'Cold re-enroll succeeded but session migrate failed; refusing to come online '
+          + 'with stranded sessions. '
+          + (error instanceof Error ? error.message : String(error))
+        )
+      }
+    } else if (pendingReenroll) {
+      clearReenrollGrant()
     }
     logger.debug(`[RUNNER RUN] Machine registered: ${machine.id}`);
 
@@ -1534,6 +1565,26 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       if (restartOnStaleVersionAndHeartbeat) {
         clearInterval(restartOnStaleVersionAndHeartbeat);
         logger.debug('[RUNNER RUN] Health check interval cleared');
+      }
+
+      // Mint a short-lived migrate grant while runnerProof is still valid so a
+      // subsequent cold start can remap sessions (#1473 Blocker). Best-effort:
+      // crash/SIGKILL skips this path and sessions stay on the old machine.
+      try {
+        const issued = await api.issueMachineReenrollGrant({
+          machineId,
+          machineTag,
+          runnerProof,
+        })
+        writeReenrollGrant({
+          fromMachineId: machineId,
+          machineTag,
+          grant: issued.grant,
+          expiresAt: issued.expiresAt,
+        })
+        logger.debug('[RUNNER RUN] Wrote cold-restart reenroll grant for session migrate')
+      } catch (error) {
+        logger.debug('[RUNNER RUN] Failed to mint reenroll grant before shutdown', error)
       }
 
       // Update runner state before shutting down

@@ -381,6 +381,8 @@ export class ApiSessionClient extends EventEmitter {
                 this.peerDeliverBroker = null
                 this.peerBrokerReady = null
                 logger.debug(`[API] Peer deliver broker failed to start for ${this.sessionId}`, error)
+                // Propagate so launchers do not spawn with a missing broker env (#1473).
+                throw error
             }
         })()
         return this.peerBrokerReady
@@ -681,6 +683,8 @@ export class ApiSessionClient extends EventEmitter {
                 this.agentStateVersion = materialized.agentStateVersion
                 if (typeof materialized.sessionCapability === 'string' && materialized.sessionCapability.trim()) {
                     this.applyPeerSessionCapability(materialized.sessionCapability, 'materialize')
+                    // Lazy Codex/MCP spawn races broker listen otherwise (#1473 Major).
+                    await this.ensurePeerDeliverBrokerReady()
                 }
                 this.state = 'active'
 
