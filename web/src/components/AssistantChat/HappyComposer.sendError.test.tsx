@@ -4,6 +4,7 @@ import { useRef, useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
+import type { ComposerSendIntent } from '@/lib/messageDelivery'
 import { HappyComposer, type ComposerSendError } from './HappyComposer'
 
 /**
@@ -29,6 +30,9 @@ const runtime = vi.hoisted(() => ({
         thread: { isRunning: false, isDisabled: false },
     } as FakeRuntimeState,
     setSnapshot: null as null | ((updater: (current: FakeRuntimeState) => FakeRuntimeState) => void),
+    pendingSendIntentRef: null as null | { current: ComposerSendIntent },
+    sentIntents: [] as ComposerSendIntent[],
+    modelChanges: [] as Array<{ provider: string; modelId: string } | string | null>,
 }))
 
 vi.mock('@assistant-ui/react', async () => {
@@ -43,6 +47,9 @@ vi.mock('@assistant-ui/react', async () => {
                     }))
                 },
                 send: () => {
+                    const intent = runtime.pendingSendIntentRef?.current ?? 'default'
+                    runtime.sentIntents.push(intent)
+                    if (runtime.pendingSendIntentRef) runtime.pendingSendIntentRef.current = 'default'
                     runtime.setSnapshot!((current) => ({
                         ...current,
                         composer: { text: '', attachments: [] },
@@ -85,7 +92,11 @@ vi.mock('@assistant-ui/react', async () => {
     }
 })
 
-vi.mock('@/lib/composerSegments', () => ({ isRichComposerMentionsEnabled: () => false }))
+vi.mock('@/lib/composerSegments', () => ({
+    isRichComposerMentionsEnabled: () => false,
+    resolveComposerPlaceholderKey: ({ showContinueHint }: { showContinueHint: boolean }) =>
+        showContinueHint ? 'misc.typeMessage' : 'misc.typeAMessage',
+}))
 vi.mock('@/hooks/useComposerDraft', () => ({
     useComposerDraft: (sessionId: string | undefined) => ({ sessionId, complete: true, restoredAny: false, hasStoredAttachments: false }),
 }))
@@ -97,7 +108,20 @@ vi.mock('@/hooks/useActiveSuggestions', () => ({ useActiveSuggestions: () => [[]
 vi.mock('@/components/ChatInput/FloatingOverlay', () => ({ FloatingOverlay: ({ children }: { children: ReactNode }) => <>{children}</> }))
 vi.mock('@/components/ChatInput/Autocomplete', () => ({ Autocomplete: () => null }))
 vi.mock('@/components/AssistantChat/StatusBar', () => ({ StatusBar: () => null }))
-vi.mock('./PiModelPanel', () => ({ PiModelPanel: () => null }))
+vi.mock('./PiModelPanel', () => ({
+    PiModelPanel: (props: {
+        controlsDisabled?: boolean
+        onSelect: (model: { provider: string; modelId: string }) => void
+    }) => (
+        <button
+            type="button"
+            disabled={props.controlsDisabled}
+            onClick={() => props.onSelect({ provider: 'pi', modelId: 'pi-next' })}
+        >
+            select model
+        </button>
+    ),
+}))
 vi.mock('./PiThinkingLevelPanel', () => ({ PiThinkingLevelPanel: () => null }))
 vi.mock('@/components/AssistantChat/ComposerButtons', () => ({
     ComposerButtons: (props: {
@@ -107,6 +131,9 @@ vi.mock('@/components/AssistantChat/ComposerButtons', () => ({
         pendingSchedule: PendingSchedule | null
         expanded: boolean
         onExpandedToggle: () => void
+        piModelLabel?: string
+        piModelDisabled?: boolean
+        onPiModelToggle?: () => void
     }) => (
         <div>
             <button type="button" onClick={props.onSend}>send</button>
@@ -115,6 +142,9 @@ vi.mock('@/components/AssistantChat/ComposerButtons', () => ({
             </button>
             <button type="button" onClick={() => props.onSchedule({ type: 'absolute', ms: 9000 })}>select schedule</button>
             <button type="button" onClick={props.onClearSchedule}>clear schedule</button>
+            {props.piModelLabel ? (
+                <button type="button" disabled={props.piModelDisabled} onClick={props.onPiModelToggle}>model</button>
+            ) : null}
             <output data-testid="pending-schedule">{JSON.stringify(props.pendingSchedule)}</output>
         </div>
     ),
@@ -128,15 +158,22 @@ type HarnessControls = {
     remount: () => void
     programmaticSetText: (text: string) => void
     acceptSend: () => void
+    setSending: (sending: boolean) => void
+    setThreadDisabled: (disabled: boolean) => void
     settleSend: (error?: ComposerSendError) => void
     settleAttachmentSendFailure: () => void
     getClearErrorCalls: () => number
 }
 
-function ComposerHarness(props: { initialText: string; initialSchedule?: PendingSchedule | null; controls: { current: HarnessControls | null } }) {
+function ComposerHarness(props: {
+    initialText: string
+    initialSchedule?: PendingSchedule | null
+    piRunning?: boolean
+    controls: { current: HarnessControls | null }
+}) {
     const [snapshot, setSnapshot] = useState<FakeRuntimeState>(() => ({
         composer: { text: props.initialText, attachments: [] },
-        thread: { isRunning: false, isDisabled: false },
+        thread: { isRunning: props.piRunning ?? false, isDisabled: false },
     }))
     const [schedule, setSchedule] = useState<PendingSchedule | null>(props.initialSchedule ?? null)
     const [sendError, setSendError] = useState<ComposerSendError | null>(null)
@@ -148,9 +185,11 @@ function ComposerHarness(props: { initialText: string; initialSchedule?: Pending
         status: 'success' | 'error'
     } | null>(null)
     const clearErrorCallsRef = useRef(0)
+    const pendingSendIntentRef = useRef<ComposerSendIntent>('default')
 
     runtime.snapshot = snapshot
     runtime.setSnapshot = setSnapshot
+    runtime.pendingSendIntentRef = pendingSendIntentRef
     props.controls.current = {
         setError: sendError => setSendError(sendError),
         addAttachment: () => setSnapshot((current) => ({
@@ -175,6 +214,11 @@ function ComposerHarness(props: { initialText: string; initialSchedule?: Pending
             setSendSettlement(null)
             setSendAcceptance({ attemptId: 'attempt-1' })
         },
+        setSending: setIsSending,
+        setThreadDisabled: (disabled) => setSnapshot((current) => ({
+            ...current,
+            thread: { ...current.thread, isDisabled: disabled },
+        })),
         settleSend: (error) => {
             if (error) setSendError(error)
             setSendSettlement({ attemptId: 'attempt-1', status: error ? 'error' : 'success' })
@@ -208,14 +252,25 @@ function ComposerHarness(props: { initialText: string; initialSchedule?: Pending
                         ? { ...current, restoreSuppressed: true }
                         : current
                 )}
+                agentFlavor="pi"
+                thinking={props.piRunning}
+                piModels={[{ provider: 'pi', modelId: 'pi-model', name: 'Pi model' }]}
+                onModelChange={(model) => runtime.modelChanges.push(model)}
+                pendingSendIntentRef={pendingSendIntentRef}
             />
         </I18nProvider>
     )
 }
 
-function renderComposer(initialText = 'failed text', initialSchedule: PendingSchedule | null = { type: 'absolute', ms: 1234 }) {
+function renderComposer(
+    initialText = 'failed text',
+    initialSchedule: PendingSchedule | null = { type: 'absolute', ms: 1234 },
+    piRunning = false,
+) {
     const controls: { current: HarnessControls | null } = { current: null }
-    render(<ComposerHarness initialText={initialText} initialSchedule={initialSchedule} controls={controls} />)
+    runtime.sentIntents = []
+    runtime.modelChanges = []
+    render(<ComposerHarness initialText={initialText} initialSchedule={initialSchedule} piRunning={piRunning} controls={controls} />)
     return controls
 }
 
@@ -231,6 +286,18 @@ function fail(
 function send() {
     fireEvent.click(screen.getByRole('button', { name: 'send' }))
 }
+
+it('keeps Pi model selection available while a message is pending', () => {
+    const controls = renderComposer()
+
+    act(() => controls.current!.setThreadDisabled(true))
+
+    expect(screen.getByRole('button', { name: 'model' })).not.toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'model' }))
+    expect(screen.getByRole('button', { name: 'select model' })).not.toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'select model' }))
+    expect(runtime.modelChanges).toEqual([{ provider: 'pi', modelId: 'pi-next' }])
+})
 
 function acceptAndClearSchedule(controls: { current: HarnessControls | null }) {
     act(() => controls.current!.acceptAndClearSchedule())

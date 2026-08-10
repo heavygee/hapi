@@ -1,6 +1,17 @@
-import { describe, expect, it } from 'bun:test'
+import { afterEach, describe, expect, it } from 'bun:test'
 import { Database } from 'bun:sqlite'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Store } from './index'
+
+const tempDirs: string[] = []
+
+afterEach(() => {
+    for (const dir of tempDirs.splice(0)) {
+        rmSync(dir, { recursive: true, force: true })
+    }
+})
 
 function getColumns(store: Store, table: string): string[] {
     const db: Database = (store as unknown as { db: Database }).db
@@ -124,5 +135,37 @@ describe('Store V22→V23 (soup); fresh schema still includes migration: session
         expect(store.sessionJobs.getPrimaryRunning(newSession.id)?.remaining).toBe(5)
         expect(store.sessionJobs.list(oldSession.id)).toHaveLength(0)
         store.close()
+    })
+})
+
+describe('schema migration v22 to v23', () => {
+    it('adds events and event_links tables to a V22 database', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v23-'))
+        tempDirs.push(dir)
+        const dbPath = join(dir, 'hapi.db')
+
+        new Store(dbPath).close()
+        const legacy = new Database(dbPath)
+        legacy.exec(`
+            DROP TABLE IF EXISTS event_links;
+            DROP TABLE IF EXISTS events;
+            PRAGMA user_version = 22;
+        `)
+        legacy.close()
+
+        const migrated = new Store(dbPath)
+        const internalDb = (migrated as unknown as { db: Database }).db
+        const events = internalDb.prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'events'"
+        ).get() as { name: string } | null
+        const links = internalDb.prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'event_links'"
+        ).get() as { name: string } | null
+        const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
+
+        expect(events?.name).toBe('events')
+        expect(links?.name).toBe('event_links')
+        expect(version.user_version).toBe(24)
+        migrated.close()
     })
 })

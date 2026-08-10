@@ -72,6 +72,7 @@ import { extractAssistantPlainText } from '@hapi/protocol/messages'
 import type { InboxOperatorAction } from '@hapi/protocol'
 import type { ListSystemEventsOptions, StoredSystemEvent, InsertSystemEventInput } from '../store'
 import type { ListInboxItemsOptions, StoredInboxItem } from '../store/inboxItems'
+import { ingestNotifySummaryFromMessage } from './workGraphNotifyIngest'
 
 type PiResumeAttempt = NonNullable<NonNullable<Session['metadata']>['piResumeAttempt']>
 type PtyResumeAttempt = NonNullable<NonNullable<Session['metadata']>['ptyResumeAttempt']>
@@ -222,6 +223,11 @@ export class SyncEngine {
     private readonly getUpgradeOffer: (() => HubUpgradeOffer) | null
     private readonly prepareArtifactOffer: SyncEngineOptions['prepareArtifactOffer']
     private readonly getFleetUpgradePolicy: () => FleetUpgradePolicy
+    /**
+     * Hub owner id for accountable work-graph principals (A2A P1/P3).
+     * Defaults to "1" for unit tests; startHub overwrites with getOrCreateOwnerId().
+     */
+    private hubOwnerUserId: string = '1'
 
     constructor(
         private readonly store: Store,
@@ -258,6 +264,10 @@ export class SyncEngine {
         this.overseerByNamespace.set('default', this.createOverseerForNamespace('default'))
         this.reloadAll()
         this.inactivityTimer = setInterval(() => this.expireInactive(), 5_000)
+    }
+
+    setHubOwnerUserId(ownerUserId: string | number): void {
+        this.hubOwnerUserId = String(ownerUserId)
     }
 
     stop(): void {
@@ -541,7 +551,31 @@ export class SyncEngine {
             }
         }
 
+        // Emit chat updates before ledger capture so SSE is not blocked on
+        // synchronous SQLite ingest (cold review m5).
         this.eventPublisher.emit(event)
+
+        if (event.type === 'message-received' && event.sessionId && 'message' in event && event.message) {
+            // A2A P3: well-formed AGENT_NOTIFY_SUMMARY → work-graph work_ad.
+            // Capture is independent of chat display settings (#1462/#1464).
+            const session = this.getSession(event.sessionId)
+            if (session) {
+                try {
+                    ingestNotifySummaryFromMessage({
+                        store: this.store,
+                        namespace: session.namespace,
+                        sessionId: session.id,
+                        messageId: event.message.id,
+                        content: event.message.content,
+                        ts: event.message.createdAt,
+                        ownerUserId: this.hubOwnerUserId,
+                        flavor: session.metadata?.flavor ?? null
+                    })
+                } catch (error) {
+                    console.error('[work-graph] notify ingest failed', error)
+                }
+            }
+        }
     }
 
     getOverseer(namespace = 'default'): OverseerEntity {

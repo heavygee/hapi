@@ -35,6 +35,7 @@ import { createSystemEventsRoutes } from './routes/systemEvents'
 import { createInboxItemsRoutes } from './routes/inboxItems'
 import { createOverseerRoutes } from './routes/overseer'
 import { createHubSettingsRoutes } from './routes/hubSettings'
+import { createWorkGraphRoutes } from './routes/workGraph'
 import type { SSEManager } from '../sse/sseManager'
 import type { VisibilityTracker } from '../visibility/visibilityTracker'
 import type { Server as BunServer, ServerWebSocket } from 'bun'
@@ -236,8 +237,13 @@ function createWebApp(options: {
 
     app.use('*', logger())
 
-    // Health check endpoint (no auth required)
-    app.get('/health', (c) => c.json({ status: 'ok', protocolVersion: PROTOCOL_VERSION }))
+    // Health check endpoint (no auth required).
+    // capabilities.workGraph is additive: old clients ignore unknown fields.
+    app.get('/health', (c) => c.json({
+        status: 'ok',
+        protocolVersion: PROTOCOL_VERSION,
+        capabilities: { workGraph: true }
+    }))
 
     const configuration = getConfiguration()
     const corsOrigins = options.corsOrigins ?? configuration.corsOrigins
@@ -308,6 +314,8 @@ function createWebApp(options: {
     app.route('/api', createSystemEventsRoutes(options.getSyncEngine))
     app.route('/api', createInboxItemsRoutes(options.getSyncEngine))
     app.route('/api', createOverseerRoutes(options.getSyncEngine))
+    // Path is intentionally NOT `/api/events` — that route is the SSE stream.
+    app.route('/api', createWorkGraphRoutes(options.store))
 
     // Skip static serving in relay mode, show helpful message on root
     if (options.relayMode) {
