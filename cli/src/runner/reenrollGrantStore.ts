@@ -6,6 +6,9 @@ import {
     chmodSync,
     mkdirSync,
     renameSync,
+    openSync,
+    fsyncSync,
+    closeSync,
 } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { configuration } from '@/configuration'
@@ -56,6 +59,14 @@ export function writeReenrollGrantPending(grant: PersistedReenrollGrant): void {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
     writeFileSync(path, JSON.stringify(grant), { mode: 0o600 })
     chmodSync(path, 0o600)
+    // Durability before hub ack — power loss must not drop the only token
+    // that still matches a newly issued hash (#1473 Major).
+    const fd = openSync(path, 'r')
+    try {
+        fsyncSync(fd)
+    } finally {
+        closeSync(fd)
+    }
 }
 
 /** Promote the staged grant after hub ack. */
@@ -68,6 +79,12 @@ export function commitReenrollGrant(): void {
     mkdirSync(dirname(finalPath), { recursive: true, mode: 0o700 })
     renameSync(pending, finalPath)
     chmodSync(finalPath, 0o600)
+    const fd = openSync(finalPath, 'r')
+    try {
+        fsyncSync(fd)
+    } finally {
+        closeSync(fd)
+    }
 }
 
 /** @deprecated Prefer writeReenrollGrantPending + commitReenrollGrant. */

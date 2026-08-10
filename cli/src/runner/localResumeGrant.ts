@@ -92,12 +92,11 @@ export async function startLocalResumeGrantServer(options: {
                         const tracked = options.resolveTrackedSessionId?.(cred.pid) ?? null
                         if (tracked) {
                             if (tracked !== sessionId) {
-                                // Session A must not mint session B's capability.
                                 socket.end(`${JSON.stringify({ ok: false, code: 'auth_failed' })}\n`)
                                 return
                             }
                         } else if (!options.isTrustedOperatorPeer?.(cred.pid)) {
-                            // Untracked peer that is not the hapi CLI (reparented
+                            // Untracked peer without resume-CLI proof (reparented
                             // helpers, random same-UID processes).
                             socket.end(`${JSON.stringify({ ok: false, code: 'auth_failed' })}\n`)
                             return

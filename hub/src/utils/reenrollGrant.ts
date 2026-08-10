@@ -72,12 +72,7 @@ export function bindReenrollGrantDb(db: Database): void {
             expires_at: number
         }>
         grantsByHash.clear()
-        const now = Date.now()
         for (const row of rows) {
-            if (row.expires_at < now) {
-                db.prepare('DELETE FROM machine_reenroll_grants WHERE grant_hash = ?').run(row.grant_hash)
-                continue
-            }
             grantsByHash.set(row.grant_hash, {
                 hash: row.grant_hash,
                 machineId: row.machine_id,

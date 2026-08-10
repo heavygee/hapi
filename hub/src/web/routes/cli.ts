@@ -445,9 +445,12 @@ export function createCliRoutes(
             namespace,
             grant: reenrollGrant,
         })) {
-            // Lost-response replay: grant already consumed, sessions already on
-            // the destination machine — treat as success (#1473 Major).
-            if (engine.countSessionsOnMachine(fromMachineId, namespace) === 0) {
+            // Lost-response replay: grant already consumed. Only succeed when
+            // the destination already owns every former source session and the
+            // source is empty (#1473 Major).
+            const remainingOnSource = engine.countSessionsOnMachine(fromMachineId, namespace)
+            const ownedByDestination = engine.countSessionsOnMachine(newMachineId, namespace)
+            if (remainingOnSource === 0 && ownedByDestination > 0) {
                 return c.json({ migrated: 0, alreadyComplete: true })
             }
             return c.json({ error: 'Source machine proof required' }, 403)

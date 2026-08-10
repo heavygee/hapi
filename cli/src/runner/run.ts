@@ -1345,25 +1345,33 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       return null
     }
     const isTrustedOperatorPeer = (peerPid: number): boolean => {
-      // Same binary as this runner — `hapi resume` from the CLI. Reparented
-      // agent helpers are bun/node/agent binaries, not process.execPath.
+      // Agents are often the same hapi binary as the runner, so exe alone is
+      // not auth. Require an untracked peer whose cmdline is clearly
+      // `hapi resume` (#1473 Blocker).
       if (process.platform === 'linux') {
         try {
           const exe = readlinkSync(`/proc/${peerPid}/exe`).replace(/ \(deleted\)$/, '')
-          return exe === process.execPath
+          const sameBinary = exe === process.execPath
             || basename(exe) === basename(process.execPath)
+          if (!sameBinary) {
+            return false
+          }
+          const cmdline = readFileSync(`/proc/${peerPid}/cmdline`, 'utf8')
+          const args = cmdline.split('\0').filter(Boolean)
+          return args.includes('resume')
         } catch {
           return false
         }
       }
       if (process.platform === 'darwin') {
         try {
-          const out = execFileSync('ps', ['-p', String(peerPid), '-o', 'comm='], {
+          const out = execFileSync('ps', ['-p', String(peerPid), '-o', 'args='], {
             encoding: 'utf8',
             timeout: 1_000,
           }).trim()
           const runnerBase = basename(process.execPath)
-          return out === runnerBase || out.endsWith(`/${runnerBase}`) || out.includes('hapi')
+          const looksLikeHapi = out.includes(runnerBase) || /\bhapi\b/.test(out)
+          return looksLikeHapi && /\bresume\b/.test(out)
         } catch {
           return false
         }
