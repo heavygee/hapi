@@ -129,6 +129,11 @@ export class Store {
         this.workGraph = new WorkGraphStore(this.db)
     }
 
+    /** Run `fn` inside a single SQLite transaction (nested calls become savepoints). */
+    runInTransaction<T>(fn: () => T): T {
+        return this.db.transaction(fn)()
+    }
+
     /**
      * Atomically records a CLI prompt-consumption acknowledgement and returns
      * the persisted session activity timestamp. A duplicate or sibling-stamped

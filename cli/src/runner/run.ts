@@ -24,6 +24,7 @@ import { isRetryableConnectionError } from '@/utils/errorUtils';
 import { cleanupRunnerState, getInstalledCliMtimeMs, isRunnerRunningCurrentlyInstalledHappyVersion, stopRunner, waitForRunnerHandoff } from './controlClient';
 import { startRunnerControlServer } from './controlServer';
 import { startLocalResumeGrantServer } from './localResumeGrant';
+import { isProcessDescendant } from '@/api/processDescendant';
 import { createWorktree, removeWorktree, type WorktreeInfo } from './worktree';
 import { validateWorkspaceDirectory } from './validateWorkspaceDirectory';
 import { join } from 'path';
@@ -1277,37 +1278,53 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     }
     logger.debug(`[RUNNER RUN] Machine registered: ${machine.id}`);
 
-    // Keep a short-lived reenroll grant fresh so crash/reboot can still migrate
-    // sessions without depending on graceful cleanup (#1473 Blocker).
+    // Keep a reenroll grant fresh so crash/reboot can still migrate sessions
+    // without depending on graceful cleanup (#1473 Blocker).
     // Issue keeps prior hashes valid until we persist + ack the replacement.
+    // Serialize refreshes so interval + shutdown acks cannot revoke each other.
+    let reenrollRefreshInFlight: Promise<void> | null = null
     const persistFreshReenrollGrant = async (options?: { required?: boolean }) => {
       const required = options?.required === true
-      try {
-        const issued = await api.issueMachineReenrollGrant({
-          machineId,
-          machineTag,
-          runnerProof,
-        })
-        writeReenrollGrant({
-          fromMachineId: machineId,
-          machineTag,
-          grant: issued.grant,
-          expiresAt: issued.expiresAt,
-        })
-        await api.ackMachineReenrollGrant({
-          machineId,
-          machineTag,
-          runnerProof,
-          grant: issued.grant,
-        })
-      } catch (error) {
-        if (required) {
-          throw error instanceof Error
-            ? error
-            : new Error(String(error))
+      if (reenrollRefreshInFlight) {
+        await reenrollRefreshInFlight
+        if (!required) {
+          return
         }
-        logger.debug('[RUNNER RUN] Failed to refresh reenroll grant', error)
       }
+      const task = (async () => {
+        try {
+          const issued = await api.issueMachineReenrollGrant({
+            machineId,
+            machineTag,
+            runnerProof,
+          })
+          writeReenrollGrant({
+            fromMachineId: machineId,
+            machineTag,
+            grant: issued.grant,
+            expiresAt: issued.expiresAt,
+          })
+          await api.ackMachineReenrollGrant({
+            machineId,
+            machineTag,
+            runnerProof,
+            grant: issued.grant,
+          })
+        } catch (error) {
+          if (required) {
+            throw error instanceof Error
+              ? error
+              : new Error(String(error))
+          }
+          logger.debug('[RUNNER RUN] Failed to refresh reenroll grant', error)
+        }
+      })()
+      reenrollRefreshInFlight = task.finally(() => {
+        if (reenrollRefreshInFlight === task) {
+          reenrollRefreshInFlight = null
+        }
+      })
+      await reenrollRefreshInFlight
     }
     await persistFreshReenrollGrant({ required: true })
     const reenrollRefresh = setInterval(() => {
@@ -1321,8 +1338,21 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         runnerProof,
       })
     }
+    const resolveTrackedSessionIdForPeer = (peerPid: number): string | null => {
+      for (const child of getCurrentChildren()) {
+        if (!isProcessDescendant(peerPid, child.pid)) {
+          continue
+        }
+        const sessionId = child.happySessionId?.trim()
+          || child.requestedHappySessionId?.trim()
+          || ''
+        return sessionId || null
+      }
+      return null
+    }
     const localResumeGrant = await startLocalResumeGrantServer({
       mintCapability: (sessionId) => mintLocalResumeCapability!(sessionId),
+      resolveTrackedSessionId: resolveTrackedSessionIdForPeer,
     })
     if (localResumeGrant) {
       stopLocalResumeGrantServer = localResumeGrant.close

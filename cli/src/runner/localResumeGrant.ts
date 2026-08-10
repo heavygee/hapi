@@ -25,6 +25,12 @@ function defaultSocketPath(): string {
 
 export async function startLocalResumeGrantServer(options: {
     mintCapability: (sessionId: string) => Promise<string>
+    /**
+     * If the peer PID belongs to a tracked session process tree, return that
+     * session id — minting is restricted to it. Return null for operator
+     * terminals (not under a tracked child). (#1473 Blocker)
+     */
+    resolveTrackedSessionId?: (peerPid: number) => string | null
     readPeerCred?: PeerCredReader
     socketPath?: string
 }): Promise<LocalResumeGrantServer | null> {
@@ -76,6 +82,12 @@ export async function startLocalResumeGrantServer(options: {
                             : ''
                         if (!sessionId) {
                             socket.end(`${JSON.stringify({ ok: false, code: 'bad_request' })}\n`)
+                            return
+                        }
+                        const tracked = options.resolveTrackedSessionId?.(cred.pid) ?? null
+                        if (tracked && tracked !== sessionId) {
+                            // Session A must not mint session B's capability.
+                            socket.end(`${JSON.stringify({ ok: false, code: 'auth_failed' })}\n`)
                             return
                         }
                         const sessionCapability = await options.mintCapability(sessionId)

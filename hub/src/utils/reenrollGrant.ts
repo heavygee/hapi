@@ -17,7 +17,7 @@ type GrantRecord = {
 const grantsByHash = new Map<string, GrantRecord>()
 let grantDb: Database | null = null
 
-const DEFAULT_TTL_MS = 5 * 60_000
+const DEFAULT_TTL_MS = 24 * 60 * 60_000
 
 function hashGrant(grant: string): string {
     return createHash('sha256').update(grant.trim(), 'utf8').digest('base64url')

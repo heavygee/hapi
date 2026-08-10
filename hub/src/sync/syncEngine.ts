@@ -982,6 +982,8 @@ async uploadScratchlistAttachment(
     /**
      * After machine-id re-enroll, rewrite session metadata.machineId so remote
      * resume / provenance routing stay attached (#1473 Major).
+     * All remaps commit in one SQLite transaction so a hub crash cannot leave
+     * a partial move onto an abandoned intermediate machine id.
      */
     migrateSessionsMachineId(
         fromMachineId: string,
@@ -993,51 +995,63 @@ async uploadScratchlistAttachment(
         if (!from || !to || from === to) {
             return 0
         }
-        let migrated = 0
-        for (const session of this.getSessionsByNamespace(namespace)) {
-            let attempts = 0
-            while (attempts < 5) {
-                attempts += 1
-                const current = this.sessionCache.refreshSession(session.id) ?? session
-                const currentId = typeof current.metadata?.machineId === 'string'
-                    ? current.metadata.machineId.trim()
-                    : ''
-                if (currentId !== from) {
-                    break
-                }
-                const result = this.store.sessions.updateSessionMetadata(
-                    current.id,
-                    { ...current.metadata, machineId: to },
-                    current.metadataVersion,
-                    namespace,
-                    { touchUpdatedAt: false }
-                )
-                if (result.result === 'success') {
-                    migrated += 1
-                    this.sessionCache.refreshSession(current.id)
-                    break
-                }
-                if (result.result === 'error' || attempts >= 5) {
-                    throw new Error(
-                        `session migration conflicted for ${current.id} `
-                        + `(${from} → ${to})`
+        const migratedIds: string[] = []
+        this.store.runInTransaction(() => {
+            for (const stored of this.store.sessions.getSessionsByNamespace(namespace)) {
+                let attempts = 0
+                while (attempts < 5) {
+                    attempts += 1
+                    const current = this.store.sessions.getSessionByNamespace(stored.id, namespace)
+                    if (!current) {
+                        break
+                    }
+                    const metadata = (current.metadata && typeof current.metadata === 'object')
+                        ? current.metadata as Record<string, unknown>
+                        : {}
+                    const currentId = typeof metadata.machineId === 'string'
+                        ? metadata.machineId.trim()
+                        : ''
+                    if (currentId !== from) {
+                        break
+                    }
+                    const result = this.store.sessions.updateSessionMetadata(
+                        current.id,
+                        { ...metadata, machineId: to },
+                        current.metadataVersion,
+                        namespace,
+                        { touchUpdatedAt: false }
                     )
+                    if (result.result === 'success') {
+                        migratedIds.push(current.id)
+                        break
+                    }
+                    if (result.result === 'error' || attempts >= 5) {
+                        throw new Error(
+                            `session migration conflicted for ${current.id} `
+                            + `(${from} → ${to})`
+                        )
+                    }
                 }
             }
-        }
-        // Fail closed if any namespace session still references the old machine.
-        const remaining = this.getSessionsByNamespace(namespace).filter((session) => {
-            const currentId = typeof session.metadata?.machineId === 'string'
-                ? session.metadata.machineId.trim()
-                : ''
-            return currentId === from
+            const remaining = this.store.sessions.getSessionsByNamespace(namespace).filter((session) => {
+                const metadata = (session.metadata && typeof session.metadata === 'object')
+                    ? session.metadata as Record<string, unknown>
+                    : {}
+                const currentId = typeof metadata.machineId === 'string'
+                    ? metadata.machineId.trim()
+                    : ''
+                return currentId === from
+            })
+            if (remaining.length > 0) {
+                throw new Error(
+                    `session migration incomplete: ${remaining.length} session(s) still on ${from}`
+                )
+            }
         })
-        if (remaining.length > 0) {
-            throw new Error(
-                `session migration incomplete: ${remaining.length} session(s) still on ${from}`
-            )
+        for (const id of migratedIds) {
+            this.sessionCache.refreshSession(id)
         }
-        return migrated
+        return migratedIds.length
     }
 
     async sendMessage(

@@ -194,6 +194,8 @@ export function startRunnerControlServer({
     });
 
     // Terminal `hapi resume` capability mint (Windows / loopback fallback).
+    // Unauthenticated loopback cannot tell session A from the operator, so
+    // refuse while any tracked session exists (#1473 Blocker).
     typed.post('/prepare-local-resume', {
       schema: {
         body: z.object({
@@ -202,6 +204,9 @@ export function startRunnerControlServer({
         response: {
           200: z.object({
             sessionCapability: z.string()
+          }),
+          403: z.object({
+            error: z.string()
           }),
           500: z.object({
             error: z.string()
@@ -213,6 +218,15 @@ export function startRunnerControlServer({
       if (!prepareLocalResume) {
         reply.code(500);
         return { error: 'Local resume grants unavailable' };
+      }
+      const tracked = getChildren().filter((child) =>
+        Boolean(child.happySessionId?.trim() || child.requestedHappySessionId?.trim())
+      )
+      if (tracked.length > 0) {
+        reply.code(403);
+        return {
+          error: 'HTTP local-resume refused while sessions are tracked; use peercred socket'
+        };
       }
       try {
         const sessionCapability = await prepareLocalResume(sessionId);

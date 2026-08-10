@@ -13,7 +13,7 @@ function grantPath(): string {
     return join(configuration.happyHomeDir, 'runner-reenroll.grant.json')
 }
 
-/** Persist a short-lived hub reenroll grant across graceful runner restart (#1473). */
+/** Persist a hub reenroll grant across runner restart (#1473). */
 export function writeReenrollGrant(grant: PersistedReenrollGrant): void {
     const path = grantPath()
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
@@ -21,6 +21,10 @@ export function writeReenrollGrant(grant: PersistedReenrollGrant): void {
     chmodSync(path, 0o600)
 }
 
+/**
+ * Read the on-disk grant even if past expiresAt — hub verify is authoritative.
+ * Clearing on local expiry would skip migrate and strand sessions (#1473 Major).
+ */
 export function readReenrollGrant(): PersistedReenrollGrant | null {
     const path = grantPath()
     if (!existsSync(path)) {
@@ -34,10 +38,6 @@ export function readReenrollGrant(): PersistedReenrollGrant | null {
             || typeof parsed.grant !== 'string'
             || typeof parsed.expiresAt !== 'number'
         ) {
-            return null
-        }
-        if (parsed.expiresAt < Date.now()) {
-            clearReenrollGrant()
             return null
         }
         return {
