@@ -13,6 +13,7 @@ import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
 import { UsageStore } from './usageStore'
 import { WorkGraphStore } from './workGraphStore'
+import { bindReenrollGrantDb } from '../utils/reenrollGrant'
 
 export type {
     StoredMachine,
@@ -40,7 +41,7 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 24
+const SCHEMA_VERSION: number = 25
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -105,6 +106,7 @@ export class Store {
         this.db.exec('PRAGMA foreign_keys = ON')
         this.db.exec('PRAGMA busy_timeout = 5000')
         this.initSchema()
+        bindReenrollGrantDb(this.db)
 
         if (dbPath !== ':memory:' && !dbPath.startsWith('file::memory:')) {
             for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
@@ -303,6 +305,7 @@ export class Store {
             21: () => this.migrateFromV21ToV22(),
             22: () => this.migrateFromV22ToV23(),
             23: () => this.migrateFromV23ToV24(),
+            24: () => this.migrateFromV24ToV25(),
         })
 
         if (currentVersion === 0) {
@@ -394,6 +397,13 @@ export class Store {
                 seq INTEGER DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_machines_namespace ON machines(namespace);
+
+            CREATE TABLE IF NOT EXISTS machine_reenroll_grants (
+                machine_id TEXT PRIMARY KEY,
+                namespace TEXT NOT NULL,
+                grant_hash TEXT NOT NULL,
+                expires_at INTEGER NOT NULL
+            );
 
             CREATE TABLE IF NOT EXISTS messages (
                 id TEXT PRIMARY KEY,
@@ -990,6 +1000,17 @@ export class Store {
         if (!columns.has('runner_proof_hash')) {
             this.db.exec('ALTER TABLE machines ADD COLUMN runner_proof_hash TEXT')
         }
+    }
+
+    private migrateFromV24ToV25(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS machine_reenroll_grants (
+                machine_id TEXT PRIMARY KEY,
+                namespace TEXT NOT NULL,
+                grant_hash TEXT NOT NULL,
+                expires_at INTEGER NOT NULL
+            );
+        `)
     }
 
     private getSessionColumnNames(): Set<string> {

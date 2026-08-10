@@ -1252,17 +1252,43 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         logger.debug(`[RUNNER RUN] Migrated ${migrated} session(s) after cold re-enroll`)
         clearReenrollGrant()
       } catch (error) {
-        clearReenrollGrant()
+        // Keep the grant file so a retry can finish migrate; do not come online
+        // with stranded sessions (#1473 Major).
         throw new Error(
           'Cold re-enroll succeeded but session migrate failed; refusing to come online '
           + 'with stranded sessions. '
           + (error instanceof Error ? error.message : String(error))
         )
       }
-    } else if (pendingReenroll) {
+    } else if (pendingReenroll && machine.id === previousMachineIdForMigrate) {
+      // Same machine id recovered somehow — grant unused.
       clearReenrollGrant()
     }
     logger.debug(`[RUNNER RUN] Machine registered: ${machine.id}`);
+
+    // Keep a short-lived reenroll grant fresh so crash/reboot can still migrate
+    // sessions without depending on graceful cleanup (#1473 Blocker).
+    const persistFreshReenrollGrant = async () => {
+      try {
+        const issued = await api.issueMachineReenrollGrant({
+          machineId,
+          machineTag,
+          runnerProof,
+        })
+        writeReenrollGrant({
+          fromMachineId: machineId,
+          machineTag,
+          grant: issued.grant,
+          expiresAt: issued.expiresAt,
+        })
+      } catch (error) {
+        logger.debug('[RUNNER RUN] Failed to refresh reenroll grant', error)
+      }
+    }
+    await persistFreshReenrollGrant()
+    const reenrollRefresh = setInterval(() => {
+      void persistFreshReenrollGrant()
+    }, 60_000)
 
     // Create realtime machine session
     const apiMachine = api.machineSyncClient(machine, { workspaceRoots, machineTag, runnerProof });
@@ -1566,26 +1592,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         clearInterval(restartOnStaleVersionAndHeartbeat);
         logger.debug('[RUNNER RUN] Health check interval cleared');
       }
+      clearInterval(reenrollRefresh)
 
-      // Mint a short-lived migrate grant while runnerProof is still valid so a
-      // subsequent cold start can remap sessions (#1473 Blocker). Best-effort:
-      // crash/SIGKILL skips this path and sessions stay on the old machine.
-      try {
-        const issued = await api.issueMachineReenrollGrant({
-          machineId,
-          machineTag,
-          runnerProof,
-        })
-        writeReenrollGrant({
-          fromMachineId: machineId,
-          machineTag,
-          grant: issued.grant,
-          expiresAt: issued.expiresAt,
-        })
-        logger.debug('[RUNNER RUN] Wrote cold-restart reenroll grant for session migrate')
-      } catch (error) {
-        logger.debug('[RUNNER RUN] Failed to mint reenroll grant before shutdown', error)
-      }
+      // Refresh grant one last time while runnerProof is still valid.
+      await persistFreshReenrollGrant()
 
       // Update runner state before shutting down
       await apiMachine.updateRunnerState((state: RunnerState | null) => ({

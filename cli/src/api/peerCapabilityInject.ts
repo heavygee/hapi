@@ -333,10 +333,12 @@ export const readWindowsNamedPipeServerCredentials: PeerCredReader = (socket) =>
             },
         })
         const pidBuf = new Uint32Array(1)
-        const handleValue = typeof raw === 'bigint' ? raw : BigInt(Number(raw))
-        const handleBuf = Buffer.alloc(8)
-        handleBuf.writeBigUInt64LE(handleValue)
-        const ok = kernel32.symbols.GetNamedPipeServerProcessId(ptr(handleBuf), ptr(pidBuf))
+        const pipeHandle = typeof raw === 'bigint' ? raw : BigInt(Number(raw))
+        // Kernel32 expects the HANDLE value itself, not a pointer to a buffer (#1473).
+        const ok = kernel32.symbols.GetNamedPipeServerProcessId(
+            pipeHandle as unknown as import('bun:ffi').Pointer,
+            ptr(pidBuf),
+        )
         if (!ok) {
             return null
         }
@@ -380,10 +382,12 @@ export const readWindowsNamedPipeClientCredentials: PeerCredReader = (socket) =>
             },
         })
         const pidBuf = new Uint32Array(1)
-        const handleValue = typeof raw === 'bigint' ? raw : BigInt(Number(raw))
-        const handleBuf = Buffer.alloc(8)
-        handleBuf.writeBigUInt64LE(handleValue)
-        const ok = kernel32.symbols.GetNamedPipeClientProcessId(ptr(handleBuf), ptr(pidBuf))
+        const pipeHandle = typeof raw === 'bigint' ? raw : BigInt(Number(raw))
+        // Kernel32 expects the HANDLE value itself, not a pointer to a buffer (#1473).
+        const ok = kernel32.symbols.GetNamedPipeClientProcessId(
+            pipeHandle as unknown as import('bun:ffi').Pointer,
+            ptr(pidBuf),
+        )
         if (!ok) {
             return null
         }

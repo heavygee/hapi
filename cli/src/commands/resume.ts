@@ -272,10 +272,16 @@ export const resumeCommand: CommandDefinition = {
                 throw new Error('Session is already controlled by a local terminal')
             }
 
-            // Direct terminal resume is allowed without inject: peer delivery
-            // stays unattributed. Attributed resume remains hub/web → runner
-            // spawn + HAPI_PEER_CAP_INJECT (#1473 Major — do not disable the
-            // documented `hapi resume` command).
+            // Attributed resume needs inject/capability for session RPC auth.
+            // Direct terminal resume without inject would come up with broken
+            // web abort/config/permission RPCs (#1473 Major) — fail closed.
+            if (!process.env.HAPI_PEER_CAP_INJECT?.trim()) {
+                throw new Error(
+                    'Secure resume requires hub/web runner inject '
+                    + '(direct terminal hapi resume cannot authorize session RPC '
+                    + 'without a capability). Resume from the web UI.'
+                )
+            }
             if (target.active) {
                 await api.handoffSessionToLocal(target.sessionId)
             }

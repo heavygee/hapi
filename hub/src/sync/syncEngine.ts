@@ -995,23 +995,47 @@ async uploadScratchlistAttachment(
         }
         let migrated = 0
         for (const session of this.getSessionsByNamespace(namespace)) {
+            let attempts = 0
+            while (attempts < 5) {
+                attempts += 1
+                const current = this.sessionCache.refreshSession(session.id) ?? session
+                const currentId = typeof current.metadata?.machineId === 'string'
+                    ? current.metadata.machineId.trim()
+                    : ''
+                if (currentId !== from) {
+                    break
+                }
+                const result = this.store.sessions.updateSessionMetadata(
+                    current.id,
+                    { ...current.metadata, machineId: to },
+                    current.metadataVersion,
+                    namespace,
+                    { touchUpdatedAt: false }
+                )
+                if (result.result === 'success') {
+                    migrated += 1
+                    this.sessionCache.refreshSession(current.id)
+                    break
+                }
+                if (result.result === 'error' || attempts >= 5) {
+                    throw new Error(
+                        `session migration conflicted for ${current.id} `
+                        + `(${from} → ${to})`
+                    )
+                }
+            }
+        }
+        // Fail closed if any namespace session still references the old machine.
+        const remaining = this.getSessionsByNamespace(namespace).filter((session) => {
             const currentId = typeof session.metadata?.machineId === 'string'
                 ? session.metadata.machineId.trim()
                 : ''
-            if (currentId !== from) {
-                continue
-            }
-            const result = this.store.sessions.updateSessionMetadata(
-                session.id,
-                { ...session.metadata, machineId: to },
-                session.metadataVersion,
-                namespace,
-                { touchUpdatedAt: false }
+            return currentId === from
+        })
+        if (remaining.length > 0) {
+            throw new Error(
+                `session migration incomplete: ${remaining.length} session(s) still on ${from}`
             )
-            if (result.result === 'success') {
-                migrated += 1
-                this.sessionCache.refreshSession(session.id)
-            }
         }
         return migrated
     }
