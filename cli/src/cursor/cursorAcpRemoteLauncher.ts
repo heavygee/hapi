@@ -313,6 +313,7 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                         this.backend = backend;
                         registerAcpSessionTitleSync(backend, session.client);
                         backend.setUsageUpdateListener((message) => this.handleAgentMessage(message));
+                        this.wireAgentActivityThinking(backend, session);
                         recentStderrHint = null;
                         this.wireStderrErrorListener(backend, (hint) => {
                             recentStderrHint = hint;
