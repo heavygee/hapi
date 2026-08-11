@@ -1076,6 +1076,7 @@ export class SessionCache {
         }
 
         const movedMessages = this.store.messages.mergeSessionMessages(oldSessionId, newSessionId)
+        this.store.workGraph.reassignNotifySession(namespace, oldSessionId, newSessionId)
         if (movedMessages.moved > 0) {
             this.store.usage.transferSession(oldSessionId, newSessionId)
             if (!options.deleteOldSession) {

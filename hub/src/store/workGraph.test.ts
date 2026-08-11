@@ -225,4 +225,42 @@ describe('WorkGraphStore', () => {
             on_behalf_of: '1'
         })
     })
+
+    it('reassigns only AGENT_NOTIFY_SUMMARY rows onto the surviving session', () => {
+        const store = new Store(':memory:')
+        const notify = store.workGraph.insertEvent('default', {
+            source_kind: 'session',
+            source_ref: 'sess-old',
+            event_type: 'work_ad',
+            related_session_id: 'sess-old',
+            summary: 'notify',
+            provenance: 'AGENT_NOTIFY_SUMMARY',
+            idempotency_key: 'session:sess-old:message:msg-1:notify',
+            principal: { kind: 'agent', id: 'session:sess-old', on_behalf_of: '1' }
+        })
+        const posted = store.workGraph.insertEvent('default', {
+            source_kind: 'session',
+            source_ref: 'sess-old',
+            event_type: 'work_ad',
+            related_session_id: 'sess-old',
+            summary: 'http posted',
+            principal: humanPrincipal
+        })
+
+        expect(store.workGraph.reassignNotifySession('default', 'sess-old', 'sess-new')).toBe(1)
+
+        const moved = store.workGraph.getEvent(notify.event.id, 'default')
+        expect(moved?.relatedSessionId).toBe('sess-new')
+        expect(moved?.sourceRef).toBe('sess-new')
+        expect(moved?.idempotencyKey).toBe('session:sess-new:message:msg-1:notify')
+        expect(moved?.principal).toEqual({
+            kind: 'agent',
+            id: 'session:sess-new',
+            on_behalf_of: '1'
+        })
+
+        const untouched = store.workGraph.getEvent(posted.event.id, 'default')
+        expect(untouched?.relatedSessionId).toBe('sess-old')
+        expect(untouched?.sourceRef).toBe('sess-old')
+    })
 })

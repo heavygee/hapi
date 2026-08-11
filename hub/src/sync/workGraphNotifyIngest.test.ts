@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'bun:test'
 import { WORK_GRAPH_MAX_STRING, WORK_GRAPH_MAX_SUMMARY } from '@hapi/protocol'
+import type { SyncEvent } from '@hapi/protocol/types'
 import { Store } from '../store'
+import type { EventPublisher } from './eventPublisher'
+import { SessionCache } from './sessionCache'
 import {
     WORK_AD_DEFAULT_TTL_MS,
     buildWorkAdFromNotify,
@@ -434,7 +437,8 @@ describe('ingestNotifySummaryFromMessage cause stamping', () => {
             causeMessageId: firstUser.id,
             causeText: 'do the first thing',
             causeKind: 'webapp',
-            causeSeq: firstUser.seq
+            causeSeq: firstUser.seq,
+            causeCursorMessageId: firstUser.id
         })
 
         const secondUser = store.messages.addMessage(session.id, userInbound('do the second thing', 'cli'))
@@ -593,14 +597,16 @@ describe('ingestNotifySummaryFromMessage cause stamping', () => {
     it('advances causeSeq past every invoked inbound in the same Claude batch', () => {
         const store = new Store(':memory:')
         const session = store.sessions.getOrCreateSession('sess-cause-batch', {}, null, 'default')
-        const one = store.messages.addMessage(session.id, userInbound('one'))
-        const two = store.messages.addMessage(session.id, userInbound('two'))
-        const three = store.messages.addMessage(session.id, userInbound('three'))
+        const one = store.messages.addMessage(session.id, userInbound('one'), 'batch-1')
+        const two = store.messages.addMessage(session.id, userInbound('two'), 'batch-2')
+        const three = store.messages.addMessage(session.id, userInbound('three'), 'batch-3')
+        store.messages.markMessagesInvoked(session.id, ['batch-1', 'batch-2', 'batch-3'], 1_700_000_111_000)
         const assistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('Batched')))
         const first = ingestNotify(store, session.id, 'default', assistant.content, assistant.id)
         expect(first?.event.payloadJson).toMatchObject({
             causeMessageId: one.id,
-            causeSeq: three.seq
+            causeSeq: three.seq,
+            causeCursorMessageId: three.id
         })
 
         const next = store.messages.addMessage(session.id, userInbound('next turn'))
@@ -839,5 +845,74 @@ describe('ingestNotifySummaryFromMessage cause stamping', () => {
             causeText: 'prompt',
             action: fat
         })
+    })
+
+    it('preserves notify history across mergeSessions into the surviving id', async () => {
+        const store = new Store(':memory:')
+        const cache = new SessionCache(store, {
+            emit: (_event: SyncEvent) => {}
+        } as EventPublisher)
+        const oldSession = cache.getOrCreateSession(
+            'sess-cause-merge-old',
+            { path: '/tmp/project', host: 'localhost' },
+            null,
+            'default'
+        )
+        const newSession = cache.getOrCreateSession(
+            'sess-cause-merge-new',
+            { path: '/tmp/project', host: 'localhost' },
+            null,
+            'default'
+        )
+
+        store.messages.addMessage(oldSession.id, userInbound('from the old session'))
+        const firstAssistant = store.messages.addMessage(oldSession.id, assistantOutput(notifyFooter('Old turn')))
+        const first = ingestNotify(store, oldSession.id, 'default', firstAssistant.content, firstAssistant.id)
+        expect(first?.inserted).toBe(true)
+
+        await cache.mergeSessions(oldSession.id, newSession.id, 'default')
+
+        const nextUser = store.messages.addMessage(newSession.id, userInbound('after merge'))
+        const nextAssistant = store.messages.addMessage(newSession.id, assistantOutput(notifyFooter('New turn')))
+        const second = ingestNotify(store, newSession.id, 'default', nextAssistant.content, nextAssistant.id)
+
+        expect(second?.event.relatedEventId).toBe(first!.event.id)
+        expect(second?.event.payloadJson).toMatchObject({
+            causeMessageId: nextUser.id,
+            causeText: 'after merge'
+        })
+        const onSurvivor = store.workGraph.listWorkAdsByRelatedSession('default', newSession.id)
+            .map((event) => event.id)
+        expect(onSurvivor).toContain(first!.event.id)
+        expect(onSurvivor).toContain(second!.event.id)
+    })
+
+    it('does not re-attribute a prior batch after surviving-session seq-shift', () => {
+        const store = new Store(':memory:')
+        const surviving = store.sessions.getOrCreateSession('sess-cause-shift-live', {}, null, 'default')
+        const incoming = store.sessions.getOrCreateSession('sess-cause-shift-in', {}, null, 'default')
+
+        const one = store.messages.addMessage(surviving.id, userInbound('one'), 'shift-1')
+        const two = store.messages.addMessage(surviving.id, userInbound('two'), 'shift-2')
+        store.messages.addMessage(surviving.id, userInbound('three'), 'shift-3')
+        store.messages.markMessagesInvoked(surviving.id, ['shift-1', 'shift-2', 'shift-3'], 1_700_000_222_000)
+        const assistant = store.messages.addMessage(surviving.id, assistantOutput(notifyFooter('Batched')))
+        const first = ingestNotify(store, surviving.id, 'default', assistant.content, assistant.id)
+        expect(first?.event.payloadJson).toMatchObject({ causeMessageId: one.id })
+
+        store.messages.addMessage(incoming.id, userInbound('history from the other id'))
+        store.messages.mergeSessionMessages(incoming.id, surviving.id)
+
+        const secondAssistant = store.messages.addMessage(
+            surviving.id,
+            assistantOutput(notifyFooter('Sticky after merge'))
+        )
+        const second = ingestNotify(store, surviving.id, 'default', secondAssistant.content, secondAssistant.id)
+        expect(second?.event.payloadJson).toMatchObject({
+            causeMessageId: one.id,
+            causeText: 'one'
+        })
+        expect((second?.event.payloadJson as { causeMessageId?: string })?.causeMessageId)
+            .not.toBe(two.id)
     })
 })

@@ -141,6 +141,7 @@ export type WorkAdCause = {
     causeText: string | null
     causeKind: string | null
     causeSeq: number | null
+    causeCursorMessageId: string | null
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -202,6 +203,13 @@ function readCauseSeq(payload: unknown): number | null {
         : null
 }
 
+function readCauseCursorMessageId(payload: unknown): string | null {
+    const record = asRecord(payload)
+    return typeof record?.causeCursorMessageId === 'string' && record.causeCursorMessageId.length > 0
+        ? record.causeCursorMessageId
+        : null
+}
+
 function readCauseFromPayload(payload: unknown): WorkAdCause | null {
     const record = asRecord(payload)
     if (typeof record?.causeMessageId !== 'string' || record.causeMessageId.length === 0) {
@@ -211,7 +219,8 @@ function readCauseFromPayload(payload: unknown): WorkAdCause | null {
         causeMessageId: record.causeMessageId,
         causeText: typeof record.causeText === 'string' ? record.causeText : null,
         causeKind: typeof record.causeKind === 'string' ? record.causeKind : null,
-        causeSeq: readCauseSeq(payload)
+        causeSeq: readCauseSeq(payload),
+        causeCursorMessageId: readCauseCursorMessageId(payload)
     }
 }
 
@@ -221,6 +230,14 @@ function loadMessagesForCause(
     previousWorkAds: WorkGraphEvent[]
 ): StoredMessage[] {
     const previous = previousWorkAds.at(-1) ?? null
+    const cursorId = readCauseCursorMessageId(previous?.payloadJson)
+    if (cursorId) {
+        const cursorSeq = store.messages.getSeqById(sessionId, cursorId)
+        if (cursorSeq != null) {
+            return store.messages.getMessagesAfterSeq(sessionId, cursorSeq)
+        }
+        return store.messages.getAllMessages(sessionId)
+    }
     const afterSeq = readCauseSeq(previous?.payloadJson)
     // First event / legacy rows without causeSeq still need the full session.
     // Later notifies only need rows after the previous cause (not every
@@ -279,19 +296,22 @@ function consumedInboundIds(
  * Claude batch can join several same-mode prompts). Uninvoked leftovers wait.
  * No new invoked inbound → sticky copy of the previous event's cause.
  */
-function batchCauseSeq(
+function batchCauseCursor(
     messages: StoredMessage[],
     inbound: StoredMessage,
     assistantSeq: number | null
-): number {
+): { causeSeq: number; causeCursorMessageId: string } {
     let maxSeq = inbound.seq
+    let cursorId = inbound.id
     for (const message of messages) {
         if (assistantSeq != null && message.seq >= assistantSeq) continue
-        if (message.seq <= inbound.seq) continue
         if (!isCauseCandidate(message)) continue
-        if (message.seq > maxSeq) maxSeq = message.seq
+        if (message.seq > maxSeq) {
+            maxSeq = message.seq
+            cursorId = message.id
+        }
     }
-    return maxSeq
+    return { causeSeq: maxSeq, causeCursorMessageId: cursorId }
 }
 
 export function resolveWorkAdCause(params: {
@@ -314,12 +334,14 @@ export function resolveWorkAdCause(params: {
         })[0]
     if (inbound) {
         const text = extractInboundCauseText(inbound.content)
+        const cursor = batchCauseCursor(params.messages, inbound, params.assistantSeq ?? null)
         return {
             cause: {
                 causeMessageId: inbound.id,
                 causeText: text === null ? null : clampJsonUtf8(text, WORK_GRAPH_MAX_SUMMARY),
                 causeKind: extractInboundSentFrom(inbound.content),
-                causeSeq: batchCauseSeq(params.messages, inbound, params.assistantSeq ?? null)
+                causeSeq: cursor.causeSeq,
+                causeCursorMessageId: cursor.causeCursorMessageId
             },
             previousEventId: previous?.id ?? null
         }
@@ -397,7 +419,10 @@ export function buildWorkAdFromNotify(params: {
                     causeMessageId,
                     causeText,
                     causeKind,
-                    causeSeq: cause.causeSeq
+                    causeSeq: cause.causeSeq,
+                    ...(cause.causeCursorMessageId
+                        ? { causeCursorMessageId: clampJsonUtf8(cause.causeCursorMessageId, 256) }
+                        : {})
                 }
                 : {})
         },
