@@ -479,4 +479,44 @@ describe('runOverseerConverse', () => {
         expect(focus?.itemId).toBe(118)
         expect(focus?.sessionId).toBe(sessionId)
     })
+
+    it('attaches mid-turn focus onto BrainUnavailableError after a resolving tool', async () => {
+        const sessionId = '6cd8d0c3-aaaa-bbbb-cccc-ddddeeeeffff'
+        const overseer = {
+            ...fakeOverseer,
+            explainPriority: () => ({
+                inboxItemId: 118,
+                relatedSessionId: sessionId,
+                title: 'W1.8'
+            })
+        } as unknown as OverseerEntity
+
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(chatResponse({
+                role: 'assistant',
+                content: '',
+                tool_calls: [{
+                    id: 'c1',
+                    type: 'function',
+                    function: { name: 'explain_priority', arguments: '{"itemId":118}' }
+                }]
+            }))
+            .mockRejectedValueOnce(new TypeError('fetch failed'))
+        setFetch(fetchMock)
+
+        try {
+            await runOverseerConverse({
+                overseer,
+                config,
+                messages: [{ role: 'operator', content: 'what is item 118?' }],
+                focus: null
+            })
+            expect.unreachable('should have thrown')
+        } catch (error) {
+            expect(error).toBeInstanceOf(BrainUnavailableError)
+            const brainErr = error as BrainUnavailableError
+            expect(brainErr.converseFocus?.itemId).toBe(118)
+            expect(brainErr.converseFocus?.sessionId).toBe(sessionId)
+        }
+    })
 })

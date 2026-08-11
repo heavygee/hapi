@@ -27,6 +27,7 @@ import { isOverseerToolName, runOverseerTool } from './runOverseerTool'
 import { projectToolResultForBrain } from './toolProjection'
 import {
     callBrain,
+    BrainUnavailableError,
     type BrainConfig,
     type OpenAiChatMessage,
     type OverseerOpenAiToolLike
@@ -189,6 +190,11 @@ export async function runOverseerConverse(params: {
             if (hasSuccessfulWrite(toolTrace)) {
                 return finish(fallbackReplyAfterWriteSuccess(writeConfirmations))
             }
+            if (error instanceof BrainUnavailableError) {
+                // Carry mid-turn tool-resolved focus so the route can persist it
+                // even when the follow-up brain call fails (Codex P2).
+                error.converseFocus = focus
+            }
             throw error
         }
         const calls = message.tool_calls ?? []
@@ -304,6 +310,9 @@ export async function runOverseerConverse(params: {
     } catch (error) {
         if (hasSuccessfulWrite(toolTrace)) {
             return finish(fallbackReplyAfterWriteSuccess(writeConfirmations))
+        }
+        if (error instanceof BrainUnavailableError) {
+            error.converseFocus = focus
         }
         throw error
     }

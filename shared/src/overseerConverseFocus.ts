@@ -222,24 +222,28 @@ export function applyFocusFromToolResolve(
             itemFromResult(result) ??
             (typeof args.itemId === 'number' ? args.itemId : null)
         if (!sessionId && itemId == null) return previous
-        return buildFocus({
-            previous,
-            sessionId: sessionId || undefined,
-            itemId: itemId ?? undefined,
+        // Subject-changing write replaces the whole pair — do not inherit a
+        // stale counterpart from the prior focus (Codex P2).
+        return {
+            sessionId: sessionId || null,
+            itemId: itemId ?? null,
             source: 'tool_resolve',
-            now
-        })
+            updatedAt: now
+        }
     }
 
     if (tool === 'record_disposition') {
         const itemId = typeof args.itemId === 'number' ? args.itemId : itemFromResult(result)
         if (itemId == null) return previous
-        return buildFocus({
-            previous,
+        const sessionId =
+            sessionFromResult(result) ??
+            (typeof args.sessionId === 'string' ? args.sessionId.trim() : null)
+        return {
+            sessionId: sessionId || null,
             itemId,
             source: 'tool_resolve',
-            now
-        })
+            updatedAt: now
+        }
     }
 
     // query_inbox: only retarget when exactly one subject.
@@ -267,6 +271,26 @@ export function applyFocusFromToolResolve(
     if (tool === 'list_active_workers' && isObj(result) && Array.isArray(result.workers)) {
         if (result.workers.length !== 1) return previous
         const only = result.workers[0]
+        if (!isObj(only)) return previous
+        const sessionId =
+            typeof only.sessionId === 'string'
+                ? only.sessionId.trim()
+                : typeof only.id === 'string'
+                    ? only.id.trim()
+                    : ''
+        if (!sessionId) return previous
+        return {
+            sessionId,
+            itemId: null,
+            source: 'tool_resolve',
+            updatedAt: now
+        }
+    }
+
+    // Singleton open-loop — same rule (abandoned-thread questions).
+    if (tool === 'query_open_loops' && isObj(result) && Array.isArray(result.openLoops)) {
+        if (result.openLoops.length !== 1) return previous
+        const only = result.openLoops[0]
         if (!isObj(only)) return previous
         const sessionId =
             typeof only.sessionId === 'string'

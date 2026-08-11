@@ -118,6 +118,18 @@ export class Store {
         this.settings = new SettingsStore(this.db)
     }
 
+    /**
+     * Delete a session row and clear conversational focus when it pointed at
+     * that id. Prefer this over `sessions.deleteSession` so cache-bypass paths
+     * (e.g. Codex duplicate merge without a SyncEngine) cannot leave a stale
+     * anaphoric target.
+     */
+    deleteSession(id: string, namespace: string): boolean {
+        const deleted = this.sessions.deleteSession(id, namespace)
+        if (deleted) this.settings.clearConverseFocusIfSession(id, namespace)
+        return deleted
+    }
+
     close(): void {
         if (this.closed) return
         this.db.close()

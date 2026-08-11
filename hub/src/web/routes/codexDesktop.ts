@@ -1212,7 +1212,7 @@ async function mergeSingleDuplicateCodexSessionGroup(options: {
         if (engine) {
             await engine.deleteSession(source.sessionId)
         } else {
-            const deleted = options.store.sessions.deleteSession(source.sessionId, options.namespace)
+            const deleted = options.store.deleteSession(source.sessionId, options.namespace)
             if (!deleted) {
                 throw new Error(`Failed to delete duplicate Hapi session: ${source.sessionId}`)
             }

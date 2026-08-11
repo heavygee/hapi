@@ -328,11 +328,13 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 const reply = error.reachable
                     ? 'I reached the Overseer brain but could not complete the tool conversation (request error). This is a converse-loop issue, not the brain being offline — please retry, and flag it if it persists.'
                     : 'The Overseer brain is offline right now. Try again shortly — your events and inbox are still being captured.'
-                if (priorFocus) settings.setConverseFocusIfNewer(priorFocus, namespace)
+                const focusToPersist = error.converseFocus ?? priorFocus
+                if (focusToPersist) settings.setConverseFocusIfNewer(focusToPersist, namespace)
                 persistOverseerConvoExchange(overseer, assembled, {
                     operatorText: lastOperator,
                     overseerText: reply,
-                    relatedSessionId: parsed.data.relatedSessionId ?? priorFocus?.sessionId ?? null
+                    relatedSessionId:
+                        parsed.data.relatedSessionId ?? focusToPersist?.sessionId ?? null
                 })
                 return c.json({
                     reply,
@@ -341,7 +343,7 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
                     brainOnline: error.reachable,
                     hydratedTurns: assembled.hydratedTurns,
                     truncated: assembled.truncated,
-                    focus: priorFocus
+                    focus: focusToPersist
                 })
             }
             throw error

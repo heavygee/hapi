@@ -181,6 +181,61 @@ describe('hub-owned conversational focus (capability, not pattern matching)', ()
         ).toEqual(focus())
     })
 
+    it('replaces the whole focus pair on subject-changing writes', () => {
+        const afterPing = applyFocusFromToolResolve(focus(), {
+            tool: 'ping_session',
+            ok: true,
+            args: { sessionId: SESSION_B, message: 'retry' },
+            result: { ok: true, sessionId: SESSION_B }
+        })
+        expect(afterPing).toEqual(
+            expect.objectContaining({
+                sessionId: SESSION_B,
+                itemId: null,
+                source: 'tool_resolve'
+            })
+        )
+        const afterDisp = applyFocusFromToolResolve(focus(), {
+            tool: 'record_disposition',
+            ok: true,
+            args: { itemId: 99, action: 'done' },
+            result: { ok: true, itemId: 99 }
+        })
+        expect(afterDisp).toEqual(
+            expect.objectContaining({
+                sessionId: null,
+                itemId: 99,
+                source: 'tool_resolve'
+            })
+        )
+    })
+
+    it('promotes singleton query_open_loops to focus', () => {
+        expect(
+            applyFocusFromToolResolve(null, {
+                tool: 'query_open_loops',
+                ok: true,
+                args: {},
+                result: {
+                    openLoops: [{ sessionId: SESSION_A, name: 'abandoned', bucket: 'waiting_on_you' }]
+                }
+            })?.sessionId
+        ).toBe(SESSION_A)
+        expect(
+            applyFocusFromToolResolve(focus(), {
+                tool: 'query_open_loops',
+                ok: true,
+                args: {},
+                result: {
+                    openLoops: [
+                        { sessionId: SESSION_A, name: 'a' },
+                        { sessionId: SESSION_B, name: 'b' }
+                    ]
+                }
+            })
+        ).toEqual(focus())
+    })
+
     it('parses clear-tombstones and ignores them as write subjects', () => {
         const tomb = parseConverseFocus({
             sessionId: null,
