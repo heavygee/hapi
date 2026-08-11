@@ -256,6 +256,10 @@ describe('responsive settings pages', () => {
         getHubSettings.mockResolvedValue({ sessionSummaryContract: false })
         updateHubSettings.mockResolvedValue({ sessionSummaryContract: true })
         context.token = `x.${btoa(JSON.stringify({ ns: 'default' }))}.x`
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{"error":"hapi inline disabled"}', {
+            status: 404,
+            headers: { 'Content-Type': 'application/json' }
+        }))
     })
 
     it('renders the mobile hub categories with current summaries', () => {
@@ -285,6 +289,36 @@ describe('responsive settings pages', () => {
         expect(await screen.findByRole('checkbox', { name: 'Ask agents to emit session status summary' })).toBeInTheDocument()
         fireEvent.click(screen.getByRole('radio', { name: '简体中文' }))
         expect(localStorage.getItem('hapi-lang')).toBe('zh-CN')
+    })
+
+    it('shows an owner-only operator dock switch when /hapi/config is enabled', async () => {
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+            hapiInline: { enabled: true }
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+        renderPage(<SettingsGeneralPage />)
+        expect(await screen.findByRole('checkbox', { name: 'Show operator tools' })).toBeInTheDocument()
+    })
+
+    it('hides the operator dock switch from tenant namespaces', async () => {
+        context.token = `x.${btoa(JSON.stringify({ ns: 'tenant' }))}.x`
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+            hapiInline: { enabled: true }
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+        renderPage(<SettingsGeneralPage />)
+        expect(await screen.findByText('Companion pairing')).toBeInTheDocument()
+        expect(screen.queryByRole('checkbox', { name: 'Show operator tools' })).not.toBeInTheDocument()
+    })
+
+    it('persists operator dock enable like other prefs and stores the gate secret', async () => {
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+            hapiInline: { enabled: true }
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+        vi.spyOn(window, 'prompt').mockReturnValue('gate-secret')
+        renderPage(<SettingsGeneralPage />)
+        const toggle = await screen.findByRole('checkbox', { name: 'Show operator tools' })
+        fireEvent.click(toggle)
+        expect(localStorage.getItem('hapi-operator-dock')).toBe('true')
+        expect(localStorage.getItem('hapiInlineSecret')).toBe('gate-secret')
     })
 
     it('renders compact display controls without dropdown popovers', () => {
