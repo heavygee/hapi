@@ -13,6 +13,7 @@ import {
     isMachineCapabilitySkewed,
 } from '@hapi/protocol/runnerCapabilities'
 import type { CursorChatStoreStatus, CursorMigrateOutcome, CursorMigrateToAcpRequest, MessageDeliveryMode, MessagesResponse, QueuedStateResponse, SlashCommandsResponse } from '@hapi/protocol/apiTypes'
+import type { SteerQueuedMessageResponse } from '@hapi/protocol/schemas'
 import type { ExternalRef, AgentFlavor, CodexCollaborationMode, CopilotAgentMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
 import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
 import type { Server } from 'socket.io'
@@ -1195,13 +1196,13 @@ export class SyncEngine {
     }
 
     /**
-     * Manual stop-runner (banner Restart). Normally unnecessary: runners already
-     * self-restart on CLI mtime drift via version handoff. Use when handoff is
-     * disabled (HAPI_DISABLE_VERSION_HANDOFF=1) or stuck.
+     * Manual stop-runner for supervised hosts only (banner Restart).
+     * Detached `hapi runner start` has no supervisor — stop would leave the
+     * host offline. Require `metadata.supervisedRestart` (HAPI_RUNNER_SUPERVISED=1).
      */
     async restartMachineRunner(machineId: string, namespace: string): Promise<
         | { type: 'success'; message: string }
-        | { type: 'error'; message: string; code: 'machine_not_found' | 'machine_offline' | 'restart_failed' }
+        | { type: 'error'; message: string; code: 'machine_not_found' | 'machine_offline' | 'restart_unsupported' | 'restart_failed' }
     > {
         const machine = this.machineCache.getMachineByNamespace(machineId, namespace)
             ?? this.machineCache.refreshMachine(machineId)
@@ -1211,9 +1212,16 @@ export class SyncEngine {
         if (!machine.active) {
             return { type: 'error', message: 'Machine is offline', code: 'machine_offline' }
         }
+        if (machine.metadata?.supervisedRestart !== true) {
+            return {
+                type: 'error',
+                message: 'Restart requires a supervised runner (HAPI_RUNNER_SUPERVISED=1); unsupervised stop would leave the host offline',
+                code: 'restart_unsupported',
+            }
+        }
         try {
             await this.rpcGateway.stopRunner(machineId)
-            return { type: 'success', message: 'Runner restart requested' }
+            return { type: 'success', message: 'Runner stop requested; supervisor will relaunch' }
         } catch (error) {
             return {
                 type: 'error',
@@ -1455,6 +1463,72 @@ export class SyncEngine {
         messageId: string
     ): Promise<CancelQueuedMessageResult> {
         return this.messageService.cancelQueuedMessage(sessionId, messageId)
+    }
+
+    /**
+     * Ask the CLI to deliver one waiting-queue message into the active Pi turn
+     * (Pi native steer). Only pi sessions support this today; the CLI's
+     * `steer-queued-message` handler is registered by the pi runner alone.
+     */
+    async steerQueuedMessage(
+        sessionId: string,
+        messageId: string
+    ): Promise<SteerQueuedMessageResponse> {
+        const session = this.getSession(sessionId)
+        if (!session) {
+            return { status: 'failed', error: 'Session not found', localId: null }
+        }
+        if (session.metadata?.flavor !== 'pi') {
+            return { status: 'failed', error: 'Steering is only supported for Pi sessions', localId: null }
+        }
+        if (session.agentState?.controlledByUser === true) {
+            return { status: 'failed', error: 'Steering is only available for remote sessions', localId: null }
+        }
+
+        const lookup = this.store.messages.lookupQueuedMessage(sessionId, messageId)
+        if (lookup.status === 'absent') {
+            return { status: 'failed', error: 'Message not found', localId: null }
+        }
+        if (lookup.status === 'invoked') {
+            const message = lookup.message
+            return {
+                status: 'invoked',
+                message: {
+                    id: message.id,
+                    seq: message.seq,
+                    localId: message.localId,
+                    content: message.content,
+                    createdAt: message.createdAt,
+                    invokedAt: message.invokedAt,
+                    scheduledAt: message.scheduledAt
+                }
+            }
+        }
+        const { localId, scheduledAt } = lookup
+        if (!localId) {
+            return { status: 'failed', error: 'Message has no localId', localId: null }
+        }
+        // Reject every scheduled row — mature ones included. A matured row is
+        // released by the scheduled-FIFO path moments later anyway, and the web
+        // never offers Steer on scheduled rows.
+        if (scheduledAt != null) {
+            return { status: 'failed', error: 'Scheduled messages cannot be steered', localId }
+        }
+
+        try {
+            const result = await this.rpcGateway.steerQueuedMessage(sessionId, localId)
+            if (result.steered) {
+                return { status: 'steered', localId }
+            }
+            return {
+                status: 'failed',
+                error: result.error ?? 'Steer failed',
+                localId
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Steer failed'
+            return { status: 'failed', error: message, localId }
+        }
     }
 
     sweepImmediateQueuedOnSessionEnd(sessionId: string, invokedAt: number): void {

@@ -3,8 +3,8 @@ import {
     type ChatModelAdapter,
     useLocalRuntime,
 } from '@assistant-ui/react'
-import type { ReactElement, ReactNode } from 'react'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import type { ComponentProps, ReactElement, ReactNode } from 'react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
 import {
@@ -104,6 +104,60 @@ describe('UnifiedButton — routesToScratchlist visual state', () => {
         )
         const btn = getButton('Send')
         expect(btn.className).not.toContain('bg-amber-500')
+    })
+})
+
+describe('UnifiedButton — default send intent', () => {
+    function renderSendButton(overrides: Partial<ComponentProps<typeof UnifiedButton>> = {}) {
+        const onSend = vi.fn()
+        renderInProviders(
+            <UnifiedButton
+                canSend
+                voiceStatus="disconnected"
+                voiceEnabled={false}
+                controlsDisabled={false}
+                onSend={onSend}
+                onVoiceToggle={() => {}}
+                {...overrides}
+            />,
+        )
+        const label = overrides.voiceStatus === 'connected'
+            ? 'Stop'
+            : overrides.routesToScratchlist
+                ? /scratchlist/i
+                : 'Send'
+        return { onSend, button: getButton(label) }
+    }
+
+    it('keeps normal native click and keyboard activation as the default send intent', () => {
+        const { onSend, button } = renderSendButton()
+
+        fireEvent.keyDown(button, { key: 'Enter' })
+        expect(onSend).not.toHaveBeenCalled()
+        fireEvent.click(button, { detail: 1 })
+
+        expect(onSend).toHaveBeenCalledOnce()
+        expect(onSend).toHaveBeenCalledWith('default')
+    })
+
+    it('keeps touch tap, desktop mouse hold, and desktop right-click on normal behavior', () => {
+        vi.useFakeTimers()
+        const { onSend, button } = renderSendButton()
+
+        fireEvent.touchStart(button, { touches: [{ clientX: 10, clientY: 10 }] })
+        fireEvent.touchEnd(button, { changedTouches: [{ clientX: 10, clientY: 10 }] })
+        fireEvent.click(button)
+
+        fireEvent.mouseDown(button, { button: 0, clientX: 10, clientY: 10 })
+        act(() => vi.advanceTimersByTime(500))
+        fireEvent.mouseUp(button, { button: 0, clientX: 10, clientY: 10 })
+        fireEvent.click(button)
+        const contextMenuWasNotPrevented = fireEvent.contextMenu(button, { clientX: 10, clientY: 10 })
+
+        expect(onSend).toHaveBeenCalledTimes(2)
+        expect(onSend).toHaveBeenNthCalledWith(1, 'default')
+        expect(onSend).toHaveBeenNthCalledWith(2, 'default')
+        expect(contextMenuWasNotPrevented).toBe(true)
     })
 })
 

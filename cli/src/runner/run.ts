@@ -1231,6 +1231,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     // Cursor/Pi exact-id resume survives restart (#1473 merge gate). Untagged
     // legacy / true tag conflict still rotates; CLI then migrates sessions
     // onto the new id without the dead machine's proof.
+    // asRunner: true — only the daemon may advertise caps/mtimes (#1108).
     clearReenrollGrant()
     let machine
     try {
@@ -1239,7 +1240,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           machineId,
           machineTag,
           runnerProof,
-          metadata: buildMachineMetadata({ workspaceRoots, startedCliMtimeMs: startedWithCliMtimeMs }),
+          metadata: buildMachineMetadata({
+            workspaceRoots,
+            startedCliMtimeMs: startedWithCliMtimeMs,
+            asRunner: true,
+          }),
           runnerState: initialRunnerState,
           allowLegacyReenroll: !handoffRunnerProof,
         }),

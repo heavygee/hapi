@@ -475,6 +475,20 @@ export class RpcGateway {
         return await this.sessionRpc(sessionId, method, params ?? {}, timeoutMs ?? DEFAULT_RPC_TIMEOUT_MS) as T
     }
 
+    /**
+     * Ask the CLI to deliver one queued message into the active Pi turn
+     * (Pi native steer). Only the pi flavor registers this handler.
+     */
+    async steerQueuedMessage(
+        sessionId: string,
+        localId: string
+    ): Promise<{ steered: boolean; error?: string }> {
+        return await this.sessionRpc(sessionId, RPC_METHODS.SteerQueuedMessage, { localId }) as {
+            steered: boolean
+            error?: string
+        }
+    }
+
     async forkConversation(
         sessionId: string,
         params: { messageLocalId?: string }

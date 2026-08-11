@@ -60,7 +60,7 @@ import type {
     UploadFileResponse
 } from '@hapi/protocol/apiTypes'
 import type { AgentFlavor, MessageDeliveryMode } from '@hapi/protocol'
-import type { CancelMessageResponse } from '@hapi/protocol/schemas'
+import type { CancelMessageResponse, SteerQueuedMessageResponse } from '@hapi/protocol/schemas'
 import type { TranscriptionMode, TranscriptionProvider, TranscriptionProviderInfo } from '@hapi/protocol/voice'
 
 export type ProviderCredentialSource = 'env' | 'settings' | 'none'
@@ -578,6 +578,14 @@ export class ApiClient {
             { method: 'DELETE' }
         )
         return response as CancelMessageResponse
+    }
+
+    async steerMessage(sessionId: string, messageId: string): Promise<SteerQueuedMessageResponse> {
+        const response = await this.request(
+            `/api/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/steer`,
+            { method: 'POST' }
+        )
+        return response as SteerQueuedMessageResponse
     }
 
     async abortSession(sessionId: string): Promise<void> {

@@ -557,3 +557,54 @@ describe('HappyComposer send-error atomic restore', () => {
         expect(screen.getByTestId('pending-schedule')).toHaveTextContent('null')
     })
 })
+
+describe('HappyComposer send intent gestures', () => {
+    afterEach(() => {
+        cleanup()
+        runtime.pendingSendIntentRef = null
+        runtime.sentIntents = []
+    })
+
+    it('ignores Alt/Option+Enter (the old explicit-queue gesture) entirely', () => {
+        renderComposer('follow-up', null, true)
+
+        fireEvent.keyDown(input(), { key: 'Enter', altKey: true })
+
+        // Every send now queues by default (issue #1466); the Alt+Enter
+        // gesture was removed with the Pi automatic steer.
+        expect(runtime.sentIntents).toEqual([])
+        expect(runtime.pendingSendIntentRef?.current).toBe('default')
+    })
+
+    it('uses default intent for the configured normal Enter send', () => {
+        renderComposer('ordinary send', null, true)
+
+        fireEvent.keyDown(input(), { key: 'Enter' })
+
+        expect(runtime.sentIntents).toEqual(['default'])
+        expect(runtime.pendingSendIntentRef?.current).toBe('default')
+    })
+
+    it('consumes a restored queue retry mark before resetting the shared ref', () => {
+        renderComposer('retry queue', null, true)
+        runtime.pendingSendIntentRef!.current = 'queue'
+
+        fireEvent.keyDown(input(), { key: 'Enter' })
+
+        expect(runtime.sentIntents).toEqual(['queue'])
+        expect(runtime.pendingSendIntentRef?.current).toBe('default')
+    })
+
+    it('keeps Alt/Option+Enter inert when Pi is idle or a schedule is active', () => {
+        const idle = renderComposer('idle', null, false)
+        fireEvent.keyDown(input(), { key: 'Enter', altKey: true })
+        expect(runtime.sentIntents).toEqual([])
+        expect(idle.current).not.toBeNull()
+
+        cleanup()
+        renderComposer('scheduled', { type: 'absolute', ms: 1234 }, true)
+        fireEvent.keyDown(input(), { key: 'Enter', altKey: true })
+        expect(runtime.sentIntents).toEqual([])
+        expect(runtime.pendingSendIntentRef?.current).toBe('default')
+    })
+})

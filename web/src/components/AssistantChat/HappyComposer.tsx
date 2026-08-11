@@ -1268,7 +1268,6 @@ export function HappyComposer(props: {
 
         // Collapsed: honor Settings Enter behavior. Expanded: always newline
         // (plain Enter inserts; Ctrl/Cmd+Enter or the send button submits).
-        // Soup tip lacks upstream Alt+Enter Pi-queue plumbing; do not import it here.
         if (key === 'Enter') {
             const action = resolveComposerEnterKeyAction({
                 composerEnterBehavior,

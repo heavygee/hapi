@@ -45,21 +45,35 @@ export type SessionBootstrapResult = {
 export function buildMachineMetadata(options?: {
     workspaceRoots?: string[]
     startedCliMtimeMs?: number
+    /**
+     * Only the long-lived runner daemon may advertise machine RPC capabilities
+     * and CLI mtimes. Terminal/lazy/existing session bootstraps must omit this
+     * so a newer CLI session cannot paint an old connected runner as current
+     * (#1108 bot Major).
+     */
+    asRunner?: boolean
 }): MachineMetadata {
     const installedCliMtimeMs = getInstalledCliMtimeMs()
     const startedCliMtimeMs = options?.startedCliMtimeMs ?? installedCliMtimeMs
-    return {
+    const base: MachineMetadata = {
         host: process.env.HAPI_HOSTNAME || os.hostname(),
         platform: os.platform(),
-        arch: process.arch,
         happyCliVersion: packageJson.version,
         homeDir: os.homedir(),
         happyHomeDir: configuration.happyHomeDir,
         happyLibDir: runtimePath(),
         workspaceRoots: options?.workspaceRoots,
+    }
+    if (!options?.asRunner) {
+        return base
+    }
+    return {
+        ...base,
         capabilities: [...CURRENT_MACHINE_CAPABILITIES],
         ...(typeof startedCliMtimeMs === 'number' ? { startedCliMtimeMs } : {}),
         ...(typeof installedCliMtimeMs === 'number' ? { installedCliMtimeMs } : {}),
+        // Always boolean so hub merge can clear a prior true on unsupervised restart.
+        supervisedRestart: process.env.HAPI_RUNNER_SUPERVISED === '1',
     }
 }
 
@@ -112,12 +126,14 @@ function pickExistingSessionMetadata(metadata: Metadata | null | undefined): Par
     if (metadata.geminiSessionId !== undefined) preserved.geminiSessionId = metadata.geminiSessionId
     if (metadata.opencodeSessionId !== undefined) preserved.opencodeSessionId = metadata.opencodeSessionId
     if (metadata.grokSessionId !== undefined) preserved.grokSessionId = metadata.grokSessionId
+    if (metadata.agySessionId !== undefined) preserved.agySessionId = metadata.agySessionId
     if (metadata.cursorSessionId !== undefined) preserved.cursorSessionId = metadata.cursorSessionId
     if (metadata.cursorSessionProtocol !== undefined) preserved.cursorSessionProtocol = metadata.cursorSessionProtocol
     if (metadata.kimiSessionId !== undefined) preserved.kimiSessionId = metadata.kimiSessionId
     if (metadata.copilotSessionId !== undefined) preserved.copilotSessionId = metadata.copilotSessionId
     if (metadata.piSessionId !== undefined) preserved.piSessionId = metadata.piSessionId
     if (metadata.piResumeAttempt !== undefined) preserved.piResumeAttempt = metadata.piResumeAttempt
+    if (metadata.ptyResumeAttempt !== undefined) preserved.ptyResumeAttempt = metadata.ptyResumeAttempt
     if (metadata.preferredPermissionMode !== undefined) preserved.preferredPermissionMode = metadata.preferredPermissionMode
     if (metadata.tools !== undefined) preserved.tools = metadata.tools
     if (metadata.slashCommands !== undefined) preserved.slashCommands = metadata.slashCommands
@@ -127,8 +143,6 @@ function pickExistingSessionMetadata(metadata: Metadata | null | undefined): Par
     if (metadata.piAvailableModels !== undefined) preserved.piAvailableModels = metadata.piAvailableModels
     // Preserve provider-qualified Pi model selection (disambiguates duplicate modelIds).
     if (metadata.piSelectedModel !== undefined) preserved.piSelectedModel = metadata.piSelectedModel
-    // Preserve structured PR links across resume/bootstrap rebuilds (tiann/hapi#1160).
-    if (metadata.externalRefs !== undefined) preserved.externalRefs = metadata.externalRefs
     if (metadata.conversationHistoryPoints !== undefined) {
         preserved.conversationHistoryPoints = metadata.conversationHistoryPoints
     }
@@ -137,6 +151,9 @@ function pickExistingSessionMetadata(metadata: Metadata | null | undefined): Par
     }
     if (metadata.conversationHistoryTurns !== undefined) {
         preserved.conversationHistoryTurns = metadata.conversationHistoryTurns
+    }
+    if (metadata.conversationHistoryEntryIds !== undefined) {
+        preserved.conversationHistoryEntryIds = metadata.conversationHistoryEntryIds
     }
     if (metadata.conversationHistoryDiverged !== undefined) {
         preserved.conversationHistoryDiverged = metadata.conversationHistoryDiverged
@@ -154,16 +171,15 @@ function pickExistingSessionMetadata(metadata: Metadata | null | undefined): Par
     return preserved
 }
 
-async function getMachineCredentialsOrExit(): Promise<{ machineId: string; machineTag?: string }> {
+async function getMachineIdOrExit(): Promise<string> {
     const settings = await readSettings()
     const machineId = settings?.machineId
     if (!machineId) {
         console.error(`[START] No machine ID found in settings, which is unexpected since authAndSetupMachineIfNeeded should have created it. Please report this issue on ${packageJson.bugs}`)
         process.exit(1)
     }
-    const machineTag = settings?.machineTag?.trim() || undefined
     logger.debug(`Using machineId: ${machineId}`)
-    return { machineId, machineTag }
+    return machineId
 }
 
 async function reportSessionStarted(sessionId: string, metadata: Metadata): Promise<void> {
@@ -188,11 +204,11 @@ export async function bootstrapSession(options: SessionBootstrapOptions): Promis
 
     const api = await ApiClient.create()
 
-    const credentials = await getMachineCredentialsOrExit()
-    // Terminal/session processes must not create the machine row (#1473 Major).
-    // Only the runner INSERTs with runnerProof so the first runner start does
-    // not rotate away from sessions that already recorded machineId.
-    const machineId = credentials.machineId
+    const machineId = await getMachineIdOrExit()
+    await api.getOrCreateMachine({
+        machineId,
+        metadata: buildMachineMetadata()
+    })
 
     const metadata = buildSessionMetadata({
         flavor: options.flavor,
@@ -211,10 +227,7 @@ export async function bootstrapSession(options: SessionBootstrapOptions): Promis
         effort: options.effort
     })
 
-    const session = api.sessionSyncClient(sessionInfo, { sessionTag })
-
-    // Broker env must land before wrapped agents snapshot process.env (#1473).
-    await session.waitForPeerSessionCapability({ timeoutMs: 16_000 })
+    const session = api.sessionSyncClient(sessionInfo)
 
     exportHapiSessionEnv(sessionInfo.id)
 
@@ -239,9 +252,8 @@ export async function bootstrapLazySession(options: SessionBootstrapOptions): Pr
     }
 
     const api = await ApiClient.create()
-    const credentials = await getMachineCredentialsOrExit()
-    // Do not POST /cli/machines from terminal/lazy bootstrap (#1473 Major).
-    const machineId = credentials.machineId
+    const machineId = await getMachineIdOrExit()
+    const machineMetadata = buildMachineMetadata()
     const metadata = buildSessionMetadata({
         flavor: options.flavor,
         startedBy,
@@ -286,6 +298,10 @@ export async function bootstrapLazySession(options: SessionBootstrapOptions): Pr
                 model: options.model,
                 modelReasoningEffort: options.modelReasoningEffort,
                 effort: options.effort,
+                machine: {
+                    id: machineId,
+                    metadata: machineMetadata
+                },
                 timeoutMs: 10_000,
                 signal
             })
@@ -294,7 +310,6 @@ export async function bootstrapLazySession(options: SessionBootstrapOptions): Pr
             }
             return materialized
         },
-        sessionTag,
         onMaterialized: (materialized, snapshot) => {
             // Export only after the hub row exists. Exporting the provisional id at
             // bootstrap lets agents inherit HAPI_SESSION_ID before GET /api/sessions/:id
@@ -324,14 +339,13 @@ export async function bootstrapExistingSession(options: {
 }): Promise<SessionBootstrapResult> {
     const startedBy = options.startedBy ?? 'terminal'
     const api = await ApiClient.create()
-    const credentials = await getMachineCredentialsOrExit()
-    // Do not POST /cli/machines from resume either (#1473 Major) — runner owns INSERT.
-    const machineId = credentials.machineId
+    const machineId = await getMachineIdOrExit()
 
-    // GET omits sessionCapability by design (#1203). Runner resume does not
-    // receive the create-time tag (pass 2g/2h — no child fd/env mint-proof);
-    // hub arms a spawn-RPC nonce; runner redeems + PID-injects capability.
-    // Direct terminal resume without inject cannot register session RPC (#1473).
+    await api.getOrCreateMachine({
+        machineId,
+        metadata: buildMachineMetadata()
+    })
+
     const sessionInfo = await api.getSession(options.sessionId)
     const baseMetadata = buildSessionMetadata({
         flavor: options.flavor,
@@ -354,29 +368,8 @@ export async function bootstrapExistingSession(options: {
     }
     const metadata = buildUpdatedMetadata(sessionInfo.metadata)
 
-    // Capture before ApiSession constructor drains HAPI_PEER_CAP_INJECT (#1473).
-    const {
-        HAPI_PEER_CAP_INJECT_ENV,
-        takeDirectResumeCapability,
-    } = await import('@/api/peerCapabilityInject')
-    const directCapability = takeDirectResumeCapability()
-    const expectsInjectedCapability = Boolean(process.env[HAPI_PEER_CAP_INJECT_ENV]?.trim())
-
-    // Host-fallback / terminal resume may be intentionally unattributed when
-    // the hub omitted resumePeerMintNonce (#1473 Major). Only fail closed when
-    // an attributed path was actually armed.
-    const session = api.sessionSyncClient(
-        sessionInfo,
-        directCapability ? { sessionCapability: directCapability } : undefined
-    )
+    const session = api.sessionSyncClient(sessionInfo)
     session.updateMetadata(buildUpdatedMetadata)
-
-    if (directCapability || expectsInjectedCapability) {
-        const injected = await session.waitForPeerSessionCapability({ timeoutMs: 16_000 })
-        if (!injected) {
-            throw new Error('Cannot resume: runner peer capability inject failed')
-        }
-    }
 
     exportHapiSessionEnv(sessionInfo.id)
 
