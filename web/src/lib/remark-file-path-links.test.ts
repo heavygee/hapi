@@ -48,14 +48,9 @@ describe('remarkFilePathLinks', () => {
         expect(links.map(linkedPath)).toEqual(['screenshot.png', 'README.md'])
     })
 
-    it('links Windows absolute paths so the session host can validate and read them', () => {
+    it('does not autolink Windows absolute paths (containment needs session cwd in <A>)', () => {
         const nodes = transform('Open C:\\Users\\dev\\project\\handoff.md and D:/work/app/src/main.ts:12')
-        const links = nodes.filter((node) => node.type === 'link')
-
-        expect(links.map(linkedPath)).toEqual([
-            'C:\\Users\\dev\\project\\handoff.md',
-            'D:/work/app/src/main.ts'
-        ])
+        expect(nodes.some((node) => node.type === 'link')).toBe(false)
     })
 
     it('does not link other absolute or parent paths', () => {
@@ -119,13 +114,10 @@ describe('remarkFilePathLinks — inlineCode', () => {
     it.each([
         'C:\\Users\\dev\\project\\handoff.md',
         'D:/work/app/src/main.ts:12'
-    ])('links Windows absolute inlineCode path %s', (value) => {
+    ])('does not autolink Windows absolute inlineCode path %s', (value) => {
         const nodes = transformNodes([{ type: 'inlineCode', value }])
-        const link = nodes.find((node) => node.type === 'link')!
-
-        expect(linkedPath(link)).toBe(value.replace(/:\d+(?::\d+)?$/, ''))
-        expect(link.children?.[0]?.type).toBe('inlineCode')
-        expect(link.children?.[0]?.value).toBe(value)
+        expect(nodes.some((node) => node.type === 'link')).toBe(false)
+        expect(nodes.find((node) => node.type === 'inlineCode')?.value).toBe(value)
     })
 
     it.each([
@@ -189,12 +181,13 @@ describe('remarkFilePathLinks — explicit markdown links', () => {
 
     it.each([
         'C:\\Users\\dev\\project\\handoff.md',
-        'D:/work/app/src/main.ts:12'
-    ])('rewrites a Windows absolute file link %s', (url) => {
+        'D:/work/app/src/main.ts:12',
+        'D:/outside/secret.ts#L1',
+    ])('does not rewrite Windows absolute file link %s', (url) => {
         const nodes = transformNodes([linkNode(url)])
         const link = nodes.find((node) => node.type === 'link')!
-
-        expect(linkedPath(link)).toBe(url.replace(/:\d+(?::\d+)?$/, ''))
+        expect(decodeFilePathHref(link.url as string)).toBeNull()
+        expect(link.url).toBe(url)
     })
 
     it.each([

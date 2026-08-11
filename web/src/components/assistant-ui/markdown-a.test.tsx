@@ -335,6 +335,27 @@ describe('markdown <A> component — fail-closed path-like hrefs (#1452)', () =>
         expect(document.querySelector('.aui-md-a-inert')?.textContent).toBe('etc')
     })
 
+    it('keeps outside-workspace Windows absolute href inert despite drive colon looking like a scheme', () => {
+        renderA(
+            { href: 'D:/outside/secret.ts#L1', children: 'win' },
+            chatContext()
+        )
+        expect(document.querySelector('a')).toBeNull()
+        expect(document.querySelector('.aui-md-a-inert')?.textContent).toBe('win')
+    })
+
+    it('routes in-workspace Windows absolute href to FilePathAnchor', () => {
+        renderA(
+            { href: 'C:\\Users\\ada\\coding\\hapi\\docs\\a.md', children: 'win' },
+            chatContext({
+                metadata: { path: 'C:\\Users\\ada\\coding\\hapi', host: 'local' },
+            })
+        )
+        const link = document.querySelector('a')
+        expect(link).not.toBeNull()
+        expect(link!.getAttribute('href')).toContain('/sessions/session-1/file?')
+    })
+
     it('expands ~/ and routes to FilePathAnchor when workspace metadata is present', () => {
         renderA(
             { href: '~/coding/hapi/docs/a.md', children: 'tilde' },

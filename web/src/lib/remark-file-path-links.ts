@@ -87,7 +87,8 @@ function shouldLinkPath(value: string): boolean {
     if (path.length < 3) return false
     if (path.startsWith('/') || path.startsWith('~/')) return false
     if (path.startsWith('../') || path.includes('/../')) return false
-    if (isWindowsAbsolutePath(path)) return hasKnownFileExtension(path)
+    // Windows abs needs session cwd for containment — leave for <A>.
+    if (isWindowsAbsolutePath(path)) return false
     if (path.includes('/')) return hasKnownFileExtension(path)
     return hasKnownFileExtension(path)
 }
@@ -168,10 +169,8 @@ function linkInlineCodeNode(node: MarkdownNode): MarkdownNode | null {
 //
 // Accepts:
 // - repo-relative allowlisted paths (including `./` and `#fragment` / `:line` stripped)
-// - Windows absolute paths with allowlisted extensions (CLI validatePath still
-//   enforces workspace containment at read time)
 //
-// Still rejects: POSIX abs / `~/` (need session cwd — handled fail-closed in <A>),
+// Still rejects: POSIX/Windows abs / `~/` (need session cwd — handled fail-closed in <A>),
 // `../`, scheme-bearing URLs, and non-file targets (`/settings`, `#section`).
 function rewriteFileLinkNode(node: MarkdownNode): void {
     if (node.type !== 'link') return
@@ -189,11 +188,13 @@ function rewriteFileLinkNode(node: MarkdownNode): void {
     const withoutMeta = cut >= 0 ? url.slice(0, cut) : url
 
     const target = stripLineSuffix(withoutMeta)
-    if (!isWindowsAbsolutePath(target) && target.includes(':')) return
 
-    // POSIX absolute paths need chat workspace metadata for containment — leave
-    // them for <A> / classifyNoSchemeHref instead of painting a premature hapi-file link.
-    if (target.startsWith('/') && !target.startsWith('//')) return
+    // Absolute paths (POSIX or Windows) need chat workspace metadata for
+    // containment — leave them for <A> / classifyNoSchemeHref.
+    if ((target.startsWith('/') && !target.startsWith('//')) || isWindowsAbsolutePath(target)) {
+        return
+    }
+    if (target.includes(':')) return
 
     if (!shouldLinkPath(target)) return
 

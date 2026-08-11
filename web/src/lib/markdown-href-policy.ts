@@ -134,7 +134,8 @@ function isRepoRelativeCandidate(path: string): boolean {
     if (path.includes('://')) return false
     if (path.startsWith('/') || path.startsWith('~/') || path === '~') return false
     if (path.startsWith('../') || path.includes('/../')) return false
-    if (isWindowsAbsolutePath(path)) return hasKnownFileExtension(path)
+    // Drive-qualified paths need workspace containment — never treat as relative.
+    if (isWindowsAbsolutePath(path)) return false
     return hasKnownFileExtension(path)
 }
 

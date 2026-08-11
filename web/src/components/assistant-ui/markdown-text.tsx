@@ -621,7 +621,10 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
 
     // Defense in depth for scheme-less hrefs that remark did not rewrite to
     // hapi-file: (absolute / ~/ / no-ext / fragment leftovers, etc.).
-    if (href && !hasScheme(href)) {
+    // Windows drive paths look scheme-bearing to hasScheme (`C:...`) but are
+    // filesystem paths — route them through the same fail-closed classifier.
+    const isWindowsAbsHref = href ? /^[A-Za-z]:[\\/]/.test(href) : false
+    if (href && (!hasScheme(href) || isWindowsAbsHref)) {
         const decision = classifyNoSchemeHref(href, {
             workspacePath: chat?.metadata?.path ?? null,
         })
@@ -644,7 +647,7 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
     // scheme, which previously caused the onClick handler to preventDefault and
     // silently break all relative markdown links. Treat them as 'iana' so the
     // browser or SPA router can navigate normally.
-    const isRelative = href ? !hasScheme(href) : false
+    const isRelative = href ? (!hasScheme(href) || isWindowsAbsHref) : false
     const classification = href && !isRelative ? classifyScheme(href) : 'iana'
     const colonIdx = href ? href.indexOf(':') : -1
     const scheme = colonIdx > 0 && !isRelative ? href!.slice(0, colonIdx).toLowerCase() : ''

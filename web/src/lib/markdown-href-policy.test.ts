@@ -112,6 +112,23 @@ describe('classifyNoSchemeHref — fail-closed (#1452)', () => {
         })
     })
 
+    it('does not treat Windows absolute paths as repo-relative (containment required)', () => {
+        expect(classifyNoSchemeHref('D:\\outside\\secret.ts')).toEqual({ action: 'inert' })
+        expect(classifyNoSchemeHref('D:/outside/secret.ts#L1')).toEqual({ action: 'inert' })
+    })
+
+    it('routes in-workspace Windows absolute paths to file preview', () => {
+        const winWorkspace = 'C:\\Users\\ada\\coding\\hapi'
+        expect(
+            classifyNoSchemeHref('C:\\Users\\ada\\coding\\hapi\\docs\\a.md', {
+                workspacePath: winWorkspace,
+            })
+        ).toEqual({
+            action: 'file',
+            path: 'C:\\Users\\ada\\coding\\hapi\\docs\\a.md',
+        })
+    })
+
     it('renders absolute paths without workspace metadata as inert (fail closed)', () => {
         expect(classifyNoSchemeHref('/home/ada/coding/hapi/docs/a.md')).toEqual({ action: 'inert' })
     })
