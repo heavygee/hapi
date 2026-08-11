@@ -696,6 +696,12 @@ export class ApiSessionClient extends EventEmitter {
             this.pendingHubPromptEchoes = this.pendingHubPromptEchoes.filter(
                 (entry) => !entry.localIds.some((id) => replacementIds.has(id))
             )
+        } else {
+            // SendMessageRequest allows omitting localId. One id-less delivery
+            // is in flight at a time; replace the previous nameless marker.
+            this.pendingHubPromptEchoes = this.pendingHubPromptEchoes.filter(
+                (entry) => entry.localIds.length > 0
+            )
         }
         if (this.pendingHubPromptEchoes.some((entry) => entry.text === normalized)) return
         this.pendingHubPromptEchoes.push({ text: normalized, localIds })
@@ -706,6 +712,14 @@ export class ApiSessionClient extends EventEmitter {
 
     discardPendingHubPromptEcho(localId: string): void {
         const index = this.pendingHubPromptEchoes.findIndex((entry) => entry.localIds.includes(localId))
+        if (index < 0) return
+        this.pendingHubPromptEchoes.splice(index, 1)
+    }
+
+    discardPendingHubPromptEchoText(text: string): void {
+        const normalized = text.trim()
+        if (!normalized) return
+        const index = this.pendingHubPromptEchoes.findIndex((entry) => entry.text === normalized)
         if (index < 0) return
         this.pendingHubPromptEchoes.splice(index, 1)
     }

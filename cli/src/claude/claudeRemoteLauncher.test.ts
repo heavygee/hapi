@@ -104,7 +104,8 @@ function createClientStub() {
         sendClaudeSessionMessage: () => {},
         sendSessionEvent: () => {},
         notePendingHubPromptEcho: () => {},
-        discardPendingHubPromptEcho: () => {}
+        discardPendingHubPromptEcho: () => {},
+        discardPendingHubPromptEchoText: () => {}
     }
 }
 

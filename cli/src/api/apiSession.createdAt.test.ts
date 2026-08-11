@@ -281,6 +281,60 @@ describe('sendClaudeSessionMessage createdAt propagation', () => {
             .not.toBe(true)
     })
 
+    it('id-less rebatch replaces the previous id-less echo marker', () => {
+        const { client, fakeSocket } = makeClient()
+        client.notePendingHubPromptEcho('hello from web')
+        client.notePendingHubPromptEcho('hello from web\nqueued while retrying')
+
+        client.sendClaudeSessionMessage({
+            type: 'user',
+            uuid: 'user-idless-combined',
+            userType: 'external',
+            isSidechain: false,
+            timestamp: '2024-03-10T00:00:00.000Z',
+            message: { role: 'user', content: 'hello from web\nqueued while retrying' }
+        } as unknown as RawJSONLines)
+
+        const [, combined] = fakeSocket.emit.mock.calls[0] as [string, Record<string, unknown>]
+        expect(combined.message).toMatchObject({
+            role: 'user',
+            meta: { sentFrom: 'cli', isTranscriptEcho: true }
+        })
+
+        fakeSocket.emit.mockClear()
+        client.sendClaudeSessionMessage({
+            type: 'user',
+            uuid: 'user-local-after-idless',
+            userType: 'external',
+            isSidechain: false,
+            timestamp: '2024-03-10T00:00:01.000Z',
+            message: { role: 'user', content: 'hello from web' }
+        } as unknown as RawJSONLines)
+
+        const [, local] = fakeSocket.emit.mock.calls[0] as [string, Record<string, unknown>]
+        expect((local.message as { meta?: { isTranscriptEcho?: boolean } }).meta?.isTranscriptEcho)
+            .not.toBe(true)
+    })
+
+    it('id-less dropped marker does not misclassify a later matching local prompt', () => {
+        const { client, fakeSocket } = makeClient()
+        client.notePendingHubPromptEcho('hello from web')
+        client.discardPendingHubPromptEchoText('hello from web')
+
+        client.sendClaudeSessionMessage({
+            type: 'user',
+            uuid: 'user-local-after-idless-drop',
+            userType: 'external',
+            isSidechain: false,
+            timestamp: '2024-03-10T00:00:00.000Z',
+            message: { role: 'user', content: 'hello from web' }
+        } as unknown as RawJSONLines)
+
+        const [, payload] = fakeSocket.emit.mock.calls[0] as [string, Record<string, unknown>]
+        expect((payload.message as { meta?: { isTranscriptEcho?: boolean } }).meta?.isTranscriptEcho)
+            .not.toBe(true)
+    })
+
     it('unmatched local Claude prompt stays unmarked when a different hub prompt is pending', () => {
         const { client, fakeSocket } = makeClient()
         client.notePendingHubPromptEcho('hello from web', 'local-1')
