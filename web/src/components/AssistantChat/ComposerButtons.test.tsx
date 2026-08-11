@@ -137,7 +137,7 @@ describe('UnifiedButton — default send intent', () => {
         fireEvent.click(button, { detail: 1 })
 
         expect(onSend).toHaveBeenCalledOnce()
-        expect(onSend).toHaveBeenCalledWith('default')
+        expect(onSend).toHaveBeenCalledWith()
     })
 
     it('keeps touch tap, desktop mouse hold, and desktop right-click on normal behavior', () => {
@@ -155,8 +155,8 @@ describe('UnifiedButton — default send intent', () => {
         const contextMenuWasNotPrevented = fireEvent.contextMenu(button, { clientX: 10, clientY: 10 })
 
         expect(onSend).toHaveBeenCalledTimes(2)
-        expect(onSend).toHaveBeenNthCalledWith(1, 'default')
-        expect(onSend).toHaveBeenNthCalledWith(2, 'default')
+        expect(onSend).toHaveBeenNthCalledWith(1)
+        expect(onSend).toHaveBeenNthCalledWith(2)
         expect(contextMenuWasNotPrevented).toBe(true)
     })
 })
