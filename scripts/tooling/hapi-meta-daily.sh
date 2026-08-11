@@ -12,7 +12,8 @@
 #      ADR D8+). Never writes emoji or PR-number prefixes into titles.
 #      Keeps "Peer #N:" incubating titles (no issue chip yet).
 #   4. Pings a session ONLY when policy says it is actionable and not noise
-#      (ping windows: always rouse sticky ⚠️/🔧 incl. inactive resume;
+#      (ping windows: always rouse sticky ⚠️/🔧 incl. inactive/archived resume;
+#      SKIP if session.thinking — already in a turn / emitting (not merely active).
 #      🧹 complete never pings; 🔧 Gate A clean / archive-pending never hourly
 #      resume — that undoes archive → 🔧 forever; 2026-08-11 e4d152f3)
 #      transition / fingerprint / reminder for greens)
@@ -579,7 +580,7 @@ main() {
     # HARD RULE (2026-08-06 Sparling): session titles are decorative. Meta tracks a
     # session iff metadata.externalRefs has github_pr on tiann/hapi | heavygee/hapi.
     # Linked → hapi or not. Unlinked → invisible to Meta. No Peer/PR/# title scrape.
-    declare -A SESS_ID SESS_ACTIVE SESS_NAME SESS_PRS SESS_REFS SESS_PATH SESS_LIFECYCLE
+    declare -A SESS_ID SESS_ACTIVE SESS_NAME SESS_PRS SESS_REFS SESS_PATH SESS_LIFECYCLE SESS_THINKING
     declare -A PR_SESSIONS      # pr -> "sid8,sid8"
     declare -A ALL_PR           # pr -> 1
     declare -A MERGED_TITLE
@@ -588,7 +589,7 @@ main() {
     # empty metadata.name shifts fields and Meta drops ownership (estate: #1383).
     # Column [2] is md_session_display_title (name → summary → path), not raw
     # metadata.name — see comment block above that helper.
-    local row sid sid8 active name prs refs_json path lifecycle
+    local row sid sid8 active name prs refs_json path lifecycle thinking
     while IFS= read -r row; do
         [[ -z "$row" ]] && continue
         sid="$(jq -r '.[0] // empty' <<<"$row")"
@@ -598,6 +599,7 @@ main() {
         refs_json="$(jq -c '.[3] // []' <<<"$row")"
         path="$(jq -r '.[4] // ""' <<<"$row")"
         lifecycle="$(jq -r '.[5] // ""' <<<"$row")"
+        thinking="$(jq -r '.[6] // false' <<<"$row")"
 
         local hapi_refs=""
         hapi_refs="$(printf '%s' "${refs_json:-[]}" | jq -r '
@@ -618,6 +620,7 @@ main() {
         SESS_REFS["$sid8"]="${refs_json:-[]}"
         SESS_PATH["$sid8"]="${path:-}"
         SESS_LIFECYCLE["$sid8"]="${lifecycle:-}"
+        SESS_THINKING["$sid8"]="${thinking:-false}"
         local p
         for p in $prs; do
             ALL_PR["$p"]=1
@@ -650,7 +653,8 @@ main() {
             $title,
             ($o.metadata.externalRefs // []),
             ($o.metadata.path // ""),
-            ($o.metadata.lifecycleState // "")
+            ($o.metadata.lifecycleState // ""),
+            ($o.thinking // false)
           ]')
     if [[ -n "$PR_ONLY" ]]; then
         # Restrict to a single explicit PR (allows low-numbered upstream PRs).
@@ -695,7 +699,7 @@ main() {
 
     # --- per-session: rename + policy ping; build next state ---
     local new_state="$state"
-    local -a Q_WARN Q_MERGED Q_COMPLETE Q_ORPHAN Q_INACTIVE Q_PINGED Q_RENAMED Q_STATUS Q_WAIT_TIANN Q_SELF_MERGE
+    local -a Q_WARN Q_MERGED Q_COMPLETE Q_ORPHAN Q_INACTIVE Q_PINGED Q_RENAMED Q_STATUS Q_WAIT_TIANN Q_SELF_MERGE Q_SKIP_RUNNING
     local -a PLAN_ROWS   # for --json
     MD_EMIT_FAILURES=0
     local now_ms=$(( now * 1000 ))
@@ -820,6 +824,14 @@ main() {
         # the next window pings again. Never rouse for that remainder.
         if [[ "$combined" == "🔧" ]] && printf '%s' "$acts" | grep -q 'Gate A clean'; then
             decision="no"
+        fi
+        # In-turn skip: session.thinking means the agent is emitting / in a
+        # turn (not merely active=true). Injecting "are you done yet?" steers
+        # a live turn. Archived/inactive ⚠️ still rouse — chip says work owed.
+        local thinking="${SESS_THINKING[$sid8]:-false}"
+        if [[ "$thinking" == "true" && "$decision" == "yes" ]]; then
+            decision="no"
+            Q_SKIP_RUNNING+=("$sid8  $combined  #$(echo "$prs" | tr ' ' ',')  — thinking; skip ping this window")
         fi
 
         local this_ping="$prev_ping"
@@ -1268,6 +1280,7 @@ _print_queue() {
     _print_section "✅ RENAMED this run:" "${Q_RENAMED[@]:-}"
     _print_section "🏷️  CHIP STATUS updated (externalRefs cache):" "${Q_STATUS[@]:-}"
     _print_section "📣 PINGED this run:" "${Q_PINGED[@]:-}"
+    _print_section "🧠 SKIPPED (in a turn / thinking — already working):" "${Q_SKIP_RUNNING[@]:-}"
     _print_section "🟢 WAIT TIANN (✅ green, lane A - maintainer merge):" "${Q_WAIT_TIANN[@]:-}"
     _print_section "🟣 SELF-MERGE ELIGIBLE (✅ green, lane B - operator/Meta may merge):" "${Q_SELF_MERGE[@]:-}"
     echo ""

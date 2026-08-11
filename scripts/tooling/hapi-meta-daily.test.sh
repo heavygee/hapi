@@ -55,6 +55,7 @@ for a in "$@"; do
         200) j="$(echo "$j" | jq -c '. + {"200":{emoji:"✅",action:"full green - wait on tiann",prePr:false,merged:false}}')" ;;
         300) j="$(echo "$j" | jq -c '. + {"300":{emoji:"🔧",action:"MERGED — clean up",prePr:false,merged:true}}')" ;;
         400) j="$(echo "$j" | jq -c '. + {"400":{emoji:"⚠️",action:"fix failing CI",prePr:false,merged:false}}')" ;;
+        600) j="$(echo "$j" | jq -c '. + {"600":{emoji:"⚠️",action:"resolve 1 open thread(s)",prePr:false,merged:false}}')" ;;
         999) j="$(echo "$j" | jq -c '. + {"999":{emoji:"⚠️",action:"push to trigger bot review",prePr:false,merged:false}}')" ;;
     esac
 done
@@ -63,7 +64,7 @@ EOF
 chmod +x "$WORK/batch"
 
 # --- mock curl (hub) ------------------------------------------------------
-# auth → token; sessions → 4 PR-tagged sessions; PATCH → ok
+# auth → token; sessions → 5 PR-tagged sessions; PATCH → ok
 cat >"$WORK/curl" <<'EOF'
 #!/usr/bin/env bash
 args="$*"
@@ -75,7 +76,8 @@ cat <<'JSON'
  {"id":"aaaaaaaa-1111","active":true,"metadata":{"name":"needs work","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":100,"url":"https://github.com/tiann/hapi/pull/100","role":"primary"}]}},
  {"id":"bbbbbbbb-2222","active":true,"metadata":{"name":"green thing","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":200,"url":"https://github.com/tiann/hapi/pull/200","role":"primary"}]}},
  {"id":"cccccccc-3333","active":true,"metadata":{"name":"merged thing","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":300,"url":"https://github.com/tiann/hapi/pull/300","role":"primary"}]}},
- {"id":"dddddddd-4444","active":false,"metadata":{"name":"asleep warn","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":400,"url":"https://github.com/tiann/hapi/pull/400","role":"primary"}]}}
+ {"id":"dddddddd-4444","active":false,"metadata":{"name":"asleep warn","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":400,"url":"https://github.com/tiann/hapi/pull/400","role":"primary"}]}},
+ {"id":"ffffffff-6666","active":true,"thinking":true,"metadata":{"name":"running warn","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":600,"url":"https://github.com/tiann/hapi/pull/600","role":"primary"}]}}
 ]}
 JSON
 exit 0
@@ -136,6 +138,7 @@ check "run1: pinged #100 warn (aaaaaaaa)" "grep -q '^aaaaaaaa' <<<\"\$pings\""
 check "run1: pinged #300 merged (cccccccc)" "grep -q '^cccccccc' <<<\"\$pings\""
 check "run1: ✅ #200 first-sight transition pings (bbbbbbbb)" "grep -q '^bbbbbbbb' <<<\"\$pings\""
 check "run1: #400 asleep resume-pinged (C)" "grep -q '^dddddddd' <<<\"\$pings\""
+check "run1: thinking ⚠️ #600 not pinged (ffffffff)" "! grep -q '^ffffffff' <<<\"\$pings\""
 
 # ============ 3. second run: window-rouse sticky ⚠️/🔧; ✅ stays quiet ============
 out="$(run 2>&1)"
@@ -143,6 +146,8 @@ pings2="$(sort "$WORK/pings.log" 2>/dev/null || true)"
 check "run2: window-rouse re-pings ⚠️ #100" "grep -q '^aaaaaaaa' <<<\"\$pings2\""
 check "run2: window-rouse re-pings 🔧 #300" "grep -q '^cccccccc' <<<\"\$pings2\""
 check "run2: window-rouse re-pings asleep ⚠️ #400" "grep -q '^dddddddd' <<<\"\$pings2\""
+check "run2: thinking ⚠️ #600 still not pinged" "! grep -q '^ffffffff' <<<\"\$pings2\""
+check "run2: thinking skip listed" "grep -q 'ffffffff' <<<\"\$out\" && grep -qiE 'thinking|SKIPPED' <<<\"\$out\""
 check "run2: ✅ #200 stays silent (not work-state)" "! grep -q '^bbbbbbbb' <<<\"\$pings2\""
 check "run2: still lists warn #100 in queue" "grep -q '#100' <<<\"\$out\""
 
