@@ -3,7 +3,7 @@ import type { ToolCallMessagePartProps } from '@assistant-ui/react'
 import type { ChatBlock } from '@/chat/types'
 import type { GeneratedImageBlock, ToolCallBlock } from '@/chat/types'
 import type { ToolGroupBlock } from '@/chat/toolGroups'
-import { isObject, safeStringify } from '@hapi/protocol'
+import { isObject, safeStringify, stripAgentContract } from '@hapi/protocol'
 import { isSubagentToolName } from '@/chat/subagentTool'
 import { ToolGroupCard } from '@/components/ToolCard/ToolGroupCard'
 import { getEventPresentation } from '@/chat/presentation'
@@ -15,6 +15,7 @@ import { useHappyChatContext } from '@/components/AssistantChat/context'
 import { CliOutputBlock } from '@/components/CliOutputBlock'
 import { UserBubbleContent, getUserBubbleClassName, shouldShowMessageStatus } from '@/components/AssistantChat/messages/user-bubble'
 import { ImagePreview } from '@/components/ImagePreview'
+import { useShowAgentContract } from '@/hooks/useShowAgentContract'
 
 function isToolCallBlock(value: unknown): value is ToolCallBlock {
     if (!isObject(value)) return false
@@ -126,6 +127,7 @@ function HappyNestedBlockList(props: {
     blocks: ChatBlock[]
 }) {
     const ctx = useHappyChatContext()
+    const { showAgentContract } = useShowAgentContract()
 
     return (
         <div className="flex flex-col gap-3">
@@ -155,7 +157,7 @@ function HappyNestedBlockList(props: {
                 if (block.kind === 'agent-text') {
                     return (
                         <div key={`agent:${block.id}`} className="px-1">
-                            <MarkdownRenderer content={block.text} />
+                            <MarkdownRenderer content={showAgentContract ? block.text : stripAgentContract(block.text)} />
                         </div>
                     )
                 }

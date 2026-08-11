@@ -103,6 +103,8 @@ describe('overseerEvents mapping', () => {
 
     test('deriveSessionProject uses path basename', () => {
         expect(deriveSessionProject({ path: '/coding/hapi' })).toBe('hapi')
+        expect(deriveSessionProject({ path: 'C:\\repo\\hapi' })).toBe('hapi')
+        expect(deriveSessionProject({ path: 'C:/repo/hapi' })).toBe('hapi')
     })
 
     test('extractHttpUrls strips trailing punctuation and dedupes', () => {
