@@ -3,6 +3,7 @@ import {
     formatGithubPrChipLabel,
     formatGithubPrChipTitle,
     GITHUB_PR_CHIP_STALE_MS,
+    isGithubPrHoldPulse,
     resolveGithubPrChipDisplay
 } from './SessionPrChip'
 import { getPrimaryGithubPrRef, githubPrStatusFromEmoji, githubPrStatusEmoji } from '@hapi/protocol'
@@ -77,10 +78,34 @@ describe('SessionPrChip helpers', () => {
     it('maps Meta emoji contract to stable status enums', () => {
         expect(githubPrStatusFromEmoji('✅')).toBe('clean')
         expect(githubPrStatusFromEmoji('⚠️')).toBe('needs_work')
+        expect(githubPrStatusFromEmoji('🛑')).toBe('needs_operator')
         expect(githubPrStatusEmoji('merged')).toBe('🔧')
+        expect(githubPrStatusEmoji('needs_operator')).toBe('🛑')
         expect(githubPrStatusEmoji('unknown')).toBe('❓')
         expect(githubPrStatusFromEmoji('❓')).toBe('unknown')
         expect(githubPrStatusFromEmoji('?')).toBe('unknown')
+    })
+
+    it('pulses only while hold status is fresh', () => {
+        const now = 1_700_000_000_000 + 60_000
+        const hold = resolveGithubPrChipDisplay(baseRef({
+            status: 'needs_operator',
+            statusCheckedAt: 1_700_000_000_000,
+            statusAction: 'HOLD @tiann: please trim'
+        }), now)
+        expect(formatGithubPrChipLabel(baseRef({
+            status: 'needs_operator',
+            statusCheckedAt: 1_700_000_000_000
+        }), now)).toBe('🛑')
+        expect(isGithubPrHoldPulse(hold)).toBe(true)
+        expect(isGithubPrHoldPulse(resolveGithubPrChipDisplay(baseRef({
+            status: 'needs_work',
+            statusCheckedAt: 1_700_000_000_000
+        }), now))).toBe(false)
+        expect(isGithubPrHoldPulse(resolveGithubPrChipDisplay(baseRef({
+            status: 'needs_operator',
+            statusCheckedAt: 1_700_000_000_000
+        }), 1_700_000_000_000 + GITHUB_PR_CHIP_STALE_MS + 1))).toBe(false)
     })
 
     it('uses relative ago in chip title (tooltip already - no absolute nest)', () => {

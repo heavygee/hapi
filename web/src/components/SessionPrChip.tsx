@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import { formatRelativeTime } from '@/lib/relativeTime'
 import { useTranslation } from '@/lib/use-translation'
 import { HoverTooltip } from '@/components/HoverTooltip'
+import { FueDot } from '@/components/Fue'
 
 type RelativeTimeTFunc = (key: string, params?: Record<string, string | number>) => string
 
@@ -45,6 +46,11 @@ export function resolveGithubPrChipDisplay(
     return { status: ref.status, stale: false }
 }
 
+/** Pulse on the existing PR chip while Meta hold is latched (not a new FUE id). */
+export function isGithubPrHoldPulse(display: GithubPrChipDisplay): boolean {
+    return display.status === 'needs_operator' && !display.stale
+}
+
 /**
  * Compact chip glyph: status emoji only (or `PR` when uncached).
  * Full `repo#N` + status copy lives in the tooltip / action-menu header.
@@ -65,6 +71,8 @@ function statusToneClass(status: GithubPrStatus | undefined): string {
             return 'border-emerald-500/40 text-emerald-700 dark:text-emerald-300'
         case 'needs_work':
             return 'border-amber-500/50 text-amber-800 dark:text-amber-200'
+        case 'needs_operator':
+            return 'border-rose-500/70 text-rose-800 dark:text-rose-200'
         case 'pending':
             return 'border-sky-500/40 text-sky-700 dark:text-sky-300'
         case 'merged':
@@ -130,6 +138,7 @@ export function SessionPrChip(props: SessionPrChipProps) {
     const display = resolveGithubPrChipDisplay(primary, nowMs)
     const glyph = formatGithubPrChipLabel(primary, nowMs)
     const detail = formatGithubPrChipTitle(primary, display, t, nowMs)
+    const holdPulse = isGithubPrHoldPulse(display)
 
     return (
         <HoverTooltip
@@ -147,6 +156,7 @@ export function SessionPrChip(props: SessionPrChipProps) {
                     data-testid="session-pr-chip"
                     data-pr-status={display.status ?? 'unset'}
                     data-pr-stale={display.stale ? '1' : '0'}
+                    data-pr-hold={holdPulse ? '1' : '0'}
                     aria-describedby={tooltipId}
                     title={detail}
                     aria-label={
@@ -161,7 +171,7 @@ export function SessionPrChip(props: SessionPrChipProps) {
                     onMouseDown={(event) => event.stopPropagation()}
                     onPointerDown={(event) => event.stopPropagation()}
                     className={cn(
-                        'inline-flex min-w-[1.35rem] shrink-0 items-center justify-center rounded-md border',
+                        'relative inline-flex min-w-[1.35rem] shrink-0 items-center justify-center rounded-md border',
                         'bg-[var(--app-subtle-bg)] px-1 py-0.5 text-[12px] font-medium leading-none',
                         'hover:opacity-90 focus-visible:outline-none',
                         'focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
@@ -169,6 +179,9 @@ export function SessionPrChip(props: SessionPrChipProps) {
                     )}
                 >
                     {glyph}
+                    {holdPulse ? (
+                        <FueDot pulsing color="bg-rose-500" ariaLabel="operator hold" />
+                    ) : null}
                 </a>
             )}
         >

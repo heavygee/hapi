@@ -25,6 +25,8 @@ export function githubPrStatusFromEmoji(emoji: string): GithubPrStatus {
             return 'pending'
         case '⚠️':
             return 'needs_work'
+        case '🛑':
+            return 'needs_operator'
         case '📝':
             return 'pre_pr'
         case '🔧':
@@ -47,6 +49,8 @@ export function githubPrStatusEmoji(status: GithubPrStatus | null | undefined): 
             return '🔁'
         case 'needs_work':
             return '⚠️'
+        case 'needs_operator':
+            return '🛑'
         case 'pre_pr':
             return '📝'
         case 'merged':
@@ -206,8 +210,10 @@ export function githubPrChipStatusFromEmoji(
         case '✅':
         case '🔁':
         case '⚠️':
+        case '🛑':
         case '📝':
-        case '🔧': {
+        case '🔧':
+        case '🧹': {
             const trimmed = action.trim()
             return {
                 status: githubPrStatusFromEmoji(emoji),
