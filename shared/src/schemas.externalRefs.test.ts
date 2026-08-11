@@ -49,6 +49,19 @@ describe('ExternalRefSchema', () => {
         }
     })
 
+    it('accepts needs_operator hold status (babysit.hold)', () => {
+        const parsed = ExternalRefSchema.safeParse({
+            ...validPr,
+            status: 'needs_operator',
+            statusCheckedAt: 1_700_000_000_000,
+            statusAction: 'HOLD @tiann: please trim'
+        })
+        expect(parsed.success).toBe(true)
+        if (parsed.success) {
+            expect(parsed.data.status).toBe('needs_operator')
+        }
+    })
+
     it('rejects unknown status values', () => {
         expect(ExternalRefSchema.safeParse({
             ...validPr,

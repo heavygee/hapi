@@ -60,6 +60,7 @@ export const GithubPrStatusSchema = z.enum([
     'clean',
     'pending',
     'needs_work',
+    'needs_operator',
     'pre_pr',
     'merged',
     'complete',
