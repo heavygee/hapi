@@ -38,6 +38,7 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 | Session title / PR health | Title = workstream only (no `PR #N:` once chipped); identity+health on **chip**; attach via `hapi link-pr` / MCP `link_pr` | Lifecycle [§ Session titles and PR chips](../tooling/feature-work-lifecycle.md#session-titles-and-pr-chips) |
 | Local Pi coding agent (5090 / oos-linux) | New Session → **Pi**; backend `oos-llm` VIP | [`pi-local-coding-agent.md`](./pi-local-coding-agent.md) |
 | Agent mangles `tiann`/`oos-linux`/MagicDNS doubles | Free-recall / tokenization hazard - not HAPI pipe. **Outside-Cursor control done (2026-07-24): native claude+codex 0/27 drops** | [`2026-07-22-doubled-character-free-recall.md`](../plans/2026-07-22-doubled-character-free-recall.md) + [outside-cursor results](../plans/2026-07-22-doubled-character-free-recall-outside-cursor-results.md) |
+| Blocked on a missing host diagnostic (`strace`, `lsof`, `bpftrace`, …) | **Install it** (`sudo apt-get install -y …`), tell the operator you did, continue — estate-wide, every agent/flavor on this host; not a per-session courtesy | Keep installs scoped to the missing tool; no drive-by package museums |
 
 ---
 
