@@ -774,8 +774,8 @@ layers:
 
   # EMERGENCY 2026-08-11: tiann/hapi#1502 / PR #1503 — Cursor ACP state_update
   # chatter flips hub thinking every ~1–2s after #1487 (session-list spinner dance).
-  # CLI-only: ignore state_update for thinking; bump only on real activity.
+  # CLI-only: state_update only (+750ms running debounce); ignore tool/content while idle.
   # Worktree: ~/coding/hapi/worktrees/thinking-flicker-1487 @ fix/cursor-thinking-flicker-1487
-  # Tip: f2f36e02e (origin/fix/cursor-thinking-flicker-1487) — upstream PR #1503
+  # Tip: 81af5350e (origin/fix/cursor-thinking-flicker-1487) — upstream PR #1503
   - branch: fix/cursor-thinking-flicker-1487
 
