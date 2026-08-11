@@ -787,3 +787,8 @@ layers:
   # Tip: ee39d11d8 (driver/hapi-inline-operator-dock)
   - branch: driver/hapi-inline-operator-dock
 
+  # heavygee/hapi#121 — operator-hold chip pulse (🛑 needs_operator / babysit.hold).
+  # Soup UI on awareness ancestry. Classifier is fork-main scripts (PR #124).
+  # Worktree: ~/coding/hapi/worktrees/operator-hold-chip-ui @ driver/operator-hold-chip
+  - branch: driver/operator-hold-chip
+
