@@ -378,6 +378,18 @@ describe('markdown <A> component — fail-closed path-like hrefs (#1452)', () =>
         expect(document.querySelector('.aui-md-a-inert')?.textContent).toBe('empty')
     })
 
+    it('renders uppercase hapi-file-candidate scheme as inert when payload is empty', () => {
+        renderA({ href: 'HAPI-FILE-CANDIDATE:', children: 'upper' }, chatContext())
+        expect(document.querySelector('a')).toBeNull()
+        expect(document.querySelector('.aui-md-a-inert')?.textContent).toBe('upper')
+    })
+
+    it('renders percent-encoded hapi-file-candidate scheme as inert when payload is empty', () => {
+        renderA({ href: 'hapi%2Dfile%2Dcandidate:', children: 'enc' }, chatContext())
+        expect(document.querySelector('a')).toBeNull()
+        expect(document.querySelector('.aui-md-a-inert')?.textContent).toBe('enc')
+    })
+
     it('treats percent-encoded backslash Windows href as inert when outside workspace', () => {
         renderA(
             { href: 'D:%5Coutside%5Csecret.ts', children: 'win' },

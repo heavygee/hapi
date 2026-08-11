@@ -54,6 +54,12 @@ describe('isKnownSpaHref', () => {
     ])('does not treat %s as SPA', (href) => {
         expect(isKnownSpaHref(href)).toBe(false)
     })
+
+    it('strips Vite BASE_URL prefix before SPA allowlist checks', () => {
+        expect(isKnownSpaHref('/hapi/settings', { baseUrl: '/hapi/' })).toBe(true)
+        expect(isKnownSpaHref('/hapi/sessions/abc/file', { baseUrl: '/hapi/' })).toBe(true)
+        expect(isKnownSpaHref('/hapi/settings/typo', { baseUrl: '/hapi/' })).toBe(false)
+    })
 })
 
 describe('expandTildePath', () => {

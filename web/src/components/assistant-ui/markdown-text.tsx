@@ -625,7 +625,7 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
     // before painting FilePathAnchor or treating `C:` as a custom URI scheme.
     // Candidates are Windows-only; reject empty / non-drive payloads fail-closed
     // (do not fall through to custom-scheme confirmation for this scheme).
-    const isCandidateHref = href?.startsWith('hapi-file-candidate:') ?? false
+    const isCandidateHref = href ? normalizedScheme(href) === 'hapi-file-candidate' : false
     if (isCandidateHref && (!candidatePath || !/^[A-Za-z]:[\\/]/.test(candidatePath))) {
         return (
             <InertMarkdownHref href={href ?? ''} className={props.className}>

@@ -62,13 +62,22 @@ export function hasKnownFileExtension(value: string): boolean {
     return COMMON_FILE_EXTENSIONS.has(ext)
 }
 
-export function isKnownSpaHref(href: string): boolean {
+export function isKnownSpaHref(
+    href: string,
+    options: { baseUrl?: string } = {}
+): boolean {
     if (href.startsWith('#') || href.startsWith('?')) return true
     if (href.startsWith('//')) return false
     const { path: raw } = splitHrefMeta(href)
     const path = raw.replace(/\/+$/, '') || '/'
-    if (STATIC_SPA_PATHS.has(path)) return true
-    return SESSION_SPA_PATH.test(path)
+    const rawBase = options.baseUrl ?? (import.meta.env.BASE_URL as string | undefined) ?? '/'
+    const base = rawBase === '/' ? '' : rawBase.replace(/\/+$/, '')
+    const routePath =
+        base && (path === base || path.startsWith(`${base}/`))
+            ? path.slice(base.length) || '/'
+            : path
+    if (STATIC_SPA_PATHS.has(routePath)) return true
+    return SESSION_SPA_PATH.test(routePath)
 }
 
 export function inferHomeDir(workspacePath: string): string | null {

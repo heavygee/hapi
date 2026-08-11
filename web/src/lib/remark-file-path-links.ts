@@ -44,13 +44,27 @@ export function decodeFilePathHref(href: string): string | null {
 }
 
 export function decodeFilePathCandidateHref(href: string): string | null {
-    if (!href.startsWith(FILE_PATH_CANDIDATE_HREF_PREFIX)) return null
-    const encoded = href.slice(FILE_PATH_CANDIDATE_HREF_PREFIX.length)
-    if (!encoded) return null
+    // Decode scheme bypass spellings (`HAPI-FILE-CANDIDATE:`, percent-encoded)
+    // before extracting the payload. Empty payload → null (caller fails closed).
+    let value = href.trimStart()
+    for (let i = 0; i < 2; i++) {
+        try {
+            const next = decodeURIComponent(value)
+            if (next === value) break
+            value = next
+        } catch {
+            break
+        }
+    }
+    const match = /^hapi-file-candidate:(.*)$/i.exec(value)
+    if (!match) return null
+    const payload = match[1]
+    if (!payload) return null
     try {
-        return decodeURIComponent(encoded)
+        // Payload may already be decoded by the loop above; retry is a no-op.
+        return decodeURIComponent(payload)
     } catch {
-        return null
+        return payload
     }
 }
 
