@@ -623,6 +623,16 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
 
     // Windows candidate (or raw / %5C-normalized drive path): classify with workspace
     // before painting FilePathAnchor or treating `C:` as a custom URI scheme.
+    // Candidates are Windows-only; reject non-drive payloads fail-closed (do not
+    // treat them as scheme-less SPA navigate and skip custom-scheme confirm).
+    if (candidatePath && !/^[A-Za-z]:[\\/]/.test(candidatePath)) {
+        return (
+            <InertMarkdownHref href={href ?? ''} className={props.className}>
+                {props.children}
+            </InertMarkdownHref>
+        )
+    }
+
     const windowsPathFromHref = (() => {
         if (candidatePath) return candidatePath
         if (!href) return null

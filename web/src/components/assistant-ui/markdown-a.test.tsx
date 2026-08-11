@@ -360,6 +360,18 @@ describe('markdown <A> component — fail-closed path-like hrefs (#1452)', () =>
         expect(link!.getAttribute('href')).toContain('/sessions/session-1/file?')
     })
 
+    it('renders non-Windows hapi-file-candidate payloads as inert (no SPA navigate bypass)', () => {
+        renderA(
+            {
+                href: 'hapi-file-candidate:' + encodeURIComponent('/settings'),
+                children: 'spoof',
+            },
+            chatContext()
+        )
+        expect(document.querySelector('a')).toBeNull()
+        expect(document.querySelector('.aui-md-a-inert')?.textContent).toBe('spoof')
+    })
+
     it('treats percent-encoded backslash Windows href as inert when outside workspace', () => {
         renderA(
             { href: 'D:%5Coutside%5Csecret.ts', children: 'win' },
