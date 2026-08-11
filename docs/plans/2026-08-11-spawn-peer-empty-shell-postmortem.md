@@ -56,7 +56,7 @@ Machine spawn is **create process + session row**, not **assign work**. A Cursor
 
 ## Remediation (ordered)
 
-1. **Now:** `hapi-spawn-peer` — spawn + PATCH name + `hapi-ping-peer` + fail if no user message. Skill leads with that; first curl block is not spawn-only.
+1. **Now:** `hapi-spawn-peer` — spawn + PATCH name + `hapi-ping-peer` + fail if no user message. Skill leads with that; first curl block is not spawn-only. Resolve `hapi-ping-peer` to an **absolute path** (`command -v`); `[[ -x hapi-ping-peer ]]` looks in cwd and false-fails after a successful spawn (2026-08-11, left #1509 empty until emergency ping).
 2. **Skill:** state explicitly: extra JSON keys on `/spawn` are **silently ignored**; `message` is not a spawn field.
 3. **Upstream:** [tiann/hapi#1509](https://github.com/tiann/hapi/issues/1509) — MCP `spawn_peer` + `hapi spawn-peer`, fail-closed, same pattern as #1195. Optional 400 if spawn body contains `message`. Not the May 2026 relocate route. Not P1/P2.
 4. **Do not** wait on the May 2026 spawn-peer offering to make today's orchestrators reliable. Estate wrapper stays until #1509 ships.

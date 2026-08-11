@@ -101,11 +101,19 @@ else
     err "renamed → $NAME"
 fi
 
-PING_BIN="${HAPI_PING_PEER:-hapi-ping-peer}"
-if ! command -v "$PING_BIN" >/dev/null 2>&1; then
-    PING_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/hapi-ping-peer.sh"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+if [[ -n "${HAPI_PING_PEER:-}" ]]; then
+    PING_BIN="$HAPI_PING_PEER"
+elif command -v hapi-ping-peer >/dev/null 2>&1; then
+    PING_BIN="$(command -v hapi-ping-peer)"
+elif [[ -f "$SCRIPT_DIR/hapi-ping-peer.sh" ]]; then
+    PING_BIN="$SCRIPT_DIR/hapi-ping-peer.sh"
+elif [[ -x "$HOME/.local/bin/hapi-ping-peer" ]]; then
+    PING_BIN="$HOME/.local/bin/hapi-ping-peer"
+else
+    die "hapi-ping-peer not found (PATH / $SCRIPT_DIR / ~/.local/bin)"
 fi
-[[ -x "$PING_BIN" || -f "$PING_BIN" ]] || die "hapi-ping-peer not found"
+[[ -x "$PING_BIN" || -f "$PING_BIN" ]] || die "hapi-ping-peer not executable: $PING_BIN"
 
 err "delivering handoff via $PING_BIN (spawn JSON cannot carry message)"
 if [[ "$MESSAGE_FILE" == "-" ]]; then
