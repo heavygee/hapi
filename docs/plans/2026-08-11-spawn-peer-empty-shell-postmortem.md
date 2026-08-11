@@ -58,8 +58,8 @@ Machine spawn is **create process + session row**, not **assign work**. A Cursor
 
 1. **Now:** `hapi-spawn-peer` — spawn + PATCH name + `hapi-ping-peer` + fail if no user message. Skill leads with that; first curl block is not spawn-only.
 2. **Skill:** state explicitly: extra JSON keys on `/spawn` are **silently ignored**; `message` is not a spawn field.
-3. **Product (later, tiann or fork):** either `spawn-peer` route that accepts `message`, or `.strict()` / explicit 400 `"unknown key message; use POST /sessions/:id/messages"`. Silent strip is the footgun.
-4. **Do not** wait on the May 2026 spawn-peer offering to make today's orchestrators reliable.
+3. **Upstream:** [tiann/hapi#1509](https://github.com/tiann/hapi/issues/1509) — MCP `spawn_peer` + `hapi spawn-peer`, fail-closed, same pattern as #1195. Optional 400 if spawn body contains `message`. Not the May 2026 relocate route. Not P1/P2.
+4. **Do not** wait on the May 2026 spawn-peer offering to make today's orchestrators reliable. Estate wrapper stays until #1509 ships.
 
 ## Not this incident
 

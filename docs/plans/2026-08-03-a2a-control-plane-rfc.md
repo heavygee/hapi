@@ -101,13 +101,29 @@ These are the A2A substrate that already shipped:
 | Rich `@` composer chips | #1228 | Human authoring of peer refs |
 | `inspect_peer` / `hapi inspect-peer` | #1228 | Read peer metadata + recent text |
 | `ping_peer` / `hapi ping-peer` | #1195 | Resume + message a peer |
+| `spawn_peer` / `hapi spawn-peer` | **no** ([#1509](https://github.com/tiann/hapi/issues/1509)) | Create a session **with a remit**; fail if empty |
 | Flavor system prompts | #1228 | Agents taught: cite → inspect / ping |
 | `SessionSummary` | core | Fleet listing fields |
 | Multi-flavor / multi-machine | core | Heterogeneous workers and placement |
 | Same-hub / same-namespace gate | #1195 | Trust boundary |
 | Manual approval on peer tools | Claude MCP | Human interrupt friction |
 
-**Layer 0 truth:** messaging + discovery. Not yet structured collaboration.
+**Layer 0 truth:** messaging + discovery. Not yet structured collaboration. **Not yet create-with-remit** — machine spawn is an empty shell; that is a Layer 0 hole, not a P1/P2 object ([#1509](https://github.com/tiann/hapi/issues/1509)).
+
+### Revision 2026-08-11 - Layer 0 spawn with remit ([#1509](https://github.com/tiann/hapi/issues/1509))
+
+**Status:** independently shippable Layer 0 primitive. **Not** a Layer 1 work-contract. P2 typed handoffs **call** this; they do not invent a second spawn.
+
+**Problem (observed):** `POST /api/machines/:id/spawn` has no first-prompt field. Extra JSON `message` is stripped. Orchestrators get `sessionId` and zero user turns. `ping_peer` only targets an existing id.
+
+**Contract (Layer 0 only):**
+
+1. CLI `hapi spawn-peer` + MCP `spawn_peer` — same pattern as #1195. Remit required. Fail closed if the new session has no user message.
+2. Delivery of that remit uses the `ping_peer` path so #1203 provenance applies.
+3. Do not auto-approve in read-only/default (#1401 / #1402 class).
+4. Do not wait on Hub-as-MCP-server (#360) or `POST /sessions/:parentId/spawn-peer` relocate.
+
+**Kill criteria:** a tool that returns `sessionId` with 0 messages after a remit was supplied → stop. Empty `message` allowed → stop.
 
 ### Revision 2026-08-09 - Layer 0 peer delivery provenance ([#1203](https://github.com/tiann/hapi/issues/1203))
 
@@ -490,6 +506,7 @@ Backward compatible default:
 | Capability | Upstream today | This RFC |
 |------------|----------------|----------|
 | cite / inspect / ping | yes | canon as Layer 0 |
+| spawn peer **with remit** | no (#1509) | Layer 0 gap — MCP `spawn_peer` + CLI; fail-closed |
 | attributed peer delivery (`sentFrom: peer`) | no (#1203) | Layer 0.1 / P0.5 - not a handoff |
 | message retention | yes | remains |
 | `AGENT_NOTIFY_SUMMARY` parse | yes (#803) | elevate to work-ad feed |
@@ -517,13 +534,14 @@ This matters here specifically because [#1371](https://github.com/tiann/hapi/iss
 | Phase | Deliverable |
 |-------|-------------|
 | **P0** | This RFC + additive-only object schemas + capability flag |
+| **P0.4** | Layer 0 spawn with remit ([#1509](https://github.com/tiann/hapi/issues/1509)) - MCP `spawn_peer` + CLI; fail-closed. Not a work-contract. |
 | **P0.5** | Layer 0 peer delivery provenance ([#1203](https://github.com/tiann/hapi/issues/1203)) - trusted `meta.sentFrom: "peer"` + source session; UI badge. Not a work-contract. |
 | **P1** | `events` / `event_links` + namespace/principal ownership + isolation tests |
 | **P2** | Handoff create / deliver / receipt (+ notice back to source) |
 | **P3** | `AGENT_NOTIFY_SUMMARY` → work-ad / status ingest |
 | **P4** | Query APIs + minimal debug surfaces (no manager UI) |
 
-Each phase should be independently useful. P0.5 without P1 still stops ghost user messages. P1 without P2 still gives a place to put structured status. P2 without P3 still gives explicit handoffs.
+Each phase should be independently useful. P0.4 without P1 still lets an agent create a worker with work. P0.5 without P1 still stops ghost user messages. P1 without P2 still gives a place to put structured status. P2 without P3 still gives explicit handoffs.
 
 The smallest useful upstream slice is **P1 alone**: tables, write/query, structured principal, namespace isolation tests - no handoff helper, no UI.
 
