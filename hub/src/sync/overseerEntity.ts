@@ -860,6 +860,14 @@ export class OverseerEntity {
 
     /**
      * Exact session id, else unique prefix (hapi-ping-peer / loomux / pi pattern).
+     * Ambiguous or unknown → null. Never silently picks among collisions.
+     */
+    resolveCanonicalSessionId(sessionId: string): string | null {
+        return this.resolveSession(sessionId)?.id ?? null
+    }
+
+    /**
+     * Exact session id, else unique prefix (hapi-ping-peer / loomux / pi pattern).
      * Ambiguous or unknown → undefined. Never silently picks among collisions.
      */
     private resolveSession(sessionId: string): Session | undefined {

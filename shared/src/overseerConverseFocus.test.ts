@@ -221,6 +221,22 @@ describe('hub-owned conversational focus (capability, not pattern matching)', ()
         expect(after?.itemId).toBe(118)
     })
 
+    it('retains itemId from an item-only successful ping', () => {
+        const after = applyFocusFromToolResolve(null, {
+            tool: 'ping_session',
+            ok: true,
+            args: { itemId: 118, message: 'hi' },
+            result: { ok: true, sessionId: SESSION_A }
+        })
+        expect(after).toEqual(
+            expect.objectContaining({
+                sessionId: SESSION_A,
+                itemId: 118,
+                source: 'tool_resolve'
+            })
+        )
+    })
+
     it('promotes singleton query_events to focus', () => {
         expect(
             applyFocusFromToolResolve(null, {

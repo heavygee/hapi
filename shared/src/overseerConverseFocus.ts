@@ -224,11 +224,15 @@ export function applyFocusFromToolResolve(
         }
         const resultItem = itemFromResult(result)
         const argsItem = typeof args.itemId === 'number' && args.itemId > 0 ? args.itemId : null
-        // Never adopt a model-supplied itemId that was not already the focused item.
-        // Session-matched pings keep the prior item; off-session writes clear it.
+        const argsSession =
+            typeof args.sessionId === 'string' && args.sessionId.trim() ? args.sessionId.trim() : null
+        // Never adopt a model-supplied itemId that was not already focused, unless
+        // this was an item-only ping (the item was the authorized target).
         let itemId: number | null = resultItem
         if (itemId == null) {
             if (argsItem != null && previous?.itemId === argsItem) {
+                itemId = argsItem
+            } else if (argsItem != null && !argsSession) {
                 itemId = argsItem
             } else if (
                 previous?.itemId != null &&

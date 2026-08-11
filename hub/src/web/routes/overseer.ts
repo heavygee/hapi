@@ -16,6 +16,26 @@ import { assembleOverseerConverseMessages, listRecentConvoTurns, persistOverseer
 import { BrainUnavailableError, filterChatModels, isKnownBrainProfile, listBrainModels, listBrainProfiles, resolveBrainConfig, resolveBrainSelection } from '../../overseer/brainClient'
 import type { ActiveBrainSetting } from '../../store/settingsStore'
 import { applyFocusFromClientSession } from '@hapi/protocol'
+import type { OverseerEntity } from '../../sync/overseerEntity'
+
+const FULL_SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Client relatedSessionId must resolve to one canonical session before it can
+ * authorize write prefixes. Ambiguous/unknown short prefixes are refused;
+ * unknown full UUIDs are kept (session may not be loaded yet).
+ */
+function resolveClientRelatedSessionId(
+    overseer: OverseerEntity,
+    relatedSessionId: string | null | undefined
+): string | null {
+    const raw = typeof relatedSessionId === 'string' ? relatedSessionId.trim() : ''
+    if (!raw) return null
+    const canonical = overseer.resolveCanonicalSessionId(raw)
+    if (canonical) return canonical
+    if (FULL_SESSION_ID_RE.test(raw)) return raw
+    return null
+}
 
 const convoTurnBodySchema = z.object({
     operatorText: z.string().max(8000).default(''),
@@ -241,9 +261,13 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
         const messages = assembled.messages
         const lastOperator = [...messages].reverse().find((m) => m.role === 'operator')?.content ?? ''
         const durableFocus = settings.getConverseFocus(namespace)
+        const clientSessionSeed = resolveClientRelatedSessionId(
+            overseer,
+            parsed.data.relatedSessionId
+        )
         const priorFocus = applyFocusFromClientSession(
             durableFocus,
-            parsed.data.relatedSessionId,
+            clientSessionSeed,
             Math.max(Date.now(), (durableFocus?.updatedAt ?? 0) + 1)
         )
 
