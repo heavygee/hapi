@@ -483,6 +483,51 @@ describe('OverseerEventRecorder LLM fallback', () => {
         expect(event?.provenance).toContain('session-end')
     })
 
+    it('does not let an in-flight earlier LLM cover a later tool-only turn', async () => {
+        const store = new Store(':memory:')
+        let releaseFirst!: (value: NotifySummary) => void
+        const firstGate = new Promise<NotifySummary>((resolve) => {
+            releaseFirst = resolve
+        })
+        let firstStarted!: () => void
+        const firstStartedP = new Promise<void>((resolve) => {
+            firstStarted = resolve
+        })
+        const recorder = new OverseerEventRecorder(store.events, store.inbox, {
+            llmFallback: {
+                synthesizeNotifySummary: mock(async () => {
+                    firstStarted()
+                    return firstGate
+                }),
+            },
+        })
+        const live = makeSession('sess-inflight', 'cursor')
+        const stored = store.sessions.getOrCreateSession('llm-inflight', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
+        live.id = stored.id
+        const snapshot = toSessionSnapshot(live, stored.tag)
+
+        const first = recorder.onAgentMessage(snapshot, 'msg-a', agentText('earlier turn'), Date.now())
+        await firstStartedP
+        await recorder.onAgentMessage(snapshot, 'msg-tool', {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: { type: 'tool-call-result', output: { exit_code: 0 } },
+            },
+        }, Date.now() + 1)
+        releaseFirst({ status: 'done', summary: 'caught earlier' })
+        await first
+
+        const event = await recorder.onSessionEnd(
+            live,
+            stored.tag,
+            Date.now() + 2,
+            'completed',
+            () => 'earlier turn'
+        )
+        expect(event?.provenance).toContain('session-end')
+    })
+
     it('publishes after a successful LLM insert', async () => {
         const store = new Store(':memory:')
         let published = 0

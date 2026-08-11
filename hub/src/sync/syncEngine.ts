@@ -481,25 +481,29 @@ export class SyncEngine {
 
     private expireInactive(): void {
         const expired = this.sessionCache.expireInactive()
-        for (const sessionId of expired) {
-            const session = this.sessionCache.getSession(sessionId)
-            if (!session) continue
-            void this.overseerEvents.onSessionUpdated(
-                session,
-                this.store.sessions.getSession(sessionId)?.tag ?? null
-            ).catch((error) => {
-                console.error('[overseer] onSessionUpdated from expireInactive failed', error)
-            })
-        }
-        // Sort by most recent first so dedup keeps the newest session when multiple
-        // duplicates for the same agent thread expire in the same sweep.
-        const sorted = expired
-            .map((id) => this.sessionCache.getSession(id))
-            .filter((s): s is NonNullable<typeof s> => s != null)
-            .sort((a, b) => (b.activeAt - a.activeAt) || (b.updatedAt - a.updatedAt))
-        for (const session of sorted) {
-            this.triggerDedupIfNeeded(session.id)
-        }
+        void (async () => {
+            for (const sessionId of expired) {
+                const session = this.sessionCache.getSession(sessionId)
+                if (!session) continue
+                try {
+                    await this.overseerEvents.onSessionUpdated(
+                        session,
+                        this.store.sessions.getSession(sessionId)?.tag ?? null
+                    )
+                } catch (error) {
+                    console.error('[overseer] onSessionUpdated from expireInactive failed', error)
+                }
+            }
+            // Sort by most recent first so dedup keeps the newest session when multiple
+            // duplicates for the same agent thread expire in the same sweep.
+            const sorted = expired
+                .map((id) => this.sessionCache.getSession(id))
+                .filter((s): s is NonNullable<typeof s> => s != null)
+                .sort((a, b) => (b.activeAt - a.activeAt) || (b.updatedAt - a.updatedAt))
+            for (const session of sorted) {
+                this.triggerDedupIfNeeded(session.id)
+            }
+        })()
         this.machineCache.expireInactive()
         this.overseerEvents.checkStaleSessions(this.sessionCache.getSessions())
         // Piggybacked on the inactivity tick; not a logical part of expireInactive

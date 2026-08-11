@@ -174,8 +174,9 @@ export class OverseerEventRecorder {
     private readonly sessionThinking = new Map<string, boolean>()
     /** Per-session tail so concurrent LLM calls insert in arrival order. */
     private readonly sessionWork = new Map<string, Promise<unknown>>()
-    /** Sessions that already got a hub-llm-fallback row for the latest missed turn. */
-    private readonly llmFallbackSucceeded = new Set<string>()
+    /** Successful LLM fallback messageId per session (not a session-wide boolean). */
+    private readonly llmFallbackSucceeded = new Map<string, string>()
+    private readonly lastAgentMessageId = new Map<string, string>()
 
     constructor(
         private readonly events: EventStore,
@@ -205,7 +206,7 @@ export class OverseerEventRecorder {
 
         if (isAgentMessageContent(content)) {
             this.lastAgentMessageAt.set(session.id, ts)
-            this.llmFallbackSucceeded.delete(session.id)
+            this.lastAgentMessageId.set(session.id, messageId)
 
             const agentBody = unwrapRoleWrappedRecordEnvelope(content)
             const agentContent = agentBody?.role === 'agent' ? agentBody.content : content
@@ -219,7 +220,7 @@ export class OverseerEventRecorder {
                 if (detectEmptyHapiEventsSentinel(plainText)) {
                     this.pendingLlmFallback.delete(session.id)
                     primary = await this.enqueueSessionWork(session.id, () =>
-                        Promise.resolve(this.insertSystemEvent(session, {
+                        Promise.resolve(this.insertInferredEvent(session, {
                             ts,
                             sourceKind: 'system',
                             eventType: 'validation_error',
@@ -235,7 +236,7 @@ export class OverseerEventRecorder {
                 } else if (detectMalformedNotifySummaryLine(plainText)) {
                     this.pendingLlmFallback.delete(session.id)
                     primary = await this.enqueueSessionWork(session.id, () =>
-                        Promise.resolve(this.insertSystemEvent(session, {
+                        Promise.resolve(this.insertInferredEvent(session, {
                             ts,
                             sourceKind: 'system',
                             eventType: 'validation_error',
@@ -265,7 +266,7 @@ export class OverseerEventRecorder {
                 const toolFailure = extractToolFailureSummary(agentContent)
                 if (toolFailure) {
                     primary = await this.enqueueSessionWork(session.id, () =>
-                        Promise.resolve(this.insertSystemEvent(session, {
+                        Promise.resolve(this.insertInferredEvent(session, {
                             ts,
                             sourceKind: 'system',
                             sourceRef: session.id,
@@ -340,7 +341,9 @@ export class OverseerEventRecorder {
             }
             // Successful LLM row already captured this missed turn — do not
             // also write "session ended without AGENT_NOTIFY_SUMMARY".
-            if (llmEvent || this.llmFallbackSucceeded.has(session.id)) {
+            const successForLatest = this.lastAgentMessageId.get(session.id)
+                && this.llmFallbackSucceeded.get(session.id) === this.lastAgentMessageId.get(session.id)
+            if (llmEvent || successForLatest) {
                 return llmEvent
             }
 
@@ -460,7 +463,7 @@ export class OverseerEventRecorder {
                 tags: buildTags(notify, session.flavor),
             })
             if (stored) {
-                this.llmFallbackSucceeded.add(session.id)
+                this.llmFallbackSucceeded.set(session.id, messageId)
                 this.onAsyncSystemEvent?.(session.id)
             }
             return stored
@@ -494,6 +497,7 @@ export class OverseerEventRecorder {
         this.sessionWork.delete(sessionId)
         this.llmFallbackSucceeded.delete(sessionId)
         this.lastAgentMessageAt.delete(sessionId)
+        this.lastAgentMessageId.delete(sessionId)
         this.knownPermissionRequestIds.delete(sessionId)
         this.sessionThinking.delete(sessionId)
     }
@@ -610,6 +614,19 @@ export class OverseerEventRecorder {
         }
 
         this.knownPermissionRequestIds.set(session.id, currentIds)
+    }
+
+    private insertInferredEvent(
+        session: SessionSnapshot,
+        input: Omit<InsertSystemEventInput, 'riskDetected' | 'payloadJson'> & {
+            riskDetected?: 0 | 1
+            payloadFields?: Record<string, unknown>
+            notifyProject?: string | null
+        }
+    ): StoredSystemEvent | null {
+        const stored = this.insertSystemEvent(session, input)
+        if (stored) this.onAsyncSystemEvent?.(session.id)
+        return stored
     }
 
     private insertSystemEvent(
