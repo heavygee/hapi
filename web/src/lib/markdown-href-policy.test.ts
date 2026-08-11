@@ -119,6 +119,26 @@ describe('classifyNoSchemeHref — fail-closed (#1452)', () => {
         })
     })
 
+    it('decodes percent-encoded spaces before workspace containment', () => {
+        const workspace = '/home/ada/My Project'
+        expect(
+            classifyNoSchemeHref('/home/ada/My%20Project/docs/a.md', {
+                workspacePath: workspace,
+            })
+        ).toEqual({
+            action: 'file',
+            path: '/home/ada/My Project/docs/a.md',
+        })
+        expect(
+            classifyNoSchemeHref('~/My%20Project/docs/a.md', {
+                workspacePath: workspace,
+            })
+        ).toEqual({
+            action: 'file',
+            path: '/home/ada/My Project/docs/a.md',
+        })
+    })
+
     it('renders absolute paths outside the workspace as inert', () => {
         expect(classifyNoSchemeHref('/etc/passwd.sh', { workspacePath: workspace })).toEqual({
             action: 'inert',

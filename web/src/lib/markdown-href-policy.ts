@@ -171,7 +171,14 @@ export function classifyNoSchemeHref(
     if (isKnownSpaHref(trimmed)) return { action: 'navigate' }
 
     const { path: rawPath } = splitHrefMeta(trimmed)
-    const path = stripLineSuffix(rawPath)
+    // mdast→hast percent-encodes spaces etc.; compare against literal workspace.
+    let decodedPath: string
+    try {
+        decodedPath = decodeURIComponent(rawPath)
+    } catch {
+        return { action: 'inert' }
+    }
+    const path = stripLineSuffix(decodedPath)
     const workspacePath = options.workspacePath ?? null
 
     if (isRepoRelativeCandidate(path)) {
