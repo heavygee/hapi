@@ -17,6 +17,14 @@ export type OverseerConverseFocus = {
     updatedAt: number
 }
 
+/** True when focus names a session and/or inbox item (not a clear-tombstone). */
+export function hasConverseFocusSubject(
+    focus: OverseerConverseFocus | null | undefined
+): boolean {
+    if (!focus) return false
+    return Boolean(focus.sessionId?.trim()) || (focus.itemId != null && focus.itemId > 0)
+}
+
 export type OverseerToolResolveEvent = {
     tool: string
     ok: boolean
@@ -255,12 +263,32 @@ export function applyFocusFromToolResolve(
         }
     }
 
+    // Singleton worker roster — same singular-subject rule as query_inbox.
+    if (tool === 'list_active_workers' && isObj(result) && Array.isArray(result.workers)) {
+        if (result.workers.length !== 1) return previous
+        const only = result.workers[0]
+        if (!isObj(only)) return previous
+        const sessionId =
+            typeof only.sessionId === 'string'
+                ? only.sessionId.trim()
+                : typeof only.id === 'string'
+                    ? only.id.trim()
+                    : ''
+        if (!sessionId) return previous
+        return {
+            sessionId,
+            itemId: null,
+            source: 'tool_resolve',
+            updatedAt: now
+        }
+    }
+
     return previous
 }
 
 /** System-prompt / assemble hint so the brain shares the hub referent. */
 export function formatConverseFocusDirective(focus: OverseerConverseFocus | null): string | null {
-    if (!focus || (!focus.sessionId && focus.itemId == null)) return null
+    if (!hasConverseFocusSubject(focus)) return null
     const parts: string[] = ['# Conversational focus (hub-owned)', '']
     parts.push(
         'The operator is currently focused on the subject below. Prefer this referent for',
@@ -269,12 +297,16 @@ export function formatConverseFocusDirective(focus: OverseerConverseFocus | null
         'When they direct action on this subject in natural language, use write tools against it.'
     )
     parts.push('')
-    if (focus.itemId != null) parts.push(`- inbox itemId: ${focus.itemId}`)
-    if (focus.sessionId) parts.push(`- sessionId: ${focus.sessionId}`)
-    parts.push(`- established via: ${focus.source}`)
+    if (focus!.itemId != null) parts.push(`- inbox itemId: ${focus!.itemId}`)
+    if (focus!.sessionId) parts.push(`- sessionId: ${focus!.sessionId}`)
+    parts.push(`- established via: ${focus!.source}`)
     return parts.join('\n')
 }
 
+/**
+ * Parse persisted focus. Empty session+item with an updatedAt is a clear-tombstone
+ * (generation barrier for concurrent older turns) — not a live subject.
+ */
 export function parseConverseFocus(raw: unknown): OverseerConverseFocus | null {
     if (!isObj(raw)) return null
     const sessionId =
@@ -283,12 +315,17 @@ export function parseConverseFocus(raw: unknown): OverseerConverseFocus | null {
         typeof raw.itemId === 'number' && Number.isFinite(raw.itemId) && raw.itemId > 0
             ? raw.itemId
             : null
-    if (!sessionId && itemId == null) return null
     const source: OverseerConverseFocusSource =
         raw.source === 'tool_resolve' || raw.source === 'client' ? raw.source : 'tool_resolve'
     const updatedAt =
         typeof raw.updatedAt === 'number' && Number.isFinite(raw.updatedAt)
             ? raw.updatedAt
             : Date.now()
+    if (!sessionId && itemId == null) {
+        // Tombstone must carry an updatedAt so setConverseFocusIfNewer can reject
+        // older in-flight turns that still hold the deleted session.
+        if (typeof raw.updatedAt !== 'number' || !Number.isFinite(raw.updatedAt)) return null
+        return { sessionId: null, itemId: null, source, updatedAt }
+    }
     return { sessionId, itemId, source, updatedAt }
 }

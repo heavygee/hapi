@@ -70,7 +70,32 @@ describe('SettingsStore', () => {
         expect(s.getConverseFocus('ns-a')?.sessionId).toBe('other')
         expect(s.getConverseFocus()?.itemId).toBe(118)
         s.clearConverseFocus()
-        expect(s.getConverseFocus()).toBeNull()
+        const tombstone = s.getConverseFocus()
+        expect(tombstone?.sessionId).toBeNull()
+        expect(tombstone?.itemId).toBeNull()
+        expect(typeof tombstone?.updatedAt).toBe('number')
+    })
+
+    it('tombstone blocks older in-flight focus resurrection', () => {
+        const s = freshStore()
+        s.setConverseFocus({
+            sessionId: 'sess',
+            itemId: null,
+            source: 'tool_resolve',
+            updatedAt: 100
+        })
+        s.clearConverseFocus()
+        const clearedAt = s.getConverseFocus()?.updatedAt ?? 0
+        expect(clearedAt).toBeGreaterThanOrEqual(100)
+        expect(
+            s.setConverseFocusIfNewer({
+                sessionId: 'sess',
+                itemId: null,
+                source: 'tool_resolve',
+                updatedAt: clearedAt - 1
+            })
+        ).toBe(false)
+        expect(s.getConverseFocus()?.sessionId).toBeNull()
     })
 
     it('setConverseFocusIfNewer refuses older overlapping writes', () => {

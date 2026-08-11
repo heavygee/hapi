@@ -114,8 +114,21 @@ export class SettingsStore {
         return true
     }
 
+    /**
+     * Clear live subject by writing a timestamped tombstone (not a row delete).
+     * Keeps setConverseFocusIfNewer able to reject older in-flight turns that
+     * still hold the deleted session (Codex P2).
+     */
     clearConverseFocus(namespace = 'default'): void {
-        this.delete(converseFocusKey(namespace))
+        this.setConverseFocus(
+            {
+                sessionId: null,
+                itemId: null,
+                source: 'client',
+                updatedAt: Date.now()
+            },
+            namespace
+        )
     }
 
     /** After session merge/resume remaps ids — keep anaphoric writes on the live session. */

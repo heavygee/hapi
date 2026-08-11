@@ -18,6 +18,7 @@
 
 import { isOverseerWriteTool, type OverseerWriteToolName } from './overseerEntity'
 import type { OverseerConverseFocus } from './overseerConverseFocus'
+import { hasConverseFocusSubject } from './overseerConverseFocus'
 
 export type OverseerWriteAuthorization = {
     allowed: ReadonlySet<OverseerWriteToolName>
@@ -44,15 +45,14 @@ function focusTargets(focus: OverseerConverseFocus | null | undefined): {
 } {
     const sessionIdPrefixes: string[] = []
     const itemIds: number[] = []
-    if (!focus) return { sessionIdPrefixes, itemIds }
+    if (!hasConverseFocusSubject(focus) || !focus) return { sessionIdPrefixes, itemIds }
     if (focus.sessionId?.trim()) sessionIdPrefixes.push(focus.sessionId.trim().toLowerCase())
     if (focus.itemId != null && focus.itemId > 0) itemIds.push(focus.itemId)
     return { sessionIdPrefixes, itemIds }
 }
 
 function hasFocusSubject(focus: OverseerConverseFocus | null | undefined): boolean {
-    const t = focusTargets(focus)
-    return t.sessionIdPrefixes.length > 0 || t.itemIds.length > 0
+    return hasConverseFocusSubject(focus)
 }
 
 /**

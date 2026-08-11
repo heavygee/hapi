@@ -134,6 +134,8 @@ export async function runOverseerConverse(params: {
      * Cross-turn "tell it…" uses the focus persisted from the prior turn.
      */
     const writeFocus = params.focus ?? null
+    /** Monotonic turn token — tool resolves stamp this, not wall-clock at completion. */
+    const turnStartedAt = Date.now()
 
     const writeAuthFor = (): OverseerWriteAuthorization =>
         resolveOverseerWriteAuthorization({
@@ -257,12 +259,16 @@ export async function runOverseerConverse(params: {
                     ...(ok ? {} : { error: toolResultError(result) })
                 })
                 if (ok) {
-                    focus = applyFocusFromToolResolve(focus, {
-                        tool: name,
-                        ok: true,
-                        args,
-                        result
-                    })
+                    focus = applyFocusFromToolResolve(
+                        focus,
+                        {
+                            tool: name,
+                            ok: true,
+                            args,
+                            result
+                        },
+                        turnStartedAt
+                    )
                 }
                 if (ok && isOverseerWriteTool(name)) {
                     consumedWriteFingerprints.add(fingerprintWriteToolCall(name, args))

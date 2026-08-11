@@ -3,6 +3,8 @@ import {
     applyFocusFromClientSession,
     applyFocusFromToolResolve,
     formatConverseFocusDirective,
+    hasConverseFocusSubject,
+    parseConverseFocus,
     type OverseerConverseFocus
 } from './overseerConverseFocus'
 import {
@@ -146,5 +148,54 @@ describe('hub-owned conversational focus (capability, not pattern matching)', ()
         expect(line).toContain('118')
         expect(line).toContain(SESSION_A)
         expect(line.toLowerCase()).toMatch(/focus|subject/)
+    })
+
+    it('promotes singleton list_active_workers roster to focus', () => {
+        const next = applyFocusFromToolResolve(null, {
+            tool: 'list_active_workers',
+            ok: true,
+            args: {},
+            result: {
+                workers: [{ sessionId: SESSION_A, name: 'W1.8', observedState: 'working' }]
+            }
+        })
+        expect(next).toEqual(
+            expect.objectContaining({
+                sessionId: SESSION_A,
+                itemId: null,
+                source: 'tool_resolve'
+            })
+        )
+        expect(
+            applyFocusFromToolResolve(focus(), {
+                tool: 'list_active_workers',
+                ok: true,
+                args: {},
+                result: {
+                    workers: [
+                        { sessionId: SESSION_A, name: 'a' },
+                        { sessionId: SESSION_B, name: 'b' }
+                    ]
+                }
+            })
+        ).toEqual(focus())
+    })
+
+    it('parses clear-tombstones and ignores them as write subjects', () => {
+        const tomb = parseConverseFocus({
+            sessionId: null,
+            itemId: null,
+            source: 'client',
+            updatedAt: 50
+        })
+        expect(tomb).toEqual({
+            sessionId: null,
+            itemId: null,
+            source: 'client',
+            updatedAt: 50
+        })
+        expect(hasConverseFocusSubject(tomb)).toBe(false)
+        expect(formatConverseFocusDirective(tomb)).toBeNull()
+        expect(parseConverseFocus({ sessionId: null, itemId: null, source: 'client' })).toBeNull()
     })
 })
