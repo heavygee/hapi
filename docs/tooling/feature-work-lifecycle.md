@@ -348,7 +348,7 @@ hapi-worktree-create my-feature --branch feat/my-feature
 # → ~/coding/hapi/worktrees/my-feature
 ```
 
-**One feature → one worktree → one peer agent.** Handoff block required: [`new-feature-intake.md` §0](../tooling/new-feature-intake.md#0--feature-peer-agent--mandatory-handoff).
+**One feature → one worktree → one peer agent.** Handoff block required: [`new-feature-intake.md` §0](../tooling/new-feature-intake.md#0--feature-peer-agent--mandatory-handoff). Deliver with **`hapi-spawn-peer`** (spawn HTTP ≠ handoff; empty shell = failed spawn — [`2026-08-11-spawn-peer-empty-shell-postmortem.md`](../plans/2026-08-11-spawn-peer-empty-shell-postmortem.md)).
 
 ---
 

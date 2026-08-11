@@ -20,6 +20,8 @@ See [`feature-work-lifecycle.md` § When you say "do the next feature"](./featur
 
 When intake starts, spawn (or hand off to) a **dedicated feature peer**. The **orchestrator prompt is not optional** — it must list **which steps are already done** and **which steps the peer owns**.
 
+**How to spawn:** `hapi-spawn-peer --dir <worktree> --name 'Peer #<n>: <slug>' --message-file -` with the block below. Do **not** put the brief in `POST /api/machines/:id/spawn` JSON — that field is stripped (`docs/plans/2026-08-11-spawn-peer-empty-shell-postmortem.md`). A `sessionId` with 0 messages is a failed spawn.
+
 Copy and fill this block (do not spawn a peer with only "implement X"):
 
 ```markdown
