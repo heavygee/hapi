@@ -3,11 +3,18 @@
 #
 # Gate A: owned 🔧 sessions only. A member is clean when:
 #   1. no active soup layer attributable to that PR in the manifest text
-#   2. no live worktree at the session's metadata.path (when under worktrees/)
+#   2. no live worktree *for that PR* — either:
+#        - a Worktree:/branch token declared in PR comment blocks still on disk, or
+#        - session metadata.path under worktrees/ that is attributable to the PR
+#      Stale session paths pointing at unrelated live checkouts must NOT keep
+#      Gate A dirty after the layer is DROPPED (2026-08-11 #1413 ping loop).
+#      While the layer is still active, any live session worktree still dirties
+#      (fail-closed legacy).
 # Orphans (merged PR, no HAPI session) never enter the wave and never block.
 #
 # Sourced by hapi-meta-daily.sh. Unit tests: lib/meta-wave.test.sh
 # NO network. Callers inject manifest text + worktree existence checks.
+# Optional: HAPI_META_WORKTREES_ROOT — override …/worktrees dir for declared names.
 
 # mw_manifest_pr_layer_active <manifest_text> <pr_number>
 # Exit 0 if an active (uncommented) layer is attributable to PR; 1 if clean.
@@ -58,7 +65,10 @@ _mw_block_mentions_pr() {
 # Comment block already marks this PR as DROPPED (layer should be commented out).
 _mw_block_dropped_pr() {
     local block="$1" pr="$2"
-    printf '%s' "$block" | grep -Eiq "DROPPED.*#${pr}\\b|#${pr}\\b.*DROPPED|MERGED[[:space:]]+(UPSTREAM[[:space:]]+)?as[[:space:]]+(PR[[:space:]]*)?#${pr}\\b"
+    # Accept: DROPPED … #N | #N … DROPPED | MERGED as #N | MERGED as PR #N
+    # | MERGED as tiann/hapi#N (owner/repo#N)
+    printf '%s' "$block" | grep -Eiq \
+        "DROPPED.*#${pr}\\b|#${pr}\\b.*DROPPED|MERGED[[:space:]]+(UPSTREAM[[:space:]]+)?as[[:space:]]+(PR[[:space:]]*)?#${pr}\\b|MERGED[[:space:]]+(UPSTREAM[[:space:]]+)?as[[:space:]]+[[:alnum:]._-]+/[[:alnum:]._-]+#${pr}\\b"
 }
 
 # mw_worktree_present <path> — exit 0 if a real checkout exists under …/worktrees/
@@ -73,6 +83,120 @@ mw_worktree_present() {
     [[ -e "$path/.git" ]]
 }
 
+# Collect comment text for every block that mentions this PR (DROPPED or live).
+# Includes the following active layer line when present (branch name tokens).
+_mw_pr_related_text() {
+    local text="$1" pr="$2"
+    local block="" line stripped out=""
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        stripped="${line#"${line%%[![:space:]]*}"}"
+        if [[ -z "$stripped" ]]; then
+            if _mw_block_mentions_pr "$block" "$pr"; then
+                out+="$block"$'\n'
+            fi
+            block=""
+            continue
+        fi
+        if [[ "$stripped" == \#* ]]; then
+            block+="$stripped"$'\n'
+            continue
+        fi
+        if [[ "$stripped" =~ ^-[[:space:]]*(branch|pr|integrate): ]]; then
+            if _mw_block_mentions_pr "$block" "$pr"; then
+                out+="$block"$'\n'"$stripped"$'\n'
+            fi
+            block=""
+            continue
+        fi
+        if [[ "$stripped" != \#* ]]; then
+            if _mw_block_mentions_pr "$block" "$pr"; then
+                out+="$block"$'\n'
+            fi
+            block=""
+        fi
+    done <<<"$text"
+    if _mw_block_mentions_pr "$block" "$pr"; then
+        out+="$block"$'\n'
+    fi
+    printf '%s' "$out"
+}
+
+# Newline-separated worktree basenames attributable to this PR.
+# Sources: Worktree: lines; - branch: foo/bar → bar; (was driver/foo) → foo.
+mw_pr_worktree_basenames() {
+    local text="$1" pr="$2"
+    local related name
+    related="$(_mw_pr_related_text "$text" "$pr")"
+    [[ -n "$related" ]] || return 0
+    {
+        # Worktree: path or bare name (strip ~ and …/worktrees/)
+        printf '%s' "$related" | grep -Eio 'Worktree:[[:space:]]*[^[:space:]#]+' \
+            | sed -E 's/^[Ww]orktree:[[:space:]]*//; s|.*/worktrees/||; s|.*/||'
+        # - branch: feat/foo or driver/foo
+        printf '%s' "$related" | grep -Eio '\-[[:space:]]*branch:[[:space:]]*[^[:space:]]+' \
+            | sed -E 's/.*branch:[[:space:]]*//; s|.*/||'
+        # DROPPED … feat/foo or (was driver/foo)
+        printf '%s' "$related" | grep -Eio '(feat|fix|chore|driver)/[A-Za-z0-9._-]+' \
+            | sed -E 's|.*/||'
+    } | sed '/^$/d' | sort -u
+}
+
+# Resolve a basename to an absolute path under the estate worktrees root.
+_mw_resolve_worktree_basename() {
+    local base="$1"
+    local root="${HAPI_META_WORKTREES_ROOT:-}"
+    if [[ -z "$root" ]]; then
+        root="${HAPI_PRIMARY:-$HOME/coding/hapi}/worktrees"
+    fi
+    printf '%s/%s' "${root%/}" "$base"
+}
+
+# Exit 0 if session path's worktree basename is attributable to this PR.
+mw_path_attributable_to_pr() {
+    local manifest="$1" path="$2" pr="$3"
+    local base names
+    [[ -n "$path" ]] || return 1
+    base="$(basename "$path")"
+    [[ -n "$base" && "$base" != "/" && "$base" != "." ]] || return 1
+    names="$(mw_pr_worktree_basenames "$manifest" "$pr")"
+    [[ -n "$names" ]] || return 1
+    printf '%s\n' "$names" | grep -Fxq "$base"
+}
+
+# Exit 0 if any PR-declared worktree basename still has a live checkout.
+mw_declared_worktree_present_for_pr() {
+    local manifest="$1" pr="$2"
+    local base resolved
+    while IFS= read -r base; do
+        [[ -z "$base" ]] && continue
+        resolved="$(_mw_resolve_worktree_basename "$base")"
+        if mw_worktree_present "$resolved"; then
+            return 0
+        fi
+    done < <(mw_pr_worktree_basenames "$manifest" "$pr")
+    return 1
+}
+
+# Should session path / declared wts count as worktree-dirty for Gate A?
+mw_worktree_dirty_for_pr() {
+    local manifest="$1" path="$2" pr="$3"
+    if mw_declared_worktree_present_for_pr "$manifest" "$pr"; then
+        return 0
+    fi
+    if ! mw_worktree_present "$path"; then
+        return 1
+    fi
+    if mw_path_attributable_to_pr "$manifest" "$path" "$pr"; then
+        return 0
+    fi
+    # Fail-closed while soup layer still active: any live session worktree counts.
+    if mw_manifest_pr_layer_active "$manifest" "$pr"; then
+        return 0
+    fi
+    # Layer DROPPED/absent + session path not attributable → ignore stale path.
+    return 1
+}
+
 # mw_wave_member_clean <manifest_text> <session_path> <pr_number>
 # Exit 0 if clean; 1 if still dirty. Prints reason to stdout: clean|layer|worktree|layer+worktree
 mw_wave_member_clean() {
@@ -81,7 +205,7 @@ mw_wave_member_clean() {
     if mw_manifest_pr_layer_active "$manifest" "$pr"; then
         layer=1
     fi
-    if mw_worktree_present "$path"; then
+    if mw_worktree_dirty_for_pr "$manifest" "$path" "$pr"; then
         wt=1
     fi
     if [[ "$layer" -eq 0 && "$wt" -eq 0 ]]; then

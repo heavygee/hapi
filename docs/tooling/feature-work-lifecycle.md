@@ -217,6 +217,8 @@ When a PR merges on `tiann/hapi`, do **not** stop at "congrats, archive yourself
 
 **🔧 after Gate A is already clean** (layer DROPPED + worktree gone): chip `statusAction` softens to **ack + idle; archive pending** — peers must not rematerialize or self-archive mid-turn. Meta archives from outside when `thinking=false`, then the chip can go 🧹.
 
+**Gate A worktree sensor** (`scripts/tooling/lib/meta-wave.sh`): after the layer is DROPPED, only worktrees *attributable to that PR* count (manifest `Worktree:` / branch tokens, or a session path whose basename matches). A stale `metadata.path` pointing at someone else's live checkout must not keep hourly 🔧 nags alive (2026-08-11 #1413). While the layer is still active, any live session worktree still dirties (fail-closed).
+
 ### Sequence (accurate)
 
 ```text

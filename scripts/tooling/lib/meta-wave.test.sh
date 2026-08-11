@@ -76,8 +76,13 @@ rm -rf "$WT"
 # --- member clean ---
 got="$(mw_wave_member_clean "$MANIFEST_CLEAN" "/nope/worktrees/x" 896)" && ok || bad "clean exit 0"
 eq "member clean both gone" "$got" "clean"
+# Isolate declared Worktree: lookups from the real estate (agent-import-picker may exist).
+EMPTY_WT_ROOT="$(mktemp -d)"
+export HAPI_META_WORKTREES_ROOT="$EMPTY_WT_ROOT"
 reason="$(mw_wave_member_clean "$MANIFEST_ACTIVE" "" 896 || true)"
 eq "member dirty layer only" "$reason" "layer"
+unset HAPI_META_WORKTREES_ROOT
+rmdir "$EMPTY_WT_ROOT"
 WT="$(mktemp -d)"; mkdir -p "$WT/worktrees/foo"; touch "$WT/worktrees/foo/.git"
 reason="$(mw_wave_member_clean "$MANIFEST_CLEAN" "$WT/worktrees/foo" 896 || true)"
 eq "member dirty worktree only" "$reason" "worktree"
@@ -86,6 +91,58 @@ mkdir -p "$WT/worktrees/husk/.cursor"
 got="$(mw_wave_member_clean "$MANIFEST_CLEAN" "$WT/worktrees/husk" 896)" && ok || bad "husk should be clean"
 eq "member clean IDE husk" "$got" "clean"
 rm -rf "$WT"
+
+# Stale session path pointing at an unrelated live worktree must NOT keep Gate A
+# dirty after the PR layer is DROPPED (2026-08-11 #1413 ping loop).
+WT="$(mktemp -d)"
+mkdir -p "$WT/worktrees/hub-runner-version-skew" "$WT/worktrees/share-native-deeplink"
+touch "$WT/worktrees/hub-runner-version-skew/.git"
+# Feature wt already gone; only unrelated wt remains
+rm -rf "$WT/worktrees/share-native-deeplink"
+MANIFEST_DROP_1413=$(cat <<'EOF'
+base: upstream/main
+layers:
+  # DROPPED 2026-08-11: feat/share-native-fileurl (was driver/share-native-deeplink)
+  # MERGED as tiann/hapi#1413 (a0621194 — Fixes #1412)
+  # Worktree: ~/coding/hapi/worktrees/share-native-deeplink
+EOF
+)
+got="$(mw_wave_member_clean "$MANIFEST_DROP_1413" "$WT/worktrees/hub-runner-version-skew" 1413)" && ok || bad "stale unrelated path must be Gate A clean"
+eq "stale unrelated session path clean" "$got" "clean"
+
+# Declared Worktree: for this PR still on disk → dirty even if session path is mirror
+mkdir -p "$WT/worktrees/share-native-deeplink"
+touch "$WT/worktrees/share-native-deeplink/.git"
+# Override resolver root for declared relative worktrees
+export HAPI_META_WORKTREES_ROOT="$WT/worktrees"
+reason="$(mw_wave_member_clean "$MANIFEST_DROP_1413" "$HOME/coding/hapi" 1413 || true)"
+eq "declared Worktree still present dirty" "$reason" "worktree"
+# Attributable session path still present → dirty
+reason="$(mw_wave_member_clean "$MANIFEST_DROP_1413" "$WT/worktrees/share-native-deeplink" 1413 || true)"
+eq "attributable session path dirty" "$reason" "worktree"
+unset HAPI_META_WORKTREES_ROOT
+rm -rf "$WT"
+
+# Active layer + unrelated session path still dirties (legacy fail-closed)
+WT="$(mktemp -d)"
+mkdir -p "$WT/worktrees/other-feature"
+touch "$WT/worktrees/other-feature/.git"
+reason="$(mw_wave_member_clean "$MANIFEST_ACTIVE" "$WT/worktrees/other-feature" 896 || true)"
+eq "active layer + any live session wt dirty" "$reason" "layer+worktree"
+rm -rf "$WT"
+
+# MERGED as owner/repo#N counts as DROPPED
+MANIFEST_OWNER_REPO=$(cat <<'EOF'
+base: upstream/main
+layers:
+  # DROPPED 2026-08-11: tip
+  # MERGED as tiann/hapi#1413
+  - branch: should-not-count-because-dropped-block-wrong
+EOF
+)
+# The active - branch: after a DROPPED block that mentions 1413 should be clean
+# for 1413 (dropped matcher), not attributed as active.
+if mw_manifest_pr_layer_active "$MANIFEST_OWNER_REPO" 1413; then bad "tiann/hapi#1413 DROPPED must be clean"; else ok; fi
 
 # --- wave id ---
 eq "wave id sorted" "$(mw_wave_id_from_prs 945 896)" "w-896-945"
