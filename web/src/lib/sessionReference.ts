@@ -1,7 +1,7 @@
 import type { SessionSummary } from '@/types/api'
 import { normalizeSearch, sessionMatchesQuery } from '@/components/SessionList'
 import { truncateGraphemes } from '@/lib/graphemes'
-import { getSessionTitle } from '@/lib/sessionTitle'
+import { getSessionTitle, hasSessionTitleSignal } from '@/lib/sessionTitle'
 import { SESSION_REFERENCE_STEER_SUFFIX } from '@hapi/protocol/sessionCitation'
 
 export function buildSessionReferencePath(sessionId: string): string {
@@ -54,10 +54,20 @@ function scoreMatchedSession(session: SessionSummary, query: string): number {
 }
 
 /**
+ * Mention pool is stricter than sidebar visibility (#1506): require a real
+ * title signal (`metadata.name` or summary text). Path last-segment fallback
+ * and id-only labels are not @-targets — including husks sidebar still shows
+ * via flattened `agentSessionId` / `claudeSessionId`.
+ */
+export function isMentionableSession(session: SessionSummary): boolean {
+    return hasSessionTitleSignal(session)
+}
+
+/**
  * Rank sessions for composer `@` autocomplete.
- * Match filter is the same code path as share/sidebar search (`sessionMatchesQuery`).
- * Display/insert still use `getSessionTitle` (name before summary).
- * Empty query → active/recent shortlist (excludes archived).
+ * Candidates need a real title signal (#1506); match filter then reuses
+ * share/sidebar `sessionMatchesQuery`. Display/insert still use `getSessionTitle`.
+ * Empty query → active/recent shortlist (excludes archived + untitled husks).
  */
 export function matchSessionsForMention(
     sessions: readonly SessionSummary[],
@@ -72,6 +82,7 @@ export function matchSessionsForMention(
     const scored: { session: SessionSummary; score: number }[] = []
     for (const session of sessions) {
         if (excludeId && session.id === excludeId) continue
+        if (!isMentionableSession(session)) continue
 
         if (!normalized) {
             // Empty / whitespace query: shortlist only — active first, then recent.

@@ -30,7 +30,7 @@ import { getSessionLastSeenAt, getSessionLastSeenSnapshot } from '@/lib/sessionL
 import { useSessionRowTooltipIds } from '@/components/HoverTooltip'
 import { subscribeCodexImportedSessions } from '@/lib/codexImportedSessions'
 import { formatReopenError } from '@/lib/reopenError'
-import { getSessionTitle } from '@/lib/sessionTitle'
+import { getSessionTitle, hasSessionTitleSignal } from '@/lib/sessionTitle'
 import { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
 import type { Machine } from '@/types/api'
 import { getMachinePlatform, presentMachineHealth } from '@/lib/machineHealth'
@@ -218,20 +218,12 @@ export function deduplicateSessionsByAgentId(sessions: SessionSummary[], selecte
     return result
 }
 
-function hasSidebarTitleSignal(session: SessionSummary): boolean {
-    const meta = session.metadata
-    if (!meta) return false
-    if (meta.name?.trim()) return true
-    if (meta.summary?.text?.trim()) return true
-    return false
-}
-
 export function isSidebarEmptySessionStub(session: SessionSummary): boolean {
     if (session.active) return false
     const meta = session.metadata
     if (!meta) return true
     if (meta.agentSessionId?.trim()) return false
-    if (hasSidebarTitleSignal(session)) return false
+    if (hasSessionTitleSignal(session)) return false
     return true
 }
 
