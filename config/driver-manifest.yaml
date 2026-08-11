@@ -780,9 +780,9 @@ layers:
   - branch: fix/cursor-thinking-flicker-1487
 
   # tiann/hapi#1506 — @ mention pool excludes path-only husks + sidebar-hidden stubs.
-  # Web-only: require metadata.name / summary title signal in matchSessionsForMention.
+  # Web-only: prepareSidebarSessions then hasSessionTitleSignal in matchSessionsForMention.
   # Peer-stack Playwright green (1506-session-mention-sidebar-husks.png).
   # Worktree: ~/coding/hapi/worktrees/mention-sidebar-husks @ fix/session-mention-sidebar-husks
-  # Tip: e4cad280f (origin/fix/session-mention-sidebar-husks)
+  # Tip: 17d091007 (origin/fix/session-mention-sidebar-husks) — sidebar-dedup + title-signal
   - branch: fix/session-mention-sidebar-husks
 
