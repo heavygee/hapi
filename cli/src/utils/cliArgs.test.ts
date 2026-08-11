@@ -53,4 +53,66 @@ describe('CLI argv normalization', () => {
         expect(normalizeCliArgs([exec, 'prompt.ts'])).toEqual(['prompt.ts'])
         expect(normalizeCliArgs(['bun', main])).toEqual([])
     })
+
+    // #1404: later `--` is the job-run child separator, not a runtime handoff.
+    it('keeps job run flags and the -- child separator under bun entrypoint', () => {
+        expect(normalizeCliArgs([
+            'bun',
+            entrypoint,
+            'job',
+            'run',
+            'SID',
+            'KEY',
+            '--label',
+            'x',
+            '--',
+            '/bin/echo',
+            'hi'
+        ])).toEqual([
+            'job',
+            'run',
+            'SID',
+            'KEY',
+            '--label',
+            'x',
+            '--',
+            '/bin/echo',
+            'hi'
+        ])
+    })
+
+    it('keeps -- for an installed binary argv (no runtime-wrapper handoff)', () => {
+        expect(normalizeCliArgs([
+            exec,
+            'job',
+            'run',
+            'SID',
+            'KEY',
+            '--label',
+            'x',
+            '--',
+            '/bin/echo',
+            'hi'
+        ])).toEqual([
+            'job',
+            'run',
+            'SID',
+            'KEY',
+            '--label',
+            'x',
+            '--',
+            '/bin/echo',
+            'hi'
+        ])
+    })
+
+    it('still treats bun entrypoint -- as runtime handoff when no HAPI command precedes it', () => {
+        expect(normalizeCliArgs([
+            'bun',
+            entrypoint,
+            '--',
+            'auth',
+            'login'
+        ])).toEqual(['auth', 'login'])
+    })
 })
