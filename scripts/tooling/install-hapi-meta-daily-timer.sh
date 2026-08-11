@@ -14,7 +14,9 @@
 # hourly cadence + 3h chip mute replaced it. Installer disables leftover units.
 #
 # Optional ~/.hapi/meta-daily.env:
-#   HAPI_META_TOOLING_SESSION_ID=<sid>   # wave-clear unlock ping target
+#   HAPI_META_SESSION_ID=<full-uuid>     # Meta watcher; hourly ping SOURCE (#1203)
+#   HAPI_META_SESSION_NAME='meta - PR watcher'
+#   HAPI_META_TOOLING_SESSION_ID=<sid>   # wave-clear unlock ping TARGET
 #   HAPI_META_WAVE_COLLECT_SECS=1800     # inbox collect fuse (default 30m)
 #
 # Usage:

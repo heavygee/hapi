@@ -62,6 +62,8 @@
 #   HAPI_PRIMARY        (default ~/coding/hapi) — canonical tool fallback root
 #   HAPI_META_BATCH_BIN (explicit override; else same-dir, else $HAPI_PRIMARY)
 #   HAPI_META_PING_BIN  (explicit override; else same-dir, else $HAPI_PRIMARY)
+#   HAPI_META_SESSION_ID — Meta PR watcher full UUID (hourly ping SOURCE for #1203)
+#   HAPI_META_SESSION_NAME — optional chip name (default "meta - PR watcher")
 #   HAPI_META_TOOLING_SESSION_ID — Meta tooling bot session (unlock ping target)
 #   HAPI_META_WAVE_COLLECT_SECS (default 1800) — inbox collect fuse
 #   HAPI_META_MANIFEST — manifest path override (tests)
@@ -131,6 +133,19 @@ done
 if [[ "$BACKFILL_APPLY" -eq 1 && "$BACKFILL_REFS" -eq 0 ]]; then
     die "--apply requires --backfill-refs"
 fi
+
+# Timer pings are outside a wrapped session (no peer-deliver broker). Stamp
+# them as Meta via hub HMAC (#1203) so recipients see a verified chip, not
+# "unknown peer". Unlock target (HAPI_META_TOOLING_SESSION_ID) is the
+# destination of wave-clear, not the sender.
+if [[ -n "${HAPI_META_SESSION_ID:-}" ]]; then
+    export HAPI_SESSION_ID="$HAPI_META_SESSION_ID"
+    export HAPI_SESSION_NAME="${HAPI_META_SESSION_NAME:-meta - PR watcher}"
+    export HAPI_ESTATE_PEER_ATTRIBUTE=1
+elif [[ "$DO_PING" -eq 1 && "$DRY_RUN" -eq 0 ]]; then
+    err "WARNING: HAPI_META_SESSION_ID unset — peer pings will be unattributed (unknown peer chip)"
+fi
+
 if [[ "$BACKFILL_REFS" -eq 1 && "$DRY_RUN" -eq 1 && "$BACKFILL_APPLY" -eq 1 ]]; then
     die "--backfill-refs: refuse both --dry-run and --apply"
 fi

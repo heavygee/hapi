@@ -19,12 +19,12 @@
 # Bash body below is the fallback when soup CLI is unavailable.
 # Override: HAPI_PING_PEER_FORCE_BASH=1
 #
-# Identity (interim until A2A stamps principal on the wire):
-#   Agents MUST identify themselves. This script auto-prepends
-#     From: /sessions/<HAPI_SESSION_ID>
-#     Name: <HAPI_SESSION_NAME>   # optional
-#   when HAPI_SESSION_ID is set and the message does not already start with
-#   "From:". If unset, warns on stderr — recipient will not know who sent it.
+# Identity:
+#   Wrapped sessions: soup `hapi ping-peer` uses the parent broker (#1203).
+#   systemd timers are not broker descendants — set HAPI_ESTATE_PEER_ATTRIBUTE=1
+#   plus HAPI_SESSION_ID=<full uuid> so this script mints the hub HMAC and
+#   POSTs /cli/sessions/:source/peer-messages (verified chip). Timer-only;
+#   agents must not set that flag. Fallback: From: text stamp (unverified ⚠).
 #   Canon: docs/operator/AGENTS.md § Peer message identity.
 #
 # Long briefs: hapi-ping-peer 05d9f0f2 --message-file /tmp/brief.md
@@ -40,8 +40,9 @@
 #   HAPI_HOST       (default http://localhost:3006)
 #   HAPI_SETTINGS   (default ~/.hapi/settings.json - reads cliApiToken)
 #   HAPI_WAIT_ACTIVE_SECS (default 60)
-#   HAPI_SESSION_ID   (caller session — stamped into From: when set)
+#   HAPI_SESSION_ID   (caller session — From: stamp, or HMAC source when attributing)
 #   HAPI_SESSION_NAME (optional display name for stamp)
+#   HAPI_ESTATE_PEER_ATTRIBUTE=1  timer path: hub-attributed send (see lib/estate-peer-deliver.sh)
 #   HAPI_PING_PEER_FORCE_BASH=1  skip soup CLI delegation
 #   HAPI_PING_PEER_SKIP_FROM=1   do not auto-stamp (rare; Meta templates that already embed From:)
 #
@@ -52,8 +53,32 @@
 #   4 = wait-for-active timed out OR send failed
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+
 err() { echo "hapi-ping-peer: $*" >&2; }
 die() { err "$*"; exit 2; }
+
+ESTATE_ATTR=0
+estate_try_attribute() {
+    [[ "${HAPI_ESTATE_PEER_ATTRIBUTE:-0}" == "1" ]] || return 1
+    [[ -n "${HAPI_SESSION_ID:-}" ]] || {
+        err "HAPI_ESTATE_PEER_ATTRIBUTE=1 but HAPI_SESSION_ID unset"
+        return 1
+    }
+    [[ -f "$SCRIPT_DIR/lib/estate-peer-deliver.sh" ]] || {
+        err "estate-peer-deliver.sh missing beside ping-peer"
+        return 1
+    }
+    # shellcheck source=lib/estate-peer-deliver.sh
+    source "$SCRIPT_DIR/lib/estate-peer-deliver.sh"
+    if estate_mint_peer_capability "$HAPI_SESSION_ID" >/dev/null; then
+        ESTATE_ATTR=1
+        err "estate attribute: source ${HAPI_SESSION_ID:0:8}… (hub capability)"
+        return 0
+    fi
+    err "WARNING: estate attribute mint failed — falling back to unattributed"
+    return 1
+}
 
 SESSION_ARG=""
 MESSAGE=""
@@ -81,6 +106,7 @@ done
 HAPI_HOST="${HAPI_HOST_ARG:-${HAPI_HOST:-http://localhost:3006}}"
 SETTINGS="${HAPI_SETTINGS:-$HOME/.hapi/settings.json}"
 WAIT_FOR_ACTIVE="${WAIT_FOR_ACTIVE_ARG:-${HAPI_WAIT_ACTIVE_SECS:-60}}"
+export HAPI_HOST HAPI_SETTINGS="$SETTINGS"
 
 if [[ "$LIST_ONLY" != "1" ]]; then
     if [[ -n "$MESSAGE_FILE" ]]; then
@@ -94,8 +120,12 @@ if [[ "$LIST_ONLY" != "1" ]]; then
     [[ -n "$SESSION_ARG" ]] || die "missing session id; usage: hapi-ping-peer <session-id> <message>"
     [[ -n "$MESSAGE" ]] || die "missing message; provide as arg, --message-file PATH, or --message-file -"
 
+    estate_try_attribute || true
+
     # Interim peer identity stamp (docs/operator/AGENTS.md § Peer message identity)
-    if [[ "${HAPI_PING_PEER_SKIP_FROM:-0}" != "1" ]] \
+    # Skip when hub-attributed: verified chip keeps From: lines in the bubble.
+    if [[ "$ESTATE_ATTR" != "1" ]] \
+        && [[ "${HAPI_PING_PEER_SKIP_FROM:-0}" != "1" ]] \
         && ! [[ "$MESSAGE" =~ ^[Ff]rom:[[:space:]] ]]; then
         if [[ -n "${HAPI_SESSION_ID:-}" ]]; then
             _from="From: /sessions/${HAPI_SESSION_ID}"
@@ -113,7 +143,8 @@ if [[ "$LIST_ONLY" != "1" ]]; then
 fi
 
 # Prefer soup CLI after message is stamped — pass via temp file so From: survives.
-if [[ "${HAPI_PING_PEER_FORCE_BASH:-0}" != "1" ]]; then
+# Skip when attributing: soup CLI has no timer HMAC path and would send unattributed.
+if [[ "$ESTATE_ATTR" != "1" && "${HAPI_PING_PEER_FORCE_BASH:-0}" != "1" ]]; then
     _hapi_bin="$(command -v hapi 2>/dev/null || true)"
     if [[ -n "$_hapi_bin" && "$_hapi_bin" != */.bun/bin/hapi ]]; then
         if _help="$("$_hapi_bin" ping-peer --help 2>&1)" && [[ "$_help" == *'ping-peer'* ]]; then
@@ -221,6 +252,14 @@ fi
 
 # step 5: send message
 echo "hapi-ping-peer: sending message (${#MESSAGE} chars)..."
+if [[ "$ESTATE_ATTR" == "1" ]]; then
+    if estate_peer_deliver_attributed "$HAPI_SESSION_ID" "$SID" "$MESSAGE"; then
+        echo "hapi-ping-peer: OK - delivered to $SID (attributed)"
+        exit 0
+    fi
+    err "attributed send failed; not falling back (would be a different principal)"
+    exit 4
+fi
 SEND=$(hapi_post "/api/sessions/$SID/messages" "$(jq -cn --arg t "$MESSAGE" '{text:$t}')")
 if echo "$SEND" | jq -e '.ok == true' >/dev/null 2>&1; then
     echo "hapi-ping-peer: OK - delivered to $SID"

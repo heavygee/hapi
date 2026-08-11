@@ -42,28 +42,29 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 
 ---
 
-## Peer message identity (interim until A2A stamps principal)
+## Peer message identity (#1203 / soup #1473)
 
-> **Upstream track:** [#1203](https://github.com/tiann/hapi/issues/1203) = A2A RFC **P0.5** (Layer 0 delivery provenance - not a P2 work-contract). Peer `6212dae5` / worktree `a2a-p05-peer-provenance` owns the PR. Until that lands, the habit below still applies.
+Hub-attributed peer delivery is in the driver soup (PR [#1473](https://github.com/tiann/hapi/pull/1473), issue [#1203](https://github.com/tiann/hapi/issues/1203), A2A RFC P0.5). The chip is **verified** only when the hub stored `meta.sentFrom: "peer"` + `meta.peer.sourceSessionId` from a session capability. Client `From:` text is display-only (⚠ unverified). Bare CLI / systemd with no capability is **unknown peer**.
 
-Cross-session pings (`hapi-ping-peer` / MCP `ping_peer`) are **not** intrinsically attributed on the wire today. The recipient sees a user message with no trusted "who sent this" field - shades of the A2A ledger problem (#1332 / notify→events). Until the hub stamps a principal on peer delivery:
+**Kill criterion still holds:** never pass `sourceSessionId` as a tool argument or JSON body field and treat it as truth.
 
-**Every agent-authored message to another HAPI session MUST open with:**
+| Mechanism | What the recipient sees |
+|-----------|-------------------------|
+| MCP `ping_peer` inside a wrapped session | Verified `@session` chip (parent broker / in-memory capability). Still open with `From:` so agents that only read text can reply. |
+| `hapi-ping-peer` inside a wrapped session (`HAPI_SESSION_ID` + broker) | Same verified chip. Script also auto-stamps `From:` when not attributing. |
+| systemd timers (`hapi-meta-daily.timer`) | Not a broker descendant. Estate helper mints the hub HMAC for `HAPI_META_SESSION_ID` and POSTs `/cli/sessions/:source/peer-messages`. Set that full UUID in `~/.hapi/meta-daily.env`. Timer-only — agents must not copy the mint. |
+| CLI outside a session, mint unset | Unattributed peer row → **unknown peer** ⚠. If `HAPI_SESSION_ID` is set, `From:` yields an unverified chip, not a verified one. |
+
+**Every agent-authored message to another HAPI session MUST still open with:**
 
 ```markdown
 From: /sessions/<your-full-or-8+-char-hapi-session-id>
 Name: <optional metadata.name>
 ```
 
-Then the body. No exceptions for "obvious from context," Meta briefs, or close-the-loop pings.
+Then the body. No exceptions for "obvious from context," Meta briefs, or close-the-loop pings. `hapi-ping-peer` auto-prepends `From:` when `HAPI_SESSION_ID` is set (skip with `HAPI_PING_PEER_SKIP_FROM=1` if the body already has it). MCP `ping_peer` does not — you type the stamp.
 
-| Mechanism | Behavior |
-|-----------|----------|
-| `hapi-ping-peer` (PATH script) | Auto-prepends `From:` when `HAPI_SESSION_ID` is set (runner/agent shells usually export it). Warns on stderr if unset. Skip only with `HAPI_PING_PEER_SKIP_FROM=1` when the body already has a correct `From:`. |
-| MCP `ping_peer` / bare soup CLI (until product stamp) | **You** must include the `From:` lines in the message text. |
-| Operator paste into a chat | Prefer the same header so agents do not treat you as an anonymous peer. |
-
-Forgery is still possible (it is text). The point is a **shared estate habit** so orchestrators stop guessing. Hub-attributed delivery is the real fix ([#1203](https://github.com/tiann/hapi/issues/1203) / A2A RFC **P0.5** - Layer 0 provenance, not a P2 work-contract). Do not invent a parallel auth protocol here.
+Do not invent a parallel auth protocol. Do not set `HAPI_ESTATE_PEER_ATTRIBUTE=1` from an agent shell.
 
 ---
 
@@ -192,7 +193,7 @@ sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh
 | `hapi-meta-daily.timer` | **hourly :00 Europe/London** (+ up to 2m random; BST/GMT) | full Meta (peer pings + wave-clear unlock) |
 | `hapi-meta-daily-refresh.timer` | every **45m 24/7** (`OnBootSec=3min` + `OnUnitActiveSec=45min`) | `--no-ping --emit-events` |
 
-Quiet chip-only refresh (45m) was retired 2026-08-04 — hourly London `:00` refreshes chips and may ping peers / unlock Meta tooling for rematerialize. Chip UI mutes to `?` when `statusCheckedAt` is older than **3h** (`config/pr-chip-states.yaml` / `$HAPI_HOME/pr-chip-display.json` staleMs). Host TZ on oos may stay `Etc/UTC`; the timer unit suffixes `Europe/London` so the hour is operator-local, not UTC. Units: `scripts/tooling/systemd/hapi-meta-daily*`. Optional env: `~/.hapi/meta-daily.env` (`HAPI_META_TOOLING_SESSION_ID`, `HAPI_META_WAVE_COLLECT_SECS`). Chip UI never live-queries GitHub. Logs: `journalctl -u hapi-meta-daily`.
+Quiet chip-only refresh (45m) was retired 2026-08-04 — hourly London `:00` refreshes chips and may ping peers / unlock Meta tooling for rematerialize. Chip UI mutes to `?` when `statusCheckedAt` is older than **3h** (`config/pr-chip-states.yaml` / `$HAPI_HOME/pr-chip-display.json` staleMs). Host TZ on oos may stay `Etc/UTC`; the timer unit suffixes `Europe/London` so the hour is operator-local, not UTC. Units: `scripts/tooling/systemd/hapi-meta-daily*`. Optional env: `~/.hapi/meta-daily.env` (`HAPI_META_SESSION_ID` = Meta watcher **full UUID** so hourly pings get a verified chip, `HAPI_META_TOOLING_SESSION_ID` = wave-clear unlock **target**, `HAPI_META_WAVE_COLLECT_SECS`). Chip UI never live-queries GitHub. Logs: `journalctl -u hapi-meta-daily`.
 
 What it does, idempotently:
 
