@@ -28,6 +28,7 @@ import {
 export type SpawnPeerErrorCode =
     | 'bad_args'
     | 'auth_failed'
+    | 'broker_unavailable'
     | 'spawn_failed'
     | 'empty_session'
     | 'not_found'
