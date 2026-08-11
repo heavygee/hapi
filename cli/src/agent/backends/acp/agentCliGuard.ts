@@ -33,6 +33,9 @@ let activeAcpTransportCount = 0;
 /** @internal Test hook fired between register publish steps. */
 let registerPublishHook: ((step: 'after-mkdir' | 'after-host-pid' | 'after-count') => void) | null = null;
 
+/** @internal Test hook inside addLockPid (mkdir vs write gap). */
+let addLockPidHook: ((phase: 'after-pids-mkdir' | 'after-pid-write') => void) | null = null;
+
 /** Fail-closed window while mkdir → first pid file is in flight. */
 const PRESPAWN_RESERVATION_GRACE_MS = 5_000;
 
@@ -123,8 +126,11 @@ function clearChildPidHint(lockDir: string): void {
 
 function addLockPid(lockDir: string, pid: number): void {
     const pidsDir = getPidsDir(lockDir);
+    const pidPath = join(pidsDir, String(pid));
     mkdirSync(pidsDir, { recursive: true });
-    writeFileSync(join(pidsDir, String(pid)), String(pid), 'utf8');
+    addLockPidHook?.('after-pids-mkdir');
+    writeFileSync(pidPath, String(pid), { encoding: 'utf8', flag: 'w' });
+    addLockPidHook?.('after-pid-write');
 }
 
 function removeLockPid(lockDir: string, pid: number): void {
@@ -197,6 +203,30 @@ function reconcileRefcountLock(lockDir: string): boolean {
     }
 
     if (liveCount <= 0) {
+        // Re-read: registrar may have published a pid during our scan, or we
+        // are between mkdir(pids) and writeFile (empty dir, count not written
+        // yet — fail closed). Post-unregister leaves count>0 with empty pids.
+        let entries: string[] = [];
+        try {
+            entries = readdirSync(pidsDir);
+        } catch {
+            entries = [];
+        }
+        const liveAgain = entries.filter((entry) => {
+            const pid = Number(entry);
+            return Number.isInteger(pid) && pid > 0 && isProcessAlive(pid);
+        });
+        if (liveAgain.length > 0) {
+            writeLockCount(lockDir, liveAgain.length);
+            return true;
+        }
+        if (
+            entries.length === 0
+            && readLockCount(lockDir) <= 0
+            && (isFreshPrespawnReservation(pidsDir) || isFreshPrespawnReservation(lockDir))
+        ) {
+            return true;
+        }
         removeAcpLockDir();
         return false;
     }
@@ -348,6 +378,12 @@ export function _setRegisterPublishHookForTests(
     registerPublishHook = hook;
 }
 
+export function _setAddLockPidHookForTests(
+    hook: ((phase: 'after-pids-mkdir' | 'after-pid-write') => void) | null
+): void {
+    addLockPidHook = hook;
+}
+
 /** Simulate a cross-process reader (no in-process reservation). */
 export function _setActiveAcpTransportCountForTests(count: number): void {
     activeAcpTransportCount = Math.max(0, count);
@@ -356,5 +392,6 @@ export function _setActiveAcpTransportCountForTests(count: number): void {
 export function _resetAgentCliGuardForTests(): void {
     activeAcpTransportCount = 0;
     registerPublishHook = null;
+    addLockPidHook = null;
     removeAcpLockDir();
 }

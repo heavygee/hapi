@@ -1,10 +1,11 @@
-import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { afterEach, describe, expect, test } from 'vitest';
 import {
     _resetAgentCliGuardForTests,
     _setActiveAcpTransportCountForTests,
+    _setAddLockPidHookForTests,
     _setRegisterPublishHookForTests,
     getAgentAcpLockDir,
     isAgentAcpTransportActive,
@@ -222,5 +223,29 @@ describe('agentCliGuard', () => {
         expect(isAgentAcpTransportActive()).toBe(true);
         expect(existsSync(dir)).toBe(true);
         expect(existsSync(join(dir, 'pids', String(process.pid)))).toBe(true);
+    });
+
+    test('empty pids/ mid-addLockPid stays active for concurrent readers', () => {
+        process.env.HAPI_HOME = testHome;
+        let sawEmptyPids = false;
+        _setAddLockPidHookForTests((phase) => {
+            if (phase !== 'after-pids-mkdir') {
+                return;
+            }
+            sawEmptyPids = true;
+            _setActiveAcpTransportCountForTests(0);
+            const dir = lockDir();
+            expect(existsSync(join(dir, 'pids'))).toBe(true);
+            expect(existsSync(join(dir, 'count'))).toBe(false);
+            expect(readdirSync(join(dir, 'pids'))).toEqual([]);
+            expect(isAgentAcpTransportActive()).toBe(true);
+            expect(existsSync(dir)).toBe(true);
+        });
+
+        registerActiveAcpTransport();
+        expect(sawEmptyPids).toBe(true);
+        _setAddLockPidHookForTests(null);
+        unregisterActiveAcpTransport();
+        expect(isAgentAcpTransportActive()).toBe(false);
     });
 });
