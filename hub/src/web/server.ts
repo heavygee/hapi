@@ -37,6 +37,8 @@ import { createInboxItemsRoutes } from './routes/inboxItems'
 import { createOverseerRoutes } from './routes/overseer'
 import { createHubSettingsRoutes } from './routes/hubSettings'
 import { createWorkGraphRoutes } from './routes/workGraph'
+import { createHapiInlineRoutes } from './hapi-inline/routes'
+import { loadHapiInlineConfig } from './hapi-inline/config'
 import type { SSEManager } from '../sse/sseManager'
 import type { VisibilityTracker } from '../visibility/visibilityTracker'
 import type { Server as BunServer, ServerWebSocket } from 'bun'
@@ -52,6 +54,10 @@ import type { Store } from '../store'
 // Normalise upstream close codes before forwarding to the browser client.
 // Codes 1005/1006/1015 are reserved and cannot be sent in a close frame;
 // abnormal upstream drops commonly produce 1006, which would throw on clientWs.close().
+function isSpaPassthroughPath(path: string): boolean {
+    return path.startsWith('/api') || path.startsWith('/cli') || path.startsWith('/hapi')
+}
+
 function toClientCloseCode(code: number): number {
     return code >= 1000 && code <= 4999 && code !== 1005 && code !== 1006 && code !== 1015
         ? code
@@ -258,6 +264,12 @@ function createWebApp(options: {
     })
     app.use('/api/*', corsMiddleware)
     app.use('/cli/*', corsMiddleware)
+    app.use('/hapi/*', cors({
+        origin: corsOriginOption,
+        allowMethods: ['GET', 'POST', 'OPTIONS'],
+        allowHeaders: ['content-type', 'x-hapi-inline-secret', 'x-operator-mic-secret']
+    }))
+    app.route('/hapi', createHapiInlineRoutes({ config: loadHapiInlineConfig() }))
 
     // Gzip JSON API responses. Over the relay tunnel every byte is metered
     // twice (the SNI proxy copies in both directions), and API payloads are
@@ -366,7 +378,7 @@ from GitHub Pages instead of through the relay tunnel.
         }
 
         app.use('*', async (c, next) => {
-            if (c.req.path.startsWith('/api')) {
+            if (isSpaPassthroughPath(c.req.path)) {
                 return await next()
             }
 
@@ -383,7 +395,7 @@ from GitHub Pages instead of through the relay tunnel.
         })
 
         app.get('*', async (c, next) => {
-            if (c.req.path.startsWith('/api')) {
+            if (isSpaPassthroughPath(c.req.path)) {
                 await next()
                 return
             }
@@ -409,7 +421,7 @@ from GitHub Pages instead of through the relay tunnel.
     app.use('/assets/*', serveStatic({ root: distDir }))
 
     app.use('*', async (c, next) => {
-        if (c.req.path.startsWith('/api')) {
+        if (isSpaPassthroughPath(c.req.path)) {
             await next()
             return
         }
@@ -418,7 +430,7 @@ from GitHub Pages instead of through the relay tunnel.
     })
 
     app.get('*', async (c, next) => {
-        if (c.req.path.startsWith('/api')) {
+        if (isSpaPassthroughPath(c.req.path)) {
             await next()
             return
         }

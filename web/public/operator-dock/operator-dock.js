@@ -1,0 +1,1511 @@
+/*
+ * Operator Dock — reusable "magic microphone" affordance for operator-only UI debugging.
+ *
+ * NOT app-specific. Drop this + operator-dock.css + vendor/html2canvas.min.js into any tool's
+ * static root and call HapiInline.init({...}) (legacy alias: OperatorDock). Primary flow:
+ *   Fine pointer: idle mic; hover fans settings/markup/sessions/mic; mic click records.
+ *   Coarse/no-hover: idle hub (not a mic); tap opens the cluster; mic satellite records.
+ * Long-press remains a hidden markup shortcut. Markup is also a first-class cluster tool.
+ * After sending, a read-back panel polls the session and shows the agent's replies IN-APP.
+ *
+ * Ships NO secrets; talks only to the app's own same-origin /hapi proxy.
+ * See docs/adr/0001-operator-mic-debug-affordance.md (§13 proxy) + ADR 0002.
+ *
+ * UX:
+ *   cluster mic (no markup) -> red pulse + live text -> tap again -> send screenshot + transcript.
+ *   markup tool (or hidden long-press) -> draw on frozen shot -> Cancel / Send (no typed-note field).
+ *   tap mic WHILE markup open -> keep drawings visible + STT; tap again -> annotated shot + transcript.
+ * STT chain: native/browser first; if empty, MediaRecorder → config.hapiInline.sttUrl.
+ * Native WebView host (AndroidOperator): skips ?opmic / /opmic visibility knock; auth/secret unchanged.
+ * Path knock: /opmic (aliases /mic, /unlock) — same as ?opmic=1. Never /hapi (proxy collision).
+ *
+ * HapiInline.init({
+ *   appId, configUrl='/api/config',   // config.hapiInline (or legacy config.operatorMic)
+ *   navProvider: () => ({...}),        // returns the nav context object (see ADR §4)
+ *   captureRoot: document.body,        // element html2canvas rasterizes
+ * });
+ */
+(function () {
+  'use strict';
+
+  var SECRET_KEY = 'hapiInlineSecret';
+  var LEGACY_SECRET_KEY = 'operatorMicSecret';
+  var SECRET_HEADER = 'X-Hapi-Inline-Secret';
+  var LEGACY_SECRET_HEADER = 'X-Operator-Mic-Secret';
+  var MODE_PROXY = 'proxy';
+  var MODE_BROWSER_HUB = 'browser-hub';
+  var SENSITIVE_KEY_RE = /(token|secret|auth|jwt|key|pass|password|opmic|credential|bearer)/i;
+  var COLORS = ['#ef4444', '#f59e0b', '#22c55e', '#3b82f6', '#ffffff'];
+  var cfg = null, dock = null, ready = false;
+  var recognition = null, recognizing = false, recording = false;
+  var overlay = null, drawCanvas = null, drawCtx = null;
+  var strokes = [], curStroke = null, penColor = COLORS[0], penWidth = 4;
+  var shotImg = null; // Image of the frozen screenshot
+  var replies = null, replyPoll = null;
+  var pendingShot = null, liveTranscript = '', liveInterim = '', recordLabel = null;
+  var longPressTimer = null, longPressFired = false;
+  var mediaRecorder = null, mediaStream = null, mediaChunks = [], mediaMime = '', mediaStopWait = null;
+  var toolSheet = null;
+
+  function $(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function getSecret() {
+    try {
+      var next = (localStorage.getItem(SECRET_KEY) || '').trim();
+      if (next) return next;
+      return (localStorage.getItem(LEGACY_SECRET_KEY) || '').trim();
+    } catch (e) { return ''; }
+  }
+  function setSecret(v) {
+    try {
+      if (v) localStorage.setItem(SECRET_KEY, v);
+      else localStorage.removeItem(SECRET_KEY);
+      // TODO(2027-02-01): remove legacy storage key compatibility.
+      localStorage.removeItem(LEGACY_SECRET_KEY);
+    } catch (e) {}
+  }
+
+  function routingModeKey() {
+    return 'hapiInline.routingMode.' + ((cfg && cfg.appId) || 'unknown-app');
+  }
+  function pinnedSessionKey() {
+    return 'hapiInline.pinnedSession.' + ((cfg && cfg.appId) || 'unknown-app');
+  }
+  function getRoutingMode() {
+    try {
+      var raw = localStorage.getItem(routingModeKey());
+      if (raw === 'pick' || raw === 'spawn-per-send' || raw === 'pin') return raw;
+    } catch (e) {}
+    return 'pin';
+  }
+  function setRoutingMode(mode) {
+    var next = (mode === 'pick' || mode === 'spawn-per-send') ? mode : 'pin';
+    try { localStorage.setItem(routingModeKey(), next); } catch (e) {}
+    return next;
+  }
+  function getPinnedSession() {
+    try {
+      var override = (localStorage.getItem(pinnedSessionKey()) || '').trim();
+      if (override) return override;
+    } catch (e) {}
+    return (cfg && cfg.session) || null;
+  }
+  function setPinnedSession(id) {
+    try {
+      if (id) localStorage.setItem(pinnedSessionKey(), String(id));
+      else localStorage.removeItem(pinnedSessionKey());
+    } catch (e) {}
+  }
+
+  function toast(msg, kind) {
+    var t = $('div', 'opdock-toast opdock-toast--' + (kind || 'info'), msg);
+    document.body.appendChild(t); void t.offsetWidth; t.classList.add('opdock-toast--show');
+    setTimeout(function () { t.classList.remove('opdock-toast--show'); setTimeout(function () { t.remove(); }, 400); }, kind === 'err' ? 6000 : 3000);
+  }
+
+  function promptMessageForMode() {
+    if (cfg && cfg.mode === MODE_BROWSER_HUB) {
+      return 'HAPI inline is locked. Paste your HAPI CLI token or JWT (stored on this device only):';
+    }
+    return 'HAPI inline is locked. Paste the operator gate secret (stored on this device only):';
+  }
+
+  function ensureSecret() {
+    var s = getSecret();
+    if (s) return s;
+    var e = window.prompt(promptMessageForMode());
+    if (e && e.trim()) { setSecret(e.trim()); return e.trim(); }
+    return '';
+  }
+
+  // Keep in sync with lib/operator-mic-unlock.ts (drop-in dock has no imports).
+  // Prefer /opmic on Quest/phone. Never /hapi — proxy collision on many consumers.
+  var UNLOCK_PATHS = { '/opmic': 1, '/mic': 1, '/unlock': 1 };
+
+  function normalizeUnlockPathname(pathname) {
+    var raw = String(pathname || '/').trim() || '/';
+    if (raw === '/') return '/';
+    return raw.replace(/\/+$/, '') || '/';
+  }
+
+  function isUnlockPath(pathname) {
+    return !!UNLOCK_PATHS[normalizeUnlockPathname(pathname)];
+  }
+
+  function parseUnlockQuery(search, pathname) {
+    var raw = (search || '').replace(/^\?/, '');
+    var params = new URLSearchParams(raw);
+    var pathKnock = isUnlockPath(pathname || '/');
+    var cleanedPathname = pathKnock ? '/' : normalizeUnlockPathname(pathname || '/');
+    if (!params.has('opmic')) {
+      return {
+        consumed: pathKnock,
+        shouldPrompt: pathKnock,
+        rejectedCredentialInQuery: false,
+        cleanedSearch: raw,
+        cleanedPathname: cleanedPathname,
+        pathKnock: pathKnock,
+      };
+    }
+    var value = String(params.get('opmic') || '').trim();
+    params.delete('opmic');
+    var cleanedSearch = params.toString();
+    if (!value || value === '1') {
+      return {
+        consumed: true,
+        shouldPrompt: true,
+        rejectedCredentialInQuery: false,
+        cleanedSearch: cleanedSearch,
+        cleanedPathname: cleanedPathname,
+        pathKnock: pathKnock,
+      };
+    }
+    return {
+      consumed: true,
+      shouldPrompt: pathKnock,
+      rejectedCredentialInQuery: true,
+      cleanedSearch: cleanedSearch,
+      cleanedPathname: cleanedPathname,
+      pathKnock: pathKnock,
+    };
+  }
+
+  function stripUnlockFromUrl(cleanedSearch, cleanedPathname) {
+    var next = cleanedSearch ? ('?' + cleanedSearch) : '';
+    var path = cleanedPathname || '/';
+    var out = '' + path + next + (location.hash || '');
+    try { history.replaceState(null, '', out); } catch (e) {}
+  }
+
+  function sanitizeQuery(rawQuery) {
+    var clean = {};
+    var src = rawQuery || {};
+    for (var k in src) {
+      if (!Object.prototype.hasOwnProperty.call(src, k)) continue;
+      clean[k] = SENSITIVE_KEY_RE.test(k) ? 'REDACTED' : src[k];
+    }
+    return clean;
+  }
+
+  function sanitizeHash(rawHash) {
+    if (!rawHash) return null;
+    if (SENSITIVE_KEY_RE.test(rawHash)) return '#REDACTED';
+    return rawHash;
+  }
+
+  function sanitizeNavExtra(extra) {
+    if (!extra || typeof extra !== 'object') return extra;
+    try {
+      var clone = JSON.parse(JSON.stringify(extra));
+      if (clone.query && typeof clone.query === 'object') clone.query = sanitizeQuery(clone.query);
+      if (typeof clone.hash === 'string') clone.hash = sanitizeHash(clone.hash);
+      if (typeof clone.url === 'string' && /\?|#/.test(clone.url)) clone.url = clone.url.split(/[?#]/)[0];
+      return clone;
+    } catch (e) {
+      return extra;
+    }
+  }
+
+  // --- screenshot (html2canvas) -------------------------------------------------------------
+  function captureScreenshot() {
+    if (typeof html2canvas !== 'function') return Promise.resolve(null);
+    var root = (cfg.captureRoot && cfg.captureRoot.nodeType) ? cfg.captureRoot : document.body;
+    return html2canvas(root, { logging: false, useCORS: true, scale: Math.min(window.devicePixelRatio || 1, 2) })
+      .then(function (canvas) { return canvas.toDataURL('image/jpeg', 0.9); })
+      .catch(function () { return null; });
+  }
+
+  // --- nav context --------------------------------------------------------------------------
+  function collectNav() {
+    var base = {
+      appId: cfg.appId, build: cfg.build || null, url: location.origin + location.pathname, route: location.pathname,
+      hash: sanitizeHash(location.hash || null),
+      query: sanitizeQuery((function () { var q = {}; new URLSearchParams(location.search).forEach(function (v, k) { q[k] = v; }); return q; })()),
+      scrollY: window.scrollY | 0, viewport: { w: window.innerWidth, h: window.innerHeight, dpr: window.devicePixelRatio || 1 },
+    };
+    var extra = {};
+    try { extra = sanitizeNavExtra((typeof cfg.navProvider === 'function' && cfg.navProvider()) || {}); } catch (e) { extra = { navProviderError: String(e) }; }
+    for (var k in extra) if (Object.prototype.hasOwnProperty.call(extra, k)) base[k] = extra[k];
+    return base;
+  }
+
+  function renderText(nav, transcript, annotated) {
+    var bits = ['app=' + (nav.appId || cfg.appId), 'route=' + (nav.route || nav.url || '?')];
+    if (nav.view) bits.push('view=' + nav.view);
+    if (nav.scope) bits.push('scope=' + nav.scope);
+    var lines = ['🎙️ Operator mic — ' + bits.join(' · ')];
+    var meta = [];
+    if (nav.build) meta.push('build ' + nav.build);
+    if (nav.baseUrl) meta.push('base ' + nav.baseUrl);
+    if (nav.selection && nav.selection.galleryPath) meta.push('selection ' + nav.selection.galleryPath);
+    if (annotated) meta.push('screenshot has operator markup ✍️');
+    if (meta.length) lines.push(meta.join(' · '));
+    lines.push('');
+    lines.push(transcript || '(no transcript — screenshot/context only)');
+    lines.push('');
+    lines.push('```json\n' + JSON.stringify(nav, null, 2) + '\n```');
+    return lines.join('\n');
+  }
+
+  // --- STT ----------------------------------------------------------------------------------
+  function hasNativeHost() {
+    try { return !!(window.AndroidOperator && window.AndroidOperator.onCaptureDone); } catch (e) { return false; }
+  }
+
+  /** Pure status for overlay/FAB — exported for unit tests as HapiInline._voiceStatus. */
+  function voiceStatus(opts) {
+    // Native Android SpeechRecognizer works on LAN HTTP; browser Web Speech / MediaRecorder need HTTPS.
+    if (opts.hasNative) {
+      return { mode: 'listen', text: '🎙️ Listening… tap mic again to send' };
+    }
+    if (!opts.secure) {
+      return { mode: 'warn', text: '⚠️ Voice needs HTTPS (open via Tailscale URL)' };
+    }
+    if (opts.hasSR || opts.hasMedia) {
+      return { mode: 'listen', text: '🎙️ Listening… tap mic again to send' };
+    }
+    return { mode: 'warn', text: '⚠️ Voice not supported in this browser' };
+  }
+
+  /** True when we should POST recorded audio to the LAN whisper proxy. */
+  function needsWhisperFallback(transcript, hasAudio) {
+    return !(transcript || '').trim() && !!hasAudio;
+  }
+
+  function canMediaRecorder() {
+    try {
+      return !!(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+    } catch (e) { return false; }
+  }
+
+  function pickRecorderMime() {
+    if (typeof MediaRecorder === 'undefined') return '';
+    var cands = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
+    for (var i = 0; i < cands.length; i++) {
+      try { if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(cands[i])) return cands[i]; } catch (e) {}
+    }
+    return '';
+  }
+
+  function blobToB64(blob) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onloadend = function () {
+        var dataUrl = String(reader.result || '');
+        var i = dataUrl.indexOf(',');
+        resolve(i >= 0 ? dataUrl.slice(i + 1) : '');
+      };
+      reader.onerror = function () { reject(new Error('audio read failed')); };
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  function startMediaCapture() {
+    if (hasNativeHost()) return Promise.resolve(false); // native SpeechRecognizer owns the mic
+    if (!canMediaRecorder()) return Promise.resolve(false);
+    stopMediaCapture(true);
+    mediaChunks = [];
+    mediaMime = pickRecorderMime();
+    return navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      mediaStream = stream;
+      try {
+        mediaRecorder = mediaMime ? new MediaRecorder(stream, { mimeType: mediaMime }) : new MediaRecorder(stream);
+      } catch (e) {
+        mediaRecorder = new MediaRecorder(stream);
+      }
+      mediaMime = mediaRecorder.mimeType || mediaMime || 'audio/webm';
+      mediaRecorder.ondataavailable = function (ev) {
+        if (ev.data && ev.data.size > 0) mediaChunks.push(ev.data);
+      };
+      try { mediaRecorder.start(250); } catch (e2) { mediaRecorder.start(); }
+      return true;
+    }).catch(function () { return false; });
+  }
+
+  /** Stop capture. discard=true drops audio; otherwise resolves {b64,mime}|null. */
+  function stopMediaCapture(discard) {
+    return new Promise(function (resolve) {
+      function releaseStream() {
+        if (mediaStream) {
+          try { mediaStream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+        }
+        mediaStream = null;
+        mediaRecorder = null;
+      }
+      if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+        releaseStream();
+        mediaChunks = [];
+        resolve(null);
+        return;
+      }
+      mediaRecorder.onstop = function () {
+        var chunks = mediaChunks.slice();
+        var mime = mediaMime || 'audio/webm';
+        releaseStream();
+        mediaChunks = [];
+        if (discard || !chunks.length) { resolve(null); return; }
+        var blob = new Blob(chunks, { type: mime });
+        if (!blob.size) { resolve(null); return; }
+        blobToB64(blob).then(function (b64) {
+          resolve(b64 ? { b64: b64, mime: mime } : null);
+        }).catch(function () { resolve(null); });
+      };
+      try { mediaRecorder.stop(); } catch (e) { releaseStream(); mediaChunks = []; resolve(null); }
+    });
+  }
+
+  function isRelativeSameOriginPath(url) {
+    return typeof url === 'string' && url.charAt(0) === '/' && url.slice(0, 2) !== '//';
+  }
+
+  function isHttpsHubBase(url) {
+    try {
+      var parsed = new URL(url);
+      return parsed.protocol === 'https:';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function joinUrl(base, path) {
+    var b = String(base || '').replace(/\/+$/, '');
+    var p = String(path || '');
+    return b + (p.charAt(0) === '/' ? p : '/' + p);
+  }
+
+  function b64urlToUtf8(seg) {
+    try {
+      var s = String(seg || '').replace(/-/g, '+').replace(/_/g, '/');
+      while (s.length % 4) s += '=';
+      return decodeURIComponent(escape(atob(s)));
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function looksLikeJwt(input) {
+    if (!input) return false;
+    var parts = String(input).trim().split('.');
+    if (parts.length !== 3) return false;
+    if (!parts[0] || !parts[1] || !parts[2]) return false;
+    if (!/^[A-Za-z0-9_-]+$/.test(parts[0]) || !/^[A-Za-z0-9_-]+$/.test(parts[1]) || !/^[A-Za-z0-9_-]+$/.test(parts[2])) return false;
+    var payloadRaw = b64urlToUtf8(parts[1]);
+    if (!payloadRaw) return false;
+    try {
+      var payload = JSON.parse(payloadRaw);
+      if (!payload || typeof payload !== 'object') return false;
+      if (typeof payload.exp !== 'number' || !isFinite(payload.exp)) return false;
+      var nowSec = Math.floor(Date.now() / 1000);
+      if (payload.exp < nowSec - 60) return false;
+      if (payload.exp > nowSec + (60 * 60 * 24 * 365 * 10)) return false;
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function mintBrowserHubJwt(credential) {
+    var accessToken = credential.indexOf(':') === -1 ? (credential + ':default') : credential;
+    return fetch(joinUrl(cfg.hapiProxy, '/api/auth'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessToken: accessToken }),
+      cache: 'no-store',
+    }).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (body) {
+        if (!res.ok || !body || !body.token) return Promise.reject(new Error('hub auth failed'));
+        cfg._jwt = String(body.token);
+        cfg._jwtFrom = credential;
+        return cfg._jwt;
+      });
+    });
+  }
+
+  function getBrowserHubJwt(credential, forceRefresh) {
+    if (!credential) return Promise.reject(new Error('credential required'));
+    if (looksLikeJwt(credential)) {
+      cfg._jwt = credential;
+      cfg._jwtFrom = '__jwt__';
+      return Promise.resolve(cfg._jwt);
+    }
+    if (!forceRefresh && cfg._jwt && cfg._jwtFrom === credential) return Promise.resolve(cfg._jwt);
+    return mintBrowserHubJwt(credential);
+  }
+
+  /** Proxy auth: send both secret headers for one release train (#73). Same value only. */
+  function proxySecretHeaders(secret) {
+    var h = {};
+    h[SECRET_HEADER] = secret;
+    h[LEGACY_SECRET_HEADER] = secret;
+    return h;
+  }
+
+  function authHeaders(credential, forceRefresh) {
+    if (cfg.mode === MODE_BROWSER_HUB) {
+      return getBrowserHubJwt(credential, !!forceRefresh).then(function (jwt) {
+        return { Authorization: 'Bearer ' + jwt };
+      });
+    }
+    return Promise.resolve(proxySecretHeaders(credential));
+  }
+
+  function requestTarget(path) {
+    if (cfg.mode === MODE_BROWSER_HUB) return joinUrl(cfg.hapiProxy, path);
+    return joinUrl(cfg.hapiProxy, path);
+  }
+
+  function whisperTranscribe(b64, mime) {
+    if (cfg.mode !== MODE_PROXY) return Promise.reject(new Error('server stt unavailable in browser-hub mode'));
+    var secret = ensureSecret();
+    if (!secret) return Promise.reject(new Error('operator secret required'));
+    var url = (cfg && cfg.sttUrl) || '/api/stt';
+    var headers = proxySecretHeaders(secret);
+    headers['Content-Type'] = 'application/json';
+    return fetch(url, {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify({ audio_b64: b64, mime: mime || 'audio/webm' }),
+      cache: 'no-store',
+    }).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (body) {
+        if (!res.ok || !body || !body.ok) {
+          var err = (body && body.error) || ('stt ' + res.status);
+          return Promise.reject(new Error(err));
+        }
+        return String(body.text || '').trim();
+      });
+    });
+  }
+
+  /** If transcript empty, stop MediaRecorder and fill via /api/stt. */
+  function resolveTranscriptWithWhisper(transcript, onBadge) {
+    var text = (transcript || '').trim();
+    return stopMediaCapture(false).then(function (audio) {
+      if (!needsWhisperFallback(text, !!(audio && audio.b64))) return text;
+      if (typeof onBadge === 'function') onBadge('⏳ Transcribing on server…');
+      return whisperTranscribe(audio.b64, audio.mime).then(function (out) {
+        return (out || '').trim();
+      });
+    });
+  }
+
+  function setListenBadge(mode, text) {
+    if (!overlay || !overlay._badge) return;
+    var b = overlay._badge;
+    b.style.display = mode === 'hide' ? 'none' : 'inline-flex';
+    if (mode === 'hide') { b.className = 'opdock-listening'; return; }
+    b.className = 'opdock-listening' + (mode === 'warn' ? ' opdock-listening--warn' : '');
+    if (text) b.textContent = text;
+  }
+
+  function makeRecognition(onFinal, onInterim) {
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return null;
+    var r = new SR(); r.continuous = true; r.interimResults = true; r.lang = navigator.language || 'en-US';
+    r.onresult = function (ev) {
+      var fin = '', interim = '';
+      for (var i = ev.resultIndex; i < ev.results.length; i++) {
+        if (ev.results[i].isFinal) fin += ev.results[i][0].transcript;
+      }
+      for (var j = 0; j < ev.results.length; j++) { if (!ev.results[j].isFinal) interim += ev.results[j][0].transcript; }
+      if (fin) onFinal(fin.trim());
+      onInterim(interim);
+    };
+    r.onerror = function (ev) {
+      var code = (ev && ev.error) || '';
+      if (code === 'aborted' || code === 'no-speech') return;
+      var msg = '';
+      if (code === 'not-allowed') msg = 'Microphone permission denied';
+      else if (code === 'audio-capture') msg = 'No microphone found';
+      else if (code === 'network' || code === 'service-not-allowed') msg = 'Speech service unavailable';
+      else if (code) msg = 'Speech error (' + code + ')';
+      if (!msg) return;
+      toast(msg, 'err');
+      if (overlay) setListenBadge('warn', '⚠️ ' + msg + ' — type below, then Send');
+      else if (recording) {
+        recording = false;
+        recognizing = false;
+        hideRecordLabel();
+        setBtnState('idle');
+      }
+    };
+    return r;
+  }
+
+  // --- HAPI transport via proxy or browser-hub -----------------------------------------------
+  function hapiPost(path, credential, body) {
+    return authHeaders(credential, false).then(function (headers) {
+      headers['Content-Type'] = 'application/json';
+      return fetch(requestTarget(path), { method: 'POST', headers: headers, body: JSON.stringify(body), cache: 'no-store' })
+        .then(function (res) {
+          if (cfg.mode !== MODE_BROWSER_HUB || res.status !== 401 || looksLikeJwt(credential)) return res;
+          return authHeaders(credential, true).then(function (retryHeaders) {
+            retryHeaders['Content-Type'] = 'application/json';
+            return fetch(requestTarget(path), { method: 'POST', headers: retryHeaders, body: JSON.stringify(body), cache: 'no-store' });
+          });
+        });
+    });
+  }
+  function hapiGet(path, credential) {
+    return authHeaders(credential, false).then(function (headers) {
+      return fetch(requestTarget(path), { headers: headers, cache: 'no-store' })
+        .then(function (res) {
+          if (cfg.mode !== MODE_BROWSER_HUB || res.status !== 401 || looksLikeJwt(credential)) return res;
+          return authHeaders(credential, true).then(function (retryHeaders) {
+            return fetch(requestTarget(path), { headers: retryHeaders, cache: 'no-store' });
+          });
+        });
+    });
+  }
+  function uploadAttachment(secret, session, name, b64, mime) {
+    return hapiPost('/api/sessions/' + encodeURIComponent(session) + '/upload', secret, { filename: name, content: b64, mimeType: mime })
+      .then(function (res) { if (!res.ok) return Promise.reject(res); return res.json(); })
+      .then(function (out) { if (!out || !out.path) return Promise.reject(new Error('upload rejected')); var size = 0; try { size = atob(b64).length; } catch (e) {} return { id: name, filename: name, mimeType: mime, size: size, path: out.path }; });
+  }
+
+  // --- annotation overlay -------------------------------------------------------------------
+  function openOverlay(shotDataUrl) {
+    overlay = $('div', 'opdock-overlay');
+    var stage = $('div', 'opdock-stage');
+    // background screenshot
+    shotImg = new Image();
+    if (shotDataUrl) { shotImg.src = shotDataUrl; shotImg.className = 'opdock-shot'; stage.appendChild(shotImg); }
+    // draw layer
+    drawCanvas = $('canvas', 'opdock-draw');
+    stage.appendChild(drawCanvas);
+    overlay.appendChild(stage);
+
+    // toolbar
+    var bar = $('div', 'opdock-toolbar');
+    COLORS.forEach(function (c) {
+      var sw = $('button', 'opdock-swatch'); sw.style.background = c;
+      if (c === penColor) sw.classList.add('opdock-swatch--on');
+      sw.addEventListener('click', function () { penColor = c; bar.querySelectorAll('.opdock-swatch').forEach(function (n) { n.classList.remove('opdock-swatch--on'); }); sw.classList.add('opdock-swatch--on'); });
+      bar.appendChild(sw);
+    });
+    var undo = $('button', 'opdock-tool', '↶ Undo'); undo.addEventListener('click', function () { strokes.pop(); redraw(); });
+    var clear = $('button', 'opdock-tool', '✕ Clear'); clear.addEventListener('click', function () { strokes = []; redraw(); });
+    bar.appendChild(undo); bar.appendChild(clear);
+    overlay.appendChild(bar);
+
+    // Markup is DRAW-ONLY: Cancel / Send only. No typed-note field (voice is tap-mic).
+    // Foot is padded clear of the FAB (web + native host) — see .opdock-foot in CSS.
+    var foot = $('div', 'opdock-foot');
+    var actions = $('div', 'opdock-actions');
+    var cancel = $('button', 'opdock-btn2 opdock-cancel', 'Cancel');
+    var send = $('button', 'opdock-btn2 opdock-send', 'Send ▶');
+    cancel.addEventListener('click', function () { closeOverlay(); });
+    send.addEventListener('click', function () { doSend(''); });
+    actions.appendChild(cancel); actions.appendChild(send);
+    foot.appendChild(actions);
+    overlay.appendChild(foot);
+
+    document.body.appendChild(overlay);
+    document.body.classList.add('opdock-noscroll');
+    sizeCanvas();
+    window.addEventListener('resize', sizeCanvas);
+    attachDrawing();
+
+    overlay._ta = null;
+    overlay._interim = null;
+    overlay._badge = null;
+
+    // Ensure no leftover voice session bleeds into markup.
+    stopWebRecognition();
+    stopMediaCapture(true);
+    recognizing = false;
+    recording = false;
+    liveTranscript = '';
+    liveInterim = '';
+    hideRecordLabel();
+    setBtnState('markup');
+    if (hasNativeHost() && dock) {
+      var ob = dock.querySelector('.opdock-btn');
+      if (ob) ob.style.display = 'none';
+    }
+  }
+
+  // Live feedback that speech is being captured (driven by the web recognizer or a native host).
+  function setListening(on) {
+    if (on) setListenBadge('listen', '🎙️ Listening… type or talk, then tap Send');
+    else setListenBadge('hide');
+    if (!on && overlay && overlay._interim) overlay._interim.textContent = '';
+  }
+  function setInterim(text) {
+    if (overlay && overlay._interim) overlay._interim.textContent = text || '';
+  }
+
+  function sizeCanvas() {
+    if (!drawCanvas) return;
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var w = window.innerWidth, h = window.innerHeight;
+    drawCanvas.style.width = w + 'px'; drawCanvas.style.height = h + 'px';
+    drawCanvas.width = Math.round(w * dpr); drawCanvas.height = Math.round(h * dpr);
+    drawCtx = drawCanvas.getContext('2d'); drawCtx.scale(dpr, dpr);
+    redraw();
+  }
+
+  function redraw() {
+    if (!drawCtx) return;
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    drawCtx.clearRect(0, 0, drawCanvas.width / dpr, drawCanvas.height / dpr);
+    drawCtx.lineJoin = drawCtx.lineCap = 'round';
+    strokes.forEach(function (s) {
+      drawCtx.strokeStyle = s.color; drawCtx.lineWidth = s.width;
+      drawCtx.beginPath();
+      s.pts.forEach(function (p, i) { i ? drawCtx.lineTo(p.x, p.y) : drawCtx.moveTo(p.x, p.y); });
+      drawCtx.stroke();
+    });
+  }
+
+  function attachDrawing() {
+    function pt(e) { var r = drawCanvas.getBoundingClientRect(); var t = e.touches ? e.touches[0] : e; return { x: t.clientX - r.left, y: t.clientY - r.top }; }
+    function down(e) { e.preventDefault(); curStroke = { color: penColor, width: penWidth, pts: [pt(e)] }; strokes.push(curStroke); }
+    function move(e) { if (!curStroke) return; e.preventDefault(); curStroke.pts.push(pt(e)); redraw(); }
+    function up() { curStroke = null; }
+    drawCanvas.addEventListener('pointerdown', down);
+    drawCanvas.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+
+  function closeOverlay() {
+    if (recognition) { try { recognition.stop(); } catch (e) {} }
+    recognizing = false;
+    recording = false;
+    stopMediaCapture(true);
+    window.removeEventListener('resize', sizeCanvas);
+    if (overlay) { overlay.remove(); overlay = null; }
+    document.body.classList.remove('opdock-noscroll');
+    // Tell a native host (Android) the capture surface closed, so it can stop its SpeechRecognizer.
+    try { if (window.AndroidOperator && window.AndroidOperator.onCaptureDone) window.AndroidOperator.onCaptureDone(); } catch (e) {}
+    strokes = []; curStroke = null; shotImg = null; drawCanvas = null; drawCtx = null;
+    setBtnState('idle');
+  }
+
+  // flatten screenshot + strokes -> JPEG base64
+  function flatten() {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var w = window.innerWidth, h = window.innerHeight;
+    var out = document.createElement('canvas'); out.width = Math.round(w * dpr); out.height = Math.round(h * dpr);
+    var ctx = out.getContext('2d');
+    if (shotImg && shotImg.complete && shotImg.naturalWidth) ctx.drawImage(shotImg, 0, 0, out.width, out.height);
+    else { ctx.fillStyle = '#111'; ctx.fillRect(0, 0, out.width, out.height); }
+    if (drawCanvas) ctx.drawImage(drawCanvas, 0, 0, out.width, out.height);
+    return out.toDataURL('image/jpeg', 0.9).split(',')[1];
+  }
+
+  function doSend(transcript) {
+    var secret = ensureSecret(); if (!secret) return;
+    resolveTargetSession(secret).then(function (session) {
+    if (!session) { toast('No target session configured', 'err'); return; }
+    var annotated = strokes.length > 0;
+    var b64 = flatten();
+    var nav = collectNav();
+    var text = renderText(nav, (transcript || '').trim(), annotated);
+    setBtnState('sending');
+    uploadAttachment(secret, session, 'operator-screenshot.jpg', b64, 'image/jpeg')
+      .then(function (att) {
+        return hapiPost('/api/sessions/' + encodeURIComponent(session) + '/messages', secret, { text: text, attachments: [att] });
+      })
+      .then(function (res) {
+        if (res.status === 401 || res.status === 403) { setSecret(''); toast('Inline credential rejected — re-enter next time', 'err'); }
+        else if (!res.ok) { toast('HAPI error ' + res.status, 'err'); }
+        else { toast('Sent to agent 🎙️', 'ok'); closeOverlay(); openReplies(secret, session); return; }
+        setBtnState('overlay');
+      })
+      .catch(function (e) {
+        if (e && (e.status === 401 || e.status === 403)) setSecret('');
+        toast('Send failed: ' + ((e && e.status) ? ('upload ' + e.status) : (e && e.message || e)), 'err');
+        setBtnState('overlay');
+      });
+    });
+  }
+
+  function shotToB64(dataUrl) {
+    if (!dataUrl || typeof dataUrl !== 'string') return '';
+    var i = dataUrl.indexOf(',');
+    return i >= 0 ? dataUrl.slice(i + 1) : dataUrl;
+  }
+
+  function doSendFromShot(transcript, shotDataUrl) {
+    var secret = ensureSecret(); if (!secret) { setBtnState('idle'); return; }
+    resolveTargetSession(secret).then(function (session) {
+    if (!session) { toast('No target session configured', 'err'); setBtnState('idle'); return; }
+    var nav = collectNav();
+    var text = renderText(nav, (transcript || '').trim(), false);
+    var b64 = shotToB64(shotDataUrl);
+    setBtnState('sending');
+    var post = function (attachments) {
+      return hapiPost('/api/sessions/' + encodeURIComponent(session) + '/messages', secret, { text: text, attachments: attachments || [] });
+    };
+    var chain = b64
+      ? uploadAttachment(secret, session, 'operator-screenshot.jpg', b64, 'image/jpeg').then(function (att) { return post([att]); })
+      : post([]);
+    chain.then(function (res) {
+      if (res.status === 401 || res.status === 403) { setSecret(''); toast('Inline credential rejected — re-enter next time', 'err'); setBtnState('idle'); }
+      else if (!res.ok) { toast('HAPI error ' + res.status, 'err'); setBtnState('idle'); }
+      else { toast('Sent to agent 🎙️', 'ok'); setBtnState('idle'); openReplies(secret, session); }
+    }).catch(function (e) {
+      if (e && (e.status === 401 || e.status === 403)) setSecret('');
+      toast('Send failed: ' + ((e && e.status) ? ('upload ' + e.status) : (e && e.message || e)), 'err');
+      setBtnState('idle');
+    });
+    });
+  }
+
+  // --- read-back panel (Phase 4) ------------------------------------------------------------
+  // Match lib/strip-agent-notify-summary.ts — keep in sync (drop-in dock has no imports).
+  function stripAgentNotifySummary(text) {
+    if (text == null) return '';
+    var raw = String(text);
+    if (!raw.trim()) return '';
+    var out = raw.replace(/(?:^|\n)\s*AGENT_NOTIFY_SUMM?ARY\s*(?:\r?\n\s*)?(\{[\s\S]*\})\s*$/i, '');
+    if (out === raw) {
+      out = raw.replace(/\s*AGENT_NOTIFY_SUMM?ARY\s+(\{[\s\S]*?\})\s*$/gi, '');
+    }
+    return out.replace(/\s+$/u, '').replace(/^\s+/u, '');
+  }
+
+  // --- replies display sanitize (#102) ---
+  function summarizeContextJson(raw) {
+    try {
+      var o = JSON.parse(String(raw || '').trim());
+      if (!o || typeof o !== 'object' || Array.isArray(o)) return '📍 page context';
+      var bits = [];
+      if (o.appId) bits.push(String(o.appId));
+      if (o.view) bits.push(String(o.view));
+      if (o.route) bits.push(String(o.route));
+      if (o.chatId) bits.push('chat ' + String(o.chatId).slice(0, 8));
+      return bits.length ? '📍 ' + bits.join(' · ') : '📍 page context';
+    } catch (e) {
+      return '📍 page context';
+    }
+  }
+
+  function isOperatorNavJson(raw) {
+    return /"appId"\s*:/.test(raw) && (/"viewport"\s*:/.test(raw) || /"route"\s*:/.test(raw));
+  }
+
+  function extractJsonObjectAt(s, start) {
+    if (s.charAt(start) !== '{') return null;
+    var depth = 0, inStr = false, esc = false;
+    for (var j = start; j < s.length; j++) {
+      var ch = s.charAt(j);
+      if (inStr) {
+        if (esc) { esc = false; continue; }
+        if (ch === '\\') { esc = true; continue; }
+        if (ch === '"') inStr = false;
+        continue;
+      }
+      if (ch === '"') { inStr = true; continue; }
+      if (ch === '{') depth++;
+      else if (ch === '}') {
+        depth--;
+        if (depth === 0) return s.slice(start, j + 1);
+      }
+    }
+    return null;
+  }
+
+  function stripRawJsonForDisplay(text) {
+    var out = String(text || '');
+    out = out.replace(/```json\s*([\s\S]*?)```/gi, function (_m, body) {
+      return summarizeContextJson(body);
+    });
+    var rebuilt = '';
+    var i = 0;
+    while (i < out.length) {
+      if (out.charAt(i) === '{') {
+        var block = extractJsonObjectAt(out, i);
+        if (block && isOperatorNavJson(block)) {
+          rebuilt += summarizeContextJson(block);
+          i += block.length;
+          continue;
+        }
+      }
+      rebuilt += out.charAt(i);
+      i++;
+    }
+    return rebuilt.replace(/\n{3,}/g, '\n\n').replace(/\s+$/u, '').replace(/^\s+/u, '');
+  }
+  // --- end replies display sanitize ---
+
+  function extractMessage(m) {
+    var c = m.content;
+    if (typeof c === 'string') { try { c = JSON.parse(c); } catch (e) {} }
+    if (!c || typeof c !== 'object') return null;
+    var inner = c.content, text = '';
+    if (inner && typeof inner === 'object') {
+      if (inner.type === 'event') return null;
+      if (typeof inner.text === 'string') text = inner.text;
+      else if (inner.data && typeof inner.data === 'object') { if (inner.data.type === 'reasoning') return null; text = inner.data.message || inner.data.text || ''; }
+    } else if (typeof inner === 'string') text = inner;
+    text = stripRawJsonForDisplay(stripAgentNotifySummary(text || ''));
+    if (!text) return null;
+    return { role: c.role || '?', text: text, seq: m.seq };
+  }
+
+  var REPLIES_COLLAPSE_KEY = 'hapiInlineRepliesCollapsed';
+  function repliesWantCollapsed() {
+    try { return sessionStorage.getItem(REPLIES_COLLAPSE_KEY) === '1'; } catch (e) { return false; }
+  }
+  function setRepliesWantCollapsed(on) {
+    try { sessionStorage.setItem(REPLIES_COLLAPSE_KEY, on ? '1' : '0'); } catch (e) {}
+  }
+
+  function openReplies(secret, session) {
+    closeReplies();
+    replies = $('div', 'opdock-replies');
+    replies.setAttribute('data-testid', 'opdock-replies');
+    var collapsed = repliesWantCollapsed();
+    if (collapsed) replies.classList.add('opdock-replies--min');
+
+    var head = $('div', 'opdock-replies-head');
+    head.setAttribute('role', 'button');
+    head.setAttribute('tabindex', '0');
+    head.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    head.title = 'Collapse or expand replies';
+    var title = $('span', 'opdock-replies-title', '🤖 Agent replies');
+    var unread = $('span', 'opdock-replies-unread');
+    unread.hidden = true;
+    unread.setAttribute('aria-label', 'Unread agent replies');
+    var close = $('button', 'opdock-replies-close', '✕');
+    close.setAttribute('aria-label', 'Close replies');
+    close.addEventListener('click', function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      closeReplies();
+    });
+    head.appendChild(title);
+    head.appendChild(unread);
+    head.appendChild(close);
+
+    var unreadCount = 0;
+    function setCollapsed(next) {
+      collapsed = !!next;
+      replies.classList.toggle('opdock-replies--min', collapsed);
+      head.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      title.textContent = collapsed ? '🤖' : '🤖 Agent replies';
+      setRepliesWantCollapsed(collapsed);
+      if (!collapsed) {
+        unreadCount = 0;
+        unread.hidden = true;
+      }
+    }
+    title.textContent = collapsed ? '🤖' : '🤖 Agent replies';
+    head.addEventListener('click', function () { setCollapsed(!collapsed); });
+    head.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter' || ev.key === ' ') {
+        ev.preventDefault();
+        setCollapsed(!collapsed);
+      }
+    });
+
+    var body = $('div', 'opdock-replies-body', 'Waiting for the agent…');
+    replies.appendChild(head);
+    replies.appendChild(body);
+    document.body.appendChild(replies);
+
+    var seen = {};
+    var primed = false;
+    function tick() {
+      hapiGet('/api/sessions/' + encodeURIComponent(session) + '/messages?limit=25', secret)
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (!d || !d.messages) return;
+          var items = d.messages.map(extractMessage).filter(Boolean);
+          var fresh = items.filter(function (it) { return !seen[it.seq]; });
+          if (fresh.length && body.textContent === 'Waiting for the agent…') body.textContent = '';
+          fresh.forEach(function (it) {
+            seen[it.seq] = 1;
+            var row = $('div', 'opdock-msg opdock-msg--' + (it.role === 'agent' ? 'agent' : 'you'));
+            row.appendChild($('div', 'opdock-msg-role', it.role === 'agent' ? 'agent' : 'you'));
+            row.appendChild($('div', 'opdock-msg-text', it.text));
+            body.appendChild(row);
+            body.scrollTop = body.scrollHeight;
+            if (primed && collapsed && it.role === 'agent') {
+              unreadCount += 1;
+              unread.hidden = false;
+            }
+          });
+          primed = true;
+        }).catch(function () {});
+    }
+    tick();
+    replyPoll = setInterval(tick, 4000);
+    setTimeout(function () { if (replyPoll) { clearInterval(replyPoll); replyPoll = null; } }, 300000);
+  }
+  function closeReplies() { if (replyPoll) { clearInterval(replyPoll); replyPoll = null; } if (replies) { replies.remove(); replies = null; } }
+
+  // --- mic button / toggle record -----------------------------------------------------------
+  function notifyNativeMicUi(state, label) {
+    try {
+      if (window.AndroidOperator && typeof window.AndroidOperator.onMicUi === 'function') {
+        window.AndroidOperator.onMicUi(String(state || 'idle'), label == null ? '' : String(label));
+      }
+    } catch (e) {}
+  }
+
+  function setBtnState(state) {
+    if (!dock) return;
+    var btn = dock.querySelector('.opdock-btn');
+    // Only true voice-record pulses red. Markup stays calm purple (not a listening session).
+    dock.classList.toggle('opdock--listening', state === 'recording');
+    dock.classList.toggle('opdock--busy', state === 'sending');
+    if (btn) {
+      btn.disabled = (state === 'sending');
+      btn.setAttribute('aria-pressed', state === 'recording' ? 'true' : 'false');
+    }
+    var label = '';
+    if (state === 'recording' && recordLabel && recordLabel.style.display !== 'none') {
+      label = recordLabel.textContent || '';
+    } else if (state === 'markup') {
+      label = ''; // no chip — FAB stays tappable; foot has Cancel/Send
+    }
+    notifyNativeMicUi(state, label);
+  }
+
+  function showRecordLabel(text) {
+    if (!dock) return;
+    if (!recordLabel) {
+      recordLabel = $('div', 'opdock-label');
+      dock.insertBefore(recordLabel, dock.firstChild);
+    }
+    var st = recording ? 'recording' : (overlay ? 'markup' : 'idle');
+    if (dock.classList.contains('opdock--busy')) st = 'sending';
+    var labelText = text || 'Listening… tap mic again to send';
+    // #104: native host present → one STT label surface (native onMicUi only).
+    if (hasNativeHost()) {
+      recordLabel.style.display = 'none';
+      notifyNativeMicUi(st, recording ? labelText : '');
+      return;
+    }
+    recordLabel.style.display = 'block';
+    recordLabel.textContent = labelText;
+    notifyNativeMicUi(st, recording ? recordLabel.textContent : '');
+  }
+  function hideRecordLabel() {
+    if (recordLabel) recordLabel.style.display = 'none';
+    var st = 'idle';
+    if (dock) {
+      if (dock.classList.contains('opdock--busy')) st = 'sending';
+      else if (recording) st = 'recording';
+      else if (overlay) st = 'markup';
+    }
+    notifyNativeMicUi(st, '');
+  }
+  function refreshRecordLabel() {
+    if (!recording) return;
+    var bits = liveTranscript || '';
+    if (liveInterim) bits = (bits ? bits + ' ' : '') + liveInterim;
+    showRecordLabel(bits ? ('🎙️ ' + bits) : 'Listening… tap mic again to send');
+  }
+
+  function stopWebRecognition() {
+    if (recognition) { try { recognition.stop(); } catch (e) {} recognition = null; }
+    recognizing = false;
+  }
+
+  function startWebStt() {
+    recognition = makeRecognition(
+      function (fin) {
+        liveTranscript = (liveTranscript ? liveTranscript + ' ' : '') + fin;
+        liveInterim = '';
+        if (overlay && overlay._ta) overlay._ta.value = liveTranscript;
+        refreshRecordLabel();
+      },
+      function (txt) {
+        liveInterim = txt || '';
+        if (overlay && overlay._interim) overlay._interim.textContent = liveInterim;
+        refreshRecordLabel();
+      }
+    );
+    if (!recognition) return false;
+    recognizing = true;
+    try {
+      recognition.onstart = function () { refreshRecordLabel(); };
+      recognition.start();
+      return true;
+    } catch (e) {
+      recognizing = false;
+      recognition = null;
+      return false;
+    }
+  }
+
+  function startRecording(providedShot) {
+    var status = voiceStatus({
+      hasSR: !!(window.SpeechRecognition || window.webkitSpeechRecognition),
+      hasNative: hasNativeHost(),
+      secure: !!window.isSecureContext,
+      hasMedia: canMediaRecorder(),
+    });
+    if (status.mode === 'warn') {
+      toast(status.text.replace(/^⚠️\s*/, ''), 'err');
+      return false;
+    }
+    liveTranscript = '';
+    liveInterim = '';
+    // Keep strokes when markup overlay is open — tap-to-talk must not erase drawings.
+    if (!overlay) strokes = [];
+    recording = true;
+    setBtnState('recording');
+    showRecordLabel(status.text);
+
+    function armed(shot) {
+      if (!recording) return;
+      pendingShot = overlay ? null : (shot || null);
+      if (hasNativeHost()) {
+        refreshRecordLabel();
+        try {
+          if (window.AndroidOperator && typeof window.AndroidOperator.startNativeStt === 'function') {
+            window.AndroidOperator.startNativeStt();
+          }
+        } catch (e) {}
+        return;
+      }
+      var webOk = startWebStt();
+      startMediaCapture().then(function (mediaOk) {
+        if (!recording) return;
+        if (!webOk && !mediaOk) {
+          toast('Mic failed to start', 'err');
+          recording = false;
+          hideRecordLabel();
+          setBtnState(overlay ? 'markup' : 'idle');
+          return;
+        }
+        if (!webOk && mediaOk) showRecordLabel('🎙️ Listening (server STT on stop)…');
+        else refreshRecordLabel();
+      });
+    }
+
+    if (overlay) {
+      armed(null);
+      return true;
+    }
+    if (providedShot) armed(providedShot);
+    else {
+      captureScreenshot().then(function (shot) {
+        if (!recording) return;
+        armed(shot);
+      });
+    }
+    return true;
+  }
+
+  function finishRecording() {
+    if (!recording) return;
+    var fromMarkup = !!overlay;
+    recording = false;
+    stopWebRecognition();
+    try { if (window.AndroidOperator && window.AndroidOperator.onCaptureDone) window.AndroidOperator.onCaptureDone(); } catch (e) {}
+    var transcript = (liveTranscript || '').trim();
+    var shot = pendingShot;
+    pendingShot = null;
+    liveInterim = '';
+    function done(text) {
+      hideRecordLabel();
+      if (!(text || '').trim()) {
+        toast('No speech captured — tap mic, talk, tap again (use HTTPS Tailscale if this keeps failing)', 'err');
+        setBtnState(fromMarkup ? 'markup' : 'idle');
+        return;
+      }
+      if (fromMarkup) doSend(text.trim());
+      else doSendFromShot(text.trim(), shot);
+    }
+    if (transcript) {
+      stopMediaCapture(true);
+      done(transcript);
+      return;
+    }
+    showRecordLabel('⏳ Transcribing on server…');
+    setBtnState('sending');
+    resolveTranscriptWithWhisper('', function (msg) { showRecordLabel(msg); })
+      .then(done)
+      .catch(function (e) {
+        hideRecordLabel();
+        toast('Transcribe failed: ' + (e && e.message || e), 'err');
+        setBtnState(fromMarkup ? 'markup' : 'idle');
+      });
+  }
+
+  function toggleMic(providedShot) {
+    // Tap = voice. If markup is open, keep drawings and record on top.
+    if (recording) { finishRecording(); return 'stopped'; }
+    return startRecording(providedShot || null) ? 'started' : 'blocked';
+  }
+
+  function beginMarkup(providedShot) {
+    if (recording) {
+      stopWebRecognition();
+      stopMediaCapture(true);
+      recording = false;
+      hideRecordLabel();
+      try { if (window.AndroidOperator && window.AndroidOperator.onCaptureDone) window.AndroidOperator.onCaptureDone(); } catch (e) {}
+    }
+    strokes = [];
+    if (providedShot) openOverlay(providedShot);
+    else captureScreenshot().then(function (shot) { openOverlay(shot); });
+  }
+
+  function appendTranscript(text) {
+    if (!text) return;
+    var t = String(text).trim();
+    if (!t) return;
+    liveTranscript = (liveTranscript ? liveTranscript + ' ' : '') + t;
+    if (overlay && overlay._ta) {
+      overlay._ta.value = (overlay._ta.value ? overlay._ta.value + ' ' : '') + t;
+    }
+    refreshRecordLabel();
+  }
+
+  /** Replace the in-memory transcript (native SpeechRecognizer pushes full text each partial). */
+  function setTranscript(text) {
+    liveTranscript = text ? String(text) : '';
+    liveInterim = '';
+    if (overlay && overlay._ta) overlay._ta.value = liveTranscript;
+    refreshRecordLabel();
+  }
+
+  /** True when tap-record can produce a transcript (native host, Web Speech, or whisper path). */
+  function voiceIsUsable() {
+    var hasSR = false;
+    try {
+      hasSR = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+    } catch (e) {}
+    var status = voiceStatus({
+      hasSR: hasSR,
+      hasNative: hasNativeHost(),
+      secure: !!window.isSecureContext,
+      hasMedia: canMediaRecorder(),
+    });
+    return status.mode === 'listen';
+  }
+
+  function hasFinePointer() {
+    try {
+      return !!(window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches);
+    } catch (e) { return false; }
+  }
+  function micIconSvg() {
+    return '<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V22h2v-3.08A7 7 0 0 0 19 12h-2z"/></svg>';
+  }
+  function hubIconSvg() {
+    return '<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path fill="currentColor" d="M12 2L3 7v2h18V7L12 2zm-7 9v7h2v-7H5zm5 0v7h4v-7h-4zm6 0v7h2v-7h-2zM3 20v2h18v-2H3z"/></svg>';
+  }
+  function satIcon(kind) {
+    if (kind === 'mic') return '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V22h2v-3.08A7 7 0 0 0 19 12h-2z"/></svg>';
+    if (kind === 'markup') return '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
+    if (kind === 'sessions') return '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h10v2H4v-2z"/></svg>';
+    return '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.61-.22l-2.39.96a7.07 7.07 0 0 0-1.63-.94l-.36-2.54A.5.5 0 0 0 13.9 2h-3.8a.5.5 0 0 0-.49.42l-.36 2.54c-.59.22-1.14.52-1.63.94l-2.39-.96a.5.5 0 0 0-.61.22L2.7 8.84a.5.5 0 0 0 .12.64L4.85 11.06c-.04.31-.06.63-.06.94s.02.63.06.94L2.82 14.52a.5.5 0 0 0-.12.64l1.92 3.32c.13.23.4.32.61.22l2.39-.96c.5.42 1.04.72 1.63.94l.36 2.54c.05.24.25.42.49.42h3.8c.24 0 .44-.18.49-.42l.36-2.54c.59-.22 1.14-.52 1.63-.94l2.39.96c.23.1.48 0 .61-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/></svg>';
+  }
+  function pathUnderProject(sessionPath, projectPath) {
+    var session = String(sessionPath || '').replace(/\\/g, '/').replace(/\/+$/, '');
+    var project = String(projectPath || '').replace(/\\/g, '/').replace(/\/+$/, '');
+    if (!session || !project) return false;
+    return session === project || session.indexOf(project + '/') === 0;
+  }
+  function mapPickerSession(s) {
+    var meta = s && s.metadata && typeof s.metadata === 'object' ? s.metadata : null;
+    var id = s && s.id ? String(s.id) : '';
+    if (!id) return null;
+    return {
+      id: id,
+      name: (meta && meta.name) || s.name || id,
+      active: !!(s && s.active),
+      updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : 0,
+      flavor: (meta && meta.flavor) || s.flavor || null,
+      unread: !!(s && ((s.unread === true) || (typeof s.pendingRequestsCount === 'number' && s.pendingRequestsCount > 0))),
+    };
+  }
+  function listProjectSessions(secret) {
+    if (cfg.mode === MODE_BROWSER_HUB) {
+      return hapiGet('/api/sessions', secret).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+        var raw = (d && Array.isArray(d.sessions)) ? d.sessions : (Array.isArray(d) ? d : []);
+        var project = cfg.projectPath || '';
+        return raw.filter(function (s) {
+          var path = s && s.metadata && s.metadata.path;
+          return pathUnderProject(path, project);
+        }).map(mapPickerSession).filter(Boolean);
+      });
+    }
+    return hapiGet('/operator/sessions', secret).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+      return (d && Array.isArray(d.sessions)) ? d.sessions : [];
+    });
+  }
+  function spawnProjectSession(secret, name) {
+    if (cfg.mode === MODE_BROWSER_HUB) {
+      if (!cfg.machineId || !cfg.projectPath) return Promise.reject(new Error('spawn not configured'));
+      return hapiPost('/api/machines/' + encodeURIComponent(cfg.machineId) + '/spawn', secret, { directory: cfg.projectPath })
+        .then(function (res) { if (!res.ok) return Promise.reject(res); return res.json(); })
+        .then(function (out) {
+          var id = out && out.type === 'success' ? out.sessionId : (out && out.id);
+          if (!id) return Promise.reject(new Error('spawn returned no session'));
+          return id;
+        });
+    }
+    var body = name ? { name: name } : {};
+    return hapiPost('/operator/sessions', secret, body)
+      .then(function (res) { if (!res.ok) return Promise.reject(res); return res.json(); })
+      .then(function (out) {
+        if (!out || !out.id) return Promise.reject(new Error('spawn returned no session'));
+        return out.id;
+      });
+  }
+  function resolveTargetSession(secret) {
+    var mode = getRoutingMode();
+    if (mode === 'spawn-per-send') return spawnProjectSession(secret);
+    if (mode === 'pick') {
+      var picked = getPinnedSession();
+      if (!picked) {
+        toast('Pick a project session first', 'err');
+        openSessionPicker();
+        return Promise.resolve(null);
+      }
+      return Promise.resolve(picked);
+    }
+    return Promise.resolve(getPinnedSession() || cfg.session || null);
+  }
+  function closeToolSheet() {
+    if (toolSheet) { toolSheet.remove(); toolSheet = null; }
+  }
+  function closeCluster() {
+    if (!dock) return;
+    dock.classList.remove('opdock--cluster-open');
+    closeToolSheet();
+  }
+  function openCluster() {
+    if (!ready || !dock) return false;
+    dock.classList.add('opdock--cluster-open');
+    return true;
+  }
+  function onHubClick() {
+    if (longPressFired) { longPressFired = false; return; }
+    if (recording) { toggleMic(null); return; }
+    if (!hasFinePointer()) {
+      if (dock.classList.contains('opdock--cluster-open')) closeCluster();
+      else openCluster();
+      return;
+    }
+    toggleMic(null);
+  }
+  function onSatellite(tool) {
+    if (tool === 'mic') { closeToolSheet(); toggleMic(null); return; }
+    if (tool === 'markup') { closeCluster(); beginMarkup(null); return; }
+    if (tool === 'settings') { openSettingsSheet(); return; }
+    if (tool === 'sessions') { openSessionPicker(); return; }
+  }
+  function openSettingsSheet() {
+    closeToolSheet();
+    if (!dock) return;
+    toolSheet = $('div', 'opdock-sheet');
+    toolSheet.appendChild($('h3', null, 'Routing'));
+    ['pin', 'pick', 'spawn-per-send'].forEach(function (mode) {
+      var lab = $('label');
+      var inp = document.createElement('input');
+      inp.type = 'radio';
+      inp.name = 'opdock-routing';
+      inp.value = mode;
+      inp.checked = getRoutingMode() === mode;
+      inp.addEventListener('change', function () { setRoutingMode(mode); });
+      lab.appendChild(inp);
+      lab.appendChild(document.createTextNode(mode === 'spawn-per-send' ? 'spawn per send' : mode));
+      toolSheet.appendChild(lab);
+    });
+    toolSheet.appendChild($('div', 'opdock-session-meta', 'Pinned: ' + (getPinnedSession() || cfg.session || '(none)')));
+    dock.appendChild(toolSheet);
+  }
+  function openSessionPicker() {
+    closeToolSheet();
+    if (!dock) return;
+    var secret = ensureSecret();
+    if (!secret) return;
+    toolSheet = $('div', 'opdock-sheet');
+    toolSheet.appendChild($('h3', null, 'Project sessions'));
+    var list = $('div');
+    list.appendChild($('div', 'opdock-session-meta', 'Loading…'));
+    toolSheet.appendChild(list);
+    dock.appendChild(toolSheet);
+    listProjectSessions(secret).then(function (sessions) {
+      list.textContent = '';
+      if (!sessions.length) {
+        list.appendChild($('div', 'opdock-session-meta', 'No sessions for this project.'));
+        return;
+      }
+      var current = getPinnedSession();
+      sessions.forEach(function (s) {
+        var row = $('button', 'opdock-session-row' + (s.id === current ? ' opdock-session-row--on' : ''));
+        var unread = $('span', 'opdock-unread-dot');
+        if (!s.unread) unread.hidden = true;
+        row.appendChild(unread);
+        var body = $('div');
+        body.appendChild($('div', null, s.name || s.id));
+        var meta = (s.active ? 'active' : 'idle') + (s.flavor ? ' · ' + s.flavor : '');
+        if (s.updatedAt) meta += ' · ' + new Date(s.updatedAt).toLocaleString();
+        body.appendChild($('div', 'opdock-session-meta', meta));
+        row.appendChild(body);
+        row.addEventListener('click', function () {
+          setPinnedSession(s.id);
+          cfg.session = s.id;
+          closeToolSheet();
+          closeCluster();
+          openReplies(secret, s.id);
+        });
+        list.appendChild(row);
+      });
+    }).catch(function () {
+      list.textContent = '';
+      list.appendChild($('div', 'opdock-session-meta', 'Could not load sessions.'));
+    });
+  }
+  function applyIdleIcon(btn) {
+    if (!btn) return;
+    if (hasFinePointer()) {
+      btn.innerHTML = micIconSvg();
+      btn.setAttribute('aria-label', 'Operator mic');
+      btn.setAttribute('title', 'Record. Hover for tools. Long-press markup shortcut.');
+    } else {
+      btn.innerHTML = hubIconSvg();
+      btn.setAttribute('aria-label', 'Operator tools');
+      btn.setAttribute('title', 'Open operator tools (mic, markup, sessions, settings).');
+    }
+  }
+
+  function render() {
+    dock = $('div', 'opdock');
+    var cluster = $('div', 'opdock-cluster');
+    ['settings', 'markup', 'sessions', 'mic'].forEach(function (tool) {
+      var sat = $('button', 'opdock-sat');
+      sat.setAttribute('data-tool', tool);
+      sat.setAttribute('aria-label', tool);
+      sat.innerHTML = satIcon(tool);
+      sat.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        onSatellite(tool);
+      });
+      cluster.appendChild(sat);
+    });
+    dock.appendChild(cluster);
+    var btn = $('button', 'opdock-btn');
+    applyIdleIcon(btn);
+    btn.addEventListener('click', onHubClick);
+    btn.addEventListener('pointerdown', function () {
+      longPressFired = false;
+      if (longPressTimer) clearTimeout(longPressTimer);
+      longPressTimer = setTimeout(function () {
+        longPressFired = true;
+        beginMarkup(pendingShot);
+      }, 650);
+    });
+    function clearLong() { if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; } }
+    btn.addEventListener('pointerup', clearLong);
+    btn.addEventListener('pointerleave', clearLong);
+    btn.addEventListener('pointercancel', clearLong);
+    dock.appendChild(btn);
+    document.body.appendChild(dock);
+    ready = true;
+    // Native FAB (AndroidOperator) is the only mic button — hide in-page FAB; cluster satellites stay.
+    if (hasNativeHost()) {
+      var nb = dock.querySelector('.opdock-btn');
+      if (nb) nb.style.display = 'none';
+    }
+  }
+
+  function init(options) {
+    cfg = options || {};
+    cfg.configUrl = cfg.configUrl || '/api/config';
+    cfg.appId = cfg.appId || 'unknown-app';
+    fetch(cfg.configUrl, { headers: { 'Accept': 'application/json' }, cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : {}; })
+      .catch(function () { return {}; })
+      .then(function (config) {
+        var om = (config && (config.hapiInline || config.operatorMic)) || {};
+        cfg._config = om;
+        if (om.enabled !== true) return;
+        cfg.mode = om.mode === MODE_BROWSER_HUB ? MODE_BROWSER_HUB : MODE_PROXY;
+        cfg.authMode = om.authMode || (cfg.mode === MODE_BROWSER_HUB ? 'bearer' : 'proxy-secret');
+        cfg.hapiProxy = om.hapiProxy || (cfg.mode === MODE_BROWSER_HUB ? '' : '/hapi');
+        cfg.session = om.session || null;
+        cfg.projectPath = om.projectPath || null;
+        cfg.machineId = om.machineId || null;
+        cfg.sttUrl = om.sttUrl || '/api/stt';
+        if (!cfg.build) cfg.build = om.build || null;
+        if (om.appId && cfg.appId === 'unknown-app') cfg.appId = om.appId;
+
+        if (cfg.mode === MODE_BROWSER_HUB) {
+          if (!cfg.hapiProxy || !isHttpsHubBase(cfg.hapiProxy)) {
+            toast('HAPI inline disabled: browser-hub requires an explicit HTTPS hub origin', 'err');
+            return;
+          }
+        } else {
+          if (!isRelativeSameOriginPath(cfg.hapiProxy)) {
+            toast('HAPI inline disabled: proxy target must be same-origin relative', 'err');
+            return;
+          }
+          if (!isRelativeSameOriginPath(cfg.sttUrl)) {
+            toast('HAPI inline disabled: sttUrl must be same-origin relative', 'err');
+            return;
+          }
+        }
+
+        var unlock = parseUnlockQuery(location.search, location.pathname);
+        if (unlock.consumed) stripUnlockFromUrl(unlock.cleanedSearch, unlock.cleanedPathname);
+        if (unlock.rejectedCredentialInQuery) {
+          toast('Ignored insecure ?opmic credential in URL. Use /opmic or ?opmic=1 and paste in prompt.', 'err');
+        }
+        // Visibility vs auth: installed native host IS the visibility knock (?opmic / /opmic optional).
+        // Auth is unchanged — proxy still needs ensureSecret / X-Hapi-Inline-Secret.
+        var nativePresent = hasNativeHost();
+        if (!getSecret() && (nativePresent || unlock.shouldPrompt)) ensureSecret();
+        if (!getSecret()) return;
+        render();
+      });
+  }
+
+  window.HapiInline = {
+    init: init,
+    _version: '0.10.0',
+    openCluster: function () { return openCluster(); },
+    _stripRawJsonForDisplay: stripRawJsonForDisplay,
+    _summarizeContextJson: summarizeContextJson,
+    _voiceStatus: voiceStatus,
+    _needsWhisperFallback: needsWhisperFallback,
+    _voiceIsUsable: voiceIsUsable,
+    isReady: function () { return ready; },
+    isRecording: function () { return !!recording; },
+    toggleMic: function (dataUrl) { return toggleMic(dataUrl || null); },
+    finishRecording: finishRecording,
+    beginMarkup: function (dataUrl) { beginMarkup(dataUrl || null); },
+    openWithShot: function (dataUrl) {
+      if (!ready) return false;
+      // Tap = voice. Markup stays open if present (annotated send on stop).
+      if (recording) { finishRecording(); return true; }
+      return !!startRecording(dataUrl || null);
+    },
+    appendTranscript: appendTranscript,
+    setTranscript: setTranscript,
+    setInterim: function (text) {
+      liveInterim = text || '';
+      setInterim(text);
+      refreshRecordLabel();
+    },
+    setListening: function (on) {
+      if (on) {
+        recording = true;
+        setBtnState('recording');
+        refreshRecordLabel();
+      } else {
+        setListening(false);
+      }
+    },
+    hideButton: function () {
+      // Hide the in-page FAB only. Native hosts own the hub chrome; #104 keeps STT on native.
+      if (dock) {
+        var btn = dock.querySelector('.opdock-btn');
+        if (btn) btn.style.display = 'none';
+      }
+    },
+  };
+  // TODO(2027-02-01): remove legacy global alias.
+  window.OperatorDock = window.HapiInline;
+})();
