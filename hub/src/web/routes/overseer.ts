@@ -33,7 +33,7 @@ function resolveClientRelatedSessionId(
     if (!raw) return null
     const canonical = overseer.resolveCanonicalSessionId(raw)
     if (canonical) return canonical
-    if (FULL_SESSION_ID_RE.test(raw)) return raw
+    if (FULL_SESSION_ID_RE.test(raw)) return raw.toLowerCase()
     return null
 }
 

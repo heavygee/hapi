@@ -586,6 +586,60 @@ describe('runOverseerConverse', () => {
         expect(focus?.sessionId).toBe(sessionA)
     })
 
+    it('keeps focus when inbox item and same-session probe are compatible', async () => {
+        const sessionA = '6cd8d0c3-aaaa-bbbb-cccc-ddddeeeeffff'
+        const entity = {
+            ...fakeOverseer,
+            queryInbox: () => ({
+                items: [{ id: 1, title: 'one', relatedSessionId: sessionA }],
+                candidates: [],
+                surfaced: [],
+                held: []
+            }),
+            getSessionState: (sessionId: string) => ({
+                sessionId,
+                name: 'W1.8',
+                active: true
+            })
+        } as unknown as OverseerEntity
+
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(chatResponse({
+                role: 'assistant',
+                content: '',
+                tool_calls: [
+                    {
+                        id: 'c1',
+                        type: 'function',
+                        function: { name: 'query_inbox', arguments: '{"limit":1}' }
+                    },
+                    {
+                        id: 'c2',
+                        type: 'function',
+                        function: {
+                            name: 'get_session_state',
+                            arguments: JSON.stringify({ sessionId: sessionA })
+                        }
+                    }
+                ]
+            }))
+            .mockResolvedValueOnce(chatResponse({
+                role: 'assistant',
+                content: 'Same worker.'
+            }))
+        setFetch(fetchMock)
+
+        const { focus } = await runOverseerConverse({
+            overseer: entity,
+            config,
+            messages: [{ role: 'operator', content: 'look at the one inbox item then its health' }],
+            focus: null
+        })
+
+        expect(focus?.sessionId).toBe(sessionA)
+        expect(focus?.itemId).toBe(1)
+    })
+
     it('still retargets when a non-retargeting read precedes a real subject change', async () => {
         const sessionA = '6cd8d0c3-aaaa-bbbb-cccc-ddddeeeeffff'
         const sessionB = '96f67085-1111-2222-3333-444455556666'

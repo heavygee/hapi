@@ -879,9 +879,10 @@ export class OverseerEntity {
     private matchSessions(sessionId: string): Session[] {
         const trimmed = sessionId.trim()
         if (!trimmed) return []
-        const exact = this.getSession(trimmed)
+        const lower = trimmed.toLowerCase()
+        const exact = this.getSession(trimmed) ?? this.getSessions().find((s) => s.id.toLowerCase() === lower)
         if (exact) return [exact]
-        return this.getSessions().filter((s) => s.id.startsWith(trimmed))
+        return this.getSessions().filter((s) => s.id.toLowerCase().startsWith(lower))
     }
 
     private parseEventPayload(payloadJson: string | null): {

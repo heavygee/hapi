@@ -110,9 +110,16 @@ function hasSuccessfulWrite(toolTrace: OverseerToolTraceEntry[]): boolean {
     return toolTrace.some((entry) => entry.ok && isOverseerWriteTool(entry.tool as OverseerToolName))
 }
 
-function focusSubjectKey(focus: OverseerConverseFocus | null | undefined): string | null {
-    if (!hasConverseFocusSubject(focus) || !focus) return null
-    return `${(focus.sessionId ?? '').trim().toLowerCase()}#${focus.itemId ?? ''}`
+/** True when two resolved subjects refer to the same conversational referent. */
+function subjectsCompatible(
+    a: OverseerConverseFocus,
+    b: OverseerConverseFocus
+): boolean {
+    const aSession = a.sessionId?.trim().toLowerCase() || null
+    const bSession = b.sessionId?.trim().toLowerCase() || null
+    if (aSession && bSession && aSession === bSession) return true
+    if (a.itemId != null && b.itemId != null && a.itemId === b.itemId) return true
+    return false
 }
 
 export async function runOverseerConverse(params: {
@@ -178,10 +185,11 @@ export async function runOverseerConverse(params: {
     /** Successful irreversible call fingerprints — reject duplicates in this turn. */
     const consumedWriteFingerprints = new Set<string>()
     /**
-     * Distinct subjects established by successful tool resolves this turn.
-     * More than one → do not last-win; keep turn-start focus (Codex P2).
+     * Subjects this turn's tools identified on their own (apply-from-null).
+     * Incompatible subjects → do not last-win; keep turn-start focus.
+     * Compatible pairs (same session or same item) count as one referent.
      */
-    const subjectsResolvedThisTurn = new Set<string>()
+    const subjectsResolvedThisTurn: OverseerConverseFocus[] = []
     // The brain (llama-server) does not honor tool_choice:'required', so it will
     // sometimes answer a fleet question from nothing (e.g. "the inbox is empty"
     // when it never called query_inbox). Guardrail: if the very first answer
@@ -197,13 +205,18 @@ export async function runOverseerConverse(params: {
     ): OverseerConverseFocus | null => {
         // What subject did THIS tool identify on its own (ignore prior focus passthrough)?
         const identifiedAlone = applyFocusFromToolResolve(null, event, turnStartedAt)
-        const identifiedKey = focusSubjectKey(identifiedAlone)
-        if (identifiedKey) subjectsResolvedThisTurn.add(identifiedKey)
+        if (hasConverseFocusSubject(identifiedAlone) && identifiedAlone) {
+            subjectsResolvedThisTurn.push(identifiedAlone)
+        }
 
         const next = applyFocusFromToolResolve(previous, event, turnStartedAt)
-        if (subjectsResolvedThisTurn.size > 1) {
-            // Multi-subject comparison turn — refuse to invent a last-wins referent.
-            return params.focus ?? null
+        if (subjectsResolvedThisTurn.length > 1) {
+            const first = subjectsResolvedThisTurn[0]!
+            const multi = subjectsResolvedThisTurn.some((s) => !subjectsCompatible(first, s))
+            if (multi) {
+                // Multi-subject comparison turn — refuse to invent a last-wins referent.
+                return params.focus ?? null
+            }
         }
         return next
     }
