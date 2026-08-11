@@ -564,9 +564,8 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
     }
 
     /**
-     * #1470 / #1502: ACP activity after idle → hub thinking via keepalive.
-     * Transitions only. Gate ignores state_update running (Cursor chatter);
-     * idle still clears so mid-idle wakes do not stick.
+     * #1470 / #1502: ACP foreground state → hub thinking via keepalive.
+     * Background tool/content updates are ignored; running is debounced in the backend.
      */
     private wireAgentActivityThinking(backend: AcpSdkBackend, session: CursorSession): void {
         backend.setAgentActivityListener((thinking) => {
