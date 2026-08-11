@@ -25,13 +25,19 @@ const CO_AUTHORED_CREDITS = (() => trimIdent(`
 
 /**
  * System prompt with conditional Co-Authored-By lines based on Claude's settings.json configuration.
- * Settings are read once on startup for performance. Session-summary contract rides here
- * (append-system-prompt) so it is invisible in the chat transcript.
+ * Settings are read once on startup for performance.
+ *
+ * Local native Claude CLI uses `systemPrompt` (no notify contract — the line
+ * would print in the TUI). Remote/web uses `remoteSystemPrompt` so overseer
+ * still gets AGENT_NOTIFY_SUMMARY and the web UI can strip it.
  */
-export const systemPrompt = (() => {
+const systemPromptBase = (() => {
   const includeCoAuthored = shouldIncludeCoAuthoredBy();
-  const base = includeCoAuthored
+  return includeCoAuthored
     ? BASE_SYSTEM_PROMPT + '\n\n' + CO_AUTHORED_CREDITS
     : BASE_SYSTEM_PROMPT;
-  return withSessionSummaryInstruction(base);
 })();
+
+export const systemPrompt = systemPromptBase;
+
+export const remoteSystemPrompt = withSessionSummaryInstruction(systemPromptBase);

@@ -6,9 +6,12 @@ Scope: FORK-ONLY. Never upstream. The whole overseer feature is fork-private.
 
 - Piece 1 — `feat/overseer-summary-emit` (fork PR #86): CLI Cursor rule overlay.
 - Piece 2 — `feat/overseer-summary-fallback` (PR #87): hub deterministic backstop.
-- Piece 3 — `feat/overseer-summary-flavors-and-dates`: Claude/Codex/Grok/OpenCode
-  get the same contract via systemPrompt / developer_instructions / one-shot
-  first-turn instructions (`HAPI_SESSION_SUMMARY_CONTRACT=0` to opt out). Debug
+- Piece 3 — `feat/overseer-summary-flavors-and-dates`: Claude remote + Codex
+  app-server get the contract via system/developer instructions
+  (`HAPI_SESSION_SUMMARY_CONTRACT=0` to opt out). Local native TUI
+  (Claude/Codex/OpenCode) stays human-facing. Grok/OpenCode first-turn user
+  prepend is not wrapped (#1095/#1096); those flavors wait on #89. Generic
+  prompts omit `<agent-id>`/`<project>`; hub ignores those tokens. Debug
   events/inbox timestamps use standard "x ago" + absolute tooltip.
 
 

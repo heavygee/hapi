@@ -16,7 +16,8 @@ import {
     OVERSEER_EVENT_TYPES,
     HAPI_EVENTS_BEGIN,
     HAPI_EVENTS_END,
-    stripAgentContract
+    stripAgentContract,
+    usableNotifyToken
 } from './overseerEvents'
 import { extractNotifySummary } from './messages'
 
@@ -60,6 +61,24 @@ describe('overseerEvents mapping', () => {
         expect(identity.tag).toBe('meta-triage')
         expect(identity.project).toBe('hapi')
         expect(identity.flavor).toBe('codex')
+    })
+
+    test('usableNotifyToken rejects angle-bracket prompt examples', () => {
+        expect(usableNotifyToken('<project>')).toBeNull()
+        expect(usableNotifyToken('<agent-id>')).toBeNull()
+        expect(usableNotifyToken('  <project>  ')).toBeNull()
+        expect(usableNotifyToken('hapi')).toBe('hapi')
+        expect(usableNotifyToken('')).toBeNull()
+    })
+
+    test('buildOverseerSessionIdentity ignores placeholder notify.project', () => {
+        const identity = buildOverseerSessionIdentity({
+            id: 'sess-1',
+            flavor: 'claude',
+            metadata: { path: '/coding/hapi/worktrees/overseer-summary-emit' },
+            notifyProject: '<project>'
+        })
+        expect(identity.project).toBe('overseer-summary-emit')
     })
 
     test('mergeEventPayloadWithSession embeds session snapshot', () => {

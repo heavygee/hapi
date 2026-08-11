@@ -199,6 +199,7 @@ describe('responsive settings pages', () => {
         expect(screen.getByText(String(__APP_VERSION__))).toBeInTheDocument()
         expect(screen.getByText('Protocol Version')).toBeInTheDocument()
         expect(screen.getByRole('link', { name: 'hapi.run' })).toHaveAttribute('rel', 'noopener noreferrer')
+        expect(screen.getByText('Show AGENT_NOTIFY line')).toBeInTheDocument()
     })
 
     it('links common voice settings to full-page voices and advanced pages', () => {

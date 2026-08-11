@@ -23,7 +23,8 @@ export const TITLE_INSTRUCTION = trimIdent(`
 `);
 
 /**
- * The system prompt to inject via developer_instructions in local mode.
- * Includes the session-status summary contract when enabled.
+ * Developer instructions for Codex app-server / remote (HAPI-rendered).
+ * Local native Codex CLI uses TITLE_INSTRUCTION only so the notify line
+ * does not print in the TUI.
  */
 export const codexSystemPrompt = withSessionSummaryInstruction(TITLE_INSTRUCTION);

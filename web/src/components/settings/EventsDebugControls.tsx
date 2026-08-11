@@ -74,7 +74,7 @@ export function EventsDebugControls() {
                 <div className="space-y-2 border-t border-[var(--app-divider)] bg-[var(--app-subtle-bg)]/40 px-3 py-2">
                     <div className="flex items-center justify-between gap-2">
                         <p className="text-xs text-[var(--app-hint)]">
-                            Read-only substrate feed (#22). Populated from AGENT_NOTIFY_SUMMARY + hub fallback.
+                            Read-only substrate feed (#22). Populated from AGENT_NOTIFY_SUMMARY.
                         </p>
                         <button
                             type="button"
