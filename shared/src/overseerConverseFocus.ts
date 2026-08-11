@@ -307,6 +307,26 @@ export function applyFocusFromToolResolve(
         }
     }
 
+    // Singleton list-mode disposition — reopen/follow-up on the dismissed item.
+    if (
+        tool === 'query_dispositions' &&
+        isObj(result) &&
+        result.mode === 'list' &&
+        Array.isArray(result.rows)
+    ) {
+        if (result.rows.length !== 1) return previous
+        const only = result.rows[0]
+        if (!isObj(only)) return previous
+        const itemId = typeof only.itemId === 'number' && only.itemId > 0 ? only.itemId : null
+        if (itemId == null) return previous
+        return {
+            sessionId: null,
+            itemId,
+            source: 'tool_resolve',
+            updatedAt: now
+        }
+    }
+
     return previous
 }
 

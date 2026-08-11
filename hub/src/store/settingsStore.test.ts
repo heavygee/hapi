@@ -124,6 +124,15 @@ describe('SettingsStore', () => {
             })
         ).toBe(true)
         expect(s.getConverseFocus()?.sessionId).toBe('newer')
+        expect(
+            s.setConverseFocusIfNewer({
+                sessionId: 'same-ms',
+                itemId: 4,
+                source: 'client',
+                updatedAt: 300
+            })
+        ).toBe(false)
+        expect(s.getConverseFocus()?.sessionId).toBe('newer')
     })
 
     it('repoints and clears focus when sessions merge or delete', () => {

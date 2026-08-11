@@ -236,6 +236,33 @@ describe('hub-owned conversational focus (capability, not pattern matching)', ()
         ).toEqual(focus())
     })
 
+    it('promotes singleton list-mode query_dispositions to focus', () => {
+        expect(
+            applyFocusFromToolResolve(null, {
+                tool: 'query_dispositions',
+                ok: true,
+                args: {},
+                result: {
+                    mode: 'list',
+                    rows: [{ itemId: 42, action: 'dismiss' }],
+                    total: 1
+                }
+            })?.itemId
+        ).toBe(42)
+        expect(
+            applyFocusFromToolResolve(focus(), {
+                tool: 'query_dispositions',
+                ok: true,
+                args: { groupBy: ['action'] },
+                result: {
+                    mode: 'cluster',
+                    clusters: [{ keys: { action: 'dismiss' }, count: 3 }],
+                    total: 1
+                }
+            })
+        ).toEqual(focus())
+    })
+
     it('parses clear-tombstones and ignores them as write subjects', () => {
         const tomb = parseConverseFocus({
             sessionId: null,

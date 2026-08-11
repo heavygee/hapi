@@ -105,13 +105,21 @@ export class SettingsStore {
 
     /**
      * Persist focus only when it is strictly newer than the durable row.
-     * Prevents an older overlapping converse request from rolling focus back.
+     * Equal timestamps refuse (first writer wins) so same-ms overlapping turns
+     * cannot resurrect a deleted or superseded subject.
      */
     setConverseFocusIfNewer(value: OverseerConverseFocus, namespace = 'default'): boolean {
         const current = this.getConverseFocus(namespace)
-        if (current && current.updatedAt > value.updatedAt) return false
+        if (current && current.updatedAt >= value.updatedAt) return false
         this.setConverseFocus(value, namespace)
         return true
+    }
+
+    /** Wall clock, but always strictly above the durable focus version. */
+    private nextFocusUpdatedAt(namespace: string): number {
+        const current = this.getConverseFocus(namespace)
+        const floor = current?.updatedAt ?? 0
+        return Math.max(Date.now(), floor + 1)
     }
 
     /**
@@ -125,7 +133,7 @@ export class SettingsStore {
                 sessionId: null,
                 itemId: null,
                 source: 'client',
-                updatedAt: Date.now()
+                updatedAt: this.nextFocusUpdatedAt(namespace)
             },
             namespace
         )
@@ -143,7 +151,7 @@ export class SettingsStore {
         this.setConverseFocus({
             ...focus,
             sessionId: newSessionId,
-            updatedAt: Date.now()
+            updatedAt: this.nextFocusUpdatedAt(namespace)
         }, namespace)
     }
 
@@ -157,7 +165,7 @@ export class SettingsStore {
                 sessionId: null,
                 itemId: focus.itemId,
                 source: focus.source,
-                updatedAt: Date.now()
+                updatedAt: this.nextFocusUpdatedAt(namespace)
             }, namespace)
             return
         }

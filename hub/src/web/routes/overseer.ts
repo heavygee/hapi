@@ -240,9 +240,11 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
         })
         const messages = assembled.messages
         const lastOperator = [...messages].reverse().find((m) => m.role === 'operator')?.content ?? ''
+        const durableFocus = settings.getConverseFocus(namespace)
         const priorFocus = applyFocusFromClientSession(
-            settings.getConverseFocus(namespace),
-            parsed.data.relatedSessionId
+            durableFocus,
+            parsed.data.relatedSessionId,
+            Math.max(Date.now(), (durableFocus?.updatedAt ?? 0) + 1)
         )
 
         const active = getSanitizedActiveBrain(engine, c.get('namespace'))

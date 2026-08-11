@@ -135,8 +135,8 @@ export async function runOverseerConverse(params: {
      * Cross-turn "tell it…" uses the focus persisted from the prior turn.
      */
     const writeFocus = params.focus ?? null
-    /** Monotonic turn token — tool resolves stamp this, not wall-clock at completion. */
-    const turnStartedAt = Date.now()
+    /** Strictly above prior focus version — equal wall-clock ms cannot clobber. */
+    const turnStartedAt = Math.max(Date.now(), (params.focus?.updatedAt ?? 0) + 1)
 
     const writeAuthFor = (): OverseerWriteAuthorization =>
         resolveOverseerWriteAuthorization({
