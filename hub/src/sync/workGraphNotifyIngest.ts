@@ -10,7 +10,7 @@ import {
     type WorkGraphEventCreate
 } from '@hapi/protocol'
 import type { Store, StoredMessage } from '../store'
-import { WorkGraphNotFoundError, WorkGraphValidationError } from '../store'
+import { WorkGraphValidationError } from '../store'
 import type { InsertWorkGraphEventResult } from '../store/workGraph'
 
 const WORK_GRAPH_MAX_TAG = 256
@@ -152,6 +152,13 @@ function isInboundUserMessage(content: unknown): boolean {
     return asRecord(content)?.role === 'user'
 }
 
+function isCauseCandidate(message: StoredMessage, now: number = Date.now()): boolean {
+    if (!isInboundUserMessage(message.content)) return false
+    // Future-scheduled rows are persisted before delivery; they are not this turn's cause.
+    if (message.scheduledAt != null && message.scheduledAt > now) return false
+    return true
+}
+
 function extractInboundSentFrom(content: unknown): string | null {
     const meta = asRecord(asRecord(content)?.meta)
     return typeof meta?.sentFrom === 'string' && meta.sentFrom.trim().length > 0
@@ -200,7 +207,14 @@ function listPreviousWorkAds(
     namespace: string,
     sessionId: string
 ): WorkGraphEvent[] {
-    return store.workGraph.listWorkAdsByRelatedSession(namespace, sessionId)
+    // Only hub notify elevation. Client POST /work-graph/events can mint
+    // work_ad rows; those must not steal related_event_id, follows, or sticky cause.
+    return store.workGraph
+        .listWorkAdsByRelatedSession(namespace, sessionId)
+        .filter((event) => (
+            event.provenance === 'AGENT_NOTIFY_SUMMARY'
+            && event.sourceRef === sessionId
+        ))
 }
 
 function consumedInboundIds(
@@ -222,7 +236,7 @@ function consumedInboundIds(
         const assistant = assistantId ? byId.get(assistantId) : undefined
         if (!assistant) continue
         for (const message of messages) {
-            if (message.seq <= assistant.seq && isInboundUserMessage(message.content)) {
+            if (message.seq <= assistant.seq && isCauseCandidate(message)) {
                 consumed.add(message.id)
             }
         }
@@ -232,19 +246,18 @@ function consumedInboundIds(
 
 /**
  * Sequential rule: first unconsumed inbound (role=user) in session order.
- * Queued inbound during an in-flight turn stays unconsumed for the next event.
+ * Each work_ad consumes exactly one inbound (queued leftovers wait for later
+ * events — that is the in-flight queued exception, not a drain of the whole queue).
  * No new inbound → sticky copy of the previous event's cause.
  */
 export function resolveWorkAdCause(params: {
     messages: StoredMessage[]
     previousWorkAds: WorkGraphEvent[]
 }): { cause: WorkAdCause | null; previousEventId: string | null } {
-    const previousWorkAds = [...params.previousWorkAds]
-        .sort((a, b) => (a.ts !== b.ts ? a.ts - b.ts : a.id.localeCompare(b.id)))
-    const previous = previousWorkAds.at(-1) ?? null
-    const consumed = consumedInboundIds(params.messages, previousWorkAds)
+    const previous = params.previousWorkAds.at(-1) ?? null
+    const consumed = consumedInboundIds(params.messages, params.previousWorkAds)
     const inbound = params.messages.find(
-        (message) => isInboundUserMessage(message.content) && !consumed.has(message.id)
+        (message) => isCauseCandidate(message) && !consumed.has(message.id)
     )
     if (inbound) {
         const text = extractInboundCauseText(inbound.content)
@@ -398,8 +411,8 @@ export function ingestNotifySummaryFromMessage(input: NotifyIngestInput): Notify
                     to_event_id: previousEventId,
                     relation_type: 'follows'
                 })
-            } catch (error) {
-                if (!(error instanceof WorkGraphNotFoundError)) throw error
+            } catch {
+                // Best-effort edge; related_event_id is already on the row.
             }
         }
         return result

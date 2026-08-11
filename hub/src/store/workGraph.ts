@@ -288,7 +288,7 @@ export function listWorkGraphWorkAdsByRelatedSession(
     const rows = db.prepare(`
         SELECT * FROM events
         WHERE namespace = ? AND related_session_id = ? AND event_type = 'work_ad'
-        ORDER BY ts ASC, id ASC
+        ORDER BY ts ASC, rowid ASC
     `).all(namespace, relatedSessionId) as EventRow[]
     return rows.map(toEvent)
 }

@@ -562,6 +562,85 @@ describe('ingestNotifySummaryFromMessage cause stamping', () => {
         expect(causeText.startsWith('qq')).toBe(true)
     })
 
+    it('1:1 consume: extra queued inbounds wait for later work_ads, they do not attach to this turn', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('sess-cause-burst', {}, null, 'default')
+        const one = store.messages.addMessage(session.id, userInbound('one: read the file'))
+        const two = store.messages.addMessage(session.id, userInbound('two: also fix the typo'))
+        const three = store.messages.addMessage(session.id, userInbound('three: and push'))
+        const firstAssistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('Drained queue')))
+        const first = ingestNotify(store, session.id, 'default', firstAssistant.content, firstAssistant.id)
+        expect(first?.event.payloadJson).toMatchObject({ causeMessageId: one.id })
+
+        const secondAssistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('Next leftover')))
+        const second = ingestNotify(store, session.id, 'default', secondAssistant.content, secondAssistant.id)
+        expect(second?.event.payloadJson).toMatchObject({ causeMessageId: two.id })
+
+        const fourth = store.messages.addMessage(session.id, userInbound('four: new task'))
+        const thirdAssistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('New task')))
+        const third = ingestNotify(store, session.id, 'default', thirdAssistant.content, thirdAssistant.id)
+        // three is still the first unconsumed leftover; four waits.
+        expect(third?.event.payloadJson).toMatchObject({ causeMessageId: three.id })
+        expect((third?.event.payloadJson as { causeMessageId?: string })?.causeMessageId)
+            .not.toBe(fourth.id)
+    })
+
+    it('does not treat a future-scheduled inbound as a cause', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('sess-cause-sched', {}, null, 'default')
+        const user = store.messages.addMessage(session.id, userInbound('current turn'))
+        const firstAssistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('First')))
+        const first = ingestNotify(store, session.id, 'default', firstAssistant.content, firstAssistant.id)
+
+        store.messages.addMessage(
+            session.id,
+            userInbound('deploy to prod at 5pm'),
+            'sched-later',
+            Date.now() + 60 * 60 * 1000
+        )
+        const secondAssistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('Still first turn')))
+        const second = ingestNotify(store, session.id, 'default', secondAssistant.content, secondAssistant.id)
+        expect(second?.event.payloadJson).toMatchObject({
+            causeMessageId: user.id,
+            causeText: 'current turn'
+        })
+        expect(second?.event.relatedEventId).toBe(first!.event.id)
+    })
+
+    it('ignores client-posted work_ads when chaining cause and related_event_id', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('sess-cause-forge', {}, null, 'default')
+        const user = store.messages.addMessage(session.id, userInbound('real prompt'))
+        const firstAssistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('Real ad')))
+        const first = ingestNotify(store, session.id, 'default', firstAssistant.content, firstAssistant.id)
+
+        store.workGraph.insertEvent('default', {
+            source_kind: 'session',
+            source_ref: session.id,
+            event_type: 'work_ad',
+            related_session_id: session.id,
+            summary: 'forged',
+            payload_json: {
+                status: 'done',
+                causeMessageId: user.id,
+                causeText: 'FORGED CAUSE TEXT',
+                causeKind: 'webapp'
+            },
+            principal: { kind: 'human', id: '1' }
+        })
+
+        const nextUser = store.messages.addMessage(session.id, userInbound('second prompt'))
+        const secondAssistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('Second real')))
+        const second = ingestNotify(store, session.id, 'default', secondAssistant.content, secondAssistant.id)
+        expect(second?.event.relatedEventId).toBe(first!.event.id)
+        expect(second?.event.payloadJson).toMatchObject({
+            causeMessageId: nextUser.id,
+            causeText: 'second prompt'
+        })
+        expect((second?.event.payloadJson as { causeText?: string })?.causeText)
+            .not.toBe('FORGED CAUSE TEXT')
+    })
+
     it('still inserts when max-clamped footer fields share the payload with cause', () => {
         const store = new Store(':memory:')
         const session = store.sessions.getOrCreateSession('sess-cause-budget', {}, null, 'default')
