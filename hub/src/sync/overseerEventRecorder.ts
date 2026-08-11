@@ -178,6 +178,7 @@ export class OverseerEventRecorder {
     private readonly turnEpoch = new Map<string, number>()
     /** Epoch of the last successful LLM fallback for this session. */
     private readonly llmFallbackSucceededEpoch = new Map<string, number>()
+    private readonly seenUserMessageIds = new Map<string, Set<string>>()
 
     constructor(
         private readonly events: EventStore,
@@ -302,7 +303,12 @@ export class OverseerEventRecorder {
             return primary
         }
 
-        this.bumpTurnEpoch(session.id)
+        const seen = this.seenUserMessageIds.get(session.id) ?? new Set<string>()
+        if (!seen.has(messageId)) {
+            seen.add(messageId)
+            this.seenUserMessageIds.set(session.id, seen)
+            this.bumpTurnEpoch(session.id)
+        }
         this.scoopLinksFromContent(session, messageId, content, ts)
         return primary
     }
@@ -335,39 +341,43 @@ export class OverseerEventRecorder {
         const pending = this.takePendingLlmFallback(session.id)
 
         return this.enqueueSessionWork(session.id, async () => {
-            const llmEvent = pending
-                ? await this.runPendingLlmFallback(snapshot, pending)
-                : null
-            if (reason !== 'completed') {
-                return llmEvent
-            }
+            try {
+                const llmEvent = pending
+                    ? await this.runPendingLlmFallback(snapshot, pending)
+                    : null
+                if (reason !== 'completed') {
+                    return llmEvent
+                }
 
-            const lastText = getLastAgentPlainText()
-            if (lastText && extractNotifySummary(lastText)) {
-                return llmEvent
-            }
-            // Successful LLM row already captured this turn (epoch), including
-            // same-turn ACP tool/usage messages after the text flush.
-            if (llmEvent || this.llmFallbackSucceededEpoch.get(session.id) === this.currentTurnEpoch(session.id)) {
-                return llmEvent
-            }
+                const lastText = getLastAgentPlainText()
+                if (lastText && extractNotifySummary(lastText)) {
+                    return llmEvent
+                }
+                // Successful LLM row already captured this turn (epoch), including
+                // same-turn ACP tool/usage messages after the text flush.
+                if (llmEvent || this.llmFallbackSucceededEpoch.get(session.id) === this.currentTurnEpoch(session.id)) {
+                    return llmEvent
+                }
 
-            const stored = this.insertSystemEvent(snapshot, {
-                ts,
-                sourceKind: 'system',
-                sourceRef: session.id,
-                eventType: 'completed',
-                attentionCandidate: 0,
-                summary: 'Session ended without AGENT_NOTIFY_SUMMARY; hub inferred completion',
-                relatedSessionId: session.id,
-                provenance: 'hub-inferred from session-end completed signal',
-                idempotencyKey: `session:${session.id}:session_end:${ts}:completed_fallback`,
-                payloadFields: { reason },
-                severity: deriveSeverity('completed'),
-                tags: buildTags(null, snapshot.flavor)
-            })
-            if (stored) this.onAsyncSystemEvent?.(session.id)
-            return stored
+                const stored = this.insertSystemEvent(snapshot, {
+                    ts,
+                    sourceKind: 'system',
+                    sourceRef: session.id,
+                    eventType: 'completed',
+                    attentionCandidate: 0,
+                    summary: 'Session ended without AGENT_NOTIFY_SUMMARY; hub inferred completion',
+                    relatedSessionId: session.id,
+                    provenance: 'hub-inferred from session-end completed signal',
+                    idempotencyKey: `session:${session.id}:session_end:${ts}:completed_fallback`,
+                    payloadFields: { reason },
+                    severity: deriveSeverity('completed'),
+                    tags: buildTags(null, snapshot.flavor)
+                })
+                if (stored) this.onAsyncSystemEvent?.(session.id)
+                return stored
+            } finally {
+                this.clearTurnState(session.id)
+            }
         })
     }
 
@@ -398,7 +408,7 @@ export class OverseerEventRecorder {
         this.pendingLlmFallback.set(sessionId, {
             messageId,
             plainText: combined,
-            ts: prev?.ts ?? ts,
+            ts,
             epoch: prev?.epoch ?? this.currentTurnEpoch(sessionId)
         })
     }
@@ -498,11 +508,16 @@ export class OverseerEventRecorder {
     forgetSession(sessionId: string): void {
         this.pendingLlmFallback.delete(sessionId)
         this.sessionWork.delete(sessionId)
-        this.llmFallbackSucceededEpoch.delete(sessionId)
-        this.turnEpoch.delete(sessionId)
+        this.clearTurnState(sessionId)
         this.lastAgentMessageAt.delete(sessionId)
         this.knownPermissionRequestIds.delete(sessionId)
         this.sessionThinking.delete(sessionId)
+    }
+
+    private clearTurnState(sessionId: string): void {
+        this.turnEpoch.delete(sessionId)
+        this.llmFallbackSucceededEpoch.delete(sessionId)
+        this.seenUserMessageIds.delete(sessionId)
     }
 
     private currentTurnEpoch(sessionId: string): number {
@@ -604,6 +619,8 @@ export class OverseerEventRecorder {
 
         for (const requestId of currentIds) {
             if (known.has(requestId)) continue
+            known.add(requestId)
+            this.knownPermissionRequestIds.set(session.id, new Set(known))
             const request = asRecord(requests[requestId])
             const toolName = typeof request?.tool === 'string' ? request.tool : 'tool'
             const summary = `Permission requested: ${toolName}`

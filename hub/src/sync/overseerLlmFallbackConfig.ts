@@ -49,7 +49,9 @@ function normalizeBaseUrl(raw: string): string {
 function isAbsoluteHttpUrl(value: string): boolean {
     try {
         const parsed = new URL(value)
-        return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false
+        if (parsed.search !== '' || parsed.hash !== '') return false
+        return true
     } catch {
         return false
     }
