@@ -101,6 +101,29 @@ describe('peerCapabilityInject (#1203 pass 2h)', () => {
         }
     })
 
+    it('still receives when client peercred is null on connect (Bun race)', async () => {
+        const socketPath = tempSock()
+        const server = await startPeerCapabilityInjectServer({
+            socketPath,
+            readPeerCred: () => ({ pid: process.pid, uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 }),
+        })
+        expect(server).not.toBeNull()
+        try {
+            const deliver = server!.deliverTo(process.pid, { sessionCapability: 'cap-null-cred' })
+            const capability = await receivePeerCapabilityFromRunner({
+                socketPath,
+                ownerPid: process.pid,
+                attempts: 20,
+                // Simulate SO_PEERCRED unavailable on the client connect path.
+                readPeerCred: () => null,
+            })
+            await deliver
+            expect(capability).toBe('cap-null-cred')
+        } finally {
+            server!.close()
+        }
+    })
+
     it('rejects a sibling pid that is not the expected child', async () => {
         const socketPath = tempSock()
         const siblingPid = process.pid + 10_000_000
