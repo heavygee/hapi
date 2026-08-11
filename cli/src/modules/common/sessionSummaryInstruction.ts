@@ -37,10 +37,16 @@ export function isSessionSummaryContractEnabled(
 
 /**
  * Canonical trailing-line contract. Matches the FCM / native-companion parser
- * in `@hapi/protocol` (`extractNotifySummary`).
+ * in `@hapi/protocol` (`extractNotifySummary`) and the Cursor rule overlay
+ * (`AGENT_NOTIFY_CONTRACT_INLINE_PREFIX` in shared overseerEvents).
+ *
+ * Do **not** put literal `<agent-id>` / `<project>` tokens in the generic
+ * flavor prompt: the hub treats `notify.project` as authoritative and those
+ * placeholders would poison project-scoped queries. Cursor's overlay fills
+ * real tokens per cwd; other flavors omit the fields.
  */
 export const SESSION_SUMMARY_CONTRACT_LINE =
-    'AGENT_NOTIFY_SUMMARY {"version":1,"agent":"<agent-id>","project":"<project>","status":"done|blocked|needs_review|needs_decision|failed|stalled","action":"<=12 words","summary":"one-line triage"}'
+    'AGENT_NOTIFY_SUMMARY {"version":1,"status":"done|blocked|needs_review|needs_decision|failed|stalled","action":"<=12 words","summary":"one-line triage"}'
 
 /**
  * Body appended to flavor system / developer instructions when enabled.
@@ -54,7 +60,7 @@ export function buildSessionSummaryInstruction(): string {
         'final line after all other content:',
         SESSION_SUMMARY_CONTRACT_LINE,
         'Use status "blocked" if unsure. Keep action to 12 words or fewer when status',
-        'is "done" and follow-up remains.'
+        'is "done" and follow-up remains. Omit agent and project fields.',
     ].join('\n')
 }
 

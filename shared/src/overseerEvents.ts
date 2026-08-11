@@ -250,6 +250,19 @@ export function deriveSessionDisplayName(
     return tagValue || null
 }
 
+/**
+ * Angle-bracket prompt tokens (`<project>`, `<agent-id>`) are examples, not
+ * real workspace / agent ids. Treat them as absent so payload.session.project
+ * stays the derived path basename and tags do not poison project queries.
+ */
+export function usableNotifyToken(value: string | null | undefined): string | null {
+    if (typeof value !== 'string') return null
+    const trimmed = value.trim()
+    if (!trimmed) return null
+    if (/^<[^>]+>$/.test(trimmed)) return null
+    return trimmed
+}
+
 export function deriveSessionProject(
     metadata: { path?: string; worktree?: { name?: string } } | null | undefined
 ): string | null {
@@ -258,7 +271,7 @@ export function deriveSessionProject(
     if (worktreeName) return worktreeName
     const path = metadata.path?.trim()
     if (!path) return null
-    const parts = path.split('/').filter(Boolean)
+    const parts = path.split(/[/\\]/).filter(Boolean)
     return parts.length > 0 ? parts[parts.length - 1]! : null
 }
 
@@ -271,7 +284,7 @@ export function buildOverseerSessionIdentity(input: {
 }): OverseerSessionIdentity {
     const tag = input.tag ?? null
     const derivedProject = deriveSessionProject(input.metadata)
-    const notifyProject = input.notifyProject?.trim()
+    const notifyProject = usableNotifyToken(input.notifyProject)
     return {
         id: input.id,
         tag,

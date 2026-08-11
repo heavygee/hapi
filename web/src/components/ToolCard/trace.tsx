@@ -3,7 +3,8 @@
  * Placed between Input and Result sections.
  */
 import { useState } from 'react'
-import { isObject, safeStringify } from '@hapi/protocol'
+import { useShowAgentContract } from '@/hooks/useShowAgentContract'
+import { isObject, safeStringify, stripAgentContract } from '@hapi/protocol'
 import type { ChatBlock, ToolCallBlock } from '@/chat/types'
 import type { SessionMetadataSummary } from '@/types/api'
 import { getToolFullViewComponent } from '@/components/ToolCard/views/_all'
@@ -222,6 +223,7 @@ type TraceChildRowProps = {
 
 function TraceChildRow({ child, metadata, expanded, onToggle, mode }: TraceChildRowProps) {
     const { t } = useTranslation()
+    const { showAgentContract } = useShowAgentContract()
     const isSessionMode = mode === 'session'
     const rowClassName = isSessionMode
         ? 'flex flex-col gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] p-2'
@@ -238,7 +240,8 @@ function TraceChildRow({ child, metadata, expanded, onToggle, mode }: TraceChild
 
     if (child.kind === 'agent-text' || child.kind === 'agent-reasoning') {
         const label = child.kind === 'agent-reasoning' ? 'Reasoning' : 'Message'
-        const preview = child.text.trim().split('\n')[0] ?? ''
+        const text = showAgentContract ? child.text : stripAgentContract(child.text)
+        const preview = text.trim().split('\n')[0] ?? ''
 
         return (
             <div className={rowClassName}>
@@ -254,7 +257,7 @@ function TraceChildRow({ child, metadata, expanded, onToggle, mode }: TraceChild
                 </button>
                 {expanded && (
                     <div className={detailClassName}>
-                        <MarkdownRenderer content={child.text} />
+                        <MarkdownRenderer content={text} />
                     </div>
                 )}
             </div>

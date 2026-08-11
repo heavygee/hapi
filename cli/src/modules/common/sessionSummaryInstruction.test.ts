@@ -49,6 +49,10 @@ describe('sessionSummaryInstruction', () => {
         expect(body.toLowerCase()).toContain('session tracking')
         expect(body.toLowerCase()).not.toContain('overseer')
         expect(body.toLowerCase()).not.toContain('surveillance')
+        expect(body).not.toContain('<project>')
+        expect(body).not.toContain('<agent-id>')
+        expect(SESSION_SUMMARY_CONTRACT_LINE).not.toContain('"agent"')
+        expect(SESSION_SUMMARY_CONTRACT_LINE).not.toContain('"project"')
     })
 
     it('appends to an existing base prompt when enabled', () => {

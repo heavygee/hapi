@@ -19,7 +19,8 @@ import {
     OVERSEER_OPEN_LOOP_EVENT_TYPES,
     HAPI_EVENTS_BEGIN,
     HAPI_EVENTS_END,
-    stripAgentContract
+    stripAgentContract,
+    usableNotifyToken
 } from './overseerEvents'
 import { extractNotifySummary } from './messages'
 
@@ -65,6 +66,24 @@ describe('overseerEvents mapping', () => {
         expect(identity.flavor).toBe('codex')
     })
 
+    test('usableNotifyToken rejects angle-bracket prompt examples', () => {
+        expect(usableNotifyToken('<project>')).toBeNull()
+        expect(usableNotifyToken('<agent-id>')).toBeNull()
+        expect(usableNotifyToken('  <project>  ')).toBeNull()
+        expect(usableNotifyToken('hapi')).toBe('hapi')
+        expect(usableNotifyToken('')).toBeNull()
+    })
+
+    test('buildOverseerSessionIdentity ignores placeholder notify.project', () => {
+        const identity = buildOverseerSessionIdentity({
+            id: 'sess-1',
+            flavor: 'claude',
+            metadata: { path: '/coding/hapi/worktrees/overseer-summary-emit' },
+            notifyProject: '<project>'
+        })
+        expect(identity.project).toBe('overseer-summary-emit')
+    })
+
     test('mergeEventPayloadWithSession embeds session snapshot', () => {
         const json = mergeEventPayloadWithSession(
             { notify_summary: { summary: 'ok' } },
@@ -87,6 +106,8 @@ describe('overseerEvents mapping', () => {
 
     test('deriveSessionProject uses path basename', () => {
         expect(deriveSessionProject({ path: '/coding/hapi' })).toBe('hapi')
+        expect(deriveSessionProject({ path: 'C:\\repo\\hapi' })).toBe('hapi')
+        expect(deriveSessionProject({ path: 'C:/repo/hapi' })).toBe('hapi')
     })
 
     test('extractHttpUrls strips trailing punctuation and dedupes', () => {

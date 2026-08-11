@@ -136,6 +136,14 @@ describe('assignThreadMessageIds', () => {
         expect(second[0].threadMessageId).toBe('agent-text:a')
         expect(second[1].threadMessageId).toBe('user-text:u')
     })
+
+    it('a fresh WeakMap yields new wrappers so converter caches can bust', () => {
+        const block = agentText('a')
+        const first = assignThreadMessageIdsWithStableWrappers([block], new WeakMap())
+        const second = assignThreadMessageIdsWithStableWrappers([block], new WeakMap())
+        expect(second[0]).not.toBe(first[0])
+        expect(second[0].threadMessageId).toBe(first[0].threadMessageId)
+    })
 })
 
 describe('findLatestCompletedBoundaryId', () => {

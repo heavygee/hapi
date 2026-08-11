@@ -733,12 +733,19 @@ export function useHappyRuntime(props: {
     const threadIdWrapperCacheRef = useRef(
         new WeakMap<VisibleChatBlock, BlockWithThreadMessageId>()
     )
+    const lastShowAgentContractRef = useRef(showAgentContract)
+    // useExternalMessageConverter WeakMap-keys on wrapper objects. Reusing
+    // wrappers after the strip toggle flips would keep stale stripped text.
+    if (lastShowAgentContractRef.current !== showAgentContract) {
+        lastShowAgentContractRef.current = showAgentContract
+        threadIdWrapperCacheRef.current = new WeakMap()
+    }
     const blocksWithThreadIds = useMemo(
         () => assignThreadMessageIdsWithStableWrappers(
             props.blocks,
             threadIdWrapperCacheRef.current
         ),
-        [props.blocks]
+        [props.blocks, showAgentContract]
     )
 
     const aggregates = useMemo(
