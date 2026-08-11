@@ -1,17 +1,24 @@
 /**
  * Server-side write authorization for Overseer converse.
  *
- * Write tools must not run merely because the model asked — untrusted tool
- * results (inbox titles, worker output) are fed back as `user` messages and can
- * prompt-inject a relay/disposition. Authorization comes from the operator's
- * latest utterance and/or an explicit client `allowWrites` flag — never from
- * model-selected tools alone.
+ * Capability is hub-owned conversational focus (structured session and/or inbox
+ * item), not regex matching of the latest utterance. The old RELAY_INTENT /
+ * pronoun / line-local id extractors were debt — they made "tell it to go ahead"
+ * fail and faked understanding with pattern matching.
  *
- * Grants are bound to extracted targets/payloads when present so a later
- * injected tool call cannot retarget a legitimate "ping session X" grant.
+ * Authorization:
+ *  - `allowWrites: true` (admin / voice confirm) → write tools unlocked
+ *  - else a non-empty hub focus → write tools unlocked, bound to that focus
+ *  - else writes denied
+ *
+ * Injection defense: tool-originated prose cannot set or retarget focus (see
+ * overseerConverseFocus). Write calls must bind to the hub focus when the
+ * explicit client flag is off.
  */
 
 import { isOverseerWriteTool, type OverseerWriteToolName } from './overseerEntity'
+import type { OverseerConverseFocus } from './overseerConverseFocus'
+import { hasConverseFocusSubject } from './overseerConverseFocus'
 
 export type OverseerWriteAuthorization = {
     allowed: ReadonlySet<OverseerWriteToolName>
@@ -19,43 +26,8 @@ export type OverseerWriteAuthorization = {
     explicitClientFlag: boolean
     sessionIdPrefixes: readonly string[]
     itemIds: readonly number[]
-    /** Quoted snippets from the operator line that a relay message should match. */
+    /** Quoted snippets from the operator line that a relay message should match (allowWrites only). */
     messageSnippets: readonly string[]
-}
-
-const RELAY_INTENT =
-    /\b(ping|relay|nudge|wake)\b|\btell\b[\s\S]{0,80}\b(session|worker|peer|agent|him|her|them|it)\b|\b(message|ask|send)\b[\s\S]{0,80}\b(session|worker|peer|agent)\b/i
-
-const DISPOSITION_INTENT =
-    /\b(snooze|dismiss|reopen|dispose)\b|\bmark\b[\s\S]{0,40}\bdone\b|\b(resolve|done with)\b/i
-
-/** UUID or hex-prefix session ids (production hub shape). */
-const UUID_OR_HEX_SESSION_RE =
-    /\b([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{8,})\b/gi
-/** Explicit `session <token>` form — covers short test ids like `sess-1` / `old-id`. */
-const NAMED_SESSION_RE = /\bsession\s+([a-z0-9][a-z0-9_-]{1,63})\b/gi
-const ITEM_ID_RE = /\b(?:item\s*#?|#)(\d+)\b/gi
-
-function extractSessionIdPrefixes(text: string): string[] {
-    const out: string[] = []
-    for (const match of text.matchAll(UUID_OR_HEX_SESSION_RE)) {
-        const value = match[1]?.toLowerCase()
-        if (value && !out.includes(value)) out.push(value)
-    }
-    for (const match of text.matchAll(NAMED_SESSION_RE)) {
-        const value = match[1]?.toLowerCase()
-        if (value && !out.includes(value)) out.push(value)
-    }
-    return out
-}
-
-function extractItemIds(text: string): number[] {
-    const out: number[] = []
-    for (const match of text.matchAll(ITEM_ID_RE)) {
-        const id = Number(match[1])
-        if (Number.isFinite(id) && id > 0 && !out.includes(id)) out.push(id)
-    }
-    return out
 }
 
 function extractQuotedSnippets(text: string): string[] {
@@ -67,42 +39,74 @@ function extractQuotedSnippets(text: string): string[] {
     return out
 }
 
-/** Detect which write classes the latest operator message authorizes. */
-export function detectOperatorWriteTools(operatorText: string): Set<OverseerWriteToolName> {
-    const allowed = new Set<OverseerWriteToolName>()
-    const text = operatorText.trim()
-    if (!text) return allowed
-    if (RELAY_INTENT.test(text)) allowed.add('ping_session')
-    if (DISPOSITION_INTENT.test(text)) allowed.add('record_disposition')
-    return allowed
+function focusTargets(focus: OverseerConverseFocus | null | undefined): {
+    sessionIdPrefixes: string[]
+    itemIds: number[]
+} {
+    const sessionIdPrefixes: string[] = []
+    const itemIds: number[] = []
+    if (!hasConverseFocusSubject(focus) || !focus) return { sessionIdPrefixes, itemIds }
+    if (focus.sessionId?.trim()) sessionIdPrefixes.push(focus.sessionId.trim().toLowerCase())
+    if (focus.itemId != null && focus.itemId > 0) itemIds.push(focus.itemId)
+    return { sessionIdPrefixes, itemIds }
 }
 
+function hasFocusSubject(focus: OverseerConverseFocus | null | undefined): boolean {
+    return hasConverseFocusSubject(focus)
+}
+
+/**
+ * Resolve write authorization from hub focus and/or explicit client flag.
+ * Does not pattern-match operator NL for intent or targets.
+ */
 export function resolveOverseerWriteAuthorization(opts: {
-    latestOperatorText: string
+    latestOperatorText?: string
     allowWrites?: boolean
+    /** Hub-owned subject from successful tool resolves (required for converse writes). */
+    focus?: OverseerConverseFocus | null
 }): OverseerWriteAuthorization {
-    const text = opts.latestOperatorText
+    const text = opts.latestOperatorText ?? ''
+    const targets = focusTargets(opts.focus)
+
     if (opts.allowWrites === true) {
         return {
             allowed: new Set<OverseerWriteToolName>(['ping_session', 'record_disposition']),
             explicitClientFlag: true,
-            sessionIdPrefixes: extractSessionIdPrefixes(text),
-            itemIds: extractItemIds(text),
+            sessionIdPrefixes: targets.sessionIdPrefixes,
+            itemIds: targets.itemIds,
             messageSnippets: extractQuotedSnippets(text)
         }
     }
+
+    if (hasFocusSubject(opts.focus)) {
+        return {
+            allowed: new Set<OverseerWriteToolName>(['ping_session', 'record_disposition']),
+            explicitClientFlag: false,
+            sessionIdPrefixes: targets.sessionIdPrefixes,
+            itemIds: targets.itemIds,
+            messageSnippets: []
+        }
+    }
+
     return {
-        allowed: detectOperatorWriteTools(text),
+        allowed: new Set<OverseerWriteToolName>(),
         explicitClientFlag: false,
-        sessionIdPrefixes: extractSessionIdPrefixes(text),
-        itemIds: extractItemIds(text),
-        messageSnippets: extractQuotedSnippets(text)
+        sessionIdPrefixes: [],
+        itemIds: [],
+        messageSnippets: []
     }
 }
 
 function sessionIdMatchesGrant(sessionId: string, prefixes: readonly string[]): boolean {
     const lower = sessionId.trim().toLowerCase()
-    return prefixes.some((prefix) => lower === prefix || lower.startsWith(prefix))
+    if (!lower) return false
+    return prefixes.some((prefix) => {
+        if (!prefix) return false
+        // Exact, call extends grant prefix, or call is a unique short prefix of the
+        // focused canonical id (tool contract accepts abbreviated session ids).
+        if (lower === prefix || lower.startsWith(prefix)) return true
+        return lower.length >= 8 && prefix.startsWith(lower)
+    })
 }
 
 function messageMatchesGrant(message: string, snippets: readonly string[]): boolean {
@@ -111,8 +115,8 @@ function messageMatchesGrant(message: string, snippets: readonly string[]): bool
 }
 
 /**
- * Per-call authorization: tool class must be allowed, and when the operator
- * named a target, the call args must bind to it (unless explicitClientFlag).
+ * Per-call authorization: tool class must be allowed, and (unless explicitClientFlag)
+ * the call args must bind to hub focus.
  */
 export function isWriteToolCallAuthorized(
     tool: string,
@@ -121,7 +125,10 @@ export function isWriteToolCallAuthorized(
 ): { ok: true } | { ok: false; error: string } {
     if (!isOverseerWriteTool(tool)) return { ok: true }
     if (!auth.allowed.has(tool)) {
-        return { ok: false, error: 'write not authorized by operator message (no explicit write intent)' }
+        return {
+            ok: false,
+            error: 'write not authorized (no conversational focus and no allowWrites)'
+        }
     }
 
     if (tool === 'ping_session') {
@@ -133,6 +140,8 @@ export function isWriteToolCallAuthorized(
             if (!messageMatchesGrant(message, auth.messageSnippets)) {
                 return { ok: false, error: 'relay message does not match operator-quoted payload' }
             }
+            // Optional soft bind: when focus exists under allowWrites, still prefer it,
+            // but allowWrites alone may target any session (admin confirm path).
             return { ok: true }
         }
 
@@ -140,16 +149,21 @@ export function isWriteToolCallAuthorized(
         if (!hasTargetGrant) {
             return {
                 ok: false,
-                error: 'relay requires an explicit session id / item id in the operator message (or allowWrites)'
+                error: 'relay requires conversational focus (session and/or inbox item) or allowWrites'
             }
         }
         const sessionOk = sessionId.length > 0 && sessionIdMatchesGrant(sessionId, auth.sessionIdPrefixes)
         const itemOk = itemId != null && auth.itemIds.includes(itemId)
-        if (!sessionOk && !itemOk) {
-            return { ok: false, error: 'relay target does not match operator-authorized session/item' }
+        // When focus binds both slots, every supplied selector must match —
+        // session-only match must not launder an off-focus itemId into the ping.
+        if (sessionId.length > 0 && auth.sessionIdPrefixes.length > 0 && !sessionOk) {
+            return { ok: false, error: 'relay target does not match conversational focus' }
         }
-        if (!messageMatchesGrant(message, auth.messageSnippets)) {
-            return { ok: false, error: 'relay message does not match operator-quoted payload' }
+        if (itemId != null && auth.itemIds.length > 0 && !itemOk) {
+            return { ok: false, error: 'relay target does not match conversational focus' }
+        }
+        if (!sessionOk && !itemOk) {
+            return { ok: false, error: 'relay target does not match conversational focus' }
         }
         return { ok: true }
     }
@@ -160,11 +174,11 @@ export function isWriteToolCallAuthorized(
         if (auth.itemIds.length === 0) {
             return {
                 ok: false,
-                error: 'disposition requires an explicit item id in the operator message (or allowWrites)'
+                error: 'disposition requires focused inbox item (or allowWrites)'
             }
         }
         if (itemId == null || !auth.itemIds.includes(itemId)) {
-            return { ok: false, error: 'disposition itemId does not match operator-authorized item' }
+            return { ok: false, error: 'disposition itemId does not match conversational focus' }
         }
         return { ok: true }
     }

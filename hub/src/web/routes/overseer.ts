@@ -15,6 +15,23 @@ import { runOverseerConverse } from '../../overseer/converse'
 import { assembleOverseerConverseMessages, listRecentConvoTurns, persistOverseerConvoExchange } from '../../overseer/converseContext'
 import { BrainUnavailableError, filterChatModels, isKnownBrainProfile, listBrainModels, listBrainProfiles, resolveBrainConfig, resolveBrainSelection } from '../../overseer/brainClient'
 import type { ActiveBrainSetting } from '../../store/settingsStore'
+import { applyFocusFromClientSession } from '@hapi/protocol'
+import type { OverseerEntity } from '../../sync/overseerEntity'
+
+/**
+ * Client relatedSessionId must resolve to one live canonical session before it
+ * can authorize write prefixes. Ambiguous/unknown values (including nonexistent
+ * full UUIDs) return null — never seed an unresolved id that could grant a
+ * colliding short-prefix ping.
+ */
+function resolveClientRelatedSessionId(
+    overseer: OverseerEntity,
+    relatedSessionId: string | null | undefined
+): string | null {
+    const raw = typeof relatedSessionId === 'string' ? relatedSessionId.trim() : ''
+    if (!raw) return null
+    return overseer.resolveCanonicalSessionId(raw)
+}
 
 const convoTurnBodySchema = z.object({
     operatorText: z.string().max(8000).default(''),
@@ -231,12 +248,27 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         const overseer = engine.getOverseer(c.get('namespace'))
+        const namespace = c.get('namespace')
+        const settings = engine.getSettings()
         const assembled = assembleOverseerConverseMessages({
             overseer,
             clientMessages
         })
         const messages = assembled.messages
         const lastOperator = [...messages].reverse().find((m) => m.role === 'operator')?.content ?? ''
+        const durableFocus = settings.getConverseFocus(namespace)
+        const rawRelated = parsed.data.relatedSessionId
+        const clientSessionSeed = resolveClientRelatedSessionId(overseer, rawRelated)
+        // Nonempty relatedSessionId that failed canonical resolve must not
+        // silently inherit durable focus (would authorize the wrong worker).
+        const priorFocus =
+            typeof rawRelated === 'string' && rawRelated.trim() && !clientSessionSeed
+                ? null
+                : applyFocusFromClientSession(
+                    durableFocus,
+                    clientSessionSeed,
+                    Math.max(Date.now(), (durableFocus?.updatedAt ?? 0) + 1)
+                )
 
         const active = getSanitizedActiveBrain(engine, c.get('namespace'))
         const config = resolveBrainConfig(process.env, resolveBrainSelection(active, {
@@ -253,10 +285,11 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 profile: parsed.data.profile ?? null
             })
             const reply = 'The Overseer brain is not configured on this hub (set OVERSEER_BRAIN_URL). I can still show raw events and inbox items, but I cannot answer in conversation yet.'
+            if (priorFocus) settings.setConverseFocusIfNewer(priorFocus, namespace)
             persistOverseerConvoExchange(overseer, assembled, {
                 operatorText: lastOperator,
                 overseerText: reply,
-                relatedSessionId: parsed.data.relatedSessionId ?? null
+                relatedSessionId: parsed.data.relatedSessionId ?? priorFocus?.sessionId ?? null
             })
             return c.json({
                 reply,
@@ -264,22 +297,35 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 model: null,
                 brainOnline: false,
                 hydratedTurns: assembled.hydratedTurns,
-                truncated: assembled.truncated
+                truncated: assembled.truncated,
+                focus: priorFocus
             })
         }
 
+        // Publish client-selected focus before awaiting the brain so overlapping
+        // converse requests (voice/text/devices) observe the new referent.
+        if (priorFocus) settings.setConverseFocusIfNewer(priorFocus, namespace)
+
         try {
-            const { reply, toolTrace } = await runOverseerConverse({
+            const { reply, toolTrace, focus } = await runOverseerConverse({
                 overseer,
                 config,
                 messages,
-                allowWrites: parsed.data.allowWrites
+                allowWrites: parsed.data.allowWrites,
+                focus: priorFocus
             })
+
+            if (focus) {
+                settings.setConverseFocusIfNewer(focus, namespace)
+            }
+            // Do not clear durable focus on an empty result — a concurrent newer
+            // turn may have already advanced it (lost-update race).
 
             persistOverseerConvoExchange(overseer, assembled, {
                 operatorText: lastOperator,
                 overseerText: reply,
-                relatedSessionId: parsed.data.relatedSessionId ?? null,
+                relatedSessionId:
+                    parsed.data.relatedSessionId ?? focus?.sessionId ?? null,
                 toolCalls: toolTrace
                     .filter((t) => t.ok)
                     .map((t) => ({ tool: t.tool, argsSummary: JSON.stringify(t.args).slice(0, 500) }))
@@ -291,7 +337,8 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 model: config.model,
                 brainOnline: true,
                 hydratedTurns: assembled.hydratedTurns,
-                truncated: assembled.truncated
+                truncated: assembled.truncated,
+                focus
             })
         } catch (error) {
             if (error instanceof BrainUnavailableError) {
@@ -310,10 +357,13 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 const reply = error.reachable
                     ? 'I reached the Overseer brain but could not complete the tool conversation (request error). This is a converse-loop issue, not the brain being offline — please retry, and flag it if it persists.'
                     : 'The Overseer brain is offline right now. Try again shortly — your events and inbox are still being captured.'
+                const focusToPersist = error.converseFocus ?? priorFocus
+                if (focusToPersist) settings.setConverseFocusIfNewer(focusToPersist, namespace)
                 persistOverseerConvoExchange(overseer, assembled, {
                     operatorText: lastOperator,
                     overseerText: reply,
-                    relatedSessionId: parsed.data.relatedSessionId ?? null
+                    relatedSessionId:
+                        parsed.data.relatedSessionId ?? focusToPersist?.sessionId ?? null
                 })
                 return c.json({
                     reply,
@@ -321,7 +371,8 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
                     model: config.model,
                     brainOnline: error.reachable,
                     hydratedTurns: assembled.hydratedTurns,
-                    truncated: assembled.truncated
+                    truncated: assembled.truncated,
+                    focus: focusToPersist
                 })
             }
             throw error

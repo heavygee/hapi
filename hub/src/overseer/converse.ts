@@ -8,13 +8,16 @@
  */
 
 import {
+    applyFocusFromToolResolve,
     buildOverseerOpenAiTools,
     buildOverseerSystemPrompt,
     fingerprintWriteToolCall,
+    formatConverseFocusDirective,
+    hasConverseFocusSubject,
     isOverseerWriteTool,
-    isWriteToolAuthorized,
     isWriteToolCallAuthorized,
     resolveOverseerWriteAuthorization,
+    type OverseerConverseFocus,
     type OverseerConverseMessage,
     type OverseerToolName,
     type OverseerToolTraceEntry,
@@ -25,6 +28,7 @@ import { isOverseerToolName, runOverseerTool } from './runOverseerTool'
 import { projectToolResultForBrain } from './toolProjection'
 import {
     callBrain,
+    BrainUnavailableError,
     type BrainConfig,
     type OpenAiChatMessage,
     type OverseerOpenAiToolLike
@@ -106,6 +110,23 @@ function hasSuccessfulWrite(toolTrace: OverseerToolTraceEntry[]): boolean {
     return toolTrace.some((entry) => entry.ok && isOverseerWriteTool(entry.tool as OverseerToolName))
 }
 
+/** True when two resolved subjects refer to the same conversational referent. */
+function subjectsCompatible(
+    a: OverseerConverseFocus,
+    b: OverseerConverseFocus
+): boolean {
+    const aItem = a.itemId != null && a.itemId > 0 ? a.itemId : null
+    const bItem = b.itemId != null && b.itemId > 0 ? b.itemId : null
+    // Distinct inbox items are never the same referent, even on one session.
+    if (aItem != null && bItem != null && aItem !== bItem) return false
+
+    const aSession = a.sessionId?.trim().toLowerCase() || null
+    const bSession = b.sessionId?.trim().toLowerCase() || null
+    if (aSession && bSession && aSession === bSession) return true
+    if (aItem != null && bItem != null && aItem === bItem) return true
+    return false
+}
+
 export async function runOverseerConverse(params: {
     overseer: OverseerEntity
     config: BrainConfig
@@ -114,22 +135,49 @@ export async function runOverseerConverse(params: {
     signal?: AbortSignal
     /** Explicit client opt-in for write tools (admin/voice confirm). */
     allowWrites?: boolean
-}): Promise<{ reply: string; toolTrace: OverseerToolTraceEntry[] }> {
+    /** Hub-owned subject from prior turns (session and/or inbox item). */
+    focus?: OverseerConverseFocus | null
+}): Promise<{
+    reply: string
+    toolTrace: OverseerToolTraceEntry[]
+    focus: OverseerConverseFocus | null
+}> {
     const { overseer, config, messages, maxIterations = 6, signal, allowWrites } = params
 
     const latestOperatorText = [...messages].reverse().find((m) => m.role === 'operator')?.content ?? ''
-    const writeAuth: OverseerWriteAuthorization = resolveOverseerWriteAuthorization({
-        latestOperatorText,
-        allowWrites
-    })
+    /** Focus that may advance from tool resolves — persisted for the next operator turn. */
+    let focus = params.focus ?? null
+    /**
+     * Write grants are frozen at turn start. Mid-turn tool resolves must not unlock
+     * ping/disposition against a model-chosen subject in the same turn (Codex P1).
+     * Cross-turn "tell it…" uses the focus persisted from the prior turn.
+     */
+    const writeFocus = params.focus ?? null
+    /** Strictly above prior focus version — equal wall-clock ms cannot clobber. */
+    const turnStartedAt = Math.max(Date.now(), (params.focus?.updatedAt ?? 0) + 1)
 
-    const tools = (buildOverseerOpenAiTools() as OverseerOpenAiToolLike[]).filter((tool) => {
-        const name = tool.function?.name ?? ''
-        return isWriteToolAuthorized(name, writeAuth)
-    })
+    const writeAuthFor = (): OverseerWriteAuthorization =>
+        resolveOverseerWriteAuthorization({
+            latestOperatorText,
+            allowWrites,
+            focus: writeFocus
+        })
+
+    // Full catalog always exposed; write authorization is enforced at call time
+    // against turn-start focus (or allowWrites).
+    const tools = buildOverseerOpenAiTools() as OverseerOpenAiToolLike[]
     const clockLine = `Server time now: ${new Date().toISOString()} (epoch ms ${Date.now()}, timezone ${Intl.DateTimeFormat().resolvedOptions().timeZone}). Relative snoozes must use absolute snoozedUntil epoch ms from this clock.`
+    const focusDirective = formatConverseFocusDirective(focus)
+    const systemContent = [
+        buildOverseerSystemPrompt(),
+        GROUNDING_DIRECTIVE,
+        focusDirective,
+        `# Clock\n\n${clockLine}`
+    ]
+        .filter((block): block is string => Boolean(block && block.trim()))
+        .join('\n\n')
     const convo: OpenAiChatMessage[] = [
-        { role: 'system', content: `${buildOverseerSystemPrompt()}\n\n${GROUNDING_DIRECTIVE}\n\n# Clock\n\n${clockLine}` },
+        { role: 'system', content: systemContent },
         ...messages.map((m): OpenAiChatMessage => ({
             role: m.role === 'operator' ? 'user' : 'assistant',
             content: m.content
@@ -141,12 +189,42 @@ export async function runOverseerConverse(params: {
     const writeConfirmations: string[] = []
     /** Successful irreversible call fingerprints — reject duplicates in this turn. */
     const consumedWriteFingerprints = new Set<string>()
+    /**
+     * Subjects this turn's tools identified on their own (apply-from-null).
+     * Incompatible subjects → do not last-win; keep turn-start focus.
+     * Compatible pairs (same session or same item) count as one referent.
+     */
+    const subjectsResolvedThisTurn: OverseerConverseFocus[] = []
     // The brain (llama-server) does not honor tool_choice:'required', so it will
     // sometimes answer a fleet question from nothing (e.g. "the inbox is empty"
     // when it never called query_inbox). Guardrail: if the very first answer
     // carries zero tool calls AND no tool has run this turn, nudge once to force
     // it to verify. If it still declines, the question genuinely needed no tool.
     let nudged = false
+
+    const finish = (reply: string) => ({ reply, toolTrace, focus })
+
+    const applyToolFocus = (
+        previous: OverseerConverseFocus | null,
+        event: Parameters<typeof applyFocusFromToolResolve>[1]
+    ): OverseerConverseFocus | null => {
+        // What subject did THIS tool identify on its own (ignore prior focus passthrough)?
+        const identifiedAlone = applyFocusFromToolResolve(null, event, turnStartedAt)
+        if (hasConverseFocusSubject(identifiedAlone) && identifiedAlone) {
+            subjectsResolvedThisTurn.push(identifiedAlone)
+        }
+
+        const next = applyFocusFromToolResolve(previous, event, turnStartedAt)
+        if (subjectsResolvedThisTurn.length > 1) {
+            const first = subjectsResolvedThisTurn[0]!
+            const multi = subjectsResolvedThisTurn.some((s) => !subjectsCompatible(first, s))
+            if (multi) {
+                // Multi-subject comparison turn — refuse to invent a last-wins referent.
+                return params.focus ?? null
+            }
+        }
+        return next
+    }
 
     for (let iter = 0; iter < maxIterations; iter++) {
         let message: OpenAiChatMessage
@@ -156,7 +234,12 @@ export async function runOverseerConverse(params: {
             // Irreversible writes already landed — return their audit trail so the
             // route can record the turn and the operator does not duplicate-retry.
             if (hasSuccessfulWrite(toolTrace)) {
-                return { reply: fallbackReplyAfterWriteSuccess(writeConfirmations), toolTrace }
+                return finish(fallbackReplyAfterWriteSuccess(writeConfirmations))
+            }
+            if (error instanceof BrainUnavailableError) {
+                // Carry mid-turn tool-resolved focus so the route can persist it
+                // even when the follow-up brain call fails (Codex P2).
+                error.converseFocus = focus
             }
             throw error
         }
@@ -172,7 +255,7 @@ export async function runOverseerConverse(params: {
                 })
                 continue
             }
-            return { reply: (message.content ?? '').trim(), toolTrace }
+            return finish((message.content ?? '').trim())
         }
 
         // Execute the requested tools and feed the results back as a plain USER
@@ -201,7 +284,7 @@ export async function runOverseerConverse(params: {
                 resultLines.push(`${name}(${argsRaw}) => ${JSON.stringify({ error: deferred })}`)
                 continue
             }
-            const authz = isWriteToolCallAuthorized(name, args, writeAuth)
+            const authz = isWriteToolCallAuthorized(name, args, writeAuthFor())
             if (!authz.ok) {
                 toolTrace.push({ tool: name, args, ok: false, error: authz.error })
                 resultLines.push(`${name}(${argsRaw}) => ${JSON.stringify({ error: authz.error })}`)
@@ -227,6 +310,14 @@ export async function runOverseerConverse(params: {
                     ok,
                     ...(ok ? {} : { error: toolResultError(result) })
                 })
+                if (ok) {
+                    focus = applyToolFocus(focus, {
+                        tool: name,
+                        ok: true,
+                        args,
+                        result
+                    })
+                }
                 if (ok && isOverseerWriteTool(name)) {
                     consumedWriteFingerprints.add(fingerprintWriteToolCall(name, args))
                     const tombstone = writeResultTombstone(result)
@@ -255,10 +346,15 @@ export async function runOverseerConverse(params: {
             messages: [...convo, { role: 'user', content: 'Answer now in plain text, no more tools.' }],
             signal
         })
-        return { reply: (finalMsg.content ?? '').trim() || 'I gathered the data but could not compose an answer.', toolTrace }
+        return finish(
+            (finalMsg.content ?? '').trim() || 'I gathered the data but could not compose an answer.'
+        )
     } catch (error) {
         if (hasSuccessfulWrite(toolTrace)) {
-            return { reply: fallbackReplyAfterWriteSuccess(writeConfirmations), toolTrace }
+            return finish(fallbackReplyAfterWriteSuccess(writeConfirmations))
+        }
+        if (error instanceof BrainUnavailableError) {
+            error.converseFocus = focus
         }
         throw error
     }

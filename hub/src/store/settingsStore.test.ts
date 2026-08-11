@@ -43,6 +43,113 @@ describe('SettingsStore', () => {
         expect(s.getActiveBrain()).toBeNull()
     })
 
+    it('round-trips conversational focus per namespace', () => {
+        const s = freshStore()
+        expect(s.getConverseFocus()).toBeNull()
+        s.setConverseFocus({
+            sessionId: '6cd8d0c3-aaaa-bbbb-cccc-ddddeeeeffff',
+            itemId: 118,
+            source: 'tool_resolve',
+            updatedAt: 42
+        })
+        expect(s.getConverseFocus()).toEqual({
+            sessionId: '6cd8d0c3-aaaa-bbbb-cccc-ddddeeeeffff',
+            itemId: 118,
+            source: 'tool_resolve',
+            updatedAt: 42
+        })
+        s.setConverseFocus(
+            {
+                sessionId: 'other',
+                itemId: null,
+                source: 'client',
+                updatedAt: 99
+            },
+            'ns-a'
+        )
+        expect(s.getConverseFocus('ns-a')?.sessionId).toBe('other')
+        expect(s.getConverseFocus()?.itemId).toBe(118)
+        s.clearConverseFocus()
+        const tombstone = s.getConverseFocus()
+        expect(tombstone?.sessionId).toBeNull()
+        expect(tombstone?.itemId).toBeNull()
+        expect(typeof tombstone?.updatedAt).toBe('number')
+    })
+
+    it('tombstone blocks older in-flight focus resurrection', () => {
+        const s = freshStore()
+        s.setConverseFocus({
+            sessionId: 'sess',
+            itemId: null,
+            source: 'tool_resolve',
+            updatedAt: 100
+        })
+        s.clearConverseFocus()
+        const clearedAt = s.getConverseFocus()?.updatedAt ?? 0
+        expect(clearedAt).toBeGreaterThanOrEqual(100)
+        expect(
+            s.setConverseFocusIfNewer({
+                sessionId: 'sess',
+                itemId: null,
+                source: 'tool_resolve',
+                updatedAt: clearedAt - 1
+            })
+        ).toBe(false)
+        expect(s.getConverseFocus()?.sessionId).toBeNull()
+    })
+
+    it('setConverseFocusIfNewer refuses older overlapping writes', () => {
+        const s = freshStore()
+        s.setConverseFocus({
+            sessionId: 'new',
+            itemId: 1,
+            source: 'tool_resolve',
+            updatedAt: 200
+        })
+        expect(
+            s.setConverseFocusIfNewer({
+                sessionId: 'old',
+                itemId: 2,
+                source: 'client',
+                updatedAt: 100
+            })
+        ).toBe(false)
+        expect(s.getConverseFocus()?.sessionId).toBe('new')
+        expect(
+            s.setConverseFocusIfNewer({
+                sessionId: 'newer',
+                itemId: 3,
+                source: 'tool_resolve',
+                updatedAt: 300
+            })
+        ).toBe(true)
+        expect(s.getConverseFocus()?.sessionId).toBe('newer')
+        expect(
+            s.setConverseFocusIfNewer({
+                sessionId: 'same-ms',
+                itemId: 4,
+                source: 'client',
+                updatedAt: 300
+            })
+        ).toBe(false)
+        expect(s.getConverseFocus()?.sessionId).toBe('newer')
+    })
+
+    it('repoints and clears focus when sessions merge or delete', () => {
+        const s = freshStore()
+        s.setConverseFocus({
+            sessionId: 'old-id',
+            itemId: 118,
+            source: 'tool_resolve',
+            updatedAt: 1
+        })
+        s.repointConverseFocusSession('old-id', 'new-id')
+        expect(s.getConverseFocus()?.sessionId).toBe('new-id')
+        s.clearConverseFocusIfSession('new-id')
+        expect(s.getConverseFocus()?.sessionId).toBeNull()
+        expect(s.getConverseFocus()?.itemId).toBe(118)
+    })
+
     it('DDL is idempotent', () => {
         const db = new Database(':memory:', { strict: true })
         ensureOverseerSettingsSchema(db)

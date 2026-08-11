@@ -8,6 +8,8 @@
  * `BrainUnavailableError` so callers can degrade gracefully instead of erroring.
  */
 
+import type { OverseerConverseFocus } from '@hapi/protocol'
+
 export type BrainConfig = {
     /** Base URL including the `/v1` suffix. */
     baseUrl: string
@@ -44,6 +46,9 @@ export type OverseerOpenAiToolLike = {
 export type BrainErrorKind = 'unreachable' | 'timeout' | 'http' | 'protocol'
 
 export class BrainUnavailableError extends Error {
+    /** Latest hub focus when the converse loop fails after successful tool resolves. */
+    converseFocus: OverseerConverseFocus | null | undefined
+
     constructor(
         message: string,
         readonly kind: BrainErrorKind = 'unreachable',

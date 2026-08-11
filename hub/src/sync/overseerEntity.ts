@@ -860,6 +860,14 @@ export class OverseerEntity {
 
     /**
      * Exact session id, else unique prefix (hapi-ping-peer / loomux / pi pattern).
+     * Ambiguous or unknown → null. Never silently picks among collisions.
+     */
+    resolveCanonicalSessionId(sessionId: string): string | null {
+        return this.resolveSession(sessionId)?.id ?? null
+    }
+
+    /**
+     * Exact session id, else unique prefix (hapi-ping-peer / loomux / pi pattern).
      * Ambiguous or unknown → undefined. Never silently picks among collisions.
      */
     private resolveSession(sessionId: string): Session | undefined {
@@ -871,9 +879,10 @@ export class OverseerEntity {
     private matchSessions(sessionId: string): Session[] {
         const trimmed = sessionId.trim()
         if (!trimmed) return []
-        const exact = this.getSession(trimmed)
+        const lower = trimmed.toLowerCase()
+        const exact = this.getSession(trimmed) ?? this.getSessions().find((s) => s.id.toLowerCase() === lower)
         if (exact) return [exact]
-        return this.getSessions().filter((s) => s.id.startsWith(trimmed))
+        return this.getSessions().filter((s) => s.id.toLowerCase().startsWith(lower))
     }
 
     private parseEventPayload(payloadJson: string | null): {
