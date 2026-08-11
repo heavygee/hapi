@@ -58,12 +58,12 @@ describe('MachineCache live capabilities', () => {
 
         registry.register(
             { id: 'sock-1' } as never,
-            `cold:${MACHINE_CAPABILITIES.RunnerSelfUpgrade}`,
+            `cold:${MACHINE_CAPABILITIES.StopRunner}`,
         )
 
         const refreshed = cache.refreshMachine('cold')
         expect(refreshed?.metadata?.capabilities).toEqual([
-            MACHINE_CAPABILITIES.RunnerSelfUpgrade,
+            MACHINE_CAPABILITIES.StopRunner,
         ])
     })
 })

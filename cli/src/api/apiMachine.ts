@@ -60,8 +60,6 @@ import { collectMachineHealth } from '@/utils/machineHealth'
 import { inspectCursorChatStore } from '@/cursor/cursorChatStoreStatus'
 import { homedir } from 'node:os'
 import type { CursorChatStoreStatus } from '@hapi/protocol/apiTypes'
-import type { HubUpgradeOffer, RunnerSelfUpgradeResponse } from '@hapi/protocol/upgradeChannel'
-import { applyRunnerSelfUpgrade } from '@/upgrade/selfUpgrade'
 import { buildMachineMetadata } from '@/agent/sessionFactory'
 import {
     machineRegistrationNeedsRefresh,
@@ -580,23 +578,6 @@ export class ApiMachineClient {
             return { message: 'Runner stop request acknowledged' }
         })
 
-        this.rpcHandlerManager.registerHandler<
-            { offer: HubUpgradeOffer },
-            RunnerSelfUpgradeResponse
-        >(RPC_METHODS.RunnerSelfUpgrade, async (params) => {
-            const offer = params?.offer
-            if (!offer || typeof offer !== 'object') {
-                throw new Error('offer is required')
-            }
-            return await applyRunnerSelfUpgrade({
-                offer,
-                downloadBaseUrl: configuration.apiUrl,
-                authToken: configuration.cliApiToken,
-                requestShutdown: () => {
-                    setTimeout(() => requestShutdown(), 500)
-                },
-            })
-        })
     }
 
     async updateMachineMetadata(handler: (metadata: MachineMetadata | null) => MachineMetadata): Promise<void> {

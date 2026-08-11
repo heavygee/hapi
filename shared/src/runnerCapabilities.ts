@@ -1,6 +1,24 @@
 import { RPC_METHODS } from './rpcMethods'
 
 /**
+ * Capabilities the current runner generation advertises to the hub.
+ *
+ * `piExistingSessionResume` gates the Pi native-history resume path in
+ * hub/src/sync/syncEngine.ts: the runner must be able to hand back an
+ * existing native Pi process. The runner declares it at registration
+ * (HTTP POST /machines) and again on every socket connect, because the hub
+ * merges registration-time runner state only for brand-new machines and the
+ * socket heartbeat owns the persisted runner_state afterwards — without the
+ * socket-side advertisement, a runner upgraded in place would never get its
+ * new capabilities observed by the hub.
+ */
+export const RUNNER_CAPABILITIES = {
+    piExistingSessionResume: true
+} as const
+
+export type RunnerCapabilities = typeof RUNNER_CAPABILITIES
+
+/**
  * Machine-scoped capabilities runners advertise on connect.
  * Hub features that hard-depend on a machine RPC must list that capability
  * in {@link REQUIRED_MACHINE_CAPABILITIES} so skew surfaces as a banner
@@ -9,14 +27,6 @@ import { RPC_METHODS } from './rpcMethods'
 export const MACHINE_CAPABILITIES = {
     CursorChatStoreStatus: RPC_METHODS.CursorChatStoreStatus,
     StopRunner: RPC_METHODS.StopRunner,
-    RunnerSelfUpgrade: RPC_METHODS.RunnerSelfUpgrade,
-    /**
-     * Marker (not an RPC): this runner understands hub-artifact
-     * `targetGeneration` fingerprints. Pre-generation binaries omit it, so the
-     * hub's offer still forces an apply at the same semver instead of a false
-     * "Already at X" no-op that leaves the skew banner stuck forever.
-     */
-    CliArtifactGeneration: 'cli-artifact-generation',
 } as const
 
 export type MachineCapability =
@@ -26,13 +36,12 @@ export type MachineCapability =
 export const CURRENT_MACHINE_CAPABILITIES: readonly MachineCapability[] = [
     MACHINE_CAPABILITIES.CursorChatStoreStatus,
     MACHINE_CAPABILITIES.StopRunner,
-    MACHINE_CAPABILITIES.RunnerSelfUpgrade,
-    MACHINE_CAPABILITIES.CliArtifactGeneration,
 ]
 
 /**
  * Capabilities the hub requires on every connected runner for features it
- * hard-depends on. Missing entries → operator-visible skew banner.
+ * hard-depends on. Missing entries → operator-visible skew banner (+ optional
+ * stop-runner ensure when a newer binary is already on disk).
  */
 export const REQUIRED_MACHINE_CAPABILITIES: readonly MachineCapability[] = [
     MACHINE_CAPABILITIES.CursorChatStoreStatus,
@@ -64,21 +73,3 @@ export function cliBinaryUpdatedOnDisk(metadata: {
         && Number.isFinite(installed)
         && started !== installed
 }
-
-/**
- * Capabilities the current runner generation advertises to the hub.
- *
- * `piExistingSessionResume` gates the Pi native-history resume path in
- * hub/src/sync/syncEngine.ts: the runner must be able to hand back an
- * existing native Pi process. The runner declares it at registration
- * (HTTP POST /machines) and again on every socket connect, because the hub
- * merges registration-time runner state only for brand-new machines and the
- * socket heartbeat owns the persisted runner_state afterwards — without the
- * socket-side advertisement, a runner upgraded in place would never get its
- * new capabilities observed by the hub.
- */
-export const RUNNER_CAPABILITIES = {
-    piExistingSessionResume: true
-} as const
-
-export type RunnerCapabilities = typeof RUNNER_CAPABILITIES

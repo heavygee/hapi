@@ -40,20 +40,6 @@ vi.mock('@/hooks/queries/useMachines', () => ({
     }),
 }))
 
-vi.mock('@/hooks/queries/useUpgradeInfo', () => ({
-    useUpgradeInfo: () => ({
-        info: {
-            policy: 'alert',
-            offer: {
-                channel: 'npm',
-                targetVersion: '0.25.1',
-                targetCapabilities: ['runner-self-upgrade'],
-                npmPackage: '@twsxtd/hapi',
-            },
-        },
-    }),
-}))
-
 describe('topFleetBannersOffsetClass', () => {
     it('offsets below status banners when they are active', () => {
         expect(topFleetBannersOffsetClass({ isOnline: true, hasTopStatusBanner: true }))

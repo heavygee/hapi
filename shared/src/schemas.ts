@@ -559,17 +559,10 @@ export const MachineMetadataSchema = z.object({
     workspaceRoots: z.array(z.string()).optional(),
     /** Machine-scoped RPC capability ids this runner registers (see runnerCapabilities). */
     capabilities: z.array(z.string()).optional(),
-    /** True when this runner process started with HAPI_DISABLE_VERSION_HANDOFF=1. */
-    versionHandoffDisabled: z.boolean().optional(),
     /** CLI binary/package mtime when this runner process started. */
     startedCliMtimeMs: z.number().optional(),
     /** Current on-disk CLI binary/package mtime (may differ after upgrade). */
     installedCliMtimeMs: z.number().optional(),
-    /**
-     * Hub-artifact build generation this runner last applied (source fingerprint).
-     * Used to detect same-semver soup rebuilds that still need fleet upgrade.
-     */
-    cliArtifactGeneration: z.string().optional(),
 })
 
 export type MachineMetadata = z.infer<typeof MachineMetadataSchema>

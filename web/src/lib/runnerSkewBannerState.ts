@@ -1,26 +1,10 @@
+const MINIMIZED_KEY = 'hapi.runnerSkew.minimized.v1'
+const DISMISS_UNTIL_KEY = 'hapi.runnerSkew.dismissUntil.v1'
 export const RUNNER_SKEW_TEMP_DISMISS_MS = 60 * 60_000
 
-const MINIMIZED_KEY_PREFIX = 'hapi.runnerSkew.minimized.v1'
-const DISMISS_UNTIL_KEY_PREFIX = 'hapi.runnerSkew.dismissUntil.v1'
-
 /** In-memory fallback when sessionStorage is full / blocked (QuotaExceededError). */
-const memoryMinimizedByScope = new Map<string, boolean>()
-const memoryDismissUntilByScope = new Map<string, number>()
-
-/** Scope dismiss/minimize state to hub + namespace (PWA can switch hubs in-tab). */
-export function runnerSkewBannerScope(baseUrl: string | null | undefined, namespace: string | null | undefined): string {
-    const hub = (baseUrl ?? (typeof window !== 'undefined' ? window.location.origin : 'unknown')).trim() || 'unknown'
-    const ns = (namespace ?? 'unknown').trim() || 'unknown'
-    return `${hub}:${ns}`
-}
-
-function minimizedKey(scope: string): string {
-    return `${MINIMIZED_KEY_PREFIX}.${encodeURIComponent(scope)}`
-}
-
-function dismissUntilKey(scope: string): string {
-    return `${DISMISS_UNTIL_KEY_PREFIX}.${encodeURIComponent(scope)}`
-}
+let memoryMinimized: boolean | null = null
+let memoryDismissUntil: number | null = null
 
 function readStorage(): Storage | null {
     if (typeof window === 'undefined') {
@@ -45,36 +29,34 @@ function writeStorage(mutate: (storage: Storage) => void): void {
     }
 }
 
-export function isRunnerSkewMinimized(scope: string): boolean {
-    const memory = memoryMinimizedByScope.get(scope)
-    if (memory !== undefined) {
-        return memory
+export function isRunnerSkewMinimized(): boolean {
+    if (memoryMinimized !== null) {
+        return memoryMinimized
     }
     try {
-        return readStorage()?.getItem(minimizedKey(scope)) === '1'
+        return readStorage()?.getItem(MINIMIZED_KEY) === '1'
     } catch {
         return false
     }
 }
 
-export function setRunnerSkewMinimized(scope: string, minimized: boolean): void {
-    memoryMinimizedByScope.set(scope, minimized)
+export function setRunnerSkewMinimized(minimized: boolean): void {
+    memoryMinimized = minimized
     writeStorage((storage) => {
         if (minimized) {
-            storage.setItem(minimizedKey(scope), '1')
+            storage.setItem(MINIMIZED_KEY, '1')
         } else {
-            storage.removeItem(minimizedKey(scope))
+            storage.removeItem(MINIMIZED_KEY)
         }
     })
 }
 
-export function getRunnerSkewDismissUntil(scope: string): number {
-    const memory = memoryDismissUntilByScope.get(scope)
-    if (memory !== undefined) {
-        return memory
+export function getRunnerSkewDismissUntil(): number {
+    if (memoryDismissUntil !== null) {
+        return memoryDismissUntil
     }
     try {
-        const raw = readStorage()?.getItem(dismissUntilKey(scope))
+        const raw = readStorage()?.getItem(DISMISS_UNTIL_KEY)
         if (!raw) {
             return 0
         }
@@ -85,27 +67,27 @@ export function getRunnerSkewDismissUntil(scope: string): number {
     }
 }
 
-export function isRunnerSkewTempDismissed(scope: string, now: number = Date.now()): boolean {
-    return getRunnerSkewDismissUntil(scope) > now
+export function isRunnerSkewTempDismissed(now: number = Date.now()): boolean {
+    return getRunnerSkewDismissUntil() > now
 }
 
-export function tempDismissRunnerSkew(scope: string, now: number = Date.now()): void {
+export function tempDismissRunnerSkew(now: number = Date.now()): void {
     const until = now + RUNNER_SKEW_TEMP_DISMISS_MS
-    memoryDismissUntilByScope.set(scope, until)
+    memoryDismissUntil = until
     writeStorage((storage) => {
-        storage.setItem(dismissUntilKey(scope), String(until))
+        storage.setItem(DISMISS_UNTIL_KEY, String(until))
     })
 }
 
-export function clearRunnerSkewTempDismiss(scope: string): void {
-    memoryDismissUntilByScope.set(scope, 0)
+export function clearRunnerSkewTempDismiss(): void {
+    memoryDismissUntil = 0
     writeStorage((storage) => {
-        storage.removeItem(dismissUntilKey(scope))
+        storage.removeItem(DISMISS_UNTIL_KEY)
     })
 }
 
 /** Test helper: reset memory mirrors (sessionStorage cleared separately). */
 export function resetRunnerSkewBannerMemoryForTests(): void {
-    memoryMinimizedByScope.clear()
-    memoryDismissUntilByScope.clear()
+    memoryMinimized = null
+    memoryDismissUntil = null
 }

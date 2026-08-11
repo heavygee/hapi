@@ -55,46 +55,6 @@ describe('machineRegistration', () => {
         )).toBe(true)
     })
 
-    it('refreshes when incoming omits a previously stored artifact generation', () => {
-        expect(machineRegistrationNeedsRefresh(
-            {
-                host: 'teemo',
-                platform: 'linux',
-                happyCliVersion: '0.24.0',
-                capabilities: ['cursor-chat-store-status'],
-                cliArtifactGeneration: 'gen-a',
-            },
-            {
-                host: 'teemo',
-                platform: 'linux',
-                happyCliVersion: '0.24.0',
-                capabilities: ['cursor-chat-store-status'],
-                // generation-unaware / rolled-back runner omitted the field
-            },
-        )).toBe(true)
-
-        expect(mergeMachineRegistrationMetadata(
-            {
-                host: 'teemo',
-                platform: 'linux',
-                happyCliVersion: '0.24.0',
-                capabilities: ['cursor-chat-store-status'],
-                cliArtifactGeneration: 'gen-a',
-            },
-            {
-                host: 'teemo',
-                platform: 'linux',
-                happyCliVersion: '0.24.0',
-                capabilities: ['cursor-chat-store-status'],
-            },
-        )).toEqual({
-            host: 'teemo',
-            platform: 'linux',
-            happyCliVersion: '0.24.0',
-            capabilities: ['cursor-chat-store-status'],
-        })
-    })
-
     it('preserves displayName when incoming omits it', () => {
         expect(mergeMachineRegistrationMetadata(
             {

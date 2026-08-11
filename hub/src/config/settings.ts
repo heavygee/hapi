@@ -3,7 +3,6 @@ import { chmod, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promi
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { withSettingsFileLock } from '@hapi/protocol/settingsFileLock'
-import type { FleetUpgradePolicy } from '@hapi/protocol/upgradeChannel'
 
 export interface Settings {
     machineId?: string
@@ -25,8 +24,7 @@ export interface Settings {
     corsOrigins?: string[]
     /** Opt-in GitHub PR awareness for sessions. Default off. */
     githubPrAwareness?: boolean
-    // Operator fleet-upgrade policy (no alert / alert / auto-upgrade)
-    fleetUpgradePolicy?: FleetUpgradePolicy
+    fleetUpgradePolicy?: string
     /** Per-hub relay auth key issued by the relay server (/issue) */
     relayAuthKey?: string
     /**

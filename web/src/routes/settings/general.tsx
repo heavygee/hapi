@@ -1,12 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
 import { useTranslation, type Locale } from '@/lib/use-translation'
 import { useAppContext } from '@/lib/app-context'
 import { useFeatures, usePatchFeatures } from '@/hooks/queries/useFeatures'
-import { isDefaultNamespaceToken } from '@/lib/tokenNamespace'
 import { CompanionPairing } from '@/components/settings/CompanionPairing'
-import { SettingsChoiceGroup, SettingsLinkRow, SettingsPageContent, SettingsSection, SettingsSwitch } from '@/components/settings/SettingsPrimitives'
+import { SettingsChoiceGroup, SettingsPageContent, SettingsSection, SettingsSwitch } from '@/components/settings/SettingsPrimitives'
 import { disableAllFue, enableAllFue, isFueDisabledGlobally } from '@/lib/use-fue'
 import { queryKeys } from '@/lib/query-keys'
 
@@ -31,9 +29,7 @@ function getNamespace(token: string | null): string | null {
 export default function SettingsGeneralPage() {
     const { t, locale, setLocale } = useTranslation()
     const { api, baseUrl, token } = useAppContext()
-    const navigate = useNavigate()
     const queryClient = useQueryClient()
-    const showRunnerManagement = isDefaultNamespaceToken(token)
     const isOwner = getNamespace(token) === 'default'
     const { features } = useFeatures(api)
     const { setGithubPrAwareness, isPending } = usePatchFeatures(api)
@@ -118,15 +114,6 @@ export default function SettingsGeneralPage() {
                     <CompanionPairing baseUrl={baseUrl} />
                 </div>
             </SettingsSection>
-            {showRunnerManagement ? (
-                <SettingsSection title={t('settings.runnerMgmt.title')}>
-                    <SettingsLinkRow
-                        label={t('settings.runnerMgmt.title')}
-                        description={t('settings.runnerMgmt.linkHint')}
-                        onClick={() => navigate({ to: '/settings/general/runners' })}
-                    />
-                </SettingsSection>
-            ) : null}
         </SettingsPageContent>
     )
 }
