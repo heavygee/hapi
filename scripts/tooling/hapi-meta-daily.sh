@@ -617,7 +617,7 @@ md_hold_events_json() {
 # Prints updated state. Latches the newest qualifying event if new fingerprint.
 md_hold_ingest() {
     local state="$1" repo="$2" number="$3" csv="$4"
-    local events ev_id login type surface body url
+    local events ev_id login type surface body url created_at
     events="$(md_hold_events_json "$repo" "$number")"
     # Walk newest-first; first qualifying new-or-current latch wins.
     while IFS= read -r ev; do
@@ -628,10 +628,11 @@ md_hold_ingest() {
         body="$(jq -r '.body // ""' <<<"$ev")"
         ev_id="$(jq -r '.id' <<<"$ev")"
         url="$(jq -r '.url // ""' <<<"$ev")"
+        created_at="$(jq -r '.created_at // ""' <<<"$ev")"
         pec_hold_should_latch "$surface" "$login" "$type" "$body" "$csv" || continue
-        if pec_hold_is_new_latch "$state" "$repo" "$number" "$ev_id"; then
+        if pec_hold_is_new_latch "$state" "$repo" "$number" "$ev_id" "$created_at"; then
             local next
-            next="$(pec_hold_upsert_state "$state" "$repo" "$number" "$ev_id" "$login" "$url" "$body" || true)"
+            next="$(pec_hold_upsert_state "$state" "$repo" "$number" "$ev_id" "$login" "$url" "$body" "$created_at" || true)"
             if [[ -n "$next" ]] && printf '%s' "$next" | jq -e . >/dev/null 2>&1; then
                 printf '%s' "$next"
             else

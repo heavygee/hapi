@@ -132,25 +132,29 @@ pec_hold_overlay_emoji() {
     printf '%s' "$live"
 }
 
-# pec_hold_is_new_latch STATE_JSON REPO PR COMMENT_ID
+# pec_hold_is_new_latch STATE_JSON REPO PR COMMENT_ID [CREATED_AT]
 # New when this comment_id is not already the recorded fingerprint.
 # Acked same id must NOT re-latch (operator ack is sticky until a new comment).
-# GitHub issue/review ids increase; an older id than the stored cursor must
-# not re-latch if the newer comment disappeared from the API page.
+# Issue-comment ids and review ids are different GitHub namespaces — never
+# compare them as a shared high-water mark. When both sides have created_at,
+# only a strictly later event can re-latch (covers deleted-newer-comment).
 pec_hold_is_new_latch() {
-    local state="${1-}" repo="${2:-}" pr="${3:-}" comment_id="${4:-}"
-    local key fp existing_id
+    local state="${1-}" repo="${2:-}" pr="${3:-}" comment_id="${4:-}" created_at="${5:-}"
+    local key fp existing_id existing_at
     [[ -n "$state" ]] || state='{}'
     key="$(pec_hold_state_key "$repo" "$pr")"
     fp="$(pec_hold_fingerprint "$repo" "$pr" "$comment_id")"
     existing_id="$(printf '%s' "$state" | jq -r --arg k "$key" '.hold[$k].comment_id // empty' 2>/dev/null || true)"
+    existing_at="$(printf '%s' "$state" | jq -r --arg k "$key" '.hold[$k].created_at // empty' 2>/dev/null || true)"
     if [[ -n "$comment_id" && "$existing_id" == "$comment_id" ]]; then
         return 1
     fi
-    if [[ -n "$existing_id" && -n "$comment_id" \
-        && "$existing_id" =~ ^[0-9]+$ && "$comment_id" =~ ^[0-9]+$ \
-        && "$comment_id" -le "$existing_id" ]]; then
-        return 1
+    if [[ -n "$created_at" && -n "$existing_at" && "$existing_at" != "null" ]]; then
+        if [[ "$created_at" < "$existing_at" || "$created_at" == "$existing_at" ]]; then
+            return 1
+        fi
+        [[ -n "$fp" ]]
+        return $?
     fi
     [[ -n "$fp" ]]
 }
@@ -170,11 +174,11 @@ pec_hold_ack_state() {
     '
 }
 
-# pec_hold_upsert_state STATE_JSON REPO PR COMMENT_ID AUTHOR URL EXCERPT
+# pec_hold_upsert_state STATE_JSON REPO PR COMMENT_ID AUTHOR URL EXCERPT [CREATED_AT]
 # Writes/replaces the unacked hold row. Sets notified=false for a new fingerprint.
 pec_hold_upsert_state() {
     local state="${1-}" repo="${2:-}" pr="${3:-}" comment_id="${4:-}" \
-        author="${5:-}" url="${6:-}" excerpt="${7:-}"
+        author="${5:-}" url="${6:-}" excerpt="${7:-}" created_at="${8:-}"
     [[ -n "$state" ]] || state='{}'
     local key fp
     key="$(pec_hold_state_key "$repo" "$pr")"
@@ -184,7 +188,7 @@ pec_hold_upsert_state() {
     printf '%s' "$state" | jq -c \
         --arg k "$key" --arg repo "$repo" --arg pr "$pr" \
         --arg cid "$comment_id" --arg author "$author" --arg url "$url" \
-        --arg excerpt "$excerpt" --arg fp "$fp" '
+        --arg excerpt "$excerpt" --arg fp "$fp" --arg created_at "$created_at" '
         .hold = (.hold // {})
         | (.hold[$k] // {}) as $prev
         | .hold[$k] = {
@@ -195,6 +199,7 @@ pec_hold_upsert_state() {
             url: $url,
             excerpt: $excerpt,
             fingerprint: $fp,
+            created_at: $created_at,
             acked: false,
             notified: (if ($prev.fingerprint // "") == $fp then ($prev.notified == true) else false end)
         }
