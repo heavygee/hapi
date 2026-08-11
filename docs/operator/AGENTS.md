@@ -345,6 +345,8 @@ git commit -m "chore(fork): drop upstream AGENTS.md (canonical copy in docs/oper
 Audience is upstream maintainers and other contributors - not the estate.
 Write like a careful external collaborator. Diffident in tone; concrete in facts.
 
+**Pronoun (public posts):** first person singular. The GitHub account is **heavygee the human**. Drafts an agent writes for the operator to post are still **I**, never **we**. Royal-we / "we believe" / "our reading" reads as a fleet of agents (or a committee) stacking weight on the statement. It is one person. Beliefs stay **I think / on my reading**; established product facts can stay impersonal ("spawn strips unknown keys"). Do not present a private opinion as "we have concluded."
+
 **Our PR bodies** = humble first-timer; work = first-class. Silent checklist: rebase, tests, default path note, no fork docs in diff. Skeleton: Summary / Problem / Approach / Testing / Related / Questions.
 
 Never in upstream PR **bodies**: AI disclosure, fork strategy, internal plans, canon edits.
@@ -375,7 +377,7 @@ Exception: answering a direct @-mention / review question on a thread we already
 ### Allowed when the operator greenlights a public note
 
 - Plain technical facts the author can use (e.g. "main already has schema v21 from #1390; this PR's pin migration still claims v20 and needs remapping to v22")
-- Short, optional offer framed as **heavygee the human**, not "we/the soup kitchen"
+- Short, optional offer framed as **heavygee the human** (**I**, not royal-we, not "the soup kitchen")
 - Zero fork autobiography. If a local nickname must appear once, define it in one plain sentence - prefer not to use it at all
 
 Canonical correction example: `tiann/hapi#1115` comment `5204453417` (operator rewrite after an agent dump).
