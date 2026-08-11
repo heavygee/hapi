@@ -6,6 +6,7 @@ import { createConnection } from 'node:net'
 import {
     MAX_UNIX_SOCKET_PATH_BYTES,
     PeerDeliverBroker,
+    authorizeBrokerListener,
     defaultBrokerSocketPath,
     requestParentPeerDeliver,
 } from './peerDeliverBroker'
@@ -36,6 +37,7 @@ vi.mock('@/ui/logger', () => ({
 describe('PeerDeliverBroker', () => {
     const dirs: string[] = []
     const previousXdg = process.env.XDG_RUNTIME_DIR
+    const originalPlatform = process.platform
 
     afterEach(() => {
         for (const dir of dirs.splice(0)) {
@@ -47,6 +49,11 @@ describe('PeerDeliverBroker', () => {
         } else {
             process.env.XDG_RUNTIME_DIR = previousXdg
         }
+        Object.defineProperty(process, 'platform', {
+            value: originalPlatform,
+            configurable: true,
+        })
+        delete process.env[HAPI_SESSION_ID_ENV]
     })
 
     it('keeps the default socket path within the portable unix pathname budget', () => {
@@ -190,6 +197,59 @@ describe('PeerDeliverBroker', () => {
             expect(unhandled).toEqual([])
         } finally {
             process.off('unhandledRejection', onUnhandled)
+            broker.stop()
+        }
+    })
+
+    it('authorizeBrokerListener: win32 allows null cred (Bun fd=-1)', () => {
+        expect(authorizeBrokerListener(null, process.pid, process.pid, 'win32')).toBe(true)
+        expect(authorizeBrokerListener(null, undefined, process.pid, 'linux')).toBe(false)
+        expect(authorizeBrokerListener(
+            { pid: process.pid, uid: 0, gid: 0 },
+            process.pid,
+            process.pid,
+            'win32',
+        )).toBe(true)
+        expect(authorizeBrokerListener(
+            { pid: process.pid + 99_999, uid: 0, gid: 0 },
+            process.pid,
+            process.pid,
+            'win32',
+        )).toBe(false)
+    })
+
+    it('delivers on win32 when named-pipe peer pid is unavailable', async () => {
+        Object.defineProperty(process, 'platform', { value: 'win32', configurable: true })
+        process.env[HAPI_SESSION_ID_ENV] = '6212dae5-8a60-4284-b7a5-c09aa3571ce4'
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-peer-broker-'))
+        dirs.push(dir)
+        const socketPath = join(dir, 'win32.sock')
+        pingPeerMock.mockResolvedValue({
+            sessionId: '05d9f0f2-9273-4137-933c-07459a1146a2',
+            name: 'Target',
+            resumed: false,
+        })
+        const broker = new PeerDeliverBroker({
+            sessionId: '6212dae5-8a60-4284-b7a5-c09aa3571ce4',
+            sessionCapability: 'cap-win32',
+            ownerPid: process.pid,
+            socketPath,
+            readPeerCred: () => null,
+        })
+        await broker.start()
+        try {
+            const result = await requestParentPeerDeliver({
+                sessionIdPrefix: '05d9f0f2',
+                message: 'teemo ping',
+                socketPath,
+                readPeerCred: () => null,
+            })
+            expect(result.sessionId).toBe('05d9f0f2-9273-4137-933c-07459a1146a2')
+            expect(pingPeerMock).toHaveBeenCalledWith(expect.objectContaining({
+                sessionCapability: 'cap-win32',
+                message: 'teemo ping',
+            }))
+        } finally {
             broker.stop()
         }
     })

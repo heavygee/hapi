@@ -5,8 +5,9 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { logger } from '@/ui/logger'
 import { isProcessDescendant } from './processDescendant'
-import { readUnixPeerCredentials, type PeerCredReader } from './peercred'
+import { readUnixPeerCredentials, type PeerCredentials, type PeerCredReader } from './peercred'
 import {
+    authorizePeerCapInjectClient,
     readWindowsNamedPipeClientCredentials,
     readWindowsNamedPipeServerCredentials,
 } from './peerCapabilityInject'
@@ -144,7 +145,7 @@ export class PeerDeliverBroker {
 
     private async handleConnection(socket: Socket): Promise<void> {
         const cred = this.readPeerCred(socket)
-        if (!cred || !isProcessDescendant(cred.pid, this.ownerPid)) {
+        if (!authorizePeerCapInjectClient(cred, this.ownerPid)) {
             socket.end(`${JSON.stringify({
                 ok: false,
                 code: 'auth_failed',
@@ -250,6 +251,31 @@ function readSocketLine(socket: Socket): Promise<string> {
     })
 }
 
+/**
+ * Child verifies the broker listener.
+ *
+ * Linux/macOS: SO_PEERCRED and ancestor (or exported server PID).
+ * Win32: Bun named-pipe `_handle.fd === -1`, so GetNamedPipeServerProcessId
+ * never runs. Null cred + possession of the ephemeral pipe path (env) is the
+ * auth — same as inject. Mapping that to `auth_failed` strands `hapi ping-peer`
+ * on Teemo; `broker_unavailable` would drop every live Windows broker to
+ * unattributed.
+ */
+export function authorizeBrokerListener(
+    cred: PeerCredentials | null,
+    expectedServerPid: number | undefined,
+    childPid: number = process.pid,
+    platform: NodeJS.Platform = process.platform,
+): boolean {
+    if (!cred) {
+        return platform === 'win32'
+    }
+    if (expectedServerPid !== undefined) {
+        return cred.pid === expectedServerPid
+    }
+    return isProcessDescendant(childPid, cred.pid)
+}
+
 /** Child-side: ask the session parent to deliver an attributed ping. */
 export async function requestParentPeerDeliver(options: {
     sessionIdPrefix: string
@@ -305,9 +331,7 @@ export async function requestParentPeerDeliver(options: {
             // M3: verify the listener is an ancestor (Unix) or the exported
             // server PID (Windows — ancestry walk is unavailable).
             const cred = readPeerCred(socket)
-            const authorized = expectedServerPid !== undefined
-                ? cred?.pid === expectedServerPid
-                : Boolean(cred && isProcessDescendant(process.pid, cred.pid))
+            const authorized = authorizeBrokerListener(cred, expectedServerPid)
             if (!authorized) {
                 const err = new PingPeerError(
                     'auth_failed',
