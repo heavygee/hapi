@@ -4,6 +4,7 @@ import {
     readdirSync,
     readFileSync,
     rmSync,
+    statSync,
     writeFileSync
 } from 'node:fs';
 import { join } from 'node:path';
@@ -21,8 +22,19 @@ import { resolveHapiHomeDir } from '@/configuration';
  * cleanup and logs attribute the real `agent` process. Register the lock
  * before spawn, and keep it held until stdio `close` — releasing on bare
  * `exit` opens a window where list-models can start another `agent`.
+ *
+ * Filesystem publish order is fail-closed: host PID marker under `pids/` is
+ * written before `count`, so concurrent reconcile never sees a lock with no
+ * pids and clears it mid-reservation. A short mtime grace covers the mkdir
+ * gap before the first pid file lands.
  */
 let activeAcpTransportCount = 0;
+
+/** @internal Test hook fired between register publish steps. */
+let registerPublishHook: ((step: 'after-mkdir' | 'after-host-pid' | 'after-count') => void) | null = null;
+
+/** Fail-closed window while mkdir → first pid file is in flight. */
+const PRESPAWN_RESERVATION_GRACE_MS = 5_000;
 
 export type AgentAcpGuardPidOptions = {
     /** Spawned `agent` child PID when known. */
@@ -46,6 +58,15 @@ function getAcpLockDir(): string {
 
 function getPidsDir(lockDir: string): string {
     return join(lockDir, 'pids');
+}
+
+function isFreshPrespawnReservation(lockDir: string): boolean {
+    try {
+        return Date.now() - statSync(lockDir).mtimeMs < PRESPAWN_RESERVATION_GRACE_MS;
+    } catch {
+        // Fail closed — prefer keeping a disputed lock over list-models SIGTERM.
+        return true;
+    }
 }
 
 function readLockPid(lockDir: string): number | null {
@@ -144,6 +165,9 @@ function removeAcpLockDir(): void {
 function reconcileRefcountLock(lockDir: string): boolean {
     const pidsDir = getPidsDir(lockDir);
     if (!existsSync(pidsDir)) {
+        if (isFreshPrespawnReservation(lockDir)) {
+            return true;
+        }
         removeAcpLockDir();
         return false;
     }
@@ -203,6 +227,10 @@ function clearStaleAcpLockIfNeeded(): void {
  * Reserve / register the ACP lock. Call before spawn (no childPid) so
  * list-models cannot race the new `agent` process, then call
  * {@link recordActiveAcpChildPid} once the child PID is known.
+ *
+ * Publish order is fail-closed: `pids/<hostPid>` (and optional child) land
+ * before `count`, so concurrent reconcile never treats the reservation as
+ * a lock with no pids.
  */
 export function registerActiveAcpTransport(options?: AgentAcpGuardPidOptions): void {
     activeAcpTransportCount += 1;
@@ -210,14 +238,17 @@ export function registerActiveAcpTransport(options?: AgentAcpGuardPidOptions): v
     const childPid = normalizePid(options?.childPid);
     try {
         mkdirSync(lockDir, { recursive: true });
-        writeLockCount(lockDir, readLockCount(lockDir) + 1);
+        registerPublishHook?.('after-mkdir');
         // Always keep the HAPI host PID for crash/stale cleanup of the session
-        // process; also record the ACP child when known.
+        // process; also record the ACP child when known — before count.
         addLockPid(lockDir, process.pid);
         if (childPid !== null) {
             addLockPid(lockDir, childPid);
             writeChildPidHint(lockDir, childPid);
         }
+        registerPublishHook?.('after-host-pid');
+        writeLockCount(lockDir, readLockCount(lockDir) + 1);
+        registerPublishHook?.('after-count');
     } catch {
         // Another process may have created the lock; in-process guard still applies.
     }
@@ -286,7 +317,11 @@ export function isAgentAcpTransportActive(): boolean {
         return pid !== null && isProcessAlive(pid);
     }
 
-    return readLockCount(lockDir) > 0;
+    if (readLockCount(lockDir) > 0) {
+        return true;
+    }
+    // Mid-publish or grace: lock dir survived reconcile without a count yet.
+    return isFreshPrespawnReservation(lockDir);
 }
 
 /** Debug attribution for exit / list-models races (PID, lock dir, activity). */
@@ -307,7 +342,19 @@ export function describeAgentAcpGuardState(childPid?: number | null): {
     };
 }
 
+export function _setRegisterPublishHookForTests(
+    hook: ((step: 'after-mkdir' | 'after-host-pid' | 'after-count') => void) | null
+): void {
+    registerPublishHook = hook;
+}
+
+/** Simulate a cross-process reader (no in-process reservation). */
+export function _setActiveAcpTransportCountForTests(count: number): void {
+    activeAcpTransportCount = Math.max(0, count);
+}
+
 export function _resetAgentCliGuardForTests(): void {
     activeAcpTransportCount = 0;
+    registerPublishHook = null;
     removeAcpLockDir();
 }

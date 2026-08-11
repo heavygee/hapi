@@ -1,9 +1,11 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { afterEach, describe, expect, test } from 'vitest';
 import {
     _resetAgentCliGuardForTests,
+    _setActiveAcpTransportCountForTests,
+    _setRegisterPublishHookForTests,
     getAgentAcpLockDir,
     isAgentAcpTransportActive,
     recordActiveAcpChildPid,
@@ -103,9 +105,23 @@ describe('agentCliGuard', () => {
         const dir = lockDir();
         mkdirSync(dir, { recursive: true });
         writeFileSync(join(dir, 'count'), '1', 'utf8');
+        // Age the lock past the pre-spawn grace so missing pids is truly stale.
+        const aged = Date.now() - 60_000;
+        utimesSync(dir, aged / 1000, aged / 1000);
 
         expect(isAgentAcpTransportActive()).toBe(false);
         expect(existsSync(dir)).toBe(false);
+    });
+
+    test('keeps a fresh count-without-pids lock fail-closed during pre-spawn grace', () => {
+        process.env.HAPI_HOME = testHome;
+        const dir = lockDir();
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 'count'), '1', 'utf8');
+        _setActiveAcpTransportCountForTests(0);
+
+        expect(isAgentAcpTransportActive()).toBe(true);
+        expect(existsSync(dir)).toBe(true);
     });
 
     test('clears refcount lock when all pid entries are stale', () => {
@@ -165,5 +181,46 @@ describe('agentCliGuard', () => {
             // Restore isolated home before afterEach reset (belt + suspenders).
             process.env.HAPI_HOME = testHome;
         }
+    });
+
+    test('publishes host pid marker before count so mid-register readers stay active', () => {
+        process.env.HAPI_HOME = testHome;
+        const steps: string[] = [];
+        _setRegisterPublishHookForTests((step) => {
+            steps.push(step);
+            if (step === 'after-host-pid') {
+                // Cross-process reader: no in-process reservation yet for them.
+                _setActiveAcpTransportCountForTests(0);
+                expect(existsSync(join(lockDir(), 'pids', String(process.pid)))).toBe(true);
+                expect(existsSync(join(lockDir(), 'count'))).toBe(false);
+                expect(isAgentAcpTransportActive()).toBe(true);
+                expect(existsSync(lockDir())).toBe(true);
+            }
+            if (step === 'after-mkdir') {
+                _setActiveAcpTransportCountForTests(0);
+                // Grace keeps the mkdir-only reservation fail-closed.
+                expect(isAgentAcpTransportActive()).toBe(true);
+                expect(existsSync(lockDir())).toBe(true);
+            }
+        });
+
+        registerActiveAcpTransport();
+        expect(steps).toEqual(['after-mkdir', 'after-host-pid', 'after-count']);
+        expect(isAgentAcpTransportActive()).toBe(true);
+        _setRegisterPublishHookForTests(null);
+        unregisterActiveAcpTransport();
+    });
+
+    test('host-pid-without-count reservation is not cleared as stale by reconcile', () => {
+        process.env.HAPI_HOME = testHome;
+        const dir = lockDir();
+        mkdirSync(join(dir, 'pids'), { recursive: true });
+        writeFileSync(join(dir, 'pids', String(process.pid)), String(process.pid), 'utf8');
+        // No count file — the old race window after count-before-pids, inverted.
+        _setActiveAcpTransportCountForTests(0);
+
+        expect(isAgentAcpTransportActive()).toBe(true);
+        expect(existsSync(dir)).toBe(true);
+        expect(existsSync(join(dir, 'pids', String(process.pid)))).toBe(true);
     });
 });
