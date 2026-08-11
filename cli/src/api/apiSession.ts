@@ -239,7 +239,7 @@ export class ApiSessionClient extends EventEmitter {
     private agentStateVersion: number
     private readonly socket: Socket<ServerToClientEvents, ClientToServerEvents>
     private pendingMessages: { message: UserMessage; localId?: string }[] = []
-    private pendingHubPromptEchoes: string[] = []
+    private pendingHubPromptEchoes: { text: string; localId?: string }[] = []
     private pendingMessageCallback: ((message: UserMessage, localId?: string) => void) | null = null
     private cancelQueuedMessageCallback: ((localId: string) => boolean) | null = null
     private readonly incomingFilter = new IncomingMessageFilter()
@@ -677,19 +677,30 @@ export class ApiSessionClient extends EventEmitter {
         }
     }
 
-    private notePendingHubPromptEcho(message: UserMessage): void {
-        const text = message.content.text.trim()
-        if (!text) return
-        this.pendingHubPromptEchoes.push(text)
+    /**
+     * Record the text Claude will actually see (after attachment/skill//plan
+     * formatting). Matching transcript rows then stamp isTranscriptEcho.
+     * Call this at the queue boundary, not on raw hub delivery.
+     */
+    notePendingHubPromptEcho(text: string, localId?: string): void {
+        const normalized = text.trim()
+        if (!normalized) return
+        this.pendingHubPromptEchoes.push({ text: normalized, localId })
         if (this.pendingHubPromptEchoes.length > 32) {
             this.pendingHubPromptEchoes.shift()
         }
     }
 
+    discardPendingHubPromptEcho(localId: string): void {
+        const index = this.pendingHubPromptEchoes.findIndex((entry) => entry.localId === localId)
+        if (index < 0) return
+        this.pendingHubPromptEchoes.splice(index, 1)
+    }
+
     private consumePendingHubPromptEcho(text: string): boolean {
         const normalized = text.trim()
         if (!normalized) return false
-        const index = this.pendingHubPromptEchoes.indexOf(normalized)
+        const index = this.pendingHubPromptEchoes.findIndex((entry) => entry.text === normalized)
         if (index < 0) return false
         this.pendingHubPromptEchoes.splice(index, 1)
         return true
@@ -708,7 +719,6 @@ export class ApiSessionClient extends EventEmitter {
             if (userResult.data.meta?.sentFrom === 'cli') {
                 return
             }
-            this.notePendingHubPromptEcho(userResult.data)
             this.enqueueUserMessage(userResult.data, message.localId ?? undefined)
             return
         }

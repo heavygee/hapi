@@ -398,6 +398,7 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
             };
             // Use raw text only, ignore attachments for special commands
             const commandText = specialCommand.originalMessage || message.content.text;
+            session.notePendingHubPromptEcho(commandText, localId);
             messageQueue.pushIsolateAndClear(commandText, enhancedMode, localId);
             logger.debugLargeJson('[start] /compact command pushed to queue:', message);
             return;
@@ -417,6 +418,7 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
             };
             // Use raw text only, ignore attachments for special commands
             const commandText = specialCommand.originalMessage || message.content.text;
+            session.notePendingHubPromptEcho(commandText, localId);
             messageQueue.pushIsolateAndClear(commandText, enhancedMode, localId);
             logger.debugLargeJson('[start] /clear command pushed to queue:', message);
             return;
@@ -445,6 +447,7 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
 
             if (!specialCommand.prompt) {
                 if (localId) {
+                    session.discardPendingHubPromptEcho(localId);
                     session.emitMessagesConsumed([localId]);
                 }
                 logger.debugLargeJson('[start] /plan command applied without prompt:', message);
@@ -452,6 +455,7 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
             }
 
             const planPrompt = formatMessageWithAttachments(specialCommand.prompt, message.content.attachments);
+            session.notePendingHubPromptEcho(planPrompt, localId);
             messageQueue.push(planPrompt, enhancedMode, localId);
             logger.debugLargeJson('[start] /plan command prompt pushed to queue:', message);
             return;
@@ -468,6 +472,7 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
             allowedTools: messageAllowedTools,
             disallowedTools: messageDisallowedTools
         };
+        session.notePendingHubPromptEcho(formattedText, localId);
         messageQueue.push(formattedText, enhancedMode, localId);
         logger.debugLargeJson('User message pushed to queue:', message)
     };
@@ -486,6 +491,7 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
     });
 
     session.onCancelQueuedMessage((localId) => {
+        session.discardPendingHubPromptEcho(localId);
         const deferredIndex = deferredMessages.findIndex(([, id]) => id === localId);
         if (deferredIndex >= 0) {
             deferredMessages.splice(deferredIndex, 1);

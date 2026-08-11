@@ -433,7 +433,8 @@ describe('ingestNotifySummaryFromMessage cause stamping', () => {
             messageId: firstAssistant.id,
             causeMessageId: firstUser.id,
             causeText: 'do the first thing',
-            causeKind: 'webapp'
+            causeKind: 'webapp',
+            causeSeq: firstUser.seq
         })
 
         const secondUser = store.messages.addMessage(session.id, userInbound('do the second thing', 'cli'))
@@ -639,6 +640,54 @@ describe('ingestNotifySummaryFromMessage cause stamping', () => {
         })
         expect((second?.event.payloadJson as { causeText?: string })?.causeText)
             .not.toBe('FORGED CAUSE TEXT')
+    })
+
+    it('later notifies bound the scan after the previous causeSeq', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('sess-cause-after-seq', {}, null, 'default')
+        const firstUser = store.messages.addMessage(session.id, userInbound('first'))
+        const firstAssistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('First')))
+        const first = ingestNotify(store, session.id, 'default', firstAssistant.content, firstAssistant.id)
+        expect(first?.event.payloadJson).toMatchObject({ causeSeq: firstUser.seq })
+
+        const nextUser = store.messages.addMessage(session.id, userInbound('second'))
+        const secondAssistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('Second')))
+        const second = ingestNotify(store, session.id, 'default', secondAssistant.content, secondAssistant.id)
+        expect(second?.event.payloadJson).toMatchObject({
+            causeMessageId: nextUser.id,
+            causeText: 'second',
+            causeSeq: nextUser.seq
+        })
+    })
+
+    it('legacy notify without causeSeq still consumes inbounds at or before that assistant', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('sess-cause-legacy-seq', {}, null, 'default')
+        const oldUser = store.messages.addMessage(session.id, userInbound('old prompt'))
+        const oldAssistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('Legacy')))
+        store.workGraph.insertEvent('default', {
+            source_kind: 'session',
+            source_ref: session.id,
+            event_type: 'work_ad',
+            related_session_id: session.id,
+            summary: 'legacy',
+            provenance: 'AGENT_NOTIFY_SUMMARY',
+            payload_json: {
+                status: 'done',
+                messageId: oldAssistant.id
+            },
+            principal: { kind: 'agent', id: `session:${session.id}`, on_behalf_of: '1' }
+        })
+
+        const nextUser = store.messages.addMessage(session.id, userInbound('new prompt'))
+        const nextAssistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('Next')))
+        const result = ingestNotify(store, session.id, 'default', nextAssistant.content, nextAssistant.id)
+        expect(result?.event.payloadJson).toMatchObject({
+            causeMessageId: nextUser.id,
+            causeText: 'new prompt'
+        })
+        expect((result?.event.payloadJson as { causeMessageId?: string })?.causeMessageId)
+            .not.toBe(oldUser.id)
     })
 
     it('treats an unmarked local CLI prompt as a cause', () => {

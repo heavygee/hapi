@@ -140,6 +140,7 @@ export type WorkAdCause = {
     causeMessageId: string
     causeText: string | null
     causeKind: string | null
+    causeSeq: number | null
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -193,6 +194,13 @@ function extractInboundCauseText(content: unknown): string | null {
     return null
 }
 
+function readCauseSeq(payload: unknown): number | null {
+    const record = asRecord(payload)
+    return typeof record?.causeSeq === 'number' && Number.isInteger(record.causeSeq)
+        ? record.causeSeq
+        : null
+}
+
 function readCauseFromPayload(payload: unknown): WorkAdCause | null {
     const record = asRecord(payload)
     if (typeof record?.causeMessageId !== 'string' || record.causeMessageId.length === 0) {
@@ -201,8 +209,25 @@ function readCauseFromPayload(payload: unknown): WorkAdCause | null {
     return {
         causeMessageId: record.causeMessageId,
         causeText: typeof record.causeText === 'string' ? record.causeText : null,
-        causeKind: typeof record.causeKind === 'string' ? record.causeKind : null
+        causeKind: typeof record.causeKind === 'string' ? record.causeKind : null,
+        causeSeq: readCauseSeq(payload)
     }
+}
+
+function loadMessagesForCause(
+    store: Store,
+    sessionId: string,
+    previousWorkAds: WorkGraphEvent[]
+): StoredMessage[] {
+    const previous = previousWorkAds.at(-1) ?? null
+    const afterSeq = readCauseSeq(previous?.payloadJson)
+    // First event / legacy rows without causeSeq still need the full session.
+    // Later notifies only need rows after the previous cause (not every
+    // compressed agent/tool blob since session start).
+    if (afterSeq == null) {
+        return store.messages.getAllMessages(sessionId)
+    }
+    return store.messages.getMessagesAfterSeq(sessionId, afterSeq)
 }
 
 function listPreviousWorkAds(
@@ -268,7 +293,8 @@ export function resolveWorkAdCause(params: {
             cause: {
                 causeMessageId: inbound.id,
                 causeText: text === null ? null : clampJsonUtf8(text, WORK_GRAPH_MAX_SUMMARY),
-                causeKind: extractInboundSentFrom(inbound.content)
+                causeKind: extractInboundSentFrom(inbound.content),
+                causeSeq: inbound.seq
             },
             previousEventId: previous?.id ?? null
         }
@@ -345,7 +371,8 @@ export function buildWorkAdFromNotify(params: {
                 ? {
                     causeMessageId,
                     causeText,
-                    causeKind
+                    causeKind,
+                    causeSeq: cause.causeSeq
                 }
                 : {})
         },
@@ -387,10 +414,10 @@ export function ingestNotifySummaryFromMessage(input: NotifyIngestInput): Notify
         return null
     }
 
-    // Cause is hub-derived from the full session messages table (no REST 200 cap).
+    // Cause is hub-derived from session messages SQL (no REST 200 cap).
     const previousWorkAds = listPreviousWorkAds(input.store, input.namespace, input.sessionId)
     const { cause, previousEventId } = resolveWorkAdCause({
-        messages: input.store.messages.getAllMessages(input.sessionId),
+        messages: loadMessagesForCause(input.store, input.sessionId, previousWorkAds),
         previousWorkAds
     })
 

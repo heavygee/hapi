@@ -41,6 +41,8 @@ function makeClient() {
         }),
         sendSessionEvent: vi.fn(),
         sendClaudeSessionMessage: vi.fn(),
+        notePendingHubPromptEcho: vi.fn(),
+        discardPendingHubPromptEcho: vi.fn(),
         sendAgentMessage: vi.fn(),
         keepAlive: vi.fn(),
         emitMessagesConsumed: vi.fn()
