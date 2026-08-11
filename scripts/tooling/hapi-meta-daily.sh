@@ -584,6 +584,7 @@ main() {
     declare -A PR_SESSIONS      # pr -> "sid8,sid8"
     declare -A ALL_PR           # pr -> 1
     declare -A MERGED_TITLE
+    declare -A PR_REPO          # pr -> owner/name (from chip; prefer tiann/hapi)
 
     # NDJSON rows — NOT @tsv. Bash IFS=$'\t' collapses consecutive tabs, so an
     # empty metadata.name shifts fields and Meta drops ownership (estate: #1383).
@@ -621,10 +622,19 @@ main() {
         SESS_PATH["$sid8"]="${path:-}"
         SESS_LIFECYCLE["$sid8"]="${lifecycle:-}"
         SESS_THINKING["$sid8"]="${thinking:-false}"
-        local p
+        local p chip_repo
         for p in $prs; do
             ALL_PR["$p"]=1
             PR_SESSIONS["$p"]="${PR_SESSIONS[$p]:+${PR_SESSIONS[$p]},}$sid8"
+            chip_repo="$(printf '%s' "${refs_json:-[]}" | jq -r --argjson n "$p" '
+                [.[] | select(.kind == "github_pr" and ((.number | tonumber) == $n)) | .repo // empty]
+                | first // empty
+            ' 2>/dev/null || true)"
+            if [[ -n "$chip_repo" ]]; then
+                if [[ "${PR_REPO[$p]:-}" != "$UPSTREAM_REPO" ]]; then
+                    PR_REPO["$p"]="$chip_repo"
+                fi
+            fi
         done
     done < <(printf '%s' "$sessions_json" | jq -c '
         .[]
@@ -675,17 +685,29 @@ main() {
     IFS=$'\n' pr_list=($(sort -n <<<"${pr_list[*]}")); unset IFS
 
     vlog "classifying ${#pr_list[@]} PR(s): ${pr_list[*]}"
-    local batch_json
-    batch_json="$(HAPI_PR_REPO="$UPSTREAM_REPO" "$BATCH_BIN" --repo "$UPSTREAM_REPO" "${pr_list[@]}")" \
-        || die "batch classify failed"
-
     declare -A PR_EMOJI PR_ACTION PR_PREPR PR_HEADREF
     declare -A SESS_PR_EMOJI SESS_PR_ACTION
+    # Per chip.repo, not one tiann batch. Number collision (heavygee#124 vs
+    # tiann#124 closed-unmerged) must not inherit upstream closed-without-merge.
+    local batch_json r
+    local -a classify_prs
+    declare -A REPO_PR_LIST
     for p in "${pr_list[@]}"; do
-        PR_EMOJI["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].emoji // "?"')"
-        PR_ACTION["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].action // ""')"
-        PR_PREPR["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].prePr // false')"
-        PR_HEADREF["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].headRef // ""')"
+        r="${PR_REPO[$p]:-$UPSTREAM_REPO}"
+        REPO_PR_LIST["$r"]="${REPO_PR_LIST[$r]:+${REPO_PR_LIST[$r]} }$p"
+    done
+    for r in "${!REPO_PR_LIST[@]}"; do
+        classify_prs=()
+        read -r -a classify_prs <<<"${REPO_PR_LIST[$r]}"
+        [[ ${#classify_prs[@]} -gt 0 ]] || continue
+        batch_json="$(HAPI_PR_REPO="$r" "$BATCH_BIN" --repo "$r" "${classify_prs[@]}")" \
+            || die "batch classify failed for $r"
+        for p in "${classify_prs[@]}"; do
+            PR_EMOJI["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].emoji // "?"')"
+            PR_ACTION["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].action // ""')"
+            PR_PREPR["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].prePr // false')"
+            PR_HEADREF["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].headRef // ""')"
+        done
     done
 
     # Manifest once for 🧹 complete promotion (same path as wave-clear).
@@ -933,7 +955,7 @@ main() {
     # --- orphan PRs (tracked/open/merged but no session) ---
     for p in "${pr_list[@]}"; do
         [[ -n "${PR_SESSIONS[$p]:-}" ]] && continue
-        local e="${PR_EMOJI[$p]}"
+        local e="${PR_EMOJI[$p]:-?}"
         case "$e" in
             🔧) Q_ORPHAN+=("#$p 🔧 merged, no owning session — confirm wave cleanup done / archive") ;;
             📝|"?") : ;;

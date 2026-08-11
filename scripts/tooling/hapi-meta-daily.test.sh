@@ -103,7 +103,12 @@ exit 0
 EOF
 chmod +x "$WORK/driver-status"
 # Empty manifest → no active layers (wave members clean for worktree/path).
-: >"$WORK/manifest.yaml"
+# Early ping-policy tests need #300 Gate A *dirty* so 🔧 still hourly-pings.
+# Section 18 wave-clear resets this to empty.
+cat >"$WORK/manifest.yaml" <<'EOF'
+# PR #300 still in soup — Gate A dirty
+- branch: feat/shipped-thing
+EOF
 
 run() {
     rm -f "$WORK/pings.log"
@@ -694,6 +699,7 @@ check "chip-over-peer: updates chip for session" "grep -q '43c0f634' <<<\"\$out\
 check "chip-over-peer: PUT status for #1087" "grep -q 'external-refs' '$WORK/put-refs.log'"
 
 # ============ 18. wave-clear: --no-ping stays ready; ping window unlocks tooling ============
+: >"$WORK/manifest.yaml"
 rm -f "$WORK/state.json" "$WORK/pings.log"
 cat >"$WORK/gh" <<'EOF'
 #!/usr/bin/env bash
@@ -963,6 +969,76 @@ check "display title: path basename when no summary" "grep -qE '\"title\": ?\"fo
 check "display title: named session kept" "grep -q 'Keep Me' <<<\"\$out\""
 check "display title: never blank-name heal" "! grep -qE 'heal blank name|blank-name heal' <<<\"\$out\""
 check "display title: dry-run never PATCHes" "! grep -q 'UNEXPECTED PATCH' <<<\"\$out\""
+
+# ============ fork chip repo wins when the number collides with tiann ============
+# heavygee/hapi#124 (open) vs tiann/hapi#124 (closed Jan 2026, no merge).
+rm -f "$WORK/state.json" "$WORK/pings.log" "$WORK/batch.args"
+cat >"$WORK/batch" <<'EOF'
+#!/usr/bin/env bash
+echo "$@" >> "${HAPI_META_BATCH_ARGS_LOG:-/dev/null}"
+repo="tiann/hapi"
+j='{}'
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --repo) repo="$2"; shift 2 ;;
+        [0-9]*)
+            n="$1"
+            if [[ "$n" == "124" && "$repo" == "tiann/hapi" ]]; then
+                j="$(echo "$j" | jq -c --arg n "$n" '.[$n]={emoji:"⚠️",action:"PR closed WITHOUT merge — reopen or drop",prePr:false,merged:false,closed:true}')"
+            elif [[ "$n" == "124" && "$repo" == "heavygee/hapi" ]]; then
+                j="$(echo "$j" | jq -c --arg n "$n" '.[$n]={emoji:"🔁",action:"CI running",prePr:false,merged:false,closed:false}')"
+            elif [[ "$n" == "100" ]]; then
+                j="$(echo "$j" | jq -c '. + {"100":{emoji:"⚠️",action:"resolve 1 open thread(s)",prePr:false,merged:false,closed:false}}')"
+            fi
+            shift
+            ;;
+        *) shift ;;
+    esac
+done
+echo "$j"
+EOF
+chmod +x "$WORK/batch"
+cat >"$WORK/gh" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+if [[ "$args" == *"pr list"* && "$args" == *"--state open"* ]]; then
+    printf '100\n'; exit 0
+fi
+if [[ "$args" == *"pr list"* && "$args" == *"merged"* ]]; then
+    exit 0
+fi
+if [[ "$args" == *"notifications"* ]]; then
+    exit 0
+fi
+exit 0
+EOF
+chmod +x "$WORK/gh"
+cat >"$WORK/curl" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+if [[ "$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
+if [[ "$args" == *"-X PATCH"* ]]; then echo '{"ok":true}'; exit 0; fi
+if [[ "$args" == *"/api/sessions?limit=500"* ]]; then
+cat <<'JSON'
+{"sessions":[
+ {"id":"e76e5a9f-a7e3-463b-888c-f0f294b369f9","active":true,"metadata":{"name":"Peer #121: operator hold chip","path":"/home/heavygee/coding/hapi/worktrees/operator-hold-chip","externalRefs":[{"kind":"github_pr","repo":"heavygee/hapi","number":124,"url":"https://github.com/heavygee/hapi/pull/124","role":"primary"}]}}
+]}
+JSON
+exit 0
+fi
+echo '{}'; exit 0
+EOF
+chmod +x "$WORK/curl"
+
+set +e
+out="$(HAPI_META_BATCH_ARGS_LOG="$WORK/batch.args" run --dry-run 2>&1)"
+rc=$?
+set -e
+[[ $rc -eq 0 ]] || printf '%s\n' "$out" >&2
+check "fork chip: meta-daily exits 0" "[[ $rc -eq 0 ]]"
+check "fork chip: batch invoked with --repo heavygee/hapi" "grep -q -- '--repo heavygee/hapi' '$WORK/batch.args'"
+check "fork chip: does not inherit tiann closed-without-merge" "! grep -q 'closed WITHOUT merge' <<<\"\$out\""
+check "fork chip: live classify is fork CI/pending" "grep -q 'CI running' <<<\"\$out\""
 
 echo ""
 echo "hapi-meta-daily.test.sh: $PASS passed, $FAIL failed"
