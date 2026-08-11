@@ -735,6 +735,18 @@ export class SyncEngine {
             sessionId: payload.sid,
             reason: payload.reason
         })
+        // Clear resume/ready bits synchronously. Delaying this until after
+        // onSessionEnd races a reopen's handleSessionReady and wipes the new
+        // native-ready bit (Pi in-place resume then hangs in waitForSessionReady).
+        this.sessionReadyIds.delete(payload.sid)
+        this.piResumeQuarantinedIds.delete(payload.sid)
+        this.piUnexpectedTempOriginalIds.delete(payload.sid)
+        if (ownsPiAttempt || isPiAttemptChild) {
+            void this.clearPiAttemptForEndedSession(payload.sid, restorePiArchive)
+        }
+        if (ownsPtyAttempt) {
+            void this.writePtyResumeAttempt(payload.sid, before!.namespace, null).catch(() => {})
+        }
         // Await recorder work before dedup so a queued LLM/completed_fallback
         // insert still has a live relatedSessionId.
         void (async () => {
@@ -756,15 +768,6 @@ export class SyncEngine {
             // never reached session-ready must not dedup-merge the original on failure.
             if (shouldRetryDedup) {
                 this.triggerDedupIfNeeded(payload.sid)
-            }
-            this.sessionReadyIds.delete(payload.sid)
-            this.piResumeQuarantinedIds.delete(payload.sid)
-            this.piUnexpectedTempOriginalIds.delete(payload.sid)
-            if (ownsPiAttempt || isPiAttemptChild) {
-                void this.clearPiAttemptForEndedSession(payload.sid, restorePiArchive)
-            }
-            if (ownsPtyAttempt) {
-                void this.writePtyResumeAttempt(payload.sid, before!.namespace, null).catch(() => {})
             }
         })()
 
