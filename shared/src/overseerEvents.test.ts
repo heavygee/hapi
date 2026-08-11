@@ -32,6 +32,8 @@ describe('overseerEvents mapping', () => {
         expect(deriveAttentionCandidate('blocked')).toBe(1)
         expect(deriveAttentionCandidate('done', '')).toBe(0)
         expect(deriveAttentionCandidate('done', 'Merge PR')).toBe(1)
+        expect(deriveAttentionCandidate('done', 'none')).toBe(0)
+        expect(deriveAttentionCandidate('done', '<=12 words')).toBe(0)
         expect(deriveAttentionCandidate('needs_decision')).toBe(1)
     })
 
