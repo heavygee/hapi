@@ -12,6 +12,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useScratchlistCount } from '@/lib/use-scratchlist-count'
 import { formatReopenError } from '@/lib/reopenError'
 import { formatReasoningLabel, getReasoningEffortForFlavor } from '@/lib/codexStatusLabels'
+import { retargetSharePendingTransfer } from '@/lib/sharePendingState'
 import { getSessionModelLabel } from '@/lib/sessionModelLabel'
 import { useTranslation } from '@/lib/use-translation'
 import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
@@ -155,6 +156,7 @@ export function SessionHeader(props: {
     api: ApiClient | null
     canReopen?: boolean
     reopenDisabledReason?: string
+    reopenHint?: string
     onSessionDeleted?: () => void
     onSessionReopened?: (newSessionId: string) => void | Promise<void>
 }) {
@@ -280,6 +282,7 @@ export function SessionHeader(props: {
         try {
             const result = await reopenSession()
             if (result.sessionId && result.sessionId !== session.id) {
+                retargetSharePendingTransfer(session.id, result.sessionId)
                 await onSessionReopened?.(result.sessionId)
             }
         } catch (error) {
@@ -549,6 +552,7 @@ export function SessionHeader(props: {
                 onArchive={() => setArchiveOpen(true)}
                 onReopen={props.canReopen === false ? undefined : handleReopen}
                 reopenDisabledReason={props.reopenDisabledReason}
+                reopenHint={props.reopenHint}
                 onDelete={() => setDeleteOpen(true)}
                 anchorPoint={menuAnchorPoint}
                 menuId={menuId}
