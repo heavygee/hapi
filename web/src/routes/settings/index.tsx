@@ -2,6 +2,8 @@ import { useTranslation } from '@/lib/use-translation'
 import { SettingsNav } from '@/components/settings/SettingsNav'
 import SettingsDisplayPage from './display'
 
+/** Operator dock switch lives on General (owner-gated). Keep /opmic. See heavygee/hapi#123. */
+
 export default function SettingsHubPage() {
     const { t } = useTranslation()
     return (

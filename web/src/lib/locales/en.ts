@@ -762,6 +762,8 @@ export default {
   'settings.general.agents.description': 'Hub-wide defaults for how agents behave in new and resumed sessions.',
   'settings.general.sessionSummaryContract': 'Ask agents to emit session status summary',
   'settings.general.sessionSummaryContract.desc': 'When on, Claude, Codex, OpenCode, and remote Grok sessions are asked to end each turn with an AGENT_NOTIFY_SUMMARY line for denser ready notifications. Off by default. Local Grok and Cursor are not covered yet. Applies to new/resumed sessions.',
+  'settings.general.operatorDock': 'Show operator tools',
+  'settings.general.operatorDock.desc': 'Same unlock as /opmic. Shows the operator dock (settings, markup, sessions, mic) on this device only. Not a public mic.',
   'settings.language.title': 'Language',
   'settings.language.label': 'Language',
   'settings.display.title': 'Display',
