@@ -755,12 +755,8 @@ layers:
   - branch: fix/acp-143-false-transport-closed
 
 
-  # tiann/hapi#1470 / PR #1487 — harness wake → hub thinking (Cursor ACP).
-  # CLI: activity/idle edges + permission bump; launcher transition keepalive.
-  # Dogfood: Cursor ACP notify_on_output / mid-idle activity → list thinking.
-  # Worktree: ~/coding/hapi/worktrees/agent-harness-session-wake @ feat/agent-harness-session-wake
-  # Tip: 2d7039b93 (origin/feat/agent-harness-session-wake)
-  - branch: feat/agent-harness-session-wake
+  # DROPPED 2026-08-11: feat/agent-harness-session-wake MERGED as tiann/hapi#1487
+  # (Path A only; Path B for #1470 still open — no soup layer until Path B lands)
 
   # tiann/hapi#1473 / Peer #1203 — A2A P0.5 peer delivery provenance UI.
   # Web PeerSenderChip + hub peer attribution; schema ladder tip 27 on branch
