@@ -34,7 +34,14 @@ export function listSkewedMachines(machines: Machine[]): Machine[] {
  * Manual Restart asks hub to stop-runner (escape hatch when version handoff
  * is stuck or HAPI_DISABLE_VERSION_HANDOFF=1). Normal upgrades self-restart.
  */
-export function RunnerVersionSkewBanner({ topClassName }: { topClassName?: string } = {}) {
+export function RunnerVersionSkewBanner({
+    topClassName,
+    stacked = false,
+}: {
+    topClassName?: string
+    /** When true, parent owns fixed positioning (share a vertical stack). */
+    stacked?: boolean
+} = {}) {
     const { api } = useAppContext()
     const { machines } = useMachines(api, true)
     const { t } = useTranslation()
@@ -103,6 +110,7 @@ export function RunnerVersionSkewBanner({ topClassName }: { topClassName?: strin
     }
 
     const topClass = topClassName ?? (isOnline ? 'top-2' : 'top-10')
+    const positionClass = stacked ? 'relative w-full' : `fixed left-4 right-4 ${topClass}`
     const hosts = skewed.map(machineDisplayHost).join(', ')
 
     if (minimized) {
@@ -110,7 +118,7 @@ export function RunnerVersionSkewBanner({ topClassName }: { topClassName?: strin
             <div
                 data-testid="runner-version-skew-banner"
                 data-state="minimized"
-                className={`fixed left-4 right-4 z-40 ${topClass}`}
+                className={`${positionClass} z-40`}
             >
                 <button
                     type="button"
@@ -129,7 +137,7 @@ export function RunnerVersionSkewBanner({ topClassName }: { topClassName?: strin
             data-testid="runner-version-skew-banner"
             data-state="expanded"
             role="alert"
-            className={`fixed left-4 right-4 z-40 max-h-[40vh] overflow-y-auto rounded-lg border-2 border-amber-500 bg-amber-50 p-3 shadow-lg dark:bg-amber-950/90 ${topClass}`}
+            className={`${positionClass} z-40 max-h-[40vh] overflow-y-auto rounded-lg border-2 border-amber-500 bg-amber-50 p-3 shadow-lg dark:bg-amber-950/90`}
         >
             <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">

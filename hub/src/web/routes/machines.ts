@@ -357,8 +357,7 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
         if (result.type === 'error') {
             const status = result.code === 'machine_not_found' ? 404
                 : result.code === 'machine_offline' ? 503
-                    : result.code === 'restart_unavailable' ? 400
-                        : 502
+                    : 502
             return c.json({ error: result.message, code: result.code }, status)
         }
         return c.json({ message: result.message })
