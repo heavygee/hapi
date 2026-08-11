@@ -39,7 +39,7 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 | Local Pi coding agent (5090 / oos-linux) | New Session → **Pi**; backend `oos-llm` VIP | [`pi-local-coding-agent.md`](./pi-local-coding-agent.md) |
 | Agent mangles `tiann`/`oos-linux`/MagicDNS doubles | Free-recall / tokenization hazard - not HAPI pipe. **Outside-Cursor control done (2026-07-24): native claude+codex 0/27 drops** | [`2026-07-22-doubled-character-free-recall.md`](../plans/2026-07-22-doubled-character-free-recall.md) + [outside-cursor results](../plans/2026-07-22-doubled-character-free-recall-outside-cursor-results.md) |
 | Blocked on a missing host diagnostic (`strace`, `lsof`, `bpftrace`, …) | **Install it** (`sudo apt-get install -y …`), tell the operator you did, continue — estate-wide, every agent/flavor on this host; not a per-session courtesy | Keep installs scoped to the missing tool; no drive-by package museums |
-| Phone / voice / `AGENT_NOTIFY_SUMMARY` mentions another session | **Display name first** — never bare `sid8` / UUID in `action`, `summary`, or operator-facing prose | § Operator-facing session names; Cursor rule `hapi-session.mdc` |
+| Phone / voice / `AGENT_NOTIFY_SUMMARY` mentions another session | **@-mention chip wire format** in HAPI chat; spoken **display name** in notify `action`/`summary` — never bare `sid8` | § Operator-facing session names; Cursor rule `hapi-session.mdc` |
 
 ---
 
@@ -47,11 +47,15 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 
 The operator often hears `AGENT_NOTIFY_SUMMARY.action` (TTS) and reads `summary` on phone FCM **without** the session sidebar. A line like `6ce7f124 not current WORKING` is worse than useless.
 
-**Rule (all agents on this host):** when referring to another HAPI session in chat to the operator, in Meta/peer pings the operator will see, or in `AGENT_NOTIFY_SUMMARY` `action`/`summary`:
+**In HAPI chat and peer pings the operator opens:** use the session **@-mention wire format** so the UI paints the same `@Name` chip as composer autocomplete and peer-delivery sender chips (click-through, hover tooltip, navigate):
 
-1. Lead with **`metadata.name` / session title** (e.g. `upstream issue/pr discovery`).
-2. Optional id only as a trailer for agents: `"Name" (/sessions/<id>)`.
-3. If unnamed: say `unnamed session on <path>` — still never lead with a naked hash.
+```markdown
+[upstream issue/pr discovery](/sessions/<full-session-id>)
+```
+
+That is what rich composer serializes for `@` picks (`[title](/sessions/<id>)`). Do not use bare hashes, bare `/sessions/<id>`, or plain-name-only prose when a chip is possible.
+
+**In `AGENT_NOTIFY_SUMMARY` `action`/`summary`:** chips do not render on TTS/FCM - use the **spoken display name** (same title string). Never a naked hash.
 
 Canon also in `.cursor/rules/hapi-session.mdc` (alwaysApply).
 

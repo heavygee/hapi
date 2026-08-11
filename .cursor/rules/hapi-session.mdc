@@ -27,13 +27,25 @@ sidebar. Bare session hashes (`6ce7f124`, `sid8`, UUID prefixes) are
 **forbidden** in `action`, `summary`, chat replies to the operator, and
 peer pings the operator will hear/read.
 
-When referring to another HAPI session / agent:
+### In HAPI chat / peer pings (chip affordance)
 
-1. **Lead with the display name** (`metadata.name` / session title), e.g.
-   "upstream issue/pr discovery".
-2. Optional trailing id only if useful for agents: `"Name" (/sessions/<id>)`.
-3. If the name is missing, say so explicitly ("unnamed session on path …") -
-   still never lead with a naked hash.
+Whenever you mention another agent/session to the operator (or in text the
+operator will open in HAPI), use the **session @-mention wire format** so the
+UI renders the same `@Name` chip as composer autocomplete / peer-delivery
+sender chips (click, hover tooltip, navigate):
 
-Bad: `6ce7f124 not current WORKING`
-Good: `upstream issue/pr discovery not blocking drain`
+```markdown
+[upstream issue/pr discovery](/sessions/<full-session-id>)
+```
+
+That is how the rich composer serializes `@` picks (`composerSegments.ts`).
+Do **not** substitute bare names, bare `/sessions/<id>`, or `"Name" (id)`
+prose when a chip is possible.
+
+Bad: `6ce7f124` / `session 6ce7f124` / plain `upstream issue/pr discovery`
+Good: `[upstream issue/pr discovery](/sessions/6ce7f124-6240-4479-8dad-f2e27eb880a1)`
+
+### In `AGENT_NOTIFY_SUMMARY` action/summary (voice / FCM)
+
+Chips do not render on TTS. Use the **display name as spoken words** (still
+never a naked hash). Prefer the same title string the chip would show.
