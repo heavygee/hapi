@@ -1,11 +1,14 @@
 # Overseer summary emission (Half B) — 2026-07-24
 
-Status: Pieces 1–3 live/in-flight; Option A LLM fallback implemented (default OFF, #90)
+Status: Piece 1 live; Piece 2 hub text-synth **removed**; Piece 3 in flight
+(Claude remote + Codex app-server only; Grok/OpenCode deferred to #89).
+Option A LLM fallback implemented (default OFF, #90).
 Owner: feat/overseer-summary-emit (peer of 🔁overseer prep)
 Scope: FORK-ONLY. Never upstream. The whole overseer feature is fork-private.
 
 - Piece 1 — `feat/overseer-summary-emit` (fork PR #86): CLI Cursor rule overlay.
-- Piece 2 — `feat/overseer-summary-fallback` (PR #87): hub deterministic backstop.
+- Piece 2 — `feat/overseer-summary-fallback` (PR #87): hub text-synth **removed**
+  (operator: Session Log is AGENT_NOTIFY_SUMMARY only). LLM fallback is #90.
 - Piece 3 — `feat/overseer-summary-flavors-and-dates`: Claude remote + Codex
   app-server get the contract via system/developer instructions
   (`HAPI_SESSION_SUMMARY_CONTRACT=0` to opt out). Local native TUI
@@ -98,22 +101,13 @@ Discipline (mandatory, same shape a config overlay would use):
   (`shared/src/overseerEvents.ts`):
   `AGENT_NOTIFY_SUMMARY {"version":1,"agent":"<agent-id>","project":"<project>","status":"done|blocked|needs_review|needs_decision|failed|stalled","action":"<=12 words","summary":"one-line triage"}`
 
-### Piece 2 — Hub deterministic backstop (stacked branch: `feat/overseer-summary-fallback`)
+### Piece 2 — Hub deterministic backstop — REMOVED
 
-LLMs cannot be 100%-forced to emit a trailing line. For any agent turn where
-`extractNotifySummary()` returns `null` (and the turn is not already covered by
-the malformed-line / empty-sentinel / tool-failure branches), synthesize a
-**minimal** overseer event from the assistant text the hub already has:
-
-- summary = first non-empty line of the assistant plain text (trimmed/capped),
-- status heuristic = default `progress`; no LLM (operator explicitly rejected the
-  clunky LLM summarizer for v1),
-- provenance marks it hub-synthesized so it is distinguishable from a real
-  self-report and never counted as compliance.
-
-Wired into `hub/src/sync/overseerEventRecorder.ts` `onAgentMessage`, only on the
-`else` path where no `notify` was found. Guarantees the overseer never has a
-completely blind agent turn.
+Operator rejected hub first-line text synth. `onAgentMessage` does **not**
+synthesize events from assistant text. Session Log is agent
+`AGENT_NOTIFY_SUMMARY` (+ rare session-end completed) only. Opt-in LLM fallback
+is #90 / `feat/overseer-llm-fallback`, default off. Do not reintroduce Piece 2
+heuristics.
 
 ## Stealth requirements (operator-critical — "don't freak users out")
 
@@ -134,12 +128,12 @@ ordinary, useful project config, never as surveillance:
 ## Scope / non-goals
 
 - Cursor: transient `.mdc` overlay (Piece 1).
-- Claude / Codex / Grok / OpenCode: systemPrompt / developer_instructions /
-  one-shot first-turn instruction (Piece 3). Opt-out via
-  `HAPI_SESSION_SUMMARY_CONTRACT=0`.
-- kimi + generic ACP / pi: **tracked** — fork issue
-  [#89](https://github.com/heavygee/hapi/issues/89); required for next overseer
-  phase full-coverage.
+- Claude remote + Codex app-server: system / developer instructions (Piece 3).
+  Opt-out via `HAPI_SESSION_SUMMARY_CONTRACT=0`.
+- Local native Claude / Codex / OpenCode TUI: **no** notify contract (stdio).
+- Grok / OpenCode first-turn prepend: title + skill-lookup only. Session-summary
+  for those flavors is [#89](https://github.com/heavygee/hapi/issues/89).
+- kimi + generic ACP / pi: also #89.
 - Better LLM / oneshot-agent fallback: Option A implemented behind
   `HAPI_OVERSEER_LLM_FALLBACK` (default off); see § Better fallback / #90.
   Option B oneshot agent remains out of scope.
@@ -157,8 +151,8 @@ and is a real cost tax - so it must be **opt-in**, clearly labeled, and rare
 
 Do **not** enable a better fallback until primary emission is good enough that
 fallback is a thin residue - target **well under 5% of turns** (5% is already
-generous). Measure emit vs hub-synthesized ratio fleet-wide after Piece 3 is
-live; only then flip the enable flag.
+generous). Measure emit vs missing-line ratio fleet-wide after Piece 3 is
+live; only then enable LLM fallback.
 
 When it *does* run, it must be **at least as useful as a primary self-report**:
 feed the **full last-turn assistant content** (no input-char truncation that
@@ -228,15 +222,15 @@ easier to reason about cost, no phantom sessions.
 
 - **Concurrent HAPI sessions sharing one cwd:** the sentinel prevents user-data
   loss; worst case is one session removing the shared rule mid-run of another
-  (rule stops applying, hub backstop still covers it). Acceptable for v1.
+  (rule stops applying). Acceptable for v1.
 - **Cursor native `--worktree`:** the backend spawn cwd is `session.path`; if a
   future cursor-native worktree changes the effective workspace root, revisit
   where the rule is written. Noted, not handled in v1.
-- **Rule compliance ceiling:** even with `alwaysApply` / systemPrompt, the model
-  may drop the line. That is exactly why Piece 2 exists.
-- **Grok / OpenCode remote:** contract rides the existing one-shot
-  `instructionsSent` first-turn inject (same channel as title instructions) -
-  not every user turn (avoids the #1095/#1096 prepend anti-pattern).
+- **Rule compliance ceiling:** even with `alwaysApply` / remote systemPrompt, the
+  model may drop the line. No hub text-synth; missing lines stay missing until
+  #90 LLM fallback (opt-in).
+- **Grok / OpenCode remote:** first-turn prepend is title + skill-lookup only.
+  Session-summary for those flavors is #89 (durable instruction channel).
 
 ## Soup / coordination
 

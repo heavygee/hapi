@@ -204,7 +204,7 @@ export function deriveSessionProject(
     if (worktreeName) return worktreeName
     const path = metadata.path?.trim()
     if (!path) return null
-    const parts = path.split('/').filter(Boolean)
+    const parts = path.split(/[/\\]/).filter(Boolean)
     return parts.length > 0 ? parts[parts.length - 1]! : null
 }
 
