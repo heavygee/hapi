@@ -239,7 +239,7 @@ export class ApiSessionClient extends EventEmitter {
     private agentStateVersion: number
     private readonly socket: Socket<ServerToClientEvents, ClientToServerEvents>
     private pendingMessages: { message: UserMessage; localId?: string }[] = []
-    private pendingHubPromptEchoes: { text: string; localId?: string }[] = []
+    private pendingHubPromptEchoes: { text: string; localIds: string[] }[] = []
     private pendingMessageCallback: ((message: UserMessage, localId?: string) => void) | null = null
     private cancelQueuedMessageCallback: ((localId: string) => boolean) | null = null
     private readonly incomingFilter = new IncomingMessageFilter()
@@ -682,18 +682,20 @@ export class ApiSessionClient extends EventEmitter {
      * formatting). Matching transcript rows then stamp isTranscriptEcho.
      * Call this at the queue boundary, not on raw hub delivery.
      */
-    notePendingHubPromptEcho(text: string, localId?: string): void {
+    notePendingHubPromptEcho(text: string, localId?: string | readonly string[]): void {
         const normalized = text.trim()
         if (!normalized) return
         if (this.pendingHubPromptEchoes.some((entry) => entry.text === normalized)) return
-        this.pendingHubPromptEchoes.push({ text: normalized, localId })
+        const localIds = (Array.isArray(localId) ? localId : localId ? [localId] : [])
+            .filter((id) => id.length > 0)
+        this.pendingHubPromptEchoes.push({ text: normalized, localIds })
         if (this.pendingHubPromptEchoes.length > 32) {
             this.pendingHubPromptEchoes.shift()
         }
     }
 
     discardPendingHubPromptEcho(localId: string): void {
-        const index = this.pendingHubPromptEchoes.findIndex((entry) => entry.localId === localId)
+        const index = this.pendingHubPromptEchoes.findIndex((entry) => entry.localIds.includes(localId))
         if (index < 0) return
         this.pendingHubPromptEchoes.splice(index, 1)
     }

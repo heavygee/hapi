@@ -705,6 +705,33 @@ describe('ingestNotifySummaryFromMessage cause stamping', () => {
             .not.toBe('FORGED CAUSE TEXT')
     })
 
+    it('first notify after copied history uses the latest invoked inbound, not the oldest copy', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('sess-cause-fork-hydrate', {}, null, 'default')
+        const copied = store.messages.addMessage(
+            session.id,
+            userInbound('copied prefix'),
+            undefined,
+            undefined,
+            1_000
+        )
+        const forkPrompt = store.messages.addMessage(
+            session.id,
+            userInbound('fork prompt'),
+            undefined,
+            undefined,
+            2_000
+        )
+        const assistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('Forked')))
+        const result = ingestNotify(store, session.id, 'default', assistant.content, assistant.id)
+        expect(result?.event.payloadJson).toMatchObject({
+            causeMessageId: forkPrompt.id,
+            causeText: 'fork prompt'
+        })
+        expect((result?.event.payloadJson as { causeMessageId?: string })?.causeMessageId)
+            .not.toBe(copied.id)
+    })
+
     it('later notifies bound the scan after the previous causeSeq', () => {
         const store = new Store(':memory:')
         const session = store.sessions.getOrCreateSession('sess-cause-after-seq', {}, null, 'default')

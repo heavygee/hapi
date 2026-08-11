@@ -229,8 +229,8 @@ describe('sendClaudeSessionMessage createdAt propagation', () => {
 
     it('cancelled queued prompt does not misclassify a later matching local prompt', () => {
         const { client, fakeSocket } = makeClient()
-        client.notePendingHubPromptEcho('hello from web', 'local-1')
-        client.discardPendingHubPromptEcho('local-1')
+        client.notePendingHubPromptEcho('hello from web', ['local-1', 'local-2'])
+        client.discardPendingHubPromptEcho('local-2')
 
         client.sendClaudeSessionMessage({
             type: 'user',

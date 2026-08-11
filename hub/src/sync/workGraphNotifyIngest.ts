@@ -301,9 +301,17 @@ export function resolveWorkAdCause(params: {
 }): { cause: WorkAdCause | null; previousEventId: string | null } {
     const previous = params.previousWorkAds.at(-1) ?? null
     const consumed = consumedInboundIds(params.messages, params.previousWorkAds)
-    const inbound = params.messages.find(
-        (message) => isCauseCandidate(message) && !consumed.has(message.id)
-    )
+    const inbound = params.messages
+        .filter((message) => (
+            isCauseCandidate(message)
+            && !consumed.has(message.id)
+            && (params.assistantSeq == null || message.seq < params.assistantSeq)
+        ))
+        .sort((left, right) => {
+            const invokedDelta = (right.invokedAt ?? 0) - (left.invokedAt ?? 0)
+            if (invokedDelta !== 0) return invokedDelta
+            return left.seq - right.seq
+        })[0]
     if (inbound) {
         const text = extractInboundCauseText(inbound.content)
         return {

@@ -424,7 +424,10 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
                                 inFlightMessage = { items: p.items, mode: p.mode, isolate: p.isolate };
                                 deliveredMessageThisAttempt = true;
                                 const deliveredText = session.expandSkillReference(p.message)
-                                session.client.notePendingHubPromptEcho(deliveredText)
+                                session.client.notePendingHubPromptEcho(
+                                    deliveredText,
+                                    p.items.flatMap((item) => item.localId ? [item.localId] : [])
+                                )
                                 return { ...p, message: deliveredText };
                             }
 
@@ -456,7 +459,10 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
                                 inFlightMessage = { items: msg.items, mode: msg.mode, isolate: msg.isolate };
                                 deliveredMessageThisAttempt = true;
                                 const deliveredText = session.expandSkillReference(msg.message)
-                                session.client.notePendingHubPromptEcho(deliveredText)
+                                session.client.notePendingHubPromptEcho(
+                                    deliveredText,
+                                    msg.items.flatMap((item) => item.localId ? [item.localId] : [])
+                                )
                                 return {
                                     message: deliveredText,
                                     mode: msg.mode
