@@ -326,6 +326,79 @@ describe('markdown <A> component — fail-closed path-like hrefs (#1452)', () =>
         expect(document.querySelector('.aui-md-a-inert')).toBeNull()
     })
 
+    it('keeps outside-workspace absolute file href inert even with chat present', () => {
+        renderA(
+            { href: '/etc/passwd.sh', children: 'etc' },
+            chatContext()
+        )
+        expect(document.querySelector('a')).toBeNull()
+        expect(document.querySelector('.aui-md-a-inert')?.textContent).toBe('etc')
+    })
+
+    it('keeps outside-workspace Windows absolute href inert despite drive colon looking like a scheme', () => {
+        renderA(
+            { href: 'D:/outside/secret.ts#L1', children: 'win' },
+            chatContext()
+        )
+        expect(document.querySelector('a')).toBeNull()
+        expect(document.querySelector('.aui-md-a-inert')?.textContent).toBe('win')
+    })
+
+    it('routes hapi-file-candidate Windows href through containment to FilePathAnchor', () => {
+        const path = 'C:\\Users\\ada\\coding\\hapi\\docs\\a.md'
+        renderA(
+            {
+                href: 'hapi-file-candidate:' + encodeURIComponent(path),
+                children: 'win',
+            },
+            chatContext({
+                metadata: { path: 'C:\\Users\\ada\\coding\\hapi', host: 'local' },
+            })
+        )
+        const link = document.querySelector('a')
+        expect(link).not.toBeNull()
+        expect(link!.getAttribute('href')).toContain('/sessions/session-1/file?')
+    })
+
+    it('renders non-Windows hapi-file-candidate payloads as inert (no SPA navigate bypass)', () => {
+        renderA(
+            {
+                href: 'hapi-file-candidate:' + encodeURIComponent('/settings'),
+                children: 'spoof',
+            },
+            chatContext()
+        )
+        expect(document.querySelector('a')).toBeNull()
+        expect(document.querySelector('.aui-md-a-inert')?.textContent).toBe('spoof')
+    })
+
+    it('renders empty hapi-file-candidate payload as inert (no custom-scheme confirm)', () => {
+        renderA({ href: 'hapi-file-candidate:', children: 'empty' }, chatContext())
+        expect(document.querySelector('a')).toBeNull()
+        expect(document.querySelector('.aui-md-a-inert')?.textContent).toBe('empty')
+    })
+
+    it('renders uppercase hapi-file-candidate scheme as inert when payload is empty', () => {
+        renderA({ href: 'HAPI-FILE-CANDIDATE:', children: 'upper' }, chatContext())
+        expect(document.querySelector('a')).toBeNull()
+        expect(document.querySelector('.aui-md-a-inert')?.textContent).toBe('upper')
+    })
+
+    it('renders percent-encoded hapi-file-candidate scheme as inert when payload is empty', () => {
+        renderA({ href: 'hapi%2Dfile%2Dcandidate:', children: 'enc' }, chatContext())
+        expect(document.querySelector('a')).toBeNull()
+        expect(document.querySelector('.aui-md-a-inert')?.textContent).toBe('enc')
+    })
+
+    it('treats percent-encoded backslash Windows href as inert when outside workspace', () => {
+        renderA(
+            { href: 'D:%5Coutside%5Csecret.ts', children: 'win' },
+            chatContext()
+        )
+        expect(document.querySelector('a')).toBeNull()
+        expect(document.querySelector('.aui-md-a-inert')?.textContent).toBe('win')
+    })
+
     it('expands ~/ and routes to FilePathAnchor when workspace metadata is present', () => {
         renderA(
             { href: '~/coding/hapi/docs/a.md', children: 'tilde' },

@@ -29,6 +29,8 @@ describe('isKnownSpaHref', () => {
         '/sessions',
         '/sessions/abc-def',
         '/sessions/abc/file',
+        '/sessions/abc/files',
+        '/sessions/abc/terminal',
         '/browse',
         '/share',
         '#section',
@@ -45,8 +47,18 @@ describe('isKnownSpaHref', () => {
         './foo',
         '../escape.md',
         '//example.com/path',
+        '/settings/typo',
+        '/browse/extra',
+        '/sessions/id/unknown',
+        '/share/extra',
     ])('does not treat %s as SPA', (href) => {
         expect(isKnownSpaHref(href)).toBe(false)
+    })
+
+    it('strips Vite BASE_URL prefix before SPA allowlist checks', () => {
+        expect(isKnownSpaHref('/hapi/settings', { baseUrl: '/hapi/' })).toBe(true)
+        expect(isKnownSpaHref('/hapi/sessions/abc/file', { baseUrl: '/hapi/' })).toBe(true)
+        expect(isKnownSpaHref('/hapi/settings/typo', { baseUrl: '/hapi/' })).toBe(false)
     })
 })
 
@@ -55,6 +67,10 @@ describe('expandTildePath', () => {
         expect(expandTildePath('~/coding/hapi/docs/a.md', '/home/ada/coding/hapi')).toBe(
             '/home/ada/coding/hapi/docs/a.md'
         )
+    })
+
+    it('expands ~/ against /root workspaces', () => {
+        expect(expandTildePath('~/hapi/docs/a.md', '/root/hapi')).toBe('/root/hapi/docs/a.md')
     })
 
     it('returns null without workspace metadata', () => {
@@ -100,10 +116,83 @@ describe('classifyNoSchemeHref — fail-closed (#1452)', () => {
         })
     })
 
+    it('expands ~/ for root-owned workspaces', () => {
+        expect(
+            classifyNoSchemeHref('~/hapi/docs/a.md', { workspacePath: '/root/hapi' })
+        ).toEqual({
+            action: 'file',
+            path: '/root/hapi/docs/a.md',
+        })
+    })
+
+    it('decodes percent-encoded spaces before workspace containment', () => {
+        const workspace = '/home/ada/My Project'
+        expect(
+            classifyNoSchemeHref('/home/ada/My%20Project/docs/a.md', {
+                workspacePath: workspace,
+            })
+        ).toEqual({
+            action: 'file',
+            path: '/home/ada/My Project/docs/a.md',
+        })
+        expect(
+            classifyNoSchemeHref('~/My%20Project/docs/a.md', {
+                workspacePath: workspace,
+            })
+        ).toEqual({
+            action: 'file',
+            path: '/home/ada/My Project/docs/a.md',
+        })
+    })
+
     it('renders absolute paths outside the workspace as inert', () => {
         expect(classifyNoSchemeHref('/etc/passwd.sh', { workspacePath: workspace })).toEqual({
             action: 'inert',
         })
+    })
+
+    it('does not treat Windows absolute paths as repo-relative (containment required)', () => {
+        expect(classifyNoSchemeHref('D:\\outside\\secret.ts')).toEqual({ action: 'inert' })
+        expect(classifyNoSchemeHref('D:/outside/secret.ts#L1')).toEqual({ action: 'inert' })
+    })
+
+    it('routes in-workspace Windows absolute paths to file preview', () => {
+        const winWorkspace = 'C:\\Users\\ada\\coding\\hapi'
+        expect(
+            classifyNoSchemeHref('C:\\Users\\ada\\coding\\hapi\\docs\\a.md', {
+                workspacePath: winWorkspace,
+            })
+        ).toEqual({
+            action: 'file',
+            path: 'C:\\Users\\ada\\coding\\hapi\\docs\\a.md',
+        })
+    })
+
+    it('compares Windows workspace containment case-insensitively', () => {
+        expect(
+            classifyNoSchemeHref('c:\\users\\ada\\coding\\hapi\\docs\\a.md', {
+                workspacePath: 'C:\\Users\\Ada\\coding\\hapi',
+            })
+        ).toEqual({
+            action: 'file',
+            path: 'c:\\users\\ada\\coding\\hapi\\docs\\a.md',
+        })
+    })
+
+    it('renders absolute paths without workspace metadata as inert (fail closed)', () => {
+        expect(classifyNoSchemeHref('/home/ada/coding/hapi/docs/a.md')).toEqual({ action: 'inert' })
+    })
+
+    it('rejects tilde paths that lexically escape the workspace via ..', () => {
+        expect(classifyNoSchemeHref('~/coding/hapi/../secret.ts', { workspacePath: workspace })).toEqual({
+            action: 'inert',
+        })
+    })
+
+    it('treats nonexistent SPA children as inert, not navigate', () => {
+        expect(classifyNoSchemeHref('/settings/typo')).toEqual({ action: 'inert' })
+        expect(classifyNoSchemeHref('/browse/extra')).toEqual({ action: 'inert' })
+        expect(classifyNoSchemeHref('/sessions/id/unknown')).toEqual({ action: 'inert' })
     })
 
     it('renders unresolvable ~/ without workspace as inert (never SPA)', () => {
