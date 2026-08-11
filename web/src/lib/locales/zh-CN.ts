@@ -900,6 +900,8 @@ export default {
   'settings.general.agents.description': '适用于新建与恢复会话的中心级智能体默认行为。',
   'settings.general.sessionSummaryContract': '要求智能体输出会话状态摘要',
   'settings.general.sessionSummaryContract.desc': '开启后，Claude、Codex、OpenCode 以及远程 Grok 会话会在每轮结束时追加 AGENT_NOTIFY_SUMMARY 行，便于更清晰的就绪通知。默认关闭。本地 Grok 与 Cursor 暂不覆盖。对新开/恢复的会话生效。',
+  'settings.general.operatorDock': '显示操作员工具',
+  'settings.general.operatorDock.desc': '与 /opmic 相同的解锁。仅在本机显示操作员工具坞（设置、标注、会话、麦克风）。不是公开麦克风。',
   'settings.language.title': '语言',
   'settings.language.label': '语言',
   'settings.runnerMgmt.title': '运行器管理',
