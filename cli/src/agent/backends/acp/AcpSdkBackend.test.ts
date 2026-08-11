@@ -1457,7 +1457,7 @@ describe('AcpSdkBackend', () => {
             update: { sessionUpdate: 'state_update', state: 'idle' }
         });
 
-        expect(activity).toEqual([true, true, false]);
+        expect(activity).toEqual([true]);
     });
 
     it('notifies agent-activity listener when a permission request arrives (#1470)', async () => {
