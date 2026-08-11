@@ -185,8 +185,9 @@ export HAPI_OVERSEER_LLM_TIMEOUT_MS=30000
 ```
 
 Prefer `chat-completions` for local-gateway compatibility; use `responses` for
-OpenAI-native. Failures / non-compliant model output fall through to the
-heuristic first-line fallback. Events are marked
+OpenAI-native. Failures / non-compliant model output produce **no** Session Log
+row (no first-line heuristic). Session-end may still write `completed_fallback`
+if the session completes without a later successful notify/LLM row. Events are marked
 `provenance: hub-llm-fallback ...` with `payload.synthesis = "llm-fallback"`,
 `attentionCandidate = 0` (Session Log only — not inbox / voice).
 
@@ -217,7 +218,7 @@ in Session Log / inbox so the operator never wonders "wtf usage is this."
   primary turn lacked a contract - never pretend the primary agent said it.
 - **Kill-criterion:** if opt-in users report surprise usage, the toggle and
   provenance labels failed - fix UX before expanding defaults. If fallback
-  summaries are worse than the heuristic first-line, do not ship.
+  summaries are worse than a primary `AGENT_NOTIFY_SUMMARY` emit, do not ship.
 
 Prefer **Option A** as the first better-fallback ship: smaller blast radius,
 easier to reason about cost, no phantom sessions.

@@ -374,4 +374,42 @@ describe('OverseerEventRecorder LLM fallback', () => {
         await pending
         expect(store.events.list().filter((row) => row.provenance?.includes('hub-llm-fallback'))).toHaveLength(1)
     })
+
+    it('does not append a new turn onto a flush already queued', async () => {
+        const store = new Store(':memory:')
+        let releaseFirst!: (value: NotifySummary) => void
+        const firstGate = new Promise<NotifySummary>((resolve) => {
+            releaseFirst = resolve
+        })
+        let firstStarted!: () => void
+        const firstStartedP = new Promise<void>((resolve) => {
+            firstStarted = resolve
+        })
+        const synthesize = mock(async (plainText: string): Promise<NotifySummary | null> => {
+            if (plainText.includes('TURN A')) {
+                firstStarted()
+                return firstGate
+            }
+            return { status: 'done', summary: plainText.includes('TURN C') ? 'turn c' : 'turn b' }
+        })
+        const recorder = new OverseerEventRecorder(store.events, store.inbox, {
+            llmFallback: { synthesizeNotifySummary: synthesize },
+        })
+        const stored = store.sessions.getOrCreateSession('llm-detach', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
+        const snapshot = toSessionSnapshot(makeSession(stored.id, 'cursor'), stored.tag)
+
+        const first = recorder.onAgentMessage(snapshot, 'msg-a', agentText('TURN A body'), Date.now())
+        await firstStartedP
+        await recorder.onAgentMessage(snapshot, 'msg-b', agentText('TURN B body'), Date.now() + 1, { thinking: true })
+        const flushedB = recorder.flushPendingLlmFallback(snapshot)
+        await recorder.onAgentMessage(snapshot, 'msg-c', agentText('TURN C body'), Date.now() + 2, { thinking: true })
+
+        releaseFirst({ status: 'done', summary: 'turn a' })
+        await first
+        const eventB = await flushedB
+        expect(eventB?.summary).toBe('turn b')
+
+        const eventC = await recorder.flushPendingLlmFallback(snapshot)
+        expect(eventC?.summary).toBe('turn c')
+    })
 })

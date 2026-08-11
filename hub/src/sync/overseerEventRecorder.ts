@@ -310,9 +310,12 @@ export class OverseerEventRecorder {
         this.knownPermissionRequestIds.delete(session.id)
         this.sessionThinking.delete(session.id)
         const snapshot = toSessionSnapshot(session, tag)
+        const pending = this.takePendingLlmFallback(session.id)
 
         return this.enqueueSessionWork(session.id, async () => {
-            const llmEvent = await this.flushPendingLlmFallbackUnlocked(snapshot)
+            const llmEvent = pending
+                ? await this.runPendingLlmFallback(snapshot, pending)
+                : null
             if (reason !== 'completed') {
                 return llmEvent
             }
@@ -345,8 +348,15 @@ export class OverseerEventRecorder {
     }
 
     async flushPendingLlmFallback(session: SessionSnapshot): Promise<StoredSystemEvent | null> {
-        if (!this.pendingLlmFallback.has(session.id)) return null
-        return this.enqueueSessionWork(session.id, () => this.flushPendingLlmFallbackUnlocked(session))
+        const pending = this.takePendingLlmFallback(session.id)
+        if (!pending) return null
+        return this.enqueueSessionWork(session.id, () => this.runPendingLlmFallback(session, pending))
+    }
+
+    private takePendingLlmFallback(sessionId: string): PendingLlmFallback | undefined {
+        const pending = this.pendingLlmFallback.get(sessionId)
+        if (pending) this.pendingLlmFallback.delete(sessionId)
+        return pending
     }
 
     private rememberPendingLlmFallback(
@@ -371,10 +381,10 @@ export class OverseerEventRecorder {
         })
     }
 
-    private async flushPendingLlmFallbackUnlocked(session: SessionSnapshot): Promise<StoredSystemEvent | null> {
-        const pending = this.pendingLlmFallback.get(session.id)
-        if (!pending) return null
-        this.pendingLlmFallback.delete(session.id)
+    private async runPendingLlmFallback(
+        session: SessionSnapshot,
+        pending: PendingLlmFallback
+    ): Promise<StoredSystemEvent | null> {
         if (extractNotifySummary(pending.plainText)) return null
         return this.tryLlmFallback(session, pending.messageId, pending.plainText, pending.ts)
     }
