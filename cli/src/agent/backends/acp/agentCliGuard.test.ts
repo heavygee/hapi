@@ -238,6 +238,7 @@ describe('agentCliGuard', () => {
             expect(existsSync(join(dir, 'pids'))).toBe(true);
             expect(existsSync(join(dir, 'count'))).toBe(false);
             expect(readdirSync(join(dir, 'pids'))).toEqual([]);
+            expect(existsSync(join(dir, 'registering'))).toBe(true);
             expect(isAgentAcpTransportActive()).toBe(true);
             expect(existsSync(dir)).toBe(true);
         });
@@ -245,6 +246,39 @@ describe('agentCliGuard', () => {
         registerActiveAcpTransport();
         expect(sawEmptyPids).toBe(true);
         _setAddLockPidHookForTests(null);
+        unregisterActiveAcpTransport();
+        expect(isAgentAcpTransportActive()).toBe(false);
+    });
+
+    test('last unregister does not erase concurrent mid-addLockPid registration', () => {
+        process.env.HAPI_HOME = testHome;
+        registerActiveAcpTransport();
+        expect(readFileSync(join(lockDir(), 'count'), 'utf8')).toBe('1');
+
+        let sawRace = false;
+        _setAddLockPidHookForTests((phase) => {
+            if (phase !== 'after-pids-mkdir') {
+                return;
+            }
+            sawRace = true;
+            // Prior transport's last unregister while the new registrar has
+            // empty-or-about-to-rewrite pids/ and a live `registering` marker.
+            // Force last-unregister semantics (in-process count → 0).
+            _setActiveAcpTransportCountForTests(1);
+            unregisterActiveAcpTransport();
+            expect(existsSync(join(lockDir(), 'registering'))).toBe(true);
+            _setActiveAcpTransportCountForTests(0);
+            expect(isAgentAcpTransportActive()).toBe(true);
+            expect(existsSync(lockDir())).toBe(true);
+        });
+
+        registerActiveAcpTransport();
+        expect(sawRace).toBe(true);
+        _setAddLockPidHookForTests(null);
+        _setActiveAcpTransportCountForTests(1);
+        expect(existsSync(join(lockDir(), 'pids', String(process.pid)))).toBe(true);
+        expect(existsSync(join(lockDir(), 'registering'))).toBe(false);
+        expect(isAgentAcpTransportActive()).toBe(true);
         unregisterActiveAcpTransport();
         expect(isAgentAcpTransportActive()).toBe(false);
     });

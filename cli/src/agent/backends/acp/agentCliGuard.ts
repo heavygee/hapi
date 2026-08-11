@@ -25,8 +25,10 @@ import { resolveHapiHomeDir } from '@/configuration';
  *
  * Filesystem publish order is fail-closed: host PID marker under `pids/` is
  * written before `count`, so concurrent reconcile never sees a lock with no
- * pids and clears it mid-reservation. A short mtime grace covers the mkdir
- * gap before the first pid file lands.
+ * pids and clears it mid-reservation. A short-lived `registering` marker
+ * covers the mkdir→pid gap even when a prior transport left a positive
+ * `count` (last-unregister vs concurrent register). Mtime grace is a
+ * backstop for the tiny window before that marker lands.
  */
 let activeAcpTransportCount = 0;
 
@@ -38,6 +40,8 @@ let addLockPidHook: ((phase: 'after-pids-mkdir' | 'after-pid-write') => void) | 
 
 /** Fail-closed window while mkdir → first pid file is in flight. */
 const PRESPAWN_RESERVATION_GRACE_MS = 5_000;
+
+const REGISTERING_MARKER = 'registering';
 
 export type AgentAcpGuardPidOptions = {
     /** Spawned `agent` child PID when known. */
@@ -61,6 +65,26 @@ function getAcpLockDir(): string {
 
 function getPidsDir(lockDir: string): string {
     return join(lockDir, 'pids');
+}
+
+function getRegisteringPath(lockDir: string): string {
+    return join(lockDir, REGISTERING_MARKER);
+}
+
+function isRegistering(lockDir: string): boolean {
+    return existsSync(getRegisteringPath(lockDir));
+}
+
+function beginRegistering(lockDir: string): void {
+    writeFileSync(getRegisteringPath(lockDir), String(Date.now()), 'utf8');
+}
+
+function endRegistering(lockDir: string): void {
+    try {
+        rmSync(getRegisteringPath(lockDir), { force: true });
+    } catch {
+        // Best effort.
+    }
 }
 
 function isFreshPrespawnReservation(lockDir: string): boolean {
@@ -127,10 +151,23 @@ function clearChildPidHint(lockDir: string): void {
 function addLockPid(lockDir: string, pid: number): void {
     const pidsDir = getPidsDir(lockDir);
     const pidPath = join(pidsDir, String(pid));
-    mkdirSync(pidsDir, { recursive: true });
-    addLockPidHook?.('after-pids-mkdir');
-    writeFileSync(pidPath, String(pid), { encoding: 'utf8', flag: 'w' });
-    addLockPidHook?.('after-pid-write');
+    // Retry once if a concurrent last-unregister deleted the lock mid-publish.
+    for (let attempt = 0; attempt < 2; attempt++) {
+        mkdirSync(lockDir, { recursive: true });
+        mkdirSync(pidsDir, { recursive: true });
+        addLockPidHook?.('after-pids-mkdir');
+        try {
+            writeFileSync(pidPath, String(pid), { encoding: 'utf8', flag: 'w' });
+            addLockPidHook?.('after-pid-write');
+            return;
+        } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code;
+            if (attempt === 0 && (code === 'ENOENT' || code === 'ENOTDIR')) {
+                continue;
+            }
+            throw error;
+        }
+    }
 }
 
 function removeLockPid(lockDir: string, pid: number): void {
@@ -171,7 +208,8 @@ function removeAcpLockDir(): void {
 function reconcileRefcountLock(lockDir: string): boolean {
     const pidsDir = getPidsDir(lockDir);
     if (!existsSync(pidsDir)) {
-        if (isFreshPrespawnReservation(lockDir)) {
+        // Registrar mid-publish, or grace before `registering` / first pid.
+        if (isRegistering(lockDir) || isFreshPrespawnReservation(lockDir)) {
             return true;
         }
         removeAcpLockDir();
@@ -204,8 +242,9 @@ function reconcileRefcountLock(lockDir: string): boolean {
 
     if (liveCount <= 0) {
         // Re-read: registrar may have published a pid during our scan, or we
-        // are between mkdir(pids) and writeFile (empty dir, count not written
-        // yet — fail closed). Post-unregister leaves count>0 with empty pids.
+        // are between mkdir(pids) and writeFile (empty dir — fail closed).
+        // A live `registering` marker covers overlap with leftover count>0
+        // from a concurrent last-unregister.
         let entries: string[] = [];
         try {
             entries = readdirSync(pidsDir);
@@ -218,6 +257,9 @@ function reconcileRefcountLock(lockDir: string): boolean {
         });
         if (liveAgain.length > 0) {
             writeLockCount(lockDir, liveAgain.length);
+            return true;
+        }
+        if (isRegistering(lockDir)) {
             return true;
         }
         if (
@@ -268,6 +310,7 @@ export function registerActiveAcpTransport(options?: AgentAcpGuardPidOptions): v
     const childPid = normalizePid(options?.childPid);
     try {
         mkdirSync(lockDir, { recursive: true });
+        beginRegistering(lockDir);
         registerPublishHook?.('after-mkdir');
         // Always keep the HAPI host PID for crash/stale cleanup of the session
         // process; also record the ACP child when known — before count.
@@ -281,6 +324,8 @@ export function registerActiveAcpTransport(options?: AgentAcpGuardPidOptions): v
         registerPublishHook?.('after-count');
     } catch {
         // Another process may have created the lock; in-process guard still applies.
+    } finally {
+        endRegistering(lockDir);
     }
 }
 
@@ -350,7 +395,10 @@ export function isAgentAcpTransportActive(): boolean {
     if (readLockCount(lockDir) > 0) {
         return true;
     }
-    // Mid-publish or grace: lock dir survived reconcile without a count yet.
+    // Mid-publish: registering marker or mtime grace without a count yet.
+    if (isRegistering(lockDir)) {
+        return true;
+    }
     return isFreshPrespawnReservation(lockDir);
 }
 
