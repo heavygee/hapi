@@ -104,9 +104,11 @@ Every feature peer **assesses the task at handoff time** (before peer-stack capt
 - No meaningful motion, timing, or multi-step choreography.
 - Change is non-web (CLI, hub API, config) and handoff uses logs or API output instead.
 
-**Human pace (MP4):** show the click (visible cursor), wait until the result is
-on screen, dwell ~0.8–1.5s so a human can see it happened, then the next
-action. Smash-cut robot clips fail even if `expect` passed.
+**Human pace (MP4) — Playwright default, not optional:** annotated screencast
+(`annotatedVideoUseOption` / `startAnnotatedScreencast`) so the pointer and
+click target are visible. Use `clickForHuman` (wait for the UI result, dwell
+~1s, then the next action). Smash-cut robot clips and raw `recordVideo`
+without `showActions` fail even if `expect` passed.
 
 **Choose MP4 when** motion or sequence matters:
 
@@ -121,7 +123,7 @@ action. Smash-cut robot clips fail even if `expect` passed.
 Capture paths (always under gitignored `localdocs/playwright-runs/`):
 
 - PNG — **`hapi-dogfood-shot`** (preferred oneshot for SessionChat / file viewer on `:3006` or peer; see [`dogfood-shot.md`](./dogfood-shot.md)) or a feature Playwright spec / handoff `--screenshot`.
-- MP4 — Playwright `recordVideo` → `scripts/dev/peer-stack-trim-video.sh`.
+- MP4 — annotated Playwright screencast (`scripts/dev/playwright-annotated-video.mjs`) → `scripts/dev/peer-stack-trim-video.sh`.
 
 Post the chosen artifact(s) **inline in HAPI web** (below) before operator dogfood. After upstream PR opens, attach the **same files to the GitHub PR** (description or comment upload) — **not** `git add`. GitHub hosts the bytes; the repo stays lean.
 

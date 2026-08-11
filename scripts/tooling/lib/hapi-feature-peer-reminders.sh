@@ -21,6 +21,7 @@ hapi_print_feature_peer_reminders() {
     fi
     cat >&2 <<'EOF'
   • Visible UI change: PNG proof (MP4 if interaction story).
+  • Playwright MP4: annotated pointer + clickForHuman (dwell on the result). Raw recordVideo = fail.
   • Proof oneshot (capture OR re-display existing e2e PNG — not a test runner):
       hapi-dogfood-shot
       hapi-dogfood-shot --from localdocs/playwright-runs/<spec>.png --title '…'

@@ -398,7 +398,7 @@ stayed green. See [`driver-soup.md`](./driver-soup.md) § HappyComposer send-int
 Peers **must** assess tier before capture ([`peer-stack.md` § Evidence modality](../tooling/peer-stack.md#evidence-modality--agent-decides-png-vs-mp4)).
 
 - **§6.4b PNG** — static existence (label, layout, copy, icon). Always for visible UI change.
-- **§6.4c MP4/GIF** — interaction story (toggle, send, drawer, async feedback). **Human pace, not robot:** visible click, wait until the result is on screen, dwell ~0.8–1.5s so a human can see it happened, then the next action. Annotated screencast preferred. Length is whatever that pacing needs.
+- **§6.4c MP4/GIF** — interaction story (toggle, send, drawer, async feedback). **Playwright default:** annotated screencast (`scripts/dev/playwright-annotated-video.mjs` — pointer + click overlay) and `clickForHuman` (wait for the UI result, dwell ~1s, then the next action). Raw `video: 'on'` without `showActions` is a kill-criterion. Length is whatever that pacing needs.
 - **§6.4d Inline** — post into **HAPI web session chat** (not Cursor composer paths). Session needs `metadata.hapiMcpUrl` (ACP + MCP bridge, e.g. Cursor #956).
 - **§8 PR** — attach the same assets to the GitHub PR **without** committing binaries. Preferred: estate **`pr-attach-proof ./shot.png --pr owner/repo#N`** (or `hapi-dogfood-shot --from … --pr …`). Exact `user-attachments/assets/…` still needs manual PR UI drag-drop (no public API; [cli/cli#13256](https://github.com/cli/cli/issues/13256)). See [`dogfood-shot.md` § PR attach](./dogfood-shot.md#pr-attach-recommended-path) and `github-operations` skill.
 

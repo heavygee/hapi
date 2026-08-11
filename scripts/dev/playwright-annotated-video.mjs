@@ -1,24 +1,32 @@
 /**
- * Playwright screencast helpers — click highlights + animated pointer on recorded video.
+ * Playwright screencast helpers — estate default for ANY recorded video.
+ *
+ * Videos are for humans. When recording is on:
+ *   1. Annotated screencast (element highlight + moving pointer) — never raw `video: 'on'`
+ *   2. `clickForHuman` / `dwellForHuman` — wait for the UI result, then dwell so a
+ *      person can see it happened. Smash-cut robot clips fail even if `expect` passed.
  *
  * Requires Playwright >= 1.59 (screencast.showActions); cursor animation needs >= 1.61.
  *
  * @playwright/test fixtures:
  *   import { annotatedVideoUseOption } from './scripts/dev/playwright-annotated-video.mjs'
- *   use: { video: process.env.PLAYWRIGHT_RECORD_VIDEO === '1' ? annotatedVideoUseOption('on') : 'off' }
+ *   use: { video: shouldRecordAnnotatedVideo() ? annotatedVideoUseOption('on') : 'off' }
  *
  * Programmatic (handoff .mjs scripts):
- *   import { startAnnotatedScreencast, stopAnnotatedScreencast } from './playwright-annotated-video.mjs'
+ *   import { startAnnotatedScreencast, stopAnnotatedScreencast, clickForHuman } from './playwright-annotated-video.mjs'
  *   await startAnnotatedScreencast(page, { path: 'localdocs/playwright-runs/demo.webm' })
- *   // ... interactions ...
+ *   await clickForHuman(page.getByRole('button', { name: 'Send' }))
  *   await stopAnnotatedScreencast(page)
  */
+
+/** Dwell after the UI result is on screen (human can register the click worked). */
+export const HUMAN_DWELL_MS = 1000
 
 /** Default overlays: element outline, action title, pointer glide between clicks. */
 export const ANNOTATED_SHOW_ACTIONS = {
     position: 'top-right',
     cursor: 'pointer',
-    duration: 800,
+    duration: HUMAN_DWELL_MS,
     fontSize: 22,
 }
 
@@ -68,4 +76,30 @@ export function annotatedVideoPaths(dir, basename) {
     const webm = `${dir.replace(/\/$/, '')}/${basename}.webm`
     const mp4 = `${dir.replace(/\/$/, '')}/${basename}.mp4`
     return { webm, mp4 }
+}
+
+/**
+ * Hold on the current frame so a human watching the clip can see the result.
+ * Use AFTER the UI consequence is visible (toast, panel, navigation), not instead of waiting for it.
+ * @param {import('playwright').Page} page
+ * @param {number} [ms]
+ */
+export async function dwellForHuman(page, ms = HUMAN_DWELL_MS) {
+    await page.waitForTimeout(ms)
+}
+
+/**
+ * Click with human pacing: click, optional wait-for-result, then dwell.
+ * The annotated screencast overlay shows *where* the click landed; the dwell shows *that it worked*.
+ *
+ * @param {import('playwright').Locator} locator
+ * @param {{ waitFor?: () => Promise<unknown>, dwellMs?: number, click?: import('playwright').LocatorClickOptions }} [options]
+ */
+export async function clickForHuman(locator, options = {}) {
+    const page = locator.page()
+    await locator.click(options.click)
+    if (options.waitFor) {
+        await options.waitFor()
+    }
+    await dwellForHuman(page, options.dwellMs ?? HUMAN_DWELL_MS)
 }

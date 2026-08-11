@@ -15,6 +15,7 @@ import { readFileSync, existsSync, mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import {
     annotatedVideoPaths,
+    clickForHuman,
     startAnnotatedScreencast,
     stopAnnotatedScreencast,
 } from './playwright-annotated-video.mjs'
@@ -88,15 +89,13 @@ try {
     await settle(page)
     const toggle = page.getByRole('button', { name: 'Scratchlist drawer' })
     await toggle.waitFor({ state: 'visible', timeout: 60_000 })
-    await toggle.click()
-    await settle(page)
+    await clickForHuman(toggle)
     await page.getByPlaceholder('Type a message...').fill('Peer stack handoff #959')
     await settle(page)
-    await page.getByRole('button', { name: 'Send to scratchlist' }).click()
-    await page.getByText('Peer stack handoff #959').waitFor({ timeout: 10000 })
-    await settle(page)
-    await page.getByRole('button', { name: 'Send to queue' }).first().click()
-    await settle(page)
+    await clickForHuman(page.getByRole('button', { name: 'Send to scratchlist' }), {
+        waitFor: () => page.getByText('Peer stack handoff #959').waitFor({ timeout: 10000 }),
+    })
+    await clickForHuman(page.getByRole('button', { name: 'Send to queue' }).first())
     await toggle.waitFor({ state: 'visible' })
     const pressed = await toggle.getAttribute('aria-pressed')
     if (pressed !== 'false') {

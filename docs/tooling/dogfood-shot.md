@@ -30,10 +30,16 @@ hapi-dogfood-shot --from "$SCREENSHOT_PATH" --pr 1234 --repo tiann/hapi --asset-
 |-------|------|
 | Vitest / Playwright `expect` | Correctness (assertions) |
 | Playwright `page.screenshot({ path })` or `hapi-dogfood-shot` capture | Disk PNG |
+| Playwright video (when recording) | Annotated screencast + `clickForHuman` — not raw `recordVideo`. See `scripts/dev/playwright-annotated-video.mjs` |
 | `hapi-dogfood-shot --from …` (or capture with display on) | HAPI chat inline |
 | `--pr owner/repo#N` | GitHub PR comment via estate `pr-attach-proof` (release asset) |
 | `pr-attach-proof` (PATH) | Same attach, any repo/agent — no HAPI session required |
 | `--pr-checklist` | Reminder only — manual UI drag-drop for exact `user-attachments/assets/…` |
+
+Playwright **video** (interaction proof) is a different layer: annotated
+screencast + human click pacing. See `scripts/dev/playwright-annotated-video.mjs`.
+This oneshot is PNG-first; do not use it as an excuse to skip click-visible MP4
+when the story is an interaction.
 
 Feature e2e specs keep asserting. At the end, either:
 

@@ -1,0 +1,16 @@
+---
+description: Playwright videos are for humans — annotated clicks + dwell
+globs: e2e/**/*.ts,e2e/**/*.js,playwright*.ts,scripts/dev/*playwright*,scripts/dev/*handoff*
+---
+
+# Playwright videos: human default
+
+Any Playwright recording on this estate is for a **human** watching HAPI chat or a PR.
+
+**Required**
+
+- `video` / screencast via `annotatedVideoUseOption` / `startAnnotatedScreencast` (`scripts/dev/playwright-annotated-video.mjs`). Pointer + action overlay on.
+- Interactions: `clickForHuman` (or click → wait for the UI result → `dwellForHuman` ~1s). Breathing room between actions.
+- Kill: raw `video: 'on'` / `recordVideo` without `showActions`. Smash-cut clips with no aftermath.
+
+**Not required:** turning video on for every CI unit run. When video *is* on, annotations + human pace are mandatory.

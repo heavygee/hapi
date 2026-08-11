@@ -27,6 +27,8 @@ export default defineConfig({
         baseURL,
         trace: 'retain-on-failure',
         screenshot: 'only-on-failure',
+        // When video is on it MUST be annotated (pointer + action overlay).
+        // Raw `video: 'on'` is a kill-criterion — humans cannot see the click.
         video: shouldRecordAnnotatedVideo()
             ? annotatedVideoUseOption('on', usePeerStack ? { width: 1440, height: 900 } : undefined)
             : 'off',

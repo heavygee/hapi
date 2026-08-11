@@ -216,11 +216,12 @@ When the feature is about **what happens when the user acts** — not merely tha
 - Static render with no interaction story (typography, spacing, new inert panel)
 - Backend/hub/cli-only (no web UI change) — skip 4b/4c entirely
 
-**Clip spec (agent-friendly):**
+**Clip spec (agent-friendly) — human default, not robot:**
 
-- **Length:** 3–10 seconds, one interaction per clip
-- **Size:** target under 5MB (trim in ffmpeg if Playwright recording ran long)
-- **Capture:** use annotated screencast (`scripts/dev/playwright-annotated-video.mjs` or `playwright.config.ts` with `PLAYWRIGHT_RECORD_VIDEO=1` / `HAPI_PEER_RECORD_VIDEO=1`) so clicks show element highlights and a moving pointer; then trim webm → `.mp4` via `scripts/dev/peer-stack-trim-video.sh` or ffmpeg. Raw `recordVideo` without `showActions` is discouraged on this estate.
+- **Clicks:** annotated screencast is **mandatory** when video is on (`scripts/dev/playwright-annotated-video.mjs` → `annotatedVideoUseOption` / `startAnnotatedScreencast`). Pointer + element highlight. Use `clickForHuman` (wait for the UI result, then ~1s dwell). Raw `video: 'on'` / `recordVideo` without `showActions` is a **kill-criterion**.
+- **Length:** whatever that pacing needs (often 8–20s). One interaction story per clip. Trimming dead air is fine; trimming the consequence of the click is not.
+- **Size:** target under 5MB after trim (`scripts/dev/peer-stack-trim-video.sh` or ffmpeg).
+- **Env:** `PLAYWRIGHT_RECORD_VIDEO=1` / `HAPI_PEER_RECORD_VIDEO=1` (peer-stack runner already defaults the latter on).
 
 #### 4d — Inline in HAPI chat (mandatory for 4b/4c; operator reads sessions in the web app)
 
