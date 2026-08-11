@@ -22,7 +22,7 @@ describe('thinkingHintFromSessionUpdate', () => {
         expect(shouldBumpThinkingFromSessionUpdate({ sessionUpdate })).toBe(true)
     })
 
-    it('ignores ACP v2 state_update (Cursor chatters running/idle while queue-idle)', () => {
+    it('ignores state_update running/requires_action (Cursor chatter; #1502)', () => {
         expect(thinkingHintFromSessionUpdate({
             sessionUpdate: 'state_update',
             state: 'running',
@@ -31,10 +31,17 @@ describe('thinkingHintFromSessionUpdate', () => {
             sessionUpdate: 'state_update',
             state: 'requires_action',
         })).toBeNull()
+    })
+
+    it('returns false for state_update idle so mid-idle wakes can clear', () => {
         expect(thinkingHintFromSessionUpdate({
             sessionUpdate: 'state_update',
             state: 'idle',
-        })).toBeNull()
+        })).toBe(false)
+        expect(shouldBumpThinkingFromSessionUpdate({
+            sessionUpdate: 'state_update',
+            state: 'idle',
+        })).toBe(false)
     })
 
     it.each([

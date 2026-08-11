@@ -1,10 +1,14 @@
 /**
- * Gate for harness/ACP resume → hub thinking (#1470).
+ * Gate for harness/ACP resume → hub thinking (#1470 / #1502).
  *
  * Returns:
  * - `true` — real agent activity (bump thinking)
- * - `false` — reserved (unused after #1487 flicker fix; clear via prompt finally)
- * - `null` — noise / unknown / state_update (do not touch thinking)
+ * - `false` — ACP v2 `state_update: idle` (clear thinking)
+ * - `null` — noise / unknown / state_update running chatter (do not touch)
+ *
+ * Cursor chatters `state_update` running/idle while HAPI MessageQueue is idle.
+ * Mapping `running` onto hub thinking caused list spinner flicker after #1487.
+ * Ignore running/requires_action; still clear on idle so mid-idle wakes do not stick.
  */
 export type SessionUpdateThinkingHint = boolean | null
 
@@ -28,10 +32,12 @@ export function thinkingHintFromSessionUpdate(
         case 'user_message_chunk':
             return true
         case 'state_update':
-            // Cursor ACP chatters running/idle while HAPI MessageQueue is idle.
-            // Mapping that onto hub thinking caused list spinner flicker after
-            // #1487. Ignore state_update here; HAPI prompt finally/abort still
-            // clear thinking for client-driven turns.
+            // Never bump from running/requires_action — Cursor emits these while
+            // HAPI is queue-idle and they flipped session-list spinners (#1502).
+            // Permission bumps go through setAgentActivityListener(true) directly.
+            if (update.state === 'idle') {
+                return false
+            }
             return null
         default:
             return null
