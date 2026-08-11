@@ -75,14 +75,30 @@ state="$(jq -c '.' "$STATE_FILE" 2>/dev/null || die "state is not valid JSON: $S
 
 if [[ "$REPO_EXPLICIT" -eq 0 ]]; then
     # Bare number: unique hold row for that PR, preferring an unacked latch.
+    # Multiple unacked (or multiple matching) rows for the same number must
+    # not silently fall through to the default tiann/hapi and "succeed" while
+    # the fork chip stays held.
     resolved="$(printf '%s' "$state" | jq -r --arg n "$PR" '
         (.hold // {})
         | to_entries
         | map(select(.key | endswith("#" + $n)))
-        | (map(select(.value.acked == false)) | if length == 1 then .[0].key else empty end)
-          // (if length == 1 then .[0].key else empty end)
-          // empty
+        | . as $all
+        | ($all | map(select(.value.acked == false))) as $unacked
+        | if ($unacked | length) > 1 then
+            "AMBIGUOUS\t" + ($unacked | map(.key) | join(", "))
+          elif ($unacked | length) == 1 then
+            $unacked[0].key
+          elif ($all | length) > 1 then
+            "AMBIGUOUS\t" + ($all | map(.key) | join(", "))
+          elif ($all | length) == 1 then
+            $all[0].key
+          else
+            empty
+          end
     ')"
+    if [[ "$resolved" == AMBIGUOUS$'\t'* ]]; then
+        die "ambiguous hold for #$PR (${resolved#*$'\t'}) — pass --repo owner/repo"
+    fi
     if [[ -n "$resolved" ]]; then
         REPO="${resolved%\#*}"
     fi

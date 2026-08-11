@@ -136,8 +136,11 @@ pec_hold_overlay_emoji() {
 # New when this comment_id is not already the recorded fingerprint.
 # Acked same id must NOT re-latch (operator ack is sticky until a new comment).
 # Issue-comment ids and review ids are different GitHub namespaces — never
-# compare them as a shared high-water mark. When both sides have created_at,
-# only a strictly later event can re-latch (covers deleted-newer-comment).
+# compare them as a shared high-water mark. When both sides have created_at:
+#   - strictly later → new
+#   - older → not new
+#   - equal second (GitHub ts is 1s resolution) + different id → new only after
+#     operator ack (unacked hold already covers that second; don't flip mid-hold)
 pec_hold_is_new_latch() {
     local state="${1-}" repo="${2:-}" pr="${3:-}" comment_id="${4:-}" created_at="${5:-}"
     local key fp existing_id existing_at
@@ -150,8 +153,15 @@ pec_hold_is_new_latch() {
         return 1
     fi
     if [[ -n "$created_at" && -n "$existing_at" && "$existing_at" != "null" ]]; then
-        if [[ "$created_at" < "$existing_at" || "$created_at" == "$existing_at" ]]; then
+        if [[ "$created_at" < "$existing_at" ]]; then
             return 1
+        fi
+        if [[ "$created_at" == "$existing_at" ]]; then
+            if printf '%s' "$state" | jq -e --arg k "$key" '.hold[$k].acked == false' >/dev/null 2>&1; then
+                return 1
+            fi
+            [[ -n "$fp" ]]
+            return $?
         fi
         [[ -n "$fp" ]]
         return $?

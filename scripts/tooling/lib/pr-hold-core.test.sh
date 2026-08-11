@@ -105,6 +105,10 @@ eq "older event after ack is not a new latch" \
     "$(pec_hold_is_new_latch "$STATE_ACKED" "tiann/hapi" "1108" "100" "2026-08-01T00:00:00Z" && echo yes || echo no)" "no"
 eq "later issue comment with smaller id than stored review still latches" \
     "$(pec_hold_is_new_latch "$STATE_ACKED" "tiann/hapi" "1108" "99" "2026-08-04T00:00:00Z" && echo yes || echo no)" "yes"
+eq "equal timestamp different id while unacked is not new" \
+    "$(pec_hold_is_new_latch "$STATE_UNACKED" "tiann/hapi" "1108" "5154418999" "2026-08-02T01:26:00Z" && echo yes || echo no)" "no"
+eq "equal timestamp different id after ack is new latch" \
+    "$(pec_hold_is_new_latch "$STATE_ACKED" "tiann/hapi" "1108" "5154418999" "2026-08-02T01:26:00Z" && echo yes || echo no)" "yes"
 
 ACKED2="$(pec_hold_ack_state "$STATE_UNACKED" "tiann/hapi" "1108")"
 eq "ack sets acked true" \

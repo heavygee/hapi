@@ -89,13 +89,23 @@ FORK_REPO="${HAPI_FORK_REPO:-heavygee/hapi}"
 HAPI_HOST="${HAPI_HOST:-http://localhost:3006}"
 SETTINGS="${HAPI_SETTINGS:-$HOME/.hapi/settings.json}"
 STATE_FILE="${HAPI_META_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/hapi/meta-daily.json}"
-# Serialize against hold-ack. Must run before argv is shifted. Skip when
-# systemd already wrapped ExecStart in flock (nested flock deadlocks).
+# Serialize against hold-ack. Must run before argv is shifted. Skip only when
+# parent flock already holds THIS lock file (systemd ExecStart); a bare
+# "parent is named flock" check would skip while locking a different path
+# (HAPI_META_STATE / HAPI_META_LOCK redirect) and race hold-ack.
 if [[ "${BASH_SOURCE[0]}" == "${0}" && -z "${HAPI_META_LOCKED:-}" ]]; then
+    _md_lock="${HAPI_META_LOCK:-$(dirname "$STATE_FILE")/meta-daily.lock}"
     _md_parent_comm="$(ps -o comm= -p "${PPID:-0}" 2>/dev/null || true)"
     _md_parent_comm="${_md_parent_comm##*/}"
-    if [[ "$_md_parent_comm" != "flock" ]]; then
-        _md_lock="${HAPI_META_LOCK:-$(dirname "$STATE_FILE")/meta-daily.lock}"
+    _md_skip_lock=0
+    if [[ "$_md_parent_comm" == "flock" ]]; then
+        _md_parent_args="$(ps -o args= -p "${PPID:-0}" 2>/dev/null || true)"
+        # Token match so a shorter path cannot substring-spoof the lock.
+        if [[ " ${_md_parent_args} " == *" ${_md_lock} "* ]]; then
+            _md_skip_lock=1
+        fi
+    fi
+    if [[ "$_md_skip_lock" -eq 0 ]]; then
         mkdir -p "$(dirname "$_md_lock")"
         export HAPI_META_LOCKED=1
         exec flock -w 600 "$_md_lock" "$0" "$@"

@@ -1171,6 +1171,24 @@ EOF
 bash "$DIR/hapi-hold-ack.sh" --state "$WORK/hold-only.json" 124
 check "hold-ack bare number: acked heavygee row" "jq -e --arg k 'heavygee/hapi#124' '.hold[\$k].acked == true' '$WORK/hold-only.json' >/dev/null"
 
+# Dual unacked holds for the same number must refuse bare ack (no silent tiann default).
+cat >"$WORK/hold-dual.json" <<'EOF'
+{"schema":1,"hold":{
+  "tiann/hapi#124":{"acked":false,"comment_id":"1"},
+  "heavygee/hapi#124":{"acked":false,"comment_id":"2"}
+}}
+EOF
+set +e
+dual_out="$(bash "$DIR/hapi-hold-ack.sh" --state "$WORK/hold-dual.json" 124 2>&1)"
+dual_rc=$?
+set -e
+check "hold-ack ambiguous bare: nonzero" "[[ $dual_rc -ne 0 ]]"
+check "hold-ack ambiguous bare: demands --repo" "grep -qi 'ambiguous\\|pass --repo' <<<\"\$dual_out\""
+check "hold-ack ambiguous bare: neither row acked" "jq -e --arg a 'tiann/hapi#124' --arg b 'heavygee/hapi#124' '.hold[\$a].acked == false and .hold[\$b].acked == false' '$WORK/hold-dual.json' >/dev/null"
+bash "$DIR/hapi-hold-ack.sh" --state "$WORK/hold-dual.json" --repo heavygee/hapi 124
+check "hold-ack ambiguous with --repo: fork acked" "jq -e --arg k 'heavygee/hapi#124' '.hold[\$k].acked == true' '$WORK/hold-dual.json' >/dev/null"
+check "hold-ack ambiguous with --repo: tiann still held" "jq -e --arg k 'tiann/hapi#124' '.hold[\$k].acked == false' '$WORK/hold-dual.json' >/dev/null"
+
 # Authored open tiann#124 + fork chip only: classify upstream pair; orphan tiann.
 rm -f "$WORK/state.json" "$WORK/pings.log" "$WORK/batch.args"
 cat >"$WORK/gh" <<'EOF'
