@@ -12,9 +12,15 @@
  * namespace as ping-peer. Callers must not invent parallel auth.
  */
 
+import { resolve as resolvePath } from 'node:path'
 import axios, { type AxiosInstance } from 'axios'
 import { isObject, SESSION_NAME_MAX_LENGTH } from '@hapi/protocol'
-import { CREATABLE_AGENT_FLAVORS, type AgentFlavor, type PermissionMode } from '@hapi/protocol/modes'
+import {
+    CREATABLE_AGENT_FLAVORS,
+    isPermissionModeAllowedForFlavor,
+    type AgentFlavor,
+    type PermissionMode
+} from '@hapi/protocol/modes'
 import { configuration } from '@/configuration'
 import { getAuthToken } from '@/api/auth'
 import { buildHubRequestHeaders } from '@/api/hubExtraHeaders'
@@ -153,17 +159,32 @@ async function exchangeJwt(
     }
 }
 
-function wrapPingPeerError(error: unknown): never {
-    if (error instanceof SpawnPeerError) {
-        throw error
+async function archiveFailedSpawn(
+    apiUrl: string,
+    jwt: string,
+    sessionId: string,
+    http: AxiosInstance
+): Promise<boolean> {
+    try {
+        const response = await http.post(
+            `${apiUrl}/api/sessions/${encodeURIComponent(sessionId)}/archive`,
+            {},
+            {
+                headers: authHeaders(jwt),
+                timeout: 15_000,
+                validateStatus: () => true
+            }
+        )
+        return response.status >= 200 && response.status < 300 && response.data?.ok === true
+    } catch {
+        return false
     }
-    if (error instanceof PingPeerError) {
-        throw new SpawnPeerError(error.code, error.message)
-    }
-    throw new SpawnPeerError(
-        'send_failed',
-        error instanceof Error ? error.message : String(error)
-    )
+}
+
+function failedChildCleanupNote(sessionId: string, archived: boolean): string {
+    return archived
+        ? `archived the failed child. Retry spawn-peer; do not ping the archived id.`
+        : `archive failed so the child may still be running. Stop or archive ${sessionId} before retrying spawn-peer.`
 }
 
 function collapsedRemitNeedle(message: string): string {
@@ -181,15 +202,20 @@ async function sessionHasRemit(
     if (!needle) {
         return false
     }
-    const response = await http.get(
-        `${apiUrl}/api/sessions/${encodeURIComponent(sessionId)}/messages`,
-        {
-            headers: authHeaders(jwt),
-            params: { limit: 50 },
-            timeout: 20_000,
-            validateStatus: () => true
-        }
-    )
+    let response: { status: number; data?: { messages?: unknown } }
+    try {
+        response = await http.get(
+            `${apiUrl}/api/sessions/${encodeURIComponent(sessionId)}/messages`,
+            {
+                headers: authHeaders(jwt),
+                params: { limit: 50 },
+                timeout: 20_000,
+                validateStatus: () => true
+            }
+        )
+    } catch {
+        return false
+    }
     if (response.status < 200 || response.status >= 300) {
         return false
     }
@@ -205,11 +231,14 @@ async function sessionHasRemit(
 }
 
 export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerResult> {
-    const directory = (options.directory ?? '').trim()
+    const rawDirectory = (options.directory ?? '').trim()
     const message = options.message ?? ''
-    if (!directory) {
+    if (!rawDirectory) {
         throw new SpawnPeerError('bad_args', 'directory is required')
     }
+    // Runner RPC resolves relative paths against the long-lived runner cwd
+    // (`hapi runner start`), not the calling CLI/MCP process. Anchor here.
+    const directory = resolvePath(rawDirectory)
     if (!message.trim()) {
         throw new SpawnPeerError(
             'bad_args',
@@ -226,6 +255,13 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
 
     if (options.agent && !(CREATABLE_AGENT_FLAVORS as readonly string[]).includes(options.agent)) {
         throw new SpawnPeerError('bad_args', `unsupported agent: ${options.agent}`)
+    }
+    const flavor = options.agent ?? 'claude'
+    if (options.permissionMode && !isPermissionModeAllowedForFlavor(options.permissionMode, flavor)) {
+        throw new SpawnPeerError(
+            'bad_args',
+            `permission mode ${options.permissionMode} is not supported by ${flavor}`
+        )
     }
 
     const waitActiveSecs = options.waitActiveSecs ?? DEFAULT_WAIT_ACTIVE_SECS
@@ -318,12 +354,14 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
     }
 
     onProgress?.(`delivering remit (${message.length} chars) via ping-peer path...`)
-    let pingResult: { sessionId: string; name: string }
+    let pingResult: { sessionId: string; name: string } | undefined
+    let deliveryError: unknown
     try {
         pingResult = await pingPeer({
             sessionId,
             message,
             waitActiveSecs,
+            waitForInitialActive: true,
             apiUrl,
             accessToken,
             http,
@@ -332,7 +370,7 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
             onProgress
         })
     } catch (error) {
-        wrapPingPeerError(error)
+        deliveryError = error
     }
 
     const deadline = now() + waitActiveSecs * 1000
@@ -340,7 +378,9 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
         if (await sessionHasRemit(apiUrl, jwt, sessionId, message, http)) {
             return {
                 sessionId,
-                name: renamed ? requestedName : pingResult.name
+                name: renamed
+                    ? requestedName
+                    : pingResult?.name || sessionId.slice(0, 8)
             }
         }
         if (now() >= deadline) {
@@ -349,10 +389,23 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
         await sleep(POLL_VERIFY_MS)
     }
 
+    const archived = await archiveFailedSpawn(apiUrl, jwt, sessionId, http)
+    const cleanupNote = failedChildCleanupNote(sessionId, archived)
+    if (deliveryError) {
+        if (deliveryError instanceof SpawnPeerError) {
+            throw new SpawnPeerError(deliveryError.code, `${deliveryError.message}; ${cleanupNote}`)
+        }
+        if (deliveryError instanceof PingPeerError) {
+            throw new SpawnPeerError(deliveryError.code, `${deliveryError.message}; ${cleanupNote}`)
+        }
+        throw new SpawnPeerError(
+            'send_failed',
+            `${deliveryError instanceof Error ? deliveryError.message : String(deliveryError)}; ${cleanupNote}`
+        )
+    }
     throw new SpawnPeerError(
         'empty_session',
-        `session ${sessionId} still has no user message after remit delivery (empty shell). ` +
-            `Re-run: hapi ping-peer ${sessionId} --message-file <brief>`
+        `session ${sessionId} still has no user message after remit delivery (empty shell); ${cleanupNote}`
     )
 }
 
