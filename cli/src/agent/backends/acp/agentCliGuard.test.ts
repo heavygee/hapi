@@ -36,6 +36,9 @@ describe('agentCliGuard', () => {
     const previousHome = process.env.HAPI_HOME;
 
     afterEach(() => {
+        // Always tear down under the isolated test home — never while HAPI_HOME
+        // is unset (that would resolve ~/.hapi and could wipe a live ACP guard).
+        process.env.HAPI_HOME = testHome;
         _resetAgentCliGuardForTests();
         if (previousHome === undefined) {
             delete process.env.HAPI_HOME;
@@ -123,10 +126,12 @@ describe('agentCliGuard', () => {
 
     test('records the ACP child PID when provided, not only the HAPI host PID', () => {
         process.env.HAPI_HOME = testHome;
-        const childPid = process.pid;
+        // Distinct from process.pid so host + child markers are both asserted.
+        const childPid = process.pid + 1_000_000;
         registerActiveAcpTransport({ childPid });
 
         const dir = lockDir();
+        expect(existsSync(join(dir, 'pids', String(process.pid)))).toBe(true);
         expect(existsSync(join(dir, 'pids', String(childPid)))).toBe(true);
         expect(readFileSync(join(dir, 'child-pid'), 'utf8').trim()).toBe(String(childPid));
 
@@ -137,10 +142,11 @@ describe('agentCliGuard', () => {
     test('recordActiveAcpChildPid upgrades a pre-spawn reservation to the real child PID', () => {
         process.env.HAPI_HOME = testHome;
         registerActiveAcpTransport();
-        const childPid = process.pid;
+        const childPid = process.pid + 1_000_001;
         recordActiveAcpChildPid(childPid);
 
         const dir = lockDir();
+        expect(existsSync(join(dir, 'pids', String(process.pid)))).toBe(true);
         expect(existsSync(join(dir, 'pids', String(childPid)))).toBe(true);
         expect(readFileSync(join(dir, 'child-pid'), 'utf8').trim()).toBe(String(childPid));
         expect(isAgentAcpTransportActive()).toBe(true);
@@ -151,8 +157,13 @@ describe('agentCliGuard', () => {
 
     test('uses ~/.hapi lock home when HAPI_HOME is unset (not /tmp/hapi)', () => {
         delete process.env.HAPI_HOME;
-        const expected = join(homedir(), '.hapi', 'locks', 'agent-acp-active');
-        expect(getAgentAcpLockDir()).toBe(expected);
-        expect(getAgentAcpLockDir()).not.toContain(join(tmpdir(), 'hapi'));
+        try {
+            const expected = join(homedir(), '.hapi', 'locks', 'agent-acp-active');
+            expect(getAgentAcpLockDir()).toBe(expected);
+            expect(getAgentAcpLockDir()).not.toContain(join(tmpdir(), 'hapi'));
+        } finally {
+            // Restore isolated home before afterEach reset (belt + suspenders).
+            process.env.HAPI_HOME = testHome;
+        }
     });
 });
