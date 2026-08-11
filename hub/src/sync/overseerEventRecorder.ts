@@ -48,6 +48,7 @@ type PendingLlmFallback = {
     messageId: string
     plainText: string
     ts: number
+    epoch: number
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -174,9 +175,9 @@ export class OverseerEventRecorder {
     private readonly sessionThinking = new Map<string, boolean>()
     /** Per-session tail so concurrent LLM calls insert in arrival order. */
     private readonly sessionWork = new Map<string, Promise<unknown>>()
-    /** Successful LLM fallback messageId per session (not a session-wide boolean). */
-    private readonly llmFallbackSucceeded = new Map<string, string>()
-    private readonly lastAgentMessageId = new Map<string, string>()
+    private readonly turnEpoch = new Map<string, number>()
+    /** Epoch of the last successful LLM fallback for this session. */
+    private readonly llmFallbackSucceededEpoch = new Map<string, number>()
 
     constructor(
         private readonly events: EventStore,
@@ -206,7 +207,6 @@ export class OverseerEventRecorder {
 
         if (isAgentMessageContent(content)) {
             this.lastAgentMessageAt.set(session.id, ts)
-            this.lastAgentMessageId.set(session.id, messageId)
 
             const agentBody = unwrapRoleWrappedRecordEnvelope(content)
             const agentContent = agentBody?.role === 'agent' ? agentBody.content : content
@@ -292,20 +292,27 @@ export class OverseerEventRecorder {
                     this.rememberPendingLlmFallback(session.id, messageId, plainText, ts)
                 } else {
                     this.pendingLlmFallback.delete(session.id)
+                    this.bumpTurnEpoch(session.id)
+                    const epoch = this.currentTurnEpoch(session.id)
                     primary = await this.enqueueSessionWork(session.id, () =>
-                        this.tryLlmFallback(session, messageId, plainText, ts)
+                        this.tryLlmFallback(session, messageId, plainText, ts, epoch)
                     )
                 }
             }
             return primary
         }
 
+        this.bumpTurnEpoch(session.id)
         this.scoopLinksFromContent(session, messageId, content, ts)
         return primary
     }
 
     async onSessionUpdated(session: Session, tag?: string | null): Promise<void> {
+        const wasThinking = this.sessionThinking.get(session.id) === true
         this.sessionThinking.set(session.id, session.thinking)
+        if (session.thinking && !wasThinking) {
+            this.bumpTurnEpoch(session.id)
+        }
         await this.syncPermissionRequests(session, tag ?? null)
         // Flush whenever thinking is clear and a deferred turn is waiting —
         // not only on a true→false edge. Keepalives often never sent the
@@ -339,11 +346,9 @@ export class OverseerEventRecorder {
             if (lastText && extractNotifySummary(lastText)) {
                 return llmEvent
             }
-            // Successful LLM row already captured this missed turn — do not
-            // also write "session ended without AGENT_NOTIFY_SUMMARY".
-            const successForLatest = this.lastAgentMessageId.get(session.id)
-                && this.llmFallbackSucceeded.get(session.id) === this.lastAgentMessageId.get(session.id)
-            if (llmEvent || successForLatest) {
+            // Successful LLM row already captured this turn (epoch), including
+            // same-turn ACP tool/usage messages after the text flush.
+            if (llmEvent || this.llmFallbackSucceededEpoch.get(session.id) === this.currentTurnEpoch(session.id)) {
                 return llmEvent
             }
 
@@ -390,13 +395,11 @@ export class OverseerEventRecorder {
         const combined = prev && prev.messageId !== messageId
             ? `${prev.plainText}\n${plainText}`
             : plainText
-        if (!prev || prev.messageId !== messageId) {
-            this.llmFallbackSucceeded.delete(sessionId)
-        }
         this.pendingLlmFallback.set(sessionId, {
             messageId,
             plainText: combined,
-            ts: prev?.ts ?? ts
+            ts: prev?.ts ?? ts,
+            epoch: prev?.epoch ?? this.currentTurnEpoch(sessionId)
         })
     }
 
@@ -405,7 +408,7 @@ export class OverseerEventRecorder {
         pending: PendingLlmFallback
     ): Promise<StoredSystemEvent | null> {
         if (extractNotifySummary(pending.plainText)) return null
-        return this.tryLlmFallback(session, pending.messageId, pending.plainText, pending.ts)
+        return this.tryLlmFallback(session, pending.messageId, pending.plainText, pending.ts, pending.epoch)
     }
 
     private enqueueSessionWork<T>(sessionId: string, work: () => Promise<T>): Promise<T> {
@@ -429,10 +432,10 @@ export class OverseerEventRecorder {
         session: SessionSnapshot,
         messageId: string,
         plainText: string,
-        ts: number
+        ts: number,
+        epoch: number
     ): Promise<StoredSystemEvent | null> {
         if (!this.llmFallback) return null
-        this.llmFallbackSucceeded.delete(session.id)
         try {
             const notify = await this.llmFallback.synthesizeNotifySummary(plainText)
             if (!notify) return null
@@ -463,7 +466,7 @@ export class OverseerEventRecorder {
                 tags: buildTags(notify, session.flavor),
             })
             if (stored) {
-                this.llmFallbackSucceeded.set(session.id, messageId)
+                this.llmFallbackSucceededEpoch.set(session.id, epoch)
                 this.onAsyncSystemEvent?.(session.id)
             }
             return stored
@@ -495,11 +498,19 @@ export class OverseerEventRecorder {
     forgetSession(sessionId: string): void {
         this.pendingLlmFallback.delete(sessionId)
         this.sessionWork.delete(sessionId)
-        this.llmFallbackSucceeded.delete(sessionId)
+        this.llmFallbackSucceededEpoch.delete(sessionId)
+        this.turnEpoch.delete(sessionId)
         this.lastAgentMessageAt.delete(sessionId)
-        this.lastAgentMessageId.delete(sessionId)
         this.knownPermissionRequestIds.delete(sessionId)
         this.sessionThinking.delete(sessionId)
+    }
+
+    private currentTurnEpoch(sessionId: string): number {
+        return this.turnEpoch.get(sessionId) ?? 0
+    }
+
+    private bumpTurnEpoch(sessionId: string): void {
+        this.turnEpoch.set(sessionId, this.currentTurnEpoch(sessionId) + 1)
     }
 
     private scoopLinksFromContent(
@@ -596,9 +607,10 @@ export class OverseerEventRecorder {
             const request = asRecord(requests[requestId])
             const toolName = typeof request?.tool === 'string' ? request.tool : 'tool'
             const summary = `Permission requested: ${toolName}`
+            const ts = Date.now()
             await this.enqueueSessionWork(session.id, () =>
                 Promise.resolve(this.insertInferredEvent(snapshot, {
-                    ts: Date.now(),
+                    ts,
                     sourceKind: 'system',
                     sourceRef: session.id,
                     eventType: 'approval_requested',
