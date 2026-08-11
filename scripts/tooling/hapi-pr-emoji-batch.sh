@@ -358,9 +358,11 @@ classify_one() {
 }
 
 export REPO OWNER NAME TIMEOUT TMPDIR WALL_LIMIT MERGE_POLICY_JSON
+# Path-kind helpers (pmp_path_is_*) removed with product_paths lane reject (5d23292bb);
+# do not export -f names that are no longer functions — that aborts the whole batch.
 export -f classify_one gh_t fetch_latest_bot_body _emit_pr_json _apply_merge_lane \
     pec_decide_emoji pmp_classify pmp_action_for_lane pmp_load_policy \
-    pmp_default_policy_json pmp_path_is_test pmp_path_is_product pmp_files_have_product \
+    pmp_default_policy_json \
     _gh_check_signals _fetch_review_signals _bot_body_findings_clean \
     pec_count_chip_unresolved_threads
 

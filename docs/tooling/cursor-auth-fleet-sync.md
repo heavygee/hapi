@@ -33,16 +33,16 @@ Everything else is **derived** from `apiKey`:
 
 **Do not** keep alternate accounts as commented `#CURSOR_API_KEY=` lines in the live env file. That is how runners silently lose the key (all-comment file → empty env → ACP `Authentication required`) or flip accounts under pressure. Archive history under `~/.config/cursor/auth-bak/` if needed.
 
-## Why pin + immutable
+## Why pin (and when *not* to leave auth immutable)
 
 `agent` / ACP can **rewrite** `auth.json` on refresh to a different account’s tokens. Incident class (2026-08-09): oos auth copied to proxmox, then a live agent rewrite flipped `apiKey` back to a usage-limited lockhouse key while `api-key.env` still pointed at the oos key (or the reverse). Sessions then fail with `Authentication required` / `Upgrade your plan to continue` even though `agent -p` “works” under `CURSOR_API_KEY`.
 
 Mitigations:
 
-1. **`~/.hapi/pin-cursor-auth.sh`** — on runner start: if `auth.json.apiKey` ≠ `cursor.env`, rewrite toward `cursor.env` (preserve tokens when possible); **always `chattr +i` afterward**.
-2. **`sudo chattr +i ~/.config/cursor/auth.json`** after a deliberate sync so mid-flight rewrites fail closed until an operator unlocks.
+1. **`~/.hapi/pin-cursor-auth.sh`** — on runner start: if `auth.json.apiKey` ≠ `cursor.env`, rewrite toward `cursor.env` (preserve tokens when possible). Keep derived env files equal to the intended `apiKey`.
+2. **Do not leave `chattr +i` on `auth.json` during normal ops.** Cursor opens the file read/write for token refresh. Immutable → `EPERM` → ACP `session/new` / `session/load` fail with opaque **`Internal error`**, and `agent -p` dies. Use `+i` only for a short window while copying/syncing if you must, then **`chattr -i` before any agent/runner work**.
 
-Pin must **re-lock**. An older pin that only `chattr -i` and exits left the file writable; that is a footgun.
+Pin may temporarily unlock; it must not leave the file immutable afterward if agents need to run.
 
 ## Sync procedure (oos → fleet runner)
 
@@ -82,12 +82,12 @@ PY
 #   [Service]
 #   ExecStartPre=/home/heavygee/.hapi/pin-cursor-auth.sh
 
-sudo chattr +i "$HOME/.config/cursor/auth.json"
+# Leave auth.json writable (Cursor token refresh). Do NOT chattr +i for steady-state.
 # Runner restart needs a real TTY for the systemctl wrapper override:
 HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1 sudo -E systemctl restart hapi-runner.service
 sleep 2
 systemctl is-active hapi-runner.service
-lsattr "$HOME/.config/cursor/auth.json"
+lsattr "$HOME/.config/cursor/auth.json"   # should NOT show immutable 'i'
 # runner must see the key:
 python3 - <<'PY'
 import hashlib
@@ -171,4 +171,4 @@ Revive **one at a time** on memory-tight proxmox (earlyoom). See also `hapi-safe
 
 ## Incident notes
 
-- **2026-08-09:** Hard kill of proxmox runner + commented-out `api-key.env` + account thrash. Fix = restore oos `auth.json`, derive single-line envs, `chattr +i`, runner restart, revive Netgear via `hapi cursor --resume … --existing-session-id …`.
+- **2026-08-09:** Hard kill of proxmox runner + commented-out `api-key.env` + account thrash. Fix = restore oos `auth.json`, derive single-line envs, runner restart, revive with `hapi cursor --resume … --existing-session-id …`. Leaving `chattr +i` on `auth.json` later caused ACP `Internal error` / “shell broken”; unlock for steady-state. Poisoned ACP stores: quarantine `~/.cursor/acp-sessions/<id>` and fresh-bind the same HAPI row (no `--resume`).

@@ -15,9 +15,17 @@
 #   - `cd …/driver/cli && bun run src/index.ts ping-peer` (ad-hoc; use PATH)
 #
 # When soup-aware `hapi` is on PATH (install-hapi-local-bin → hapi-from-active),
-# this script delegates to `hapi ping-peer` (shared TS module + MCP). Bash body
-# below is the fallback when soup CLI is unavailable.
+# this script stamps a From: header (if needed) then delegates to `hapi ping-peer`.
+# Bash body below is the fallback when soup CLI is unavailable.
 # Override: HAPI_PING_PEER_FORCE_BASH=1
+#
+# Identity (interim until A2A stamps principal on the wire):
+#   Agents MUST identify themselves. This script auto-prepends
+#     From: /sessions/<HAPI_SESSION_ID>
+#     Name: <HAPI_SESSION_NAME>   # optional
+#   when HAPI_SESSION_ID is set and the message does not already start with
+#   "From:". If unset, warns on stderr — recipient will not know who sent it.
+#   Canon: docs/operator/AGENTS.md § Peer message identity.
 #
 # Long briefs: hapi-ping-peer 05d9f0f2 --message-file /tmp/brief.md
 #              hapi-ping-peer 05d9f0f2 --message-file - <<'EOF'
@@ -32,7 +40,10 @@
 #   HAPI_HOST       (default http://localhost:3006)
 #   HAPI_SETTINGS   (default ~/.hapi/settings.json - reads cliApiToken)
 #   HAPI_WAIT_ACTIVE_SECS (default 60)
+#   HAPI_SESSION_ID   (caller session — stamped into From: when set)
+#   HAPI_SESSION_NAME (optional display name for stamp)
 #   HAPI_PING_PEER_FORCE_BASH=1  skip soup CLI delegation
+#   HAPI_PING_PEER_SKIP_FROM=1   do not auto-stamp (rare; Meta templates that already embed From:)
 #
 # Exit codes:
 #   0 = message delivered
@@ -40,21 +51,6 @@
 #   3 = resume failed (no_machine_online, access_denied, etc)
 #   4 = wait-for-active timed out OR send failed
 set -euo pipefail
-
-# Prefer soup CLI (hapi-from-active → ~/.local/bin/hapi) over this bash body.
-# Refuse ~/.bun/bin/hapi — that path is the stale npm global footgun.
-if [[ "${HAPI_PING_PEER_FORCE_BASH:-0}" != "1" ]]; then
-    _hapi_bin="$(command -v hapi 2>/dev/null || true)"
-    if [[ -n "$_hapi_bin" && "$_hapi_bin" != */.bun/bin/hapi ]]; then
-        if _help="$("$_hapi_bin" ping-peer --help 2>&1)" && [[ "$_help" == *'ping-peer'* ]]; then
-            exec "$_hapi_bin" ping-peer "$@"
-        fi
-    fi
-fi
-
-HAPI_HOST="${HAPI_HOST:-http://localhost:3006}"
-SETTINGS="${HAPI_SETTINGS:-$HOME/.hapi/settings.json}"
-WAIT_FOR_ACTIVE="${HAPI_WAIT_ACTIVE_SECS:-60}"
 
 err() { echo "hapi-ping-peer: $*" >&2; }
 die() { err "$*"; exit 2; }
@@ -66,10 +62,10 @@ LIST_ONLY=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --message-file) MESSAGE_FILE="$2"; shift 2 ;;
-        --wait) WAIT_FOR_ACTIVE="$2"; shift 2 ;;
-        --host) HAPI_HOST="$2"; shift 2 ;;
+        --wait) WAIT_FOR_ACTIVE_ARG="$2"; shift 2 ;;
+        --host) HAPI_HOST_ARG="$2"; shift 2 ;;
         --list) LIST_ONLY=1; shift ;;
-        --help|-h) sed -n '2,21p' "$0"; exit 0 ;;
+        --help|-h) sed -n '2,45p' "$0"; exit 0 ;;
         *)
             if [[ -z "$SESSION_ARG" ]]; then
                 SESSION_ARG="$1"
@@ -81,6 +77,65 @@ while [[ $# -gt 0 ]]; do
             shift ;;
     esac
 done
+
+HAPI_HOST="${HAPI_HOST_ARG:-${HAPI_HOST:-http://localhost:3006}}"
+SETTINGS="${HAPI_SETTINGS:-$HOME/.hapi/settings.json}"
+WAIT_FOR_ACTIVE="${WAIT_FOR_ACTIVE_ARG:-${HAPI_WAIT_ACTIVE_SECS:-60}}"
+
+if [[ "$LIST_ONLY" != "1" ]]; then
+    if [[ -n "$MESSAGE_FILE" ]]; then
+        if [[ "$MESSAGE_FILE" == "-" ]]; then
+            MESSAGE=$(cat)
+        else
+            [[ -f "$MESSAGE_FILE" ]] || die "message file not found: $MESSAGE_FILE"
+            MESSAGE=$(cat "$MESSAGE_FILE")
+        fi
+    fi
+    [[ -n "$SESSION_ARG" ]] || die "missing session id; usage: hapi-ping-peer <session-id> <message>"
+    [[ -n "$MESSAGE" ]] || die "missing message; provide as arg, --message-file PATH, or --message-file -"
+
+    # Interim peer identity stamp (docs/operator/AGENTS.md § Peer message identity)
+    if [[ "${HAPI_PING_PEER_SKIP_FROM:-0}" != "1" ]] \
+        && ! [[ "$MESSAGE" =~ ^[Ff]rom:[[:space:]] ]]; then
+        if [[ -n "${HAPI_SESSION_ID:-}" ]]; then
+            _from="From: /sessions/${HAPI_SESSION_ID}"
+            if [[ -n "${HAPI_SESSION_NAME:-}" ]]; then
+                _from+=$'\n'"Name: ${HAPI_SESSION_NAME}"
+            fi
+            MESSAGE="${_from}"$'\n\n'"${MESSAGE}"
+            err "stamped From: /sessions/${HAPI_SESSION_ID:0:8}… (HAPI_SESSION_ID)"
+        else
+            err "WARNING: HAPI_SESSION_ID unset — recipient cannot tell who sent this."
+            err "  Agents MUST open the message with: From: /sessions/<your-hapi-session-id>"
+            err "  (fork AGENTS.md § Peer message identity; A2A wire stamp is the real fix later)"
+        fi
+    fi
+fi
+
+# Prefer soup CLI after message is stamped — pass via temp file so From: survives.
+if [[ "${HAPI_PING_PEER_FORCE_BASH:-0}" != "1" ]]; then
+    _hapi_bin="$(command -v hapi 2>/dev/null || true)"
+    if [[ -n "$_hapi_bin" && "$_hapi_bin" != */.bun/bin/hapi ]]; then
+        if _help="$("$_hapi_bin" ping-peer --help 2>&1)" && [[ "$_help" == *'ping-peer'* ]]; then
+            if [[ "$LIST_ONLY" == "1" ]]; then
+                exec "$_hapi_bin" ping-peer --list
+            fi
+            _tmp="$(mktemp "${TMPDIR:-/tmp}/hapi-ping-peer.XXXXXX")"
+            printf '%s' "$MESSAGE" >"$_tmp"
+            trap 'rm -f "$_tmp"' EXIT
+            _args=("$SESSION_ARG" --message-file "$_tmp")
+            [[ -n "${WAIT_FOR_ACTIVE_ARG:-}" ]] && _args+=(--wait "$WAIT_FOR_ACTIVE")
+            [[ -n "${HAPI_HOST_ARG:-}" ]] && _args+=(--host "$HAPI_HOST")
+            exec "$_hapi_bin" ping-peer "${_args[@]}"
+        fi
+    fi
+fi
+
+if [[ "$LIST_ONLY" == "1" ]]; then
+    :
+elif [[ -z "$MESSAGE" ]]; then
+    die "missing message"
+fi
 
 # step 1: token
 [[ -f "$SETTINGS" ]] || die "settings file not found: $SETTINGS"
@@ -108,17 +163,6 @@ if [[ "$LIST_ONLY" == "1" ]]; then
         | head -30
     exit 0
 fi
-
-[[ -n "$SESSION_ARG" ]] || die "missing session id; usage: hapi-ping-peer <session-id> <message>"
-if [[ -n "$MESSAGE_FILE" ]]; then
-    if [[ "$MESSAGE_FILE" == "-" ]]; then
-        MESSAGE=$(cat)
-    else
-        [[ -f "$MESSAGE_FILE" ]] || die "message file not found: $MESSAGE_FILE"
-        MESSAGE=$(cat "$MESSAGE_FILE")
-    fi
-fi
-[[ -n "$MESSAGE" ]] || die "missing message; provide as arg, --message-file PATH, or --message-file -"
 
 # step 3: resolve session ID prefix
 SESSIONS=$(hapi_get "/api/sessions?limit=500")
@@ -155,7 +199,6 @@ if [[ "$ACTIVE" != "true" ]]; then
 fi
 
 # step 4b: Pi ready-race — active can precede piSessionId (tiann/hapi#1143).
-# Instant /messages before get_state settles wedges (Prompt accepted / agent_start / silence).
 FLAVOR=$(hapi_get "/api/sessions/$SID" 2>/dev/null | jq -r '.session.metadata.flavor // empty')
 if [[ "$FLAVOR" == "pi" ]]; then
     echo "hapi-ping-peer: flavor=pi — waiting up to ${WAIT_FOR_ACTIVE}s for metadata.piSessionId (ready gate)..."

@@ -208,6 +208,32 @@ mw_advance_wave() {
         prev_deadline=""
     fi
 
+    # Terminal: this wave id already unlocked once. Never re-unlock — even if
+    # a member flickers dirty (orphan dir / not_archived blip) and returns to
+    # all-clean. Incident 2026-08-10: hourly Meta re-unlocked w-1372…1467 at
+    # 13/14/15 because dispatched → collecting → ready → unlock.
+    if [[ "$prev_status" == "dispatched" && "$prev_id" == "$wid" ]]; then
+        jq -cn \
+            --arg id "$wid" \
+            --argjson members "$members" \
+            --arg started "${prev_started:-}" \
+            --arg deadline "${prev_deadline:-}" \
+            '{
+                wave: {
+                    id: $id,
+                    members: $members,
+                    collect_started_at: (if $started == "" then null else ($started | tonumber) end),
+                    collect_deadline_at: (if $deadline == "" then null else ($deadline | tonumber) end),
+                    status: "dispatched"
+                },
+                unlock: false,
+                emit_collect: false,
+                emit_ready: false,
+                defer_reason: "already_dispatched"
+            }'
+        return 0
+    fi
+
     local status="idle" started="" deadline="" unlock=false emit_collect=false emit_ready=false defer=""
 
     if [[ "$dirty_count" -gt 0 && "$clean_count" -eq 0 ]]; then
@@ -215,12 +241,7 @@ mw_advance_wave() {
         defer="dirty_members"
     elif [[ "$dirty_count" -eq 0 ]]; then
         # All owned members clean → ready (early), or stay/dispatch.
-        if [[ "$prev_status" == "dispatched" && "$prev_id" == "$wid" ]]; then
-            status="dispatched"
-            started="$prev_started"
-            deadline="$prev_deadline"
-            defer="already_dispatched"
-        elif [[ "$prev_status" == "ready" && "$prev_id" == "$wid" ]]; then
+        if [[ "$prev_status" == "ready" && "$prev_id" == "$wid" ]]; then
             status="ready"
             started="${prev_started:-$now}"
             deadline="${prev_deadline:-$((now + collect_secs))}"

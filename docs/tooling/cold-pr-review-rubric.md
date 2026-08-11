@@ -63,3 +63,7 @@ Monorepo: `cli/`, `hub/` (or `server/`), `web/`, `shared/`. Run verification fro
 ## After upstream bot comments
 
 Reply to each thread with fix SHA + one sentence. Resolve with `resolveReviewThread`. See [pr-review-loop.md](./pr-review-loop.md).
+
+## Full court press
+
+When the operator wants to **minimize HAPI Bot back-and-forth** on a high-stakes tip, escalate beyond a single cold read: two sequential Cursor agent peers (Claude high-effort, then GPT Sol) — see [pr-review-loop.md § Full court press](./pr-review-loop.md#full-court-press-escalate-when-bot-thrash-must-die). Same severity bar and "run tests before verdict" rules apply to **both** passes.

@@ -41,7 +41,7 @@ Feature agents should **read the relevant doc below at session start**; meta bot
 | [operator-lock.md](./operator-lock.md) | **Portable install** — `install-hapi-operator-lock.sh` (all guards) |
 | [watch-activate-driver.md](./watch-activate-driver.md) | `hapi-watch-activate-driver` - external-only watch; ouroboros guard + excludes |
 | `~/coding/server-setup/config/logrotate/hapi-logs` | **Machine:** rotate `~/.hapi/logs/*.log` (CLI/runner/agent nohup hubs). Prod hub → `journalctl -u hapi-hub`. Install: `sudo cp …/hapi-logs /etc/logrotate.d/hapi-logs` |
-| [pr-review-loop.md](./pr-review-loop.md) | Pre-PR verification + cold review; pre-push open-PR gate; post-push PR comment poll |
+| [pr-review-loop.md](./pr-review-loop.md) | Pre-PR verification + cold review; **full court press** (dual Cursor colds to minimize bot thrash); pre-push open-PR gate; post-push poll |
 | [pr-reply.md](./pr-reply.md) | `hapi-pr-reply` — atomic reply + `resolveReviewThread` for PR review comments. Mandatory for bot/reviewer thread responses (never `gh pr comment` for that) |
 | [cold-pr-review-rubric.md](./cold-pr-review-rubric.md) | Open-PR cold review bar (match upstream HAPI Bot severity) |
 | `scripts/tooling/hapi-pr-create.sh` | Upstream PR gate (leak scan, fork-stage, defaults `--repo tiann/hapi`) |

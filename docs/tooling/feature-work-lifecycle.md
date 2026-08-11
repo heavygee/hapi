@@ -535,7 +535,7 @@ The intake mermaid is the **"operator requests next feature"** path. These cases
 - **Fork sync / branch hygiene** — `hapi-sync-fork-main`, `hapi-branch-audit`; [repo-layout-and-dev-flow.md](../operator/repo-layout-and-dev-flow.md)
 - **Garden** — separate product repo proxying `:3006`; [driver-soup.md](./driver-soup.md)
 - **Windows estate agents** — Teemo scope lock; [windows-estate-agents.md](../operator/windows-estate-agents.md)
-- **PR review loop** — cold review, post-push monitor; [pr-review-loop.md](./pr-review-loop.md)
+- **PR review loop** — cold review, post-push monitor; [pr-review-loop.md](./pr-review-loop.md). High-stakes / minimize bot thrash: **full court press** (two sequential Cursor colds — Claude high-effort then GPT Sol) — same doc § Full court press.
 
 Historical **`docs/plans/`** peer briefings may contradict lifecycle until refreshed — see [DOC-SUPERSESSION.md](../plans/DOC-SUPERSESSION.md).
 

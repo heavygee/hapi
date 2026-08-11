@@ -1,9 +1,9 @@
 # RFC: HAPI Agent-to-Agent (A2A) Control Plane
 
 > **Status:** draft proposal for upstream discussion
-> **Date:** 2026-08-03 (revised 2026-08-04)
+> **Date:** 2026-08-03 (revised 2026-08-04; **Layer 0 peer provenance 2026-08-09**)
 > **Authors:** @heavygee (with community review requested)
-> **Related:** [Discussion #1258](https://github.com/tiann/hapi/discussions/1258), [#1195](https://github.com/tiann/hapi/pull/1195), [#1228](https://github.com/tiann/hapi/pull/1228), [#803](https://github.com/tiann/hapi/pull/803), [#1370](https://github.com/tiann/hapi/issues/1370), [#1371](https://github.com/tiann/hapi/issues/1371)
+> **Related:** [Discussion #1258](https://github.com/tiann/hapi/discussions/1258), [Discussion #1332](https://github.com/tiann/hapi/discussions/1332), [#1195](https://github.com/tiann/hapi/pull/1195), [#1228](https://github.com/tiann/hapi/pull/1228), [#803](https://github.com/tiann/hapi/pull/803), [#1203](https://github.com/tiann/hapi/issues/1203), [#1370](https://github.com/tiann/hapi/issues/1370), [#1371](https://github.com/tiann/hapi/issues/1371)
 
 ---
 
@@ -108,6 +108,53 @@ These are the A2A substrate that already shipped:
 | Manual approval on peer tools | Claude MCP | Human interrupt friction |
 
 **Layer 0 truth:** messaging + discovery. Not yet structured collaboration.
+
+### Revision 2026-08-09 - Layer 0 peer delivery provenance ([#1203](https://github.com/tiann/hapi/issues/1203))
+
+**Status:** independently shippable Layer 0 hardening. **Not** a Layer 1 work-contract / handoff object. Related to A2A because every later handoff *rides* the same delivery path, and today that path lies about authorship.
+
+**Problem (observed):** `ping_peer` POSTs `{ text }` to `POST /api/sessions/:id/messages`. The hub records the row as a normal user message with `meta.sentFrom: "webapp"`. The recipient (agent + human UI) cannot tell peer delivery from operator keystrokes. Prose `From:` headers and AGENTS.md habits are forgeable social convention - useful dogfood, not a contract.
+
+**Contract (Layer 0 only):**
+
+1. When `ping_peer` / `hapi ping-peer` runs inside a wrapped HAPI session, the CLI derives `sourceSessionId` from trusted env (`HAPI_SESSION_ID`) - **never** from a free-form MCP/tool argument.
+2. The hub stores peer-delivered messages with machine-readable metadata, additive-only, for example:
+   ```json
+   {
+     "role": "user",
+     "meta": {
+       "sentFrom": "peer",
+       "peer": {
+         "sourceSessionId": "<uuid>",
+         "sourceName": "<optional metadata.name>"
+       }
+     }
+   }
+   ```
+3. If invoked outside a session (no trusted sender), still mark delivery as peer/CLI-originated with **unknown** source - never as `sentFrom: "webapp"`.
+4. Web UI SHOULD badge peer-originated rows (e.g. "From peer session") and link `/sessions/<sourceSessionId>` when known.
+5. Receiving agents MAY reply with `ping_peer` targeting `meta.peer.sourceSessionId`. No automatic reply loop.
+
+**Kill criteria (this slice):**
+
+- Client-supplied `sourceSessionId` in the request body is accepted as authoritative → stop (forged provenance is worse than none).
+- A client-settable request header (or any claim not bound to an authenticated source-session channel) is the only gate on that body id → stop. Namespace existence checks are not binding. Prefer hub-derived id from the source session's authenticated CLI/socket path; ignore body id. Bare out-of-session CLI → unattributed peer mark is OK.
+- Peer rows remain indistinguishable from operator `webapp` rows in stored `meta` → stop.
+- Receiving agents cannot observe `sourceSessionId` (human UI badge alone) → stop for contract item 5 completeness.
+- Scope creeps into typed handoff / receipt / ledger write → that is **P2**, not this revision. Plain prose `ping_peer` stays Layer 0; this revision only attributes delivery.
+
+**Relationship to Layer 1 / phases:**
+
+| This revision | P2 handoff |
+|---------------|------------|
+| Attributes *who delivered a chat nudge* | Creates a durable work-contract with artifacts, receipts, idempotency |
+| Lives on `messages.meta` | Lives on `events` / `event_links` |
+| Independently useful tomorrow | Requires P1 ledger first |
+| Maps later: `session:<sourceSessionId>` can become a principal id on ledger writes | Does not require this meta field, but MUST NOT contradict it |
+
+Phased delivery gains an optional **P0.5** (or "Layer 0.1") row: trusted peer `sentFrom` + UI badge - before or in parallel with P1. Compatibility matrix: cite / inspect / ping remains Layer 0; **attributed ping** is Layer 0 complete, not Layer 1.
+
+**Non-goals for #1203:** automatic replies, cancellation, durable queue, ack protocol, principal/ledger writes, cross-namespace anything.
 
 ---
 
@@ -443,6 +490,7 @@ Backward compatible default:
 | Capability | Upstream today | This RFC |
 |------------|----------------|----------|
 | cite / inspect / ping | yes | canon as Layer 0 |
+| attributed peer delivery (`sentFrom: peer`) | no (#1203) | Layer 0.1 / P0.5 - not a handoff |
 | message retention | yes | remains |
 | `AGENT_NOTIFY_SUMMARY` parse | yes (#803) | elevate to work-ad feed |
 | cross-session events ledger | no | add |
@@ -469,12 +517,13 @@ This matters here specifically because [#1371](https://github.com/tiann/hapi/iss
 | Phase | Deliverable |
 |-------|-------------|
 | **P0** | This RFC + additive-only object schemas + capability flag |
+| **P0.5** | Layer 0 peer delivery provenance ([#1203](https://github.com/tiann/hapi/issues/1203)) - trusted `meta.sentFrom: "peer"` + source session; UI badge. Not a work-contract. |
 | **P1** | `events` / `event_links` + namespace/principal ownership + isolation tests |
 | **P2** | Handoff create / deliver / receipt (+ notice back to source) |
 | **P3** | `AGENT_NOTIFY_SUMMARY` → work-ad / status ingest |
 | **P4** | Query APIs + minimal debug surfaces (no manager UI) |
 
-Each phase should be independently useful. P1 without P2 still gives a place to put structured status. P2 without P3 still gives explicit handoffs.
+Each phase should be independently useful. P0.5 without P1 still stops ghost user messages. P1 without P2 still gives a place to put structured status. P2 without P3 still gives explicit handoffs.
 
 The smallest useful upstream slice is **P1 alone**: tables, write/query, structured principal, namespace isolation tests - no handoff helper, no UI.
 
@@ -497,6 +546,8 @@ P4's debug surface is an API plus one read-only JSON route. Not a panel.
 - Valid `AGENT_NOTIFY_SUMMARY` can promote into a work-ad / status event
 - Invalid notify line is ignored (no crash, no bogus event)
 - Plain prose `ping_peer` still works unchanged
+- Peer-delivered messages store `meta.sentFrom: "peer"` (never `webapp`); when `HAPI_SESSION_ID` is set, `meta.peer.sourceSessionId` matches that id and is not client-forgeable
+- Request bodies that invent `sourceSessionId` are ignored or rejected (hub derives sender)
 - Event query by `related_session_id` returns that session's A2A history
 - An old client without the capability flag neither offers nor breaks on Layer 1
 

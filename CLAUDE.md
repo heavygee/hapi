@@ -42,3 +42,4 @@ Orchestrator must pass completed vs owned intake steps when spawning peers — t
 - **NEVER `sudo systemctl restart hapi-hub.service`** (or `... hapi-hub.service hapi-runner.service`). It yanks WORKING agents mid-turn. Use **`hapi-restart-hub`** (patient drain, 10min timeout, `--impatient` for hung-hub emergencies). For stack switches use `hapi-use-worktree`. See `docs/tooling/driver-soup.md#patient-restarts-dont-yank-live-agents`.
 - **Upstream PR branches:** from `upstream/main` only; never include `docs/operator/`, `docs/plans/`, or this `CLAUDE.md` in the PR diff (the leak scanner enforces this).
 - **Plans:** `docs/plans/`.
+- **Peer pings:** open with `From: /sessions/<your-id>` — see `docs/operator/AGENTS.md` § Peer message identity (`hapi-ping-peer` auto-stamps when `HAPI_SESSION_ID` is set).

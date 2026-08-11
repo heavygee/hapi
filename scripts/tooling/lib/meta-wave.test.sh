@@ -127,6 +127,15 @@ prev="$(jq -c '.wave' <<<"$(mw_advance_wave '{"status":"idle"}' '[{"pr":896,"sid
 out="$(mw_advance_wave "$prev" '[{"pr":896,"sid":"aaaa","clean":true}]' 3000 1800 0)"
 eq "dispatched sticky" "$(jq -r '.wave.status' <<<"$out")" "dispatched"
 eq "dispatched no unlock" "$(jq -r '.unlock' <<<"$out")" "false"
+eq "dispatched defer" "$(jq -r '.defer_reason' <<<"$out")" "already_dispatched"
+
+# --- dispatched survives dirty flicker (2026-08-10 hourly re-unlock) ---
+flicker="$(mw_advance_wave "$prev" '[{"pr":896,"sid":"aaaa","clean":false}]' 4000 1800 0)"
+eq "dispatched sticky while dirty" "$(jq -r '.wave.status' <<<"$flicker")" "dispatched"
+eq "dispatched dirty no unlock" "$(jq -r '.unlock' <<<"$flicker")" "false"
+out="$(mw_advance_wave "$(jq -c '.wave' <<<"$flicker")" '[{"pr":896,"sid":"aaaa","clean":true}]' 5000 1800 0)"
+eq "dispatched after re-clean" "$(jq -r '.wave.status' <<<"$out")" "dispatched"
+eq "dispatched after re-clean no unlock" "$(jq -r '.unlock' <<<"$out")" "false"
 
 # --- orphans never in members (caller contract) — empty members → idle ---
 out="$(mw_advance_wave '{"status":"ready"}' '[]' 1000 1800 0)"

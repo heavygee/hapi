@@ -13,7 +13,8 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 | When | Do | Detail |
 |------|----|--------|
 | Any local feature / soup / peer work | Read lifecycle first | [`feature-work-lifecycle.md`](../tooling/feature-work-lifecycle.md) (sole workflow) |
-| Message another HAPI session | **PATH tooling only** — never reinvent JWT+curl; never `cd driver/cli && bun run …` | `hapi-ping-peer …` **or** `hapi ping-peer …` (same job; soup `hapi` = `hapi-from-active`, not `~/.bun/bin/hapi`) |
+| Message another HAPI session | **PATH tooling only** + **identify yourself** (see § Peer message identity) | `hapi-ping-peer …` / `hapi ping-peer …`; open with `From: /sessions/<your-id>` (auto-stamped when `HAPI_SESSION_ID` is set) |
+| Peer close-the-loop / status | **Spawn parent only** — never CC Meta PR watcher | § quieter Meta (2026-08-10); intake §0 + spawn-peer skill |
 | Read another HAPI session | Same — no JWT+curl | `hapi inspect-peer <id>` / MCP `inspect_peer` (read-only, no resume). Citations: `[title](/sessions/<id>)` → pass `<id>` |
 | Proof / screenshots / clips for operator | **Inline into HAPI chat** — do not only paste paths | **Estate default:** `~/coding/server-setup/docs/operator-visible-proof.md`. HAPI deep dive: lifecycle [§ Proof tiers](../tooling/feature-work-lifecycle.md#proof-tiers-images-and-video) — MCP `display_image` / `display_video`, or `bun scripts/tooling/hapi-display-image.mjs <session-prefix> <abs-path> [title]` |
 | Stale Cursor `mcp.json` / hub-move MCP panic | **Hub ≠ MCP URL.** Strip project `hapi`/`hapi-*` sidecars; never rewrite `--url` to `:3006`. Live HAPI Cursor sessions overlay **user-level** `~/.cursor/mcp.json` → loopback `hapiMcpUrl` | [`cursor-hapi-mcp.md`](../tooling/cursor-hapi-mcp.md); prune: `hapi-prune-stale-cursor-mcp` |
@@ -21,10 +22,12 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 | Link operator to a file/doc in HAPI chat | Write path as **bare text** — no `[](...)`, no backticks | HAPI auto-links bare paths → in-app file viewer (`remarkFilePathLinks`). Only allowlisted extensions link; **wrap `.mmd`/exotic in a `.md`** so it's clickable + previewable. Tracking: [tiann/hapi#1120](https://github.com/tiann/hapi/issues/1120) |
 | New behavior intake / peer spawn | Follow intake §0 handoff | [`new-feature-intake.md`](../tooling/new-feature-intake.md) |
 | Touch `:3006` soup | `hapi-driver-status --quiet` first (0 idle / 75 busy / **76 remat-hold**); no stack-switch from agent shell; on remat failure **stop** — Meta owns escalation (`hapi-remat-hold status`); **never park peer layers** to unblock rematerialize | Lifecycle § Agent permission matrix; [`driver-soup.md`](../tooling/driver-soup.md) § Remat escalation hold |
+| Resume fails after hub/runner restart (`spawn-happy-session` / `No machine online`) or ACP `agent` not on PATH | Machine id re-enroll orphaned sessions (#1473 gap) and/or multi-runner soup — **not** Quest | Runbook [`machine-reenroll-resume-runbook.md`](../tooling/machine-reenroll-resume-runbook.md); postmortem [`2026-08-10-1473-provenance-dogfood-machine-id-postmortem.md`](../plans/2026-08-10-1473-provenance-dogfood-machine-id-postmortem.md) |
 | Remat conflict on `playwright.config.ts` | Keep soup/fork peer-stack file; cherry-pick tip `testIgnore` only — **never** ask upstreamable tips to absorb annotated-video / fork Playwright | [`peer-stack.md`](../tooling/peer-stack.md#meta-remat-playwrightconfigts-conflicts-2026-07-28) |
 | Re-thin a soup layer after remat conflict | **Not** onto `origin/driver/integration` — use `upstream/main` or the exact pre-layer SHA Meta names; each remat mint may differ | [`driver-soup.md`](../tooling/driver-soup.md#re-thin-bases-2026-07-29--awareness-remat) |
 | Claim wave remat / web soup “green” | Smoke `/sessions` past error boundary **and** `hapi-session-send-smoke` (Send/Enter must not ReferenceError); new `index-*.js` hash if UI was broken; hard-reload / clear Workbox if sticky | [`driver-soup.md`](../tooling/driver-soup.md) § HappyComposer send-intent + When upstream moves |
 | About to claim gates / PR ready | Mechanical verify before assertion | Lifecycle §6 + [`pr-review-loop.md`](../tooling/pr-review-loop.md) |
+| High-stakes upstream tip / "minimize bot thrash" | **Full court press** — Claude→FIX→Sol→FIX→**then** open PR (bot attacks on create; never open early for a URL) | [`pr-review-loop.md` § Full court press](../tooling/pr-review-loop.md#full-court-press-escalate-when-bot-thrash-must-die) |
 | Upstream PR “babysit / merge-ready” | **Prepare only** (agents); lane B self-merge is operator/Meta | § Upstream relationship - lanes A/B/C; #1096; #1268 blessing |
 | Public speech on others' PRs/issues | **Operator first**; no estate jargon; do not police other contributors | § Public GitHub voice |
 | **Daily PR sweep / "the dance"** | Run **`hapi-meta-daily.sh`** — classify → chip status cache → strip title emoji (chipped) → policy-ping → action queue. Don't reinvent it each morning. | § Meta PR watcher (below) |
@@ -35,6 +38,31 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 | Session title / PR health | Title = workstream only (no `PR #N:` once chipped); identity+health on **chip**; attach via `hapi link-pr` / MCP `link_pr` | Lifecycle [§ Session titles and PR chips](../tooling/feature-work-lifecycle.md#session-titles-and-pr-chips) |
 | Local Pi coding agent (5090 / oos-linux) | New Session → **Pi**; backend `oos-llm` VIP | [`pi-local-coding-agent.md`](./pi-local-coding-agent.md) |
 | Agent mangles `tiann`/`oos-linux`/MagicDNS doubles | Free-recall / tokenization hazard - not HAPI pipe. **Outside-Cursor control done (2026-07-24): native claude+codex 0/27 drops** | [`2026-07-22-doubled-character-free-recall.md`](../plans/2026-07-22-doubled-character-free-recall.md) + [outside-cursor results](../plans/2026-07-22-doubled-character-free-recall-outside-cursor-results.md) |
+
+---
+
+## Peer message identity (interim until A2A stamps principal)
+
+> **Upstream track:** [#1203](https://github.com/tiann/hapi/issues/1203) = A2A RFC **P0.5** (Layer 0 delivery provenance - not a P2 work-contract). Peer `6212dae5` / worktree `a2a-p05-peer-provenance` owns the PR. Until that lands, the habit below still applies.
+
+Cross-session pings (`hapi-ping-peer` / MCP `ping_peer`) are **not** intrinsically attributed on the wire today. The recipient sees a user message with no trusted "who sent this" field - shades of the A2A ledger problem (#1332 / notify→events). Until the hub stamps a principal on peer delivery:
+
+**Every agent-authored message to another HAPI session MUST open with:**
+
+```markdown
+From: /sessions/<your-full-or-8+-char-hapi-session-id>
+Name: <optional metadata.name>
+```
+
+Then the body. No exceptions for "obvious from context," Meta briefs, or close-the-loop pings.
+
+| Mechanism | Behavior |
+|-----------|----------|
+| `hapi-ping-peer` (PATH script) | Auto-prepends `From:` when `HAPI_SESSION_ID` is set (runner/agent shells usually export it). Warns on stderr if unset. Skip only with `HAPI_PING_PEER_SKIP_FROM=1` when the body already has a correct `From:`. |
+| MCP `ping_peer` / bare soup CLI (until product stamp) | **You** must include the `From:` lines in the message text. |
+| Operator paste into a chat | Prefer the same header so agents do not treat you as an anonymous peer. |
+
+Forgery is still possible (it is text). The point is a **shared estate habit** so orchestrators stop guessing. Hub-attributed delivery is the real fix ([#1203](https://github.com/tiann/hapi/issues/1203) / A2A RFC **P0.5** - Layer 0 provenance, not a P2 work-contract). Do not invent a parallel auth protocol here.
 
 ---
 
@@ -110,6 +138,27 @@ Default remains **fork-contributor discipline** for product work (PRs from `upst
 - Offering rebase/takeover/scope changes on others' work without operator-approved wording
 
 If @tiann narrows or expands scope, revise this section.
+
+---
+
+## Meta orchestration volume (quieter Meta — 2026-08-09; tightened 2026-08-10)
+
+Meta (`meta - PR watcher`) is **dispatch + queue**, not a party line. Peers must **not** CC Meta by default.
+
+**Hard rule (operator 2026-08-10):** a peer's close-the-loop / status pings go to the **session that spawned them** (originator), **at most**. Do **not** ping Meta PR watcher for IDLE acks, dogfood progress, hub-flip yells, "thanks", or polite status. Meta must **not** solicit those replies ("Yell when…", "please IDLE and ack", "ping me when ready").
+
+| Do | Don't |
+|----|--------|
+| One-shot handoff to a **single owning peer** (feature peer or PR-chip babysitter) | Require every cold/implementer ping to Meta |
+| Spawn a babysit peer onto a PR chip and step away | Stay in the loop for every freeze / Sol / race ACK |
+| Take **one** rollup when Ready YES/NO or blocked for operator judgment | Be CC on close-the-loop (unless Meta **was** the spawn parent) |
+| Remat hold → ping **remat owner** (`config/remat-escalate.yaml` / soup-stabilize), not PR watcher | Treat "ping Meta" as "ping PR watcher" for every soup hiccup |
+
+**Full court press:** orchestrator (or Meta) may spawn pass 1, then **devolve** — implementer owns subsequent cold spawns, fix loops, and freeze discipline. Cold peers ping **implementer only**. Meta PR watcher gets pinged once at Ready YES (upstream draft) or hard block needing **operator** judgment — not for routine peer↔peer coordination. Standing cyber-flag recovery still applies to whoever owns the press (`pr-review-loop.md` § Provider cyber-flag recovery).
+
+**Race noise to avoid:** after Meta/orchestrator already spawned the next cold, do **not** send a second "please spawn Sol" ping — that was the double-ping storm.
+
+**Incident note (2026-08-10):** Meta asked peers for IDLE/hub-flip/dogfood reply loops during a soup storm; that made Quest FCM chattery. Undone — do not reintroduce reply-soliciting Meta briefs.
 
 ---
 
