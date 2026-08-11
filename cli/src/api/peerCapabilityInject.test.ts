@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+    authorizePeerCapInjectClient,
     receivePeerCapabilityFromRunner,
     receiveRunnerProofFromHandoff,
     startPeerCapabilityInjectServer,
@@ -119,6 +120,43 @@ describe('peerCapabilityInject (#1203 pass 2h)', () => {
             })
             await deliver
             expect(capability).toBe('cap-null-cred')
+        } finally {
+            server!.close()
+        }
+    })
+
+    it('authorizePeerCapInjectClient: win32 allows null cred (Bun fd=-1)', () => {
+        expect(authorizePeerCapInjectClient(null, process.pid, 'win32')).toBe(true)
+        expect(authorizePeerCapInjectClient(null, process.pid, 'linux')).toBe(false)
+        expect(authorizePeerCapInjectClient(
+            { pid: process.pid, uid: 0, gid: 0 },
+            process.pid,
+            'win32',
+        )).toBe(true)
+    })
+
+    it('delivers on win32 when server cannot read named-pipe client pid', async () => {
+        Object.defineProperty(process, 'platform', {
+            value: 'win32',
+            configurable: true,
+        })
+        const socketPath = tempSock()
+        const server = await startPeerCapabilityInjectServer({
+            socketPath,
+            // Bun Windows: GetNamedPipeClientProcessId never works (fd=-1).
+            readPeerCred: () => null,
+        })
+        expect(server).not.toBeNull()
+        try {
+            const deliver = server!.deliverTo(process.pid, { sessionCapability: 'cap-win32-null-cred' })
+            const capability = await receivePeerCapabilityFromRunner({
+                socketPath,
+                ownerPid: process.pid,
+                attempts: 20,
+                readPeerCred: () => null,
+            })
+            await deliver
+            expect(capability).toBe('cap-win32-null-cred')
         } finally {
             server!.close()
         }
