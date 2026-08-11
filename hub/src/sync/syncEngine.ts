@@ -175,6 +175,8 @@ export class SyncEngine {
             console.log(
                 `[overseer] LLM summary fallback ENABLED (api=${llmFallbackConfig.api}, model=${llmFallbackConfig.model}, base=${redactOverseerLlmBaseUrlForLog(llmFallbackConfig.baseUrl)})`
             )
+        } else if (llmFallbackConfig.reasonDisabled !== 'flag_off') {
+            console.warn(`[overseer] LLM summary fallback disabled (${llmFallbackConfig.reasonDisabled})`)
         }
         this.overseerEvents = new OverseerEventRecorder(store.events, store.inbox, {
             llmFallback,

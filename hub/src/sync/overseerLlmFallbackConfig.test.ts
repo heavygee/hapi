@@ -139,6 +139,18 @@ describe('loadOverseerLlmFallbackConfig', () => {
         expect(userinfo.enabled).toBe(false)
         if (userinfo.enabled) throw new Error('expected disabled')
         expect(userinfo.reasonDisabled).toBe('invalid_base_url')
+
+        process.env.HAPI_OVERSEER_LLM_BASE_URL = 'https://host/v1?'
+        const emptyQuery = loadOverseerLlmFallbackConfig()
+        expect(emptyQuery.enabled).toBe(false)
+        if (emptyQuery.enabled) throw new Error('expected disabled')
+        expect(emptyQuery.reasonDisabled).toBe('invalid_base_url')
+
+        process.env.HAPI_OVERSEER_LLM_BASE_URL = 'https://host/v1#'
+        const emptyHash = loadOverseerLlmFallbackConfig()
+        expect(emptyHash.enabled).toBe(false)
+        if (emptyHash.enabled) throw new Error('expected disabled')
+        expect(emptyHash.reasonDisabled).toBe('invalid_base_url')
     })
 
     it('redacts URL userinfo for startup logs', () => {

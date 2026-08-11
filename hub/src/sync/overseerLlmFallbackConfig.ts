@@ -63,7 +63,8 @@ function isAbsoluteHttpUrl(value: string): boolean {
     try {
         const parsed = new URL(value)
         if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false
-        if (parsed.search !== '' || parsed.hash !== '') return false
+        // URL() strips empty `?` / `#`; joinUrl would then glue the path into query/hash.
+        if (value.includes('?') || value.includes('#')) return false
         if (parsed.username !== '' || parsed.password !== '') return false
         return true
     } catch {
