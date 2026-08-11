@@ -167,7 +167,6 @@ describe('machine metadata backfill', () => {
         expect(refreshed.metadata).toEqual({
             host: 'MacBook Pro',
             platform: 'darwin',
-            capabilities: [],
         })
         expect(refreshed.metadataVersion).toBe(created.metadataVersion + 1)
     })
@@ -191,7 +190,6 @@ describe('machine metadata backfill', () => {
         expect(refreshed.metadata).toEqual({
             displayName: 'Workstation',
             host: 'new-host',
-            capabilities: [],
         })
     })
 
@@ -401,7 +399,6 @@ describe('runner capabilities backfill', () => {
         expect(refreshed.metadata).toEqual({
             host: 'new-host',
             happyCliVersion: '0.28.0',
-            capabilities: [],
         })
         expect(refreshed.metadataVersion).toBe(created.metadataVersion + 1)
         expect(refreshed.runnerState).toEqual({

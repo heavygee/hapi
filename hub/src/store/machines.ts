@@ -227,7 +227,12 @@ export function getOrCreateMachine(
         // (version/capabilities from the first connect). Refresh identity when
         // the client sends newer registration fields.
         if (machineRegistrationNeedsRefresh(stored.metadata, metadata)) {
-            const merged = mergeMachineRegistrationMetadata(stored.metadata, metadata)
+            const identityMerged = mergeMachineRegistrationMetadata(stored.metadata, metadata)
+            // Identity merge starts from incoming but keeps capabilities: [].
+            // Runner re-register must omit ads entirely (#1108 sticky supervisedRestart).
+            const merged = mergeMachineMetadata(identityMerged, metadata, {
+                clearOmittedRunnerAds: true,
+            }) ?? identityMerged
             const result = updateMachineMetadata(
                 db,
                 id,
