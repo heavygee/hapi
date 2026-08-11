@@ -29,6 +29,8 @@ describe('isKnownSpaHref', () => {
         '/sessions',
         '/sessions/abc-def',
         '/sessions/abc/file',
+        '/sessions/abc/files',
+        '/sessions/abc/terminal',
         '/browse',
         '/share',
         '#section',
@@ -45,6 +47,10 @@ describe('isKnownSpaHref', () => {
         './foo',
         '../escape.md',
         '//example.com/path',
+        '/settings/typo',
+        '/browse/extra',
+        '/sessions/id/unknown',
+        '/share/extra',
     ])('does not treat %s as SPA', (href) => {
         expect(isKnownSpaHref(href)).toBe(false)
     })
@@ -104,6 +110,22 @@ describe('classifyNoSchemeHref — fail-closed (#1452)', () => {
         expect(classifyNoSchemeHref('/etc/passwd.sh', { workspacePath: workspace })).toEqual({
             action: 'inert',
         })
+    })
+
+    it('renders absolute paths without workspace metadata as inert (fail closed)', () => {
+        expect(classifyNoSchemeHref('/home/ada/coding/hapi/docs/a.md')).toEqual({ action: 'inert' })
+    })
+
+    it('rejects tilde paths that lexically escape the workspace via ..', () => {
+        expect(classifyNoSchemeHref('~/coding/hapi/../secret.ts', { workspacePath: workspace })).toEqual({
+            action: 'inert',
+        })
+    })
+
+    it('treats nonexistent SPA children as inert, not navigate', () => {
+        expect(classifyNoSchemeHref('/settings/typo')).toEqual({ action: 'inert' })
+        expect(classifyNoSchemeHref('/browse/extra')).toEqual({ action: 'inert' })
+        expect(classifyNoSchemeHref('/sessions/id/unknown')).toEqual({ action: 'inert' })
     })
 
     it('renders unresolvable ~/ without workspace as inert (never SPA)', () => {

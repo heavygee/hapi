@@ -168,11 +168,11 @@ function linkInlineCodeNode(node: MarkdownNode): MarkdownNode | null {
 //
 // Accepts:
 // - repo-relative allowlisted paths (including `./` and `#fragment` / `:line` stripped)
-// - POSIX / Windows absolute paths with allowlisted extensions (CLI validatePath
-//   still enforces workspace containment at read time)
+// - Windows absolute paths with allowlisted extensions (CLI validatePath still
+//   enforces workspace containment at read time)
 //
-// Still rejects: `~/` (needs session cwd to expand — handled in <A>), `../`,
-// scheme-bearing URLs, and non-file targets (`/settings`, `#section`).
+// Still rejects: POSIX abs / `~/` (need session cwd — handled fail-closed in <A>),
+// `../`, scheme-bearing URLs, and non-file targets (`/settings`, `#section`).
 function rewriteFileLinkNode(node: MarkdownNode): void {
     if (node.type !== 'link') return
     const url = node.url
@@ -191,12 +191,11 @@ function rewriteFileLinkNode(node: MarkdownNode): void {
     const target = stripLineSuffix(withoutMeta)
     if (!isWindowsAbsolutePath(target) && target.includes(':')) return
 
-    // Absolute file paths: allow when extension is known. Relative: shouldLinkPath.
-    const isAbsFile =
-        (target.startsWith('/') || isWindowsAbsolutePath(target)) &&
-        hasKnownFileExtension(target) &&
-        !target.startsWith('//')
-    if (!isAbsFile && !shouldLinkPath(target)) return
+    // POSIX absolute paths need chat workspace metadata for containment — leave
+    // them for <A> / classifyNoSchemeHref instead of painting a premature hapi-file link.
+    if (target.startsWith('/') && !target.startsWith('//')) return
+
+    if (!shouldLinkPath(target)) return
 
     node.url = createFileHref(target)
 }

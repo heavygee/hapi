@@ -180,9 +180,11 @@ describe('remarkFilePathLinks — explicit markdown links', () => {
         expect(linkedPath(nodes.find((n) => n.type === 'link')!)).toBe('docs/foo.md')
     })
 
-    it('rewrites an in-workspace-shaped absolute POSIX file link', () => {
+    it('does not rewrite POSIX absolute file links (containment needs session cwd in <A>)', () => {
         const nodes = transformNodes([linkNode('/home/ada/coding/hapi/docs/a.md')])
-        expect(linkedPath(nodes.find((n) => n.type === 'link')!)).toBe('/home/ada/coding/hapi/docs/a.md')
+        const link = nodes.find((n) => n.type === 'link')!
+        expect(decodeFilePathHref(link.url as string)).toBeNull()
+        expect(link.url).toBe('/home/ada/coding/hapi/docs/a.md')
     })
 
     it.each([
@@ -199,6 +201,8 @@ describe('remarkFilePathLinks — explicit markdown links', () => {
         'https://example.com/a.md',
         'mailto:dev@example.com',
         'obsidian://open?file=a.md',
+        '/abs/path.md',
+        '/etc/passwd.sh',
         '~/home.md',
         '../escape.md',
         'foo:bar.md',

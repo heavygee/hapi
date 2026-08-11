@@ -13,7 +13,27 @@ export type MarkdownHrefDecision =
     | { action: 'file'; path: string }
     | { action: 'inert' }
 
-const SPA_ROOT_PREFIXES = ['/settings', '/sessions', '/browse', '/share'] as const
+const STATIC_SPA_PATHS = new Set([
+    '/',
+    '/browse',
+    '/share',
+    '/sessions',
+    '/settings',
+    '/settings/general',
+    '/settings/display',
+    '/settings/chat',
+    '/settings/voice',
+    '/settings/voice/voices',
+    '/settings/voice/advanced',
+    '/settings/machines',
+    '/settings/about',
+    '/settings/storage',
+    '/settings/usage',
+])
+
+// /sessions/<id> plus known children only (files | file | terminal).
+const SESSION_SPA_PATH =
+    /^\/sessions\/[^/]+(?:\/(?:files|file|terminal))?\/?$/
 
 export function splitHrefMeta(href: string): { path: string; suffix: string } {
     const hashIdx = href.indexOf('#')
@@ -45,9 +65,10 @@ export function hasKnownFileExtension(value: string): boolean {
 export function isKnownSpaHref(href: string): boolean {
     if (href.startsWith('#') || href.startsWith('?')) return true
     if (href.startsWith('//')) return false
-    const { path } = splitHrefMeta(href)
-    if (path === '/' || path === '') return true
-    return SPA_ROOT_PREFIXES.some((root) => path === root || path.startsWith(`${root}/`))
+    const { path: raw } = splitHrefMeta(href)
+    const path = raw.replace(/\/+$/, '') || '/'
+    if (STATIC_SPA_PATHS.has(path)) return true
+    return SESSION_SPA_PATH.test(path)
 }
 
 export function inferHomeDir(workspacePath: string): string | null {
@@ -70,11 +91,43 @@ export function expandTildePath(path: string, workspacePath: string | null | und
     return `${home}/${rest}`
 }
 
+/** Lexically resolve `.` / `..`; return null if `..` escapes above the root. */
+export function resolveLexicalPath(absPath: string): string | null {
+    const norm = absPath.replace(/\\/g, '/')
+    const absolute = norm.startsWith('/')
+    const drive = /^[A-Za-z]:/.exec(norm)
+    const parts = norm.split('/')
+    const out: string[] = []
+    for (const part of parts) {
+        if (part === '' || part === '.') continue
+        if (drive && part === drive[0]) {
+            out.push(part)
+            continue
+        }
+        if (part === '..') {
+            if (out.length === 0) return null
+            // Do not pop a Windows drive root segment.
+            if (out.length === 1 && /^[A-Za-z]:$/.test(out[0]!)) return null
+            out.pop()
+            continue
+        }
+        out.push(part)
+    }
+    if (absolute) return `/${out.join('/')}`
+    if (drive) {
+        const [root, ...rest] = out
+        return rest.length === 0 ? `${root}\\` : `${root}\\${rest.join('\\')}`
+    }
+    return out.join('/')
+}
+
 export function isWithinWorkspace(absPath: string, workspacePath: string): boolean {
-    const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '')
-    const target = norm(absPath)
-    const root = norm(workspacePath)
-    return target === root || target.startsWith(`${root}/`)
+    const target = resolveLexicalPath(absPath)
+    const root = resolveLexicalPath(workspacePath)
+    if (!target || !root) return false
+    const normTarget = target.replace(/\\/g, '/').replace(/\/+$/, '')
+    const normRoot = root.replace(/\\/g, '/').replace(/\/+$/, '')
+    return normTarget === normRoot || normTarget.startsWith(`${normRoot}/`)
 }
 
 function isRepoRelativeCandidate(path: string): boolean {
@@ -118,15 +171,17 @@ export function classifyNoSchemeHref(
         return { action: 'file', path }
     }
 
+    // Absolute / tilde targets need workspace metadata so we can fail closed on
+    // out-of-tree paths (remark deliberately does not rewrite POSIX abs).
     if (isWindowsAbsolutePath(path) && hasKnownFileExtension(path)) {
-        if (workspacePath && !isWithinWorkspace(path, workspacePath)) {
+        if (!workspacePath || !isWithinWorkspace(path, workspacePath)) {
             return { action: 'inert' }
         }
         return { action: 'file', path }
     }
 
     if (path.startsWith('/') && hasKnownFileExtension(path)) {
-        if (workspacePath && !isWithinWorkspace(path, workspacePath)) {
+        if (!workspacePath || !isWithinWorkspace(path, workspacePath)) {
             return { action: 'inert' }
         }
         return { action: 'file', path }
@@ -136,7 +191,7 @@ export function classifyNoSchemeHref(
         if (!hasKnownFileExtension(path)) return { action: 'inert' }
         const expanded = expandTildePath(path, workspacePath)
         if (!expanded) return { action: 'inert' }
-        if (workspacePath && !isWithinWorkspace(expanded, workspacePath)) {
+        if (!workspacePath || !isWithinWorkspace(expanded, workspacePath)) {
             return { action: 'inert' }
         }
         return { action: 'file', path: expanded }

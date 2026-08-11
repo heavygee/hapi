@@ -326,6 +326,15 @@ describe('markdown <A> component — fail-closed path-like hrefs (#1452)', () =>
         expect(document.querySelector('.aui-md-a-inert')).toBeNull()
     })
 
+    it('keeps outside-workspace absolute file href inert even with chat present', () => {
+        renderA(
+            { href: '/etc/passwd.sh', children: 'etc' },
+            chatContext()
+        )
+        expect(document.querySelector('a')).toBeNull()
+        expect(document.querySelector('.aui-md-a-inert')?.textContent).toBe('etc')
+    })
+
     it('expands ~/ and routes to FilePathAnchor when workspace metadata is present', () => {
         renderA(
             { href: '~/coding/hapi/docs/a.md', children: 'tilde' },
