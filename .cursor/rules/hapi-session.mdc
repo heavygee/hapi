@@ -14,6 +14,26 @@ AGENT_NOTIFY_SUMMARY {"version":1,"agent":"<agent-id>","project":"hapi","status"
 Guidance:
 - status: pick the closest value; use "blocked" if unsure.
 - action: concrete next step (required when status is "done" and follow-up
-  remains); 12 words or fewer.
-- summary: one-line triage of what this turn did.
+  remains); 12 words or fewer. This field drives phone/voice TTS - write it
+  for a human who is not looking at a session list.
+- summary: one-line triage of what this turn did (also operator-facing via
+  FCM / notify body). Same human-language bar as action.
 - Keep it as the very last line of every response.
+
+## Operator-facing session identity (mandatory)
+
+Phone, voice, and notify surfaces show `action` / `summary` with **no**
+sidebar. Bare session hashes (`6ce7f124`, `sid8`, UUID prefixes) are
+**forbidden** in `action`, `summary`, chat replies to the operator, and
+peer pings the operator will hear/read.
+
+When referring to another HAPI session / agent:
+
+1. **Lead with the display name** (`metadata.name` / session title), e.g.
+   "upstream issue/pr discovery".
+2. Optional trailing id only if useful for agents: `"Name" (/sessions/<id>)`.
+3. If the name is missing, say so explicitly ("unnamed session on path …") -
+   still never lead with a naked hash.
+
+Bad: `6ce7f124 not current WORKING`
+Good: `upstream issue/pr discovery not blocking drain`

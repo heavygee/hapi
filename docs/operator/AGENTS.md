@@ -39,6 +39,21 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 | Local Pi coding agent (5090 / oos-linux) | New Session → **Pi**; backend `oos-llm` VIP | [`pi-local-coding-agent.md`](./pi-local-coding-agent.md) |
 | Agent mangles `tiann`/`oos-linux`/MagicDNS doubles | Free-recall / tokenization hazard - not HAPI pipe. **Outside-Cursor control done (2026-07-24): native claude+codex 0/27 drops** | [`2026-07-22-doubled-character-free-recall.md`](../plans/2026-07-22-doubled-character-free-recall.md) + [outside-cursor results](../plans/2026-07-22-doubled-character-free-recall-outside-cursor-results.md) |
 | Blocked on a missing host diagnostic (`strace`, `lsof`, `bpftrace`, …) | **Install it** (`sudo apt-get install -y …`), tell the operator you did, continue — estate-wide, every agent/flavor on this host; not a per-session courtesy | Keep installs scoped to the missing tool; no drive-by package museums |
+| Phone / voice / `AGENT_NOTIFY_SUMMARY` mentions another session | **Display name first** — never bare `sid8` / UUID in `action`, `summary`, or operator-facing prose | § Operator-facing session names; Cursor rule `hapi-session.mdc` |
+
+---
+
+## Operator-facing session names (phone / voice / notify)
+
+The operator often hears `AGENT_NOTIFY_SUMMARY.action` (TTS) and reads `summary` on phone FCM **without** the session sidebar. A line like `6ce7f124 not current WORKING` is worse than useless.
+
+**Rule (all agents on this host):** when referring to another HAPI session in chat to the operator, in Meta/peer pings the operator will see, or in `AGENT_NOTIFY_SUMMARY` `action`/`summary`:
+
+1. Lead with **`metadata.name` / session title** (e.g. `upstream issue/pr discovery`).
+2. Optional id only as a trailer for agents: `"Name" (/sessions/<id>)`.
+3. If unnamed: say `unnamed session on <path>` — still never lead with a naked hash.
+
+Canon also in `.cursor/rules/hapi-session.mdc` (alwaysApply).
 
 ---
 
