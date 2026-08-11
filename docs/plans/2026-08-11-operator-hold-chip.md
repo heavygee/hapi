@@ -75,7 +75,7 @@ Soup: awareness layer already owns the chip. Track A ships classifier on fork `m
 ### Tests
 
 - `pr-emoji-core.test.sh`: rank 7 beats ⚠️; `pec_status_from_emoji 🛑` = `needs_operator`; strip leading 🛑 from titles
-- Meta daily test: human tiann comment → hold; bot Findings → no hold; ack fingerprint → back to live classify
+- Meta daily test: human tiann comment → hold; bot Findings → no hold; ack fingerprint → back to live classify; hold ingest gated on owned `(repo, number)` (unlinked colliding tiann#N must not latch)
 - Web chip test (awareness layer): pulse class present iff hold
 
 ### Agent canon (one paragraph, High-signal later)

@@ -1213,6 +1213,67 @@ check "upstream discover: classifies tiann and fork" "grep -q -- '--repo heavyge
 check "upstream discover: fork session not painted closed" "! grep -q 'e76e5a9f  →  ⚠️' <<<\"\$out\" || grep -q 'CI running' <<<\"\$out\""
 check "upstream discover: tiann#124 is orphan" "grep -q 'tiann/hapi#124' <<<\"\$out\" && grep -qi 'NO HAPI session\\|orphan' <<<\"\$out\""
 
+# Hold ingest must be pair-owned. Authored tiann#124 + fork chip on heavygee#124
+# used to pass the number-only PR_SESSIONS gate and latch a stale upstream 🛑.
+rm -f "$WORK/state.json" "$WORK/pings.log" "$WORK/events.log" "$WORK/gh.args"
+cat >"$WORK/gh" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+echo "$args" >> "${HAPI_META_GH_ARGS_LOG:-/dev/null}"
+if [[ "$args" == *"pr list"* && "$args" == *"--state open"* ]]; then
+    printf '124\n'; exit 0
+fi
+if [[ "$args" == *"pr list"* && "$args" == *"merged"* ]]; then
+    exit 0
+fi
+if [[ "$args" == *"repos/tiann/hapi/issues/124/comments"* ]]; then
+    cat <<'JSON'
+[{"id":9001,"user":{"login":"tiann","type":"User"},"body":"hold the fork work","html_url":"https://github.com/tiann/hapi/pull/124#issuecomment-9001","created_at":"2026-08-11T22:00:00Z"}]
+JSON
+    exit 0
+fi
+if [[ "$args" == *"repos/heavygee/hapi/issues/124/comments"* ]]; then
+    cat <<'JSON'
+[{"id":9002,"user":{"login":"tiann","type":"User"},"body":"please hold this fork PR","html_url":"https://github.com/heavygee/hapi/pull/124#issuecomment-9002","created_at":"2026-08-11T22:01:00Z"}]
+JSON
+    exit 0
+fi
+if [[ "$args" == *"/reviews"* ]]; then
+    echo '[]'; exit 0
+fi
+if [[ "$args" == *"notifications"* ]]; then
+    exit 0
+fi
+exit 0
+EOF
+chmod +x "$WORK/gh"
+cat >"$WORK/curl" <<EOF
+#!/usr/bin/env bash
+args="\$*"
+if [[ "\$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
+if [[ "\$args" == *"-X PATCH"* ]]; then echo '{"ok":true}'; exit 0; fi
+if [[ "\$args" == *"/api/system-events"* && "\$args" == *"-X POST"* ]]; then
+    echo "\$args" >> "$WORK/events.log"
+    echo '{"event":{"id":1},"deduped":false}'; exit 0
+fi
+if [[ "\$args" == *"/api/sessions?limit=500"* ]]; then
+cat <<'JSON'
+{"sessions":[
+ {"id":"e76e5a9f-a7e3-463b-888c-f0f294b369f9","active":true,"metadata":{"name":"Peer #121: operator hold chip","path":"/home/heavygee/coding/hapi/worktrees/operator-hold-chip","externalRefs":[{"kind":"github_pr","repo":"heavygee/hapi","number":124,"url":"https://github.com/heavygee/hapi/pull/124","role":"primary"}]}}
+]}
+JSON
+exit 0
+fi
+echo '{}'; exit 0
+EOF
+chmod +x "$WORK/curl"
+out="$(HAPI_META_GH_ARGS_LOG="$WORK/gh.args" run 2>&1)"
+check "hold pair-own: heavygee latch only" "jq -e --arg k 'heavygee/hapi#124' '.hold[\$k].acked == false' '$WORK/state.json' >/dev/null"
+check "hold pair-own: unlinked tiann not latched" "! jq -e --arg k 'tiann/hapi#124' '.hold | has(\$k)' '$WORK/state.json' >/dev/null"
+check "hold pair-own: skip tiann comment fetch" "! grep -q 'repos/tiann/hapi/issues/124/comments' '$WORK/gh.args'"
+check "hold pair-own: fetch owned fork comments" "grep -q 'repos/heavygee/hapi/issues/124/comments' '$WORK/gh.args'"
+check "hold pair-own: OPERATOR HOLD is fork #124" "grep -A6 'OPERATOR HOLD' <<<\"\$out\" | grep -q 'heavygee/hapi#124\\| #124'"
+
 # hold-ack must not claim success when jq cannot serialize.
 mkdir -p "$WORK/jqbin"
 cat >"$WORK/jqbin/jq" <<'EOF'

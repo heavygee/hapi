@@ -685,6 +685,7 @@ main() {
     # Linked → hapi or not. Unlinked → invisible to Meta. No Peer/PR/# title scrape.
     declare -A SESS_ID SESS_ACTIVE SESS_NAME SESS_PRS SESS_REFS SESS_PATH SESS_LIFECYCLE SESS_THINKING SESS_PR_REPO
     declare -A PR_SESSIONS      # pr -> "sid8,sid8"
+    declare -A PAIR_OWNED       # repo#number -> 1 (session chips that exact pair)
     declare -A ALL_PR           # pr -> 1
     declare -A MERGED_TITLE
     declare -A PR_REPO          # pr -> owner/name (from chip; prefer tiann/hapi)
@@ -736,6 +737,7 @@ main() {
             ' 2>/dev/null || true)"
             if [[ -n "$chip_repo" ]]; then
                 SESS_PR_REPO["$sid8:$p"]="$chip_repo"
+                PAIR_OWNED["$chip_repo#$p"]=1
                 if [[ "${PR_REPO[$p]:-}" != "$UPSTREAM_REPO" ]]; then
                     PR_REPO["$p"]="$chip_repo"
                 fi
@@ -866,16 +868,17 @@ main() {
     MD_EMIT_FAILURES=0
     local now_ms=$(( now * 1000 ))
 
-    # Ingest 🛑 from chipped (repo, number) pairs only. Orphans and prePr
-    # (issue-number 404 on /pulls) must not latch. Overlay is per-session below
-    # so tiann#N and heavygee#N do not clobber each other.
+    # Ingest 🛑 from chipped (repo, number) pairs only. PAIR_SEEN also
+    # includes authored upstream numbers that collide with a fork chip;
+    # PR_SESSIONS is number-only and would ingest the unlinked repo.
+    # Orphans and prePr (issue-number 404 on /pulls) must not latch.
     local hold_csv hrepo over hold_action pair_key_h p_h
     hold_csv="$(md_hold_logins)"
     vlog "hold logins: $hold_csv"
     for pair_key_h in "${!PAIR_SEEN[@]}"; do
         hrepo="${pair_key_h%\#*}"
         p_h="${pair_key_h##*\#}"
-        [[ -n "${PR_SESSIONS[$p_h]:-}" ]] || continue
+        [[ -n "${PAIR_OWNED[$pair_key_h]:-}" ]] || continue
         [[ "${PR_BY_REPO_PREPR[$pair_key_h]:-false}" == "true" ]] && continue
         new_state="$(md_hold_ingest "$new_state" "$hrepo" "$p_h" "$hold_csv")"
     done
@@ -1156,14 +1159,7 @@ main() {
     for pair_o in "${!PAIR_SEEN[@]}"; do
         r_o="${pair_o%\#*}"
         p="${pair_o##*\#}"
-        local owned_o=0 sid_o
-        for sid_o in "${!SESS_ID[@]}"; do
-            if [[ "${SESS_PR_REPO[$sid_o:$p]:-}" == "$r_o" ]]; then
-                owned_o=1
-                break
-            fi
-        done
-        [[ "$owned_o" -eq 1 ]] && continue
+        [[ -n "${PAIR_OWNED[$pair_o]:-}" ]] && continue
         local e="${PR_BY_REPO_EMOJI[$pair_o]:-${PR_EMOJI[$p]:-?}}"
         case "$e" in
             🔧) Q_ORPHAN+=("$r_o#$p 🔧 merged, no owning session — confirm wave cleanup done / archive") ;;
