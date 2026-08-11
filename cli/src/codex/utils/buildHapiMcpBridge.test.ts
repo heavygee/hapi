@@ -14,8 +14,8 @@ vi.mock('@/claude/utils/startHappyServer', () => ({
         return {
             url: 'http://127.0.0.1:43006/',
             toolNames: options.skillLookup
-                ? ['change_title', 'display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer', 'session_job', 'skill_lookup']
-                : ['change_title', 'display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer', 'session_job'],
+                ? ['change_title', 'display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer', 'spawn_peer', 'session_job', 'skill_lookup']
+                : ['change_title', 'display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer', 'spawn_peer', 'session_job'],
             stop: vi.fn()
         }
     })
@@ -71,7 +71,7 @@ describe('buildHapiMcpBridge skill lookup config', () => {
             '--url',
             'http://127.0.0.1:43006/',
             '--tools',
-            'change_title,display_image,display_video,display_media,list_peers,ping_peer,inspect_peer,session_job,skill_lookup'
+            'change_title,display_image,display_video,display_media,list_peers,ping_peer,inspect_peer,spawn_peer,session_job,skill_lookup'
         ])
         expect(bridge.mcpServers.hapi.tools).toEqual({
             display_image: { approval_mode: 'prompt' },
@@ -88,7 +88,7 @@ describe('buildHapiMcpBridge skill lookup config', () => {
         const bridge = await buildHapiMcpBridge(createClient())
 
         expect(harness.cliArgs.at(-1)).toBe(
-            'change_title,display_image,display_video,display_media,list_peers,ping_peer,inspect_peer,session_job'
+            'change_title,display_image,display_video,display_media,list_peers,ping_peer,inspect_peer,spawn_peer,session_job'
         )
         expect(bridge.mcpServers.hapi.tools).toEqual({
             display_image: { approval_mode: 'prompt' },

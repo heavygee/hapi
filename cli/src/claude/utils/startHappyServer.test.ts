@@ -117,6 +117,7 @@ describe('startHappyServer skill_lookup', () => {
             'list_peers',
             'ping_peer',
             'session_job',
+            'spawn_peer',
         ].sort())
     })
 
@@ -162,6 +163,7 @@ describe('startHappyServer skill_lookup', () => {
             'list_peers',
             'ping_peer',
             'inspect_peer',
+            'spawn_peer',
             'session_job',
         ])
         expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
@@ -172,6 +174,7 @@ describe('startHappyServer skill_lookup', () => {
             'list_peers',
             'ping_peer',
             'session_job',
+            'spawn_peer',
         ].sort())
     })
 
@@ -187,6 +190,7 @@ describe('toClaudeAllowedHapiMcpTools', () => {
             'list_peers',
             'ping_peer',
             'inspect_peer',
+            'spawn_peer',
             'session_job',
             'skill_lookup'
         ])).toEqual([
