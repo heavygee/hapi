@@ -115,4 +115,24 @@ describe('CLI argv normalization', () => {
             'login'
         ])).toEqual(['auth', 'login'])
     })
+
+    it('does not re-insert -- for hapi -- auth login', () => {
+        const hapiBin = process.execPath
+        expect(normalizeCliArgs([
+            hapiBin,
+            '--',
+            'auth',
+            'login'
+        ])).toEqual(['auth', 'login'])
+    })
+
+    it('preserves later -- for hapi codex -- --model o3 (command-owned separator)', () => {
+        expect(normalizeCliArgs([
+            exec,
+            'codex',
+            '--',
+            '--model',
+            'o3'
+        ])).toEqual(['codex', '--', '--model', 'o3'])
+    })
 })
