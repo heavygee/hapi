@@ -208,6 +208,15 @@ describe('hub-owned conversational focus (capability, not pattern matching)', ()
                 source: 'tool_resolve'
             })
         )
+        // Injected unsupported sessionId on disposition args must not retarget focus.
+        const poisoned = applyFocusFromToolResolve(focus(), {
+            tool: 'record_disposition',
+            ok: true,
+            args: { itemId: 118, action: 'done', sessionId: SESSION_B },
+            result: { ok: true, itemId: 118 }
+        })
+        expect(poisoned?.sessionId).toBe(SESSION_A)
+        expect(poisoned?.itemId).toBe(118)
     })
 
     it('does not promote an ungranted itemId from a successful ping', () => {

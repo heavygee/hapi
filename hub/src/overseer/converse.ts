@@ -115,10 +115,15 @@ function subjectsCompatible(
     a: OverseerConverseFocus,
     b: OverseerConverseFocus
 ): boolean {
+    const aItem = a.itemId != null && a.itemId > 0 ? a.itemId : null
+    const bItem = b.itemId != null && b.itemId > 0 ? b.itemId : null
+    // Distinct inbox items are never the same referent, even on one session.
+    if (aItem != null && bItem != null && aItem !== bItem) return false
+
     const aSession = a.sessionId?.trim().toLowerCase() || null
     const bSession = b.sessionId?.trim().toLowerCase() || null
     if (aSession && bSession && aSession === bSession) return true
-    if (a.itemId != null && b.itemId != null && a.itemId === b.itemId) return true
+    if (aItem != null && bItem != null && aItem === bItem) return true
     return false
 }
 

@@ -257,9 +257,11 @@ export function applyFocusFromToolResolve(
     if (tool === 'record_disposition') {
         const itemId = typeof args.itemId === 'number' ? args.itemId : itemFromResult(result)
         if (itemId == null) return previous
+        // Never read sessionId from raw model args — Zod strips it before the
+        // write runs; accepting it here would let an injected arg retarget focus.
         const sessionId =
             sessionFromResult(result) ??
-            (typeof args.sessionId === 'string' ? args.sessionId.trim() : null)
+            (previous?.itemId === itemId ? previous.sessionId : null)
         return {
             sessionId: sessionId || null,
             itemId,

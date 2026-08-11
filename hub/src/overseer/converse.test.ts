@@ -640,6 +640,50 @@ describe('runOverseerConverse', () => {
         expect(focus?.itemId).toBe(1)
     })
 
+    it('treats two different inbox items on the same session as multi-subject', async () => {
+        const sessionA = '6cd8d0c3-aaaa-bbbb-cccc-ddddeeeeffff'
+        const entity = {
+            ...fakeOverseer,
+            explainPriority: ({ itemId }: { itemId: number }) => ({
+                inboxItemId: itemId,
+                relatedSessionId: sessionA,
+                title: `item-${itemId}`
+            })
+        } as unknown as OverseerEntity
+
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(chatResponse({
+                role: 'assistant',
+                content: '',
+                tool_calls: [
+                    {
+                        id: 'c1',
+                        type: 'function',
+                        function: { name: 'explain_priority', arguments: '{"itemId":1}' }
+                    },
+                    {
+                        id: 'c2',
+                        type: 'function',
+                        function: { name: 'explain_priority', arguments: '{"itemId":2}' }
+                    }
+                ]
+            }))
+            .mockResolvedValueOnce(chatResponse({
+                role: 'assistant',
+                content: 'Compared both items.'
+            }))
+        setFetch(fetchMock)
+
+        const { focus } = await runOverseerConverse({
+            overseer: entity,
+            config,
+            messages: [{ role: 'operator', content: 'compare item 1 and 2' }],
+            focus: null
+        })
+
+        expect(focus).toBeNull()
+    })
+
     it('still retargets when a non-retargeting read precedes a real subject change', async () => {
         const sessionA = '6cd8d0c3-aaaa-bbbb-cccc-ddddeeeeffff'
         const sessionB = '96f67085-1111-2222-3333-444455556666'
