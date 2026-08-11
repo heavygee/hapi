@@ -165,6 +165,10 @@ export class OverseerEventRecorder {
     /** Latest no-notify assistant text awaiting end-of-turn LLM attempt. */
     private readonly pendingLlmFallback = new Map<string, PendingLlmFallback>()
     private readonly sessionThinking = new Map<string, boolean>()
+    /** Per-session tail so concurrent LLM calls insert in arrival order. */
+    private readonly sessionWork = new Map<string, Promise<unknown>>()
+    /** Sessions that already got a hub-llm-fallback row for the latest missed turn. */
+    private readonly llmFallbackSucceeded = new Set<string>()
 
     constructor(
         private readonly events: EventStore,
@@ -231,6 +235,7 @@ export class OverseerEventRecorder {
                     const notify = extractNotifySummary(plainText)
                     if (notify) {
                         this.pendingLlmFallback.delete(session.id)
+                        this.llmFallbackSucceeded.delete(session.id)
                         primary = this.recordNotifySummary(session, messageId, notify, ts)
                     }
                 }
@@ -264,7 +269,9 @@ export class OverseerEventRecorder {
                     this.pendingLlmFallback.set(session.id, { messageId, plainText, ts })
                 } else {
                     this.pendingLlmFallback.delete(session.id)
-                    primary = await this.tryLlmFallback(session, messageId, plainText, ts)
+                    primary = await this.enqueueSessionWork(session.id, () =>
+                        this.tryLlmFallback(session, messageId, plainText, ts)
+                    )
                 }
             }
         }
@@ -273,62 +280,78 @@ export class OverseerEventRecorder {
         return primary
     }
 
-    onSessionUpdated(session: Session, tag?: string | null): void {
-        const prevThinking = this.sessionThinking.get(session.id) ?? false
+    async onSessionUpdated(session: Session, tag?: string | null): Promise<void> {
         this.sessionThinking.set(session.id, session.thinking)
         this.syncPermissionRequests(session, tag ?? null)
-        if (prevThinking && !session.thinking) {
-            void this.flushPendingLlmFallback(toSessionSnapshot(session, tag ?? null)).catch((error) => {
-                console.error('[overseer] flushPendingLlmFallback failed', error)
-            })
+        // Flush whenever thinking is clear and a deferred turn is waiting —
+        // not only on a true→false edge. Keepalives often never sent the
+        // thinking=true update through this recorder.
+        if (!session.thinking) {
+            await this.flushPendingLlmFallback(toSessionSnapshot(session, tag ?? null))
         }
     }
 
-    onSessionEnd(
+    async onSessionEnd(
         session: Session,
         tag: string | null,
         ts: number,
         reason: string | undefined,
         getLastAgentPlainText: () => string | null
-    ): StoredSystemEvent | null {
+    ): Promise<StoredSystemEvent | null> {
         this.knownPermissionRequestIds.delete(session.id)
         this.sessionThinking.delete(session.id)
-        void this.flushPendingLlmFallback(toSessionSnapshot(session, tag)).catch((error) => {
-            console.error('[overseer] flushPendingLlmFallback on session-end failed', error)
-        })
-
-        if (reason !== 'completed') {
-            return null
-        }
-
-        const lastText = getLastAgentPlainText()
-        if (lastText && extractNotifySummary(lastText)) {
-            return null
-        }
-
         const snapshot = toSessionSnapshot(session, tag)
-        return this.insertSystemEvent(snapshot, {
-            ts,
-            sourceKind: 'system',
-            sourceRef: session.id,
-            eventType: 'completed',
-            attentionCandidate: 0,
-            summary: 'Session ended without AGENT_NOTIFY_SUMMARY; hub inferred completion',
-            relatedSessionId: session.id,
-            provenance: 'hub-inferred from session-end completed signal',
-            idempotencyKey: `session:${session.id}:session_end:${ts}:completed_fallback`,
-            payloadFields: { reason },
-            severity: deriveSeverity('completed'),
-            tags: buildTags(null, snapshot.flavor)
+
+        return this.enqueueSessionWork(session.id, async () => {
+            const llmEvent = await this.flushPendingLlmFallbackUnlocked(snapshot)
+            if (reason !== 'completed') {
+                return llmEvent
+            }
+
+            const lastText = getLastAgentPlainText()
+            if (lastText && extractNotifySummary(lastText)) {
+                return llmEvent
+            }
+            // Successful LLM row already captured this missed turn — do not
+            // also write "session ended without AGENT_NOTIFY_SUMMARY".
+            if (llmEvent || this.llmFallbackSucceeded.has(session.id)) {
+                return llmEvent
+            }
+
+            return this.insertSystemEvent(snapshot, {
+                ts,
+                sourceKind: 'system',
+                sourceRef: session.id,
+                eventType: 'completed',
+                attentionCandidate: 0,
+                summary: 'Session ended without AGENT_NOTIFY_SUMMARY; hub inferred completion',
+                relatedSessionId: session.id,
+                provenance: 'hub-inferred from session-end completed signal',
+                idempotencyKey: `session:${session.id}:session_end:${ts}:completed_fallback`,
+                payloadFields: { reason },
+                severity: deriveSeverity('completed'),
+                tags: buildTags(null, snapshot.flavor)
+            })
         })
     }
 
     async flushPendingLlmFallback(session: SessionSnapshot): Promise<StoredSystemEvent | null> {
+        return this.enqueueSessionWork(session.id, () => this.flushPendingLlmFallbackUnlocked(session))
+    }
+
+    private async flushPendingLlmFallbackUnlocked(session: SessionSnapshot): Promise<StoredSystemEvent | null> {
         const pending = this.pendingLlmFallback.get(session.id)
         if (!pending) return null
         this.pendingLlmFallback.delete(session.id)
         if (extractNotifySummary(pending.plainText)) return null
         return this.tryLlmFallback(session, pending.messageId, pending.plainText, pending.ts)
+    }
+
+    private enqueueSessionWork<T>(sessionId: string, work: () => Promise<T>): Promise<T> {
+        const previous = this.sessionWork.get(sessionId) ?? Promise.resolve()
+        const run = previous.then(work, work)
+        this.sessionWork.set(sessionId, run.then(() => undefined, () => undefined))
+        return run
     }
 
     /**
@@ -345,8 +368,11 @@ export class OverseerEventRecorder {
         try {
             const notify = await this.llmFallback.synthesizeNotifySummary(plainText)
             if (!notify) return null
-            const eventType = mapNotifyStatusToEventType(notify.status)
-            return this.insertSystemEvent(session, {
+            // Session Log All hides `stale` (ambient silence). Keep LLM
+            // fallbacks visible as captured-only progress.
+            const mapped = mapNotifyStatusToEventType(notify.status)
+            const eventType = mapped === 'stale' ? 'progress' : mapped
+            const stored = this.insertSystemEvent(session, {
                 ts,
                 sourceKind: 'system',
                 sourceRef: session.id,
@@ -368,6 +394,8 @@ export class OverseerEventRecorder {
                 severity: deriveSeverity(eventType),
                 tags: buildTags(notify, session.flavor),
             })
+            if (stored) this.llmFallbackSucceeded.add(session.id)
+            return stored
         } catch {
             return null
         }

@@ -307,10 +307,12 @@ export class SyncEngine {
             this.sessionCache.refreshSession(event.sessionId)
             const after = this.sessionCache.getSession(event.sessionId)
             if (after) {
-                this.overseerEvents.onSessionUpdated(
+                void this.overseerEvents.onSessionUpdated(
                     after,
                     this.store.sessions.getSession(after.id)?.tag ?? null
-                )
+                ).catch((error) => {
+                    console.error('[overseer] onSessionUpdated failed', error)
+                })
             }
             if (after?.metadata && !this.hasSameAgentSessionIds(before?.metadata ?? null, after.metadata)) {
                 if (!this.canRunCursorDedup(after)) {
@@ -402,6 +404,17 @@ export class SyncEngine {
     }): void {
         this.sessionCache.handleSessionAlive(payload)
         this.triggerDedupIfNeeded(payload.sid)
+        const session = this.getSession(payload.sid)
+        if (session) {
+            // thinking=true→false usually arrives on session-alive, not
+            // session-updated. Flush deferred LLM fallback on that path.
+            void this.overseerEvents.onSessionUpdated(
+                session,
+                this.store.sessions.getSession(session.id)?.tag ?? null
+            ).catch((error) => {
+                console.error('[overseer] onSessionUpdated from session-alive failed', error)
+            })
+        }
     }
 
     handleSessionReady(payload: { sid: string; time: number }): void {
@@ -422,13 +435,15 @@ export class SyncEngine {
         this.sessionCache.handleSessionEnd(payload)
         const session = this.getSession(payload.sid)
         if (session) {
-            this.overseerEvents.onSessionEnd(
+            void this.overseerEvents.onSessionEnd(
                 session,
                 this.store.sessions.getSession(session.id)?.tag ?? null,
                 payload.time,
                 payload.reason,
                 () => this.getLastAgentPlainText(session.id)
-            )
+            ).catch((error) => {
+                console.error('[overseer] onSessionEnd failed', error)
+            })
         }
         this.eventPublisher.emit({
             type: 'session-ended',

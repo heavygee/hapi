@@ -23,6 +23,15 @@ vi.mock('@tanstack/react-router', () => ({
     useNavigate: () => navigate,
 }))
 
+vi.mock('@/lib/app-context', () => ({
+    useAppContext: () => ({
+        api: {
+            fetchSystemEvents: vi.fn(async () => ({ total: 0, events: [] })),
+            fetchInboxItems: vi.fn(async () => ({ total: 0, items: [] })),
+        },
+    }),
+}))
+
 vi.mock('@hapi/protocol', () => ({ PROTOCOL_VERSION: 1 }))
 
 vi.mock('@/hooks/useTheme', () => ({

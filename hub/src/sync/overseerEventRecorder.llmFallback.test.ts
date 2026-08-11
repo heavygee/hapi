@@ -152,4 +152,131 @@ describe('OverseerEventRecorder LLM fallback', () => {
         expect(event).toBeNull()
         expect(store.events.count()).toBe(0)
     })
+
+    it('maps stalled LLM status to progress so Session Log All still shows it', async () => {
+        const store = new Store(':memory:')
+        const recorder = new OverseerEventRecorder(store.events, store.inbox, {
+            llmFallback: {
+                synthesizeNotifySummary: mock(async () => ({
+                    status: 'stalled',
+                    summary: 'Agent went quiet mid-turn',
+                })),
+            },
+        })
+        const session = store.sessions.getOrCreateSession('llm-stale', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
+
+        const event = await recorder.onAgentMessage(
+            toSessionSnapshot(makeSession(session.id, 'cursor'), session.tag),
+            'msg-stalled',
+            agentText('Still working on the rebase.'),
+            Date.now()
+        )
+
+        expect(event?.eventType).toBe('progress')
+        expect(event?.attentionCandidate).toBe(0)
+        const payload = JSON.parse(event!.payloadJson!) as { notify_summary?: NotifySummary }
+        expect(payload.notify_summary?.status).toBe('stalled')
+    })
+
+    it('flushes deferred LLM fallback when thinking clears', async () => {
+        const store = new Store(':memory:')
+        const synthesize = mock(async () => ({ status: 'done', summary: 'End of turn' }))
+        const recorder = new OverseerEventRecorder(store.events, store.inbox, {
+            llmFallback: { synthesizeNotifySummary: synthesize },
+        })
+        const live = store.sessions.getOrCreateSession('llm-think', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
+        const snapshot = toSessionSnapshot(makeSession(live.id, 'cursor'), live.tag)
+
+        expect(await recorder.onAgentMessage(snapshot, 'msg-mid', agentText('Partial flush.'), Date.now(), { thinking: true })).toBeNull()
+        expect(synthesize).toHaveBeenCalledTimes(0)
+
+        const flushed = await recorder.flushPendingLlmFallback(snapshot)
+        expect(synthesize).toHaveBeenCalledTimes(1)
+        expect(flushed?.summary).toBe('End of turn')
+        expect(store.events.count()).toBe(1)
+    })
+
+    it('flushes pending fallback from onSessionUpdated when thinking is false', async () => {
+        const store = new Store(':memory:')
+        const synthesize = mock(async () => ({ status: 'blocked', summary: 'Need a decision' }))
+        const recorder = new OverseerEventRecorder(store.events, store.inbox, {
+            llmFallback: { synthesizeNotifySummary: synthesize },
+        })
+        const live = makeSession('sess-alive', 'cursor', { thinking: true })
+        const stored = store.sessions.getOrCreateSession('llm-alive', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
+        live.id = stored.id
+        const snapshot = toSessionSnapshot(live, stored.tag)
+
+        await recorder.onAgentMessage(snapshot, 'msg-pending', agentText('No notify yet.'), Date.now(), { thinking: true })
+        expect(store.events.count()).toBe(0)
+
+        live.thinking = false
+        await recorder.onSessionUpdated(live, stored.tag)
+
+        expect(synthesize).toHaveBeenCalledTimes(1)
+        expect(store.events.list({ eventType: 'blocked' })).toHaveLength(1)
+    })
+
+    it('does not insert session-end completed_fallback after a successful LLM flush', async () => {
+        const store = new Store(':memory:')
+        const recorder = new OverseerEventRecorder(store.events, store.inbox, {
+            llmFallback: {
+                synthesizeNotifySummary: mock(async () => ({
+                    status: 'done',
+                    summary: 'LLM caught the last turn',
+                })),
+            },
+        })
+        const live = makeSession('sess-end', 'cursor', { thinking: true })
+        const stored = store.sessions.getOrCreateSession('llm-end', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
+        live.id = stored.id
+        const snapshot = toSessionSnapshot(live, stored.tag)
+
+        await recorder.onAgentMessage(snapshot, 'msg-last', agentText('Finishing up.'), Date.now(), { thinking: true })
+
+        const event = await recorder.onSessionEnd(
+            live,
+            stored.tag,
+            Date.now(),
+            'completed',
+            () => 'Finishing up.'
+        )
+
+        expect(event?.provenance).toContain('hub-llm-fallback')
+        expect(store.events.count()).toBe(1)
+        expect(store.events.list().some((row) => row.provenance?.includes('session-end'))).toBe(false)
+    })
+
+    it('serializes LLM fallbacks on one session so earlier turns keep lower ids', async () => {
+        const store = new Store(':memory:')
+        let releaseFirst: ((value: NotifySummary) => void) | undefined
+        const firstGate = new Promise<NotifySummary>((resolve) => {
+            releaseFirst = resolve
+        })
+        let firstStarted!: () => void
+        const firstStartedP = new Promise<void>((resolve) => {
+            firstStarted = resolve
+        })
+        const synthesize = mock(async (plainText: string): Promise<NotifySummary | null> => {
+            if (plainText.includes('FIRST')) {
+                firstStarted()
+                return firstGate
+            }
+            return { status: 'done', summary: 'second turn' }
+        })
+        const recorder = new OverseerEventRecorder(store.events, store.inbox, {
+            llmFallback: { synthesizeNotifySummary: synthesize },
+        })
+        const stored = store.sessions.getOrCreateSession('llm-ord', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
+        const snapshot = toSessionSnapshot(makeSession(stored.id, 'cursor'), stored.tag)
+
+        const first = recorder.onAgentMessage(snapshot, 'msg-a', agentText('FIRST turn body'), Date.now())
+        await firstStartedP
+        const second = recorder.onAgentMessage(snapshot, 'msg-b', agentText('SECOND turn body'), Date.now() + 1)
+        releaseFirst!({ status: 'done', summary: 'first turn' })
+        await Promise.all([first, second])
+
+        const rows = store.events.list().sort((a, b) => a.id - b.id)
+        expect(rows.map((row) => row.summary)).toEqual(['first turn', 'second turn'])
+    })
 })
