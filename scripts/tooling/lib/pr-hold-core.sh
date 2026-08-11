@@ -135,6 +135,8 @@ pec_hold_overlay_emoji() {
 # pec_hold_is_new_latch STATE_JSON REPO PR COMMENT_ID
 # New when this comment_id is not already the recorded fingerprint.
 # Acked same id must NOT re-latch (operator ack is sticky until a new comment).
+# GitHub issue/review ids increase; an older id than the stored cursor must
+# not re-latch if the newer comment disappeared from the API page.
 pec_hold_is_new_latch() {
     local state="${1-}" repo="${2:-}" pr="${3:-}" comment_id="${4:-}"
     local key fp existing_id
@@ -143,6 +145,11 @@ pec_hold_is_new_latch() {
     fp="$(pec_hold_fingerprint "$repo" "$pr" "$comment_id")"
     existing_id="$(printf '%s' "$state" | jq -r --arg k "$key" '.hold[$k].comment_id // empty' 2>/dev/null || true)"
     if [[ -n "$comment_id" && "$existing_id" == "$comment_id" ]]; then
+        return 1
+    fi
+    if [[ -n "$existing_id" && -n "$comment_id" \
+        && "$existing_id" =~ ^[0-9]+$ && "$comment_id" =~ ^[0-9]+$ \
+        && "$comment_id" -le "$existing_id" ]]; then
         return 1
     fi
     [[ -n "$fp" ]]

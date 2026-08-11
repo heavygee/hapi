@@ -96,11 +96,13 @@ eq "no hold row returns live emoji" \
 eq "same fingerprint already latched is not new" \
     "$(pec_hold_is_new_latch "$STATE_UNACKED" "tiann/hapi" "1108" "5154418101" && echo yes || echo no)" "no"
 eq "different comment id is new latch" \
-    "$(pec_hold_is_new_latch "$STATE_UNACKED" "tiann/hapi" "1108" "999999" && echo yes || echo no)" "yes"
+    "$(pec_hold_is_new_latch "$STATE_UNACKED" "tiann/hapi" "1108" "5154418199" && echo yes || echo no)" "yes"
 eq "acked fingerprint can re-latch on new comment" \
-    "$(pec_hold_is_new_latch "$STATE_ACKED" "tiann/hapi" "1108" "999999" && echo yes || echo no)" "yes"
+    "$(pec_hold_is_new_latch "$STATE_ACKED" "tiann/hapi" "1108" "5154418199" && echo yes || echo no)" "yes"
 eq "acked same comment id is not a new latch" \
     "$(pec_hold_is_new_latch "$STATE_ACKED" "tiann/hapi" "1108" "5154418101" && echo yes || echo no)" "no"
+eq "older comment id after ack is not a new latch" \
+    "$(pec_hold_is_new_latch "$STATE_ACKED" "tiann/hapi" "1108" "100" && echo yes || echo no)" "no"
 
 ACKED2="$(pec_hold_ack_state "$STATE_UNACKED" "tiann/hapi" "1108")"
 eq "ack sets acked true" \
