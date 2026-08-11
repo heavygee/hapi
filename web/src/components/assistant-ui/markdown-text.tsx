@@ -25,7 +25,7 @@ import { useCodeWrap } from '@/hooks/useCodeWrap'
 import { CopyIcon, CheckIcon, WrapIcon } from '@/components/icons'
 import { useTranslation } from '@/lib/use-translation'
 import { useOptionalHappyChatContext } from '@/components/AssistantChat/context'
-import { decodeFilePathHref, remarkFilePathLinks } from '@/lib/remark-file-path-links'
+import { decodeFilePathCandidateHref, decodeFilePathHref, remarkFilePathLinks } from '@/lib/remark-file-path-links'
 import { classifyNoSchemeHref } from '@/lib/markdown-href-policy'
 import { remarkSessionPathLinks } from '@/lib/remark-session-path-links'
 import { buildSessionReferencePath, parseSessionPathHref } from '@/lib/sessionReference'
@@ -603,6 +603,8 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
     // <UriConfirmProvider> (or supply a mock UriConfirmContext.Provider).
     const ctx = useContext(UriConfirmContext)
     const filePath = typeof props.href === 'string' ? decodeFilePathHref(props.href) : null
+    const candidatePath =
+        typeof props.href === 'string' ? decodeFilePathCandidateHref(props.href) : null
     const targetSessionId = typeof props.href === 'string' ? parseSessionPathHref(props.href) : null
     const rel = props.target === '_blank' ? (props.rel ?? 'noreferrer') : props.rel
 
@@ -619,25 +621,37 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
 
     const { onClick, href, ...rest } = props
 
-    // Defense in depth for scheme-less hrefs that remark did not rewrite to
-    // hapi-file: (absolute / ~/ / no-ext / fragment leftovers, etc.).
-    // Windows drive paths look scheme-bearing to hasScheme (`C:...`) but are
-    // filesystem paths — route them through the same fail-closed classifier.
-    const isWindowsAbsHref = href ? /^[A-Za-z]:[\\/]/.test(href) : false
-    if (href && (!hasScheme(href) || isWindowsAbsHref)) {
-        const decision = classifyNoSchemeHref(href, {
+    // Windows candidate (or raw / %5C-normalized drive path): classify with workspace
+    // before painting FilePathAnchor or treating `C:` as a custom URI scheme.
+    const windowsPathFromHref = (() => {
+        if (candidatePath) return candidatePath
+        if (!href) return null
+        if (/^[A-Za-z]:[\\/]/.test(href)) return href
+        // mdast→hast may percent-encode backslashes before props.href arrives.
+        if (/^[A-Za-z]:(?:%5[Cc]|\/)/.test(href)) {
+            try {
+                return decodeURIComponent(href)
+            } catch {
+                return null
+            }
+        }
+        return null
+    })()
+
+    if (windowsPathFromHref || (href && !hasScheme(href))) {
+        const decision = classifyNoSchemeHref(windowsPathFromHref ?? href!, {
             workspacePath: chat?.metadata?.path ?? null,
         })
         if (decision.action === 'file') {
             if (!chat) {
-                return <InertMarkdownHref href={href} className={props.className}>{props.children}</InertMarkdownHref>
+                return <InertMarkdownHref href={href ?? windowsPathFromHref} className={props.className}>{props.children}</InertMarkdownHref>
             }
             return <FilePathAnchor {...props} filePath={decision.path} sessionId={chat.sessionId} />
         }
         if (decision.action === 'inert') {
-            return <InertMarkdownHref href={href} className={props.className}>{props.children}</InertMarkdownHref>
+            return <InertMarkdownHref href={href ?? windowsPathFromHref} className={props.className}>{props.children}</InertMarkdownHref>
         }
-        // action === 'navigate' → fall through to normal relative handling
+        // action === 'navigate' → fall through (only for non-Windows scheme-less SPA)
     }
 
     const isAllowed = ctx?.isAllowed ?? (() => false)
@@ -647,7 +661,7 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
     // scheme, which previously caused the onClick handler to preventDefault and
     // silently break all relative markdown links. Treat them as 'iana' so the
     // browser or SPA router can navigate normally.
-    const isRelative = href ? (!hasScheme(href) || isWindowsAbsHref) : false
+    const isRelative = href ? (!hasScheme(href) || Boolean(windowsPathFromHref)) : false
     const classification = href && !isRelative ? classifyScheme(href) : 'iana'
     const colonIdx = href ? href.indexOf(':') : -1
     const scheme = colonIdx > 0 && !isRelative ? href!.slice(0, colonIdx).toLowerCase() : ''

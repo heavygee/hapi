@@ -48,13 +48,13 @@ describe('remarkFilePathLinks', () => {
         expect(links.map(linkedPath)).toEqual(['screenshot.png', 'README.md'])
     })
 
-    it('autolinks Windows absolute paths as raw hrefs for <A> containment (not hapi-file:)', () => {
+    it('autolinks Windows absolute paths as hapi-file-candidate (backslash-safe through hast)', () => {
         const nodes = transform('Open C:\\Users\\dev\\project\\handoff.md and D:/work/app/src/main.ts:12')
         const links = nodes.filter((node) => node.type === 'link')
 
         expect(links.map((n) => n.url)).toEqual([
-            'C:\\Users\\dev\\project\\handoff.md',
-            'D:/work/app/src/main.ts',
+            'hapi-file-candidate:' + encodeURIComponent('C:\\Users\\dev\\project\\handoff.md'),
+            'hapi-file-candidate:' + encodeURIComponent('D:/work/app/src/main.ts'),
         ])
         for (const link of links) {
             expect(decodeFilePathHref(link.url as string)).toBeNull()
@@ -122,11 +122,11 @@ describe('remarkFilePathLinks — inlineCode', () => {
     it.each([
         'C:\\Users\\dev\\project\\handoff.md',
         'D:/work/app/src/main.ts:12'
-    ])('autolinks Windows absolute inlineCode path %s as raw href (not hapi-file:)', (value) => {
+    ])('autolinks Windows absolute inlineCode path %s as hapi-file-candidate', (value) => {
         const nodes = transformNodes([{ type: 'inlineCode', value }])
         const link = nodes.find((node) => node.type === 'link')!
         const expected = value.replace(/:\d+(?::\d+)?$/, '')
-        expect(link.url).toBe(expected)
+        expect(link.url).toBe('hapi-file-candidate:' + encodeURIComponent(expected))
         expect(decodeFilePathHref(link.url as string)).toBeNull()
         expect(link.children?.[0]?.type).toBe('inlineCode')
         expect(link.children?.[0]?.value).toBe(value)
@@ -195,11 +195,13 @@ describe('remarkFilePathLinks — explicit markdown links', () => {
         'C:\\Users\\dev\\project\\handoff.md',
         'D:/work/app/src/main.ts:12',
         'D:/outside/secret.ts#L1',
-    ])('does not rewrite Windows absolute file link %s', (url) => {
+    ])('rewrites Windows absolute file link %s to hapi-file-candidate (not premature hapi-file)', (url) => {
         const nodes = transformNodes([linkNode(url)])
         const link = nodes.find((node) => node.type === 'link')!
+        const withoutMeta = url.replace(/#.*$/, '').replace(/\?.*$/, '')
+        const expectedPath = withoutMeta.replace(/:\d+(?::\d+)?$/, '')
         expect(decodeFilePathHref(link.url as string)).toBeNull()
-        expect(link.url).toBe(url)
+        expect(link.url).toBe('hapi-file-candidate:' + encodeURIComponent(expectedPath))
     })
 
     it.each([

@@ -344,9 +344,13 @@ describe('markdown <A> component — fail-closed path-like hrefs (#1452)', () =>
         expect(document.querySelector('.aui-md-a-inert')?.textContent).toBe('win')
     })
 
-    it('routes in-workspace Windows absolute href to FilePathAnchor', () => {
+    it('routes hapi-file-candidate Windows href through containment to FilePathAnchor', () => {
+        const path = 'C:\\Users\\ada\\coding\\hapi\\docs\\a.md'
         renderA(
-            { href: 'C:\\Users\\ada\\coding\\hapi\\docs\\a.md', children: 'win' },
+            {
+                href: 'hapi-file-candidate:' + encodeURIComponent(path),
+                children: 'win',
+            },
             chatContext({
                 metadata: { path: 'C:\\Users\\ada\\coding\\hapi', host: 'local' },
             })
@@ -354,6 +358,15 @@ describe('markdown <A> component — fail-closed path-like hrefs (#1452)', () =>
         const link = document.querySelector('a')
         expect(link).not.toBeNull()
         expect(link!.getAttribute('href')).toContain('/sessions/session-1/file?')
+    })
+
+    it('treats percent-encoded backslash Windows href as inert when outside workspace', () => {
+        renderA(
+            { href: 'D:%5Coutside%5Csecret.ts', children: 'win' },
+            chatContext()
+        )
+        expect(document.querySelector('a')).toBeNull()
+        expect(document.querySelector('.aui-md-a-inert')?.textContent).toBe('win')
     })
 
     it('expands ~/ and routes to FilePathAnchor when workspace metadata is present', () => {

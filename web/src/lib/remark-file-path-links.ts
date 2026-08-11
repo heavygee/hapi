@@ -1,4 +1,7 @@
 const FILE_PATH_HREF_PREFIX = 'hapi-file:'
+// Encoded Windows abs handoff: raw `C:\…` is URI-normalized to `%5C` before <A>,
+// which breaks drive detection. Candidate scheme preserves the path through hast.
+const FILE_PATH_CANDIDATE_HREF_PREFIX = 'hapi-file-candidate:'
 
 const PATH_PATTERN = /(?:[A-Za-z]:[\\/]|\.\/|[A-Za-z0-9_.-]+\/)[^\s`"\'<>]*?\.(?:[A-Za-z0-9]{1,12}|lock)(?::\d+(?::\d+)?)?|(?:[A-Za-z0-9_.-]+\.(?:[A-Za-z0-9]{1,12}|lock))(?::\d+(?::\d+)?)?/g
 
@@ -38,6 +41,19 @@ export function decodeFilePathHref(href: string): string | null {
     } catch {
         return null
     }
+}
+
+export function decodeFilePathCandidateHref(href: string): string | null {
+    if (!href.startsWith(FILE_PATH_CANDIDATE_HREF_PREFIX)) return null
+    try {
+        return decodeURIComponent(href.slice(FILE_PATH_CANDIDATE_HREF_PREFIX.length))
+    } catch {
+        return null
+    }
+}
+
+function createFileCandidateHref(path: string): string {
+    return `${FILE_PATH_CANDIDATE_HREF_PREFIX}${encodeURIComponent(path)}`
 }
 
 function splitTrailingPunctuation(value: string): { path: string; trailing: string } {
@@ -94,9 +110,9 @@ function shouldLinkPath(value: string): boolean {
     return hasKnownFileExtension(path)
 }
 
-/** Autolink href: Windows abs stays raw for <A> containment; else hapi-file:. */
+/** Autolink href: Windows abs uses candidate encoding so backslashes survive hast. */
 function createAutolinkHref(filePath: string): string {
-    if (isWindowsAbsolutePath(filePath)) return filePath
+    if (isWindowsAbsolutePath(filePath)) return createFileCandidateHref(filePath)
     return createFileHref(filePath)
 }
 
@@ -197,10 +213,14 @@ function rewriteFileLinkNode(node: MarkdownNode): void {
     const target = stripLineSuffix(withoutMeta)
 
     // Absolute paths (POSIX or Windows) need chat workspace metadata for
-    // containment — leave them for <A> / classifyNoSchemeHref.
-    if ((target.startsWith('/') && !target.startsWith('//')) || isWindowsAbsolutePath(target)) {
+    // containment — leave POSIX for <A>; encode Windows as candidate so
+    // backslashes survive mdast→hast URI normalization.
+    if (isWindowsAbsolutePath(target)) {
+        if (!hasKnownFileExtension(target)) return
+        node.url = createFileCandidateHref(target)
         return
     }
+    if (target.startsWith('/') && !target.startsWith('//')) return
     if (target.includes(':')) return
 
     if (!shouldLinkPath(target)) return
