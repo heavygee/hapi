@@ -45,6 +45,8 @@ export type SessionSummaryMetadata = {
     flavor?: string | null
     worktree?: WorktreeMetadata
     agentSessionId?: string
+    /** Native Claude transcript id when flavor is claude (not the flattened agentSessionId). */
+    claudeSessionId?: string
     lifecycleState?: string
     /** Loopback MCP URL when session CLI happy server is running (#956). */
     hapiMcpUrl?: string
@@ -211,6 +213,7 @@ export function toSessionSummaryMetadata(metadata: Metadata | null | undefined):
         flavor: metadata.flavor ?? null,
         worktree: metadata.worktree,
         agentSessionId: getSummaryAgentSessionId(metadata),
+        claudeSessionId: metadata.claudeSessionId ?? undefined,
         lifecycleState: metadata.lifecycleState,
         hapiMcpUrl: metadata.hapiMcpUrl ?? undefined
     }
