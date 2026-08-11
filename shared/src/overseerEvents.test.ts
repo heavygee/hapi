@@ -17,6 +17,7 @@ import {
     HAPI_EVENTS_BEGIN,
     HAPI_EVENTS_END,
     stripAgentContract,
+    usableNotifyAction,
     usableNotifyToken
 } from './overseerEvents'
 import { extractNotifySummary } from './messages'
@@ -71,6 +72,13 @@ describe('overseerEvents mapping', () => {
         expect(usableNotifyToken('  <project>  ')).toBeNull()
         expect(usableNotifyToken('hapi')).toBe('hapi')
         expect(usableNotifyToken('')).toBeNull()
+    })
+
+    test('usableNotifyAction rejects sentinels', () => {
+        expect(usableNotifyAction('none')).toBeNull()
+        expect(usableNotifyAction('<=12 words')).toBeNull()
+        expect(usableNotifyAction('N/A')).toBeNull()
+        expect(usableNotifyAction('Merge PR')).toBe('Merge PR')
     })
 
     test('buildOverseerSessionIdentity ignores placeholder notify.project', () => {
