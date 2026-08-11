@@ -644,12 +644,12 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
         })
         if (decision.action === 'file') {
             if (!chat) {
-                return <InertMarkdownHref href={href ?? windowsPathFromHref} className={props.className}>{props.children}</InertMarkdownHref>
+                return <InertMarkdownHref href={href ?? windowsPathFromHref ?? ''} className={props.className}>{props.children}</InertMarkdownHref>
             }
             return <FilePathAnchor {...props} filePath={decision.path} sessionId={chat.sessionId} />
         }
         if (decision.action === 'inert') {
-            return <InertMarkdownHref href={href ?? windowsPathFromHref} className={props.className}>{props.children}</InertMarkdownHref>
+            return <InertMarkdownHref href={href ?? windowsPathFromHref ?? ''} className={props.className}>{props.children}</InertMarkdownHref>
         }
         // action === 'navigate' → fall through (only for non-Windows scheme-less SPA)
     }
