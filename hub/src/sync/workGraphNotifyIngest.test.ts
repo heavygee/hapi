@@ -586,6 +586,41 @@ describe('ingestNotifySummaryFromMessage cause stamping', () => {
             .not.toBe(fourth.id)
     })
 
+    it('does not treat an uninvoked queued inbound as a cause', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('sess-cause-uninvoked', {}, null, 'default')
+        const causing = store.messages.addMessage(session.id, userInbound('current turn'))
+        const queued = store.messages.addMessage(
+            session.id,
+            userInbound('queued not yet started'),
+            'queued-local'
+        )
+        expect(queued.invokedAt).toBeNull()
+        const firstAssistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('First')))
+        const first = ingestNotify(store, session.id, 'default', firstAssistant.content, firstAssistant.id)
+        expect(first?.event.payloadJson).toMatchObject({
+            causeMessageId: causing.id,
+            causeText: 'current turn'
+        })
+
+        const secondAssistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('Still first turn')))
+        const second = ingestNotify(store, session.id, 'default', secondAssistant.content, secondAssistant.id)
+        expect(second?.event.payloadJson).toMatchObject({
+            causeMessageId: causing.id,
+            causeText: 'current turn'
+        })
+        expect((second?.event.payloadJson as { causeMessageId?: string })?.causeMessageId)
+            .not.toBe(queued.id)
+
+        store.messages.markMessagesInvoked(session.id, ['queued-local'], Date.now())
+        const thirdAssistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('Queued turn')))
+        const third = ingestNotify(store, session.id, 'default', thirdAssistant.content, thirdAssistant.id)
+        expect(third?.event.payloadJson).toMatchObject({
+            causeMessageId: queued.id,
+            causeText: 'queued not yet started'
+        })
+    })
+
     it('does not treat a future-scheduled inbound as a cause', () => {
         const store = new Store(':memory:')
         const session = store.sessions.getOrCreateSession('sess-cause-sched', {}, null, 'default')

@@ -168,6 +168,26 @@ describe('sendClaudeSessionMessage createdAt propagation', () => {
         })
     })
 
+    it('batched same-mode prompts match the joined Claude transcript row', () => {
+        const { client, fakeSocket } = makeClient()
+        client.notePendingHubPromptEcho('one\ntwo')
+
+        client.sendClaudeSessionMessage({
+            type: 'user',
+            uuid: 'user-batch-1',
+            userType: 'external',
+            isSidechain: false,
+            timestamp: '2024-03-10T00:00:00.000Z',
+            message: { role: 'user', content: 'one\ntwo' }
+        } as unknown as RawJSONLines)
+
+        const [, payload] = fakeSocket.emit.mock.calls[0] as [string, Record<string, unknown>]
+        expect(payload.message).toMatchObject({
+            role: 'user',
+            meta: { sentFrom: 'cli', isTranscriptEcho: true }
+        })
+    })
+
     it('formatted Claude prompt (attachments/plan) matches the queue-boundary text, not raw hub text', () => {
         const { client, fakeSocket } = makeClient()
         fireIncomingUserMessage(fakeSocket, { seq: 1, text: 'hello from web', sentFrom: 'webapp' })

@@ -685,6 +685,7 @@ export class ApiSessionClient extends EventEmitter {
     notePendingHubPromptEcho(text: string, localId?: string): void {
         const normalized = text.trim()
         if (!normalized) return
+        if (this.pendingHubPromptEchoes.some((entry) => entry.text === normalized)) return
         this.pendingHubPromptEchoes.push({ text: normalized, localId })
         if (this.pendingHubPromptEchoes.length > 32) {
             this.pendingHubPromptEchoes.shift()

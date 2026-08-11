@@ -158,7 +158,8 @@ function isCauseCandidate(message: StoredMessage, now: number = Date.now()): boo
     const meta = asRecord(asRecord(message.content)?.meta)
     // Claude jsonl echoes the remote prompt as a second role=user row (sentFrom cli).
     if (meta?.isTranscriptEcho === true) return false
-    // Future-scheduled rows are persisted before delivery; they are not this turn's cause.
+    // Queued (localId, not yet acked) and unmatured scheduled rows are not this turn.
+    if (message.invokedAt === null) return false
     if (message.scheduledAt != null && message.scheduledAt > now) return false
     return true
 }
