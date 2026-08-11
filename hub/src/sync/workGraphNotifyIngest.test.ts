@@ -887,6 +887,48 @@ describe('ingestNotifySummaryFromMessage cause stamping', () => {
         expect(onSurvivor).toContain(second!.event.id)
     })
 
+    it('keeps notify history on the live source after mergeSessionHistory', async () => {
+        const store = new Store(':memory:')
+        const cache = new SessionCache(store, {
+            emit: (_event: SyncEvent) => {}
+        } as EventPublisher)
+        const source = cache.getOrCreateSession(
+            'sess-cause-hist-src',
+            { path: '/tmp/project', host: 'localhost' },
+            null,
+            'default'
+        )
+        const target = cache.getOrCreateSession(
+            'sess-cause-hist-tgt',
+            { path: '/tmp/project', host: 'localhost' },
+            null,
+            'default'
+        )
+
+        const firstUser = store.messages.addMessage(source.id, userInbound('live source prompt'))
+        const firstAssistant = store.messages.addMessage(source.id, assistantOutput(notifyFooter('Before history merge')))
+        const first = ingestNotify(store, source.id, 'default', firstAssistant.content, firstAssistant.id)
+        expect(first?.inserted).toBe(true)
+
+        await cache.mergeSessionHistory(source.id, target.id, 'default', { mergeAgentState: false })
+
+        const nextUser = store.messages.addMessage(source.id, userInbound('still on the live source'))
+        const nextAssistant = store.messages.addMessage(source.id, assistantOutput(notifyFooter('After history merge')))
+        const second = ingestNotify(store, source.id, 'default', nextAssistant.content, nextAssistant.id)
+
+        expect(second?.event.relatedEventId).toBe(first!.event.id)
+        expect(second?.event.payloadJson).toMatchObject({
+            causeMessageId: nextUser.id,
+            causeText: 'still on the live source'
+        })
+        expect((second?.event.payloadJson as { causeMessageId?: string })?.causeMessageId)
+            .not.toBe(firstUser.id)
+        const onSource = store.workGraph.listWorkAdsByRelatedSession('default', source.id)
+            .map((event) => event.id)
+        expect(onSource).toContain(first!.event.id)
+        expect(onSource).toContain(second!.event.id)
+    })
+
     it('does not re-attribute a prior batch after surviving-session seq-shift', () => {
         const store = new Store(':memory:')
         const surviving = store.sessions.getOrCreateSession('sess-cause-shift-live', {}, null, 'default')
