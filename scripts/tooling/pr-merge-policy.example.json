@@ -9,5 +9,5 @@
       "max_delta_lines": 120
     }
   },
-  "_comment": "Copy to ~/.hapi/pr-merge-policy.json. Chip status stays health-only; this overlay picks lane A (maintainer) vs B (self-merge). Auto-B = size caps only (product paths OK). Oversized / judgment-call PRs promote via low-impact label or allow_pr_numbers. Path-kind reject (product_paths) retired 2026-08-09."
+  "_comment": "Copy to ~/.hapi/pr-merge-policy.json. Chip status stays health-only; this overlay picks lane A (maintainer) vs B (self-merge). Auto-B = size caps on product files only (*.test.* / *.spec.* / __tests__ excluded; pure test-only PRs stay auto-B). Product paths OK under caps. Oversized / judgment-call PRs promote via low-impact label or allow_pr_numbers. Path-kind reject (product_paths) retired 2026-08-09."
 }

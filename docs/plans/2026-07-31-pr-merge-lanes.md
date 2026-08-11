@@ -6,7 +6,7 @@ Chip = health. Lane = local policy. Build order: (1) policy lib + tests (2) Meta
 
 **Retired:** auto-B short-circuit `product_paths` ("because product" → lane A). Touching `cli/src|hub/src|web/src|shared/src` is no longer a hard reject.
 
-**Current auto-B:** size caps only (≤8 files, ≤120 delta). Product under caps → lane B. Oversized / judgment-call → still needs **promote** (`low-impact` / allowlist).
+**Current auto-B:** size caps on **product files only** (≤8 files, ≤120 delta). Unit/spec tests (`*.test.*`, `*.spec.*`, `__tests__/`, `__mocks__/`) are excluded from both caps - they measure thoroughness, not blast radius. Pure test-only PRs (#1268 class) stay auto-B. Docs still count. Product under caps → lane B. Oversized / judgment-call → still needs **promote** (`low-impact` / allowlist).
 
 **Why:** Meta was teaching "wait on tiann (product_paths)" for every runtime PR, which contradicted the label table ("product OK if scoped") and the #1268 blessing scope. Path kind is a weak proxy for blast radius; size + human promote is enough.
 

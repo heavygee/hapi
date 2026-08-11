@@ -95,7 +95,7 @@ Chip status stays **PR health only** (`✅` / `🔁` / `⚠️` / …). Merge au
 | Lane | Who merges | How you get there | Agents |
 |------|------------|-------------------|--------|
 | **A** maintainer | **@tiann** | Default when over size caps and not promoted | Prepare only - never `gh pr merge` |
-| **B** self-merge | Operator / Meta tooling (not agents) | Auto: size caps (≤8 files, ≤120 delta) - **product paths OK**; **or** human promote via GitHub label `low-impact` **or** `allow_pr_numbers` in policy | Prepare only - no auto merge yet |
+| **B** self-merge | Operator / Meta tooling (not agents) | Auto: size caps on **product files** (≤8 files, ≤120 delta; `*.test.*` / `*.spec.*` / `__tests__` excluded); **or** human promote via GitHub label `low-impact` **or** `allow_pr_numbers` in policy | Prepare only - no auto merge yet |
 | **C** forbidden | Nobody here | Others' PRs, direct push to `main`, settings, force-push | Hard no |
 
 **Blessing:** after heavygee self-merged test-only [#1268](https://github.com/tiann/hapi/pull/1268), @tiann replied ([comment](https://github.com/tiann/hapi/pull/1268#issuecomment-5141575753)): *"Sounds great! Thanks for helping out."* That authorizes taking **low-impact** PRs off tiann's plate - not a blank check for every green PR.

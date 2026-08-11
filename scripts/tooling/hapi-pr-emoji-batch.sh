@@ -133,18 +133,22 @@ _emit_pr_json() {
 # Chip emoji stays ✅; action string becomes wait-on-tiann vs self-merge eligible.
 _apply_merge_lane() {
     local n="$1" action_inout="$2"
-    local meta files labs additions deletions class lane reason
+    local meta files labs additions deletions prod_add prod_del class lane reason
+    # Per-file add/del so auto-B size caps can ignore *.test.* / *.spec.* paths.
     meta="$(gh_t pr view "$n" --repo "$REPO" --json files,labels,additions,deletions \
-        --jq '{files:[.files[].path],labels:[.labels[].name],additions,deletions}' 2>/dev/null || echo "")"
+        --jq '{files:[.files[]|{path,additions,deletions}],labels:[.labels[].name],additions,deletions}' 2>/dev/null || echo "")"
     if [[ -z "$meta" ]] || ! printf '%s' "$meta" | jq -e . >/dev/null 2>&1; then
         printf '%s\t%s' "maintainer" "$(pmp_action_for_lane maintainer)"
         return
     fi
-    files="$(printf '%s' "$meta" | jq -r '.files[]?' )"
+    files="$(printf '%s' "$meta" | jq -r '.files[].path?' )"
     labs="$(printf '%s' "$meta" | jq -r '.labels|join(",")')"
     additions="$(printf '%s' "$meta" | jq -r '.additions // 0')"
     deletions="$(printf '%s' "$meta" | jq -r '.deletions // 0')"
-    class="$(pmp_classify "${MERGE_POLICY_JSON}" "$n" "$files" "$additions" "$deletions" "$labs")"
+    # Product-only delta: drop unit/spec test paths (same rules as pmp_is_test_path).
+    prod_add="$(printf '%s' "$meta" | jq '[.files[] | select(.path|test("\\.(test|spec)\\.(ts|tsx|js|jsx|mjs|cjs)$")|not) | select(.path|test("/(__tests__|__mocks__)/")|not) | .additions] | add // 0')"
+    prod_del="$(printf '%s' "$meta" | jq '[.files[] | select(.path|test("\\.(test|spec)\\.(ts|tsx|js|jsx|mjs|cjs)$")|not) | select(.path|test("/(__tests__|__mocks__)/")|not) | .deletions] | add // 0')"
+    class="$(pmp_classify "${MERGE_POLICY_JSON}" "$n" "$files" "$additions" "$deletions" "$labs" "$prod_add" "$prod_del")"
     lane="${class%%$'\t'*}"
     reason="${class#*$'\t'}"
     printf '%s\t%s' "$lane" "$(pmp_action_for_lane "$lane") (${reason})"
