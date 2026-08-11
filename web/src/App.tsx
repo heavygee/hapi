@@ -330,33 +330,6 @@ function AppInner() {
             }
         }
 
-        if (normalizedTitle === 'Runner upgraded') {
-            const host = normalizedBody.replace(/\s+is now on the hub version$/i, '').trim()
-            return {
-                title: t('toast.runnerUpgrade.success.title'),
-                body: host
-                    ? t('toast.runnerUpgrade.success.body', { host })
-                    : normalizedBody,
-            }
-        }
-
-        if (normalizedTitle === 'Runner upgrade failed') {
-            const match = normalizedBody.match(/^(.+?):\s*(.+)$/)
-            if (match) {
-                return {
-                    title: t('toast.runnerUpgrade.failed.title'),
-                    body: t('toast.runnerUpgrade.failed.body', {
-                        host: match[1]?.trim() ?? '',
-                        message: match[2]?.trim() ?? '',
-                    }),
-                }
-            }
-            return {
-                title: t('toast.runnerUpgrade.failed.title'),
-                body: normalizedBody,
-            }
-        }
-
         return { title, body }
     }, [t])
 
