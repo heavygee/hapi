@@ -63,6 +63,10 @@ describe('expandTildePath', () => {
         )
     })
 
+    it('expands ~/ against /root workspaces', () => {
+        expect(expandTildePath('~/hapi/docs/a.md', '/root/hapi')).toBe('/root/hapi/docs/a.md')
+    })
+
     it('returns null without workspace metadata', () => {
         expect(expandTildePath('~/docs/a.md', null)).toBeNull()
     })
@@ -103,6 +107,15 @@ describe('classifyNoSchemeHref — fail-closed (#1452)', () => {
         expect(classifyNoSchemeHref('~/coding/hapi/docs/a.md', { workspacePath: workspace })).toEqual({
             action: 'file',
             path: '/home/ada/coding/hapi/docs/a.md',
+        })
+    })
+
+    it('expands ~/ for root-owned workspaces', () => {
+        expect(
+            classifyNoSchemeHref('~/hapi/docs/a.md', { workspacePath: '/root/hapi' })
+        ).toEqual({
+            action: 'file',
+            path: '/root/hapi/docs/a.md',
         })
     })
 

@@ -72,6 +72,7 @@ export function isKnownSpaHref(href: string): boolean {
 }
 
 export function inferHomeDir(workspacePath: string): string | null {
+    if (workspacePath === '/root' || workspacePath.startsWith('/root/')) return '/root'
     const posix = workspacePath.match(/^(\/(?:home|Users)\/[^/]+)/)
     if (posix) return posix[1]
     const win = workspacePath.match(/^([A-Za-z]:[\\/]Users[\\/][^\\/]+)/i)
