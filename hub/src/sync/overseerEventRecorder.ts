@@ -12,6 +12,7 @@ import {
     mapNotifyStatusToEventType,
     mergeEventPayloadWithSession,
     normalizeUrlIdempotencyKey,
+    usableNotifyToken,
     isObject,
     type NotifySummary,
     type OverseerSessionIdentity
@@ -90,13 +91,14 @@ function buildPayload(
     fields: Record<string, unknown>,
     notifyProject?: string | null
 ): string {
-    const identity = notifyProject
+    const usable = usableNotifyToken(notifyProject)
+    const identity = usable
         ? buildOverseerSessionIdentity({
             id: session.id,
             flavor: session.flavor,
             tag: session.tag,
             metadata: { name: session.name ?? undefined },
-            notifyProject
+            notifyProject: usable
         })
         : session
     return mergeEventPayloadWithSession(fields, identity)
@@ -132,8 +134,10 @@ function extractToolFailureSummary(content: unknown): string | null {
 
 function buildTags(notify: NotifySummary | null, flavor: string): string | null {
     const parts: string[] = []
-    if (notify?.agent) parts.push(`agent:${notify.agent}`)
-    if (notify?.project) parts.push(`project:${notify.project}`)
+    const agent = usableNotifyToken(notify?.agent)
+    const project = usableNotifyToken(notify?.project)
+    if (agent) parts.push(`agent:${agent}`)
+    if (project) parts.push(`project:${project}`)
     parts.push(`flavor:${flavor}`)
     return parts.length > 0 ? parts.join(' ') : null
 }
@@ -349,7 +353,10 @@ export class OverseerEventRecorder {
         const eventType = mapNotifyStatusToEventType(notify.status)
         const attentionCandidate = deriveAttentionCandidate(notify.status, notify.action)
         const operatorActionRequired = deriveOperatorActionRequired(notify.status, notify.action)
-        const sourceRef = notify.agent ?? notify.project ?? session.tag ?? session.id
+        const sourceRef = usableNotifyToken(notify.agent)
+            ?? usableNotifyToken(notify.project)
+            ?? session.tag
+            ?? session.id
 
         return this.insertSystemEvent(session, {
             ts,
@@ -367,7 +374,7 @@ export class OverseerEventRecorder {
                 notify_summary: notify,
                 suggested_action: notify.action ?? null
             },
-            notifyProject: notify.project ?? null,
+            notifyProject: usableNotifyToken(notify.project),
             severity: deriveSeverity(eventType),
             tags: buildTags(notify, session.flavor)
         })
