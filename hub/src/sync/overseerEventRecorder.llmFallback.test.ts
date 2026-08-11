@@ -449,7 +449,43 @@ describe('OverseerEventRecorder LLM fallback', () => {
         expect(rows.map((row) => row.summary)).toEqual(['llm first', 'real notify'])
     })
 
-    it('writes completed_fallback after a textless tool turn following LLM success', async () => {
+    it('does not write completed_fallback for same-turn ACP tool after LLM success', async () => {
+        const store = new Store(':memory:')
+        const recorder = new OverseerEventRecorder(store.events, store.inbox, {
+            llmFallback: {
+                synthesizeNotifySummary: mock(async () => ({
+                    status: 'done',
+                    summary: 'caught this turn',
+                })),
+            },
+        })
+        const live = makeSession('sess-same', 'cursor')
+        const stored = store.sessions.getOrCreateSession('llm-same', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
+        live.id = stored.id
+        const snapshot = toSessionSnapshot(live, stored.tag)
+
+        await recorder.onAgentMessage(snapshot, 'msg-text', agentText('turn body'), Date.now())
+        await recorder.onAgentMessage(snapshot, 'msg-tool', {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: { type: 'tool-call-result', output: { exit_code: 0 } },
+            },
+        }, Date.now() + 1)
+
+        const event = await recorder.onSessionEnd(
+            live,
+            stored.tag,
+            Date.now() + 2,
+            'completed',
+            () => 'turn body'
+        )
+        expect(event).toBeNull()
+        expect(store.events.list().filter((row) => row.provenance?.includes('hub-llm-fallback'))).toHaveLength(1)
+        expect(store.events.list().some((row) => row.provenance?.includes('session-end'))).toBe(false)
+    })
+
+    it('writes completed_fallback for a later tool-only turn after a user message', async () => {
         const store = new Store(':memory:')
         const recorder = new OverseerEventRecorder(store.events, store.inbox, {
             llmFallback: {
@@ -465,25 +501,29 @@ describe('OverseerEventRecorder LLM fallback', () => {
         const snapshot = toSessionSnapshot(live, stored.tag)
 
         await recorder.onAgentMessage(snapshot, 'msg-text', agentText('earlier turn body'), Date.now())
+        await recorder.onAgentMessage(snapshot, 'msg-user', {
+            role: 'user',
+            content: { type: 'text', text: 'do the next thing' },
+        }, Date.now() + 1)
         await recorder.onAgentMessage(snapshot, 'msg-tool', {
             role: 'agent',
             content: {
                 type: 'codex',
                 data: { type: 'tool-call-result', output: { exit_code: 0 } },
             },
-        }, Date.now() + 1)
+        }, Date.now() + 2)
 
         const event = await recorder.onSessionEnd(
             live,
             stored.tag,
-            Date.now() + 2,
+            Date.now() + 3,
             'completed',
             () => 'earlier turn body'
         )
         expect(event?.provenance).toContain('session-end')
     })
 
-    it('does not let an in-flight earlier LLM cover a later tool-only turn', async () => {
+    it('does not let an in-flight earlier LLM cover a later user+tool turn', async () => {
         const store = new Store(':memory:')
         let releaseFirst!: (value: NotifySummary) => void
         const firstGate = new Promise<NotifySummary>((resolve) => {
@@ -508,20 +548,24 @@ describe('OverseerEventRecorder LLM fallback', () => {
 
         const first = recorder.onAgentMessage(snapshot, 'msg-a', agentText('earlier turn'), Date.now())
         await firstStartedP
+        await recorder.onAgentMessage(snapshot, 'msg-user', {
+            role: 'user',
+            content: { type: 'text', text: 'continue' },
+        }, Date.now() + 1)
         await recorder.onAgentMessage(snapshot, 'msg-tool', {
             role: 'agent',
             content: {
                 type: 'codex',
                 data: { type: 'tool-call-result', output: { exit_code: 0 } },
             },
-        }, Date.now() + 1)
+        }, Date.now() + 2)
         releaseFirst({ status: 'done', summary: 'caught earlier' })
         await first
 
         const event = await recorder.onSessionEnd(
             live,
             stored.tag,
-            Date.now() + 2,
+            Date.now() + 3,
             'completed',
             () => 'earlier turn'
         )
@@ -600,5 +644,46 @@ describe('OverseerEventRecorder LLM fallback', () => {
         const rows = store.events.list().sort((a, b) => a.id - b.id)
         expect(rows.map((row) => row.eventType)).toEqual(['completed', 'approval_requested'])
         expect(rows[0]?.summary).toBe('llm first')
+    })
+
+    it('stamps permission requests at observe time, not queue-drain time', async () => {
+        const store = new Store(':memory:')
+        let releaseFirst!: (value: NotifySummary) => void
+        const firstGate = new Promise<NotifySummary>((resolve) => {
+            releaseFirst = resolve
+        })
+        let firstStarted!: () => void
+        const firstStartedP = new Promise<void>((resolve) => {
+            firstStarted = resolve
+        })
+        const recorder = new OverseerEventRecorder(store.events, store.inbox, {
+            llmFallback: {
+                synthesizeNotifySummary: mock(async () => {
+                    firstStarted()
+                    return firstGate
+                }),
+            },
+        })
+        const live = makeSession('sess-perm-ts', 'cursor')
+        const stored = store.sessions.getOrCreateSession('llm-perm-ts', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
+        live.id = stored.id
+        const snapshot = toSessionSnapshot(live, stored.tag)
+
+        const first = recorder.onAgentMessage(snapshot, 'msg-a', agentText('TURN A body'), Date.now())
+        await firstStartedP
+        live.agentState = {
+            requests: {
+                req1: { tool: 'Bash', arguments: { command: 'ls' } }
+            }
+        }
+        const marked = Date.now()
+        const perm = recorder.onSessionUpdated(live, stored.tag)
+        await Bun.sleep(40)
+        releaseFirst({ status: 'done', summary: 'llm first' })
+        await Promise.all([first, perm])
+
+        const row = store.events.list({ eventType: 'approval_requested' })[0]
+        expect(row).toBeDefined()
+        expect(row!.ts).toBeLessThan(marked + 25)
     })
 })
