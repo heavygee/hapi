@@ -13,6 +13,7 @@ import {
     buildOverseerSystemPrompt,
     fingerprintWriteToolCall,
     formatConverseFocusDirective,
+    hasConverseFocusSubject,
     isOverseerWriteTool,
     isWriteToolCallAuthorized,
     resolveOverseerWriteAuthorization,
@@ -109,6 +110,11 @@ function hasSuccessfulWrite(toolTrace: OverseerToolTraceEntry[]): boolean {
     return toolTrace.some((entry) => entry.ok && isOverseerWriteTool(entry.tool as OverseerToolName))
 }
 
+function focusSubjectKey(focus: OverseerConverseFocus | null | undefined): string | null {
+    if (!hasConverseFocusSubject(focus) || !focus) return null
+    return `${(focus.sessionId ?? '').trim().toLowerCase()}#${focus.itemId ?? ''}`
+}
+
 export async function runOverseerConverse(params: {
     overseer: OverseerEntity
     config: BrainConfig
@@ -171,6 +177,11 @@ export async function runOverseerConverse(params: {
     const writeConfirmations: string[] = []
     /** Successful irreversible call fingerprints — reject duplicates in this turn. */
     const consumedWriteFingerprints = new Set<string>()
+    /**
+     * Distinct subjects established by successful tool resolves this turn.
+     * More than one → do not last-win; keep turn-start focus (Codex P2).
+     */
+    const subjectsResolvedThisTurn = new Set<string>()
     // The brain (llama-server) does not honor tool_choice:'required', so it will
     // sometimes answer a fleet question from nothing (e.g. "the inbox is empty"
     // when it never called query_inbox). Guardrail: if the very first answer
@@ -179,6 +190,20 @@ export async function runOverseerConverse(params: {
     let nudged = false
 
     const finish = (reply: string) => ({ reply, toolTrace, focus })
+
+    const applyToolFocus = (
+        previous: OverseerConverseFocus | null,
+        event: Parameters<typeof applyFocusFromToolResolve>[1]
+    ): OverseerConverseFocus | null => {
+        const next = applyFocusFromToolResolve(previous, event, turnStartedAt)
+        const key = focusSubjectKey(next)
+        if (key) subjectsResolvedThisTurn.add(key)
+        if (subjectsResolvedThisTurn.size > 1) {
+            // Multi-subject comparison turn — refuse to invent a last-wins referent.
+            return params.focus ?? null
+        }
+        return next
+    }
 
     for (let iter = 0; iter < maxIterations; iter++) {
         let message: OpenAiChatMessage
@@ -265,16 +290,12 @@ export async function runOverseerConverse(params: {
                     ...(ok ? {} : { error: toolResultError(result) })
                 })
                 if (ok) {
-                    focus = applyFocusFromToolResolve(
-                        focus,
-                        {
-                            tool: name,
-                            ok: true,
-                            args,
-                            result
-                        },
-                        turnStartedAt
-                    )
+                    focus = applyToolFocus(focus, {
+                        tool: name,
+                        ok: true,
+                        args,
+                        result
+                    })
                 }
                 if (ok && isOverseerWriteTool(name)) {
                     consumedWriteFingerprints.add(fingerprintWriteToolCall(name, args))

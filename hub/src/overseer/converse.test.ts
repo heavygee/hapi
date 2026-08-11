@@ -480,6 +480,55 @@ describe('runOverseerConverse', () => {
         expect(focus?.sessionId).toBe(sessionId)
     })
 
+    it('does not last-win when multiple distinct subjects resolve in one turn', async () => {
+        const sessionA = '6cd8d0c3-aaaa-bbbb-cccc-ddddeeeeffff'
+        const sessionB = '96f67085-1111-2222-3333-444455556666'
+        const overseer = {
+            ...fakeOverseer,
+            getSessionState: ({ sessionId }: { sessionId: string }) => ({
+                state: { sessionId, name: sessionId.slice(0, 8), active: true }
+            })
+        } as unknown as OverseerEntity
+
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(chatResponse({
+                role: 'assistant',
+                content: '',
+                tool_calls: [
+                    {
+                        id: 'c1',
+                        type: 'function',
+                        function: {
+                            name: 'get_session_state',
+                            arguments: JSON.stringify({ sessionId: sessionA })
+                        }
+                    },
+                    {
+                        id: 'c2',
+                        type: 'function',
+                        function: {
+                            name: 'get_session_state',
+                            arguments: JSON.stringify({ sessionId: sessionB })
+                        }
+                    }
+                ]
+            }))
+            .mockResolvedValueOnce(chatResponse({
+                role: 'assistant',
+                content: 'Compared both workers.'
+            }))
+        setFetch(fetchMock)
+
+        const { focus } = await runOverseerConverse({
+            overseer,
+            config,
+            messages: [{ role: 'operator', content: 'compare these two workers' }],
+            focus: null
+        })
+
+        expect(focus).toBeNull()
+    })
+
     it('attaches mid-turn focus onto BrainUnavailableError after a resolving tool', async () => {
         const sessionId = '6cd8d0c3-aaaa-bbbb-cccc-ddddeeeeffff'
         const overseer = {
