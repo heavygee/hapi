@@ -121,29 +121,29 @@ Tiann's rationale stays valid for *upstream*. Estate still wants the onboarding-
 
 **Files:** `config/pr-chip-states.yaml`, `scripts/tooling/config/pr-chip-display.estate.json`, `scripts/tooling/lib/pr-emoji-core.sh` (+ `.test.sh`)
 
-Add `needs_operator` / `🛑` / rank 7 / `stickyPing: false`. Title strip includes 🛑.
+Add `needs_operator` / `🛑` / rank 7 / `stickyPing: false`. Title strip includes 🛑. **Shipped** on `tooling/operator-hold-chip` (PR #124).
 
 ### Task 2: Latch in Meta
 
 **Files:** `scripts/tooling/hapi-meta-daily.sh`, `hapi-meta-daily.test.sh`
 
-After classify, overlay hold from GitHub issue comments + review bodies. Persist `hold` in `meta-daily.json` (`pr`, `comment_id`, `author`, `url`, `acked`). `pec_worst_emoji` with live emoji. Skip peer ping when combined is 🛑. Emit one `needs_decision` event per new latch (`--emit-events` path already on 45m timer).
+After classify, overlay hold from GitHub issue comments + review bodies. Persist `hold` in `meta-daily.json` (`pr`, `comment_id`, `author`, `url`, `acked`). `pec_worst_emoji` with live emoji. Skip peer ping when combined is 🛑. Emit one `needs_decision` event per new latch (`--emit-events` path already on 45m timer). **Shipped** (`pr-hold-core.sh` + Meta overlay tests).
 
 ### Task 3: Ack
 
 **Files:** new `scripts/tooling/hapi-hold-ack.sh`; optional MCP later
 
-`hapi hold-ack <pr>` sets `acked`. Next Meta run returns to live classify. Chip tap in web is the same hub mutation if we add a tiny route; v1 CLI ack is enough.
+`hapi hold-ack <pr>` sets `acked`. Next Meta run returns to live classify. Chip tap in web is the same hub mutation if we add a tiny route; v1 CLI ack is enough. **Shipped** CLI ack; chip-tap route still deferred.
 
 ### Task 4: Chip pulse (soup)
 
 **Files:** awareness `SessionPrChip` + `FueDot`
 
-Pulse + tooltip. Do not put 🛑 in session titles (ADR D8).
+Pulse + tooltip. Do not put 🛑 in session titles (ADR D8). **Shipped** soup layer `driver/operator-hold-chip`; peer proof `e2e/peer/121-operator-hold-chip.spec.ts`.
 
 ### Task 5: Agent rule
 
-**Files:** `docs/operator/AGENTS.md` High-signal row + Meta watcher legend; lifecycle one-liner. No title emoji.
+**Files:** `docs/operator/AGENTS.md` High-signal row + Meta watcher legend; lifecycle one-liner. No title emoji. **Shipped** on the classifier branch.
 
 ---
 
