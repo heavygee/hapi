@@ -776,3 +776,9 @@ layers:
   # (5d8cd9b8f — @ mention pool: prepareSidebarSessions + title-signal; Fixes #1506)
   # Was: tip 17d091007. Worktree mention-sidebar-husks.
 
+  # tiann/hapi#1509 / PR #1511 — first-class spawn-peer with required remit.
+  # CLI hapi spawn-peer + MCP spawn_peer; hub 400 on spawn body message/prompt/text.
+  # Worktree: ~/coding/hapi/worktrees/spawn-peer-remit @ feat/spawn-peer-remit
+  # Tip: 8e3ffd9a4 (origin/feat/spawn-peer-remit)
+  - branch: feat/spawn-peer-remit
+
