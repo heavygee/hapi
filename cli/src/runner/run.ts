@@ -389,17 +389,14 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     }
     persistResumeProcesses();
 
-    // Webhook timeout tolerance. Opus 1M + --resume can legitimately take
-    // longer than the default 15s to reach the "Session started" webhook
-    // (observed real-world durations of 30s – 60min under rate-limit /
-    // heavy session restore). Allow advanced users to raise this ceiling
-    // so that slow starts no longer leave orphaned child processes which
-    // later report back as ghost sessions.
+    // Webhook timeout tolerance. Peer-cap inject wait is 16s; default must be
+    // higher or resume SIGTERMs before session webhook (#1473). Override via
+    // HAPI_RUNNER_WEBHOOK_TIMEOUT_MS.
     const envWebhookTimeout = Number(process.env.HAPI_RUNNER_WEBHOOK_TIMEOUT_MS);
     const webhookTimeoutMs =
       Number.isFinite(envWebhookTimeout) && envWebhookTimeout > 0
         ? envWebhookTimeout
-        : 15_000;
+        : 25_000;
 
     // Session spawning awaiter system
     const pidToAwaiter = new Map<number, (session: TrackedSession) => void>();

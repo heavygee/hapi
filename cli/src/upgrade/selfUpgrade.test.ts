@@ -424,6 +424,15 @@ describe('remainingDeadlineMs / createDeadlineRunner', () => {
     })
 })
 
+describe('shouldUseSupervisedUpgradeExit', () => {
+    it('is true only when HAPI_RUNNER_SUPERVISED=1', async () => {
+        const { shouldUseSupervisedUpgradeExit } = await import('./selfUpgrade')
+        expect(shouldUseSupervisedUpgradeExit({} as NodeJS.ProcessEnv)).toBe(false)
+        expect(shouldUseSupervisedUpgradeExit({ HAPI_RUNNER_SUPERVISED: '0' } as NodeJS.ProcessEnv)).toBe(false)
+        expect(shouldUseSupervisedUpgradeExit({ HAPI_RUNNER_SUPERVISED: '1' } as NodeJS.ProcessEnv)).toBe(true)
+    })
+})
+
 describe('applyRunnerSelfUpgrade concurrency gate', () => {
     afterEach(() => {
         __resetRunnerSelfUpgradeGateForTests()

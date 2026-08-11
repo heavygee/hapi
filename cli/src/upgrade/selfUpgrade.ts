@@ -755,6 +755,15 @@ function scheduleExit(response: RunnerSelfUpgradeResponse): UpgradeOutcome {
     return { response, exitScheduled: true }
 }
 
+/**
+ * systemd/pm2 fleet hosts set HAPI_RUNNER_SUPERVISED=1. Upgrade then installs
+ * and exits; the supervisor cold-starts the new binary. Avoids in-process
+ * authorized handoff that requires #1473 runnerProof socket delivery.
+ */
+export function shouldUseSupervisedUpgradeExit(env: NodeJS.ProcessEnv = process.env): boolean {
+    return env.HAPI_RUNNER_SUPERVISED === '1'
+}
+
 async function applyRunnerSelfUpgradeUnlocked(options: {
     offer: HubUpgradeOffer
     downloadBaseUrl: string
@@ -800,6 +809,55 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
             })
         }
 
+        // Supervised hosts (systemd/pm2 with HAPI_RUNNER_SUPERVISED=1): install,
+        // write the durable target, answer the hub, then exit cleanly. The
+        // supervisor cold-starts the new binary — no in-process spawn, so we
+        // never hit the #1473 "Authorized handoff missing runnerProof" FATAL
+        // that killed fleet Upgrade (homelab 2026-08-11: artifact installed,
+        // child died, parent toasted upgrade_failed after 30s).
+        if (shouldUseSupervisedUpgradeExit()) {
+            let markerError: Error | null = null
+            try {
+                writeUpgradeTarget({
+                    path: installedExecutable,
+                    targetVersion: options.offer.targetVersion,
+                    targetCapabilities: [...options.offer.targetCapabilities],
+                    targetGeneration: options.offer.targetGeneration
+                        || (options.offer.channel === 'hub-artifact' ? options.offer.artifact?.sha256 : undefined),
+                })
+            } catch (error) {
+                markerError = error instanceof Error ? error : new Error(String(error))
+                logger.debug('[SELF-UPGRADE] Durable target write failed (supervised)', markerError)
+            }
+            pruneSupersededArtifactsAfterDurableMarker({
+                markerError,
+                channel: options.offer.channel,
+                keepPath: installedExecutable,
+            })
+            // Exit after the RPC response is in flight. Prefer requestShutdown so
+            // ApiMachineClient can drop the socket cleanly; systemd Restart=always
+            // (KillMode=process) relaunches without yanking agent children.
+            if (options.requestShutdown) {
+                options.requestShutdown()
+            } else {
+                setTimeout(() => {
+                    process.exit(0)
+                }, 250)
+            }
+            if (markerError) {
+                return scheduleExit({
+                    status: 'failed',
+                    message: `Installed, but durable target could not be saved: ${markerError.message}`,
+                    channel: options.offer.channel,
+                })
+            }
+            return scheduleExit({
+                status: 'started',
+                message: `Upgrade to ${options.offer.targetVersion} via ${options.offer.channel} installed; supervisor restarting runner`,
+                channel: options.offer.channel,
+            })
+        }
+
         // Capture before spawn: the child may overwrite runner.state.json, and a
         // failed handoff must restore THIS process's identity — not the child's.
         const parentState = await readRunnerState()
@@ -807,6 +865,10 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
         // Spawn replacement, release the runner lock so the child can register,
         // then wait for handoff before shutting down. Mirrors run.ts mtime handoff
         // so a failed child does not leave the machine offline after a "started" RPC.
+        // NOTE: unsponsored hosts still need runnerProof on the PID-checked socket
+        // when the child binary enforces #1473 — that delivery lands with the
+        // peer-cap inject helpers (fix/self-upgrade-proof-handoff). Supervised
+        // path above is the fleet default for systemd.
         const candidate = await scheduleRunnerRelaunch(installedExecutable)
         await releaseRunnerLockForHandoff()
         const handoffOk = await waitForRunnerHandoff(process.pid, { timeoutMs: 30_000 })

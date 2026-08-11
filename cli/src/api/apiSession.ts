@@ -1088,6 +1088,11 @@ export class ApiSessionClient extends EventEmitter {
         if (this.state !== 'active') {
             return
         }
+        // Re-register RPCs every heartbeat. Hub restarts clear the in-memory
+        // RpcRegistry while this socket may keep sending session-alive —
+        // uploadFile/skills then 500 until a full reconnect. Mirror
+        // ApiMachineClient keepalive heal (#1108).
+        this.rpcHandlerManager.reregisterAll()
         this.socket.volatile.emit('session-alive', {
             sid: this.sessionId,
             time: Date.now(),
