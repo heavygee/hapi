@@ -98,8 +98,8 @@ pec_hold_should_latch() {
 }
 
 pec_hold_fingerprint() {
-    local repo="${1:-}" pr="${2:-}" comment_id="${3:-}"
-    printf '%s#%s:%s' "$repo" "$pr" "$comment_id"
+    local repo="${1:-}" pr="${2:-}" surface="${3:-}" comment_id="${4:-}"
+    printf '%s#%s:%s:%s' "$repo" "$pr" "$surface" "$comment_id"
 }
 
 pec_hold_state_key() {
@@ -132,25 +132,30 @@ pec_hold_overlay_emoji() {
     printf '%s' "$live"
 }
 
-# pec_hold_is_new_latch STATE_JSON REPO PR COMMENT_ID [CREATED_AT]
-# New when this comment_id is not already the recorded fingerprint.
-# Acked same id must NOT re-latch (operator ack is sticky until a new comment).
-# Issue-comment ids and review ids are different GitHub namespaces — never
-# compare them as a shared high-water mark. When both sides have created_at:
+# pec_hold_is_new_latch STATE_JSON REPO PR SURFACE COMMENT_ID [CREATED_AT]
+# New when this (surface, comment_id) is not already the recorded fingerprint.
+# Issue-comment ids and review ids are different GitHub namespaces — same
+# numeric id on a different surface is a distinct event. Acked same pair must
+# NOT re-latch. When both sides have created_at:
 #   - strictly later → new
 #   - older → not new
-#   - equal second (GitHub ts is 1s resolution) + different id → new only after
+#   - equal second (GitHub ts is 1s resolution) + different pair → new only after
 #     operator ack (unacked hold already covers that second; don't flip mid-hold)
 pec_hold_is_new_latch() {
-    local state="${1-}" repo="${2:-}" pr="${3:-}" comment_id="${4:-}" created_at="${5:-}"
-    local key fp existing_id existing_at
+    local state="${1-}" repo="${2:-}" pr="${3:-}" surface="${4:-}" comment_id="${5:-}" created_at="${6:-}"
+    local key fp existing_id existing_at existing_surface
     [[ -n "$state" ]] || state='{}'
     key="$(pec_hold_state_key "$repo" "$pr")"
-    fp="$(pec_hold_fingerprint "$repo" "$pr" "$comment_id")"
+    fp="$(pec_hold_fingerprint "$repo" "$pr" "$surface" "$comment_id")"
     existing_id="$(printf '%s' "$state" | jq -r --arg k "$key" '.hold[$k].comment_id // empty' 2>/dev/null || true)"
     existing_at="$(printf '%s' "$state" | jq -r --arg k "$key" '.hold[$k].created_at // empty' 2>/dev/null || true)"
+    existing_surface="$(printf '%s' "$state" | jq -r --arg k "$key" '.hold[$k].surface // empty' 2>/dev/null || true)"
     if [[ -n "$comment_id" && "$existing_id" == "$comment_id" ]]; then
-        return 1
+        # Legacy rows lack surface — treat missing as matching any surface for
+        # same-id sticky ack. Once upserted with surface, only equal pairs match.
+        if [[ -z "$existing_surface" || "$existing_surface" == "$surface" ]]; then
+            return 1
+        fi
     fi
     if [[ -n "$created_at" && -n "$existing_at" && "$existing_at" != "null" ]]; then
         if [[ "$created_at" < "$existing_at" ]]; then
@@ -184,19 +189,19 @@ pec_hold_ack_state() {
     '
 }
 
-# pec_hold_upsert_state STATE_JSON REPO PR COMMENT_ID AUTHOR URL EXCERPT [CREATED_AT]
+# pec_hold_upsert_state STATE_JSON REPO PR SURFACE COMMENT_ID AUTHOR URL EXCERPT [CREATED_AT]
 # Writes/replaces the unacked hold row. Sets notified=false for a new fingerprint.
 pec_hold_upsert_state() {
-    local state="${1-}" repo="${2:-}" pr="${3:-}" comment_id="${4:-}" \
-        author="${5:-}" url="${6:-}" excerpt="${7:-}" created_at="${8:-}"
+    local state="${1-}" repo="${2:-}" pr="${3:-}" surface="${4:-}" comment_id="${5:-}" \
+        author="${6:-}" url="${7:-}" excerpt="${8:-}" created_at="${9:-}"
     [[ -n "$state" ]] || state='{}'
     local key fp
     key="$(pec_hold_state_key "$repo" "$pr")"
-    fp="$(pec_hold_fingerprint "$repo" "$pr" "$comment_id")"
+    fp="$(pec_hold_fingerprint "$repo" "$pr" "$surface" "$comment_id")"
     excerpt="$(pec_hold_excerpt "$excerpt")"
     # jq object constructors cannot take a bare `and` as a value — wrap in `if`.
     printf '%s' "$state" | jq -c \
-        --arg k "$key" --arg repo "$repo" --arg pr "$pr" \
+        --arg k "$key" --arg repo "$repo" --arg pr "$pr" --arg surface "$surface" \
         --arg cid "$comment_id" --arg author "$author" --arg url "$url" \
         --arg excerpt "$excerpt" --arg fp "$fp" --arg created_at "$created_at" '
         .hold = (.hold // {})
@@ -204,6 +209,7 @@ pec_hold_upsert_state() {
         | .hold[$k] = {
             pr: $pr,
             repo: $repo,
+            surface: $surface,
             comment_id: $cid,
             author: $author,
             url: $url,

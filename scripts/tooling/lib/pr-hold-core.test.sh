@@ -76,10 +76,10 @@ eq "tiann thanks still latches (no NLP)" \
     "$(pec_hold_should_latch "issue_comment" "tiann" "User" "thanks" "tiann" && echo yes || echo no)" "yes"
 
 # ---- fingerprint + ack overlay -------------------------------------------
-HOLD_JSON='{"repo":"tiann/hapi","pr":"1108","comment_id":"5154418101","author":"tiann","url":"https://github.com/tiann/hapi/pull/1108#issuecomment-5154418101","excerpt":"please trim","acked":false,"created_at":"2026-08-02T01:26:00Z"}'
+HOLD_JSON='{"repo":"tiann/hapi","pr":"1108","surface":"issue_comment","comment_id":"5154418101","author":"tiann","url":"https://github.com/tiann/hapi/pull/1108#issuecomment-5154418101","excerpt":"please trim","acked":false,"created_at":"2026-08-02T01:26:00Z"}'
 eq "fingerprint stable" \
-    "$(pec_hold_fingerprint "tiann/hapi" "1108" "5154418101")" \
-    "tiann/hapi#1108:5154418101"
+    "$(pec_hold_fingerprint "tiann/hapi" "1108" "issue_comment" "5154418101")" \
+    "tiann/hapi#1108:issue_comment:5154418101"
 
 # jq treats # as a comment in object literals — always pass the key via --arg.
 STATE_UNACKED="$(jq -cn --argjson h "$HOLD_JSON" --arg k "tiann/hapi#1108" '{hold:{($k):$h}}')"
@@ -94,21 +94,25 @@ eq "no hold row returns live emoji" \
 
 # same fingerprint already latched → not a new latch
 eq "same fingerprint already latched is not new" \
-    "$(pec_hold_is_new_latch "$STATE_UNACKED" "tiann/hapi" "1108" "5154418101" && echo yes || echo no)" "no"
+    "$(pec_hold_is_new_latch "$STATE_UNACKED" "tiann/hapi" "1108" "issue_comment" "5154418101" && echo yes || echo no)" "no"
 eq "different comment id is new latch" \
-    "$(pec_hold_is_new_latch "$STATE_UNACKED" "tiann/hapi" "1108" "5154418199" "2026-08-03T00:00:00Z" && echo yes || echo no)" "yes"
+    "$(pec_hold_is_new_latch "$STATE_UNACKED" "tiann/hapi" "1108" "issue_comment" "5154418199" "2026-08-03T00:00:00Z" && echo yes || echo no)" "yes"
 eq "acked fingerprint can re-latch on new comment" \
-    "$(pec_hold_is_new_latch "$STATE_ACKED" "tiann/hapi" "1108" "5154418199" "2026-08-03T00:00:00Z" && echo yes || echo no)" "yes"
+    "$(pec_hold_is_new_latch "$STATE_ACKED" "tiann/hapi" "1108" "issue_comment" "5154418199" "2026-08-03T00:00:00Z" && echo yes || echo no)" "yes"
 eq "acked same comment id is not a new latch" \
-    "$(pec_hold_is_new_latch "$STATE_ACKED" "tiann/hapi" "1108" "5154418101" && echo yes || echo no)" "no"
+    "$(pec_hold_is_new_latch "$STATE_ACKED" "tiann/hapi" "1108" "issue_comment" "5154418101" && echo yes || echo no)" "no"
 eq "older event after ack is not a new latch" \
-    "$(pec_hold_is_new_latch "$STATE_ACKED" "tiann/hapi" "1108" "100" "2026-08-01T00:00:00Z" && echo yes || echo no)" "no"
+    "$(pec_hold_is_new_latch "$STATE_ACKED" "tiann/hapi" "1108" "issue_comment" "100" "2026-08-01T00:00:00Z" && echo yes || echo no)" "no"
 eq "later issue comment with smaller id than stored review still latches" \
-    "$(pec_hold_is_new_latch "$STATE_ACKED" "tiann/hapi" "1108" "99" "2026-08-04T00:00:00Z" && echo yes || echo no)" "yes"
+    "$(pec_hold_is_new_latch "$STATE_ACKED" "tiann/hapi" "1108" "issue_comment" "99" "2026-08-04T00:00:00Z" && echo yes || echo no)" "yes"
 eq "equal timestamp different id while unacked is not new" \
-    "$(pec_hold_is_new_latch "$STATE_UNACKED" "tiann/hapi" "1108" "5154418999" "2026-08-02T01:26:00Z" && echo yes || echo no)" "no"
+    "$(pec_hold_is_new_latch "$STATE_UNACKED" "tiann/hapi" "1108" "issue_comment" "5154418999" "2026-08-02T01:26:00Z" && echo yes || echo no)" "no"
 eq "equal timestamp different id after ack is new latch" \
-    "$(pec_hold_is_new_latch "$STATE_ACKED" "tiann/hapi" "1108" "5154418999" "2026-08-02T01:26:00Z" && echo yes || echo no)" "yes"
+    "$(pec_hold_is_new_latch "$STATE_ACKED" "tiann/hapi" "1108" "issue_comment" "5154418999" "2026-08-02T01:26:00Z" && echo yes || echo no)" "yes"
+eq "same numeric id different surface after ack is new latch" \
+    "$(pec_hold_is_new_latch "$STATE_ACKED" "tiann/hapi" "1108" "review_body" "5154418101" "2026-08-03T00:00:00Z" && echo yes || echo no)" "yes"
+eq "same numeric id different surface later while unacked is new latch" \
+    "$(pec_hold_is_new_latch "$STATE_UNACKED" "tiann/hapi" "1108" "review_body" "5154418101" "2026-08-03T00:00:00Z" && echo yes || echo no)" "yes"
 
 ACKED2="$(pec_hold_ack_state "$STATE_UNACKED" "tiann/hapi" "1108")"
 eq "ack sets acked true" \
@@ -122,19 +126,20 @@ eq "excerpt caps at 140" \
     "$(pec_hold_excerpt "$LONG" | wc -c | tr -d ' ')" "140"
 
 # upsert must emit valid JSON (jq object-value `and` is a parse error)
-UPSERT="$(pec_hold_upsert_state '{}' "tiann/hapi" "100" "5154418101" "tiann" \
+UPSERT="$(pec_hold_upsert_state '{}' "tiann/hapi" "100" "issue_comment" "5154418101" "tiann" \
     "https://github.com/tiann/hapi/pull/100#issuecomment-5154418101" "please trim" \
     "2026-08-02T01:26:00Z")"
 eq "upsert emits JSON" "$(printf '%s' "$UPSERT" | jq -e . >/dev/null && echo yes || echo no)" "yes"
 eq "upsert stores created_at" "$(printf '%s' "$UPSERT" | jq -r --arg k 'tiann/hapi#100' '.hold[$k].created_at')" "2026-08-02T01:26:00Z"
+eq "upsert stores surface" "$(printf '%s' "$UPSERT" | jq -r --arg k 'tiann/hapi#100' '.hold[$k].surface')" "issue_comment"
 eq "upsert acked false" "$(printf '%s' "$UPSERT" | jq -r --arg k 'tiann/hapi#100' '.hold[$k].acked')" "false"
 eq "upsert notified false on new fp" "$(printf '%s' "$UPSERT" | jq -r --arg k 'tiann/hapi#100' '.hold[$k].notified')" "false"
 eq "upsert overlay is hold" "$(pec_hold_overlay_emoji "⚠️" "$UPSERT" "tiann/hapi" "100")" "🛑"
 MARKED="$(pec_hold_mark_notified "$UPSERT" "tiann/hapi" "100")"
-SAME_FP="$(pec_hold_upsert_state "$MARKED" "tiann/hapi" "100" "5154418101" "tiann" \
+SAME_FP="$(pec_hold_upsert_state "$MARKED" "tiann/hapi" "100" "issue_comment" "5154418101" "tiann" \
     "https://github.com/tiann/hapi/pull/100#issuecomment-5154418101" "please trim")"
 eq "upsert same fp keeps notified" "$(printf '%s' "$SAME_FP" | jq -r --arg k 'tiann/hapi#100' '.hold[$k].notified')" "true"
-NEW_FP="$(pec_hold_upsert_state "$MARKED" "tiann/hapi" "100" "999" "tiann" \
+NEW_FP="$(pec_hold_upsert_state "$MARKED" "tiann/hapi" "100" "issue_comment" "999" "tiann" \
     "https://github.com/tiann/hapi/pull/100#issuecomment-999" "new cut")"
 eq "upsert new fp resets notified" "$(printf '%s' "$NEW_FP" | jq -r --arg k 'tiann/hapi#100' '.hold[$k].notified')" "false"
 

@@ -640,9 +640,9 @@ md_hold_ingest() {
         url="$(jq -r '.url // ""' <<<"$ev")"
         created_at="$(jq -r '.created_at // ""' <<<"$ev")"
         pec_hold_should_latch "$surface" "$login" "$type" "$body" "$csv" || continue
-        if pec_hold_is_new_latch "$state" "$repo" "$number" "$ev_id" "$created_at"; then
+        if pec_hold_is_new_latch "$state" "$repo" "$number" "$surface" "$ev_id" "$created_at"; then
             local next
-            next="$(pec_hold_upsert_state "$state" "$repo" "$number" "$ev_id" "$login" "$url" "$body" "$created_at" || true)"
+            next="$(pec_hold_upsert_state "$state" "$repo" "$number" "$surface" "$ev_id" "$login" "$url" "$body" "$created_at" || true)"
             if [[ -n "$next" ]] && printf '%s' "$next" | jq -e . >/dev/null 2>&1; then
                 printf '%s' "$next"
             else
