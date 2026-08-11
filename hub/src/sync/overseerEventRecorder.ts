@@ -266,11 +266,15 @@ export class OverseerEventRecorder {
                 }
             }
 
+            // Scoop URLs before any LLM await so a slow/crashed fallback
+            // cannot drop already-persisted assistant links.
+            this.scoopLinksFromContent(session, messageId, content, ts)
+
             // Opt-in LLM only (#90). No first-line heuristic. Defer while
             // thinking so ACP mid-turn flushes do not each hit the LLM.
             if (!primary && plainText && this.llmFallback) {
                 if (opts.thinking) {
-                    this.pendingLlmFallback.set(session.id, { messageId, plainText, ts })
+                    this.rememberPendingLlmFallback(session.id, messageId, plainText, ts)
                 } else {
                     this.pendingLlmFallback.delete(session.id)
                     primary = await this.enqueueSessionWork(session.id, () =>
@@ -278,6 +282,7 @@ export class OverseerEventRecorder {
                     )
                 }
             }
+            return primary
         }
 
         this.scoopLinksFromContent(session, messageId, content, ts)
@@ -340,7 +345,30 @@ export class OverseerEventRecorder {
     }
 
     async flushPendingLlmFallback(session: SessionSnapshot): Promise<StoredSystemEvent | null> {
+        if (!this.pendingLlmFallback.has(session.id)) return null
         return this.enqueueSessionWork(session.id, () => this.flushPendingLlmFallbackUnlocked(session))
+    }
+
+    private rememberPendingLlmFallback(
+        sessionId: string,
+        messageId: string,
+        plainText: string,
+        ts: number
+    ): void {
+        const prev = this.pendingLlmFallback.get(sessionId)
+        // New ACP text segment in the same thinking turn — keep the whole turn.
+        // Same messageId is a redelivery; replace rather than duplicate.
+        const combined = prev && prev.messageId !== messageId
+            ? `${prev.plainText}\n${plainText}`
+            : plainText
+        if (!prev || prev.messageId !== messageId) {
+            this.llmFallbackSucceeded.delete(sessionId)
+        }
+        this.pendingLlmFallback.set(sessionId, {
+            messageId,
+            plainText: combined,
+            ts: prev?.ts ?? ts
+        })
     }
 
     private async flushPendingLlmFallbackUnlocked(session: SessionSnapshot): Promise<StoredSystemEvent | null> {
@@ -354,7 +382,13 @@ export class OverseerEventRecorder {
     private enqueueSessionWork<T>(sessionId: string, work: () => Promise<T>): Promise<T> {
         const previous = this.sessionWork.get(sessionId) ?? Promise.resolve()
         const run = previous.then(work, work)
-        this.sessionWork.set(sessionId, run.then(() => undefined, () => undefined))
+        const tail: Promise<unknown> = run.then(() => undefined, () => undefined)
+        this.sessionWork.set(sessionId, tail)
+        void tail.then(() => {
+            if (this.sessionWork.get(sessionId) === tail) {
+                this.sessionWork.delete(sessionId)
+            }
+        })
         return run
     }
 
@@ -369,6 +403,7 @@ export class OverseerEventRecorder {
         ts: number
     ): Promise<StoredSystemEvent | null> {
         if (!this.llmFallback) return null
+        this.llmFallbackSucceeded.delete(session.id)
         try {
             const notify = await this.llmFallback.synthesizeNotifySummary(plainText)
             if (!notify) return null

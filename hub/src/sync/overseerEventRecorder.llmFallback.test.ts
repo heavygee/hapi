@@ -279,4 +279,99 @@ describe('OverseerEventRecorder LLM fallback', () => {
         const rows = store.events.list().sort((a, b) => a.id - b.id)
         expect(rows.map((row) => row.summary)).toEqual(['first turn', 'second turn'])
     })
+
+    it('accumulates ACP thinking segments before fallback', async () => {
+        const store = new Store(':memory:')
+        const synthesize = mock(async (plainText: string): Promise<NotifySummary | null> => {
+            expect(plainText).toContain('First chunk')
+            expect(plainText).toContain('Second chunk')
+            return { status: 'done', summary: 'both chunks' }
+        })
+        const recorder = new OverseerEventRecorder(store.events, store.inbox, {
+            llmFallback: { synthesizeNotifySummary: synthesize },
+        })
+        const stored = store.sessions.getOrCreateSession('llm-acc', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
+        const snapshot = toSessionSnapshot(makeSession(stored.id, 'cursor'), stored.tag)
+
+        await recorder.onAgentMessage(snapshot, 'msg-1', agentText('First chunk'), Date.now(), { thinking: true })
+        await recorder.onAgentMessage(snapshot, 'msg-2', agentText('Second chunk'), Date.now() + 1, { thinking: true })
+        const flushed = await recorder.flushPendingLlmFallback(snapshot)
+
+        expect(synthesize).toHaveBeenCalledTimes(1)
+        expect(flushed?.summary).toBe('both chunks')
+    })
+
+    it('writes completed_fallback when a later missed turn LLM fails', async () => {
+        const store = new Store(':memory:')
+        const synthesize = mock(async (plainText: string): Promise<NotifySummary | null> => {
+            if (plainText.includes('first turn')) {
+                return { status: 'done', summary: 'caught first' }
+            }
+            return null
+        })
+        const recorder = new OverseerEventRecorder(store.events, store.inbox, {
+            llmFallback: { synthesizeNotifySummary: synthesize },
+        })
+        const live = makeSession('sess-later', 'cursor', { thinking: true })
+        const stored = store.sessions.getOrCreateSession('llm-later', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
+        live.id = stored.id
+        const snapshot = toSessionSnapshot(live, stored.tag)
+
+        await recorder.onAgentMessage(snapshot, 'msg-first', agentText('first turn body'), Date.now(), { thinking: true })
+        live.thinking = false
+        await recorder.onSessionUpdated(live, stored.tag)
+        expect(store.events.list({ eventType: 'completed' })).toHaveLength(1)
+
+        await recorder.onAgentMessage(snapshot, 'msg-second', agentText('second turn miss'), Date.now() + 1)
+        expect(synthesize).toHaveBeenCalledTimes(2)
+
+        const event = await recorder.onSessionEnd(
+            live,
+            stored.tag,
+            Date.now() + 2,
+            'completed',
+            () => 'second turn miss'
+        )
+
+        expect(event?.provenance).toContain('session-end')
+        expect(store.events.list().filter((row) => row.provenance?.includes('session-end'))).toHaveLength(1)
+        expect(store.events.list().filter((row) => row.provenance?.includes('hub-llm-fallback'))).toHaveLength(1)
+    })
+
+    it('persists scooped links before awaiting LLM', async () => {
+        const store = new Store(':memory:')
+        let release!: (value: NotifySummary) => void
+        const gate = new Promise<NotifySummary>((resolve) => {
+            release = resolve
+        })
+        let started!: () => void
+        const startedP = new Promise<void>((resolve) => {
+            started = resolve
+        })
+        const recorder = new OverseerEventRecorder(store.events, store.inbox, {
+            llmFallback: {
+                synthesizeNotifySummary: mock(async () => {
+                    started()
+                    return gate
+                }),
+            },
+        })
+        const stored = store.sessions.getOrCreateSession('llm-scoop', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
+        const snapshot = toSessionSnapshot(makeSession(stored.id, 'cursor'), stored.tag)
+
+        const pending = recorder.onAgentMessage(
+            snapshot,
+            'msg-url',
+            agentText('See https://example.com/docs for details.'),
+            Date.now()
+        )
+        await startedP
+
+        expect(store.events.list({ eventType: 'link_seen' })).toHaveLength(1)
+        expect(store.events.list().filter((row) => row.provenance?.includes('hub-llm-fallback'))).toHaveLength(0)
+
+        release({ status: 'done', summary: 'linked turn' })
+        await pending
+        expect(store.events.list().filter((row) => row.provenance?.includes('hub-llm-fallback'))).toHaveLength(1)
+    })
 })
