@@ -46,11 +46,11 @@ import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
 import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 import { getDraftAttachments } from '@/lib/composer-attachment-drafts'
 import { refreshSessionDetailPreservingActive } from '@/lib/session-detail-optimistic'
-import { inactiveSessionCanResume } from '@/lib/sessionResume'
+import { inactiveSessionCanResume, resolveCursorReopenGate } from '@/lib/sessionResume'
 import { initializeSessionLastSeen, markSessionSeen } from '@/lib/sessionLastSeen'
 import { useSessionBrowserTitle } from '@/hooks/useSessionBrowserTitle'
 import { clearCodexImportedSession } from '@/lib/codexImportedSessions'
-import { getSupersedingSessionId, shouldFollowSupersedingSession } from '@/routes/sessions/followSupersedingSession'
+import { getSupersedingSessionId, prepareFollowSupersedingSession, shouldFollowSupersedingSession } from '@/routes/sessions/followSupersedingSession'
 import { migrateSuppressedSendError } from '@/lib/suppressed-send-error'
 import FilesPage from '@/routes/sessions/files'
 import FilePage from '@/routes/sessions/file'
@@ -68,7 +68,7 @@ import SettingsAboutPage from '@/routes/settings/about'
 import SettingsStoragePage from '@/routes/settings/storage'
 import SettingsUsagePage from '@/routes/settings/usage'
 import SharePage from '@/routes/share'
-import { setSharePendingTransfer } from '@/lib/sharePendingState'
+import { retargetSharePendingTransfer, setSharePendingTransfer } from '@/lib/sharePendingState'
 import { deleteShareTransfer, parseShareSearch } from '@/lib/shareTransfer'
 
 
@@ -346,6 +346,7 @@ function SessionPage() {
         status: cursorChatStoreStatus,
         isApplicable: cursorChatStoreApplicable,
         error: cursorChatStoreError,
+        isLoading: cursorChatStoreLoading,
     } = useCursorChatStoreStatus({ api, session })
     const {
         messages,
@@ -436,6 +437,7 @@ function SessionPage() {
                 await queryClient.invalidateQueries({ queryKey: queryKeys.session(result.sessionId) })
                 await queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
                 if (result.sessionId && result.sessionId !== errorSessionId) {
+                    retargetSharePendingTransfer(errorSessionId, result.sessionId)
                     await transferComposerDraftThenNavigate(
                         errorSessionId,
                         result.sessionId,
@@ -460,12 +462,19 @@ function SessionPage() {
         })()
     }, [api, queryClient, navigate, addToast, t])
 
-    const cursorReopenDisabledReason = cursorChatStoreApplicable && cursorChatStoreStatus?.onDisk !== true
-        ? cursorChatStoreError
-            ? t('session.action.reopenCursorCheckFailed')
-            : cursorChatStoreStatus?.onDisk === false
-                ? t('session.action.reopenCursorMissing')
-                : t('session.action.reopenCursorChecking')
+    const cursorReopenGate = resolveCursorReopenGate({
+        applicable: cursorChatStoreApplicable,
+        onDisk: cursorChatStoreStatus?.onDisk,
+        error: cursorChatStoreError,
+        isLoading: cursorChatStoreLoading,
+    })
+    const cursorReopenDisabledReason = cursorReopenGate.disabledReason === 'missing'
+        ? t('session.action.reopenCursorMissing')
+        : cursorReopenGate.disabledReason === 'checking'
+            ? t('session.action.reopenCursorChecking')
+            : undefined
+    const cursorReopenUnverifiedHint = cursorReopenGate.probeUnverified
+        ? t('session.action.reopenCursorUnverified')
         : undefined
     const canOfferInactiveReopen = session
         ? inactiveSessionCanResume(session, messages.length, cursorChatStoreStatus?.onDisk)
@@ -537,6 +546,7 @@ function SessionPage() {
     const handleSessionResolved = useCallback((resolvedSessionId: string) => {
         if (session) {
             if (resolvedSessionId !== session.id) {
+                retargetSharePendingTransfer(session.id, resolvedSessionId)
                 seedMessageWindowFromSession(session.id, resolvedSessionId)
             }
             queryClient.setQueryData(queryKeys.session(resolvedSessionId), (previous: { session?: typeof session } | undefined) => ({
@@ -768,6 +778,7 @@ function SessionPage() {
             session={session}
             cursorChatOnDisk={cursorChatStoreStatus?.onDisk}
             reopenDisabledReason={cursorReopenDisabledReason}
+            reopenHint={cursorReopenUnverifiedHint}
             messages={messages}
             messagesWarning={messagesWarning}
             hasMoreMessages={messagesHasMore}
@@ -840,6 +851,7 @@ function SessionDetailRoute() {
         )
         observedSessionRef.current = { sessionId, supersedingSessionId }
         if (!shouldFollow || !supersedingSessionId) return
+        prepareFollowSupersedingSession(sessionId, supersedingSessionId)
         navigate({
             to: '/sessions/$sessionId',
             params: { sessionId: supersedingSessionId },
@@ -883,7 +895,7 @@ function NewSessionPage() {
 
     const handleSuccess = useCallback((sessionId: string) => {
         if (shareTransferId) {
-            setSharePendingTransfer(shareTransferId)
+            setSharePendingTransfer(shareTransferId, sessionId)
         }
         void queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
         // Replace current page with /sessions to clear spawn flow from history

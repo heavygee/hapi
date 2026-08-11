@@ -1210,7 +1210,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           machineId,
           machineTag,
           runnerProof,
-          metadata: buildMachineMetadata({ workspaceRoots }),
+          metadata: buildMachineMetadata({
+            workspaceRoots,
+            startedCliMtimeMs: startedWithCliMtimeMs,
+            asRunner: true,
+          }),
           runnerState: initialRunnerState,
           allowLegacyReenroll: !handoffRunnerProof,
         }),
