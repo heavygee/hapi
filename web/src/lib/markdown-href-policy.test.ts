@@ -129,6 +129,17 @@ describe('classifyNoSchemeHref — fail-closed (#1452)', () => {
         })
     })
 
+    it('compares Windows workspace containment case-insensitively', () => {
+        expect(
+            classifyNoSchemeHref('c:\\users\\ada\\coding\\hapi\\docs\\a.md', {
+                workspacePath: 'C:\\Users\\Ada\\coding\\hapi',
+            })
+        ).toEqual({
+            action: 'file',
+            path: 'c:\\users\\ada\\coding\\hapi\\docs\\a.md',
+        })
+    })
+
     it('renders absolute paths without workspace metadata as inert (fail closed)', () => {
         expect(classifyNoSchemeHref('/home/ada/coding/hapi/docs/a.md')).toEqual({ action: 'inert' })
     })

@@ -48,9 +48,17 @@ describe('remarkFilePathLinks', () => {
         expect(links.map(linkedPath)).toEqual(['screenshot.png', 'README.md'])
     })
 
-    it('does not autolink Windows absolute paths (containment needs session cwd in <A>)', () => {
+    it('autolinks Windows absolute paths as raw hrefs for <A> containment (not hapi-file:)', () => {
         const nodes = transform('Open C:\\Users\\dev\\project\\handoff.md and D:/work/app/src/main.ts:12')
-        expect(nodes.some((node) => node.type === 'link')).toBe(false)
+        const links = nodes.filter((node) => node.type === 'link')
+
+        expect(links.map((n) => n.url)).toEqual([
+            'C:\\Users\\dev\\project\\handoff.md',
+            'D:/work/app/src/main.ts',
+        ])
+        for (const link of links) {
+            expect(decodeFilePathHref(link.url as string)).toBeNull()
+        }
     })
 
     it('does not link other absolute or parent paths', () => {
@@ -114,10 +122,14 @@ describe('remarkFilePathLinks — inlineCode', () => {
     it.each([
         'C:\\Users\\dev\\project\\handoff.md',
         'D:/work/app/src/main.ts:12'
-    ])('does not autolink Windows absolute inlineCode path %s', (value) => {
+    ])('autolinks Windows absolute inlineCode path %s as raw href (not hapi-file:)', (value) => {
         const nodes = transformNodes([{ type: 'inlineCode', value }])
-        expect(nodes.some((node) => node.type === 'link')).toBe(false)
-        expect(nodes.find((node) => node.type === 'inlineCode')?.value).toBe(value)
+        const link = nodes.find((node) => node.type === 'link')!
+        const expected = value.replace(/:\d+(?::\d+)?$/, '')
+        expect(link.url).toBe(expected)
+        expect(decodeFilePathHref(link.url as string)).toBeNull()
+        expect(link.children?.[0]?.type).toBe('inlineCode')
+        expect(link.children?.[0]?.value).toBe(value)
     })
 
     it.each([

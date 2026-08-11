@@ -87,10 +87,17 @@ function shouldLinkPath(value: string): boolean {
     if (path.length < 3) return false
     if (path.startsWith('/') || path.startsWith('~/')) return false
     if (path.startsWith('../') || path.includes('/../')) return false
-    // Windows abs needs session cwd for containment — leave for <A>.
-    if (isWindowsAbsolutePath(path)) return false
+    // Windows abs: autolink with the raw path (not hapi-file:) so <A> can
+    // apply workspace containment before painting FilePathAnchor.
+    if (isWindowsAbsolutePath(path)) return hasKnownFileExtension(path)
     if (path.includes('/')) return hasKnownFileExtension(path)
     return hasKnownFileExtension(path)
+}
+
+/** Autolink href: Windows abs stays raw for <A> containment; else hapi-file:. */
+function createAutolinkHref(filePath: string): string {
+    if (isWindowsAbsolutePath(filePath)) return filePath
+    return createFileHref(filePath)
 }
 
 function linkTextNode(node: MarkdownNode): MarkdownNode[] {
@@ -118,7 +125,7 @@ function linkTextNode(node: MarkdownNode): MarkdownNode[] {
         }
         parts.push({
             type: 'link',
-            url: createFileHref(filePath),
+            url: createAutolinkHref(filePath),
             title: null,
             children: [{ type: 'text', value: displayPath }]
         })
@@ -158,7 +165,7 @@ function linkInlineCodeNode(node: MarkdownNode): MarkdownNode | null {
 
     return {
         type: 'link',
-        url: createFileHref(filePath),
+        url: createAutolinkHref(filePath),
         title: null,
         children: [{ type: 'inlineCode', value: trimmed }]
     }

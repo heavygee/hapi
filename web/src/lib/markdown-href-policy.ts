@@ -127,7 +127,12 @@ export function isWithinWorkspace(absPath: string, workspacePath: string): boole
     if (!target || !root) return false
     const normTarget = target.replace(/\\/g, '/').replace(/\/+$/, '')
     const normRoot = root.replace(/\\/g, '/').replace(/\/+$/, '')
-    return normTarget === normRoot || normTarget.startsWith(`${normRoot}/`)
+    // Windows filesystems are case-insensitive; compare folded when both sides
+    // are drive-qualified so `c:\Users\…` matches `C:\Users\…`.
+    const windows = isWindowsAbsolutePath(normTarget) && isWindowsAbsolutePath(normRoot)
+    const comparableTarget = windows ? normTarget.toLowerCase() : normTarget
+    const comparableRoot = windows ? normRoot.toLowerCase() : normRoot
+    return comparableTarget === comparableRoot || comparableTarget.startsWith(`${comparableRoot}/`)
 }
 
 function isRepoRelativeCandidate(path: string): boolean {
