@@ -80,4 +80,28 @@ describe('resolveOverseerWriteAuthorization (focus-owned, not regex)', () => {
         expect(isWriteToolCallAuthorized('record_disposition', { itemId: 118, action: 'done' }, auth).ok).toBe(true)
         expect(isWriteToolCallAuthorized('record_disposition', { itemId: 999, action: 'done' }, auth).ok).toBe(false)
     })
+
+    it('accepts a unique short prefix of the focused session id', () => {
+        const auth = resolveOverseerWriteAuthorization({
+            focus: { ...focused, itemId: null }
+        })
+        expect(
+            isWriteToolCallAuthorized(
+                'ping_session',
+                { sessionId: '6cd8d0c3', message: 'retry' },
+                auth
+            ).ok
+        ).toBe(true)
+    })
+
+    it('rejects an off-focus itemId even when the session selector matches', () => {
+        const auth = resolveOverseerWriteAuthorization({ focus: focused })
+        expect(
+            isWriteToolCallAuthorized(
+                'ping_session',
+                { sessionId: SESSION_A, itemId: 999, message: 'hi' },
+                auth
+            ).ok
+        ).toBe(false)
+    })
 })

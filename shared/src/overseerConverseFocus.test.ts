@@ -210,6 +210,30 @@ describe('hub-owned conversational focus (capability, not pattern matching)', ()
         )
     })
 
+    it('does not promote an ungranted itemId from a successful ping', () => {
+        const after = applyFocusFromToolResolve(focus(), {
+            tool: 'ping_session',
+            ok: true,
+            args: { sessionId: SESSION_A, itemId: 999, message: 'hi' },
+            result: { ok: true, sessionId: SESSION_A }
+        })
+        expect(after?.sessionId).toBe(SESSION_A)
+        expect(after?.itemId).toBe(118)
+    })
+
+    it('promotes singleton query_events to focus', () => {
+        expect(
+            applyFocusFromToolResolve(null, {
+                tool: 'query_events',
+                ok: true,
+                args: { limit: 1 },
+                result: {
+                    events: [{ id: 1, relatedSessionId: SESSION_A, eventType: 'failed' }]
+                }
+            })?.sessionId
+        ).toBe(SESSION_A)
+    })
+
     it('promotes singleton query_open_loops to focus', () => {
         expect(
             applyFocusFromToolResolve(null, {

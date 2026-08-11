@@ -99,7 +99,14 @@ export function resolveOverseerWriteAuthorization(opts: {
 
 function sessionIdMatchesGrant(sessionId: string, prefixes: readonly string[]): boolean {
     const lower = sessionId.trim().toLowerCase()
-    return prefixes.some((prefix) => lower === prefix || lower.startsWith(prefix))
+    if (!lower) return false
+    return prefixes.some((prefix) => {
+        if (!prefix) return false
+        // Exact, call extends grant prefix, or call is a unique short prefix of the
+        // focused canonical id (tool contract accepts abbreviated session ids).
+        if (lower === prefix || lower.startsWith(prefix)) return true
+        return lower.length >= 8 && prefix.startsWith(lower)
+    })
 }
 
 function messageMatchesGrant(message: string, snippets: readonly string[]): boolean {
@@ -147,6 +154,14 @@ export function isWriteToolCallAuthorized(
         }
         const sessionOk = sessionId.length > 0 && sessionIdMatchesGrant(sessionId, auth.sessionIdPrefixes)
         const itemOk = itemId != null && auth.itemIds.includes(itemId)
+        // When focus binds both slots, every supplied selector must match —
+        // session-only match must not launder an off-focus itemId into the ping.
+        if (sessionId.length > 0 && auth.sessionIdPrefixes.length > 0 && !sessionOk) {
+            return { ok: false, error: 'relay target does not match conversational focus' }
+        }
+        if (itemId != null && auth.itemIds.length > 0 && !itemOk) {
+            return { ok: false, error: 'relay target does not match conversational focus' }
+        }
         if (!sessionOk && !itemOk) {
             return { ok: false, error: 'relay target does not match conversational focus' }
         }

@@ -218,15 +218,33 @@ export function applyFocusFromToolResolve(
         const sessionId =
             sessionFromResult(result) ??
             (typeof args.sessionId === 'string' ? args.sessionId.trim() : null)
-        const itemId =
-            itemFromResult(result) ??
-            (typeof args.itemId === 'number' ? args.itemId : null)
+        if (!sessionId && itemFromResult(result) == null) {
+            // No session identity — do not promote an ungranted model itemId alone.
+            return previous
+        }
+        const resultItem = itemFromResult(result)
+        const argsItem = typeof args.itemId === 'number' && args.itemId > 0 ? args.itemId : null
+        // Never adopt a model-supplied itemId that was not already the focused item.
+        // Session-matched pings keep the prior item; off-session writes clear it.
+        let itemId: number | null = resultItem
+        if (itemId == null) {
+            if (argsItem != null && previous?.itemId === argsItem) {
+                itemId = argsItem
+            } else if (
+                previous?.itemId != null &&
+                sessionId &&
+                previous.sessionId &&
+                previous.sessionId.toLowerCase() === sessionId.toLowerCase()
+            ) {
+                itemId = previous.itemId
+            } else {
+                itemId = null
+            }
+        }
         if (!sessionId && itemId == null) return previous
-        // Subject-changing write replaces the whole pair — do not inherit a
-        // stale counterpart from the prior focus (Codex P2).
         return {
             sessionId: sessionId || null,
-            itemId: itemId ?? null,
+            itemId,
             source: 'tool_resolve',
             updatedAt: now
         }
@@ -322,6 +340,28 @@ export function applyFocusFromToolResolve(
         return {
             sessionId: null,
             itemId,
+            source: 'tool_resolve',
+            updatedAt: now
+        }
+    }
+
+    // Singleton event — "what just failed?" then "tell it to retry".
+    if (tool === 'query_events' && isObj(result) && Array.isArray(result.events)) {
+        if (result.events.length !== 1) return previous
+        const only = result.events[0]
+        if (!isObj(only)) return previous
+        const sessionId =
+            typeof only.relatedSessionId === 'string'
+                ? only.relatedSessionId.trim()
+                : typeof only.sessionId === 'string'
+                    ? only.sessionId.trim()
+                    : typeof only.session === 'string'
+                        ? only.session.trim()
+                        : ''
+        if (!sessionId) return previous
+        return {
+            sessionId,
+            itemId: null,
             source: 'tool_resolve',
             updatedAt: now
         }

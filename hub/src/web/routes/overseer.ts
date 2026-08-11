@@ -279,6 +279,10 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
             })
         }
 
+        // Publish client-selected focus before awaiting the brain so overlapping
+        // converse requests (voice/text/devices) observe the new referent.
+        if (priorFocus) settings.setConverseFocusIfNewer(priorFocus, namespace)
+
         try {
             const { reply, toolTrace, focus } = await runOverseerConverse({
                 overseer,
