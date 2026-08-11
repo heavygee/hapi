@@ -95,5 +95,12 @@ fi
 
 next="$(pec_hold_ack_state "$state" "$REPO" "$PR")"
 tmp="$(mktemp "$(dirname "$STATE_FILE")/.hold-ack.XXXXXX")"
-printf '%s' "$next" | jq '.' >"$tmp" && mv -f "$tmp" "$STATE_FILE"
+if ! printf '%s' "$next" | jq '.' >"$tmp"; then
+    rm -f "$tmp"
+    die "failed to serialize ack state for $key"
+fi
+if ! mv -f "$tmp" "$STATE_FILE"; then
+    rm -f "$tmp"
+    die "failed to persist ack state for $key"
+fi
 echo "hapi-hold-ack: acked $key — next Meta run returns to live classify"

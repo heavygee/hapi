@@ -1171,6 +1171,69 @@ EOF
 bash "$DIR/hapi-hold-ack.sh" --state "$WORK/hold-only.json" 124
 check "hold-ack bare number: acked heavygee row" "jq -e --arg k 'heavygee/hapi#124' '.hold[\$k].acked == true' '$WORK/hold-only.json' >/dev/null"
 
+# Authored open tiann#124 + fork chip only: classify upstream pair; orphan tiann.
+rm -f "$WORK/state.json" "$WORK/pings.log" "$WORK/batch.args"
+cat >"$WORK/gh" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+if [[ "$args" == *"pr list"* && "$args" == *"--state open"* ]]; then
+    printf '124\n'; exit 0
+fi
+if [[ "$args" == *"pr list"* && "$args" == *"merged"* ]]; then
+    exit 0
+fi
+if [[ "$args" == *"notifications"* ]]; then
+    exit 0
+fi
+exit 0
+EOF
+chmod +x "$WORK/gh"
+cat >"$WORK/curl" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+if [[ "$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
+if [[ "$args" == *"-X PATCH"* ]]; then echo '{"ok":true}'; exit 0; fi
+if [[ "$args" == *"/api/sessions?limit=500"* ]]; then
+cat <<'JSON'
+{"sessions":[
+ {"id":"e76e5a9f-a7e3-463b-888c-f0f294b369f9","active":true,"metadata":{"name":"Peer #121: operator hold chip","path":"/home/heavygee/coding/hapi/worktrees/operator-hold-chip","externalRefs":[{"kind":"github_pr","repo":"heavygee/hapi","number":124,"url":"https://github.com/heavygee/hapi/pull/124","role":"primary"}]}}
+]}
+JSON
+exit 0
+fi
+echo '{}'; exit 0
+EOF
+chmod +x "$WORK/curl"
+set +e
+out="$(HAPI_META_BATCH_ARGS_LOG="$WORK/batch.args" run --dry-run --no-ping 2>&1)"
+rc=$?
+set -e
+[[ $rc -eq 0 ]] || printf '%s\n' "$out" >&2
+check "upstream discover: classifies tiann and fork" "grep -q -- '--repo heavygee/hapi' '$WORK/batch.args' && grep -q -- '--repo tiann/hapi' '$WORK/batch.args'"
+check "upstream discover: fork session not painted closed" "! grep -q 'e76e5a9f  →  ⚠️' <<<\"\$out\" || grep -q 'CI running' <<<\"\$out\""
+check "upstream discover: tiann#124 is orphan" "grep -q 'tiann/hapi#124' <<<\"\$out\" && grep -qi 'NO HAPI session\\|orphan' <<<\"\$out\""
+
+# hold-ack must not claim success when jq cannot serialize.
+mkdir -p "$WORK/jqbin"
+cat >"$WORK/jqbin/jq" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "." && $# -eq 1 ]]; then
+    exit 1
+fi
+exec /usr/bin/jq "$@"
+EOF
+chmod +x "$WORK/jqbin/jq"
+cat >"$WORK/hold-fail.json" <<'EOF'
+{"schema":1,"hold":{"heavygee/hapi#124":{"acked":false,"comment_id":"1"}}}
+EOF
+set +e
+ack_out="$(PATH="$WORK/jqbin:$PATH" bash "$DIR/hapi-hold-ack.sh" --state "$WORK/hold-fail.json" --repo heavygee/hapi 124 2>&1)"
+ack_rc=$?
+set -e
+check "hold-ack serialize fail: nonzero" "[[ $ack_rc -ne 0 ]]"
+check "hold-ack serialize fail: no success line" "! grep -q 'acked heavygee/hapi#124' <<<\"\$ack_out\""
+check "hold-ack serialize fail: row still unacked" "jq -e --arg k 'heavygee/hapi#124' '.hold[\$k].acked == false' '$WORK/hold-fail.json' >/dev/null"
+
 echo ""
 echo "hapi-meta-daily.test.sh: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]] || exit 1

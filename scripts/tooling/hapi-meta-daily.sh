@@ -688,6 +688,7 @@ main() {
     declare -A ALL_PR           # pr -> 1
     declare -A MERGED_TITLE
     declare -A PR_REPO          # pr -> owner/name (from chip; prefer tiann/hapi)
+    declare -A UPSTREAM_DISCOVERED  # pr -> 1 (gh open/merged on UPSTREAM_REPO)
 
     # NDJSON rows — NOT @tsv. Bash IFS=$'\t' collapses consecutive tabs, so an
     # empty metadata.name shifts fields and Meta drops ownership (estate: #1383).
@@ -775,10 +776,14 @@ main() {
         ALL_PR=(["$PR_ONLY"]=1)
     else
         local p
-        for p in $(gh_open_pr_numbers); do ALL_PR["$p"]=1; done
+        for p in $(gh_open_pr_numbers); do
+            ALL_PR["$p"]=1
+            UPSTREAM_DISCOVERED["$p"]=1
+        done
         while IFS=$'\t' read -r num title _mergedAt; do
             [[ -z "$num" ]] && continue
             ALL_PR["$num"]=1
+            UPSTREAM_DISCOVERED["$num"]=1
             MERGED_TITLE["$num"]="$title"
         done < <(gh_merged_recent "$merged_since")
     fi
@@ -817,6 +822,14 @@ main() {
     done
     for p in "${pr_list[@]}"; do
         md_add_classify_pair "${PR_REPO[$p]:-$UPSTREAM_REPO}" "$p"
+    done
+    # Authored open/merged live on UPSTREAM_REPO even when a fork chip already
+    # claimed PR_REPO[N]. Number collision must still classify tiann#N.
+    for p in "${!UPSTREAM_DISCOVERED[@]}"; do
+        if [[ -n "$PR_ONLY" && "$p" != "$PR_ONLY" ]]; then
+            continue
+        fi
+        md_add_classify_pair "$UPSTREAM_REPO" "$p"
     done
     for r in "${!REPO_PR_LIST[@]}"; do
         classify_prs=()
@@ -1138,37 +1151,47 @@ main() {
             '{sid:$sid,emoji:$emoji,prs:$prs,ping:$ping,title:$title,renamed:$renamed}')")
     done
 
-    # --- orphan PRs (tracked/open/merged but no session) ---
-    for p in "${pr_list[@]}"; do
-        [[ -n "${PR_SESSIONS[$p]:-}" ]] && continue
-        local e="${PR_EMOJI[$p]:-?}"
+    # --- orphan PRs (tracked/open/merged but no session for that repo#number) ---
+    local pair_o r_o
+    for pair_o in "${!PAIR_SEEN[@]}"; do
+        r_o="${pair_o%\#*}"
+        p="${pair_o##*\#}"
+        local owned_o=0 sid_o
+        for sid_o in "${!SESS_ID[@]}"; do
+            if [[ "${SESS_PR_REPO[$sid_o:$p]:-}" == "$r_o" ]]; then
+                owned_o=1
+                break
+            fi
+        done
+        [[ "$owned_o" -eq 1 ]] && continue
+        local e="${PR_BY_REPO_EMOJI[$pair_o]:-${PR_EMOJI[$p]:-?}}"
         case "$e" in
-            🔧) Q_ORPHAN+=("#$p 🔧 merged, no owning session — confirm wave cleanup done / archive") ;;
+            🔧) Q_ORPHAN+=("$r_o#$p 🔧 merged, no owning session — confirm wave cleanup done / archive") ;;
             📝|"?") : ;;
-            *) Q_ORPHAN+=("#$p $e open, NO HAPI session — assign an owner or spawn a peer") ;;
+            *) Q_ORPHAN+=("$r_o#$p $e open, NO HAPI session — assign an owner or spawn a peer") ;;
         esac
         # Orphan ⚠️ emits needs_decision with null relatedSessionId (inbox stays quiet).
         # State-gated like sessions so steady re-runs stay silent.
         if [[ "$EMIT_EVENTS" -eq 1 && "$e" == "⚠️" ]]; then
             local orphan_fp orphan_prev_e orphan_prev_fp orphan_reason orphan_body orphan_date
             orphan_date="$(date -u +%Y-%m-%d)"
-            orphan_fp="$(pec_action_fingerprint "$e" "${PR_ACTION[$p]}")"
-            orphan_prev_e="$(printf '%s' "$state" | jq -r --arg p "$p" '(.orphan_prs // {})[$p].emoji // ""')"
-            orphan_prev_fp="$(printf '%s' "$state" | jq -r --arg p "$p" '(.orphan_prs // {})[$p].fp // ""')"
+            orphan_fp="$(pec_action_fingerprint "$e" "${PR_BY_REPO_ACTION[$pair_o]:-${PR_ACTION[$p]:-}}")"
+            orphan_prev_e="$(printf '%s' "$state" | jq -r --arg p "$pair_o" '(.orphan_prs // {})[$p].emoji // ""')"
+            orphan_prev_fp="$(printf '%s' "$state" | jq -r --arg p "$pair_o" '(.orphan_prs // {})[$p].fp // ""')"
             orphan_reason="$(pec_emit_reason "$e" "$orphan_prev_e" "$orphan_fp" "$orphan_prev_fp" 0 "$now" "$REMINDER_SECS" || true)"
             if [[ "$orphan_reason" != "none" && -n "$orphan_reason" ]]; then
                 orphan_body="$(pec_build_channel_event_body \
-                    --repo "$UPSTREAM_REPO" \
+                    --repo "$r_o" \
                     --number "$p" \
                     --emoji "$e" \
-                    --action "${PR_ACTION[$p]}" \
+                    --action "${PR_BY_REPO_ACTION[$pair_o]:-${PR_ACTION[$p]:-}}" \
                     --fingerprint "$orphan_fp" \
                     --session-id "" \
                     --reason "$orphan_reason" \
                     --date "$orphan_date")"
                 if hub_emit_event "$jwt" "$orphan_body"; then
                     new_state="$(printf '%s' "$new_state" | jq -c \
-                        --arg p "$p" --arg e "$e" --arg f "$orphan_fp" \
+                        --arg p "$pair_o" --arg e "$e" --arg f "$orphan_fp" \
                         '.orphan_prs = ((.orphan_prs // {}) + {($p): {emoji:$e, fp:$f}})')"
                 else
                     MD_EMIT_FAILURES=$((MD_EMIT_FAILURES + 1))
