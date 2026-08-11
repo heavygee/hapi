@@ -217,7 +217,7 @@ What it does, idempotently:
 | 🧹 `complete` | fully cleaned (layer DROPPED, no worktree/branch, session archived) | **never** (babysit ended) |
 | `?` `unknown` | GitHub data unavailable this run | **chip left at last good status; never pinged** |
 
-Chip thread count excludes GraphQL `isOutdated` unresolved threads (#847: leftover bot Majors on old lines must not keep ⚠️ after Findings:None + green CI on tip).
+Chip thread count excludes GraphQL `isOutdated` unresolved threads (#847: leftover bot Majors on old lines must not keep ⚠️ after Findings:None + green CI on tip). Mid-hour, a green tip can still show cached ⚠️ until the :00 classify; peers should cite `hapi-pr-status` / live `hapi-pr-emoji-batch`, not sit on the stale chip.
 
 **Ping policy (why it isn't spam for greens, but is a rouse for work):** on **hourly ping windows** (Europe/London :00), Meta **always** pings sticky ⚠️ / 🔧 sessions — "are you done yet?" — including **inactive** ones (`hapi-ping-peer` resumes them). **Exception (2026-08-11):** 🔧 whose remainder is only **Gate A clean / archive pending** is **not** pinged — resume undoes archive (`not_archived`) and the chip flips 🧹→🔧 forever (`e4d152f3`). Meta archives those from outside. ✅ / 🔁 / 📝 only ping on an emoji **transition** (first sight / state change), never on every window. 🧹 / `?` **never** ping (incl. 🔧→🧹). Once 🧹, a later resume must **not** demote the chip. Manual `--no-ping` never pings. State lives at `${XDG_STATE_HOME:-~/.local/state}/hapi/meta-daily.json`. Classifier / sticky 🔧 pings already mention exit reflection; **human Meta briefs must too** — use the paste block below (do not invent "stand down / archive now").
 

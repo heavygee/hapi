@@ -196,6 +196,8 @@ Manifest format, atomic swap mechanics, DB jiu-jitsu: [`driver-soup.md`](./drive
 
 Daily classify + chip cache + pings: `./scripts/tooling/hapi-meta-daily.sh` (see [`docs/operator/AGENTS.md`](../operator/AGENTS.md) § Meta PR watcher). After rebase/CI flips on a babysat PR: `./scripts/tooling/hapi-meta-daily.sh --pr <N>`. On this estate, systemd runs full Meta **hourly at :00 Europe/London** (chips + pings + wave unlock; BST/GMT). Chip UI mutes to `?` when `statusCheckedAt` is older than **3h**. Quiet 45m refresh retired. Session-list **filters** by chip / attention state are fork follow-ups (not title search).
 
+**Mid-hour stale ⚠️:** `externalRefs` can stay ⚠️ until the next :00 `hapi-meta-daily` even after the tip is three-dim clean (CI + threads + bot). Live truth is `hapi-pr-status <N>` / `hapi-pr-emoji-batch`; do not treat a stale um as unfinished PR work (#1108 exit, 2026-08-11).
+
 **No chip = no Meta cleanup loop:** Meta discovers babysit sessions only via linked `github_pr` chips. Same-turn `hapi link-pr` after `gh pr create` (and retarget on absorber merge) is what enables hourly 🔧 Gate A / Gate A' nags. Title text alone stays invisible - merge can land and this session will never get the "clean your shit + exit reflection" rouse until someone links late.
 
 ---
