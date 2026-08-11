@@ -529,6 +529,66 @@ describe('runOverseerConverse', () => {
         expect(focus).toBeNull()
     })
 
+    it('still retargets when a non-retargeting read precedes a real subject change', async () => {
+        const sessionA = '6cd8d0c3-aaaa-bbbb-cccc-ddddeeeeffff'
+        const sessionB = '96f67085-1111-2222-3333-444455556666'
+        const overseer = {
+            ...fakeOverseer,
+            queryInbox: () => ({
+                items: [
+                    { id: 1, title: 'noise', relatedSessionId: sessionA },
+                    { id: 2, title: 'other', relatedSessionId: sessionB }
+                ],
+                candidates: [],
+                surfaced: [],
+                held: []
+            }),
+            explainPriority: () => ({
+                inboxItemId: 99,
+                relatedSessionId: sessionB,
+                title: 'B'
+            })
+        } as unknown as OverseerEntity
+
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(chatResponse({
+                role: 'assistant',
+                content: '',
+                tool_calls: [
+                    {
+                        id: 'c1',
+                        type: 'function',
+                        function: { name: 'query_inbox', arguments: '{"limit":10}' }
+                    },
+                    {
+                        id: 'c2',
+                        type: 'function',
+                        function: { name: 'explain_priority', arguments: '{"itemId":99}' }
+                    }
+                ]
+            }))
+            .mockResolvedValueOnce(chatResponse({
+                role: 'assistant',
+                content: 'Focused on B.'
+            }))
+        setFetch(fetchMock)
+
+        const { focus } = await runOverseerConverse({
+            overseer,
+            config,
+            messages: [{ role: 'operator', content: 'look at inbox then explain 99' }],
+            focus: {
+                sessionId: sessionA,
+                itemId: 1,
+                source: 'tool_resolve',
+                updatedAt: 1
+            }
+        })
+
+        expect(focus?.sessionId).toBe(sessionB)
+        expect(focus?.itemId).toBe(99)
+    })
+
     it('attaches mid-turn focus onto BrainUnavailableError after a resolving tool', async () => {
         const sessionId = '6cd8d0c3-aaaa-bbbb-cccc-ddddeeeeffff'
         const overseer = {

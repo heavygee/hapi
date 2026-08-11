@@ -196,8 +196,14 @@ export async function runOverseerConverse(params: {
         event: Parameters<typeof applyFocusFromToolResolve>[1]
     ): OverseerConverseFocus | null => {
         const next = applyFocusFromToolResolve(previous, event, turnStartedAt)
-        const key = focusSubjectKey(next)
-        if (key) subjectsResolvedThisTurn.add(key)
+        const prevKey = focusSubjectKey(previous)
+        const nextKey = focusSubjectKey(next)
+        // Count only when this tool actually established/changed a subject —
+        // unchanged passthrough (e.g. multi-item query_inbox) must not pollute
+        // the multi-subject set (Codex P1).
+        if (nextKey && nextKey !== prevKey) {
+            subjectsResolvedThisTurn.add(nextKey)
+        }
         if (subjectsResolvedThisTurn.size > 1) {
             // Multi-subject comparison turn — refuse to invent a last-wins referent.
             return params.focus ?? null
