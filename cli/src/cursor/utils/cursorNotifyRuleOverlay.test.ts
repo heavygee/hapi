@@ -15,6 +15,7 @@ describe('buildNotifyRuleContent', () => {
         expect(content).toContain(HAPI_SESSION_RULE_SENTINEL);
         expect(content).toContain('AGENT_NOTIFY_SUMMARY {"version":1,');
         expect(content).toContain('"status":"done|blocked|needs_review|needs_decision|failed|stalled"');
+        expect(content.toLowerCase()).toContain('omit action');
     });
 
     it('bakes in project and agent id when provided', () => {

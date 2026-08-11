@@ -263,6 +263,16 @@ export function usableNotifyToken(value: string | null | undefined): string | nu
     return trimmed
 }
 
+/** Sentinel / example `action` values are not operator work. */
+export function usableNotifyAction(value: string | null | undefined): string | null {
+    const token = usableNotifyToken(value)
+    if (!token) return null
+    const lower = token.toLowerCase()
+    if (['none', 'n/a', 'na', 'nil', 'null', '-', 'n.a.'].includes(lower)) return null
+    if (/^<=?\s*12\s+words$/i.test(token)) return null
+    return token
+}
+
 export function deriveSessionProject(
     metadata: { path?: string; worktree?: { name?: string } } | null | undefined
 ): string | null {
@@ -338,7 +348,7 @@ export function deriveAttentionCandidate(status: string | undefined, action?: st
         case 'stalled':
             return 1
         case 'done':
-            return action && action.trim().length > 0 ? 1 : 0
+            return usableNotifyAction(action) ? 1 : 0
         default:
             return 0
     }
