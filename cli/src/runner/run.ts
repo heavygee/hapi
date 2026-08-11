@@ -1122,7 +1122,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     const machine = await withRetry(
       () => api.getOrCreateMachine({
         machineId,
-        metadata: buildMachineMetadata({ workspaceRoots }),
+        metadata: buildMachineMetadata({
+            workspaceRoots,
+            startedCliMtimeMs: startedWithCliMtimeMs,
+            asRunner: true,
+        }),
         runnerState: initialRunnerState
       }),
       {
