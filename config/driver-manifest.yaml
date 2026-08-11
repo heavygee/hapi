@@ -776,6 +776,6 @@ layers:
   # chatter flips hub thinking every ~1–2s after #1487 (session-list spinner dance).
   # CLI-only: ignore state_update for thinking; bump only on real activity.
   # Worktree: ~/coding/hapi/worktrees/thinking-flicker-1487 @ fix/cursor-thinking-flicker-1487
-  # Tip: 47edc3c33 (origin/fix/cursor-thinking-flicker-1487) — upstream PR #1503
+  # Tip: f2f36e02e (origin/fix/cursor-thinking-flicker-1487) — upstream PR #1503
   - branch: fix/cursor-thinking-flicker-1487
 
