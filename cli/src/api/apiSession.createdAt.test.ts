@@ -113,6 +113,10 @@ describe('sendClaudeSessionMessage createdAt propagation', () => {
         const [, payload] = fakeSocket.emit.mock.calls[0] as [string, Record<string, unknown>]
         expect(payload.sid).toBe('session-1')
         expect(payload).not.toHaveProperty('createdAt')
+        expect(payload.message).toMatchObject({
+            role: 'user',
+            meta: { sentFrom: 'cli', isTranscriptEcho: true }
+        })
     })
 
     it('agent message without a parseable timestamp: omits createdAt (hub falls back to Date.now())', () => {

@@ -154,6 +154,9 @@ function isInboundUserMessage(content: unknown): boolean {
 
 function isCauseCandidate(message: StoredMessage, now: number = Date.now()): boolean {
     if (!isInboundUserMessage(message.content)) return false
+    const meta = asRecord(asRecord(message.content)?.meta)
+    // Claude jsonl echoes the remote prompt as a second role=user row (sentFrom cli).
+    if (meta?.isTranscriptEcho === true) return false
     // Future-scheduled rows are persisted before delivery; they are not this turn's cause.
     if (message.scheduledAt != null && message.scheduledAt > now) return false
     return true

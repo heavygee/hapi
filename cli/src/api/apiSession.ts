@@ -801,7 +801,8 @@ export class ApiSessionClient extends EventEmitter {
                     text: extractRawUserTextContent(body.message.content) ?? ''
                 },
                 meta: {
-                    sentFrom: 'cli'
+                    sentFrom: 'cli',
+                    isTranscriptEcho: true
                 }
             }
         } else {

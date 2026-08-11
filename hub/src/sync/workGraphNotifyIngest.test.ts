@@ -23,11 +23,11 @@ function assistantOutput(text: string) {
     }
 }
 
-function userInbound(text: string, sentFrom: string = 'webapp') {
+function userInbound(text: string, sentFrom: string = 'webapp', extraMeta: Record<string, unknown> = {}) {
     return {
         role: 'user' as const,
         content: { type: 'text' as const, text },
-        meta: { sentFrom }
+        meta: { sentFrom, ...extraMeta }
     }
 }
 
@@ -639,6 +639,32 @@ describe('ingestNotifySummaryFromMessage cause stamping', () => {
         })
         expect((second?.event.payloadJson as { causeText?: string })?.causeText)
             .not.toBe('FORGED CAUSE TEXT')
+    })
+
+    it('skips Claude transcript echoes so the next turn is not attributed to the previous prompt copy', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('sess-cause-echo', {}, null, 'default')
+
+        const web1 = store.messages.addMessage(session.id, userInbound('turn one'))
+        store.messages.addMessage(
+            session.id,
+            userInbound('turn one', 'cli', { isTranscriptEcho: true })
+        )
+        const firstAssistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('One')))
+        const first = ingestNotify(store, session.id, 'default', firstAssistant.content, firstAssistant.id)
+        expect(first?.event.payloadJson).toMatchObject({ causeMessageId: web1.id })
+
+        const web2 = store.messages.addMessage(session.id, userInbound('turn two'))
+        store.messages.addMessage(
+            session.id,
+            userInbound('turn two', 'cli', { isTranscriptEcho: true })
+        )
+        const secondAssistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('Two')))
+        const second = ingestNotify(store, session.id, 'default', secondAssistant.content, secondAssistant.id)
+        expect(second?.event.payloadJson).toMatchObject({
+            causeMessageId: web2.id,
+            causeText: 'turn two'
+        })
     })
 
     it('still inserts when max-clamped footer fields share the payload with cause', () => {
