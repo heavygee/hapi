@@ -103,7 +103,14 @@ exit 0
 EOF
 chmod +x "$WORK/driver-status"
 # Empty manifest → no active layers (wave members clean for worktree/path).
-: >"$WORK/manifest.yaml"
+# Early ping-policy tests need #300 Gate A *dirty* so 🔧 still hourly-pings.
+# Section 18 wave-clear resets this to empty.
+cat >"$WORK/manifest.yaml" <<'EOF'
+# PR #300 still in soup — Gate A dirty
+- branch: feat/shipped-thing
+EOF
+
+echo '{"logins":["tiann"]}' >"$WORK/pr-hold.json"
 
 run() {
     rm -f "$WORK/pings.log"
@@ -115,6 +122,8 @@ run() {
     HAPI_META_MANIFEST="$WORK/manifest.yaml" \
     HAPI_META_DRIVER_STATUS_BIN="$WORK/driver-status" \
     HAPI_SETTINGS="$WORK/settings.json" \
+    HAPI_PR_HOLD_CONFIG="$WORK/pr-hold.json" \
+    HAPI_PR_HOLD_LOGINS="" \
     HAPI_HOST="http://mock" \
     bash "$SCRIPT" "$@"
 }
@@ -694,6 +703,7 @@ check "chip-over-peer: updates chip for session" "grep -q '43c0f634' <<<\"\$out\
 check "chip-over-peer: PUT status for #1087" "grep -q 'external-refs' '$WORK/put-refs.log'"
 
 # ============ 18. wave-clear: --no-ping stays ready; ping window unlocks tooling ============
+: >"$WORK/manifest.yaml"
 rm -f "$WORK/state.json" "$WORK/pings.log"
 cat >"$WORK/gh" <<'EOF'
 #!/usr/bin/env bash
@@ -963,6 +973,96 @@ check "display title: path basename when no summary" "grep -qE '\"title\": ?\"fo
 check "display title: named session kept" "grep -q 'Keep Me' <<<\"\$out\""
 check "display title: never blank-name heal" "! grep -qE 'heal blank name|blank-name heal' <<<\"\$out\""
 check "display title: dry-run never PATCHes" "! grep -q 'UNEXPECTED PATCH' <<<\"\$out\""
+
+# ============ 22. operator hold: tiann comment latches 🛑; bots never; ack clears ============
+rm -f "$WORK/state.json" "$WORK/pings.log" "$WORK/events.log"
+cat >"$WORK/batch" <<'EOF'
+#!/usr/bin/env bash
+j='{}'
+for a in "$@"; do
+    case "$a" in
+        100) j="$(echo "$j" | jq -c '. + {"100":{emoji:"⚠️",action:"resolve 1 open thread(s)",prePr:false,merged:false,closed:false,dataUnavailable:false}}')" ;;
+        200) j="$(echo "$j" | jq -c '. + {"200":{emoji:"✅",action:"full green - wait on tiann",prePr:false,merged:false}}')" ;;
+    esac
+done
+echo "$j"
+EOF
+chmod +x "$WORK/batch"
+cat >"$WORK/gh" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+if [[ "$args" == *"pr list"* && "$args" == *"--state open"* ]]; then
+    printf '100\n200\n'; exit 0
+fi
+if [[ "$args" == *"pr list"* && "$args" == *"merged"* ]]; then
+    exit 0
+fi
+if [[ "$args" == *"issues/100/comments"* ]]; then
+    cat <<'JSON'
+[{"id":5154418101,"user":{"login":"tiann","type":"User"},"body":"please trim the upgrade stack","html_url":"https://github.com/tiann/hapi/pull/100#issuecomment-5154418101","created_at":"2026-08-02T01:26:00Z"}]
+JSON
+    exit 0
+fi
+if [[ "$args" == *"issues/200/comments"* ]]; then
+    cat <<'JSON'
+[{"id":99,"user":{"login":"github-actions[bot]","type":"Bot"},"body":"**Findings**\n- [Major] nit","html_url":"https://github.com/tiann/hapi/pull/200#issuecomment-99","created_at":"2026-08-02T01:26:00Z"}]
+JSON
+    exit 0
+fi
+if [[ "$args" == *"/reviews"* ]]; then
+    echo '[]'; exit 0
+fi
+if [[ "$args" == *"notifications"* ]]; then
+    exit 0
+fi
+exit 0
+EOF
+chmod +x "$WORK/gh"
+cat >"$WORK/curl" <<EOF
+#!/usr/bin/env bash
+args="\$*"
+if [[ "\$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
+if [[ "\$args" == *"-X PATCH"* ]]; then echo '{"ok":true}'; exit 0; fi
+if [[ "\$args" == *"/api/system-events"* && "\$args" == *"-X POST"* ]]; then
+    echo "\$args" >> "$WORK/events.log"
+    echo '{"event":{"id":1},"deduped":false}'; exit 0
+fi
+if [[ "\$args" == *"/api/sessions?limit=500"* ]]; then
+cat <<'JSON'
+{"sessions":[
+ {"id":"aaaaaaaa-1111","active":true,"metadata":{"name":"needs work","path":"/home/heavygee/coding/hapi/worktrees/foo","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":100,"url":"https://github.com/tiann/hapi/pull/100","role":"primary"}]}},
+ {"id":"bbbbbbbb-2222","active":true,"metadata":{"name":"green thing","path":"/home/heavygee/coding/hapi/worktrees/bar","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":200,"url":"https://github.com/tiann/hapi/pull/200","role":"primary"}]}}
+]}
+JSON
+exit 0
+fi
+echo '{}'; exit 0
+EOF
+chmod +x "$WORK/curl"
+
+out="$(run --emit-events 2>&1)"
+pings_h="$(cat "$WORK/pings.log" 2>/dev/null || true)"
+check "hold: queue lists OPERATOR HOLD for #100" "grep -A6 'OPERATOR HOLD' <<<\"\$out\" | grep -q '#100'"
+check "hold: tiann comment latched in state" "jq -e --arg k 'tiann/hapi#100' '.hold[\$k].acked == false' '$WORK/state.json' >/dev/null"
+check "hold: tiann comment id stored" "jq -e --arg k 'tiann/hapi#100' '.hold[\$k].comment_id == \"5154418101\"' '$WORK/state.json' >/dev/null"
+check "hold: coding peer aaaaaaaa NOT pinged" "! grep -q '^aaaaaaaa' <<<\"\$pings_h\""
+check "hold: bot Findings on #200 did not latch" "! jq -e --arg k 'tiann/hapi#200' '.hold[\$k].acked == false' '$WORK/state.json' >/dev/null"
+check "hold: emit-events posted once for latch" "[[ -f '$WORK/events.log' ]] && grep -q 'aaaaaaaa-1111' '$WORK/events.log'"
+
+rm -f "$WORK/pings.log" "$WORK/events.log"
+out="$(run --emit-events 2>&1)"
+pings_h2="$(cat "$WORK/pings.log" 2>/dev/null || true)"
+check "hold: second run still does not ping peer" "! grep -q '^aaaaaaaa' <<<\"\$pings_h2\""
+check "hold: second run no new emit (silence)" "[[ ! -f '$WORK/events.log' ]]"
+
+bash "$DIR/hapi-hold-ack.sh" --state "$WORK/state.json" --repo tiann/hapi 100
+check "hold-ack: acked true" "jq -e --arg k 'tiann/hapi#100' '.hold[\$k].acked == true' '$WORK/state.json' >/dev/null"
+
+rm -f "$WORK/pings.log"
+out="$(run 2>&1)"
+pings_h3="$(cat "$WORK/pings.log" 2>/dev/null || true)"
+check "hold-ack: next run returns to live ⚠️ ping" "grep -q '^aaaaaaaa' <<<\"\$pings_h3\""
+check "hold-ack: OPERATOR HOLD gone from queue" "! grep -q 'OPERATOR HOLD' <<<\"\$out\""
 
 echo ""
 echo "hapi-meta-daily.test.sh: $PASS passed, $FAIL failed"

@@ -16,6 +16,8 @@
 #   📝  pre-PR — tracked number, no open PR on upstream yet
 #   🔧  merged — clean up soup/worktree/branch/archive still owed (sticky ping)
 #   🧹  complete — fully cleaned by estate predicates; babysit ended (never ping)
+#   🛑  needs_operator / babysit.hold — human maintainer comment; operator ack only
+#       (never hourly-ping the coding peer; rank 7 beats ⚠️ and ?)
 #   ?   UNKNOWN — GitHub data unavailable this run; caller MUST NOT rename/ping on this
 #
 # Lives on fork main under scripts/tooling/lib/ — commit here; never hand-edit driver.
@@ -46,6 +48,7 @@ pec_strip_leading_emojis() {
             📝*) s="${s#📝}" ;;
             🔧*) s="${s#🔧}" ;;
             🧹*) s="${s#🧹}" ;;
+            🛑*) s="${s#🛑}" ;;
             "?"*) s="${s#\?}" ;;
             *) break ;;
         esac
@@ -217,6 +220,7 @@ pec_build_title() {
 # Severity ordering — higher rank wins when a session tracks multiple PRs.
 pec_emoji_rank() {
     case "$1" in
+        🛑) echo 7 ;;
         "?") echo 6 ;;
         ⚠️) echo 5 ;;
         🔁) echo 4 ;;
@@ -247,6 +251,7 @@ pec_estate_code_from_emoji() {
         📝) printf 'peer.incubating' ;;
         🔧) printf 'babysit.merged' ;;
         🧹) printf 'babysit.complete' ;;
+        🛑) printf 'babysit.hold' ;;
         *) printf '' ;;
     esac
 }
@@ -261,6 +266,7 @@ pec_status_from_emoji() {
         📝) printf 'pre_pr' ;;
         🔧) printf 'merged' ;;
         🧹) printf 'complete' ;;
+        🛑) printf 'needs_operator' ;;
         *) printf 'unknown' ;;
     esac
 }
@@ -320,6 +326,7 @@ pec_emoji_from_status() {
         pre_pr) printf '📝' ;;
         merged) printf '🔧' ;;
         complete) printf '🧹' ;;
+        needs_operator) printf '🛑' ;;
         *) printf '?' ;;
     esac
 }
@@ -333,6 +340,7 @@ pec_leading_emoji() {
         📝*) echo "📝" ;;
         🔧*) echo "🔧" ;;
         🧹*) echo "🧹" ;;
+        🛑*) echo "🛑" ;;
         "?"*) echo "?" ;;
         *) echo "" ;;
     esac
@@ -458,6 +466,7 @@ pec_action_fingerprint() {
 # Rules:
 #   - "?" (unknown)                     → never ping
 #   - 🧹 (complete)                     → never ping (incl. 🔧→🧹 transition)
+#   - 🛑 (needs_operator)               → never ping the coding peer (operator hold)
 #   - emoji changed vs recorded state   → ping (transition)
 #   - sticky ⚠️ or 🔧:
 #       - WINDOW_ROUSE=1 (Meta ping windows) → always yes ("are you done yet?")
@@ -469,7 +478,7 @@ pec_should_ping() {
     local new_emoji="$1" prev_emoji="$2" new_fp="$3" prev_fp="$4" \
         last_ping="${5:-0}" now="${6:-0}" reminder="${7:-86400}" window_rouse="${8:-0}"
 
-    if [[ "$new_emoji" == "?" || "$new_emoji" == "🧹" ]]; then
+    if [[ "$new_emoji" == "?" || "$new_emoji" == "🧹" || "$new_emoji" == "🛑" ]]; then
         echo "no"; return 1
     fi
     if [[ "$new_emoji" != "$prev_emoji" ]]; then
@@ -545,6 +554,7 @@ pec_event_type_for_emoji() {
     case "$emoji" in
         ⚠️) echo "blocked" ;;
         🔧) echo "completed" ;;
+        🛑) echo "needs_decision" ;;
         ✅|🔁|📝) echo "progress" ;;
         *) echo "needs_decision" ;;
     esac
@@ -602,6 +612,7 @@ pec_pr_target_for_repo() {
 
 pec_severity_for_emoji() {
     case "$1" in
+        🛑) echo 4 ;;
         ⚠️) echo 3 ;;
         🔧) echo 2 ;;
         ✅|🔁|📝) echo 1 ;;

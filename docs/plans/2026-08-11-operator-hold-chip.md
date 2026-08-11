@@ -151,6 +151,6 @@ Pulse + tooltip. Do not put 🛑 in session titles (ADR D8).
 
 - [x] 1 Code search - Meta queue + notif events + chip YAML exist; no hold state
 - [x] 2 Upstream search - no tiann/hapi issue for this; fork-only
-- [ ] 3 Playback - this doc + chat (waiting operator confirm)
-- [ ] 4 Issue - fork tooling issue on heavygee/hapi (not tiann) after confirm
-- [ ] 5 Peer - spawn after confirm; do not implement in the archived #1108 session
+- [x] 3 Playback - operator confirmed 2026-08-11 (🛑 contract + spawn Track A peer + Track B after remat)
+- [x] 4 Issue - https://github.com/heavygee/hapi/issues/121 (fork tooling; not tiann)
+- [x] 5 Peer - this session (`feat/operator-hold-chip`); do not implement in archived #1108 Gate A session

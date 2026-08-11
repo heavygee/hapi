@@ -64,6 +64,13 @@ states:
       branch: absent
       session: archived  # metadata.lifecycleState == archived
 
+  needs_operator:
+    emoji: "🛑"
+    estateCode: babysit.hold
+    status: needs_operator
+    stickyPing: false
+    meaning: Human maintainer (hold-login) issue comment or review body. Operator ack only — never hourly-ping the coding peer. Rank 7 (worst).
+
   unknown:
     emoji: "?"
     estateCode: ""

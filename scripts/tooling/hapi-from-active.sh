@@ -43,5 +43,11 @@ fi
 export HAPI_DISABLE_VERSION_HANDOFF="${HAPI_DISABLE_VERSION_HANDOFF:-1}"
 export HAPI_API_URL="${HAPI_API_URL:-http://127.0.0.1:3006}"
 
+# Fork-only: `hapi hold-ack` is Meta state, not soup CLI.
+if [[ "${1:-}" == "hold-ack" ]]; then
+    shift
+    exec "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/hapi-hold-ack.sh" "$@"
+fi
+
 cd "$CLI_DIR"
 exec "$BUN" run src/index.ts "$@"
