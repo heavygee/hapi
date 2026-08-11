@@ -69,7 +69,7 @@ import SettingsStoragePage from '@/routes/settings/storage'
 import SettingsUsagePage from '@/routes/settings/usage'
 import SharePage from '@/routes/share'
 import { setSharePendingTransfer } from '@/lib/sharePendingState'
-import { deleteShareTransfer } from '@/lib/shareTransfer'
+import { deleteShareTransfer, parseShareSearch } from '@/lib/shareTransfer'
 
 
 function BackIcon(props: { className?: string }) {
@@ -641,7 +641,7 @@ function SessionPage() {
     const {
         getSuggestions: getSkillSuggestions,
     } = useSkills(api, sessionId)
-    // Same list + search matcher as sidebar / share picker (tiann/hapi#1213).
+    // Mention pool is stricter than sidebar (#1506): titled sessions only; match via sessionMatchesQuery.
     const { sessions: allSessions } = useSessions(api)
     const { machines: mentionMachines } = useMachines(api, true)
     const mentionMachineLabelsById = useMachineLabels(mentionMachines)
@@ -1218,19 +1218,12 @@ const settingsUsageRoute = createRoute({
 // Web Share Target landing route. Service worker (`web/src/sw.ts`)
 // intercepts the manifest's `POST /share` and 303-redirects here with an
 // IDB transfer id. `error=ingest` is set when the SW failed to write IDB.
+// Native / deep-link clients open `/share#url=&text=&title=` (fragment, not
+// query) so shared content is never part of the HTTP request line.
 const shareRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/share',
-    validateSearch: (search: Record<string, unknown>): { id?: string; error?: string } => {
-        const result: { id?: string; error?: string } = {}
-        if (typeof search.id === 'string' && search.id) {
-            result.id = search.id
-        }
-        if (typeof search.error === 'string' && search.error) {
-            result.error = search.error
-        }
-        return result
-    },
+    validateSearch: (search: Record<string, unknown>) => parseShareSearch(search),
     component: SharePage,
 })
 
