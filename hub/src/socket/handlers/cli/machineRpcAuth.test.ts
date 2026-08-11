@@ -231,4 +231,77 @@ describe('machine RPC auth (#1473 B1)', () => {
         expect(ackResult).toEqual({ registered: false })
         expect(register).not.toHaveBeenCalled()
     })
+
+    it('rejects machine-alive and state mutations without runner-proof bind', () => {
+        const onMachineAlive = mock(() => {})
+        const updateMetadata = mock(() => ({ result: 'success', version: 2, value: {} }))
+        const { socket, handlers } = createSocketHarness({
+            machineId: 'machine-1',
+            machineTag: 'secret-tag',
+            runnerProof: 'proof-sibling',
+            clientType: 'machine-scoped',
+        })
+        registerCliHandlers(socket as never, {
+            io: { of: () => ({}) },
+            store: {
+                sessions: { getSessionByNamespace: () => null, getSession: () => null },
+                machines: {
+                    ...machineStore(),
+                    updateMachineMetadata: updateMetadata,
+                    updateMachineRunnerState: mock(() => ({ result: 'success', version: 2, value: {} })),
+                },
+            },
+            rpcRegistry: {
+                register: mock(() => true),
+                unregister: mock(() => {}),
+                unregisterAll: mock(() => {}),
+            },
+            terminalRegistry: {},
+            jwtSecret: JWT_SECRET,
+            onMachineAlive,
+        } as never)
+
+        expect(socket.data.machineRpcAuthorizedId).toBeUndefined()
+        handlers.get('machine-alive')?.({ machineId: 'machine-1', time: Date.now() })
+        expect(onMachineAlive).not.toHaveBeenCalled()
+
+        let metaAck: { result?: string; reason?: string } | undefined
+        handlers.get('machine-update-metadata')?.(
+            { machineId: 'machine-1', expectedVersion: 1, metadata: { host: 'hijack' } },
+            (response: { result: string; reason?: string }) => {
+                metaAck = response
+            }
+        )
+        expect(metaAck).toEqual({ result: 'error', reason: 'access-denied' })
+        expect(updateMetadata).not.toHaveBeenCalled()
+    })
+
+    it('accepts machine-alive when the socket is runner-proof bound', () => {
+        const onMachineAlive = mock(() => {})
+        const { socket, handlers } = createSocketHarness({
+            machineId: 'machine-1',
+            machineTag: 'secret-tag',
+            runnerProof: PROOF,
+            clientType: 'machine-scoped',
+        })
+        registerCliHandlers(socket as never, {
+            io: { of: () => ({}) },
+            store: {
+                sessions: { getSessionByNamespace: () => null, getSession: () => null },
+                machines: machineStore(),
+            },
+            rpcRegistry: {
+                register: mock(() => true),
+                unregister: mock(() => {}),
+                unregisterAll: mock(() => {}),
+            },
+            terminalRegistry: {},
+            jwtSecret: JWT_SECRET,
+            onMachineAlive,
+        } as never)
+
+        expect(socket.data.machineRpcAuthorizedId).toBe('machine-1')
+        handlers.get('machine-alive')?.({ machineId: 'machine-1', time: 42 })
+        expect(onMachineAlive).toHaveBeenCalled()
+    })
 })
