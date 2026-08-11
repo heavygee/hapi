@@ -44,7 +44,7 @@ import {
 import { SessionCache } from './sessionCache'
 import { OverseerEventRecorder, toSessionSnapshot } from './overseerEventRecorder'
 import { createOverseerLlmFallbackClient } from './overseerLlmFallback'
-import { loadOverseerLlmFallbackConfig } from './overseerLlmFallbackConfig'
+import { loadOverseerLlmFallbackConfig, redactOverseerLlmBaseUrlForLog } from './overseerLlmFallbackConfig'
 import { OverseerEntity } from './overseerEntity'
 import { extractAssistantPlainText } from '@hapi/protocol/messages'
 import type { InboxOperatorAction } from '@hapi/protocol'
@@ -173,7 +173,7 @@ export class SyncEngine {
             : null
         if (llmFallbackConfig.enabled) {
             console.log(
-                `[overseer] LLM summary fallback ENABLED (api=${llmFallbackConfig.api}, model=${llmFallbackConfig.model}, base=${llmFallbackConfig.baseUrl})`
+                `[overseer] LLM summary fallback ENABLED (api=${llmFallbackConfig.api}, model=${llmFallbackConfig.model}, base=${redactOverseerLlmBaseUrlForLog(llmFallbackConfig.baseUrl)})`
             )
         }
         this.overseerEvents = new OverseerEventRecorder(store.events, store.inbox, {

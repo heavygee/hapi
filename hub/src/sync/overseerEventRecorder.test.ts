@@ -98,12 +98,12 @@ describe('OverseerEventRecorder', () => {
         expect(event?.attentionCandidate).toBe(0)
     })
 
-    it('drops sentinel notify actions from suggested_action and inbox', () => {
+    it('drops sentinel notify actions from suggested_action and inbox', async () => {
         const store = new Store(':memory:')
         const recorder = new OverseerEventRecorder(store.events, store.inbox)
         const session = store.sessions.getOrCreateSession('test-sentinel', { flavor: 'claude', path: '/tmp', host: 'local' }, null, 'default')
 
-        const event = recorder.onAgentMessage(
+        const event = await recorder.onAgentMessage(
             toSessionSnapshot(makeSession(session.id, 'claude'), session.tag),
             'msg-sentinel',
             {
