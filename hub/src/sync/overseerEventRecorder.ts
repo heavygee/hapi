@@ -179,6 +179,7 @@ export class OverseerEventRecorder {
     /** Epoch of the last successful LLM fallback for this session. */
     private readonly llmFallbackSucceededEpoch = new Map<string, number>()
     private readonly seenUserMessageIds = new Map<string, Set<string>>()
+    private readonly sessionEnded = new Set<string>()
 
     constructor(
         private readonly events: EventStore,
@@ -335,6 +336,7 @@ export class OverseerEventRecorder {
         reason: string | undefined,
         getLastAgentPlainText: () => string | null
     ): Promise<StoredSystemEvent | null> {
+        this.sessionEnded.add(session.id)
         this.knownPermissionRequestIds.delete(session.id)
         this.sessionThinking.delete(session.id)
         const snapshot = toSessionSnapshot(session, tag)
@@ -512,6 +514,7 @@ export class OverseerEventRecorder {
         this.lastAgentMessageAt.delete(sessionId)
         this.knownPermissionRequestIds.delete(sessionId)
         this.sessionThinking.delete(sessionId)
+        this.sessionEnded.delete(sessionId)
     }
 
     private clearTurnState(sessionId: string): void {
@@ -607,6 +610,7 @@ export class OverseerEventRecorder {
     }
 
     private async syncPermissionRequests(session: Session, tag: string | null): Promise<void> {
+        if (this.sessionEnded.has(session.id)) return
         const requests = session.agentState?.requests ?? null
         if (!requests) {
             this.knownPermissionRequestIds.delete(session.id)
@@ -644,7 +648,9 @@ export class OverseerEventRecorder {
             )
         }
 
-        this.knownPermissionRequestIds.set(session.id, currentIds)
+        if (!this.sessionEnded.has(session.id)) {
+            this.knownPermissionRequestIds.set(session.id, currentIds)
+        }
     }
 
     private insertInferredEvent(

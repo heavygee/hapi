@@ -798,8 +798,8 @@ export class SyncEngine {
     }
 
     async deleteSession(sessionId: string): Promise<void> {
-        this.overseerEvents.forgetSession(sessionId)
         await this.sessionCache.deleteSession(sessionId)
+        this.overseerEvents.forgetSession(sessionId)
     }
 
     async applySessionConfig(
