@@ -98,6 +98,33 @@ describe('OverseerEventRecorder', () => {
         expect(event?.attentionCandidate).toBe(0)
     })
 
+    it('drops sentinel notify actions from suggested_action and inbox', () => {
+        const store = new Store(':memory:')
+        const recorder = new OverseerEventRecorder(store.events, store.inbox)
+        const session = store.sessions.getOrCreateSession('test-sentinel', { flavor: 'claude', path: '/tmp', host: 'local' }, null, 'default')
+
+        const event = recorder.onAgentMessage(
+            toSessionSnapshot(makeSession(session.id, 'claude'), session.tag),
+            'msg-sentinel',
+            {
+                role: 'agent',
+                content: {
+                    type: 'codex',
+                    data: {
+                        type: 'message',
+                        message: 'AGENT_NOTIFY_SUMMARY {"version":1,"status":"blocked","action":"none","summary":"Stuck"}'
+                    }
+                }
+            },
+            Date.now()
+        )
+
+        expect(event?.attentionCandidate).toBe(1)
+        const payload = JSON.parse(event!.payloadJson!) as { suggested_action: string | null }
+        expect(payload.suggested_action).toBeNull()
+        expect(store.inbox.list({ activeOnly: true })[0]?.suggestedAction).toBeNull()
+    })
+
     it('does not persist hub-inferred stale silence (derive live; no Session Log noise)', () => {
         const store = new Store(':memory:')
         const recorder = new OverseerEventRecorder(store.events, store.inbox)

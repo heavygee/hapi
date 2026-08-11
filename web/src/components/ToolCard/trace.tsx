@@ -189,6 +189,7 @@ type TraceChildListProps = {
 
 function TraceChildList({ items, metadata, mode }: TraceChildListProps) {
     const [expandedId, setExpandedId] = useState<string | null>(null)
+    const { showAgentContract } = useShowAgentContract()
 
     return (
         <div className={mode === 'session'
@@ -203,6 +204,7 @@ function TraceChildList({ items, metadata, mode }: TraceChildListProps) {
                     expanded={expandedId === child.id}
                     onToggle={() => setExpandedId((prev) => (prev === child.id ? null : child.id))}
                     mode={mode}
+                    showAgentContract={showAgentContract}
                 />
             ))}
         </div>
@@ -219,11 +221,11 @@ type TraceChildRowProps = {
     expanded: boolean
     onToggle?: () => void
     mode: 'trace' | 'session'
+    showAgentContract: boolean
 }
 
-function TraceChildRow({ child, metadata, expanded, onToggle, mode }: TraceChildRowProps) {
+function TraceChildRow({ child, metadata, expanded, onToggle, mode, showAgentContract }: TraceChildRowProps) {
     const { t } = useTranslation()
-    const { showAgentContract } = useShowAgentContract()
     const isSessionMode = mode === 'session'
     const rowClassName = isSessionMode
         ? 'flex flex-col gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] p-2'

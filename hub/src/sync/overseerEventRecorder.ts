@@ -12,6 +12,7 @@ import {
     mapNotifyStatusToEventType,
     mergeEventPayloadWithSession,
     normalizeUrlIdempotencyKey,
+    usableNotifyAction,
     usableNotifyToken,
     isObject,
     type NotifySummary,
@@ -601,7 +602,7 @@ export class OverseerEventRecorder {
             payloadFields: {
                 messageId,
                 notify_summary: notify,
-                suggested_action: notify.action ?? null
+                suggested_action: usableNotifyAction(notify.action)
             },
             notifyProject: usableNotifyToken(notify.project),
             severity: deriveSeverity(eventType),

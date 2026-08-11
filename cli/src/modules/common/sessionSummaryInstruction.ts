@@ -43,8 +43,9 @@ export function buildSessionSummaryInstruction(): string {
         'so this workspace\'s session tracking can record progress. Put it on its own',
         'final line after all other content:',
         SESSION_SUMMARY_CONTRACT_LINE,
-        'Use status "blocked" if unsure. Keep action to 12 words or fewer when status',
-        'is "done" and follow-up remains. Omit agent and project fields.',
+        'Use status "blocked" if unsure. When status is "done" and follow-up remains,',
+        'keep action to 12 words or fewer. Omit action (or use "") when nothing remains.',
+        'Omit agent and project fields.',
     ].join('\n')
 }
 

@@ -30,6 +30,7 @@ describe('sessionSummaryInstruction', () => {
         expect(body).not.toContain('<agent-id>')
         expect(SESSION_SUMMARY_CONTRACT_LINE).not.toContain('"agent"')
         expect(SESSION_SUMMARY_CONTRACT_LINE).not.toContain('"project"')
+        expect(body.toLowerCase()).toContain('omit action')
     })
 
     it('appends to an existing base prompt', () => {

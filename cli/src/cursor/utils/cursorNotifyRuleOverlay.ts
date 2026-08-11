@@ -74,8 +74,8 @@ export function buildNotifyRuleContent(opts: { project?: string | null; agentId?
         '',
         'Guidance:',
         '- status: pick the closest value; use "blocked" if unsure.',
-        '- action: concrete next step (required when status is "done" and follow-up',
-        '  remains); 12 words or fewer.',
+        '- action: concrete next step when status is "done" and follow-up remains;',
+        '  12 words or fewer. Omit action (empty) when nothing remains.',
         '- summary: one-line triage of what this turn did.',
         '- Keep it as the very last line of every response.',
         ''
