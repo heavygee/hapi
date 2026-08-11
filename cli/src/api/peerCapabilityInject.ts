@@ -103,7 +103,7 @@ export async function startPeerCapabilityInjectServer(options?: {
                     return
                 }
                 const cred = readPeerCred(socket)
-                if (!cred || !isProcessDescendant(cred.pid, childPid)) {
+                if (!authorizePeerCapInjectClient(cred, childPid)) {
                     socket.end(`${JSON.stringify({ ok: false, code: 'auth_failed' })}\n`)
                     return
                 }
@@ -342,6 +342,27 @@ function tryReceiveOnce(
             // Server pushes secret on accept when armed.
         })
     })
+}
+
+/**
+ * Authorize a peer-cap inject client for an armed `deliverTo(childPid, …)`.
+ *
+ * Linux/macOS require SO_PEERCRED and a descendant of `expectedChildPid`.
+ * Bun on Windows exposes named-pipe `_handle.fd === -1`, so
+ * `GetNamedPipeClientProcessId` cannot run (Teemo 2026-08-11: every resume
+ * hit `auth_failed` → `peer capability inject timed out`). When credentials
+ * are unavailable on win32, possession of the ephemeral pipe path (set only
+ * in the child env) is the auth — still requires an armed deliverTo.
+ */
+export function authorizePeerCapInjectClient(
+    cred: PeerCredentials | null,
+    expectedChildPid: number,
+    platform: NodeJS.Platform = process.platform,
+): boolean {
+    if (cred) {
+        return isProcessDescendant(cred.pid, expectedChildPid)
+    }
+    return platform === 'win32'
 }
 
 /** Windows client → verify named-pipe server PID (#1473 Major). */
