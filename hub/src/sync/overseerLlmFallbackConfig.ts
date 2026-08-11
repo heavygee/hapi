@@ -77,6 +77,9 @@ export function loadOverseerLlmFallbackConfig(
     let timeoutMs = DEFAULT_TIMEOUT_MS
     const timeoutRaw = env.HAPI_OVERSEER_LLM_TIMEOUT_MS?.trim()
     if (timeoutRaw) {
+        if (!/^\d+$/.test(timeoutRaw)) {
+            return { enabled: false, reasonDisabled: 'invalid_timeout' }
+        }
         const parsed = Number.parseInt(timeoutRaw, 10)
         if (!Number.isFinite(parsed) || parsed <= 0) {
             return { enabled: false, reasonDisabled: 'invalid_timeout' }

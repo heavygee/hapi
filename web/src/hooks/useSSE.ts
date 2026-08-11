@@ -487,6 +487,10 @@ export function useSSE(options: {
                 ingestIncomingMessages(event.sessionId, [event.message])
             }
 
+            if (event.type === 'session-updated' || event.type === 'message-received' || event.type === 'session-ended') {
+                void queryClient.invalidateQueries({ queryKey: ['session-system-events', event.sessionId] })
+            }
+
             if (event.type === 'session-added' || event.type === 'session-updated' || event.type === 'session-removed') {
                 if (event.type === 'session-removed') {
                     removeSessionSummary(event.sessionId)

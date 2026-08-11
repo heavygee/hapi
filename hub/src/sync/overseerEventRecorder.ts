@@ -32,6 +32,8 @@ export type SessionSnapshot = OverseerSessionIdentity
 export type OverseerEventRecorderOptions = {
     /** Opt-in OpenAI-compatible synthesizer (issue #90). Default: unset / off. */
     llmFallback?: OverseerLlmFallbackClient | null
+    /** Fired after an async Session Log insert so SSE clients can refetch. */
+    onAsyncSystemEvent?: ((sessionId: string) => void) | null
 }
 
 export type OnAgentMessageOptions = {
@@ -166,6 +168,7 @@ export class OverseerEventRecorder {
     private readonly lastAgentMessageAt = new Map<string, number>()
     private readonly knownPermissionRequestIds = new Map<string, Set<string>>()
     private readonly llmFallback: OverseerLlmFallbackClient | null
+    private readonly onAsyncSystemEvent: ((sessionId: string) => void) | null
     /** Latest no-notify assistant text awaiting end-of-turn LLM attempt. */
     private readonly pendingLlmFallback = new Map<string, PendingLlmFallback>()
     private readonly sessionThinking = new Map<string, boolean>()
@@ -180,6 +183,7 @@ export class OverseerEventRecorder {
         options?: OverseerEventRecorderOptions
     ) {
         this.llmFallback = options?.llmFallback ?? null
+        this.onAsyncSystemEvent = options?.onAsyncSystemEvent ?? null
     }
 
     list(options: Parameters<EventStore['list']>[0] = {}): StoredSystemEvent[] {
@@ -201,46 +205,58 @@ export class OverseerEventRecorder {
 
         if (isAgentMessageContent(content)) {
             this.lastAgentMessageAt.set(session.id, ts)
+            this.llmFallbackSucceeded.delete(session.id)
 
             const agentBody = unwrapRoleWrappedRecordEnvelope(content)
             const agentContent = agentBody?.role === 'agent' ? agentBody.content : content
+
+            // Scoop URLs before any queued await so a slow/crashed fallback
+            // cannot drop already-persisted assistant links.
+            this.scoopLinksFromContent(session, messageId, content, ts)
 
             const plainText = extractAssistantPlainText(agentContent)
             if (plainText) {
                 if (detectEmptyHapiEventsSentinel(plainText)) {
                     this.pendingLlmFallback.delete(session.id)
-                    primary = this.insertSystemEvent(session, {
-                        ts,
-                        sourceKind: 'system',
-                        eventType: 'validation_error',
-                        attentionCandidate: 0,
-                        summary: 'Malformed HAPI_EVENTS sentinel block (empty body)',
-                        relatedSessionId: session.id,
-                        provenance: 'hub-inferred from empty HAPI_EVENTS sentinel pair',
-                        idempotencyKey: `session:${session.id}:message:${messageId}:validation_error:empty_hapi_events`,
-                        payloadFields: { messageId, plainTextPreview: plainText.slice(0, 500) },
-                        severity: 1
-                    })
+                    primary = await this.enqueueSessionWork(session.id, () =>
+                        Promise.resolve(this.insertSystemEvent(session, {
+                            ts,
+                            sourceKind: 'system',
+                            eventType: 'validation_error',
+                            attentionCandidate: 0,
+                            summary: 'Malformed HAPI_EVENTS sentinel block (empty body)',
+                            relatedSessionId: session.id,
+                            provenance: 'hub-inferred from empty HAPI_EVENTS sentinel pair',
+                            idempotencyKey: `session:${session.id}:message:${messageId}:validation_error:empty_hapi_events`,
+                            payloadFields: { messageId, plainTextPreview: plainText.slice(0, 500) },
+                            severity: 1
+                        }))
+                    )
                 } else if (detectMalformedNotifySummaryLine(plainText)) {
                     this.pendingLlmFallback.delete(session.id)
-                    primary = this.insertSystemEvent(session, {
-                        ts,
-                        sourceKind: 'system',
-                        eventType: 'validation_error',
-                        attentionCandidate: 0,
-                        summary: 'Malformed AGENT_NOTIFY_SUMMARY line on last turn',
-                        relatedSessionId: session.id,
-                        provenance: 'hub-inferred from malformed AGENT_NOTIFY_SUMMARY JSON',
-                        idempotencyKey: `session:${session.id}:message:${messageId}:validation_error:malformed_notify`,
-                        payloadFields: { messageId },
-                        severity: 1
-                    })
+                    primary = await this.enqueueSessionWork(session.id, () =>
+                        Promise.resolve(this.insertSystemEvent(session, {
+                            ts,
+                            sourceKind: 'system',
+                            eventType: 'validation_error',
+                            attentionCandidate: 0,
+                            summary: 'Malformed AGENT_NOTIFY_SUMMARY line on last turn',
+                            relatedSessionId: session.id,
+                            provenance: 'hub-inferred from malformed AGENT_NOTIFY_SUMMARY JSON',
+                            idempotencyKey: `session:${session.id}:message:${messageId}:validation_error:malformed_notify`,
+                            payloadFields: { messageId },
+                            severity: 1
+                        }))
+                    )
                 } else {
                     const notify = extractNotifySummary(plainText)
                     if (notify) {
                         this.pendingLlmFallback.delete(session.id)
-                        this.llmFallbackSucceeded.delete(session.id)
-                        primary = this.recordNotifySummary(session, messageId, notify, ts)
+                        primary = await this.enqueueSessionWork(session.id, () => {
+                            const stored = this.recordNotifySummary(session, messageId, notify, ts)
+                            if (stored) this.onAsyncSystemEvent?.(session.id)
+                            return Promise.resolve(stored)
+                        })
                     }
                 }
             }
@@ -248,27 +264,25 @@ export class OverseerEventRecorder {
             if (!primary) {
                 const toolFailure = extractToolFailureSummary(agentContent)
                 if (toolFailure) {
-                    primary = this.insertSystemEvent(session, {
-                        ts,
-                        sourceKind: 'system',
-                        sourceRef: session.id,
-                        eventType: 'failed',
-                        attentionCandidate: 1,
-                        operatorActionRequired: 1,
-                        summary: toolFailure,
-                        relatedSessionId: session.id,
-                        provenance: 'hub-inferred from tool-call-result exit code',
-                        idempotencyKey: `session:${session.id}:message:${messageId}:tool_failed`,
-                        payloadFields: { messageId },
-                        severity: deriveSeverity('failed'),
-                        tags: buildTags(null, session.flavor)
-                    })
+                    primary = await this.enqueueSessionWork(session.id, () =>
+                        Promise.resolve(this.insertSystemEvent(session, {
+                            ts,
+                            sourceKind: 'system',
+                            sourceRef: session.id,
+                            eventType: 'failed',
+                            attentionCandidate: 1,
+                            operatorActionRequired: 1,
+                            summary: toolFailure,
+                            relatedSessionId: session.id,
+                            provenance: 'hub-inferred from tool-call-result exit code',
+                            idempotencyKey: `session:${session.id}:message:${messageId}:tool_failed`,
+                            payloadFields: { messageId },
+                            severity: deriveSeverity('failed'),
+                            tags: buildTags(null, session.flavor)
+                        }))
+                    )
                 }
             }
-
-            // Scoop URLs before any LLM await so a slow/crashed fallback
-            // cannot drop already-persisted assistant links.
-            this.scoopLinksFromContent(session, messageId, content, ts)
 
             // Opt-in LLM only (#90). No first-line heuristic. Defer while
             // thinking so ACP mid-turn flushes do not each hit the LLM.
@@ -330,7 +344,7 @@ export class OverseerEventRecorder {
                 return llmEvent
             }
 
-            return this.insertSystemEvent(snapshot, {
+            const stored = this.insertSystemEvent(snapshot, {
                 ts,
                 sourceKind: 'system',
                 sourceRef: session.id,
@@ -344,6 +358,8 @@ export class OverseerEventRecorder {
                 severity: deriveSeverity('completed'),
                 tags: buildTags(null, snapshot.flavor)
             })
+            if (stored) this.onAsyncSystemEvent?.(session.id)
+            return stored
         })
     }
 
@@ -443,7 +459,10 @@ export class OverseerEventRecorder {
                 severity: deriveSeverity(eventType),
                 tags: buildTags(notify, session.flavor),
             })
-            if (stored) this.llmFallbackSucceeded.add(session.id)
+            if (stored) {
+                this.llmFallbackSucceeded.add(session.id)
+                this.onAsyncSystemEvent?.(session.id)
+            }
             return stored
         } catch {
             return null
@@ -467,6 +486,16 @@ export class OverseerEventRecorder {
 
     seedLastAgentMessageAt(sessionId: string, ts: number): void {
         this.lastAgentMessageAt.set(sessionId, ts)
+    }
+
+    /** Drop deferred LLM state when a session is deleted (do not flush). */
+    forgetSession(sessionId: string): void {
+        this.pendingLlmFallback.delete(sessionId)
+        this.sessionWork.delete(sessionId)
+        this.llmFallbackSucceeded.delete(sessionId)
+        this.lastAgentMessageAt.delete(sessionId)
+        this.knownPermissionRequestIds.delete(sessionId)
+        this.sessionThinking.delete(sessionId)
     }
 
     private scoopLinksFromContent(

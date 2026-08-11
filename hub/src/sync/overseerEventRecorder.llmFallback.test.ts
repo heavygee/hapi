@@ -412,4 +412,109 @@ describe('OverseerEventRecorder LLM fallback', () => {
         const eventC = await recorder.flushPendingLlmFallback(snapshot)
         expect(eventC?.summary).toBe('turn c')
     })
+
+    it('queues a later AGENT_NOTIFY_SUMMARY behind an in-flight LLM insert', async () => {
+        const store = new Store(':memory:')
+        let releaseFirst!: (value: NotifySummary) => void
+        const firstGate = new Promise<NotifySummary>((resolve) => {
+            releaseFirst = resolve
+        })
+        let firstStarted!: () => void
+        const firstStartedP = new Promise<void>((resolve) => {
+            firstStarted = resolve
+        })
+        const recorder = new OverseerEventRecorder(store.events, store.inbox, {
+            llmFallback: {
+                synthesizeNotifySummary: mock(async () => {
+                    firstStarted()
+                    return firstGate
+                }),
+            },
+        })
+        const stored = store.sessions.getOrCreateSession('llm-notify-ord', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
+        const snapshot = toSessionSnapshot(makeSession(stored.id, 'cursor'), stored.tag)
+
+        const first = recorder.onAgentMessage(snapshot, 'msg-a', agentText('TURN A body'), Date.now())
+        await firstStartedP
+        const second = recorder.onAgentMessage(
+            snapshot,
+            'msg-b',
+            agentText('Done.\nAGENT_NOTIFY_SUMMARY {"version":1,"status":"done","action":"Review","summary":"real notify"}'),
+            Date.now() + 1
+        )
+        releaseFirst({ status: 'done', summary: 'llm first' })
+        await Promise.all([first, second])
+
+        const rows = store.events.list().sort((a, b) => a.id - b.id)
+        expect(rows.map((row) => row.summary)).toEqual(['llm first', 'real notify'])
+    })
+
+    it('writes completed_fallback after a textless tool turn following LLM success', async () => {
+        const store = new Store(':memory:')
+        const recorder = new OverseerEventRecorder(store.events, store.inbox, {
+            llmFallback: {
+                synthesizeNotifySummary: mock(async () => ({
+                    status: 'done',
+                    summary: 'caught earlier turn',
+                })),
+            },
+        })
+        const live = makeSession('sess-tool', 'cursor')
+        const stored = store.sessions.getOrCreateSession('llm-tool', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
+        live.id = stored.id
+        const snapshot = toSessionSnapshot(live, stored.tag)
+
+        await recorder.onAgentMessage(snapshot, 'msg-text', agentText('earlier turn body'), Date.now())
+        await recorder.onAgentMessage(snapshot, 'msg-tool', {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: { type: 'tool-call-result', output: { exit_code: 0 } },
+            },
+        }, Date.now() + 1)
+
+        const event = await recorder.onSessionEnd(
+            live,
+            stored.tag,
+            Date.now() + 2,
+            'completed',
+            () => 'earlier turn body'
+        )
+        expect(event?.provenance).toContain('session-end')
+    })
+
+    it('publishes after a successful LLM insert', async () => {
+        const store = new Store(':memory:')
+        let published = 0
+        const recorder = new OverseerEventRecorder(store.events, store.inbox, {
+            llmFallback: {
+                synthesizeNotifySummary: mock(async () => ({ status: 'done', summary: 'ok' })),
+            },
+            onAsyncSystemEvent: () => {
+                published += 1
+            },
+        })
+        const stored = store.sessions.getOrCreateSession('llm-pub', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
+        await recorder.onAgentMessage(
+            toSessionSnapshot(makeSession(stored.id, 'cursor'), stored.tag),
+            'msg-pub',
+            agentText('Turn body'),
+            Date.now()
+        )
+        expect(published).toBe(1)
+    })
+
+    it('forgetSession drops deferred LLM state without flushing', async () => {
+        const store = new Store(':memory:')
+        const synthesize = mock(async () => ({ status: 'done', summary: 'should not run' }))
+        const recorder = new OverseerEventRecorder(store.events, store.inbox, {
+            llmFallback: { synthesizeNotifySummary: synthesize },
+        })
+        const stored = store.sessions.getOrCreateSession('llm-forget', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
+        const snapshot = toSessionSnapshot(makeSession(stored.id, 'cursor'), stored.tag)
+        await recorder.onAgentMessage(snapshot, 'msg-p', agentText('pending'), Date.now(), { thinking: true })
+        recorder.forgetSession(stored.id)
+        expect(await recorder.flushPendingLlmFallback(snapshot)).toBeNull()
+        expect(synthesize).toHaveBeenCalledTimes(0)
+    })
 })

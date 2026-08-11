@@ -176,7 +176,12 @@ export class SyncEngine {
                 `[overseer] LLM summary fallback ENABLED (api=${llmFallbackConfig.api}, model=${llmFallbackConfig.model}, base=${llmFallbackConfig.baseUrl})`
             )
         }
-        this.overseerEvents = new OverseerEventRecorder(store.events, store.inbox, { llmFallback })
+        this.overseerEvents = new OverseerEventRecorder(store.events, store.inbox, {
+            llmFallback,
+            onAsyncSystemEvent: (sessionId) => {
+                this.eventPublisher.emit({ type: 'session-updated', sessionId })
+            }
+        })
         this.overseer = new OverseerEntity({
             events: store.events,
             inbox: store.inbox,
@@ -434,29 +439,32 @@ export class SyncEngine {
 
         this.sessionCache.handleSessionEnd(payload)
         const session = this.getSession(payload.sid)
-        if (session) {
-            void this.overseerEvents.onSessionEnd(
-                session,
-                this.store.sessions.getSession(session.id)?.tag ?? null,
-                payload.time,
-                payload.reason,
-                () => this.getLastAgentPlainText(session.id)
-            ).catch((error) => {
-                console.error('[overseer] onSessionEnd failed', error)
-            })
-        }
         this.eventPublisher.emit({
             type: 'session-ended',
             sessionId: payload.sid,
             reason: payload.reason
         })
-        // Retry dedup now that this session is inactive — a prior dedup may have
-        // skipped it because it was still active at the time. Cursor ACP rows that
-        // never reached session-ready must not dedup-merge the original on failure.
-        if (shouldRetryDedup) {
-            this.triggerDedupIfNeeded(payload.sid)
-        }
-        this.sessionReadyIds.delete(payload.sid)
+        // Await recorder work before dedup so a queued LLM/completed_fallback
+        // insert still has a live relatedSessionId.
+        void (async () => {
+            try {
+                if (session) {
+                    await this.overseerEvents.onSessionEnd(
+                        session,
+                        this.store.sessions.getSession(session.id)?.tag ?? null,
+                        payload.time,
+                        payload.reason,
+                        () => this.getLastAgentPlainText(session.id)
+                    )
+                }
+            } catch (error) {
+                console.error('[overseer] onSessionEnd failed', error)
+            }
+            if (shouldRetryDedup) {
+                this.triggerDedupIfNeeded(payload.sid)
+            }
+            this.sessionReadyIds.delete(payload.sid)
+        })()
     }
 
     handleBackgroundTaskDelta(sessionId: string, delta: { started: number; completed: number }): void {
@@ -473,6 +481,16 @@ export class SyncEngine {
 
     private expireInactive(): void {
         const expired = this.sessionCache.expireInactive()
+        for (const sessionId of expired) {
+            const session = this.sessionCache.getSession(sessionId)
+            if (!session) continue
+            void this.overseerEvents.onSessionUpdated(
+                session,
+                this.store.sessions.getSession(sessionId)?.tag ?? null
+            ).catch((error) => {
+                console.error('[overseer] onSessionUpdated from expireInactive failed', error)
+            })
+        }
         // Sort by most recent first so dedup keeps the newest session when multiple
         // duplicates for the same agent thread expire in the same sweep.
         const sorted = expired
@@ -776,6 +794,7 @@ export class SyncEngine {
     }
 
     async deleteSession(sessionId: string): Promise<void> {
+        this.overseerEvents.forgetSession(sessionId)
         await this.sessionCache.deleteSession(sessionId)
     }
 
