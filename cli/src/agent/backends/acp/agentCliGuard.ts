@@ -25,9 +25,10 @@ import { resolveHapiHomeDir } from '@/configuration';
  *
  * Filesystem publish order is fail-closed: host PID marker under `pids/` is
  * written before `count`, so concurrent reconcile never sees a lock with no
- * pids and clears it mid-reservation. A short-lived `registering` marker
- * covers the mkdir→pid gap even when a prior transport left a positive
- * `count` (last-unregister vs concurrent register). Mtime grace is a
+ * pids and clears it mid-reservation. Per-host `registering/<pid>` markers
+ * cover the mkdir→pid gap even when a prior transport left a positive
+ * `count` (last-unregister vs concurrent register); dead-owner markers are
+ * pruned so a crash cannot pin list-models forever. Mtime grace is a
  * backstop for the tiny window before that marker lands.
  */
 let activeAcpTransportCount = 0;
@@ -67,24 +68,53 @@ function getPidsDir(lockDir: string): string {
     return join(lockDir, 'pids');
 }
 
-function getRegisteringPath(lockDir: string): string {
+function getRegisteringDir(lockDir: string): string {
     return join(lockDir, REGISTERING_MARKER);
 }
 
-function isRegistering(lockDir: string): boolean {
-    return existsSync(getRegisteringPath(lockDir));
-}
-
 function beginRegistering(lockDir: string): void {
-    writeFileSync(getRegisteringPath(lockDir), String(Date.now()), 'utf8');
+    const dir = getRegisteringDir(lockDir);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, String(process.pid)), String(Date.now()), 'utf8');
 }
 
 function endRegistering(lockDir: string): void {
     try {
-        rmSync(getRegisteringPath(lockDir), { force: true });
+        rmSync(join(getRegisteringDir(lockDir), String(process.pid)), { force: true });
     } catch {
         // Best effort.
     }
+}
+
+/** True if any live host still holds a mid-publish reservation marker. */
+function isRegistering(lockDir: string): boolean {
+    const dir = getRegisteringDir(lockDir);
+    if (!existsSync(dir)) {
+        return false;
+    }
+
+    let anyLive = false;
+    for (const entry of readdirSync(dir)) {
+        const pid = Number(entry);
+        if (!Number.isInteger(pid) || pid <= 0) {
+            try {
+                rmSync(join(dir, entry), { force: true });
+            } catch {
+                // Best effort.
+            }
+            continue;
+        }
+        if (isProcessAlive(pid)) {
+            anyLive = true;
+            continue;
+        }
+        try {
+            rmSync(join(dir, entry), { force: true });
+        } catch {
+            // Best effort — crash/reboot left a dead registrar marker.
+        }
+    }
+    return anyLive;
 }
 
 function isFreshPrespawnReservation(lockDir: string): boolean {

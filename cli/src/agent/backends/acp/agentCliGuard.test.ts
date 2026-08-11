@@ -238,7 +238,7 @@ describe('agentCliGuard', () => {
             expect(existsSync(join(dir, 'pids'))).toBe(true);
             expect(existsSync(join(dir, 'count'))).toBe(false);
             expect(readdirSync(join(dir, 'pids'))).toEqual([]);
-            expect(existsSync(join(dir, 'registering'))).toBe(true);
+            expect(existsSync(join(dir, 'registering', String(process.pid)))).toBe(true);
             expect(isAgentAcpTransportActive()).toBe(true);
             expect(existsSync(dir)).toBe(true);
         });
@@ -262,11 +262,11 @@ describe('agentCliGuard', () => {
             }
             sawRace = true;
             // Prior transport's last unregister while the new registrar has
-            // empty-or-about-to-rewrite pids/ and a live `registering` marker.
+            // empty-or-about-to-rewrite pids/ and a live `registering/<pid>`.
             // Force last-unregister semantics (in-process count → 0).
             _setActiveAcpTransportCountForTests(1);
             unregisterActiveAcpTransport();
-            expect(existsSync(join(lockDir(), 'registering'))).toBe(true);
+            expect(existsSync(join(lockDir(), 'registering', String(process.pid)))).toBe(true);
             _setActiveAcpTransportCountForTests(0);
             expect(isAgentAcpTransportActive()).toBe(true);
             expect(existsSync(lockDir())).toBe(true);
@@ -277,9 +277,23 @@ describe('agentCliGuard', () => {
         _setAddLockPidHookForTests(null);
         _setActiveAcpTransportCountForTests(1);
         expect(existsSync(join(lockDir(), 'pids', String(process.pid)))).toBe(true);
-        expect(existsSync(join(lockDir(), 'registering'))).toBe(false);
+        expect(existsSync(join(lockDir(), 'registering', String(process.pid)))).toBe(false);
         expect(isAgentAcpTransportActive()).toBe(true);
         unregisterActiveAcpTransport();
         expect(isAgentAcpTransportActive()).toBe(false);
+    });
+
+    test('prunes crash-stale registering/<deadPid> so list-models is not pinned', () => {
+        process.env.HAPI_HOME = testHome;
+        const dir = lockDir();
+        mkdirSync(join(dir, 'registering'), { recursive: true });
+        mkdirSync(join(dir, 'pids'), { recursive: true });
+        writeFileSync(join(dir, 'count'), '1', 'utf8');
+        // Unlikely-to-be-alive PID — marker left by SIGKILL mid-publish.
+        writeFileSync(join(dir, 'registering', '999999'), '1', 'utf8');
+        _setActiveAcpTransportCountForTests(0);
+
+        expect(isAgentAcpTransportActive()).toBe(false);
+        expect(existsSync(dir)).toBe(false);
     });
 });
