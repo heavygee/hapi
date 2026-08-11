@@ -466,7 +466,11 @@ describe('ingestNotifySummaryFromMessage cause stamping', () => {
 
         const causing = store.messages.addMessage(session.id, userInbound('start the long turn'))
         store.messages.addMessage(session.id, agentToolRow())
-        const queued = store.messages.addMessage(session.id, userInbound('queued while in flight'))
+        const queued = store.messages.addMessage(
+            session.id,
+            userInbound('queued while in flight'),
+            'queued-while-in-flight'
+        )
         const assistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('Finished long turn')))
 
         const first = ingestNotify(store, session.id, 'default', assistant.content, assistant.id)
@@ -477,6 +481,7 @@ describe('ingestNotifySummaryFromMessage cause stamping', () => {
         expect((first?.event.payloadJson as { causeMessageId?: string })?.causeMessageId)
             .not.toBe(queued.id)
 
+        store.messages.markMessagesInvoked(session.id, ['queued-while-in-flight'], Date.now())
         const secondAssistant = store.messages.addMessage(
             session.id,
             assistantOutput(notifyFooter('Queued turn'))
@@ -563,27 +568,50 @@ describe('ingestNotifySummaryFromMessage cause stamping', () => {
         expect(causeText.startsWith('qq')).toBe(true)
     })
 
-    it('1:1 consume: extra queued inbounds wait for later work_ads, they do not attach to this turn', () => {
+    it('1:1 consume: extra uninvoked queued inbounds wait for later work_ads', () => {
         const store = new Store(':memory:')
         const session = store.sessions.getOrCreateSession('sess-cause-burst', {}, null, 'default')
         const one = store.messages.addMessage(session.id, userInbound('one: read the file'))
-        const two = store.messages.addMessage(session.id, userInbound('two: also fix the typo'))
-        const three = store.messages.addMessage(session.id, userInbound('three: and push'))
+        const two = store.messages.addMessage(session.id, userInbound('two: also fix the typo'), 'burst-two')
+        const three = store.messages.addMessage(session.id, userInbound('three: and push'), 'burst-three')
         const firstAssistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('Drained queue')))
         const first = ingestNotify(store, session.id, 'default', firstAssistant.content, firstAssistant.id)
         expect(first?.event.payloadJson).toMatchObject({ causeMessageId: one.id })
 
-        const secondAssistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('Next leftover')))
+        const secondAssistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('Still first turn')))
         const second = ingestNotify(store, session.id, 'default', secondAssistant.content, secondAssistant.id)
-        expect(second?.event.payloadJson).toMatchObject({ causeMessageId: two.id })
+        expect(second?.event.payloadJson).toMatchObject({ causeMessageId: one.id })
 
-        const fourth = store.messages.addMessage(session.id, userInbound('four: new task'))
-        const thirdAssistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('New task')))
+        store.messages.markMessagesInvoked(session.id, ['burst-two'], Date.now())
+        const thirdAssistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('Next leftover')))
         const third = ingestNotify(store, session.id, 'default', thirdAssistant.content, thirdAssistant.id)
-        // three is still the first unconsumed leftover; four waits.
-        expect(third?.event.payloadJson).toMatchObject({ causeMessageId: three.id })
+        expect(third?.event.payloadJson).toMatchObject({ causeMessageId: two.id })
         expect((third?.event.payloadJson as { causeMessageId?: string })?.causeMessageId)
-            .not.toBe(fourth.id)
+            .not.toBe(three.id)
+    })
+
+    it('advances causeSeq past every invoked inbound in the same Claude batch', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('sess-cause-batch', {}, null, 'default')
+        const one = store.messages.addMessage(session.id, userInbound('one'))
+        const two = store.messages.addMessage(session.id, userInbound('two'))
+        const three = store.messages.addMessage(session.id, userInbound('three'))
+        const assistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('Batched')))
+        const first = ingestNotify(store, session.id, 'default', assistant.content, assistant.id)
+        expect(first?.event.payloadJson).toMatchObject({
+            causeMessageId: one.id,
+            causeSeq: three.seq
+        })
+
+        const next = store.messages.addMessage(session.id, userInbound('next turn'))
+        const secondAssistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('Next')))
+        const second = ingestNotify(store, session.id, 'default', secondAssistant.content, secondAssistant.id)
+        expect(second?.event.payloadJson).toMatchObject({
+            causeMessageId: next.id,
+            causeText: 'next turn'
+        })
+        expect((second?.event.payloadJson as { causeMessageId?: string })?.causeMessageId)
+            .not.toBe(two.id)
     })
 
     it('does not treat an uninvoked queued inbound as a cause', () => {

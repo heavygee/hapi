@@ -187,6 +187,29 @@ describe('WorkGraphStore', () => {
         expect(store.workGraph.listWorkAdsByRelatedSession('beta', 'sess-a')).toEqual([])
     })
 
+    it('lists work_ads in insert order even when a later row has an older ts', () => {
+        const store = new Store(':memory:')
+        const first = store.workGraph.insertEvent('default', {
+            source_kind: 'session',
+            source_ref: 'sess-a',
+            event_type: 'work_ad',
+            related_session_id: 'sess-a',
+            summary: 'inserted first',
+            principal: humanPrincipal
+        }, { ts: 5000 })
+        const second = store.workGraph.insertEvent('default', {
+            source_kind: 'session',
+            source_ref: 'sess-a',
+            event_type: 'work_ad',
+            related_session_id: 'sess-a',
+            summary: 'inserted second, older ts',
+            principal: humanPrincipal
+        }, { ts: 1000 })
+
+        const ads = store.workGraph.listWorkAdsByRelatedSession('default', 'sess-a')
+        expect(ads.map((event) => event.id)).toEqual([first.event.id, second.event.id])
+    })
+
     it('accepts agent principal with on_behalf_of human owner', () => {
         const store = new Store(':memory:')
         const result = store.workGraph.insertEvent('default', {

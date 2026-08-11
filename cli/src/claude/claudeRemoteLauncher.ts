@@ -423,7 +423,9 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
                                 sdkToLogConverter.updateSelectedModel(p.mode.model ?? null);
                                 inFlightMessage = { items: p.items, mode: p.mode, isolate: p.isolate };
                                 deliveredMessageThisAttempt = true;
-                                return { ...p, message: session.expandSkillReference(p.message) };
+                                const deliveredText = session.expandSkillReference(p.message)
+                                session.client.notePendingHubPromptEcho(deliveredText)
+                                return { ...p, message: deliveredText };
                             }
 
                             let msg = await session.queue.waitForMessagesAndGetAsString(controller.signal);

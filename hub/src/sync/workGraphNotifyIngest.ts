@@ -274,14 +274,30 @@ function consumedInboundIds(
 }
 
 /**
- * Sequential rule: first unconsumed inbound (role=user) in session order.
- * Each work_ad consumes exactly one inbound (queued leftovers wait for later
- * events — that is the in-flight queued exception, not a drain of the whole queue).
- * No new inbound → sticky copy of the previous event's cause.
+ * Sequential rule: first unconsumed invoked inbound is the cause identity.
+ * causeSeq advances past other invoked inbounds before this assistant (one
+ * Claude batch can join several same-mode prompts). Uninvoked leftovers wait.
+ * No new invoked inbound → sticky copy of the previous event's cause.
  */
+function batchCauseSeq(
+    messages: StoredMessage[],
+    inbound: StoredMessage,
+    assistantSeq: number | null
+): number {
+    let maxSeq = inbound.seq
+    for (const message of messages) {
+        if (assistantSeq != null && message.seq >= assistantSeq) continue
+        if (message.seq <= inbound.seq) continue
+        if (!isCauseCandidate(message)) continue
+        if (message.seq > maxSeq) maxSeq = message.seq
+    }
+    return maxSeq
+}
+
 export function resolveWorkAdCause(params: {
     messages: StoredMessage[]
     previousWorkAds: WorkGraphEvent[]
+    assistantSeq?: number | null
 }): { cause: WorkAdCause | null; previousEventId: string | null } {
     const previous = params.previousWorkAds.at(-1) ?? null
     const consumed = consumedInboundIds(params.messages, params.previousWorkAds)
@@ -295,7 +311,7 @@ export function resolveWorkAdCause(params: {
                 causeMessageId: inbound.id,
                 causeText: text === null ? null : clampJsonUtf8(text, WORK_GRAPH_MAX_SUMMARY),
                 causeKind: extractInboundSentFrom(inbound.content),
-                causeSeq: inbound.seq
+                causeSeq: batchCauseSeq(params.messages, inbound, params.assistantSeq ?? null)
             },
             previousEventId: previous?.id ?? null
         }
@@ -417,9 +433,12 @@ export function ingestNotifySummaryFromMessage(input: NotifyIngestInput): Notify
 
     // Cause is hub-derived from session messages SQL (no REST 200 cap).
     const previousWorkAds = listPreviousWorkAds(input.store, input.namespace, input.sessionId)
+    const messages = loadMessagesForCause(input.store, input.sessionId, previousWorkAds)
+    const assistantSeq = messages.find((message) => message.id === input.messageId)?.seq ?? null
     const { cause, previousEventId } = resolveWorkAdCause({
-        messages: loadMessagesForCause(input.store, input.sessionId, previousWorkAds),
-        previousWorkAds
+        messages,
+        previousWorkAds,
+        assistantSeq
     })
 
     const create = buildWorkAdFromNotify({
