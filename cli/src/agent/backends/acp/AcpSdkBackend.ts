@@ -444,10 +444,10 @@ export class AcpSdkBackend implements AgentBackend {
     }
 
     /**
-     * Called when ACP reports thinking transitions for harness wake (#1470).
-     * `true` = activity / running / permission; `false` = state_update idle.
-     * Usage/title noise does not fire. Launchers should ignore no-ops when
-     * session.thinking already matches.
+     * Called when ACP reports agent activity for harness wake (#1470).
+     * `true` = real activity / permission. `state_update` is ignored (null gate)
+     * after #1487 spinner flicker. Launchers should ignore no-ops when
+     * session.thinking already matches, and should not clear on ACP `false`.
      */
     setAgentActivityListener(listener: ((thinking: boolean) => void) | null): void {
         this.agentActivityListener = listener;

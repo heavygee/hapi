@@ -563,11 +563,19 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         });
     }
 
-    /** #1470: ACP activity after idle → hub thinking via existing keepalive. */
+    /**
+     * #1470 / #1487 regression: ACP activity after idle → hub thinking.
+     * Only bump thinking *up*. Never clear from ACP idle/running chatter —
+     * Cursor emits state chatter while HAPI is queue-idle, which flickered
+     * session-list spinners every ~1–2s. Clear via prompt finally / abort.
+     */
     private wireAgentActivityThinking(backend: AcpSdkBackend, session: CursorSession): void {
         backend.setAgentActivityListener((thinking) => {
-            if (session.thinking !== thinking) {
-                session.onThinkingChange(thinking);
+            if (!thinking) {
+                return;
+            }
+            if (!session.thinking) {
+                session.onThinkingChange(true);
             }
         });
     }

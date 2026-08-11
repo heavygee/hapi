@@ -310,10 +310,10 @@ describe('cursorAcpRemoteLauncher', () => {
 
         harness.agentActivityListener!(true);
         harness.agentActivityListener!(true);
-        harness.agentActivityListener!(false);
+        harness.agentActivityListener!(false); // idle clear ignored — no flicker
 
-        expect(session.thinking).toBe(false);
-        expect(keepAlive.mock.calls.map((call) => call[0])).toEqual([true, false]);
+        expect(session.thinking).toBe(true);
+        expect(keepAlive.mock.calls.map((call) => call[0])).toEqual([true]);
 
         queue.close();
         await runPromise;

@@ -22,26 +22,19 @@ describe('thinkingHintFromSessionUpdate', () => {
         expect(shouldBumpThinkingFromSessionUpdate({ sessionUpdate })).toBe(true)
     })
 
-    it('returns true for ACP v2 state_update running / requires_action', () => {
+    it('ignores ACP v2 state_update (Cursor chatters running/idle while queue-idle)', () => {
         expect(thinkingHintFromSessionUpdate({
             sessionUpdate: 'state_update',
             state: 'running',
-        })).toBe(true)
+        })).toBeNull()
         expect(thinkingHintFromSessionUpdate({
             sessionUpdate: 'state_update',
             state: 'requires_action',
-        })).toBe(true)
-    })
-
-    it('returns false for ACP v2 state_update idle', () => {
+        })).toBeNull()
         expect(thinkingHintFromSessionUpdate({
             sessionUpdate: 'state_update',
             state: 'idle',
-        })).toBe(false)
-        expect(shouldBumpThinkingFromSessionUpdate({
-            sessionUpdate: 'state_update',
-            state: 'idle',
-        })).toBe(false)
+        })).toBeNull()
     })
 
     it.each([
