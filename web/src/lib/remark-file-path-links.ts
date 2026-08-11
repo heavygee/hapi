@@ -45,8 +45,10 @@ export function decodeFilePathHref(href: string): string | null {
 
 export function decodeFilePathCandidateHref(href: string): string | null {
     if (!href.startsWith(FILE_PATH_CANDIDATE_HREF_PREFIX)) return null
+    const encoded = href.slice(FILE_PATH_CANDIDATE_HREF_PREFIX.length)
+    if (!encoded) return null
     try {
-        return decodeURIComponent(href.slice(FILE_PATH_CANDIDATE_HREF_PREFIX.length))
+        return decodeURIComponent(encoded)
     } catch {
         return null
     }
