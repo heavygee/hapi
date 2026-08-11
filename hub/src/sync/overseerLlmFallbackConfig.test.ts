@@ -81,4 +81,45 @@ describe('loadOverseerLlmFallbackConfig', () => {
         expect(config.apiKey).toBe('sk-test')
         expect(config.timeoutMs).toBe(12_000)
     })
+
+    it('rejects partially numeric timeout values', () => {
+        stashEnv()
+        process.env.HAPI_OVERSEER_LLM_FALLBACK = '1'
+        process.env.HAPI_OVERSEER_LLM_BASE_URL = 'http://127.0.0.1:11434/v1'
+        process.env.HAPI_OVERSEER_LLM_MODEL = 'llama3.3'
+        process.env.HAPI_OVERSEER_LLM_TIMEOUT_MS = '30s'
+        const suffix = loadOverseerLlmFallbackConfig()
+        expect(suffix.enabled).toBe(false)
+        if (suffix.enabled) throw new Error('expected disabled')
+        expect(suffix.reasonDisabled).toBe('invalid_timeout')
+
+        process.env.HAPI_OVERSEER_LLM_TIMEOUT_MS = '1e3'
+        const scientific = loadOverseerLlmFallbackConfig()
+        expect(scientific.enabled).toBe(false)
+        if (scientific.enabled) throw new Error('expected disabled')
+        expect(scientific.reasonDisabled).toBe('invalid_timeout')
+
+        process.env.HAPI_OVERSEER_LLM_TIMEOUT_MS = '2147483648'
+        const overflow = loadOverseerLlmFallbackConfig()
+        expect(overflow.enabled).toBe(false)
+        if (overflow.enabled) throw new Error('expected disabled')
+        expect(overflow.reasonDisabled).toBe('invalid_timeout')
+    })
+
+    it('rejects malformed fallback base URLs', () => {
+        stashEnv()
+        process.env.HAPI_OVERSEER_LLM_FALLBACK = '1'
+        process.env.HAPI_OVERSEER_LLM_MODEL = 'llama3.3'
+        process.env.HAPI_OVERSEER_LLM_BASE_URL = 'localhost:11434/v1'
+        const missingScheme = loadOverseerLlmFallbackConfig()
+        expect(missingScheme.enabled).toBe(false)
+        if (missingScheme.enabled) throw new Error('expected disabled')
+        expect(missingScheme.reasonDisabled).toBe('invalid_base_url')
+
+        process.env.HAPI_OVERSEER_LLM_BASE_URL = '/'
+        const slash = loadOverseerLlmFallbackConfig()
+        expect(slash.enabled).toBe(false)
+        if (slash.enabled) throw new Error('expected disabled')
+        expect(slash.reasonDisabled).toBe('invalid_base_url')
+    })
 })

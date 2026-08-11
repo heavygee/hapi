@@ -118,7 +118,7 @@ describe('OverseerEventRecorder', () => {
         expect(store.inbox.count()).toBe(0)
     })
 
-    it('synthesizes approval_requested from permission prompts', () => {
+    it('synthesizes approval_requested from permission prompts', async () => {
         const store = new Store(':memory:')
         const recorder = new OverseerEventRecorder(store.events, store.inbox)
         const session = store.sessions.getOrCreateSession('perm', { flavor: 'claude', path: '/tmp', host: 'local' }, null, 'default')
@@ -130,7 +130,7 @@ describe('OverseerEventRecorder', () => {
             }
         }
 
-        recorder.onSessionUpdated(live, session.tag)
+        await recorder.onSessionUpdated(live, session.tag)
 
         const events = store.events.list({ eventType: 'approval_requested' })
         expect(events).toHaveLength(1)

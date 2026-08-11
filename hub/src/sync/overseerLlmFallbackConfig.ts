@@ -25,7 +25,7 @@ export type OverseerLlmFallbackEnabledConfig = {
 
 export type OverseerLlmFallbackDisabledConfig = {
     enabled: false
-    reasonDisabled: 'flag_off' | 'incomplete_config' | 'invalid_api' | 'invalid_timeout'
+    reasonDisabled: 'flag_off' | 'incomplete_config' | 'invalid_api' | 'invalid_timeout' | 'invalid_base_url'
 }
 
 export type OverseerLlmFallbackConfig =
@@ -33,6 +33,8 @@ export type OverseerLlmFallbackConfig =
     | OverseerLlmFallbackDisabledConfig
 
 const DEFAULT_TIMEOUT_MS = 30_000
+/** Node/Bun setTimeout clamps delays above 2^31-1 ms to 1 ms. */
+const MAX_TIMEOUT_MS = 2_147_483_647
 
 function envTruthy(value: string | undefined): boolean {
     if (!value) return false
@@ -42,6 +44,15 @@ function envTruthy(value: string | undefined): boolean {
 
 function normalizeBaseUrl(raw: string): string {
     return raw.trim().replace(/\/+$/, '')
+}
+
+function isAbsoluteHttpUrl(value: string): boolean {
+    try {
+        const parsed = new URL(value)
+        return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+    } catch {
+        return false
+    }
 }
 
 function parseApiMode(raw: string | undefined): OverseerLlmApiMode | null {
@@ -77,16 +88,24 @@ export function loadOverseerLlmFallbackConfig(
     let timeoutMs = DEFAULT_TIMEOUT_MS
     const timeoutRaw = env.HAPI_OVERSEER_LLM_TIMEOUT_MS?.trim()
     if (timeoutRaw) {
+        if (!/^\d+$/.test(timeoutRaw)) {
+            return { enabled: false, reasonDisabled: 'invalid_timeout' }
+        }
         const parsed = Number.parseInt(timeoutRaw, 10)
-        if (!Number.isFinite(parsed) || parsed <= 0) {
+        if (!Number.isFinite(parsed) || parsed <= 0 || parsed > MAX_TIMEOUT_MS) {
             return { enabled: false, reasonDisabled: 'invalid_timeout' }
         }
         timeoutMs = parsed
     }
 
+    const baseUrl = normalizeBaseUrl(baseUrlRaw)
+    if (!isAbsoluteHttpUrl(baseUrl)) {
+        return { enabled: false, reasonDisabled: 'invalid_base_url' }
+    }
+
     return {
         enabled: true,
-        baseUrl: normalizeBaseUrl(baseUrlRaw),
+        baseUrl,
         apiKey: env.HAPI_OVERSEER_LLM_API_KEY?.trim() ?? '',
         model,
         api,

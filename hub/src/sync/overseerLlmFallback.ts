@@ -1,3 +1,4 @@
+import { NOTIFY_SUMMARY_STATUSES } from '@hapi/protocol'
 import { extractNotifySummary, type NotifySummary } from '@hapi/protocol/messages'
 import type { OverseerLlmFallbackEnabledConfig } from './overseerLlmFallbackConfig'
 
@@ -41,9 +42,20 @@ function stripMarkdownFences(text: string): string {
  * Parse an AGENT_NOTIFY_SUMMARY from LLM output.
  * Uses the same end-anchored extractor as primary agent turns.
  */
+const LLM_NOTIFY_STATUSES = new Set<string>(NOTIFY_SUMMARY_STATUSES)
+
+function isCompliantLlmNotify(notify: NotifySummary): boolean {
+    const summary = notify.summary?.trim()
+    if (!summary) return false
+    if (!notify.status || !LLM_NOTIFY_STATUSES.has(notify.status)) return false
+    return true
+}
+
 export function parseNotifySummaryFromLlmText(text: string): NotifySummary | null {
     if (typeof text !== 'string' || text.trim().length === 0) return null
-    return extractNotifySummary(stripMarkdownFences(text))
+    const parsed = extractNotifySummary(stripMarkdownFences(text))
+    if (!parsed || !isCompliantLlmNotify(parsed)) return null
+    return parsed
 }
 
 export function extractTextFromChatCompletionsBody(body: unknown): string | null {

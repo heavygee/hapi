@@ -35,6 +35,10 @@ describe('parseNotifySummaryFromLlmText', () => {
     it('returns null for empty or non-compliant text', () => {
         expect(parseNotifySummaryFromLlmText('')).toBeNull()
         expect(parseNotifySummaryFromLlmText('just a paragraph')).toBeNull()
+        expect(parseNotifySummaryFromLlmText('AGENT_NOTIFY_SUMMARY {}')).toBeNull()
+        expect(parseNotifySummaryFromLlmText('AGENT_NOTIFY_SUMMARY {"status":"done"}')).toBeNull()
+        expect(parseNotifySummaryFromLlmText('AGENT_NOTIFY_SUMMARY {"summary":"no status"}')).toBeNull()
+        expect(parseNotifySummaryFromLlmText('AGENT_NOTIFY_SUMMARY {"status":"nope","summary":"bad status"}')).toBeNull()
     })
 })
 

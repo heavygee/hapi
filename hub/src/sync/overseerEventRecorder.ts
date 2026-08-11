@@ -32,6 +32,8 @@ export type SessionSnapshot = OverseerSessionIdentity
 export type OverseerEventRecorderOptions = {
     /** Opt-in OpenAI-compatible synthesizer (issue #90). Default: unset / off. */
     llmFallback?: OverseerLlmFallbackClient | null
+    /** Fired after an async Session Log insert so SSE clients can refetch. */
+    onAsyncSystemEvent?: ((sessionId: string) => void) | null
 }
 
 export type OnAgentMessageOptions = {
@@ -166,9 +168,15 @@ export class OverseerEventRecorder {
     private readonly lastAgentMessageAt = new Map<string, number>()
     private readonly knownPermissionRequestIds = new Map<string, Set<string>>()
     private readonly llmFallback: OverseerLlmFallbackClient | null
+    private readonly onAsyncSystemEvent: ((sessionId: string) => void) | null
     /** Latest no-notify assistant text awaiting end-of-turn LLM attempt. */
     private readonly pendingLlmFallback = new Map<string, PendingLlmFallback>()
     private readonly sessionThinking = new Map<string, boolean>()
+    /** Per-session tail so concurrent LLM calls insert in arrival order. */
+    private readonly sessionWork = new Map<string, Promise<unknown>>()
+    /** Successful LLM fallback messageId per session (not a session-wide boolean). */
+    private readonly llmFallbackSucceeded = new Map<string, string>()
+    private readonly lastAgentMessageId = new Map<string, string>()
 
     constructor(
         private readonly events: EventStore,
@@ -176,6 +184,7 @@ export class OverseerEventRecorder {
         options?: OverseerEventRecorderOptions
     ) {
         this.llmFallback = options?.llmFallback ?? null
+        this.onAsyncSystemEvent = options?.onAsyncSystemEvent ?? null
     }
 
     list(options: Parameters<EventStore['list']>[0] = {}): StoredSystemEvent[] {
@@ -197,45 +206,58 @@ export class OverseerEventRecorder {
 
         if (isAgentMessageContent(content)) {
             this.lastAgentMessageAt.set(session.id, ts)
+            this.lastAgentMessageId.set(session.id, messageId)
 
             const agentBody = unwrapRoleWrappedRecordEnvelope(content)
             const agentContent = agentBody?.role === 'agent' ? agentBody.content : content
+
+            // Scoop URLs before any queued await so a slow/crashed fallback
+            // cannot drop already-persisted assistant links.
+            this.scoopLinksFromContent(session, messageId, content, ts)
 
             const plainText = extractAssistantPlainText(agentContent)
             if (plainText) {
                 if (detectEmptyHapiEventsSentinel(plainText)) {
                     this.pendingLlmFallback.delete(session.id)
-                    primary = this.insertSystemEvent(session, {
-                        ts,
-                        sourceKind: 'system',
-                        eventType: 'validation_error',
-                        attentionCandidate: 0,
-                        summary: 'Malformed HAPI_EVENTS sentinel block (empty body)',
-                        relatedSessionId: session.id,
-                        provenance: 'hub-inferred from empty HAPI_EVENTS sentinel pair',
-                        idempotencyKey: `session:${session.id}:message:${messageId}:validation_error:empty_hapi_events`,
-                        payloadFields: { messageId, plainTextPreview: plainText.slice(0, 500) },
-                        severity: 1
-                    })
+                    primary = await this.enqueueSessionWork(session.id, () =>
+                        Promise.resolve(this.insertInferredEvent(session, {
+                            ts,
+                            sourceKind: 'system',
+                            eventType: 'validation_error',
+                            attentionCandidate: 0,
+                            summary: 'Malformed HAPI_EVENTS sentinel block (empty body)',
+                            relatedSessionId: session.id,
+                            provenance: 'hub-inferred from empty HAPI_EVENTS sentinel pair',
+                            idempotencyKey: `session:${session.id}:message:${messageId}:validation_error:empty_hapi_events`,
+                            payloadFields: { messageId, plainTextPreview: plainText.slice(0, 500) },
+                            severity: 1
+                        }))
+                    )
                 } else if (detectMalformedNotifySummaryLine(plainText)) {
                     this.pendingLlmFallback.delete(session.id)
-                    primary = this.insertSystemEvent(session, {
-                        ts,
-                        sourceKind: 'system',
-                        eventType: 'validation_error',
-                        attentionCandidate: 0,
-                        summary: 'Malformed AGENT_NOTIFY_SUMMARY line on last turn',
-                        relatedSessionId: session.id,
-                        provenance: 'hub-inferred from malformed AGENT_NOTIFY_SUMMARY JSON',
-                        idempotencyKey: `session:${session.id}:message:${messageId}:validation_error:malformed_notify`,
-                        payloadFields: { messageId },
-                        severity: 1
-                    })
+                    primary = await this.enqueueSessionWork(session.id, () =>
+                        Promise.resolve(this.insertInferredEvent(session, {
+                            ts,
+                            sourceKind: 'system',
+                            eventType: 'validation_error',
+                            attentionCandidate: 0,
+                            summary: 'Malformed AGENT_NOTIFY_SUMMARY line on last turn',
+                            relatedSessionId: session.id,
+                            provenance: 'hub-inferred from malformed AGENT_NOTIFY_SUMMARY JSON',
+                            idempotencyKey: `session:${session.id}:message:${messageId}:validation_error:malformed_notify`,
+                            payloadFields: { messageId },
+                            severity: 1
+                        }))
+                    )
                 } else {
                     const notify = extractNotifySummary(plainText)
                     if (notify) {
                         this.pendingLlmFallback.delete(session.id)
-                        primary = this.recordNotifySummary(session, messageId, notify, ts)
+                        primary = await this.enqueueSessionWork(session.id, () => {
+                            const stored = this.recordNotifySummary(session, messageId, notify, ts)
+                            if (stored) this.onAsyncSystemEvent?.(session.id)
+                            return Promise.resolve(stored)
+                        })
                     }
                 }
             }
@@ -243,21 +265,23 @@ export class OverseerEventRecorder {
             if (!primary) {
                 const toolFailure = extractToolFailureSummary(agentContent)
                 if (toolFailure) {
-                    primary = this.insertSystemEvent(session, {
-                        ts,
-                        sourceKind: 'system',
-                        sourceRef: session.id,
-                        eventType: 'failed',
-                        attentionCandidate: 1,
-                        operatorActionRequired: 1,
-                        summary: toolFailure,
-                        relatedSessionId: session.id,
-                        provenance: 'hub-inferred from tool-call-result exit code',
-                        idempotencyKey: `session:${session.id}:message:${messageId}:tool_failed`,
-                        payloadFields: { messageId },
-                        severity: deriveSeverity('failed'),
-                        tags: buildTags(null, session.flavor)
-                    })
+                    primary = await this.enqueueSessionWork(session.id, () =>
+                        Promise.resolve(this.insertInferredEvent(session, {
+                            ts,
+                            sourceKind: 'system',
+                            sourceRef: session.id,
+                            eventType: 'failed',
+                            attentionCandidate: 1,
+                            operatorActionRequired: 1,
+                            summary: toolFailure,
+                            relatedSessionId: session.id,
+                            provenance: 'hub-inferred from tool-call-result exit code',
+                            idempotencyKey: `session:${session.id}:message:${messageId}:tool_failed`,
+                            payloadFields: { messageId },
+                            severity: deriveSeverity('failed'),
+                            tags: buildTags(null, session.flavor)
+                        }))
+                    )
                 }
             }
 
@@ -265,74 +289,136 @@ export class OverseerEventRecorder {
             // thinking so ACP mid-turn flushes do not each hit the LLM.
             if (!primary && plainText && this.llmFallback) {
                 if (opts.thinking) {
-                    this.pendingLlmFallback.set(session.id, { messageId, plainText, ts })
+                    this.rememberPendingLlmFallback(session.id, messageId, plainText, ts)
                 } else {
                     this.pendingLlmFallback.delete(session.id)
-                    primary = await this.tryLlmFallback(session, messageId, plainText, ts)
+                    primary = await this.enqueueSessionWork(session.id, () =>
+                        this.tryLlmFallback(session, messageId, plainText, ts)
+                    )
                 }
             }
+            return primary
         }
 
         this.scoopLinksFromContent(session, messageId, content, ts)
         return primary
     }
 
-    onSessionUpdated(session: Session, tag?: string | null): void {
-        const prevThinking = this.sessionThinking.get(session.id) ?? false
+    async onSessionUpdated(session: Session, tag?: string | null): Promise<void> {
         this.sessionThinking.set(session.id, session.thinking)
-        this.syncPermissionRequests(session, tag ?? null)
-        if (prevThinking && !session.thinking) {
-            void this.flushPendingLlmFallback(toSessionSnapshot(session, tag ?? null)).catch((error) => {
-                console.error('[overseer] flushPendingLlmFallback failed', error)
-            })
+        await this.syncPermissionRequests(session, tag ?? null)
+        // Flush whenever thinking is clear and a deferred turn is waiting —
+        // not only on a true→false edge. Keepalives often never sent the
+        // thinking=true update through this recorder.
+        if (!session.thinking) {
+            await this.flushPendingLlmFallback(toSessionSnapshot(session, tag ?? null))
         }
     }
 
-    onSessionEnd(
+    async onSessionEnd(
         session: Session,
         tag: string | null,
         ts: number,
         reason: string | undefined,
         getLastAgentPlainText: () => string | null
-    ): StoredSystemEvent | null {
+    ): Promise<StoredSystemEvent | null> {
         this.knownPermissionRequestIds.delete(session.id)
         this.sessionThinking.delete(session.id)
-        void this.flushPendingLlmFallback(toSessionSnapshot(session, tag)).catch((error) => {
-            console.error('[overseer] flushPendingLlmFallback on session-end failed', error)
-        })
-
-        if (reason !== 'completed') {
-            return null
-        }
-
-        const lastText = getLastAgentPlainText()
-        if (lastText && extractNotifySummary(lastText)) {
-            return null
-        }
-
         const snapshot = toSessionSnapshot(session, tag)
-        return this.insertSystemEvent(snapshot, {
-            ts,
-            sourceKind: 'system',
-            sourceRef: session.id,
-            eventType: 'completed',
-            attentionCandidate: 0,
-            summary: 'Session ended without AGENT_NOTIFY_SUMMARY; hub inferred completion',
-            relatedSessionId: session.id,
-            provenance: 'hub-inferred from session-end completed signal',
-            idempotencyKey: `session:${session.id}:session_end:${ts}:completed_fallback`,
-            payloadFields: { reason },
-            severity: deriveSeverity('completed'),
-            tags: buildTags(null, snapshot.flavor)
+        const pending = this.takePendingLlmFallback(session.id)
+
+        return this.enqueueSessionWork(session.id, async () => {
+            const llmEvent = pending
+                ? await this.runPendingLlmFallback(snapshot, pending)
+                : null
+            if (reason !== 'completed') {
+                return llmEvent
+            }
+
+            const lastText = getLastAgentPlainText()
+            if (lastText && extractNotifySummary(lastText)) {
+                return llmEvent
+            }
+            // Successful LLM row already captured this missed turn — do not
+            // also write "session ended without AGENT_NOTIFY_SUMMARY".
+            const successForLatest = this.lastAgentMessageId.get(session.id)
+                && this.llmFallbackSucceeded.get(session.id) === this.lastAgentMessageId.get(session.id)
+            if (llmEvent || successForLatest) {
+                return llmEvent
+            }
+
+            const stored = this.insertSystemEvent(snapshot, {
+                ts,
+                sourceKind: 'system',
+                sourceRef: session.id,
+                eventType: 'completed',
+                attentionCandidate: 0,
+                summary: 'Session ended without AGENT_NOTIFY_SUMMARY; hub inferred completion',
+                relatedSessionId: session.id,
+                provenance: 'hub-inferred from session-end completed signal',
+                idempotencyKey: `session:${session.id}:session_end:${ts}:completed_fallback`,
+                payloadFields: { reason },
+                severity: deriveSeverity('completed'),
+                tags: buildTags(null, snapshot.flavor)
+            })
+            if (stored) this.onAsyncSystemEvent?.(session.id)
+            return stored
         })
     }
 
     async flushPendingLlmFallback(session: SessionSnapshot): Promise<StoredSystemEvent | null> {
-        const pending = this.pendingLlmFallback.get(session.id)
+        const pending = this.takePendingLlmFallback(session.id)
         if (!pending) return null
-        this.pendingLlmFallback.delete(session.id)
+        return this.enqueueSessionWork(session.id, () => this.runPendingLlmFallback(session, pending))
+    }
+
+    private takePendingLlmFallback(sessionId: string): PendingLlmFallback | undefined {
+        const pending = this.pendingLlmFallback.get(sessionId)
+        if (pending) this.pendingLlmFallback.delete(sessionId)
+        return pending
+    }
+
+    private rememberPendingLlmFallback(
+        sessionId: string,
+        messageId: string,
+        plainText: string,
+        ts: number
+    ): void {
+        const prev = this.pendingLlmFallback.get(sessionId)
+        // New ACP text segment in the same thinking turn — keep the whole turn.
+        // Same messageId is a redelivery; replace rather than duplicate.
+        const combined = prev && prev.messageId !== messageId
+            ? `${prev.plainText}\n${plainText}`
+            : plainText
+        if (!prev || prev.messageId !== messageId) {
+            this.llmFallbackSucceeded.delete(sessionId)
+        }
+        this.pendingLlmFallback.set(sessionId, {
+            messageId,
+            plainText: combined,
+            ts: prev?.ts ?? ts
+        })
+    }
+
+    private async runPendingLlmFallback(
+        session: SessionSnapshot,
+        pending: PendingLlmFallback
+    ): Promise<StoredSystemEvent | null> {
         if (extractNotifySummary(pending.plainText)) return null
         return this.tryLlmFallback(session, pending.messageId, pending.plainText, pending.ts)
+    }
+
+    private enqueueSessionWork<T>(sessionId: string, work: () => Promise<T>): Promise<T> {
+        const previous = this.sessionWork.get(sessionId) ?? Promise.resolve()
+        const run = previous.then(work, work)
+        const tail: Promise<unknown> = run.then(() => undefined, () => undefined)
+        this.sessionWork.set(sessionId, tail)
+        void tail.then(() => {
+            if (this.sessionWork.get(sessionId) === tail) {
+                this.sessionWork.delete(sessionId)
+            }
+        })
+        return run
     }
 
     /**
@@ -346,11 +432,15 @@ export class OverseerEventRecorder {
         ts: number
     ): Promise<StoredSystemEvent | null> {
         if (!this.llmFallback) return null
+        this.llmFallbackSucceeded.delete(session.id)
         try {
             const notify = await this.llmFallback.synthesizeNotifySummary(plainText)
             if (!notify) return null
-            const eventType = mapNotifyStatusToEventType(notify.status)
-            return this.insertSystemEvent(session, {
+            // Session Log All hides `stale` (ambient silence). Keep LLM
+            // fallbacks visible as captured-only progress.
+            const mapped = mapNotifyStatusToEventType(notify.status)
+            const eventType = mapped === 'stale' ? 'progress' : mapped
+            const stored = this.insertSystemEvent(session, {
                 ts,
                 sourceKind: 'system',
                 sourceRef: session.id,
@@ -372,6 +462,11 @@ export class OverseerEventRecorder {
                 severity: deriveSeverity(eventType),
                 tags: buildTags(notify, session.flavor),
             })
+            if (stored) {
+                this.llmFallbackSucceeded.set(session.id, messageId)
+                this.onAsyncSystemEvent?.(session.id)
+            }
+            return stored
         } catch {
             return null
         }
@@ -394,6 +489,17 @@ export class OverseerEventRecorder {
 
     seedLastAgentMessageAt(sessionId: string, ts: number): void {
         this.lastAgentMessageAt.set(sessionId, ts)
+    }
+
+    /** Drop deferred LLM state when a session is deleted (do not flush). */
+    forgetSession(sessionId: string): void {
+        this.pendingLlmFallback.delete(sessionId)
+        this.sessionWork.delete(sessionId)
+        this.llmFallbackSucceeded.delete(sessionId)
+        this.lastAgentMessageAt.delete(sessionId)
+        this.lastAgentMessageId.delete(sessionId)
+        this.knownPermissionRequestIds.delete(sessionId)
+        this.sessionThinking.delete(sessionId)
     }
 
     private scoopLinksFromContent(
@@ -474,7 +580,7 @@ export class OverseerEventRecorder {
         })
     }
 
-    private syncPermissionRequests(session: Session, tag: string | null): void {
+    private async syncPermissionRequests(session: Session, tag: string | null): Promise<void> {
         const requests = session.agentState?.requests ?? null
         if (!requests) {
             this.knownPermissionRequestIds.delete(session.id)
@@ -490,24 +596,39 @@ export class OverseerEventRecorder {
             const request = asRecord(requests[requestId])
             const toolName = typeof request?.tool === 'string' ? request.tool : 'tool'
             const summary = `Permission requested: ${toolName}`
-            this.insertSystemEvent(snapshot, {
-                ts: Date.now(),
-                sourceKind: 'system',
-                sourceRef: session.id,
-                eventType: 'approval_requested',
-                attentionCandidate: 1,
-                operatorActionRequired: 1,
-                summary,
-                relatedSessionId: session.id,
-                provenance: 'hub-inferred from permission prompt',
-                idempotencyKey: `session:${session.id}:permission:${requestId}`,
-                payloadFields: { requestId, request },
-                severity: deriveSeverity('approval_requested'),
-                tags: buildTags(null, snapshot.flavor)
-            })
+            await this.enqueueSessionWork(session.id, () =>
+                Promise.resolve(this.insertInferredEvent(snapshot, {
+                    ts: Date.now(),
+                    sourceKind: 'system',
+                    sourceRef: session.id,
+                    eventType: 'approval_requested',
+                    attentionCandidate: 1,
+                    operatorActionRequired: 1,
+                    summary,
+                    relatedSessionId: session.id,
+                    provenance: 'hub-inferred from permission prompt',
+                    idempotencyKey: `session:${session.id}:permission:${requestId}`,
+                    payloadFields: { requestId, request },
+                    severity: deriveSeverity('approval_requested'),
+                    tags: buildTags(null, snapshot.flavor)
+                }))
+            )
         }
 
         this.knownPermissionRequestIds.set(session.id, currentIds)
+    }
+
+    private insertInferredEvent(
+        session: SessionSnapshot,
+        input: Omit<InsertSystemEventInput, 'riskDetected' | 'payloadJson'> & {
+            riskDetected?: 0 | 1
+            payloadFields?: Record<string, unknown>
+            notifyProject?: string | null
+        }
+    ): StoredSystemEvent | null {
+        const stored = this.insertSystemEvent(session, input)
+        if (stored) this.onAsyncSystemEvent?.(session.id)
+        return stored
     }
 
     private insertSystemEvent(
