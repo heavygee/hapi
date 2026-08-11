@@ -89,6 +89,18 @@ FORK_REPO="${HAPI_FORK_REPO:-heavygee/hapi}"
 HAPI_HOST="${HAPI_HOST:-http://localhost:3006}"
 SETTINGS="${HAPI_SETTINGS:-$HOME/.hapi/settings.json}"
 STATE_FILE="${HAPI_META_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/hapi/meta-daily.json}"
+# Serialize against hold-ack. Must run before argv is shifted. Skip when
+# systemd already wrapped ExecStart in flock (nested flock deadlocks).
+if [[ "${BASH_SOURCE[0]}" == "${0}" && -z "${HAPI_META_LOCKED:-}" ]]; then
+    _md_parent_comm="$(ps -o comm= -p "${PPID:-0}" 2>/dev/null || true)"
+    _md_parent_comm="${_md_parent_comm##*/}"
+    if [[ "$_md_parent_comm" != "flock" ]]; then
+        _md_lock="${HAPI_META_LOCK:-$(dirname "$STATE_FILE")/meta-daily.lock}"
+        mkdir -p "$(dirname "$_md_lock")"
+        export HAPI_META_LOCKED=1
+        exec flock -w 600 "$_md_lock" "$0" "$@"
+    fi
+fi
 GH_BIN="${HAPI_META_GH_BIN:-gh}"
 CURL_BIN="${HAPI_META_CURL_BIN:-curl}"
 # Low-level tools live beside this script in the mirror, but soup/driver
@@ -559,10 +571,20 @@ md_hold_logins() {
 
 # md_hold_events_json <repo> <number> → JSON array of
 # {id,login,type,surface,body,url,created_at}
+# Flatten gh --paginate --slurp (array-of-pages) or a single page array.
+md_hold_flatten_pages() {
+    jq -c 'if type == "array" then
+            if length == 0 then .
+            elif (.[0] | type) == "array" then add
+            else .
+            end
+          else [] end' 2>/dev/null || echo '[]'
+}
+
 md_hold_events_json() {
     local repo="$1" number="$2" comments reviews
-    comments="$("$GH_BIN" api --paginate "repos/${repo}/issues/${number}/comments?per_page=100" 2>/dev/null || true)"
-    reviews="$("$GH_BIN" api --paginate "repos/${repo}/pulls/${number}/reviews?per_page=100" 2>/dev/null || true)"
+    comments="$("$GH_BIN" api --paginate --slurp "repos/${repo}/issues/${number}/comments?per_page=100" 2>/dev/null | md_hold_flatten_pages || true)"
+    reviews="$("$GH_BIN" api --paginate --slurp "repos/${repo}/pulls/${number}/reviews?per_page=100" 2>/dev/null | md_hold_flatten_pages || true)"
     [[ -n "$comments" ]] || comments='[]'
     [[ -n "$reviews" ]] || reviews='[]'
     printf '%s\n%s\n' "$comments" "$reviews" | jq -s '
@@ -1170,13 +1192,15 @@ main() {
         prs="${SESS_PRS[$sid8]}"
         local emojis_w=() combined_w
         for p in $prs; do
-            emojis_w+=("${PR_EMOJI[$p]:-?}")
+            local crepo_w="${SESS_PR_REPO[$sid8:$p]:-${PR_REPO[$p]:-$UPSTREAM_REPO}}"
+            emojis_w+=("${PR_BY_REPO_EMOJI[$crepo_w#$p]:-${PR_EMOJI[$p]:-?}}")
         done
         combined_w="$(md_combined_emoji "${emojis_w[@]}")"
         [[ "$combined_w" == "🔧" ]] || continue
         # One member row per PR on this session that is merged.
         for p in $prs; do
-            [[ "${PR_EMOJI[$p]:-}" == "🔧" ]] || continue
+            local crepo_w="${SESS_PR_REPO[$sid8:$p]:-${PR_REPO[$p]:-$UPSTREAM_REPO}}"
+            [[ "${PR_BY_REPO_EMOJI[$crepo_w#$p]:-${PR_EMOJI[$p]:-}}" == "🔧" ]] || continue
             local reason_w clean_json=false
             if reason_w="$(mw_wave_member_clean "$manifest_text" "${SESS_PATH[$sid8]:-}" "$p")"; then
                 clean_json=true
@@ -1308,7 +1332,7 @@ main() {
         echo "  [dry-run] state NOT written; no renames/pings performed"
     fi
 
-    if [[ "$EMIT_EVENTS" -eq 1 && "$MD_EMIT_FAILURES" -gt 0 ]]; then
+    if [[ "$MD_EMIT_FAILURES" -gt 0 ]]; then
         err "emit-events: $MD_EMIT_FAILURES POST(s) failed — emit cursor not advanced for those; will retry next run"
         return 1
     fi
