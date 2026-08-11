@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+    authorizePeerCapInjectClient,
     receivePeerCapabilityFromRunner,
     receiveRunnerProofFromHandoff,
     startPeerCapabilityInjectServer,
@@ -71,6 +72,91 @@ describe('peerCapabilityInject (#1203 pass 2h)', () => {
             })
             await deliver
             expect(proof).toBe('proof-handoff')
+        } finally {
+            server!.close()
+        }
+    })
+
+    it('delivers capability when child connects before deliverTo arms payload', async () => {
+        const socketPath = tempSock()
+        const server = await startPeerCapabilityInjectServer({
+            socketPath,
+            readPeerCred: () => ({ pid: process.pid, uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 }),
+        })
+        expect(server).not.toBeNull()
+        try {
+            // Child connects first (resume race).
+            const capabilityPromise = receivePeerCapabilityFromRunner({
+                socketPath,
+                ownerPid: process.pid,
+                attempts: 100,
+                readPeerCred: () => ({ pid: process.pid, uid: 0, gid: 0 }),
+            })
+            await new Promise((r) => setTimeout(r, 50))
+            const deliver = server!.deliverTo(process.pid, { sessionCapability: 'cap-after-connect' })
+            const capability = await capabilityPromise
+            await deliver
+            expect(capability).toBe('cap-after-connect')
+        } finally {
+            server!.close()
+        }
+    })
+
+    it('still receives when client peercred is null on connect (Bun race)', async () => {
+        const socketPath = tempSock()
+        const server = await startPeerCapabilityInjectServer({
+            socketPath,
+            readPeerCred: () => ({ pid: process.pid, uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 }),
+        })
+        expect(server).not.toBeNull()
+        try {
+            const deliver = server!.deliverTo(process.pid, { sessionCapability: 'cap-null-cred' })
+            const capability = await receivePeerCapabilityFromRunner({
+                socketPath,
+                ownerPid: process.pid,
+                attempts: 20,
+                // Simulate SO_PEERCRED unavailable on the client connect path.
+                readPeerCred: () => null,
+            })
+            await deliver
+            expect(capability).toBe('cap-null-cred')
+        } finally {
+            server!.close()
+        }
+    })
+
+    it('authorizePeerCapInjectClient: win32 allows null cred (Bun fd=-1)', () => {
+        expect(authorizePeerCapInjectClient(null, process.pid, 'win32')).toBe(true)
+        expect(authorizePeerCapInjectClient(null, process.pid, 'linux')).toBe(false)
+        expect(authorizePeerCapInjectClient(
+            { pid: process.pid, uid: 0, gid: 0 },
+            process.pid,
+            'win32',
+        )).toBe(true)
+    })
+
+    it('delivers on win32 when server cannot read named-pipe client pid', async () => {
+        Object.defineProperty(process, 'platform', {
+            value: 'win32',
+            configurable: true,
+        })
+        const socketPath = tempSock()
+        const server = await startPeerCapabilityInjectServer({
+            socketPath,
+            // Bun Windows: GetNamedPipeClientProcessId never works (fd=-1).
+            readPeerCred: () => null,
+        })
+        expect(server).not.toBeNull()
+        try {
+            const deliver = server!.deliverTo(process.pid, { sessionCapability: 'cap-win32-null-cred' })
+            const capability = await receivePeerCapabilityFromRunner({
+                socketPath,
+                ownerPid: process.pid,
+                attempts: 20,
+                readPeerCred: () => null,
+            })
+            await deliver
+            expect(capability).toBe('cap-win32-null-cred')
         } finally {
             server!.close()
         }

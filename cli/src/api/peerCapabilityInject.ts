@@ -83,29 +83,50 @@ export async function startPeerCapabilityInjectServer(options?: {
         }
 
         server = createServer((socket) => {
-            const cred = readPeerCred(socket)
-            const childPid = expectedChildPid
-            const payload = pendingPayload
-            if (
-                !cred
-                || childPid === null
-                || !payload
-                || !isProcessDescendant(cred.pid, childPid)
-            ) {
-                socket.end(`${JSON.stringify({ ok: false, code: 'auth_failed' })}\n`)
-                return
-            }
-            socket.end(`${JSON.stringify({ ok: true, ...payload })}\n`)
-            if (deliverResolve) {
-                if (deliverTimer) {
-                    clearTimeout(deliverTimer)
-                    deliverTimer = null
+            // Child often connects before redeem+deliverTo arms payload
+            // (#1473 estate: early auth_failed exhausts retries → inject failed
+            // even when redeem HTTP 200). Hold the socket until armed or timeout.
+            const startedAt = Date.now()
+            const maxWaitMs = 16_000
+            const tryDeliver = () => {
+                if (socket.destroyed) {
+                    return
                 }
-                const resolve = deliverResolve
-                deliverResolve = null
-                deliverReject = null
-                resolve()
+                const childPid = expectedChildPid
+                const payload = pendingPayload
+                if (childPid === null || !payload) {
+                    if (Date.now() - startedAt >= maxWaitMs) {
+                        socket.end(`${JSON.stringify({ ok: false, code: 'not_armed' })}\n`)
+                        return
+                    }
+                    setTimeout(tryDeliver, 20)
+                    return
+                }
+                const cred = readPeerCred(socket)
+                if (!authorizePeerCapInjectClient(cred, childPid)) {
+                    socket.end(`${JSON.stringify({ ok: false, code: 'auth_failed' })}\n`)
+                    return
+                }
+                // Do not resolve deliverTo if the client already abandoned this
+                // socket (null peercred race → client finish(undefined) while we
+                // still held). Resolving here unlinks the sock and the real
+                // retry hits ENOENT (#1473 estate).
+                if (socket.destroyed) {
+                    return
+                }
+                socket.end(`${JSON.stringify({ ok: true, ...payload })}\n`)
+                if (deliverResolve) {
+                    if (deliverTimer) {
+                        clearTimeout(deliverTimer)
+                        deliverTimer = null
+                    }
+                    const resolve = deliverResolve
+                    deliverResolve = null
+                    deliverReject = null
+                    resolve()
+                }
             }
+            tryDeliver()
         })
 
         await new Promise<void>((resolve, reject) => {
@@ -140,6 +161,8 @@ export async function startPeerCapabilityInjectServer(options?: {
             pendingPayload = payload
             deliverResolve = resolve
             deliverReject = reject
+            // Keep above child receivePeerCapabilityFromRunner attempts (~16s)
+            // and aligned with runner webhook default (25s).
             deliverTimer = setTimeout(() => {
                 if (deliverReject) {
                     const rej = deliverReject
@@ -147,7 +170,7 @@ export async function startPeerCapabilityInjectServer(options?: {
                     deliverReject = null
                     rej(new Error('peer capability inject timed out waiting for session CLI'))
                 }
-            }, 15_000)
+            }, 20_000)
         }),
         close: () => {
             if (deliverTimer) {
@@ -303,15 +326,43 @@ function tryReceiveOnce(
         })
         socket.on('connect', () => {
             const cred = readPeerCred(socket)
-            const authorized = expectedServerPid !== undefined
-                ? cred?.pid === expectedServerPid
-                : Boolean(cred && isProcessDescendant(ownerPid, cred.pid))
-            if (!authorized) {
+            // Bun/Linux: SO_PEERCRED can be briefly unavailable on connect.
+            // Treat missing cred as "wait for server push", not hard fail —
+            // aborting here lets the server still mark deliverTo complete and
+            // unlink the socket while we retry into ENOENT (#1473).
+            if (expectedServerPid !== undefined) {
+                if (cred && cred.pid !== expectedServerPid) {
+                    finish(undefined)
+                }
+                return
+            }
+            if (cred && !isProcessDescendant(ownerPid, cred.pid)) {
                 finish(undefined)
             }
             // Server pushes secret on accept when armed.
         })
     })
+}
+
+/**
+ * Authorize a peer-cap inject client for an armed `deliverTo(childPid, …)`.
+ *
+ * Linux/macOS require SO_PEERCRED and a descendant of `expectedChildPid`.
+ * Bun on Windows exposes named-pipe `_handle.fd === -1`, so
+ * `GetNamedPipeClientProcessId` cannot run (Teemo 2026-08-11: every resume
+ * hit `auth_failed` → `peer capability inject timed out`). When credentials
+ * are unavailable on win32, possession of the ephemeral pipe path (set only
+ * in the child env) is the auth — still requires an armed deliverTo.
+ */
+export function authorizePeerCapInjectClient(
+    cred: PeerCredentials | null,
+    expectedChildPid: number,
+    platform: NodeJS.Platform = process.platform,
+): boolean {
+    if (cred) {
+        return isProcessDescendant(cred.pid, expectedChildPid)
+    }
+    return platform === 'win32'
 }
 
 /** Windows client → verify named-pipe server PID (#1473 Major). */
