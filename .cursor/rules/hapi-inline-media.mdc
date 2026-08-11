@@ -7,7 +7,7 @@ alwaysApply: true
 
 Whenever you **create, generate, edit, or regenerate** an image or video for the operator while this session is under HAPI, show it **inline in the current HAPI chat** before claiming done.
 
-**Estate canon (doc, not a skill):** `~/coding/server-setup/docs/operator-visible-proof.md`.
+**Estate canon (doc, not a skill):** `~/coding/server-setup/docs/operator-visible-proof.md` on the **operator host** (oos). Off-host peers cannot open that path — use skill **`localize-estate-guidance`** and paste a self-contained recipe. Videos: human pace (show the click, dwell on the result). Git default branch language: **main**.
 
 MCP: `display_image` / `display_video` with absolute `path`.  
 Fallback: `bun scripts/tooling/hapi-display-image.mjs <session-prefix> <absolute-path> [title]`.

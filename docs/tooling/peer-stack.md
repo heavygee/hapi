@@ -104,6 +104,10 @@ Every feature peer **assesses the task at handoff time** (before peer-stack capt
 - No meaningful motion, timing, or multi-step choreography.
 - Change is non-web (CLI, hub API, config) and handoff uses logs or API output instead.
 
+**Human pace (MP4):** show the click (visible cursor), wait until the result is
+on screen, dwell ~0.8–1.5s so a human can see it happened, then the next
+action. Smash-cut robot clips fail even if `expect` passed.
+
 **Choose MP4 when** motion or sequence matters:
 
 - Multi-step flow (open panel → edit → submit → thread updates).
