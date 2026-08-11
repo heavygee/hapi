@@ -1040,17 +1040,17 @@ echo '{}'; exit 0
 EOF
 chmod +x "$WORK/curl"
 
-out="$(run --emit-events 2>&1)"
+out="$(run 2>&1)"
 pings_h="$(cat "$WORK/pings.log" 2>/dev/null || true)"
 check "hold: queue lists OPERATOR HOLD for #100" "grep -A6 'OPERATOR HOLD' <<<\"\$out\" | grep -q '#100'"
 check "hold: tiann comment latched in state" "jq -e --arg k 'tiann/hapi#100' '.hold[\$k].acked == false' '$WORK/state.json' >/dev/null"
 check "hold: tiann comment id stored" "jq -e --arg k 'tiann/hapi#100' '.hold[\$k].comment_id == \"5154418101\"' '$WORK/state.json' >/dev/null"
 check "hold: coding peer aaaaaaaa NOT pinged" "! grep -q '^aaaaaaaa' <<<\"\$pings_h\""
 check "hold: bot Findings on #200 did not latch" "! jq -e --arg k 'tiann/hapi#200' '.hold[\$k].acked == false' '$WORK/state.json' >/dev/null"
-check "hold: emit-events posted once for latch" "[[ -f '$WORK/events.log' ]] && grep -q 'aaaaaaaa-1111' '$WORK/events.log'"
+check "hold: latch emits without --emit-events (hourly timer path)" "[[ -f '$WORK/events.log' ]] && grep -q 'aaaaaaaa-1111' '$WORK/events.log'"
 
 rm -f "$WORK/pings.log" "$WORK/events.log"
-out="$(run --emit-events 2>&1)"
+out="$(run 2>&1)"
 pings_h2="$(cat "$WORK/pings.log" 2>/dev/null || true)"
 check "hold: second run still does not ping peer" "! grep -q '^aaaaaaaa' <<<\"\$pings_h2\""
 check "hold: second run no new emit (silence)" "[[ ! -f '$WORK/events.log' ]]"
@@ -1134,6 +1134,42 @@ check "fork chip: meta-daily exits 0" "[[ $rc -eq 0 ]]"
 check "fork chip: batch invoked with --repo heavygee/hapi" "grep -q -- '--repo heavygee/hapi' '$WORK/batch.args'"
 check "fork chip: does not inherit tiann closed-without-merge" "! grep -q 'closed WITHOUT merge' <<<\"\$out\""
 check "fork chip: live classify is fork CI/pending" "grep -q 'CI running' <<<\"\$out\""
+
+# Dual chips, same number: tiann#124 closed-unmerged must not paint the fork session.
+rm -f "$WORK/state.json" "$WORK/pings.log" "$WORK/batch.args"
+cat >"$WORK/curl" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+if [[ "$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
+if [[ "$args" == *"-X PATCH"* ]]; then echo '{"ok":true}'; exit 0; fi
+if [[ "$args" == *"/api/sessions?limit=500"* ]]; then
+cat <<'JSON'
+{"sessions":[
+ {"id":"e76e5a9f-a7e3-463b-888c-f0f294b369f9","active":true,"metadata":{"name":"Peer #121: operator hold chip","path":"/home/heavygee/coding/hapi/worktrees/operator-hold-chip","externalRefs":[{"kind":"github_pr","repo":"heavygee/hapi","number":124,"url":"https://github.com/heavygee/hapi/pull/124","role":"primary"}]}},
+ {"id":"aaaa1240-0000-4000-8000-tiannclosed01","active":true,"metadata":{"name":"env port leftover","path":"/home/heavygee/coding/hapi/worktrees/old-port","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":124,"url":"https://github.com/tiann/hapi/pull/124","role":"primary"}]}}
+]}
+JSON
+exit 0
+fi
+echo '{}'; exit 0
+EOF
+chmod +x "$WORK/curl"
+set +e
+out="$(HAPI_META_BATCH_ARGS_LOG="$WORK/batch.args" run --dry-run --no-ping 2>&1)"
+rc=$?
+set -e
+[[ $rc -eq 0 ]] || printf '%s\n' "$out" >&2
+check "dual chip: exits 0" "[[ $rc -eq 0 ]]"
+check "dual chip: classifies both repos" "grep -q -- '--repo heavygee/hapi' '$WORK/batch.args' && grep -q -- '--repo tiann/hapi' '$WORK/batch.args'"
+check "dual chip: fork session keeps CI running" "grep -A2 'e76e5a9f' <<<\"\$out\" | grep -q 'CI running' || grep -q 'e76e5a9f  →  🔁' <<<\"\$out\""
+check "dual chip: tiann session keeps closed-without-merge" "grep -q 'closed WITHOUT merge' <<<\"\$out\""
+
+# Bare hold-ack resolves unique heavygee row (not tiann default).
+cat >"$WORK/hold-only.json" <<'EOF'
+{"schema":1,"hold":{"heavygee/hapi#124":{"acked":false,"comment_id":"1","notified":true}}}
+EOF
+bash "$DIR/hapi-hold-ack.sh" --state "$WORK/hold-only.json" 124
+check "hold-ack bare number: acked heavygee row" "jq -e --arg k 'heavygee/hapi#124' '.hold[\$k].acked == true' '$WORK/hold-only.json' >/dev/null"
 
 echo ""
 echo "hapi-meta-daily.test.sh: $PASS passed, $FAIL failed"

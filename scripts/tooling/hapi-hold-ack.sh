@@ -15,6 +15,7 @@ source "$SCRIPT_DIR/lib/pr-hold-core.sh"
 
 STATE_FILE="${HAPI_META_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/hapi/meta-daily.json}"
 REPO="${HAPI_PR_REPO:-tiann/hapi}"
+REPO_EXPLICIT=0
 PR=""
 
 err() { echo "hapi-hold-ack: $*" >&2; }
@@ -36,12 +37,13 @@ EOF
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -h|--help) usage; exit 0 ;;
-        --repo) REPO="$2"; shift 2 ;;
+        --repo) REPO="$2"; REPO_EXPLICIT=1; shift 2 ;;
         --state) STATE_FILE="$2"; shift 2 ;;
         *)
             if [[ "$1" == */*\#* ]]; then
                 REPO="${1%%\#*}"
                 PR="${1##*\#}"
+                REPO_EXPLICIT=1
             elif [[ "$1" == *\#* ]]; then
                 PR="${1##*\#}"
             else
@@ -54,12 +56,41 @@ done
 
 [[ -n "$PR" ]] || die "missing PR number (see --help)"
 [[ "$PR" =~ ^[0-9]+$ ]] || die "PR must be a number (got: $PR)"
+
+# Serialize against hourly Meta (load→save can clobber an in-flight ack).
+# Sibling of the state file so tests using --state $WORK/state.json do not
+# contend with the live timer lock.
+LOCK_FILE="${HAPI_META_LOCK:-$(dirname "$STATE_FILE")/meta-daily.lock}"
+if [[ -z "${HAPI_HOLD_ACK_LOCKED:-}" ]]; then
+    mkdir -p "$(dirname "$LOCK_FILE")"
+    export HAPI_HOLD_ACK_LOCKED=1
+    ack_args=(--state "$STATE_FILE" "$PR")
+    [[ "$REPO_EXPLICIT" -eq 1 ]] && ack_args=(--repo "$REPO" "${ack_args[@]}")
+    exec flock -w 60 "$LOCK_FILE" "$0" "${ack_args[@]}"
+fi
+
 [[ -f "$STATE_FILE" ]] || die "state file missing: $STATE_FILE (run hapi-meta-daily first)"
 
 state="$(jq -c '.' "$STATE_FILE" 2>/dev/null || die "state is not valid JSON: $STATE_FILE")"
+
+if [[ "$REPO_EXPLICIT" -eq 0 ]]; then
+    # Bare number: unique hold row for that PR, preferring an unacked latch.
+    resolved="$(printf '%s' "$state" | jq -r --arg n "$PR" '
+        (.hold // {})
+        | to_entries
+        | map(select(.key | endswith("#" + $n)))
+        | (map(select(.value.acked == false)) | if length == 1 then .[0].key else empty end)
+          // (if length == 1 then .[0].key else empty end)
+          // empty
+    ')"
+    if [[ -n "$resolved" ]]; then
+        REPO="${resolved%\#*}"
+    fi
+fi
+
 key="$(pec_hold_state_key "$REPO" "$PR")"
 if ! printf '%s' "$state" | jq -e --arg k "$key" '(.hold[$k] | type) == "object"' >/dev/null 2>&1; then
-    die "no hold row for $key"
+    die "no hold row for $key (pass --repo owner/repo if the number collides)"
 fi
 
 next="$(pec_hold_ack_state "$state" "$REPO" "$PR")"

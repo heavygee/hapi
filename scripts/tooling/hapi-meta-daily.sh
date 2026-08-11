@@ -322,7 +322,7 @@ md_refs_apply_status() {
                        elif $emoji == "🔧" then {openState:"merged"}
                        elif $emoji == "🧹" then {openState:"merged"}
                        elif $emoji == "📝" then {openState:"draft"}
-                       elif $emoji == "🛑" then {openState:"open"}
+                       elif $emoji == "🛑" then {}
                        else {} end)
                 )
             else . end
@@ -561,8 +561,8 @@ md_hold_logins() {
 # {id,login,type,surface,body,url,created_at}
 md_hold_events_json() {
     local repo="$1" number="$2" comments reviews
-    comments="$("$GH_BIN" api "repos/${repo}/issues/${number}/comments?per_page=100" 2>/dev/null || true)"
-    reviews="$("$GH_BIN" api "repos/${repo}/pulls/${number}/reviews?per_page=100" 2>/dev/null || true)"
+    comments="$("$GH_BIN" api --paginate "repos/${repo}/issues/${number}/comments?per_page=100" 2>/dev/null || true)"
+    reviews="$("$GH_BIN" api --paginate "repos/${repo}/pulls/${number}/reviews?per_page=100" 2>/dev/null || true)"
     [[ -n "$comments" ]] || comments='[]'
     [[ -n "$reviews" ]] || reviews='[]'
     printf '%s\n%s\n' "$comments" "$reviews" | jq -s '
@@ -660,7 +660,7 @@ main() {
     # HARD RULE (2026-08-06 Sparling): session titles are decorative. Meta tracks a
     # session iff metadata.externalRefs has github_pr on tiann/hapi | heavygee/hapi.
     # Linked → hapi or not. Unlinked → invisible to Meta. No Peer/PR/# title scrape.
-    declare -A SESS_ID SESS_ACTIVE SESS_NAME SESS_PRS SESS_REFS SESS_PATH SESS_LIFECYCLE SESS_THINKING
+    declare -A SESS_ID SESS_ACTIVE SESS_NAME SESS_PRS SESS_REFS SESS_PATH SESS_LIFECYCLE SESS_THINKING SESS_PR_REPO
     declare -A PR_SESSIONS      # pr -> "sid8,sid8"
     declare -A ALL_PR           # pr -> 1
     declare -A MERGED_TITLE
@@ -711,6 +711,7 @@ main() {
                 | first // empty
             ' 2>/dev/null || true)"
             if [[ -n "$chip_repo" ]]; then
+                SESS_PR_REPO["$sid8:$p"]="$chip_repo"
                 if [[ "${PR_REPO[$p]:-}" != "$UPSTREAM_REPO" ]]; then
                     PR_REPO["$p"]="$chip_repo"
                 fi
@@ -766,15 +767,33 @@ main() {
 
     vlog "classifying ${#pr_list[@]} PR(s): ${pr_list[*]}"
     declare -A PR_EMOJI PR_ACTION PR_PREPR PR_HEADREF
+    declare -A PR_BY_REPO_EMOJI PR_BY_REPO_ACTION PR_BY_REPO_PREPR PR_BY_REPO_HEADREF
     declare -A SESS_PR_EMOJI SESS_PR_ACTION
-    # Per chip.repo, not one tiann batch. Number collision (heavygee#124 vs
-    # tiann#124 closed-unmerged) must not inherit upstream closed-without-merge.
-    local batch_json r
+    # Per (chip.repo, number), not one tiann batch keyed by number. Dual chips
+    # heavygee#124 + tiann#124 must keep independent classify results.
+    local batch_json r pair_key
     local -a classify_prs
-    declare -A REPO_PR_LIST
+    declare -A REPO_PR_LIST PAIR_SEEN
+    md_add_classify_pair() {
+        local _r="$1" _n="$2"
+        local _k="${_r}#${_n}"
+        [[ -n "${PAIR_SEEN[$_k]:-}" ]] && return 0
+        PAIR_SEEN["$_k"]=1
+        REPO_PR_LIST["$_r"]="${REPO_PR_LIST[$_r]:+${REPO_PR_LIST[$_r]} }$_n"
+    }
+    local sid8_c
+    for sid8_c in "${!SESS_ID[@]}"; do
+        local p_c
+        for p_c in ${SESS_PRS[$sid8_c]}; do
+            if [[ -n "$PR_ONLY" && "$p_c" != "$PR_ONLY" ]]; then
+                continue
+            fi
+            r="${SESS_PR_REPO[$sid8_c:$p_c]:-${PR_REPO[$p_c]:-$UPSTREAM_REPO}}"
+            md_add_classify_pair "$r" "$p_c"
+        done
+    done
     for p in "${pr_list[@]}"; do
-        r="${PR_REPO[$p]:-$UPSTREAM_REPO}"
-        REPO_PR_LIST["$r"]="${REPO_PR_LIST[$r]:+${REPO_PR_LIST[$r]} }$p"
+        md_add_classify_pair "${PR_REPO[$p]:-$UPSTREAM_REPO}" "$p"
     done
     for r in "${!REPO_PR_LIST[@]}"; do
         classify_prs=()
@@ -783,10 +802,15 @@ main() {
         batch_json="$(HAPI_PR_REPO="$r" "$BATCH_BIN" --repo "$r" "${classify_prs[@]}")" \
             || die "batch classify failed for $r"
         for p in "${classify_prs[@]}"; do
-            PR_EMOJI["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].emoji // "?"')"
-            PR_ACTION["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].action // ""')"
-            PR_PREPR["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].prePr // false')"
-            PR_HEADREF["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].headRef // ""')"
+            pair_key="$r#$p"
+            PR_BY_REPO_EMOJI["$pair_key"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].emoji // "?"')"
+            PR_BY_REPO_ACTION["$pair_key"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].action // ""')"
+            PR_BY_REPO_PREPR["$pair_key"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].prePr // false')"
+            PR_BY_REPO_HEADREF["$pair_key"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].headRef // ""')"
+            PR_EMOJI["$p"]="${PR_BY_REPO_EMOJI[$pair_key]}"
+            PR_ACTION["$p"]="${PR_BY_REPO_ACTION[$pair_key]}"
+            PR_PREPR["$p"]="${PR_BY_REPO_PREPR[$pair_key]}"
+            PR_HEADREF["$p"]="${PR_BY_REPO_HEADREF[$pair_key]}"
         done
     done
 
@@ -806,19 +830,18 @@ main() {
     MD_EMIT_FAILURES=0
     local now_ms=$(( now * 1000 ))
 
-    # Overlay 🛑 after live classify. Identity latch; never NLP. Bots cannot hold.
-    local hold_csv hrepo over hold_action
+    # Ingest 🛑 from chipped (repo, number) pairs only. Orphans and prePr
+    # (issue-number 404 on /pulls) must not latch. Overlay is per-session below
+    # so tiann#N and heavygee#N do not clobber each other.
+    local hold_csv hrepo over hold_action pair_key_h p_h
     hold_csv="$(md_hold_logins)"
     vlog "hold logins: $hold_csv"
-    for p in "${pr_list[@]}"; do
-        hrepo="${PR_REPO[$p]:-$UPSTREAM_REPO}"
-        new_state="$(md_hold_ingest "$new_state" "$hrepo" "$p" "$hold_csv")"
-        over="$(pec_hold_overlay_emoji "${PR_EMOJI[$p]:-?}" "$new_state" "$hrepo" "$p")"
-        if [[ "$over" == "🛑" ]]; then
-            PR_EMOJI["$p"]="🛑"
-            hold_action="$(pec_hold_action_from_state "$new_state" "$hrepo" "$p")"
-            [[ -n "$hold_action" ]] && PR_ACTION["$p"]="$hold_action"
-        fi
+    for pair_key_h in "${!PAIR_SEEN[@]}"; do
+        hrepo="${pair_key_h%\#*}"
+        p_h="${pair_key_h##*\#}"
+        [[ -n "${PR_SESSIONS[$p_h]:-}" ]] || continue
+        [[ "${PR_BY_REPO_PREPR[$pair_key_h]:-false}" == "true" ]] && continue
+        new_state="$(md_hold_ingest "$new_state" "$hrepo" "$p_h" "$hold_csv")"
     done
 
     local sid8
@@ -841,8 +864,16 @@ main() {
         local emojis=() acts="" combined pre=0 first_pr=""
         for p in $prs; do
             # Per-session 🔧→🧹 when estate complete predicates hold (config/pr-chip-states.yaml).
-            local emoji_sess="${PR_EMOJI[$p]:-?}"
-            local action_sess="${PR_ACTION[$p]:-}"
+            local crepo="${SESS_PR_REPO[$sid8:$p]:-${PR_REPO[$p]:-$UPSTREAM_REPO}}"
+            local pair_sess="$crepo#$p"
+            local emoji_sess="${PR_BY_REPO_EMOJI[$pair_sess]:-${PR_EMOJI[$p]:-?}}"
+            local action_sess="${PR_BY_REPO_ACTION[$pair_sess]:-${PR_ACTION[$p]:-}}"
+            over="$(pec_hold_overlay_emoji "$emoji_sess" "$new_state" "$crepo" "$p")"
+            if [[ "$over" == "🛑" ]]; then
+                emoji_sess="🛑"
+                hold_action="$(pec_hold_action_from_state "$new_state" "$crepo" "$p")"
+                [[ -n "$hold_action" ]] && action_sess="$hold_action"
+            fi
             if [[ "$emoji_sess" == "🔧" ]]; then
                 local complete_reason="" gate_a_reason=""
                 if complete_reason="$(mw_member_complete \
@@ -851,7 +882,7 @@ main() {
                     "$p" \
                     "${SESS_LIFECYCLE[$sid8]:-}" \
                     "$HAPI_PRIMARY" \
-                    "${PR_HEADREF[$p]:-}")"; then
+                    "${PR_BY_REPO_HEADREF[$pair_sess]:-${PR_HEADREF[$p]:-}}")"; then
                     emoji_sess="🧹"
                     action_sess="fully cleaned — babysit ended"
                 else
@@ -981,31 +1012,46 @@ main() {
 
             # Channel emit uses a separate emitted_* cursor so a failed POST
             # remains retryable even when rename/ping state advances.
-            if [[ "$EMIT_EVENTS" -eq 1 ]]; then
+            # Hold latch notify is independent of --emit-events: hourly timer
+            # does not pass that flag (refresh timer is disabled).
+            if [[ "$combined" == "🛑" ]]; then
+                local emit_date_h emit_body_h emit_repo_h emit_pr_h
+                emit_date_h="$(date -u +%Y-%m-%d)"
+                for p in $prs; do
+                    emit_repo_h="${SESS_PR_REPO[$sid8:$p]:-${PR_REPO[$p]:-$UPSTREAM_REPO}}"
+                    if ! printf '%s' "$new_state" | jq -e --arg k "$(pec_hold_state_key "$emit_repo_h" "$p")" \
+                        '.hold[$k].acked == false and (.hold[$k].notified != true)' >/dev/null 2>&1; then
+                        continue
+                    fi
+                    emit_pr_h="$p"
+                    emit_body_h="$(pec_build_channel_event_body \
+                        --repo "$emit_repo_h" \
+                        --number "$emit_pr_h" \
+                        --emoji "🛑" \
+                        --action "${SESS_PR_ACTION[$sid8:$p]:-${PR_ACTION[$p]:-}}" \
+                        --fingerprint "$action_fp" \
+                        --session-id "$sid" \
+                        --reason transition \
+                        --date "$emit_date_h")"
+                    if hub_emit_event "$jwt" "$emit_body_h"; then
+                        new_state="$(printf '%s' "$new_state" | jq -c \
+                            --arg s "$sid" --arg e "$combined" --arg f "$action_fp" --argjson le "$now" \
+                            '.sessions[$s] = ((.sessions[$s] // {}) + {emitted_emoji:$e, emitted_fp:$f, last_emitted:$le})')"
+                        new_state="$(pec_hold_mark_notified "$new_state" "$emit_repo_h" "$p")"
+                        vlog "emit-events $sid8 🛑 $emit_repo_h#$p"
+                    else
+                        MD_EMIT_FAILURES=$((MD_EMIT_FAILURES + 1))
+                    fi
+                done
+            elif [[ "$EMIT_EVENTS" -eq 1 ]]; then
                 local emit_reason prev_emitted_e prev_emitted_fp prev_emitted_at
                 prev_emitted_e="$(md_prev "$state" "$sid" "emitted_emoji")"
                 prev_emitted_fp="$(md_prev "$state" "$sid" "emitted_fp")"
                 prev_emitted_at="$(md_prev "$state" "$sid" "last_emitted")"
                 [[ -z "$prev_emitted_at" ]] && prev_emitted_at=0
                 emit_reason="$(pec_emit_reason "$combined" "$prev_emitted_e" "$action_fp" "$prev_emitted_fp" "$prev_emitted_at" "$now" "$REMINDER_SECS" "$window_rouse" || true)"
-                # One operator notify per un-notified latch. New fingerprint while
-                # still 🛑 must emit again; hourly window must not.
-                if [[ "$combined" == "🛑" ]]; then
-                    local hold_pending=0
-                    for p in $prs; do
-                        if printf '%s' "$new_state" | jq -e --arg k "$(pec_hold_state_key "${PR_REPO[$p]:-$UPSTREAM_REPO}" "$p")" \
-                            '.hold[$k].acked == false and (.hold[$k].notified != true)' >/dev/null 2>&1; then
-                            hold_pending=1
-                        fi
-                    done
-                    if [[ "$hold_pending" -eq 1 ]]; then
-                        emit_reason="transition"
-                    else
-                        emit_reason="none"
-                    fi
-                fi
                 if [[ "$emit_reason" != "none" && -n "$emit_reason" ]]; then
-                    local emit_date emit_pr emit_body
+                    local emit_date emit_pr emit_body emit_repo
                     # Window emits key by London hour so 3 daily windows don't collide.
                     if [[ "$emit_reason" == "window" ]]; then
                         emit_date="$(TZ=Europe/London date +%Y-%m-%dT%H)"
@@ -1013,8 +1059,9 @@ main() {
                         emit_date="$(date -u +%Y-%m-%d)"
                     fi
                     emit_pr="${first_pr}"
+                    emit_repo="${SESS_PR_REPO[$sid8:$emit_pr]:-${PR_REPO[$emit_pr]:-$UPSTREAM_REPO}}"
                     emit_body="$(pec_build_channel_event_body \
-                        --repo "$UPSTREAM_REPO" \
+                        --repo "$emit_repo" \
                         --number "$emit_pr" \
                         --emoji "$combined" \
                         --action "$(echo "$acts" | head -1 | sed 's/^#[0-9]*: //')" \
@@ -1027,11 +1074,6 @@ main() {
                             --arg s "$sid" --arg e "$combined" --arg f "$action_fp" --argjson le "$now" \
                             '.sessions[$s] = ((.sessions[$s] // {}) + {emitted_emoji:$e, emitted_fp:$f, last_emitted:$le})')"
                         vlog "emit-events $sid8 $combined reason=$emit_reason"
-                        if [[ "$combined" == "🛑" ]]; then
-                            for p in $prs; do
-                                new_state="$(pec_hold_mark_notified "$new_state" "${PR_REPO[$p]:-$UPSTREAM_REPO}" "$p")"
-                            done
-                        fi
                     else
                         MD_EMIT_FAILURES=$((MD_EMIT_FAILURES + 1))
                     fi

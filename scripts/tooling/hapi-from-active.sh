@@ -12,6 +12,13 @@
 # See docs/tooling/driver-soup.md § Scripts / hapi-from-active.
 set -euo pipefail
 
+# Fork-only: `hapi hold-ack` is Meta state, not soup CLI. Intercept before
+# active-tree / bun checks so a broken soup still acks 🛑.
+if [[ "${1:-}" == "hold-ack" ]]; then
+    shift
+    exec "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/hapi-hold-ack.sh" "$@"
+fi
+
 BUN="${BUN:-$HOME/.bun/bin/bun}"
 ACTIVE_LINK="${HAPI_ACTIVE_LINK:-$HOME/coding/hapi/active}"
 
@@ -42,12 +49,6 @@ fi
 # Keep agent/operator CLI on soup; do not hand off to Upgrade binaries.
 export HAPI_DISABLE_VERSION_HANDOFF="${HAPI_DISABLE_VERSION_HANDOFF:-1}"
 export HAPI_API_URL="${HAPI_API_URL:-http://127.0.0.1:3006}"
-
-# Fork-only: `hapi hold-ack` is Meta state, not soup CLI.
-if [[ "${1:-}" == "hold-ack" ]]; then
-    shift
-    exec "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/hapi-hold-ack.sh" "$@"
-fi
 
 cd "$CLI_DIR"
 exec "$BUN" run src/index.ts "$@"
