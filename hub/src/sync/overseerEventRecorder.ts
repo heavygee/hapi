@@ -306,7 +306,7 @@ export class OverseerEventRecorder {
 
     async onSessionUpdated(session: Session, tag?: string | null): Promise<void> {
         this.sessionThinking.set(session.id, session.thinking)
-        this.syncPermissionRequests(session, tag ?? null)
+        await this.syncPermissionRequests(session, tag ?? null)
         // Flush whenever thinking is clear and a deferred turn is waiting —
         // not only on a true→false edge. Keepalives often never sent the
         // thinking=true update through this recorder.
@@ -580,7 +580,7 @@ export class OverseerEventRecorder {
         })
     }
 
-    private syncPermissionRequests(session: Session, tag: string | null): void {
+    private async syncPermissionRequests(session: Session, tag: string | null): Promise<void> {
         const requests = session.agentState?.requests ?? null
         if (!requests) {
             this.knownPermissionRequestIds.delete(session.id)
@@ -596,21 +596,23 @@ export class OverseerEventRecorder {
             const request = asRecord(requests[requestId])
             const toolName = typeof request?.tool === 'string' ? request.tool : 'tool'
             const summary = `Permission requested: ${toolName}`
-            this.insertSystemEvent(snapshot, {
-                ts: Date.now(),
-                sourceKind: 'system',
-                sourceRef: session.id,
-                eventType: 'approval_requested',
-                attentionCandidate: 1,
-                operatorActionRequired: 1,
-                summary,
-                relatedSessionId: session.id,
-                provenance: 'hub-inferred from permission prompt',
-                idempotencyKey: `session:${session.id}:permission:${requestId}`,
-                payloadFields: { requestId, request },
-                severity: deriveSeverity('approval_requested'),
-                tags: buildTags(null, snapshot.flavor)
-            })
+            await this.enqueueSessionWork(session.id, () =>
+                Promise.resolve(this.insertInferredEvent(snapshot, {
+                    ts: Date.now(),
+                    sourceKind: 'system',
+                    sourceRef: session.id,
+                    eventType: 'approval_requested',
+                    attentionCandidate: 1,
+                    operatorActionRequired: 1,
+                    summary,
+                    relatedSessionId: session.id,
+                    provenance: 'hub-inferred from permission prompt',
+                    idempotencyKey: `session:${session.id}:permission:${requestId}`,
+                    payloadFields: { requestId, request },
+                    severity: deriveSeverity('approval_requested'),
+                    tags: buildTags(null, snapshot.flavor)
+                }))
+            )
         }
 
         this.knownPermissionRequestIds.set(session.id, currentIds)

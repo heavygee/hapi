@@ -562,4 +562,43 @@ describe('OverseerEventRecorder LLM fallback', () => {
         expect(await recorder.flushPendingLlmFallback(snapshot)).toBeNull()
         expect(synthesize).toHaveBeenCalledTimes(0)
     })
+
+    it('queues permission requests behind an in-flight LLM insert', async () => {
+        const store = new Store(':memory:')
+        let releaseFirst!: (value: NotifySummary) => void
+        const firstGate = new Promise<NotifySummary>((resolve) => {
+            releaseFirst = resolve
+        })
+        let firstStarted!: () => void
+        const firstStartedP = new Promise<void>((resolve) => {
+            firstStarted = resolve
+        })
+        const recorder = new OverseerEventRecorder(store.events, store.inbox, {
+            llmFallback: {
+                synthesizeNotifySummary: mock(async () => {
+                    firstStarted()
+                    return firstGate
+                }),
+            },
+        })
+        const live = makeSession('sess-perm', 'cursor')
+        const stored = store.sessions.getOrCreateSession('llm-perm', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
+        live.id = stored.id
+        const snapshot = toSessionSnapshot(live, stored.tag)
+
+        const first = recorder.onAgentMessage(snapshot, 'msg-a', agentText('TURN A body'), Date.now())
+        await firstStartedP
+        live.agentState = {
+            requests: {
+                req1: { tool: 'Bash', arguments: { command: 'ls' } }
+            }
+        }
+        const perm = recorder.onSessionUpdated(live, stored.tag)
+        releaseFirst({ status: 'done', summary: 'llm first' })
+        await Promise.all([first, perm])
+
+        const rows = store.events.list().sort((a, b) => a.id - b.id)
+        expect(rows.map((row) => row.eventType)).toEqual(['completed', 'approval_requested'])
+        expect(rows[0]?.summary).toBe('llm first')
+    })
 })
