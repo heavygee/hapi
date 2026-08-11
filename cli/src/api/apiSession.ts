@@ -239,6 +239,7 @@ export class ApiSessionClient extends EventEmitter {
     private agentStateVersion: number
     private readonly socket: Socket<ServerToClientEvents, ClientToServerEvents>
     private pendingMessages: { message: UserMessage; localId?: string }[] = []
+    private pendingHubPromptEchoes: string[] = []
     private pendingMessageCallback: ((message: UserMessage, localId?: string) => void) | null = null
     private cancelQueuedMessageCallback: ((localId: string) => boolean) | null = null
     private readonly incomingFilter = new IncomingMessageFilter()
@@ -676,6 +677,24 @@ export class ApiSessionClient extends EventEmitter {
         }
     }
 
+    private notePendingHubPromptEcho(message: UserMessage): void {
+        const text = message.content.text.trim()
+        if (!text) return
+        this.pendingHubPromptEchoes.push(text)
+        if (this.pendingHubPromptEchoes.length > 32) {
+            this.pendingHubPromptEchoes.shift()
+        }
+    }
+
+    private consumePendingHubPromptEcho(text: string): boolean {
+        const normalized = text.trim()
+        if (!normalized) return false
+        const index = this.pendingHubPromptEchoes.indexOf(normalized)
+        if (index < 0) return false
+        this.pendingHubPromptEchoes.splice(index, 1)
+        return true
+    }
+
     private handleIncomingMessage(message: { id?: string; seq?: number; localId?: string | null; content: unknown }): void {
         if (!this.incomingFilter.accept({ id: message.id, seq: message.seq })) {
             return
@@ -689,6 +708,7 @@ export class ApiSessionClient extends EventEmitter {
             if (userResult.data.meta?.sentFrom === 'cli') {
                 return
             }
+            this.notePendingHubPromptEcho(userResult.data)
             this.enqueueUserMessage(userResult.data, message.localId ?? undefined)
             return
         }
@@ -794,15 +814,17 @@ export class ApiSessionClient extends EventEmitter {
         let createdAt: number | undefined
 
         if (isExternalUserMessage(body)) {
+            const text = extractRawUserTextContent(body.message.content) ?? ''
+            const isTranscriptEcho = this.consumePendingHubPromptEcho(text)
             content = {
                 role: 'user',
                 content: {
                     type: 'text',
-                    text: extractRawUserTextContent(body.message.content) ?? ''
+                    text
                 },
                 meta: {
                     sentFrom: 'cli',
-                    isTranscriptEcho: true
+                    ...(isTranscriptEcho ? { isTranscriptEcho: true } : {})
                 }
             }
         } else {

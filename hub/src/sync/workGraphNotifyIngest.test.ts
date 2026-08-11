@@ -641,6 +641,19 @@ describe('ingestNotifySummaryFromMessage cause stamping', () => {
             .not.toBe('FORGED CAUSE TEXT')
     })
 
+    it('treats an unmarked local CLI prompt as a cause', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('sess-cause-local-cli', {}, null, 'default')
+        const local = store.messages.addMessage(session.id, userInbound('typed in the TTY', 'cli'))
+        const assistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('Local turn')))
+        const result = ingestNotify(store, session.id, 'default', assistant.content, assistant.id)
+        expect(result?.event.payloadJson).toMatchObject({
+            causeMessageId: local.id,
+            causeText: 'typed in the TTY',
+            causeKind: 'cli'
+        })
+    })
+
     it('skips Claude transcript echoes so the next turn is not attributed to the previous prompt copy', () => {
         const store = new Store(':memory:')
         const session = store.sessions.getOrCreateSession('sess-cause-echo', {}, null, 'default')
