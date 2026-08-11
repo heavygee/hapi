@@ -790,6 +790,6 @@ layers:
   # Soup UI on awareness ancestry (schema enum + SessionPrChip FueDot). Classifier
   # is fork-main scripts (feat/operator-hold-chip) — Meta reads the mirror, not soup.
   # Last so needs_operator survives later layers that still copy the old enum.
-  # Worktree: ~/coding/hapi/worktrees/operator-hold-chip-ui
-  - branch: estate/operator-hold-chip
+  # Worktree: ~/coding/hapi/worktrees/operator-hold-chip-ui @ driver/operator-hold-chip
+  - branch: driver/operator-hold-chip
 
