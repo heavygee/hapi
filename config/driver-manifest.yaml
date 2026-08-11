@@ -558,13 +558,11 @@ layers:
   # (Cursor worktree stdout banner + skip nested --worktree hang; #1085).
   # On upstream/main @ 79f91e4b4; next rematerialize picks it up from base.
 
-  # tiann/hapi#1084 / upstream PR #1086 (draft until operator dogfood) - Hub
-  # governs runner capabilities so Cursor reopen soft-fails on version skew
-  # instead of resume_failed. Hub+cli+shared+web (RunnerVersionSkewBanner).
-  # Requires hapi-restart-hub after rebuild. Worktree:
-  # ~/coding/hapi/worktrees/hub-runner-version-skew @
-  # fix/hub-runner-version-governance. Drop when upstream PR merges.
-  - branch: fix/hub-runner-version-governance
+  # DROPPED 2026-08-11: fix/hub-runner-version-governance MERGED UPSTREAM as
+  # PR #1108 (squash 1cd4d1137) — fleet runner version governance (skew banner,
+  # capability ads, soft-fail Cursor reopen, supervised Restart gate). On
+  # upstream/main; next rematerialize picks it up from base. Do not remat tip
+  # 99568368f — landed via upstream.
 
   # DROPPED 2026-07-24: feat/hapi-session-id-env MERGED UPSTREAM as PR #1121
   # (HAPI_SESSION_ID env export + display-image self-target). Work is on
