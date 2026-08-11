@@ -40,6 +40,7 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 | Agent mangles `tiann`/`oos-linux`/MagicDNS doubles | Free-recall / tokenization hazard - not HAPI pipe. **Outside-Cursor control done (2026-07-24): native claude+codex 0/27 drops** | [`2026-07-22-doubled-character-free-recall.md`](../plans/2026-07-22-doubled-character-free-recall.md) + [outside-cursor results](../plans/2026-07-22-doubled-character-free-recall-outside-cursor-results.md) |
 | Blocked on a missing host diagnostic (`strace`, `lsof`, `bpftrace`, …) | **Install it** (`sudo apt-get install -y …`), tell the operator you did, continue — estate-wide, every agent/flavor on this host; not a per-session courtesy | Keep installs scoped to the missing tool; no drive-by package museums |
 | Phone / voice / `AGENT_NOTIFY_SUMMARY` mentions another session | **@-mention chip wire format** in HAPI chat; spoken **display name** in notify `action`/`summary` — never bare `sid8` | § Operator-facing session names; Cursor rule `hapi-session.mdc` |
+| Operator dock / `/opmic` in HAPI web | Vendor **hapi-inline tags** only; file dock bugs on `heavygee/hapi-inline` | § hapi-inline consumer contract |
 
 ---
 
@@ -634,3 +635,35 @@ When the operator asks for **new product behavior**, follow [`docs/tooling/new-f
 Do not spawn a feature peer without filling the template in [`new-feature-intake.md` §0](../tooling/new-feature-intake.md#0--feature-peer-agent--mandatory-handoff). Minimum: parent session id, playback summary, which steps are **DONE** vs **peer-owned**, worktree path, demo topology (soup vs clean).
 
 **Deliver with `hapi-spawn-peer`.** `POST /api/machines/:id/spawn` only creates an idle row. The schema has no `message` field; stuffing the brief into spawn JSON is silently dropped (empty sidebar peer). Wrapper = spawn + rename + `hapi-ping-peer` + fail if messages = 0. Incident: [`2026-08-11-spawn-peer-empty-shell-postmortem.md`](../plans/2026-08-11-spawn-peer-empty-shell-postmortem.md).
+
+---
+
+## hapi-inline (operator mic) — consumer contract
+
+This app **vendors** [`heavygee/hapi-inline`](https://github.com/heavygee/hapi-inline) release tags. It does **not** own the dock. Pinned tag lives in `web/public/operator-dock/README.md` (currently **v0.10.0**). Fork-local; not a `tiann/hapi` PR. Tracker: [heavygee/hapi#120](https://github.com/heavygee/hapi/issues/120). Knock: `/opmic` (aliases `/mic`, `/unlock`).
+
+| Need | Do this |
+|------|---------|
+| Bug / feature in dock, proxy allow-list, visibility/`?opmic`, shared contract, Android reference | File an issue on **`heavygee/hapi-inline`**. Do **not** lasting-edit vendored `operator-dock.*` / shared proxy contract in this app. |
+| After a fix lands | Re-vendor the new **tag** (release-please cuts tags — never hand-tag). Drop any emergency local fork. |
+| App-only wiring | Host init (`web/public/operator-dock/hapi-boot.js`), env (`HAPI_INLINE_*`), `/hapi` composed proxy, same-origin `/api/stt` if used — stay in **this** repo. |
+
+**Forbidden:** persistent app fork of the dock; "quick fix" that never round-trips; PRs that change dock semantics only in the app copy.
+
+**Emergency:** app-side hotfix to unblock the operator is OK **only** with a same-day `hapi-inline` issue + round-trip + re-vendor.
+
+Canon: `hapi-inline` → `docs/CONSUMER_CONTRACT.md`. App mic router: `docs/APP_ROUTER_AGENT.md`. Package gate session title: **hapi-inline ownership**.
+
+## hapi-inline — app router (this project)
+
+This app's operator mic targets **this** session as the **app router** (not a global cross-app dispatcher). Default pin: `HAPI_INLINE_SESSION` (Peer #120: hapi-inline in HAPI web). Picker lists sessions whose `metadata.path` is under `/home/heavygee/coding/hapi`.
+
+| Rule | Detail |
+|------|--------|
+| Domain | Triage asks for **this app**; spawn peers **in this project's workspace** for incremental work (parallel). |
+| Do not | Route every ask through one long implementer queue; lasting-edit vendored `operator-dock.*`. |
+| Dock/proxy/contract need | **Builder estate (us):** file issue on **`heavygee/hapi-inline`**; ping **hapi-inline ownership**. **External integrators:** not your backlog — authors own package changes. Never lasting-edit vendored dock. |
+| Standing order | Spawn peers for incremental mic/ops work in this app without re-asking each time. |
+
+Canon: `hapi-inline` → `docs/APP_ROUTER_AGENT.md` + `docs/CONSUMER_CONTRACT.md`.
+Topology: `docs/ROUTER_AGENT.md` (one router per integrating project).

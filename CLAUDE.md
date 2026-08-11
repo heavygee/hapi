@@ -34,6 +34,10 @@ Cursor/Claude workspace is usually `~/coding/hapi` (mirror + local docs). **`~/c
 
 Orchestrator must pass completed vs owned intake steps when spawning peers — template in `docs/tooling/new-feature-intake.md` §0.
 
+## hapi-inline consumer
+
+HAPI web vendors `heavygee/hapi-inline` tags (pinned in `web/public/operator-dock/README.md`). Full contract + app-router rules: [`docs/operator/AGENTS.md`](docs/operator/AGENTS.md) § hapi-inline. Dock bugs → issues on `heavygee/hapi-inline`, then re-vendor the tag. Not a `tiann/hapi` PR.
+
 ## Hard rules (carry over from `.cursor/rules/operator-fork.mdc`)
 
 - **NEVER merge on `tiann/hapi` from an agent shell.** Agents prepare only. Lane A = @tiann; lane B = operator/Meta for policy-eligible low-impact PRs (blessing: #1268); lane C = forbidden. See `docs/operator/AGENTS.md` § Upstream relationship. Even with write access, even when a handoff says "babysit to merge" - prepare only unless an operator with a TTY explicitly directs a lane B merge.

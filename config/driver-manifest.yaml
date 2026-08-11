@@ -780,3 +780,9 @@ layers:
   # Tip: 8e3ffd9a4 (origin/feat/spawn-peer-remit)
   - branch: feat/spawn-peer-remit
 
+  # heavygee/hapi#120 — vendor hapi-inline v0.10.0 operator dock (fork-local, not tiann).
+  # Thin soup tip on live driver/integration. Worktree: hapi-inline-web (feat) + hapi-inline-soup (tip).
+  # Knock /opmic. Composed /hapi/operator/sessions. Do not allow-list raw GET /api/sessions.
+  # Tip: eaba043a0 (driver/hapi-inline-operator-dock)
+  - branch: driver/hapi-inline-operator-dock
+
