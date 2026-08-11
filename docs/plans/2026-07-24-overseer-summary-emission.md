@@ -1,7 +1,8 @@
 # Overseer summary emission (Half B) — 2026-07-24
 
 Status: Piece 1 live; Piece 2 hub text-synth **removed**; Piece 3 in flight
-(Claude remote + Codex app-server only; Grok/OpenCode deferred to #89)
+(Claude remote + Codex app-server only; Grok/OpenCode deferred to #89).
+Option A LLM fallback implemented (default OFF, #90).
 Owner: feat/overseer-summary-emit (peer of 🔁overseer prep)
 Scope: FORK-ONLY. Never upstream. The whole overseer feature is fork-private.
 
@@ -133,7 +134,9 @@ ordinary, useful project config, never as surveillance:
 - Grok / OpenCode first-turn prepend: title + skill-lookup only. Session-summary
   for those flavors is [#89](https://github.com/heavygee/hapi/issues/89).
 - kimi + generic ACP / pi: also #89.
-- Better LLM / oneshot-agent fallback: [#90](https://github.com/heavygee/hapi/issues/90), default off.
+- Better LLM / oneshot-agent fallback: Option A implemented behind
+  `HAPI_OVERSEER_LLM_FALLBACK` (default off); see § Better fallback / #90.
+  Option B oneshot agent remains out of scope.
 
 ## Better fallback (opt-in — tracked #90)
 
@@ -146,7 +149,7 @@ and is a real cost tax - so it must be **opt-in**, clearly labeled, and rare
 
 ### Gate: rarity first, quality never second
 
-Do **not** ship a better fallback until primary emission is good enough that
+Do **not** enable a better fallback until primary emission is good enough that
 fallback is a thin residue - target **well under 5% of turns** (5% is already
 generous). Measure emit vs missing-line ratio fleet-wide after Piece 3 is
 live; only then enable LLM fallback.
@@ -156,18 +159,34 @@ feed the **full last-turn assistant content** (no input-char truncation that
 would make the summary worse than the agent would have written). Rarity is the
 cost control; accuracy is non-negotiable on the rare path.
 
-### Option A — raw OpenAI-compatible completions call
+### Option A — raw OpenAI-compatible completions call (implemented)
 
-Hub (or a tiny side worker) POSTs the full last assistant turn text to an
-operator-configured base URL (`/v1/chat/completions` or `/v1/responses`) with a
-fixed prompt: "emit exactly one AGENT_NOTIFY_SUMMARY JSON line." Local (Ollama /
-vLLM / gateway) or remote (OpenAI) - same wire format.
+Hub POSTs the full last assistant turn text to an operator-configured base URL
+(`/v1/chat/completions` or `/v1/responses`) with a fixed prompt: "emit exactly
+one AGENT_NOTIFY_SUMMARY JSON line." Local (Ollama / vLLM / gateway) or remote
+(OpenAI) - same wire format.
 
-- Pros: cheap to wire, no session surface, easy to bill/attribute as
-  `provenance: hub-llm-fallback`.
-- Cons: large turns = large prompt tokens (accepted when rare); operator must
-  provision a key/URL; prefer Chat Completions for local-gateway compatibility,
-  Responses for OpenAI-native - support both behind one adapter.
+**Enable (default OFF — never surprise usage):**
+
+```bash
+export HAPI_OVERSEER_LLM_FALLBACK=1
+export HAPI_OVERSEER_LLM_BASE_URL=http://127.0.0.1:11434/v1   # include /v1
+export HAPI_OVERSEER_LLM_MODEL=llama3.3
+# optional:
+export HAPI_OVERSEER_LLM_API_KEY=ollama                       # Bearer token; empty OK for local
+export HAPI_OVERSEER_LLM_API=chat-completions                # or: responses
+export HAPI_OVERSEER_LLM_TIMEOUT_MS=30000
+```
+
+Prefer `chat-completions` for local-gateway compatibility; use `responses` for
+OpenAI-native. Failures / non-compliant model output produce **no** Session Log
+row (no first-line heuristic). Session-end may still write `completed_fallback`
+if the session completes without a later successful notify/LLM row. Events are marked
+`provenance: hub-llm-fallback ...` with `payload.synthesis = "llm-fallback"`,
+`attentionCandidate = 0` (Session Log only — not inbox / voice).
+
+**Cost warning:** every missed primary emit becomes a full-turn prompt. Enable
+only after the rarity gate, or accept the bill deliberately.
 
 ### Option B — out-of-band oneshot agent
 
@@ -180,6 +199,7 @@ in Session Log / inbox so the operator never wonders "wtf usage is this."
   multi-step retrieval if needed.
 - Cons: heavier; looks like a phantom session if not carefully labeled; higher
   cost variance; more moving parts.
+  **Out of scope for #90** — revisit only if Option A proves insufficient.
 
 ### Shared requirements (either option)
 
@@ -192,7 +212,7 @@ in Session Log / inbox so the operator never wonders "wtf usage is this."
   primary turn lacked a contract - never pretend the primary agent said it.
 - **Kill-criterion:** if opt-in users report surprise usage, the toggle and
   provenance labels failed - fix UX before expanding defaults. If fallback
-  summaries are worse than the heuristic first-line, do not ship.
+  summaries are worse than a primary `AGENT_NOTIFY_SUMMARY` emit, do not ship.
 
 Prefer **Option A** as the first better-fallback ship: smaller blast radius,
 easier to reason about cost, no phantom sessions.

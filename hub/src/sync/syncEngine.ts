@@ -43,6 +43,8 @@ import {
 } from './rpcGateway'
 import { SessionCache } from './sessionCache'
 import { OverseerEventRecorder, toSessionSnapshot } from './overseerEventRecorder'
+import { createOverseerLlmFallbackClient } from './overseerLlmFallback'
+import { loadOverseerLlmFallbackConfig, redactOverseerLlmBaseUrlForLog } from './overseerLlmFallbackConfig'
 import { OverseerEntity } from './overseerEntity'
 import { extractAssistantPlainText } from '@hapi/protocol/messages'
 import type { InboxOperatorAction } from '@hapi/protocol'
@@ -165,7 +167,23 @@ export class SyncEngine {
             (sessionId, updatedAt) => this.recordSessionActivity(sessionId, updatedAt)
         )
         this.rpcGateway = new RpcGateway(io, rpcRegistry)
-        this.overseerEvents = new OverseerEventRecorder(store.events, store.inbox)
+        const llmFallbackConfig = loadOverseerLlmFallbackConfig()
+        const llmFallback = llmFallbackConfig.enabled
+            ? createOverseerLlmFallbackClient(llmFallbackConfig)
+            : null
+        if (llmFallbackConfig.enabled) {
+            console.log(
+                `[overseer] LLM summary fallback ENABLED (api=${llmFallbackConfig.api}, model=${llmFallbackConfig.model}, base=${redactOverseerLlmBaseUrlForLog(llmFallbackConfig.baseUrl)})`
+            )
+        } else if (llmFallbackConfig.reasonDisabled !== 'flag_off') {
+            console.warn(`[overseer] LLM summary fallback disabled (${llmFallbackConfig.reasonDisabled})`)
+        }
+        this.overseerEvents = new OverseerEventRecorder(store.events, store.inbox, {
+            llmFallback,
+            onAsyncSystemEvent: (sessionId) => {
+                this.eventPublisher.emit({ type: 'session-updated', sessionId })
+            }
+        })
         this.overseer = new OverseerEntity({
             events: store.events,
             inbox: store.inbox,
@@ -296,10 +314,12 @@ export class SyncEngine {
             this.sessionCache.refreshSession(event.sessionId)
             const after = this.sessionCache.getSession(event.sessionId)
             if (after) {
-                this.overseerEvents.onSessionUpdated(
+                void this.overseerEvents.onSessionUpdated(
                     after,
                     this.store.sessions.getSession(after.id)?.tag ?? null
-                )
+                ).catch((error) => {
+                    console.error('[overseer] onSessionUpdated failed', error)
+                })
             }
             if (after?.metadata && !this.hasSameAgentSessionIds(before?.metadata ?? null, after.metadata)) {
                 if (!this.canRunCursorDedup(after)) {
@@ -328,8 +348,11 @@ export class SyncEngine {
                     toSessionSnapshot(session, storedSession?.tag ?? null),
                     event.message.id,
                     event.message.content,
-                    event.message.createdAt
-                )
+                    event.message.createdAt,
+                    { thinking: session.thinking }
+                ).catch((error) => {
+                    console.error('[overseer] onAgentMessage failed', error)
+                })
             }
         }
 
@@ -388,6 +411,17 @@ export class SyncEngine {
     }): void {
         this.sessionCache.handleSessionAlive(payload)
         this.triggerDedupIfNeeded(payload.sid)
+        const session = this.getSession(payload.sid)
+        if (session) {
+            // thinking=true→false usually arrives on session-alive, not
+            // session-updated. Flush deferred LLM fallback on that path.
+            void this.overseerEvents.onSessionUpdated(
+                session,
+                this.store.sessions.getSession(session.id)?.tag ?? null
+            ).catch((error) => {
+                console.error('[overseer] onSessionUpdated from session-alive failed', error)
+            })
+        }
     }
 
     handleSessionReady(payload: { sid: string; time: number }): void {
@@ -407,27 +441,32 @@ export class SyncEngine {
 
         this.sessionCache.handleSessionEnd(payload)
         const session = this.getSession(payload.sid)
-        if (session) {
-            this.overseerEvents.onSessionEnd(
-                session,
-                this.store.sessions.getSession(session.id)?.tag ?? null,
-                payload.time,
-                payload.reason,
-                () => this.getLastAgentPlainText(session.id)
-            )
-        }
         this.eventPublisher.emit({
             type: 'session-ended',
             sessionId: payload.sid,
             reason: payload.reason
         })
-        // Retry dedup now that this session is inactive — a prior dedup may have
-        // skipped it because it was still active at the time. Cursor ACP rows that
-        // never reached session-ready must not dedup-merge the original on failure.
-        if (shouldRetryDedup) {
-            this.triggerDedupIfNeeded(payload.sid)
-        }
-        this.sessionReadyIds.delete(payload.sid)
+        // Await recorder work before dedup so a queued LLM/completed_fallback
+        // insert still has a live relatedSessionId.
+        void (async () => {
+            try {
+                if (session) {
+                    await this.overseerEvents.onSessionEnd(
+                        session,
+                        this.store.sessions.getSession(session.id)?.tag ?? null,
+                        payload.time,
+                        payload.reason,
+                        () => this.getLastAgentPlainText(session.id)
+                    )
+                }
+            } catch (error) {
+                console.error('[overseer] onSessionEnd failed', error)
+            }
+            if (shouldRetryDedup) {
+                this.triggerDedupIfNeeded(payload.sid)
+            }
+            this.sessionReadyIds.delete(payload.sid)
+        })()
     }
 
     handleBackgroundTaskDelta(sessionId: string, delta: { started: number; completed: number }): void {
@@ -444,15 +483,29 @@ export class SyncEngine {
 
     private expireInactive(): void {
         const expired = this.sessionCache.expireInactive()
-        // Sort by most recent first so dedup keeps the newest session when multiple
-        // duplicates for the same agent thread expire in the same sweep.
-        const sorted = expired
-            .map((id) => this.sessionCache.getSession(id))
-            .filter((s): s is NonNullable<typeof s> => s != null)
-            .sort((a, b) => (b.activeAt - a.activeAt) || (b.updatedAt - a.updatedAt))
-        for (const session of sorted) {
-            this.triggerDedupIfNeeded(session.id)
-        }
+        void (async () => {
+            for (const sessionId of expired) {
+                const session = this.sessionCache.getSession(sessionId)
+                if (!session) continue
+                try {
+                    await this.overseerEvents.onSessionUpdated(
+                        session,
+                        this.store.sessions.getSession(sessionId)?.tag ?? null
+                    )
+                } catch (error) {
+                    console.error('[overseer] onSessionUpdated from expireInactive failed', error)
+                }
+            }
+            // Sort by most recent first so dedup keeps the newest session when multiple
+            // duplicates for the same agent thread expire in the same sweep.
+            const sorted = expired
+                .map((id) => this.sessionCache.getSession(id))
+                .filter((s): s is NonNullable<typeof s> => s != null)
+                .sort((a, b) => (b.activeAt - a.activeAt) || (b.updatedAt - a.updatedAt))
+            for (const session of sorted) {
+                this.triggerDedupIfNeeded(session.id)
+            }
+        })()
         this.machineCache.expireInactive()
         this.overseerEvents.checkStaleSessions(this.sessionCache.getSessions())
         // Piggybacked on the inactivity tick; not a logical part of expireInactive
@@ -748,6 +801,7 @@ export class SyncEngine {
 
     async deleteSession(sessionId: string): Promise<void> {
         await this.sessionCache.deleteSession(sessionId)
+        this.overseerEvents.forgetSession(sessionId)
     }
 
     async applySessionConfig(
