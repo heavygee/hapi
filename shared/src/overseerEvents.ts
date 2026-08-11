@@ -183,6 +183,29 @@ export function deriveSessionDisplayName(
     return tagValue || null
 }
 
+/**
+ * Angle-bracket prompt tokens (`<project>`, `<agent-id>`) are examples, not
+ * real workspace / agent ids. Treat them as absent so payload.session.project
+ * stays the derived path basename and tags do not poison project queries.
+ */
+export function usableNotifyToken(value: string | null | undefined): string | null {
+    if (typeof value !== 'string') return null
+    const trimmed = value.trim()
+    if (!trimmed) return null
+    if (/^<[^>]+>$/.test(trimmed)) return null
+    return trimmed
+}
+
+/** Sentinel / example `action` values are not operator work. */
+export function usableNotifyAction(value: string | null | undefined): string | null {
+    const token = usableNotifyToken(value)
+    if (!token) return null
+    const lower = token.toLowerCase()
+    if (['none', 'n/a', 'na', 'nil', 'null', '-', 'n.a.'].includes(lower)) return null
+    if (/^<=?\s*12\s+words$/i.test(token)) return null
+    return token
+}
+
 export function deriveSessionProject(
     metadata: { path?: string; worktree?: { name?: string } } | null | undefined
 ): string | null {
@@ -191,7 +214,7 @@ export function deriveSessionProject(
     if (worktreeName) return worktreeName
     const path = metadata.path?.trim()
     if (!path) return null
-    const parts = path.split('/').filter(Boolean)
+    const parts = path.split(/[/\\]/).filter(Boolean)
     return parts.length > 0 ? parts[parts.length - 1]! : null
 }
 
@@ -204,7 +227,7 @@ export function buildOverseerSessionIdentity(input: {
 }): OverseerSessionIdentity {
     const tag = input.tag ?? null
     const derivedProject = deriveSessionProject(input.metadata)
-    const notifyProject = input.notifyProject?.trim()
+    const notifyProject = usableNotifyToken(input.notifyProject)
     return {
         id: input.id,
         tag,
@@ -258,7 +281,7 @@ export function deriveAttentionCandidate(status: string | undefined, action?: st
         case 'stalled':
             return 1
         case 'done':
-            return action && action.trim().length > 0 ? 1 : 0
+            return usableNotifyAction(action) ? 1 : 0
         default:
             return 0
     }

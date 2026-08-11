@@ -3,7 +3,8 @@ import {
     type BlockWithThreadMessageId,
     aggregateResponseGroups,
     assignThreadMessageIds,
-    assignThreadMessageIdsWithStableWrappers
+    assignThreadMessageIdsWithStableWrappers,
+    textForHumanRender
 } from './assistant-runtime'
 import type { AgentEventBlock, AgentTextBlock, CliOutputBlock, ToolCallBlock, UserTextBlock } from '@/chat/types'
 import type { ToolGroupBlock, VisibleChatBlock } from '@/chat/toolGroups'
@@ -128,6 +129,14 @@ describe('assignThreadMessageIds', () => {
         expect(second[0]).toBe(first[0])
         expect(second[0].threadMessageId).toBe('agent-text:a')
         expect(second[1].threadMessageId).toBe('user-text:u')
+    })
+
+    it('a fresh WeakMap yields new wrappers so converter caches can bust', () => {
+        const block = agentText('a')
+        const first = assignThreadMessageIdsWithStableWrappers([block], new WeakMap())
+        const second = assignThreadMessageIdsWithStableWrappers([block], new WeakMap())
+        expect(second[0]).not.toBe(first[0])
+        expect(second[0].threadMessageId).toBe(first[0].threadMessageId)
     })
 })
 
@@ -645,5 +654,17 @@ describe('aggregateResponseGroups', () => {
         const meta = aggregates.get('a1')
         expect(meta?.usage?.cache_creation_input_tokens).toBe(300)
         expect(meta?.usage?.cache_read_input_tokens).toBe(100)
+    })
+})
+
+describe('textForHumanRender', () => {
+    const raw = 'Answer body.\n\nAGENT_NOTIFY_SUMMARY {"version":1,"agent":"a","project":"p","status":"done","action":"none","summary":"ok"}'
+
+    it('strips by default', () => {
+        expect(textForHumanRender(raw, false)).toBe('Answer body.')
+    })
+
+    it('keeps the notify line when showAgentContract is true', () => {
+        expect(textForHumanRender(raw, true)).toBe(raw)
     })
 })

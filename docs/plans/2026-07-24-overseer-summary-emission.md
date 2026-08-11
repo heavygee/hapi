@@ -1,24 +1,39 @@
 # Overseer summary emission (Half B) — 2026-07-24
 
-Status: both pieces implemented + tested (awaiting operator `hapi-restart-hub` + soup)
+Status: Piece 1 live; Piece 2 hub text-synth **removed**; Piece 3 in flight
+(Claude remote + Codex app-server only; Grok/OpenCode deferred to #89)
 Owner: feat/overseer-summary-emit (peer of 🔁overseer prep)
 Scope: FORK-ONLY. Never upstream. The whole overseer feature is fork-private.
 
 - Piece 1 — `feat/overseer-summary-emit` (fork PR #86): CLI Cursor rule overlay.
-  11 overlay tests + 19 launcher tests green; typecheck clean.
-- Piece 2 — `feat/overseer-summary-fallback` (stacked on Piece 1): hub per-turn
-  backstop in `overseerEventRecorder`. 6 fallback tests + full hub suite (524)
-  green; typecheck clean.
+- Piece 2 — `feat/overseer-summary-fallback` (PR #87): hub text-synth **removed**
+  (operator: Session Log is AGENT_NOTIFY_SUMMARY only). LLM fallback is #90.
+- Piece 3 — `feat/overseer-summary-flavors-and-dates`: Claude remote + Codex
+  app-server get the contract via system/developer instructions
+  (`HAPI_SESSION_SUMMARY_CONTRACT=0` to opt out). Local native TUI
+  (Claude/Codex/OpenCode) stays human-facing. Grok/OpenCode first-turn user
+  prepend is not wrapped (#1095/#1096); those flavors wait on #89. Generic
+  prompts omit `<agent-id>`/`<project>`; hub ignores those tokens. Debug
+  events/inbox timestamps use standard "x ago" + absolute tooltip.
+
 
 ## Why this exists (the real WHY — keep it here, not in product code)
 
 The overseer/inbox/session-log is fed by `AGENT_NOTIFY_SUMMARY` lines that agents
 emit as the last line of every turn. PR #81 (`feat/overseer-contract-invisible`)
-shipped **Half A — invisibility**: `stripAgentContract()` hides the trailing
-`AGENT_NOTIFY_SUMMARY {...}` line from the human render/copy, and
-`extractNotifySummary()` / `collapseRepeats()` parse it corruption-tolerantly
-(recovers Cursor's `SUMMARY`->`SUMARY` dup-drop). The raw text survives in the
-store so the overseer can read it.
+**Half A strip is now optional in the web UI.** Settings → About → "Show
+AGENT_NOTIFY line" (`hapi-show-agent-contract` localStorage) leaves the trailing
+line visible in session chat so the operator can verify emission without
+digging in SQLite. Default remains strip-on. Raw store is never mutated.
+
+**No hub first-line text synth.** Piece 2's `hub-synthesized from assistant text`
+path is removed. ACP mid-turn text flushes are not Session Log events. Primary
+signal is agent `AGENT_NOTIFY_SUMMARY` only; opt-in LLM fallback (#90) remains
+a separate layer (default off). Tool-call timelines belong in session-flow
+experiments, not overseer Session Log.
+
+
+
 
 **Half A is useless for Cursor because nothing emits the line.** The hub
 deliberately does not inject the contract for Cursor
@@ -85,22 +100,13 @@ Discipline (mandatory, same shape a config overlay would use):
   (`shared/src/overseerEvents.ts`):
   `AGENT_NOTIFY_SUMMARY {"version":1,"agent":"<agent-id>","project":"<project>","status":"done|blocked|needs_review|needs_decision|failed|stalled","action":"<=12 words","summary":"one-line triage"}`
 
-### Piece 2 — Hub deterministic backstop (stacked branch: `feat/overseer-summary-fallback`)
+### Piece 2 — Hub deterministic backstop — REMOVED
 
-LLMs cannot be 100%-forced to emit a trailing line. For any agent turn where
-`extractNotifySummary()` returns `null` (and the turn is not already covered by
-the malformed-line / empty-sentinel / tool-failure branches), synthesize a
-**minimal** overseer event from the assistant text the hub already has:
-
-- summary = first non-empty line of the assistant plain text (trimmed/capped),
-- status heuristic = default `progress`; no LLM (operator explicitly rejected the
-  clunky LLM summarizer for v1),
-- provenance marks it hub-synthesized so it is distinguishable from a real
-  self-report and never counted as compliance.
-
-Wired into `hub/src/sync/overseerEventRecorder.ts` `onAgentMessage`, only on the
-`else` path where no `notify` was found. Guarantees the overseer never has a
-completely blind agent turn.
+Operator rejected hub first-line text synth. `onAgentMessage` does **not**
+synthesize events from assistant text. Session Log is agent
+`AGENT_NOTIFY_SUMMARY` (+ rare session-end completed) only. Opt-in LLM fallback
+is #90 / `feat/overseer-llm-fallback`, default off. Do not reintroduce Piece 2
+heuristics.
 
 ## Stealth requirements (operator-critical — "don't freak users out")
 
@@ -120,22 +126,91 @@ ordinary, useful project config, never as surveillance:
 
 ## Scope / non-goals
 
-- Focus Cursor (the 95% gap).
-- kimi + generic ACP share the same removed-prepend gap — **optional follow-up**,
-  not in scope now.
-- codex/grok/opencode have clean `systemPrompt.ts` and may already emit via their
-  own channels — optional later.
+- Cursor: transient `.mdc` overlay (Piece 1).
+- Claude remote + Codex app-server: system / developer instructions (Piece 3).
+  Opt-out via `HAPI_SESSION_SUMMARY_CONTRACT=0`.
+- Local native Claude / Codex / OpenCode TUI: **no** notify contract (stdio).
+- Grok / OpenCode first-turn prepend: title + skill-lookup only. Session-summary
+  for those flavors is [#89](https://github.com/heavygee/hapi/issues/89).
+- kimi + generic ACP / pi: also #89.
+- Better LLM / oneshot-agent fallback: [#90](https://github.com/heavygee/hapi/issues/90), default off.
+
+## Better fallback (opt-in — tracked #90)
+
+v1 fallback is first-non-empty-line heuristics. A *better* fallback needs an LLM
+and is a real cost tax - so it must be **opt-in**, clearly labeled, and rare
+(only when the primary agent omitted the contract).
+
+**Issue:** [#90](https://github.com/heavygee/hapi/issues/90) — implement Option A (default off).
+**Remaining flavor coverage (separate):** [#89](https://github.com/heavygee/hapi/issues/89).
+
+### Gate: rarity first, quality never second
+
+Do **not** ship a better fallback until primary emission is good enough that
+fallback is a thin residue - target **well under 5% of turns** (5% is already
+generous). Measure emit vs missing-line ratio fleet-wide after Piece 3 is
+live; only then enable LLM fallback.
+
+When it *does* run, it must be **at least as useful as a primary self-report**:
+feed the **full last-turn assistant content** (no input-char truncation that
+would make the summary worse than the agent would have written). Rarity is the
+cost control; accuracy is non-negotiable on the rare path.
+
+### Option A — raw OpenAI-compatible completions call
+
+Hub (or a tiny side worker) POSTs the full last assistant turn text to an
+operator-configured base URL (`/v1/chat/completions` or `/v1/responses`) with a
+fixed prompt: "emit exactly one AGENT_NOTIFY_SUMMARY JSON line." Local (Ollama /
+vLLM / gateway) or remote (OpenAI) - same wire format.
+
+- Pros: cheap to wire, no session surface, easy to bill/attribute as
+  `provenance: hub-llm-fallback`.
+- Cons: large turns = large prompt tokens (accepted when rare); operator must
+  provision a key/URL; prefer Chat Completions for local-gateway compatibility,
+  Responses for OpenAI-native - support both behind one adapter.
+
+### Option B — out-of-band oneshot agent
+
+Spawn a short-lived non-HAPI (or disposable HAPI) agent with a fixed prompt:
+retrieve last turn text for session X and emit a compliant summary line. Mark
+the resulting event `provenance: oneshot-agent-fallback` and surface that label
+in Session Log / inbox so the operator never wonders "wtf usage is this."
+
+- Pros: can use whatever model/provider the operator already trusts; can do
+  multi-step retrieval if needed.
+- Cons: heavier; looks like a phantom session if not carefully labeled; higher
+  cost variance; more moving parts.
+
+### Shared requirements (either option)
+
+- **Default off.** Explicit settings toggle + config (URL/key for A; spawn
+  recipe for B). Unlock only after rarity gate is met (or operator accepts the
+  measured miss rate).
+- **Full turn content.** No max-input-char chop that degrades quality below a
+  primary emit. Empty turns still skip.
+- **Transparency:** event payload must say this was synthesized *because* the
+  primary turn lacked a contract - never pretend the primary agent said it.
+- **Kill-criterion:** if opt-in users report surprise usage, the toggle and
+  provenance labels failed - fix UX before expanding defaults. If fallback
+  summaries are worse than the heuristic first-line, do not ship.
+
+Prefer **Option A** as the first better-fallback ship: smaller blast radius,
+easier to reason about cost, no phantom sessions.
+
 
 ## Known edge cases / follow-ups
 
 - **Concurrent HAPI sessions sharing one cwd:** the sentinel prevents user-data
   loss; worst case is one session removing the shared rule mid-run of another
-  (rule stops applying, hub backstop still covers it). Acceptable for v1.
+  (rule stops applying). Acceptable for v1.
 - **Cursor native `--worktree`:** the backend spawn cwd is `session.path`; if a
   future cursor-native worktree changes the effective workspace root, revisit
   where the rule is written. Noted, not handled in v1.
-- **Rule compliance ceiling:** even with `alwaysApply`, the model may drop the
-  line. That is exactly why Piece 2 exists.
+- **Rule compliance ceiling:** even with `alwaysApply` / remote systemPrompt, the
+  model may drop the line. No hub text-synth; missing lines stay missing until
+  #90 LLM fallback (opt-in).
+- **Grok / OpenCode remote:** first-turn prepend is title + skill-lookup only.
+  Session-summary for those flavors is #89 (durable instruction channel).
 
 ## Soup / coordination
 
