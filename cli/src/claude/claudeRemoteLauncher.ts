@@ -602,6 +602,11 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
                             // Reset the streak and keep the loop (and this OS
                             // process) alive so an unrelated later message
                             // gets its own fresh budget.
+                            for (const item of inFlightMessage?.items ?? []) {
+                                if (item.localId) {
+                                    session.client.discardPendingHubPromptEcho(item.localId)
+                                }
+                            }
                             inFlightMessage = null;
                             session.client.sendSessionEvent({
                                 type: 'message',
