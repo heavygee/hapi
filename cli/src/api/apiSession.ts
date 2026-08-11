@@ -685,9 +685,19 @@ export class ApiSessionClient extends EventEmitter {
     notePendingHubPromptEcho(text: string, localId?: string | readonly string[]): void {
         const normalized = text.trim()
         if (!normalized) return
-        if (this.pendingHubPromptEchoes.some((entry) => entry.text === normalized)) return
         const localIds = (Array.isArray(localId) ? localId : localId ? [localId] : [])
             .filter((id) => id.length > 0)
+        // Recoverable launch failure restores the original items; a later
+        // same-mode prompt can rebatch them under new delivered text. Drop
+        // the stale marker that still names those localIds so a later
+        // identical local prompt is not stamped isTranscriptEcho.
+        if (localIds.length > 0) {
+            const replacementIds = new Set(localIds)
+            this.pendingHubPromptEchoes = this.pendingHubPromptEchoes.filter(
+                (entry) => !entry.localIds.some((id) => replacementIds.has(id))
+            )
+        }
+        if (this.pendingHubPromptEchoes.some((entry) => entry.text === normalized)) return
         this.pendingHubPromptEchoes.push({ text: normalized, localIds })
         if (this.pendingHubPromptEchoes.length > 32) {
             this.pendingHubPromptEchoes.shift()
