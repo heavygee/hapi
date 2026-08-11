@@ -13,7 +13,9 @@
 #      Keeps "Peer #N:" incubating titles (no issue chip yet).
 #   4. Pings a session ONLY when policy says it is actionable and not noise
 #      (ping windows: always rouse sticky ⚠️/🔧 incl. inactive resume;
-#      🧹 complete never pings; transition / fingerprint / reminder for greens)
+#      🧹 complete never pings; 🔧 Gate A clean / archive-pending never hourly
+#      resume — that undoes archive → 🔧 forever; 2026-08-11 e4d152f3)
+#      transition / fingerprint / reminder for greens)
 #   5. Reads GitHub notifications for tiann/hapi + heavygee/hapi since a stored
 #      cursor and folds new human comms into the action queue. Never marks read.
 #   6. Prints a sorted operator ACTION QUEUE (⚠️ / 🔧 / 🧹 / wave / orphans / inactive /
@@ -689,6 +691,8 @@ main() {
         name="${SESS_NAME[$sid8]}"
         active="${SESS_ACTIVE[$sid8]}"
         prs="${SESS_PRS[$sid8]}"
+        local prev_emoji_early
+        prev_emoji_early="$(md_prev "$state" "$sid" "emoji")"
         # --pr N only classifies N; skip sessions that do not reference it.
         # Without this, set -u dies on PR_EMOJI[$other] for every other chipped session.
         if [[ -n "$PR_ONLY" ]]; then
@@ -723,6 +727,12 @@ main() {
                         "${SESS_PATH[$sid8]:-}" \
                         "$p")"; then
                         action_sess="Gate A clean — exit reflection (or skip:) then ack + idle; archive pending (Meta archives from outside; do not rematerialize / self-archive mid-turn)"
+                        # Latch 🧹: a Meta/peer resume must not demote complete → merged
+                        # solely because lifecycle is no longer archived (2026-08-11 e4d152f3).
+                        if [[ "$prev_emoji_early" == "🧹" ]]; then
+                            emoji_sess="🧹"
+                            action_sess="fully cleaned — babysit ended"
+                        fi
                     else
                         vlog "gate A dirty #$p [$sid8] → $gate_a_reason"
                     fi
@@ -790,6 +800,12 @@ main() {
         [[ -z "$prev_ping" ]] && prev_ping=0
         # md_plan_ping/pec_should_ping return 1 for "no"; capture text, ignore rc.
         decision="$(md_plan_ping "$combined" "$action_fp" "$prev_emoji" "$prev_fp" "$prev_ping" "$now" "$REMINDER_SECS" "$window_rouse" || true)"
+        # Gate A clean + archive pending is Meta's job. Hourly ping-peer resumes
+        # the row, mw_member_complete fails not_archived, chip flips 🧹→🔧, and
+        # the next window pings again. Never rouse for that remainder.
+        if [[ "$combined" == "🔧" ]] && printf '%s' "$acts" | grep -q 'Gate A clean'; then
+            decision="no"
+        fi
 
         local this_ping="$prev_ping"
         if [[ "$combined" == "?" ]]; then
