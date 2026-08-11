@@ -11,6 +11,7 @@ import {
     insertWorkGraphEventLink,
     listWorkGraphEventLinksForEvent,
     listWorkGraphEventsByRelatedSession,
+    listWorkGraphWorkAdsByRelatedSession,
     type InsertWorkGraphEventResult
 } from './workGraph'
 
@@ -39,6 +40,10 @@ export class WorkGraphStore {
         options?: { limit?: number }
     ): WorkGraphEvent[] {
         return listWorkGraphEventsByRelatedSession(this.db, namespace, relatedSessionId, options)
+    }
+
+    listWorkAdsByRelatedSession(namespace: string, relatedSessionId: string): WorkGraphEvent[] {
+        return listWorkGraphWorkAdsByRelatedSession(this.db, namespace, relatedSessionId)
     }
 
     insertLink(namespace: string, input: WorkGraphEventLinkCreate): WorkGraphEventLink {

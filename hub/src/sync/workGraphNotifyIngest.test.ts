@@ -23,6 +23,51 @@ function assistantOutput(text: string) {
     }
 }
 
+function userInbound(text: string, sentFrom: string = 'webapp') {
+    return {
+        role: 'user' as const,
+        content: { type: 'text' as const, text },
+        meta: { sentFrom }
+    }
+}
+
+function agentToolRow() {
+    return {
+        role: 'agent' as const,
+        content: {
+            type: 'output',
+            data: { type: 'tool_use', name: 'Read', id: 'tool-1' }
+        }
+    }
+}
+
+function notifyFooter(summary: string): string {
+    return `Prose.\n\nAGENT_NOTIFY_SUMMARY ${JSON.stringify({
+        version: 1,
+        status: 'done',
+        summary
+    })}`
+}
+
+function ingestNotify(
+    store: Store,
+    sessionId: string,
+    namespace: string,
+    content: unknown,
+    messageId: string,
+    ts: number = Date.now()
+) {
+    return ingestNotifySummaryFromMessage({
+        store,
+        namespace,
+        sessionId,
+        messageId,
+        content,
+        ts,
+        ownerUserId: 1
+    })
+}
+
 describe('mapNotifyStatusToWorkAdStatus', () => {
     it('maps notify contract statuses onto RFC WorkAd vocabulary', () => {
         expect(mapNotifyStatusToWorkAdStatus('done')).toBe('done')
@@ -370,5 +415,172 @@ describe('ingestNotifySummaryFromMessage', () => {
         const escaped = JSON.stringify(action).slice(1, -1)
         expect(new TextEncoder().encode(escaped).byteLength).toBeLessThanOrEqual(WORK_GRAPH_MAX_STRING)
         expect(store.workGraph.listByRelatedSession('default', session.id)).toHaveLength(1)
+    })
+})
+
+describe('ingestNotifySummaryFromMessage cause stamping', () => {
+    it('happy path: first unconsumed inbound is the cause; previous work_ad is related', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('sess-cause-happy', {}, null, 'default')
+
+        const firstUser = store.messages.addMessage(session.id, userInbound('do the first thing'))
+        const firstAssistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('Turn one')))
+        const first = ingestNotify(store, session.id, 'default', firstAssistant.content, firstAssistant.id)
+
+        expect(first?.inserted).toBe(true)
+        expect(first?.event.relatedEventId).toBeNull()
+        expect(first?.event.payloadJson).toMatchObject({
+            messageId: firstAssistant.id,
+            causeMessageId: firstUser.id,
+            causeText: 'do the first thing',
+            causeKind: 'webapp'
+        })
+
+        const secondUser = store.messages.addMessage(session.id, userInbound('do the second thing', 'cli'))
+        const secondAssistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('Turn two')))
+        const second = ingestNotify(store, session.id, 'default', secondAssistant.content, secondAssistant.id)
+
+        expect(second?.inserted).toBe(true)
+        expect(second?.event.relatedEventId).toBe(first!.event.id)
+        expect(second?.event.payloadJson).toMatchObject({
+            messageId: secondAssistant.id,
+            causeMessageId: secondUser.id,
+            causeText: 'do the second thing',
+            causeKind: 'cli'
+        })
+
+        const links = store.workGraph.listLinksForEvent('default', second!.event.id)
+        expect(links).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                fromEventId: second!.event.id,
+                toEventId: first!.event.id,
+                relationType: 'follows'
+            })
+        ]))
+    })
+
+    it('queued inbound: cause is the unconsumed inbound, not the nearest user before the assistant', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('sess-cause-queued', {}, null, 'default')
+
+        const causing = store.messages.addMessage(session.id, userInbound('start the long turn'))
+        store.messages.addMessage(session.id, agentToolRow())
+        const queued = store.messages.addMessage(session.id, userInbound('queued while in flight'))
+        const assistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('Finished long turn')))
+
+        const first = ingestNotify(store, session.id, 'default', assistant.content, assistant.id)
+        expect(first?.event.payloadJson).toMatchObject({
+            causeMessageId: causing.id,
+            causeText: 'start the long turn'
+        })
+        expect((first?.event.payloadJson as { causeMessageId?: string })?.causeMessageId)
+            .not.toBe(queued.id)
+
+        const secondAssistant = store.messages.addMessage(
+            session.id,
+            assistantOutput(notifyFooter('Queued turn'))
+        )
+        const second = ingestNotify(store, session.id, 'default', secondAssistant.content, secondAssistant.id)
+        expect(second?.event.payloadJson).toMatchObject({
+            causeMessageId: queued.id,
+            causeText: 'queued while in flight'
+        })
+        expect(second?.event.relatedEventId).toBe(first!.event.id)
+    })
+
+    it('sticky cause: two summaries with no new inbound reuse the previous cause', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('sess-cause-sticky', {}, null, 'default')
+
+        const user = store.messages.addMessage(session.id, userInbound('keep going'))
+        const firstAssistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('First summary')))
+        const first = ingestNotify(store, session.id, 'default', firstAssistant.content, firstAssistant.id)
+
+        const secondAssistant = store.messages.addMessage(
+            session.id,
+            assistantOutput(notifyFooter('Second summary same turn'))
+        )
+        const second = ingestNotify(store, session.id, 'default', secondAssistant.content, secondAssistant.id)
+
+        expect(second?.event.payloadJson).toMatchObject({
+            messageId: secondAssistant.id,
+            causeMessageId: user.id,
+            causeText: 'keep going',
+            causeKind: 'webapp'
+        })
+        expect(second?.event.relatedEventId).toBe(first!.event.id)
+        expect(second?.event.summary).toBe('Second summary same turn')
+        expect(first?.event.summary).toBe('First summary')
+    })
+
+    it('peer inbound meta.sentFrom counts as cause', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('sess-cause-peer', {}, null, 'default')
+
+        const peer = store.messages.addMessage(
+            session.id,
+            userInbound('please take this handoff', 'peer')
+        )
+        const assistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('Ack peer')))
+        const result = ingestNotify(store, session.id, 'default', assistant.content, assistant.id)
+
+        expect(result?.event.payloadJson).toMatchObject({
+            messageId: assistant.id,
+            causeMessageId: peer.id,
+            causeText: 'please take this handoff',
+            causeKind: 'peer'
+        })
+    })
+
+    it('skips agent-role tool/prose rows when choosing cause', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('sess-cause-skip-agent', {}, null, 'default')
+
+        const user = store.messages.addMessage(session.id, userInbound('the real prompt'))
+        store.messages.addMessage(session.id, agentToolRow())
+        store.messages.addMessage(session.id, assistantOutput('intermediate prose, no footer'))
+        const assistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('Done')))
+
+        const result = ingestNotify(store, session.id, 'default', assistant.content, assistant.id)
+        expect(result?.event.payloadJson).toMatchObject({
+            causeMessageId: user.id,
+            causeText: 'the real prompt'
+        })
+    })
+
+    it('clamps oversized inbound causeText so elevation still inserts', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('sess-cause-bound', {}, null, 'default')
+        const fat = 'q'.repeat(WORK_GRAPH_MAX_SUMMARY + 400)
+        store.messages.addMessage(session.id, userInbound(fat))
+        const assistant = store.messages.addMessage(session.id, assistantOutput(notifyFooter('ok')))
+        const result = ingestNotify(store, session.id, 'default', assistant.content, assistant.id)
+
+        expect(result?.inserted).toBe(true)
+        const causeText = (result?.event.payloadJson as { causeText?: string })?.causeText ?? ''
+        expect(causeText.length).toBeLessThanOrEqual(WORK_GRAPH_MAX_SUMMARY)
+        expect(causeText.startsWith('qq')).toBe(true)
+    })
+
+    it('still inserts when max-clamped footer fields share the payload with cause', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('sess-cause-budget', {}, null, 'default')
+        store.messages.addMessage(session.id, userInbound('prompt'))
+        const fat = 'a'.repeat(6_000)
+        const assistant = store.messages.addMessage(session.id, assistantOutput(
+            `AGENT_NOTIFY_SUMMARY ${JSON.stringify({
+                status: 'done',
+                summary: 'ok',
+                action: fat,
+                project: fat,
+                agent: fat
+            })}`
+        ))
+        const result = ingestNotify(store, session.id, 'default', assistant.content, assistant.id)
+        expect(result?.inserted).toBe(true)
+        expect(result?.event.payloadJson).toMatchObject({
+            causeText: 'prompt',
+            action: fat
+        })
     })
 })

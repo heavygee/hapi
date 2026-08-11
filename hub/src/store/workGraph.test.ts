@@ -155,6 +155,38 @@ describe('WorkGraphStore', () => {
         expect(store.workGraph.listLinksForEvent('default', handoff.event.id)).toHaveLength(1)
     })
 
+    it('lists work_ads for a session in chronological order without the HTTP cap', () => {
+        const store = new Store(':memory:')
+        const first = store.workGraph.insertEvent('default', {
+            source_kind: 'session',
+            source_ref: 'sess-a',
+            event_type: 'work_ad',
+            related_session_id: 'sess-a',
+            summary: 'first',
+            principal: humanPrincipal
+        }, { ts: 1000 })
+        store.workGraph.insertEvent('default', {
+            source_kind: 'session',
+            source_ref: 'sess-a',
+            event_type: 'handoff',
+            related_session_id: 'sess-a',
+            summary: 'not an ad',
+            principal: humanPrincipal
+        }, { ts: 1500 })
+        const second = store.workGraph.insertEvent('default', {
+            source_kind: 'session',
+            source_ref: 'sess-a',
+            event_type: 'work_ad',
+            related_session_id: 'sess-a',
+            summary: 'second',
+            principal: humanPrincipal
+        }, { ts: 2000 })
+
+        const ads = store.workGraph.listWorkAdsByRelatedSession('default', 'sess-a')
+        expect(ads.map((event) => event.id)).toEqual([first.event.id, second.event.id])
+        expect(store.workGraph.listWorkAdsByRelatedSession('beta', 'sess-a')).toEqual([])
+    })
+
     it('accepts agent principal with on_behalf_of human owner', () => {
         const store = new Store(':memory:')
         const result = store.workGraph.insertEvent('default', {

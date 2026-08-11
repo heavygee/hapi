@@ -6,10 +6,11 @@ import {
     extractNotifySummary,
     unwrapRoleWrappedRecordEnvelope,
     type NotifySummary,
+    type WorkGraphEvent,
     type WorkGraphEventCreate
 } from '@hapi/protocol'
-import type { Store } from '../store'
-import { WorkGraphValidationError } from '../store'
+import type { Store, StoredMessage } from '../store'
+import { WorkGraphNotFoundError, WorkGraphValidationError } from '../store'
 import type { InsertWorkGraphEventResult } from '../store/workGraph'
 
 const WORK_GRAPH_MAX_TAG = 256
@@ -135,6 +136,136 @@ function isAgentMessageContent(content: unknown): boolean {
     return false
 }
 
+export type WorkAdCause = {
+    causeMessageId: string
+    causeText: string | null
+    causeKind: string | null
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+    return value !== null && typeof value === 'object' && !Array.isArray(value)
+        ? value as Record<string, unknown>
+        : null
+}
+
+function isInboundUserMessage(content: unknown): boolean {
+    return asRecord(content)?.role === 'user'
+}
+
+function extractInboundSentFrom(content: unknown): string | null {
+    const meta = asRecord(asRecord(content)?.meta)
+    return typeof meta?.sentFrom === 'string' && meta.sentFrom.trim().length > 0
+        ? meta.sentFrom.trim()
+        : null
+}
+
+function extractInboundCauseText(content: unknown): string | null {
+    const record = asRecord(content)
+    if (!record) return null
+    const inner = record.content
+    if (typeof inner === 'string') {
+        const text = inner.trim()
+        return text.length > 0 ? text : null
+    }
+    if (Array.isArray(inner)) {
+        const parts = inner.flatMap((block) => {
+            const item = asRecord(block)
+            return item?.type === 'text' && typeof item.text === 'string' ? [item.text] : []
+        })
+        const text = parts.join(' ').trim()
+        return text.length > 0 ? text : null
+    }
+    const nested = asRecord(inner)
+    if (nested?.type === 'text' && typeof nested.text === 'string') {
+        const text = nested.text.trim()
+        return text.length > 0 ? text : null
+    }
+    return null
+}
+
+function readCauseFromPayload(payload: unknown): WorkAdCause | null {
+    const record = asRecord(payload)
+    if (typeof record?.causeMessageId !== 'string' || record.causeMessageId.length === 0) {
+        return null
+    }
+    return {
+        causeMessageId: record.causeMessageId,
+        causeText: typeof record.causeText === 'string' ? record.causeText : null,
+        causeKind: typeof record.causeKind === 'string' ? record.causeKind : null
+    }
+}
+
+function listPreviousWorkAds(
+    store: Store,
+    namespace: string,
+    sessionId: string
+): WorkGraphEvent[] {
+    return store.workGraph.listWorkAdsByRelatedSession(namespace, sessionId)
+}
+
+function consumedInboundIds(
+    messages: StoredMessage[],
+    previousWorkAds: WorkGraphEvent[]
+): Set<string> {
+    const consumed = new Set<string>()
+    const byId = new Map(messages.map((message) => [message.id, message]))
+    for (const event of previousWorkAds) {
+        const stamped = readCauseFromPayload(event.payloadJson)
+        if (stamped) {
+            consumed.add(stamped.causeMessageId)
+            continue
+        }
+        // Legacy notify rows have no causeMessageId. Treat inbounds at/before
+        // that notify as consumed so the next turn does not re-attribute them.
+        const payload = asRecord(event.payloadJson)
+        const assistantId = typeof payload?.messageId === 'string' ? payload.messageId : null
+        const assistant = assistantId ? byId.get(assistantId) : undefined
+        if (!assistant) continue
+        for (const message of messages) {
+            if (message.seq <= assistant.seq && isInboundUserMessage(message.content)) {
+                consumed.add(message.id)
+            }
+        }
+    }
+    return consumed
+}
+
+/**
+ * Sequential rule: first unconsumed inbound (role=user) in session order.
+ * Queued inbound during an in-flight turn stays unconsumed for the next event.
+ * No new inbound → sticky copy of the previous event's cause.
+ */
+export function resolveWorkAdCause(params: {
+    messages: StoredMessage[]
+    previousWorkAds: WorkGraphEvent[]
+}): { cause: WorkAdCause | null; previousEventId: string | null } {
+    const previousWorkAds = [...params.previousWorkAds]
+        .sort((a, b) => (a.ts !== b.ts ? a.ts - b.ts : a.id.localeCompare(b.id)))
+    const previous = previousWorkAds.at(-1) ?? null
+    const consumed = consumedInboundIds(params.messages, previousWorkAds)
+    const inbound = params.messages.find(
+        (message) => isInboundUserMessage(message.content) && !consumed.has(message.id)
+    )
+    if (inbound) {
+        const text = extractInboundCauseText(inbound.content)
+        return {
+            cause: {
+                causeMessageId: inbound.id,
+                causeText: text === null ? null : clampJsonUtf8(text, WORK_GRAPH_MAX_SUMMARY),
+                causeKind: extractInboundSentFrom(inbound.content)
+            },
+            previousEventId: previous?.id ?? null
+        }
+    }
+    if (previous) {
+        const sticky = readCauseFromPayload(previous.payloadJson)
+        if (sticky) {
+            return { cause: sticky, previousEventId: previous.id }
+        }
+    }
+    return { cause: null, previousEventId: previous?.id ?? null }
+}
+
 function buildTags(notify: NotifySummary, flavor: string | null | undefined): string[] {
     // Project stays in tags + payload for now. Indexed `project` column /
     // project-scoped list query is deferred to #1374 / P4 (cold review M4).
@@ -159,6 +290,8 @@ export function buildWorkAdFromNotify(params: {
     ts: number
     flavor?: string | null
     expiresAt?: number
+    cause?: WorkAdCause | null
+    relatedEventId?: string | null
 }): WorkGraphEventCreate {
     const status = mapNotifyStatusToWorkAdStatus(params.notify.status)
     // Footer fields are untrusted. Clamp to ledger schema bounds so elevation
@@ -167,6 +300,16 @@ export function buildWorkAdFromNotify(params: {
     const action = clampJsonUtf8Opt(params.notify.action, WORK_GRAPH_MAX_STRING) ?? null
     const project = clampJsonUtf8Opt(params.notify.project, WORK_GRAPH_MAX_STRING) ?? null
     const agent = clampJsonUtf8Opt(params.notify.agent, WORK_GRAPH_MAX_STRING) ?? null
+    const cause = params.cause
+    const causeMessageId = cause
+        ? clampJsonUtf8(cause.causeMessageId, 256)
+        : null
+    const causeText = cause?.causeText == null
+        ? null
+        : clampJsonUtf8(cause.causeText, WORK_GRAPH_MAX_SUMMARY)
+    const causeKind = cause?.causeKind == null
+        ? null
+        : clampJsonUtf8(cause.causeKind, WORK_GRAPH_MAX_TAG)
     // Audit principal is always session-bound. notify.agent is untrusted
     // self-label text and stays advisory in payload/tags only.
     // Do not nest a full notify_summary copy — duplicating clamped strings
@@ -181,10 +324,18 @@ export function buildWorkAdFromNotify(params: {
             action,
             project,
             agent,
-            messageId: params.messageId
+            messageId: params.messageId,
+            ...(cause && causeMessageId
+                ? {
+                    causeMessageId,
+                    causeText,
+                    causeKind
+                }
+                : {})
         },
         tags: buildTags(params.notify, params.flavor),
         related_session_id: params.sessionId,
+        related_event_id: params.relatedEventId || undefined,
         provenance: 'AGENT_NOTIFY_SUMMARY',
         idempotency_key: `session:${params.sessionId}:message:${params.messageId}:notify`,
         expires_at: params.expiresAt ?? (params.ts + WORK_AD_DEFAULT_TTL_MS),
@@ -220,17 +371,38 @@ export function ingestNotifySummaryFromMessage(input: NotifyIngestInput): Notify
         return null
     }
 
+    // Cause is hub-derived from the full session messages table (no REST 200 cap).
+    const previousWorkAds = listPreviousWorkAds(input.store, input.namespace, input.sessionId)
+    const { cause, previousEventId } = resolveWorkAdCause({
+        messages: input.store.messages.getAllMessages(input.sessionId),
+        previousWorkAds
+    })
+
     const create = buildWorkAdFromNotify({
         sessionId: input.sessionId,
         messageId: input.messageId,
         notify,
         ownerUserId: input.ownerUserId,
         flavor: input.flavor,
-        ts: input.ts
+        ts: input.ts,
+        cause,
+        relatedEventId: previousEventId
     })
 
     try {
-        return input.store.workGraph.insertEvent(input.namespace, create, { ts: input.ts })
+        const result = input.store.workGraph.insertEvent(input.namespace, create, { ts: input.ts })
+        if (result.inserted && previousEventId) {
+            try {
+                input.store.workGraph.insertLink(input.namespace, {
+                    from_event_id: result.event.id,
+                    to_event_id: previousEventId,
+                    relation_type: 'follows'
+                })
+            } catch (error) {
+                if (!(error instanceof WorkGraphNotFoundError)) throw error
+            }
+        }
+        return result
     } catch (error) {
         // Best-effort capture: never break message ingest on ledger bounds.
         if (error instanceof WorkGraphValidationError) {

@@ -279,6 +279,20 @@ export function listWorkGraphEventsByRelatedSession(
     return rows.map(toEvent)
 }
 
+/** Full-session work_ad history for notify-ingest cause resolution (no HTTP list cap). */
+export function listWorkGraphWorkAdsByRelatedSession(
+    db: Database,
+    namespace: string,
+    relatedSessionId: string
+): WorkGraphEvent[] {
+    const rows = db.prepare(`
+        SELECT * FROM events
+        WHERE namespace = ? AND related_session_id = ? AND event_type = 'work_ad'
+        ORDER BY ts ASC, id ASC
+    `).all(namespace, relatedSessionId) as EventRow[]
+    return rows.map(toEvent)
+}
+
 export function insertWorkGraphEventLink(
     db: Database,
     namespace: string,
