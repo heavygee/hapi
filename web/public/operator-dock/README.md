@@ -1,0 +1,15 @@
+# Vendored hapi-inline operator dock
+
+Pinned tag: **v0.10.0**  
+Source: https://github.com/heavygee/hapi-inline/releases/tag/v0.10.0
+
+Files here (`operator-dock.js`, `operator-dock.css`, `vendor/html2canvas.min.js`) are a byte copy of that release. Do not edit them in this repo.
+
+Host wiring (not this folder):
+
+- `hapi-boot.js` — HAPI web init (`appId: hapi-web`, `configUrl: /hapi/config`)
+- `hub/src/web/hapi-inline/` — operator-gated `/hapi` proxy (composed `/operator/sessions`, messages/upload only)
+
+Re-vendor: copy `web/` from the next release-please tag. Drop any local dock fork.
+
+Tracker: https://github.com/heavygee/hapi/issues/120
