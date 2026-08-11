@@ -779,3 +779,10 @@ layers:
   # Tip: 81af5350e (origin/fix/cursor-thinking-flicker-1487) — upstream PR #1503
   - branch: fix/cursor-thinking-flicker-1487
 
+  # tiann/hapi#1506 — @ mention pool excludes path-only husks + sidebar-hidden stubs.
+  # Web-only: require metadata.name / summary title signal in matchSessionsForMention.
+  # Peer-stack Playwright green (1506-session-mention-sidebar-husks.png).
+  # Worktree: ~/coding/hapi/worktrees/mention-sidebar-husks @ fix/session-mention-sidebar-husks
+  # Tip: e4cad280f (origin/fix/session-mention-sidebar-husks)
+  - branch: fix/session-mention-sidebar-husks
+
