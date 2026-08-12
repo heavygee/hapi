@@ -30,6 +30,7 @@ export function formatModelErrorTitle(kind: string): string {
         case 'canceled':              return 'Agent canceled'
         case 'internal':              return 'Internal agent error'
         case 'prompt_failed':         return 'Prompt failed'
+        case 'invalid_argument':      return 'Cursor refused the request'
         case 'unknown_stderr':
         case 'unknown_t_prefix':
         default:                      return 'Model error'
@@ -57,7 +58,9 @@ export function formatModelErrorBody(
         lines.push('Agent claimed completion before this error - work likely INCOMPLETE.')
     }
     lines.push(`${context.agentName} - ${context.sessionName}`)
-    if (notification.transient) {
+    if (notification.kind === 'invalid_argument') {
+        lines.push('Looks like a Cursor / model-route refusal. Retrying the same turn usually fails; trying another model (including leaving auto temporarily) is one option - auto stays the default unless you change it.')
+    } else if (notification.transient) {
         lines.push('(transient)')
     }
     return lines.join('\n')

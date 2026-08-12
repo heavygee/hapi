@@ -68,6 +68,27 @@ describe('classifyCursorAgentMessage', () => {
         expect(result?.transient).toBe(false)
     })
 
+    it('classifies invalid_argument as own non-transient kind (#1522)', () => {
+        // Estate incident + Cursor forum: RetriableError:[invalid_argument] Error
+        // used to fall through unknown_t_prefix; soup catch-all was transient:true
+        // and auto-bridge death-spiraled. Own kind + transient:false stops Continues.
+        const exactWire = 'Error: RetriableError: [invalid_argument] Error'
+        const result = classifyCursorAgentMessage(exactWire)
+        expect(result).not.toBeNull()
+        expect(result?.kind).toBe('invalid_argument')
+        expect(result?.transient).toBe(false)
+        expect(result?.source).toBe('text')
+        expect(result?.raw).toBe(exactWire)
+
+        expect(classifyCursorAgentMessage('Error: T: [invalid_argument] Error')?.kind)
+            .toBe('invalid_argument')
+        expect(classifyCursorAgentMessage('\n\nError: RetriableError: [invalid_argument] Error')?.kind)
+            .toBe('invalid_argument')
+        expect(classifyCursorAgentMessage(
+            "Partial narrative before refuse:\n\nError: RetriableError: [invalid_argument] Error"
+        )?.kind).toBe('invalid_argument')
+    })
+
     it('preserves raw text', () => {
         const raw = 'Error: T: [canceled] something something'
         const result = classifyCursorAgentMessage(raw)
