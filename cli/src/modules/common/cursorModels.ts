@@ -6,6 +6,7 @@ import {
 } from '@hapi/protocol/agentCliSpawnLease';
 import { isAgentAcpTransportActive } from '@/agent/backends/acp/agentCliGuard';
 import { resolveHapiHomeDir } from '@/configuration';
+import { killProcessByChildProcess } from '@/utils/process';
 import { getCursorAcpModelsSnapshot } from '@/cursor/utils/cursorAcpModelsBridge';
 import { getErrorMessage } from './rpcResponses';
 import {
@@ -249,7 +250,7 @@ async function runCursorModelProbe(): Promise<ListCursorModelsResponse> {
 
         const timeout = setTimeout(() => {
             timeoutError = new Error('Cursor model discovery timed out');
-            child.kill('SIGTERM');
+            void killProcessByChildProcess(child, true);
         }, PROBE_TIMEOUT_MS);
 
         child.stdout?.on('data', (chunk) => {

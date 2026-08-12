@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, mkdirSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+    acquireAgentCliSpawnLease,
     acquireAgentCliSpawnLeaseSync,
     getAgentCliSpawnLockTarget,
     releaseAgentCliSpawnLeaseFromAcpRegisterSync,
@@ -42,6 +43,19 @@ describe('agentCliSpawnLease', () => {
         expect(tryAcquireAgentCliSpawnLeaseSync(dir)).toBe(false)
         releaseAgentCliSpawnLeaseSync()
         acquireAgentCliSpawnLeaseSync(dir)
+        releaseAgentCliSpawnLeaseFromAcpRegisterSync()
+    })
+
+    test('async blocking acquire yields while same-process probe holds lease', async () => {
+        expect(tryAcquireAgentCliSpawnLeaseSync(dir)).toBe(true)
+        const acquirePromise = acquireAgentCliSpawnLease(dir)
+        let probeReleased = false
+        setTimeout(() => {
+            releaseAgentCliSpawnLeaseSync()
+            probeReleased = true
+        }, 50)
+        await acquirePromise
+        expect(probeReleased).toBe(true)
         releaseAgentCliSpawnLeaseFromAcpRegisterSync()
     })
 

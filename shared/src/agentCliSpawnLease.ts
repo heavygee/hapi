@@ -86,7 +86,11 @@ export function tryAcquireAgentCliSpawnLeaseSync(hapiHome: string): boolean {
     return claimSpawnLeaseSync(hapiHome)
 }
 
-/** Blocking exclusive lease for ACP transport startup. */
+function sleepMs(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** Blocking exclusive lease for ACP transport startup (sync — tests only). */
 export function acquireAgentCliSpawnLeaseSync(hapiHome: string): void {
     if (acpRegisterLeaseDepth > 0) {
         acpRegisterLeaseDepth += 1
@@ -99,6 +103,24 @@ export function acquireAgentCliSpawnLeaseSync(hapiHome: string): void {
             return
         }
         sleepMsSync(SPAWN_LOCK_RETRY_INTERVAL_MS)
+    }
+
+    throw new Error('agent CLI spawn lease held by another process')
+}
+
+/** Blocking exclusive lease for ACP transport startup (yields event loop between retries). */
+export async function acquireAgentCliSpawnLease(hapiHome: string): Promise<void> {
+    if (acpRegisterLeaseDepth > 0) {
+        acpRegisterLeaseDepth += 1
+        return
+    }
+
+    for (let attempt = 0; attempt < SPAWN_LOCK_MAX_ATTEMPTS; attempt++) {
+        if (claimSpawnLeaseSync(hapiHome)) {
+            acpRegisterLeaseDepth = 1
+            return
+        }
+        await sleepMs(SPAWN_LOCK_RETRY_INTERVAL_MS)
     }
 
     throw new Error('agent CLI spawn lease held by another process')
