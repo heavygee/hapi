@@ -426,6 +426,7 @@ describe('listCursorModels', () => {
     test('does not spawn list-models when ACP marker appears after lease acquire', async () => {
         vi.mocked(isAgentAcpTransportActive)
             .mockReturnValueOnce(false)
+            .mockReturnValueOnce(false)
             .mockReturnValueOnce(true)
         acpProbeMock.runCursorAcpModelProbe.mockResolvedValue({
             success: false,
