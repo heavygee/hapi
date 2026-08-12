@@ -101,20 +101,26 @@ export class AcpStdioTransport {
         // Register before spawn so runner/list-models cannot observe an unlocked
         // window between process creation and lock write (#1472).
         if (this.shouldGuardAgentCli) {
-            registerActiveAcpTransport();
             acquireAgentCliSpawnLeaseSync(resolveHapiHomeDir());
-        }
-
-        try {
+            try {
+                registerActiveAcpTransport();
+                this.process = spawn(
+                    options.command,
+                    options.args ?? [],
+                    buildAcpStdioSpawnOptions(options.env)
+                ) as ChildProcessWithoutNullStreams;
+            } catch (error) {
+                unregisterActiveAcpTransport();
+                throw error;
+            } finally {
+                releaseAgentCliSpawnLeaseFromAcpRegisterSync();
+            }
+        } else {
             this.process = spawn(
                 options.command,
                 options.args ?? [],
                 buildAcpStdioSpawnOptions(options.env)
             ) as ChildProcessWithoutNullStreams;
-        } finally {
-            if (this.shouldGuardAgentCli) {
-                releaseAgentCliSpawnLeaseFromAcpRegisterSync();
-            }
         }
 
         if (this.shouldGuardAgentCli) {
