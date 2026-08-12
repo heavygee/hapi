@@ -68,6 +68,18 @@ describe('model error UI states', () => {
         expect(canShowModelErrorBridge(metadata)).toBe(false)
     })
 
+    it('hides Bridge for non-transient invalid_argument (#1522)', () => {
+        const metadata = holder({
+            ...base,
+            kind: 'invalid_argument',
+            transient: false,
+            rawSnippet: 'Error: RetriableError: [invalid_argument] Error'
+        })
+        expect(getModelErrorUiState(metadata)).toBe('unrecovered')
+        expect(hasUrgentModelError(metadata)).toBe(true)
+        expect(canShowModelErrorBridge(metadata)).toBe(false)
+    })
+
     it('keeps Bridge settling after enqueue until metadata records an outcome', () => {
         const unrecovered = holder(base)
         expect(isBridgeSettling(unrecovered, 'evt-1000')).toBe(true)
