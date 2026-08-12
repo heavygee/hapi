@@ -63,13 +63,12 @@ describe('agentCliGuard', () => {
         expect(isAgentAcpTransportActive()).toBe(false);
     });
 
-    test('acquires spawn lease on register and releases on last unregister', () => {
+    test('does not hold spawn lease for the full register lifetime', () => {
         process.env.HAPI_HOME = testHome;
         registerActiveAcpTransport();
-        expect(tryAcquireAgentCliSpawnLeaseSync(testHome)).toBe(false);
-        unregisterActiveAcpTransport();
         expect(tryAcquireAgentCliSpawnLeaseSync(testHome)).toBe(true);
         releaseAgentCliSpawnLeaseSync();
+        unregisterActiveAcpTransport();
     });
 
     test('keeps cross-process lock until the last transport unregisters', () => {
