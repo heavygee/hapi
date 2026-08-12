@@ -1,8 +1,9 @@
 /**
- * Operator-gated /hapi proxy for the vendored hapi-inline dock (tag v0.10.6).
+ * Operator-gated /hapi proxy for the vendored hapi-inline dock (tag v0.10.7).
  * Hono port of server/node/operator-hapi-proxy.mjs — composed /operator/sessions,
  * messages/upload only, auto-resume on 409 session_inactive. Do not allow-list
- * raw GET /api/sessions.
+ * raw GET /api/sessions. Spawn privilege fields (directory/agent/yolo) are
+ * server-owned (#127/#128).
  */
 import { Hono } from 'hono'
 import {
@@ -13,6 +14,10 @@ import {
     parseOperatorMicPath,
     type ParsedOperatorMicPath
 } from './allowlist'
+
+const OPERATOR_SPAWN_AGENTS = ['claude', 'codex', 'cursor', 'gemini', 'kimi', 'opencode', 'pi'] as const
+export type OperatorSpawnAgent = (typeof OPERATOR_SPAWN_AGENTS)[number]
+const DEFAULT_SPAWN_AGENT: OperatorSpawnAgent = 'cursor'
 
 export type HapiInlineHostConfig = {
     enabled: boolean
@@ -25,6 +30,38 @@ export type HapiInlineHostConfig = {
     session: string
     appId: string
     build: string
+    spawnAgent?: string
+    spawnYolo?: boolean | string
+}
+
+export function normalizeSpawnAgent(raw: unknown): OperatorSpawnAgent {
+    const value = String(raw ?? '').trim().toLowerCase()
+    return (OPERATOR_SPAWN_AGENTS as readonly string[]).includes(value)
+        ? value as OperatorSpawnAgent
+        : DEFAULT_SPAWN_AGENT
+}
+
+export function parseSpawnYolo(raw: unknown, fallback = true): boolean {
+    if (raw == null) return fallback
+    if (typeof raw === 'boolean') return raw
+    const value = String(raw).trim().toLowerCase()
+    if (!value) return fallback
+    if (/^(1|true|yes|on)$/.test(value)) return true
+    if (/^(0|false|no|off)$/.test(value)) return false
+    return fallback
+}
+
+export function buildOperatorSpawnBody(
+    config: Pick<HapiInlineHostConfig, 'projectPath' | 'spawnAgent' | 'spawnYolo'>
+): { directory: string, agent: OperatorSpawnAgent, yolo?: true } | null {
+    const directory = normalizeFsPath(config.projectPath)
+    if (!directory) return null
+    const body: { directory: string, agent: OperatorSpawnAgent, yolo?: true } = {
+        directory,
+        agent: normalizeSpawnAgent(config.spawnAgent)
+    }
+    if (parseSpawnYolo(config.spawnYolo, true)) body.yolo = true
+    return body
 }
 
 export type HapiInlineRouteOptions = {
@@ -45,6 +82,8 @@ function publicConfigBody(config: HapiInlineHostConfig) {
         session: config.session,
         projectPath: config.projectPath,
         machineId: config.machineId,
+        spawnAgent: normalizeSpawnAgent(config.spawnAgent),
+        spawnYolo: parseSpawnYolo(config.spawnYolo, true),
         build: config.build,
         sttUrl: null as string | null
     }
@@ -195,7 +234,13 @@ export function createHapiInlineRoutes(options: HapiInlineRouteOptions): Hono {
                 headers: { ...noStoreHeaders(), 'Content-Type': 'application/json' }
             })
         }
-        const directory = normalizeFsPath(config.projectPath)
+        const spawnBody = buildOperatorSpawnBody(config)
+        if (!spawnBody) {
+            return new Response(JSON.stringify({ error: 'operator spawn not configured' }), {
+                status: 503,
+                headers: { ...noStoreHeaders(), 'Content-Type': 'application/json' }
+            })
+        }
         let name = ''
         try {
             const parsed = await c.req.json()
@@ -203,7 +248,7 @@ export function createHapiInlineRoutes(options: HapiInlineRouteOptions): Hono {
                 name = parsed.name.trim().slice(0, 255)
             }
         } catch {
-            // directory still comes from the server
+            // directory/agent/yolo still come from the server
         }
         const spawnRes = await authedFetch(
             config,
@@ -211,7 +256,7 @@ export function createHapiInlineRoutes(options: HapiInlineRouteOptions): Hono {
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ directory })
+                body: JSON.stringify(spawnBody)
             },
             jwt
         )

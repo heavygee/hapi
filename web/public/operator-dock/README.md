@@ -1,7 +1,7 @@
 # Vendored hapi-inline operator dock
 
-Pinned tag: **v0.10.6**  
-Source: https://github.com/heavygee/hapi-inline/releases/tag/v0.10.6
+Pinned tag: **v0.10.7**  
+Source: https://github.com/heavygee/hapi-inline/releases/tag/v0.10.7
 
 Files here (`operator-dock.js`, `operator-dock.css`, `vendor/html2canvas.min.js`) are a byte copy of that release. Do not edit them in this repo.
 

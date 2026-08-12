@@ -17,7 +17,9 @@ function enabledConfig(overrides: Partial<HapiInlineHostConfig> = {}): HapiInlin
         machineId: MACHINE,
         session: '217719f7-479c-4250-99a6-ee15cbc1c6cc',
         appId: 'hapi-web',
-        build: 'v0.10.6',
+        build: 'v0.10.7',
+        spawnAgent: 'cursor',
+        spawnYolo: true,
         ...overrides
     }
 }
@@ -44,7 +46,22 @@ describe('hapi-inline host routes', () => {
         expect(body.hapiInline.hapiProxy).toBe('/hapi')
         expect(body.hapiInline.projectPath).toBe(PROJECT)
         expect(body.hapiInline.machineId).toBe(MACHINE)
+        expect(body.hapiInline.spawnAgent).toBe('cursor')
+        expect(body.hapiInline.spawnYolo).toBe(true)
         expect(JSON.stringify(body)).not.toContain(SECRET)
+    })
+
+    it('exposes overridden spawnAgent/spawnYolo on public config', async () => {
+        const app = mount(enabledConfig({ spawnAgent: 'claude', spawnYolo: false }), fetch)
+        const body = await (await app.request('/hapi/config')).json() as { hapiInline: Record<string, unknown> }
+        expect(body.hapiInline.spawnAgent).toBe('claude')
+        expect(body.hapiInline.spawnYolo).toBe(false)
+    })
+
+    it('falls unknown spawnAgent back to cursor on public config', async () => {
+        const app = mount(enabledConfig({ spawnAgent: 'not-real' }), fetch)
+        const body = await (await app.request('/hapi/config')).json() as { hapiInline: Record<string, unknown> }
+        expect(body.hapiInline.spawnAgent).toBe('cursor')
     })
 
     it('404s config and proxy when disabled', async () => {
@@ -128,5 +145,56 @@ describe('hapi-inline host routes', () => {
         expect(seen).toHaveLength(1)
         expect(seen[0]).toContain(PROJECT)
         expect(seen[0]).not.toContain('/tmp/evil')
+    })
+
+    it('POST /operator/sessions uses server agent+yolo and ignores client privilege fields', async () => {
+        const seen: unknown[] = []
+        const fetchImpl: typeof fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+            const url = String(input)
+            if (url.endsWith('/api/auth')) {
+                return new Response(JSON.stringify({ token: 'jwt' }), { status: 200 })
+            }
+            if (url.includes('/spawn')) {
+                seen.push(JSON.parse(String(init?.body)))
+                return new Response(JSON.stringify({ type: 'success', sessionId: 'new-sess' }), { status: 200 })
+            }
+            return new Response('no', { status: 500 })
+        }) as typeof fetch
+        const app = mount(enabledConfig(), fetchImpl)
+        const res = await app.request('/hapi/operator/sessions', {
+            method: 'POST',
+            headers: { ...secretHeaders, 'content-type': 'application/json' },
+            body: JSON.stringify({
+                directory: '/tmp/evil',
+                agent: 'claude',
+                yolo: false,
+                name: 'from-dock'
+            })
+        })
+        expect(res.status).toBe(200)
+        expect(seen).toEqual([{ directory: PROJECT, agent: 'cursor', yolo: true }])
+    })
+
+    it('POST /operator/sessions omits yolo when server spawnYolo is false', async () => {
+        const seen: unknown[] = []
+        const fetchImpl: typeof fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+            const url = String(input)
+            if (url.endsWith('/api/auth')) {
+                return new Response(JSON.stringify({ token: 'jwt' }), { status: 200 })
+            }
+            if (url.includes('/spawn')) {
+                seen.push(JSON.parse(String(init?.body)))
+                return new Response(JSON.stringify({ type: 'success', sessionId: 'new-sess' }), { status: 200 })
+            }
+            return new Response('no', { status: 500 })
+        }) as typeof fetch
+        const app = mount(enabledConfig({ spawnAgent: 'claude', spawnYolo: false }), fetchImpl)
+        const res = await app.request('/hapi/operator/sessions', {
+            method: 'POST',
+            headers: { ...secretHeaders, 'content-type': 'application/json' },
+            body: JSON.stringify({ agent: 'cursor', yolo: true })
+        })
+        expect(res.status).toBe(200)
+        expect(seen).toEqual([{ directory: PROJECT, agent: 'claude' }])
     })
 })
