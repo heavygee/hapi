@@ -21,6 +21,7 @@ const IDENTITY_KEYS = [
     'happyHomeDir',
     'happyLibDir',
     'versionHandoffDisabled',
+    'supervisedRestart',
     'startedCliMtimeMs',
     'installedCliMtimeMs',
 ] as const
@@ -77,6 +78,12 @@ export function machineRegistrationNeedsRefresh(existing: unknown, incoming: unk
     if (!capabilitiesEqual(current.capabilities, next.capabilities)) {
         return true
     }
+    // Same for artifact generation: omitted means the live runner is generation-
+    // unaware (or rolled back). Do not keep a stale stored generation that would
+    // suppress fleet skew / auto-upgrade.
+    if (next.cliArtifactGeneration !== current.cliArtifactGeneration) {
+        return true
+    }
     if (next.workspaceRoots !== undefined && !workspaceRootsEqual(current.workspaceRoots, next.workspaceRoots)) {
         return true
     }
@@ -93,9 +100,15 @@ export function mergeMachineRegistrationMetadata(existing: unknown, incoming: un
     const next = asRecord(incoming) ?? {}
     // Start from incoming so omitted identity fields (especially capabilities)
     // do not inherit a prior runner generation's advertisements.
-    const merged: Record<string, unknown> = {
-        ...next,
-        capabilities: sortedCapabilities(next.capabilities),
+    const merged: Record<string, unknown> = { ...next }
+    const caps = sortedCapabilities(next.capabilities)
+    if (caps.length > 0) {
+        merged.capabilities = caps
+    }
+    for (const key of ['supervisedRestart', 'startedCliMtimeMs', 'installedCliMtimeMs', 'cliArtifactGeneration'] as const) {
+        if (!(key in next)) {
+            delete merged[key]
+        }
     }
     if (next.displayName === undefined && current.displayName !== undefined) {
         merged.displayName = current.displayName

@@ -28,7 +28,7 @@ describe('SyncEngine restartMachineRunner', () => {
             const result = await engine.restartMachineRunner('manual-runner', 'default')
             expect(result.type).toBe('error')
             if (result.type === 'error') {
-                expect(result.code).toBe('restart_unsupported')
+                expect(result.code).toBe('restart_unavailable')
             }
             expect(stopRunner).not.toHaveBeenCalled()
         } finally {
@@ -56,6 +56,8 @@ describe('SyncEngine restartMachineRunner', () => {
                     platform: 'linux',
                     happyCliVersion: '0.20.0',
                     supervisedRestart: true,
+                    startedCliMtimeMs: 100,
+                    installedCliMtimeMs: 200,
                 },
                 null,
                 'default'
@@ -65,7 +67,7 @@ describe('SyncEngine restartMachineRunner', () => {
             const result = await engine.restartMachineRunner('supervised-runner', 'default')
             expect(result).toEqual({
                 type: 'success',
-                message: 'Runner stop requested; supervisor will relaunch',
+                message: 'Runner restart requested',
             })
             expect(stopRunner).toHaveBeenCalledWith('supervised-runner')
         } finally {
