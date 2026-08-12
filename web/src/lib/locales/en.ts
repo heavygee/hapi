@@ -401,6 +401,8 @@ export default {
   'runner.skew.upgradeFailed': 'Failed to upgrade runner',
   'runner.skew.alreadyCurrent': 'Runner reports it is already at the hub target',
   'runner.skew.upgradeStarted': 'Upgrade started on the runner',
+  'toast.runnerUpgrade.success.title': 'Runner upgraded',
+  'toast.runnerUpgrade.success.body': 'Machine {host} applied the hub upgrade target.',
   'session.action.delete': 'Delete',
   'session.action.copy': 'Copy',
   'session.action.copyReference': 'Copy reference',

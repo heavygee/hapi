@@ -377,6 +377,8 @@ export default {
   'runner.skew.upgradeFailed': '升级运行器失败',
   'runner.skew.alreadyCurrent': '运行器报告已处于 Hub 目标版本',
   'runner.skew.upgradeStarted': '已在运行器上开始升级',
+  'toast.runnerUpgrade.success.title': '运行器已升级',
+  'toast.runnerUpgrade.success.body': '主机 {host} 已应用 Hub 升级目标。',
   'session.action.delete': '删除',
   'session.action.copy': '复制',
   'session.action.copyReference': '复制引用',
