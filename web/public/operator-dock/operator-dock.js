@@ -1359,10 +1359,15 @@
       return (d && Array.isArray(d.sessions)) ? d.sessions : [];
     });
   }
+  function spawnHubBody() {
+    var body = { directory: cfg.projectPath, agent: cfg.spawnAgent || 'cursor' };
+    if (cfg.spawnYolo !== false) body.yolo = true;
+    return body;
+  }
   function spawnProjectSession(secret, name) {
     if (cfg.mode === MODE_BROWSER_HUB) {
       if (!cfg.machineId || !cfg.projectPath) return Promise.reject(new Error('spawn not configured'));
-      return hapiPost('/api/machines/' + encodeURIComponent(cfg.machineId) + '/spawn', secret, { directory: cfg.projectPath })
+      return hapiPost('/api/machines/' + encodeURIComponent(cfg.machineId) + '/spawn', secret, spawnHubBody())
         .then(function (res) { if (!res.ok) return Promise.reject(res); return res.json(); })
         .then(function (out) {
           var id = out && out.type === 'success' ? out.sessionId : (out && out.id);
@@ -1600,6 +1605,8 @@
         cfg.session = om.session || null;
         cfg.projectPath = om.projectPath || null;
         cfg.machineId = om.machineId || null;
+        cfg.spawnAgent = om.spawnAgent || 'cursor';
+        cfg.spawnYolo = om.spawnYolo !== false;
         cfg.sttUrl = om.sttUrl || '/api/stt';
         if (!cfg.build) cfg.build = om.build || null;
         if (om.appId && cfg.appId === 'unknown-app') cfg.appId = om.appId;
@@ -1636,7 +1643,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.10.6', // x-release-please-version
+    _version: '0.10.7', // x-release-please-version
     openCluster: function () { return openCluster(); },
     _stripRawJsonForDisplay: stripRawJsonForDisplay,
     _summarizeContextJson: summarizeContextJson,

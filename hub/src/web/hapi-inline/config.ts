@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { HapiInlineHostConfig } from './routes'
+import { parseSpawnYolo, type HapiInlineHostConfig } from './routes'
 
-const PINNED_TAG = 'v0.10.6'
+const PINNED_TAG = 'v0.10.7'
 const DEFAULT_PROJECT = '/home/heavygee/coding/hapi'
 
 function env(name: string): string {
@@ -40,6 +40,8 @@ export function loadHapiInlineConfig(): HapiInlineHostConfig {
         machineId: pick('HAPI_INLINE_MACHINE_ID', 'OPERATOR_MIC_MACHINE_ID', settings.machineId ?? ''),
         session: pick('HAPI_INLINE_SESSION', 'OPERATOR_MIC_SESSION'),
         appId: pick('HAPI_INLINE_APP_ID', 'OPERATOR_MIC_APP_ID', 'hapi-web'),
+        spawnAgent: pick('HAPI_INLINE_SPAWN_AGENT', 'OPERATOR_MIC_SPAWN_AGENT', 'cursor'),
+        spawnYolo: parseSpawnYolo(pick('HAPI_INLINE_SPAWN_YOLO', 'OPERATOR_MIC_SPAWN_YOLO', '1'), true),
         build: PINNED_TAG
     }
 }
