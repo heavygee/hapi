@@ -791,6 +791,12 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/operator-hold-chip-ui @ driver/operator-hold-chip
   - branch: driver/operator-hold-chip
 
+  # Thin soup tip: cross-machine provenance doctor (GET /api/doctor/provenance +
+  # `hapi doctor provenance`). Cherry-picked from feat/a2a-p05-peer-provenance @ 08abd0525.
+  # Worktree: ~/coding/hapi/worktrees/doctor-provenance @ driver/doctor-provenance
+  # Tip: 522fe8996
+  - branch: driver/doctor-provenance
+
   # tiann/hapi#1520 / PR #1529 — spawn lease spawn-window only + babysit hardening.
   # Residual post-#1518 check-then-act gap; does not revert #1518.
   # Worktree: ~/coding/hapi/worktrees/list-models-acp-lease
