@@ -9,7 +9,6 @@ export function PwaUpdateBanner({
     stacked = false,
 }: {
     topClassName?: string
-    /** When true, parent owns fixed positioning (share a vertical stack). */
     stacked?: boolean
 } = {}) {
     const { t } = useTranslation()
@@ -21,17 +20,20 @@ export function PwaUpdateBanner({
         return null
     }
 
-    const topClass = topClassName ?? (isOnline
-        ? 'top-[calc(env(safe-area-inset-top)+0.5rem)]'
-        : 'top-[calc(env(safe-area-inset-top)+2.5rem)]')
+    const topClass = stacked
+        ? ''
+        : topClassName ?? (isOnline
+            ? 'top-[calc(env(safe-area-inset-top)+0.5rem)]'
+            : 'top-[calc(env(safe-area-inset-top)+2.5rem)]')
+
     const positionClass = stacked
         ? 'relative w-full'
-        : `fixed left-4 right-4 ${topClass}`
+        : `fixed left-4 right-4 z-50 ${topClass}`
 
     return (
         <div
             data-testid="pwa-update-banner"
-            className={`${positionClass} bg-[var(--app-secondary-bg)] border border-[var(--app-border)] rounded-lg p-4 shadow-lg z-50`}
+            className={`${positionClass} bg-[var(--app-secondary-bg)] border border-[var(--app-border)] rounded-lg p-4 shadow-lg`}
         >
             <div className="flex items-center justify-between gap-3">
                 <div className="flex-1 min-w-0">

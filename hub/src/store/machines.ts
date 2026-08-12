@@ -111,6 +111,29 @@ export class MachineTagConflictError extends Error {
     }
 }
 
+function terminalBootstrapWouldMaskRunner(stored: unknown, incoming: unknown): boolean {
+    const current = isPlainObject(stored) ? stored : null
+    const next = isPlainObject(incoming) ? incoming : null
+    if (!current || !next) {
+        return false
+    }
+    const runnerKeys = [
+        'happyCliVersion',
+        'capabilities',
+        'cliArtifactGeneration',
+        'versionHandoffDisabled',
+        'supervisedRestart',
+        'startedCliMtimeMs',
+        'installedCliMtimeMs',
+    ] as const
+    for (const key of runnerKeys) {
+        if (next[key] !== undefined && JSON.stringify(next[key]) !== JSON.stringify(current[key])) {
+            return true
+        }
+    }
+    return false
+}
+
 export function getOrCreateMachine(
     db: Database,
     id: string,
@@ -220,7 +243,30 @@ export function getOrCreateMachine(
         // (banner/auto-upgrade disappear while the runner socket is stale).
         const isRunnerRegistration = runnerState !== null && runnerState !== undefined
         if (!isRunnerRegistration) {
-            return current
+            if (terminalBootstrapWouldMaskRunner(current.metadata, metadata)) {
+                return current
+            }
+            const merged = mergeMachineMetadata(current.metadata, metadata)
+            if (merged === undefined) {
+                return current
+            }
+            db.prepare(`
+                UPDATE machines
+                SET metadata = @metadata,
+                    metadata_version = metadata_version + 1,
+                    updated_at = @updated_at,
+                    seq = seq + 1
+                WHERE id = @id
+            `).run({
+                metadata: JSON.stringify(merged),
+                updated_at: Date.now(),
+                id
+            })
+            const row = getMachine(db, id)
+            if (!row) {
+                throw new Error('Failed to refresh machine metadata')
+            }
+            return row
         }
 
         // Re-registering runners used to keep stale hub metadata forever

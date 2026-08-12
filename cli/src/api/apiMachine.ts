@@ -60,6 +60,8 @@ import { collectMachineHealth } from '@/utils/machineHealth'
 import { inspectCursorChatStore } from '@/cursor/cursorChatStoreStatus'
 import { homedir } from 'node:os'
 import type { CursorChatStoreStatus } from '@hapi/protocol/apiTypes'
+import type { HubUpgradeOffer, RunnerSelfUpgradeResponse } from '@hapi/protocol/upgradeChannel'
+import { applyRunnerSelfUpgrade } from '@/upgrade/selfUpgrade'
 import { buildMachineMetadata } from '@/agent/sessionFactory'
 import {
     machineRegistrationNeedsRefresh,
@@ -578,6 +580,23 @@ export class ApiMachineClient {
             return { message: 'Runner stop request acknowledged' }
         })
 
+        this.rpcHandlerManager.registerHandler<
+            { offer: HubUpgradeOffer },
+            RunnerSelfUpgradeResponse
+        >(RPC_METHODS.RunnerSelfUpgrade, async (params) => {
+            const offer = params?.offer
+            if (!offer || typeof offer !== 'object') {
+                throw new Error('offer is required')
+            }
+            return await applyRunnerSelfUpgrade({
+                offer,
+                downloadBaseUrl: configuration.apiUrl,
+                authToken: configuration.cliApiToken,
+                requestShutdown: () => {
+                    setTimeout(() => requestShutdown(), 500)
+                },
+            })
+        })
     }
 
     async updateMachineMetadata(handler: (metadata: MachineMetadata | null) => MachineMetadata): Promise<void> {
@@ -808,6 +827,12 @@ export class ApiMachineClient {
     private startKeepAlive(): void {
         this.stopKeepAlive()
         const emitAlive = () => {
+            // Re-register RPCs every heartbeat. Hub restarts clear the in-memory
+            // RpcRegistry; fire-and-forget connect-time registration can be
+            // dropped while this socket keeps sending machine-alive. Without
+            // this, Teemo/proxmox stay "active" with zero machine RPCs until a
+            // full reconnect.
+            this.rpcHandlerManager.reregisterAll()
             this.socket.emit('machine-alive', {
                 machineId: this.machine.id,
                 time: Date.now(),

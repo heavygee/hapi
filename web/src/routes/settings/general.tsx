@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 import { useTranslation, type Locale } from '@/lib/use-translation'
 import { useAppContext } from '@/lib/app-context'
+import { isDefaultNamespaceToken } from '@/lib/tokenNamespace'
 import { useFeatures, usePatchFeatures } from '@/hooks/queries/useFeatures'
 import { CompanionPairing } from '@/components/settings/CompanionPairing'
-import { SettingsChoiceGroup, SettingsPageContent, SettingsSection, SettingsSwitch } from '@/components/settings/SettingsPrimitives'
+import { SettingsChoiceGroup, SettingsLinkRow, SettingsPageContent, SettingsSection, SettingsSwitch } from '@/components/settings/SettingsPrimitives'
 import { disableAllFue, enableAllFue, isFueDisabledGlobally } from '@/lib/use-fue'
 import { queryKeys } from '@/lib/query-keys'
 import { useOperatorDock } from '@/hooks/useOperatorDock'
@@ -30,16 +32,14 @@ function getNamespace(token: string | null): string | null {
 export default function SettingsGeneralPage() {
     const { t, locale, setLocale } = useTranslation()
     const { api, baseUrl, token } = useAppContext()
+    const navigate = useNavigate()
     const queryClient = useQueryClient()
     const isOwner = getNamespace(token) === 'default'
+    const showRunnerManagement = isDefaultNamespaceToken(token)
     const { features } = useFeatures(api)
     const { setGithubPrAwareness, isPending } = usePatchFeatures(api)
     const awareness = features?.githubPrAwareness
     const envPinned = awareness?.source === 'env'
-    // Mirrors the escape hatch on any single FueCallout ("don't show tips
-    // like this again") — this is the same hapi.fue.v1.disabled flag,
-    // surfaced here for operators who want to flip it back on, or who
-    // prefer finding it in Settings over a popover link. See use-fue.ts.
     const [onboardingTipsEnabled, setOnboardingTipsEnabled] = useState(() => !isFueDisabledGlobally())
 
     const hubSettingsQuery = useQuery({
@@ -153,6 +153,15 @@ export default function SettingsGeneralPage() {
                     <CompanionPairing baseUrl={baseUrl} />
                 </div>
             </SettingsSection>
+            {showRunnerManagement ? (
+                <SettingsSection>
+                    <SettingsLinkRow
+                        label={t('settings.runnerMgmt.title')}
+                        description={t('settings.runnerMgmt.linkHint')}
+                        onClick={() => navigate({ to: '/settings/general/runners' })}
+                    />
+                </SettingsSection>
+            ) : null}
         </SettingsPageContent>
     )
 }
