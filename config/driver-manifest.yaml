@@ -784,7 +784,7 @@ layers:
   # Pin v0.10.2 (JS-computed even-arc fan, #112). #123 Settings unlock.
   # Thin soup tip on live driver/integration. Worktree: hapi-inline-web (feat) + hapi-inline-soup (tip).
   # Knock /opmic. Composed /hapi/operator/sessions. Do not allow-list raw GET /api/sessions.
-  # Tip: (pending soup commit) driver/hapi-inline-operator-dock
+  # Tip: e104b310e (driver/hapi-inline-operator-dock)
   - branch: driver/hapi-inline-operator-dock
 
   # heavygee/hapi#121 — operator-hold chip pulse (🛑 needs_operator / babysit.hold).
