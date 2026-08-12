@@ -1,4 +1,9 @@
 import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptions } from 'node:child_process';
+import {
+    acquireAgentCliSpawnLeaseSync,
+    releaseAgentCliSpawnLeaseFromAcpRegisterSync
+} from '@hapi/protocol/agentCliSpawnLease';
+import { resolveHapiHomeDir } from '@/configuration';
 import { logger } from '@/ui/logger';
 import { killProcessByChildProcess } from '@/utils/process';
 import { GEMINI_MODEL_PRESETS } from '@hapi/protocol';
@@ -97,13 +102,20 @@ export class AcpStdioTransport {
         // window between process creation and lock write (#1472).
         if (this.shouldGuardAgentCli) {
             registerActiveAcpTransport();
+            acquireAgentCliSpawnLeaseSync(resolveHapiHomeDir());
         }
 
-        this.process = spawn(
-            options.command,
-            options.args ?? [],
-            buildAcpStdioSpawnOptions(options.env)
-        ) as ChildProcessWithoutNullStreams;
+        try {
+            this.process = spawn(
+                options.command,
+                options.args ?? [],
+                buildAcpStdioSpawnOptions(options.env)
+            ) as ChildProcessWithoutNullStreams;
+        } finally {
+            if (this.shouldGuardAgentCli) {
+                releaseAgentCliSpawnLeaseFromAcpRegisterSync();
+            }
+        }
 
         if (this.shouldGuardAgentCli) {
             const childPid = typeof this.process.pid === 'number' ? this.process.pid : null;

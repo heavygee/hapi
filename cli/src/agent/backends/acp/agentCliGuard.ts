@@ -9,7 +9,6 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import {
-    acquireAgentCliSpawnLeaseSync,
     releaseAgentCliSpawnLeaseFromAcpRegisterSync,
     _resetAgentCliSpawnLeaseForTests
 } from '@hapi/protocol/agentCliSpawnLease';
@@ -21,9 +20,10 @@ import { resolveHapiHomeDir } from '@/configuration';
  * child (SIGTERM / exit 143) and crashes the remote session.
  *
  * In-process ref counting covers RPC handlers in the same process; a HAPI_HOME
- * lock directory covers runner vs session child processes. A proper-lockfile
- * spawn lease (`locks/agent-cli.spawn`) covers atomic mutual exclusion before
- * any `agent` child starts (#1520).
+ * lock directory covers runner vs session child processes. The proper-lockfile
+ * spawn lease (`locks/agent-cli.spawn`) is held only around `spawn('agent')`
+ * in AcpStdioTransport and during list-models probes — not for the full session
+ * (#1520; multi-session ACP must remain possible).
  *
  * Prefer recording the ACP child PID (not only the HAPI host PID) so stale
  * cleanup and logs attribute the real `agent` process. Register the lock
@@ -343,9 +343,6 @@ function clearStaleAcpLockIfNeeded(): void {
  */
 export function registerActiveAcpTransport(options?: AgentAcpGuardPidOptions): void {
     activeAcpTransportCount += 1;
-    if (activeAcpTransportCount === 1) {
-        acquireAgentCliSpawnLeaseSync(resolveHapiHomeDir());
-    }
     const lockDir = getAcpLockDir();
     const childPid = normalizePid(options?.childPid);
     try {
@@ -388,23 +385,16 @@ export function recordActiveAcpChildPid(childPid: number): void {
 }
 
 export function unregisterActiveAcpTransport(options?: AgentAcpGuardPidOptions): void {
-    const wasLastTransport = activeAcpTransportCount <= 1;
     activeAcpTransportCount = Math.max(0, activeAcpTransportCount - 1);
 
     const lockDir = getAcpLockDir();
     if (!existsSync(lockDir)) {
-        if (wasLastTransport) {
-            releaseAgentCliSpawnLeaseFromAcpRegisterSync();
-        }
         return;
     }
 
     if (isLegacyLock(lockDir)) {
         if (activeAcpTransportCount <= 0) {
             removeAcpLockDir();
-        }
-        if (wasLastTransport) {
-            releaseAgentCliSpawnLeaseFromAcpRegisterSync();
         }
         return;
     }
@@ -421,10 +411,6 @@ export function unregisterActiveAcpTransport(options?: AgentAcpGuardPidOptions):
         reconcileRefcountLock(lockDir);
     } catch {
         // Best effort.
-    }
-
-    if (wasLastTransport) {
-        releaseAgentCliSpawnLeaseFromAcpRegisterSync();
     }
 }
 
