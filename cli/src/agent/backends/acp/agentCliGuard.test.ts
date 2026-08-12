@@ -13,6 +13,11 @@ import {
     registerActiveAcpTransport,
     unregisterActiveAcpTransport
 } from './agentCliGuard';
+import {
+    releaseAgentCliSpawnLeaseFromAcpRegisterSync,
+    releaseAgentCliSpawnLeaseSync,
+    tryAcquireAgentCliSpawnLeaseSync
+} from '@hapi/protocol/agentCliSpawnLease';
 
 const testHome = join(tmpdir(), `hapi-agent-cli-guard-${process.pid}`);
 
@@ -56,6 +61,15 @@ describe('agentCliGuard', () => {
         expect(isAgentAcpTransportActive()).toBe(true);
         unregisterActiveAcpTransport();
         expect(isAgentAcpTransportActive()).toBe(false);
+    });
+
+    test('acquires spawn lease on register and releases on last unregister', () => {
+        process.env.HAPI_HOME = testHome;
+        registerActiveAcpTransport();
+        expect(tryAcquireAgentCliSpawnLeaseSync(testHome)).toBe(false);
+        unregisterActiveAcpTransport();
+        expect(tryAcquireAgentCliSpawnLeaseSync(testHome)).toBe(true);
+        releaseAgentCliSpawnLeaseSync();
     });
 
     test('keeps cross-process lock until the last transport unregisters', () => {
