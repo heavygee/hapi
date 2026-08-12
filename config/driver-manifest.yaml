@@ -797,11 +797,9 @@ layers:
   # Tip: 522fe8996
   - branch: driver/doctor-provenance
 
-  # tiann/hapi#1520 / PR #1529 — spawn lease spawn-window only + babysit hardening.
-  # Residual post-#1518 check-then-act gap; does not revert #1518.
-  # Worktree: ~/coding/hapi/worktrees/list-models-acp-lease
-  # Tip: f4a1a1a92 (origin/fix/list-models-acp-overlap-1520) — dogfood max-paranoia 2026-08-12
-  - branch: fix/list-models-acp-overlap-1520
+  # DROPPED 2026-08-12: fix/list-models-acp-overlap-1520 MERGED UPSTREAM as PR #1529 (Fixes #1520)
+  # Worktree removed: ~/coding/hapi/worktrees/list-models-acp-lease
+  # - branch: fix/list-models-acp-overlap-1520
 
   # tiann/hapi#1522 — invalid_argument own kind + non-transient bridge gate.
   # Soup tip: shared classifier (estate death spiral was transient:true catch-all).
