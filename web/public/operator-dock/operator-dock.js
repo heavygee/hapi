@@ -745,10 +745,6 @@
       hideRecordLabel();
       setBtnState('markup');
     }
-    if (hasNativeHost() && dock) {
-      var ob = dock.querySelector('.opdock-btn');
-      if (ob) ob.style.display = 'none';
-    }
   }
 
   // Live feedback that speech is being captured (driven by the web recognizer or a native host).
@@ -1582,10 +1578,10 @@
     dock.appendChild(btn);
     document.body.appendChild(dock);
     ready = true;
-    // Native FAB (AndroidOperator) is the only mic button — hide in-page FAB; cluster satellites stay.
+    // #121: native FAB owns mic STT only — keep H hub; hide in-page mic satellite.
     if (hasNativeHost()) {
-      var nb = dock.querySelector('.opdock-btn');
-      if (nb) nb.style.display = 'none';
+      var micSat = dock.querySelector('.opdock-sat[data-tool="mic"]');
+      if (micSat) micSat.style.display = 'none';
     }
   }
 
@@ -1642,7 +1638,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.10.4', // x-release-please-version
+    _version: '0.10.5', // x-release-please-version
     openCluster: function () { return openCluster(); },
     _stripRawJsonForDisplay: stripRawJsonForDisplay,
     _summarizeContextJson: summarizeContextJson,
@@ -1677,10 +1673,10 @@
       }
     },
     hideButton: function () {
-      // Hide the in-page FAB only. Native hosts own the hub chrome; #104 keeps STT on native.
+      // #121: legacy Android probe calls this after isReady. Hide mic sat only — hub stays.
       if (dock) {
-        var btn = dock.querySelector('.opdock-btn');
-        if (btn) btn.style.display = 'none';
+        var micSat = dock.querySelector('.opdock-sat[data-tool="mic"]');
+        if (micSat) micSat.style.display = 'none';
       }
     },
   };
