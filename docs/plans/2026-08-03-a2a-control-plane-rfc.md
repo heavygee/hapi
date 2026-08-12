@@ -1,9 +1,9 @@
 # RFC: HAPI Agent-to-Agent (A2A) Control Plane
 
 > **Status:** draft proposal for upstream discussion
-> **Date:** 2026-08-03 (revised 2026-08-04; **Layer 0 peer provenance 2026-08-09**)
+> **Date:** 2026-08-03 (revised 2026-08-04; **Layer 0 peer provenance 2026-08-09; spawn-with-remit + live pressure test 2026-08-12**)
 > **Authors:** @heavygee (with community review requested)
-> **Related:** [Discussion #1258](https://github.com/tiann/hapi/discussions/1258), [Discussion #1332](https://github.com/tiann/hapi/discussions/1332), [#1195](https://github.com/tiann/hapi/pull/1195), [#1228](https://github.com/tiann/hapi/pull/1228), [#803](https://github.com/tiann/hapi/pull/803), [#1203](https://github.com/tiann/hapi/issues/1203), [#1370](https://github.com/tiann/hapi/issues/1370), [#1371](https://github.com/tiann/hapi/issues/1371)
+> **Related:** [Discussion #1258](https://github.com/tiann/hapi/discussions/1258), [Discussion #1332](https://github.com/tiann/hapi/discussions/1332), [#1195](https://github.com/tiann/hapi/pull/1195), [#1228](https://github.com/tiann/hapi/pull/1228), [#803](https://github.com/tiann/hapi/pull/803), [#1203](https://github.com/tiann/hapi/issues/1203), [#1509](https://github.com/tiann/hapi/issues/1509), [#1370](https://github.com/tiann/hapi/issues/1370), [#1371](https://github.com/tiann/hapi/issues/1371)
 
 ---
 
