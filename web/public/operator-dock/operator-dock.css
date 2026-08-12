@@ -3,14 +3,15 @@
 
 .opdock {
   position: fixed;
-  right: max(16px, env(safe-area-inset-right));
-  bottom: max(16px, env(safe-area-inset-bottom));
+  /* #107: flush bottom-right so HAPI composer Send stays clear. Safe-area alone (0 when absent). */
+  right: env(safe-area-inset-right, 0px);
+  bottom: env(safe-area-inset-bottom, 0px);
   z-index: 2147483000; /* above app chrome, below browser dialogs */
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 8px;
-  pointer-events: none; /* only the button is interactive */
+  pointer-events: none; /* only the button / open fan plate are interactive */
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
@@ -228,7 +229,7 @@
 .opdock-msg--agent .opdock-msg-text { background: rgba(124, 58, 237, 0.16); padding: 8px 10px; border-radius: 8px; }
 .opdock-msg--user .opdock-msg-text { color: #cbd5e1; }
 
-/* --- tool cluster (#105) -------------------------------------------------------------- */
+/* --- tool cluster (#105 / #107 click-toggle) ----------------------------------------- */
 .opdock-cluster {
   position: absolute;
   right: 0;
@@ -258,29 +259,18 @@
   z-index: 1;
 }
 .opdock-sat svg { display: block; }
-.opdock--cluster-open .opdock-sat,
-.opdock--cluster-open .opdock-cluster { pointer-events: auto; }
-.opdock--cluster-open .opdock-sat { opacity: 1; }
+/* #107: expanded footprint is a continuous hit plate (hub + tools + gaps). No hover-open. */
+.opdock--cluster-open .opdock-cluster {
+  width: 152px;
+  height: 152px;
+  pointer-events: auto;
+  background: rgba(15, 17, 23, 0.02);
+}
+.opdock--cluster-open .opdock-sat { pointer-events: auto; opacity: 1; }
 .opdock--cluster-open .opdock-sat[data-tool="settings"] { transform: translate(-72px, 4px) scale(1); }
 .opdock--cluster-open .opdock-sat[data-tool="markup"] { transform: translate(-64px, -56px) scale(1); }
 .opdock--cluster-open .opdock-sat[data-tool="sessions"] { transform: translate(-12px, -78px) scale(1); }
 .opdock--cluster-open .opdock-sat[data-tool="mic"] { transform: translate(-78px, -20px) scale(1); }
-
-@media (hover: hover) and (pointer: fine) {
-  .opdock:hover .opdock-sat,
-  .opdock:focus-within .opdock-sat {
-    pointer-events: auto;
-    opacity: 1;
-  }
-  .opdock:hover .opdock-sat[data-tool="settings"],
-  .opdock:focus-within .opdock-sat[data-tool="settings"] { transform: translate(-72px, 4px) scale(1); }
-  .opdock:hover .opdock-sat[data-tool="markup"],
-  .opdock:focus-within .opdock-sat[data-tool="markup"] { transform: translate(-64px, -56px) scale(1); }
-  .opdock:hover .opdock-sat[data-tool="sessions"],
-  .opdock:focus-within .opdock-sat[data-tool="sessions"] { transform: translate(-12px, -78px) scale(1); }
-  .opdock:hover .opdock-sat[data-tool="mic"],
-  .opdock:focus-within .opdock-sat[data-tool="mic"] { transform: translate(-78px, -20px) scale(1); }
-}
 
 .opdock-sheet {
   pointer-events: auto;
