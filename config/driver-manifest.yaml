@@ -803,3 +803,10 @@ layers:
   # Tip: f4a1a1a92 (origin/fix/list-models-acp-overlap-1520) — dogfood max-paranoia 2026-08-12
   - branch: fix/list-models-acp-overlap-1520
 
+  # tiann/hapi#1522 — invalid_argument own kind + non-transient bridge gate.
+  # Soup tip: shared classifier (estate death spiral was transient:true catch-all).
+  # Upstream stack: heavygee/hapi#125 on feat/cursor-detect-inline-model-errors (#987).
+  # Worktree: ~/coding/hapi/worktrees/invalid-arg-soup
+  # Tip: 61a5fef13 (origin/driver/invalid-argument-bridge-gate)
+  - branch: driver/invalid-argument-bridge-gate
+
