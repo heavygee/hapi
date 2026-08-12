@@ -25,7 +25,6 @@ export interface Settings {
     corsOrigins?: string[]
     /** Opt-in GitHub PR awareness for sessions. Default off. */
     githubPrAwareness?: boolean
-    fleetUpgradePolicy?: string
     /** Per-hub relay auth key issued by the relay server (/issue) */
     relayAuthKey?: string
     /**
