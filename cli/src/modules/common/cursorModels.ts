@@ -207,10 +207,11 @@ export function parseCursorModelsOutput(output: string): {
 }
 
 async function runCursorModelProbe(): Promise<ListCursorModelsResponse> {
-    if (isAgentAcpTransportActive()) {
+    if (!tryAcquireAgentCliSpawnLeaseSync(resolveHapiHomeDir())) {
         throw new Error('Cursor ACP transport is active');
     }
-    if (!tryAcquireAgentCliSpawnLeaseSync(resolveHapiHomeDir())) {
+    if (isAgentAcpTransportActive()) {
+        releaseAgentCliSpawnLeaseSync();
         throw new Error('Cursor ACP transport is active');
     }
 
