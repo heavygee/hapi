@@ -230,7 +230,7 @@ What it does, idempotently:
 
 | Emoji / status | Meaning | Advice pinged |
 |----------------|---------|---------------|
-| ✅ `clean` | open PR, CI green, 0 **current** unresolved threads, bot clean, mergeable | wait on tiann |
+| ✅ `clean` | open PR, CI green, 0 **current** unresolved threads, bot clean, mergeable | **chip.repo**-aware: `tiann/hapi` → wait on tiann (lane A) or self-merge (lane B); **`heavygee/hapi` fork** → wait on Meta/operator (never "wait on tiann") |
 | 🔁 `pending` | CI/bot in flight, or thread/CI data momentarily unavailable | wait / retry |
 | ⚠️ `needs_work` | failing CI, **current** open threads, bot findings, rebase, or **closed-unmerged** | fix per action string |
 | 📝 `pre_pr` | tracked number, no open PR upstream yet | file when ready |
@@ -238,7 +238,7 @@ What it does, idempotently:
 | 🧹 `complete` | fully cleaned (layer DROPPED, no worktree/branch, session archived) | **never** (babysit ended) |
 | `?` `unknown` | GitHub data unavailable this run | **chip left at last good status; never pinged** |
 
-Chip thread count excludes GraphQL `isOutdated` unresolved threads (#847: leftover bot Majors on old lines must not keep ⚠️ after Findings:None + green CI on tip). Mid-hour, a green tip can still show cached ⚠️ until the :00 classify; peers should cite `hapi-pr-status` / live `hapi-pr-emoji-batch`, not sit on the stale chip.
+Chip thread count excludes GraphQL `isOutdated` unresolved threads (#847: leftover bot Majors on old lines must not keep ⚠️ after Findings:None + green CI on tip). Mid-hour, a green tip can still show cached ⚠️ until the :00 classify; peers should cite `hapi-pr-status` / live `hapi-pr-emoji-batch`, not sit on the stale chip. Classify is **per `chip.repo`** (2026-08-11): fork numbers must not inherit tiann lane-A copy (`wait on tiann` on a heavygee-only overseer PR is a bug).
 
 **Ping policy (why it isn't spam for greens, but is a rouse for work):** on **hourly ping windows** (Europe/London :00), Meta **always** pings sticky ⚠️ / 🔧 sessions — "are you done yet?" — including **inactive and archived** ones (`hapi-ping-peer` resumes them). Chip says work is owed; archive is not a skip. **Skip only if `session.thinking`** (in a turn / emitting — not merely `active=true`). **Exception (2026-08-11):** 🔧 whose remainder is only **Gate A clean / archive pending** is **not** pinged — resume undoes archive (`not_archived`) and the chip flips 🧹→🔧 forever (`e4d152f3`). Meta archives those from outside. ✅ / 🔁 / 📝 only ping on an emoji **transition** (first sight / state change), never on every window. 🧹 / `?` **never** ping (incl. 🔧→🧹). Once 🧹, a later resume must **not** demote the chip. Manual `--no-ping` never pings. State lives at `${XDG_STATE_HOME:-~/.local/state}/hapi/meta-daily.json`. Classifier / sticky 🔧 pings already mention exit reflection; **human Meta briefs must too** — use the paste block below (do not invent "stand down / archive now").
 

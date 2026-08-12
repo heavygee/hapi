@@ -142,10 +142,28 @@ pmp_classify() {
     return 0
 }
 
-# pmp_action_for_lane LANE → statusAction fragment for clean PRs
+# pmp_action_for_lane LANE [REPO]
+# → statusAction fragment for clean PRs. REPO defaults to $REPO or tiann/hapi.
+# Fork chips (heavygee/hapi) must NOT say "wait on tiann" — there is no
+# upstream PR; Meta/operator merges the fork stack.
 pmp_action_for_lane() {
-    case "$1" in
-        self_merge) echo "full green - self-merge eligible (low-impact)" ;;
-        *) echo "full green - wait on tiann" ;;
+    local lane="$1" repo="${2:-${REPO:-tiann/hapi}}"
+    local fork=0
+    [[ "$repo" != "tiann/hapi" ]] && fork=1
+    case "$lane" in
+        self_merge)
+            if [[ "$fork" -eq 1 ]]; then
+                echo "full green - Meta/operator may merge (fork)"
+            else
+                echo "full green - self-merge eligible (low-impact)"
+            fi
+            ;;
+        *)
+            if [[ "$fork" -eq 1 ]]; then
+                echo "full green - wait on Meta/operator (fork)"
+            else
+                echo "full green - wait on tiann"
+            fi
+            ;;
     esac
 }
