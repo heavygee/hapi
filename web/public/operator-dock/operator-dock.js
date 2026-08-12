@@ -1786,7 +1786,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.11.3', // x-release-please-version
+    _version: '0.11.4', // x-release-please-version
     openCluster: function () { return openCluster(); },
     _stripRawJsonForDisplay: stripRawJsonForDisplay,
     _summarizeContextJson: summarizeContextJson,
