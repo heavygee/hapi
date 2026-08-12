@@ -808,7 +808,8 @@ layers:
   # Tip: d459caffb (origin/driver/invalid-argument-bridge-gate)
   - branch: driver/invalid-argument-bridge-gate
 
-  # heavygee/hapi#122 — fleet runner self-upgrade (#1108 fat follow-on; fork soup, not upstream yet).
+  # heavygee/hapi#122 — fleet runner self-upgrade (fat follow-on to thin upstream merge; fork soup).
+  # NOT tiann PR 1108 scope — do not attribute this layer to chip 1108 (Meta mw_manifest_pr_layer_active).
   # Soup union: driver/fleet-runner-upgrade (merged onto live soup tip).
   # Upstream PR branch: estate/fleet-runner-upgrade @ upstream/main (cooling off).
   # Worktree: ~/coding/hapi/worktrees/estate-fleet-runner-upgrade
