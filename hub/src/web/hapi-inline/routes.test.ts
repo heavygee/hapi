@@ -17,7 +17,7 @@ function enabledConfig(overrides: Partial<HapiInlineHostConfig> = {}): HapiInlin
         machineId: MACHINE,
         session: '217719f7-479c-4250-99a6-ee15cbc1c6cc',
         appId: 'hapi-web',
-        build: 'v0.11.1',
+        build: 'v0.11.2',
         spawnAgent: 'cursor',
         spawnYolo: true,
         ...overrides
