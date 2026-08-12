@@ -134,7 +134,7 @@ export class AcpSdkBackend implements AgentBackend {
     async initialize(): Promise<void> {
         if (this.transport) return;
 
-        this.transport = new AcpStdioTransport({
+        this.transport = await AcpStdioTransport.create({
             command: this.options.command,
             args: this.options.args,
             env: this.options.env
