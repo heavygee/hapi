@@ -71,6 +71,9 @@
   function pinnedSessionKey() {
     return 'hapiInline.pinnedSession.' + ((cfg && cfg.appId) || 'unknown-app');
   }
+  function pinnedSessionLabelKey() {
+    return 'hapiInline.pinnedSessionLabel.' + ((cfg && cfg.appId) || 'unknown-app');
+  }
   function getRoutingMode() {
     try {
       var raw = localStorage.getItem(routingModeKey());
@@ -90,11 +93,45 @@
     } catch (e) {}
     return (cfg && cfg.session) || null;
   }
-  function setPinnedSession(id) {
+  function getPinnedSessionLabel() {
     try {
-      if (id) localStorage.setItem(pinnedSessionKey(), String(id));
-      else localStorage.removeItem(pinnedSessionKey());
+      var label = (localStorage.getItem(pinnedSessionLabelKey()) || '').trim();
+      if (label) return label;
     } catch (e) {}
+    return null;
+  }
+  function setPinnedSession(id, label) {
+    try {
+      if (id) {
+        localStorage.setItem(pinnedSessionKey(), String(id));
+        if (label) localStorage.setItem(pinnedSessionLabelKey(), String(label));
+        else localStorage.removeItem(pinnedSessionLabelKey());
+      } else {
+        localStorage.removeItem(pinnedSessionKey());
+        localStorage.removeItem(pinnedSessionLabelKey());
+      }
+    } catch (e) {}
+  }
+  function shortSessionId(id) {
+    return id && id.length > 8 ? id.slice(0, 8) : (id || '');
+  }
+  function resolvePinnedLabel(secret) {
+    var id = getPinnedSession();
+    if (!id) return Promise.resolve(null);
+    var cached = getPinnedSessionLabel();
+    if (!secret) return Promise.resolve(cached || shortSessionId(id));
+    return listProjectSessions(secret).then(function (sessions) {
+      for (var i = 0; i < sessions.length; i++) {
+        if (sessions[i].id === id) {
+          var name = sessions[i].name || shortSessionId(id);
+          setPinnedSession(id, name);
+          return name;
+        }
+      }
+      return cached || shortSessionId(id);
+    }).catch(function () {
+      return cached || shortSessionId(id);
+    });
   }
 
   function toast(msg, kind) {
@@ -1509,6 +1546,8 @@
   }
   function openCluster() {
     if (!ready || !dock) return false;
+    // #143: never fan tools behind an open sheet.
+    closeToolSheet();
     var cluster = dock.querySelector('.opdock-cluster');
     applyFanGeometry(cluster);
     dock.classList.add('opdock--cluster-open');
@@ -1518,8 +1557,15 @@
   }
   function onHubClick() {
     if (longPressFired) { longPressFired = false; return; }
+    // #143: open tool sheet → first H dismisses sheet only (no fan on that click).
+    if (toolSheet) {
+      closeToolSheet();
+      if (dock.classList.contains('opdock--cluster-open')) closeCluster();
+      return;
+    }
     // #115: hub always toggles the fan (markup + mic). Mic satellite starts/stops record.
     // Click-toggle fan for all pointers — no hover-open / hover-close (#107).
+    // #144: hub stays above fan hit plate (CSS z-index) so retract always works.
     if (dock.classList.contains('opdock--cluster-open')) closeCluster();
     else openCluster();
   }
@@ -1542,12 +1588,31 @@
       inp.name = 'opdock-routing';
       inp.value = mode;
       inp.checked = getRoutingMode() === mode;
-      inp.addEventListener('change', function () { setRoutingMode(mode); });
+      inp.addEventListener('change', function () {
+        // Radios persist instantly (selected state is enough — #139).
+        setRoutingMode(mode);
+        // #141: pick must manifest immediately (even if a pin already exists).
+        if (mode === 'pick') openSessionPicker();
+      });
       lab.appendChild(inp);
       lab.appendChild(document.createTextNode(mode === 'spawn-per-send' ? 'spawn per send' : mode));
       toolSheet.appendChild(lab);
     });
-    toolSheet.appendChild($('div', 'opdock-session-meta', 'Pinned: ' + (getPinnedSession() || cfg.session || '(none)')));
+    toolSheet.appendChild($('div', 'opdock-session-meta',
+      'pin / spawn apply on send · pick opens the session list now (and on send if unset)'));
+    var pinnedId = getPinnedSession() || cfg.session || null;
+    var pinnedLine = $('div', 'opdock-session-meta',
+      'Pinned: ' + (getPinnedSessionLabel() || (pinnedId ? shortSessionId(pinnedId) : '(none)')));
+    if (pinnedId) pinnedLine.title = pinnedId;
+    toolSheet.appendChild(pinnedLine);
+    var secretForLabel = getSecret();
+    if (secretForLabel && pinnedId) {
+      resolvePinnedLabel(secretForLabel).then(function (label) {
+        if (!toolSheet || !pinnedLine.isConnected) return;
+        pinnedLine.textContent = 'Pinned: ' + (label || shortSessionId(pinnedId));
+        pinnedLine.title = pinnedId;
+      });
+    }
     toolSheet.appendChild($('h3', null, 'Credential'));
     var secInp = document.createElement('input');
     secInp.type = 'password';
@@ -1555,9 +1620,16 @@
     secInp.setAttribute('autocomplete', 'off');
     secInp.placeholder = getSecret() ? 'Saved — paste to replace' : 'Paste gate secret';
     toolSheet.appendChild(secInp);
-    var secBtn = $('button', 'opdock-btn2 opdock-send', 'Save secret');
+    // #139: Done is always primary dismiss; credential is secondary and never owns routing exit.
+    var actions = $('div', 'opdock-actions');
+    var doneBtn = $('button', 'opdock-btn2 opdock-send', 'Done');
+    doneBtn.addEventListener('click', function () { closeToolSheet(); });
+    var hasSecret = !!getSecret();
+    var secBtn = $('button', 'opdock-btn2 opdock-secondary', hasSecret ? 'Update secret' : 'Save secret');
     secBtn.addEventListener('click', function () { saveProbedSecret(secInp.value, secBtn); });
-    toolSheet.appendChild(secBtn);
+    actions.appendChild(doneBtn);
+    actions.appendChild(secBtn);
+    toolSheet.appendChild(actions);
     dock.appendChild(toolSheet);
   }
   function openSessionPicker() {
@@ -1570,6 +1642,11 @@
     var list = $('div');
     list.appendChild($('div', 'opdock-session-meta', 'Loading…'));
     toolSheet.appendChild(list);
+    var actions = $('div', 'opdock-actions');
+    var doneBtn = $('button', 'opdock-btn2 opdock-send', 'Done');
+    doneBtn.addEventListener('click', function () { closeToolSheet(); });
+    actions.appendChild(doneBtn);
+    toolSheet.appendChild(actions);
     dock.appendChild(toolSheet);
     listProjectSessions(secret).then(function (sessions) {
       list.textContent = '';
@@ -1584,13 +1661,16 @@
         if (!s.unread) unread.hidden = true;
         row.appendChild(unread);
         var body = $('div');
-        body.appendChild($('div', null, s.name || s.id));
+        var title = s.name || shortSessionId(s.id);
+        var titleEl = $('div', null, title);
+        if (s.id) titleEl.title = s.id;
+        body.appendChild(titleEl);
         var meta = (s.active ? 'active' : 'idle') + (s.flavor ? ' · ' + s.flavor : '');
         if (s.updatedAt) meta += ' · ' + new Date(s.updatedAt).toLocaleString();
         body.appendChild($('div', 'opdock-session-meta', meta));
         row.appendChild(body);
         row.addEventListener('click', function () {
-          setPinnedSession(s.id);
+          setPinnedSession(s.id, s.name || shortSessionId(s.id));
           cfg.session = s.id;
           closeToolSheet();
           closeCluster();
@@ -1706,7 +1786,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.11.2', // x-release-please-version
+    _version: '0.11.3', // x-release-please-version
     openCluster: function () { return openCluster(); },
     _stripRawJsonForDisplay: stripRawJsonForDisplay,
     _summarizeContextJson: summarizeContextJson,

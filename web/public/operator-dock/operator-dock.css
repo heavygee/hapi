@@ -16,6 +16,9 @@
 }
 
 .opdock-btn {
+  /* #144: stay above open fan hit plate so H always toggles retract */
+  position: relative;
+  z-index: 2;
   pointer-events: auto;
   width: 56px;
   height: 56px;
@@ -170,6 +173,9 @@
 .opdock-actions { display: flex; justify-content: flex-start; flex-wrap: wrap; gap: 10px; }
 .opdock-btn2 { border: none; cursor: pointer; font-size: 15px; font-weight: 600; padding: 10px 20px; border-radius: 10px; }
 .opdock-cancel { background: rgba(255, 255, 255, 0.14); color: #e5e7eb; }
+/* #139: secondary credential CTA next to primary Done */
+.opdock-secondary { background: rgba(255, 255, 255, 0.14); color: #e5e7eb; }
+.opdock-secondary:hover { background: rgba(255, 255, 255, 0.22); }
 .opdock-send { background: #6b21a8; color: #fff; }
 .opdock-send:hover { background: #7c3aed; }
 .opdock-send:disabled { opacity: 0.45; cursor: not-allowed; }
