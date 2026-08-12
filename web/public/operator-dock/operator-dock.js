@@ -1578,11 +1578,9 @@
     dock.appendChild(btn);
     document.body.appendChild(dock);
     ready = true;
-    // #121: native FAB owns mic STT only — keep H hub; hide in-page mic satellite.
-    if (hasNativeHost()) {
-      var micSat = dock.querySelector('.opdock-sat[data-tool="mic"]');
-      if (micSat) micSat.style.display = 'none';
-    }
+    // #124: native host ≠ hide mic sat. AndroidOperator is a bridge (STT / PixelCopy),
+    // not chrome ownership. Native FAB may be hub (QAR openCluster) or mic (Jessica).
+    // Hosts that own mic chrome call hideButton() (or CSS-hide the sat).
   }
 
   function init(options) {
@@ -1638,7 +1636,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.10.5', // x-release-please-version
+    _version: '0.10.6', // x-release-please-version
     openCluster: function () { return openCluster(); },
     _stripRawJsonForDisplay: stripRawJsonForDisplay,
     _summarizeContextJson: summarizeContextJson,
@@ -1673,7 +1671,7 @@
       }
     },
     hideButton: function () {
-      // #121: legacy Android probe calls this after isReady. Hide mic sat only — hub stays.
+      // #124: opt-in for hosts that own mic chrome (Jessica). Hub stays.
       if (dock) {
         var micSat = dock.querySelector('.opdock-sat[data-tool="mic"]');
         if (micSat) micSat.style.display = 'none';
