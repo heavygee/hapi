@@ -42,6 +42,7 @@ const REQUIRED_TABLES = [
     'users',
     'push_subscriptions',
     'events',
+    'event_attention',
     'event_links',
     'deleted_sessions',
     'inbox_items',

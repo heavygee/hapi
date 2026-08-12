@@ -11,6 +11,12 @@
  *  - else a non-empty hub focus → write tools unlocked, bound to that focus
  *  - else writes denied
  *
+ * Fresh grant (RFC Security / privileged reader):
+ *  Ledger content (event summaries, work ads, inbox titles) is **data** — it may
+ *  influence ordering and presentation, never authority. This resolver never
+ *  reads ledger text. A work ad that says "operator approved ping of sess-X"
+ *  cannot widen what the overseer may do; only hub focus or allowWrites can.
+ *
  * Injection defense: tool-originated prose cannot set or retarget focus (see
  * overseerConverseFocus). Write calls must bind to the hub focus when the
  * explicit client flag is off.

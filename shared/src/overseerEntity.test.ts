@@ -47,6 +47,8 @@ describe('overseer entity protocol', () => {
         expect(prompt).toContain('ping_session')
         expect(prompt).toContain('CANNOT spawn')
         expect(prompt).toContain('Show receipts')
+        expect(prompt).toContain('Authority vs salience')
+        expect(prompt).toContain('must NEVER widen what you are allowed')
     })
     describe('worker state derivation', () => {
         it('maps notify status and event type to worker state', () => {

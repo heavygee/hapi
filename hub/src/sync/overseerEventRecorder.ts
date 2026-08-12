@@ -25,7 +25,10 @@ import type { Session } from '@hapi/protocol/types'
 import type { EventStore, InsertSystemEventInput, StoredSystemEvent } from '../store'
 import type { InboxStore } from '../store/inboxStore'
 
-export type SessionSnapshot = OverseerSessionIdentity
+export type SessionSnapshot = OverseerSessionIdentity & {
+    /** Session tenancy — written onto every recorded event. */
+    namespace?: string | null
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
     return isObject(value) ? value as Record<string, unknown> : null
@@ -402,6 +405,12 @@ export class OverseerEventRecorder {
         const stored = this.events.insert({
             riskDetected: 0,
             ...rest,
+            namespace: session.namespace?.trim() || 'default',
+            principal: {
+                kind: rest.sourceKind === 'worker' ? 'agent' : 'service',
+                id: rest.sourceRef?.trim() || session.id,
+                onBehalfOf: 'operator'
+            },
             payloadJson: buildPayload(session, payloadFields, notifyProject)
         })
         if (stored && stored.attentionCandidate === 1 && this.inbox) {
@@ -412,12 +421,15 @@ export class OverseerEventRecorder {
 }
 
 export function toSessionSnapshot(session: Session, tag?: string | null): SessionSnapshot {
-    return buildOverseerSessionIdentity({
-        id: session.id,
-        flavor: session.metadata?.flavor ?? 'claude',
-        tag: tag ?? null,
-        metadata: session.metadata
-    })
+    return {
+        ...buildOverseerSessionIdentity({
+            id: session.id,
+            flavor: session.metadata?.flavor ?? 'claude',
+            tag: tag ?? null,
+            metadata: session.metadata
+        }),
+        namespace: session.namespace || 'default'
+    }
 }
 
 export function shouldInjectNotifyContract(flavor: string | undefined | null): boolean {

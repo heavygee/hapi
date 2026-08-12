@@ -1,6 +1,15 @@
 import type { Database } from 'bun:sqlite'
 import { randomUUID } from 'node:crypto'
-import type { OverseerSessionIdentity } from '@hapi/protocol'
+import {
+    defaultPrincipalForSourceKind,
+    EventPrincipalOwnershipError,
+    serializeEventPrincipal,
+    type EventPrincipal,
+    type OverseerSessionIdentity
+} from '@hapi/protocol'
+
+export { EventPrincipalOwnershipError }
+export type { EventPrincipal }
 
 export type InsertSystemEventInput = {
     ts: number
@@ -24,6 +33,14 @@ export type InsertSystemEventInput = {
     idempotencyKey?: string | null
     confidence?: number | null
     severity?: number | null
+    /** Tenancy scope. Defaults to `default` when omitted. */
+    namespace?: string | null
+    /**
+     * Structured principal. When omitted, derived from sourceKind with a
+     * resolvable human owner (single-op fork default). Non-human without
+     * owner is refused (RFC kill criterion).
+     */
+    principal?: EventPrincipal | null
 }
 
 export type StoredSystemEvent = {
@@ -49,6 +66,8 @@ export type StoredSystemEvent = {
     idempotencyKey: string | null
     confidence: number | null
     severity: number | null
+    namespace: string | null
+    principalJson: string | null
 }
 
 export type ListSystemEventsOptions = {
@@ -57,6 +76,8 @@ export type ListSystemEventsOptions = {
     sessionId?: string | null
     attentionCandidate?: 0 | 1 | null
     eventType?: string | null
+    /** When set, only rows in this namespace (NULL legacy rows match `default`). */
+    namespace?: string | null
 }
 
 /** Extended read-only filter set for the Overseer `query_events` tool. */
@@ -95,6 +116,8 @@ type SystemEventRow = {
     idempotency_key: string | null
     confidence: number | null
     severity: number | null
+    namespace: string | null
+    principal_json: string | null
 }
 
 function mapRow(row: SystemEventRow): StoredSystemEvent {
@@ -120,8 +143,116 @@ function mapRow(row: SystemEventRow): StoredSystemEvent {
         provenance: row.provenance,
         idempotencyKey: row.idempotency_key,
         confidence: row.confidence,
-        severity: row.severity
+        severity: row.severity,
+        namespace: row.namespace,
+        principalJson: row.principal_json
     }
+}
+
+/**
+ * Attention triad lives in fork-local `event_attention` (RFC B7 / A2A #1332).
+ * Reads COALESCE from the sidecar; absent row = all zeros.
+ * Legacy `events.attention_*` columns remain but are no longer written for new rows.
+ */
+const EVENT_SELECT_WITH_ATTENTION = `
+    e.id, e.ts, e.source_kind, e.source_ref, e.sink_kind, e.sink_ref, e.event_type,
+    COALESCE(a.attention_candidate, 0) AS attention_candidate,
+    COALESCE(a.operator_action_required, 0) AS operator_action_required,
+    COALESCE(a.risk_detected, 0) AS risk_detected,
+    e.summary, e.payload_json, e.artifact_refs, e.tags,
+    e.related_session_id, e.related_event_id, e.dedupe_key, e.expires_at,
+    e.provenance, e.idempotency_key, e.confidence, e.severity,
+    e.namespace, e.principal_json
+`
+
+const EVENT_FROM_WITH_ATTENTION = `
+    FROM events e
+    LEFT JOIN event_attention a ON a.event_id = e.id
+`
+
+/** Persist salience flags to the sidecar. Zero triad deletes the sparse row. */
+export function upsertEventAttention(
+    db: Database,
+    eventId: number,
+    flags: { attentionCandidate: number; operatorActionRequired: number; riskDetected: number }
+): void {
+    const attn = flags.attentionCandidate ? 1 : 0
+    const oar = flags.operatorActionRequired ? 1 : 0
+    const risk = flags.riskDetected ? 1 : 0
+    if (attn === 0 && oar === 0 && risk === 0) {
+        db.prepare('DELETE FROM event_attention WHERE event_id = ?').run(eventId)
+        return
+    }
+    db.prepare(`
+        INSERT INTO event_attention (
+            event_id, attention_candidate, operator_action_required, risk_detected
+        ) VALUES (?, ?, ?, ?)
+        ON CONFLICT(event_id) DO UPDATE SET
+            attention_candidate = excluded.attention_candidate,
+            operator_action_required = excluded.operator_action_required,
+            risk_detected = excluded.risk_detected
+    `).run(eventId, attn, oar, risk)
+}
+
+/**
+ * Sparse backfill from legacy events columns → sidecar.
+ * Idempotent (INSERT OR IGNORE). Absent sidecar row means all-zero.
+ */
+export function backfillEventAttentionFromEvents(db: Database): number {
+    const result = db.prepare(`
+        INSERT OR IGNORE INTO event_attention (
+            event_id, attention_candidate, operator_action_required, risk_detected
+        )
+        SELECT id, attention_candidate, operator_action_required, risk_detected
+        FROM events
+        WHERE attention_candidate <> 0
+           OR operator_action_required <> 0
+           OR risk_detected <> 0
+    `).run()
+    return result.changes
+}
+
+/**
+ * Every non-zero legacy events-column triad must match the sidecar.
+ * After we stop writing the columns, new salience-only-in-sidecar rows are
+ * excluded (events flags stay 0) — so this stays valid across boots.
+ */
+export function verifyEventAttentionParity(db: Database): {
+    mismatches: number
+    events: { attention: number; operatorAction: number; risk: number }
+    sidecar: { attention: number; operatorAction: number; risk: number }
+} {
+    const mismatches = (db.prepare(`
+        SELECT COUNT(*) AS c FROM events e
+        LEFT JOIN event_attention a ON a.event_id = e.id
+        WHERE (e.attention_candidate <> 0
+            OR e.operator_action_required <> 0
+            OR e.risk_detected <> 0)
+          AND (
+            a.event_id IS NULL
+            OR a.attention_candidate != e.attention_candidate
+            OR a.operator_action_required != e.operator_action_required
+            OR a.risk_detected != e.risk_detected
+          )
+    `).get() as { c: number }).c
+
+    const eSums = db.prepare(`
+        SELECT
+            COALESCE(SUM(attention_candidate), 0) AS attention,
+            COALESCE(SUM(operator_action_required), 0) AS operatorAction,
+            COALESCE(SUM(risk_detected), 0) AS risk
+        FROM events
+    `).get() as { attention: number; operatorAction: number; risk: number }
+
+    const aSums = db.prepare(`
+        SELECT
+            COALESCE(SUM(attention_candidate), 0) AS attention,
+            COALESCE(SUM(operator_action_required), 0) AS operatorAction,
+            COALESCE(SUM(risk_detected), 0) AS risk
+        FROM event_attention
+    `).get() as { attention: number; operatorAction: number; risk: number }
+
+    return { mismatches, events: eSums, sidecar: aSums }
 }
 
 /** Clear session FK refs so DELETE FROM sessions succeeds (events are audit-retained). */
@@ -160,19 +291,38 @@ export function insertSystemEvent(db: Database, input: InsertSystemEventInput): 
         }
     }
 
+    const attentionCandidate = input.attentionCandidate ? 1 : 0
+    const operatorActionRequired = input.operatorActionRequired ? 1 : 0
+    const riskDetected = input.riskDetected ? 1 : 0
+
+    const principal = input.principal
+        ?? defaultPrincipalForSourceKind(input.sourceKind, input.sourceRef)
+    let principalJson: string
+    try {
+        principalJson = serializeEventPrincipal(principal)
+    } catch (error) {
+        if (error instanceof EventPrincipalOwnershipError) throw error
+        throw error
+    }
+
+    const namespace = (input.namespace?.trim() || 'default')
+
+    // Legacy events.* attention columns: stop writing (always 0). Sidecar is SoT.
     const stmt = db.prepare(`
         INSERT INTO events (
             ts, source_kind, source_ref, sink_kind, sink_ref,
             event_type, attention_candidate, operator_action_required, risk_detected,
             summary, payload_json, artifact_refs, tags,
             related_session_id, related_event_id, dedupe_key, expires_at,
-            provenance, idempotency_key, confidence, severity
+            provenance, idempotency_key, confidence, severity,
+            namespace, principal_json
         ) VALUES (
             ?, ?, ?, ?, ?,
             ?, ?, ?, ?,
             ?, ?, ?, ?,
             ?, ?, ?, ?,
-            ?, ?, ?, ?
+            ?, ?, ?, ?,
+            ?, ?
         )
     `)
 
@@ -183,9 +333,9 @@ export function insertSystemEvent(db: Database, input: InsertSystemEventInput): 
         input.sinkKind ?? null,
         input.sinkRef ?? null,
         input.eventType,
-        input.attentionCandidate,
-        input.operatorActionRequired ?? 0,
-        input.riskDetected ?? 0,
+        0,
+        0,
+        0,
         input.summary,
         input.payloadJson ?? null,
         input.artifactRefs ?? null,
@@ -197,15 +347,26 @@ export function insertSystemEvent(db: Database, input: InsertSystemEventInput): 
         input.provenance ?? null,
         input.idempotencyKey ?? null,
         input.confidence ?? null,
-        input.severity ?? null
+        input.severity ?? null,
+        namespace,
+        principalJson
     )
 
     const id = Number(result.lastInsertRowid)
+    upsertEventAttention(db, id, {
+        attentionCandidate,
+        operatorActionRequired,
+        riskDetected
+    })
     return getSystemEventById(db, id)
 }
 
 export function getSystemEventById(db: Database, id: number): StoredSystemEvent | null {
-    const row = db.prepare('SELECT * FROM events WHERE id = ?').get(id) as SystemEventRow | undefined
+    const row = db.prepare(`
+        SELECT ${EVENT_SELECT_WITH_ATTENTION}
+        ${EVENT_FROM_WITH_ATTENTION}
+        WHERE e.id = ?
+    `).get(id) as SystemEventRow | undefined
     return row ? mapRow(row) : null
 }
 
@@ -230,26 +391,34 @@ export function listSystemEvents(db: Database, options: ListSystemEventsOptions 
     const params: Array<string | number> = []
 
     if (options.sessionId) {
-        clauses.push('related_session_id = ?')
+        clauses.push('e.related_session_id = ?')
         params.push(options.sessionId)
     }
     if (options.attentionCandidate !== undefined && options.attentionCandidate !== null) {
-        clauses.push('attention_candidate = ?')
+        clauses.push('COALESCE(a.attention_candidate, 0) = ?')
         params.push(options.attentionCandidate)
     }
     if (options.eventType) {
-        clauses.push('event_type = ?')
+        clauses.push('e.event_type = ?')
         params.push(options.eventType)
     }
+    if (options.namespace) {
+        clauses.push("COALESCE(e.namespace, 'default') = ?")
+        params.push(options.namespace)
+    }
     if (options.beforeId) {
-        clauses.push('id < ?')
+        clauses.push('e.id < ?')
         params.push(options.beforeId)
     }
 
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''
-    const rows = db.prepare(
-        `SELECT * FROM events ${where} ORDER BY id DESC LIMIT ?`
-    ).all(...params, limit) as SystemEventRow[]
+    const rows = db.prepare(`
+        SELECT ${EVENT_SELECT_WITH_ATTENTION}
+        ${EVENT_FROM_WITH_ATTENTION}
+        ${where}
+        ORDER BY e.id DESC
+        LIMIT ?
+    `).all(...params, limit) as SystemEventRow[]
 
     return rows.map(mapRow)
 }
@@ -264,47 +433,55 @@ export function queryEvents(db: Database, options: QueryEventsOptions = {}): Sto
     const params: Array<string | number> = []
 
     if (options.sessionId) {
-        clauses.push('related_session_id = ?')
+        clauses.push('e.related_session_id = ?')
         params.push(options.sessionId)
     }
     if (options.attentionCandidate !== undefined && options.attentionCandidate !== null) {
-        clauses.push('attention_candidate = ?')
+        clauses.push('COALESCE(a.attention_candidate, 0) = ?')
         params.push(options.attentionCandidate)
     }
     if (options.eventType) {
-        clauses.push('event_type = ?')
+        clauses.push('e.event_type = ?')
         params.push(options.eventType)
     }
     if (options.sourceKind) {
-        clauses.push('source_kind = ?')
+        clauses.push('e.source_kind = ?')
         params.push(options.sourceKind)
     }
     if (options.severityMin !== undefined && options.severityMin !== null) {
-        clauses.push('severity >= ?')
+        clauses.push('e.severity >= ?')
         params.push(options.severityMin)
     }
     if (options.sinceTs !== undefined && options.sinceTs !== null) {
-        clauses.push('ts >= ?')
+        clauses.push('e.ts >= ?')
         params.push(options.sinceTs)
     }
     if (options.untilTs !== undefined && options.untilTs !== null) {
-        clauses.push('ts <= ?')
+        clauses.push('e.ts <= ?')
         params.push(options.untilTs)
     }
     if (options.project) {
         // Denormalized session.project lives in payload_json (#22).
-        clauses.push("json_extract(payload_json, '$.session.project') = ?")
+        clauses.push("json_extract(e.payload_json, '$.session.project') = ?")
         params.push(options.project)
     }
+    if (options.namespace) {
+        clauses.push("COALESCE(e.namespace, 'default') = ?")
+        params.push(options.namespace)
+    }
     if (options.beforeId) {
-        clauses.push('id < ?')
+        clauses.push('e.id < ?')
         params.push(options.beforeId)
     }
 
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''
-    const rows = db.prepare(
-        `SELECT * FROM events ${where} ORDER BY id DESC LIMIT ?`
-    ).all(...params, limit) as SystemEventRow[]
+    const rows = db.prepare(`
+        SELECT ${EVENT_SELECT_WITH_ATTENTION}
+        ${EVENT_FROM_WITH_ATTENTION}
+        ${where}
+        ORDER BY e.id DESC
+        LIMIT ?
+    `).all(...params, limit) as SystemEventRow[]
 
     return rows.map(mapRow)
 }
@@ -320,7 +497,8 @@ export function queryEvents(db: Database, options: QueryEventsOptions = {}): Sto
 export function queryLatestWorkerStatusPerSession(db: Database, limit = 500): StoredSystemEvent[] {
     const cap = Math.min(Math.max(limit, 1), 2000)
     const rows = db.prepare(`
-        SELECT e.* FROM events e
+        SELECT ${EVENT_SELECT_WITH_ATTENTION}
+        ${EVENT_FROM_WITH_ATTENTION}
         JOIN (
             SELECT related_session_id AS sid, MAX(id) AS max_id
             FROM events
@@ -395,10 +573,13 @@ export function ensureOverseerEventsSchema(db: Database): void {
             provenance TEXT,
             idempotency_key TEXT,
             confidence REAL,
-            severity INTEGER
+            severity INTEGER,
+            namespace TEXT,
+            principal_json TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_events_session_ts ON events(related_session_id, ts DESC);
         CREATE INDEX IF NOT EXISTS idx_events_type_ts ON events(event_type, ts DESC);
+        CREATE INDEX IF NOT EXISTS idx_events_namespace_ts ON events(namespace, ts DESC);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_events_dedupe_key ON events(dedupe_key) WHERE dedupe_key IS NOT NULL;
         CREATE UNIQUE INDEX IF NOT EXISTS idx_events_idempotency_key ON events(idempotency_key) WHERE idempotency_key IS NOT NULL;
 
@@ -413,6 +594,17 @@ export function ensureOverseerEventsSchema(db: Database): void {
         CREATE INDEX IF NOT EXISTS idx_event_links_from ON event_links(from_event_id);
         CREATE INDEX IF NOT EXISTS idx_event_links_to ON event_links(to_event_id);
 
+        CREATE TABLE IF NOT EXISTS event_attention (
+            event_id INTEGER PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE,
+            attention_candidate INTEGER NOT NULL DEFAULT 0,
+            operator_action_required INTEGER NOT NULL DEFAULT 0,
+            risk_detected INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_event_attention_attn
+            ON event_attention(attention_candidate) WHERE attention_candidate <> 0;
+        CREATE INDEX IF NOT EXISTS idx_event_attention_oar
+            ON event_attention(operator_action_required) WHERE operator_action_required <> 0;
+
         CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
             summary,
             tags,
@@ -420,6 +612,8 @@ export function ensureOverseerEventsSchema(db: Database): void {
             tokenize = 'porter'
         );
     `)
+
+    ensureEventsTenancyColumns(db)
 
     // Recreate triggers every boot so a live DB with dropped/broken triggers self-heals.
     db.exec(`
@@ -442,6 +636,33 @@ export function ensureOverseerEventsSchema(db: Database): void {
             VALUES (new.id, new.summary, COALESCE(new.tags, ''), COALESCE(new.payload_json, ''));
         END;
     `)
+
+    const backfilled = backfillEventAttentionFromEvents(db)
+    const parity = verifyEventAttentionParity(db)
+    console.info('[Overseer][Events] event_attention parity', {
+        backfilled,
+        mismatches: parity.mismatches,
+        events: parity.events,
+        sidecar: parity.sidecar
+    })
+    if (parity.mismatches > 0) {
+        console.warn('[Overseer][Events] event_attention parity mismatch', {
+            count: parity.mismatches
+        })
+    }
+}
+
+/** Idempotent ADD COLUMN for tenancy fields (SQLite has no ADD COLUMN IF NOT EXISTS). */
+function ensureEventsTenancyColumns(db: Database): void {
+    const existing = new Set(
+        (db.prepare('PRAGMA table_info(events)').all() as { name: string }[]).map((c) => c.name)
+    )
+    if (!existing.has('namespace')) {
+        db.exec('ALTER TABLE events ADD COLUMN namespace TEXT')
+    }
+    if (!existing.has('principal_json')) {
+        db.exec('ALTER TABLE events ADD COLUMN principal_json TEXT')
+    }
 }
 
 /** @deprecated use ensureOverseerEventsSchema */
@@ -493,11 +714,15 @@ export function dropOverseerEventsSchema(db: Database): void {
         DROP TRIGGER IF EXISTS events_fts_update;
         DROP TRIGGER IF EXISTS events_fts_insert;
         DROP TABLE IF EXISTS events_fts;
+        DROP INDEX IF EXISTS idx_event_attention_oar;
+        DROP INDEX IF EXISTS idx_event_attention_attn;
+        DROP TABLE IF EXISTS event_attention;
         DROP INDEX IF EXISTS idx_events_idempotency_key;
         DROP INDEX IF EXISTS idx_event_links_to;
         DROP INDEX IF EXISTS idx_event_links_from;
         DROP TABLE IF EXISTS event_links;
         DROP INDEX IF EXISTS idx_events_dedupe_key;
+        DROP INDEX IF EXISTS idx_events_namespace_ts;
         DROP INDEX IF EXISTS idx_events_type_ts;
         DROP INDEX IF EXISTS idx_events_session_ts;
         DROP TABLE IF EXISTS events;

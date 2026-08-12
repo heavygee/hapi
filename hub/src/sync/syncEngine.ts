@@ -349,6 +349,7 @@ export class SyncEngine {
             events: this.store.events,
             inbox: this.store.inbox,
             messages: this.store.messages,
+            namespace,
             getSession: (sessionId) => {
                 const access = this.resolveSessionAccess(sessionId, namespace)
                 return access.ok ? access.session : undefined

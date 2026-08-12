@@ -61,6 +61,8 @@ export type OverseerEntityDeps = {
     messages: MessageStore
     getSession: (sessionId: string) => Session | undefined
     getSessions: () => Session[]
+    /** Caller tenancy scope — used for event write/query namespace. */
+    namespace?: string
     /**
      * Stage 1.5 relay (R5): resume if inactive, then enqueue a user message.
      * Injected from SyncEngine — never shell out to `hapi-ping-peer`.
@@ -106,6 +108,7 @@ export class OverseerEntity {
     private readonly relayToSession: OverseerEntityDeps['relayToSession']
     private readonly now: () => number
     private readonly staleSilenceMs: number
+    private readonly namespace: string
 
     constructor(deps: OverseerEntityDeps) {
         this.events = deps.events
@@ -116,6 +119,7 @@ export class OverseerEntity {
         this.relayToSession = deps.relayToSession
         this.now = deps.now ?? (() => Date.now())
         this.staleSilenceMs = deps.staleSilenceMs ?? OVERSEER_STALE_SILENCE_MS
+        this.namespace = deps.namespace?.trim() || 'default'
     }
 
     identity(): OverseerIdentity {
@@ -148,7 +152,8 @@ export class OverseerEntity {
             sinceTs: args.sinceTs ?? null,
             untilTs: args.untilTs ?? null,
             beforeId: args.beforeId ?? null,
-            limit: args.limit ?? 50
+            limit: args.limit ?? 50,
+            namespace: this.namespace
         }).filter((event) => this.eventInCallerScope(event))
     }
 
@@ -668,13 +673,21 @@ export class OverseerEntity {
         resumed: boolean
         tombstone: string
     }): void {
-        this.events.insert(buildOverseerDispatchedEventInput({
-            sessionId: args.sessionId,
-            message: args.message,
-            resumed: args.resumed,
-            tombstone: args.tombstone,
-            ts: this.now()
-        }))
+        this.events.insert({
+            ...buildOverseerDispatchedEventInput({
+                sessionId: args.sessionId,
+                message: args.message,
+                resumed: args.resumed,
+                tombstone: args.tombstone,
+                ts: this.now()
+            }),
+            namespace: this.namespace,
+            principal: {
+                kind: 'agent',
+                id: 'overseer',
+                onBehalfOf: 'operator'
+            }
+        })
     }
 
     private resolvePingTarget(args: PingSessionArgs): {
@@ -806,7 +819,15 @@ export class OverseerEntity {
 
     recordConvoTurn(input: OverseerConvoTurnInput): StoredSystemEvent | null {
         const eventInput = buildOverseerConvoTurnEventInput({ ...input, ts: input.ts ?? this.now() })
-        return this.events.insert(eventInput)
+        return this.events.insert({
+            ...eventInput,
+            namespace: this.namespace,
+            principal: {
+                kind: 'agent',
+                id: 'overseer',
+                onBehalfOf: 'operator'
+            }
+        })
     }
 
     /**
@@ -852,7 +873,17 @@ export class OverseerEntity {
         return this.matchSessions(related).length === 1
     }
 
-    private eventInCallerScope(event: { relatedSessionId: string | null }): boolean {
+    /**
+     * Fail-closed for cross-namespace: prefer the event's recorded namespace
+     * when present; otherwise fall back to related-session scope (legacy rows).
+     */
+    private eventInCallerScope(event: {
+        relatedSessionId: string | null
+        namespace?: string | null
+    }): boolean {
+        if (event.namespace != null && event.namespace.trim() !== '') {
+            return event.namespace === this.namespace
+        }
         const related = event.relatedSessionId?.trim()
         if (!related) return true
         return this.matchSessions(related).length === 1
