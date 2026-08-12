@@ -1,16 +1,3 @@
-diff --git a/web/src/components/RunnerVersionSkewBanner.test.tsx b/web/src/components/RunnerVersionSkewBanner.test.tsx
-index c0642d777..58b45bf41 100644
---- a/web/src/components/RunnerVersionSkewBanner.test.tsx
-+++ b/web/src/components/RunnerVersionSkewBanner.test.tsx
-@@ -273,7 +273,7 @@ describe('RunnerVersionSkewBanner', () => {
-         renderBanner()
- 
-         expect(screen.getByTestId('runner-version-skew-banner')).toHaveAttribute('data-state', 'expanded')
--        expect(screen.getByText(/1 machine\(s\) with outdated runners/)).toBeInTheDocument()
-+        expect(screen.getByText(/1 runner\(s\) out of date/)).toBeInTheDocument()
-         expect(screen.getByTestId('runner-version-skew-minimize')).toBeInTheDocument()
-         expect(screen.getByTestId('runner-version-skew-dismiss')).toBeInTheDocument()
-         expect(screen.getByTestId('runner-version-skew-restart-old')).toBeInTheDocument()
 diff --git a/web/src/routes/settings/index.test.tsx b/web/src/routes/settings/index.test.tsx
 index f08d04ac9..46923a64e 100644
 --- a/web/src/routes/settings/index.test.tsx
