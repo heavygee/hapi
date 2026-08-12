@@ -807,6 +807,6 @@ layers:
   # Soup tip: shared classifier (estate death spiral was transient:true catch-all).
   # Upstream stack: heavygee/hapi#125 on feat/cursor-detect-inline-model-errors (#987).
   # Worktree: ~/coding/hapi/worktrees/invalid-arg-soup
-  # Tip: 61a5fef13 (origin/driver/invalid-argument-bridge-gate)
+  # Tip: d459caffb (origin/driver/invalid-argument-bridge-gate)
   - branch: driver/invalid-argument-bridge-gate
 
