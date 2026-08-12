@@ -9,9 +9,13 @@
 # is NOT a hard reject — "because product" was retired 2026-08-09. Oversized
 # or judgment-call PRs still need human promote via GitHub label or allowlist.
 #
-# Size caps ignore unit/spec test paths (*.test.*, *.spec.*, __tests__/):
-# those inflate "how thoroughly we tested," not blast radius. Pure test-only
-# PRs (#1268 class) remain auto-B. Docs still count.
+# Size caps ignore unit/spec test paths (*.test.*, *.spec.*, __tests__/) and
+# lockfiles (bun.lock, etc.): tests inflate "how thoroughly we tested," not
+# blast radius; lockfiles are mechanical dependency churn. Pure test-only PRs
+# (#1268 class) remain auto-B. Docs still count.
+#
+# File cap fringe: one product file over max_changed_files still passes the
+# file axis (9 when max is 8). Beyond fringe → maintainer lane on file count.
 #
 # Config: ~/.hapi/pr-merge-policy.json (see pr-merge-policy.example.json)
 # Sourced by hapi-meta-daily.sh. Unit tests: pr-merge-policy.test.sh
@@ -43,6 +47,15 @@ pmp_load_policy() {
     fi
 }
 
+# Return 0 if PATH is a lockfile (excluded from auto-B file cap).
+pmp_is_lockfile_path() {
+    local p="${1:-}"
+    case "$p" in
+        bun.lock|package-lock.json|yarn.lock|pnpm-lock.yaml) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 # Return 0 if PATH is a unit/spec test (excluded from auto-B size caps).
 pmp_is_test_path() {
     local p="${1:-}"
@@ -60,6 +73,9 @@ pmp_product_files() {
     while IFS= read -r line; do
         [[ -z "$line" ]] && continue
         if pmp_is_test_path "$line"; then
+            continue
+        fi
+        if pmp_is_lockfile_path "$line"; then
             continue
         fi
         printf '%s\n' "$line"
@@ -126,7 +142,9 @@ pmp_classify() {
         return 0
     fi
 
-    if [[ "$nfiles" -gt "$max_files" ]]; then
+    # Fringe: max+1 product files still passes the file axis (operator 2026-08-12).
+    local file_cap=$((max_files + 1))
+    if [[ "$nfiles" -gt "$file_cap" ]]; then
         echo -e "${default_lane}\ttoo_many_files:${nfiles}>${max_files}"
         return 0
     fi
