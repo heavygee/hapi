@@ -216,6 +216,7 @@ export default {
   'session.modelError.banner.subtitle.nonTransient': '非暂时性',
   'session.modelError.banner.claimedDone': '代理在此错误之前声称任务已完成。工作可能未完成。',
   'session.modelError.banner.midExecution': '上一轮代理在执行过程中失败。',
+  'session.modelError.banner.invalidArgument': 'Cursor 拒绝了本轮（常见于模型路由/参数拒绝）。自动桥接不会反复重试同一提示。可尝试切换模型（包括暂时离开 auto）；除非你主动更改，否则 auto 仍是一等默认。',
   'session.modelError.banner.recoveredTitle': '已恢复 — 已在 {kind} 后继续',
   'session.modelError.banner.recoveredBody': 'HAPI 已桥接该失败并重新发送你的上一条消息。不再需要此提示时请忽略。',
   'session.modelError.banner.bridgeFailedTitle': '桥接失败 — {kind}',

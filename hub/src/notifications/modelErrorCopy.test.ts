@@ -20,6 +20,7 @@ describe('formatModelErrorTitle', () => {
         expect(formatModelErrorTitle('agent_crashed')).toBe('Agent crashed')
         expect(formatModelErrorTitle('rpc_timeout')).toBe('Agent request timed out')
         expect(formatModelErrorTitle('context_window')).toBe('Context window exceeded')
+        expect(formatModelErrorTitle('invalid_argument')).toBe('Cursor refused the request')
     })
 
     it('falls back to generic Model error for unknown kinds', () => {
@@ -65,6 +66,17 @@ describe('formatModelErrorBody', () => {
             ctx
         )
         expect(body).not.toContain('transient')
+    })
+
+    it('adds advisory model-route copy for invalid_argument (#1522)', () => {
+        const body = formatModelErrorBody(
+            baseNotification({ kind: 'invalid_argument', transient: false }),
+            ctx
+        )
+        expect(body).toContain('model-route refusal')
+        expect(body).toContain('leaving auto temporarily')
+        expect(body).not.toContain('(transient - safe to retry)')
+        expect(body).not.toContain('resource_exhausted')
     })
 
     it('omits rawSnippet from external notification bodies', () => {
