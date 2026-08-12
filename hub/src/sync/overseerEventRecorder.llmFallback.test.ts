@@ -293,12 +293,15 @@ describe('OverseerEventRecorder LLM fallback', () => {
         const stored = store.sessions.getOrCreateSession('llm-acc', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
         const snapshot = toSessionSnapshot(makeSession(stored.id, 'cursor'), stored.tag)
 
-        await recorder.onAgentMessage(snapshot, 'msg-1', agentText('First chunk'), Date.now(), { thinking: true })
-        await recorder.onAgentMessage(snapshot, 'msg-2', agentText('Second chunk'), Date.now() + 1, { thinking: true })
+        const firstTs = Date.now()
+        const lastTs = firstTs + 120_000
+        await recorder.onAgentMessage(snapshot, 'msg-1', agentText('First chunk'), firstTs, { thinking: true })
+        await recorder.onAgentMessage(snapshot, 'msg-2', agentText('Second chunk'), lastTs, { thinking: true })
         const flushed = await recorder.flushPendingLlmFallback(snapshot)
 
         expect(synthesize).toHaveBeenCalledTimes(1)
         expect(flushed?.summary).toBe('both chunks')
+        expect(flushed?.ts).toBe(lastTs)
     })
 
     it('writes completed_fallback when a later missed turn LLM fails', async () => {
@@ -685,5 +688,35 @@ describe('OverseerEventRecorder LLM fallback', () => {
         const row = store.events.list({ eventType: 'approval_requested' })[0]
         expect(row).toBeDefined()
         expect(row!.ts).toBeLessThan(marked + 25)
+    })
+
+    it('does not bump turn epoch on redelivered user messages', async () => {
+        const store = new Store(':memory:')
+        const recorder = new OverseerEventRecorder(store.events, store.inbox, {
+            llmFallback: {
+                synthesizeNotifySummary: mock(async () => ({ status: 'done', summary: 'turn' })),
+            },
+        })
+        const live = makeSession('sess-redeliver', 'cursor', { thinking: true })
+        const stored = store.sessions.getOrCreateSession('llm-redeliver', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
+        live.id = stored.id
+        const snapshot = toSessionSnapshot(live, stored.tag)
+        const user = { role: 'user', content: { type: 'text', text: 'go' } }
+
+        await recorder.onAgentMessage(snapshot, 'user-1', user, Date.now())
+        await recorder.onAgentMessage(snapshot, 'msg-a', agentText('working'), Date.now() + 1, { thinking: true })
+        await recorder.flushPendingLlmFallback(snapshot)
+        await recorder.onAgentMessage(snapshot, 'user-1', user, Date.now() + 2)
+
+        const event = await recorder.onSessionEnd(
+            live,
+            stored.tag,
+            Date.now() + 3,
+            'completed',
+            () => 'working'
+        )
+        expect(event).toBeNull()
+        expect(store.events.list().filter((row) => row.provenance?.includes('hub-llm-fallback'))).toHaveLength(1)
+        expect(store.events.list().some((row) => row.provenance?.includes('session-end'))).toBe(false)
     })
 })

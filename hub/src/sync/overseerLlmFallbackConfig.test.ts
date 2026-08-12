@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { loadOverseerLlmFallbackConfig } from './overseerLlmFallbackConfig'
+import { loadOverseerLlmFallbackConfig, redactOverseerLlmBaseUrlForLog } from './overseerLlmFallbackConfig'
 
 const ENV_KEYS = [
     'HAPI_OVERSEER_LLM_FALLBACK',
@@ -121,5 +121,43 @@ describe('loadOverseerLlmFallbackConfig', () => {
         expect(slash.enabled).toBe(false)
         if (slash.enabled) throw new Error('expected disabled')
         expect(slash.reasonDisabled).toBe('invalid_base_url')
+
+        process.env.HAPI_OVERSEER_LLM_BASE_URL = 'https://host/v1?tenant=x'
+        const query = loadOverseerLlmFallbackConfig()
+        expect(query.enabled).toBe(false)
+        if (query.enabled) throw new Error('expected disabled')
+        expect(query.reasonDisabled).toBe('invalid_base_url')
+
+        process.env.HAPI_OVERSEER_LLM_BASE_URL = 'https://host/v1#frag'
+        const hash = loadOverseerLlmFallbackConfig()
+        expect(hash.enabled).toBe(false)
+        if (hash.enabled) throw new Error('expected disabled')
+        expect(hash.reasonDisabled).toBe('invalid_base_url')
+
+        process.env.HAPI_OVERSEER_LLM_BASE_URL = 'https://user:secret@gateway/v1'
+        const userinfo = loadOverseerLlmFallbackConfig()
+        expect(userinfo.enabled).toBe(false)
+        if (userinfo.enabled) throw new Error('expected disabled')
+        expect(userinfo.reasonDisabled).toBe('invalid_base_url')
+
+        process.env.HAPI_OVERSEER_LLM_BASE_URL = 'https://host/v1?'
+        const emptyQuery = loadOverseerLlmFallbackConfig()
+        expect(emptyQuery.enabled).toBe(false)
+        if (emptyQuery.enabled) throw new Error('expected disabled')
+        expect(emptyQuery.reasonDisabled).toBe('invalid_base_url')
+
+        process.env.HAPI_OVERSEER_LLM_BASE_URL = 'https://host/v1#'
+        const emptyHash = loadOverseerLlmFallbackConfig()
+        expect(emptyHash.enabled).toBe(false)
+        if (emptyHash.enabled) throw new Error('expected disabled')
+        expect(emptyHash.reasonDisabled).toBe('invalid_base_url')
+    })
+
+    it('redacts URL userinfo for startup logs', () => {
+        expect(redactOverseerLlmBaseUrlForLog('https://user:secret@gateway/v1')).toBe(
+            'https://REDACTED:REDACTED@gateway/v1'
+        )
+        expect(redactOverseerLlmBaseUrlForLog('https://gateway/v1')).toBe('https://gateway/v1')
+        expect(redactOverseerLlmBaseUrlForLog('not a url')).toBe('[invalid-url]')
     })
 })

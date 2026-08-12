@@ -64,7 +64,7 @@ import {
 import { SessionCache } from './sessionCache'
 import { OverseerEventRecorder, toSessionSnapshot } from './overseerEventRecorder'
 import { createOverseerLlmFallbackClient } from './overseerLlmFallback'
-import { loadOverseerLlmFallbackConfig } from './overseerLlmFallbackConfig'
+import { loadOverseerLlmFallbackConfig, redactOverseerLlmBaseUrlForLog } from './overseerLlmFallbackConfig'
 import { OverseerEntity } from './overseerEntity'
 import { extractAssistantPlainText } from '@hapi/protocol/messages'
 import type { InboxOperatorAction } from '@hapi/protocol'
@@ -235,8 +235,10 @@ export class SyncEngine {
             : null
         if (llmFallbackConfig.enabled) {
             console.log(
-                `[overseer] LLM summary fallback ENABLED (api=${llmFallbackConfig.api}, model=${llmFallbackConfig.model}, base=${llmFallbackConfig.baseUrl})`
+                `[overseer] LLM summary fallback ENABLED (api=${llmFallbackConfig.api}, model=${llmFallbackConfig.model}, base=${redactOverseerLlmBaseUrlForLog(llmFallbackConfig.baseUrl)})`
             )
+        } else if (llmFallbackConfig.reasonDisabled !== 'flag_off') {
+            console.warn(`[overseer] LLM summary fallback disabled (${llmFallbackConfig.reasonDisabled})`)
         }
         this.overseerEvents = new OverseerEventRecorder(store.events, store.inbox, {
             llmFallback,
@@ -2334,8 +2336,8 @@ export class SyncEngine {
     }
 
     async deleteSession(sessionId: string): Promise<void> {
-        this.overseerEvents.forgetSession(sessionId)
         await this.sessionCache.deleteSession(sessionId)
+        this.overseerEvents.forgetSession(sessionId)
     }
 
     async applySessionConfig(

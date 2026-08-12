@@ -46,10 +46,27 @@ function normalizeBaseUrl(raw: string): string {
     return raw.trim().replace(/\/+$/, '')
 }
 
+export function redactOverseerLlmBaseUrlForLog(url: string): string {
+    try {
+        const parsed = new URL(url)
+        if (parsed.username !== '' || parsed.password !== '') {
+            parsed.username = parsed.username !== '' ? 'REDACTED' : ''
+            parsed.password = parsed.password !== '' ? 'REDACTED' : ''
+        }
+        return parsed.toString().replace(/\/$/, '')
+    } catch {
+        return '[invalid-url]'
+    }
+}
+
 function isAbsoluteHttpUrl(value: string): boolean {
     try {
         const parsed = new URL(value)
-        return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false
+        // URL() strips empty `?` / `#`; joinUrl would then glue the path into query/hash.
+        if (value.includes('?') || value.includes('#')) return false
+        if (parsed.username !== '' || parsed.password !== '') return false
+        return true
     } catch {
         return false
     }
