@@ -106,6 +106,17 @@ export type LocalHandoffResult =
     | { type: 'success' }
     | { type: 'error'; message: string; code: 'session_not_found' | 'access_denied' | 'already_local' | 'handoff_failed' }
 
+/** Archive refused: CLI is still connected (or runner says still alive) but session RPC is missing. */
+export class SessionArchiveUncontrollableError extends Error {
+    readonly sessionId: string
+
+    constructor(sessionId: string) {
+        super('Session is connected but not controllable. Reopen or restart the CLI on that machine.')
+        this.name = 'SessionArchiveUncontrollableError'
+        this.sessionId = sessionId
+    }
+}
+
 export type ClearOpencodeSessionResult =
     | { type: 'success'; sessionId: string }
     | {
@@ -1773,25 +1784,73 @@ export class SyncEngine {
     }
 
     async archiveSession(sessionId: string): Promise<void> {
-        // tiann/hapi#916: when the CLI is already gone (e.g. after a
-        // hub-restart cascade SIGTERMed the runner but the in-memory
-        // `active` flag has not been reconciled yet) the kill-RPC throws
-        // and the route used to surface that as HTTP 500. Treat the
-        // missing target as a benign condition: still flip the session's
-        // lifecycleState to `archived` in the hub-side metadata so the
-        // UI does not see a half-cleaned zombie, and continue to mark
-        // it inactive in the cache. Real RPC errors (timeout, protocol
-        // failure) still propagate as 5xx.
+        // tiann/hapi#916: missing KillSession used to mean "CLI already gone".
+        // After #1203, an in-flight pre-proof CLI can stay connected without
+        // registering `${sessionId}:killSession`. Do not stamp archived while
+        // that process is still alive — try runner StopSession, then refuse.
         try {
             await this.rpcGateway.killSession(sessionId)
+            this.handleSessionEnd({ sid: sessionId, time: Date.now() })
+            return
         } catch (error) {
-            if (error instanceof RpcTargetMissingError) {
-                this.sessionCache.markSessionArchivedFromHub(sessionId, 'Archived from hub (CLI unreachable)')
-            } else {
+            if (!(error instanceof RpcTargetMissingError)) {
                 throw error
             }
         }
+
+        const session = this.sessionCache.getSession(sessionId)
+        const machineId = typeof session?.metadata?.machineId === 'string'
+            ? session.metadata.machineId.trim()
+            : ''
+
+        if (machineId) {
+            try {
+                const status = await this.rpcGateway.stopRunnerSession(machineId, sessionId)
+                if (status === 'still_alive') {
+                    throw new SessionArchiveUncontrollableError(sessionId)
+                }
+                if (status === 'stopped') {
+                    this.sessionCache.markSessionArchivedFromHub(
+                        sessionId,
+                        'Archived from hub (CLI unreachable)'
+                    )
+                    this.handleSessionEnd({ sid: sessionId, time: Date.now() })
+                    return
+                }
+                // already_gone: runner does not have the pid. A live unproven
+                // socket must not be stamped archived (#1203 / dual-CLI).
+            } catch (error) {
+                if (error instanceof SessionArchiveUncontrollableError) {
+                    throw error
+                }
+                if (!(error instanceof RpcTargetMissingError)) {
+                    throw error
+                }
+            }
+        }
+
+        if (this.hasLiveCliSocket(sessionId)) {
+            throw new SessionArchiveUncontrollableError(sessionId)
+        }
+
+        this.sessionCache.markSessionArchivedFromHub(sessionId, 'Archived from hub (CLI unreachable)')
         this.handleSessionEnd({ sid: sessionId, time: Date.now() })
+    }
+
+    private hasLiveCliSocket(sessionId: string): boolean {
+        const of = this.io?.of
+        if (typeof of !== 'function') {
+            return false
+        }
+        try {
+            const nsp = of.call(this.io, '/cli') as {
+                adapter?: { rooms?: Map<string, Set<string>> }
+            } | undefined
+            const room = nsp?.adapter?.rooms?.get(`session:${sessionId}`)
+            return Boolean(room && room.size > 0)
+        } catch {
+            return false
+        }
     }
 
     /**
