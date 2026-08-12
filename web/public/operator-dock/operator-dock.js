@@ -688,12 +688,43 @@
   }
 
   // --- annotation overlay -------------------------------------------------------------------
+  /** True when shotImg is decoded and has pixels (not a missing / still-loading capture). */
+  function shotIsUsable(img) {
+    return !!(img && img.complete && img.naturalWidth > 0);
+  }
+
+  /** Resolve when shotImg is ready to drawImage, or false if missing/failed. Uses decode() when available. */
+  function waitForShotReady(img) {
+    if (!img) return Promise.resolve(false);
+    if (shotIsUsable(img)) return Promise.resolve(true);
+    if (!img.src) return Promise.resolve(false);
+    if (typeof img.decode === 'function') {
+      return img.decode().then(function () { return shotIsUsable(img); }).catch(function () { return false; });
+    }
+    return new Promise(function (resolve) {
+      function finish() {
+        img.removeEventListener('load', finish);
+        img.removeEventListener('error', finish);
+        resolve(shotIsUsable(img));
+      }
+      img.addEventListener('load', finish);
+      img.addEventListener('error', finish);
+    });
+  }
+
   function openOverlay(shotDataUrl) {
+    // #133: never open a draw-only black overlay when capture produced nothing.
+    if (!shotDataUrl) {
+      toast('Screenshot capture failed — nothing to annotate', 'err');
+      return;
+    }
     overlay = $('div', 'opdock-overlay');
     var stage = $('div', 'opdock-stage');
     // background screenshot
     shotImg = new Image();
-    if (shotDataUrl) { shotImg.src = shotDataUrl; shotImg.className = 'opdock-shot'; stage.appendChild(shotImg); }
+    shotImg.src = shotDataUrl;
+    shotImg.className = 'opdock-shot';
+    stage.appendChild(shotImg);
     // draw layer
     drawCanvas = $('canvas', 'opdock-draw');
     stage.appendChild(drawCanvas);
@@ -718,6 +749,8 @@
     var actions = $('div', 'opdock-actions');
     var cancel = $('button', 'opdock-btn2 opdock-cancel', 'Cancel');
     var send = $('button', 'opdock-btn2 opdock-send', 'Send ▶');
+    // #133: Send unusable until shotImg decode/load — blocks race that flattens #111 + strokes.
+    send.disabled = true;
     cancel.addEventListener('click', function () { closeOverlay(); });
     send.addEventListener('click', function () { doSend(''); });
     actions.appendChild(cancel); actions.appendChild(send);
@@ -733,6 +766,12 @@
     overlay._ta = null;
     overlay._interim = null;
     overlay._badge = null;
+
+    waitForShotReady(shotImg).then(function (ready) {
+      if (!overlay) return;
+      if (ready) send.disabled = false;
+      else toast('Screenshot failed to load', 'err');
+    });
 
     // #115: markup must stay available while mic runs. Do not abort an active recording.
     if (recording) {
@@ -808,47 +847,58 @@
     setBtnState('idle');
   }
 
-  // flatten screenshot + strokes -> JPEG base64
+  // flatten screenshot + strokes -> JPEG base64 (null when no usable shot — #133 fail-closed)
   function flatten() {
+    if (!shotIsUsable(shotImg)) return null;
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
     var w = window.innerWidth, h = window.innerHeight;
     var out = document.createElement('canvas'); out.width = Math.round(w * dpr); out.height = Math.round(h * dpr);
     var ctx = out.getContext('2d');
-    if (shotImg && shotImg.complete && shotImg.naturalWidth) ctx.drawImage(shotImg, 0, 0, out.width, out.height);
-    else { ctx.fillStyle = '#111'; ctx.fillRect(0, 0, out.width, out.height); }
+    ctx.drawImage(shotImg, 0, 0, out.width, out.height);
     if (drawCanvas) ctx.drawImage(drawCanvas, 0, 0, out.width, out.height);
     return out.toDataURL('image/jpeg', 0.9).split(',')[1];
   }
 
   function doSend(transcript) {
     var secret = ensureSecret(); if (!secret) return;
-    resolveTargetSession(secret).then(function (session) {
-    if (!session) { toast('No target session configured', 'err'); return; }
-    var annotated = strokes.length > 0;
-    var b64 = flatten();
-    var nav = collectNav();
-    var text = renderText(nav, (transcript || '').trim(), annotated);
-    setBtnState('sending');
-    uploadAttachment(secret, session, 'operator-screenshot.jpg', b64, 'image/jpeg')
-      .then(function (att) {
-        return hapiPost('/api/sessions/' + encodeURIComponent(session) + '/messages', secret, { text: text, attachments: [att] });
-      })
-      .then(function (res) {
-        if (res.status === 401 || res.status === 403) {
-          var msgPath = '/api/sessions/' + encodeURIComponent(session) + '/messages';
-          return readRejectDetail(res, msgPath, session).then(function (d) {
-            onAuthRejected(d.status, d);
-            setBtnState('overlay');
-          });
-        }
-        if (!res.ok) { toast('HAPI error ' + res.status, 'err'); setBtnState('overlay'); return; }
-        toast('Sent to agent 🎙️', 'ok'); closeOverlay(); openReplies(secret, session);
-      })
-      .catch(function (e) {
-        var st = e && e.status;
-        if (st === 401 || st === 403) onAuthRejected(st, e);
-        else toast('Send failed: ' + (st ? ('upload ' + st) : (e && e.message || e)), 'err');
-        setBtnState('overlay');
+    // #133: await decode/load; never upload a fake #111 + strokes JPEG.
+    waitForShotReady(shotImg).then(function (ready) {
+      if (!ready || !shotIsUsable(shotImg)) {
+        toast('Screenshot not ready — capture failed or still loading. Try markup again.', 'err');
+        return;
+      }
+      var b64 = flatten();
+      if (!b64) {
+        toast('Screenshot not ready — capture failed or still loading. Try markup again.', 'err');
+        return;
+      }
+      resolveTargetSession(secret).then(function (session) {
+      if (!session) { toast('No target session configured', 'err'); return; }
+      var annotated = strokes.length > 0;
+      var nav = collectNav();
+      var text = renderText(nav, (transcript || '').trim(), annotated);
+      setBtnState('sending');
+      uploadAttachment(secret, session, 'operator-screenshot.jpg', b64, 'image/jpeg')
+        .then(function (att) {
+          return hapiPost('/api/sessions/' + encodeURIComponent(session) + '/messages', secret, { text: text, attachments: [att] });
+        })
+        .then(function (res) {
+          if (res.status === 401 || res.status === 403) {
+            var msgPath = '/api/sessions/' + encodeURIComponent(session) + '/messages';
+            return readRejectDetail(res, msgPath, session).then(function (d) {
+              onAuthRejected(d.status, d);
+              setBtnState('overlay');
+            });
+          }
+          if (!res.ok) { toast('HAPI error ' + res.status, 'err'); setBtnState('overlay'); return; }
+          toast('Sent to agent 🎙️', 'ok'); closeOverlay(); openReplies(secret, session);
+        })
+        .catch(function (e) {
+          var st = e && e.status;
+          if (st === 401 || st === 403) onAuthRejected(st, e);
+          else toast('Send failed: ' + (st ? ('upload ' + st) : (e && e.message || e)), 'err');
+          setBtnState('overlay');
+        });
       });
     });
   }
@@ -1278,8 +1328,17 @@
     if (overlay) return;
     strokes = [];
     var shot = providedShot || (recording ? pendingShot : null);
-    if (shot) openOverlay(shot);
-    else captureScreenshot().then(function (next) { openOverlay(next); });
+    if (shot) {
+      openOverlay(shot);
+      return;
+    }
+    captureScreenshot().then(function (next) {
+      if (!next) {
+        toast('Screenshot capture failed — nothing to annotate', 'err');
+        return;
+      }
+      openOverlay(next);
+    });
   }
 
   function appendTranscript(text) {
@@ -1647,7 +1706,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.11.1', // x-release-please-version
+    _version: '0.11.2', // x-release-please-version
     openCluster: function () { return openCluster(); },
     _stripRawJsonForDisplay: stripRawJsonForDisplay,
     _summarizeContextJson: summarizeContextJson,
