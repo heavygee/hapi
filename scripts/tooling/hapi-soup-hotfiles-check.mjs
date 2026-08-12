@@ -21,7 +21,9 @@ const syncEngine = read('hub/src/sync/syncEngine.ts')
 const rpcGateway = read('hub/src/sync/rpcGateway.ts')
 
 const calls = [...new Set([...syncEngine.matchAll(/this\.rpcGateway\.(\w+)\(/g)].map((m) => m[1]))]
-const methods = new Set([...rpcGateway.matchAll(/^\s+async (\w+)\(/gm)].map((m) => m[1]))
+const methods = new Set([
+    ...rpcGateway.matchAll(/^\s+(?:async )?(\w+)\(/gm),
+].map((m) => m[1]).filter((name) => name !== 'constructor'))
 
 const missing = calls.filter((name) => !methods.has(name))
 if (missing.length > 0) {
