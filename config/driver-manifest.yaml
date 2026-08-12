@@ -792,9 +792,9 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/operator-hold-chip-ui @ driver/operator-hold-chip
   - branch: driver/operator-hold-chip
 
-  # tiann/hapi#1520 / PR #1529 — exclusive agent spawn lease (list-models vs ACP).
+  # tiann/hapi#1520 / PR #1529 — spawn lease spawn-window only + babysit hardening.
   # Residual post-#1518 check-then-act gap; does not revert #1518.
   # Worktree: ~/coding/hapi/worktrees/list-models-acp-lease
-  # Tip: af4af0ce2 (origin/fix/list-models-acp-overlap-1520)
+  # Tip: f4a1a1a92 (origin/fix/list-models-acp-overlap-1520) — dogfood max-paranoia 2026-08-12
   - branch: fix/list-models-acp-overlap-1520
 
