@@ -15,6 +15,7 @@
  *   cluster mic (no markup) -> red pulse + live text -> tap again -> send screenshot + transcript.
  *   markup tool (or hidden long-press) -> draw on frozen shot -> Cancel / Send (no typed-note field).
  *   tap mic WHILE markup open -> keep drawings visible + STT; tap again -> annotated shot + transcript.
+ *   #115: overlay is transparent; hub+fan sit above it. Secret recovery is an in-dock sheet (Quest prompt fails).
  * STT chain: native/browser first; if empty, MediaRecorder → config.hapiInline.sttUrl.
  * Native WebView host (AndroidOperator): skips ?opmic / /opmic visibility knock; auth/secret unchanged.
  * Path knock: /opmic (aliases /mic, /unlock) — same as ?opmic=1. Never /hapi (proxy collision).
@@ -109,11 +110,86 @@
     return 'HAPI inline is locked. Paste the operator gate secret (stored on this device only):';
   }
 
+  // Keep in sync with lib/operator-secret-recovery.ts (drop-in dock has no imports).
+  function preferInDockSecretSheet() { return true; }
+  function shouldClearStoredSecretOnStatus(_status) { return false; }
+  function probeStatusMeansSecretRejected(status) { return status === 401 || status === 403; }
+  function shouldWriteSecretAfterProbe(probe) {
+    if (probeStatusMeansSecretRejected(probe && probe.status)) return false;
+    return true;
+  }
+  function authRejectOperatorCopy(status) {
+    return 'HAPI rejected the inline credential (' + status + '). Paste the gate secret in the dock sheet.';
+  }
+  function probeSecret(secret) {
+    if (!secret) return Promise.resolve({ ok: false, status: 0 });
+    var path = (cfg && cfg.mode === MODE_BROWSER_HUB) ? '/api/sessions' : '/operator/sessions';
+    return hapiGet(path, secret).then(function (res) {
+      return { ok: !!res.ok, status: res.status };
+    }).catch(function () {
+      return { ok: false, status: 0 };
+    });
+  }
+  function saveProbedSecret(value, inp) {
+    var v = (value || '').trim();
+    if (!v) { toast('Paste the operator gate secret', 'err'); return Promise.resolve(false); }
+    if (inp) inp.disabled = true;
+    return probeSecret(v).then(function (probe) {
+      if (inp) inp.disabled = false;
+      if (!shouldWriteSecretAfterProbe(probe)) {
+        toast(authRejectOperatorCopy(probe.status), 'err');
+        return false;
+      }
+      setSecret(v);
+      closeToolSheet();
+      if (!probe.ok && probe.status >= 500) {
+        toast('Host probe failed (' + probe.status + ') — secret stored. Retry send. If 403 persists, hub may need HAPI_INLINE_SECRET loaded.', 'err');
+      } else if (!probe.ok) {
+        toast('Secret stored — retry send', 'err');
+      } else {
+        toast('Inline credential saved', 'ok');
+      }
+      return true;
+    });
+  }
+  function onAuthRejected(status) {
+    // shouldClearStoredSecretOnStatus is always false (#115) — never wipe; open the sheet.
+    if (shouldClearStoredSecretOnStatus(status)) return;
+    toast(authRejectOperatorCopy(status), 'err');
+    openSecretSheet({ reason: 'rejected' });
+  }
+  function openSecretSheet(opts) {
+    opts = opts || {};
+    if (!dock) return;
+    closeToolSheet();
+    var reason = opts.reason === 'rejected' ? 'rejected' : 'missing';
+    toolSheet = $('div', 'opdock-sheet opdock-secret-sheet');
+    toolSheet.appendChild($('h3', null, reason === 'rejected' ? 'Credential rejected' : 'Unlock HAPI inline'));
+    toolSheet.appendChild($('div', 'opdock-session-meta', promptMessageForMode()));
+    var inp = document.createElement('input');
+    inp.type = 'password';
+    inp.className = 'opdock-secret-input';
+    inp.setAttribute('autocomplete', 'off');
+    inp.setAttribute('autocapitalize', 'off');
+    inp.placeholder = 'Gate secret';
+    if (reason === 'rejected') inp.value = getSecret();
+    toolSheet.appendChild(inp);
+    var actions = $('div', 'opdock-secret-actions');
+    var save = $('button', 'opdock-btn2 opdock-send', 'Save');
+    save.addEventListener('click', function () {
+      saveProbedSecret(inp.value, save).then(function (ok) {
+        if (ok && typeof opts.onSaved === 'function') opts.onSaved(getSecret());
+      });
+    });
+    actions.appendChild(save);
+    toolSheet.appendChild(actions);
+    dock.appendChild(toolSheet);
+    try { inp.focus(); } catch (e) {}
+  }
   function ensureSecret() {
     var s = getSecret();
     if (s) return s;
-    var e = window.prompt(promptMessageForMode());
-    if (e && e.trim()) { setSecret(e.trim()); return e.trim(); }
+    if (preferInDockSecretSheet()) openSecretSheet({ reason: 'missing' });
     return '';
   }
 
@@ -466,6 +542,10 @@
       body: JSON.stringify({ audio_b64: b64, mime: mime || 'audio/webm' }),
       cache: 'no-store',
     }).then(function (res) {
+      if (res.status === 401 || res.status === 403) {
+        onAuthRejected(res.status);
+        return Promise.reject(new Error('stt ' + res.status));
+      }
       return res.json().catch(function () { return {}; }).then(function (body) {
         if (!res.ok || !body || !body.ok) {
           var err = (body && body.error) || ('stt ' + res.status);
@@ -609,15 +689,18 @@
     overlay._interim = null;
     overlay._badge = null;
 
-    // Ensure no leftover voice session bleeds into markup.
-    stopWebRecognition();
-    stopMediaCapture(true);
-    recognizing = false;
-    recording = false;
-    liveTranscript = '';
-    liveInterim = '';
-    hideRecordLabel();
-    setBtnState('markup');
+    // #115: markup must stay available while mic runs. Do not abort an active recording.
+    if (recording) {
+      setBtnState('recording');
+    } else {
+      stopWebRecognition();
+      stopMediaCapture(true);
+      recognizing = false;
+      liveTranscript = '';
+      liveInterim = '';
+      hideRecordLabel();
+      setBtnState('markup');
+    }
     if (hasNativeHost() && dock) {
       var ob = dock.querySelector('.opdock-btn');
       if (ob) ob.style.display = 'none';
@@ -707,14 +790,15 @@
         return hapiPost('/api/sessions/' + encodeURIComponent(session) + '/messages', secret, { text: text, attachments: [att] });
       })
       .then(function (res) {
-        if (res.status === 401 || res.status === 403) { setSecret(''); toast('Inline credential rejected — re-enter next time', 'err'); }
+        if (res.status === 401 || res.status === 403) { onAuthRejected(res.status); }
         else if (!res.ok) { toast('HAPI error ' + res.status, 'err'); }
         else { toast('Sent to agent 🎙️', 'ok'); closeOverlay(); openReplies(secret, session); return; }
         setBtnState('overlay');
       })
       .catch(function (e) {
-        if (e && (e.status === 401 || e.status === 403)) setSecret('');
-        toast('Send failed: ' + ((e && e.status) ? ('upload ' + e.status) : (e && e.message || e)), 'err');
+        var st = e && e.status;
+        if (st === 401 || st === 403) onAuthRejected(st);
+        else toast('Send failed: ' + (st ? ('upload ' + st) : (e && e.message || e)), 'err');
         setBtnState('overlay');
       });
     });
@@ -741,12 +825,13 @@
       ? uploadAttachment(secret, session, 'operator-screenshot.jpg', b64, 'image/jpeg').then(function (att) { return post([att]); })
       : post([]);
     chain.then(function (res) {
-      if (res.status === 401 || res.status === 403) { setSecret(''); toast('Inline credential rejected — re-enter next time', 'err'); setBtnState('idle'); }
+      if (res.status === 401 || res.status === 403) { onAuthRejected(res.status); setBtnState('idle'); }
       else if (!res.ok) { toast('HAPI error ' + res.status, 'err'); setBtnState('idle'); }
       else { toast('Sent to agent 🎙️', 'ok'); setBtnState('idle'); openReplies(secret, session); }
     }).catch(function (e) {
-      if (e && (e.status === 401 || e.status === 403)) setSecret('');
-      toast('Send failed: ' + ((e && e.status) ? ('upload ' + e.status) : (e && e.message || e)), 'err');
+      var st = e && e.status;
+      if (st === 401 || st === 403) onAuthRejected(st);
+      else toast('Send failed: ' + (st ? ('upload ' + st) : (e && e.message || e)), 'err');
       setBtnState('idle');
     });
     });
@@ -972,7 +1057,7 @@
     }
     var st = recording ? 'recording' : (overlay ? 'markup' : 'idle');
     if (dock.classList.contains('opdock--busy')) st = 'sending';
-    var labelText = text || 'Listening… tap mic again to send';
+    var labelText = text || 'Listening… open H and tap mic to send';
     // #104: native host present → one STT label surface (native onMicUi only).
     if (hasNativeHost()) {
       recordLabel.style.display = 'none';
@@ -1135,16 +1220,11 @@
   }
 
   function beginMarkup(providedShot) {
-    if (recording) {
-      stopWebRecognition();
-      stopMediaCapture(true);
-      recording = false;
-      hideRecordLabel();
-      try { if (window.AndroidOperator && window.AndroidOperator.onCaptureDone) window.AndroidOperator.onCaptureDone(); } catch (e) {}
-    }
+    if (overlay) return;
     strokes = [];
-    if (providedShot) openOverlay(providedShot);
-    else captureScreenshot().then(function (shot) { openOverlay(shot); });
+    var shot = providedShot || (recording ? pendingShot : null);
+    if (shot) openOverlay(shot);
+    else captureScreenshot().then(function (next) { openOverlay(next); });
   }
 
   function appendTranscript(text) {
@@ -1319,7 +1399,7 @@
   }
   function onHubClick() {
     if (longPressFired) { longPressFired = false; return; }
-    if (recording) { toggleMic(null); return; }
+    // #115: hub always toggles the fan (markup + mic). Mic satellite starts/stops record.
     // Click-toggle fan for all pointers — no hover-open / hover-close (#107).
     if (dock.classList.contains('opdock--cluster-open')) closeCluster();
     else openCluster();
@@ -1349,6 +1429,16 @@
       toolSheet.appendChild(lab);
     });
     toolSheet.appendChild($('div', 'opdock-session-meta', 'Pinned: ' + (getPinnedSession() || cfg.session || '(none)')));
+    toolSheet.appendChild($('h3', null, 'Credential'));
+    var secInp = document.createElement('input');
+    secInp.type = 'password';
+    secInp.className = 'opdock-secret-input';
+    secInp.setAttribute('autocomplete', 'off');
+    secInp.placeholder = getSecret() ? 'Saved — paste to replace' : 'Paste gate secret';
+    toolSheet.appendChild(secInp);
+    var secBtn = $('button', 'opdock-btn2 opdock-send', 'Save secret');
+    secBtn.addEventListener('click', function () { saveProbedSecret(secInp.value, secBtn); });
+    toolSheet.appendChild(secBtn);
     dock.appendChild(toolSheet);
   }
   function openSessionPicker() {
@@ -1484,20 +1574,20 @@
         var unlock = parseUnlockQuery(location.search, location.pathname);
         if (unlock.consumed) stripUnlockFromUrl(unlock.cleanedSearch, unlock.cleanedPathname);
         if (unlock.rejectedCredentialInQuery) {
-          toast('Ignored insecure ?opmic credential in URL. Use /opmic or ?opmic=1 and paste in prompt.', 'err');
+          toast('Ignored insecure ?opmic credential in URL. Use /opmic or ?opmic=1 and paste in the dock sheet.', 'err');
         }
         // Visibility vs auth: installed native host IS the visibility knock (?opmic / /opmic optional).
-        // Auth is unchanged — proxy still needs ensureSecret / X-Hapi-Inline-Secret.
+        // Auth: in-dock sheet (Quest prompt fails). Never soft-lock by returning before render.
         var nativePresent = hasNativeHost();
-        if (!getSecret() && (nativePresent || unlock.shouldPrompt)) ensureSecret();
-        if (!getSecret()) return;
+        if (!getSecret() && !nativePresent && !unlock.shouldPrompt) return;
         render();
+        if (!getSecret()) openSecretSheet({ reason: 'missing' });
       });
   }
 
   window.HapiInline = {
     init: init,
-    _version: '0.10.2', // x-release-please-version
+    _version: '0.10.3', // x-release-please-version
     openCluster: function () { return openCluster(); },
     _stripRawJsonForDisplay: stripRawJsonForDisplay,
     _summarizeContextJson: summarizeContextJson,
