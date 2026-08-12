@@ -72,6 +72,8 @@ import type { ListSystemEventsOptions, StoredSystemEvent, InsertSystemEventInput
 import type { ListInboxItemsOptions, StoredInboxItem } from '../store/inboxItems'
 import { ingestNotifySummaryFromMessage } from './workGraphNotifyIngest'
 import { armResumePeerMint, clearResumePeerMint } from '../web/pendingResumePeerMint'
+import { buildProvenanceDiagnostics } from './provenanceDiagnostics'
+import type { ProvenanceDiagnostics } from '@hapi/protocol/provenanceDiagnostics'
 
 type PiResumeAttempt = NonNullable<NonNullable<Session['metadata']>['piResumeAttempt']>
 type PtyResumeAttempt = NonNullable<NonNullable<Session['metadata']>['ptyResumeAttempt']>
@@ -419,6 +421,15 @@ export class SyncEngine {
 
     getOnlineMachinesByNamespace(namespace: string): Machine[] {
         return this.machineCache.getOnlineMachinesByNamespace(namespace)
+    }
+
+    getProvenanceDiagnostics(namespace: string): ProvenanceDiagnostics {
+        return buildProvenanceDiagnostics({
+            sessions: this.getSessionsByNamespace(namespace),
+            machines: this.getOnlineMachinesByNamespace(namespace),
+            getStoredMachine: (machineId) => this.store.machines.getMachineByNamespace(machineId, namespace),
+            hasLiveRpcHandler: (method) => this.rpcGateway.hasLiveHandler(method),
+        })
     }
 
     async renameMachine(machineId: string, displayName: string): Promise<void> {

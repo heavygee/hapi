@@ -539,6 +539,15 @@ export class RpcGateway {
         return await this.rpcCall(`${machineId}:${method}`, params, timeoutMs)
     }
 
+    /** True when a live /cli socket owns the RPC method (hub-side provenance signal). */
+    hasLiveHandler(method: string): boolean {
+        const socketId = this.rpcRegistry.getSocketIdForMethod(method)
+        if (!socketId) {
+            return false
+        }
+        return this.io.of('/cli').sockets.has(socketId)
+    }
+
     private async rpcCall(method: string, params: unknown, timeoutMs: number = DEFAULT_RPC_TIMEOUT_MS): Promise<unknown> {
         const socketId = this.rpcRegistry.getSocketIdForMethod(method)
         if (!socketId) {
