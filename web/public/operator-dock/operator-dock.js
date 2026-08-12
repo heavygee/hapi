@@ -1264,6 +1264,43 @@
   function closeToolSheet() {
     if (toolSheet) { toolSheet.remove(); toolSheet = null; }
   }
+  // #112: even fan from (R, count, arc). Keep in sync with lib/fan-geometry.ts.
+  var FAN_RADIUS_PX = 108;
+  var FAN_PLATE_PX = 168;
+  var FAN_ARC_START_DEG = 90;
+  var FAN_ARC_END_DEG = 180;
+  var FAN_TOOLS = ['sessions', 'markup', 'mic', 'settings'];
+  function fanSatOffsets(radius, count, arcStartDeg, arcEndDeg, tools) {
+    var out = [];
+    if (count < 1) return out;
+    for (var i = 0; i < count; i++) {
+      var t = count === 1 ? 0 : i / (count - 1);
+      var deg = arcStartDeg + t * (arcEndDeg - arcStartDeg);
+      var rad = deg * Math.PI / 180;
+      out.push({
+        tool: tools[i],
+        deg: deg,
+        tx: Math.round(radius * Math.cos(rad)) || 0,
+        ty: Math.round(-radius * Math.sin(rad)) || 0,
+      });
+    }
+    return out;
+  }
+  function applyFanGeometry(cluster) {
+    if (!cluster) return;
+    cluster.style.width = FAN_PLATE_PX + 'px';
+    cluster.style.height = FAN_PLATE_PX + 'px';
+    var offsets = fanSatOffsets(
+      FAN_RADIUS_PX, FAN_TOOLS.length, FAN_ARC_START_DEG, FAN_ARC_END_DEG, FAN_TOOLS
+    );
+    for (var i = 0; i < offsets.length; i++) {
+      var p = offsets[i];
+      var sat = cluster.querySelector('.opdock-sat[data-tool="' + p.tool + '"]');
+      if (!sat) continue;
+      sat.style.setProperty('--opdock-sat-tx', p.tx + 'px');
+      sat.style.setProperty('--opdock-sat-ty', p.ty + 'px');
+    }
+  }
   function closeCluster() {
     if (!dock) return;
     dock.classList.remove('opdock--cluster-open');
@@ -1273,6 +1310,8 @@
   }
   function openCluster() {
     if (!ready || !dock) return false;
+    var cluster = dock.querySelector('.opdock-cluster');
+    applyFanGeometry(cluster);
     dock.classList.add('opdock--cluster-open');
     var btn = dock.querySelector('.opdock-btn');
     if (btn) btn.setAttribute('aria-expanded', 'true');
@@ -1378,6 +1417,7 @@
       });
       cluster.appendChild(sat);
     });
+    applyFanGeometry(cluster);
     dock.appendChild(cluster);
     var btn = $('button', 'opdock-btn');
     applyIdleIcon(btn);
@@ -1457,7 +1497,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.10.0',
+    _version: '0.10.2', // x-release-please-version
     openCluster: function () { return openCluster(); },
     _stripRawJsonForDisplay: stripRawJsonForDisplay,
     _summarizeContextJson: summarizeContextJson,

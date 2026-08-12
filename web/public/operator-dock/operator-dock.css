@@ -259,18 +259,24 @@
   z-index: 1;
 }
 .opdock-sat svg { display: block; }
-/* #107: expanded footprint is a continuous hit plate (hub + tools + gaps). No hover-open. */
+/* #107: expanded footprint is a continuous hit plate (hub + tools + gaps). No hover-open.
+ * #112: positions from (R, count, arc) — JS sets --opdock-sat-tx/ty; CSS values below are
+ * fallback only (R=108, 90°→180°, tx=R cos θ, ty=-R sin θ). Do not hand-pile new sats. */
 .opdock--cluster-open .opdock-cluster {
-  width: 152px;
-  height: 152px;
+  width: 168px;
+  height: 168px;
   pointer-events: auto;
   background: rgba(15, 17, 23, 0.02);
 }
-.opdock--cluster-open .opdock-sat { pointer-events: auto; opacity: 1; }
-.opdock--cluster-open .opdock-sat[data-tool="settings"] { transform: translate(-72px, 4px) scale(1); }
-.opdock--cluster-open .opdock-sat[data-tool="markup"] { transform: translate(-64px, -56px) scale(1); }
-.opdock--cluster-open .opdock-sat[data-tool="sessions"] { transform: translate(-12px, -78px) scale(1); }
-.opdock--cluster-open .opdock-sat[data-tool="mic"] { transform: translate(-78px, -20px) scale(1); }
+.opdock--cluster-open .opdock-sat {
+  pointer-events: auto;
+  opacity: 1;
+  transform: translate(var(--opdock-sat-tx, 0px), var(--opdock-sat-ty, 0px)) scale(1);
+}
+.opdock--cluster-open .opdock-sat[data-tool="sessions"] { --opdock-sat-tx: 0px; --opdock-sat-ty: -108px; }
+.opdock--cluster-open .opdock-sat[data-tool="markup"] { --opdock-sat-tx: -54px; --opdock-sat-ty: -94px; }
+.opdock--cluster-open .opdock-sat[data-tool="mic"] { --opdock-sat-tx: -94px; --opdock-sat-ty: -54px; }
+.opdock--cluster-open .opdock-sat[data-tool="settings"] { --opdock-sat-tx: -108px; --opdock-sat-ty: 0px; }
 
 .opdock-sheet {
   pointer-events: auto;
