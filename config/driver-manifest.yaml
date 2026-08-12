@@ -780,10 +780,10 @@ layers:
   - branch: feat/spawn-peer-remit
 
   # heavygee/hapi#120 — vendor hapi-inline operator dock (fork-local, not tiann).
-  # Pin v0.11.1 (transcript chip dismiss + park left of hub, #134/#135). #123 Settings unlock.
+  # Pin v0.11.2 (fail-closed blank markup shot, #133/#137). #123 Settings unlock.
   # Thin soup tip on live driver/integration. Worktree: hapi-inline-web (feat) + hapi-inline-soup (tip).
   # Knock /opmic. Composed /hapi/operator/sessions. Do not allow-list raw GET /api/sessions.
-  # Tip: c49732d5d (driver/hapi-inline-operator-dock)
+  # Tip: f871a37f3 (driver/hapi-inline-operator-dock)
   - branch: driver/hapi-inline-operator-dock
 
   # heavygee/hapi#121 — operator-hold chip pulse (🛑 needs_operator / babysit.hold).
