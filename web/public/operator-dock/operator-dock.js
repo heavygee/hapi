@@ -3,9 +3,9 @@
  *
  * NOT app-specific. Drop this + operator-dock.css + vendor/html2canvas.min.js into any tool's
  * static root and call HapiInline.init({...}) (legacy alias: OperatorDock). Primary flow:
- *   Fine pointer: idle mic; hover fans settings/markup/sessions/mic; mic click records.
- *   Coarse/no-hover: idle hub (not a mic); tap opens the cluster; mic satellite records.
- * Long-press remains a hidden markup shortcut. Markup is also a first-class cluster tool.
+ *   Idle hub glyph is H (all pointers). Click toggles the tool fan; click again closes.
+ *   Selecting a tool (settings / markup / sessions / mic) also closes the fan.
+ *   Mic is a fan tool only — not the idle hub. Long-press remains a hidden markup shortcut.
  * After sending, a read-back panel polls the session and shows the agent's replies IN-APP.
  *
  * Ships NO secrets; talks only to the app's own same-origin /hapi proxy.
@@ -1181,16 +1181,12 @@
     return status.mode === 'listen';
   }
 
-  function hasFinePointer() {
-    try {
-      return !!(window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches);
-    } catch (e) { return false; }
-  }
   function micIconSvg() {
     return '<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V22h2v-3.08A7 7 0 0 0 19 12h-2z"/></svg>';
   }
   function hubIconSvg() {
-    return '<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path fill="currentColor" d="M12 2L3 7v2h18V7L12 2zm-7 9v7h2v-7H5zm5 0v7h4v-7h-4zm6 0v7h2v-7h-2zM3 20v2h18v-2H3z"/></svg>';
+    // Idle hub is the letter H for every pointer — mic lives only as a fan tool (#107).
+    return '<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><text x="12" y="17" text-anchor="middle" font-size="15" font-weight="700" fill="currentColor" font-family="ui-sans-serif,system-ui,sans-serif">H</text></svg>';
   }
   function satIcon(kind) {
     if (kind === 'mic') return '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V22h2v-3.08A7 7 0 0 0 19 12h-2z"/></svg>';
@@ -1272,27 +1268,29 @@
     if (!dock) return;
     dock.classList.remove('opdock--cluster-open');
     closeToolSheet();
+    var btn = dock.querySelector('.opdock-btn');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
   }
   function openCluster() {
     if (!ready || !dock) return false;
     dock.classList.add('opdock--cluster-open');
+    var btn = dock.querySelector('.opdock-btn');
+    if (btn) btn.setAttribute('aria-expanded', 'true');
     return true;
   }
   function onHubClick() {
     if (longPressFired) { longPressFired = false; return; }
     if (recording) { toggleMic(null); return; }
-    if (!hasFinePointer()) {
-      if (dock.classList.contains('opdock--cluster-open')) closeCluster();
-      else openCluster();
-      return;
-    }
-    toggleMic(null);
+    // Click-toggle fan for all pointers — no hover-open / hover-close (#107).
+    if (dock.classList.contains('opdock--cluster-open')) closeCluster();
+    else openCluster();
   }
   function onSatellite(tool) {
-    if (tool === 'mic') { closeToolSheet(); toggleMic(null); return; }
+    // Selecting any tool closes the fan. Sheets/overlays recreate after closeCluster.
+    if (tool === 'mic') { closeCluster(); toggleMic(null); return; }
     if (tool === 'markup') { closeCluster(); beginMarkup(null); return; }
-    if (tool === 'settings') { openSettingsSheet(); return; }
-    if (tool === 'sessions') { openSessionPicker(); return; }
+    if (tool === 'settings') { closeCluster(); openSettingsSheet(); return; }
+    if (tool === 'sessions') { closeCluster(); openSessionPicker(); return; }
   }
   function openSettingsSheet() {
     closeToolSheet();
@@ -1359,15 +1357,10 @@
   }
   function applyIdleIcon(btn) {
     if (!btn) return;
-    if (hasFinePointer()) {
-      btn.innerHTML = micIconSvg();
-      btn.setAttribute('aria-label', 'Operator mic');
-      btn.setAttribute('title', 'Record. Hover for tools. Long-press markup shortcut.');
-    } else {
-      btn.innerHTML = hubIconSvg();
-      btn.setAttribute('aria-label', 'Operator tools');
-      btn.setAttribute('title', 'Open operator tools (mic, markup, sessions, settings).');
-    }
+    btn.innerHTML = hubIconSvg();
+    btn.setAttribute('aria-label', 'Operator tools');
+    btn.setAttribute('title', 'Open operator tools (mic, markup, sessions, settings). Click to toggle. Long-press markup shortcut.');
+    btn.setAttribute('aria-expanded', dock && dock.classList.contains('opdock--cluster-open') ? 'true' : 'false');
   }
 
   function render() {
