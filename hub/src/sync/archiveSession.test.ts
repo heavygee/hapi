@@ -15,11 +15,10 @@ function gateway(engine: SyncEngine): RpcGatewayStub {
     return (engine as unknown as { rpcGateway: RpcGatewayStub }).rpcGateway
 }
 
-function createIo(rooms = new Map<string, Set<string>>()) {
+function createIo() {
     return {
         of() {
             return {
-                adapter: { rooms },
                 to() {
                     return { emit() {} }
                 }
@@ -28,10 +27,10 @@ function createIo(rooms = new Map<string, Set<string>>()) {
     } as never
 }
 
-function createEngine(rooms = new Map<string, Set<string>>()) {
+function createEngine() {
     const store = new Store(':memory:')
-    const engine = new SyncEngine(store, createIo(rooms), new RpcRegistry(), { broadcast() {} } as never)
-    return { store, engine, rooms }
+    const engine = new SyncEngine(store, createIo(), new RpcRegistry(), { broadcast() {} } as never)
+    return { store, engine }
 }
 
 function seedActiveSession(
@@ -129,11 +128,10 @@ describe('archiveSession (#1203 in-flight CLI)', () => {
         }
     })
 
-    it('refuses to archive when StopSession is already_gone but a CLI socket is still in the room', async () => {
-        const { engine, rooms } = createEngine()
+    it('refuses to archive when StopSession is already_gone but the session is still heartbeating', async () => {
+        const { engine } = createEngine()
         try {
-            const session = seedActiveSession(engine, 'zombie-socket', { machineId: 'machine-1' })
-            rooms.set(`session:${session.id}`, new Set(['sock-1']))
+            const session = seedActiveSession(engine, 'zombie-active', { machineId: 'machine-1' })
             const rpc = gateway(engine)
             rpc.killSession = async (sessionId) => {
                 throw missingKill(sessionId)
@@ -150,10 +148,11 @@ describe('archiveSession (#1203 in-flight CLI)', () => {
         }
     })
 
-    it('archives the classic #916 case: no kill handler, runner already_gone, no live socket', async () => {
+    it('archives the classic #916 case: no kill handler, runner already_gone, heartbeat already expired', async () => {
         const { engine } = createEngine()
         try {
             const session = seedActiveSession(engine, 'truly-gone', { machineId: 'machine-1' })
+            engine.handleSessionEnd({ sid: session.id, time: Date.now() })
             const rpc = gateway(engine)
             rpc.killSession = async (sessionId) => {
                 throw missingKill(sessionId)
@@ -171,11 +170,10 @@ describe('archiveSession (#1203 in-flight CLI)', () => {
         }
     })
 
-    it('refuses to archive a connected unproven CLI when there is no machineId', async () => {
-        const { engine, rooms } = createEngine()
+    it('refuses to archive a heartbeating unproven CLI when there is no machineId', async () => {
+        const { engine } = createEngine()
         try {
             const session = seedActiveSession(engine, 'no-machine')
-            rooms.set(`session:${session.id}`, new Set(['sock-1']))
             gateway(engine).killSession = async (sessionId) => {
                 throw missingKill(sessionId)
             }
@@ -190,10 +188,30 @@ describe('archiveSession (#1203 in-flight CLI)', () => {
         }
     })
 
-    it('archives when KillSession and StopSession are both missing and no CLI socket remains', async () => {
+    it('refuses to archive when KillSession and StopSession are both missing but the session is still heartbeating', async () => {
         const { engine } = createEngine()
         try {
-            const session = seedActiveSession(engine, 'both-missing', { machineId: 'machine-1' })
+            const session = seedActiveSession(engine, 'both-missing-live', { machineId: 'machine-1' })
+            const rpc = gateway(engine)
+            rpc.killSession = async (sessionId) => {
+                throw missingKill(sessionId)
+            }
+            rpc.stopRunnerSession = async (machineId) => {
+                throw missingStop(machineId)
+            }
+
+            await expect(engine.archiveSession(session.id)).rejects.toThrow(/not controllable/)
+            expect(engine.getSessionByNamespace(session.id, 'default')?.active).toBe(true)
+        } finally {
+            engine.stop()
+        }
+    })
+
+    it('archives when KillSession and StopSession are both missing and the heartbeat has expired', async () => {
+        const { engine } = createEngine()
+        try {
+            const session = seedActiveSession(engine, 'both-missing-dead', { machineId: 'machine-1' })
+            engine.handleSessionEnd({ sid: session.id, time: Date.now() })
             const rpc = gateway(engine)
             rpc.killSession = async (sessionId) => {
                 throw missingKill(sessionId)

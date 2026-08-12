@@ -1787,7 +1787,8 @@ export class SyncEngine {
         // tiann/hapi#916: missing KillSession used to mean "CLI already gone".
         // After #1203, an in-flight pre-proof CLI can stay connected without
         // registering `${sessionId}:killSession`. Do not stamp archived while
-        // that process is still alive — try runner StopSession, then refuse.
+        // that process is still alive: try runner StopSession, then refuse if
+        // the session is still heartbeating.
         try {
             await this.rpcGateway.killSession(sessionId)
             this.handleSessionEnd({ sid: sessionId, time: Date.now() })
@@ -1817,8 +1818,9 @@ export class SyncEngine {
                     this.handleSessionEnd({ sid: sessionId, time: Date.now() })
                     return
                 }
-                // already_gone: runner does not have the pid. A live unproven
-                // socket must not be stamped archived (#1203 / dual-CLI).
+                // already_gone: runner does not have the pid. Fall through to
+                // the heartbeat check — do not trust `/cli` room membership
+                // (namespace token joins that room before tag/capability).
             } catch (error) {
                 if (error instanceof SessionArchiveUncontrollableError) {
                     throw error
@@ -1829,28 +1831,18 @@ export class SyncEngine {
             }
         }
 
-        if (this.hasLiveCliSocket(sessionId)) {
+        // Unproven in-flight CLIs keep session-alive without KillSession.
+        // Counting raw room sockets is attacker-controlled (#1473 review).
+        // Counting only sessionRpcAuthorizedId sockets misses this CLI.
+        // Heartbeat is the hub-side liveness signal; expireInactive (~30s)
+        // clears it when the process is actually gone (#916).
+        const latest = this.sessionCache.getSession(sessionId)
+        if (latest?.active) {
             throw new SessionArchiveUncontrollableError(sessionId)
         }
 
         this.sessionCache.markSessionArchivedFromHub(sessionId, 'Archived from hub (CLI unreachable)')
         this.handleSessionEnd({ sid: sessionId, time: Date.now() })
-    }
-
-    private hasLiveCliSocket(sessionId: string): boolean {
-        const of = this.io?.of
-        if (typeof of !== 'function') {
-            return false
-        }
-        try {
-            const nsp = of.call(this.io, '/cli') as {
-                adapter?: { rooms?: Map<string, Set<string>> }
-            } | undefined
-            const room = nsp?.adapter?.rooms?.get(`session:${sessionId}`)
-            return Boolean(room && room.size > 0)
-        } catch {
-            return false
-        }
     }
 
     /**
