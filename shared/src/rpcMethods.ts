@@ -42,10 +42,10 @@ export const RPC_METHODS = {
     ListCopilotModels: 'listCopilotModels',
     ListOpencodeReasoningEffortOptions: 'listOpencodeReasoningEffortOptions',
     ListAgyModels: 'listAgyModels',
-    /** Deliver one queued message into the active Pi turn (native steer). */
-    SteerQueuedMessage: 'steer-queued-message',
     ForkConversation: 'fork-conversation',
     RewindConversation: 'rewind-conversation',
+    SteerQueuedMessage: 'steer-queued-message',
+    RunnerSelfUpgrade: 'runner-self-upgrade',
 } as const
 
 export const RPC_TARGET_MISSING_ERROR_CODE = 'rpc_target_missing' as const
