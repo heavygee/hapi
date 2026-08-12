@@ -101,10 +101,7 @@ export function mergeMachineRegistrationMetadata(existing: unknown, incoming: un
     // Start from incoming so omitted identity fields (especially capabilities)
     // do not inherit a prior runner generation's advertisements.
     const merged: Record<string, unknown> = { ...next }
-    const caps = sortedCapabilities(next.capabilities)
-    if (caps.length > 0) {
-        merged.capabilities = caps
-    }
+    merged.capabilities = sortedCapabilities(next.capabilities)
     for (const key of ['supervisedRestart', 'startedCliMtimeMs', 'installedCliMtimeMs', 'cliArtifactGeneration'] as const) {
         if (!(key in next)) {
             delete merged[key]
