@@ -236,6 +236,51 @@ describe('Overseer inbox schema (init-gated, not SCHEMA_VERSION)', () => {
         expect(link.inbox_item_id).toBe(item!.id)
     })
 
+    it('does not promote sentinel suggested_action into inbox', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('sentinel-action', { flavor: 'codex', name: 'peer' }, null, 'default')
+        const event = store.events.insert({
+            ts: 1000,
+            sourceKind: 'worker',
+            eventType: 'blocked',
+            attentionCandidate: 1,
+            summary: 'stuck',
+            relatedSessionId: session.id,
+            payloadJson: payloadForSession(session, { suggested_action: 'none' }),
+            provenance: 'test'
+        })
+        const item = store.inbox.promoteAttentionEvent(event!)
+        expect(item?.suggestedAction).toBeNull()
+    })
+
+    it('does not overwrite a real suggested_action with a sentinel', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('keep-action', { flavor: 'codex', name: 'peer' }, null, 'default')
+        const first = store.events.insert({
+            ts: 1000,
+            sourceKind: 'worker',
+            eventType: 'blocked',
+            attentionCandidate: 1,
+            summary: 'CI failed',
+            relatedSessionId: session.id,
+            payloadJson: payloadForSession(session, { suggested_action: 'Fix CI' }),
+            provenance: 'test'
+        })
+        store.inbox.promoteAttentionEvent(first!)
+        const second = store.events.insert({
+            ts: 2000,
+            sourceKind: 'worker',
+            eventType: 'needs_review',
+            attentionCandidate: 1,
+            summary: 'please look',
+            relatedSessionId: session.id,
+            payloadJson: payloadForSession(session, { suggested_action: '<=12 words' }),
+            provenance: 'test'
+        })
+        const item = store.inbox.promoteAttentionEvent(second!)
+        expect(item?.suggestedAction).toBe('Fix CI')
+    })
+
     it('keeps denormalized title after session delete', () => {
         const store = new Store(':memory:')
         const session = store.sessions.getOrCreateSession('gone', { name: 'meta HAPI triage' }, null, 'default')
