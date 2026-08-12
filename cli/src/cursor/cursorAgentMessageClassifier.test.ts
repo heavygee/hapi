@@ -64,7 +64,19 @@ describe('classifyCursorAgentMessage', () => {
         const result = classifyCursorAgentMessage('Error: T: [some_new_error] weird thing happened')
         expect(result).not.toBeNull()
         expect(result?.kind).toBe('unknown_t_prefix')
-        expect(result?.transient).toBe(true)
+        // #1522: catch-all must not auto-bridge (estate soup used to be transient:true).
+        expect(result?.transient).toBe(false)
+    })
+
+    it('classifies invalid_argument as own non-transient kind (#1522)', () => {
+        const exactWire = 'Error: RetriableError: [invalid_argument] Error'
+        const result = classifyCursorAgentMessage(exactWire)
+        expect(result).not.toBeNull()
+        expect(result?.kind).toBe('invalid_argument')
+        expect(result?.transient).toBe(false)
+        expect(result?.raw).toBe(exactWire)
+        expect(classifyCursorAgentMessage('Error: T: [invalid_argument] Error')?.kind)
+            .toBe('invalid_argument')
     })
 
     it('preserves raw text', () => {
