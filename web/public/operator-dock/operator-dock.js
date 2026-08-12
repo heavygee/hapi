@@ -190,6 +190,7 @@
   function onAuthRejected(status, detail) {
     // shouldClearStoredSecretOnStatus is always false (#115) — never wipe; open the sheet.
     if (shouldClearStoredSecretOnStatus(status)) return;
+    hideRecordLabel();
     toast(authRejectOperatorCopy(status, detail), 'err');
     openSecretSheet({ reason: 'rejected', detail: detail || {} });
   }
@@ -795,6 +796,9 @@
     recognizing = false;
     recording = false;
     stopMediaCapture(true);
+    liveTranscript = '';
+    liveInterim = '';
+    hideRecordLabel();
     window.removeEventListener('resize', sizeCanvas);
     if (overlay) { overlay.remove(); overlay = null; }
     document.body.classList.remove('opdock-noscroll');
@@ -1643,7 +1647,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.10.7', // x-release-please-version
+    _version: '0.11.1', // x-release-please-version
     openCluster: function () { return openCluster(); },
     _stripRawJsonForDisplay: stripRawJsonForDisplay,
     _summarizeContextJson: summarizeContextJson,

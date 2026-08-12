@@ -44,11 +44,14 @@
   100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
 }
 
+/* #134: absolute left of the hub so the chip never covers hub/fan tools (desktop + mobile web). */
 .opdock-label {
   pointer-events: none;
-  position: relative;
+  position: absolute;
+  right: 64px;
+  bottom: 8px;
   z-index: 2;
-  max-width: min(72vw, 320px);
+  max-width: min(56vw, 280px);
   padding: 6px 10px;
   border-radius: 10px;
   background: rgba(17, 17, 17, 0.92);
