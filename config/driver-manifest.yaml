@@ -780,11 +780,11 @@ layers:
   # Tip: 8e3ffd9a4 (origin/feat/spawn-peer-remit)
   - branch: feat/spawn-peer-remit
 
-  # heavygee/hapi#120 — vendor hapi-inline v0.10.0 operator dock (fork-local, not tiann).
-  # #123 — Settings → General owner switch (same unlock as /opmic). Keep path knock.
+  # heavygee/hapi#120 — vendor hapi-inline operator dock (fork-local, not tiann).
+  # Pin v0.10.6 (mic sat stays on native host by default, #124/#125). #123 Settings unlock.
   # Thin soup tip on live driver/integration. Worktree: hapi-inline-web (feat) + hapi-inline-soup (tip).
   # Knock /opmic. Composed /hapi/operator/sessions. Do not allow-list raw GET /api/sessions.
-  # Tip: ee39d11d8 (driver/hapi-inline-operator-dock)
+  # Tip: 8334fb174 (driver/hapi-inline-operator-dock)
   - branch: driver/hapi-inline-operator-dock
 
   # heavygee/hapi#121 — operator-hold chip pulse (🛑 needs_operator / babysit.hold).

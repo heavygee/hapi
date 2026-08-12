@@ -138,7 +138,7 @@ _apply_merge_lane() {
     meta="$(gh_t pr view "$n" --repo "$REPO" --json files,labels,additions,deletions \
         --jq '{files:[.files[]|{path,additions,deletions}],labels:[.labels[].name],additions,deletions}' 2>/dev/null || echo "")"
     if [[ -z "$meta" ]] || ! printf '%s' "$meta" | jq -e . >/dev/null 2>&1; then
-        printf '%s\t%s' "maintainer" "$(pmp_action_for_lane maintainer)"
+        printf '%s\t%s' "maintainer" "$(pmp_action_for_lane maintainer "$REPO")"
         return
     fi
     files="$(printf '%s' "$meta" | jq -r '.files[].path?' )"
@@ -151,7 +151,7 @@ _apply_merge_lane() {
     class="$(pmp_classify "${MERGE_POLICY_JSON}" "$n" "$files" "$additions" "$deletions" "$labs" "$prod_add" "$prod_del")"
     lane="${class%%$'\t'*}"
     reason="${class#*$'\t'}"
-    printf '%s\t%s' "$lane" "$(pmp_action_for_lane "$lane") (${reason})"
+    printf '%s\t%s' "$lane" "$(pmp_action_for_lane "$lane" "$REPO") (${reason})"
 }
 
 # Derive CI signals. Requires gh >= HAPI_GH_MIN_VERSION (see require-gh-version.sh).

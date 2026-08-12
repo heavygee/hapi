@@ -61,7 +61,10 @@ got="$(pmp_classify "$POL" 1 "$files" 200 50 "" 200 50)"
 eq "fat docs → maintainer" "$got" $'maintainer\ttoo_large_delta:250>120'
 
 eq "action self_merge" "$(pmp_action_for_lane self_merge)" "full green - self-merge eligible (low-impact)"
-eq "action maintainer" "$(pmp_action_for_lane maintainer)" "full green - wait on tiann"
+eq "action maintainer tiann default" "$(pmp_action_for_lane maintainer)" "full green - wait on tiann"
+eq "action maintainer tiann explicit" "$(pmp_action_for_lane maintainer tiann/hapi)" "full green - wait on tiann"
+eq "action maintainer fork" "$(pmp_action_for_lane maintainer heavygee/hapi)" "full green - wait on Meta/operator (fork)"
+eq "action self_merge fork" "$(pmp_action_for_lane self_merge heavygee/hapi)" "full green - Meta/operator may merge (fork)"
 
 eq "is_test path" "$(pmp_is_test_path 'web/src/foo.test.ts' && echo yes || echo no)" "yes"
 eq "is_product path" "$(pmp_is_test_path 'web/src/foo.ts' && echo yes || echo no)" "no"
