@@ -234,6 +234,8 @@ async function runCursorModelProbe(): Promise<ListCursorModelsResponse> {
         let stderr = '';
         let settled = false;
 
+        let timeoutError: Error | null = null;
+
         const finish = (handler: () => void): void => {
             if (settled) {
                 return;
@@ -245,10 +247,8 @@ async function runCursorModelProbe(): Promise<ListCursorModelsResponse> {
         };
 
         const timeout = setTimeout(() => {
-            finish(() => {
-                child.kill('SIGTERM');
-                reject(new Error('Cursor model discovery timed out'));
-            });
+            timeoutError = new Error('Cursor model discovery timed out');
+            child.kill('SIGTERM');
         }, PROBE_TIMEOUT_MS);
 
         child.stdout?.on('data', (chunk) => {
@@ -262,6 +262,10 @@ async function runCursorModelProbe(): Promise<ListCursorModelsResponse> {
         });
         child.on('exit', (code) => {
             finish(() => {
+                if (timeoutError) {
+                    reject(timeoutError);
+                    return;
+                }
                 if (code !== 0) {
                     reject(new Error(stderr.trim() || `agent --list-models exited with code ${code}`));
                     return;
