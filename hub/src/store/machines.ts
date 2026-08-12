@@ -230,13 +230,13 @@ export function getOrCreateMachine(
             const identityMerged = mergeMachineRegistrationMetadata(stored.metadata, metadata)
             // Identity merge starts from incoming but keeps capabilities: [].
             // Runner re-register must omit ads entirely (#1108 sticky supervisedRestart).
-            const merged = mergeMachineMetadata(identityMerged, metadata, {
+            const mergedIdentity = mergeMachineMetadata(identityMerged, metadata, {
                 clearOmittedRunnerAds: true,
             }) ?? identityMerged
             const result = updateMachineMetadata(
                 db,
                 id,
-                merged,
+                mergedIdentity,
                 stored.metadataVersion,
                 namespace,
             )
@@ -277,8 +277,10 @@ export function getOrCreateMachine(
         // General merge: fill missing machine-owned fields (e.g. arch)
         // that are not covered by the identity refresh predicate above.
         const merged = mergeMachineMetadata(current.metadata, metadata, {
-            // Runner registration owns skew ads — omit means clear (#1108).
-            clearOmittedRunnerAds: true,
+            // Full runner registration (with runnerState) owns the skew ads —
+            // omit means clear, so rollback cannot leave sticky supervisedRestart.
+            // After tag/proof gates so a failed auth cannot refresh ads (#1473).
+            clearOmittedRunnerAds: runnerState !== null && runnerState !== undefined,
         })
         if (merged !== undefined) {
             db.prepare(`

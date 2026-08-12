@@ -121,6 +121,17 @@ export type LocalHandoffResult =
     | { type: 'success' }
     | { type: 'error'; message: string; code: 'session_not_found' | 'access_denied' | 'already_local' | 'handoff_failed' }
 
+/** Archive refused: CLI is still connected (or runner says still alive) but session RPC is missing. */
+export class SessionArchiveUncontrollableError extends Error {
+    readonly sessionId: string
+
+    constructor(sessionId: string) {
+        super('Session is connected but not controllable. Reopen or restart the CLI on that machine.')
+        this.name = 'SessionArchiveUncontrollableError'
+        this.sessionId = sessionId
+    }
+}
+
 export type ClearOpencodeSessionResult =
     | { type: 'success'; sessionId: string }
     | {
@@ -2145,24 +2156,64 @@ export class SyncEngine {
     }
 
     async archiveSession(sessionId: string): Promise<void> {
-        // tiann/hapi#916: when the CLI is already gone (e.g. after a
-        // hub-restart cascade SIGTERMed the runner but the in-memory
-        // `active` flag has not been reconciled yet) the kill-RPC throws
-        // and the route used to surface that as HTTP 500. Treat the
-        // missing target as a benign condition: still flip the session's
-        // lifecycleState to `archived` in the hub-side metadata so the
-        // UI does not see a half-cleaned zombie, and continue to mark
-        // it inactive in the cache. Real RPC errors (timeout, protocol
-        // failure) still propagate as 5xx.
+        // tiann/hapi#916: missing KillSession used to mean "CLI already gone".
+        // After #1203, an in-flight pre-proof CLI can stay connected without
+        // registering `${sessionId}:killSession`. Do not stamp archived while
+        // that process is still alive: try runner StopSession, then refuse if
+        // the session is still heartbeating.
         try {
             await this.rpcGateway.killSession(sessionId)
+            this.handleSessionEnd({ sid: sessionId, time: Date.now() })
+            return
         } catch (error) {
-            if (error instanceof RpcTargetMissingError) {
-                this.sessionCache.markSessionArchivedFromHub(sessionId, 'Archived from hub (CLI unreachable)')
-            } else {
+            if (!(error instanceof RpcTargetMissingError)) {
                 throw error
             }
         }
+
+        const session = this.sessionCache.getSession(sessionId)
+        const machineId = typeof session?.metadata?.machineId === 'string'
+            ? session.metadata.machineId.trim()
+            : ''
+
+        if (machineId) {
+            try {
+                const status = await this.rpcGateway.stopRunnerSession(machineId, sessionId)
+                if (status === 'still_alive') {
+                    throw new SessionArchiveUncontrollableError(sessionId)
+                }
+                if (status === 'stopped') {
+                    this.sessionCache.markSessionArchivedFromHub(
+                        sessionId,
+                        'Archived from hub (CLI unreachable)'
+                    )
+                    this.handleSessionEnd({ sid: sessionId, time: Date.now() })
+                    return
+                }
+                // already_gone: runner does not have the pid. Fall through to
+                // the heartbeat check — do not trust `/cli` room membership
+                // (namespace token joins that room before tag/capability).
+            } catch (error) {
+                if (error instanceof SessionArchiveUncontrollableError) {
+                    throw error
+                }
+                if (!(error instanceof RpcTargetMissingError)) {
+                    throw error
+                }
+            }
+        }
+
+        // Unproven in-flight CLIs keep session-alive without KillSession.
+        // Counting raw room sockets is attacker-controlled (#1473 review).
+        // Counting only sessionRpcAuthorizedId sockets misses this CLI.
+        // Heartbeat is the hub-side liveness signal; expireInactive (~30s)
+        // clears it when the process is actually gone (#916).
+        const latest = this.sessionCache.getSession(sessionId)
+        if (latest?.active) {
+            throw new SessionArchiveUncontrollableError(sessionId)
+        }
+
+        this.sessionCache.markSessionArchivedFromHub(sessionId, 'Archived from hub (CLI unreachable)')
         this.handleSessionEnd({ sid: sessionId, time: Date.now() })
     }
 
