@@ -65,4 +65,43 @@ describe('hapi-inline project path filter', () => {
             unread: true
         }])
     })
+
+    it('titles unnamed sessions like HAPI sidebar (summary → path segment → short id)', () => {
+        const sessions = filterOperatorSessions([
+            {
+                id: 'b15b3422-4fdf-4019-9758-1463f57b3c0a',
+                active: false,
+                updatedAt: 1,
+                metadata: { path: project, flavor: 'claude' }
+            },
+            {
+                id: 'ccbe5489-5447-4f6a-b9ce-7b16c5f1cf50',
+                active: false,
+                updatedAt: 2,
+                metadata: {
+                    path: `${project}/worktrees/hub-runner-version-skew`,
+                    flavor: 'claude',
+                    summary: { text: '  ' }
+                }
+            },
+            {
+                id: 'sum-sess',
+                active: false,
+                updatedAt: 3,
+                metadata: {
+                    path: project,
+                    summary: { text: 'A2A P3 Ingest' },
+                    flavor: 'cursor'
+                }
+            }
+        ], project)
+        expect(sessions.map((s) => ({ id: s.id, name: s.name }))).toEqual([
+            { id: 'b15b3422-4fdf-4019-9758-1463f57b3c0a', name: 'hapi' },
+            { id: 'ccbe5489-5447-4f6a-b9ce-7b16c5f1cf50', name: 'hub-runner-version-skew' },
+            { id: 'sum-sess', name: 'A2A P3 Ingest' }
+        ])
+        for (const s of sessions) {
+            expect(s.name).not.toBe(s.id)
+        }
+    })
 })

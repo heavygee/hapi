@@ -117,20 +117,39 @@ type HubSessionLike = {
     active?: unknown
     updatedAt?: unknown
     pendingRequestsCount?: unknown
-    metadata?: { name?: unknown, path?: unknown, flavor?: unknown } | null
+    metadata?: {
+        name?: unknown
+        path?: unknown
+        flavor?: unknown
+        summary?: { text?: unknown } | null
+    } | null
     name?: unknown
+}
+
+/** Match web/src/lib/sessionTitle.ts — never prefer full UUID as the operator title. */
+export function operatorSessionDisplayName(session: HubSessionLike, id: string): string {
+    const meta = session.metadata && typeof session.metadata === 'object' ? session.metadata : null
+    const named = meta && typeof meta.name === 'string' ? meta.name.trim() : ''
+    if (named) return named
+    const summary = meta && meta.summary && typeof meta.summary === 'object'
+        ? (typeof meta.summary.text === 'string' ? meta.summary.text.trim() : '')
+        : ''
+    if (summary) return summary
+    const path = meta && typeof meta.path === 'string' ? meta.path : ''
+    const parts = normalizeFsPath(path).split('/').filter(Boolean)
+    if (parts.length > 0) return parts[parts.length - 1]!
+    return id.slice(0, 8)
 }
 
 export function toOperatorSessionListItem(session: HubSessionLike): OperatorSessionListItem | null {
     const id = typeof session.id === 'string' ? session.id : ''
     if (!id) return null
     const meta = session.metadata && typeof session.metadata === 'object' ? session.metadata : null
-    const nameRaw = (meta && typeof meta.name === 'string' && meta.name.trim()) || ''
     const flavorRaw = meta && typeof meta.flavor === 'string' ? meta.flavor : null
     const unread = typeof session.pendingRequestsCount === 'number' && session.pendingRequestsCount > 0
     return {
         id,
-        name: nameRaw || id,
+        name: operatorSessionDisplayName(session, id),
         active: session.active === true,
         updatedAt: typeof session.updatedAt === 'number' ? session.updatedAt : 0,
         flavor: flavorRaw,
