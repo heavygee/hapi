@@ -55,6 +55,19 @@ Copy and fill this block (do not spawn a peer with only "implement X"):
 
 One feature → one worktree → one peer. Do not share worktrees across agents.
 
+### 0-backstop — unnamed / bare-spawn peers (fail-closed)
+
+When a peer arrives **without** a filled §0 handoff — bare machine spawn, **spawn-per-send** from `/opmic`, or other transport that did not set a human-salient title — the peer **self-serves** the same intake bar **before implementation**:
+
+1. **Self-name** — If the session title is generic or unset (bare agent flavor, UUID, empty sidebar), rename to `Peer #<issue>: <slug>` (or equivalent) from the remit / issue text. Same bar as the §0 session-title line; do not work under an unnamed row.
+2. **Seek precedents** — First substantive step **after** naming: search GitHub **open and closed** issues and PRs ([§2](#2--upstream-search-mandatory)). Pick repo by domain:
+   - HAPI product → `tiann/hapi`
+   - hapi-inline dock / package → `heavygee/hapi-inline`
+   - HAPI consumer re-vendor → note package issues; do **not** lasting-edit vendored `operator-dock.*`
+   Note matches in your next operator/orchestrator update; reference priors if filing new ([§3](#3--playback-mandatory)). **Do not implement** until precedents are searched and noted — even when the parent did not run discovery.
+
+Orchestrator-led spawns with a completed §0 block may skip steps marked **DONE** in the handoff. **[Upstream issue/pr discovery](/sessions/6ce7f124-6240-4479-8dad-f2e27eb880a1)** remains the specialist for dedicated discovery passes; this backstop covers peers that arrive without that parent.
+
 ### 0-closure — salvage audit (reverse handoff)
 
 When mirror `main` is tidied and a **backup branch** exists (see [`mirror-main-layout.md`](./mirror-main-layout.md)), the orchestrator runs **salvage closure** before deleting it: bucket backup commits, resume originating peers with the four-section template, verify dispositions, record in `docs/plans/*-salvage-audit.md`. Full process: [`salvage-closure.md`](./salvage-closure.md). This is the mirror of §0 above — **backward accountability**, not spawn.
@@ -100,7 +113,7 @@ Search the repo for existing behavior, flags, routes, and UI:
 
 ### 2 — Upstream search (mandatory)
 
-On `tiann/hapi`, search **open and closed** issues and PRs for the same theme:
+On the **target repo** for the work (default `tiann/hapi`; hapi-inline dock/package → `heavygee/hapi-inline` — see [§0-backstop](#0-backstop--unnamed--bare-spawn-peers-fail-closed)), search **open and closed** issues and PRs for the same theme:
 
 ```bash
 gh search issues "scroll restoration" --repo tiann/hapi --state open
@@ -261,7 +274,7 @@ Only after (1)-(4): send operator **links**, **what to click**, **declared tier 
 
 ### 7 — Operator dogfood
 
-Operator validates in browser. Iterate in the worktree; re-run gates after each round. **Do not** open upstream PR until explicit approval.
+Operator validates in browser. Iterate in the worktree; re-run gates after each round. **Do not** open upstream PR until explicit approval. Inline Playwright proof ([§6.4d](#4d--inline-in-hapi-chat-mandatory-for-4b4c-operator-reads-sessions-in-the-web-app)) satisfies **ready for operator** handoff — it does **not** substitute for operator click-test on `:3006` or unilateral PR open unless the operator says otherwise in chat.
 
 **Soup promotion on `:3006` (default — peer-owned):** the **feature peer** edits `~/.config/hapi/driver-manifest.yaml`, commits `config/driver-manifest.yaml` on mirror, then `hapi-driver-rebuild --build-web --verify`, `hapi-verify-web-dist`, and `hapi-restart-hub` if hub/cli/shared changed. See [feature-work-lifecycle.md § Soup promotion](./feature-work-lifecycle.md#soup-promotion-peer-owned--default-not-optional). **Do not** ask the operator to add manifest layers or grant permission to soup-promote.
 

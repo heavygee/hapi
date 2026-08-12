@@ -632,7 +632,7 @@ When the operator asks for **new product behavior**, follow [`docs/tooling/new-f
 
 ## Peer spawn handoff (required)
 
-Do not spawn a feature peer without filling the template in [`new-feature-intake.md` §0](../tooling/new-feature-intake.md#0--feature-peer-agent--mandatory-handoff). Minimum: parent session id, playback summary, which steps are **DONE** vs **peer-owned**, worktree path, demo topology (soup vs clean).
+Do not spawn a feature peer without filling the template in [`new-feature-intake.md` §0](../tooling/new-feature-intake.md#0--feature-peer-agent--mandatory-handoff). Minimum: parent session id, playback summary, which steps are **DONE** vs **peer-owned**, worktree path, demo topology (soup vs clean). Peers that arrive **without** §0 (bare spawn, spawn-per-send) must self-serve naming + precedent search per [intake §0-backstop](../tooling/new-feature-intake.md#0-backstop--unnamed--bare-spawn-peers-fail-closed).
 
 **Deliver with `hapi-spawn-peer`.** `POST /api/machines/:id/spawn` only creates an idle row. The schema has no `message` field; stuffing the brief into spawn JSON is silently dropped (empty sidebar peer). Wrapper = spawn + rename + `hapi-ping-peer` + fail if messages = 0. Incident: [`2026-08-11-spawn-peer-empty-shell-postmortem.md`](../plans/2026-08-11-spawn-peer-empty-shell-postmortem.md).
 
@@ -647,6 +647,7 @@ This app **vendors** [`heavygee/hapi-inline`](https://github.com/heavygee/hapi-i
 | Bug / feature in dock, proxy allow-list, visibility/`?opmic`, shared contract, Android reference | File an issue on **`heavygee/hapi-inline`**. Do **not** lasting-edit vendored `operator-dock.*` / shared proxy contract in this app. |
 | After a fix lands | Re-vendor the new **tag** (release-please cuts tags — never hand-tag). Drop any emergency local fork. |
 | App-only wiring | Host init (`web/public/operator-dock/hapi-boot.js`), env (`HAPI_INLINE_*`), `/hapi` composed proxy, same-origin `/api/stt` if used — stay in **this** repo. Spawn privilege fields are server-owned: `HAPI_INLINE_SPAWN_AGENT` (default `cursor`) and `HAPI_INLINE_SPAWN_YOLO` (default on). Do not trust client `agent` / `yolo` / `directory`. |
+| Bare spawn from `/opmic` | Transport-only — peer still **self-names** and runs **precedent search** on `heavygee/hapi-inline` before implement ([intake §0-backstop](../tooling/new-feature-intake.md#0-backstop--unnamed--bare-spawn-peers-fail-closed)). |
 
 **Forbidden:** persistent app fork of the dock; "quick fix" that never round-trips; PRs that change dock semantics only in the app copy.
 
