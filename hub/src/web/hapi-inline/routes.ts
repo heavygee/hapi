@@ -1,5 +1,5 @@
 /**
- * Operator-gated /hapi proxy for the vendored hapi-inline dock (tag v0.10.5).
+ * Operator-gated /hapi proxy for the vendored hapi-inline dock (tag v0.10.6).
  * Hono port of server/node/operator-hapi-proxy.mjs — composed /operator/sessions,
  * messages/upload only, auto-resume on 409 session_inactive. Do not allow-list
  * raw GET /api/sessions.
