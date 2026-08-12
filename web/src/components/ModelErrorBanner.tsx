@@ -91,9 +91,11 @@ export function ModelErrorBanner({
         ? t('session.modelError.banner.recoveredBody')
         : isBridgeFailed
             ? t('session.modelError.banner.bridgeFailedBody')
-            : err.priorAssistantClaimsDone
-                ? t('session.modelError.banner.claimedDone')
-                : t('session.modelError.banner.midExecution')
+            : err.kind === 'invalid_argument'
+                ? t('session.modelError.banner.invalidArgument')
+                : err.priorAssistantClaimsDone
+                    ? t('session.modelError.banner.claimedDone')
+                    : t('session.modelError.banner.midExecution')
 
     const showBridge = canShowModelErrorBridge(metadata) && onBridge
 

@@ -289,6 +289,7 @@ export default {
   'session.modelError.banner.subtitle.nonTransient': 'non-transient',
   'session.modelError.banner.claimedDone': 'The agent claimed completion before this error. The work is likely INCOMPLETE.',
   'session.modelError.banner.midExecution': 'The last agent turn failed mid-execution.',
+  'session.modelError.banner.invalidArgument': 'Cursor refused this turn (often a model-route / argument rejection). Auto-bridge will not keep retrying the same prompt. Trying another model - including leaving auto temporarily - is one option; auto stays first-class unless you change it.',
   'session.modelError.banner.recoveredTitle': 'RECOVERED \u2014 continued after {kind}',
   'session.modelError.banner.recoveredBody': 'HAPI bridged the failure and re-sent your last message. Dismiss when you no longer need this notice.',
   'session.modelError.banner.bridgeFailedTitle': 'BRIDGE FAILED \u2014 {kind}',

@@ -25,6 +25,7 @@ export type CursorAgentStreamFailureKind =
     | 'connection_stalled'
     | 'context_window'
     | 'capacity_exhausted'
+    | 'invalid_argument'
     | 'unknown_t_prefix'
     // --- structural kinds ---
     | 'transport_closed'      // ACP transport closed mid-turn (WritableIterable, etc.)
@@ -144,6 +145,16 @@ const PATTERNS: Pattern[] = [
         kind: 'capacity_exhausted',
         transient: false
     },
+    // gRPC INVALID_ARGUMENT / Cursor model-route refusal. Cursor may label it
+    // RetriableError, but auto-bridge loops the same refusal (#1522). Keep
+    // transient:false so Continues / opt-in auto-bridge stop; advisory copy
+    // may still suggest a manual resend or temporary model change.
+    {
+        test: (t) => /^[ \t]*Error: T: \[invalid_argument\]/im.test(t)
+            || /^[ \t]*Error: RetriableError: \[invalid_argument\]/im.test(t),
+        kind: 'invalid_argument',
+        transient: false
+    },
     {
         test: (t) => /^[ \t]*Error: T: WritableIterable/im.test(t)
             || /^[ \t]*Error: RetriableError: WritableIterable/im.test(t),
@@ -155,7 +166,7 @@ const PATTERNS: Pattern[] = [
         test: (t) => /^[ \t]*Error: T:/im.test(t)
             || /^[ \t]*Error: RetriableError:/im.test(t),
         kind: 'unknown_t_prefix',
-        transient: true
+        transient: false
     }
 ]
 
