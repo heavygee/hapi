@@ -187,6 +187,17 @@ A `ping_peer` message is retained in the target session transcript. That is arch
 - whether a handoff completed or stalled
 - what was advertised fleet-wide in the last hour
 
+### Pressure test - 2026-08-12 inline ownership gate
+
+A live ownership gate across three sessions and two machines reproduced the Layer 0 limits:
+
+- `inspect_peer` truncated a long contract, forcing the sender to rewrite it as chat-sized bullets
+- an 18 KB artifact written under `/tmp` on the producing machine was not readable by the receiving peer
+- delivery had no typed consumed / blocked / completed receipt
+- operator-inline traffic needed a distinct authenticated human channel rather than a peer or ghost `webapp` identity
+
+This validates the P1 -> P2 sequence, but sharpens two P2 requirements. A handoff handle must be fetchable by id in P2; waiting for P4 query APIs would leave transcript truncation in the critical path. An `ArtifactRef` must also describe locality and resolvability. A durable pointer to bytes that the receiver cannot access is not a delivered artifact.
+
 ### Proposal: `events` + `event_links`
 
 Minimal hub tables (shape intentionally boring and SQLite-native):
@@ -249,6 +260,8 @@ Suggested `kind` values: `github_pr`, `github_issue`, `commit`, `branch`, `file_
 
 Artifact refs are **handles, never payloads**. Secrets must never be embedded; credential references stay elsewhere. Command output, transcripts and diffs are referenced (`log_url`, `file_path`), never inlined - otherwise the ledger becomes both a bloat and a leak surface.
 
+**Locality is part of the handle contract.** A machine-local `file_path` / `diff` must identify its owning machine or session and must not count as accessible to a sink on another machine. Cross-machine handoffs need a sink-resolvable ref such as a PR, commit, or authenticated URL, or a future hub artifact-ingress capability. P2 does not need to invent blob storage, but it must refuse to represent an inaccessible local path as a successfully delivered artifact.
+
 ### 2. WorkAdvertisement
 
 A session's claim about current or completed work:
@@ -304,6 +317,8 @@ Structured request from one session to another:
 - **`confirmation.source`** - `human_approved_peer_tool` today; see [One Boss rules](#one-boss-rules) for delegated authority.
 
 Delivery still goes through the hub (see flows). The envelope is the durable object; the worker-facing message is a **rendering** of it, not the object itself.
+
+P2 includes a minimal authenticated fetch-by-handoff-id route. The rendered message carries that handle, and the receiving session can fetch the complete envelope without depending on `inspect_peer` transcript limits. P4 adds indexed and fleet-wide queries; it does not defer basic object retrieval.
 
 ### 4. HandoffReceipt
 
@@ -446,6 +461,8 @@ Layer 0 tools remain the human/agent UX for read/nudge. Layer 1 makes the collab
 
 Rule 7 is what keeps "keep native agents native" ([#1258](https://github.com/tiann/hapi/discussions/1258)) true structurally rather than aspirationally, and it is also what keeps A2A transport-neutral: several flavors reach HAPI over ACP today and several do not, so handoff semantics must never be expressed in any single backend's terms.
 
+Operator-inline / dock traffic is an adjacent authenticated human channel, not a peer event type and not a `webapp` compatibility fallback. This RFC does not design that transport, but its principal and channel vocabulary must represent the operator without laundering the message through peer provenance. Authority still terminates at that human principal.
+
 ### Bounds
 
 Worker sessions may read only hub-owned data about peers they are permitted to see, and may not use the ledger as a self-service work queue. There is no polling for work, and no wake-up that is not hub-mediated and attributable to a principal.
@@ -463,6 +480,7 @@ Exact routes can bikeshed; the capabilities matter:
 | Capability | Proposal |
 |------------|----------|
 | Write event | authenticated hub write with schema validation + idempotency |
+| Fetch event / handoff by id | authenticated same-namespace read; required with P2 rendered handles |
 | Query events | filter by session, project, type, artifact, tag, time, status, staleness |
 | Create handoff | **dedicated helper** that writes `handoff`, creates links, and delivers - atomically |
 | Write receipt | binds to handoff via `event_links`; delivers notice to source when `notify_source` |
@@ -537,7 +555,7 @@ This matters here specifically because [#1371](https://github.com/tiann/hapi/iss
 | **P0.4** | Layer 0 spawn with remit ([#1509](https://github.com/tiann/hapi/issues/1509)) - MCP `spawn_peer` + CLI; fail-closed. Not a work-contract. |
 | **P0.5** | Layer 0 peer delivery provenance ([#1203](https://github.com/tiann/hapi/issues/1203)) - trusted `meta.sentFrom: "peer"` + source session; UI badge. Not a work-contract. |
 | **P1** | `events` / `event_links` + namespace/principal ownership + isolation tests |
-| **P2** | Handoff create / deliver / receipt (+ notice back to source) |
+| **P2** | Handoff create / deliver / fetch-by-id / receipt (+ notice back to source); enforce artifact locality |
 | **P3** | `AGENT_NOTIFY_SUMMARY` → work-ad / status ingest |
 | **P4** | Query APIs + minimal debug surfaces (no manager UI) |
 
@@ -552,7 +570,9 @@ P4's debug surface is an API plus one read-only JSON route. Not a panel.
 ## Acceptance tests
 
 - Handoff remains queryable after both sessions are archived
+- A rendered handoff handle retrieves the complete envelope without reading the source transcript
 - Artifact refs survive and can be listed by PR / commit / path
+- A machine-local artifact ref records its locality and cannot be reported accessible to a cross-machine sink
 - Query by artifact (`github_pr`) returns every handoff and ad touching that PR
 - Retry with same idempotency key does not duplicate handoff
 - Retry after a failed delivery creates a new linked event (`retries`), never overwrites the prior one
