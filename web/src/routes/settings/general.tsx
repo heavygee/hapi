@@ -1,8 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
 import { useTranslation, type Locale } from '@/lib/use-translation'
 import { useAppContext } from '@/lib/app-context'
+import { isDefaultNamespaceToken } from '@/lib/tokenNamespace'
 import { CompanionPairing } from '@/components/settings/CompanionPairing'
-import { SettingsChoiceGroup, SettingsPageContent, SettingsSection, SettingsSwitch } from '@/components/settings/SettingsPrimitives'
+import { SettingsChoiceGroup, SettingsLinkRow, SettingsPageContent, SettingsSection, SettingsSwitch } from '@/components/settings/SettingsPrimitives'
 import { queryKeys } from '@/lib/query-keys'
 
 const locales: ReadonlyArray<{ value: Locale; label: string }> = [
@@ -26,8 +28,10 @@ function getNamespace(token: string | null): string | null {
 export default function SettingsGeneralPage() {
     const { t, locale, setLocale } = useTranslation()
     const { api, baseUrl, token } = useAppContext()
+    const navigate = useNavigate()
     const queryClient = useQueryClient()
     const isOwner = getNamespace(token) === 'default'
+    const showRunnerManagement = isDefaultNamespaceToken(token)
 
     const hubSettingsQuery = useQuery({
         queryKey: queryKeys.hubSettings,
@@ -86,6 +90,15 @@ export default function SettingsGeneralPage() {
                     <CompanionPairing baseUrl={baseUrl} />
                 </div>
             </SettingsSection>
+            {showRunnerManagement ? (
+                <SettingsSection>
+                    <SettingsLinkRow
+                        label={t('settings.runnerMgmt.title')}
+                        description={t('settings.runnerMgmt.linkHint')}
+                        onClick={() => navigate({ to: '/settings/general/runners' })}
+                    />
+                </SettingsSection>
+            ) : null}
         </SettingsPageContent>
     )
 }

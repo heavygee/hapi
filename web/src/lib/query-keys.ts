@@ -6,6 +6,7 @@ export const queryKeys = {
     sqliteStorage: ['sqlite-storage'] as const,
     hubSettings: ['hub-settings'] as const,
     usageSummary: (range: string, timeZone: string) => ['usage-summary', range, timeZone] as const,
+    upgradeInfo: ['upgrade-info'] as const,
     machineCodexModels: (machineId: string) => ['machine-codex-models', machineId] as const,
     sessionCodexModels: (sessionId: string) => ['session-codex-models', sessionId] as const,
     gitStatus: (sessionId: string) => ['git-status', sessionId] as const,

@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from '@/lib/i18n-context'
 import SettingsHubPage from './index'
 import SettingsGeneralPage from './general'
+import SettingsRunnerManagementPage from './runner-management'
 import SettingsDisplayPage from './display'
 import SettingsChatPage from './chat'
 import SettingsAboutPage from './about'
@@ -11,7 +12,7 @@ import SettingsVoicePage from './voice'
 import SettingsVoiceVoicesPage from './voice-voices'
 import SettingsVoiceAdvancedPage from './voice-advanced'
 
-const { context, navigate, setAppearance, setColorTheme, setFontScale, setTerminalFontSize, setComposerEnterBehavior, setCodexExplorationCollapsed, setVoice } = vi.hoisted(() => ({
+const { context, navigate, setAppearance, setColorTheme, setFontScale, setTerminalFontSize, setComposerEnterBehavior, setCodexExplorationCollapsed, setVoice, setFleetPolicy } = vi.hoisted(() => ({
     context: { token: '' },
     navigate: vi.fn(),
     setAppearance: vi.fn(),
@@ -21,10 +22,11 @@ const { context, navigate, setAppearance, setColorTheme, setFontScale, setTermin
     setComposerEnterBehavior: vi.fn(),
     setCodexExplorationCollapsed: vi.fn(),
     setVoice: vi.fn(),
+    setFleetPolicy: vi.fn(),
 }))
 
-const getHubSettings = vi.fn().mockResolvedValue({ sessionSummaryContract: false, sessionSummaryInChat: false })
-const updateHubSettings = vi.fn().mockResolvedValue({ sessionSummaryContract: true, sessionSummaryInChat: false })
+const getHubSettings = vi.fn().mockResolvedValue({ sessionSummaryContract: false })
+const updateHubSettings = vi.fn().mockResolvedValue({ sessionSummaryContract: true })
 
 vi.mock('@/hooks/useColorTheme', () => ({
     useColorTheme: () => ({ colorTheme: 'default', setColorTheme }),
@@ -39,9 +41,22 @@ vi.mock('@/hooks/useColorTheme', () => ({
 
 vi.mock('@tanstack/react-router', () => ({
     useNavigate: () => navigate,
+    Navigate: ({ to, replace }: { to: string; replace?: boolean }) => {
+        navigate({ to, replace: Boolean(replace) })
+        return null
+    },
 }))
 
 vi.mock('@hapi/protocol', () => ({ PROTOCOL_VERSION: 1 }))
+
+vi.mock('@/lib/app-context', () => ({
+    useAppContext: () => ({ api: null, token: context.token }),
+}))
+
+vi.mock('@/hooks/queries/useUpgradeInfo', () => ({
+    useUpgradeInfo: () => ({ info: null, isLoading: false }),
+    useSetFleetUpgradePolicy: () => ({ mutate: setFleetPolicy }),
+}))
 
 vi.mock('@/hooks/useTheme', () => ({
     useAppearance: () => ({ appearance: 'system', setAppearance }),
@@ -216,8 +231,8 @@ describe('responsive settings pages', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         localStorage.clear()
-        getHubSettings.mockResolvedValue({ sessionSummaryContract: false, sessionSummaryInChat: false })
-        updateHubSettings.mockResolvedValue({ sessionSummaryContract: true, sessionSummaryInChat: false })
+        getHubSettings.mockResolvedValue({ sessionSummaryContract: false })
+        updateHubSettings.mockResolvedValue({ sessionSummaryContract: true })
         context.token = `x.${btoa(JSON.stringify({ ns: 'default' }))}.x`
     })
 
@@ -246,9 +261,37 @@ describe('responsive settings pages', () => {
         expect(screen.getByText('Companion')).toBeInTheDocument()
         expect(screen.getByText('Companion pairing')).toBeInTheDocument()
         expect(await screen.findByRole('checkbox', { name: 'Ask agents to emit session status summary' })).toBeInTheDocument()
-        expect(screen.getByRole('checkbox', { name: 'Show session status summary in chat' })).toBeInTheDocument()
         fireEvent.click(screen.getByRole('radio', { name: '简体中文' }))
         expect(localStorage.getItem('hapi-lang')).toBe('zh-CN')
+    })
+
+    it('buries runner management behind a link row on General (not a front-and-center switch)', () => {
+        renderPage(<SettingsGeneralPage />)
+        // The 3-pole switch must NOT be present on the General page itself.
+        expect(screen.queryByRole('radio', { name: /Auto-upgrade/ })).not.toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: /Runner management/ }))
+        expect(navigate).toHaveBeenCalledWith({ to: '/settings/general/runners' })
+    })
+
+    it('hides runner management from tenant namespaces on General', () => {
+        context.token = `x.${btoa(JSON.stringify({ ns: 'tenant' }))}.x`
+        renderPage(<SettingsGeneralPage />)
+        expect(screen.queryByRole('button', { name: /Runner management/ })).not.toBeInTheDocument()
+    })
+
+    it('renders the 3-pole policy switch on the runner management sub-page', () => {
+        renderPage(<SettingsRunnerManagementPage />)
+        expect(screen.getByRole('radio', { name: /^No alert/ })).toBeInTheDocument()
+        expect(screen.getByRole('radio', { name: /^Alert/ })).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('radio', { name: /^Auto-upgrade/ }))
+        expect(setFleetPolicy).toHaveBeenCalledWith('auto')
+    })
+
+    it('redirects tenant namespaces away from the runner management route', () => {
+        context.token = `x.${btoa(JSON.stringify({ ns: 'tenant' }))}.x`
+        renderPage(<SettingsRunnerManagementPage />)
+        expect(navigate).toHaveBeenCalledWith({ to: '/settings/general', replace: true })
+        expect(screen.queryByRole('radio', { name: /^Auto-upgrade/ })).not.toBeInTheDocument()
     })
 
     it('renders compact display controls without dropdown popovers', () => {
@@ -270,10 +313,8 @@ describe('responsive settings pages', () => {
     it('keeps the session status description visible with its choice group', () => {
         renderPage(<SettingsDisplayPage />)
 
-        const description = screen.getByText('Choose which status hints appear in the session list. Basic shows runtime state; Extended also shows permission, input, background-task, new-activity, and scheduled-message hints (clock icon).')
-        const choices = screen.getByRole('radiogroup', { name: 'Session list status hints' })
-        expect(screen.getByRole('radio', { name: 'Basic' })).toBeInTheDocument()
-        expect(screen.getByRole('radio', { name: 'Extended' })).toBeInTheDocument()
+        const description = screen.getByText('Shows why a session stopped: permission, input, background work, new activity, or a scheduled message (clock icon).')
+        const choices = screen.getByRole('radiogroup', { name: 'Session list status' })
         expect(description.parentElement?.parentElement).toBe(choices.parentElement)
         expect(description.compareDocumentPosition(choices) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     })
