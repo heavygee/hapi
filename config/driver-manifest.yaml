@@ -810,3 +810,10 @@ layers:
   # Tip: d459caffb (origin/driver/invalid-argument-bridge-gate)
   - branch: driver/invalid-argument-bridge-gate
 
+  # heavygee/hapi#122 — fleet runner self-upgrade (#1108 fat follow-on; fork soup, not upstream yet).
+  # Soup union: driver/fleet-runner-upgrade (merged onto live soup tip).
+  # Upstream PR branch: estate/fleet-runner-upgrade @ upstream/main (cooling off).
+  # Worktree: ~/coding/hapi/worktrees/estate-fleet-runner-upgrade
+  # Tip: 4f44852de (origin/driver/fleet-runner-upgrade) — typecheck heal @ remat WIP 594fbaf4c
+  - branch: driver/fleet-runner-upgrade
+
