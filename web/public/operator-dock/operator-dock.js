@@ -118,16 +118,51 @@
     if (probeStatusMeansSecretRejected(probe && probe.status)) return false;
     return true;
   }
-  function authRejectOperatorCopy(status) {
-    return 'HAPI rejected the inline credential (' + status + '). Paste the gate secret in the dock sheet.';
+  function parseProxyRejectError(body) {
+    if (!body || typeof body !== 'object') return '';
+    return (typeof body.error === 'string' ? body.error : '').trim();
+  }
+  function classifyAuthReject(error) {
+    var e = String(error || '').toLowerCase();
+    if (e.indexOf('operator secret required') !== -1 || e.indexOf('secret required') !== -1) return 'mismatch';
+    if (e.indexOf('conflict') !== -1) return 'conflict';
+    if (e.indexOf('forbidden') !== -1) return 'forbidden';
+    return 'unknown';
+  }
+  function authRejectOperatorCopy(status, detail) {
+    detail = detail || {};
+    var error = (detail.error || '').trim();
+    var kind = classifyAuthReject(error);
+    var path = (detail.path || '').trim();
+    var bits = ['HAPI rejected the inline credential (' + status + ')'];
+    if (error) bits.push(error);
+    if (path) bits.push(path);
+    if (detail.sessionId) bits.push('session ' + detail.sessionId);
+    if (kind === 'mismatch') bits.push('Stored gate secret does not match. Paste it in the dock sheet.');
+    else if (kind === 'conflict') bits.push('Primary and legacy secret headers differ. Paste one secret in the dock sheet.');
+    else if (kind === 'forbidden') bits.push('Proxy refused this path or session — not an unloaded hub secret.');
+    else bits.push('Paste the gate secret in the dock sheet.');
+    return bits.join(' — ');
+  }
+  function readRejectDetail(res, path, sessionId) {
+    return res.json().catch(function () { return {}; }).then(function (body) {
+      return {
+        status: res.status,
+        error: parseProxyRejectError(body),
+        path: path || '',
+        sessionId: sessionId || '',
+      };
+    });
   }
   function probeSecret(secret) {
-    if (!secret) return Promise.resolve({ ok: false, status: 0 });
+    if (!secret) return Promise.resolve({ ok: false, status: 0, error: '', path: '' });
     var path = (cfg && cfg.mode === MODE_BROWSER_HUB) ? '/api/sessions' : '/operator/sessions';
     return hapiGet(path, secret).then(function (res) {
-      return { ok: !!res.ok, status: res.status };
+      return res.json().catch(function () { return {}; }).then(function (body) {
+        return { ok: !!res.ok, status: res.status, error: parseProxyRejectError(body), path: path };
+      });
     }).catch(function () {
-      return { ok: false, status: 0 };
+      return { ok: false, status: 0, error: '', path: path };
     });
   }
   function saveProbedSecret(value, inp) {
@@ -137,13 +172,13 @@
     return probeSecret(v).then(function (probe) {
       if (inp) inp.disabled = false;
       if (!shouldWriteSecretAfterProbe(probe)) {
-        toast(authRejectOperatorCopy(probe.status), 'err');
+        toast(authRejectOperatorCopy(probe.status, probe), 'err');
         return false;
       }
       setSecret(v);
       closeToolSheet();
       if (!probe.ok && probe.status >= 500) {
-        toast('Host probe failed (' + probe.status + ') — secret stored. Retry send. If 403 persists, hub may need HAPI_INLINE_SECRET loaded.', 'err');
+        toast('Host probe failed (' + probe.status + ') — secret stored. Retry send.', 'err');
       } else if (!probe.ok) {
         toast('Secret stored — retry send', 'err');
       } else {
@@ -152,20 +187,23 @@
       return true;
     });
   }
-  function onAuthRejected(status) {
+  function onAuthRejected(status, detail) {
     // shouldClearStoredSecretOnStatus is always false (#115) — never wipe; open the sheet.
     if (shouldClearStoredSecretOnStatus(status)) return;
-    toast(authRejectOperatorCopy(status), 'err');
-    openSecretSheet({ reason: 'rejected' });
+    toast(authRejectOperatorCopy(status, detail), 'err');
+    openSecretSheet({ reason: 'rejected', detail: detail || {} });
   }
   function openSecretSheet(opts) {
     opts = opts || {};
     if (!dock) return;
     closeToolSheet();
     var reason = opts.reason === 'rejected' ? 'rejected' : 'missing';
+    var detail = opts.detail || {};
     toolSheet = $('div', 'opdock-sheet opdock-secret-sheet');
     toolSheet.appendChild($('h3', null, reason === 'rejected' ? 'Credential rejected' : 'Unlock HAPI inline'));
-    toolSheet.appendChild($('div', 'opdock-session-meta', promptMessageForMode()));
+    var meta = promptMessageForMode();
+    if (detail.error || detail.path) meta = authRejectOperatorCopy(403, detail);
+    toolSheet.appendChild($('div', 'opdock-session-meta', meta));
     var inp = document.createElement('input');
     inp.type = 'password';
     inp.className = 'opdock-secret-input';
@@ -543,8 +581,10 @@
       cache: 'no-store',
     }).then(function (res) {
       if (res.status === 401 || res.status === 403) {
-        onAuthRejected(res.status);
-        return Promise.reject(new Error('stt ' + res.status));
+        return res.json().catch(function () { return {}; }).then(function (body) {
+          onAuthRejected(res.status, { error: parseProxyRejectError(body) || ('stt ' + res.status), path: url });
+          return Promise.reject(new Error('stt ' + res.status));
+        });
       }
       return res.json().catch(function () { return {}; }).then(function (body) {
         if (!res.ok || !body || !body.ok) {
@@ -637,8 +677,12 @@
     });
   }
   function uploadAttachment(secret, session, name, b64, mime) {
-    return hapiPost('/api/sessions/' + encodeURIComponent(session) + '/upload', secret, { filename: name, content: b64, mimeType: mime })
-      .then(function (res) { if (!res.ok) return Promise.reject(res); return res.json(); })
+    var path = '/api/sessions/' + encodeURIComponent(session) + '/upload';
+    return hapiPost(path, secret, { filename: name, content: b64, mimeType: mime })
+      .then(function (res) {
+        if (res.ok) return res.json();
+        return readRejectDetail(res, path, session).then(function (d) { return Promise.reject(d); });
+      })
       .then(function (out) { if (!out || !out.path) return Promise.reject(new Error('upload rejected')); var size = 0; try { size = atob(b64).length; } catch (e) {} return { id: name, filename: name, mimeType: mime, size: size, path: out.path }; });
   }
 
@@ -790,14 +834,19 @@
         return hapiPost('/api/sessions/' + encodeURIComponent(session) + '/messages', secret, { text: text, attachments: [att] });
       })
       .then(function (res) {
-        if (res.status === 401 || res.status === 403) { onAuthRejected(res.status); }
-        else if (!res.ok) { toast('HAPI error ' + res.status, 'err'); }
-        else { toast('Sent to agent 🎙️', 'ok'); closeOverlay(); openReplies(secret, session); return; }
-        setBtnState('overlay');
+        if (res.status === 401 || res.status === 403) {
+          var msgPath = '/api/sessions/' + encodeURIComponent(session) + '/messages';
+          return readRejectDetail(res, msgPath, session).then(function (d) {
+            onAuthRejected(d.status, d);
+            setBtnState('overlay');
+          });
+        }
+        if (!res.ok) { toast('HAPI error ' + res.status, 'err'); setBtnState('overlay'); return; }
+        toast('Sent to agent 🎙️', 'ok'); closeOverlay(); openReplies(secret, session);
       })
       .catch(function (e) {
         var st = e && e.status;
-        if (st === 401 || st === 403) onAuthRejected(st);
+        if (st === 401 || st === 403) onAuthRejected(st, e);
         else toast('Send failed: ' + (st ? ('upload ' + st) : (e && e.message || e)), 'err');
         setBtnState('overlay');
       });
@@ -825,12 +874,18 @@
       ? uploadAttachment(secret, session, 'operator-screenshot.jpg', b64, 'image/jpeg').then(function (att) { return post([att]); })
       : post([]);
     chain.then(function (res) {
-      if (res.status === 401 || res.status === 403) { onAuthRejected(res.status); setBtnState('idle'); }
-      else if (!res.ok) { toast('HAPI error ' + res.status, 'err'); setBtnState('idle'); }
-      else { toast('Sent to agent 🎙️', 'ok'); setBtnState('idle'); openReplies(secret, session); }
+      if (res.status === 401 || res.status === 403) {
+        var msgPath = '/api/sessions/' + encodeURIComponent(session) + '/messages';
+        return readRejectDetail(res, msgPath, session).then(function (d) {
+          onAuthRejected(d.status, d);
+          setBtnState('idle');
+        });
+      }
+      if (!res.ok) { toast('HAPI error ' + res.status, 'err'); setBtnState('idle'); return; }
+      toast('Sent to agent 🎙️', 'ok'); setBtnState('idle'); openReplies(secret, session);
     }).catch(function (e) {
       var st = e && e.status;
-      if (st === 401 || st === 403) onAuthRejected(st);
+      if (st === 401 || st === 403) onAuthRejected(st, e);
       else toast('Send failed: ' + (st ? ('upload ' + st) : (e && e.message || e)), 'err');
       setBtnState('idle');
     });
@@ -1587,7 +1642,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.10.3', // x-release-please-version
+    _version: '0.10.4', // x-release-please-version
     openCluster: function () { return openCluster(); },
     _stripRawJsonForDisplay: stripRawJsonForDisplay,
     _summarizeContextJson: summarizeContextJson,
