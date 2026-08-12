@@ -1,4 +1,8 @@
 import type { Database } from 'bun:sqlite'
+import {
+    machineRegistrationNeedsRefresh,
+    mergeMachineRegistrationMetadata,
+} from '@hapi/protocol/machineRegistration'
 
 import type { StoredMachine, VersionedUpdateResult } from './types'
 import { safeJsonParse } from './json'
@@ -48,7 +52,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 // When `clearOmittedRunnerAds` is set (full runner daemon registration with
 // runnerState), runner-advertised keys omitted from incoming are deleted so
 // rollback / unsupervised restart cannot leave sticky capabilities or
-// supervisedRestart:true (#1108 bot Major).
+// supervisedRestart:true.
 export const RUNNER_ADVERTISED_METADATA_KEYS = [
     'capabilities',
     'supervisedRestart',
@@ -92,6 +96,29 @@ function mergeRunnerCapabilities(stored: unknown, incoming: unknown): Record<str
     return JSON.stringify(mergedCaps) === JSON.stringify(currentCaps) ? undefined : { ...base, capabilities: mergedCaps }
 }
 
+function terminalBootstrapWouldMaskRunner(stored: unknown, incoming: unknown): boolean {
+    const current = isPlainObject(stored) ? stored : null
+    const next = isPlainObject(incoming) ? incoming : null
+    if (!current || !next) {
+        return false
+    }
+    const runnerKeys = [
+        'happyCliVersion',
+        'capabilities',
+        'cliArtifactGeneration',
+        'versionHandoffDisabled',
+        'supervisedRestart',
+        'startedCliMtimeMs',
+        'installedCliMtimeMs',
+    ] as const
+    for (const key of runnerKeys) {
+        if (next[key] !== undefined && JSON.stringify(next[key]) !== JSON.stringify(current[key])) {
+            return true
+        }
+    }
+    return false
+}
+
 export function getOrCreateMachine(
     db: Database,
     id: string,
@@ -105,13 +132,15 @@ export function getOrCreateMachine(
         if (stored.namespace !== namespace) {
             throw new Error('Machine namespace mismatch')
         }
-        const merged = mergeMachineMetadata(stored.metadata, metadata, {
-            // Full runner registration (with runnerState) owns the skew ads —
-            // omit means clear, so rollback cannot leave sticky supervisedRestart.
-            clearOmittedRunnerAds: runnerState !== null && runnerState !== undefined,
-        })
-        let current = stored
-        if (merged !== undefined) {
+        const isRunnerRegistration = runnerState !== null && runnerState !== undefined
+        if (!isRunnerRegistration) {
+            if (terminalBootstrapWouldMaskRunner(stored.metadata, metadata)) {
+                return stored
+            }
+            const merged = mergeMachineMetadata(stored.metadata, metadata)
+            if (merged === undefined) {
+                return stored
+            }
             db.prepare(`
                 UPDATE machines
                 SET metadata = @metadata,
@@ -128,7 +157,58 @@ export function getOrCreateMachine(
             if (!row) {
                 throw new Error('Failed to refresh machine metadata')
             }
-            current = row
+            return row
+        }
+
+        // Re-registering runners used to keep stale hub metadata forever
+        // (version/capabilities from the first connect). Refresh identity when
+        // the client sends newer registration fields.
+        //
+        // Do not return early after identity refresh: upstream runner-state
+        // capability backfill (e.g. piExistingSessionResume) must still run on
+        // the same registration call when metadata also changes.
+        let current = stored
+        if (machineRegistrationNeedsRefresh(stored.metadata, metadata)) {
+            const merged = mergeMachineRegistrationMetadata(stored.metadata, metadata)
+            const result = updateMachineMetadata(
+                db,
+                id,
+                merged,
+                stored.metadataVersion,
+                namespace,
+            )
+            if (result.result === 'success') {
+                current = getMachine(db, id) ?? stored
+            } else {
+                // Version conflict or race: keep current row; connect path can
+                // still push identity via machine-update-metadata.
+                current = getMachine(db, id) ?? stored
+            }
+        } else {
+            // General merge: fill missing machine-owned fields (e.g. arch)
+            // that are not covered by the identity refresh predicate above.
+            const merged = mergeMachineMetadata(stored.metadata, metadata, {
+                clearOmittedRunnerAds: true,
+            })
+            if (merged !== undefined) {
+                db.prepare(`
+                    UPDATE machines
+                    SET metadata = @metadata,
+                        metadata_version = metadata_version + 1,
+                        updated_at = @updated_at,
+                        seq = seq + 1
+                    WHERE id = @id
+                `).run({
+                    metadata: JSON.stringify(merged),
+                    updated_at: Date.now(),
+                    id
+                })
+                const row = getMachine(db, id)
+                if (!row) {
+                    throw new Error('Failed to refresh machine metadata')
+                }
+                current = row
+            }
         }
         const mergedRunnerState = mergeRunnerCapabilities(current.runnerState, runnerState)
         if (mergedRunnerState !== undefined) {

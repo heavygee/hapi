@@ -283,6 +283,25 @@ export class RpcGateway {
         await this.machineRpc(machineId, RPC_METHODS.StopRunner, {})
     }
 
+    async runnerSelfUpgrade(machineId: string, offer: unknown): Promise<unknown> {
+        // Upgrades can take minutes (npm install / artifact download).
+        return await this.machineRpc(machineId, RPC_METHODS.RunnerSelfUpgrade, { offer }, 10 * 60_000)
+    }
+
+    /**
+     * Ask the CLI to deliver one queued message into the active Pi turn
+     * (Pi native steer). Only the pi flavor registers this handler.
+     */
+    async steerQueuedMessage(
+        sessionId: string,
+        localId: string
+    ): Promise<{ steered: boolean; error?: string }> {
+        return await this.sessionRpc(sessionId, RPC_METHODS.SteerQueuedMessage, { localId }) as {
+            steered: boolean
+            error?: string
+        }
+    }
+
     async getGitStatus(sessionId: string, cwd?: string): Promise<RpcCommandResponse> {
         return await this.sessionRpc(sessionId, RPC_METHODS.GitStatus, { cwd }) as RpcCommandResponse
     }
@@ -417,20 +436,6 @@ export class RpcGateway {
      *  a single entry point instead of per-method wrappers. */
     async callPiRpc<T = unknown>(sessionId: string, method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<T> {
         return await this.sessionRpc(sessionId, method, params ?? {}, timeoutMs ?? DEFAULT_RPC_TIMEOUT_MS) as T
-    }
-
-    /**
-     * Ask the CLI to deliver one queued message into the active Pi turn
-     * (Pi native steer). Only the pi flavor registers this handler.
-     */
-    async steerQueuedMessage(
-        sessionId: string,
-        localId: string
-    ): Promise<{ steered: boolean; error?: string }> {
-        return await this.sessionRpc(sessionId, RPC_METHODS.SteerQueuedMessage, { localId }) as {
-            steered: boolean
-            error?: string
-        }
     }
 
     async forkConversation(
