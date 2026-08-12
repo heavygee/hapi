@@ -172,6 +172,7 @@
 .opdock-cancel { background: rgba(255, 255, 255, 0.14); color: #e5e7eb; }
 .opdock-send { background: #6b21a8; color: #fff; }
 .opdock-send:hover { background: #7c3aed; }
+.opdock-send:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* --- read-back replies panel ---------------------------------------------------------- */
 .opdock-replies {
