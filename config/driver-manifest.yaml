@@ -784,7 +784,7 @@ layers:
   # Pin v0.10.1 (click-toggle H hub / corner pin / fan plate). #123 Settings unlock.
   # Thin soup tip on live driver/integration. Worktree: hapi-inline-web (feat) + hapi-inline-soup (tip).
   # Knock /opmic. Composed /hapi/operator/sessions. Do not allow-list raw GET /api/sessions.
-  # Tip: e38849a74 (driver/hapi-inline-operator-dock)
+  # Tip: a820e1470 (driver/hapi-inline-operator-dock) — host even-arc fan overlay (hapi-inline#112)
   - branch: driver/hapi-inline-operator-dock
 
   # heavygee/hapi#121 — operator-hold chip pulse (🛑 needs_operator / babysit.hold).
