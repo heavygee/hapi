@@ -119,11 +119,12 @@ These are the A2A substrate that already shipped:
 **Contract (Layer 0 only):**
 
 1. CLI `hapi spawn-peer` + MCP `spawn_peer` — same pattern as #1195. Remit required. Fail closed if the new session has no user message.
-2. Delivery of that remit uses the `ping_peer` path so #1203 provenance applies.
-3. Do not auto-approve in read-only/default (#1401 / #1402 class).
-4. Do not wait on Hub-as-MCP-server (#360) or `POST /sessions/:parentId/spawn-peer` relocate.
+2. A session-bound / MCP spawn preflights the calling session capability **before** machine spawn. Missing capability returns an error and creates no child.
+3. Deliver the remit through the authenticated source-session peer path from #1203 (`POST /cli/sessions/:source/peer-messages`). A spawn remit must not silently downgrade to unattributed `/messages` delivery.
+4. Do not auto-approve in read-only/default (#1401 / #1402 class).
+5. Do not wait on Hub-as-MCP-server (#360) or `POST /sessions/:parentId/spawn-peer` relocate.
 
-**Kill criteria:** a tool that returns `sessionId` with 0 messages after a remit was supplied → stop. Empty `message` allowed → stop.
+**Kill criteria:** a tool that returns `sessionId` with 0 messages after a remit was supplied → stop. Empty `message` allowed → stop. A missing source capability is discovered only after creating the child → stop. A session-bound spawn falls back to unattributed delivery → stop.
 
 ### Revision 2026-08-09 - Layer 0 peer delivery provenance ([#1203](https://github.com/tiann/hapi/issues/1203))
 
