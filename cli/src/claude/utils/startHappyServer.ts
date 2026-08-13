@@ -32,11 +32,23 @@ import { PingPeerError, formatInspectPeerReport, formatPeerSessionsList, inspect
 type StartHappyServerOptions = {
     emitTitleSummary?: boolean;
     enableChangeTitle?: boolean;
+    /**
+     * Cursor-only (#1516): doubled-letter URL recall is a Cursor-routed failure mode.
+     * Defaults on when skillLookup.flavor === 'cursor'.
+     */
+    enableDisplayLinks?: boolean;
     skillLookup?: {
         workingDirectory: string;
         flavor: string;
     };
 };
+
+function resolveEnableDisplayLinks(options: StartHappyServerOptions): boolean {
+    if (options.enableDisplayLinks !== undefined) {
+        return options.enableDisplayLinks;
+    }
+    return options.skillLookup?.flavor === 'cursor';
+}
 
 /** Registered on the MCP server, but never pre-approved via Claude --allowedTools. */
 const CLAUDE_MANUAL_APPROVAL_HAPI_TOOLS = new Set([
@@ -62,7 +74,8 @@ function createHapiMcpServer(
     client: ApiSessionClient,
     emitTitleSummary: boolean,
     enableChangeTitle: boolean,
-    skillLookup: StartHappyServerOptions['skillLookup']
+    skillLookup: StartHappyServerOptions['skillLookup'],
+    enableDisplayLinks: boolean
 ): McpServer {
     const handler = async (title: string) => {
         logger.debug('[hapiMCP] Changing title to:', title);
@@ -302,43 +315,45 @@ function createHapiMcpServer(
         }
     });
 
-    mcp.registerTool<any, any>('display_links', {
-        description: `Paint clickable http(s) URL cards into the current HAPI chat without a fake user turn. ${DISPLAY_LINKS_PROMPT_CURSOR}`,
-        title: 'Display Links',
-        inputSchema: displayLinksInputSchema,
-    }, async (args: { urls: Array<{ href: string; title?: string } | string> }) => {
-        logger.debug('[hapiMCP] Display links:', args.urls);
+    if (enableDisplayLinks) {
+        mcp.registerTool<any, any>('display_links', {
+            description: `Paint clickable http(s) URL cards into the current HAPI chat without a fake user turn. Cursor-only: other flavors type URLs fine. ${DISPLAY_LINKS_PROMPT_CURSOR}`,
+            title: 'Display Links',
+            inputSchema: displayLinksInputSchema,
+        }, async (args: { urls: Array<{ href: string; title?: string } | string> }) => {
+            logger.debug('[hapiMCP] Display links:', args.urls);
 
-        try {
-            const urls = parseDisplayLinksInput(args.urls);
-            client.sendAgentMessage(buildDisplayLinksPayload({
-                urls,
-                id: randomUUID(),
-            }));
+            try {
+                const urls = parseDisplayLinksInput(args.urls);
+                client.sendAgentMessage(buildDisplayLinksPayload({
+                    urls,
+                    id: randomUUID(),
+                }));
 
-            return {
-                content: [
-                    {
-                        type: 'text' as const,
-                        text: `Displayed ${urls.length} link${urls.length === 1 ? '' : 's'}`,
-                    },
-                ],
-                isError: false,
-            };
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            logger.debug('[hapiMCP] Failed to display links:', message);
-            return {
-                content: [
-                    {
-                        type: 'text' as const,
-                        text: `Failed to display links: ${message}`,
-                    },
-                ],
-                isError: true,
-            };
-        }
-    });
+                return {
+                    content: [
+                        {
+                            type: 'text' as const,
+                            text: `Displayed ${urls.length} link${urls.length === 1 ? '' : 's'}`,
+                        },
+                    ],
+                    isError: false,
+                };
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                logger.debug('[hapiMCP] Failed to display links:', message);
+                return {
+                    content: [
+                        {
+                            type: 'text' as const,
+                            text: `Failed to display links: ${message}`,
+                        },
+                    ],
+                    isError: true,
+                };
+            }
+        });
+    }
 
     mcp.registerTool<any, any>('ping_peer', {
         description: PING_PEER_TOOL_DESCRIPTION,
@@ -524,11 +539,12 @@ function readMcpSessionId(req: IncomingMessage): string | undefined {
 export async function startHappyServer(client: ApiSessionClient, options: StartHappyServerOptions = {}) {
     const emitTitleSummary = options.emitTitleSummary ?? true;
     const enableChangeTitle = options.enableChangeTitle ?? true;
+    const enableDisplayLinks = resolveEnableDisplayLinks(options);
     const transports = new Map<string, StreamableHTTPServerTransport>();
     const mcps = new Map<string, McpServer>();
 
     const createMcpTransport = () => {
-        const mcp = createHapiMcpServer(client, emitTitleSummary, enableChangeTitle, options.skillLookup);
+        const mcp = createHapiMcpServer(client, emitTitleSummary, enableChangeTitle, options.skillLookup, enableDisplayLinks);
         const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomUUID(),
             onsessioninitialized: (sessionId) => {
@@ -583,8 +599,12 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
     }));
 
     const toolNames = enableChangeTitle
-        ? ['change_title', 'display_image', 'display_video', 'display_media', 'display_links', 'list_peers', 'ping_peer', 'inspect_peer']
-        : ['display_image', 'display_video', 'display_media', 'display_links', 'list_peers', 'ping_peer', 'inspect_peer'];
+        ? ['change_title', 'display_image', 'display_video', 'display_media']
+        : ['display_image', 'display_video', 'display_media'];
+    if (enableDisplayLinks) {
+        toolNames.push('display_links');
+    }
+    toolNames.push('list_peers', 'ping_peer', 'inspect_peer');
     if (options.skillLookup) {
         toolNames.push('skill_lookup');
     }

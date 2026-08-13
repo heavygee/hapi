@@ -9,13 +9,20 @@ const harness = vi.hoisted(() => ({
 }))
 
 vi.mock('@/claude/utils/startHappyServer', () => ({
-    startHappyServer: vi.fn(async (_client: unknown, options: { skillLookup?: unknown }) => {
+    startHappyServer: vi.fn(async (_client: unknown, options: {
+        skillLookup?: { flavor?: string }
+        enableDisplayLinks?: boolean
+    }) => {
         harness.startOptions = options
+        const cursorLinks = options.enableDisplayLinks === true
+            || (options.enableDisplayLinks !== false && options.skillLookup?.flavor === 'cursor')
+        const names = ['change_title', 'display_image', 'display_video', 'display_media']
+        if (cursorLinks) names.push('display_links')
+        names.push('list_peers', 'ping_peer', 'inspect_peer')
+        if (options.skillLookup) names.push('skill_lookup')
         return {
             url: 'http://127.0.0.1:43006/',
-            toolNames: options.skillLookup
-                ? ['change_title', 'display_image', 'display_video', 'display_media', 'display_links', 'list_peers', 'ping_peer', 'inspect_peer', 'skill_lookup']
-                : ['change_title', 'display_image', 'display_video', 'display_media', 'display_links', 'list_peers', 'ping_peer', 'inspect_peer'],
+            toolNames: names,
             stop: vi.fn()
         }
     })
@@ -64,6 +71,7 @@ describe('buildHapiMcpBridge skill lookup config', () => {
 
         expect(harness.startOptions).toEqual({
             emitTitleSummary: undefined,
+            enableDisplayLinks: undefined,
             skillLookup
         })
         expect(harness.cliArgs).toEqual([
@@ -71,31 +79,40 @@ describe('buildHapiMcpBridge skill lookup config', () => {
             '--url',
             'http://127.0.0.1:43006/',
             '--tools',
-            'change_title,display_image,display_video,display_media,display_links,list_peers,ping_peer,inspect_peer,skill_lookup'
+            'change_title,display_image,display_video,display_media,list_peers,ping_peer,inspect_peer,skill_lookup'
         ])
         expect(bridge.mcpServers.hapi.tools).toEqual({
             change_title: { approval_mode: 'approve' },
             display_image: { approval_mode: 'prompt' },
             display_video: { approval_mode: 'prompt' },
             display_media: { approval_mode: 'prompt' },
-            display_links: { approval_mode: 'approve' },
             list_peers: { approval_mode: 'approve' },
             skill_lookup: { approval_mode: 'approve' }
         })
+        expect(bridge.mcpServers.hapi.tools).not.toHaveProperty('display_links')
     })
 
     it('does not expose skill_lookup for native-skill bridge callers', async () => {
         const bridge = await buildHapiMcpBridge(createClient())
 
-        expect(harness.cliArgs.at(-1)).toBe('change_title,display_image,display_video,display_media,display_links,list_peers,ping_peer,inspect_peer')
+        expect(harness.cliArgs.at(-1)).toBe('change_title,display_image,display_video,display_media,list_peers,ping_peer,inspect_peer')
         expect(bridge.mcpServers.hapi.tools).toEqual({
             change_title: { approval_mode: 'approve' },
             display_image: { approval_mode: 'prompt' },
             display_video: { approval_mode: 'prompt' },
             display_media: { approval_mode: 'prompt' },
-            display_links: { approval_mode: 'approve' },
             list_peers: { approval_mode: 'approve' }
         })
+        expect(bridge.mcpServers.hapi.tools).not.toHaveProperty('display_links')
+    })
+
+    it('auto-approves display_links for cursor sessions', async () => {
+        const bridge = await buildHapiMcpBridge(createClient(), {
+            enableDisplayLinks: true,
+            skillLookup: { workingDirectory: '/repo', flavor: 'cursor' }
+        })
+        expect(harness.cliArgs.at(-1)).toContain('display_links')
+        expect(bridge.mcpServers.hapi.tools?.display_links).toEqual({ approval_mode: 'approve' })
     })
 
     it('materializes pending lazy sessions before starting the MCP server', async () => {
