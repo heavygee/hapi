@@ -29,8 +29,8 @@ states:
     emoji: "⚠️"
     estateCode: babysit.needs_work
     status: needs_work
-    stickyPing: true
-    meaning: Failing CI, open threads, bot findings, rebase, or closed-unmerged.
+    stickyPing: true  # default; classifier blockedUpstream=true overrides false
+    meaning: Failing CI, open threads, bot findings, rebase, closed-unmerged, or a visible upstream dependency wait.
 
   pre_pr:
     emoji: "📝"

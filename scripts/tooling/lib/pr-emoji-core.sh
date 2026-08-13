@@ -492,7 +492,7 @@ pec_blocked_upstream_action() {
 }
 
 # pec_gate_draft_blocked DRAFT LABELS_CSV [BODY]
-# Prints "emoji\taction\tprePr" when a gate fires; empty if no gate.
+# Prints "emoji\taction\tprePr\tblockedUpstream" when a gate fires; empty if no gate.
 # Precedence: status:blocked-upstream (⚠️, prePr=0) beats draft alone (📝, prePr=1).
 pec_gate_draft_blocked() {
     local draft="${1:-0}" labels_csv="${2:-}" body="${3:-}"
@@ -501,11 +501,11 @@ pec_gate_draft_blocked() {
         1|true|yes) is_draft=1 ;;
     esac
     if pec_labels_csv_has "$labels_csv" "status:blocked-upstream"; then
-        printf '%s\t%s\t%s' "⚠️" "$(pec_blocked_upstream_action "$body")" "0"
+        printf '%s\t%s\t%s\t%s' "⚠️" "$(pec_blocked_upstream_action "$body")" "0" "1"
         return 0
     fi
     if [[ "$is_draft" -eq 1 ]]; then
-        printf '%s\t%s\t%s' "📝" "draft PR — not ready for green; mark ready when unblocked" "1"
+        printf '%s\t%s\t%s\t%s' "📝" "draft PR — not ready for green; mark ready when unblocked" "1" "0"
         return 0
     fi
     printf ''
@@ -522,10 +522,11 @@ pec_action_fingerprint() {
 }
 
 # Decide whether to ping a session, given its previous recorded state.
-#   pec_should_ping NEW_EMOJI PREV_EMOJI NEW_FP PREV_FP LAST_PING_EPOCH NOW_EPOCH REMINDER_SECS [WINDOW_ROUSE]
+#   pec_should_ping NEW_EMOJI PREV_EMOJI NEW_FP PREV_FP LAST_PING_EPOCH NOW_EPOCH REMINDER_SECS [WINDOW_ROUSE] [SUPPRESS_NAG]
 # Prints "yes" / "no" and returns 0/1 respectively.
 #
 # Rules:
+#   - SUPPRESS_NAG=1                    → never ping (known external wait)
 #   - "?" (unknown)                     → never ping
 #   - 🧹 (complete)                     → never ping (incl. 🔧→🧹 transition)
 #   - 🛑 (needs_operator)               → never ping the coding peer (operator hold)
@@ -538,9 +539,10 @@ pec_action_fingerprint() {
 #   - unchanged ✅ / 🔁 / 📝            → no (even on ping windows)
 pec_should_ping() {
     local new_emoji="$1" prev_emoji="$2" new_fp="$3" prev_fp="$4" \
-        last_ping="${5:-0}" now="${6:-0}" reminder="${7:-86400}" window_rouse="${8:-0}"
+        last_ping="${5:-0}" now="${6:-0}" reminder="${7:-86400}" \
+        window_rouse="${8:-0}" suppress_nag="${9:-0}"
 
-    if [[ "$new_emoji" == "?" || "$new_emoji" == "🧹" || "$new_emoji" == "🛑" ]]; then
+    if [[ "$suppress_nag" == "1" || "$new_emoji" == "?" || "$new_emoji" == "🧹" || "$new_emoji" == "🛑" ]]; then
         echo "no"; return 1
     fi
     if [[ "$new_emoji" != "$prev_emoji" ]]; then
@@ -577,14 +579,15 @@ pec_should_rename() {
 # Channel event emit helpers (ContributionState → POST /api/system-events)
 # ---------------------------------------------------------------------------
 
-# pec_emit_reason NEW_EMOJI PREV_EMOJI NEW_FP PREV_FP LAST_PING NOW REMINDER [WINDOW_ROUSE]
+# pec_emit_reason NEW_EMOJI PREV_EMOJI NEW_FP PREV_FP LAST_PING NOW REMINDER [WINDOW_ROUSE] [SUPPRESS_NAG]
 # → transition | fingerprint | reminder | window | none
 # Same triggers as pec_should_ping, but returns why (reminder/window need key suffix).
 pec_emit_reason() {
     local new_emoji="$1" prev_emoji="$2" new_fp="$3" prev_fp="$4" \
-        last_ping="${5:-0}" now="${6:-0}" reminder="${7:-86400}" window_rouse="${8:-0}"
+        last_ping="${5:-0}" now="${6:-0}" reminder="${7:-86400}" \
+        window_rouse="${8:-0}" suppress_nag="${9:-0}"
 
-    if [[ "$new_emoji" == "?" || "$new_emoji" == "🧹" ]]; then
+    if [[ "$suppress_nag" == "1" || "$new_emoji" == "?" || "$new_emoji" == "🧹" ]]; then
         echo "none"; return 1
     fi
     if [[ "$new_emoji" != "$prev_emoji" ]]; then

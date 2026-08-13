@@ -103,12 +103,13 @@ fetch_latest_bot_body() {
 
 # Emit the per-PR JSON blob. All signal bits are 0/1 strings; jq converts.
 # Optional mergeLane (maintainer|self_merge) for ✅ PRs — chip stays health-only.
+# blockedUpstream is structured actuator policy; callers must not parse action prose.
 _emit_pr_json() {
     local out="$1" emoji="$2" action="$3" exists="$4" merged="$5" closed="$6" \
         prepr="$7" data_unavail="$8" threads="$9" checks_ok="${10}" \
         checks_pending="${11}" checks_seen="${12}" bot_clean="${13}" \
         bot_major="${14}" merge_state="${15}" merge_lane="${16:-}" \
-        head_ref="${17:-}"
+        head_ref="${17:-}" blocked_upstream="${18:-0}"
     local in_queue=true
     [[ "$exists" == "1" && "$merged" == "0" && "$closed" == "0" && "$data_unavail" == "0" ]] || in_queue=false
     b() { [[ "$1" == "1" ]] && echo true || echo false; }
@@ -123,7 +124,8 @@ _emit_pr_json() {
         --argjson checksOk "$(b "$checks_ok")" --argjson checksPending "$(b "$checks_pending")" \
         --argjson checksSeen "$(b "$checks_seen")" \
         --argjson botClean "$(b "$bot_clean")" --argjson botMajor "$(b "$bot_major")" \
-        '{emoji:$emoji,exists:$exists,inQueue:$inQueue,open:$inQueue,prePr:$prePr,merged:$merged,closed:$closed,dataUnavailable:$dataUnavailable,threads:$threads,checksOk:$checksOk,checksPending:$checksPending,checksSeen:$checksSeen,botClean:$botClean,botMajor:$botMajor,mergeState:$merge,action:$action}
+        --argjson blockedUpstream "$(b "$blocked_upstream")" \
+        '{emoji:$emoji,exists:$exists,inQueue:$inQueue,open:$inQueue,prePr:$prePr,merged:$merged,closed:$closed,dataUnavailable:$dataUnavailable,threads:$threads,checksOk:$checksOk,checksPending:$checksPending,checksSeen:$checksSeen,botClean:$botClean,botMajor:$botMajor,blockedUpstream:$blockedUpstream,mergeState:$merge,action:$action}
          + (if ($mergeLane|length)>0 then {mergeLane:$mergeLane} else {} end)
          + (if ($headRef|length)>0 then {headRef:$headRef} else {} end)' \
         >"$out"
@@ -311,14 +313,11 @@ classify_one() {
     fi
 
     # Draft / blocked-upstream before CI/bot can invent ✅ (heavygee/hapi#127).
-    local gate gate_emoji gate_action gate_prepr
+    local gate gate_emoji gate_action gate_prepr gate_blocked
     gate="$(pec_gate_draft_blocked "$draft_flag" "$labels_csv" "$pr_body")"
     if [[ -n "$gate" ]]; then
-        gate_emoji="${gate%%$'\t'*}"
-        gate="${gate#*$'\t'}"
-        gate_action="${gate%%$'\t'*}"
-        gate_prepr="${gate#*$'\t'}"
-        _emit_pr_json "$out" "$gate_emoji" "$gate_action" 1 0 0 "$gate_prepr" 0 -1 0 0 0 0 0 "$merge_state" "" "$head_ref"
+        IFS=$'\t' read -r gate_emoji gate_action gate_prepr gate_blocked <<<"$gate"
+        _emit_pr_json "$out" "$gate_emoji" "$gate_action" 1 0 0 "$gate_prepr" 0 -1 0 0 0 0 0 "$merge_state" "" "$head_ref" "$gate_blocked"
         return
     fi
 

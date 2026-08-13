@@ -405,14 +405,17 @@ eq "dep from body missing" \
 GATE_DRAFT="$(pec_gate_draft_blocked true "enhancement" "")"
 eq "draft alone → 📝" "$(printf '%s' "$GATE_DRAFT" | cut -f1)" "📝"
 eq "draft alone → prePr 1" "$(printf '%s' "$GATE_DRAFT" | cut -f3)" "1"
+eq "draft alone → blockedUpstream 0" "$(printf '%s' "$GATE_DRAFT" | cut -f4)" "0"
 GATE_BLOCK="$(pec_gate_draft_blocked false "status:blocked-upstream" "blocked on #1473")"
 eq "ready + blocked-upstream → ⚠️" "$(printf '%s' "$GATE_BLOCK" | cut -f1)" "⚠️"
 eq "ready + blocked-upstream → prePr 0" "$(printf '%s' "$GATE_BLOCK" | cut -f3)" "0"
+eq "ready + blocked-upstream → blockedUpstream 1" "$(printf '%s' "$GATE_BLOCK" | cut -f4)" "1"
 eq "ready + blocked-upstream names dep" \
     "$(printf '%s' "$GATE_BLOCK" | cut -f2 | grep -q '#1473' && echo yes || echo no)" "yes"
 GATE_BOTH="$(pec_gate_draft_blocked true "enhancement|status:blocked-upstream" "blocked by #99")"
 eq "draft + blocked-upstream → ⚠️ wins" "$(printf '%s' "$GATE_BOTH" | cut -f1)" "⚠️"
 eq "draft + blocked-upstream → prePr 0" "$(printf '%s' "$GATE_BOTH" | cut -f3)" "0"
+eq "draft + blocked-upstream → blockedUpstream 1" "$(printf '%s' "$GATE_BOTH" | cut -f4)" "1"
 eq "no gate when ready and unlabeled" \
     "$(pec_gate_draft_blocked false "enhancement" "" | wc -c | tr -d ' ')" "0"
 
@@ -420,6 +423,18 @@ eq "no gate when ready and unlabeled" \
 eq "ping never on complete" "$(pec_should_ping "🧹" "🔧" "a" "b" 0 100 10 1 || true)" "no"
 eq "ping sticky 🔧 on window" "$(pec_should_ping "🔧" "🔧" "a" "a" 0 100 10 1 || true)" "yes"
 eq "emit none on complete" "$(pec_emit_reason "🧹" "🔧" "a" "b" 0 100 10 1 || true)" "none"
+eq "suppressed external wait never pings on transition" \
+    "$(pec_should_ping "⚠️" "" "a" "" 0 100 10 1 1 || true)" "no"
+eq "suppressed external wait never pings on reminder" \
+    "$(pec_should_ping "⚠️" "⚠️" "a" "a" 1 100 10 0 1 || true)" "no"
+eq "suppressed external wait emits no transition event" \
+    "$(pec_emit_reason "⚠️" "" "a" "" 0 100 10 1 1 || true)" "none"
+eq "suppressed external wait emits no recurring event" \
+    "$(pec_emit_reason "⚠️" "⚠️" "a" "a" 1 100 10 1 1 || true)" "none"
+eq "cleared external wait restores fingerprint ping" \
+    "$(pec_should_ping "⚠️" "⚠️" "new" "old" 100 101 1000 0 0 || true)" "yes"
+eq "cleared external wait restores fingerprint event" \
+    "$(pec_emit_reason "⚠️" "⚠️" "new" "old" 100 101 1000 0 0 || true)" "fingerprint"
 
 echo ""
 echo "pr-emoji-core.test.sh: $PASS passed, $FAIL failed"

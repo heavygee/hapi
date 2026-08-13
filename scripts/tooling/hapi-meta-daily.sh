@@ -12,7 +12,8 @@
 #      ADR D8+). Never writes emoji or PR-number prefixes into titles.
 #      Keeps "Peer #N:" incubating titles (no issue chip yet).
 #   4. Pings a session ONLY when policy says it is actionable and not noise
-#      (ping windows: always rouse sticky ⚠️/🔧 incl. inactive/archived resume;
+#      (ping windows: rouse sticky ⚠️/🔧 incl. inactive/archived resume;
+#      structured blockedUpstream-only ⚠️ stays queued but never peer-pings;
 #      SKIP if session.thinking — already in a turn / emitting (not merely active).
 #      🧹 complete never pings; 🔧 Gate A clean / archive-pending never hourly
 #      resume — that undoes archive → 🔧 forever; 2026-08-11 e4d152f3)
@@ -539,10 +540,10 @@ md_combined_emoji() {
     printf '%s' "$combined"
 }
 
-# md_plan_ping <new_emoji> <new_fp> <prev_emoji> <prev_fp> <prev_ping> <now> <reminder> [window_rouse]
+# md_plan_ping <new_emoji> <new_fp> <prev_emoji> <prev_fp> <prev_ping> <now> <reminder> [window_rouse] [suppress_nag]
 #   → "yes"/"no" (wraps pec_should_ping; kept for test clarity)
 md_plan_ping() {
-    pec_should_ping "$1" "$3" "$2" "$4" "${5:-0}" "$6" "$7" "${8:-0}"
+    pec_should_ping "$1" "$3" "$2" "$4" "${5:-0}" "$6" "$7" "${8:-0}" "${9:-0}"
 }
 
 # ---------------------------------------------------------------------------
@@ -685,7 +686,7 @@ main() {
     IFS=$'\n' pr_list=($(sort -n <<<"${pr_list[*]}")); unset IFS
 
     vlog "classifying ${#pr_list[@]} PR(s): ${pr_list[*]}"
-    declare -A PR_EMOJI PR_ACTION PR_PREPR PR_HEADREF
+    declare -A PR_EMOJI PR_ACTION PR_PREPR PR_HEADREF PR_BLOCKED_UPSTREAM
     declare -A SESS_PR_EMOJI SESS_PR_ACTION
     # Per chip.repo, not one tiann batch. Number collision (heavygee#124 vs
     # tiann#124 closed-unmerged) must not inherit upstream closed-without-merge.
@@ -707,6 +708,7 @@ main() {
             PR_ACTION["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].action // ""')"
             PR_PREPR["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].prePr // false')"
             PR_HEADREF["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].headRef // ""')"
+            PR_BLOCKED_UPSTREAM["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].blockedUpstream // false')"
         done
     done
 
@@ -744,6 +746,7 @@ main() {
             [[ "$hit_pr" -eq 1 ]] || continue
         fi
         local emojis=() acts="" combined pre=0 first_pr=""
+        local warning_count=0 blocked_warning_count=0 has_cleanup_work=0
         for p in $prs; do
             # Per-session 🔧→🧹 when estate complete predicates hold (config/pr-chip-states.yaml).
             local emoji_sess="${PR_EMOJI[$p]:-?}"
@@ -779,6 +782,14 @@ main() {
                     fi
                 fi
             fi
+            if [[ "$emoji_sess" == "⚠️" ]]; then
+                warning_count=$((warning_count + 1))
+                if [[ "${PR_BLOCKED_UPSTREAM[$p]:-false}" == "true" ]]; then
+                    blocked_warning_count=$((blocked_warning_count + 1))
+                fi
+            elif [[ "$emoji_sess" == "🔧" ]]; then
+                has_cleanup_work=1
+            fi
             emojis+=("$emoji_sess")
             [[ -z "$first_pr" ]] && first_pr="$p"
             [[ -n "$action_sess" ]] && acts+="#$p: $action_sess"$'\n'
@@ -788,6 +799,15 @@ main() {
         done
         combined="$(md_combined_emoji "${emojis[@]}")"
         [[ -z "$combined" ]] && combined="?"
+        # A known external dependency stays visible as ⚠️ but is not peer work.
+        # Suppress only when every warning is structured blocked-upstream and
+        # no merged-cleanup disposition also needs the coding peer.
+        local suppress_nag=0
+        if [[ "$combined" == "⚠️" && "$warning_count" -gt 0 \
+            && "$warning_count" -eq "$blocked_warning_count" \
+            && "$has_cleanup_work" -eq 0 ]]; then
+            suppress_nag=1
+        fi
 
         # Chip status cache on externalRefs (ADR D8). Skip "?" to preserve last good.
         local refs_cur refs_next changed_status=0 has_chip=0
@@ -840,7 +860,7 @@ main() {
         prev_ping="$(md_prev "$state" "$sid" "last_ping")"
         [[ -z "$prev_ping" ]] && prev_ping=0
         # md_plan_ping/pec_should_ping return 1 for "no"; capture text, ignore rc.
-        decision="$(md_plan_ping "$combined" "$action_fp" "$prev_emoji" "$prev_fp" "$prev_ping" "$now" "$REMINDER_SECS" "$window_rouse" || true)"
+        decision="$(md_plan_ping "$combined" "$action_fp" "$prev_emoji" "$prev_fp" "$prev_ping" "$now" "$REMINDER_SECS" "$window_rouse" "$suppress_nag" || true)"
         # Gate A clean + archive pending is Meta's job. Hourly ping-peer resumes
         # the row, mw_member_complete fails not_archived, chip flips 🧹→🔧, and
         # the next window pings again. Never rouse for that remainder.
@@ -888,7 +908,7 @@ main() {
                 prev_emitted_fp="$(md_prev "$state" "$sid" "emitted_fp")"
                 prev_emitted_at="$(md_prev "$state" "$sid" "last_emitted")"
                 [[ -z "$prev_emitted_at" ]] && prev_emitted_at=0
-                emit_reason="$(pec_emit_reason "$combined" "$prev_emitted_e" "$action_fp" "$prev_emitted_fp" "$prev_emitted_at" "$now" "$REMINDER_SECS" "$window_rouse" || true)"
+                emit_reason="$(pec_emit_reason "$combined" "$prev_emitted_e" "$action_fp" "$prev_emitted_fp" "$prev_emitted_at" "$now" "$REMINDER_SECS" "$window_rouse" "$suppress_nag" || true)"
                 if [[ "$emit_reason" != "none" && -n "$emit_reason" ]]; then
                     local emit_date emit_pr emit_body
                     # Window emits key by London hour so 3 daily windows don't collide.
