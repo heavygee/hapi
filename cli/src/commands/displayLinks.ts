@@ -8,6 +8,26 @@ import { initializeToken } from '@/ui/tokenInit'
 import type { CommandDefinition } from './types'
 
 const SELF_TOKENS = new Set(['self', '@self', '@me', 'current', '-'])
+const LOCAL_SESSION_ONLY_ERROR =
+    'display-links only supports the current local session; run it on the target runner'
+
+/**
+ * hapiMcpUrl is loopback on the owning CLI. Opening it for another hub session
+ * hits the caller host (wrong server / coincident port). Self tokens and the
+ * current $HAPI_SESSION_ID (full id or prefix) are the only safe targets.
+ */
+export function assertLocalDisplayLinksTarget(
+    sessionArg: string | null,
+    selfSessionId: string = process.env.HAPI_SESSION_ID?.trim() ?? ''
+): void {
+    if (!sessionArg || SELF_TOKENS.has(sessionArg)) {
+        return
+    }
+    if (selfSessionId && (sessionArg === selfSessionId || selfSessionId.startsWith(sessionArg))) {
+        return
+    }
+    throw new Error(LOCAL_SESSION_ONLY_ERROR)
+}
 
 type ParsedDisplayLinksArgs = {
     help: boolean
@@ -53,10 +73,10 @@ ${chalk.bold('hapi display-links')} - Paint tappable http(s) URL cards into a HA
 ${chalk.bold('Usage:')}
   hapi display-links <href> [title]
   hapi display-links self <href> [title]
-  hapi display-links <session-id-prefix> <href> [title]
 
 ${chalk.bold('Notes:')}
-  Uses the session MCP bridge (same path as display_image). Does not create a user turn.
+  Uses this process's session MCP bridge (loopback hapiMcpUrl). Does not create a user turn.
+  Other-session / cross-runner targeting is refused — run the command on the runner that owns the session.
   Construct landmine hosts by concatenation in the calling script ("tia"+"nn"), never from model prose.
   http/https only. javascript/data/vbscript/file are rejected.
 
@@ -157,6 +177,8 @@ export async function handleDisplayLinksCommand(args: string[]): Promise<void> {
     const urls = parseDisplayLinksInput(
         parsed.title ? [{ href: parsed.href, title: parsed.title }] : [{ href: parsed.href }]
     )
+
+    assertLocalDisplayLinksTarget(parsed.sessionArg)
 
     await initializeToken()
     const headers = await authHeaders()

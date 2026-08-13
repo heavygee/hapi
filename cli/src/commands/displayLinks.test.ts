@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { parseDisplayLinksArgs } from './displayLinks'
+import { afterEach, describe, expect, it } from 'vitest'
+import { assertLocalDisplayLinksTarget, parseDisplayLinksArgs } from './displayLinks'
 
 describe('parseDisplayLinksArgs', () => {
     it('treats a leading http(s) href as self-target', () => {
@@ -37,5 +37,43 @@ describe('parseDisplayLinksArgs', () => {
     it('throws when href is missing', () => {
         expect(() => parseDisplayLinksArgs([])).toThrow(/missing href/)
         expect(() => parseDisplayLinksArgs(['self'])).toThrow(/missing href/)
+    })
+})
+
+describe('assertLocalDisplayLinksTarget', () => {
+    const previous = process.env.HAPI_SESSION_ID
+    const selfId = '2acd2599-525c-4774-825f-09ce7802549d'
+
+    afterEach(() => {
+        if (previous === undefined) {
+            delete process.env.HAPI_SESSION_ID
+        } else {
+            process.env.HAPI_SESSION_ID = previous
+        }
+    })
+
+    it('allows omitted session arg and self tokens', () => {
+        process.env.HAPI_SESSION_ID = selfId
+        expect(() => assertLocalDisplayLinksTarget(null)).not.toThrow()
+        expect(() => assertLocalDisplayLinksTarget('self')).not.toThrow()
+        expect(() => assertLocalDisplayLinksTarget('@me')).not.toThrow()
+    })
+
+    it('allows targeting the current session by id or prefix', () => {
+        process.env.HAPI_SESSION_ID = selfId
+        expect(() => assertLocalDisplayLinksTarget(selfId)).not.toThrow()
+        expect(() => assertLocalDisplayLinksTarget(selfId.slice(0, 8))).not.toThrow()
+    })
+
+    it('refuses another session id so loopback hapiMcpUrl is not opened on the caller', () => {
+        process.env.HAPI_SESSION_ID = selfId
+        expect(() => assertLocalDisplayLinksTarget('9b46cfe7-daf1-446a-bb24-a23208ed9e2a')).toThrow(
+            /current local session/
+        )
+    })
+
+    it('refuses an explicit prefix when HAPI_SESSION_ID is unset', () => {
+        delete process.env.HAPI_SESSION_ID
+        expect(() => assertLocalDisplayLinksTarget('9b46cfe7')).toThrow(/current local session/)
     })
 })
