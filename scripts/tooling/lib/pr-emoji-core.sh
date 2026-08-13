@@ -522,13 +522,14 @@ pec_action_fingerprint() {
 }
 
 # Decide whether to ping a session, given its previous recorded state.
-#   pec_should_ping NEW_EMOJI PREV_EMOJI NEW_FP PREV_FP LAST_PING_EPOCH NOW_EPOCH REMINDER_SECS [WINDOW_ROUSE]
+#   pec_should_ping NEW_EMOJI PREV_EMOJI NEW_FP PREV_FP LAST_PING_EPOCH NOW_EPOCH REMINDER_SECS [WINDOW_ROUSE] [BLOCKED_UPSTREAM_ONLY]
 # Prints "yes" / "no" and returns 0/1 respectively.
 #
 # Rules:
 #   - "?" (unknown)                     → never ping
 #   - 🧹 (complete)                     → never ping (incl. 🔧→🧹 transition)
 #   - 🛑 (needs_operator)               → never ping the coding peer (operator hold)
+#   - BLOCKED_UPSTREAM_ONLY=1           → never ping (known ext dep; #128)
 #   - emoji changed vs recorded state   → ping (transition)
 #   - sticky ⚠️ or 🔧:
 #       - WINDOW_ROUSE=1 (Meta ping windows) → always yes ("are you done yet?")
@@ -538,8 +539,12 @@ pec_action_fingerprint() {
 #   - unchanged ✅ / 🔁 / 📝            → no (even on ping windows)
 pec_should_ping() {
     local new_emoji="$1" prev_emoji="$2" new_fp="$3" prev_fp="$4" \
-        last_ping="${5:-0}" now="${6:-0}" reminder="${7:-86400}" window_rouse="${8:-0}"
+        last_ping="${5:-0}" now="${6:-0}" reminder="${7:-86400}" window_rouse="${8:-0}" \
+        blocked_upstream_only="${9:-0}"
 
+    if [[ "$blocked_upstream_only" == "1" ]]; then
+        echo "no"; return 1
+    fi
     if [[ "$new_emoji" == "?" || "$new_emoji" == "🧹" || "$new_emoji" == "🛑" ]]; then
         echo "no"; return 1
     fi
@@ -577,13 +582,21 @@ pec_should_rename() {
 # Channel event emit helpers (ContributionState → POST /api/system-events)
 # ---------------------------------------------------------------------------
 
-# pec_emit_reason NEW_EMOJI PREV_EMOJI NEW_FP PREV_FP LAST_PING NOW REMINDER [WINDOW_ROUSE]
+# pec_emit_reason NEW_EMOJI PREV_EMOJI NEW_FP PREV_FP LAST_PING NOW REMINDER [WINDOW_ROUSE] [BLOCKED_UPSTREAM_ONLY]
 # → transition | fingerprint | reminder | window | none
 # Same triggers as pec_should_ping, but returns why (reminder/window need key suffix).
+# BLOCKED_UPSTREAM_ONLY suppresses window/fingerprint/reminder nag emits (#128).
 pec_emit_reason() {
     local new_emoji="$1" prev_emoji="$2" new_fp="$3" prev_fp="$4" \
-        last_ping="${5:-0}" now="${6:-0}" reminder="${7:-86400}" window_rouse="${8:-0}"
+        last_ping="${5:-0}" now="${6:-0}" reminder="${7:-86400}" window_rouse="${8:-0}" \
+        blocked_upstream_only="${9:-0}"
 
+    if [[ "$blocked_upstream_only" == "1" ]]; then
+        if [[ -n "$prev_emoji" && "$new_emoji" != "$prev_emoji" ]]; then
+            echo "transition"; return 0
+        fi
+        echo "none"; return 1
+    fi
     if [[ "$new_emoji" == "?" || "$new_emoji" == "🧹" ]]; then
         echo "none"; return 1
     fi

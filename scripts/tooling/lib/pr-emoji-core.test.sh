@@ -419,6 +419,15 @@ eq "no gate when ready and unlabeled" \
 # complete never pings (incl. transition from 🔧)
 eq "ping never on complete" "$(pec_should_ping "🧹" "🔧" "a" "b" 0 100 10 1 || true)" "no"
 eq "ping sticky 🔧 on window" "$(pec_should_ping "🔧" "🔧" "a" "a" 0 100 10 1 || true)" "yes"
+
+# #128 blocked-upstream: visible ⚠️ but never ping/rouse the coding peer
+eq "blocked-upstream transition → no ping" "$(pec_should_ping "⚠️" "✅" "$FP_A" "x" 0 300 86400 0 1 || true)" "no"
+eq "blocked-upstream window rouse → no ping" "$(pec_should_ping "⚠️" "⚠️" "$FP_A" "$FP_A" 200 300 86400 1 1 || true)" "no"
+eq "blocked-upstream fingerprint change → no ping" "$(pec_should_ping "⚠️" "⚠️" "$FP_B" "$FP_A" 200 300 86400 0 1 || true)" "no"
+eq "blocked-upstream reminder → no ping" "$(pec_should_ping "⚠️" "⚠️" "$FP_A" "$FP_A" 100 100000 86400 0 1 || true)" "no"
+eq "blocked-upstream emit window → none" "$(pec_emit_reason "⚠️" "⚠️" "$FP_A" "$FP_A" 200 300 86400 1 1 || true)" "none"
+eq "blocked-upstream emit transition → transition" "$(pec_emit_reason "⚠️" "✅" "$FP_A" "x" 0 300 86400 0 1 || true)" "transition"
+eq "actionable ⚠️ still window-roused" "$(pec_should_ping "⚠️" "⚠️" "$FP_A" "$FP_A" 200 300 86400 1 0 || true)" "yes"
 eq "emit none on complete" "$(pec_emit_reason "🧹" "🔧" "a" "b" 0 100 10 1 || true)" "none"
 
 echo ""

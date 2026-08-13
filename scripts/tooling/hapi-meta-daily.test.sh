@@ -1040,6 +1040,61 @@ check "fork chip: batch invoked with --repo heavygee/hapi" "grep -q -- '--repo h
 check "fork chip: does not inherit tiann closed-without-merge" "! grep -q 'closed WITHOUT merge' <<<\"\$out\""
 check "fork chip: live classify is fork CI/pending" "grep -q 'CI running' <<<\"\$out\""
 
+# ============ blocked-upstream #128: no peer ping on window or transition ============
+rm -f "$WORK/state.json" "$WORK/pings.log" "$WORK/events.log"
+cat >"$WORK/batch" <<'EOF'
+#!/usr/bin/env bash
+j='{}'
+for a in "$@"; do
+    case "$a" in
+        1511) j="$(echo "$j" | jq -c '. + {"1511":{emoji:"⚠️",action:"blocked upstream — wait on #1473 (status:blocked-upstream)",prePr:false,blockedUpstream:true}}')" ;;
+    esac
+done
+echo "$j"
+EOF
+chmod +x "$WORK/batch"
+cat >"$WORK/gh" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+if [[ "$args" == *"pr list"* && "$args" == *"--state open"* ]]; then
+    printf '1511\n'; exit 0
+fi
+if [[ "$args" == *"pr list"* && "$args" == *"merged"* ]]; then
+    exit 0
+fi
+if [[ "$args" == *"notifications"* ]]; then
+    exit 0
+fi
+exit 0
+EOF
+chmod +x "$WORK/gh"
+cat >"$WORK/curl" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+if [[ "$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
+if [[ "$args" == *"-X PATCH"* ]]; then echo '{"ok":true}'; exit 0; fi
+if [[ "$args" == *"/api/system-events"* && "$args" == *"-X POST"* ]]; then
+    echo '{}' >> /dev/null
+    echo '{"event":{"id":1},"deduped":false}'; exit 0
+fi
+if [[ "$args" == *"/api/sessions?limit=500"* ]]; then
+cat <<'JSON'
+{"sessions":[
+ {"id":"8e8f4e6e-f8c1-4b17-90d6-92870566a24d","active":true,"metadata":{"name":"Peer #1509: spawn-peer remit","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":1511,"url":"https://github.com/tiann/hapi/pull/1511","role":"primary"}]}}
+]}
+JSON
+exit 0
+fi
+echo '{}'; exit 0
+EOF
+chmod +x "$WORK/curl"
+run 2>&1 >/dev/null
+pings_bu="$(cat "$WORK/pings.log" 2>/dev/null || true)"
+check "blocked-upstream run1: no peer ping on first sight" "! grep -q '^8e8f4e6e' <<<\"\$pings_bu\""
+run 2>&1 >/dev/null
+pings_bu2="$(cat "$WORK/pings.log" 2>/dev/null || true)"
+check "blocked-upstream run2: no window-rouse peer ping" "! grep -q '^8e8f4e6e' <<<\"\$pings_bu2\""
+
 echo ""
 echo "hapi-meta-daily.test.sh: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]] || exit 1

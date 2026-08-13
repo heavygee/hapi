@@ -539,10 +539,28 @@ md_combined_emoji() {
     printf '%s' "$combined"
 }
 
-# md_plan_ping <new_emoji> <new_fp> <prev_emoji> <prev_fp> <prev_ping> <now> <reminder> [window_rouse]
+# md_plan_ping <new_emoji> <new_fp> <prev_emoji> <prev_fp> <prev_ping> <now> <reminder> [window_rouse] [blocked_upstream_only]
 #   → "yes"/"no" (wraps pec_should_ping; kept for test clarity)
 md_plan_ping() {
-    pec_should_ping "$1" "$3" "$2" "$4" "${5:-0}" "$6" "$7" "${8:-0}"
+    pec_should_ping "$1" "$3" "$2" "$4" "${5:-0}" "$6" "$7" "${8:-0}" "${9:-0}"
+}
+
+# md_session_blocked_upstream_only SID8 COMBINED PR...
+# Session is blocked-upstream-only when combined is ⚠️ and every contributing
+# ⚠️ PR has blockedUpstream from the classifier (#128).
+md_session_blocked_upstream_only() {
+    local sid8="$1" combined="$2"
+    shift 2
+    [[ "$combined" == "⚠️" ]] || return 1
+    local saw_warn=0 p emoji bu
+    for p in "$@"; do
+        emoji="${SESS_PR_EMOJI[$sid8:$p]:-${PR_EMOJI[$p]:-?}}"
+        [[ "$emoji" == "⚠️" ]] || continue
+        saw_warn=1
+        bu="${PR_BLOCKED_UPSTREAM[$p]:-false}"
+        [[ "$bu" == "true" ]] || return 1
+    done
+    [[ "$saw_warn" -eq 1 ]]
 }
 
 # ---------------------------------------------------------------------------
@@ -685,7 +703,7 @@ main() {
     IFS=$'\n' pr_list=($(sort -n <<<"${pr_list[*]}")); unset IFS
 
     vlog "classifying ${#pr_list[@]} PR(s): ${pr_list[*]}"
-    declare -A PR_EMOJI PR_ACTION PR_PREPR PR_HEADREF
+    declare -A PR_EMOJI PR_ACTION PR_PREPR PR_HEADREF PR_BLOCKED_UPSTREAM
     declare -A SESS_PR_EMOJI SESS_PR_ACTION
     # Per chip.repo, not one tiann batch. Number collision (heavygee#124 vs
     # tiann#124 closed-unmerged) must not inherit upstream closed-without-merge.
@@ -707,6 +725,7 @@ main() {
             PR_ACTION["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].action // ""')"
             PR_PREPR["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].prePr // false')"
             PR_HEADREF["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].headRef // ""')"
+            PR_BLOCKED_UPSTREAM["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].blockedUpstream // false')"
         done
     done
 
@@ -832,15 +851,18 @@ main() {
         # ping policy (actuator cursor: emoji/fp/last_ping)
         # Ping windows (DO_PING=1): force-rouse sticky ⚠️/🔧 ("are you done yet?").
         # Quiet --no-ping refresh: never pings; emit still uses non-window policy.
-        local action_fp prev_emoji prev_fp prev_ping decision window_rouse=0
+        local action_fp prev_emoji prev_fp prev_ping decision window_rouse=0 blocked_only=0
         [[ "$DO_PING" -eq 1 ]] && window_rouse=1
+        if md_session_blocked_upstream_only "$sid8" "$combined" $prs; then
+            blocked_only=1
+        fi
         action_fp="$(pec_action_fingerprint "$combined" "$acts")"
         prev_emoji="$(md_prev "$state" "$sid" "emoji")"
         prev_fp="$(md_prev "$state" "$sid" "fp")"
         prev_ping="$(md_prev "$state" "$sid" "last_ping")"
         [[ -z "$prev_ping" ]] && prev_ping=0
         # md_plan_ping/pec_should_ping return 1 for "no"; capture text, ignore rc.
-        decision="$(md_plan_ping "$combined" "$action_fp" "$prev_emoji" "$prev_fp" "$prev_ping" "$now" "$REMINDER_SECS" "$window_rouse" || true)"
+        decision="$(md_plan_ping "$combined" "$action_fp" "$prev_emoji" "$prev_fp" "$prev_ping" "$now" "$REMINDER_SECS" "$window_rouse" "$blocked_only" || true)"
         # Gate A clean + archive pending is Meta's job. Hourly ping-peer resumes
         # the row, mw_member_complete fails not_archived, chip flips 🧹→🔧, and
         # the next window pings again. Never rouse for that remainder.
@@ -888,7 +910,7 @@ main() {
                 prev_emitted_fp="$(md_prev "$state" "$sid" "emitted_fp")"
                 prev_emitted_at="$(md_prev "$state" "$sid" "last_emitted")"
                 [[ -z "$prev_emitted_at" ]] && prev_emitted_at=0
-                emit_reason="$(pec_emit_reason "$combined" "$prev_emitted_e" "$action_fp" "$prev_emitted_fp" "$prev_emitted_at" "$now" "$REMINDER_SECS" "$window_rouse" || true)"
+                emit_reason="$(pec_emit_reason "$combined" "$prev_emitted_e" "$action_fp" "$prev_emitted_fp" "$prev_emitted_at" "$now" "$REMINDER_SECS" "$window_rouse" "$blocked_only" || true)"
                 if [[ "$emit_reason" != "none" && -n "$emit_reason" ]]; then
                     local emit_date emit_pr emit_body
                     # Window emits key by London hour so 3 daily windows don't collide.
