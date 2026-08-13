@@ -14,14 +14,20 @@ type LinkPrDialogProps = {
     isOpen: boolean
     onClose: () => void
     currentPrimaryLabel?: string | null
+    /** Current session refs — used so primary link/unlink preserves secondaries. */
+    existingRefs?: readonly ExternalRef[] | null
     onLink: (refs: ExternalRef[]) => Promise<void>
     onUnlink?: () => Promise<void>
     isPending: boolean
 }
 
+function withoutPrimaryGithubPr(refs: readonly ExternalRef[]): ExternalRef[] {
+    return refs.filter((ref) => ref.kind !== 'github_pr' || ref.role !== 'primary')
+}
+
 export function LinkPrDialog(props: LinkPrDialogProps) {
     const { t } = useTranslation()
-    const { isOpen, onClose, currentPrimaryLabel, onLink, onUnlink, isPending } = props
+    const { isOpen, onClose, currentPrimaryLabel, existingRefs, onLink, onUnlink, isPending } = props
     const [input, setInput] = useState('')
     const [error, setError] = useState<string | null>(null)
     const inputRef = useRef<HTMLInputElement>(null)
@@ -43,7 +49,8 @@ export function LinkPrDialog(props: LinkPrDialogProps) {
         }
         setError(null)
         try {
-            await onLink([buildGithubPrExternalRef({
+            const retained = withoutPrimaryGithubPr(existingRefs ?? [])
+            await onLink([...retained, buildGithubPrExternalRef({
                 repo: parsed.repo,
                 number: parsed.number,
                 role: 'primary',
@@ -53,6 +60,17 @@ export function LinkPrDialog(props: LinkPrDialogProps) {
             onClose()
         } catch (linkError) {
             setError(linkError instanceof Error ? linkError.message : t('dialog.linkPr.error'))
+        }
+    }
+
+    const handleUnlink = async () => {
+        if (!onUnlink) return
+        setError(null)
+        try {
+            await onUnlink()
+            onClose()
+        } catch (unlinkError) {
+            setError(unlinkError instanceof Error ? unlinkError.message : t('dialog.linkPr.error'))
         }
     }
 
@@ -87,9 +105,7 @@ export function LinkPrDialog(props: LinkPrDialogProps) {
                                 type="button"
                                 variant="secondary"
                                 disabled={isPending}
-                                onClick={() => void onUnlink().then(onClose).catch((unlinkError) => {
-                                    setError(unlinkError instanceof Error ? unlinkError.message : t('dialog.linkPr.error'))
-                                })}
+                                onClick={() => void handleUnlink()}
                             >
                                 {t('dialog.linkPr.unlink')}
                             </Button>

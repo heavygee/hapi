@@ -41,6 +41,7 @@ import { MachineFilterBar, MachineFilterMenu } from '@/components/MachineFilterB
 import { useSessionListMachineFilter } from '@/hooks/useSessionListMachineFilter'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
 import { useFeatures } from '@/hooks/queries/useFeatures'
+import { useMinuteTick } from '@/hooks/useMinuteTick'
 import { SessionRowSummary } from '@/components/SessionRowSummary'
 import {
     DEFAULT_PR_CHIP_DISPLAY,
@@ -972,8 +973,10 @@ function SessionItem(props: {
 
     const sessionName = getSessionTitle(s)
     const primaryPrRef = getPrimaryGithubPrRef(s.metadata?.externalRefs)
+    const prClockTick = useMinuteTick(githubPrAwarenessEnabled && Boolean(primaryPrRef))
     const linkedPr = useMemo(() => {
         if (!githubPrAwarenessEnabled || !primaryPrRef) return null
+        void prClockTick
         const nowMs = Date.now()
         const profile = prChipDisplay ?? DEFAULT_PR_CHIP_DISPLAY
         const display = resolveGithubPrChipDisplay(primaryPrRef, profile, nowMs)
@@ -983,7 +986,7 @@ function SessionItem(props: {
             detail: parts.detail,
             href: primaryPrRef.url
         }
-    }, [githubPrAwarenessEnabled, primaryPrRef, prChipDisplay, t])
+    }, [githubPrAwarenessEnabled, primaryPrRef, prChipDisplay, prClockTick, t])
     const attention = useMemo(
         () => showDetailedStatus
             ? classifySessionAttention(s, {
@@ -1073,8 +1076,13 @@ function SessionItem(props: {
                 isOpen={linkPrOpen}
                 onClose={() => setLinkPrOpen(false)}
                 currentPrimaryLabel={primaryPrRef ? `${primaryPrRef.repo}#${primaryPrRef.number}` : null}
+                existingRefs={s.metadata?.externalRefs}
                 onLink={setExternalRefs}
-                onUnlink={primaryPrRef ? () => setExternalRefs([]) : undefined}
+                onUnlink={primaryPrRef ? () => setExternalRefs(
+                    (s.metadata?.externalRefs ?? []).filter(
+                        (ref) => ref.kind !== 'github_pr' || ref.role !== 'primary'
+                    )
+                ) : undefined}
                 isPending={isPending}
             />
 

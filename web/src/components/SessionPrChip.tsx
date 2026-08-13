@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils'
 import { formatRelativeTime } from '@/lib/relativeTime'
 import { useTranslation } from '@/lib/use-translation'
 import { HoverTooltip } from '@/components/HoverTooltip'
+import { useMinuteTick } from '@/hooks/useMinuteTick'
 
 type TFunc = (key: string, params?: Record<string, string | number>) => string
 
@@ -86,12 +87,14 @@ export function formatGithubPrChipTitle(
 export function SessionPrChip(props: SessionPrChipProps) {
     const { t } = useTranslation()
     const tooltipId = useId()
+    const clockTick = useMinuteTick(props.nowMs === undefined)
+    void clockTick
+    const nowMs = props.nowMs ?? Date.now()
+    const profile = props.displayProfile ?? DEFAULT_PR_CHIP_DISPLAY
 
     const primary = getPrimaryGithubPrRef(props.refs)
     if (!primary) return null
 
-    const nowMs = props.nowMs ?? Date.now()
-    const profile = props.displayProfile ?? DEFAULT_PR_CHIP_DISPLAY
     const display = resolveGithubPrChipDisplay(primary, profile, nowMs)
     const glyph = formatGithubPrChipLabel(primary, display)
     const detail = formatGithubPrChipTitle(primary, display, t)

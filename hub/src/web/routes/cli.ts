@@ -286,6 +286,41 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
         return c.json({ messages })
     })
 
+    app.get('/features', (c) => {
+        const configuration = getConfiguration()
+        return c.json({
+            githubPrAwareness: {
+                enabled: configuration.githubPrAwareness,
+                source: configuration.sources.githubPrAwareness
+            }
+        })
+    })
+
+    app.get('/sessions/:id/external-refs', async (c) => {
+        const configuration = getConfiguration()
+        if (!configuration.githubPrAwareness) {
+            return c.json({
+                error: 'GitHub PR awareness is disabled',
+                code: 'github_pr_awareness_disabled'
+            }, 403)
+        }
+
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not ready' }, 503)
+        }
+
+        const sessionId = c.req.param('id')
+        const namespace = c.get('namespace')
+        const resolved = resolveSessionForNamespace(engine, sessionId, namespace)
+        if (!resolved.ok) {
+            return c.json({ error: resolved.error }, resolved.status)
+        }
+
+        const externalRefs = resolved.session.metadata?.externalRefs ?? []
+        return c.json({ externalRefs })
+    })
+
     app.put('/sessions/:id/external-refs', async (c) => {
         const configuration = getConfiguration()
         if (!configuration.githubPrAwareness) {

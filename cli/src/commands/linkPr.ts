@@ -1,22 +1,49 @@
 import axios from 'axios'
 import chalk from 'chalk'
-import { buildGithubPrExternalRef, parseGithubPrInput } from '@hapi/protocol'
+import { buildGithubPrExternalRef, parseGithubPrInput, type ExternalRef } from '@hapi/protocol'
 import { configuration } from '@/configuration'
 import { getAuthToken } from '@/api/auth'
 import { buildHubRequestHeaders } from '@/api/hubExtraHeaders'
 import { HAPI_SESSION_ID_ENV } from '@/agent/hapiSessionEnv'
 import type { CommandDefinition } from './types'
 
-async function putExternalRefs(sessionId: string, externalRefs: ReturnType<typeof buildGithubPrExternalRef>[]) {
-    const token = getAuthToken()
+function authHeaders() {
+    return buildHubRequestHeaders({
+        Authorization: `Bearer ${getAuthToken()}`,
+        'Content-Type': 'application/json'
+    })
+}
+
+async function getExternalRefs(sessionId: string): Promise<ExternalRef[]> {
+    const response = await axios.get(
+        `${configuration.apiUrl}/cli/sessions/${encodeURIComponent(sessionId)}/external-refs`,
+        {
+            headers: authHeaders(),
+            timeout: 30_000,
+            validateStatus: () => true
+        }
+    )
+    if (response.status === 403) {
+        throw Object.assign(new Error('GitHub PR awareness is disabled on the hub (enable in Settings → General).'), {
+            status: 403
+        })
+    }
+    if (response.status < 200 || response.status >= 300) {
+        const message = typeof response.data?.error === 'string'
+            ? response.data.error
+            : `HTTP ${response.status}`
+        throw Object.assign(new Error(message), { status: response.status })
+    }
+    const refs = response.data?.externalRefs
+    return Array.isArray(refs) ? refs as ExternalRef[] : []
+}
+
+async function putExternalRefs(sessionId: string, externalRefs: ExternalRef[]) {
     const response = await axios.put(
         `${configuration.apiUrl}/cli/sessions/${encodeURIComponent(sessionId)}/external-refs`,
         { externalRefs },
         {
-            headers: buildHubRequestHeaders({
-                Authorization: `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            }),
+            headers: authHeaders(),
             timeout: 30_000,
             validateStatus: () => true
         }
@@ -57,7 +84,11 @@ export const linkPrCommand: CommandDefinition = {
         })
 
         try {
-            const response = await putExternalRefs(sessionId, [ref])
+            const current = await getExternalRefs(sessionId)
+            const retained = current.filter(
+                (candidate) => candidate.kind !== 'github_pr' || candidate.role !== 'primary'
+            )
+            const response = await putExternalRefs(sessionId, [...retained, ref])
             if (response.status === 403) {
                 console.error(chalk.red('Error:'), 'GitHub PR awareness is disabled on the hub (enable in Settings → General).')
                 process.exit(1)

@@ -289,3 +289,16 @@ describe('cli lazy session creation', () => {
         expect(response.status).toBe(409)
     })
 })
+
+describe('cli features and external-refs read', () => {
+    it('returns githubPrAwareness for CLI token auth', async () => {
+        const app = createApp({} as never)
+        const response = await app.request('/cli/features', { headers: authHeaders() })
+        expect(response.status).toBe(200)
+        const body = await response.json() as { githubPrAwareness: { enabled: boolean; source: string } }
+        expect(body.githubPrAwareness).toMatchObject({
+            enabled: expect.any(Boolean),
+            source: expect.any(String)
+        })
+    })
+})

@@ -11,7 +11,7 @@ export async function fetchGithubPrAwarenessEnabled(): Promise<boolean> {
     try {
         const token = getAuthToken()
         const response = await axios.get(
-            `${configuration.apiUrl}/api/features`,
+            `${configuration.apiUrl}/cli/features`,
             {
                 headers: buildHubRequestHeaders({
                     Authorization: `Bearer ${token}`

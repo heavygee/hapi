@@ -234,8 +234,10 @@ export function SessionHeader(props: {
     const githubPrAwarenessEnabled = Boolean(features?.githubPrAwareness.enabled)
     const prChipDisplay = features?.prChipDisplay
     const primaryPrRef = getPrimaryGithubPrRef(session.metadata?.externalRefs)
+    const prClockTick = useMinuteTick(githubPrAwarenessEnabled && Boolean(primaryPrRef))
     const linkedPr = useMemo(() => {
         if (!githubPrAwarenessEnabled || !primaryPrRef) return null
+        void prClockTick
         const nowMs = Date.now()
         const profile = prChipDisplay ?? DEFAULT_PR_CHIP_DISPLAY
         const display = resolveGithubPrChipDisplay(primaryPrRef, profile, nowMs)
@@ -245,7 +247,7 @@ export function SessionHeader(props: {
             detail: parts.detail,
             href: primaryPrRef.url
         }
-    }, [githubPrAwarenessEnabled, primaryPrRef, prChipDisplay, t])
+    }, [githubPrAwarenessEnabled, primaryPrRef, prChipDisplay, prClockTick, t])
 
     const { archiveSession, reopenSession, renameSession, setExternalRefs, setPinMode, deleteSession, isPending } = useSessionActions(
         api,
@@ -584,8 +586,13 @@ export function SessionHeader(props: {
                 isOpen={linkPrOpen}
                 onClose={() => setLinkPrOpen(false)}
                 currentPrimaryLabel={primaryPrRef ? `${primaryPrRef.repo}#${primaryPrRef.number}` : null}
+                existingRefs={session.metadata?.externalRefs}
                 onLink={setExternalRefs}
-                onUnlink={primaryPrRef ? () => setExternalRefs([]) : undefined}
+                onUnlink={primaryPrRef ? () => setExternalRefs(
+                    (session.metadata?.externalRefs ?? []).filter(
+                        (ref) => ref.kind !== 'github_pr' || ref.role !== 'primary'
+                    )
+                ) : undefined}
                 isPending={isPending}
             />
 
