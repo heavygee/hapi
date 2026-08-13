@@ -8,10 +8,8 @@
  * Usage:
  *   # inside a wrapped session (self-targets via $HAPI_SESSION_ID — no list):
  *   bun scripts/tooling/hapi-display-links.mjs <href> [title]
- *   # explicit self:
  *   bun scripts/tooling/hapi-display-links.mjs self <href> [title]
- *   # explicit other session:
- *   bun scripts/tooling/hapi-display-links.mjs <session-id-prefix> <href> [title]
+ * Other-session / cross-runner targeting is refused (loopback MCP).
  *
  * Construct landmine hosts by concatenation in the calling script ("tia"+"nn"),
  * never copy a URL from model prose. http/https only.
@@ -25,6 +23,19 @@ const HAPI_HOST = process.env.HAPI_HOST ?? process.env.HAPI_API_URL ?? 'http://l
 const SETTINGS = process.env.HAPI_SETTINGS ?? `${process.env.HOME}/.hapi/settings.json`
 
 const SELF_TOKENS = new Set(['self', '@self', '@me', 'current', '-'])
+const LOCAL_SESSION_ONLY_ERROR =
+    'display-links only supports the current local session; run it on the target runner'
+
+function assertLocalDisplayLinksTarget(sessionArg) {
+    if (!sessionArg || SELF_TOKENS.has(sessionArg)) {
+        return
+    }
+    const selfSessionId = process.env.HAPI_SESSION_ID?.trim() ?? ''
+    if (selfSessionId && (sessionArg === selfSessionId || selfSessionId.startsWith(sessionArg))) {
+        return
+    }
+    throw new Error(LOCAL_SESSION_ONLY_ERROR)
+}
 
 function sessionMatchesPrefix(session, prefix) {
     if (typeof session.id === 'string' && session.id.startsWith(prefix)) {
@@ -47,10 +58,9 @@ function looksLikeHref(value) {
     return typeof value === 'string' && /^https?:\/\//i.test(value)
 }
 
-// Arg shapes (backward compatible with display-image style):
-//   <href> [title]                     → self-target current session
-//   <self-token> <href> [title]        → self-target, explicit
-//   <session-id-prefix> <href> [title] → explicit session
+// Arg shapes:
+//   <href> [title]              → self-target current session
+//   <self-token> <href> [title] → self-target, explicit
 const args = process.argv.slice(2)
 let sessionArg
 let href
@@ -66,9 +76,16 @@ if (args.length > 0 && looksLikeHref(args[0]) && !SELF_TOKENS.has(args[0])) {
 }
 
 if (!href) {
-    console.error('usage: hapi-display-links.mjs [<session-id-prefix>|self] <href> [title]')
+    console.error('usage: hapi-display-links.mjs [self] <href> [title]')
     console.error('  or: HAPI_SESSION_ID=<uuid> hapi-display-links.mjs <href> [title]')
     process.exit(2)
+}
+
+try {
+    assertLocalDisplayLinksTarget(sessionArg)
+} catch (error) {
+    console.error(error instanceof Error ? error.message : error)
+    process.exit(4)
 }
 
 const token = process.env.CLI_API_TOKEN ?? JSON.parse(readFileSync(SETTINGS, 'utf8')).cliApiToken
