@@ -14,20 +14,14 @@ type LinkPrDialogProps = {
     isOpen: boolean
     onClose: () => void
     currentPrimaryLabel?: string | null
-    /** Current session refs — used so primary link/unlink preserves secondaries. */
-    existingRefs?: readonly ExternalRef[] | null
-    onLink: (refs: ExternalRef[]) => Promise<void>
-    onUnlink?: () => Promise<void>
+    onUpsert: (ref: ExternalRef) => Promise<void>
+    onRemovePrimary?: () => Promise<void>
     isPending: boolean
-}
-
-function withoutPrimaryGithubPr(refs: readonly ExternalRef[]): ExternalRef[] {
-    return refs.filter((ref) => ref.kind !== 'github_pr' || ref.role !== 'primary')
 }
 
 export function LinkPrDialog(props: LinkPrDialogProps) {
     const { t } = useTranslation()
-    const { isOpen, onClose, currentPrimaryLabel, existingRefs, onLink, onUnlink, isPending } = props
+    const { isOpen, onClose, currentPrimaryLabel, onUpsert, onRemovePrimary, isPending } = props
     const [input, setInput] = useState('')
     const [error, setError] = useState<string | null>(null)
     const inputRef = useRef<HTMLInputElement>(null)
@@ -49,14 +43,13 @@ export function LinkPrDialog(props: LinkPrDialogProps) {
         }
         setError(null)
         try {
-            const retained = withoutPrimaryGithubPr(existingRefs ?? [])
-            await onLink([...retained, buildGithubPrExternalRef({
+            await onUpsert(buildGithubPrExternalRef({
                 repo: parsed.repo,
                 number: parsed.number,
                 role: 'primary',
                 source: 'user',
                 linkedAt: Date.now()
-            })])
+            }))
             onClose()
         } catch (linkError) {
             setError(linkError instanceof Error ? linkError.message : t('dialog.linkPr.error'))
@@ -64,10 +57,10 @@ export function LinkPrDialog(props: LinkPrDialogProps) {
     }
 
     const handleUnlink = async () => {
-        if (!onUnlink) return
+        if (!onRemovePrimary) return
         setError(null)
         try {
-            await onUnlink()
+            await onRemovePrimary()
             onClose()
         } catch (unlinkError) {
             setError(unlinkError instanceof Error ? unlinkError.message : t('dialog.linkPr.error'))
@@ -100,7 +93,7 @@ export function LinkPrDialog(props: LinkPrDialogProps) {
                         </div>
                     ) : null}
                     <div className="flex gap-2 justify-end">
-                        {currentPrimaryLabel && onUnlink ? (
+                        {currentPrimaryLabel && onRemovePrimary ? (
                             <Button
                                 type="button"
                                 variant="secondary"

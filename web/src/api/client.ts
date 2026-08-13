@@ -964,6 +964,24 @@ export class ApiClient {
         })
     }
 
+    async upsertSessionExternalRef(
+        sessionId: string,
+        ref: import('@/types/api').ExternalRef
+    ): Promise<{ ok: true; externalRefs: import('@/types/api').ExternalRef[] }> {
+        return await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/external-refs/upsert`, {
+            method: 'POST',
+            body: JSON.stringify({ ref })
+        })
+    }
+
+    async removePrimarySessionExternalRef(
+        sessionId: string
+    ): Promise<{ ok: true; externalRefs: import('@/types/api').ExternalRef[] }> {
+        return await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/external-refs/remove-primary`, {
+            method: 'POST'
+        })
+    }
+
     async setSessionPinMode(sessionId: string, mode: 'none' | 'project' | 'global'): Promise<void> {
         await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/pin`, {
             method: 'PUT',

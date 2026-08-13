@@ -249,7 +249,7 @@ export function SessionHeader(props: {
         }
     }, [githubPrAwarenessEnabled, primaryPrRef, prChipDisplay, prClockTick, t])
 
-    const { archiveSession, reopenSession, renameSession, setExternalRefs, setPinMode, deleteSession, isPending } = useSessionActions(
+    const { archiveSession, reopenSession, renameSession, upsertExternalRef, removePrimaryExternalRef, setPinMode, deleteSession, isPending } = useSessionActions(
         api,
         session.id,
         session.metadata?.flavor ?? null
@@ -586,13 +586,8 @@ export function SessionHeader(props: {
                 isOpen={linkPrOpen}
                 onClose={() => setLinkPrOpen(false)}
                 currentPrimaryLabel={primaryPrRef ? `${primaryPrRef.repo}#${primaryPrRef.number}` : null}
-                existingRefs={session.metadata?.externalRefs}
-                onLink={setExternalRefs}
-                onUnlink={primaryPrRef ? () => setExternalRefs(
-                    (session.metadata?.externalRefs ?? []).filter(
-                        (ref) => ref.kind !== 'github_pr' || ref.role !== 'primary'
-                    )
-                ) : undefined}
+                onUpsert={upsertExternalRef}
+                onRemovePrimary={primaryPrRef ? removePrimaryExternalRef : undefined}
                 isPending={isPending}
             />
 

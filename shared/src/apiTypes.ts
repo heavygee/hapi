@@ -413,6 +413,13 @@ export const SetExternalRefsRequestSchema = z.object({
 
 export type SetExternalRefsRequest = z.infer<typeof SetExternalRefsRequestSchema>
 
+/** Atomic primary/secondary attach — hub merges against the latest metadata version. */
+export const UpsertExternalRefRequestSchema = z.object({
+    ref: ExternalRefSchema
+})
+
+export type UpsertExternalRefRequest = z.infer<typeof UpsertExternalRefRequestSchema>
+
 export const FeaturesPatchRequestSchema = z.object({
     githubPrAwareness: z.boolean().optional()
 }).refine((value) => value.githubPrAwareness !== undefined, {

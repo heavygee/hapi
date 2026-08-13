@@ -281,6 +281,7 @@ export function SessionRowSummary(props: {
                         <SessionPrChip
                             refs={s.metadata?.externalRefs}
                             displayProfile={prChipDisplay}
+                            interactive={false}
                         />
                     ) : null}
                     {timeLabel ? (

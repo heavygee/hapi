@@ -24,6 +24,11 @@ export type SessionPrChipProps = {
     nowMs?: number
     /** Estate-overridable display profile (from GET /api/features). */
     displayProfile?: PrChipDisplayProfile
+    /**
+     * When false, render a non-interactive glyph (for nesting inside a row
+     * `<button>`). The session action menu still carries the GitHub link.
+     */
+    interactive?: boolean
 }
 
 export { formatGithubPrChipLabel, resolveGithubPrChipDisplay }
@@ -98,6 +103,51 @@ export function SessionPrChip(props: SessionPrChipProps) {
     const display = resolveGithubPrChipDisplay(primary, profile, nowMs)
     const glyph = formatGithubPrChipLabel(primary, display)
     const detail = formatGithubPrChipTitle(primary, display, t)
+    const interactive = props.interactive !== false
+    const chipClassName = cn(
+        'inline-flex min-w-[1.35rem] shrink-0 items-center justify-center rounded-md border',
+        'bg-[var(--app-subtle-bg)] px-1 py-0.5 text-[12px] font-medium leading-none',
+        interactive ? 'hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]' : null,
+        toneClass(display.tone)
+    )
+    const chipLabel = display.label
+        ? t('session.item.prChipWithStatus', {
+            number: primary.number,
+            status: display.label
+        })
+        : t('session.item.prChip', { number: primary.number })
+
+    const chip = interactive ? (
+        <a
+            href={primary.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid="session-pr-chip"
+            data-pr-tone={display.tone ?? 'unset'}
+            data-pr-stale={display.stale ? '1' : '0'}
+            aria-describedby={tooltipId}
+            title={detail}
+            aria-label={chipLabel}
+            onClick={(event) => event.stopPropagation()}
+            onMouseDown={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+            className={chipClassName}
+        >
+            {glyph}
+        </a>
+    ) : (
+        <span
+            data-testid="session-pr-chip"
+            data-pr-tone={display.tone ?? 'unset'}
+            data-pr-stale={display.stale ? '1' : '0'}
+            aria-describedby={tooltipId}
+            title={detail}
+            aria-label={chipLabel}
+            className={chipClassName}
+        >
+            {glyph}
+        </span>
+    )
 
     return (
         <HoverTooltip
@@ -108,38 +158,7 @@ export function SessionPrChip(props: SessionPrChipProps) {
             hoverGroup="help"
             className={cn('relative z-20 shrink-0 overflow-visible', props.className)}
             tooltipClassName="max-w-[18rem] whitespace-normal"
-            target={(
-                <a
-                    href={primary.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    data-testid="session-pr-chip"
-                    data-pr-tone={display.tone ?? 'unset'}
-                    data-pr-stale={display.stale ? '1' : '0'}
-                    aria-describedby={tooltipId}
-                    title={detail}
-                    aria-label={
-                        display.label
-                            ? t('session.item.prChipWithStatus', {
-                                number: primary.number,
-                                status: display.label
-                            })
-                            : t('session.item.prChip', { number: primary.number })
-                    }
-                    onClick={(event) => event.stopPropagation()}
-                    onMouseDown={(event) => event.stopPropagation()}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    className={cn(
-                        'inline-flex min-w-[1.35rem] shrink-0 items-center justify-center rounded-md border',
-                        'bg-[var(--app-subtle-bg)] px-1 py-0.5 text-[12px] font-medium leading-none',
-                        'hover:opacity-90 focus-visible:outline-none',
-                        'focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
-                        toneClass(display.tone)
-                    )}
-                >
-                    {glyph}
-                </a>
-            )}
+            target={chip}
         >
             <span className="block font-medium">{detail}</span>
         </HoverTooltip>

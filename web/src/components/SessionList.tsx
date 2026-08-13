@@ -918,7 +918,7 @@ function SessionItem(props: {
         ? t('session.action.reopenCursorUnverified')
         : undefined
 
-    const { archiveSession, reopenSession, renameSession, setExternalRefs, deleteSession, setPinMode, isPending } = useSessionActions(
+    const { archiveSession, reopenSession, renameSession, upsertExternalRef, removePrimaryExternalRef, deleteSession, setPinMode, isPending } = useSessionActions(
         api,
         s.id,
         s.metadata?.flavor ?? null
@@ -1076,13 +1076,8 @@ function SessionItem(props: {
                 isOpen={linkPrOpen}
                 onClose={() => setLinkPrOpen(false)}
                 currentPrimaryLabel={primaryPrRef ? `${primaryPrRef.repo}#${primaryPrRef.number}` : null}
-                existingRefs={s.metadata?.externalRefs}
-                onLink={setExternalRefs}
-                onUnlink={primaryPrRef ? () => setExternalRefs(
-                    (s.metadata?.externalRefs ?? []).filter(
-                        (ref) => ref.kind !== 'github_pr' || ref.role !== 'primary'
-                    )
-                ) : undefined}
+                onUpsert={upsertExternalRef}
+                onRemovePrimary={primaryPrRef ? removePrimaryExternalRef : undefined}
                 isPending={isPending}
             />
 

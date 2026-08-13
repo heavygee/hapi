@@ -19,6 +19,7 @@ import {
     SessionModelRequestSchema,
     SessionPermissionModeRequestSchema,
     SetExternalRefsRequestSchema,
+    UpsertExternalRefRequestSchema,
     supportsModelChange,
     supportsEffort,
     toSessionSummary,
@@ -225,6 +226,82 @@ export function createSessionsRoutes(
             return c.json({ ok: true, externalRefs: parsed.data.externalRefs })
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to update external refs'
+            if (message.includes('concurrently') || message.includes('version')) {
+                return c.json({ error: message }, 409)
+            }
+            return c.json({ error: message }, 500)
+        }
+    })
+
+    app.post('/sessions/:id/external-refs/upsert', async (c) => {
+        if (!isGithubPrAwarenessEnabled()) {
+            return c.json({
+                error: 'GitHub PR awareness is disabled',
+                code: 'github_pr_awareness_disabled'
+            }, 403)
+        }
+
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = UpsertExternalRefRequestSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body: ref is required' }, 400)
+        }
+
+        const ref = parsed.data.ref
+        try {
+            const externalRefs = await engine.mutateSessionExternalRefs(sessionResult.sessionId, (current) => {
+                const retained = current.filter((candidate) => {
+                    if (candidate.kind !== 'github_pr') return true
+                    if (candidate.repo === ref.repo && candidate.number === ref.number) return false
+                    return ref.role !== 'primary' || candidate.role !== 'primary'
+                })
+                return [...retained, ref]
+            })
+            return c.json({ ok: true, externalRefs })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to upsert external ref'
+            if (message.includes('concurrently') || message.includes('version')) {
+                return c.json({ error: message }, 409)
+            }
+            return c.json({ error: message }, 500)
+        }
+    })
+
+    app.post('/sessions/:id/external-refs/remove-primary', async (c) => {
+        if (!isGithubPrAwarenessEnabled()) {
+            return c.json({
+                error: 'GitHub PR awareness is disabled',
+                code: 'github_pr_awareness_disabled'
+            }, 403)
+        }
+
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        try {
+            const externalRefs = await engine.mutateSessionExternalRefs(sessionResult.sessionId, (current) =>
+                current.filter((candidate) => candidate.kind !== 'github_pr' || candidate.role !== 'primary')
+            )
+            return c.json({ ok: true, externalRefs })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to remove primary external ref'
             if (message.includes('concurrently') || message.includes('version')) {
                 return c.json({ error: message }, 409)
             }

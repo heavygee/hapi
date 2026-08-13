@@ -14,26 +14,16 @@ import type { CliSocketWithData } from '../../socketTypes'
 import type { SessionEndReason } from '@hapi/protocol'
 import type { AccessErrorReason, AccessResult } from './types'
 import { getConfiguration } from '../../../configuration'
+import { stripExternalRefsWhenAwarenessDisabled } from '../../../sync/externalRefsPolicy'
 
-function stripExternalRefsWhenAwarenessDisabled(metadata: unknown): unknown {
-    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
-        return metadata
-    }
+function gateExternalRefs(metadata: unknown): unknown {
     let awarenessEnabled = false
     try {
         awarenessEnabled = getConfiguration().githubPrAwareness
     } catch {
         awarenessEnabled = false
     }
-    if (awarenessEnabled) {
-        return metadata
-    }
-    if (!('externalRefs' in metadata)) {
-        return metadata
-    }
-    const next = { ...(metadata as Record<string, unknown>) }
-    delete next.externalRefs
-    return next
+    return stripExternalRefsWhenAwarenessDisabled(metadata, awarenessEnabled)
 }
 
 type SessionAlivePayload = {
@@ -255,7 +245,7 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             return
         }
 
-        const gatedMetadata = stripExternalRefsWhenAwarenessDisabled(metadata)
+        const gatedMetadata = gateExternalRefs(metadata)
 
         const result = store.sessions.updateSessionMetadata(
             sid,

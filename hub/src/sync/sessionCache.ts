@@ -930,6 +930,18 @@ export class SessionCache {
     }
 
     async setSessionExternalRefs(sessionId: string, externalRefs: ExternalRef[]): Promise<void> {
+        await this.mutateSessionExternalRefs(sessionId, () => externalRefs)
+    }
+
+    /**
+     * Apply a pure transform to the latest externalRefs inside the metadata-version
+     * retry loop so concurrent health/classifier updates are not clobbered by a
+     * stale client-side snapshot.
+     */
+    async mutateSessionExternalRefs(
+        sessionId: string,
+        mutate: (current: ExternalRef[]) => ExternalRef[]
+    ): Promise<ExternalRef[]> {
         // tiann/hapi#1162: same metadata-version retry contract as renameSession.
         for (let attempt = 0; attempt < METADATA_RETRY_ATTEMPTS; attempt += 1) {
             const session = this.sessions.get(sessionId) ?? this.refreshSession(sessionId)
@@ -938,6 +950,10 @@ export class SessionCache {
             }
 
             const currentMetadata = session.metadata ?? { path: '', host: '' }
+            const currentRefs = Array.isArray(currentMetadata.externalRefs)
+                ? currentMetadata.externalRefs as ExternalRef[]
+                : []
+            const externalRefs = mutate(currentRefs)
             const newMetadata = { ...currentMetadata, externalRefs }
 
             const result = this.store.sessions.updateSessionMetadata(
@@ -954,7 +970,7 @@ export class SessionCache {
 
             if (result.result === 'success') {
                 this.refreshSession(sessionId)
-                return
+                return externalRefs
             }
 
             this.refreshSession(sessionId)

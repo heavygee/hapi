@@ -1850,6 +1850,13 @@ export class SyncEngine {
         await this.sessionCache.setSessionExternalRefs(sessionId, externalRefs)
     }
 
+    async mutateSessionExternalRefs(
+        sessionId: string,
+        mutate: (current: ExternalRef[]) => ExternalRef[]
+    ): Promise<ExternalRef[]> {
+        return await this.sessionCache.mutateSessionExternalRefs(sessionId, mutate)
+    }
+
     async deleteSession(sessionId: string): Promise<void> {
         await this.sessionCache.deleteSession(sessionId)
     }

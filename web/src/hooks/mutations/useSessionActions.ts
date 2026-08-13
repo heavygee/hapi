@@ -28,6 +28,8 @@ export function useSessionActions(
     setServiceTier: (serviceTier: string | null) => Promise<void>
     renameSession: (name: string) => Promise<void>
     setExternalRefs: (refs: import('@/types/api').ExternalRef[]) => Promise<void>
+    upsertExternalRef: (ref: import('@/types/api').ExternalRef) => Promise<void>
+    removePrimaryExternalRef: () => Promise<void>
     setPinMode: (mode: 'none' | 'project' | 'global') => Promise<void>
     deleteSession: () => Promise<void>
     isPending: boolean
@@ -246,6 +248,26 @@ export function useSessionActions(
         onSuccess: () => void invalidateSession(),
     })
 
+    const upsertExternalRefMutation = useMutation({
+        mutationFn: async (ref: import('@/types/api').ExternalRef) => {
+            if (!api || !sessionId) {
+                throw new Error('Session unavailable')
+            }
+            await api.upsertSessionExternalRef(sessionId, ref)
+        },
+        onSuccess: () => void invalidateSession(),
+    })
+
+    const removePrimaryExternalRefMutation = useMutation({
+        mutationFn: async () => {
+            if (!api || !sessionId) {
+                throw new Error('Session unavailable')
+            }
+            await api.removePrimarySessionExternalRef(sessionId)
+        },
+        onSuccess: () => void invalidateSession(),
+    })
+
     const pinMutation = useMutation({
         mutationFn: async (mode: 'none' | 'project' | 'global') => {
             if (!api || !sessionId) throw new Error('Session unavailable')
@@ -283,6 +305,8 @@ export function useSessionActions(
         setServiceTier: serviceTierMutation.mutateAsync,
         renameSession: renameMutation.mutateAsync,
         setExternalRefs: externalRefsMutation.mutateAsync,
+        upsertExternalRef: upsertExternalRefMutation.mutateAsync,
+        removePrimaryExternalRef: removePrimaryExternalRefMutation.mutateAsync,
         setPinMode: pinMutation.mutateAsync,
         deleteSession: deleteMutation.mutateAsync,
         isPending: abortMutation.isPending
@@ -298,6 +322,8 @@ export function useSessionActions(
             || serviceTierMutation.isPending
             || renameMutation.isPending
             || externalRefsMutation.isPending
+            || upsertExternalRefMutation.isPending
+            || removePrimaryExternalRefMutation.isPending
             || pinMutation.isPending
             || deleteMutation.isPending,
     }
