@@ -41,7 +41,7 @@ describe('startHappyServer skill_lookup', () => {
         await rm(sandboxDir, { recursive: true, force: true })
     })
 
-    async function connect(enableSkillLookup = true): Promise<Client> {
+    async function connect(enableSkillLookup = true, extra: { enableDisplayLinks?: boolean; flavor?: string } = {}): Promise<Client> {
         sendAgentMessage = vi.fn()
         const sessionClient = {
             sessionId: 'test-session-id',
@@ -49,14 +49,18 @@ describe('startHappyServer skill_lookup', () => {
             sendAgentMessage,
             sendClaudeSessionMessage: vi.fn()
         } as unknown as ApiSessionClient
-        const server = await startHappyServer(sessionClient, enableSkillLookup
-            ? {
-                skillLookup: {
-                    workingDirectory,
-                    flavor: 'opencode'
+        const { flavor, enableDisplayLinks } = extra
+        const server = await startHappyServer(sessionClient, {
+            ...(enableSkillLookup
+                ? {
+                    skillLookup: {
+                        workingDirectory,
+                        flavor: flavor ?? 'opencode'
+                    }
                 }
-            }
-            : {})
+                : {}),
+            ...(enableDisplayLinks !== undefined ? { enableDisplayLinks } : {}),
+        })
         stopServer = server.stop
 
         client = new Client(
@@ -113,13 +117,13 @@ describe('startHappyServer skill_lookup', () => {
             'display_image',
             'display_video',
             'display_media',
-            'display_links',
             'inspect_peer',
             'list_peers',
             'ping_peer',
             'session_job',
             'spawn_peer',
         ].sort())
+        expect(tools.tools.map((tool) => tool.name)).not.toContain('display_links')
     })
 
     it('displays audio through display_media and emits a generated media message', async () => {
@@ -142,8 +146,20 @@ describe('startHappyServer skill_lookup', () => {
         }))
     })
 
+    it('does not expose display_links for non-cursor flavors', async () => {
+        const mcp = await connect(true, { flavor: 'opencode' })
+        const tools = await mcp.listTools()
+        expect(tools.tools.map((tool) => tool.name)).not.toContain('display_links')
+    })
+
+    it('exposes display_links for cursor flavor', async () => {
+        const mcp = await connect(true, { flavor: 'cursor' })
+        const tools = await mcp.listTools()
+        expect(tools.tools.map((tool) => tool.name)).toContain('display_links')
+    })
+
     it('paints display_links via sendAgentMessage with concatenated href bytes', async () => {
-        const mcp = await connect(false)
+        const mcp = await connect(false, { enableDisplayLinks: true })
         const href = 'https://github.com/tia' + 'nn' + '/hapi/issues/1516'
 
         const result = await mcp.callTool({
@@ -163,7 +179,7 @@ describe('startHappyServer skill_lookup', () => {
     })
 
     it('rejects javascript hrefs without emitting an agent message', async () => {
-        const mcp = await connect(false)
+        const mcp = await connect(false, { enableDisplayLinks: true })
         const result = await mcp.callTool({
             name: 'display_links',
             arguments: { urls: [{ href: 'javascript:alert(1)' }] }
@@ -192,7 +208,6 @@ describe('startHappyServer skill_lookup', () => {
             'display_image',
             'display_video',
             'display_media',
-            'display_links',
             'list_peers',
             'ping_peer',
             'inspect_peer',
@@ -203,7 +218,6 @@ describe('startHappyServer skill_lookup', () => {
             'display_image',
             'display_media',
             'display_video',
-            'display_links',
             'inspect_peer',
             'list_peers',
             'ping_peer',
@@ -221,7 +235,6 @@ describe('toClaudeAllowedHapiMcpTools', () => {
             'display_image',
             'display_video',
             'display_media',
-            'display_links',
             'list_peers',
             'ping_peer',
             'inspect_peer',
@@ -231,7 +244,6 @@ describe('toClaudeAllowedHapiMcpTools', () => {
         ])).toEqual([
             'mcp__hapi__change_title',
             'mcp__hapi__display_image',
-            'mcp__hapi__display_links',
             'mcp__hapi__list_peers',
             'mcp__hapi__session_job',
             'mcp__hapi__skill_lookup'

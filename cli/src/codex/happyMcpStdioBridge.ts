@@ -1,7 +1,8 @@
 /**
  * HAPI MCP STDIO Bridge
  *
- * Minimal STDIO MCP server exposing HAPI tools such as `change_title`, `display_image`, `display_video`, `display_media`, `display_links`, `list_peers`, `ping_peer`, `inspect_peer`, and `spawn_peer`.
+ * Minimal STDIO MCP server exposing HAPI tools such as `change_title`, `display_image`, `display_video`, `display_media`, `list_peers`, `ping_peer`, `inspect_peer`, and `spawn_peer`.
+ * `display_links` is Cursor-only and is registered only when `--tools` includes it.
  * On invocation it forwards the tool call to an existing HAPI HTTP MCP server
  * using the StreamableHTTPClientTransport.
  *
@@ -37,7 +38,6 @@ const DEFAULT_TOOL_NAMES = [
   'display_image',
   'display_video',
   'display_media',
-  'display_links',
   'list_peers',
   'ping_peer',
   'inspect_peer',

@@ -140,7 +140,7 @@ Before commit/push/PR: use the **`pre-push-review`** skill (`~/.cursor/skills/pr
 | Add notification type | `hub/src/notifications/` |
 | Add shared type | `shared/src/types.ts`, `shared/src/schemas.ts` |
 | Attach outliving job | `cli/src/commands/job.ts`, `docs/guide/session-jobs.md` |
-| Paint tappable URLs | MCP `display_links` or `hapi display-links` / `scripts/tooling/hapi-display-links.mjs` — construct hrefs by concatenation (`"tia"+"nn"`), never type landmine hosts in prose |
+| Paint tappable URLs (Cursor only) | MCP `display_links` (Cursor sessions) or `hapi display-links` / `scripts/tooling/hapi-display-links.mjs` — construct hrefs by concatenation (`"tia"+"nn"`), never type landmine hosts in prose |
 
 ## Important patterns
 
