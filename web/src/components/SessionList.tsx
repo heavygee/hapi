@@ -29,6 +29,10 @@ import {
     type PinInProgressMode
 } from '@/hooks/usePinInProgressSessions'
 import { classifySessionAttention, sessionIsUnread } from '@/lib/sessionAttention'
+import {
+    hasAgentForegroundWork,
+    hasRunningAttachedJob,
+} from '@/lib/sessionInProgress'
 import { getSessionLastSeenAt, getSessionLastSeenSnapshot } from '@/lib/sessionLastSeen'
 import { useSessionRowTooltipIds } from '@/components/HoverTooltip'
 import { subscribeCodexImportedSessions } from '@/lib/codexImportedSessions'
@@ -66,16 +70,11 @@ const RUNNING_BUCKETS = [
     { key: 'pending', labelKey: 'session.item.pending', colorClass: 'text-[var(--app-badge-warning-text)]', pulse: true },
 ] as const
 
-function hasRunningAttachedJob(session: SessionSummary): boolean {
-    return session.attachedJob?.status === 'running'
-}
-
 function hasAgentInProgressActivity(session: SessionSummary): boolean {
     if (!session.active) {
         return false
     }
-    return session.thinking
-        || (session.backgroundTaskCount ?? 0) > 0
+    return hasAgentForegroundWork(session)
         || (session.pendingRequestsCount ?? 0) > 0
 }
 
@@ -1317,8 +1316,7 @@ export function SessionList(props: {
             if (!isPinnedInProgressSession(session, pinInProgressMode)) {
                 continue
             }
-            const agentWorking = session.active
-                && (session.thinking || (session.backgroundTaskCount ?? 0) > 0)
+            const agentWorking = hasAgentForegroundWork(session)
             const agentPending = session.active
                 && (session.pendingRequestsCount ?? 0) > 0
                 && !agentWorking

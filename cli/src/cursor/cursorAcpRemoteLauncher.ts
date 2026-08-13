@@ -62,6 +62,8 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
     /** Avoid re-queueing `/auto-review` on every mid-session mode sync. */
     private autoReviewSlashQueued = false;
     private cursorMcpOverlay: CursorMcpOverlayHandle | null = null;
+    /** True while backend.prompt() owns hub thinking for a dequeued turn. */
+    private promptInFlight = false;
 
     constructor(session: CursorSession) {
         super(process.env.DEBUG ? session.logPath : undefined);
@@ -451,6 +453,7 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             }];
 
             session.onThinkingChange(true);
+            this.promptInFlight = true;
 
             try {
                 await backend.prompt(acpSessionId, promptContent, (message) => {
@@ -467,6 +470,7 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                 }
                 messageBuffer.addMessage(message, 'status');
             } finally {
+                this.promptInFlight = false;
                 session.onThinkingChange(false);
                 await this.permissionAdapter?.cancelAll('Prompt finished');
                 await this.extensionAdapter?.cancelAll('Prompt finished');
@@ -564,11 +568,15 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
     }
 
     /**
-     * #1470 / #1502: ACP foreground state → hub thinking via keepalive.
-     * Background tool/content updates are ignored; running is debounced in the backend.
+     * #1470 / #1502 / #1553: ACP foreground state → hub thinking via keepalive.
+     * Ignore ambient running bumps while queue-idle — prompt() owns thinking, and
+     * attached jobs are the honest list signal when the agent is not working.
      */
     private wireAgentActivityThinking(backend: AcpSdkBackend, session: CursorSession): void {
         backend.setAgentActivityListener((thinking) => {
+            if (thinking && !this.promptInFlight && session.queue.size() === 0) {
+                return;
+            }
             if (session.thinking !== thinking) {
                 session.onThinkingChange(thinking);
             }
