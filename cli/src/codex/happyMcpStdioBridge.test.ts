@@ -114,9 +114,9 @@ describe('runHappyMcpStdioBridge tool forwarding', () => {
             'display_image',
             'display_video',
             'display_media',
-            'list_peers',
             'ping_peer',
-            'inspect_peer'
+            'inspect_peer',
+            'list_peers'
         ])
         expect(harness.tools.has('link_pr')).toBe(false)
     })
