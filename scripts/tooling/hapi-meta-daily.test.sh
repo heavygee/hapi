@@ -1095,6 +1095,61 @@ run 2>&1 >/dev/null
 pings_bu2="$(cat "$WORK/pings.log" 2>/dev/null || true)"
 check "blocked-upstream run2: no window-rouse peer ping" "! grep -q '^8e8f4e6e' <<<\"\$pings_bu2\""
 
+# ============ blocked-upstream + merged 🔧: cleanup ping must not be suppressed ============
+rm -f "$WORK/state.json" "$WORK/pings.log"
+cat >"$WORK/batch" <<'EOF'
+#!/usr/bin/env bash
+j='{}'
+for a in "$@"; do
+    case "$a" in
+        1511) j="$(echo "$j" | jq -c '. + {"1511":{emoji:"⚠️",action:"blocked upstream — wait on #1473 (status:blocked-upstream)",prePr:false,blockedUpstream:true}}')" ;;
+        300) j="$(echo "$j" | jq -c '. + {"300":{emoji:"🔧",action:"MERGED — clean up",prePr:false,merged:true,blockedUpstream:false}}')" ;;
+    esac
+done
+echo "$j"
+EOF
+chmod +x "$WORK/batch"
+cat >"$WORK/gh" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+if [[ "$args" == *"pr list"* && "$args" == *"--state open"* ]]; then
+    printf '1511\n'; exit 0
+fi
+if [[ "$args" == *"pr list"* && "$args" == *"merged"* ]]; then
+    printf '300\tfix: shipped thing\t2026-07-24T02:52:06Z\n'; exit 0
+fi
+if [[ "$args" == *"notifications"* ]]; then
+    exit 0
+fi
+exit 0
+EOF
+chmod +x "$WORK/gh"
+cat >"$WORK/curl" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+if [[ "$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
+if [[ "$args" == *"-X PATCH"* ]]; then echo '{"ok":true}'; exit 0; fi
+if [[ "$args" == *"/api/sessions?limit=500"* ]]; then
+cat <<'JSON'
+{"sessions":[
+ {"id":"8e8f4e6e-f8c1-4b17-90d6-92870566a24d","active":true,"metadata":{"name":"Peer #1509: spawn-peer remit","externalRefs":[
+  {"kind":"github_pr","repo":"tiann/hapi","number":1511,"url":"https://github.com/tiann/hapi/pull/1511","role":"primary"},
+  {"kind":"github_pr","repo":"tiann/hapi","number":300,"url":"https://github.com/tiann/hapi/pull/300","role":"secondary"}
+ ]}}
+]}
+JSON
+exit 0
+fi
+echo '{}'; exit 0
+EOF
+chmod +x "$WORK/curl"
+run 2>&1 >/dev/null
+pings_mix="$(cat "$WORK/pings.log" 2>/dev/null || true)"
+check "blocked+merged run1: peer ping on first sight (🔧 actionable)" "grep -q '^8e8f4e6e' <<<\"\$pings_mix\""
+run 2>&1 >/dev/null
+pings_mix2="$(cat "$WORK/pings.log" 2>/dev/null || true)"
+check "blocked+merged run2: window-rouse peer ping (not suppressed)" "grep -q '^8e8f4e6e' <<<\"\$pings_mix2\""
+
 echo ""
 echo "hapi-meta-daily.test.sh: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]] || exit 1

@@ -548,6 +548,8 @@ md_plan_ping() {
 # md_session_blocked_upstream_only SID8 COMBINED PR...
 # Session is blocked-upstream-only when combined is ⚠️ and every contributing
 # ⚠️ PR has blockedUpstream from the classifier (#128).
+# Any co-attached 🔧 (merged cleanup) is still actionable even when ⚠️ wins
+# pec_worst_emoji — do not suppress ping/emit for that case.
 md_session_blocked_upstream_only() {
     local sid8="$1" combined="$2"
     shift 2
@@ -555,6 +557,7 @@ md_session_blocked_upstream_only() {
     local saw_warn=0 p emoji bu
     for p in "$@"; do
         emoji="${SESS_PR_EMOJI[$sid8:$p]:-${PR_EMOJI[$p]:-?}}"
+        [[ "$emoji" == "🔧" ]] && return 1
         [[ "$emoji" == "⚠️" ]] || continue
         saw_warn=1
         bu="${PR_BLOCKED_UPSTREAM[$p]:-false}"
