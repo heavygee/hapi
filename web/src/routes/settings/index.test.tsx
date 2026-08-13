@@ -316,7 +316,7 @@ describe('responsive settings pages', () => {
         expect(screen.queryByRole('checkbox', { name: 'Show operator tools' })).not.toBeInTheDocument()
     })
 
-    it('persists operator dock enable like other prefs and stores the gate secret', async () => {
+    it('persists operator dock enable via in-page gate field (no window.prompt)', async () => {
         vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: RequestInfo | URL) => {
             const url = String(input)
             if (url.includes('/hapi/config')) {
@@ -333,14 +333,18 @@ describe('responsive settings pages', () => {
             }
             return new Response('unexpected', { status: 500 })
         })
-        vi.spyOn(window, 'prompt').mockReturnValue('gate-secret')
+        const promptSpy = vi.spyOn(window, 'prompt')
         renderPage(<SettingsGeneralPage />)
         const toggle = await screen.findByRole('checkbox', { name: 'Show operator tools' })
         fireEvent.click(toggle)
+        const field = await screen.findByLabelText('Operator gate secret')
+        fireEvent.change(field, { target: { value: 'gate-secret' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Unlock' }))
         await vi.waitFor(() => {
             expect(localStorage.getItem('hapi-operator-dock')).toBe('true')
             expect(localStorage.getItem('hapiInlineSecret')).toBe('gate-secret')
         })
+        expect(promptSpy).not.toHaveBeenCalled()
     })
 
     it('buries runner management behind a link row on General (not a front-and-center switch)', () => {

@@ -63,7 +63,17 @@ export default function SettingsGeneralPage() {
         },
     })
 
-    const { operatorDockEnabled, setOperatorDockEnabled } = useOperatorDock()
+    const {
+        operatorDockEnabled,
+        awaitingGateSecret,
+        gateDraft,
+        gateError,
+        gateBusy,
+        setGateDraft,
+        setOperatorDockEnabled,
+        submitGateSecret,
+        cancelGateSecret
+    } = useOperatorDock()
     const inlineConfigQuery = useQuery({
         queryKey: ['hapi-inline-config'],
         queryFn: async () => {
@@ -124,12 +134,62 @@ export default function SettingsGeneralPage() {
                         </>
                     ) : null}
                     {showOperatorDockSwitch ? (
-                        <SettingsSwitch
-                            label={t('settings.general.operatorDock')}
-                            description={t('settings.general.operatorDock.desc')}
-                            checked={operatorDockEnabled}
-                            onChange={setOperatorDockEnabled}
-                        />
+                        <>
+                            <SettingsSwitch
+                                label={t('settings.general.operatorDock')}
+                                description={t('settings.general.operatorDock.desc')}
+                                checked={operatorDockEnabled}
+                                onChange={setOperatorDockEnabled}
+                            />
+                            {awaitingGateSecret ? (
+                                <div className="space-y-2 border-t border-[var(--app-border)] px-3 py-3">
+                                    <label className="block text-sm text-[var(--app-fg)]" htmlFor="operator-dock-gate-secret">
+                                        {t('settings.general.operatorDock.gateLabel')}
+                                    </label>
+                                    <p className="text-xs text-[var(--app-muted)]">
+                                        {t('settings.general.operatorDock.gateHint')}
+                                    </p>
+                                    <input
+                                        id="operator-dock-gate-secret"
+                                        type="password"
+                                        autoComplete="off"
+                                        spellCheck={false}
+                                        value={gateDraft}
+                                        disabled={gateBusy}
+                                        onChange={(event) => setGateDraft(event.target.value)}
+                                        onKeyDown={(event) => {
+                                            if (event.key === 'Enter') {
+                                                event.preventDefault()
+                                                void submitGateSecret()
+                                            }
+                                        }}
+                                        className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 font-mono text-sm text-[var(--app-fg)]"
+                                        aria-invalid={Boolean(gateError)}
+                                    />
+                                    {gateError ? (
+                                        <p className="text-sm text-red-500" role="alert">{gateError}</p>
+                                    ) : null}
+                                    <div className="flex flex-wrap gap-2">
+                                        <button
+                                            type="button"
+                                            disabled={gateBusy || !gateDraft.trim()}
+                                            onClick={() => void submitGateSecret()}
+                                            className="rounded-md bg-[var(--app-link)] px-3 py-1.5 text-sm text-white disabled:opacity-50"
+                                        >
+                                            {t('settings.general.operatorDock.gateSubmit')}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            disabled={gateBusy}
+                                            onClick={cancelGateSecret}
+                                            className="rounded-md border border-[var(--app-border)] px-3 py-1.5 text-sm text-[var(--app-fg)]"
+                                        >
+                                            {t('settings.general.operatorDock.gateCancel')}
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : null}
+                        </>
                     ) : null}
                 </SettingsSection>
             ) : null}
