@@ -564,10 +564,30 @@ md_combined_emoji() {
     printf '%s' "$combined"
 }
 
-# md_plan_ping <new_emoji> <new_fp> <prev_emoji> <prev_fp> <prev_ping> <now> <reminder> [window_rouse]
+# md_plan_ping <new_emoji> <new_fp> <prev_emoji> <prev_fp> <prev_ping> <now> <reminder> [window_rouse] [sticky_ping]
 #   → "yes"/"no" (wraps pec_should_ping; kept for test clarity)
 md_plan_ping() {
-    pec_should_ping "$1" "$3" "$2" "$4" "${5:-0}" "$6" "$7" "${8:-0}"
+    pec_should_ping "$1" "$3" "$2" "$4" "${5:-0}" "$6" "$7" "${8:-0}" "${9:-}"
+}
+
+# md_session_sticky_peer_ping <sid8> <prs-space-joined>
+# true if any ⚠️/🔧 contribution has stickyPing=true (actionable work).
+# blockedUpstream-only sessions return false (#128).
+md_session_sticky_peer_ping() {
+    local sid8="$1" prs="$2" p e sticky
+    for p in $prs; do
+        e="${SESS_PR_EMOJI[$sid8:$p]:-}"
+        case "$e" in
+            ⚠️|🔧)
+                sticky="${SESS_PR_STICKY[$sid8:$p]:-}"
+                if [[ -z "$sticky" ]]; then
+                    sticky="$(pec_default_sticky_ping "$e" 0)"
+                fi
+                [[ "$sticky" == "true" ]] && return 0
+                ;;
+        esac
+    done
+    return 1
 }
 
 # Hold-login CSV: env HAPI_PR_HOLD_LOGINS, else ~/.hapi/pr-hold.json, else tiann.
@@ -825,7 +845,8 @@ main() {
     vlog "classifying ${#pr_list[@]} PR(s): ${pr_list[*]}"
     declare -A PR_EMOJI PR_ACTION PR_PREPR PR_HEADREF PR_EXISTS
     declare -A PR_BY_REPO_EMOJI PR_BY_REPO_ACTION PR_BY_REPO_PREPR PR_BY_REPO_HEADREF PR_BY_REPO_EXISTS
-    declare -A SESS_PR_EMOJI SESS_PR_ACTION
+    declare -A PR_BY_REPO_BLOCKED PR_BY_REPO_STICKY
+    declare -A SESS_PR_EMOJI SESS_PR_ACTION SESS_PR_STICKY
     # Per (chip.repo, number), not one tiann batch keyed by number. Dual chips
     # heavygee#124 + tiann#124 must keep independent classify results.
     local batch_json r pair_key
@@ -874,6 +895,10 @@ main() {
             PR_BY_REPO_HEADREF["$pair_key"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].headRef // ""')"
             PR_BY_REPO_EXISTS["$pair_key"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '
                 if (.[$p] | has("exists")) then (.[$p].exists | tostring) else "true" end
+            ')"
+            PR_BY_REPO_BLOCKED["$pair_key"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].blockedUpstream // false | tostring')"
+            PR_BY_REPO_STICKY["$pair_key"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '
+                if (.[$p] | has("stickyPing")) then (.[$p].stickyPing | tostring) else empty end
             ')"
             PR_EMOJI["$p"]="${PR_BY_REPO_EMOJI[$pair_key]}"
             PR_ACTION["$p"]="${PR_BY_REPO_ACTION[$pair_key]}"
@@ -984,6 +1009,17 @@ main() {
             # Stash per-session emoji for chip write (may differ from PR_EMOJI global).
             SESS_PR_EMOJI["$sid8:$p"]="$emoji_sess"
             SESS_PR_ACTION["$sid8:$p"]="$action_sess"
+            # stickyPing: classifier JSON wins; else derive. Hold always false.
+            local sticky_sess blocked_sess
+            sticky_sess="${PR_BY_REPO_STICKY[$pair_sess]:-}"
+            blocked_sess="${PR_BY_REPO_BLOCKED[$pair_sess]:-false}"
+            if [[ -z "$sticky_sess" ]]; then
+                sticky_sess="$(pec_default_sticky_ping "$emoji_sess" "$blocked_sess")"
+            fi
+            if [[ "$emoji_sess" == "🛑" ]]; then
+                sticky_sess="false"
+            fi
+            SESS_PR_STICKY["$sid8:$p"]="$sticky_sess"
         done
         combined="$(md_combined_emoji "${emojis[@]}")"
         [[ -z "$combined" ]] && combined="?"
@@ -1031,15 +1067,23 @@ main() {
         # ping policy (actuator cursor: emoji/fp/last_ping)
         # Ping windows (DO_PING=1): force-rouse sticky ⚠️/🔧 ("are you done yet?").
         # Quiet --no-ping refresh: never pings; emit still uses non-window policy.
-        local action_fp prev_emoji prev_fp prev_ping decision window_rouse=0
+        # blockedUpstream-only sessions: stickyPing=false → no peer ping (#128).
+        local action_fp prev_emoji prev_fp prev_ping decision window_rouse=0 session_sticky=true
         [[ "$DO_PING" -eq 1 ]] && window_rouse=1
+        if ! md_session_sticky_peer_ping "$sid8" "$prs"; then
+            # No actionable sticky ⚠️/🔧 (e.g. only blocked-upstream, or only ✅/📝).
+            # Pass sticky=false only when combined is a work emoji that would otherwise nag.
+            case "$combined" in
+                ⚠️|🔧) session_sticky=false ;;
+            esac
+        fi
         action_fp="$(pec_action_fingerprint "$combined" "$acts")"
         prev_emoji="$(md_prev "$state" "$sid" "emoji")"
         prev_fp="$(md_prev "$state" "$sid" "fp")"
         prev_ping="$(md_prev "$state" "$sid" "last_ping")"
         [[ -z "$prev_ping" ]] && prev_ping=0
         # md_plan_ping/pec_should_ping return 1 for "no"; capture text, ignore rc.
-        decision="$(md_plan_ping "$combined" "$action_fp" "$prev_emoji" "$prev_fp" "$prev_ping" "$now" "$REMINDER_SECS" "$window_rouse" || true)"
+        decision="$(md_plan_ping "$combined" "$action_fp" "$prev_emoji" "$prev_fp" "$prev_ping" "$now" "$REMINDER_SECS" "$window_rouse" "$session_sticky" || true)"
         # Gate A clean + archive pending is Meta's job. Hourly ping-peer resumes
         # the row, mw_member_complete fails not_archived, chip flips 🧹→🔧, and
         # the next window pings again. Never rouse for that remainder.
@@ -1048,6 +1092,10 @@ main() {
         fi
         # Operator-hold: never hourly-ping (or transition-ping) the coding peer.
         if [[ "$combined" == "🛑" ]]; then
+            decision="no"
+        fi
+        # blocked-upstream-only: chip stays ⚠️ in queue, but never peer-nag (#128).
+        if [[ "$session_sticky" == "false" ]]; then
             decision="no"
         fi
         # In-turn skip: session.thinking means the agent is emitting / in a
@@ -1122,7 +1170,12 @@ main() {
                 prev_emitted_fp="$(md_prev "$state" "$sid" "emitted_fp")"
                 prev_emitted_at="$(md_prev "$state" "$sid" "last_emitted")"
                 [[ -z "$prev_emitted_at" ]] && prev_emitted_at=0
-                emit_reason="$(pec_emit_reason "$combined" "$prev_emitted_e" "$action_fp" "$prev_emitted_fp" "$prev_emitted_at" "$now" "$REMINDER_SECS" "$window_rouse" || true)"
+                emit_reason="$(pec_emit_reason "$combined" "$prev_emitted_e" "$action_fp" "$prev_emitted_fp" "$prev_emitted_at" "$now" "$REMINDER_SECS" "$window_rouse" "$session_sticky" || true)"
+                if [[ "$session_sticky" == "false" ]]; then
+                    # No window/reminder/fingerprint/transition channel nags for
+                    # blocked-upstream-only (#128). Queue row still lists the PR.
+                    emit_reason="none"
+                fi
                 if [[ "$emit_reason" != "none" && -n "$emit_reason" ]]; then
                     local emit_date emit_pr emit_body emit_repo
                     # Window emits key by London hour so 3 daily windows don't collide.
@@ -1206,12 +1259,19 @@ main() {
         # Orphan ⚠️ emits needs_decision with null relatedSessionId (inbox stays quiet).
         # State-gated like sessions so steady re-runs stay silent.
         if [[ "$EMIT_EVENTS" -eq 1 && "$e" == "⚠️" ]]; then
-            local orphan_fp orphan_prev_e orphan_prev_fp orphan_reason orphan_body orphan_date
+            local orphan_fp orphan_prev_e orphan_prev_fp orphan_reason orphan_body orphan_date orphan_sticky
             orphan_date="$(date -u +%Y-%m-%d)"
             orphan_fp="$(pec_action_fingerprint "$e" "${PR_BY_REPO_ACTION[$pair_o]:-${PR_ACTION[$p]:-}}")"
             orphan_prev_e="$(printf '%s' "$state" | jq -r --arg p "$pair_o" '(.orphan_prs // {})[$p].emoji // ""')"
             orphan_prev_fp="$(printf '%s' "$state" | jq -r --arg p "$pair_o" '(.orphan_prs // {})[$p].fp // ""')"
-            orphan_reason="$(pec_emit_reason "$e" "$orphan_prev_e" "$orphan_fp" "$orphan_prev_fp" 0 "$now" "$REMINDER_SECS" || true)"
+            orphan_sticky="${PR_BY_REPO_STICKY[$pair_o]:-}"
+            if [[ -z "$orphan_sticky" ]]; then
+                orphan_sticky="$(pec_default_sticky_ping "$e" "${PR_BY_REPO_BLOCKED[$pair_o]:-false}")"
+            fi
+            orphan_reason="$(pec_emit_reason "$e" "$orphan_prev_e" "$orphan_fp" "$orphan_prev_fp" 0 "$now" "$REMINDER_SECS" 0 "$orphan_sticky" || true)"
+            if [[ "$orphan_sticky" == "false" ]]; then
+                orphan_reason="none"
+            fi
             if [[ "$orphan_reason" != "none" && -n "$orphan_reason" ]]; then
                 orphan_body="$(pec_build_channel_event_body \
                     --repo "$r_o" \

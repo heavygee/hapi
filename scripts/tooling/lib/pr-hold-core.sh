@@ -140,7 +140,8 @@ pec_hold_overlay_emoji() {
 #   - strictly later → new
 #   - older → not new
 #   - equal second (GitHub ts is 1s resolution) + different pair → new only after
-#     operator ack (unacked hold already covers that second; don't flip mid-hold)
+#     operator ack AND the sibling fingerprint is not already in acked_fps
+#     (otherwise A↔B equal-time siblings alternate forever — #124 Codex P2)
 pec_hold_is_new_latch() {
     local state="${1-}" repo="${2:-}" pr="${3:-}" surface="${4:-}" comment_id="${5:-}" created_at="${6:-}"
     local key fp existing_id existing_at existing_surface
@@ -150,6 +151,12 @@ pec_hold_is_new_latch() {
     existing_id="$(printf '%s' "$state" | jq -r --arg k "$key" '.hold[$k].comment_id // empty' 2>/dev/null || true)"
     existing_at="$(printf '%s' "$state" | jq -r --arg k "$key" '.hold[$k].created_at // empty' 2>/dev/null || true)"
     existing_surface="$(printf '%s' "$state" | jq -r --arg k "$key" '.hold[$k].surface // empty' 2>/dev/null || true)"
+    # Already acknowledged identity (surface:id) — never re-latch, even at equal ts.
+    if [[ -n "$fp" ]] && printf '%s' "$state" | jq -e --arg k "$key" --arg fp "$fp" '
+        ((.hold[$k].acked_fps // []) | index($fp)) != null
+    ' >/dev/null 2>&1; then
+        return 1
+    fi
     if [[ -n "$comment_id" && "$existing_id" == "$comment_id" ]]; then
         # Legacy rows lack surface — treat missing as matching any surface for
         # same-id sticky ack. Once upserted with surface, only equal pairs match.
@@ -175,14 +182,31 @@ pec_hold_is_new_latch() {
 }
 
 # pec_hold_ack_state STATE_JSON REPO PR → new state JSON
+# Marks acked and appends the current fingerprint to acked_fps so equal-time
+# siblings acknowledged earlier cannot re-latch after the next sibling is acked.
+# Legacy rows may lack fingerprint — derive from surface+comment_id when missing.
 pec_hold_ack_state() {
     local state="${1-}" repo="${2:-}" pr="${3:-}"
-    local key
+    local key fp surface cid
     [[ -n "$state" ]] || state='{}'
     key="$(pec_hold_state_key "$repo" "$pr")"
-    printf '%s' "$state" | jq -c --arg k "$key" '
+    surface="$(printf '%s' "$state" | jq -r --arg k "$key" '.hold[$k].surface // "issue_comment"' 2>/dev/null || true)"
+    cid="$(printf '%s' "$state" | jq -r --arg k "$key" '.hold[$k].comment_id // empty' 2>/dev/null || true)"
+    fp="$(printf '%s' "$state" | jq -r --arg k "$key" '.hold[$k].fingerprint // empty' 2>/dev/null || true)"
+    if [[ -z "$fp" && -n "$cid" ]]; then
+        fp="$(pec_hold_fingerprint "$repo" "$pr" "$surface" "$cid")"
+    fi
+    printf '%s' "$state" | jq -c --arg k "$key" --arg fp "$fp" '
         if (.hold[$k] | type) == "object" then
             .hold[$k].acked = true
+            | (if ($fp | length) > 0 and ((.hold[$k].fingerprint // "") | length) == 0 then
+                .hold[$k].fingerprint = $fp
+              else . end)
+            | .hold[$k].acked_fps = (
+                ((.hold[$k].acked_fps // []) + [$fp] )
+                | map(select(. != null and . != ""))
+                | unique
+              )
         else
             .
         end
@@ -191,6 +215,7 @@ pec_hold_ack_state() {
 
 # pec_hold_upsert_state STATE_JSON REPO PR SURFACE COMMENT_ID AUTHOR URL EXCERPT [CREATED_AT]
 # Writes/replaces the unacked hold row. Sets notified=false for a new fingerprint.
+# Preserves acked_fps so previously acknowledged equal-time siblings stay dead.
 pec_hold_upsert_state() {
     local state="${1-}" repo="${2:-}" pr="${3:-}" surface="${4:-}" comment_id="${5:-}" \
         author="${6:-}" url="${7:-}" excerpt="${8:-}" created_at="${9:-}"
@@ -217,7 +242,8 @@ pec_hold_upsert_state() {
             fingerprint: $fp,
             created_at: $created_at,
             acked: false,
-            notified: (if ($prev.fingerprint // "") == $fp then ($prev.notified == true) else false end)
+            notified: (if ($prev.fingerprint // "") == $fp then ($prev.notified == true) else false end),
+            acked_fps: ($prev.acked_fps // [])
         }
     '
 }

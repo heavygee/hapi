@@ -31,6 +31,8 @@ Usage:
   hapi-hold-ack --repo owner/repo <pr>
 
 Does not ping the coding peer. Next hapi-meta-daily classifies live again.
+Operator-only: requires a controlling tty (or HAPI_HOLD_ACK_ALLOW_NO_TTY=1 in tests).
+Refuses HAPI_AGENT_CONTEXT=1 — coding peers cannot clear their own hold.
 EOF
 }
 
@@ -56,6 +58,24 @@ done
 
 [[ -n "$PR" ]] || die "missing PR number (see --help)"
 [[ "$PR" =~ ^[0-9]+$ ]] || die "PR must be a number (got: $PR)"
+
+# Operator-only mutation. Coding peers must not clear the latch that stopped them
+# (Codex P1 on #124). HAPI_AGENT_CONTEXT=1 is set for wrapped agents; tests set
+# HAPI_HOLD_ACK_ALLOW_NO_TTY=1. Operator override still needs a real tty.
+# shellcheck source=lib/operator-tty-gate.sh
+source "$SCRIPT_DIR/lib/operator-tty-gate.sh"
+if [[ "${HAPI_AGENT_CONTEXT:-}" == "1" && "${HAPI_HOLD_ACK_ALLOW_NO_TTY:-}" != "1" ]]; then
+    die "refusing hold-ack from agent context (HAPI_AGENT_CONTEXT=1) — operator must ack from a real terminal"
+fi
+if ! caller_has_controlling_tty; then
+    if [[ "${HAPI_HOLD_ACK_ALLOW_NO_TTY:-}" == "1" ]]; then
+        :
+    elif [[ "${HAPI_OPERATOR_HOLD_ACK_OVERRIDE:-}" == "1" ]]; then
+        die "HAPI_OPERATOR_HOLD_ACK_OVERRIDE=1 ignored without controlling tty"
+    else
+        die "refusing hold-ack without controlling tty (operator-only; tests: HAPI_HOLD_ACK_ALLOW_NO_TTY=1)"
+    fi
+fi
 
 # Serialize against hourly Meta (load→save can clobber an in-flight ack).
 # Sibling of the state file so tests using --state $WORK/state.json do not

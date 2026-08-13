@@ -128,6 +128,11 @@ run() {
     bash "$SCRIPT" "$@"
 }
 
+# Operator-only hold-ack; tests have no controlling tty.
+hold_ack() {
+    HAPI_HOLD_ACK_ALLOW_NO_TTY=1 bash "$DIR/hapi-hold-ack.sh" "$@"
+}
+
 # ============ 1. dry-run writes no state ============
 rm -f "$WORK/state.json"
 out="$(run --dry-run 2>&1)"
@@ -1055,7 +1060,7 @@ pings_h2="$(cat "$WORK/pings.log" 2>/dev/null || true)"
 check "hold: second run still does not ping peer" "! grep -q '^aaaaaaaa' <<<\"\$pings_h2\""
 check "hold: second run no new emit (silence)" "[[ ! -f '$WORK/events.log' ]]"
 
-bash "$DIR/hapi-hold-ack.sh" --state "$WORK/state.json" --repo tiann/hapi 100
+hold_ack --state "$WORK/state.json" --repo tiann/hapi 100
 check "hold-ack: acked true" "jq -e --arg k 'tiann/hapi#100' '.hold[\$k].acked == true' '$WORK/state.json' >/dev/null"
 
 rm -f "$WORK/pings.log"
@@ -1168,7 +1173,7 @@ check "dual chip: tiann session keeps closed-without-merge" "grep -q 'closed WIT
 cat >"$WORK/hold-only.json" <<'EOF'
 {"schema":1,"hold":{"heavygee/hapi#124":{"acked":false,"comment_id":"1","notified":true}}}
 EOF
-bash "$DIR/hapi-hold-ack.sh" --state "$WORK/hold-only.json" 124
+hold_ack --state "$WORK/hold-only.json" 124
 check "hold-ack bare number: acked heavygee row" "jq -e --arg k 'heavygee/hapi#124' '.hold[\$k].acked == true' '$WORK/hold-only.json' >/dev/null"
 
 # Dual unacked holds for the same number must refuse bare ack (no silent tiann default).
@@ -1179,13 +1184,13 @@ cat >"$WORK/hold-dual.json" <<'EOF'
 }}
 EOF
 set +e
-dual_out="$(bash "$DIR/hapi-hold-ack.sh" --state "$WORK/hold-dual.json" 124 2>&1)"
+dual_out="$(hold_ack --state "$WORK/hold-dual.json" 124 2>&1)"
 dual_rc=$?
 set -e
 check "hold-ack ambiguous bare: nonzero" "[[ $dual_rc -ne 0 ]]"
 check "hold-ack ambiguous bare: demands --repo" "grep -qi 'ambiguous\\|pass --repo' <<<\"\$dual_out\""
 check "hold-ack ambiguous bare: neither row acked" "jq -e --arg a 'tiann/hapi#124' --arg b 'heavygee/hapi#124' '.hold[\$a].acked == false and .hold[\$b].acked == false' '$WORK/hold-dual.json' >/dev/null"
-bash "$DIR/hapi-hold-ack.sh" --state "$WORK/hold-dual.json" --repo heavygee/hapi 124
+hold_ack --state "$WORK/hold-dual.json" --repo heavygee/hapi 124
 check "hold-ack ambiguous with --repo: fork acked" "jq -e --arg k 'heavygee/hapi#124' '.hold[\$k].acked == true' '$WORK/hold-dual.json' >/dev/null"
 check "hold-ack ambiguous with --repo: tiann still held" "jq -e --arg k 'tiann/hapi#124' '.hold[\$k].acked == false' '$WORK/hold-dual.json' >/dev/null"
 
@@ -1306,12 +1311,109 @@ cat >"$WORK/hold-fail.json" <<'EOF'
 {"schema":1,"hold":{"heavygee/hapi#124":{"acked":false,"comment_id":"1"}}}
 EOF
 set +e
-ack_out="$(PATH="$WORK/jqbin:$PATH" bash "$DIR/hapi-hold-ack.sh" --state "$WORK/hold-fail.json" --repo heavygee/hapi 124 2>&1)"
+ack_out="$(PATH="$WORK/jqbin:$PATH" hold_ack --state "$WORK/hold-fail.json" --repo heavygee/hapi 124 2>&1)"
 ack_rc=$?
 set -e
 check "hold-ack serialize fail: nonzero" "[[ $ack_rc -ne 0 ]]"
 check "hold-ack serialize fail: no success line" "! grep -q 'acked heavygee/hapi#124' <<<\"\$ack_out\""
 check "hold-ack serialize fail: row still unacked" "jq -e --arg k 'heavygee/hapi#124' '.hold[\$k].acked == false' '$WORK/hold-fail.json' >/dev/null"
+
+# Agent context must not clear holds (Codex P1).
+set +e
+agent_out="$(HAPI_AGENT_CONTEXT=1 HAPI_HOLD_ACK_ALLOW_NO_TTY= bash "$DIR/hapi-hold-ack.sh" --state "$WORK/hold-fail.json" --repo heavygee/hapi 124 2>&1)"
+agent_rc=$?
+set -e
+check "hold-ack agent context: nonzero" "[[ $agent_rc -ne 0 ]]"
+check "hold-ack agent context: refuses" "grep -qi 'agent context\|controlling tty\|operator' <<<\"\$agent_out\""
+check "hold-ack agent context: row still unacked" "jq -e --arg k 'heavygee/hapi#124' '.hold[\$k].acked == false' '$WORK/hold-fail.json' >/dev/null"
+
+# ============ 26. blockedUpstream stickyPing=false — no hourly peer nags (#128) ============
+rm -f "$WORK/state.json" "$WORK/pings.log" "$WORK/events.log"
+cat >"$WORK/batch" <<'EOF'
+#!/usr/bin/env bash
+j='{}'
+for a in "$@"; do
+    case "$a" in
+        1511) j="$(echo "$j" | jq -c '. + {"1511":{emoji:"⚠️",action:"blocked upstream — wait on #1473 (status:blocked-upstream)",prePr:false,merged:false,closed:false,dataUnavailable:false,blockedUpstream:true,stickyPing:false}}')" ;;
+        1512) j="$(echo "$j" | jq -c '. + {"1512":{emoji:"⚠️",action:"resolve 1 open thread(s)",prePr:false,merged:false,closed:false,dataUnavailable:false,blockedUpstream:false,stickyPing:true}}')" ;;
+    esac
+done
+echo "$j"
+EOF
+chmod +x "$WORK/batch"
+cat >"$WORK/gh" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+if [[ "$args" == *"pr list"* && "$args" == *"--state open"* ]]; then
+    printf '1511\n1512\n'; exit 0
+fi
+if [[ "$args" == *"pr list"* && "$args" == *"merged"* ]]; then
+    exit 0
+fi
+if [[ "$args" == *"notifications"* ]]; then
+    exit 0
+fi
+if [[ "$args" == *"/comments"* || "$args" == *"/reviews"* ]]; then
+    echo '[]'; exit 0
+fi
+exit 0
+EOF
+chmod +x "$WORK/gh"
+cat >"$WORK/curl" <<EOF
+#!/usr/bin/env bash
+args="\$*"
+if [[ "\$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
+if [[ "\$args" == *"-X PATCH"* ]]; then echo '{"ok":true}'; exit 0; fi
+if [[ "\$args" == *"/api/system-events"* && "\$args" == *"-X POST"* ]]; then
+    echo "\$args" >> "$WORK/events.log"
+    echo '{"event":{"id":1},"deduped":false}'; exit 0
+fi
+if [[ "\$args" == *"/api/sessions?limit=500"* ]]; then
+cat <<'JSON'
+{"sessions":[
+ {"id":"bbbbbbbb-1511","active":true,"metadata":{"name":"spawn-peer remit blocked","path":"/tmp/wt-1511","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":1511,"url":"https://github.com/tiann/hapi/pull/1511","role":"primary"}]}},
+ {"id":"cccccccc-1512","active":true,"metadata":{"name":"actionable warn","path":"/tmp/wt-1512","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":1512,"url":"https://github.com/tiann/hapi/pull/1512","role":"primary"}]}},
+ {"id":"dddddddd-both","active":true,"metadata":{"name":"mixed blocked+actionable","path":"/tmp/wt-both","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":1511,"url":"https://github.com/tiann/hapi/pull/1511","role":"primary"},{"kind":"github_pr","repo":"tiann/hapi","number":1512,"url":"https://github.com/tiann/hapi/pull/1512","role":"primary"}]}}
+]}
+JSON
+exit 0
+fi
+echo '{}'; exit 0
+EOF
+chmod +x "$WORK/curl"
+
+out="$(run --emit-events 2>&1)"
+pings_b1="$(cat "$WORK/pings.log" 2>/dev/null || true)"
+check "blockedUpstream: still in NEEDS WORK queue" "grep -A20 'NEEDS WORK' <<<\"\$out\" | grep -q '#1511'"
+check "blockedUpstream: first window does NOT ping blocked-only peer" "! grep -q '^bbbbbbbb' <<<\"\$pings_b1\""
+check "blockedUpstream: actionable sibling session still pinged" "grep -q '^cccccccc' <<<\"\$pings_b1\""
+check "blockedUpstream: mixed session still pinged (actionable ⚠️)" "grep -q '^dddddddd' <<<\"\$pings_b1\""
+check "blockedUpstream: no transition emit for blocked-only" "! grep -q 'bbbbbbbb-1511' '$WORK/events.log' 2>/dev/null"
+
+rm -f "$WORK/pings.log" "$WORK/events.log"
+out="$(run --emit-events 2>&1)"
+pings_b2="$(cat "$WORK/pings.log" 2>/dev/null || true)"
+check "blockedUpstream: second window still zero peer pings" "! grep -q '^bbbbbbbb' <<<\"\$pings_b2\""
+check "blockedUpstream: second window no window emit for blocked-only" "! grep -q 'bbbbbbbb-1511' '$WORK/events.log' 2>/dev/null"
+check "blockedUpstream: second window still rouses actionable" "grep -q '^cccccccc' <<<\"\$pings_b2\""
+
+# Label cleared → stickyPing true restores normal first-sight/window policy
+cat >"$WORK/batch" <<'EOF'
+#!/usr/bin/env bash
+j='{}'
+for a in "$@"; do
+    case "$a" in
+        1511) j="$(echo "$j" | jq -c '. + {"1511":{emoji:"⚠️",action:"resolve 1 open thread(s)",prePr:false,merged:false,closed:false,blockedUpstream:false,stickyPing:true}}')" ;;
+        1512) j="$(echo "$j" | jq -c '. + {"1512":{emoji:"⚠️",action:"resolve 1 open thread(s)",prePr:false,merged:false,closed:false,blockedUpstream:false,stickyPing:true}}')" ;;
+    esac
+done
+echo "$j"
+EOF
+chmod +x "$WORK/batch"
+rm -f "$WORK/pings.log"
+out="$(run 2>&1)"
+pings_b3="$(cat "$WORK/pings.log" 2>/dev/null || true)"
+check "blockedUpstream cleared: peer ping resumes" "grep -q '^bbbbbbbb' <<<\"\$pings_b3\""
 
 echo ""
 echo "hapi-meta-daily.test.sh: $PASS passed, $FAIL failed"

@@ -117,8 +117,30 @@ eq "same numeric id different surface later while unacked is new latch" \
 ACKED2="$(pec_hold_ack_state "$STATE_UNACKED" "tiann/hapi" "1108")"
 eq "ack sets acked true" \
     "$(jq -r '.hold["tiann/hapi#1108"].acked' <<<"$ACKED2")" "true"
+eq "ack records fingerprint in acked_fps" \
+    "$(jq -r '.hold["tiann/hapi#1108"].acked_fps[]' <<<"$ACKED2" | grep -c '5154418101')" "1"
 eq "ack overlay after ack_state is live" \
     "$(pec_hold_overlay_emoji "⚠️" "$ACKED2" "tiann/hapi" "1108")" "⚠️"
+
+# Equal-time A↔B must not oscillate after both fingerprints are acknowledged.
+SIBLING_TS="2026-08-02T01:26:00Z"
+AFTER_A="$ACKED2"
+# Sibling B at equal ts latches once A is acked
+eq "sibling B equal-ts latches after A ack" \
+    "$(pec_hold_is_new_latch "$AFTER_A" "tiann/hapi" "1108" "issue_comment" "5154418999" "$SIBLING_TS" && echo yes || echo no)" "yes"
+AFTER_B="$(pec_hold_upsert_state "$AFTER_A" "tiann/hapi" "1108" "issue_comment" "5154418999" "tiann" \
+    "https://github.com/tiann/hapi/pull/1108#issuecomment-5154418999" "also trim" "$SIBLING_TS")"
+eq "upsert B preserves A's acked_fps" \
+    "$(jq -r '.hold["tiann/hapi#1108"].acked_fps[]' <<<"$AFTER_B" | grep -c '5154418101')" "1"
+AFTER_B_ACK="$(pec_hold_ack_state "$AFTER_B" "tiann/hapi" "1108")"
+eq "ack B records both fingerprints" \
+    "$(jq -r '.hold["tiann/hapi#1108"].acked_fps | length' <<<"$AFTER_B_ACK")" "2"
+eq "after both acked, A equal-ts does not re-latch" \
+    "$(pec_hold_is_new_latch "$AFTER_B_ACK" "tiann/hapi" "1108" "issue_comment" "5154418101" "$SIBLING_TS" && echo yes || echo no)" "no"
+eq "after both acked, B equal-ts does not re-latch" \
+    "$(pec_hold_is_new_latch "$AFTER_B_ACK" "tiann/hapi" "1108" "issue_comment" "5154418999" "$SIBLING_TS" && echo yes || echo no)" "no"
+eq "later comment still latches after equal-ts siblings acked" \
+    "$(pec_hold_is_new_latch "$AFTER_B_ACK" "tiann/hapi" "1108" "issue_comment" "999999" "2026-08-05T00:00:00Z" && echo yes || echo no)" "yes"
 
 # excerpt trim to 140
 LONG="$(printf 'x%.0s' {1..200})"
