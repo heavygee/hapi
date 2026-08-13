@@ -175,6 +175,68 @@ describe('startHappyServer skill_lookup', () => {
 
 })
 
+describe('startHappyServer link_pr', () => {
+    let stopServer: (() => void) | null
+    let mcp: Client | null
+
+    afterEach(async () => {
+        await mcp?.close()
+        stopServer?.()
+        mcp = null
+        stopServer = null
+    })
+
+    async function connectWithClient(sessionClient: ApiSessionClient): Promise<Client> {
+        const server = await startHappyServer(sessionClient, { enableChangeTitle: false })
+        stopServer = server.stop
+        mcp = new Client({ name: 'hapi-link-pr-test', version: '1.0.0' })
+        await mcp.connect(new StreamableHTTPClientTransport(new URL(server.url)))
+        return mcp
+    }
+
+    it('reports success only when flushMetadata persists the ref', async () => {
+        const refHolder: { current: unknown } = { current: null }
+        const sessionClient = {
+            updateMetadata: vi.fn((updater: (metadata: Record<string, unknown>) => Record<string, unknown>) => {
+                refHolder.current = updater({}).externalRefs
+            }),
+            flushMetadata: vi.fn(async () => true),
+            getMetadata: vi.fn(() => ({ externalRefs: refHolder.current })),
+            sendAgentMessage: vi.fn(),
+            sendClaudeSessionMessage: vi.fn()
+        } as unknown as ApiSessionClient
+
+        const client = await connectWithClient(sessionClient)
+        const result = await client.callTool({
+            name: 'link_pr',
+            arguments: { url: 'https://github.com/tiann/hapi/pull/1163' }
+        }) as ToolResult
+
+        expect(result.isError).toBe(false)
+        expect(result.content?.[0]?.text).toContain('Linked tiann/hapi#1163')
+        expect(sessionClient.flushMetadata).toHaveBeenCalled()
+    })
+
+    it('errors when the hub does not persist the linked ref', async () => {
+        const sessionClient = {
+            updateMetadata: vi.fn(),
+            flushMetadata: vi.fn(async () => true),
+            getMetadata: vi.fn(() => ({ externalRefs: [] })),
+            sendAgentMessage: vi.fn(),
+            sendClaudeSessionMessage: vi.fn()
+        } as unknown as ApiSessionClient
+
+        const client = await connectWithClient(sessionClient)
+        const result = await client.callTool({
+            name: 'link_pr',
+            arguments: { url: 'https://github.com/tiann/hapi/pull/1163' }
+        }) as ToolResult
+
+        expect(result.isError).toBe(true)
+        expect(result.content?.[0]?.text).toContain('Hub did not persist the PR link')
+    })
+})
+
 describe('toClaudeAllowedHapiMcpTools', () => {
     it('keeps local-path and peer tools registered but out of Claude --allowedTools', () => {
         expect(toClaudeAllowedHapiMcpTools([

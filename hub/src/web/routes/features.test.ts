@@ -4,8 +4,15 @@ import { Hono } from 'hono'
 import type { WebAppEnv } from '../middleware/auth'
 import { createFeaturesRoutes, type FeaturesRouteDeps } from './features'
 
-function createApp(deps: Partial<FeaturesRouteDeps> & Pick<FeaturesRouteDeps, 'getGithubPrAwareness' | 'setGithubPrAwareness'>) {
+function createApp(
+    deps: Partial<FeaturesRouteDeps> & Pick<FeaturesRouteDeps, 'getGithubPrAwareness' | 'setGithubPrAwareness'>,
+    namespace = 'default'
+) {
     const app = new Hono<WebAppEnv>()
+    app.use('*', async (c, next) => {
+        c.set('namespace', namespace)
+        await next()
+    })
     app.route('/api', createFeaturesRoutes({
         getPrChipDisplay: () => DEFAULT_PR_CHIP_DISPLAY,
         ...deps
@@ -85,5 +92,25 @@ describe('features routes', () => {
             body: JSON.stringify({})
         })
         expect(response.status).toBe(400)
+    })
+
+    it('rejects non-default namespaces on PATCH', async () => {
+        const app = createApp({
+            getGithubPrAwareness: () => ({ enabled: false, source: 'default' }),
+            setGithubPrAwareness: async () => {
+                throw new Error('should not write')
+            }
+        }, 'tenant')
+
+        const response = await app.request('/api/features', {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ githubPrAwareness: true })
+        })
+
+        expect(response.status).toBe(403)
+        expect(await response.json()).toEqual({
+            error: 'Feature settings are only available to the hub owner'
+        })
     })
 })

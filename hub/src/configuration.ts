@@ -28,7 +28,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { getOrCreateCliApiToken } from './config/cliApiToken'
 import { applyProviderCredentialsFromSettings } from './config/providerCredentials'
-import { getSettingsFile, readSettingsOrThrow, writeSettings } from './config/settings'
+import { getSettingsFile, updateSettings } from './config/settings'
 import { loadServerSettings, type ServerSettings, type ServerSettingsResult } from './config/serverSettings'
 
 export type ConfigSource = 'env' | 'file' | 'default'
@@ -199,9 +199,10 @@ class Configuration {
         if (this.sources.githubPrAwareness === 'env') {
             throw new Error('githubPrAwareness is pinned by HAPI_GITHUB_PR_AWARENESS')
         }
-        const settings = await readSettingsOrThrow(this.settingsFile)
-        settings.githubPrAwareness = enabled
-        await writeSettings(this.settingsFile, settings)
+        await updateSettings(this.settingsFile, (settings) => ({
+            settings: { ...settings, githubPrAwareness: enabled },
+            result: undefined
+        }))
         this.githubPrAwareness = enabled
         ;(this.sources as { githubPrAwareness: ConfigSource }).githubPrAwareness = 'file'
     }

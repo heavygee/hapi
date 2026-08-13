@@ -32,6 +32,8 @@ function defaultDeps(): FeaturesRouteDeps {
     }
 }
 
+const OWNER_ONLY_ERROR = 'Feature settings are only available to the hub owner'
+
 export function createFeaturesRoutes(deps: FeaturesRouteDeps = defaultDeps()): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
@@ -47,6 +49,10 @@ export function createFeaturesRoutes(deps: FeaturesRouteDeps = defaultDeps()): H
     })
 
     app.patch('/features', async (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({ error: OWNER_ONLY_ERROR }, 403)
+        }
+
         const body = await c.req.json().catch(() => null)
         const parsed = FeaturesPatchRequestSchema.safeParse(body)
         if (!parsed.success) {

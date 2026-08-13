@@ -239,7 +239,17 @@ function createHapiMcpServer(
                     ...metadata,
                     externalRefs: [ref],
                 }))
-                await client.flushMetadata(5_000)
+                const flushed = await client.flushMetadata(5_000)
+                const persisted = client.getMetadata()?.externalRefs?.some((candidate) =>
+                    candidate.kind === 'github_pr'
+                    && candidate.repo === ref.repo
+                    && candidate.number === ref.number
+                    && candidate.role === ref.role
+                    && candidate.linkedAt === ref.linkedAt
+                )
+                if (!flushed || !persisted) {
+                    throw new Error('Hub did not persist the PR link (awareness may be disabled)')
+                }
                 return {
                     content: [{
                         type: 'text' as const,
