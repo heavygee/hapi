@@ -640,7 +640,7 @@ Do not spawn a feature peer without filling the template in [`new-feature-intake
 
 ## hapi-inline (operator mic) — consumer contract
 
-This app **vendors** [`heavygee/hapi-inline`](https://github.com/heavygee/hapi-inline) release tags. It does **not** own the dock. Pinned tag lives in `web/public/operator-dock/README.md` (currently **v0.11.4**). Fork-local; not a `tiann/hapi` PR. Tracker: [heavygee/hapi#120](https://github.com/heavygee/hapi/issues/120). Knock: `/opmic` (aliases `/mic`, `/unlock`).
+This app **vendors** [`heavygee/hapi-inline`](https://github.com/heavygee/hapi-inline) release tags. It does **not** own the dock. Pinned tag lives in `web/public/operator-dock/README.md` (currently **v0.11.4**). Fork-local; not a `tiann/hapi` PR. Tracker: [heavygee/hapi#120](https://github.com/heavygee/hapi/issues/120). Unlock: `/opmic` (aliases `/mic`, `/unlock`) **or** Settings → General → Show operator tools ([#123](https://github.com/heavygee/hapi/issues/123)). Gate secret is hub `HAPI_INLINE_SECRET` (not the HAPI login / CLI token / JWT); Settings enable probes `/hapi/operator/sessions` and clears a stale mismatch.
 
 | Need | Do this |
 |------|---------|
