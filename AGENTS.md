@@ -25,7 +25,7 @@ Start with the task's files; read only relevant sections of these references, no
 | Native API contract, chat conformance | [client contract](docs/api/client-contract/index.md), [iOS](ios/README.md), [Android](android/README.md) |
 | Encrypted native push relay | [relay/README.md](relay/README.md) |
 | User docs / marketing site | `docs/` (VitePress) / `website/` |
-| Paint tappable URLs (Cursor) | MCP `display_links` / `hapi display-links` / `scripts/tooling/hapi-display-links.mjs` — construct hrefs by concatenation (`"tia"+"nn"`), never type landmine hosts in prose |
+| Paint tappable URLs (Cursor only) | MCP `display_links` (Cursor sessions) or `hapi display-links` / `scripts/tooling/hapi-display-links.mjs` — construct hrefs by concatenation (`"tia"+"nn"`), never type landmine hosts in prose |
 
 ## Repository conventions
 
