@@ -35,6 +35,14 @@
 .opdock-btn:hover { transform: translateY(-1px); }
 .opdock-btn:active { transform: scale(0.94); }
 
+/* #155: known-bad / missing gate — hide H + fan; secret sheet stays interactive */
+.opdock--gate-locked .opdock-btn {
+  display: none;
+}
+.opdock--gate-locked .opdock-cluster {
+  display: none;
+}
+
 .opdock--listening .opdock-btn {
   background: #dc2626;
   animation: opdock-pulse 1.2s infinite;
