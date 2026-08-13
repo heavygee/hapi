@@ -129,8 +129,10 @@ run() {
 }
 
 # Operator-only hold-ack; tests have no controlling tty.
+# Unset HAPI_AGENT_CONTEXT so harness runs under a live agent session do not
+# inherit the production refuse (explicit agent tests set it themselves).
 hold_ack() {
-    HAPI_HOLD_ACK_ALLOW_NO_TTY=1 bash "$DIR/hapi-hold-ack.sh" "$@"
+    HAPI_HOLD_ACK_ALLOW_NO_TTY=1 HAPI_AGENT_CONTEXT= bash "$DIR/hapi-hold-ack.sh" "$@"
 }
 
 # ============ 1. dry-run writes no state ============
@@ -1318,14 +1320,21 @@ check "hold-ack serialize fail: nonzero" "[[ $ack_rc -ne 0 ]]"
 check "hold-ack serialize fail: no success line" "! grep -q 'acked heavygee/hapi#124' <<<\"\$ack_out\""
 check "hold-ack serialize fail: row still unacked" "jq -e --arg k 'heavygee/hapi#124' '.hold[\$k].acked == false' '$WORK/hold-fail.json' >/dev/null"
 
-# Agent context must not clear holds (Codex P1).
+# Agent context must not clear holds (Codex P1) — even with the no-TTY test override.
 set +e
 agent_out="$(HAPI_AGENT_CONTEXT=1 HAPI_HOLD_ACK_ALLOW_NO_TTY= bash "$DIR/hapi-hold-ack.sh" --state "$WORK/hold-fail.json" --repo heavygee/hapi 124 2>&1)"
 agent_rc=$?
 set -e
 check "hold-ack agent context: nonzero" "[[ $agent_rc -ne 0 ]]"
-check "hold-ack agent context: refuses" "grep -qi 'agent context\|controlling tty\|operator' <<<\"\$agent_out\""
+check "hold-ack agent context: refuses" "grep -qi 'agent context\\|controlling tty\\|operator' <<<\"\$agent_out\""
 check "hold-ack agent context: row still unacked" "jq -e --arg k 'heavygee/hapi#124' '.hold[\$k].acked == false' '$WORK/hold-fail.json' >/dev/null"
+set +e
+agent_bypass_out="$(HAPI_AGENT_CONTEXT=1 HAPI_HOLD_ACK_ALLOW_NO_TTY=1 bash "$DIR/hapi-hold-ack.sh" --state "$WORK/hold-fail.json" --repo heavygee/hapi 124 2>&1)"
+agent_bypass_rc=$?
+set -e
+check "hold-ack agent+ALLOW_NO_TTY: still nonzero" "[[ $agent_bypass_rc -ne 0 ]]"
+check "hold-ack agent+ALLOW_NO_TTY: refuses agent" "grep -qi 'agent context' <<<\"\$agent_bypass_out\""
+check "hold-ack agent+ALLOW_NO_TTY: row still unacked" "jq -e --arg k 'heavygee/hapi#124' '.hold[\$k].acked == false' '$WORK/hold-fail.json' >/dev/null"
 
 # ============ 26. blockedUpstream stickyPing=false — no hourly peer nags (#128) ============
 rm -f "$WORK/state.json" "$WORK/pings.log" "$WORK/events.log"

@@ -60,11 +60,12 @@ done
 [[ "$PR" =~ ^[0-9]+$ ]] || die "PR must be a number (got: $PR)"
 
 # Operator-only mutation. Coding peers must not clear the latch that stopped them
-# (Codex P1 on #124). HAPI_AGENT_CONTEXT=1 is set for wrapped agents; tests set
-# HAPI_HOLD_ACK_ALLOW_NO_TTY=1. Operator override still needs a real tty.
+# (Codex P1 on #124). HAPI_AGENT_CONTEXT=1 is set for wrapped agents and is
+# refused unconditionally — HAPI_HOLD_ACK_ALLOW_NO_TTY must never bypass that.
+# ALLOW_NO_TTY only relaxes the controlling-tty check for non-agent test harnesses.
 # shellcheck source=lib/operator-tty-gate.sh
 source "$SCRIPT_DIR/lib/operator-tty-gate.sh"
-if [[ "${HAPI_AGENT_CONTEXT:-}" == "1" && "${HAPI_HOLD_ACK_ALLOW_NO_TTY:-}" != "1" ]]; then
+if [[ "${HAPI_AGENT_CONTEXT:-}" == "1" ]]; then
     die "refusing hold-ack from agent context (HAPI_AGENT_CONTEXT=1) — operator must ack from a real terminal"
 fi
 if ! caller_has_controlling_tty; then
