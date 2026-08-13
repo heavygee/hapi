@@ -13,13 +13,50 @@ SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 # shellcheck source=lib/pr-hold-core.sh
 source "$SCRIPT_DIR/lib/pr-hold-core.sh"
 
-STATE_FILE="${HAPI_META_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/hapi/meta-daily.json}"
+# Capture the live Meta state path before --state can redirect it. No-TTY
+# test bypasses must never apply to this path (Codex P1 on #124).
+LIVE_STATE_FILE="${HAPI_META_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/hapi/meta-daily.json}"
+STATE_FILE="$LIVE_STATE_FILE"
 REPO="${HAPI_PR_REPO:-tiann/hapi}"
 REPO_EXPLICIT=0
 PR=""
 
 err() { echo "hapi-hold-ack: $*" >&2; }
 die() { err "$*"; exit 2; }
+
+# Canonical absolute path (symlinks resolved) for live-vs-redirect compare.
+hold_ack_abs_path() {
+    local p="$1" dir base
+    if command -v realpath >/dev/null 2>&1; then
+        realpath -m -- "$p" 2>/dev/null && return 0
+    fi
+    if [[ -e "$p" ]]; then
+        readlink -f -- "$p"
+        return 0
+    fi
+    dir=$(dirname -- "$p")
+    base=$(basename -- "$p")
+    if [[ -d "$dir" ]]; then
+        printf '%s/%s\n' "$(cd -- "$dir" && pwd -P)" "$base"
+    else
+        printf '%s\n' "$p"
+    fi
+}
+
+# Test-only no-TTY gate: env alone is forgeable (env -u HAPI_AGENT_CONTEXT
+# HAPI_HOLD_ACK_ALLOW_NO_TTY=1). Require (1) redirected --state that is not
+# the live Meta file and (2) a sidecar cookie written by the harness next to
+# that state. Clearing a temp fixture cannot clear the production latch.
+hold_ack_test_no_tty_ok() {
+    [[ "${HAPI_HOLD_ACK_ALLOW_NO_TTY:-}" == "1" ]] || return 1
+    local live candidate cookie
+    live="$(hold_ack_abs_path "$LIVE_STATE_FILE")"
+    candidate="$(hold_ack_abs_path "$STATE_FILE")"
+    [[ -n "$live" && -n "$candidate" && "$live" != "$candidate" ]] || return 1
+    cookie="${STATE_FILE}.hold-ack-test"
+    [[ -f "$cookie" ]] || return 1
+    [[ "$(cat "$cookie" 2>/dev/null || true)" == "$candidate" ]]
+}
 
 usage() {
     cat <<'EOF'
@@ -31,7 +68,9 @@ Usage:
   hapi-hold-ack --repo owner/repo <pr>
 
 Does not ping the coding peer. Next hapi-meta-daily classifies live again.
-Operator-only: requires a controlling tty (or HAPI_HOLD_ACK_ALLOW_NO_TTY=1 in tests).
+Operator-only: requires a controlling tty. Tests may use redirected --state
+plus a sibling .hold-ack-test cookie (see hapi-meta-daily.test.sh); env alone
+never clears the live Meta latch.
 Refuses HAPI_AGENT_CONTEXT=1 — coding peers cannot clear their own hold.
 EOF
 }
@@ -60,21 +99,23 @@ done
 [[ "$PR" =~ ^[0-9]+$ ]] || die "PR must be a number (got: $PR)"
 
 # Operator-only mutation. Coding peers must not clear the latch that stopped them
-# (Codex P1 on #124). HAPI_AGENT_CONTEXT=1 is set for wrapped agents and is
-# refused unconditionally — HAPI_HOLD_ACK_ALLOW_NO_TTY must never bypass that.
-# ALLOW_NO_TTY only relaxes the controlling-tty check for non-agent test harnesses.
+# (Codex P1 on #124). HAPI_AGENT_CONTEXT=1 is refused unconditionally.
+# No-TTY: only the harness path (non-live --state + sidecar cookie + ALLOW_NO_TTY).
+# Env alone is forgeable and must not clear the live Meta latch.
 # shellcheck source=lib/operator-tty-gate.sh
 source "$SCRIPT_DIR/lib/operator-tty-gate.sh"
 if [[ "${HAPI_AGENT_CONTEXT:-}" == "1" ]]; then
     die "refusing hold-ack from agent context (HAPI_AGENT_CONTEXT=1) — operator must ack from a real terminal"
 fi
 if ! caller_has_controlling_tty; then
-    if [[ "${HAPI_HOLD_ACK_ALLOW_NO_TTY:-}" == "1" ]]; then
+    if hold_ack_test_no_tty_ok; then
         :
     elif [[ "${HAPI_OPERATOR_HOLD_ACK_OVERRIDE:-}" == "1" ]]; then
         die "HAPI_OPERATOR_HOLD_ACK_OVERRIDE=1 ignored without controlling tty"
+    elif [[ "${HAPI_HOLD_ACK_ALLOW_NO_TTY:-}" == "1" ]]; then
+        die "refusing hold-ack without controlling tty (ALLOW_NO_TTY needs non-live --state + .hold-ack-test cookie)"
     else
-        die "refusing hold-ack without controlling tty (operator-only; tests: HAPI_HOLD_ACK_ALLOW_NO_TTY=1)"
+        die "refusing hold-ack without controlling tty (operator-only)"
     fi
 fi
 

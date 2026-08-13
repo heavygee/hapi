@@ -131,7 +131,23 @@ run() {
 # Operator-only hold-ack; tests have no controlling tty.
 # Unset HAPI_AGENT_CONTEXT so harness runs under a live agent session do not
 # inherit the production refuse (explicit agent tests set it themselves).
+# Sidecar cookie + ALLOW_NO_TTY is required; env alone must not clear holds.
 hold_ack() {
+    local state="" prev="" abs
+    prev=""
+    for a in "$@"; do
+        if [[ "$prev" == "--state" ]]; then
+            state="$a"
+        fi
+        prev="$a"
+    done
+    [[ -n "$state" ]] || {
+        echo "hold_ack harness: missing --state" >&2
+        return 2
+    }
+    mkdir -p "$(dirname -- "$state")"
+    abs="$(cd -- "$(dirname -- "$state")" && pwd -P)/$(basename -- "$state")"
+    printf '%s' "$abs" >"${state}.hold-ack-test"
     HAPI_HOLD_ACK_ALLOW_NO_TTY=1 HAPI_AGENT_CONTEXT= bash "$DIR/hapi-hold-ack.sh" "$@"
 }
 
@@ -1399,6 +1415,35 @@ set -e
 check "hold-ack agent+ALLOW_NO_TTY: still nonzero" "[[ $agent_bypass_rc -ne 0 ]]"
 check "hold-ack agent+ALLOW_NO_TTY: refuses agent" "grep -qi 'agent context' <<<\"\$agent_bypass_out\""
 check "hold-ack agent+ALLOW_NO_TTY: row still unacked" "jq -e --arg k 'heavygee/hapi#124' '.hold[\$k].acked == false' '$WORK/hold-fail.json' >/dev/null"
+
+# Env-alone forge (unset agent marker + ALLOW_NO_TTY, no sidecar) must not ack.
+cat >"$WORK/hold-forge.json" <<'EOF'
+{"schema":1,"hold":{"heavygee/hapi#124":{"acked":false,"comment_id":"1"}}}
+EOF
+set +e
+forge_out="$(HAPI_AGENT_CONTEXT= HAPI_HOLD_ACK_ALLOW_NO_TTY=1 bash "$DIR/hapi-hold-ack.sh" --state "$WORK/hold-forge.json" --repo heavygee/hapi 124 2>&1)"
+forge_rc=$?
+set -e
+check "hold-ack env-alone forge: nonzero" "[[ $forge_rc -ne 0 ]]"
+check "hold-ack env-alone forge: wants cookie" "grep -qiE 'hold-ack-test|controlling tty|ALLOW_NO_TTY' <<<\"\$forge_out\""
+check "hold-ack env-alone forge: row still unacked" "jq -e --arg k 'heavygee/hapi#124' '.hold[\$k].acked == false' '$WORK/hold-forge.json' >/dev/null"
+
+# Live Meta path + forged sidecar + ALLOW still refuses without tty.
+LIVE_XDG="$WORK/fake-xdg"
+mkdir -p "$LIVE_XDG/hapi"
+cat >"$LIVE_XDG/hapi/meta-daily.json" <<'EOF'
+{"schema":1,"hold":{"heavygee/hapi#124":{"acked":false,"comment_id":"1"}}}
+EOF
+live_state="$LIVE_XDG/hapi/meta-daily.json"
+live_abs="$(cd -- "$(dirname -- "$live_state")" && pwd -P)/$(basename -- "$live_state")"
+printf '%s' "$live_abs" >"${live_state}.hold-ack-test"
+set +e
+live_forge_out="$(XDG_STATE_HOME="$LIVE_XDG" HAPI_AGENT_CONTEXT= HAPI_HOLD_ACK_ALLOW_NO_TTY=1 bash "$DIR/hapi-hold-ack.sh" --repo heavygee/hapi 124 2>&1)"
+live_forge_rc=$?
+set -e
+check "hold-ack live-path forge: nonzero" "[[ $live_forge_rc -ne 0 ]]"
+check "hold-ack live-path forge: refuses" "grep -qiE 'controlling tty|hold-ack-test|ALLOW_NO_TTY|live' <<<\"\$live_forge_out\""
+check "hold-ack live-path forge: row still unacked" "jq -e --arg k 'heavygee/hapi#124' '.hold[\$k].acked == false' '$live_state' >/dev/null"
 
 # ============ 26. blockedUpstream stickyPing=false — no hourly peer nags (#128) ============
 rm -f "$WORK/state.json" "$WORK/pings.log" "$WORK/events.log"
