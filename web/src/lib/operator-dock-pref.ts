@@ -170,8 +170,39 @@ function alertOperator(message: string, alertFn: (message: string) => void): voi
 }
 
 /**
+ * Settings unlock with an explicit secret (no window.prompt — Quest native dialogs mangle paste).
+ */
+export async function enableOperatorDockWithSecret(
+    secret: string,
+    fetchImpl: typeof fetch = fetch
+): Promise<{ ok: true } | { ok: false, kind: OperatorDockProbeKind, message: string }> {
+    const trimmed = String(secret || '').trim()
+    if (!trimmed) {
+        return { ok: false, kind: 'mismatch', message: OPERATOR_DOCK_PROMPT }
+    }
+    const probe = await probeOperatorDockSecret(trimmed, fetchImpl)
+    if (probe.ok) {
+        safeSetItem(OPERATOR_DOCK_SECRET_KEY, trimmed)
+        safeSetItem(OPERATOR_DOCK_PREF_KEY, 'true')
+        applyOperatorDockVisibility(true)
+        const host = (window as Window & { HapiInlineHost?: { boot?: () => void } }).HapiInlineHost
+        host?.boot?.()
+        return { ok: true }
+    }
+    if (probe.kind === 'mismatch' || probe.kind === 'conflict') {
+        safeRemoveItem(OPERATOR_DOCK_SECRET_KEY)
+        return { ok: false, kind: probe.kind, message: OPERATOR_DOCK_MISMATCH_ALERT }
+    }
+    if (probe.kind === 'hub_auth') {
+        return { ok: false, kind: 'hub_auth', message: OPERATOR_DOCK_HUB_AUTH_ALERT }
+    }
+    return { ok: false, kind: probe.kind, message: OPERATOR_DOCK_GENERIC_ALERT }
+}
+
+/**
  * Settings unlock: always probe the gate secret (including a previously stored one).
  * Stale wrong secrets must not silently show H/markup (Quest dogfood).
+ * Prefer enableOperatorDockWithSecret + in-page Settings UI on Quest (no window.prompt).
  */
 export async function enableOperatorDockFromSettings(
     promptFn: (message: string) => string | null = (message) => window.prompt(message),
@@ -186,29 +217,16 @@ export async function enableOperatorDockFromSettings(
             secret = entered.trim()
         }
 
-        const probe = await probeOperatorDockSecret(secret, fetchImpl)
-        if (probe.ok) {
-            safeSetItem(OPERATOR_DOCK_SECRET_KEY, secret)
-            safeSetItem(OPERATOR_DOCK_PREF_KEY, 'true')
-            applyOperatorDockVisibility(true)
-            const host = (window as Window & { HapiInlineHost?: { boot?: () => void } }).HapiInlineHost
-            host?.boot?.()
-            return true
-        }
+        const result = await enableOperatorDockWithSecret(secret, fetchImpl)
+        if (result.ok) return true
 
-        if (probe.kind === 'mismatch' || probe.kind === 'conflict') {
-            safeRemoveItem(OPERATOR_DOCK_SECRET_KEY)
+        if (result.kind === 'mismatch' || result.kind === 'conflict') {
             secret = ''
-            alertOperator(OPERATOR_DOCK_MISMATCH_ALERT, alertFn)
+            alertOperator(result.message, alertFn)
             continue
         }
 
-        if (probe.kind === 'hub_auth') {
-            alertOperator(OPERATOR_DOCK_HUB_AUTH_ALERT, alertFn)
-            return false
-        }
-
-        alertOperator(OPERATOR_DOCK_GENERIC_ALERT, alertFn)
+        alertOperator(result.message, alertFn)
         return false
     }
     return false

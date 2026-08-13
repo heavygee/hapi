@@ -9,6 +9,7 @@ import {
     classifyOperatorDockProbe,
     disableOperatorDockFromSettings,
     enableOperatorDockFromSettings,
+    enableOperatorDockWithSecret,
     isOperatorDockKnock,
     isOperatorDockPrefEnabled,
     persistOperatorDockKnock,
@@ -48,6 +49,19 @@ describe('operator dock visibility pref (host, not vendored dock)', () => {
         expect(classifyOperatorDockProbe(401, 'Missing authorization token', '')).toBe('hub_auth')
         expect(classifyOperatorDockProbe(401, 'hub JWT missing', 'hub_auth_missing')).toBe('hub_auth')
         expect(classifyOperatorDockProbe(403, 'path not allowed through operator proxy', 'proxy_path_forbidden')).toBe('forbidden')
+    })
+
+    it('enableOperatorDockWithSecret probes then persists without window.prompt', async () => {
+        const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ sessions: [] }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+        }))
+        const result = await enableOperatorDockWithSecret('gate-secret', fetchImpl as unknown as typeof fetch)
+        expect(result).toEqual({ ok: true })
+        expect(fetchImpl).toHaveBeenCalled()
+        expect(localStorage.getItem(OPERATOR_DOCK_SECRET_KEY)).toBe('gate-secret')
+        expect(isOperatorDockPrefEnabled()).toBe(true)
+        expect(document.documentElement.getAttribute('data-hapi-operator-dock')).toBe('on')
     })
 
     it('enable from Settings probes the gate secret before persisting', async () => {
