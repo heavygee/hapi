@@ -288,7 +288,13 @@ export const resumeCommand: CommandDefinition = {
                     // Operator / Windows / untracked peer: unattributed delivery.
                 }
             }
-            if (target.active && capabilityArmed) {
+            if (target.active && !capabilityArmed) {
+                throw new Error(
+                    'Cannot safely resume this active session without a session capability. '
+                    + 'Use a runner-tracked terminal or wait for the remote session to go idle.'
+                )
+            }
+            if (target.active) {
                 await api.handoffSessionToLocal(target.sessionId)
             }
             await dispatchLocalResume(target)

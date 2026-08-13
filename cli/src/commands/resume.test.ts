@@ -139,7 +139,11 @@ describe('resumeCommand', () => {
         })
     })
 
-    it('continues unattributed when runner local-resume grant fails (#1473)', async () => {
+    it('refuses local resume when active and local-resume grant fails (#1473)', async () => {
+        const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+        const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+            throw new Error(`process.exit:${code ?? 'undefined'}`)
+        }) as never)
         delete process.env.HAPI_PEER_CAP_INJECT
         requestRunnerLocalResumeCapabilityMock.mockRejectedValue(new Error('No peercred local-resume grant'))
         getLocalResumeTargetMock.mockResolvedValue({
@@ -155,12 +159,20 @@ describe('resumeCommand', () => {
             collaborationMode: 'default'
         })
 
-        await resumeCommand.run(createContext(['hapi-session-active']))
-
-        expect(requestRunnerLocalResumeCapabilityMock).toHaveBeenCalledWith('hapi-session-active')
-        expect(armDirectResumeCapabilityMock).not.toHaveBeenCalled()
-        expect(handoffSessionToLocalMock).not.toHaveBeenCalled()
-        expect(runCodexMock).toHaveBeenCalled()
+        try {
+            await expect(resumeCommand.run(createContext(['hapi-session-active']))).rejects.toThrow('process.exit:1')
+            expect(requestRunnerLocalResumeCapabilityMock).toHaveBeenCalledWith('hapi-session-active')
+            expect(armDirectResumeCapabilityMock).not.toHaveBeenCalled()
+            expect(handoffSessionToLocalMock).not.toHaveBeenCalled()
+            expect(runCodexMock).not.toHaveBeenCalled()
+            expect(consoleErrorSpy).toHaveBeenCalledWith(
+                expect.any(String),
+                expect.stringContaining('without a session capability')
+            )
+        } finally {
+            consoleErrorSpy.mockRestore()
+            exitSpy.mockRestore()
+        }
     })
 
     it('redeems a runner local-resume grant for terminal resume without inject (#1473)', async () => {
