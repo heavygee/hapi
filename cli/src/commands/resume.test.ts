@@ -159,7 +159,7 @@ describe('resumeCommand', () => {
 
         expect(requestRunnerLocalResumeCapabilityMock).toHaveBeenCalledWith('hapi-session-active')
         expect(armDirectResumeCapabilityMock).not.toHaveBeenCalled()
-        expect(handoffSessionToLocalMock).toHaveBeenCalledWith('hapi-session-active')
+        expect(handoffSessionToLocalMock).not.toHaveBeenCalled()
         expect(runCodexMock).toHaveBeenCalled()
     })
 

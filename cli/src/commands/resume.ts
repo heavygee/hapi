@@ -276,17 +276,19 @@ export const resumeCommand: CommandDefinition = {
             // Runner-spawned children get inject env; terminal `hapi resume`
             // may redeem a peercred grant when the peer is a tracked child.
             // Otherwise continue unattributed (#1473 — no forgeable HTTP mint).
-            if (!process.env.HAPI_PEER_CAP_INJECT?.trim()) {
+            let capabilityArmed = Boolean(process.env.HAPI_PEER_CAP_INJECT?.trim())
+            if (!capabilityArmed) {
                 try {
                     const { requestRunnerLocalResumeCapability } = await import('@/runner/localResumeGrant')
                     const { armDirectResumeCapability } = await import('@/api/peerCapabilityInject')
                     const capability = await requestRunnerLocalResumeCapability(target.sessionId)
                     armDirectResumeCapability(capability)
+                    capabilityArmed = true
                 } catch {
                     // Operator / Windows / untracked peer: unattributed delivery.
                 }
             }
-            if (target.active) {
+            if (target.active && capabilityArmed) {
                 await api.handoffSessionToLocal(target.sessionId)
             }
             await dispatchLocalResume(target)
