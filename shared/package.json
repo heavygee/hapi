@@ -15,6 +15,7 @@
         "./cursorInlineModelError": "./src/cursorInlineModelError.ts",
         "./modes": "./src/modes.ts",
         "./provenanceDiagnostics": "./src/provenanceDiagnostics.ts",
+        "./provenanceMessageAudit": "./src/provenanceMessageAudit.ts",
         "./rpcMethods": "./src/rpcMethods.ts",
         "./runnerCapabilities": "./src/runnerCapabilities.ts",
         "./machineRegistration": "./src/machineRegistration.ts",

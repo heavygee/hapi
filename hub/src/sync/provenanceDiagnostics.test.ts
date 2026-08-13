@@ -159,4 +159,35 @@ describe('buildProvenanceDiagnostics', () => {
         ])
         expect(report.summary.machinesWithIssues).toBe(1)
     })
+
+    it('includes unverified peer message rows and scan meta', () => {
+        const report = buildProvenanceDiagnostics({
+            sessions: [],
+            machines: [],
+            getStoredMachine: () => null,
+            hasLiveRpcHandler: () => false,
+            unverifiedPeerMessages: [{
+                messageId: 'msg-1',
+                sessionId: 'session-1',
+                sessionName: 'Peer #1',
+                seq: 3,
+                createdAt: 50,
+                textPreview: 'ping',
+                claimedPeerHeaderInText: false,
+            }],
+            messageScan: {
+                sinceMs: 1,
+                limit: 50,
+                maxScan: 5000,
+                messagesScanned: 10,
+                unverifiedTotal: 2,
+                scanTruncated: false,
+            },
+            now: () => 100,
+        })
+
+        expect(report.unverifiedPeerMessages).toHaveLength(1)
+        expect(report.messageScan?.unverifiedTotal).toBe(2)
+        expect(report.summary.unverifiedPeerMessages).toBe(1)
+    })
 })

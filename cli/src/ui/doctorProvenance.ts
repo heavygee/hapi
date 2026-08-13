@@ -8,10 +8,24 @@ import type {
     ProvenanceDiagnostics,
     ProvenanceIssueCode,
     SessionProvenanceRow,
+    UnverifiedPeerMessageRow,
 } from '@hapi/protocol/provenanceDiagnostics'
+import {
+    DEFAULT_PROVENANCE_MESSAGE_LIMIT,
+    DEFAULT_PROVENANCE_MESSAGE_SINCE_DAYS,
+} from '@hapi/protocol/provenanceMessageAudit'
 import { configuration } from '@/configuration'
 import { buildHubRequestHeaders } from '@/api/hubExtraHeaders'
 import { readSettings } from '@/persistence'
+
+export type DoctorProvenanceOptions = {
+    skipMessages?: boolean
+    sinceDays?: number
+    messageLimit?: number
+    maxScan?: number
+    /** Exit 1 when unverified peer messages exist in the scan window. */
+    strictMessages?: boolean
+}
 
 const ISSUE_LABELS: Record<ProvenanceIssueCode, string> = {
     active_unproven: 'active but missing killSession RPC (unproven CLI)',
@@ -40,8 +54,31 @@ async function hubJwt(): Promise<string | null> {
     return body.token ?? null
 }
 
-export async function fetchProvenanceDiagnostics(jwt: string): Promise<ProvenanceDiagnostics> {
-    const res = await fetch(`${configuration.apiUrl}/api/doctor/provenance`, {
+function buildProvenanceQuery(options: DoctorProvenanceOptions): string {
+    const params = new URLSearchParams()
+    if (options.skipMessages) {
+        params.set('skipMessages', '1')
+        return params.toString()
+    }
+    if (options.sinceDays !== undefined) {
+        params.set('sinceDays', String(options.sinceDays))
+    }
+    if (options.messageLimit !== undefined) {
+        params.set('messageLimit', String(options.messageLimit))
+    }
+    if (options.maxScan !== undefined) {
+        params.set('maxScan', String(options.maxScan))
+    }
+    return params.toString()
+}
+
+export async function fetchProvenanceDiagnostics(
+    jwt: string,
+    options: DoctorProvenanceOptions = {}
+): Promise<ProvenanceDiagnostics> {
+    const query = buildProvenanceQuery(options)
+    const url = `${configuration.apiUrl}/api/doctor/provenance${query ? `?${query}` : ''}`
+    const res = await fetch(url, {
         headers: buildHubRequestHeaders({ Authorization: `Bearer ${jwt}` }),
     })
     if (!res.ok) {
@@ -84,6 +121,31 @@ function formatMachineRow(row: MachineProvenanceRow): string {
     ].join('\n')
 }
 
+function formatUnverifiedMessageRow(row: UnverifiedPeerMessageRow): string {
+    const sessionLabel = row.sessionName ?? row.sessionId.slice(0, 8)
+    const claimed = row.claimedPeerHeaderInText ? chalk.yellow(' prose-From:') : ''
+    const preview = row.textPreview
+        ? ` "${row.textPreview}"`
+        : ''
+    return [
+        `  ${chalk.yellow('peer?')} ${chalk.cyan(sessionLabel)} seq=${row.seq}`,
+        `    session=${row.sessionId}`,
+        `    message=${row.messageId}${claimed}`,
+        `    ${preview}`,
+    ].join('\n')
+}
+
+function formatMessageScanNote(diagnostics: ProvenanceDiagnostics): string | null {
+    const scan = diagnostics.messageScan
+    if (!scan) {
+        return null
+    }
+    const since = new Date(scan.sinceMs).toISOString().slice(0, 10)
+    const truncated = scan.scanTruncated ? chalk.yellow(' (scan cap hit — raise --max-scan)') : ''
+    return `  window since ${since}; scanned ${scan.messagesScanned} msgs; `
+        + `unverified peer total ${scan.unverifiedTotal}; showing ${diagnostics.unverifiedPeerMessages.length}${truncated}`
+}
+
 export function formatProvenanceReport(diagnostics: ProvenanceDiagnostics): string {
     const lines: string[] = [
         chalk.bold('Summary'),
@@ -93,6 +155,14 @@ export function formatProvenanceReport(diagnostics: ProvenanceDiagnostics): stri
         `  online machines: ${diagnostics.summary.onlineMachines}`,
         `  machines with issues: ${diagnostics.summary.machinesWithIssues}`,
     ]
+
+    if (diagnostics.messageScan) {
+        const note = formatMessageScanNote(diagnostics)
+        if (note) {
+            lines.push(`  unverified peer messages: ${diagnostics.messageScan.unverifiedTotal}`)
+            lines.push(note)
+        }
+    }
 
     const flaggedSessions = diagnostics.sessions.filter((row) => row.active || row.issues.length > 0)
     lines.push('', chalk.bold('Sessions'))
@@ -113,6 +183,17 @@ export function formatProvenanceReport(diagnostics: ProvenanceDiagnostics): stri
         }
     }
 
+    if (diagnostics.messageScan) {
+        lines.push('', chalk.bold('Unverified peer messages (sentFrom=peer, no sourceSessionId)'))
+        if (diagnostics.unverifiedPeerMessages.length === 0) {
+            lines.push('  (none in scan window)')
+        } else {
+            for (const row of diagnostics.unverifiedPeerMessages) {
+                lines.push(formatUnverifiedMessageRow(row))
+            }
+        }
+    }
+
     return lines.join('\n')
 }
 
@@ -121,9 +202,47 @@ export function provenanceDiagnosticsHasIssues(diagnostics: ProvenanceDiagnostic
         || diagnostics.machines.some((row) => row.issues.length > 0)
 }
 
-export async function runDoctorProvenance(): Promise<number> {
+export function provenanceDiagnosticsHasUnverifiedMessages(diagnostics: ProvenanceDiagnostics): boolean {
+    return (diagnostics.messageScan?.unverifiedTotal ?? 0) > 0
+}
+
+export function parseDoctorProvenanceArgs(args: string[]): DoctorProvenanceOptions {
+    const options: DoctorProvenanceOptions = {}
+    for (let i = 0; i < args.length; i += 1) {
+        const arg = args[i]
+        if (arg === '--no-messages' || arg === '--skip-messages') {
+            options.skipMessages = true
+            continue
+        }
+        if (arg === '--strict-messages') {
+            options.strictMessages = true
+            continue
+        }
+        if (arg === '--since-days' && args[i + 1]) {
+            options.sinceDays = Number.parseInt(args[++i]!, 10)
+            continue
+        }
+        if (arg === '--message-limit' && args[i + 1]) {
+            options.messageLimit = Number.parseInt(args[++i]!, 10)
+            continue
+        }
+        if (arg === '--max-scan' && args[i + 1]) {
+            options.maxScan = Number.parseInt(args[++i]!, 10)
+            continue
+        }
+    }
+    return options
+}
+
+export async function runDoctorProvenance(cliArgs: string[] = []): Promise<number> {
+    const options = parseDoctorProvenanceArgs(cliArgs)
     console.log(chalk.bold.cyan('\n🔎 hapi provenance doctor\n'))
     console.log(`Hub: ${chalk.blue(configuration.apiUrl)}`)
+    if (!options.skipMessages) {
+        const sinceDays = options.sinceDays ?? DEFAULT_PROVENANCE_MESSAGE_SINCE_DAYS
+        const limit = options.messageLimit ?? DEFAULT_PROVENANCE_MESSAGE_LIMIT
+        console.log(chalk.gray(`Message audit: last ${sinceDays}d, limit ${limit} rows`))
+    }
 
     const jwt = await hubJwt()
     if (!jwt) {
@@ -134,7 +253,7 @@ export async function runDoctorProvenance(): Promise<number> {
 
     let diagnostics: ProvenanceDiagnostics
     try {
-        diagnostics = await fetchProvenanceDiagnostics(jwt)
+        diagnostics = await fetchProvenanceDiagnostics(jwt, options)
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         console.log(chalk.red(`❌ ${message}`))
@@ -145,13 +264,26 @@ export async function runDoctorProvenance(): Promise<number> {
     console.log(formatProvenanceReport(diagnostics))
     console.log('')
 
-    if (provenanceDiagnosticsHasIssues(diagnostics)) {
-        console.log(chalk.yellow('⚠️  Provenance issues found.'))
-        console.log(chalk.gray('  Unproven active sessions cannot be archived cleanly; restart the CLI on that machine.'))
+    const controlPlaneIssues = provenanceDiagnosticsHasIssues(diagnostics)
+    const messageIssues = options.strictMessages && provenanceDiagnosticsHasUnverifiedMessages(diagnostics)
+
+    if (controlPlaneIssues || messageIssues) {
+        if (controlPlaneIssues) {
+            console.log(chalk.yellow('⚠️  Provenance control-plane issues found.'))
+            console.log(chalk.gray('  Unproven active sessions cannot be archived cleanly; restart the CLI on that machine.'))
+        }
+        if (messageIssues) {
+            console.log(chalk.yellow('⚠️  Unverified peer messages in scan window (--strict-messages).'))
+            console.log(chalk.gray('  Fix: use attributed ping_peer/spawn_peer (session capability path), not x-hapi-peer-delivery alone.'))
+        }
         console.log(chalk.gray('  Inspect one session: hapi inspect-peer <session-id-prefix>'))
         return 1
     }
 
-    console.log(chalk.green('✅ No provenance issues detected.'))
+    if (provenanceDiagnosticsHasUnverifiedMessages(diagnostics)) {
+        console.log(chalk.yellow('ℹ️  Unverified peer messages listed above (informational; use --strict-messages to fail).'))
+    }
+
+    console.log(chalk.green('✅ No provenance control-plane issues detected.'))
     return 0
 }
