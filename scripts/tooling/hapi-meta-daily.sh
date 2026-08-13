@@ -651,9 +651,26 @@ md_hold_ingest() {
             fi
             return 0
         fi
-        # Already latched this fingerprint (unacked) — keep row.
-        printf '%s' "$state"
-        return 0
+        # Not a new latch. If this exact fingerprint is the current *unacked*
+        # hold, keep the row and stop. If it was already acknowledged (or is an
+        # older/equal non-matching event), keep scanning so a same-second
+        # sibling (surface,id) can still reach pec_hold_is_new_latch.
+        local key
+        key="$(pec_hold_state_key "$repo" "$number")"
+        if printf '%s' "$state" | jq -e \
+            --arg k "$key" --arg id "$ev_id" --arg surface "$surface" '
+            (.hold[$k] | type) == "object"
+            and .hold[$k].acked == false
+            and (.hold[$k].comment_id // "") == $id
+            and (
+                (.hold[$k].surface // "") == ""
+                or (.hold[$k].surface // "") == $surface
+            )
+        ' >/dev/null 2>&1; then
+            printf '%s' "$state"
+            return 0
+        fi
+        continue
     done < <(printf '%s' "$events" | jq -c 'reverse | .[]' 2>/dev/null || true)
     printf '%s' "$state"
 }
@@ -806,8 +823,8 @@ main() {
     IFS=$'\n' pr_list=($(sort -n <<<"${pr_list[*]}")); unset IFS
 
     vlog "classifying ${#pr_list[@]} PR(s): ${pr_list[*]}"
-    declare -A PR_EMOJI PR_ACTION PR_PREPR PR_HEADREF
-    declare -A PR_BY_REPO_EMOJI PR_BY_REPO_ACTION PR_BY_REPO_PREPR PR_BY_REPO_HEADREF
+    declare -A PR_EMOJI PR_ACTION PR_PREPR PR_HEADREF PR_EXISTS
+    declare -A PR_BY_REPO_EMOJI PR_BY_REPO_ACTION PR_BY_REPO_PREPR PR_BY_REPO_HEADREF PR_BY_REPO_EXISTS
     declare -A SESS_PR_EMOJI SESS_PR_ACTION
     # Per (chip.repo, number), not one tiann batch keyed by number. Dual chips
     # heavygee#124 + tiann#124 must keep independent classify results.
@@ -855,10 +872,14 @@ main() {
             PR_BY_REPO_ACTION["$pair_key"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].action // ""')"
             PR_BY_REPO_PREPR["$pair_key"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].prePr // false')"
             PR_BY_REPO_HEADREF["$pair_key"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].headRef // ""')"
+            PR_BY_REPO_EXISTS["$pair_key"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '
+                if (.[$p] | has("exists")) then (.[$p].exists | tostring) else "true" end
+            ')"
             PR_EMOJI["$p"]="${PR_BY_REPO_EMOJI[$pair_key]}"
             PR_ACTION["$p"]="${PR_BY_REPO_ACTION[$pair_key]}"
             PR_PREPR["$p"]="${PR_BY_REPO_PREPR[$pair_key]}"
             PR_HEADREF["$p"]="${PR_BY_REPO_HEADREF[$pair_key]}"
+            PR_EXISTS["$p"]="${PR_BY_REPO_EXISTS[$pair_key]}"
         done
     done
 
@@ -881,7 +902,9 @@ main() {
     # Ingest 🛑 from chipped (repo, number) pairs only. PAIR_SEEN also
     # includes authored upstream numbers that collide with a fork chip;
     # PR_SESSIONS is number-only and would ingest the unlinked repo.
-    # Orphans and prePr (issue-number 404 on /pulls) must not latch.
+    # Skip only when the PR does not exist (true 404 pre-PR). Drafts also
+    # set prePr=true (#127) but exists=true — maintainer comments on drafts
+    # must still latch 🛑.
     local hold_csv hrepo over hold_action pair_key_h p_h
     hold_csv="$(md_hold_logins)"
     vlog "hold logins: $hold_csv"
@@ -889,7 +912,8 @@ main() {
         hrepo="${pair_key_h%\#*}"
         p_h="${pair_key_h##*\#}"
         [[ -n "${PAIR_OWNED[$pair_key_h]:-}" ]] || continue
-        [[ "${PR_BY_REPO_PREPR[$pair_key_h]:-false}" == "true" ]] && continue
+        # Explicit false only (fixtures without exists still ingest).
+        [[ "${PR_BY_REPO_EXISTS[$pair_key_h]:-true}" == "false" ]] && continue
         new_state="$(md_hold_ingest "$new_state" "$hrepo" "$p_h" "$hold_csv")"
     done
 

@@ -231,16 +231,16 @@ What it does, idempotently:
 
 | Emoji / status | Meaning | Advice pinged |
 |----------------|---------|---------------|
-| ✅ `clean` | open PR, CI green, 0 **current** unresolved threads, bot clean, mergeable | wait on tiann |
+| ✅ `clean` | open PR, CI green, 0 **current** unresolved threads, bot clean, mergeable | **chip.repo**-aware: `tiann/hapi` → wait on tiann (lane A) or self-merge (lane B); **`heavygee/hapi` fork** → wait on Meta/operator (never "wait on tiann") |
 | 🔁 `pending` | CI/bot in flight, or thread/CI data momentarily unavailable | wait / retry |
 | ⚠️ `needs_work` | failing CI, **current** open threads, bot findings, rebase, or **closed-unmerged** | fix per action string |
 | 🛑 `needs_operator` | human hold-login (default `tiann`) issue comment or review **body** — not bot Findings | **stop**; operator `hapi-hold-ack <pr>` (agent GitHub reply does not clear) |
-| 📝 `pre_pr` | tracked number, no open PR upstream yet | file when ready |
+| 📝 `pre_pr` | tracked number, no open PR upstream yet; **or** open draft (never green — #127) | file when ready / mark ready when unblocked |
 | 🔧 `merged` | merged; cleanup still owed (or Gate A clean, archive pending) | drop soup/wt/branch → **exit reflection** (or `skip:`) → ack + idle; Meta archives (peers: **no mid-turn self-archive**) |
 | 🧹 `complete` | fully cleaned (layer DROPPED, no worktree/branch, session archived) | **never** (babysit ended) |
 | `?` `unknown` | GitHub data unavailable this run | **chip left at last good status; never pinged** |
 
-Chip thread count excludes GraphQL `isOutdated` unresolved threads (#847: leftover bot Majors on old lines must not keep ⚠️ after Findings:None + green CI on tip). Mid-hour, a green tip can still show cached ⚠️ until the :00 classify; peers should cite `hapi-pr-status` / live `hapi-pr-emoji-batch`, not sit on the stale chip.
+Chip thread count excludes GraphQL `isOutdated` unresolved threads (#847: leftover bot Majors on old lines must not keep ⚠️ after Findings:None + green CI on tip). Mid-hour, a green tip can still show cached ⚠️ until the :00 classify; peers should cite `hapi-pr-status` / live `hapi-pr-emoji-batch`, not sit on the stale chip. Classify is **per `chip.repo`** (2026-08-11): fork numbers must not inherit tiann lane-A copy (`wait on tiann` on a heavygee-only overseer PR is a bug).
 
 **Ping policy (why it isn't spam for greens, but is a rouse for work):** on **hourly ping windows** (Europe/London :00), Meta **always** pings sticky ⚠️ / 🔧 sessions — "are you done yet?" — including **inactive and archived** ones (`hapi-ping-peer` resumes them). Chip says work is owed; archive is not a skip. **Skip only if `session.thinking`** (in a turn / emitting — not merely `active=true`). **Exception (2026-08-11):** 🔧 whose remainder is only **Gate A clean / archive pending** is **not** pinged — resume undoes archive (`not_archived`) and the chip flips 🧹→🔧 forever (`e4d152f3`). Meta archives those from outside. ✅ / 🔁 / 📝 only ping on an emoji **transition** (first sight / state change), never on every window. 🧹 / `?` / **🛑 `needs_operator` never ping the coding peer** (operator notify once per latch, then silence until ack or a new comment id). Once 🧹, a later resume must **not** demote the chip. Manual `--no-ping` never pings. State lives at `${XDG_STATE_HOME:-~/.local/state}/hapi/meta-daily.json`. Classifier / sticky 🔧 pings already mention exit reflection; **human Meta briefs must too** — use the paste block below (do not invent "stand down / archive now"). Detector: identity + surface (`HAPI_PR_HOLD_LOGINS`, default `tiann`); bots must never set 🛑.
 
@@ -634,7 +634,7 @@ When the operator asks for **new product behavior**, follow [`docs/tooling/new-f
 
 ## Peer spawn handoff (required)
 
-Do not spawn a feature peer without filling the template in [`new-feature-intake.md` §0](../tooling/new-feature-intake.md#0--feature-peer-agent--mandatory-handoff). Minimum: parent session id, playback summary, which steps are **DONE** vs **peer-owned**, worktree path, demo topology (soup vs clean).
+Do not spawn a feature peer without filling the template in [`new-feature-intake.md` §0](../tooling/new-feature-intake.md#0--feature-peer-agent--mandatory-handoff). Minimum: parent session id, playback summary, which steps are **DONE** vs **peer-owned**, worktree path, demo topology (soup vs clean). Peers that arrive **without** §0 (bare spawn, spawn-per-send) must self-serve naming + precedent search per [intake §0-backstop](../tooling/new-feature-intake.md#0-backstop--unnamed--bare-spawn-peers-fail-closed).
 
 **Deliver with `hapi-spawn-peer`.** `POST /api/machines/:id/spawn` only creates an idle row. The schema has no `message` field; stuffing the brief into spawn JSON is silently dropped (empty sidebar peer). Wrapper = spawn + rename + `hapi-ping-peer` + fail if messages = 0. Incident: [`2026-08-11-spawn-peer-empty-shell-postmortem.md`](../plans/2026-08-11-spawn-peer-empty-shell-postmortem.md).
 
@@ -642,13 +642,14 @@ Do not spawn a feature peer without filling the template in [`new-feature-intake
 
 ## hapi-inline (operator mic) — consumer contract
 
-This app **vendors** [`heavygee/hapi-inline`](https://github.com/heavygee/hapi-inline) release tags. It does **not** own the dock. Pinned tag lives in `web/public/operator-dock/README.md` (currently **v0.10.0**). Fork-local; not a `tiann/hapi` PR. Tracker: [heavygee/hapi#120](https://github.com/heavygee/hapi/issues/120). Knock: `/opmic` (aliases `/mic`, `/unlock`).
+This app **vendors** [`heavygee/hapi-inline`](https://github.com/heavygee/hapi-inline) release tags. It does **not** own the dock. Pinned tag lives in `web/public/operator-dock/README.md` (currently **v0.11.6**). Fork-local; not a `tiann/hapi` PR. Tracker: [heavygee/hapi#120](https://github.com/heavygee/hapi/issues/120). Unlock: `/opmic` (aliases `/mic`, `/unlock`) **or** Settings → General → Show operator tools ([#123](https://github.com/heavygee/hapi/issues/123)). Gate secret is hub `HAPI_INLINE_SECRET` (not the HAPI login / CLI token / JWT); Settings enable probes `/hapi/operator/sessions` and clears a stale mismatch. v0.11.6 fail-closes H/markup on bad gate (#155).
 
 | Need | Do this |
 |------|---------|
 | Bug / feature in dock, proxy allow-list, visibility/`?opmic`, shared contract, Android reference | File an issue on **`heavygee/hapi-inline`**. Do **not** lasting-edit vendored `operator-dock.*` / shared proxy contract in this app. |
 | After a fix lands | Re-vendor the new **tag** (release-please cuts tags — never hand-tag). Drop any emergency local fork. |
-| App-only wiring | Host init (`web/public/operator-dock/hapi-boot.js`), env (`HAPI_INLINE_*`), `/hapi` composed proxy, same-origin `/api/stt` if used — stay in **this** repo. |
+| App-only wiring | Host init (`web/public/operator-dock/hapi-boot.js`), env (`HAPI_INLINE_*`), `/hapi` composed proxy, same-origin `/api/stt` if used — stay in **this** repo. Spawn privilege fields are server-owned: `HAPI_INLINE_SPAWN_AGENT` (default `cursor`) and `HAPI_INLINE_SPAWN_YOLO` (default on). Do not trust client `agent` / `yolo` / `directory`. |
+| Bare spawn from `/opmic` | Transport-only — peer still **self-names** and runs **precedent search** on `heavygee/hapi-inline` before implement ([intake §0-backstop](../tooling/new-feature-intake.md#0-backstop--unnamed--bare-spawn-peers-fail-closed)). |
 
 **Forbidden:** persistent app fork of the dock; "quick fix" that never round-trips; PRs that change dock semantics only in the app copy.
 
