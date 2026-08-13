@@ -738,12 +738,11 @@ layers:
   # (06e2507ad — mobile Control pad Ctrl+X/Ctrl+S for Jed; Fixes #1459)
   # Was: tip fd8af28ce. Worktree terminal-ctrl-xs-jed.
 
-  # tiann/hapi#1472 — residual ACP exit 143 / false transport_closed after #835.
-  # CLI: guard before spawn, hold until close, child PID + ~/.hapi lock home.
-  # Do NOT open upstream PR until operator dogfood OK on :3006 (Cursor ACP).
-  # Worktree: ~/coding/hapi/worktrees/acp-143-false-exit @ fix/acp-143-false-transport-closed
-  # Tip: 110b766e6 (origin/fix/acp-143-false-transport-closed)
-  - branch: fix/acp-143-false-transport-closed
+  # DROPPED 2026-08-12: fix/acp-143-false-transport-closed MERGED as tiann/hapi#1518
+  # (c69a88afa — ACP guard before spawn, hold until close, fail-closed publish,
+  # per-pid registering markers; list-models overlap deferred to #1520)
+  # Worktree was: ~/coding/hapi/worktrees/acp-143-false-exit
+  # - branch: fix/acp-143-false-transport-closed
 
 
   # DROPPED 2026-08-11: feat/agent-harness-session-wake MERGED as tiann/hapi#1487
@@ -781,10 +780,10 @@ layers:
   - branch: feat/spawn-peer-remit
 
   # heavygee/hapi#120 — vendor hapi-inline operator dock (fork-local, not tiann).
-  # Pin v0.10.6 (mic sat stays on native host by default, #124/#125). #123 Settings unlock.
+  # Pin v0.11.3 (settings/chrome #139–#144). #123 Settings unlock.
   # Thin soup tip on live driver/integration. Worktree: hapi-inline-web (feat) + hapi-inline-soup (tip).
   # Knock /opmic. Composed /hapi/operator/sessions. Do not allow-list raw GET /api/sessions.
-  # Tip: 8334fb174 (driver/hapi-inline-operator-dock)
+  # Tip: 2f96a34a4 (driver/hapi-inline-operator-dock)
   - branch: driver/hapi-inline-operator-dock
 
   # heavygee/hapi#121 — operator-hold chip pulse (🛑 needs_operator / babysit.hold).
@@ -793,4 +792,29 @@ layers:
   # Last so needs_operator survives later layers that still copy the old enum.
   # Worktree: ~/coding/hapi/worktrees/operator-hold-chip-ui @ driver/operator-hold-chip
   - branch: driver/operator-hold-chip
+
+  # Thin soup tip: cross-machine provenance doctor (GET /api/doctor/provenance +
+  # `hapi doctor provenance`). Cherry-picked from feat/a2a-p05-peer-provenance @ 08abd0525.
+  # Worktree: ~/coding/hapi/worktrees/doctor-provenance @ driver/doctor-provenance
+  # Tip: 522fe8996
+  - branch: driver/doctor-provenance
+
+  # DROPPED 2026-08-12: fix/list-models-acp-overlap-1520 MERGED UPSTREAM as PR #1529 (Fixes #1520)
+  # Worktree removed: ~/coding/hapi/worktrees/list-models-acp-lease
+  # - branch: fix/list-models-acp-overlap-1520
+
+  # tiann/hapi#1522 — invalid_argument own kind + non-transient bridge gate.
+  # Soup tip: shared classifier (estate death spiral was transient:true catch-all).
+  # Upstream stack: heavygee/hapi#125 on feat/cursor-detect-inline-model-errors (#987).
+  # Worktree: ~/coding/hapi/worktrees/invalid-arg-soup
+  # Tip: d459caffb (origin/driver/invalid-argument-bridge-gate)
+  - branch: driver/invalid-argument-bridge-gate
+
+  # heavygee/hapi#122 — fleet runner self-upgrade (fat follow-on to thin upstream merge; fork soup).
+  # NOT tiann PR 1108 scope — do not attribute this layer to chip 1108 (Meta mw_manifest_pr_layer_active).
+  # Soup union: driver/fleet-runner-upgrade (merged onto live soup tip).
+  # Upstream PR branch: estate/fleet-runner-upgrade @ upstream/main (cooling off).
+  # Worktree: ~/coding/hapi/worktrees/estate-fleet-runner-upgrade
+  # Tip: aa5a218d5 (origin/driver/fleet-runner-upgrade); driver soup @ bcd0a6b17
+  - branch: driver/fleet-runner-upgrade
 

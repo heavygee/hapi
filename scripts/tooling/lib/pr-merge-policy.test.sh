@@ -35,10 +35,20 @@ eq "legacy caller fat totals → too_large_delta" "$got" $'maintainer\ttoo_large
 got="$(pmp_classify "$POL" 1270 "$files" 136 10 "" 136 10)"
 eq "1270-like oversized → too_large_delta" "$got" $'maintainer\ttoo_large_delta:146>120'
 
-# 9 product files → too_many_files; tests do not pad the count
+# 9 product files → fringe (+1) passes file cap
 files=$'a.ts\nb.ts\nc.ts\nd.ts\ne.ts\nf.ts\ng.ts\nh.ts\ni.ts\na.test.ts\nb.test.ts'
 got="$(pmp_classify "$POL" 1 "$files" 50 0 "" 50 0)"
-eq "9 product + tests → too_many_files:9>8" "$got" $'maintainer\ttoo_many_files:9>8'
+eq "9 product + tests fringe → auto_size" "$got" $'self_merge\tauto_size'
+
+# 10 product files → too_many_files (beyond fringe)
+files=$'a.ts\nb.ts\nc.ts\nd.ts\ne.ts\nf.ts\ng.ts\nh.ts\ni.ts\nj.ts\na.test.ts'
+got="$(pmp_classify "$POL" 1 "$files" 50 0 "" 50 0)"
+eq "10 product → too_many_files:10>8" "$got" $'maintainer\ttoo_many_files:10>8'
+
+# lockfiles excluded from product file count
+files=$'shared/src/foo.ts\nshared/package.json\nbun.lock\nshared/src/foo.test.ts'
+got="$(pmp_classify "$POL" 3 "$files" 50 0 "" 50 0)"
+eq "lockfile + pkg + product under fringe" "$got" $'self_merge\tauto_size'
 
 # 8 product + many tests → under file cap
 files=$'a.ts\nb.ts\nc.ts\nd.ts\ne.ts\nf.ts\ng.ts\nh.ts\na.test.ts\nb.test.ts\nc.test.ts'
@@ -68,6 +78,8 @@ eq "action self_merge fork" "$(pmp_action_for_lane self_merge heavygee/hapi)" "f
 
 eq "is_test path" "$(pmp_is_test_path 'web/src/foo.test.ts' && echo yes || echo no)" "yes"
 eq "is_product path" "$(pmp_is_test_path 'web/src/foo.ts' && echo yes || echo no)" "no"
+eq "is_lockfile path" "$(pmp_is_lockfile_path 'bun.lock' && echo yes || echo no)" "yes"
+eq "is_not_lockfile path" "$(pmp_is_lockfile_path 'shared/package.json' && echo yes || echo no)" "no"
 
 echo "pr-merge-policy.test.sh: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]] || exit 1

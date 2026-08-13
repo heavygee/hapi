@@ -1,6 +1,6 @@
 # Feature work lifecycle — single source of truth (heavygee/hapi fork)
 
-**Last updated:** 2026-07-30  
+**Last updated:** 2026-08-12  
 **Audience:** Operator, orchestrators, feature peers — anyone doing local dev on this fork.
 
 ## Doc ownership — read this first
@@ -75,6 +75,10 @@ flowchart TD
 **Policy (2026-07-30):** Soup is where we dogfood. **Never** skip soup promotion because "peer stack was enough" or "upstream tip does not need soup." Peer stack proves isolated UI without yanking `:3006`; soup gets the same tip (heal/union if merge conflicts) so `:3006` stays the tastiest stack. Operator approval is for **click-testing / PR**, not for whether to add the layer.
 
 Intake step numbers (handoff template, playback, gates): [`new-feature-intake.md`](./new-feature-intake.md) — **workflow lives here only**.
+
+### Bare-spawn backstop (transport-only peers)
+
+Spawn-per-send, bare machine spawn, and other transports that deliver a remit **without** a filled §0 handoff do **not** get a separate workflow. The arriving peer runs the same intake bar: [**self-name** + **GitHub precedents**](./new-feature-intake.md#0-backstop--unnamed--bare-spawn-peers-fail-closed) before code. Orchestrator handoffs with steps marked **DONE** skip redundant work. Dedicated discovery stays with **[upstream issue/pr discovery](/sessions/6ce7f124-6240-4479-8dad-f2e27eb880a1)**; this rule is the fail-closed backstop for peers that arrive without that parent.
 
 ---
 
