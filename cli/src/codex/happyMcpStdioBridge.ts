@@ -25,7 +25,7 @@ import {
 
 const DEFAULT_TOOL_NAMES = [
   'change_title',
-  'link_pr',
+  // `link_pr` is opt-in; internal launchers add it via --tools after probing the hub.
   'display_image',
   'display_video',
   'display_media',
