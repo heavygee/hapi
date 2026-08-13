@@ -21,7 +21,7 @@ export const doctorCommand: CommandDefinition = {
             process.exit(code)
         }
         if (commandArgs[0] === 'provenance') {
-            const code = await runDoctorProvenance()
+            const code = await runDoctorProvenance(commandArgs.slice(1))
             process.exit(code)
         }
         await runDoctorCommand()

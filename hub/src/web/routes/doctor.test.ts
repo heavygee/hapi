@@ -5,9 +5,9 @@ import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { createDoctorRoutes } from './doctor'
 
-function createApp(diagnostics: ProvenanceDiagnostics) {
+function createApp(getProvenanceDiagnostics: SyncEngine['getProvenanceDiagnostics']) {
     const engine = {
-        getProvenanceDiagnostics: () => diagnostics,
+        getProvenanceDiagnostics,
     } as unknown as SyncEngine
 
     const app = new Hono<WebAppEnv>()
@@ -19,23 +19,54 @@ function createApp(diagnostics: ProvenanceDiagnostics) {
     return app
 }
 
+const baseDiagnostics: ProvenanceDiagnostics = {
+    generatedAt: 100,
+    sessions: [],
+    machines: [],
+    unverifiedPeerMessages: [],
+    messageScan: null,
+    summary: {
+        activeSessions: 0,
+        unprovenActiveSessions: 0,
+        archivedButActiveSessions: 0,
+        onlineMachines: 0,
+        machinesWithIssues: 0,
+        unverifiedPeerMessages: 0,
+    },
+}
+
 describe('doctor routes', () => {
     it('GET /doctor/provenance returns hub diagnostics', async () => {
-        const diagnostics: ProvenanceDiagnostics = {
-            generatedAt: 100,
-            sessions: [],
-            machines: [],
-            summary: {
-                activeSessions: 0,
-                unprovenActiveSessions: 0,
-                archivedButActiveSessions: 0,
-                onlineMachines: 0,
-                machinesWithIssues: 0,
-            },
-        }
-        const app = createApp(diagnostics)
+        const app = createApp(() => baseDiagnostics)
         const response = await app.request('/api/doctor/provenance')
         expect(response.status).toBe(200)
-        expect(await response.json()).toEqual(diagnostics)
+        expect(await response.json()).toEqual(baseDiagnostics)
+    })
+
+    it('passes message scan options to sync engine', async () => {
+        let captured: unknown
+        const app = createApp((_namespace, options) => {
+            captured = options
+            return baseDiagnostics
+        })
+        const response = await app.request('/api/doctor/provenance?sinceDays=3&messageLimit=10&maxScan=100')
+        expect(response.status).toBe(200)
+        expect(captured).toEqual({
+            messageScan: expect.objectContaining({
+                limit: 10,
+                maxScan: 100,
+            }),
+        })
+    })
+
+    it('skipMessages=1 disables message scan', async () => {
+        let captured: unknown
+        const app = createApp((_namespace, options) => {
+            captured = options
+            return baseDiagnostics
+        })
+        const response = await app.request('/api/doctor/provenance?skipMessages=1')
+        expect(response.status).toBe(200)
+        expect(captured).toEqual({ messageScan: false })
     })
 })

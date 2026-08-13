@@ -7,8 +7,11 @@ import type {
     MachineProvenanceRow,
     ProvenanceDiagnostics,
     ProvenanceIssueCode,
+    ProvenanceMessageScanMeta,
     SessionProvenanceRow,
+    UnverifiedPeerMessageRow,
 } from '@hapi/protocol/provenanceDiagnostics'
+import type { ProvenanceMessageScanOptions } from '@hapi/protocol/provenanceMessageAudit'
 import type { Machine, Session } from './syncEngine'
 import type { StoredMachine } from '../store/types'
 
@@ -17,6 +20,8 @@ type BuildProvenanceDiagnosticsInput = {
     machines: Machine[]
     getStoredMachine: (machineId: string) => StoredMachine | null
     hasLiveRpcHandler: (method: string) => boolean
+    unverifiedPeerMessages?: UnverifiedPeerMessageRow[]
+    messageScan?: ProvenanceMessageScanMeta | null
     now?: () => number
 }
 
@@ -107,17 +112,21 @@ export function buildProvenanceDiagnostics(input: BuildProvenanceDiagnosticsInpu
         input.getStoredMachine(machine.id),
         input.hasLiveRpcHandler
     ))
+    const unverifiedPeerMessages = input.unverifiedPeerMessages ?? []
 
     return {
         generatedAt: now(),
         sessions,
         machines,
+        unverifiedPeerMessages,
+        messageScan: input.messageScan ?? null,
         summary: {
             activeSessions: sessions.filter((row) => row.active).length,
             unprovenActiveSessions: sessions.filter((row) => row.issues.includes('active_unproven')).length,
             archivedButActiveSessions: sessions.filter((row) => row.issues.includes('archived_but_active')).length,
             onlineMachines: machines.filter((row) => row.active).length,
             machinesWithIssues: machines.filter((row) => row.issues.length > 0).length,
+            unverifiedPeerMessages: unverifiedPeerMessages.length,
         },
     }
 }
