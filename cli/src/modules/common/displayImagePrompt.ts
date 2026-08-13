@@ -55,3 +55,19 @@ export const DISPLAY_MEDIA_PROMPT_HAPI_MCP = trimIdent(`
 export const DISPLAY_MEDIA_PROMPT_CURSOR = trimIdent(`
     When you create or find a local audio file or other non-image file that the user should receive, call the tool "display_media" with the absolute filesystem path so HAPI can show a player or download card.
 `);
+
+export const DISPLAY_LINKS_PROMPT_CLAUDE = trimIdent(`
+    When the operator needs a tappable URL in HAPI chat, call "mcp__hapi__display_links" with { urls: [{ href, title? }] }. Do not type URLs in assistant prose — models drop doubled letters when recalling hosts (tiann→tian) and operators tap a 404. Construct hrefs by concatenation in the tool arguments ("tia"+"nn"), never copy a URL from your own text. http/https only.
+`);
+
+export const DISPLAY_LINKS_PROMPT_CODEX = trimIdent(`
+    When the operator needs a tappable URL in HAPI chat, call functions.hapi__display_links with { urls: [{ href, title? }] }. If that exact tool name is unavailable, use an equivalent alias such as hapi__display_links, mcp__hapi__display_links, or hapi_display_links. Do not type URLs in assistant prose — models drop doubled letters when recalling hosts (tiann→tian) and operators tap a 404. Construct hrefs by concatenation in the tool arguments ("tia"+"nn"), never copy a URL from your own text. http/https only.
+`);
+
+export const DISPLAY_LINKS_PROMPT_HAPI_MCP = trimIdent(`
+    When the operator needs a tappable URL in HAPI chat, call the tool "hapi_display_links" with { urls: [{ href, title? }] }. If that exact tool name is unavailable, use an equivalent alias such as display_links or mcp__hapi__display_links. Do not type URLs in assistant prose — models drop doubled letters when recalling hosts (tiann→tian) and operators tap a 404. Construct hrefs by concatenation in the tool arguments ("tia"+"nn"), never copy a URL from your own text. http/https only.
+`);
+
+export const DISPLAY_LINKS_PROMPT_CURSOR = trimIdent(`
+    When the operator needs a tappable URL in this HAPI chat, call the tool "display_links" with { urls: [{ href, title? }] }. Do not type URLs in assistant prose — Cursor-routed models drop doubled letters when recalling hosts (tiann→tian, MagicDNS labels) and headset operators tap a 404. Construct hrefs by concatenation in the tool arguments ("tia"+"nn"), never copy a URL from your own text. http/https only.
+`);

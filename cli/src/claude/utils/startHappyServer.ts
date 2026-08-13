@@ -19,7 +19,8 @@ import {
     registerGeneratedImage,
 } from "@/modules/common/generatedImages";
 import type { InlineMediaSource } from "@/modules/common/inlineMediaSource";
-import { DISPLAY_IMAGE_PROMPT_CURSOR, DISPLAY_MEDIA_PROMPT_CURSOR, DISPLAY_VIDEO_PROMPT_CURSOR } from "@/modules/common/displayImagePrompt";
+import { DISPLAY_IMAGE_PROMPT_CURSOR, DISPLAY_LINKS_PROMPT_CURSOR, DISPLAY_MEDIA_PROMPT_CURSOR, DISPLAY_VIDEO_PROMPT_CURSOR } from "@/modules/common/displayImagePrompt";
+import { buildDisplayLinksPayload, parseDisplayLinksInput } from "@hapi/protocol";
 import { resolveSkill } from "@/modules/common/skills";
 import {
     INSPECT_PEER_TOOL_DESCRIPTION,
@@ -106,6 +107,16 @@ function createHapiMcpServer(
     const displayMediaInputSchema: z.ZodTypeAny = z.object({
         path: z.string().describe('Local filesystem path of the media or file to send to the user'),
         title: z.string().trim().min(1).max(255).optional().describe('Optional display title or filename'),
+    });
+
+    const displayLinksInputSchema: z.ZodTypeAny = z.object({
+        urls: z.array(z.union([
+            z.object({
+                href: z.string().describe('http(s) URL to paint. Construct by concatenation for landmine strings (tia+nn), never copy from model prose.'),
+                title: z.string().trim().min(1).max(255).optional().describe('Optional link label shown on the card'),
+            }),
+            z.string(),
+        ])).min(1).max(20).describe('One or more http(s) URLs to paint as tappable cards'),
     });
 
     const pingPeerInputSchema: z.ZodTypeAny = z.object({
@@ -286,6 +297,44 @@ function createHapiMcpServer(
             logger.debug('[hapiMCP] Failed to display media:', message);
             return {
                 content: [{ type: 'text' as const, text: `Failed to display media: ${message}` }],
+                isError: true,
+            };
+        }
+    });
+
+    mcp.registerTool<any, any>('display_links', {
+        description: `Paint clickable http(s) URL cards into the current HAPI chat without a fake user turn. ${DISPLAY_LINKS_PROMPT_CURSOR}`,
+        title: 'Display Links',
+        inputSchema: displayLinksInputSchema,
+    }, async (args: { urls: Array<{ href: string; title?: string } | string> }) => {
+        logger.debug('[hapiMCP] Display links:', args.urls);
+
+        try {
+            const urls = parseDisplayLinksInput(args.urls);
+            client.sendAgentMessage(buildDisplayLinksPayload({
+                urls,
+                id: randomUUID(),
+            }));
+
+            return {
+                content: [
+                    {
+                        type: 'text' as const,
+                        text: `Displayed ${urls.length} link${urls.length === 1 ? '' : 's'}`,
+                    },
+                ],
+                isError: false,
+            };
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            logger.debug('[hapiMCP] Failed to display links:', message);
+            return {
+                content: [
+                    {
+                        type: 'text' as const,
+                        text: `Failed to display links: ${message}`,
+                    },
+                ],
                 isError: true,
             };
         }
@@ -534,8 +583,8 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
     }));
 
     const toolNames = enableChangeTitle
-        ? ['change_title', 'display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer']
-        : ['display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer'];
+        ? ['change_title', 'display_image', 'display_video', 'display_media', 'display_links', 'list_peers', 'ping_peer', 'inspect_peer']
+        : ['display_image', 'display_video', 'display_media', 'display_links', 'list_peers', 'ping_peer', 'inspect_peer'];
     if (options.skillLookup) {
         toolNames.push('skill_lookup');
     }
