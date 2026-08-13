@@ -107,8 +107,10 @@ export function resolvePrChipDisplay(
     const hasSnapshot = Boolean(
         ref.openState || ref.checks || ref.merge || ref.estateCode
     )
-    const stale = typeof ref.statusCheckedAt === 'number'
-        && nowMs - ref.statusCheckedAt > profile.staleMs
+    const stale = hasSnapshot && (
+        typeof ref.statusCheckedAt !== 'number'
+        || nowMs - ref.statusCheckedAt > profile.staleMs
+    )
 
     const estate = ref.estateCode ? profile.estateCodes[ref.estateCode] : undefined
     const forge = pickForgeEntry(ref, profile.forge)

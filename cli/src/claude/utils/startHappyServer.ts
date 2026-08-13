@@ -28,6 +28,7 @@ import {
 } from '@hapi/protocol/sessionCitation'
 import { PingPeerError, formatInspectPeerReport, formatPeerSessionsList, inspectPeer, listPeerSessions, peerListFetchLimit, pingPeer } from "@/modules/pingPeer/pingPeer";
 import { buildGithubPrExternalRef, parseGithubPrInput } from "@hapi/protocol";
+import { fetchGithubPrAwarenessEnabled } from "@/api/fetchGithubPrAwareness";
 
 type StartHappyServerOptions = {
     emitTitleSummary?: boolean;
@@ -235,10 +236,15 @@ function createHapiMcpServer(
             })
 
             try {
-                client.updateMetadata((metadata) => ({
-                    ...metadata,
-                    externalRefs: [ref],
-                }))
+                client.updateMetadata((metadata) => {
+                    const current = metadata.externalRefs ?? []
+                    const retained = current.filter((candidate) => {
+                        if (candidate.kind !== 'github_pr') return true
+                        if (candidate.repo === ref.repo && candidate.number === ref.number) return false
+                        return ref.role !== 'primary' || candidate.role !== 'primary'
+                    })
+                    return { ...metadata, externalRefs: [...retained, ref] }
+                })
                 const flushed = await client.flushMetadata(5_000)
                 const persisted = client.getMetadata()?.externalRefs?.some((candidate) =>
                     candidate.kind === 'github_pr'
@@ -544,7 +550,7 @@ function readMcpSessionId(req: IncomingMessage): string | undefined {
 export async function startHappyServer(client: ApiSessionClient, options: StartHappyServerOptions = {}) {
     const emitTitleSummary = options.emitTitleSummary ?? true;
     const enableChangeTitle = options.enableChangeTitle ?? true;
-    const enableLinkPr = options.enableLinkPr ?? true;
+    const enableLinkPr = options.enableLinkPr ?? await fetchGithubPrAwarenessEnabled();
     const transports = new Map<string, StreamableHTTPServerTransport>();
     const mcps = new Map<string, McpServer>();
 

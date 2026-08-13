@@ -60,6 +60,7 @@ export default function SettingsGeneralPage() {
             <SettingsSection title={t('settings.language.label')}>
                 <SettingsChoiceGroup hideLabel label={t('settings.language.label')} value={locale} options={locales} onChange={setLocale} />
             </SettingsSection>
+            {isOwner ? (
             <SettingsSection title={t('settings.general.githubPrAwareness')}>
                 <SettingsSwitch
                     label={t('settings.general.githubPrAwareness')}
@@ -73,6 +74,7 @@ export default function SettingsGeneralPage() {
                     }}
                 />
             </SettingsSection>
+            ) : null}
             {isOwner ? (
                 <SettingsSection title={t('settings.general.agents.title')} description={t('settings.general.agents.description')}>
                     {hubSettingsQuery.data ? (

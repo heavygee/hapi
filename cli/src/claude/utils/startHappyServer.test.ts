@@ -109,7 +109,6 @@ describe('startHappyServer skill_lookup', () => {
 
         expect(tools.tools.map((tool) => tool.name)).toEqual([
             'change_title',
-            'link_pr',
             'display_image',
             'display_video',
             'display_media',
@@ -145,7 +144,7 @@ describe('startHappyServer skill_lookup', () => {
             sendAgentMessage: vi.fn(),
             sendClaudeSessionMessage: vi.fn()
         } as unknown as ApiSessionClient
-        const server = await startHappyServer(sessionClient, { enableChangeTitle: false })
+        const server = await startHappyServer(sessionClient, { enableChangeTitle: false, enableLinkPr: false })
         stopServer = server.stop
         const mcp = new Client({ name: 'hapi-test', version: '1.0.0' })
         client = mcp
@@ -154,7 +153,6 @@ describe('startHappyServer skill_lookup', () => {
         const tools = await mcp.listTools()
 
         expect(server.toolNames).toEqual([
-            'link_pr',
             'display_image',
             'display_video',
             'display_media',
@@ -163,7 +161,6 @@ describe('startHappyServer skill_lookup', () => {
             'inspect_peer',
         ])
         expect(tools.tools.map((tool) => tool.name)).toEqual([
-            'link_pr',
             'display_image',
             'display_video',
             'display_media',
@@ -187,7 +184,7 @@ describe('startHappyServer link_pr', () => {
     })
 
     async function connectWithClient(sessionClient: ApiSessionClient): Promise<Client> {
-        const server = await startHappyServer(sessionClient, { enableChangeTitle: false })
+        const server = await startHappyServer(sessionClient, { enableChangeTitle: false, enableLinkPr: true })
         stopServer = server.stop
         mcp = new Client({ name: 'hapi-link-pr-test', version: '1.0.0' })
         await mcp.connect(new StreamableHTTPClientTransport(new URL(server.url)))
@@ -215,6 +212,41 @@ describe('startHappyServer link_pr', () => {
         expect(result.isError).toBe(false)
         expect(result.content?.[0]?.text).toContain('Linked tiann/hapi#1163')
         expect(sessionClient.flushMetadata).toHaveBeenCalled()
+    })
+
+    it('upserts without wiping other github_pr refs', async () => {
+        const existing = {
+            kind: 'github_pr' as const,
+            repo: 'tiann/hapi',
+            number: 100,
+            url: 'https://github.com/tiann/hapi/pull/100',
+            role: 'primary' as const,
+            source: 'user' as const,
+            linkedAt: 1
+        }
+        let stored: unknown[] = [existing]
+        const sessionClient = {
+            updateMetadata: vi.fn((updater: (metadata: { externalRefs?: unknown[] }) => { externalRefs?: unknown[] }) => {
+                stored = updater({ externalRefs: stored }).externalRefs ?? []
+            }),
+            flushMetadata: vi.fn(async () => true),
+            getMetadata: vi.fn(() => ({ externalRefs: stored })),
+            sendAgentMessage: vi.fn(),
+            sendClaudeSessionMessage: vi.fn()
+        } as unknown as ApiSessionClient
+
+        const client = await connectWithClient(sessionClient)
+        const result = await client.callTool({
+            name: 'link_pr',
+            arguments: { url: 'https://github.com/tiann/hapi/pull/1163', role: 'secondary' }
+        }) as ToolResult
+
+        expect(result.isError).toBe(false)
+        expect(stored).toHaveLength(2)
+        expect(stored).toEqual(expect.arrayContaining([
+            existing,
+            expect.objectContaining({ repo: 'tiann/hapi', number: 1163, role: 'secondary' })
+        ]))
     })
 
     it('errors when the hub does not persist the linked ref', async () => {

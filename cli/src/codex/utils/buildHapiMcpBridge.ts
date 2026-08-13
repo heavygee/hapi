@@ -107,7 +107,7 @@ export async function buildHapiMcpBridge(
             approval_mode: 'approve'
         };
     }
-    if (options.enableLinkPr !== false) {
+    if (happyServer.toolNames.includes('link_pr')) {
         tools.link_pr = {
             approval_mode: 'approve'
         };
