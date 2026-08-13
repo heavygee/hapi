@@ -85,6 +85,7 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
 
         const { server: happyServer, mcpServers } = await buildHapiMcpBridge(session.client, {
             enableChangeTitle: false,
+            enableDisplayLinks: true,
             skillLookup: { workingDirectory: session.path, flavor: 'cursor' }
         });
         this.happyServer = happyServer;
