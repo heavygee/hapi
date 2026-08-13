@@ -27,7 +27,7 @@ import {
     SESSION_ID_PREFIX_PARAM_DESCRIPTION,
 } from '@hapi/protocol/sessionCitation'
 import { PingPeerError, formatInspectPeerReport, formatPeerSessionsList, inspectPeer, listPeerSessions, peerListFetchLimit, pingPeer } from "@/modules/pingPeer/pingPeer";
-import { buildGithubPrExternalRef, parseGithubPrInput } from "@hapi/protocol";
+import { buildGithubPrExternalRef, parseGithubPrInput, upsertGithubPrIntoExternalRefs } from "@hapi/protocol";
 import { fetchGithubPrAwarenessEnabled } from "@/api/fetchGithubPrAwareness";
 
 type StartHappyServerOptions = {
@@ -236,15 +236,10 @@ function createHapiMcpServer(
             })
 
             try {
-                client.updateMetadata((metadata) => {
-                    const current = metadata.externalRefs ?? []
-                    const retained = current.filter((candidate) => {
-                        if (candidate.kind !== 'github_pr') return true
-                        if (candidate.repo === ref.repo && candidate.number === ref.number) return false
-                        return ref.role !== 'primary' || candidate.role !== 'primary'
-                    })
-                    return { ...metadata, externalRefs: [...retained, ref] }
-                })
+                client.updateMetadata((metadata) => ({
+                    ...metadata,
+                    externalRefs: upsertGithubPrIntoExternalRefs(metadata.externalRefs ?? [], ref),
+                }))
                 const flushed = await client.flushMetadata(5_000)
                 const persisted = client.getMetadata()?.externalRefs?.some((candidate) =>
                     candidate.kind === 'github_pr'

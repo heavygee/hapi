@@ -116,6 +116,36 @@ export function buildGithubPrExternalRef(input: {
 }
 
 /**
+ * Insert/replace a GitHub PR ref while preserving cached forge/estate health on
+ * the same repo#number identity, and replacing any other primary when linking primary.
+ */
+export function upsertGithubPrIntoExternalRefs(
+    current: readonly ExternalRef[],
+    ref: GithubPrExternalRef
+): ExternalRef[] {
+    const same = current.find((candidate): candidate is GithubPrExternalRef =>
+        candidate.kind === 'github_pr'
+        && candidate.repo === ref.repo
+        && candidate.number === ref.number
+    )
+    const nextRef: GithubPrExternalRef = same ? { ...same, ...ref } : ref
+    const retained = current.filter((candidate) => {
+        if (candidate.kind === 'github_pr'
+            && candidate.repo === ref.repo
+            && candidate.number === ref.number) {
+            return false
+        }
+        if (nextRef.role === 'primary'
+            && candidate.kind === 'github_pr'
+            && candidate.role === 'primary') {
+            return false
+        }
+        return true
+    })
+    return [...retained, nextRef]
+}
+
+/**
  * Compact chip glyph for session rows: status emoji only (or `?` when stale).
  * Full `repo#N` + status copy lives in the tooltip / aria-label — not the
  * visible chip — so multi-digit PR numbers do not crowd the list.

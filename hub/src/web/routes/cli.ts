@@ -7,7 +7,8 @@ import {
     CursorMigrateToAcpRequestSchema,
     PROTOCOL_VERSION,
     SetExternalRefsRequestSchema,
-    UpsertExternalRefRequestSchema
+    UpsertExternalRefRequestSchema,
+    upsertGithubPrIntoExternalRefs
 } from '@hapi/protocol'
 import { getConfiguration } from '../../configuration'
 import { readSessionSummaryContractEnabled } from '../../config/sessionSummaryContract'
@@ -395,14 +396,9 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
 
         const ref = parsed.data.ref
         try {
-            const externalRefs = await engine.mutateSessionExternalRefs(resolved.sessionId, (current) => {
-                const retained = current.filter((candidate) => {
-                    if (candidate.kind !== 'github_pr') return true
-                    if (candidate.repo === ref.repo && candidate.number === ref.number) return false
-                    return ref.role !== 'primary' || candidate.role !== 'primary'
-                })
-                return [...retained, ref]
-            })
+            const externalRefs = await engine.mutateSessionExternalRefs(resolved.sessionId, (current) =>
+                upsertGithubPrIntoExternalRefs(current, ref)
+            )
             return c.json({ ok: true, externalRefs })
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to upsert external ref'

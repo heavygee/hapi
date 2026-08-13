@@ -249,6 +249,46 @@ describe('startHappyServer link_pr', () => {
         ]))
     })
 
+    it('preserves cached health when re-linking the same PR', async () => {
+        const existing = {
+            kind: 'github_pr' as const,
+            repo: 'tiann/hapi',
+            number: 1163,
+            url: 'https://github.com/tiann/hapi/pull/1163',
+            role: 'primary' as const,
+            source: 'web' as const,
+            linkedAt: 100,
+            openState: 'open' as const,
+            checks: 'pending' as const,
+            merge: 'unstable' as const,
+            statusCheckedAt: 200,
+            estateCode: 'ci_pending'
+        }
+        let stored: unknown[] = [existing]
+        const sessionClient = {
+            updateMetadata: vi.fn((updater: (metadata: { externalRefs?: unknown[] }) => { externalRefs?: unknown[] }) => {
+                stored = updater({ externalRefs: stored }).externalRefs ?? []
+            }),
+            flushMetadata: vi.fn(async () => true),
+            getMetadata: vi.fn(() => ({ externalRefs: stored })),
+            sendAgentMessage: vi.fn(),
+            sendClaudeSessionMessage: vi.fn()
+        } as unknown as ApiSessionClient
+
+        const client = await connectWithClient(sessionClient)
+        const result = await client.callTool({
+            name: 'link_pr',
+            arguments: { url: 'https://github.com/tiann/hapi/pull/1163' }
+        }) as ToolResult
+
+        expect(result.isError).toBe(false)
+        expect(stored).toEqual([{
+            ...existing,
+            source: 'agent',
+            linkedAt: expect.any(Number)
+        }])
+    })
+
     it('errors when the hub does not persist the linked ref', async () => {
         const sessionClient = {
             updateMetadata: vi.fn(),

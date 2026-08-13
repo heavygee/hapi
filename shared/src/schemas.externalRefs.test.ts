@@ -5,7 +5,8 @@ import {
     formatGithubPrChipLabel,
     getPrimaryGithubPrRef,
     parseGithubPrInput,
-    resolveGithubPrChipDisplay
+    resolveGithubPrChipDisplay,
+    upsertGithubPrIntoExternalRefs
 } from './externalRefs'
 import { DEFAULT_PR_CHIP_DISPLAY, mergePrChipDisplayProfile } from './prChipDisplay'
 
@@ -201,6 +202,49 @@ describe('buildGithubPrExternalRef', () => {
             source: 'agent',
             linkedAt: 42
         })
+    })
+})
+
+describe('upsertGithubPrIntoExternalRefs', () => {
+    it('preserves cached health when re-linking the same PR', () => {
+        const existing = buildGithubPrExternalRef({
+            repo: 'tiann/hapi',
+            number: 1163,
+            source: 'web',
+            linkedAt: 100,
+            openState: 'open',
+            checks: 'pending',
+            merge: 'unstable',
+            statusCheckedAt: 200,
+            estateCode: 'ci_pending'
+        })
+        const incoming = buildGithubPrExternalRef({
+            repo: 'tiann/hapi',
+            number: 1163,
+            source: 'agent',
+            linkedAt: 300
+        })
+        expect(upsertGithubPrIntoExternalRefs([existing], incoming)).toEqual([{
+            ...existing,
+            source: 'agent',
+            linkedAt: 300,
+            role: 'primary'
+        }])
+    })
+
+    it('drops a competing primary when linking a different PR', () => {
+        const prior = buildGithubPrExternalRef({
+            repo: 'tiann/hapi',
+            number: 1,
+            linkedAt: 1,
+            checks: 'pass'
+        })
+        const next = buildGithubPrExternalRef({
+            repo: 'tiann/hapi',
+            number: 2,
+            linkedAt: 2
+        })
+        expect(upsertGithubPrIntoExternalRefs([prior], next)).toEqual([next])
     })
 })
 
