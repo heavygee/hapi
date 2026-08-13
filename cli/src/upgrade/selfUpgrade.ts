@@ -464,11 +464,23 @@ export async function publishCurrentCliEntrypoint(options: {
             // best-effort cleanup of previous current binary
         }
     } catch (error) {
+        // Windows: hapi.exe is often locked by the live runner. The versioned
+        // install + durable marker are enough; handoff/supervisor use that path.
+        if (isWin && isErrno(error, 'EBUSY') && existsSync(options.finalPath)) {
+            return
+        }
         if (!existsSync(options.linkPath) && existsSync(previousPath)) {
             renameSync(previousPath, options.linkPath)
         }
         throw error
     }
+}
+
+function isErrno(error: unknown, code: string): boolean {
+    return typeof error === 'object'
+        && error !== null
+        && 'code' in error
+        && (error as NodeJS.ErrnoException).code === code
 }
 
 async function installFromArtifact(

@@ -1248,6 +1248,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             workspaceRoots,
             startedCliMtimeMs: startedWithCliMtimeMs,
             asRunner: true,
+            versionHandoffDisabled: startedWithVersionHandoffDisabled,
           }),
           runnerState: initialRunnerState,
           allowLegacyReenroll: !handoffRunnerProof,

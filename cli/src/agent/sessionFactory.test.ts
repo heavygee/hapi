@@ -537,4 +537,11 @@ describe('buildMachineMetadata runner-only capabilities', () => {
         expect(metadata.capabilities).toEqual(expect.arrayContaining(['stop-runner']))
         expect(metadata.supervisedRestart).toBe(false)
     })
+
+    it('advertises versionHandoffDisabled for asRunner from env or snapshot', () => {
+        delete process.env.HAPI_DISABLE_VERSION_HANDOFF
+        expect(buildMachineMetadata({ asRunner: true }).versionHandoffDisabled).toBe(false)
+        process.env.HAPI_DISABLE_VERSION_HANDOFF = '1'
+        expect(buildMachineMetadata({ asRunner: true }).versionHandoffDisabled).toBe(true)
+    })
 })

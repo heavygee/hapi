@@ -701,6 +701,7 @@ export class ApiMachineClient {
             const identity = buildMachineMetadata({
                 workspaceRoots: desiredWorkspaceRoots?.length ? desiredWorkspaceRoots : undefined,
                 startedCliMtimeMs: this.machine.metadata?.startedCliMtimeMs,
+                asRunner: true,
             })
             const needsRoots = !workspaceRootsEqual(desiredWorkspaceRoots, hubWorkspaceRoots)
             const needsIdentity = machineRegistrationNeedsRefresh(this.machine.metadata, identity)
@@ -848,6 +849,7 @@ export class ApiMachineClient {
             const identity = buildMachineMetadata({
                 workspaceRoots: this.workspaceRoots?.length ? this.workspaceRoots : undefined,
                 startedCliMtimeMs: this.machine.metadata.startedCliMtimeMs,
+                asRunner: true,
             })
             const needsIdentity = machineRegistrationNeedsRefresh(this.machine.metadata, identity)
             const needsInstalledMtime = typeof installedCliMtimeMs === 'number'
