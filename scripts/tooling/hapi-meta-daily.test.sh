@@ -1338,6 +1338,10 @@ check "hold-ack agent+ALLOW_NO_TTY: row still unacked" "jq -e --arg k 'heavygee/
 
 # ============ 26. blockedUpstream stickyPing=false — no hourly peer nags (#128) ============
 rm -f "$WORK/state.json" "$WORK/pings.log" "$WORK/events.log"
+# Gate A dirty so mixed blocked+🔧 still owes cleanup pings (not archive-only silence).
+cat >"$WORK/manifest.yaml" <<'EOF'
+- branch: feat/shipped-thing
+EOF
 cat >"$WORK/batch" <<'EOF'
 #!/usr/bin/env bash
 j='{}'
@@ -1345,6 +1349,7 @@ for a in "$@"; do
     case "$a" in
         1511) j="$(echo "$j" | jq -c '. + {"1511":{emoji:"⚠️",action:"blocked upstream — wait on #1473 (status:blocked-upstream)",prePr:false,merged:false,closed:false,dataUnavailable:false,blockedUpstream:true,stickyPing:false}}')" ;;
         1512) j="$(echo "$j" | jq -c '. + {"1512":{emoji:"⚠️",action:"resolve 1 open thread(s)",prePr:false,merged:false,closed:false,dataUnavailable:false,blockedUpstream:false,stickyPing:true}}')" ;;
+        300) j="$(echo "$j" | jq -c '. + {"300":{emoji:"🔧",action:"MERGED — clean up",prePr:false,merged:true,closed:false,blockedUpstream:false,stickyPing:true}}')" ;;
     esac
 done
 echo "$j"
@@ -1357,6 +1362,7 @@ if [[ "$args" == *"pr list"* && "$args" == *"--state open"* ]]; then
     printf '1511\n1512\n'; exit 0
 fi
 if [[ "$args" == *"pr list"* && "$args" == *"merged"* ]]; then
+    printf '300\tfix: shipped thing\t2026-07-24T02:52:06Z\n'
     exit 0
 fi
 if [[ "$args" == *"notifications"* ]]; then
@@ -1382,7 +1388,8 @@ cat <<'JSON'
 {"sessions":[
  {"id":"bbbbbbbb-1511","active":true,"metadata":{"name":"spawn-peer remit blocked","path":"/tmp/wt-1511","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":1511,"url":"https://github.com/tiann/hapi/pull/1511","role":"primary"}]}},
  {"id":"cccccccc-1512","active":true,"metadata":{"name":"actionable warn","path":"/tmp/wt-1512","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":1512,"url":"https://github.com/tiann/hapi/pull/1512","role":"primary"}]}},
- {"id":"dddddddd-both","active":true,"metadata":{"name":"mixed blocked+actionable","path":"/tmp/wt-both","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":1511,"url":"https://github.com/tiann/hapi/pull/1511","role":"primary"},{"kind":"github_pr","repo":"tiann/hapi","number":1512,"url":"https://github.com/tiann/hapi/pull/1512","role":"primary"}]}}
+ {"id":"dddddddd-both","active":true,"metadata":{"name":"mixed blocked+actionable","path":"/tmp/wt-both","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":1511,"url":"https://github.com/tiann/hapi/pull/1511","role":"primary"},{"kind":"github_pr","repo":"tiann/hapi","number":1512,"url":"https://github.com/tiann/hapi/pull/1512","role":"primary"}]}},
+ {"id":"eeeeeeee-clean","active":true,"metadata":{"name":"mixed blocked+cleanup","path":"/tmp/wt-clean","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":1511,"url":"https://github.com/tiann/hapi/pull/1511","role":"related"},{"kind":"github_pr","repo":"tiann/hapi","number":300,"url":"https://github.com/tiann/hapi/pull/300","role":"primary"}]}}
 ]}
 JSON
 exit 0
@@ -1397,6 +1404,7 @@ check "blockedUpstream: still in NEEDS WORK queue" "grep -A20 'NEEDS WORK' <<<\"
 check "blockedUpstream: first window does NOT ping blocked-only peer" "! grep -q '^bbbbbbbb' <<<\"\$pings_b1\""
 check "blockedUpstream: actionable sibling session still pinged" "grep -q '^cccccccc' <<<\"\$pings_b1\""
 check "blockedUpstream: mixed session still pinged (actionable ⚠️)" "grep -q '^dddddddd' <<<\"\$pings_b1\""
+check "blockedUpstream: mixed blocked+🔧 still pinged (cleanup)" "grep -q '^eeeeeeee' <<<\"\$pings_b1\""
 check "blockedUpstream: no transition emit for blocked-only" "! grep -q 'bbbbbbbb-1511' '$WORK/events.log' 2>/dev/null"
 
 rm -f "$WORK/pings.log" "$WORK/events.log"
@@ -1405,6 +1413,7 @@ pings_b2="$(cat "$WORK/pings.log" 2>/dev/null || true)"
 check "blockedUpstream: second window still zero peer pings" "! grep -q '^bbbbbbbb' <<<\"\$pings_b2\""
 check "blockedUpstream: second window no window emit for blocked-only" "! grep -q 'bbbbbbbb-1511' '$WORK/events.log' 2>/dev/null"
 check "blockedUpstream: second window still rouses actionable" "grep -q '^cccccccc' <<<\"\$pings_b2\""
+check "blockedUpstream: second window still rouses blocked+🔧" "grep -q '^eeeeeeee' <<<\"\$pings_b2\""
 
 # Label cleared → stickyPing true restores normal first-sight/window policy
 cat >"$WORK/batch" <<'EOF'
@@ -1414,6 +1423,7 @@ for a in "$@"; do
     case "$a" in
         1511) j="$(echo "$j" | jq -c '. + {"1511":{emoji:"⚠️",action:"resolve 1 open thread(s)",prePr:false,merged:false,closed:false,blockedUpstream:false,stickyPing:true}}')" ;;
         1512) j="$(echo "$j" | jq -c '. + {"1512":{emoji:"⚠️",action:"resolve 1 open thread(s)",prePr:false,merged:false,closed:false,blockedUpstream:false,stickyPing:true}}')" ;;
+        300) j="$(echo "$j" | jq -c '. + {"300":{emoji:"🔧",action:"MERGED — clean up",prePr:false,merged:true,blockedUpstream:false,stickyPing:true}}')" ;;
     esac
 done
 echo "$j"

@@ -573,12 +573,17 @@ md_plan_ping() {
 # md_session_sticky_peer_ping <sid8> <prs-space-joined>
 # true if any ⚠️/🔧 contribution has stickyPing=true (actionable work).
 # blockedUpstream-only sessions return false (#128).
+# 🔧 merged-cleanup always restores normal policy even when combined emoji is
+# ⚠️ (pec_worst_emoji ranks ⚠️ above 🔧) — do not skip non-⚠️ rows (#128 edge).
 md_session_sticky_peer_ping() {
     local sid8="$1" prs="$2" p e sticky
     for p in $prs; do
         e="${SESS_PR_EMOJI[$sid8:$p]:-}"
         case "$e" in
-            ⚠️|🔧)
+            🔧)
+                return 0
+                ;;
+            ⚠️)
                 sticky="${SESS_PR_STICKY[$sid8:$p]:-}"
                 if [[ -z "$sticky" ]]; then
                     sticky="$(pec_default_sticky_ping "$e" 0)"
