@@ -1,10 +1,11 @@
 /**
- * Operator-gated /hapi proxy for the vendored hapi-inline dock (tag v0.11.4+).
+ * Operator-gated /hapi proxy for the vendored hapi-inline dock (tag v0.11.6).
  * Hono port of server/node/operator-hapi-proxy.mjs — composed /operator/sessions,
  * messages/upload only, auto-resume on 409 session_inactive. Do not allow-list
  * raw GET /api/sessions. Spawn privilege fields (directory/agent/yolo) are
  * server-owned (#127/#128). Proxy auth rejects carry machine `code` fields so
  * host Settings can separate gate-secret mismatch from hub JWT misses (#123 / Quest).
+ * v0.11.6 dock fail-closes H on gate mismatch (#155); hub JWT copy must classify as hubAuth.
  */
 import { Hono } from 'hono'
 import {
@@ -75,7 +76,7 @@ function noStoreHeaders(): Record<string, string> {
 }
 
 const HUB_AUTH_MISSING_ERROR =
-    'hub JWT missing or expired (forbidden for gate-secret paste) — re-login to HAPI web'
+    'Missing authorization token — hub JWT missing or expired; re-login to HAPI web (not the operator gate secret)'
 
 function jsonError(status: number, error: string, code: string): Response {
     return new Response(JSON.stringify({ error, code }), {
