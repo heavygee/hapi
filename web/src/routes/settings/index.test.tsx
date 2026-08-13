@@ -273,15 +273,30 @@ describe('responsive settings pages', () => {
     })
 
     it('persists operator dock enable like other prefs and stores the gate secret', async () => {
-        vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
-            hapiInline: { enabled: true }
-        }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: RequestInfo | URL) => {
+            const url = String(input)
+            if (url.includes('/hapi/config')) {
+                return new Response(JSON.stringify({ hapiInline: { enabled: true } }), {
+                    status: 200,
+                    headers: { 'Content-Type': 'application/json' }
+                })
+            }
+            if (url.includes('/hapi/operator/sessions')) {
+                return new Response(JSON.stringify({ sessions: [] }), {
+                    status: 200,
+                    headers: { 'Content-Type': 'application/json' }
+                })
+            }
+            return new Response('unexpected', { status: 500 })
+        })
         vi.spyOn(window, 'prompt').mockReturnValue('gate-secret')
         renderPage(<SettingsGeneralPage />)
         const toggle = await screen.findByRole('checkbox', { name: 'Show operator tools' })
         fireEvent.click(toggle)
-        expect(localStorage.getItem('hapi-operator-dock')).toBe('true')
-        expect(localStorage.getItem('hapiInlineSecret')).toBe('gate-secret')
+        await vi.waitFor(() => {
+            expect(localStorage.getItem('hapi-operator-dock')).toBe('true')
+            expect(localStorage.getItem('hapiInlineSecret')).toBe('gate-secret')
+        })
     })
 
     it('renders compact display controls without dropdown popovers', () => {

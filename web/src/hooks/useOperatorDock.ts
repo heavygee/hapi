@@ -23,8 +23,9 @@ export function useOperatorDock(): {
 
     const setOperatorDockEnabled = useCallback((value: boolean) => {
         if (value) {
-            if (!enableOperatorDockFromSettings()) return
-            setState(true)
+            void enableOperatorDockFromSettings().then((ok) => {
+                if (ok) setState(true)
+            })
             return
         }
         disableOperatorDockFromSettings()
