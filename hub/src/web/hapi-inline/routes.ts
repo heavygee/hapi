@@ -1,9 +1,10 @@
 /**
- * Operator-gated /hapi proxy for the vendored hapi-inline dock (tag v0.11.4).
+ * Operator-gated /hapi proxy for the vendored hapi-inline dock (tag v0.11.4+).
  * Hono port of server/node/operator-hapi-proxy.mjs — composed /operator/sessions,
  * messages/upload only, auto-resume on 409 session_inactive. Do not allow-list
  * raw GET /api/sessions. Spawn privilege fields (directory/agent/yolo) are
- * server-owned (#127/#128).
+ * server-owned (#127/#128). Proxy auth rejects carry machine `code` fields so
+ * host Settings can separate gate-secret mismatch from hub JWT misses (#123 / Quest).
  */
 import { Hono } from 'hono'
 import {
@@ -71,6 +72,46 @@ export type HapiInlineRouteOptions = {
 
 function noStoreHeaders(): Record<string, string> {
     return { 'Cache-Control': 'private, no-store' }
+}
+
+const HUB_AUTH_MISSING_ERROR =
+    'hub JWT missing or expired (forbidden for gate-secret paste) — re-login to HAPI web'
+
+function jsonError(status: number, error: string, code: string): Response {
+    return new Response(JSON.stringify({ error, code }), {
+        status,
+        headers: { ...noStoreHeaders(), 'Content-Type': 'application/json' }
+    })
+}
+
+/** After the gate secret matched, never forward raw hub 401 text that the dock maps to "paste gate secret". */
+function maybeRewriteUpstreamAuthFailure(hubRes: Response, body: ArrayBuffer): Response | null {
+    if (hubRes.status !== 401) return null
+    let text = ''
+    try {
+        text = Buffer.from(new Uint8Array(body)).toString('utf8')
+    } catch {
+        text = ''
+    }
+    const lower = text.toLowerCase()
+    if (
+        lower.includes('missing authorization token')
+        || lower.includes('"error":"unauthorized"')
+        || lower.includes('invalid token')
+        || !text.trim()
+    ) {
+        return jsonError(401, HUB_AUTH_MISSING_ERROR, 'hub_auth_missing')
+    }
+    // Already JSON with an error — still stamp code so host Settings classify stays stable.
+    try {
+        const parsed = JSON.parse(text) as { error?: unknown }
+        const error = typeof parsed.error === 'string' && parsed.error.trim()
+            ? parsed.error
+            : HUB_AUTH_MISSING_ERROR
+        return jsonError(401, error.includes('gate') ? HUB_AUTH_MISSING_ERROR : `${error} — re-login to HAPI web (not the gate secret)`, 'hub_auth_missing')
+    } catch {
+        return jsonError(401, HUB_AUTH_MISSING_ERROR, 'hub_auth_missing')
+    }
 }
 
 function publicConfigBody(config: HapiInlineHostConfig) {
@@ -171,16 +212,19 @@ export function createHapiInlineRoutes(options: HapiInlineRouteOptions): Hono {
         const primary = c.req.header('X-Hapi-Inline-Secret')
         const legacy = c.req.header('X-Operator-Mic-Secret')
         if (hasConflictingSecretHeaders(primary, legacy)) {
-            return c.json({ error: 'conflicting secret headers' }, 403)
+            return c.json({ error: 'conflicting secret headers', code: 'gate_secret_conflict' }, 403)
         }
         if (!operatorMicSecretMatches(config.secret, primary, legacy)) {
-            return c.json({ error: 'operator secret required' }, 403)
+            return c.json({ error: 'operator secret required', code: 'gate_secret_mismatch' }, 403)
         }
 
         const rawTarget = c.req.path.replace(/^\/hapi/, '') || '/'
         const target = parseOperatorMicPath(c.req.method, `${rawTarget}${new URL(c.req.url).search}`)
         if (!target) {
-            return c.json({ error: 'path not allowed through operator proxy' }, 403)
+            return c.json({
+                error: 'path not allowed through operator proxy (forbidden — not a gate secret problem)',
+                code: 'proxy_path_forbidden'
+            }, 403)
         }
 
         try {
@@ -210,7 +254,10 @@ export function createHapiInlineRoutes(options: HapiInlineRouteOptions): Hono {
             }
             const hubRes = await authedFetch(config, `${hubBase}/api/sessions`, { headers: {} }, jwt)
             if (!hubRes.ok) {
-                return new Response(hubRes.body, {
+                const buf = await hubRes.arrayBuffer()
+                const rewritten = maybeRewriteUpstreamAuthFailure(hubRes, buf)
+                if (rewritten) return rewritten
+                return new Response(buf, {
                     status: hubRes.status,
                     headers: {
                         ...noStoreHeaders(),
@@ -308,10 +355,7 @@ export function createHapiInlineRoutes(options: HapiInlineRouteOptions): Hono {
         const upstream = new URL(target.pathname, `${hubBase}/`)
         if (target.search) upstream.search = target.search.replace(/^\?/, '')
         if (upstream.pathname !== target.pathname) {
-            return new Response(JSON.stringify({ error: 'path canonicalization mismatch' }), {
-                status: 403,
-                headers: { ...noStoreHeaders(), 'Content-Type': 'application/json' }
-            })
+            return jsonError(403, 'path canonicalization mismatch (forbidden — not a gate secret problem)', 'proxy_path_forbidden')
         }
 
         const method = target.method
@@ -353,6 +397,8 @@ export function createHapiInlineRoutes(options: HapiInlineRouteOptions): Hono {
                     if (resume.ok) continue
                 }
             }
+            const rewritten = maybeRewriteUpstreamAuthFailure(hubRes, buf)
+            if (rewritten) return rewritten
             return new Response(buf, {
                 status: hubRes.status,
                 headers: {

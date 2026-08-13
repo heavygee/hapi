@@ -915,7 +915,7 @@ export default {
   'settings.general.sessionSummaryContract': '要求智能体输出会话状态摘要',
   'settings.general.sessionSummaryContract.desc': '开启后，Claude、Codex、OpenCode 以及远程 Grok 会话会在每轮结束时追加 AGENT_NOTIFY_SUMMARY 行，便于更清晰的就绪通知。默认关闭。本地 Grok 与 Cursor 暂不覆盖。对新开/恢复的会话生效。',
   'settings.general.operatorDock': '显示操作员工具',
-  'settings.general.operatorDock.desc': '与 /opmic 相同的解锁。仅在本机显示操作员工具坞（设置、标注、会话、麦克风）。不是公开麦克风。',
+  'settings.general.operatorDock.desc': '与 /opmic 相同的解锁。仅在本机显示操作员工具坞（设置、标注、会话、麦克风）。使用中心闸门密钥（HAPI_INLINE_SECRET），不是 HAPI 登录 / CLI token / JWT。开启时会探测密钥；错误的本地密钥会被清除。不是公开麦克风。',
   'settings.general.sessionSummaryInChat': '在聊天中显示会话状态摘要',
   'settings.general.sessionSummaryInChat.desc': '开启后，助手消息以紧凑状态行显示，而不是原始 AGENT_NOTIFY_SUMMARY JSON。默认关闭（聊天与复制中隐藏）。已存储消息、通知与采集路径不受影响。',
   'settings.language.title': '语言',

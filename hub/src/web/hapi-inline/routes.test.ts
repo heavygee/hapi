@@ -72,18 +72,50 @@ describe('hapi-inline host routes', () => {
 
     it('rejects missing or conflicting operator secrets', async () => {
         const app = mount(enabledConfig(), fetch)
-        expect((await app.request('/hapi/operator/sessions')).status).toBe(403)
-        expect((await app.request('/hapi/operator/sessions', {
+        const missing = await app.request('/hapi/operator/sessions')
+        expect(missing.status).toBe(403)
+        expect(await missing.json()).toEqual({
+            error: 'operator secret required',
+            code: 'gate_secret_mismatch'
+        })
+        const conflict = await app.request('/hapi/operator/sessions', {
             headers: { 'X-Hapi-Inline-Secret': 'a', 'X-Operator-Mic-Secret': 'b' }
-        })).status).toBe(403)
+        })
+        expect(conflict.status).toBe(403)
+        expect(await conflict.json()).toEqual({
+            error: 'conflicting secret headers',
+            code: 'gate_secret_conflict'
+        })
     })
 
     it('does not allow-list raw GET /api/sessions', async () => {
         const app = mount(enabledConfig(), fetch)
         const res = await app.request('/hapi/api/sessions', { headers: secretHeaders })
         expect(res.status).toBe(403)
-        const body = await res.json() as { error: string }
+        const body = await res.json() as { error: string, code: string }
         expect(body.error).toContain('not allowed')
+        expect(body.code).toBe('proxy_path_forbidden')
+    })
+
+    it('rewrites upstream Missing authorization token so dock copy does not blame the gate secret', async () => {
+        const fetchImpl: typeof fetch = (async (input: string | URL | Request) => {
+            const url = String(input)
+            if (url.endsWith('/api/auth')) {
+                return new Response(JSON.stringify({ token: 'jwt' }), { status: 200 })
+            }
+            if (url.includes('/api/sessions') && !url.includes('/messages')) {
+                return new Response('Missing authorization token', { status: 401 })
+            }
+            return new Response('unexpected', { status: 500 })
+        }) as typeof fetch
+        const app = mount(enabledConfig(), fetchImpl)
+        const res = await app.request('/hapi/operator/sessions', { headers: secretHeaders })
+        expect(res.status).toBe(401)
+        const body = await res.json() as { error: string, code: string }
+        expect(body.code).toBe('hub_auth_missing')
+        expect(body.error.toLowerCase()).toContain('re-login')
+        expect(body.error.toLowerCase()).toContain('gate')
+        expect(body.error).not.toMatch(/operator secret required/i)
     })
 
     it('GET /operator/sessions filters to the HAPI checkout', async () => {
