@@ -15,10 +15,14 @@
 # with HAPI_DRIVER env if needed.
 #
 # Usage:
-#   hapi-driver-rebuild              # rebuild only (no hub restart)
+#   hapi-driver-rebuild              # rebuild; patient hapi-restart-hub when hub/cli/shared changed
 #   hapi-driver-rebuild --build-web  # also rebuild web/dist
 #   hapi-driver-rebuild --verify     # run typecheck + test after merge
 #   hapi-driver-rebuild --activate   # swing hapi-active + restart hub (DESTRUCTIVE to live sessions)
+#
+# Post-remat restart: after a successful promote, if hub/cli/shared changed vs the
+# pre-remat tip, runs patient hapi-restart-hub (hub + runner). Web-only remats
+# skip restart (hard-reload dogfood). Opt out: HAPI_DRIVER_NO_RESTART=1
 #
 set -euo pipefail
 
@@ -519,6 +523,13 @@ if [[ -f "$DRIVER/hub/src/web/routes/features.ts" ]]; then
 fi
 
 hapi_print_feature_peer_reminders "driver rebuild @ $(git -C "$DRIVER" rev-parse --short HEAD) (web/dist — hard-reload dogfood)"
+
+# Patient hub+runner restart when runtime code changed (2026-08-13: was manual-only).
+if [[ "${PROMOTED:-0}" -eq 1 && -n "${PREV_TIP:-}" && -n "${WIP_SHA:-}" ]]; then
+    # shellcheck source=lib/driver-remat-auto-restart.sh
+    source "$LIB_DIR/driver-remat-auto-restart.sh"
+    driver_remat_auto_restart_hub "$DRIVER" "$PREV_TIP" "$WIP_SHA"
+fi
 
 if [[ "$ACTIVATE" -eq 1 ]]; then
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

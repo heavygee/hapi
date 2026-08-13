@@ -780,10 +780,10 @@ layers:
   - branch: feat/spawn-peer-remit
 
   # heavygee/hapi#120 — vendor hapi-inline operator dock (fork-local, not tiann).
-  # Pin v0.11.4 (html2canvas-pro oklch #145/#150). #123 Settings unlock.
+  # Pin v0.11.6 (#155 fail-closed + v0.11.5 capture). #123 Settings unlock + gate probe.
   # Thin soup tip on live driver/integration. Worktree: hapi-inline-web (feat) + hapi-inline-soup (tip).
   # Knock /opmic. Composed /hapi/operator/sessions. Do not allow-list raw GET /api/sessions.
-  # Tip: 64743d75b (driver/hapi-inline-operator-dock)
+  # Tip: b0a329de5 (driver/hapi-inline-operator-dock) — clear bad gate before init (hapi-inline#158)
   - branch: driver/hapi-inline-operator-dock
 
   # heavygee/hapi#121 — operator-hold chip pulse (🛑 needs_operator / babysit.hold).
@@ -817,4 +817,10 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/estate-fleet-runner-upgrade
   # Tip: aa5a218d5 (origin/driver/fleet-runner-upgrade); driver soup @ bcd0a6b17
   - branch: driver/fleet-runner-upgrade
+
+  # tiann/hapi#1516 — display_links MCP + CLI fallback + tappable SessionChat card.
+  # Href bytes constructed outside the model (concat landmines; no prose rewrite).
+  # Worktree: ~/coding/hapi/worktrees/display-links @ feat/display-links
+  # Tip: 1b9480192
+  - branch: feat/display-links
 
