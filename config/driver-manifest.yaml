@@ -816,3 +816,9 @@ layers:
   # Tip: aa5a218d5 (origin/driver/fleet-runner-upgrade); driver soup @ bcd0a6b17
   - branch: driver/fleet-runner-upgrade
 
+  # tiann/hapi#1516 — display_links MCP + CLI fallback + tappable SessionChat card.
+  # Href bytes constructed outside the model (concat landmines; no prose rewrite).
+  # Worktree: ~/coding/hapi/worktrees/display-links @ feat/display-links
+  # Tip: 1b9480192
+  - branch: feat/display-links
+
