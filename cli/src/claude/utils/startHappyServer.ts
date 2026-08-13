@@ -27,7 +27,7 @@ import {
     SESSION_ID_PREFIX_PARAM_DESCRIPTION,
 } from '@hapi/protocol/sessionCitation'
 import { PingPeerError, formatInspectPeerReport, formatPeerSessionsList, inspectPeer, listPeerSessions, peerListFetchLimit, pingPeer } from "@/modules/pingPeer/pingPeer";
-import { buildGithubPrExternalRef, parseGithubPrInput, upsertGithubPrIntoExternalRefs } from "@hapi/protocol";
+import { buildGithubPrExternalRef, isSameGithubPrIdentity, parseGithubPrInput, upsertGithubPrIntoExternalRefs } from "@hapi/protocol";
 import { fetchGithubPrAwarenessEnabled } from "@/api/fetchGithubPrAwareness";
 
 type StartHappyServerOptions = {
@@ -242,9 +242,7 @@ function createHapiMcpServer(
                 }))
                 const flushed = await client.flushMetadata(5_000)
                 const persisted = client.getMetadata()?.externalRefs?.some((candidate) =>
-                    candidate.kind === 'github_pr'
-                    && candidate.repo === ref.repo
-                    && candidate.number === ref.number
+                    isSameGithubPrIdentity(candidate, ref.repo, ref.number)
                     && candidate.role === ref.role
                     && candidate.linkedAt === ref.linkedAt
                 )

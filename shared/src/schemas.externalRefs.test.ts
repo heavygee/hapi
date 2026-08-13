@@ -210,7 +210,7 @@ describe('upsertGithubPrIntoExternalRefs', () => {
         const existing = buildGithubPrExternalRef({
             repo: 'tiann/hapi',
             number: 1163,
-            source: 'web',
+            source: 'user',
             linkedAt: 100,
             openState: 'open',
             checks: 'pending',
@@ -220,6 +220,29 @@ describe('upsertGithubPrIntoExternalRefs', () => {
         })
         const incoming = buildGithubPrExternalRef({
             repo: 'tiann/hapi',
+            number: 1163,
+            source: 'agent',
+            linkedAt: 300
+        })
+        expect(upsertGithubPrIntoExternalRefs([existing], incoming)).toEqual([{
+            ...existing,
+            source: 'agent',
+            linkedAt: 300,
+            role: 'primary'
+        }])
+    })
+
+    it('matches the same PR when repo casing differs', () => {
+        const existing = buildGithubPrExternalRef({
+            repo: 'tiann/hapi',
+            number: 1163,
+            source: 'user',
+            linkedAt: 100,
+            checks: 'pass',
+            statusCheckedAt: 200
+        })
+        const incoming = buildGithubPrExternalRef({
+            repo: 'Tiann/HAPI',
             number: 1163,
             source: 'agent',
             linkedAt: 300

@@ -256,7 +256,7 @@ describe('startHappyServer link_pr', () => {
             number: 1163,
             url: 'https://github.com/tiann/hapi/pull/1163',
             role: 'primary' as const,
-            source: 'web' as const,
+            source: 'user' as const,
             linkedAt: 100,
             openState: 'open' as const,
             checks: 'pending' as const,

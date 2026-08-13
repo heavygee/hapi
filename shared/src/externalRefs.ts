@@ -115,6 +115,17 @@ export function buildGithubPrExternalRef(input: {
     }
 }
 
+/** GitHub owner/repo paths are case-insensitive; compare identity that way. */
+export function isSameGithubPrIdentity(
+    candidate: ExternalRef,
+    repo: string,
+    number: number
+): boolean {
+    return candidate.kind === 'github_pr'
+        && candidate.repo.toLowerCase() === repo.toLowerCase()
+        && candidate.number === number
+}
+
 /**
  * Insert/replace a GitHub PR ref while preserving cached forge/estate health on
  * the same repo#number identity, and replacing any other primary when linking primary.
@@ -124,15 +135,20 @@ export function upsertGithubPrIntoExternalRefs(
     ref: GithubPrExternalRef
 ): ExternalRef[] {
     const same = current.find((candidate): candidate is GithubPrExternalRef =>
-        candidate.kind === 'github_pr'
-        && candidate.repo === ref.repo
-        && candidate.number === ref.number
+        isSameGithubPrIdentity(candidate, ref.repo, ref.number)
     )
-    const nextRef: GithubPrExternalRef = same ? { ...same, ...ref } : ref
+    const nextRef: GithubPrExternalRef = same
+        ? {
+            ...same,
+            ...ref,
+            // Keep the stored slug casing so re-links with different case merge.
+            repo: same.repo,
+            url: githubPrUrl(same.repo, same.number),
+            number: same.number
+        }
+        : ref
     const retained = current.filter((candidate) => {
-        if (candidate.kind === 'github_pr'
-            && candidate.repo === ref.repo
-            && candidate.number === ref.number) {
+        if (isSameGithubPrIdentity(candidate, ref.repo, ref.number)) {
             return false
         }
         if (nextRef.role === 'primary'
