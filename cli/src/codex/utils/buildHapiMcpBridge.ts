@@ -46,6 +46,8 @@ export interface HapiMcpBridge {
 export interface HapiMcpBridgeOptions {
     emitTitleSummary?: boolean;
     enableChangeTitle?: boolean;
+    /** Cursor-only (#1516). Also inferred from skillLookup.flavor === 'cursor'. */
+    enableDisplayLinks?: boolean;
     skillLookup?: {
         workingDirectory: string;
         flavor: string;
@@ -80,6 +82,7 @@ export async function buildHapiMcpBridge(
     const happyServer = await startHappyServer(client, {
         emitTitleSummary: options.emitTitleSummary,
         enableChangeTitle: options.enableChangeTitle,
+        enableDisplayLinks: options.enableDisplayLinks,
         skillLookup: options.skillLookup
     });
     const bridgeCommand = getHappyCliCommand([
@@ -98,12 +101,15 @@ export async function buildHapiMcpBridge(
         },
         display_media: {
             approval_mode: 'prompt'
-        },
-        // No local-file read — auto-approve so models actually use it instead of typing URLs.
-        display_links: {
-            approval_mode: 'approve'
         }
     };
+    // Cursor-only (#1516) — no local-file read; auto-approve so the model uses it
+    // instead of typing doubled-letter-mangled URLs.
+    if (happyServer.toolNames.includes('display_links')) {
+        tools.display_links = {
+            approval_mode: 'approve'
+        };
+    }
     if (options.enableChangeTitle !== false) {
         tools.change_title = {
             approval_mode: 'approve'
