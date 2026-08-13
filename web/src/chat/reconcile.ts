@@ -5,6 +5,7 @@ import type {
     AgentTextBlock,
     ChatBlock,
     GeneratedImageBlock,
+    DisplayLinksBlock,
     CliOutputBlock,
     CodexReviewBlock,
     ToolCallBlock,
@@ -148,6 +149,19 @@ function areGeneratedImageBlocksEqual(left: GeneratedImageBlock, right: Generate
         && left.meta === right.meta
 }
 
+function areDisplayLinksBlocksEqual(left: DisplayLinksBlock, right: DisplayLinksBlock): boolean {
+    if (left.localId !== right.localId || left.createdAt !== right.createdAt || left.meta !== right.meta) {
+        return false
+    }
+    if (left.urls.length !== right.urls.length) return false
+    for (let i = 0; i < left.urls.length; i += 1) {
+        if (left.urls[i]?.href !== right.urls[i]?.href || left.urls[i]?.title !== right.urls[i]?.title) {
+            return false
+        }
+    }
+    return true
+}
+
 function areCodexReviewBlocksEqual(left: CodexReviewBlock, right: CodexReviewBlock): boolean {
     return left.review === right.review
         && left.localId === right.localId
@@ -238,6 +252,11 @@ function reconcileBlock(block: ChatBlock, prevById: ChatBlocksById): ChatBlock {
     if (block.kind === 'generated-image') {
         const prevBlock = prev as GeneratedImageBlock
         return areGeneratedImageBlocksEqual(prevBlock, block) ? prevBlock : block
+    }
+
+    if (block.kind === 'display-links') {
+        const prevBlock = prev as DisplayLinksBlock
+        return areDisplayLinksBlocksEqual(prevBlock, block) ? prevBlock : block
     }
 
     if (block.kind === 'codex-review') {

@@ -1501,4 +1501,30 @@ describe('reduceTimeline', () => {
             activity: 'Completed: ok'
         })
     })
+
+    it('renders display-links agent content as a dedicated timeline block', () => {
+        const href = 'https://github.com/tia' + 'nn' + '/hapi/issues/1516'
+        const { blocks } = reduceTimeline([
+            {
+                id: 'msg-links',
+                localId: null,
+                createdAt: 1_700_000_000_000,
+                role: 'agent',
+                content: [{
+                    type: 'display-links',
+                    urls: [{ href, title: 'Issue 1516' }],
+                    uuid: 'u-links',
+                    parentUUID: null
+                }],
+                isSidechain: false
+            } as TracedMessage
+        ], makeContext())
+
+        expect(blocks).toHaveLength(1)
+        expect(blocks[0]).toMatchObject({
+            kind: 'display-links',
+            urls: [{ href: 'https://github.com/tiann/hapi/issues/1516', title: 'Issue 1516' }]
+        })
+        expect(blocks[0].kind).not.toBe('user-text')
+    })
 })

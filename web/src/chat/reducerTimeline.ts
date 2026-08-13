@@ -815,6 +815,19 @@ export function reduceTimeline(
                     continue
                 }
 
+                if (c.type === 'display-links') {
+                    blocks.push({
+                        kind: 'display-links',
+                        id: `${msg.id}:${idx}`,
+                        localId: msg.localId,
+                        createdAt: msg.createdAt,
+                        invokedAt: msg.invokedAt,
+                        urls: c.urls,
+                        meta: msg.meta
+                    })
+                    continue
+                }
+
                 if (c.type === 'reasoning') {
                     const streamId = asString(c.streamId)
                     if (streamId) {

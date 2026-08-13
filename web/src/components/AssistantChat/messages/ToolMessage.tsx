@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import type { ToolCallMessagePartProps } from '@assistant-ui/react'
 import type { ChatBlock } from '@/chat/types'
-import type { GeneratedImageBlock, ToolCallBlock } from '@/chat/types'
+import type { DisplayLinksBlock, GeneratedImageBlock, ToolCallBlock } from '@/chat/types'
 import type { ToolGroupBlock } from '@/chat/toolGroups'
-import { isObject, safeStringify } from '@hapi/protocol'
+import { isDisplayableHttpHref, isObject, safeStringify } from '@hapi/protocol'
 import { isSubagentToolName } from '@/chat/subagentTool'
 import { ToolGroupCard } from '@/components/ToolCard/ToolGroupCard'
 import { getEventPresentation } from '@/chat/presentation'
@@ -50,6 +50,65 @@ function isGeneratedImageBlock(value: unknown): value is GeneratedImageBlock {
     if (typeof value.fileName !== 'string') return false
     if (value.mimeType !== null && typeof value.mimeType !== 'string') return false
     return true
+}
+
+function isDisplayLinksBlock(value: unknown): value is DisplayLinksBlock {
+    if (!isObject(value)) return false
+    if (value.kind !== 'display-links') return false
+    if (typeof value.id !== 'string') return false
+    if (!Array.isArray(value.urls)) return false
+    return true
+}
+
+/** Exported for display-links renderer tests. */
+export function DisplayLinksCard(props: { block: DisplayLinksBlock }) {
+    return (
+        <div
+            data-testid="display-links-card"
+            className="max-w-[92%] rounded-2xl border border-[var(--app-border)] bg-[var(--app-tool-card-bg)] p-3"
+        >
+            <div className="mb-2 min-w-0 truncate text-xs font-medium text-[var(--app-hint)]">
+                Links
+            </div>
+            <ul className="flex flex-col gap-2">
+                {props.block.urls.map((url) => {
+                    const navigable = isDisplayableHttpHref(url.href)
+                    const label = url.title?.trim() || url.href
+                    if (!navigable) {
+                        return (
+                            <li key={url.href} className="min-w-0">
+                                <span
+                                    title={url.href}
+                                    className="block truncate text-sm text-[var(--app-hint)]"
+                                >
+                                    {label}
+                                </span>
+                            </li>
+                        )
+                    }
+                    return (
+                        <li key={url.href} className="min-w-0">
+                            <a
+                                href={url.href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                data-testid="display-links-href"
+                                data-href={url.href}
+                                className="block rounded-xl bg-[var(--app-subtle-bg)] px-3 py-2 font-medium text-[var(--app-link)] underline decoration-[color:var(--app-link-muted)] underline-offset-3"
+                            >
+                                <span className="block truncate">{label}</span>
+                                {url.title ? (
+                                    <span className="mt-0.5 block truncate text-xs font-normal text-[var(--app-hint)] no-underline">
+                                        {url.href}
+                                    </span>
+                                ) : null}
+                            </a>
+                        </li>
+                    )
+                })}
+            </ul>
+        </div>
+    )
 }
 
 const MIN_INLINE_IMAGE_DIMENSION = 64
@@ -273,6 +332,14 @@ function HappyNestedBlockList(props: {
                     )
                 }
 
+                if (block.kind === 'display-links') {
+                    return (
+                        <div key={`display-links:${block.id}`} className="px-1">
+                            <DisplayLinksCard block={block} />
+                        </div>
+                    )
+                }
+
                 if (block.kind === 'agent-event') {
                     const presentation = getEventPresentation(block.event)
                     return (
@@ -357,6 +424,14 @@ export function HappyToolMessage(props: ToolCallMessagePartProps) {
         return (
             <div className="py-1 min-w-0 max-w-full overflow-x-hidden">
                 <GeneratedImageCard block={artifact} />
+            </div>
+        )
+    }
+
+    if (isDisplayLinksBlock(artifact)) {
+        return (
+            <div className="py-1 min-w-0 max-w-full overflow-x-hidden">
+                <DisplayLinksCard block={artifact} />
             </div>
         )
     }

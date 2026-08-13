@@ -10,6 +10,7 @@ import { buildSessionCitationSteerInstruction } from '@hapi/protocol/sessionCita
 import { HAPI_MCP_BRIDGE_PROMPT } from '@/modules/common/hapiMcpBridgePrompt';
 import {
     DISPLAY_IMAGE_PROMPT_HAPI_MCP,
+    DISPLAY_LINKS_PROMPT_HAPI_MCP,
     DISPLAY_MEDIA_PROMPT_HAPI_MCP,
     DISPLAY_VIDEO_PROMPT_HAPI_MCP,
 } from '@/modules/common/displayImagePrompt';
@@ -41,6 +42,7 @@ export const OPENCODE_NATIVE_TOOL_INSTRUCTION = trimIdent(`
     ${DISPLAY_IMAGE_PROMPT_HAPI_MCP}
     ${DISPLAY_VIDEO_PROMPT_HAPI_MCP}
     ${DISPLAY_MEDIA_PROMPT_HAPI_MCP}
+    ${DISPLAY_LINKS_PROMPT_HAPI_MCP}
     ${buildSessionCitationSteerInstruction({
         inspectTool: 'hapi_inspect_peer',
         pingTool: 'hapi_ping_peer',
