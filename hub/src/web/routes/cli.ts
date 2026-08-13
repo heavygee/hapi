@@ -366,6 +366,10 @@ export function createCliRoutes(
         if (!fromAuth || fromAuth.namespace !== namespace) {
             return c.json({ error: 'Source machine not found' }, 404)
         }
+        const sourceTag = typeof fromAuth.tag === 'string' ? fromAuth.tag : ''
+        if (!sourceTag || !constantTimeEquals(sourceTag, machineTag)) {
+            return c.json({ error: 'Source machine tag mismatch' }, 403)
+        }
         try {
             const migrated = engine.migrateSessionsMachineId(fromMachineId, newMachineId, namespace)
             return c.json({ migrated })
