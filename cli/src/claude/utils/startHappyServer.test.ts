@@ -112,6 +112,7 @@ describe('startHappyServer skill_lookup', () => {
             'display_image',
             'display_video',
             'display_media',
+            'display_links',
             'ping_peer',
             'inspect_peer',
             'list_peers'
@@ -138,6 +139,37 @@ describe('startHappyServer skill_lookup', () => {
         }))
     })
 
+    it('paints display_links via sendAgentMessage with concatenated href bytes', async () => {
+        const mcp = await connect(false)
+        const href = 'https://github.com/tia' + 'nn' + '/hapi/issues/1516'
+
+        const result = await mcp.callTool({
+            name: 'display_links',
+            arguments: { urls: [{ href, title: 'Issue 1516' }] }
+        }) as ToolResult
+
+        expect(result.isError).toBe(false)
+        expect(result.content?.[0]?.text).toContain('Displayed 1 link')
+        expect(sendAgentMessage).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'display-links',
+            urls: [{ href: 'https://github.com/tiann/hapi/issues/1516', title: 'Issue 1516' }],
+        }))
+        const payload = sendAgentMessage.mock.calls[0]?.[0] as { urls: Array<{ href: string }> }
+        expect(payload.urls[0]?.href).toBe(href)
+        expect(payload.urls[0]?.href).not.toContain('tian/hapi')
+    })
+
+    it('rejects javascript hrefs without emitting an agent message', async () => {
+        const mcp = await connect(false)
+        const result = await mcp.callTool({
+            name: 'display_links',
+            arguments: { urls: [{ href: 'javascript:alert(1)' }] }
+        }) as ToolResult
+
+        expect(result.isError).toBe(true)
+        expect(sendAgentMessage).not.toHaveBeenCalled()
+    })
+
     it('does not expose change_title when native ACP titles are enabled', async () => {
         const sessionClient = {
             updateMetadata: vi.fn(),
@@ -152,11 +184,12 @@ describe('startHappyServer skill_lookup', () => {
         await mcp.connect(new StreamableHTTPClientTransport(new URL(server.url)))
         const tools = await mcp.listTools()
 
-        expect(server.toolNames).toEqual(['display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer'])
+        expect(server.toolNames).toEqual(['display_image', 'display_video', 'display_media', 'display_links', 'list_peers', 'ping_peer', 'inspect_peer'])
         expect(tools.tools.map((tool) => tool.name)).toEqual([
             'display_image',
             'display_video',
             'display_media',
+            'display_links',
             'ping_peer',
             'inspect_peer',
             'list_peers'
@@ -172,6 +205,7 @@ describe('toClaudeAllowedHapiMcpTools', () => {
             'display_image',
             'display_video',
             'display_media',
+            'display_links',
             'list_peers',
             'ping_peer',
             'inspect_peer',
@@ -179,6 +213,7 @@ describe('toClaudeAllowedHapiMcpTools', () => {
         ])).toEqual([
             'mcp__hapi__change_title',
             'mcp__hapi__display_image',
+            'mcp__hapi__display_links',
             'mcp__hapi__list_peers',
             'mcp__hapi__skill_lookup'
         ])

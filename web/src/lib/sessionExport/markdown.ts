@@ -93,6 +93,8 @@ function formatAgentContentBlock(block: NormalizedAgentContent): string | null {
         }
         case 'generated-image':
             return `- Generated image: ${block.fileName}`
+        case 'display-links':
+            return block.urls.map((url) => `- Link: ${url.title ? `${url.title} (${url.href})` : url.href}`).join('\n')
         case 'codex-review':
             return `- Codex review: ${block.review.overallCorrectness ?? 'review'} (${block.review.findings.length} findings)`
         case 'summary':

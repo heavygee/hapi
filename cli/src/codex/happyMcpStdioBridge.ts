@@ -1,7 +1,7 @@
 /**
  * HAPI MCP STDIO Bridge
  *
- * Minimal STDIO MCP server exposing HAPI tools such as `change_title`, `display_image`, `display_video`, `display_media`, `list_peers`, `ping_peer`, and `inspect_peer`.
+ * Minimal STDIO MCP server exposing HAPI tools such as `change_title`, `display_image`, `display_video`, `display_media`, `display_links`, `list_peers`, `ping_peer`, and `inspect_peer`.
  * On invocation it forwards the tool call to an existing HAPI HTTP MCP server
  * using the StreamableHTTPClientTransport.
  *
@@ -16,14 +16,14 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { z } from 'zod';
-import { DISPLAY_IMAGE_PROMPT_CURSOR, DISPLAY_MEDIA_PROMPT_CURSOR, DISPLAY_VIDEO_PROMPT_CURSOR } from '@/modules/common/displayImagePrompt';
+import { DISPLAY_IMAGE_PROMPT_CURSOR, DISPLAY_LINKS_PROMPT_CURSOR, DISPLAY_MEDIA_PROMPT_CURSOR, DISPLAY_VIDEO_PROMPT_CURSOR } from '@/modules/common/displayImagePrompt';
 import {
   INSPECT_PEER_TOOL_DESCRIPTION,
   PING_PEER_TOOL_DESCRIPTION,
   SESSION_ID_PREFIX_PARAM_DESCRIPTION,
 } from '@hapi/protocol/sessionCitation';
 
-const DEFAULT_TOOL_NAMES = ['change_title', 'display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer'];
+const DEFAULT_TOOL_NAMES = ['change_title', 'display_image', 'display_video', 'display_media', 'display_links', 'list_peers', 'ping_peer', 'inspect_peer'];
 
 function parseArgs(argv: string[]): { url: string | null; toolNames: Set<string> } {
   let url: string | null = null;
@@ -200,6 +200,38 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
       sessionIdPrefix: z.string().trim().min(1).describe(SESSION_ID_PREFIX_PARAM_DESCRIPTION),
       message: z.string().min(1).describe('Message text to deliver to the target session'),
     });
+
+    const displayLinksInputSchema: z.ZodTypeAny = z.object({
+      urls: z.array(z.union([
+        z.object({
+          href: z.string().describe('http(s) URL to paint. Construct by concatenation for landmine strings (tia+nn), never copy from model prose.'),
+          title: z.string().trim().min(1).max(255).optional().describe('Optional link label shown on the card'),
+        }),
+        z.string(),
+      ])).min(1).max(20).describe('One or more http(s) URLs to paint as tappable cards'),
+    });
+
+    if (toolNames.has('display_links')) {
+      server.registerTool<any, any>(
+        'display_links',
+        {
+          description: `Paint clickable http(s) URL cards into the current HAPI chat. ${DISPLAY_LINKS_PROMPT_CURSOR}`,
+          title: 'Display Links',
+          inputSchema: displayLinksInputSchema,
+        },
+        async (args: Record<string, unknown>) => {
+          try {
+            const client = await ensureHttpClient();
+            return await client.callTool({ name: 'display_links', arguments: args }) as any;
+          } catch (error) {
+            return {
+              content: [{ type: 'text' as const, text: `Failed to display links: ${error instanceof Error ? error.message : String(error)}` }],
+              isError: true,
+            };
+          }
+        }
+      );
+    }
 
     if (toolNames.has('ping_peer')) {
       server.registerTool<any, any>(

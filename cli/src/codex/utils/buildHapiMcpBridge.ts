@@ -98,6 +98,10 @@ export async function buildHapiMcpBridge(
         },
         display_media: {
             approval_mode: 'prompt'
+        },
+        // No local-file read — auto-approve so models actually use it instead of typing URLs.
+        display_links: {
+            approval_mode: 'approve'
         }
     };
     if (options.enableChangeTitle !== false) {
