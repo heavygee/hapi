@@ -13,9 +13,12 @@
 #   🔁  CI/bot in flight, or thread/CI data momentarily unavailable — retry
 #   ⚠️  needs work — failing CI, *current* open threads, bot findings, rebase, or closed-unmerged
 #                     (outdated unresolved threads do not count — #847 false ⚠️)
-#   📝  pre-PR — tracked number, no open PR on upstream yet
+#   📝  pre-PR — tracked number, no open PR on upstream yet; OR open draft PR
+#                 (draft must never classify green — heavygee/hapi#127)
 #   🔧  merged — clean up soup/worktree/branch/archive still owed (sticky ping)
 #   🧹  complete — fully cleaned by estate predicates; babysit ended (never ping)
+#   🛑  needs_operator / babysit.hold — human maintainer comment; operator ack only
+#       (never hourly-ping the coding peer; rank 7 beats ⚠️ and ?)
 #   ?   UNKNOWN — GitHub data unavailable this run; caller MUST NOT rename/ping on this
 #
 # Lives on fork main under scripts/tooling/lib/ — commit here; never hand-edit driver.
@@ -46,6 +49,7 @@ pec_strip_leading_emojis() {
             📝*) s="${s#📝}" ;;
             🔧*) s="${s#🔧}" ;;
             🧹*) s="${s#🧹}" ;;
+            🛑*) s="${s#🛑}" ;;
             "?"*) s="${s#\?}" ;;
             *) break ;;
         esac
@@ -217,6 +221,7 @@ pec_build_title() {
 # Severity ordering — higher rank wins when a session tracks multiple PRs.
 pec_emoji_rank() {
     case "$1" in
+        🛑) echo 7 ;;
         "?") echo 6 ;;
         ⚠️) echo 5 ;;
         🔁) echo 4 ;;
@@ -247,6 +252,7 @@ pec_estate_code_from_emoji() {
         📝) printf 'peer.incubating' ;;
         🔧) printf 'babysit.merged' ;;
         🧹) printf 'babysit.complete' ;;
+        🛑) printf 'babysit.hold' ;;
         *) printf '' ;;
     esac
 }
@@ -261,6 +267,7 @@ pec_status_from_emoji() {
         📝) printf 'pre_pr' ;;
         🔧) printf 'merged' ;;
         🧹) printf 'complete' ;;
+        🛑) printf 'needs_operator' ;;
         *) printf 'unknown' ;;
     esac
 }
@@ -320,6 +327,7 @@ pec_emoji_from_status() {
         pre_pr) printf '📝' ;;
         merged) printf '🔧' ;;
         complete) printf '🧹' ;;
+        needs_operator) printf '🛑' ;;
         *) printf '?' ;;
     esac
 }
@@ -333,6 +341,7 @@ pec_leading_emoji() {
         📝*) echo "📝" ;;
         🔧*) echo "🔧" ;;
         🧹*) echo "🧹" ;;
+        🛑*) echo "🛑" ;;
         "?"*) echo "?" ;;
         *) echo "" ;;
     esac
@@ -442,6 +451,67 @@ pec_decide_emoji() {
 }
 
 # ---------------------------------------------------------------------------
+# Draft / blocked-upstream gates (before CI/bot green can paint ✅)
+# ---------------------------------------------------------------------------
+
+# pec_labels_csv_has LABELS_CSV NEEDLE → 0 if needle is a pipe/comma-separated entry
+pec_labels_csv_has() {
+    local csv="${1:-}" needle="${2:-}"
+    [[ -n "$csv" && -n "$needle" ]] || return 1
+    local IFS=',|' entry
+    for entry in $csv; do
+        entry="${entry#"${entry%%[![:space:]]*}"}"
+        entry="${entry%"${entry##*[![:space:]]}"}"
+        [[ "$entry" == "$needle" ]] && return 0
+    done
+    return 1
+}
+
+# pec_blocked_upstream_dep_from_body BODY → "#N" or empty
+# Best-effort: "blocked on/by … #N" or owner/repo#N near blocked.
+pec_blocked_upstream_dep_from_body() {
+    local body="${1:-}" dep=""
+    [[ -n "$body" ]] || { printf ''; return 0; }
+    if [[ "$body" =~ [Bb]locked[[:space:]]+(on|by)[[:space:]]+[^[:digit:]#]{0,80}#([0-9]+) ]]; then
+        dep="#${BASH_REMATCH[2]}"
+    elif [[ "$body" =~ [Bb]locked[[:space:]]+(on|by)[[:space:]]+([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+) ]]; then
+        dep="${BASH_REMATCH[2]}"
+    fi
+    printf '%s' "$dep"
+}
+
+# pec_blocked_upstream_action [BODY] → statusAction for ⚠️ blocked-upstream
+pec_blocked_upstream_action() {
+    local body="${1:-}" dep
+    dep="$(pec_blocked_upstream_dep_from_body "$body")"
+    if [[ -n "$dep" ]]; then
+        printf 'blocked upstream — wait on %s (status:blocked-upstream)' "$dep"
+    else
+        printf 'blocked upstream (status:blocked-upstream) — known dependency; not green'
+    fi
+}
+
+# pec_gate_draft_blocked DRAFT LABELS_CSV [BODY]
+# Prints "emoji\taction\tprePr" when a gate fires; empty if no gate.
+# Precedence: status:blocked-upstream (⚠️, prePr=0) beats draft alone (📝, prePr=1).
+pec_gate_draft_blocked() {
+    local draft="${1:-0}" labels_csv="${2:-}" body="${3:-}"
+    local is_draft=0
+    case "${draft,,}" in
+        1|true|yes) is_draft=1 ;;
+    esac
+    if pec_labels_csv_has "$labels_csv" "status:blocked-upstream"; then
+        printf '%s\t%s\t%s' "⚠️" "$(pec_blocked_upstream_action "$body")" "0"
+        return 0
+    fi
+    if [[ "$is_draft" -eq 1 ]]; then
+        printf '%s\t%s\t%s' "📝" "draft PR — not ready for green; mark ready when unblocked" "1"
+        return 0
+    fi
+    printf ''
+}
+
+# ---------------------------------------------------------------------------
 # Ping policy (pure)
 # ---------------------------------------------------------------------------
 
@@ -458,6 +528,7 @@ pec_action_fingerprint() {
 # Rules:
 #   - "?" (unknown)                     → never ping
 #   - 🧹 (complete)                     → never ping (incl. 🔧→🧹 transition)
+#   - 🛑 (needs_operator)               → never ping the coding peer (operator hold)
 #   - emoji changed vs recorded state   → ping (transition)
 #   - sticky ⚠️ or 🔧:
 #       - WINDOW_ROUSE=1 (Meta ping windows) → always yes ("are you done yet?")
@@ -469,7 +540,7 @@ pec_should_ping() {
     local new_emoji="$1" prev_emoji="$2" new_fp="$3" prev_fp="$4" \
         last_ping="${5:-0}" now="${6:-0}" reminder="${7:-86400}" window_rouse="${8:-0}"
 
-    if [[ "$new_emoji" == "?" || "$new_emoji" == "🧹" ]]; then
+    if [[ "$new_emoji" == "?" || "$new_emoji" == "🧹" || "$new_emoji" == "🛑" ]]; then
         echo "no"; return 1
     fi
     if [[ "$new_emoji" != "$prev_emoji" ]]; then
@@ -545,6 +616,7 @@ pec_event_type_for_emoji() {
     case "$emoji" in
         ⚠️) echo "blocked" ;;
         🔧) echo "completed" ;;
+        🛑) echo "needs_decision" ;;
         ✅|🔁|📝) echo "progress" ;;
         *) echo "needs_decision" ;;
     esac
@@ -602,6 +674,7 @@ pec_pr_target_for_repo() {
 
 pec_severity_for_emoji() {
     case "$1" in
+        🛑) echo 4 ;;
         ⚠️) echo 3 ;;
         🔧) echo 2 ;;
         ✅|🔁|📝) echo 1 ;;

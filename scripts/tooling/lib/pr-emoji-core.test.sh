@@ -35,6 +35,7 @@ eq "strip single ✅" "$(pec_strip_leading_emojis "✅PR #941: foo")" "PR #941: 
 eq "strip stacked ⚠️✅" "$(pec_strip_leading_emojis "⚠️✅PR #941: foo")" "PR #941: foo"
 eq "strip ⚠️ with VS16 + space" "$(pec_strip_leading_emojis "⚠️ PR #941: foo")" "PR #941: foo"
 eq "strip 🔧" "$(pec_strip_leading_emojis "🔧PR #7: bar")" "PR #7: bar"
+eq "strip 🛑" "$(pec_strip_leading_emojis "🛑PR #1108: upgrade")" "PR #1108: upgrade"
 eq "no emoji unchanged" "$(pec_strip_leading_emojis "PR #941: foo")" "PR #941: foo"
 
 # ---- title: strip PR #N: once chip owns identity ----
@@ -85,8 +86,12 @@ eq "worst ⚠️ vs ✅" "$(pec_worst_emoji "⚠️" "✅")" "⚠️"
 eq "worst 🔁 vs 🔧" "$(pec_worst_emoji "🔁" "🔧")" "🔁"
 eq "worst ? vs ⚠️" "$(pec_worst_emoji "?" "⚠️")" "?"
 eq "worst ✅ vs 📝" "$(pec_worst_emoji "✅" "📝")" "✅"
+eq "worst 🛑 vs ⚠️" "$(pec_worst_emoji "🛑" "⚠️")" "🛑"
+eq "worst ⚠️ vs 🛑" "$(pec_worst_emoji "⚠️" "🛑")" "🛑"
+eq "worst 🛑 vs ?" "$(pec_worst_emoji "🛑" "?")" "🛑"
 
 eq "leading emoji ⚠️" "$(pec_leading_emoji "⚠️PR #1: x")" "⚠️"
+eq "leading emoji 🛑" "$(pec_leading_emoji "🛑PR #1: x")" "🛑"
 eq "leading emoji none" "$(pec_leading_emoji "PR #1: x")" ""
 
 # ---- decide_emoji: fixtures ----
@@ -191,6 +196,8 @@ eq "unchanged ✅ → no" "$(pec_should_ping "✅" "✅" "z" "z" 200 300 86400)"
 eq "unchanged 🔁 → no" "$(pec_should_ping "🔁" "🔁" "z" "z" 200 300 86400)" "no"
 eq "unchanged 📝 → no" "$(pec_should_ping "📝" "📝" "z" "z" 200 300 86400)" "no"
 eq "unknown ? → no" "$(pec_should_ping "?" "✅" "z" "z" 200 300 86400)" "no"
+eq "hold 🛑 transition never pings peer" "$(pec_should_ping "🛑" "✅" "z" "x" 100 200 86400 || true)" "no"
+eq "hold 🛑 window rouse never pings peer" "$(pec_should_ping "🛑" "🛑" "z" "z" 200 300 86400 1 || true)" "no"
 eq "first sight (no prev) ⚠️ → yes" "$(pec_should_ping "⚠️" "" "$FP_A" "" 0 300 86400)" "yes"
 eq "first sight (no prev) ✅ → yes" "$(pec_should_ping "✅" "" "z" "" 0 300 86400)" "yes"
 
@@ -214,7 +221,12 @@ eq "emit reason: sticky ⚠️ fp change" \
 eq "eventType ⚠️ → blocked" "$(pec_event_type_for_emoji "⚠️")" "blocked"
 eq "eventType ✅ → progress" "$(pec_event_type_for_emoji "✅")" "progress"
 eq "eventType 🔧 → completed" "$(pec_event_type_for_emoji "🔧")" "completed"
+eq "eventType 🛑 → needs_decision" "$(pec_event_type_for_emoji "🛑")" "needs_decision"
 eq "eventType orphan-warn → needs_decision" "$(pec_event_type_for_emoji "⚠️" orphan)" "needs_decision"
+eq "emit reason: first 🛑 is transition" \
+    "$(pec_emit_reason "🛑" "✅" "z" "x" 100 200 86400)" "transition"
+eq "emit reason: steady 🛑 is none (no hourly nag)" \
+    "$(pec_emit_reason "🛑" "🛑" "z" "z" 200 300 86400 1 || true)" "none"
 
 eq "idempotency base key" \
     "$(pec_contrib_idempotency_key "tiann/hapi" 999 "$FP_A")" \
@@ -375,8 +387,34 @@ eq "emoji_from_status merged" "$(pec_emoji_from_status merged)" "🔧"
 eq "status_from_emoji complete" "$(pec_status_from_emoji '🧹')" "complete"
 eq "emoji_from_status complete" "$(pec_emoji_from_status complete)" "🧹"
 eq "estate complete" "$(pec_estate_code_from_emoji '🧹')" "babysit.complete"
+eq "status_from_emoji hold" "$(pec_status_from_emoji '🛑')" "needs_operator"
+eq "emoji_from_status hold" "$(pec_emoji_from_status needs_operator)" "🛑"
+eq "estate hold" "$(pec_estate_code_from_emoji '🛑')" "babysit.hold"
 eq "worst 🔧 vs 🧹" "$(pec_worst_emoji "🔧" "🧹")" "🔧"
 eq "strip 🧹" "$(pec_strip_leading_emojis "🧹PR #941: foo")" "PR #941: foo"
+
+# #127 draft / blocked-upstream gates (never invent ✅)
+eq "labels has blocked-upstream" \
+    "$(pec_labels_csv_has "enhancement|status:blocked-upstream|area:cli" "status:blocked-upstream" && echo yes || echo no)" "yes"
+eq "labels miss blocked-upstream" \
+    "$(pec_labels_csv_has "enhancement|area:cli" "status:blocked-upstream" && echo yes || echo no)" "no"
+eq "dep from body blocked on #1473" \
+    "$(pec_blocked_upstream_dep_from_body "blocked on tiann/hapi#1473 before acceptance")" "#1473"
+eq "dep from body missing" \
+    "$(pec_blocked_upstream_dep_from_body "no blocker here" | wc -c | tr -d ' ')" "0"
+GATE_DRAFT="$(pec_gate_draft_blocked true "enhancement" "")"
+eq "draft alone → 📝" "$(printf '%s' "$GATE_DRAFT" | cut -f1)" "📝"
+eq "draft alone → prePr 1" "$(printf '%s' "$GATE_DRAFT" | cut -f3)" "1"
+GATE_BLOCK="$(pec_gate_draft_blocked false "status:blocked-upstream" "blocked on #1473")"
+eq "ready + blocked-upstream → ⚠️" "$(printf '%s' "$GATE_BLOCK" | cut -f1)" "⚠️"
+eq "ready + blocked-upstream → prePr 0" "$(printf '%s' "$GATE_BLOCK" | cut -f3)" "0"
+eq "ready + blocked-upstream names dep" \
+    "$(printf '%s' "$GATE_BLOCK" | cut -f2 | grep -q '#1473' && echo yes || echo no)" "yes"
+GATE_BOTH="$(pec_gate_draft_blocked true "enhancement|status:blocked-upstream" "blocked by #99")"
+eq "draft + blocked-upstream → ⚠️ wins" "$(printf '%s' "$GATE_BOTH" | cut -f1)" "⚠️"
+eq "draft + blocked-upstream → prePr 0" "$(printf '%s' "$GATE_BOTH" | cut -f3)" "0"
+eq "no gate when ready and unlabeled" \
+    "$(pec_gate_draft_blocked false "enhancement" "" | wc -c | tr -d ' ')" "0"
 
 # complete never pings (incl. transition from 🔧)
 eq "ping never on complete" "$(pec_should_ping "🧹" "🔧" "a" "b" 0 100 10 1 || true)" "no"

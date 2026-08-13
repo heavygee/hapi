@@ -255,13 +255,14 @@ classify_one() {
     local exists=0 merged=0 closed=0 data_unavail=0
     local decided emoji action
 
-    # Single authoritative PR fetch. Distinguish a real 404 (pre-PR) from a
-    # transport failure (timeout / network) — the latter must NOT masquerade as
-    # pre-PR, or a flaky network would retitle live PRs to 📝. Guard the command
+    # Single authoritative PR fetch. Include draft + labels so Meta cannot
+    # paint intentional drafts / status:blocked-upstream as full green (#127).
+    # Distinguish a real 404 (pre-PR) from a transport failure (timeout /
+    # network) — the latter must NOT masquerade as pre-PR. Guard the command
     # substitution in an `if` so `set -e` does not kill us on the 404 exit.
     local err_out rc=0
     if err_out="$(gh_t api "repos/${REPO}/pulls/${n}" \
-        --jq '[.state, (.merged|tostring), (.mergeable_state // "unknown"), (.head.ref // "")] | @tsv' 2>&1)"; then
+        --jq '[.state, (.merged|tostring), (.mergeable_state // "unknown"), (.head.ref // ""), (.draft|tostring), ([.labels[].name]|join("|")), ((.body // "")|gsub("[\t\n\r]";" "))] | @tsv' 2>&1)"; then
         rc=0
     else
         rc=$?
@@ -285,8 +286,8 @@ classify_one() {
     fi
 
     exists=1
-    local head_ref=""
-    IFS=$'\t' read -r pr_state pr_json merge_state head_ref <<< "$err_out"
+    local head_ref="" draft_flag="" labels_csv="" pr_body=""
+    IFS=$'\t' read -r pr_state pr_json merge_state head_ref draft_flag labels_csv pr_body <<< "$err_out"
     [[ "$pr_json" == "true" ]] && merged=1
     [[ "$pr_state" == "closed" && "$merged" -eq 0 ]] && closed=1
     [[ "$merge_state" == "dirty" || "$merge_state" == "behind" ]] && merge_bad=1
@@ -306,6 +307,18 @@ classify_one() {
         fi
         decided="$(pec_decide_emoji 1 0 1 0 0 0 0 0 0 0 0 0 0 "$superseded")"
         _emit_pr_json "$out" "${decided%%$'\t'*}" "${decided#*$'\t'}" 1 0 1 0 0 -1 0 0 0 0 0 "$merge_state" "" "$head_ref"
+        return
+    fi
+
+    # Draft / blocked-upstream before CI/bot can invent ✅ (heavygee/hapi#127).
+    local gate gate_emoji gate_action gate_prepr
+    gate="$(pec_gate_draft_blocked "$draft_flag" "$labels_csv" "$pr_body")"
+    if [[ -n "$gate" ]]; then
+        gate_emoji="${gate%%$'\t'*}"
+        gate="${gate#*$'\t'}"
+        gate_action="${gate%%$'\t'*}"
+        gate_prepr="${gate#*$'\t'}"
+        _emit_pr_json "$out" "$gate_emoji" "$gate_action" 1 0 0 "$gate_prepr" 0 -1 0 0 0 0 0 "$merge_state" "" "$head_ref"
         return
     fi
 
@@ -365,7 +378,9 @@ export REPO OWNER NAME TIMEOUT TMPDIR WALL_LIMIT MERGE_POLICY_JSON
 # Path-kind helpers (pmp_path_is_*) removed with product_paths lane reject (5d23292bb);
 # do not export -f names that are no longer functions — that aborts the whole batch.
 export -f classify_one gh_t fetch_latest_bot_body _emit_pr_json _apply_merge_lane \
-    pec_decide_emoji pmp_classify pmp_action_for_lane pmp_load_policy \
+    pec_decide_emoji pec_gate_draft_blocked pec_labels_csv_has \
+    pec_blocked_upstream_action pec_blocked_upstream_dep_from_body \
+    pmp_classify pmp_action_for_lane pmp_load_policy \
     pmp_default_policy_json \
     _gh_check_signals _fetch_review_signals _bot_body_findings_clean \
     pec_count_chip_unresolved_threads
