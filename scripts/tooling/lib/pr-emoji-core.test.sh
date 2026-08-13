@@ -393,6 +393,29 @@ eq "estate hold" "$(pec_estate_code_from_emoji '🛑')" "babysit.hold"
 eq "worst 🔧 vs 🧹" "$(pec_worst_emoji "🔧" "🧹")" "🔧"
 eq "strip 🧹" "$(pec_strip_leading_emojis "🧹PR #941: foo")" "PR #941: foo"
 
+# #127 draft / blocked-upstream gates (never invent ✅)
+eq "labels has blocked-upstream" \
+    "$(pec_labels_csv_has "enhancement|status:blocked-upstream|area:cli" "status:blocked-upstream" && echo yes || echo no)" "yes"
+eq "labels miss blocked-upstream" \
+    "$(pec_labels_csv_has "enhancement|area:cli" "status:blocked-upstream" && echo yes || echo no)" "no"
+eq "dep from body blocked on #1473" \
+    "$(pec_blocked_upstream_dep_from_body "blocked on tiann/hapi#1473 before acceptance")" "#1473"
+eq "dep from body missing" \
+    "$(pec_blocked_upstream_dep_from_body "no blocker here" | wc -c | tr -d ' ')" "0"
+GATE_DRAFT="$(pec_gate_draft_blocked true "enhancement" "")"
+eq "draft alone → 📝" "$(printf '%s' "$GATE_DRAFT" | cut -f1)" "📝"
+eq "draft alone → prePr 1" "$(printf '%s' "$GATE_DRAFT" | cut -f3)" "1"
+GATE_BLOCK="$(pec_gate_draft_blocked false "status:blocked-upstream" "blocked on #1473")"
+eq "ready + blocked-upstream → ⚠️" "$(printf '%s' "$GATE_BLOCK" | cut -f1)" "⚠️"
+eq "ready + blocked-upstream → prePr 0" "$(printf '%s' "$GATE_BLOCK" | cut -f3)" "0"
+eq "ready + blocked-upstream names dep" \
+    "$(printf '%s' "$GATE_BLOCK" | cut -f2 | grep -q '#1473' && echo yes || echo no)" "yes"
+GATE_BOTH="$(pec_gate_draft_blocked true "enhancement|status:blocked-upstream" "blocked by #99")"
+eq "draft + blocked-upstream → ⚠️ wins" "$(printf '%s' "$GATE_BOTH" | cut -f1)" "⚠️"
+eq "draft + blocked-upstream → prePr 0" "$(printf '%s' "$GATE_BOTH" | cut -f3)" "0"
+eq "no gate when ready and unlabeled" \
+    "$(pec_gate_draft_blocked false "enhancement" "" | wc -c | tr -d ' ')" "0"
+
 # complete never pings (incl. transition from 🔧)
 eq "ping never on complete" "$(pec_should_ping "🧹" "🔧" "a" "b" 0 100 10 1 || true)" "no"
 eq "ping sticky 🔧 on window" "$(pec_should_ping "🔧" "🔧" "a" "a" 0 100 10 1 || true)" "yes"

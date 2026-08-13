@@ -13,7 +13,8 @@
 #   🔁  CI/bot in flight, or thread/CI data momentarily unavailable — retry
 #   ⚠️  needs work — failing CI, *current* open threads, bot findings, rebase, or closed-unmerged
 #                     (outdated unresolved threads do not count — #847 false ⚠️)
-#   📝  pre-PR — tracked number, no open PR on upstream yet
+#   📝  pre-PR — tracked number, no open PR on upstream yet; OR open draft PR
+#                 (draft must never classify green — heavygee/hapi#127)
 #   🔧  merged — clean up soup/worktree/branch/archive still owed (sticky ping)
 #   🧹  complete — fully cleaned by estate predicates; babysit ended (never ping)
 #   🛑  needs_operator / babysit.hold — human maintainer comment; operator ack only
@@ -447,6 +448,67 @@ pec_decide_emoji() {
         [[ -n "$action" ]] || action="needs attention — run hapi-pr-status"
     fi
     printf '%s\t%s' "$emoji" "$action"
+}
+
+# ---------------------------------------------------------------------------
+# Draft / blocked-upstream gates (before CI/bot green can paint ✅)
+# ---------------------------------------------------------------------------
+
+# pec_labels_csv_has LABELS_CSV NEEDLE → 0 if needle is a pipe/comma-separated entry
+pec_labels_csv_has() {
+    local csv="${1:-}" needle="${2:-}"
+    [[ -n "$csv" && -n "$needle" ]] || return 1
+    local IFS=',|' entry
+    for entry in $csv; do
+        entry="${entry#"${entry%%[![:space:]]*}"}"
+        entry="${entry%"${entry##*[![:space:]]}"}"
+        [[ "$entry" == "$needle" ]] && return 0
+    done
+    return 1
+}
+
+# pec_blocked_upstream_dep_from_body BODY → "#N" or empty
+# Best-effort: "blocked on/by … #N" or owner/repo#N near blocked.
+pec_blocked_upstream_dep_from_body() {
+    local body="${1:-}" dep=""
+    [[ -n "$body" ]] || { printf ''; return 0; }
+    if [[ "$body" =~ [Bb]locked[[:space:]]+(on|by)[[:space:]]+[^[:digit:]#]{0,80}#([0-9]+) ]]; then
+        dep="#${BASH_REMATCH[2]}"
+    elif [[ "$body" =~ [Bb]locked[[:space:]]+(on|by)[[:space:]]+([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+) ]]; then
+        dep="${BASH_REMATCH[2]}"
+    fi
+    printf '%s' "$dep"
+}
+
+# pec_blocked_upstream_action [BODY] → statusAction for ⚠️ blocked-upstream
+pec_blocked_upstream_action() {
+    local body="${1:-}" dep
+    dep="$(pec_blocked_upstream_dep_from_body "$body")"
+    if [[ -n "$dep" ]]; then
+        printf 'blocked upstream — wait on %s (status:blocked-upstream)' "$dep"
+    else
+        printf 'blocked upstream (status:blocked-upstream) — known dependency; not green'
+    fi
+}
+
+# pec_gate_draft_blocked DRAFT LABELS_CSV [BODY]
+# Prints "emoji\taction\tprePr" when a gate fires; empty if no gate.
+# Precedence: status:blocked-upstream (⚠️, prePr=0) beats draft alone (📝, prePr=1).
+pec_gate_draft_blocked() {
+    local draft="${1:-0}" labels_csv="${2:-}" body="${3:-}"
+    local is_draft=0
+    case "${draft,,}" in
+        1|true|yes) is_draft=1 ;;
+    esac
+    if pec_labels_csv_has "$labels_csv" "status:blocked-upstream"; then
+        printf '%s\t%s\t%s' "⚠️" "$(pec_blocked_upstream_action "$body")" "0"
+        return 0
+    fi
+    if [[ "$is_draft" -eq 1 ]]; then
+        printf '%s\t%s\t%s' "📝" "draft PR — not ready for green; mark ready when unblocked" "1"
+        return 0
+    fi
+    printf ''
 }
 
 # ---------------------------------------------------------------------------
