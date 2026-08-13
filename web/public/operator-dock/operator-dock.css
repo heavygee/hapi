@@ -115,9 +115,24 @@
 .opdock-foot {
   pointer-events: auto;
 }
-.opdock-stage { position: absolute; inset: 0; }
-.opdock-shot { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.opdock-draw { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+.opdock-stage { position: absolute; inset: 0; pointer-events: none; }
+.opdock-shot {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+  pointer-events: none;
+}
+/* #154: do not cover Cancel/Send — Quest WebView canvases steal laser hits
+ * even when a higher z-index foot paints on top. Keep draw clear of .opdock-foot. */
+.opdock-draw {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  bottom: 140px;
+  width: 100%;
+  height: auto;
+  cursor: crosshair;
+  touch-action: none;
+  pointer-events: auto;
+  z-index: 1;
+}
 
 .opdock-toolbar {
   position: absolute;
@@ -155,7 +170,10 @@
            max(12px, env(safe-area-inset-left));
   background: linear-gradient(to top, rgba(6, 8, 14, 0.95), rgba(6, 8, 14, 0.0));
   display: flex; flex-direction: column; gap: 8px;
-  z-index: 2;
+  /* #154: above .opdock-draw; manipulation so Quest laser/touch lands on Cancel/Send */
+  z-index: 20;
+  pointer-events: auto;
+  touch-action: manipulation;
 }
 .opdock-interim { min-height: 16px; color: #a5b4fc; font-size: 13px; font-style: italic; }
 .opdock-listening {
@@ -179,7 +197,18 @@
   padding: 10px 12px; font: 14px/1.4 ui-sans-serif, system-ui, sans-serif;
 }
 .opdock-actions { display: flex; justify-content: flex-start; flex-wrap: wrap; gap: 10px; }
-.opdock-btn2 { border: none; cursor: pointer; font-size: 15px; font-weight: 600; padding: 10px 20px; border-radius: 10px; }
+.opdock-btn2 {
+  border: none; cursor: pointer; font-size: 15px; font-weight: 600;
+  padding: 12px 22px; border-radius: 10px;
+  /* #154: Quest laser / touch plate — not a skinny text chip */
+  min-height: 48px;
+  min-width: 48px;
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
 .opdock-cancel { background: rgba(255, 255, 255, 0.14); color: #e5e7eb; }
 /* #139: secondary credential CTA next to primary Done */
 .opdock-secondary { background: rgba(255, 255, 255, 0.14); color: #e5e7eb; }
