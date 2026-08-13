@@ -285,7 +285,7 @@
     inp.setAttribute('autocomplete', 'off');
     inp.setAttribute('autocapitalize', 'off');
     inp.placeholder = 'Gate secret';
-    if (reason === 'rejected') inp.value = getSecret();
+    // #158: never prefill known-bad — Quest paste into dotted field often fails to replace.
     toolSheet.appendChild(inp);
     var actions = $('div', 'opdock-secret-actions');
     var save = $('button', 'opdock-btn2 opdock-send', 'Save');
@@ -1921,7 +1921,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.11.7', // x-release-please-version
+    _version: '0.11.8', // x-release-please-version
     openCluster: function () { return openCluster(); },
     _stripRawJsonForDisplay: stripRawJsonForDisplay,
     _summarizeContextJson: summarizeContextJson,
