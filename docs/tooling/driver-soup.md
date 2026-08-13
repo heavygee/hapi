@@ -133,7 +133,15 @@ Rule file for agents: canonical source `scripts/tooling/cursor-rules/hapi-driver
 
 **To put a PR worktree on `:3006` instead of soup:** operator runs `hapi-use-worktree ~/coding/hapi/worktrees/<name>` (not the usual daily-driver path).
 
-### Rebuild (does not restart hub by default)
+### Rebuild (patient hub+runner restart when hub/cli/shared change)
+
+```bash
+hapi-driver-rebuild --build-web --verify
+```
+
+By default, a **successful** promote that touches `hub/`, `cli/`, or `shared/` chains into **patient `hapi-restart-hub`** (hub + runner) — same drain contract as a manual restart. Web-only remats skip restart (hard-reload dogfood). Opt out: `HAPI_DRIVER_NO_RESTART=1`.
+
+Does **not** swing `hapi-active` (that is `--activate` / `hapi-use-worktree`).
 
 ```bash
 hapi-driver-rebuild                 # merge from manifest
