@@ -55,7 +55,7 @@ export function isHapiRunnerProcess(pid: number): boolean {
   if (isWindows()) {
     const result = spawn.sync('wmic', ['process', 'where', `ProcessId=${pid}`, 'get', 'CommandLine'], { stdio: 'pipe' });
     if (result.error) {
-      return true;
+        return false;
     }
     if (result.status !== 0) {
       return isProcessAlive(pid);
