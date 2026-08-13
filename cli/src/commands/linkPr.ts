@@ -5,6 +5,7 @@ import { configuration } from '@/configuration'
 import { getAuthToken } from '@/api/auth'
 import { buildHubRequestHeaders } from '@/api/hubExtraHeaders'
 import { HAPI_SESSION_ID_ENV } from '@/agent/hapiSessionEnv'
+import { initializeToken } from '@/ui/tokenInit'
 import type { CommandDefinition } from './types'
 
 function authHeaders() {
@@ -33,10 +34,13 @@ export const linkPrCommand: CommandDefinition = {
         const input = commandArgs[0]
         if (!input || commandArgs.includes('--help') || commandArgs.includes('-h')) {
             console.log('Usage: hapi link-pr <url|owner/repo#N>')
-            console.log('Requires HAPI_SESSION_ID (exported into agent shells) and CLI_API_TOKEN.')
+            console.log(`Requires ${HAPI_SESSION_ID_ENV} (exported into agent shells).`)
+            console.log('Auth: CLI_API_TOKEN env or ~/.hapi/settings.json (hapi auth login).')
             console.log('Hub setting githubPrAwareness must be enabled.')
             process.exit(input ? 0 : 2)
         }
+
+        await initializeToken()
 
         const sessionId = process.env[HAPI_SESSION_ID_ENV]?.trim()
         if (!sessionId) {
