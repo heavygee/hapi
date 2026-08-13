@@ -88,6 +88,7 @@ eq "worst ? vs ⚠️" "$(pec_worst_emoji "?" "⚠️")" "?"
 eq "worst ✅ vs 📝" "$(pec_worst_emoji "✅" "📝")" "✅"
 eq "worst 🛑 vs ⚠️" "$(pec_worst_emoji "🛑" "⚠️")" "🛑"
 eq "worst ⚠️ vs 🛑" "$(pec_worst_emoji "⚠️" "🛑")" "🛑"
+eq "worst ⚠️ vs 🔧" "$(pec_worst_emoji "⚠️" "🔧")" "⚠️"
 eq "worst 🛑 vs ?" "$(pec_worst_emoji "🛑" "?")" "🛑"
 
 eq "leading emoji ⚠️" "$(pec_leading_emoji "⚠️PR #1: x")" "⚠️"

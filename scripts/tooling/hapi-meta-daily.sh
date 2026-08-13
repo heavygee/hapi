@@ -1315,14 +1315,27 @@ main() {
         local emojis_w=() combined_w
         for p in $prs; do
             local crepo_w="${SESS_PR_REPO[$sid8:$p]:-${PR_REPO[$p]:-$UPSTREAM_REPO}}"
-            emojis_w+=("${PR_BY_REPO_EMOJI[$crepo_w#$p]:-${PR_EMOJI[$p]:-?}}")
+            # Prefer session-loop emoji (hold overlay already applied). Fall back
+            # to classifier + pec_hold_overlay so an unacked 🛑 cannot look like 🔧
+            # and join/clear a merge wave (Codex P1 on #124).
+            local emoji_w="${SESS_PR_EMOJI[$sid8:$p]:-}"
+            if [[ -z "$emoji_w" ]]; then
+                emoji_w="${PR_BY_REPO_EMOJI[$crepo_w#$p]:-${PR_EMOJI[$p]:-?}}"
+                emoji_w="$(pec_hold_overlay_emoji "$emoji_w" "$new_state" "$crepo_w" "$p")"
+            fi
+            emojis_w+=("$emoji_w")
         done
         combined_w="$(md_combined_emoji "${emojis_w[@]}")"
         [[ "$combined_w" == "🔧" ]] || continue
         # One member row per PR on this session that is merged.
         for p in $prs; do
             local crepo_w="${SESS_PR_REPO[$sid8:$p]:-${PR_REPO[$p]:-$UPSTREAM_REPO}}"
-            [[ "${PR_BY_REPO_EMOJI[$crepo_w#$p]:-${PR_EMOJI[$p]:-}}" == "🔧" ]] || continue
+            local emoji_wp="${SESS_PR_EMOJI[$sid8:$p]:-}"
+            if [[ -z "$emoji_wp" ]]; then
+                emoji_wp="${PR_BY_REPO_EMOJI[$crepo_w#$p]:-${PR_EMOJI[$p]:-?}}"
+                emoji_wp="$(pec_hold_overlay_emoji "$emoji_wp" "$new_state" "$crepo_w" "$p")"
+            fi
+            [[ "$emoji_wp" == "🔧" ]] || continue
             local reason_w clean_json=false
             if reason_w="$(mw_wave_member_clean "$manifest_text" "${SESS_PATH[$sid8]:-}" "$p")"; then
                 clean_json=true

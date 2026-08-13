@@ -815,7 +815,7 @@ layers:
   # Soup union: driver/fleet-runner-upgrade (merged onto live soup tip).
   # Upstream PR branch: estate/fleet-runner-upgrade @ upstream/main (cooling off).
   # Worktree: ~/coding/hapi/worktrees/estate-fleet-runner-upgrade
-  # Tip: aa5a218d5 (origin/driver/fleet-runner-upgrade); driver soup @ bcd0a6b17
+  # Tip: 5301ae0b6 (origin/driver/fleet-runner-upgrade); driver soup pending remat
   - branch: driver/fleet-runner-upgrade
 
   # tiann/hapi#1516 — display_links MCP + CLI fallback + tappable SessionChat card.

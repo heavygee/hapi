@@ -797,6 +797,70 @@ check "wave no-tooling-id: no unlock to tooling" "! grep -q '^meta-tool' <<<\"\$
 check "wave no-tooling-id: stay ready" "jq -e '.wave.status == \"ready\"' '$WORK/state.json' >/dev/null"
 check "wave no-tooling-id: hints env var" "grep -q 'HAPI_META_TOOLING_SESSION_ID' <<<\"\$out\""
 
+# Unacked operator hold on a merged PR must not join/clear the wave (Codex P1).
+rm -f "$WORK/state.json" "$WORK/pings.log" "$WORK/events.log"
+cat >"$WORK/gh" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+if [[ "$args" == *"pr list"* && "$args" == *"--state open"* ]]; then
+    exit 0
+fi
+if [[ "$args" == *"pr list"* && "$args" == *"merged"* ]]; then
+    printf '300\tfix: shipped thing\t2026-07-24T02:52:06Z\n'; exit 0
+fi
+if [[ "$args" == *"issues/300/comments"* ]]; then
+    cat <<'JSON'
+[{"id":9001,"user":{"login":"tiann","type":"User"},"body":"hold — do not remat yet","html_url":"https://github.com/tiann/hapi/pull/300#issuecomment-9001","created_at":"2026-08-13T12:00:00Z"}]
+JSON
+    exit 0
+fi
+if [[ "$args" == *"/reviews"* ]]; then
+    echo '[]'; exit 0
+fi
+exit 0
+EOF
+chmod +x "$WORK/gh"
+cat >"$WORK/batch" <<'EOF'
+#!/usr/bin/env bash
+j='{}'
+for a in "$@"; do
+    case "$a" in
+        300) j="$(echo "$j" | jq -c '. + {"300":{emoji:"🔧",action:"MERGED — clean up",prePr:false,merged:true}}')" ;;
+    esac
+done
+echo "$j"
+EOF
+chmod +x "$WORK/batch"
+cat >"$WORK/curl" <<EOF
+#!/usr/bin/env bash
+args="\$*"
+if [[ "\$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
+if [[ "\$args" == *"-X PATCH"* ]]; then echo '{"ok":true}'; exit 0; fi
+if [[ "\$args" == *"-X PUT"* && "\$args" == *"/external-refs"* ]]; then
+    echo '{"ok":true,"externalRefs":[]}'; exit 0
+fi
+if [[ "\$args" == *"/api/system-events"* && "\$args" == *"-X POST"* ]]; then
+    echo "\$args" >> "$WORK/events.log"
+    echo '{"event":{"id":1},"deduped":false}'; exit 0
+fi
+if [[ "\$args" == *"/api/sessions?limit=500"* ]]; then
+cat <<'JSON'
+{"sessions":[
+ {"id":"cccccccc-3333","active":true,"metadata":{"name":"merged but held","path":"/tmp/not-a-worktree","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":300,"url":"https://github.com/tiann/hapi/pull/300","role":"primary","source":"agent","linkedAt":1}]}}
+]}
+JSON
+exit 0
+fi
+echo '{}'; exit 0
+EOF
+chmod +x "$WORK/curl"
+out="$(HAPI_META_TOOLING_SESSION_ID=meta-tooling-9999 run --emit-events 2>&1)" || true
+pings_hold_w="$(cat "$WORK/pings.log" 2>/dev/null || true)"
+check "wave hold: OPERATOR HOLD listed" "grep -q 'OPERATOR HOLD' <<<\"\$out\""
+check "wave hold: no tooling unlock" "! grep -q '^meta-tool' <<<\"\$pings_hold_w\""
+check "wave hold: wave idle or empty members" "jq -e '(.wave.members // []) | length == 0 or .wave.status == \"idle\"' '$WORK/state.json' >/dev/null"
+check "wave hold: not dispatched" "! jq -e '.wave.status == \"dispatched\"' '$WORK/state.json' >/dev/null"
+
 # ============ 19. Sparling estate fence (2026-08-06) — bare #395 must not latch ============
 # Foreign path + bare #NNN title must NEVER classify as tiann/hapi PR or get 🔧 pings.
 rm -f "$WORK/state.json" "$WORK/pings.log"
