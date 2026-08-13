@@ -260,6 +260,37 @@ describe('sessions routes', () => {
         expect(calls).toEqual([externalRefs])
     })
 
+    it('rejects PUT external-refs with two primary GitHub PRs', async () => {
+        const { app } = createApp(createSession(), {
+            githubPrAwarenessEnabled: true
+        })
+
+        const response = await app.request('/api/sessions/session-1/external-refs', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                externalRefs: [
+                    {
+                        kind: 'github_pr',
+                        repo: 'tiann/hapi',
+                        number: 1,
+                        url: 'https://github.com/tiann/hapi/pull/1',
+                        role: 'primary'
+                    },
+                    {
+                        kind: 'github_pr',
+                        repo: 'tiann/hapi',
+                        number: 2,
+                        url: 'https://github.com/tiann/hapi/pull/2',
+                        role: 'primary'
+                    }
+                ]
+            })
+        })
+
+        expect(response.status).toBe(400)
+    })
+
     it('allows PUT empty externalRefs to unlink', async () => {
         const calls: unknown[] = []
         const { app } = createApp(createSession(), {

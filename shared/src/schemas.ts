@@ -121,6 +121,17 @@ export type GithubPrExternalRef = z.infer<typeof GithubPrExternalRefSchema>
 export const ExternalRefSchema = GithubPrExternalRefSchema
 export type ExternalRef = z.infer<typeof ExternalRefSchema>
 
+/** Array boundary: at most one github_pr with role primary. */
+export const ExternalRefsSchema = z.array(ExternalRefSchema).superRefine((refs, ctx) => {
+    if (refs.filter((ref) => ref.kind === 'github_pr' && ref.role === 'primary').length > 1) {
+        ctx.addIssue({
+            code: 'custom',
+            message: 'at most one primary GitHub PR is allowed'
+        })
+    }
+})
+export type ExternalRefs = z.infer<typeof ExternalRefsSchema>
+
 export const MetadataSchema = z.object({
     path: z.string(),
     host: z.string(),
@@ -231,7 +242,7 @@ export const MetadataSchema = z.object({
     // share a modelId.
     piSelectedModel: z.object({ provider: z.string(), modelId: z.string() }).nullable().optional(),
     // Structured session↔contribution links (e.g. GitHub PRs). tiann/hapi#1160.
-    externalRefs: z.array(ExternalRefSchema).optional()
+    externalRefs: ExternalRefsSchema.optional()
 })
 
 export type Metadata = z.infer<typeof MetadataSchema>

@@ -101,3 +101,33 @@ describe('resolveToolAutoApprovalDecision list_peers', () => {
         )).toBeNull()
     })
 })
+
+describe('resolveToolAutoApprovalDecision link_pr', () => {
+    it.each([
+        'link_pr',
+        'happy__link_pr',
+        'hapi_link_pr',
+        'hapi__link_pr',
+        'mcp__hapi__link_pr',
+        'mcp__happy__link_pr',
+        'link pull request'
+    ])('auto-approves the exact HAPI tool name %s', (toolName) => {
+        expect(resolveToolAutoApprovalDecision('default', toolName, 'call-1')).toBe('approved')
+    })
+
+    it('does not approve a different tool whose name only contains link_pr', () => {
+        expect(resolveToolAutoApprovalDecision(
+            'default',
+            'link_pr_write_file',
+            'call-1'
+        )).toBeNull()
+    })
+
+    it('does not approve another tool solely from a link_pr call id', () => {
+        expect(resolveToolAutoApprovalDecision(
+            'default',
+            'dangerous_tool',
+            'link_pr-forged-id'
+        )).toBeNull()
+    })
+})

@@ -5,6 +5,7 @@ import {
     CopilotAgentModeSchema,
     DecryptedMessageSchema,
     ExternalRefSchema,
+    ExternalRefsSchema,
     MachineSchema,
     PermissionModeSchema,
     SessionSchema
@@ -408,7 +409,7 @@ export const ScratchlistEntryUpdateRequestSchema = z.object({
 export type ScratchlistEntryUpdateRequest = z.infer<typeof ScratchlistEntryUpdateRequestSchema>
 
 export const SetExternalRefsRequestSchema = z.object({
-    externalRefs: z.array(ExternalRefSchema)
+    externalRefs: ExternalRefsSchema
 })
 
 export type SetExternalRefsRequest = z.infer<typeof SetExternalRefsRequestSchema>

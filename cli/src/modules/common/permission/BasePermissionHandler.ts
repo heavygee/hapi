@@ -21,12 +21,6 @@ const AUTO_APPROVE_TOOL_NAME_HINTS = [
     'change_title',
     'happy__change_title',
     'hapi_change_title',  // OpenCode MCP tool pattern
-    'link_pr',
-    'happy__link_pr',
-    'hapi_link_pr',
-    'hapi__link_pr',
-    'mcp__hapi__link_pr',
-    'mcp__happy__link_pr',
     'geminireasoning',
     'codexreasoning',
     'think',
@@ -43,14 +37,22 @@ const AUTO_APPROVE_EXACT_TOOL_NAMES = new Set([
     'happy__list_peers',
     'mcp__hapi__list_peers',
     // ACP permission requests often surface MCP tool title, not the snake_case name.
-    'list peer sessions'
+    'list peer sessions',
+    // Exact HAPI link_pr identities only — never substring-match (e.g. link_pr_write_file).
+    'link_pr',
+    'happy__link_pr',
+    'hapi_link_pr',
+    'hapi__link_pr',
+    'mcp__hapi__link_pr',
+    'mcp__happy__link_pr',
+    'link pull request'
 ]);
 // ping_peer / inspect_peer intentionally omitted from always-approve: they can
 // resume+inject into another session or read peer histories, so permission
 // modes must still gate them. Treat both as write-like in read-only so ACP
 // titles such as "Ping Peer Session" / "Inspect Peer Session" also require
 // approval. list_peers is discovery-only and is auto-approved above.
-const AUTO_APPROVE_TOOL_ID_HINTS = ['change_title', 'link_pr', 'save_memory'];
+const AUTO_APPROVE_TOOL_ID_HINTS = ['change_title', 'save_memory'];
 const SENSITIVE_TOOL_NAME_HINTS = [
     'ping_peer',
     'ping peer',

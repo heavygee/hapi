@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ExternalRefSchema, MetadataSchema } from './schemas'
+import { ExternalRefSchema, ExternalRefsSchema, MetadataSchema } from './schemas'
 import {
     buildGithubPrExternalRef,
     formatGithubPrChipLabel,
@@ -127,6 +127,26 @@ describe('MetadataSchema.externalRefs', () => {
         expect(MetadataSchema.safeParse({
             ...base,
             externalRefs: [{ kind: 'github_pr', repo: 'x', number: 1 }]
+        }).success).toBe(false)
+    })
+
+    it('rejects more than one primary GitHub PR', () => {
+        const primaryA = {
+            kind: 'github_pr' as const,
+            repo: 'tiann/hapi',
+            number: 1,
+            url: 'https://github.com/tiann/hapi/pull/1',
+            role: 'primary' as const
+        }
+        const primaryB = {
+            ...primaryA,
+            number: 2,
+            url: 'https://github.com/tiann/hapi/pull/2'
+        }
+        expect(ExternalRefsSchema.safeParse([primaryA, primaryB]).success).toBe(false)
+        expect(MetadataSchema.safeParse({
+            ...base,
+            externalRefs: [primaryA, primaryB]
         }).success).toBe(false)
     })
 })
