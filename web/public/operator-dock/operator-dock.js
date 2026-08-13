@@ -159,27 +159,50 @@
     if (!body || typeof body !== 'object') return '';
     return (typeof body.error === 'string' ? body.error : '').trim();
   }
-  function classifyAuthReject(error) {
+  function classifyAuthReject(error, path) {
     var e = String(error || '').toLowerCase();
+    var p = String(path || '').toLowerCase();
+    if (
+      e.indexOf('missing authorization') !== -1 ||
+      e.indexOf('authorization token') !== -1 ||
+      p.indexOf('/api/ott') !== -1
+    ) return 'hubAuth';
     if (e.indexOf('operator secret required') !== -1 || e.indexOf('secret required') !== -1) return 'mismatch';
     if (e.indexOf('conflict') !== -1) return 'conflict';
     if (e.indexOf('forbidden') !== -1) return 'forbidden';
     return 'unknown';
   }
+  function shouldFailClosedGate(kind) {
+    return kind === 'mismatch' || kind === 'conflict';
+  }
   function authRejectOperatorCopy(status, detail) {
     detail = detail || {};
     var error = (detail.error || '').trim();
-    var kind = classifyAuthReject(error);
     var path = (detail.path || '').trim();
+    var kind = classifyAuthReject(error, path);
     var bits = ['HAPI rejected the inline credential (' + status + ')'];
     if (error) bits.push(error);
     if (path) bits.push(path);
     if (detail.sessionId) bits.push('session ' + detail.sessionId);
-    if (kind === 'mismatch') bits.push('Stored gate secret does not match. Paste it in the dock sheet.');
+    if (kind === 'hubAuth') bits.push('Hub login/JWT required — sign in to HAPI (not the operator gate secret).');
+    else if (kind === 'mismatch') bits.push('Stored gate secret does not match. Paste it in the dock sheet.');
     else if (kind === 'conflict') bits.push('Primary and legacy secret headers differ. Paste one secret in the dock sheet.');
     else if (kind === 'forbidden') bits.push('Proxy refused this path or session — not an unloaded hub secret.');
     else bits.push('Paste the gate secret in the dock sheet.');
     return bits.join(' — ');
+  }
+  var gateLocked = false;
+  function isGateLocked() { return !!gateLocked; }
+  function setGateLocked(locked) {
+    gateLocked = !!locked;
+    if (!dock) return;
+    if (gateLocked) {
+      dock.classList.add('opdock--gate-locked');
+      closeCluster();
+      if (overlay) closeOverlay();
+    } else {
+      dock.classList.remove('opdock--gate-locked');
+    }
   }
   function readRejectDetail(res, path, sessionId) {
     return res.json().catch(function () { return {}; }).then(function (body) {
@@ -209,10 +232,13 @@
     return probeSecret(v).then(function (probe) {
       if (inp) inp.disabled = false;
       if (!shouldWriteSecretAfterProbe(probe)) {
+        var rejectKind = classifyAuthReject(probe.error, probe.path);
+        if (shouldFailClosedGate(rejectKind)) setGateLocked(true);
         toast(authRejectOperatorCopy(probe.status, probe), 'err');
         return false;
       }
       setSecret(v);
+      setGateLocked(false);
       closeToolSheet();
       if (!probe.ok && probe.status >= 500) {
         toast('Host probe failed (' + probe.status + ') — secret stored. Retry send.', 'err');
@@ -227,9 +253,17 @@
   function onAuthRejected(status, detail) {
     // shouldClearStoredSecretOnStatus is always false (#115) — never wipe; open the sheet.
     if (shouldClearStoredSecretOnStatus(status)) return;
+    detail = detail || {};
+    var kind = classifyAuthReject(detail.error, detail.path);
     hideRecordLabel();
+    if (shouldFailClosedGate(kind)) {
+      setGateLocked(true);
+      if (overlay) closeOverlay();
+    }
     toast(authRejectOperatorCopy(status, detail), 'err');
-    openSecretSheet({ reason: 'rejected', detail: detail || {} });
+    // Gate mismatch/conflict: recover via sheet. Hub JWT 401 is not a gate-secret paste.
+    if (kind === 'hubAuth') return;
+    openSecretSheet({ reason: 'rejected', detail: detail });
   }
   function openSecretSheet(opts) {
     opts = opts || {};
@@ -358,10 +392,63 @@
   }
 
   // --- screenshot (html2canvas) -------------------------------------------------------------
+  // Some WebViews (Quest / mobile) refuse cssRules on linked stylesheets, so html2canvas
+  // keeps only inline <style> and drops external sheets → unstyled chrome and white dock
+  // boxes. Fetch same-origin CSS and inject in onclone. Also omit .opdock chrome from the
+  // shot, and hide closed <details> bodies (html2canvas paints them). Upstream: #149.
+  function isOpdockChrome(el) {
+    if (!el || !el.classList) return false;
+    if (el.classList.contains('opdock') || el.classList.contains('opdock-btn') ||
+        el.classList.contains('opdock-sat') || el.classList.contains('opdock-label') ||
+        el.classList.contains('opdock-toast') || el.classList.contains('opdock-overlay') ||
+        el.classList.contains('opdock-fan-hit')) return true;
+    try { return !!(el.closest && el.closest('.opdock')); } catch (e) { return false; }
+  }
+
+  function fetchSameOriginStylesheets() {
+    var links = Array.prototype.slice.call(document.querySelectorAll('link[rel="stylesheet"]'));
+    return Promise.all(links.map(function (link) {
+      var href = link.href;
+      if (!href) return Promise.resolve('');
+      try {
+        if (new URL(href, location.href).origin !== location.origin) return Promise.resolve('');
+      } catch (e) {
+        return Promise.resolve('');
+      }
+      return fetch(href, { credentials: 'same-origin', cache: 'force-cache' })
+        .then(function (r) { return r.ok ? r.text() : ''; })
+        .catch(function () { return ''; });
+    }));
+  }
+
   function captureScreenshot() {
     if (typeof html2canvas !== 'function') return Promise.resolve(null);
     var root = (cfg.captureRoot && cfg.captureRoot.nodeType) ? cfg.captureRoot : document.body;
-    return html2canvas(root, { logging: false, useCORS: true, scale: Math.min(window.devicePixelRatio || 1, 2) })
+    return fetchSameOriginStylesheets().then(function (cssTexts) {
+      return html2canvas(root, {
+        logging: false,
+        useCORS: true,
+        scale: Math.min(window.devicePixelRatio || 1, 2),
+        ignoreElements: isOpdockChrome,
+        onclone: function (doc) {
+          try {
+            cssTexts.forEach(function (css) {
+              if (!css) return;
+              var s = doc.createElement('style');
+              s.setAttribute('data-opdock-capture-css', '1');
+              s.textContent = css;
+              (doc.head || doc.documentElement).appendChild(s);
+            });
+            // html2canvas paints closed <details> bodies → ghost-stacked Monitor lozenges
+            doc.querySelectorAll('details:not([open])').forEach(function (d) {
+              Array.prototype.forEach.call(d.children, function (c) {
+                if (c.tagName !== 'SUMMARY') c.style.display = 'none';
+              });
+            });
+          } catch (e) {}
+        },
+      });
+    })
       .then(function (canvas) { return canvas.toDataURL('image/jpeg', 0.9); })
       .catch(function () { return null; });
   }
@@ -1357,11 +1444,13 @@
 
   function toggleMic(providedShot) {
     // Tap = voice. If markup is open, keep drawings and record on top.
+    if (isGateLocked()) { openSecretSheet({ reason: 'rejected' }); return 'blocked'; }
     if (recording) { finishRecording(); return 'stopped'; }
     return startRecording(providedShot || null) ? 'started' : 'blocked';
   }
 
   function beginMarkup(providedShot) {
+    if (isGateLocked()) { openSecretSheet({ reason: 'rejected' }); return; }
     if (overlay) return;
     strokes = [];
     var shot = providedShot || (recording ? pendingShot : null);
@@ -1545,7 +1634,7 @@
     if (btn) btn.setAttribute('aria-expanded', 'false');
   }
   function openCluster() {
-    if (!ready || !dock) return false;
+    if (!ready || !dock || isGateLocked()) return false;
     // #143: never fan tools behind an open sheet.
     closeToolSheet();
     var cluster = dock.querySelector('.opdock-cluster');
@@ -1561,6 +1650,11 @@
     if (toolSheet) {
       closeToolSheet();
       if (dock.classList.contains('opdock--cluster-open')) closeCluster();
+      return;
+    }
+    // #155: known-bad gate — re-open sheet; do not fan markup/mic.
+    if (isGateLocked()) {
+      openSecretSheet({ reason: 'rejected' });
       return;
     }
     // #115: hub always toggles the fan (markup + mic). Mic satellite starts/stops record.
@@ -1780,13 +1874,31 @@
         var nativePresent = hasNativeHost();
         if (!getSecret() && !nativePresent && !unlock.shouldPrompt) return;
         render();
-        if (!getSecret()) openSecretSheet({ reason: 'missing' });
+        if (!getSecret()) {
+          // #155: unlock without a matching secret — hide H / block tools until probe-OK save.
+          setGateLocked(true);
+          openSecretSheet({ reason: 'missing' });
+          return;
+        }
+        // Existing stored secret: probe once so a known-bad gate fails closed before markup.
+        probeSecret(getSecret()).then(function (probe) {
+          if (!probe.ok && probeStatusMeansSecretRejected(probe.status)) {
+            var kind = classifyAuthReject(probe.error, probe.path);
+            if (shouldFailClosedGate(kind) || kind === 'unknown') {
+              setGateLocked(true);
+              openSecretSheet({ reason: 'rejected', detail: probe });
+              toast(authRejectOperatorCopy(probe.status, probe), 'err');
+            } else if (kind === 'hubAuth') {
+              toast(authRejectOperatorCopy(probe.status, probe), 'err');
+            }
+          }
+        });
       });
   }
 
   window.HapiInline = {
     init: init,
-    _version: '0.11.4', // x-release-please-version
+    _version: '0.11.6', // x-release-please-version
     openCluster: function () { return openCluster(); },
     _stripRawJsonForDisplay: stripRawJsonForDisplay,
     _summarizeContextJson: summarizeContextJson,

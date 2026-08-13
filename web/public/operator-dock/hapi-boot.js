@@ -1,6 +1,10 @@
 /* HAPI host init for vendored operator-dock.js. App-owned; not the dock.
  * Visibility: /opmic knock OR localStorage hapi-operator-dock=true (Settings).
  * Keep in sync with web/src/lib/operator-dock-pref.ts
+ *
+ * Slice D / v0.11.6: package fail-closes H+fan when gate secret missing or
+ * known-bad (opdock--gate-locked). Host still boots the dock so the secret
+ * sheet can recover; Settings enable probes before setting the pref.
  */
 (function () {
     var PREF_KEY = 'hapi-operator-dock'

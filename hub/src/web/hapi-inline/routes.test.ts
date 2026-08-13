@@ -17,7 +17,7 @@ function enabledConfig(overrides: Partial<HapiInlineHostConfig> = {}): HapiInlin
         machineId: MACHINE,
         session: '217719f7-479c-4250-99a6-ee15cbc1c6cc',
         appId: 'hapi-web',
-        build: 'v0.11.4',
+        build: 'v0.11.6',
         spawnAgent: 'cursor',
         spawnYolo: true,
         ...overrides
@@ -113,8 +113,8 @@ describe('hapi-inline host routes', () => {
         expect(res.status).toBe(401)
         const body = await res.json() as { error: string, code: string }
         expect(body.code).toBe('hub_auth_missing')
-        expect(body.error.toLowerCase()).toContain('re-login')
-        expect(body.error.toLowerCase()).toContain('gate')
+        expect(body.error.toLowerCase()).toContain('missing authorization token')
+        expect(body.error.toLowerCase()).toContain('not the operator gate secret')
         expect(body.error).not.toMatch(/operator secret required/i)
     })
 
