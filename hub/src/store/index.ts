@@ -14,6 +14,8 @@ import { UserStore } from './userStore'
 import { UsageStore } from './usageStore'
 import { WorkGraphStore } from './workGraphStore'
 import { bindReenrollGrantDb } from '../utils/reenrollGrant'
+import { scanUnverifiedPeerMessages as scanUnverifiedPeerMessagesInDb } from './provenanceMessageScan'
+import type { ProvenanceMessageScanOptions } from '@hapi/protocol/provenanceMessageAudit'
 
 export type {
     StoredMachine,
@@ -81,6 +83,10 @@ export class Store {
      */
     get dbPath(): string {
         return this._dbPath
+    }
+
+    scanUnverifiedPeerMessages(namespace: string, options: ProvenanceMessageScanOptions) {
+        return scanUnverifiedPeerMessagesInDb(this.db, namespace, options)
     }
 
     constructor(dbPath: string) {
