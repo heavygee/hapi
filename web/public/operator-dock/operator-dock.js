@@ -47,6 +47,9 @@
   var longPressTimer = null, longPressFired = false;
   var mediaRecorder = null, mediaStream = null, mediaChunks = [], mediaMime = '', mediaStopWait = null;
   var toolSheet = null;
+  // #154: keep draw surface clear of Cancel/Send (match .opdock-draw bottom in CSS).
+  var FOOT_CLEAR_PX = 140;
+  var markupOpening = false;
 
   function $(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   function getSecret() {
@@ -873,10 +876,17 @@
     var actions = $('div', 'opdock-actions');
     var cancel = $('button', 'opdock-btn2 opdock-cancel', 'Cancel');
     var send = $('button', 'opdock-btn2 opdock-send', 'Send ▶');
+    cancel.type = 'button';
+    send.type = 'button';
     // #133: Send unusable until shotImg decode/load — blocks race that flattens #111 + strokes.
     send.disabled = true;
-    cancel.addEventListener('click', function () { closeOverlay(); });
-    send.addEventListener('click', function () { doSend(''); });
+    // #154: stopPropagation so Quest laser hits are not stolen by draw/hub siblings.
+    cancel.addEventListener('click', function (e) {
+      e.preventDefault(); e.stopPropagation(); closeOverlay();
+    });
+    send.addEventListener('click', function (e) {
+      e.preventDefault(); e.stopPropagation(); doSend('');
+    });
     actions.appendChild(cancel); actions.appendChild(send);
     foot.appendChild(actions);
     overlay.appendChild(foot);
@@ -924,7 +934,9 @@
   function sizeCanvas() {
     if (!drawCanvas) return;
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
-    var w = window.innerWidth, h = window.innerHeight;
+    // #154: height must match CSS bottom inset — inline 100vh would re-cover Cancel.
+    var footClear = FOOT_CLEAR_PX;
+    var w = window.innerWidth, h = Math.max(0, window.innerHeight - footClear);
     drawCanvas.style.width = w + 'px'; drawCanvas.style.height = h + 'px';
     drawCanvas.width = Math.round(w * dpr); drawCanvas.height = Math.round(h * dpr);
     drawCtx = drawCanvas.getContext('2d'); drawCtx.scale(dpr, dpr);
@@ -979,7 +991,8 @@
     var out = document.createElement('canvas'); out.width = Math.round(w * dpr); out.height = Math.round(h * dpr);
     var ctx = out.getContext('2d');
     ctx.drawImage(shotImg, 0, 0, out.width, out.height);
-    if (drawCanvas) ctx.drawImage(drawCanvas, 0, 0, out.width, out.height);
+    // #154: draw canvas is shorter than the viewport — paste 1:1 at top, do not stretch into foot.
+    if (drawCanvas) ctx.drawImage(drawCanvas, 0, 0);
     return out.toDataURL('image/jpeg', 0.9).split(',')[1];
   }
 
@@ -1452,18 +1465,28 @@
   function beginMarkup(providedShot) {
     if (isGateLocked()) { openSecretSheet({ reason: 'rejected' }); return; }
     if (overlay) return;
+    // #154: serialize capture — Quest triple-taps otherwise race and look "dead".
+    if (markupOpening) return;
     strokes = [];
     var shot = providedShot || (recording ? pendingShot : null);
     if (shot) {
       openOverlay(shot);
       return;
     }
+    markupOpening = true;
+    setBtnState('markup');
     captureScreenshot().then(function (next) {
+      markupOpening = false;
       if (!next) {
         toast('Screenshot capture failed — nothing to annotate', 'err');
+        setBtnState('idle');
         return;
       }
       openOverlay(next);
+    }).catch(function () {
+      markupOpening = false;
+      setBtnState('idle');
+      toast('Screenshot capture failed — nothing to annotate', 'err');
     });
   }
 
@@ -1898,7 +1921,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.11.6', // x-release-please-version
+    _version: '0.11.7', // x-release-please-version
     openCluster: function () { return openCluster(); },
     _stripRawJsonForDisplay: stripRawJsonForDisplay,
     _summarizeContextJson: summarizeContextJson,
