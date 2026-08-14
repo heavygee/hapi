@@ -24,6 +24,16 @@ export const OPERATOR_DOCK_GENERIC_ALERT =
 const UNLOCK_PATHS = new Set(['/opmic', '/mic', '/unlock'])
 const PROBE_PATH = '/hapi/operator/sessions'
 
+/** Quest password widgets often fill the native field without React onChange. Prefer DOM value. */
+export function readOperatorDockGateValue(
+    input: { value: string } | null | undefined,
+    reactDraft = ''
+): string {
+    const fromDom = String(input?.value ?? '').trim()
+    if (fromDom) return fromDom
+    return String(reactDraft || '').trim()
+}
+
 export type OperatorDockProbeKind =
     | 'ok'
     | 'mismatch'
