@@ -237,7 +237,7 @@ describe('hapi-inline host routes', () => {
     })
 
     it('POST /api/stt is operator-gated and forwards audio_b64 with hub JWT not the gate secret', async () => {
-        const seen: Array<{ url: string, auth: string | null, provider: FormDataEntryValue | null }> = []
+        const seen: Array<{ url: string, auth: string | null, provider: string | null }> = []
         const fetchImpl: typeof fetch = (async (input: string | URL | Request, init?: RequestInit) => {
             const url = String(input)
             if (url.endsWith('/api/auth')) {
@@ -246,10 +246,11 @@ describe('hapi-inline host routes', () => {
             if (url.includes('/api/voice/transcription')) {
                 const headers = new Headers(init?.headers)
                 const form = init?.body as FormData
+                const providerRaw = form?.get('provider')
                 seen.push({
                     url,
                     auth: headers.get('authorization'),
-                    provider: form?.get('provider') ?? null
+                    provider: typeof providerRaw === 'string' ? providerRaw : null
                 })
                 expect(headers.get('x-hapi-inline-secret')).toBeNull()
                 return new Response(JSON.stringify({ text: 'hello quest', language: 'en' }), { status: 200 })
