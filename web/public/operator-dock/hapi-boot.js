@@ -105,7 +105,48 @@
         probeThenInit()
     }
 
+    var sttJwt = ''
+    var origFetch = window.fetch.bind(window)
+    function sttPath(url) {
+        try {
+            var raw = String(url || '')
+            return (raw.charAt(0) === '/' ? raw.split('?')[0] : new URL(raw, location.origin).pathname) === '/api/stt'
+        } catch (e) {
+            return false
+        }
+    }
+    function resolveSttJwt() {
+        if (sttJwt) return Promise.resolve(sttJwt)
+        var access = ''
+        try { access = localStorage.getItem('hapi_access_token::' + location.origin) || '' } catch (e) {}
+        if (!access) return Promise.resolve('')
+        return origFetch('/api/auth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ accessToken: access })
+        }).then(function (r) { return r.ok ? r.json() : {} }).then(function (j) {
+            sttJwt = (j && j.token) || ''
+            return sttJwt
+        }).catch(function () { return '' })
+    }
+    window.fetch = function (input, init) {
+        var url = typeof input === 'string' ? input : (input && input.url) || ''
+        if (!sttPath(url)) return origFetch(input, init)
+        return resolveSttJwt().then(function (jwt) {
+            if (!jwt) {
+                return new Response(JSON.stringify({
+                    ok: false,
+                    error: 'Sign in to HAPI for voice. The gate secret unlocks the dock; STT uses your HAPI login.'
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+            }
+            var headers = new Headers((init && init.headers) || {})
+            headers.delete('X-Hapi-Inline-Secret')
+            headers.delete('X-Operator-Mic-Secret')
+            headers.set('Authorization', 'Bearer ' + jwt)
+            return origFetch(input, Object.assign({}, init || {}, { headers: headers }))
+        })
+    }
+
     window.HapiInlineHost = { boot: boot }
     boot()
-    // STT JWT attach is web App (operator-dock-stt-auth.ts), not this file.
 })()
