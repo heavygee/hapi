@@ -1643,7 +1643,11 @@
     });
   }
   function spawnHubBody() {
-    var body = { directory: cfg.projectPath, agent: cfg.spawnAgent || 'cursor' };
+    var body = {
+      directory: cfg.projectPath,
+      agent: cfg.spawnAgent || 'cursor',
+      model: cfg.spawnModel || 'auto',
+    };
     if (cfg.spawnYolo !== false) body.yolo = true;
     return body;
   }
@@ -1937,6 +1941,7 @@
         cfg.projectPath = om.projectPath || null;
         cfg.machineId = om.machineId || null;
         cfg.spawnAgent = om.spawnAgent || 'cursor';
+        cfg.spawnModel = om.spawnModel || 'auto';
         cfg.spawnYolo = om.spawnYolo !== false;
         cfg.sttUrl = om.sttUrl || '/api/stt';
         if (!cfg.build) cfg.build = om.build || null;
@@ -1992,7 +1997,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.12.0', // x-release-please-version
+    _version: '0.12.1', // x-release-please-version
     openCluster: function () { return openCluster(); },
     _stripRawJsonForDisplay: stripRawJsonForDisplay,
     _summarizeContextJson: summarizeContextJson,
