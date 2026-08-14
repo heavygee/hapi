@@ -253,7 +253,38 @@
 }
 .opdock-replies-unread[hidden] { display: none !important; }
 .opdock-replies-close { background: none; border: none; color: #9ca3af; font-size: 15px; cursor: pointer; }
-.opdock-replies-body { padding: 10px 12px; overflow-y: auto; font-size: 13px; line-height: 1.4; }
+.opdock-replies-body { padding: 10px 12px; overflow-y: auto; font-size: 13px; line-height: 1.4; flex: 1; min-height: 0; }
+.opdock-replies-compose {
+  flex-shrink: 0;
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  padding: 8px 10px 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: #16181f;
+  pointer-events: auto;
+}
+.opdock-replies-compose textarea {
+  flex: 1;
+  min-height: 40px;
+  max-height: 96px;
+  resize: vertical;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: #0f1117;
+  color: #e5e7eb;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.35;
+  padding: 8px 10px;
+}
+.opdock-replies-compose textarea:focus { outline: 2px solid #7c3aed; outline-offset: 0; }
+.opdock-replies-compose .opdock-send {
+  flex-shrink: 0;
+  min-width: 52px;
+  min-height: 40px;
+  padding: 8px 12px;
+}
 .opdock-replies--min {
   right: max(80px, calc(env(safe-area-inset-right) + 72px));
   bottom: max(16px, env(safe-area-inset-bottom));
@@ -264,6 +295,7 @@
   overflow: visible;
 }
 .opdock-replies--min .opdock-replies-body { display: none; }
+.opdock-replies--min .opdock-replies-compose { display: none; }
 .opdock-replies--min .opdock-replies-head {
   position: relative;
   width: 44px;
