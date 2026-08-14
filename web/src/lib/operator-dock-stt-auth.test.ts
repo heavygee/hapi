@@ -51,7 +51,7 @@ describe('operator dock STT uses HAPI JWT not the gate secret', () => {
     })
 
     it('leaves /hapi proxy fetches alone', async () => {
-        const fetchImpl = vi.fn(async () => new Response('{}', { status: 200 }))
+        const fetchImpl = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => new Response('{}', { status: 200 }))
         await wrapOperatorDockSttRequest(
             '/hapi/operator/sessions',
             { headers: { 'X-Hapi-Inline-Secret': 'gate' } },
