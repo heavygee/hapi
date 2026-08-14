@@ -53,6 +53,7 @@ describe('hapi-inline host routes', () => {
         expect(body.hapiInline.machineId).toBe(MACHINE)
         expect(body.hapiInline.spawnAgent).toBe('cursor')
         expect(body.hapiInline.spawnYolo).toBe(true)
+        expect(body.hapiInline.sttUrl).toBe('/hapi/api/stt')
         expect(JSON.stringify(body)).not.toContain(SECRET)
     })
 
@@ -233,5 +234,46 @@ describe('hapi-inline host routes', () => {
         })
         expect(res.status).toBe(200)
         expect(seen).toEqual([{ directory: PROJECT, agent: 'claude' }])
+    })
+
+    it('POST /api/stt is operator-gated and forwards audio_b64 with hub JWT not the gate secret', async () => {
+        const seen: Array<{ url: string, auth: string | null, provider: FormDataEntryValue | null }> = []
+        const fetchImpl: typeof fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+            const url = String(input)
+            if (url.endsWith('/api/auth')) {
+                return new Response(JSON.stringify({ token: 'hub-jwt' }), { status: 200 })
+            }
+            if (url.includes('/api/voice/transcription')) {
+                const headers = new Headers(init?.headers)
+                const form = init?.body as FormData
+                seen.push({
+                    url,
+                    auth: headers.get('authorization'),
+                    provider: form?.get('provider') ?? null
+                })
+                expect(headers.get('x-hapi-inline-secret')).toBeNull()
+                return new Response(JSON.stringify({ text: 'hello quest', language: 'en' }), { status: 200 })
+            }
+            return new Response('unexpected', { status: 500 })
+        }) as typeof fetch
+        const app = mount(enabledConfig(), fetchImpl)
+        const missing = await app.request('/hapi/api/stt', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ audio_b64: Buffer.from('abc').toString('base64'), mime: 'audio/webm' })
+        })
+        expect(missing.status).toBe(403)
+        const res = await app.request('/hapi/api/stt', {
+            method: 'POST',
+            headers: { ...secretHeaders, 'content-type': 'application/json' },
+            body: JSON.stringify({ audio_b64: Buffer.from('abc').toString('base64'), mime: 'audio/webm' })
+        })
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({ ok: true, text: 'hello quest' })
+        expect(seen).toEqual([{
+            url: 'http://127.0.0.1:3006/api/voice/transcription',
+            auth: 'Bearer hub-jwt',
+            provider: 'openai-compatible'
+        }])
     })
 })
