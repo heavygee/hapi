@@ -38,7 +38,7 @@ const secretHeaders = {
 
 describe('hapi-inline host routes', () => {
     it('stamps public config.build from the vendored pin (mic payload)', () => {
-        expect(loadHapiInlineConfig().build).toBe('v0.12.1')
+        expect(loadHapiInlineConfig().build).toBe('v0.12.2')
     })
 
     it('returns public config without a secret and never includes the secret', async () => {
@@ -54,6 +54,7 @@ describe('hapi-inline host routes', () => {
         expect(body.hapiInline.spawnAgent).toBe('cursor')
         expect(body.hapiInline.spawnYolo).toBe(true)
         expect(body.hapiInline.sttUrl).toBe('/api/stt')
+        expect(body.hapiInline.sttAuth).toBe('hub-jwt')
         expect(JSON.stringify(body)).not.toContain(SECRET)
     })
 

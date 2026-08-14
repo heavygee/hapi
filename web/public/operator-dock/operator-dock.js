@@ -508,9 +508,28 @@
     return { mode: 'warn', text: '⚠️ Voice not supported in this browser' };
   }
 
+  /**
+   * Host STT URL: omit/undefined → '/api/stt' (Jessica). Explicit null/false/'' → disabled (#176).
+   * Never treat JSON null as the hub /api/stt (HAPI JWT 401).
+   */
+  function resolveSttUrl(raw) {
+    if (raw === undefined) return '/api/stt';
+    if (raw === null || raw === false) return null;
+    var s = String(raw).trim();
+    if (!s) return null;
+    return s;
+  }
+
+  /** STT auth: omit → proxy-secret (Jessica). Explicit hub-jwt → Bearer, never gate-secret-only (#176). */
+  function resolveSttAuth(raw) {
+    var s = String(raw || '').trim().toLowerCase();
+    if (s === 'hub-jwt' || s === 'bearer' || s === 'jwt') return 'hub-jwt';
+    return 'proxy-secret';
+  }
+
   /** True when we should POST recorded audio to the LAN whisper proxy. */
   function needsWhisperFallback(transcript, hasAudio) {
-    return !(transcript || '').trim() && !!hasAudio;
+    return !!(cfg && cfg.sttUrl) && !(transcript || '').trim() && !!hasAudio;
   }
 
   function canMediaRecorder() {
@@ -673,6 +692,20 @@
     return mintBrowserHubJwt(credential);
   }
 
+  function getSttJwt() {
+    if (cfg.hubJwt && looksLikeJwt(cfg.hubJwt)) return Promise.resolve(String(cfg.hubJwt));
+    if (cfg._jwt && looksLikeJwt(cfg._jwt)) return Promise.resolve(String(cfg._jwt));
+    if (typeof cfg.getHubJwt === 'function') {
+      return Promise.resolve(cfg.getHubJwt()).then(function (tok) {
+        var t = tok == null ? '' : String(tok).trim();
+        return looksLikeJwt(t) ? t : null;
+      });
+    }
+    var cred = getSecret();
+    if (looksLikeJwt(cred)) return getBrowserHubJwt(cred, false);
+    return Promise.resolve(null);
+  }
+
   /** Proxy auth: send both secret headers for one release train (#73). Same value only. */
   function proxySecretHeaders(secret) {
     var h = {};
@@ -696,38 +729,54 @@
   }
 
   function whisperTranscribe(b64, mime) {
+    if (!cfg.sttUrl) return Promise.reject(new Error('no whisper fallback on this host'));
+    var url = cfg.sttUrl;
+    var payload = JSON.stringify({ audio_b64: b64, mime: mime || 'audio/webm' });
+    function postStt(headers) {
+      headers['Content-Type'] = 'application/json';
+      return fetch(url, {
+        method: 'POST',
+        headers: headers,
+        body: payload,
+        cache: 'no-store',
+      }).then(function (res) {
+        if (res.status === 401 || res.status === 403) {
+          return res.json().catch(function () { return {}; }).then(function (body) {
+            if (cfg.sttAuth === 'hub-jwt') {
+              return Promise.reject(new Error('hub login required for voice — text-only until signed in'));
+            }
+            onAuthRejected(res.status, { error: parseProxyRejectError(body) || ('stt ' + res.status), path: url });
+            return Promise.reject(new Error('stt ' + res.status));
+          });
+        }
+        return res.json().catch(function () { return {}; }).then(function (body) {
+          if (!res.ok || !body || !body.ok) {
+            var err = (body && body.error) || ('stt ' + res.status);
+            return Promise.reject(new Error(err));
+          }
+          return String(body.text || '').trim();
+        });
+      });
+    }
+    if (cfg.sttAuth === 'hub-jwt') {
+      return getSttJwt().then(function (jwt) {
+        if (!jwt) return Promise.reject(new Error('hub login required for voice — text-only until signed in'));
+        return postStt({ Authorization: 'Bearer ' + jwt });
+      });
+    }
     if (cfg.mode !== MODE_PROXY) return Promise.reject(new Error('no server STT on this host (browser-hub)'));
     var secret = ensureSecret();
     if (!secret) return Promise.reject(new Error('operator secret required'));
-    var url = (cfg && cfg.sttUrl) || '/api/stt';
-    var headers = proxySecretHeaders(secret);
-    headers['Content-Type'] = 'application/json';
-    return fetch(url, {
-      method: 'POST',
-      headers: headers,
-      body: JSON.stringify({ audio_b64: b64, mime: mime || 'audio/webm' }),
-      cache: 'no-store',
-    }).then(function (res) {
-      if (res.status === 401 || res.status === 403) {
-        return res.json().catch(function () { return {}; }).then(function (body) {
-          onAuthRejected(res.status, { error: parseProxyRejectError(body) || ('stt ' + res.status), path: url });
-          return Promise.reject(new Error('stt ' + res.status));
-        });
-      }
-      return res.json().catch(function () { return {}; }).then(function (body) {
-        if (!res.ok || !body || !body.ok) {
-          var err = (body && body.error) || ('stt ' + res.status);
-          return Promise.reject(new Error(err));
-        }
-        return String(body.text || '').trim();
-      });
-    });
+    return postStt(proxySecretHeaders(secret));
   }
 
   /** If transcript empty, stop MediaRecorder and fill via /api/stt. */
   function resolveTranscriptWithWhisper(transcript, onBadge) {
     var text = (transcript || '').trim();
     return stopMediaCapture(false).then(function (audio) {
+      if (!cfg.sttUrl) {
+        return Promise.reject(new Error('no whisper fallback on this host'));
+      }
       if (!needsWhisperFallback(text, !!(audio && audio.b64))) return text;
       if (typeof onBadge === 'function') onBadge('⏳ Transcribing on server…');
       return whisperTranscribe(audio.b64, audio.mime).then(function (out) {
@@ -1467,10 +1516,12 @@
           return;
         }
         if (!webOk && mediaOk) {
-          if (cfg.mode !== MODE_PROXY) {
-            toast('Web Speech unavailable — this host has no server STT. Talk will not transcribe.', 'err');
+          if (!cfg.sttUrl) {
+            toast('Web Speech unavailable — this host has no whisper fallback. Talk will not transcribe.', 'err');
+            showRecordLabel('🎙️ Listening (no server STT)…');
+          } else {
+            showRecordLabel('🎙️ Listening (server STT on stop)…');
           }
-          showRecordLabel('🎙️ Listening (server STT on stop)…');
         }
         else refreshRecordLabel();
       });
@@ -1513,6 +1564,13 @@
     if (transcript) {
       stopMediaCapture(true);
       done(transcript);
+      return;
+    }
+    if (!cfg.sttUrl) {
+      stopMediaCapture(true);
+      hideRecordLabel();
+      toast('Voice transcription is not configured on this host — no whisper fallback', 'err');
+      setBtnState(fromMarkup ? 'markup' : 'idle');
       return;
     }
     showRecordLabel('⏳ Transcribing on server…');
@@ -1943,7 +2001,8 @@
         cfg.spawnAgent = om.spawnAgent || 'cursor';
         cfg.spawnModel = om.spawnModel || 'auto';
         cfg.spawnYolo = om.spawnYolo !== false;
-        cfg.sttUrl = om.sttUrl || '/api/stt';
+        cfg.sttUrl = resolveSttUrl(om.sttUrl);
+        cfg.sttAuth = resolveSttAuth(om.sttAuth);
         if (!cfg.build) cfg.build = om.build || null;
         if (om.appId && cfg.appId === 'unknown-app') cfg.appId = om.appId;
 
@@ -1957,7 +2016,7 @@
             toast('HAPI inline disabled: proxy target must be same-origin relative', 'err');
             return;
           }
-          if (!isRelativeSameOriginPath(cfg.sttUrl)) {
+          if (cfg.sttUrl && !isRelativeSameOriginPath(cfg.sttUrl)) {
             toast('HAPI inline disabled: sttUrl must be same-origin relative', 'err');
             return;
           }
@@ -1997,12 +2056,14 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.12.1', // x-release-please-version
+    _version: '0.12.2', // x-release-please-version
     openCluster: function () { return openCluster(); },
     _stripRawJsonForDisplay: stripRawJsonForDisplay,
     _summarizeContextJson: summarizeContextJson,
     _voiceStatus: voiceStatus,
     _needsWhisperFallback: needsWhisperFallback,
+    _resolveSttUrl: resolveSttUrl,
+    _resolveSttAuth: resolveSttAuth,
     _voiceIsUsable: voiceIsUsable,
     isReady: function () { return ready; },
     isRecording: function () { return !!recording; },
