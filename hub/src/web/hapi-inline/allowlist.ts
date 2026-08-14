@@ -3,6 +3,7 @@
  * (`lib/operator-mic.ts` parseOperatorMicPath / filterOperatorSessions).
  * Host wiring only — do not widen this list. Raw GET /api/sessions is forbidden.
  * POST abort is required for replies composer (#169 / v0.12.0); GET abort is not.
+ * POST /api/stt is operator-gated whisper (audio_b64 + gate secret → hub JWT transcription).
  */
 import { timingSafeEqual } from 'node:crypto'
 
@@ -33,6 +34,13 @@ export type ParsedOperatorMicPath =
         kind: 'operator-sessions'
         method: 'GET' | 'POST'
         pathname: '/operator/sessions'
+        search: string
+        pathWithQuery: string
+    }
+    | {
+        kind: 'stt'
+        method: 'POST'
+        pathname: '/api/stt'
         search: string
         pathWithQuery: string
     }
@@ -70,6 +78,16 @@ export function parseOperatorMicPath(
             pathname: '/operator/sessions',
             search,
             pathWithQuery: `/operator/sessions${search}`
+        }
+    }
+
+    if (upper === 'POST' && segments.length === 3 && segments[1] === 'api' && segments[2] === 'stt') {
+        return {
+            kind: 'stt',
+            method: 'POST',
+            pathname: '/api/stt',
+            search,
+            pathWithQuery: `/api/stt${search}`
         }
     }
 
@@ -198,17 +216,34 @@ export function resolveSecretHeaderValue(
     return primary || legacy || ''
 }
 
-export function operatorMicSecretMatches(
-    expected: string,
-    primaryHeader: string | null | undefined,
-    legacyHeader?: string | null | undefined
-): boolean {
-    if (!expected) return false
-    if (hasConflictingSecretHeaders(primaryHeader, legacyHeader)) return false
-    const provided = resolveSecretHeaderValue(primaryHeader, legacyHeader)
-    if (!provided) return false
+function timingSafeSecretEqual(expected: string, provided: string): boolean {
     const a = Buffer.from(expected)
     const b = Buffer.from(provided)
     if (a.length !== b.length) return false
     return timingSafeEqual(a, b)
+}
+
+/** JSON body `secret` / `hapiInlineSecret` for Quest Settings probe (headers still win when present). */
+export function jsonBodySecret(body: unknown): string {
+    if (!body || typeof body !== 'object') return ''
+    const rec = body as Record<string, unknown>
+    if (typeof rec.secret === 'string' && rec.secret.trim()) return rec.secret.trim()
+    if (typeof rec.hapiInlineSecret === 'string' && rec.hapiInlineSecret.trim()) return rec.hapiInlineSecret.trim()
+    return ''
+}
+
+export function operatorMicSecretMatches(
+    expected: string,
+    primaryHeader: string | null | undefined,
+    legacyHeader?: string | null | undefined,
+    bodySecret?: string | null | undefined
+): boolean {
+    if (!expected) return false
+    if (hasConflictingSecretHeaders(primaryHeader, legacyHeader)) return false
+    const fromHeaders = resolveSecretHeaderValue(primaryHeader, legacyHeader)
+    const fromBody = normalizeHeaderValue(bodySecret)
+    if (fromHeaders && fromBody && fromHeaders !== fromBody) return false
+    const provided = fromHeaders || fromBody
+    if (!provided) return false
+    return timingSafeSecretEqual(expected, provided)
 }

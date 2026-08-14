@@ -14,6 +14,7 @@ import {
     isOperatorDockPrefEnabled,
     persistOperatorDockKnock,
     probeOperatorDockSecret,
+    readOperatorDockGateValue,
     shouldBootOperatorDock
 } from './operator-dock-pref'
 
@@ -120,6 +121,12 @@ describe('operator dock visibility pref (host, not vendored dock)', () => {
         expect(await enableOperatorDockFromSettings(prompt, alert, fetchImpl as unknown as typeof fetch)).toBe(false)
         expect(alert).toHaveBeenCalledWith(OPERATOR_DOCK_HUB_AUTH_ALERT)
         expect(isOperatorDockPrefEnabled()).toBe(false)
+    })
+
+    it('readOperatorDockGateValue prefers the input DOM value over empty React state', () => {
+        expect(readOperatorDockGateValue({ value: '  dhc1VKKjpaste  ' }, '')).toBe('dhc1VKKjpaste')
+        expect(readOperatorDockGateValue({ value: '' }, 'react-only')).toBe('react-only')
+        expect(readOperatorDockGateValue(null, '  ')).toBe('')
     })
 
     it('probeOperatorDockSecret reads proxy code fields', async () => {

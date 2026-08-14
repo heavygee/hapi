@@ -15,7 +15,7 @@ Host wiring (not this folder):
 
 - `hapi-boot.js` — HAPI web init (`appId: hapi-web`, `configUrl: /hapi/config`). Boots on `/opmic` knock or Settings pref `hapi-operator-dock=true`. Clears known-bad stored secret before init (host complement to package #158). Package fail-closes H/markup when gate secret missing/bad (#155 / v0.11.6+).
 - Settings → General → Show operator tools (owner-only). In-page gate field (no `window.prompt`); probes before enable (#123).
-- `hub/src/web/hapi-inline/` — operator-gated `/hapi` proxy. `PINNED_TAG` in `config.ts` is what the mic payload `build` field reports (must match this README pin). Cursor spawn sends `model: auto`. Package spawnHubBody also defaults `model` to auto (#165). Allow-list: POST `messages` / `upload` / `abort` (GET abort forbidden). `web/index.html` loads dock assets with `?v=<pin>`.
+- `hub/src/web/hapi-inline/` — operator-gated `/hapi` proxy. `PINNED_TAG` in `config.ts` is what the mic payload `build` field reports (must match this README pin). Cursor spawn sends `model: auto`. Package spawnHubBody also defaults `model` to auto (#165). Allow-list: POST `messages` / `upload` / `abort` (GET abort forbidden). Operator STT: `sttUrl` `/hapi/api/stt` (gate secret + audio_b64); not hub `/api/stt` JWT. `web/index.html` loads dock assets with `?v=<pin>`.
 
 Re-vendor: copy `web/` from the next release-please tag. Drop any local dock fork.
 
