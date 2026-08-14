@@ -19,6 +19,8 @@ describe('hapi-inline composed allow-list (v0.10.0 contract)', () => {
         expect(parseOperatorMicPath('POST', `/api/sessions/${id}/messages`)?.kind).toBe('session-action')
         expect(parseOperatorMicPath('POST', `/api/sessions/${id}/upload`)?.kind).toBe('session-action')
         expect(parseOperatorMicPath('GET', `/api/sessions/${id}/upload`)).toBeNull()
+        expect(parseOperatorMicPath('POST', `/api/sessions/${id}/abort`)?.kind).toBe('session-action')
+        expect(parseOperatorMicPath('GET', `/api/sessions/${id}/abort`)).toBeNull()
     })
 
     it('rejects raw GET /api/sessions and spawn', () => {
