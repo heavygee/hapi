@@ -56,7 +56,11 @@ function registerSkewedRunner(
 describe('SyncEngine fleet upgrade startup sweep', () => {
     it('does nothing when fleet policy is not auto', async () => {
         const { engine } = makeEngine({ policy: 'alert' })
-        const upgrade = mock(async () => ({ type: 'success' as const, message: 'ok', response: { status: 'started' as const } }))
+        const upgrade = mock(async () => ({
+            type: 'success' as const,
+            message: 'ok',
+            response: { status: 'started' as const, message: 'ok' },
+        }))
         engine.upgradeMachineRunner = upgrade
 
         try {
@@ -73,7 +77,11 @@ describe('SyncEngine fleet upgrade startup sweep', () => {
         const upgraded: string[] = []
         engine.upgradeMachineRunner = mock(async (machineId: string) => {
             upgraded.push(machineId)
-            return { type: 'success', message: 'ok', response: { status: 'started' } }
+            return {
+                type: 'success' as const,
+                message: 'ok',
+                response: { status: 'started' as const, message: 'ok' },
+            }
         })
 
         try {
@@ -98,7 +106,11 @@ describe('SyncEngine fleet upgrade startup sweep', () => {
         const upgraded: string[] = []
         engine.upgradeMachineRunner = mock(async (machineId: string) => {
             upgraded.push(machineId)
-            return { type: 'success', message: 'ok', response: { status: 'started' } }
+            return {
+                type: 'success' as const,
+                message: 'ok',
+                response: { status: 'started' as const, message: 'ok' },
+            }
         })
 
         try {
