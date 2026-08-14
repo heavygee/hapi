@@ -436,6 +436,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     }
     console.log('')
     console.log('HAPI Hub is ready!')
+    syncEngine.scheduleFleetUpgradeStartupSweep()
 
     return {
         stop: async () => {

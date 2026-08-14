@@ -244,7 +244,10 @@ export class SyncEngine {
     /** Serialize fork/rewind per session so concurrent native rollbacks cannot stack. */
     private readonly historyActionsInFlight = new Set<string>()
     private readonly fleetUpgradeAttemptAt = new Map<string, number>()
+    private fleetUpgradeStartupSweepTimer: ReturnType<typeof setTimeout> | null = null
     private static readonly FLEET_UPGRADE_COOLDOWN_MS = 15 * 60_000
+    /** Let runners reconnect + rpc-register after a patient hub restart before sweeping. */
+    private static readonly FLEET_UPGRADE_STARTUP_SWEEP_DELAY_MS = 15_000
     /**
      * Coalesce concurrent auto + banner Upgrade calls for the same machine so
      * the runner's "already in progress" reply is not toasted as upgrade_failed.
@@ -317,6 +320,10 @@ export class SyncEngine {
         if (this.inactivityTimer) {
             clearInterval(this.inactivityTimer)
             this.inactivityTimer = null
+        }
+        if (this.fleetUpgradeStartupSweepTimer) {
+            clearTimeout(this.fleetUpgradeStartupSweepTimer)
+            this.fleetUpgradeStartupSweepTimer = null
         }
     }
 
@@ -1310,10 +1317,71 @@ export class SyncEngine {
     }
 
     /**
+     * After hub startup (post-remat / patient restart), sweep once for runners
+     * that trail the hub offer. Heartbeat auto-upgrade alone can miss the
+     * window when a successful upgrade lands on the pre-restart generation and
+     * the 15m cooldown blocks chasing the new hub fingerprint.
+     */
+    scheduleFleetUpgradeStartupSweep(): void {
+        if (this.fleetUpgradeStartupSweepTimer) {
+            clearTimeout(this.fleetUpgradeStartupSweepTimer)
+        }
+        this.fleetUpgradeStartupSweepTimer = setTimeout(() => {
+            this.fleetUpgradeStartupSweepTimer = null
+            void this.runFleetUpgradeStartupSweep().catch((error) => {
+                console.warn('[fleet-upgrade] startup sweep failed', error)
+            })
+        }, SyncEngine.FLEET_UPGRADE_STARTUP_SWEEP_DELAY_MS)
+    }
+
+    private async runFleetUpgradeStartupSweep(): Promise<void> {
+        if (!this.getUpgradeOffer || this.getFleetUpgradePolicy() !== 'auto') {
+            return
+        }
+        const offer = this.getUpgradeOffer()
+        if (offer.channel === 'off') {
+            return
+        }
+
+        const skewed = this.getMachines().filter((machine) => {
+            if (!machine.active || !machine.metadata) {
+                return false
+            }
+            if (machine.metadata.versionHandoffDisabled === true) {
+                return false
+            }
+            return machineTrailsUpgradeOffer(
+                offer,
+                machine.metadata.happyCliVersion,
+                machine.metadata.capabilities,
+                machine.metadata.cliArtifactGeneration,
+            )
+        })
+
+        if (skewed.length === 0) {
+            console.log('[fleet-upgrade] startup sweep: no skewed runners')
+            return
+        }
+
+        console.warn('[fleet-upgrade] startup sweep', {
+            count: skewed.length,
+            hosts: skewed.map((machine) => machine.metadata?.host ?? machine.metadata?.displayName ?? machine.id),
+            targetGeneration: offer.targetGeneration?.slice(0, 16),
+        })
+
+        await Promise.all(skewed.map((machine) =>
+            this.maybeFleetUpgradeMachine(machine.id, { bypassCooldown: true, source: 'startup-sweep' })
+        ))
+    }
+
+    /**
      * When a connected runner is missing required capabilities, ask it to
      * self-upgrade to the hub's generation (npm or hub-artifact).
      */
-    private async maybeFleetUpgradeMachine(machineId: string): Promise<void> {
+    private async maybeFleetUpgradeMachine(
+        machineId: string,
+        options?: { bypassCooldown?: boolean; source?: 'machine-alive' | 'machine-updated' | 'startup-sweep' },
+    ): Promise<void> {
         // Policy-first: default `alert` must not resolve (and fingerprint) the
         // upgrade offer on every machine-alive heartbeat.
         if (!this.getUpgradeOffer) {
@@ -1346,9 +1414,11 @@ export class SyncEngine {
         )) {
             return
         }
-        const last = this.fleetUpgradeAttemptAt.get(machineId) ?? 0
-        if (Date.now() - last < SyncEngine.FLEET_UPGRADE_COOLDOWN_MS) {
-            return
+        if (!options?.bypassCooldown) {
+            const last = this.fleetUpgradeAttemptAt.get(machineId) ?? 0
+            if (Date.now() - last < SyncEngine.FLEET_UPGRADE_COOLDOWN_MS) {
+                return
+            }
         }
         this.fleetUpgradeAttemptAt.set(machineId, Date.now())
         const host = machine.metadata.host ?? machine.metadata.displayName ?? machineId
@@ -1358,6 +1428,7 @@ export class SyncEngine {
                 machineId,
                 host,
                 channel: offer.channel,
+                source: options?.source ?? 'machine-alive',
                 result,
             })
             // Only toast hard upgrade failures. `upgrade_deferred` is mid-soup
