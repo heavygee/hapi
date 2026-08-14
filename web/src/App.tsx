@@ -15,7 +15,8 @@ import { usePushNotifications } from '@/hooks/usePushNotifications'
 import { useViewportHeight } from '@/hooks/useViewportHeight'
 import { useVisibilityReporter } from '@/hooks/useVisibilityReporter'
 import { queryKeys } from '@/lib/query-keys'
-import { AppContextProvider } from '@/lib/app-context'
+import { AppContextProvider, useAppContext } from '@/lib/app-context'
+import { installOperatorDockSttJwtFetch } from '@/lib/operator-dock-stt-auth'
 import { clearMessageWindow, syncTailMessages } from '@/lib/message-window-store'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useTranslation } from '@/lib/use-translation'
@@ -40,6 +41,14 @@ import type { SyncEvent } from '@/types/api'
 type ToastEvent = Extract<SyncEvent, { type: 'toast' }>
 
 const REQUIRE_SERVER_URL = requireHubUrlForLogin()
+
+function OperatorDockSttJwtBridge() {
+    const { api, token } = useAppContext()
+    useEffect(() => {
+        return installOperatorDockSttJwtFetch(() => api.getAuthToken() || token)
+    }, [api, token])
+    return null
+}
 
 function withPwaBanner(content: ReactNode) {
     return (
@@ -464,6 +473,7 @@ function AppInner() {
 
     return (
         <AppContextProvider value={{ api, token, baseUrl }}>
+            <OperatorDockSttJwtBridge />
             <VoiceProvider>
                 <PwaUpdateBannerWithStatusOffset
                     isSyncing={isSyncing}

@@ -266,6 +266,66 @@ describe('voice transcription routes', () => {
         expect(await res.json()).toEqual({ error: 'Audio file too large' })
     })
 
+    test('POST /api/stt is JWT executive transcribe (audio_b64), not a gate-secret route', async () => {
+        const app = createApp()
+        const unauth = await app.request('/api/stt', {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'X-Hapi-Inline-Secret': 'gate-secret'
+            },
+            body: JSON.stringify({ audio_b64: Buffer.from('abc').toString('base64'), mime: 'audio/webm' })
+        })
+        expect(unauth.status).toBe(401)
+
+        const previous = {
+            openai: process.env.OPENAI_API_KEY,
+            groq: process.env.GROQ_API_KEY,
+            elevenlabs: process.env.ELEVENLABS_API_KEY,
+            deepgram: process.env.DEEPGRAM_API_KEY,
+            baseUrl: process.env.TRANSCRIPTION_BASE_URL,
+            model: process.env.TRANSCRIPTION_MODEL,
+            apiKey: process.env.TRANSCRIPTION_API_KEY
+        }
+        delete process.env.OPENAI_API_KEY
+        delete process.env.GROQ_API_KEY
+        delete process.env.ELEVENLABS_API_KEY
+        delete process.env.DEEPGRAM_API_KEY
+        process.env.TRANSCRIPTION_BASE_URL = 'http://127.0.0.1:8000/v1'
+        process.env.TRANSCRIPTION_MODEL = 'local-whisper'
+        process.env.TRANSCRIPTION_API_KEY = 'server-only-key'
+        const originalFetch = global.fetch
+        let upstreamAuth: string | null = null
+        // @ts-expect-error test override
+        global.fetch = async (_url: string, init?: RequestInit) => {
+            upstreamAuth = new Headers(init?.headers).get('authorization')
+            return new Response(JSON.stringify({ text: 'from dictate path' }), { status: 200 })
+        }
+        const res = await app.request('/api/stt', {
+            method: 'POST',
+            headers: { ...(await authHeaders()), 'content-type': 'application/json' },
+            body: JSON.stringify({ audio_b64: Buffer.from('abc').toString('base64'), mime: 'audio/webm' })
+        })
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({ ok: true, text: 'from dictate path' })
+        expect(upstreamAuth).toBe('Bearer server-only-key')
+        global.fetch = originalFetch
+        if (previous.openai === undefined) delete process.env.OPENAI_API_KEY
+        else process.env.OPENAI_API_KEY = previous.openai
+        if (previous.groq === undefined) delete process.env.GROQ_API_KEY
+        else process.env.GROQ_API_KEY = previous.groq
+        if (previous.elevenlabs === undefined) delete process.env.ELEVENLABS_API_KEY
+        else process.env.ELEVENLABS_API_KEY = previous.elevenlabs
+        if (previous.deepgram === undefined) delete process.env.DEEPGRAM_API_KEY
+        else process.env.DEEPGRAM_API_KEY = previous.deepgram
+        if (previous.baseUrl === undefined) delete process.env.TRANSCRIPTION_BASE_URL
+        else process.env.TRANSCRIPTION_BASE_URL = previous.baseUrl
+        if (previous.model === undefined) delete process.env.TRANSCRIPTION_MODEL
+        else process.env.TRANSCRIPTION_MODEL = previous.model
+        if (previous.apiKey === undefined) delete process.env.TRANSCRIPTION_API_KEY
+        else process.env.TRANSCRIPTION_API_KEY = previous.apiKey
+    })
+
     test('mints provider-specific short-lived realtime credentials without exposing API keys', async () => {
         const app = createApp()
         const headers = { ...(await authHeaders()), 'content-type': 'application/json' }

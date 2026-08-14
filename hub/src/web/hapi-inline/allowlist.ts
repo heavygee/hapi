@@ -3,7 +3,7 @@
  * (`lib/operator-mic.ts` parseOperatorMicPath / filterOperatorSessions).
  * Host wiring only — do not widen this list. Raw GET /api/sessions is forbidden.
  * POST abort is required for replies composer (#169 / v0.12.0); GET abort is not.
- * POST /api/stt is operator-gated whisper (audio_b64 + gate secret → hub JWT transcription).
+ * Hub POST /api/stt is JWT/Dictate, not this gate-secret proxy.
  */
 import { timingSafeEqual } from 'node:crypto'
 
@@ -34,13 +34,6 @@ export type ParsedOperatorMicPath =
         kind: 'operator-sessions'
         method: 'GET' | 'POST'
         pathname: '/operator/sessions'
-        search: string
-        pathWithQuery: string
-    }
-    | {
-        kind: 'stt'
-        method: 'POST'
-        pathname: '/api/stt'
         search: string
         pathWithQuery: string
     }
@@ -78,16 +71,6 @@ export function parseOperatorMicPath(
             pathname: '/operator/sessions',
             search,
             pathWithQuery: `/operator/sessions${search}`
-        }
-    }
-
-    if (upper === 'POST' && segments.length === 3 && segments[1] === 'api' && segments[2] === 'stt') {
-        return {
-            kind: 'stt',
-            method: 'POST',
-            pathname: '/api/stt',
-            search,
-            pathWithQuery: `/api/stt${search}`
         }
     }
 
