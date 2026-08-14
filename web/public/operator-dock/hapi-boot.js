@@ -107,4 +107,5 @@
 
     window.HapiInlineHost = { boot: boot }
     boot()
+    // STT JWT attach is web App (operator-dock-stt-auth.ts), not this file.
 })()
