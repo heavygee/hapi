@@ -591,7 +591,7 @@ export function createVoiceRoutes(options: { dataDir?: string } = {}): Hono<WebA
             const err = typeof body.error === 'string' && body.error.trim()
                 ? body.error
                 : `stt failed (${upstream.status})`
-            return c.json({ ok: false, error: err }, upstream.status === 401 ? 401 : upstream.status)
+            return c.json({ ok: false, error: err }, upstream.status === 401 ? 401 : 502)
         }
         return c.json({ ok: true, text: typeof body.text === 'string' ? body.text.trim() : '' })
     })
