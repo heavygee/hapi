@@ -55,13 +55,17 @@
   100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
 }
 
-/* #134: absolute left of the hub so the chip never covers hub/fan tools (desktop + mobile web). */
+/* #134 / #166: absolute left of the hub. Must set min-width — shrink-to-fit +
+   word-break:break-word collapses to a one-glyph vertical pill on desktop. */
 .opdock-label {
   pointer-events: none;
   position: absolute;
   right: 64px;
   bottom: 8px;
   z-index: 2;
+  box-sizing: border-box;
+  min-width: 196px;
+  width: max-content;
   max-width: min(56vw, 280px);
   padding: 6px 10px;
   border-radius: 10px;
@@ -69,8 +73,9 @@
   color: #f5f5f5;
   font-size: 12px;
   line-height: 1.35;
-  white-space: pre-wrap;
-  word-break: break-word;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: normal;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   border: 1px solid rgba(220, 38, 38, 0.45);
 }

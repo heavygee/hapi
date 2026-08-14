@@ -1,14 +1,14 @@
 # Vendored hapi-inline operator dock
 
-Pinned tag: **v0.11.8**  
-Source: https://github.com/heavygee/hapi-inline/releases/tag/v0.11.8
+Pinned tag: **v0.11.9**  
+Source: https://github.com/heavygee/hapi-inline/releases/tag/v0.11.9
 
 Files here (`operator-dock.js`, `operator-dock.css`, `vendor/html2canvas.min.js`) are a byte copy of that release. Do not edit them in this repo.
 
-SHA-1 (v0.11.8):
+SHA-1 (v0.11.9):
 
-- `operator-dock.js` — `337d5feb9210818daebc630198c00717aff518aa`
-- `operator-dock.css` — `2a6be0ed68538bb9cc949e2f109b5a7cafc3b6c4` (unchanged from v0.11.7)
+- `operator-dock.js` — `f710d6aa1567da400140b2ad35e8f431d3a37721`
+- `operator-dock.css` — `b4f2817dd76a1d3ef1e622f00fffd83dcc43b7dc`
 - `vendor/html2canvas.min.js` — `00dac05dbfa83704e76c420a6ab3fbcc7ada6303` (html2canvas-pro 2.3.5; same path)
 
 Host wiring (not this folder):
