@@ -646,12 +646,20 @@ This app **vendors** [`heavygee/hapi-inline`](https://github.com/heavygee/hapi-i
 |------|---------|
 | Bug / feature in dock, proxy allow-list, visibility/`?opmic`, shared contract, Android reference | File an issue on **`heavygee/hapi-inline`**. Do **not** lasting-edit vendored `operator-dock.*` / shared proxy contract in this app. |
 | After a fix lands | Re-vendor the new **tag** (release-please cuts tags — never hand-tag). Drop any emergency local fork. |
-| App-only wiring | Host init (`web/public/operator-dock/hapi-boot.js`), env (`HAPI_INLINE_*`), `/hapi` composed proxy, same-origin `/api/stt` if used — stay in **this** repo. Spawn privilege fields are server-owned: `HAPI_INLINE_SPAWN_AGENT` (default `cursor`) and `HAPI_INLINE_SPAWN_YOLO` (default on). Do not trust client `agent` / `yolo` / `directory`. |
+| App-only wiring | Host init (`web/public/operator-dock/hapi-boot.js`), env (`HAPI_INLINE_*`), `/hapi` composed proxy, same-origin `/api/stt` if used — stay in **this** repo. Spawn privilege fields are server-owned: `HAPI_INLINE_SPAWN_AGENT` (default `cursor`), `HAPI_INLINE_SPAWN_YOLO` (default on), and Cursor **`model: auto`** (omit → Sol quota burn, #164). Do not trust client `agent` / `yolo` / `directory` / `model`. |
 | Bare spawn from `/opmic` | Transport-only — peer still **self-names** and runs **precedent search** on `heavygee/hapi-inline` before implement ([intake §0-backstop](../tooling/new-feature-intake.md#0-backstop--unnamed--bare-spawn-peers-fail-closed)). |
 
 **Forbidden:** persistent app fork of the dock; "quick fix" that never round-trips; PRs that change dock semantics only in the app copy.
 
 **Emergency:** app-side hotfix to unblock the operator is OK **only** with a same-day `hapi-inline` issue + round-trip + re-vendor.
+
+**Implementor pitfalls** (package `docs/IMPLEMENTOR_PITFALLS.md`; host must follow):
+
+1. Spawn Cursor with `agent: cursor` **and** `model: auto`. Omit model → Sol quota. MCP `spawn_peer` still cannot pass `model`.
+2. Remat from a GitHub **tag**. Trust dock payload `_version` after hard-reload, not soup SHA. `PINNED_TAG` in `hub/.../config.ts` is what mic `build` reports — keep it in lockstep with the vendor README. Never `cp` worktrees dist into `driver/web/dist`. Never hand-tag.
+3. browser-hub has no `/api/stt`. Markup Send while listening must `finishRecording()`.
+4. Merge gate is aggregate **`ci`**. `merge-on-green` is often SKIPPED — squash-merge when `ci` is green.
+5. Agent replies composer (package #169): type in Agent replies → abort + continue. Needs POST abort on the proxy allow-list at remat of that tag.
 
 Canon: `hapi-inline` → `docs/CONSUMER_CONTRACT.md`. App mic router: `docs/APP_ROUTER_AGENT.md`. Package gate session title: **hapi-inline ownership**.
 
