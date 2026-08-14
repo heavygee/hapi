@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { Hono } from 'hono'
+import { loadHapiInlineConfig } from './config'
 import { createHapiInlineRoutes, type HapiInlineHostConfig } from './routes'
 
 const PROJECT = '/home/heavygee/coding/hapi'
@@ -36,6 +37,10 @@ const secretHeaders = {
 }
 
 describe('hapi-inline host routes', () => {
+    it('stamps public config.build from the vendored pin (mic payload)', () => {
+        expect(loadHapiInlineConfig().build).toBe('v0.11.9')
+    })
+
     it('returns public config without a secret and never includes the secret', async () => {
         const app = mount(enabledConfig(), fetch)
         const res = await app.request('/hapi/config')
