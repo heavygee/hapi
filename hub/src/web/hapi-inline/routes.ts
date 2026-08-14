@@ -131,7 +131,7 @@ function publicConfigBody(config: HapiInlineHostConfig) {
         spawnAgent: normalizeSpawnAgent(config.spawnAgent),
         spawnYolo: parseSpawnYolo(config.spawnYolo, true),
         build: config.build,
-        sttUrl: OPERATOR_STT_PATH as string | null
+        sttUrl: '/api/stt' as string | null
     }
     return { hapiInline, operatorMic: hapiInline }
 }
@@ -154,35 +154,6 @@ function hubPayloadSessionInactive(data: ArrayBuffer | Uint8Array | string): boo
 function sessionIdFromAllowedPath(pathname: string): string | null {
     const m = pathname.match(/^\/api\/sessions\/([A-Za-z0-9_-]+)\/(?:messages|upload|abort)$/)
     return m ? m[1] : null
-}
-
-const OPERATOR_STT_MAX_BYTES = 8 * 1024 * 1024
-const OPERATOR_STT_PATH = '/hapi/api/stt'
-
-function operatorSttProvider(): string {
-    const raw = (process.env.HAPI_INLINE_STT_PROVIDER || process.env.OPERATOR_MIC_STT_PROVIDER || 'openai-compatible').trim()
-    return raw || 'openai-compatible'
-}
-
-function filenameForMime(mime: string): string {
-    if (mime.includes('ogg')) return 'speech.ogg'
-    if (mime.includes('mp4') || mime.includes('m4a')) return 'speech.m4a'
-    if (mime.includes('mpeg') || mime.includes('mp3')) return 'speech.mp3'
-    if (mime.includes('wav')) return 'speech.wav'
-    return 'speech.webm'
-}
-
-function decodeOperatorSttAudio(raw: string): Buffer | null {
-    const s = String(raw || '').trim()
-    if (!s) return null
-    const comma = s.indexOf(',')
-    const payload = s.startsWith('data:') && comma >= 0 ? s.slice(comma + 1) : s
-    try {
-        const buf = Buffer.from(payload, 'base64')
-        return buf.byteLength > 0 ? buf : null
-    } catch {
-        return null
-    }
 }
 
 function operatorReady(config: HapiInlineHostConfig): boolean {
@@ -275,9 +246,6 @@ export function createHapiInlineRoutes(options: HapiInlineRouteOptions): Hono {
             const jwt = jwtCache || (await mintJwt(config))
             if (target.kind === 'operator-sessions') {
                 return await handleComposed(c, config, jwt, target)
-            }
-            if (target.kind === 'stt') {
-                return await handleStt(c, config, jwt)
             }
             return await handleSessionAction(c, config, jwt, target)
         } catch {
@@ -390,83 +358,6 @@ export function createHapiInlineRoutes(options: HapiInlineRouteOptions): Hono {
             status: 200,
             headers: { ...noStoreHeaders(), 'Content-Type': 'application/json' }
         })
-    }
-
-    async function handleStt(
-        c: { req: { json: () => Promise<unknown> } },
-        config: HapiInlineHostConfig,
-        jwt: string
-    ) {
-        const hubBase = config.hubBase.replace(/\/$/, '')
-        let parsed: unknown
-        try {
-            parsed = await c.req.json()
-        } catch {
-            return new Response(JSON.stringify({ ok: false, error: 'invalid stt json' }), {
-                status: 400,
-                headers: { ...noStoreHeaders(), 'Content-Type': 'application/json' }
-            })
-        }
-        const rec = parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {}
-        const rawB64 = typeof rec.audio_b64 === 'string' ? rec.audio_b64 : ''
-        const mime = typeof rec.mime === 'string' && rec.mime.trim() ? rec.mime.trim() : 'audio/webm'
-        const audio = decodeOperatorSttAudio(rawB64)
-        if (!audio) {
-            return new Response(JSON.stringify({ ok: false, error: 'audio_b64 required' }), {
-                status: 400,
-                headers: { ...noStoreHeaders(), 'Content-Type': 'application/json' }
-            })
-        }
-        if (audio.byteLength > OPERATOR_STT_MAX_BYTES) {
-            return new Response(JSON.stringify({ ok: false, error: 'audio too large' }), {
-                status: 413,
-                headers: { ...noStoreHeaders(), 'Content-Type': 'application/json' }
-            })
-        }
-        const file = new File([new Uint8Array(audio)], filenameForMime(mime), { type: mime })
-        let token = jwt
-        let jwtRetried = false
-        while (true) {
-            const form = new FormData()
-            form.set('provider', operatorSttProvider())
-            form.set('mode', 'standard')
-            form.set('file', file, file.name)
-            const hubRes = await fetchImpl(`${hubBase}/api/voice/transcription`, {
-                method: 'POST',
-                headers: { Authorization: `Bearer ${token}` },
-                body: form
-            })
-            const buf = await hubRes.arrayBuffer()
-            if (hubRes.status === 401 && !jwtRetried) {
-                jwtCache = null
-                token = await mintJwt(config)
-                jwtRetried = true
-                continue
-            }
-            const rewritten = maybeRewriteUpstreamAuthFailure(hubRes, buf)
-            if (rewritten) return rewritten
-            const text = Buffer.from(buf).toString('utf8')
-            let hubBody: { text?: unknown, error?: unknown } = {}
-            try {
-                hubBody = JSON.parse(text) as { text?: unknown, error?: unknown }
-            } catch {
-                hubBody = {}
-            }
-            if (!hubRes.ok) {
-                const err = typeof hubBody.error === 'string' && hubBody.error.trim()
-                    ? hubBody.error
-                    : `stt upstream ${hubRes.status}`
-                return new Response(JSON.stringify({ ok: false, error: err }), {
-                    status: hubRes.status === 401 ? 401 : (hubRes.status >= 400 && hubRes.status < 600 ? hubRes.status : 502),
-                    headers: { ...noStoreHeaders(), 'Content-Type': 'application/json' }
-                })
-            }
-            const out = typeof hubBody.text === 'string' ? hubBody.text.trim() : ''
-            return new Response(JSON.stringify({ ok: true, text: out }), {
-                status: 200,
-                headers: { ...noStoreHeaders(), 'Content-Type': 'application/json' }
-            })
-        }
     }
 
     async function handleSessionAction(

@@ -544,6 +544,58 @@ export function createVoiceRoutes(options: { dataDir?: string } = {}): Hono<WebA
         return transcribeStandard(provider.data, file, language.data)
     })
 
+    app.post('/stt', bodyLimit({
+        maxSize: MAX_TRANSCRIPTION_BODY_BYTES,
+        onError: (c) => c.json({ ok: false, error: 'Audio file too large' }, 413)
+    }), async (c) => {
+        const json = await c.req.json().catch(() => null)
+        const rec = json && typeof json === 'object' ? json as Record<string, unknown> : {}
+        const rawB64 = typeof rec.audio_b64 === 'string' ? rec.audio_b64 : ''
+        const mime = typeof rec.mime === 'string' && rec.mime.trim() ? rec.mime.trim() : 'audio/webm'
+        const comma = rawB64.indexOf(',')
+        const payload = rawB64.startsWith('data:') && comma >= 0 ? rawB64.slice(comma + 1) : rawB64.trim()
+        let bytes: Buffer
+        try {
+            bytes = Buffer.from(payload, 'base64')
+        } catch {
+            bytes = Buffer.alloc(0)
+        }
+        if (!payload || bytes.byteLength === 0) {
+            return c.json({ ok: false, error: 'audio_b64 required' }, 400)
+        }
+        if (bytes.byteLength > MAX_TRANSCRIPTION_BYTES) {
+            return c.json({ ok: false, error: `Audio file must be between 1 byte and ${MAX_TRANSCRIPTION_BYTES} bytes` }, 413)
+        }
+        const language = transcriptionLanguageSchema.safeParse(
+            typeof rec.language === 'string' && rec.language.trim() ? rec.language : undefined
+        )
+        if (!language.success) return c.json({ ok: false, error: 'Invalid transcription language' }, 400)
+
+        const configured = listConfiguredTranscriptionProviders(getProviderEnvironment())
+            .filter((item) => item.modes.includes('standard'))
+        const requested = transcriptionProviderSchema.safeParse(rec.provider)
+        const provider = requested.success
+            ? requested.data
+            : configured[0]?.id
+        if (!provider || provider === 'browser-local') {
+            return c.json({ ok: false, error: 'transcription is not configured' }, 400)
+        }
+        const ext = mime.includes('mp4') || mime.includes('m4a') ? 'm4a'
+            : mime.includes('ogg') ? 'ogg'
+                : mime.includes('wav') ? 'wav'
+                    : 'webm'
+        const file = new File([new Uint8Array(bytes)], `speech.${ext}`, { type: mime })
+        const upstream = await transcribeStandard(provider, file, language.data)
+        const body = await upstream.json().catch(() => ({})) as { text?: unknown, error?: unknown }
+        if (!upstream.ok) {
+            const err = typeof body.error === 'string' && body.error.trim()
+                ? body.error
+                : `stt failed (${upstream.status})`
+            return c.json({ ok: false, error: err }, upstream.status === 401 ? 401 : upstream.status)
+        }
+        return c.json({ ok: true, text: typeof body.text === 'string' ? body.text.trim() : '' })
+    })
+
     app.post('/voice/transcription/realtime-token', bodyLimit({
         maxSize: MAX_REALTIME_TOKEN_BODY_BYTES,
         onError: (c) => c.json({ error: 'Realtime token request too large' }, 413)
