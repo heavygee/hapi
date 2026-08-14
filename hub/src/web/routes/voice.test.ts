@@ -295,10 +295,10 @@ describe('voice transcription routes', () => {
         process.env.TRANSCRIPTION_MODEL = 'local-whisper'
         process.env.TRANSCRIPTION_API_KEY = 'server-only-key'
         const originalFetch = global.fetch
-        let upstreamAuth: string | null = null
+        const seen = { auth: null as string | null }
         // @ts-expect-error test override
         global.fetch = async (_url: string, init?: RequestInit) => {
-            upstreamAuth = new Headers(init?.headers).get('authorization')
+            seen.auth = new Headers(init?.headers).get('authorization')
             return new Response(JSON.stringify({ text: 'from dictate path' }), { status: 200 })
         }
         const res = await app.request('/api/stt', {
@@ -308,7 +308,7 @@ describe('voice transcription routes', () => {
         })
         expect(res.status).toBe(200)
         expect(await res.json()).toEqual({ ok: true, text: 'from dictate path' })
-        expect(upstreamAuth).toBe('Bearer server-only-key')
+        expect(seen.auth).toBe('Bearer server-only-key')
         global.fetch = originalFetch
         if (previous.openai === undefined) delete process.env.OPENAI_API_KEY
         else process.env.OPENAI_API_KEY = previous.openai
