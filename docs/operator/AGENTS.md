@@ -657,7 +657,7 @@ This app **vendors** [`heavygee/hapi-inline`](https://github.com/heavygee/hapi-i
 
 1. Spawn Cursor with `agent: cursor` **and** `model: auto`. Omit model → Sol quota. MCP `spawn_peer` still cannot pass `model`.
 2. Remat from a GitHub **tag**. Trust dock payload `_version` after hard-reload, not soup SHA. `PINNED_TAG` in `hub/.../config.ts` is what mic `build` reports — keep it in lockstep with the vendor README. Never `cp` worktrees dist into `driver/web/dist`. Never hand-tag.
-3. browser-hub has no `/api/stt`. Markup Send while listening must `finishRecording()`.
+3. browser-hub has no `/api/stt`. Markup Send while listening must `finishRecording()`. HAPI web Quest hold-to-talk uses operator-gated `POST /hapi/api/stt` (`sttUrl` in `/hapi/config`); never hub `/api/stt` with the gate secret (that route wants JWT).
 4. Merge gate is aggregate **`ci`**. `merge-on-green` is often SKIPPED — squash-merge when `ci` is green.
 5. Agent replies composer (package #169): type in Agent replies → abort + continue. Needs POST abort on the proxy allow-list at remat of that tag.
 
