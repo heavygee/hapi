@@ -2,12 +2,13 @@
  * Allow-list + session filter from heavygee/hapi-inline v0.10.0
  * (`lib/operator-mic.ts` parseOperatorMicPath / filterOperatorSessions).
  * Host wiring only — do not widen this list. Raw GET /api/sessions is forbidden.
+ * POST abort is required for replies composer (#169 / v0.12.0); GET abort is not.
  */
 import { timingSafeEqual } from 'node:crypto'
 
 const SESSION_ID_RE = /^[A-Za-z0-9_-]+$/
 
-export type AllowedSessionAction = 'messages' | 'upload'
+export type AllowedSessionAction = 'messages' | 'upload' | 'abort'
 
 export type OperatorSessionListItem = {
     id: string
@@ -78,9 +79,9 @@ export function parseOperatorMicPath(
     const sessionId = segments[3] ?? ''
     const action = segments[4] as AllowedSessionAction
     if (!sessionId || rejectSuspiciousSessionId(sessionId)) return null
-    if (action !== 'messages' && action !== 'upload') return null
+    if (action !== 'messages' && action !== 'upload' && action !== 'abort') return null
     if (upper === 'GET' && action !== 'messages') return null
-    if (upper === 'POST' && action !== 'messages' && action !== 'upload') return null
+    if (upper === 'POST' && action !== 'messages' && action !== 'upload' && action !== 'abort') return null
 
     const pathname = `/api/sessions/${sessionId}/${action}`
     return {

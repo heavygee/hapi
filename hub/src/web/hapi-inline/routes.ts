@@ -1,7 +1,7 @@
 /**
- * Operator-gated /hapi proxy for the vendored hapi-inline dock (tag v0.11.9).
+ * Operator-gated /hapi proxy for the vendored hapi-inline dock (tag v0.12.0).
  * Hono port of server/node/operator-hapi-proxy.mjs — composed /operator/sessions,
- * messages/upload only, auto-resume on 409 session_inactive. Do not allow-list
+ * messages/upload/abort, auto-resume on 409 session_inactive. Do not allow-list
  * raw GET /api/sessions. Spawn privilege fields (directory/agent/yolo/model) are
  * server-owned (#127/#128/#164). Cursor spawn always includes model: "auto" so
  * the CLI does not default to Sol. Proxy auth rejects carry machine `code` fields so
@@ -151,7 +151,7 @@ function hubPayloadSessionInactive(data: ArrayBuffer | Uint8Array | string): boo
 }
 
 function sessionIdFromAllowedPath(pathname: string): string | null {
-    const m = pathname.match(/^\/api\/sessions\/([A-Za-z0-9_-]+)\/(?:messages|upload)$/)
+    const m = pathname.match(/^\/api\/sessions\/([A-Za-z0-9_-]+)\/(?:messages|upload|abort)$/)
     return m ? m[1] : null
 }
 

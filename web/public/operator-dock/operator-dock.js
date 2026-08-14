@@ -1182,6 +1182,35 @@
     try { sessionStorage.setItem(REPLIES_COLLAPSE_KEY, on ? '1' : '0'); } catch (e) {}
   }
 
+  function sendOperatorFollowUp(secret, session, raw) {
+    var text = String(raw || '').trim();
+    if (!secret || !session || !text) return Promise.resolve(false);
+    var payload = '[Operator dock — interrupt and continue]\n\n' + text;
+    var abortPath = '/api/sessions/' + encodeURIComponent(session) + '/abort';
+    var msgPath = '/api/sessions/' + encodeURIComponent(session) + '/messages';
+    return hapiPost(abortPath, secret, {})
+      .then(function () {
+        return hapiPost(msgPath, secret, { text: payload });
+      })
+      .then(function (res) {
+        if (res.status === 401 || res.status === 403) {
+          return readRejectDetail(res, msgPath, session).then(function (d) {
+            onAuthRejected(d.status, d);
+            return false;
+          });
+        }
+        if (!res.ok) {
+          toast('Follow-up failed ' + res.status, 'err');
+          return false;
+        }
+        return true;
+      })
+      .catch(function (e) {
+        toast('Follow-up failed: ' + (e && e.message || e), 'err');
+        return false;
+      });
+  }
+
   function openReplies(secret, session) {
     closeReplies();
     replies = $('div', 'opdock-replies');
@@ -1231,8 +1260,42 @@
     });
 
     var body = $('div', 'opdock-replies-body', 'Waiting for the agent…');
+    var compose = $('div', 'opdock-replies-compose');
+    var ta = document.createElement('textarea');
+    ta.setAttribute('rows', '2');
+    ta.setAttribute('aria-label', 'Add guidance');
+    ta.placeholder = 'Type to interrupt and continue…';
+    var sendBtn = $('button', 'opdock-btn2 opdock-send', 'Send');
+    sendBtn.type = 'button';
+    function submitFollowUp() {
+      var text = (ta.value || '').trim();
+      if (!text || sendBtn.disabled) return;
+      sendBtn.disabled = true;
+      setCollapsed(false);
+      sendOperatorFollowUp(secret, session, text).then(function (ok) {
+        sendBtn.disabled = false;
+        if (ok) {
+          ta.value = '';
+          tick();
+        }
+      });
+    }
+    sendBtn.addEventListener('click', function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      submitFollowUp();
+    });
+    ta.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter' && !ev.shiftKey) {
+        ev.preventDefault();
+        submitFollowUp();
+      }
+    });
+    compose.appendChild(ta);
+    compose.appendChild(sendBtn);
     replies.appendChild(head);
     replies.appendChild(body);
+    replies.appendChild(compose);
     document.body.appendChild(replies);
 
     var seen = {};
@@ -1929,7 +1992,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.11.9', // x-release-please-version
+    _version: '0.12.0', // x-release-please-version
     openCluster: function () { return openCluster(); },
     _stripRawJsonForDisplay: stripRawJsonForDisplay,
     _summarizeContextJson: summarizeContextJson,
