@@ -2,8 +2,9 @@
  * Operator-gated /hapi proxy for the vendored hapi-inline dock (tag v0.11.9).
  * Hono port of server/node/operator-hapi-proxy.mjs — composed /operator/sessions,
  * messages/upload only, auto-resume on 409 session_inactive. Do not allow-list
- * raw GET /api/sessions. Spawn privilege fields (directory/agent/yolo) are
- * server-owned (#127/#128). Proxy auth rejects carry machine `code` fields so
+ * raw GET /api/sessions. Spawn privilege fields (directory/agent/yolo/model) are
+ * server-owned (#127/#128/#164). Cursor spawn always includes model: "auto" so
+ * the CLI does not default to Sol. Proxy auth rejects carry machine `code` fields so
  * host Settings can separate gate-secret mismatch from hub JWT misses (#123 / Quest).
  * v0.11.6 dock fail-closes H on gate mismatch (#155); hub JWT copy must classify as hubAuth.
  */
@@ -55,13 +56,15 @@ export function parseSpawnYolo(raw: unknown, fallback = true): boolean {
 
 export function buildOperatorSpawnBody(
     config: Pick<HapiInlineHostConfig, 'projectPath' | 'spawnAgent' | 'spawnYolo'>
-): { directory: string, agent: OperatorSpawnAgent, yolo?: true } | null {
+): { directory: string, agent: OperatorSpawnAgent, yolo?: true, model?: string } | null {
     const directory = normalizeFsPath(config.projectPath)
     if (!directory) return null
-    const body: { directory: string, agent: OperatorSpawnAgent, yolo?: true } = {
+    const agent = normalizeSpawnAgent(config.spawnAgent)
+    const body: { directory: string, agent: OperatorSpawnAgent, yolo?: true, model?: string } = {
         directory,
-        agent: normalizeSpawnAgent(config.spawnAgent)
+        agent
     }
+    if (agent === 'cursor') body.model = 'auto'
     if (parseSpawnYolo(config.spawnYolo, true)) body.yolo = true
     return body
 }

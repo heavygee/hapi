@@ -209,7 +209,7 @@ describe('hapi-inline host routes', () => {
             })
         })
         expect(res.status).toBe(200)
-        expect(seen).toEqual([{ directory: PROJECT, agent: 'cursor', yolo: true }])
+        expect(seen).toEqual([{ directory: PROJECT, agent: 'cursor', model: 'auto', yolo: true }])
     })
 
     it('POST /operator/sessions omits yolo when server spawnYolo is false', async () => {
