@@ -696,7 +696,7 @@
   }
 
   function whisperTranscribe(b64, mime) {
-    if (cfg.mode !== MODE_PROXY) return Promise.reject(new Error('server stt unavailable in browser-hub mode'));
+    if (cfg.mode !== MODE_PROXY) return Promise.reject(new Error('no server STT on this host (browser-hub)'));
     var secret = ensureSecret();
     if (!secret) return Promise.reject(new Error('operator secret required'));
     var url = (cfg && cfg.sttUrl) || '/api/stt';
@@ -885,7 +885,10 @@
       e.preventDefault(); e.stopPropagation(); closeOverlay();
     });
     send.addEventListener('click', function (e) {
-      e.preventDefault(); e.stopPropagation(); doSend('');
+      e.preventDefault(); e.stopPropagation();
+      // #166: Send while listening must flush STT — empty doSend dropped the recording.
+      if (recording) { finishRecording(); return; }
+      doSend((liveTranscript || '').trim());
     });
     actions.appendChild(cancel); actions.appendChild(send);
     foot.appendChild(actions);
@@ -1152,7 +1155,7 @@
       rebuilt += out.charAt(i);
       i++;
     }
-    return rebuilt.replace(/\n{3,}/g, '\n\n').replace(/\s+$/u, '').replace(/^\s+/u, '');
+    return rebuilt.replace(/\n{3,}/g, '\n\n').replace(/\n{2,}📍/g, '\n📍').replace(/\s+$/u, '').replace(/^\s+/u, '');
   }
   // --- end replies display sanitize ---
 
@@ -1400,7 +1403,12 @@
           setBtnState(overlay ? 'markup' : 'idle');
           return;
         }
-        if (!webOk && mediaOk) showRecordLabel('🎙️ Listening (server STT on stop)…');
+        if (!webOk && mediaOk) {
+          if (cfg.mode !== MODE_PROXY) {
+            toast('Web Speech unavailable — this host has no server STT. Talk will not transcribe.', 'err');
+          }
+          showRecordLabel('🎙️ Listening (server STT on stop)…');
+        }
         else refreshRecordLabel();
       });
     }
@@ -1921,7 +1929,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.11.8', // x-release-please-version
+    _version: '0.11.9', // x-release-please-version
     openCluster: function () { return openCluster(); },
     _stripRawJsonForDisplay: stripRawJsonForDisplay,
     _summarizeContextJson: summarizeContextJson,
