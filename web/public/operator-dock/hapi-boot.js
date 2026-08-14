@@ -67,6 +67,7 @@
         window.HapiInline.init({
             appId: 'hapi-web',
             configUrl: '/hapi/config',
+            getHubJwt: function () { return resolveSttJwt() },
             navProvider: function () {
                 return { route: location.pathname, app: 'hapi-web' }
             }
