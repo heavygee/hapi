@@ -1,8 +1,9 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import type { SessionSummary } from '@/types/api'
+import type { ApiClient } from '@/api/client'
 import { I18nProvider } from '@/lib/i18n-context'
 import { ToastProvider } from '@/lib/toast-context'
 import { SessionList } from './SessionList'
@@ -14,6 +15,7 @@ afterEach(() => {
     cleanup()
     localStorage.removeItem('hapi-session-preview-limit')
     localStorage.removeItem('hapi-pin-in-progress-sessions')
+    vi.unstubAllGlobals()
 })
 
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
@@ -1089,6 +1091,154 @@ describe('SessionList search toggle', () => {
         expect(screen.getByRole('button', { name: SEARCH_LABEL })).toHaveFocus()
         expect(screen.getByRole('button', { name: /Matching task/ })).toBeInTheDocument()
         expect(screen.getByRole('button', { name: /Other task/ })).toBeInTheDocument()
+    })
+
+    it('expands the field on long press without clearing the query when dictation is unconfigured', () => {
+        const sessions = [
+            makeSession({
+                id: 'session-jelly',
+                updatedAt: 100,
+                metadata: { path: '/work/hapi', name: 'jellybot task', flavor: 'codex' },
+            }),
+            makeSession({
+                id: 'session-other',
+                updatedAt: 90,
+                metadata: { path: '/work/hapi', name: 'Other task', flavor: 'codex' },
+            }),
+        ]
+
+        renderWithProviders(
+            <SessionList
+                sessions={sessions}
+                selectedSessionId={null}
+                onSelect={vi.fn()}
+                onNewSession={vi.fn()}
+                onRefresh={vi.fn()}
+                isLoading={false}
+                renderHeader={false}
+                api={null}
+            />
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
+        const input = screen.getByPlaceholderText(SEARCH_PLACEHOLDER)
+        fireEvent.change(input, { target: { value: 'jellybot' } })
+        fireEvent.blur(input)
+
+        vi.useFakeTimers()
+        const collapsed = screen.getByRole('button', { name: /Search sessions.*jellybot/ })
+        fireEvent.touchStart(collapsed, { touches: [{ clientX: 10, clientY: 10 }] })
+        act(() => {
+            vi.advanceTimersByTime(500)
+        })
+        fireEvent.touchEnd(collapsed, { changedTouches: [{ clientX: 10, clientY: 10 }] })
+        vi.useRealTimers()
+
+        // No dictation provider is configured (api is null), so the long press has
+        // nowhere to dial in — but it must never fall back to the old dismiss behavior.
+        // The query — and its filtering — stays intact.
+        expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDER)).toHaveValue('jellybot')
+        expect(screen.getByRole('button', { name: /jellybot task/ })).toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: /Other task/ })).toBeNull()
+    })
+
+    it('starts dictation into the query on long press and appends the transcript on stop', async () => {
+        const stopTrack = vi.fn()
+        Object.defineProperty(navigator, 'mediaDevices', {
+            configurable: true,
+            value: { getUserMedia: vi.fn(async () => ({ getTracks: () => [{ stop: stopTrack }] })) }
+        })
+
+        class MockMediaRecorder {
+            static isTypeSupported() { return true }
+            state: RecordingState = 'inactive'
+            mimeType = 'audio/webm'
+            ondataavailable: ((event: BlobEvent) => void) | null = null
+            onerror: (() => void) | null = null
+            onstop: (() => void) | null = null
+            start() { this.state = 'recording' }
+            stop() {
+                this.state = 'inactive'
+                this.ondataavailable?.({ data: new Blob(['audio'], { type: this.mimeType }) } as BlobEvent)
+                this.onstop?.()
+            }
+        }
+        vi.stubGlobal('MediaRecorder', MockMediaRecorder)
+
+        const fetchTranscriptionProviders = vi.fn(async () => ({
+            providers: [{ id: 'openai', label: 'OpenAI', modes: ['standard'] }]
+        }))
+        const transcribeVoice = vi.fn(async () => ({ text: 'dictated words' }))
+        const api = { fetchTranscriptionProviders, transcribeVoice }
+
+        const sessions = [
+            makeSession({
+                id: 'session-jelly',
+                updatedAt: 100,
+                metadata: { path: '/work/hapi', name: 'jellybot task', flavor: 'codex' },
+            }),
+        ]
+
+        renderWithProviders(
+            <SessionList
+                sessions={sessions}
+                selectedSessionId={null}
+                onSelect={vi.fn()}
+                onNewSession={vi.fn()}
+                onRefresh={vi.fn()}
+                isLoading={false}
+                renderHeader={false}
+                api={api as unknown as ApiClient}
+            />
+        )
+
+        await waitFor(() => expect(fetchTranscriptionProviders).toHaveBeenCalled())
+
+        // Long-pressing works whether or not there is already a query — the old
+        // `longPressEnabled: hasTextQuery` gating no longer applies.
+        const collapsed = screen.getByRole('button', { name: SEARCH_LABEL })
+        vi.useFakeTimers()
+        fireEvent.touchStart(collapsed, { touches: [{ clientX: 10, clientY: 10 }] })
+        act(() => {
+            vi.advanceTimersByTime(500)
+        })
+        fireEvent.touchEnd(collapsed, { changedTouches: [{ clientX: 10, clientY: 10 }] })
+        vi.useRealTimers()
+
+        expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDER)).toBeInTheDocument()
+        await waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalled())
+
+        const stopButton = await screen.findByRole('button', { name: 'Stop dictation' })
+        fireEvent.click(stopButton)
+
+        await waitFor(() => expect(transcribeVoice).toHaveBeenCalled())
+        await waitFor(() => expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDER)).toHaveValue('dictated words'))
+    })
+
+    it('short tap still expands to normal text search', () => {
+        const sessions = [
+            makeSession({
+                id: 'session-jelly',
+                updatedAt: 100,
+                metadata: { path: '/work/hapi', name: 'jellybot task', flavor: 'codex' },
+            }),
+        ]
+
+        renderWithProviders(
+            <SessionList
+                sessions={sessions}
+                selectedSessionId={null}
+                onSelect={vi.fn()}
+                onNewSession={vi.fn()}
+                onRefresh={vi.fn()}
+                isLoading={false}
+                renderHeader={false}
+                api={null}
+            />
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
+        expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDER)).toBeInTheDocument()
     })
 
     it('stays expanded with focus on the input after clearing the query', () => {

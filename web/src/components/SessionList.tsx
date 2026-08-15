@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { SessionSummary } from '@/types/api'
 import { isWildcardSearch, matchesSearchQuery } from '@hapi/protocol'
 import type { ApiClient } from '@/api/client'
 import { useLongPress } from '@/hooks/useLongPress'
+import { useDictation } from '@/hooks/useDictation'
+import { useVoiceInputPreferences } from '@/hooks/useVoiceInputPreferences'
 import { usePlatform } from '@/hooks/usePlatform'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
@@ -717,6 +719,7 @@ export function SessionListSearch(props: {
     onDateRangeChange: (start: string, end: string) => void
     expanded: boolean
     onExpandedChange: (expanded: boolean) => void
+    api: ApiClient | null
 }) {
     const { t } = useTranslation()
     const [datePickerOpen, setDatePickerOpen] = useState(false)
@@ -800,9 +803,37 @@ export function SessionListSearch(props: {
     }
 
     const searchLabel = t('sessions.search.open')
+    const hasTextQuery = props.value.length > 0
+
+    // getCurrentText reads from a ref, not props.value directly, so dictation's
+    // onFinalTranscript always appends onto the latest query even if this
+    // component re-rendered mid-recording.
+    const valueRef = useRef(props.value)
+    valueRef.current = props.value
+    const getCurrentValue = useCallback(() => valueRef.current, [])
+
+    const voiceInput = useVoiceInputPreferences(props.api)
+    const dictation = useDictation({
+        api: props.api,
+        provider: voiceInput.provider,
+        mode: voiceInput.transcriptionMode,
+        getCurrentText: getCurrentValue,
+        onTextChange: props.onChange
+    })
+    const dictationListening = dictation.status === 'connecting' || dictation.status === 'connected'
+
+    const startDictation = useCallback(() => {
+        props.onExpandedChange(true)
+        if (dictation.supported) void dictation.toggle()
+    }, [dictation, props.onExpandedChange])
+
+    const collapsedSearchHandlers = useLongPress({
+        onLongPress: startDictation,
+        onClick: () => props.onExpandedChange(true),
+        interaction: 'touch-only-native-click',
+    })
 
     if (!props.expanded) {
-        const hasTextQuery = props.value.length > 0
         const collapsedLabel = hasTextQuery ? `${searchLabel}: ${props.value}` : searchLabel
         return (
             <div className="relative flex items-center gap-1">
@@ -816,7 +847,7 @@ export function SessionListSearch(props: {
                     <button
                         ref={collapsedButtonRef}
                         type="button"
-                        onClick={() => props.onExpandedChange(true)}
+                        {...collapsedSearchHandlers}
                         className={cn(
                             'relative flex min-w-0 items-center gap-1 transition-colors',
                             hasTextQuery
@@ -857,14 +888,29 @@ export function SessionListSearch(props: {
         <div
             className="relative min-w-0 flex-1"
             onBlur={(event) => {
+                // Losing focus while dictation is live must not collapse the field out
+                // from under an in-progress recording — the mic keeps listening hands-free.
+                if (dictationListening) return
                 if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
                     props.onExpandedChange(false)
                 }
             }}
         >
-            <div className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center text-[var(--app-hint)]">
-                <SearchIcon className="h-3.5 w-3.5" />
-            </div>
+            {dictationListening ? (
+                <button
+                    type="button"
+                    onClick={() => void dictation.toggle()}
+                    className="absolute inset-y-0 left-2.5 flex items-center text-[#007AFF]"
+                    title={t('sessions.search.dictationStop')}
+                    aria-label={t('sessions.search.dictationStop')}
+                >
+                    <span className="h-2 w-2 animate-pulse rounded-full bg-[#007AFF]" />
+                </button>
+            ) : (
+                <div className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center text-[var(--app-hint)]">
+                    <SearchIcon className="h-3.5 w-3.5" />
+                </div>
+            )}
             <input
                 ref={inputRef}
                 type="search"
@@ -896,6 +942,23 @@ export function SessionListSearch(props: {
             <div className="absolute inset-y-0 right-0 flex items-stretch">
                 {renderDateFilter('embedded')}
             </div>
+            {dictationListening && dictation.partialTranscript ? (
+                <div
+                    role="status"
+                    aria-live="polite"
+                    className="absolute inset-x-0 top-full z-10 mt-1 max-h-20 overflow-y-auto rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm text-[var(--app-fg)] shadow-sm"
+                >
+                    {dictation.partialTranscript}
+                </div>
+            ) : null}
+            {dictation.error ? (
+                <div
+                    role="alert"
+                    className="absolute inset-x-0 top-full z-10 mt-1 rounded-md bg-[var(--app-subtle-bg)] px-3 py-2 text-xs text-red-600"
+                >
+                    {dictation.error}
+                </div>
+            ) : null}
         </div>
     )
 }
@@ -1886,6 +1949,7 @@ export function SessionList(props: {
                             }}
                             expanded={searchExpanded}
                             onExpandedChange={setSearchExpanded}
+                            api={api}
                         />
                     ) : null}
                     {!(showSearch && searchExpanded) ? (

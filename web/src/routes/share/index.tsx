@@ -336,6 +336,7 @@ export default function SharePage() {
                             }}
                             expanded={searchExpanded}
                             onExpandedChange={setSearchExpanded}
+                            api={null}
                         />
                         {pickerSessions === null ? (
                             <LoadingState label={t('share.loading')} className="text-sm py-4" />
