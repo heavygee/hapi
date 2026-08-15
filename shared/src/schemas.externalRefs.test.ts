@@ -237,6 +237,19 @@ describe('buildGithubPrExternalRef', () => {
 })
 
 describe('upsertGithubPrIntoExternalRefs', () => {
+    it('upserting a primary into MAX_EXTERNAL_REFS secondaries exceeds the cap', () => {
+        const secondaries = Array.from({ length: 32 }, (_, index) => ({
+            kind: 'github_pr' as const,
+            repo: 'tiann/hapi',
+            number: index + 1,
+            url: `https://github.com/tiann/hapi/pull/${index + 1}`,
+            role: 'secondary' as const
+        }))
+        const primary = buildGithubPrExternalRef({ repo: 'tiann/hapi', number: 99, role: 'primary' })
+        const next = upsertGithubPrIntoExternalRefs(secondaries, primary)
+        expect(ExternalRefsSchema.safeParse(next).success).toBe(false)
+    })
+
     it('preserves cached health when re-linking the same PR', () => {
         const existing = buildGithubPrExternalRef({
             repo: 'tiann/hapi',

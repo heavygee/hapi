@@ -1,4 +1,4 @@
-import { AgentStateSchema, MetadataSchema, SessionPatchSchema, TeamStateSchema } from '@hapi/protocol/schemas'
+import { AgentStateSchema, ExternalRefsSchema, MetadataSchema, SessionPatchSchema, TeamStateSchema } from '@hapi/protocol/schemas'
 import type { CodexCollaborationMode, CopilotAgentMode, ExternalRef, PermissionMode, Session, SessionPatch } from '@hapi/protocol/types'
 import type { Store } from '../store'
 import { clampAliveTime } from './aliveTime'
@@ -953,7 +953,11 @@ export class SessionCache {
             const currentRefs = Array.isArray(currentMetadata.externalRefs)
                 ? currentMetadata.externalRefs as ExternalRef[]
                 : []
-            const externalRefs = mutate(currentRefs)
+            const parsedRefs = ExternalRefsSchema.safeParse(mutate(currentRefs))
+            if (!parsedRefs.success) {
+                throw new Error(parsedRefs.error.issues[0]?.message ?? 'Invalid external refs')
+            }
+            const externalRefs = parsedRefs.data
             const newMetadata = { ...currentMetadata, externalRefs }
 
             const result = this.store.sessions.updateSessionMetadata(

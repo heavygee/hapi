@@ -37,16 +37,26 @@ const AUTO_APPROVE_EXACT_TOOL_NAMES = new Set([
     'happy__list_peers',
     'mcp__hapi__list_peers',
     // ACP permission requests often surface MCP tool title, not the snake_case name.
-    'list peer sessions',
-    // Exact HAPI link_pr identities only — never substring-match (e.g. link_pr_write_file).
-    'link_pr',
+    'list peer sessions'
+]);
+const HAPI_VERIFIED_LINK_PR_TOOL_NAMES = new Set([
     'happy__link_pr',
     'hapi_link_pr',
     'hapi__link_pr',
     'mcp__hapi__link_pr',
-    'mcp__happy__link_pr',
-    'link pull request'
+    'mcp__happy__link_pr'
 ]);
+
+function isVerifiedHapiLinkPrTool(toolName: string, serverName?: string): boolean {
+    const lowerTool = toolName.toLowerCase();
+    if (HAPI_VERIFIED_LINK_PR_TOOL_NAMES.has(lowerTool)) {
+        return true;
+    }
+    if (serverName === 'hapi' && (lowerTool === 'link_pr' || lowerTool === 'link pull request')) {
+        return true;
+    }
+    return false;
+}
 // ping_peer / inspect_peer intentionally omitted from always-approve: they can
 // resume+inject into another session or read peer histories, so permission
 // modes must still gate them. Treat both as write-like in read-only so ACP
@@ -73,7 +83,8 @@ export function resolveToolAutoApprovalDecision(
     mode: PermissionMode | undefined,
     toolName: string,
     toolCallId: string,
-    ruleOverrides?: AutoApprovalRuleSet
+    ruleOverrides?: AutoApprovalRuleSet,
+    context?: { serverName?: string }
 ): AutoApprovalDecision | null {
     const rules = {
         alwaysToolNameHints: ruleOverrides?.alwaysToolNameHints ?? AUTO_APPROVE_TOOL_NAME_HINTS,
@@ -84,6 +95,10 @@ export function resolveToolAutoApprovalDecision(
     const lowerTool = toolName.toLowerCase();
     const lowerId = toolCallId.toLowerCase();
     const decisionForMode: AutoApprovalDecision = (mode === 'yolo' || mode === 'always-proceed') ? 'approved_for_session' : 'approved';
+
+    if (isVerifiedHapiLinkPrTool(lowerTool, context?.serverName)) {
+        return decisionForMode;
+    }
 
     if (
         AUTO_APPROVE_EXACT_TOOL_NAMES.has(lowerTool)
@@ -173,9 +188,10 @@ export abstract class BasePermissionHandler<TResponse extends { id: string }, TR
         mode: PermissionMode | undefined,
         toolName: string,
         toolCallId: string,
-        ruleOverrides?: AutoApprovalRuleSet
+        ruleOverrides?: AutoApprovalRuleSet,
+        context?: { serverName?: string }
     ): AutoApprovalDecision | null {
-        return resolveToolAutoApprovalDecision(mode, toolName, toolCallId, ruleOverrides);
+        return resolveToolAutoApprovalDecision(mode, toolName, toolCallId, ruleOverrides, context);
     }
 
     protected addPendingRequest(

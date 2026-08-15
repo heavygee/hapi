@@ -69,7 +69,16 @@ export class PermissionAdapter {
         });
         const input = deriveToolInput(request);
         const mode = this.getPermissionMode?.();
-        const autoDecision = resolveToolAutoApprovalDecision(mode, toolName, request.toolCallId);
+        const serverName = input && typeof input === 'object' && 'serverName' in input
+            ? String((input as Record<string, unknown>).serverName)
+            : undefined;
+        const autoDecision = resolveToolAutoApprovalDecision(
+            mode,
+            toolName,
+            request.toolCallId,
+            undefined,
+            serverName ? { serverName } : undefined
+        );
 
         if (autoDecision) {
             void this.autoApproveRequest(request, toolName, input, autoDecision);

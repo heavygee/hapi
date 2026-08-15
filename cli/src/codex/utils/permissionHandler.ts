@@ -34,6 +34,14 @@ type UserInputResult = {
 
 type PermissionResult = ToolPermissionResult | UserInputResult;
 
+function extractServerNameFromPermissionInput(input: unknown): { serverName?: string } | undefined {
+    if (!input || typeof input !== 'object') {
+        return undefined;
+    }
+    const serverName = (input as Record<string, unknown>).serverName;
+    return typeof serverName === 'string' ? { serverName } : undefined;
+}
+
 type CodexPermissionHandlerOptions = {
     getCollaborationMode?: () => 'default' | 'plan' | undefined;
     onRequest?: (request: { id: string; toolName: string; input: unknown }) => void;
@@ -115,7 +123,13 @@ export class CodexPermissionHandler extends BasePermissionHandler<PermissionResp
             && (toolName === 'exit_plan_mode' || toolName === 'ExitPlanMode');
         const autoDecision = requiresPlanApproval
             ? null
-            : this.resolveAutoApprovalDecision(mode, toolName, toolCallId);
+            : this.resolveAutoApprovalDecision(
+                mode,
+                toolName,
+                toolCallId,
+                undefined,
+                extractServerNameFromPermissionInput(input)
+            );
         if (autoDecision) {
             return Promise.resolve(this.completeAutoApproval(toolCallId, toolName, input, autoDecision));
         }
