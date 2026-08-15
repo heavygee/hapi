@@ -1113,7 +1113,9 @@ export async function runPi(opts: {
                 return;
             }
 
-            const name = parseLeadingSlashName(message.content.text);
+            // Peer deliveries stay literal text — never receiver /compact etc. (#1473).
+            const isPeerDelivery = message.meta?.sentFrom === 'peer';
+            const name = isPeerDelivery ? null : parseLeadingSlashName(message.content.text);
             // Discovered extension commands / prompt templates win over HAPI
             // builtins: the menu already lets them override same-name entries,
             // so a user extension named "compact" must keep executing instead
@@ -1128,7 +1130,7 @@ export async function runPi(opts: {
                 return;
             }
             const isCustomCommand = Boolean(name && discovered.some((item) => item.name.toLowerCase() === name.toLowerCase()));
-            const specialCommand = isCustomCommand
+            const specialCommand = isPeerDelivery || isCustomCommand
                 ? null
                 : parsePiSpecialCommand(message.content.text);
             if (specialCommand) {
