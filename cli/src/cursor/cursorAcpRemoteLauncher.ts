@@ -568,15 +568,11 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
     }
 
     /**
-     * #1470 / #1502 / #1553: ACP foreground state → hub thinking via keepalive.
-     * Ignore ambient running bumps while queue-idle — prompt() owns thinking, and
-     * attached jobs are the honest list signal when the agent is not working.
+     * #1470 / #1502: ACP foreground state → hub thinking via keepalive.
+     * Bucket flicker with attached jobs is handled in web/sessionInProgress (#1553).
      */
     private wireAgentActivityThinking(backend: AcpSdkBackend, session: CursorSession): void {
         backend.setAgentActivityListener((thinking) => {
-            if (thinking && !this.promptInFlight && session.queue.size() === 0) {
-                return;
-            }
             if (session.thinking !== thinking) {
                 session.onThinkingChange(thinking);
             }
