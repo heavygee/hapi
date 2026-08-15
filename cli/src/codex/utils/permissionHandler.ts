@@ -34,13 +34,9 @@ type UserInputResult = {
 
 type PermissionResult = ToolPermissionResult | UserInputResult;
 
-function extractServerNameFromPermissionInput(input: unknown): { serverName?: string } | undefined {
-    if (!input || typeof input !== 'object') {
-        return undefined;
-    }
-    const serverName = (input as Record<string, unknown>).serverName;
-    return typeof serverName === 'string' ? { serverName } : undefined;
-}
+export type CodexToolCallOptions = {
+    trustedHapiMcp?: boolean;
+};
 
 type CodexPermissionHandlerOptions = {
     getCollaborationMode?: () => 'default' | 'plan' | undefined;
@@ -116,7 +112,8 @@ export class CodexPermissionHandler extends BasePermissionHandler<PermissionResp
     async handleToolCall(
         toolCallId: string,
         toolName: string,
-        input: unknown
+        input: unknown,
+        options?: CodexToolCallOptions
     ): Promise<ToolPermissionResult> {
         const mode = this.getPermissionMode() ?? 'default';
         const requiresPlanApproval = this.options?.getCollaborationMode?.() === 'plan'
@@ -128,7 +125,7 @@ export class CodexPermissionHandler extends BasePermissionHandler<PermissionResp
                 toolName,
                 toolCallId,
                 undefined,
-                extractServerNameFromPermissionInput(input)
+                options?.trustedHapiMcp ? { trustedHapiMcp: true } : undefined
             );
         if (autoDecision) {
             return Promise.resolve(this.completeAutoApproval(toolCallId, toolName, input, autoDecision));

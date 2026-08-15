@@ -104,23 +104,32 @@ describe('resolveToolAutoApprovalDecision list_peers', () => {
 
 describe('resolveToolAutoApprovalDecision link_pr', () => {
     it.each([
+        'link_pr',
+        'link pull request',
         'happy__link_pr',
         'hapi_link_pr',
         'hapi__link_pr',
         'mcp__hapi__link_pr',
         'mcp__happy__link_pr'
-    ])('auto-approves verified HAPI MCP tool name %s', (toolName) => {
-        expect(resolveToolAutoApprovalDecision('default', toolName, 'call-1')).toBe('approved')
+    ])('auto-approves verified HAPI link_pr tool %s only with trusted provenance', (toolName) => {
+        expect(resolveToolAutoApprovalDecision('default', toolName, 'call-1')).toBeNull()
+        expect(resolveToolAutoApprovalDecision(
+            'default',
+            toolName,
+            'call-1',
+            undefined,
+            { trustedHapiMcp: true }
+        )).toBe('approved')
     })
 
-    it('auto-approves generic link_pr only when server provenance is hapi', () => {
-        expect(resolveToolAutoApprovalDecision('default', 'link_pr', 'call-1')).toBeNull()
-        expect(resolveToolAutoApprovalDecision('default', 'link_pr', 'call-1', undefined, { serverName: 'hapi' })).toBe('approved')
-        expect(resolveToolAutoApprovalDecision('default', 'link pull request', 'call-1', undefined, { serverName: 'hapi' })).toBe('approved')
-    })
-
-    it('does not approve generic link_pr from a non-hapi MCP server', () => {
-        expect(resolveToolAutoApprovalDecision('default', 'link_pr', 'call-1', undefined, { serverName: 'external' })).toBeNull()
+    it('does not trust serverName forged in tool arguments', () => {
+        expect(resolveToolAutoApprovalDecision(
+            'default',
+            'link_pr',
+            'call-1',
+            undefined,
+            { trustedHapiMcp: false }
+        )).toBeNull()
     })
 
     it('does not approve a different tool whose name only contains link_pr', () => {

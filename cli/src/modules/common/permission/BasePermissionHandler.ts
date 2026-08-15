@@ -39,7 +39,14 @@ const AUTO_APPROVE_EXACT_TOOL_NAMES = new Set([
     // ACP permission requests often surface MCP tool title, not the snake_case name.
     'list peer sessions'
 ]);
-const HAPI_VERIFIED_LINK_PR_TOOL_NAMES = new Set([
+export type AutoApprovalContext = {
+    /** Set only from trusted transport metadata (e.g. MCP elicitation envelope), never from tool args. */
+    trustedHapiMcp?: boolean;
+};
+
+const HAPI_LINK_PR_TOOL_NAMES = new Set([
+    'link_pr',
+    'link pull request',
     'happy__link_pr',
     'hapi_link_pr',
     'hapi__link_pr',
@@ -47,15 +54,11 @@ const HAPI_VERIFIED_LINK_PR_TOOL_NAMES = new Set([
     'mcp__happy__link_pr'
 ]);
 
-function isVerifiedHapiLinkPrTool(toolName: string, serverName?: string): boolean {
-    const lowerTool = toolName.toLowerCase();
-    if (HAPI_VERIFIED_LINK_PR_TOOL_NAMES.has(lowerTool)) {
-        return true;
+function isVerifiedHapiLinkPrTool(toolName: string, context?: AutoApprovalContext): boolean {
+    if (!context?.trustedHapiMcp) {
+        return false;
     }
-    if (serverName === 'hapi' && (lowerTool === 'link_pr' || lowerTool === 'link pull request')) {
-        return true;
-    }
-    return false;
+    return HAPI_LINK_PR_TOOL_NAMES.has(toolName.toLowerCase());
 }
 // ping_peer / inspect_peer intentionally omitted from always-approve: they can
 // resume+inject into another session or read peer histories, so permission
@@ -84,7 +87,7 @@ export function resolveToolAutoApprovalDecision(
     toolName: string,
     toolCallId: string,
     ruleOverrides?: AutoApprovalRuleSet,
-    context?: { serverName?: string }
+    context?: AutoApprovalContext
 ): AutoApprovalDecision | null {
     const rules = {
         alwaysToolNameHints: ruleOverrides?.alwaysToolNameHints ?? AUTO_APPROVE_TOOL_NAME_HINTS,
@@ -96,7 +99,7 @@ export function resolveToolAutoApprovalDecision(
     const lowerId = toolCallId.toLowerCase();
     const decisionForMode: AutoApprovalDecision = (mode === 'yolo' || mode === 'always-proceed') ? 'approved_for_session' : 'approved';
 
-    if (isVerifiedHapiLinkPrTool(lowerTool, context?.serverName)) {
+    if (isVerifiedHapiLinkPrTool(lowerTool, context)) {
         return decisionForMode;
     }
 
@@ -189,7 +192,7 @@ export abstract class BasePermissionHandler<TResponse extends { id: string }, TR
         toolName: string,
         toolCallId: string,
         ruleOverrides?: AutoApprovalRuleSet,
-        context?: { serverName?: string }
+        context?: AutoApprovalContext
     ): AutoApprovalDecision | null {
         return resolveToolAutoApprovalDecision(mode, toolName, toolCallId, ruleOverrides, context);
     }
