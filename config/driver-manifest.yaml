@@ -839,6 +839,6 @@ layers:
   # into the query (whichever transcription provider is configured), replacing
   # the old long-press-to-dismiss gesture. Web-only.
   # Worktree: ~/coding/hapi/worktrees/session-search-longpress-dismiss @ fix/session-search-longpress-dismiss
-  # Tip: 3a99d876a
+  # Tip: 2a5bafdfc — rebased onto upstream/main @ 901f17d0c (was fat conflict vs #1545 collapsed-chip rework)
   - branch: fix/session-search-longpress-dismiss
 
