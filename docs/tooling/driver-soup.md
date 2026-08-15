@@ -385,13 +385,26 @@ Escape hatch for disaster / recipe audit: `HAPI_REMAT_MODE=full-recipe` (old beh
 | Failure | Live `driver/integration` | Where to look |
 |---|---|---|
 | Merge conflict mid-stack | **Unchanged** (pre-remat SHA) | Remat worktree stays conflicted — resolve there, or `git merge --abort` |
-| Fat layer tip skipped (tip-forward gate) | Remat continues (layer not absorbed) | Layer owner re-thins onto tip/upstream; Meta override `HAPI_REMAT_ABSORB_FAT=1` to force absorb |
+| Fat layer tip skipped (tip-forward gate) | Remat continues (layer **not** absorbed) | **Ping the layer owner.** They re-thin 1–3 commits onto the **current soup tip** (not stack more onto fat `driver/<feature>`). Meta override `HAPI_REMAT_ABSORB_FAT=1` only if wedged. SKIP ≠ dogfood of that layer. |
 | Soup-heal apply conflict (`apply -3` base drift) / router-dedupe heal error | **Unchanged** (pre-remat SHA) | Tip-forward: warn-skip. Full-recipe: remat WT left for owner (`heal_fail`) |
 | Post-promote typecheck / tests / dist verify | **Restored** to pre-remat SHA | Re-run after fixing the gate |
 
 Incident 2026-07-29 19:11Z: in-place `checkout -B driver/integration upstream/main` + layer loop `exit 1` left tip stuck after `feat/cursor-picker-ios-nested` — PR awareness + rich-composer vanished from source while stale dist still looked rich. That class must not recur.
 
 Override remat worktree: `HAPI_DRIVER_REMAT_WT=/path`.
+
+### Fat SKIP is not a thin layer (2026-08-15, #1424)
+
+Incident: `driver/session-attached-jobs` stayed fat; tip-forward SKIP WARN (57c/90f). Rescue was a **new thin** `driver/session-jobs-delta`. Operator intuition "rebase keeps soup thin" is false when the layer ref is not **re-tipped** onto live soup HEAD after each dogfood bump.
+
+**Must:**
+
+1. Remat SKIP WARN → **ping the layer owner** (`hapi-ping-peer`). Do not call the wave green for that feature.
+2. Owner: cherry-pick / re-thin **1–3 commits onto current soup tip**, force-push the layer branch, update the manifest comment (`thin-tip SHA` + `re-thin after dogfood bump`). Do **not** grow fat `driver/<feature>`.
+3. Dogfood close: `hapi-driver-status` HEAD == the SHA in the manifest comment. MCP subprocesses may need **session resume** after hub restart (lifecycle soup promotion).
+4. Gate A when the upstream PR merges: drop **fat parent and rescue delta** together.
+
+Manifest lint (refuse layer if commit-count vs tip > fat-gate threshold) is **not** shipped — fat-tip gate already skips at remat. Lint would catch the miss earlier; file a tooling issue if SKIP WARN keeps getting ignored. Do not `HAPI_REMAT_ABSORB_FAT=1` to hide a fat layer.
 
 ### externalRefs wipe — mid-stack hub + sparse metadata (2026-07-30)
 
@@ -422,7 +435,7 @@ Commenting out someone else's `- branch:` so `hapi-driver-rebuild` goes green **
 
 | Who | Must |
 |---|---|
-| **Feature peer** (layer owner) | Keep tip **thin**: prefer `upstream/main` + your delta, or the **exact remat pre-layer SHA** Meta names after a failed remat. **Do not** thin onto `origin/driver/integration` (stale publish tip). Tip-forward remat starts from the live soup tip and **refuses fat moved tips** (>20 non-merge commits / >40 files) — re-thin onto current tip before asking Meta to remat. When rematerialize fails on *your* layer: re-thin / force-push / fix conflicts yourself, then un-park if you parked. |
+| **Feature peer** (layer owner) | Keep tip **thin**: prefer `upstream/main` + your delta, or the **exact remat pre-layer SHA** Meta names after a failed remat. **Do not** thin onto `origin/driver/integration` (stale publish tip). Tip-forward remat starts from the live soup tip and **refuses fat moved tips** (>20 non-merge commits / >40 files) — re-thin onto current tip before asking Meta to remat. After each dogfood bump, **re-tip the layer** (1–3 commits on current soup HEAD); rebasing a fat `driver/<feature>` history does not make tip-forward absorb it. Manifest comment: thin-tip SHA + `re-thin after dogfood bump`. When rematerialize fails on *your* layer: re-thin / force-push / fix conflicts yourself, then un-park if you parked. Rescue thin layers (`driver/<feature>-delta`) drop **with** the fat parent at Gate A. |
 | **Meta / rematerialize agent** | **Do not** park peer layers to get a green rebuild. Fail closed: leave the layer active, ping the owning peer (`hapi-ping-peer`), report blocked. Allowed only if the operator **names the exact branch** to park. After a web-facing remat (esp. driver-side conflict unions): **smoke `/sessions` in a real browser** (or Playwright) before calling dogfood green — `bun test` + `verify-web-dist` alone missed `getTodoProgress is not defined` (2026-07-29). If the UI was broken, force a **new `index-*.js` content hash** and tell operators to hard-reload / clear Workbox if sticky. |
 | **Operator** | Explicit park instruction per branch — never "just make rematerialize green." |
 

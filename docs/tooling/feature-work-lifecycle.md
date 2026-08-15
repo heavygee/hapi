@@ -119,6 +119,8 @@ flowchart TD
     PROOF -->|yes| DONE(["Done on soup"])
 ```
 
+**Dogfood close (feature peer):** `hapi-driver-status` HEAD must match the thin-tip SHA in your manifest comment. A remat that **SKIP**s your fat `driver/<feature>` layer is not dogfood of that layer — re-thin onto the live tip (see [`driver-soup.md`](./driver-soup.md) § Fat SKIP). After hub restart, Cursor MCP may need **session resume** before new tools exist in the subprocess.
+
 ---
 
 ## Stack path swing vs in-place restart
@@ -237,7 +239,7 @@ When a PR merges on `tiann/hapi`, do **not** stop at "congrats, archive yourself
 | Step | Who | What |
 |------|-----|------|
 | **1. Notify** | Meta / orchestrator on sweep | Reopen named PR session if archived; post MERGED brief (chip already shows `merged` / 🔧). Keep workstream title — **do not** rename to `🔧PR #N MERGED: …`. Classifier action string encodes the cleanup checklist. |
-| **2. Drop soup layer(s)** | **Feature peer** (owner of the layer) | Edit `~/.config/hapi/driver-manifest.yaml`: remove the `- branch:` entry (leave a `# DROPPED YYYY-MM-DD: … MERGED as #N` comment). Do **not** hand-edit `~/coding/hapi/driver`. Do **not** each fire a full rebuild during a multi-PR merge wave. |
+| **2. Drop soup layer(s)** | **Feature peer** (owner of the layer) | Edit `~/.config/hapi/driver-manifest.yaml`: remove the `- branch:` entry (leave a `# DROPPED YYYY-MM-DD: … MERGED as #N` comment). If remat SKIP forced a **rescue thin** layer (`driver/<feature>-delta` beside fat `driver/<feature>`), drop **both** when the upstream PR merges. Do **not** hand-edit `~/coding/hapi/driver`. Do **not** each fire a full rebuild during a multi-PR merge wave. |
 | **3. Clean worktree + branch** | **Feature peer** | From mirror: `git worktree remove ~/coding/hapi/worktrees/<name>` (or `--force` if dirty junk only); delete local branch; `git push origin --delete <branch>` when the remote tip is fully in `upstream/main`. Confirm with `hapi-branch-audit --quiet` (expect no `MERGED` row for that branch). |
 | **4. Rematerialize soup** | Meta tooling bot (unlocked by Meta daily) **or** operator — **once per wave** | Gate A: owned peers only (layer gone + worktree gone). Orphans never block. Meta daily collects ~30m then unlock-pings Meta tooling on the hourly Europe/London ping windows. Manual mid-window rebuilds are fine — unlock defers while `hapi-driver-status --quiet` is busy (75). Then: `hapi-sync-fork-main` + `git push origin main` → `hapi-driver-status --quiet` → `hapi-driver-rebuild --build-web --verify` → `hapi-verify-web-dist` → `hapi-restart-hub` if hub/cli changed. Meta CLI never rebuilds itself. |
 | **5. Exit reflection** | **Feature peer** (while context still hot) | See **§ Exit reflection** below — write retro (or honest `skip:`), then ack. |
