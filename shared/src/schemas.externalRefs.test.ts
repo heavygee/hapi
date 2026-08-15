@@ -150,6 +150,28 @@ describe('MetadataSchema.externalRefs', () => {
         }).success).toBe(false)
     })
 
+    it('rejects duplicate GitHub PR identities including repo casing variants', () => {
+        const primary = {
+            kind: 'github_pr' as const,
+            repo: 'tiann/hapi',
+            number: 1163,
+            url: 'https://github.com/tiann/hapi/pull/1163',
+            role: 'primary' as const
+        }
+        const duplicateSecondary = {
+            kind: 'github_pr' as const,
+            repo: 'Tiann/Hapi',
+            number: 1163,
+            url: 'https://github.com/Tiann/Hapi/pull/1163',
+            role: 'secondary' as const
+        }
+        expect(ExternalRefsSchema.safeParse([primary, duplicateSecondary]).success).toBe(false)
+        expect(MetadataSchema.safeParse({
+            ...base,
+            externalRefs: [primary, duplicateSecondary]
+        }).success).toBe(false)
+    })
+
     it('rejects more than MAX_EXTERNAL_REFS entries', () => {
         const refs = Array.from({ length: 33 }, (_, index) => ({
             kind: 'github_pr' as const,

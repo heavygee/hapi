@@ -133,6 +133,18 @@ export const ExternalRefsSchema = z.array(ExternalRefSchema)
             message: 'at most one primary GitHub PR is allowed'
         })
     }
+    const identities = new Set<string>()
+    refs.forEach((ref, index) => {
+        const key = `${ref.kind}:${ref.repo.toLowerCase()}#${ref.number}`
+        if (identities.has(key)) {
+            ctx.addIssue({
+                code: 'custom',
+                path: [index],
+                message: 'duplicate external ref identity'
+            })
+        }
+        identities.add(key)
+    })
 })
 export type ExternalRefs = z.infer<typeof ExternalRefsSchema>
 
