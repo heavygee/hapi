@@ -44,6 +44,7 @@ import { executeSessionRelay } from './sessionRelay'
 import { EventPublisher, type SyncEventListener } from './eventPublisher'
 import { MachineCache, type Machine } from './machineCache'
 import { MessageService } from './messageService'
+import { createTitleSuggestionService, type TitleSuggestionService } from './titleSuggestion'
 import { selectForkTranscriptPrefix } from './forkTranscript'
 import {
     RpcGateway,
@@ -221,6 +222,7 @@ export class SyncEngine {
     private readonly sessionCache: SessionCache
     private readonly machineCache: MachineCache
     private readonly messageService: MessageService
+    private readonly titleSuggestionService: TitleSuggestionService
     private readonly rpcGateway: RpcGateway
     private readonly overseerEvents: OverseerEventRecorder
     private readonly overseerByNamespace: Map<string, OverseerEntity>
@@ -287,6 +289,7 @@ export class SyncEngine {
             this.eventPublisher,
             (sessionId, updatedAt) => this.recordSessionActivity(sessionId, updatedAt)
         )
+        this.titleSuggestionService = createTitleSuggestionService(store)
         this.rpcGateway = new RpcGateway(io, rpcRegistry)
         const llmFallbackConfig = loadOverseerLlmFallbackConfig()
         const llmFallback = llmFallbackConfig.enabled
@@ -2792,6 +2795,14 @@ export class SyncEngine {
 
     async renameSession(sessionId: string, name: string): Promise<void> {
         await this.sessionCache.renameSession(sessionId, name)
+    }
+
+    async suggestSessionTitle(sessionId: string): Promise<string> {
+        return await this.titleSuggestionService.suggestTitle(sessionId)
+    }
+
+    async updateSessionSummary(sessionId: string, text: string): Promise<void> {
+        await this.sessionCache.updateSessionSummary(sessionId, text)
     }
 
     async deleteSession(sessionId: string): Promise<void> {

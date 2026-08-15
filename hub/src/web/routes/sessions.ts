@@ -22,6 +22,7 @@ import {
     SessionModelRequestSchema,
     SessionPermissionModeRequestSchema,
     SetExternalRefsRequestSchema,
+    UpdateSessionSummaryRequestSchema,
     supportsModelChange,
     supportsEffort,
     toSessionSummary,
@@ -35,6 +36,7 @@ import { SessionArchiveUncontrollableError, type SyncEngine, type Session } from
 import type { WebAppEnv } from '../middleware/auth'
 import { loadScratchlistAttachmentLimitsFromEnv } from '../../config/scratchlistAttachmentLimits'
 import { validateScratchlistAttachmentsForWrite, scratchlistSessionBytesBeforeForPut } from '../../scratchlistAttachments/validate'
+import { TitleSuggestionError } from '../../sync/titleSuggestion'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
@@ -966,6 +968,57 @@ export function createSessionsRoutes(
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to rename session'
             // Map concurrency/version errors to 409 conflict
+            if (message.includes('concurrently') || message.includes('version')) {
+                return c.json({ error: message }, 409)
+            }
+            return c.json({ error: message }, 500)
+        }
+    })
+
+    app.post('/sessions/:id/title-suggestion', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        try {
+            const title = await engine.suggestSessionTitle(sessionResult.sessionId)
+            return c.json({ title })
+        } catch (error) {
+            if (error instanceof TitleSuggestionError) {
+                return c.json({ error: error.message }, error.status)
+            }
+            return c.json({ error: 'Failed to generate a session title' }, 502)
+        }
+    })
+
+    app.patch('/sessions/:id/summary', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = UpdateSessionSummaryRequestSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body: text is required' }, 400)
+        }
+
+        try {
+            await engine.updateSessionSummary(sessionResult.sessionId, parsed.data.text)
+            return c.json({ ok: true })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to update session summary'
             if (message.includes('concurrently') || message.includes('version')) {
                 return c.json({ error: message }, 409)
             }

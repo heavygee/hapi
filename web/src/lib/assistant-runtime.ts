@@ -33,7 +33,7 @@ export type AggregatedAssistantMeta = {
 }
 
 export type HappyChatMessageMetadata = {
-    kind: 'user' | 'assistant' | 'tool' | 'event' | 'cli-output' | 'codex-review'
+    kind: 'user' | 'assistant' | 'tool' | 'event' | 'cli-output' | 'codex-review' | 'compact-summary'
     status?: HappyMessageStatus
     localId?: string | null
     originalText?: string
@@ -583,6 +583,25 @@ export function toThreadMessageLike(
     }
 
     if (block.kind === 'agent-event') {
+        // Pi compaction summaries carry a real payload; surface them as a
+        // dedicated system message so the chat can render an independent
+        // block instead of a small status line.
+        if (block.event.type === 'compact-summary' && typeof block.event.summary === 'string') {
+            return {
+                role: 'system',
+                id: threadMessageId,
+                createdAt: new Date(timestamp),
+                content: [{ type: 'text', text: block.event.summary }],
+                metadata: {
+                    custom: {
+                        kind: 'compact-summary',
+                        event: block.event,
+                        invokedAt: block.invokedAt,
+                        model: block.model
+                    } satisfies HappyChatMessageMetadata
+                }
+            }
+        }
         return {
             role: 'system',
             id: threadMessageId,

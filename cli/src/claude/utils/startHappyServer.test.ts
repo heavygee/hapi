@@ -126,6 +126,16 @@ describe('startHappyServer skill_lookup', () => {
         expect(tools.tools.map((tool) => tool.name)).not.toContain('display_links')
     })
 
+    it('describes display_image as user output rather than image input', async () => {
+        const mcp = await connect(false)
+        const tools = await mcp.listTools()
+        const displayImage = tools.tools.find((tool) => tool.name === 'display_image')
+
+        expect(displayImage?.description).toContain('human user')
+        expect(displayImage?.description).toContain('does not provide image input to the model')
+        expect(displayImage?.description).toContain('cannot be used to read, inspect, or analyze image contents')
+    })
+
     it('displays audio through display_media and emits a generated media message', async () => {
         const path = join(sandboxDir, 'sample.wav')
         await writeFile(path, Buffer.from('RIFFxxxxWAVE'))

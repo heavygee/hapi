@@ -210,6 +210,7 @@ export function SessionHeader(props: {
     onToggleFlow?: () => void
     flowActive?: boolean
     api: ApiClient | null
+    titleSuggestionAvailable?: boolean
     canReopen?: boolean
     reopenDisabledReason?: string
     reopenHint?: string
@@ -313,7 +314,7 @@ export function SessionHeader(props: {
         }
     }, [githubPrAwarenessEnabled, primaryPrRef, t])
 
-    const { archiveSession, reopenSession, renameSession, setExternalRefs, setPinMode, deleteSession, isPending } = useSessionActions(
+    const { archiveSession, reopenSession, renameSession, setExternalRefs, suggestSessionTitle, updateSessionSummary, setPinMode, deleteSession, isPending } = useSessionActions(
         api,
         session.id,
         session.metadata?.flavor ?? null
@@ -447,7 +448,7 @@ export function SessionHeader(props: {
     const handleMenuToggle = () => {
         if (!menuOpen && menuAnchorRef.current) {
             const rect = menuAnchorRef.current.getBoundingClientRect()
-            setMenuAnchorPoint({ x: rect.right, y: rect.bottom })
+            setMenuAnchorPoint({ x: rect.left + rect.width / 2, y: rect.bottom })
         }
         setMenuOpen((open) => !open)
     }
@@ -698,6 +699,8 @@ export function SessionHeader(props: {
                 onClose={() => setRenameOpen(false)}
                 currentName={title}
                 onRename={renameSession}
+                onSuggestTitle={api && props.titleSuggestionAvailable ? suggestSessionTitle : undefined}
+                onUpdateSummary={api && props.titleSuggestionAvailable ? updateSessionSummary : undefined}
                 isPending={isPending}
             />
 
