@@ -371,9 +371,8 @@ function buildElicitationContent(params: unknown, answers: UserInputAnswer): Rec
 }
 
 function elicitationServerName(params: unknown): string | undefined {
-    const record = asRecord(params) ?? {};
-    const request = unwrapElicitationRequest(params);
-    return asString(record.serverName) ?? asString(request.serverName);
+    const record = asRecord(params);
+    return asString(record?.serverName);
 }
 
 function isHapiBridgeElicitation(params: unknown): boolean {

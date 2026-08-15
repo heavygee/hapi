@@ -26,7 +26,9 @@ export function useFeatures(api: ApiClient | null): {
             return await api.getFeatures()
         },
         enabled: Boolean(api),
-        staleTime: 30_000
+        staleTime: 30_000,
+        refetchInterval: 30_000,
+        refetchIntervalInBackground: false
     })
 
     return {
