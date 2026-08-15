@@ -112,10 +112,14 @@ oneliner="kitchen: ${status_word} | driver ${driver_head} (${driver_layers} laye
 
 case "$MODE" in
 json)
+    # driverLayers must stay valid JSON for --argjson even when the manifest
+    # is missing or grep found nothing countable (driver_layers="?" then).
+    driver_layers_json="$driver_layers"
+    [[ "$driver_layers_json" =~ ^[0-9]+$ ]] || driver_layers_json=0
     jq -n \
         --arg status "$status_word" \
         --arg driverHead "$driver_head" \
-        --argjson driverLayers "${driver_layers:-0}" \
+        --argjson driverLayers "$driver_layers_json" \
         --arg mirror "$mirror_note" \
         --argjson mirrorDirty "$mirror_dirty" \
         --argjson forkAhead "$fork_ahead" \
@@ -127,7 +131,7 @@ json)
         --argjson driverBusy "$driver_busy" \
         --argjson ruleChopped "$rule_chopped" \
         --arg oneliner "$oneliner" \
-        '{status, driverHead, driverLayers, mirror, mirrorDirty, forkAhead, forkBehind, working, holdActive, holdReason, lease, driverBusy, ruleChopped, oneliner}'
+        '{status: $status, driverHead: $driverHead, driverLayers: $driverLayers, mirror: $mirror, mirrorDirty: ($mirrorDirty == 1), forkAhead: $forkAhead, forkBehind: $forkBehind, working: $working, holdActive: ($holdActive == 1), holdReason: $holdReason, lease: $lease, driverBusy: ($driverBusy == 1), ruleChopped: ($ruleChopped == 1), oneliner: $oneliner}'
     ;;
 quiet)
     echo "$oneliner"
