@@ -407,6 +407,9 @@ describe('session model', () => {
             'default'
         )
 
+        store.scratchlist.create(oldSession.id, 'keep on source', { entryId: 'merge-note', createdAt: 100 })
+        store.messages.addMessage(oldSession.id, { role: 'user', content: { type: 'text', text: 'keep me' } })
+
         const originalUpdate = store.sessions.updateSessionMetadata.bind(store.sessions)
         store.sessions.updateSessionMetadata = (...args) => {
             if (args[0] === newSession.id) {
@@ -420,6 +423,58 @@ describe('session model', () => {
         ).rejects.toThrow('Session metadata changed concurrently during merge')
 
         expect(store.sessions.getSessionByNamespace(oldSession.id, 'default')).not.toBeNull()
+        expect(store.messages.getMessages(oldSession.id).length).toBe(1)
+        expect(store.messages.getMessages(newSession.id).length).toBe(0)
+        expect(store.scratchlist.list(oldSession.id).length).toBe(1)
+        expect(store.scratchlist.list(newSession.id).length).toBe(0)
+    })
+
+    it('retains source data when metadata merge hits a store error', async () => {
+        const store = new Store(':memory:')
+        const cache = new SessionCache(store, createPublisher([]))
+
+        const oldSession = cache.getOrCreateSession(
+            'session-merge-store-err-old',
+            {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'codex',
+                externalRefs: [{
+                    kind: 'github_pr' as const,
+                    repo: 'tiann/hapi',
+                    number: 3,
+                    url: 'https://github.com/tiann/hapi/pull/3',
+                    role: 'primary' as const,
+                    source: 'user' as const,
+                    linkedAt: 1
+                }]
+            },
+            null,
+            'default'
+        )
+        const newSession = cache.getOrCreateSession(
+            'session-merge-store-err-new',
+            { path: '/tmp/project', host: 'localhost', flavor: 'codex' },
+            null,
+            'default'
+        )
+        store.messages.addMessage(oldSession.id, { role: 'user', content: { type: 'text', text: 'still here' } })
+
+        const originalUpdate = store.sessions.updateSessionMetadata.bind(store.sessions)
+        store.sessions.updateSessionMetadata = (...args) => {
+            if (args[0] === newSession.id) {
+                return { result: 'error' }
+            }
+            return originalUpdate(...args)
+        }
+
+        await expect(
+            cache.mergeSessions(oldSession.id, newSession.id, 'default')
+        ).rejects.toThrow('Failed to merge session metadata')
+
+        expect(store.sessions.getSessionByNamespace(oldSession.id, 'default')).not.toBeNull()
+        expect(store.messages.getMessages(oldSession.id).length).toBe(1)
+        expect(store.messages.getMessages(newSession.id).length).toBe(0)
     })
 
     it('preserves global pin from old session when merging into resumed session', async () => {

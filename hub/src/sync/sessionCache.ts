@@ -1243,6 +1243,8 @@ export class SessionCache {
             throw new Error('Session not found for merge')
         }
 
+        await this.mergeSessionMetadataForTransfer(oldStored.metadata, newSessionId, namespace)
+
         const movedMessages = this.store.messages.mergeSessionMessages(oldSessionId, newSessionId)
         // mergeSessions deletes the source. mergeSessionHistory keeps it alive
         // with the original socket, so its notify chain must stay on that id.
@@ -1306,37 +1308,6 @@ export class SessionCache {
             // clients viewing the old id drop stale cache entries that
             // would 404 on edit/delete.
             this.emitScratchlistChanged(oldSessionId)
-        }
-
-        const oldMetadataForMerge = oldStored.metadata
-        let metadataMerged = oldMetadataForMerge === null
-        if (!metadataMerged) {
-            for (let attempt = 0; !metadataMerged && attempt < METADATA_RETRY_ATTEMPTS; attempt += 1) {
-                const latest = this.store.sessions.getSessionByNamespace(newSessionId, namespace)
-                if (!latest) {
-                    throw new Error('Merge target disappeared during metadata merge')
-                }
-                const merged = this.mergeSessionMetadata(oldMetadataForMerge, latest.metadata)
-                if (merged === null || merged === latest.metadata) {
-                    metadataMerged = true
-                    break
-                }
-                const result = this.store.sessions.updateSessionMetadata(
-                    newSessionId,
-                    merged,
-                    latest.metadataVersion,
-                    namespace,
-                    { touchUpdatedAt: false }
-                )
-                if (result.result === 'success') {
-                    metadataMerged = true
-                } else if (result.result === 'error') {
-                    throw new Error('Failed to merge session metadata')
-                }
-            }
-            if (!metadataMerged) {
-                throw new Error('Session metadata changed concurrently during merge')
-            }
         }
 
         if (newStored.model === null && oldStored.model !== null) {
@@ -1468,6 +1439,42 @@ export class SessionCache {
 
     private mergeSessionMetadata(oldMetadata: unknown | null, newMetadata: unknown | null): unknown | null {
         return mergeSessionMetadataForSessionMerge(oldMetadata, newMetadata)
+    }
+
+    private async mergeSessionMetadataForTransfer(
+        oldMetadata: unknown | null,
+        newSessionId: string,
+        namespace: string
+    ): Promise<void> {
+        let metadataMerged = oldMetadata === null
+        if (!metadataMerged) {
+            for (let attempt = 0; !metadataMerged && attempt < METADATA_RETRY_ATTEMPTS; attempt += 1) {
+                const latest = this.store.sessions.getSessionByNamespace(newSessionId, namespace)
+                if (!latest) {
+                    throw new Error('Merge target disappeared during metadata merge')
+                }
+                const merged = this.mergeSessionMetadata(oldMetadata, latest.metadata)
+                if (merged === null || merged === latest.metadata) {
+                    metadataMerged = true
+                    break
+                }
+                const result = this.store.sessions.updateSessionMetadata(
+                    newSessionId,
+                    merged,
+                    latest.metadataVersion,
+                    namespace,
+                    { touchUpdatedAt: false }
+                )
+                if (result.result === 'success') {
+                    metadataMerged = true
+                } else if (result.result === 'error') {
+                    throw new Error('Failed to merge session metadata')
+                }
+            }
+            if (!metadataMerged) {
+                throw new Error('Session metadata changed concurrently during merge')
+            }
+        }
     }
 
     private persistPreferredPermissionMode(session: Session, permissionMode: PermissionMode): void {
