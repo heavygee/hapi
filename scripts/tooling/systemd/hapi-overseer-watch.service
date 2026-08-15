@@ -1,0 +1,30 @@
+# Overseer inbox watch-loop (Gap 2) — bare script, no agent turn, no LLM tokens.
+#
+# Fork-local (heavygee estate). NOT upstream. NOT Tier-1.
+# Install: sudo bash scripts/tooling/install-hapi-overseer-watch-timer.sh
+
+[Unit]
+Description=HAPI Overseer inbox watch-loop tick
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/home/heavygee/.hapi/settings.json
+ConditionPathExists=/home/heavygee/coding/hapi/scripts/tooling/hapi-overseer-watch-tick.sh
+
+[Service]
+Type=oneshot
+User=heavygee
+Group=heavygee
+Nice=10
+Environment=HOME=/home/heavygee
+Environment=USER=heavygee
+Environment=PATH=/home/heavygee/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HAPI_HOST=http://127.0.0.1:3006
+Environment=HAPI_HOME=/var/lib/hapi
+Environment=NO_COLOR=1
+WorkingDirectory=/home/heavygee/coding/hapi
+ExecStartPre=/usr/bin/mkdir -p /home/heavygee/.local/state/hapi
+ExecStart=/usr/bin/flock -w 60 /home/heavygee/.local/state/hapi/overseer-watch.lock \
+    /home/heavygee/coding/hapi/scripts/tooling/hapi-overseer-watch-tick.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hapi-overseer-watch

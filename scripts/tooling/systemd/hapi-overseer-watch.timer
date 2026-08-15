@@ -1,0 +1,21 @@
+# Overseer inbox watch-loop (Gap 2) — every 30 minutes.
+#
+# Fork-local. Install: sudo bash scripts/tooling/install-hapi-overseer-watch-timer.sh
+#
+# Replaces an earlier CronCreate-based prototype that re-invoked a full Claude
+# Code agent turn every tick for logic that is 100% mechanical (query, diff,
+# maybe curl to ntfy) — see docs/plans/2026-08-14-overseer-general-agent-tooling-gaps.md.
+
+[Unit]
+Description=HAPI Overseer inbox watch-loop timer (every 30 min)
+Documentation=file:///home/heavygee/coding/hapi/docs/plans/2026-08-14-overseer-general-agent-tooling-gaps.md
+
+[Timer]
+OnCalendar=*:8,38
+RandomizedDelaySec=90
+AccuracySec=1min
+Persistent=true
+Unit=hapi-overseer-watch.service
+
+[Install]
+WantedBy=timers.target
