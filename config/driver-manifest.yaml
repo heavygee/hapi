@@ -703,8 +703,8 @@ layers:
   # SCHEMA: soup remumber V22→V23 (#1115 pin dual-columns now on upstream at V22).
   # Upstream feat tip keeps jobs at V21→V22 for clean PR vs upstream/main.
   # Worktree: ~/coding/hapi/worktrees/session-jobs-soup-refresh @ driver/session-attached-jobs
-  # Soup tip: 793b288f4 — 4bbb04d69 + argv: preserve `--` for `job run` (14693ab77/ab3bbf097 from 6e70f97b)
-  # Feat tip: eee95c527 — PR #1424 tip; cherry-pick onto live soup — NEVER hard-reset
+  # Soup tip: e2cb2bd09 — cherry-pick e72c1e940 + 0190bb2da + 5389fc5cb from feat/session-attached-jobs (#1424)
+  # Feat tip: 5389fc5cb — PR #1424; cherry-pick onto live soup — NEVER hard-reset
   # Do NOT open upstream PR until operator dogfood OK (incl. Lidarr self-attach).
   - branch: driver/session-attached-jobs
 
