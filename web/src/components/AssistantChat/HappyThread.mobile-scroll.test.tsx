@@ -20,14 +20,15 @@ vi.mock('@assistant-ui/react', async (importOriginal) => {
         useAuiState: (selector: (state: unknown) => unknown) => selector({
             thread: { extras: searchTargetTestState.extras }
         }),
-        unstable_useThreadMessageIds: () => [],
+        unstable_useThreadMessageIds: () => ['target-message'],
         ThreadPrimitive: {
             ...actual.ThreadPrimitive,
             Root: ({ children, className }: PropsWithChildren<{ className?: string }>) => (
                 <div className={className}>{children}</div>
             ),
             Viewport: ({ children }: PropsWithChildren) => children,
-            Messages: () => searchTargetTestState.renderMessages()
+            Messages: () => searchTargetTestState.renderMessages(),
+            Unstable_MessageById: () => searchTargetTestState.renderMessages()
         }
     }
 })
