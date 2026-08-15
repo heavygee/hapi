@@ -31,6 +31,10 @@ states:
     status: needs_work
     stickyPing: true
     meaning: Failing CI, open threads, bot findings, rebase, or closed-unmerged.
+    # Overlay (classifier JSON, not a separate chip status): label
+    # status:blocked-upstream → blockedUpstream:true + stickyPing:false while
+    # emoji/status stay needs_work / ⚠️. Meta must not hourly-nag the coding
+    # peer; dependency merge (or session job poller) is the wake source (#128).
 
   pre_pr:
     emoji: "📝"
@@ -63,6 +67,13 @@ states:
       # Unknown headRef → fail closed (stay 🔧).
       branch: absent
       session: archived  # metadata.lifecycleState == archived
+
+  needs_operator:
+    emoji: "🛑"
+    estateCode: babysit.hold
+    status: needs_operator
+    stickyPing: false
+    meaning: Human maintainer (hold-login) issue comment or review body. Operator ack only — never hourly-ping the coding peer. Rank 7 (worst).
 
   unknown:
     emoji: "?"

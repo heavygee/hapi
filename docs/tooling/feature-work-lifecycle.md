@@ -193,12 +193,12 @@ Manifest format, atomic swap mechanics, DB jiu-jitsu: [`driver-soup.md`](./drive
 | Do | Don't |
 |----|-------|
 | Title = workstream only once chipped: `opt-in awareness` | `PR #1163: opt-in awareness` (redundant with chip) |
-| Pre-PR incubating: `Peer #1085: worktree hang` until a PR exists to attach | Prefix titles with `✅` `🔁` `⚠️` `📝` `🔧` (or `?`) for CI/health |
+| Pre-PR incubating: `Peer #1085: worktree hang` until a PR exists to attach | Prefix titles with `✅` `🔁` `⚠️` `📝` `🔧` `🛑` (or `?`) for CI/health |
 | Attach with `hapi link-pr <url\|owner/repo#N>`, MCP `link_pr`, or the session **Link PR** dialog (requires Settings → GitHub PR awareness) | Rely on title scraping as the durable bind |
 | Read status from the chip / Meta action queue / `hapi-pr-status <N>` | Re-encode green/red into the title with `change_title` **or** `PATCH /sessions/:id` `{name}` |
 | Let Meta strip leftover leading status emoji **and** `PR #N:` from chipped titles | Run removed stub `hapi-pr-session-emoji.sh` then stop — it exits 2 and prints `hapi-meta-daily.sh [--pr N]`; run that; do **not** hand-roll title emoji |
 
-Daily classify + chip cache + pings: `./scripts/tooling/hapi-meta-daily.sh` (see [`docs/operator/AGENTS.md`](../operator/AGENTS.md) § Meta PR watcher). After rebase/CI flips on a babysat PR: `./scripts/tooling/hapi-meta-daily.sh --pr <N>`. On this estate, systemd runs full Meta **hourly at :00 Europe/London** (chips + pings + wave unlock; BST/GMT). Chip UI mutes to `?` when `statusCheckedAt` is older than **3h**. Quiet 45m refresh retired. Session-list **filters** by chip / attention state are fork follow-ups (not title search).
+Daily classify + chip cache + pings: `./scripts/tooling/hapi-meta-daily.sh` (see [`docs/operator/AGENTS.md`](../operator/AGENTS.md) § Meta PR watcher). After rebase/CI flips on a babysat PR: `./scripts/tooling/hapi-meta-daily.sh --pr <N>`. On this estate, systemd runs full Meta **hourly at :00 Europe/London** (chips + pings + wave unlock; BST/GMT). Chip UI mutes to `?` when `statusCheckedAt` is older than **3h**. Quiet 45m refresh retired. Session-list **filters** by chip / attention state are fork follow-ups (not title search). Chip **🛑** (`needs_operator`) is operator-hold: never put it in the title; ack with `hapi-hold-ack` / `hapi hold-ack`.
 
 **Mid-hour stale ⚠️:** `externalRefs` can stay ⚠️ until the next :00 `hapi-meta-daily` even after the tip is three-dim clean (CI + threads + bot). Live truth is `hapi-pr-status <N>` / `hapi-pr-emoji-batch`; do not treat a stale um as unfinished PR work (#1108 exit, 2026-08-11).
 

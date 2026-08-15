@@ -34,6 +34,12 @@
       "tone": "complete",
       "label": "complete",
       "action": "fully cleaned — babysit ended"
+    },
+    "babysit.hold": {
+      "emoji": "🛑",
+      "tone": "hold",
+      "label": "needs operator",
+      "action": "maintainer hold — ack only; do not thin or push"
     }
   }
 }
