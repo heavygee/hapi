@@ -1,7 +1,8 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
+import type { ApiClient } from '@/api/client'
 import type { SessionSummary } from '@/types/api'
 import { I18nProvider } from '@/lib/i18n-context'
 import { ToastProvider } from '@/lib/toast-context'
@@ -921,6 +922,63 @@ describe('SessionList search toggle', () => {
         expect(screen.getByRole('button', { name: /Search sessions/ })).toBeInTheDocument()
         expect(screen.getByRole('button', { name: /Matching task/ })).toBeInTheDocument()
         expect(screen.queryByRole('button', { name: /Other task/ })).toBeNull()
+    })
+
+    it('clears stale content results before the next query debounce finishes', async () => {
+        vi.useFakeTimers()
+        try {
+            const matchingSession = makeSession({
+                id: 'content-match',
+                updatedAt: 100,
+                metadata: { path: '/work/hapi', name: 'Content match', flavor: 'codex' },
+            })
+            const api = {
+                searchSessionContent: vi.fn().mockResolvedValue({
+                    results: [{
+                        session: matchingSession,
+                        match: {
+                            messageId: 'message-1',
+                            role: 'user' as const,
+                            seq: 1,
+                            createdAt: 1,
+                            snippet: 'old query result',
+                        },
+                    }],
+                }),
+            } as unknown as ApiClient
+
+            renderWithProviders(
+                <SessionList
+                    sessions={[matchingSession]}
+                    selectedSessionId={null}
+                    onSelect={vi.fn()}
+                    onNewSession={vi.fn()}
+                    onRefresh={vi.fn()}
+                    isLoading={false}
+                    renderHeader={false}
+                    api={api}
+                />
+            )
+
+            fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
+            fireEvent.click(screen.getByRole('button', { name: 'Search scope' }))
+            fireEvent.click(screen.getByRole('button', { name: 'Content' }))
+            const input = screen.getByRole('searchbox')
+            fireEvent.change(input, { target: { value: 'old query' } })
+
+            await act(async () => {
+                vi.advanceTimersByTime(180)
+                await Promise.resolve()
+                await Promise.resolve()
+            })
+            expect(screen.getByRole('button', { name: /Content match/ })).toBeInTheDocument()
+
+            fireEvent.change(input, { target: { value: 'new query' } })
+
+            expect(screen.queryByRole('button', { name: /Content match/ })).toBeNull()
+        } finally {
+            vi.useRealTimers()
+        }
     })
 
     it('shows truncated query text on the collapsed search control when a text filter is active', () => {

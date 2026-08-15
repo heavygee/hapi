@@ -347,6 +347,43 @@ describe('search target loading', () => {
         expect(result.container.querySelector('[data-testid="search-target-status"]')).not.toBeInTheDocument()
     })
 
+    it('clears a fallback card highlight when the search target is dismissed', async () => {
+        const onLoadMessageContext = vi.fn().mockResolvedValue(true)
+        const onInitialTargetConsumed = vi.fn()
+        searchTargetTestState.extras = { messagesVersion: 1, historyVersion: 0 }
+        searchTargetTestState.renderMessages = () => (
+            <div data-hapi-source-message-id="target-message">target card</div>
+        )
+
+        const options = {
+            initialTargetMessageId: 'target-message' as string | undefined,
+            onLoadMessageContext,
+            onInitialTargetConsumed,
+            messagesVersion: 1,
+            historyVersion: 0,
+            rawMessagesCount: 1,
+        }
+        const { renderHappyThread } = renderSearchThread(options)
+        const result = render(renderHappyThread())
+
+        await act(async () => {
+            await Promise.resolve()
+        })
+
+        const target = result.container.querySelector<HTMLElement>('[data-hapi-source-message-id="target-message"]')
+        expect(target).toHaveClass('hapi-message-search-target')
+        expect(onInitialTargetConsumed).toHaveBeenCalledTimes(1)
+
+        options.initialTargetMessageId = undefined
+        options.messagesVersion = 2
+        searchTargetTestState.extras = { messagesVersion: 2, historyVersion: 0 }
+        act(() => {
+            result.rerender(renderHappyThread())
+        })
+
+        expect(target).not.toHaveClass('hapi-message-search-target')
+    })
+
     it('loads context after the runtime catches up when the target is not in the latest window', () => {
         const onLoadMessageContext = vi.fn().mockResolvedValue(true)
         const onInitialTargetConsumed = vi.fn()

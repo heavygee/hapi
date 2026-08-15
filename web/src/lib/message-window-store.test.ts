@@ -748,6 +748,22 @@ describe('message tail synchronization', () => {
         expect(getMessageWindowState(id).warning).toBeNull()
     })
 
+    it('releases a historical target lock when the window is cleared', async () => {
+        const id = sessionId('clear-target-lock')
+        const getMessages = vi.fn(async () => latestResponse([
+            makeAgentMessage({ id: 'fresh-after-clear', seq: 1, at: 1_000 })
+        ]))
+        const api = createApi(getMessages)
+
+        setMessageWindowTargetLock(id, true)
+        clearMessageWindow(id)
+        await syncTailMessages(api, id)
+
+        expect(getMessages).toHaveBeenCalledTimes(1)
+        expect(getMessageWindowState(id).messages.map((message) => message.id))
+            .toEqual(['fresh-after-clear'])
+    })
+
     it('does not backfill older pages during the latest-tail request', async () => {
         const id = sessionId('no-cold-backfill')
         const traceRows = Array.from({ length: 200 }, (_, index) =>

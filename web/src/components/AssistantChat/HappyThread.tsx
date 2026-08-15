@@ -831,6 +831,15 @@ export function HappyThread(props: {
                 removeSearchMatchMarker(marker, parent)
             }
         }
+        // A message without a text-range match uses a class-only card
+        // highlight. It has no marker attribute, so clean it up separately.
+        for (const fallback of Array.from(document.querySelectorAll<HTMLElement>(
+            `.${SEARCH_TARGET_HIGHLIGHT_CLASS}`
+        ))) {
+            if (fallback.getAttribute(SEARCH_TARGET_MATCH_ATTRIBUTE) !== 'true') {
+                fallback.classList.remove(SEARCH_TARGET_HIGHLIGHT_CLASS)
+            }
+        }
     }, [])
     const releaseSearchTargetHistoryLock = useCallback(() => {
         searchTargetHistoryLockRef.current = false

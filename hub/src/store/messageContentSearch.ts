@@ -204,49 +204,75 @@ export function searchMessageContent(
     if (!normalizedQuery) return []
 
     const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(100, Math.floor(limit))) : 50
-    // Keep enough rows to deduplicate to one hit per session without making a
-    // broad content search scan an unbounded number of snippets.
-    const candidateLimit = Math.min(10_000, Math.max(200, safeLimit * 50))
     const useLike = [...normalizedQuery].length < 3
     const rows = useLike
         ? db.prepare(`
-            SELECT f.message_id, f.session_id, f.role, f.seq, f.created_at, f.searchable_text
-            FROM ${MESSAGE_CONTENT_SEARCH_TABLE} AS f
-            INNER JOIN sessions AS s
-                ON s.id = f.session_id AND s.namespace = ?
-            WHERE f.searchable_text LIKE ? ESCAPE '\\'
-            ORDER BY s.updated_at DESC, CAST(f.seq AS INTEGER) DESC
+            WITH ranked_matches AS (
+                SELECT
+                    f.message_id,
+                    f.session_id,
+                    f.role,
+                    f.seq,
+                    f.created_at,
+                    f.searchable_text,
+                    s.updated_at,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY f.session_id
+                        ORDER BY CAST(f.seq AS INTEGER) DESC,
+                                 CAST(f.created_at AS INTEGER) DESC,
+                                 f.message_id DESC
+                    ) AS session_rank
+                FROM ${MESSAGE_CONTENT_SEARCH_TABLE} AS f
+                INNER JOIN sessions AS s
+                    ON s.id = f.session_id AND s.namespace = ?
+                WHERE f.searchable_text LIKE ? ESCAPE '\\'
+            )
+            SELECT message_id, session_id, role, seq, created_at, searchable_text
+            FROM ranked_matches
+            WHERE session_rank = 1
+            ORDER BY updated_at DESC, CAST(seq AS INTEGER) DESC
             LIMIT ?
-        `).all(namespace, `%${escapeLikePattern(normalizedQuery)}%`, candidateLimit) as DbSearchRow[]
+        `).all(namespace, `%${escapeLikePattern(normalizedQuery)}%`, safeLimit) as DbSearchRow[]
         : db.prepare(`
-            SELECT f.message_id, f.session_id, f.role, f.seq, f.created_at,
+            WITH ranked_matches AS (
+                SELECT
+                    f.message_id,
+                    f.session_id,
+                    f.role,
+                    f.seq,
+                    f.created_at,
+                    s.updated_at,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY f.session_id
+                        ORDER BY CAST(f.seq AS INTEGER) DESC,
+                                 CAST(f.created_at AS INTEGER) DESC,
+                                 f.message_id DESC
+                    ) AS session_rank
+                FROM ${MESSAGE_CONTENT_SEARCH_TABLE} AS f
+                INNER JOIN sessions AS s
+                    ON s.id = f.session_id AND s.namespace = ?
+                WHERE ${MESSAGE_CONTENT_SEARCH_TABLE} MATCH ?
+            )
+            SELECT ranked.message_id, ranked.session_id, ranked.role, ranked.seq, ranked.created_at,
                    snippet(${MESSAGE_CONTENT_SEARCH_TABLE}, 0, '', '', '…', 24) AS snippet
-            FROM ${MESSAGE_CONTENT_SEARCH_TABLE} AS f
-            INNER JOIN sessions AS s
-                ON s.id = f.session_id AND s.namespace = ?
-            WHERE ${MESSAGE_CONTENT_SEARCH_TABLE} MATCH ?
-            ORDER BY s.updated_at DESC, CAST(f.seq AS INTEGER) DESC
+            FROM ranked_matches AS ranked
+            INNER JOIN ${MESSAGE_CONTENT_SEARCH_TABLE} AS f
+                ON f.message_id = ranked.message_id
+            WHERE ranked.session_rank = 1
+            ORDER BY ranked.updated_at DESC, CAST(ranked.seq AS INTEGER) DESC
             LIMIT ?
-        `).all(namespace, escapeFtsPhrase(normalizedQuery), candidateLimit) as DbSearchRow[]
+        `).all(namespace, escapeFtsPhrase(normalizedQuery), safeLimit) as DbSearchRow[]
 
-    const results: MessageContentSearchMatch[] = []
-    const seenSessions = new Set<string>()
-    for (const row of rows) {
-        if (seenSessions.has(row.session_id)) continue
-        seenSessions.add(row.session_id)
-        results.push({
-            sessionId: row.session_id,
-            messageId: row.message_id,
-            role: row.role,
-            seq: Number(row.seq),
-            createdAt: Number(row.created_at),
-            snippet: useLike
-                ? makeLikeSnippet(row.searchable_text ?? '', normalizedQuery)
-                : String(row.snippet ?? '').replace(/\s+/g, ' ').trim()
-        })
-        if (results.length >= safeLimit) break
-    }
-    return results
+    return rows.map((row) => ({
+        sessionId: row.session_id,
+        messageId: row.message_id,
+        role: row.role,
+        seq: Number(row.seq),
+        createdAt: Number(row.created_at),
+        snippet: useLike
+            ? makeLikeSnippet(row.searchable_text ?? '', normalizedQuery)
+            : String(row.snippet ?? '').replace(/\s+/g, ' ').trim()
+    }))
 }
 
 /**

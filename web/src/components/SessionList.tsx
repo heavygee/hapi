@@ -1291,11 +1291,13 @@ export function SessionList(props: {
             return
         }
 
+        // Do not leave the previous query's targets clickable while the new
+        // request is waiting for its debounce window.
+        setContentSearchResponse(null)
+        setContentSearchError(false)
         const controller = new AbortController()
         const timer = window.setTimeout(() => {
             setContentSearchLoading(true)
-            setContentSearchError(false)
-            setContentSearchResponse(null)
             void api.searchSessionContent(normalizedQuery, 50, controller.signal)
                 .then((response) => {
                     if (controller.signal.aborted) return

@@ -55,6 +55,27 @@ describe('message content search', () => {
             .toEqual([otherSession.id])
     })
 
+    it('applies the result limit after deduplicating matching sessions', () => {
+        const store = new Store(':memory:')
+        const otherSession = makeSession(store, 'content-search-other')
+        const busySession = makeSession(store, 'content-search-busy')
+
+        store.messages.addMessage(otherSession.id, {
+            role: 'user',
+            content: { type: 'text', text: 'needle in another session' }
+        })
+        for (let index = 0; index < 201; index += 1) {
+            store.messages.addMessage(busySession.id, {
+                role: 'user',
+                content: { type: 'text', text: `needle in frequent result ${index}` }
+            })
+        }
+        store.sessions.touchSessionUpdatedAt(busySession.id, Date.now() + 1_000, 'default')
+
+        expect(store.messages.searchContent('needle', 'default', 2).map((result) => result.sessionId))
+            .toEqual([busySession.id, otherSession.id])
+    })
+
     it('returns message-level matches and the full count for one session', () => {
         const store = new Store(':memory:')
         const session = makeSession(store, 'message-level-search')
