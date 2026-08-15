@@ -12,7 +12,7 @@ import {
 } from '@hapi/protocol'
 import { getConfiguration } from '../../configuration'
 import { readSessionSummaryContractEnabled } from '../../config/sessionSummaryContract'
-import { stripExternalRefsWhenAwarenessDisabled } from '../../sync/externalRefsPolicy'
+import { stripExternalRefsWhenAwarenessDisabled, externalRefsInMetadataValid } from '../../sync/externalRefsPolicy'
 import { mapExternalRefRouteError } from '../../sync/externalRefErrors'
 import { constantTimeEquals } from '../../utils/crypto'
 import { parseAccessToken } from '../../utils/accessToken'
@@ -128,6 +128,9 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
                 parsed.data.metadata,
                 getConfiguration().githubPrAwareness
             )
+            if (!externalRefsInMetadataValid(metadata)) {
+                return c.json({ error: 'Invalid metadata.externalRefs' }, 400)
+            }
             const session = engine.getOrCreateSession(
                 parsed.data.tag,
                 metadata,

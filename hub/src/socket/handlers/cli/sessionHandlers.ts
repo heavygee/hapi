@@ -1,5 +1,4 @@
 import type { ClientToServerEvents } from '@hapi/protocol'
-import { ExternalRefsSchema } from '@hapi/protocol/schemas'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
 import type { CopilotAgentMode } from '@hapi/protocol'
@@ -15,7 +14,7 @@ import type { CliSocketWithData } from '../../socketTypes'
 import type { SessionEndReason } from '@hapi/protocol'
 import type { AccessErrorReason, AccessResult } from './types'
 import { getConfiguration } from '../../../configuration'
-import { stripExternalRefsWhenAwarenessDisabled } from '../../../sync/externalRefsPolicy'
+import { stripExternalRefsWhenAwarenessDisabled, externalRefsInMetadataValid } from '../../../sync/externalRefsPolicy'
 
 function gateExternalRefs(metadata: unknown): unknown {
     let awarenessEnabled = false
@@ -25,17 +24,6 @@ function gateExternalRefs(metadata: unknown): unknown {
         awarenessEnabled = false
     }
     return stripExternalRefsWhenAwarenessDisabled(metadata, awarenessEnabled)
-}
-
-function externalRefsInMetadataValid(metadata: unknown): boolean {
-    if (!metadata || typeof metadata !== 'object') {
-        return true
-    }
-    const refs = (metadata as Record<string, unknown>).externalRefs
-    if (refs === undefined) {
-        return true
-    }
-    return ExternalRefsSchema.safeParse(refs).success
 }
 
 type SessionAlivePayload = {
