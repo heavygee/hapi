@@ -34,4 +34,5 @@ export const queryKeys = {
     machineAgyModels: (machineId: string) => ['machine-agy-models', machineId] as const,
     skills: (sessionId: string) => ['skills', sessionId] as const,
     scratchlist: (sessionId: string) => ['scratchlist', sessionId] as const,
+    kitchenStatus: ['kitchen-status'] as const,
 }

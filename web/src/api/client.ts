@@ -51,6 +51,7 @@ import type {
     ReopenSessionResponse,
     SqliteStorageUsageResponse,
     HubSettingsResponse,
+    KitchenStatusResponse,
     UpdateHubSettingsRequest,
     UsageSummaryResponse,
     UploadFileResponse
@@ -760,6 +761,10 @@ export class ApiClient {
             timeZone
         })
         return await this.request<UsageSummaryResponse>(`/api/usage/summary?${params.toString()}`)
+    }
+
+    async getKitchenStatus(): Promise<KitchenStatusResponse> {
+        return await this.request<KitchenStatusResponse>('/api/kitchen-status')
     }
 
     async restartMachineRunner(machineId: string): Promise<{ message: string }> {
