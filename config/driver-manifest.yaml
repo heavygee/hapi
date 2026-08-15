@@ -708,6 +708,11 @@ layers:
   # Do NOT open upstream PR until operator dogfood OK (incl. Lidarr self-attach).
   - branch: driver/session-attached-jobs
 
+  # Thin delta on live soup tip (driver/integration @ 6d198c645) — fat base above is tip-forward skipped.
+  # Worktree: ~/coding/hapi/worktrees/session-jobs-soup-refresh @ driver/session-jobs-delta
+  # Tip: 8f9e83dd3 — agent steer hints (#1424 UX); cherry-pick 5389fc5cb onto live driver tip
+  - branch: driver/session-jobs-delta
+
   # tiann/hapi#1489 — wake owning session when attached job completes/fails (opt-in).
   # Thin tip on driver/session-attached-jobs. Upstream PR tip: feat/job-complete-wake
   # (stacked on feat/session-attached-jobs with runId claim fence).
