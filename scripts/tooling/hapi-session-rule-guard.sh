@@ -61,7 +61,7 @@ kitchen skunk: it dirties the mirror and blocks hapi-sync-fork-main.
 
 What to do:
   1. Stop this edit.
-  2. Ping Meta PR watcher: /sessions/9f5f7e1d-d1d8-4d17-a668-0a0fdf4af685
+  2. Ping tooling meta-bot: /sessions/05d9f0f2-9273-4137-933c-07459a1146a2
      Say you almost clobbered hapi-session.mdc, cwd, and why.
   3. If the overlay already chopped it: git checkout -- .cursor/rules/hapi-session.mdc
 
@@ -75,6 +75,6 @@ jq -n \
     '{
         permission: "deny",
         agent_message: $msg,
-        user_message: ("Blocked: " + $abs + " is tracked headset canon. Ping Meta 9f5f7e1d; do not shorten this rule.")
+        user_message: ("Blocked: " + $abs + " is tracked headset canon. Ping tooling meta-bot 05d9f0f2; do not shorten this rule.")
     }'
 exit 0
