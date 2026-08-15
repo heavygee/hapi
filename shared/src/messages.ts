@@ -167,6 +167,12 @@ export type SearchableMessage = {
     text: string
 }
 
+function isHiddenAssistantOutput(content: unknown): boolean {
+    if (!isObject(content) || content.type !== 'output') return false
+    const data = isObject(content.data) ? content.data : null
+    return Boolean(data?.isMeta) || Boolean(data?.isCompactSummary)
+}
+
 /** Extract only user-visible user/assistant prose from a stored role envelope. */
 export function extractSearchableMessageText(value: unknown): SearchableMessage | null {
     const record = unwrapRoleWrappedRecordEnvelope(value)
@@ -178,6 +184,7 @@ export function extractSearchableMessageText(value: unknown): SearchableMessage 
     }
 
     if (record.role === 'agent' || record.role === 'assistant') {
+        if (isHiddenAssistantOutput(record.content)) return null
         const directText = typeof record.content === 'string'
             ? record.content
             : isObject(record.content)

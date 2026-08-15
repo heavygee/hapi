@@ -28,12 +28,24 @@ describe('message content search', () => {
                 data: { type: 'message', message: `long answer ${'cache rotation '.repeat(40)}` }
             }
         })
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    isMeta: true,
+                    message: { content: [{ type: 'text', text: 'hidden cache rotation metadata' }] }
+                }
+            }
+        })
 
         expect(store.messages.searchContent('rotate the cache', 'default').map((result) => result.sessionId))
             .toEqual([session.id])
         expect(store.messages.searchContent('rotation command', 'default')[0]?.role).toBe('assistant')
         expect(store.messages.searchContent('cache key', 'default')[0]?.role).toBe('user')
         expect(store.messages.searchContent('cache key', 'default')[0]?.snippet).toContain('cache')
+        expect(store.messages.searchContent('hidden cache rotation', 'default')).toEqual([])
     })
 
     it('uses a LIKE fallback for short CJK queries and isolates namespaces', () => {

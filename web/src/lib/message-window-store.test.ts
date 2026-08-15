@@ -303,7 +303,8 @@ describe('message tail synchronization', () => {
             oldestPositionSeq: 10,
             newestPositionAt: 1_000,
             newestPositionSeq: 10,
-            epoch: 3
+            epoch: 3,
+            requiresLatestReset: false
         }))
 
         expect(getMessageWindowState(id).messages.map((message) => message.id)).toEqual(['cached'])
@@ -1245,6 +1246,48 @@ describe('search-target message context', () => {
             viewMode: 'tail',
             epoch: null
         })
+    })
+
+    it('persists and hydrates the latest reset boundary for historical contexts', async () => {
+        const id = sessionId('search-context-persistence')
+        const target = makeAgentMessage({ id: 'target', seq: 40, at: 40_000 })
+        const getMessageContext = vi.fn(async () => contextResponse([target], {
+            epoch: 7,
+            hasMore: true,
+            nextBeforeAt: 39_000,
+            nextBeforeSeq: 39,
+            snapshotHeadAt: 100_000,
+            snapshotHeadSeq: 100,
+            targetMessageId: target.id
+        }))
+        const api = createApi(vi.fn(async () => latestResponse([])))
+        api.getMessageContext = getMessageContext
+
+        await expect(loadMessageContext(api, id, target.id)).resolves.toBe(true)
+        await new Promise((resolve) => setTimeout(resolve, 250))
+
+        const raw = sessionStorage.getItem(`hapi:message-window:v2:${id}`)
+        expect(raw).not.toBeNull()
+        expect(JSON.parse(raw!).requiresLatestReset).toBe(true)
+
+        const reloadedId = sessionId('search-context-persistence-reloaded')
+        sessionStorage.setItem(`hapi:message-window:v2:${reloadedId}`, raw!)
+        expect(getMessageWindowState(reloadedId).requiresLatestReset).toBe(true)
+    })
+
+    it('forces a latest reset for legacy cached windows without the persisted flag', () => {
+        const id = sessionId('legacy-history-cache')
+        sessionStorage.setItem(`hapi:message-window:v2:${id}`, JSON.stringify({
+            messages: [makeAgentMessage({ id: 'legacy', seq: 40, at: 40_000 })],
+            hasMore: true,
+            oldestPositionAt: 40_000,
+            oldestPositionSeq: 40,
+            newestPositionAt: 100_000,
+            newestPositionSeq: 100,
+            epoch: 7
+        }))
+
+        expect(getMessageWindowState(id).requiresLatestReset).toBe(true)
     })
 
     it('does not replace the current window when the target disappeared', async () => {

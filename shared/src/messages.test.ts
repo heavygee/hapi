@@ -139,6 +139,22 @@ describe('extractSearchableMessageText', () => {
         })).toBeNull()
     })
 
+    test('excludes assistant metadata and compact-summary output', () => {
+        for (const flag of ['isMeta', 'isCompactSummary'] as const) {
+            expect(extractSearchableMessageText({
+                role: 'agent',
+                content: {
+                    type: 'output',
+                    data: {
+                        type: 'assistant',
+                        [flag]: true,
+                        message: { content: [{ type: 'text', text: 'Hidden renderer output' }] }
+                    }
+                }
+            })).toBeNull()
+        }
+    })
+
     test('excludes a trailing notify summary footer from assistant search text', () => {
         expect(extractSearchableMessageText({
             role: 'agent',

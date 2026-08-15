@@ -69,6 +69,7 @@ type PersistedMessageWindowState = {
     newestPositionAt: number | null
     newestPositionSeq: number | null
     epoch: number | null
+    requiresLatestReset: boolean
 }
 
 type TailSyncController = {
@@ -181,7 +182,8 @@ function persistState(sessionId: string, state: InternalState): void {
             oldestPositionSeq: state.oldestPositionSeq,
             newestPositionAt: state.newestPositionAt,
             newestPositionSeq: state.newestPositionSeq,
-            epoch: state.epoch
+            epoch: state.epoch,
+            requiresLatestReset: state.requiresLatestReset
         }
         sessionStorage.setItem(getStorageKey(sessionId), JSON.stringify(persisted))
     } catch {
@@ -275,6 +277,12 @@ function hydrateState(sessionId: string): InternalState | null {
         const epoch = typeof parsed.epoch === 'number' && Number.isInteger(parsed.epoch) && parsed.epoch >= 0
             ? parsed.epoch
             : null
+        // Older v2 entries did not persist this bit. Treat non-empty legacy
+        // windows as provisional once so a historical context cannot be
+        // mistaken for the current tail after a reload.
+        const requiresLatestReset = typeof parsed.requiresLatestReset === 'boolean'
+            ? parsed.requiresLatestReset
+            : parsed.messages.length > 0
         return buildState(createState(sessionId), {
             messages: mergeMessages([], parsed.messages.map(restoreMessage)),
             hasMore: parsed.hasMore === true,
@@ -283,7 +291,7 @@ function hydrateState(sessionId: string): InternalState | null {
             newestPositionAt: newest?.at ?? null,
             newestPositionSeq: newest?.seq ?? null,
             epoch,
-            requiresLatestReset: parsed.messages.length > 0 && (newest === null || epoch === null)
+            requiresLatestReset
         })
     } catch {
         clearPersistedState(sessionId)

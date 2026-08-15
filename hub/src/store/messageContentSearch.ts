@@ -4,6 +4,7 @@ import { extractSearchableMessageText } from '@hapi/protocol/messages'
 import { decodeMessageContent } from './contentCodec'
 
 export const MESSAGE_CONTENT_SEARCH_TABLE = 'message_content_search'
+const MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE = 'message_content_search_lookup'
 const initializedDatabases = new WeakSet<object>()
 
 export type MessageContentSearchMatch = {
@@ -40,6 +41,7 @@ type DbMessageRow = {
 }
 
 const SEARCH_REBUILD_BATCH_SIZE = 500
+const SEARCH_LOOKUP_BACKFILL_BATCH_SIZE = 500
 
 type DbSearchRow = {
     message_id: string
@@ -51,7 +53,41 @@ type DbSearchRow = {
     searchable_text?: string
 }
 
+type DbSearchLookupRow = {
+    search_rowid: number
+}
+
+function backfillMessageContentSearchLookup(db: Database): void {
+    const select = db.prepare(`
+        SELECT rowid AS search_rowid, message_id
+        FROM ${MESSAGE_CONTENT_SEARCH_TABLE}
+        WHERE rowid > ?
+        ORDER BY rowid ASC
+        LIMIT ?
+    `)
+    const insert = db.prepare(`
+        INSERT OR IGNORE INTO ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE} (search_rowid, message_id)
+        VALUES (?, ?)
+    `)
+
+    let afterRowId = 0
+    while (true) {
+        const rows = select.all(afterRowId, SEARCH_LOOKUP_BACKFILL_BATCH_SIZE) as Array<{
+            search_rowid: number
+            message_id: string
+        }>
+        if (rows.length === 0) break
+
+        for (const row of rows) {
+            insert.run(row.search_rowid, row.message_id)
+        }
+        afterRowId = rows[rows.length - 1]!.search_rowid
+    }
+}
+
 export function createMessageContentSearchTable(db: Database): void {
+    if (initializedDatabases.has(db)) return
+
     db.exec(`
         CREATE VIRTUAL TABLE IF NOT EXISTS ${MESSAGE_CONTENT_SEARCH_TABLE} USING fts5(
             searchable_text,
@@ -63,6 +99,16 @@ export function createMessageContentSearchTable(db: Database): void {
             tokenize = 'trigram'
         )
     `)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE} (
+            search_rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+            message_id TEXT NOT NULL UNIQUE
+        )
+    `)
+    // FTS5 UNINDEXED columns are intentionally not searchable, but SQLite
+    // still has to scan the virtual table when deleting by one of them. Keep
+    // an ordinary indexed message-id lookup so the write path stays bounded.
+    backfillMessageContentSearchLookup(db)
     initializedDatabases.add(db)
 }
 
@@ -74,18 +120,42 @@ function ensureMessageContentSearchTable(db: Database): void {
 
 export function removeMessageContentSearchIndex(db: Database, messageId: string): void {
     ensureMessageContentSearchTable(db)
-    db.prepare(`DELETE FROM ${MESSAGE_CONTENT_SEARCH_TABLE} WHERE message_id = ?`).run(messageId)
+    const lookup = db.prepare(`
+        SELECT search_rowid
+        FROM ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE}
+        WHERE message_id = ?
+    `).get(messageId) as DbSearchLookupRow | undefined
+    if (!lookup) return
+
+    db.prepare(`DELETE FROM ${MESSAGE_CONTENT_SEARCH_TABLE} WHERE rowid = ?`).run(lookup.search_rowid)
+    db.prepare(`DELETE FROM ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE} WHERE search_rowid = ?`).run(lookup.search_rowid)
 }
 
 function insertMessageContentSearchIndex(
     db: Database,
     message: { id: string; sessionId: string; text: string; role: 'user' | 'assistant'; seq: number; createdAt: number }
 ): void {
+    db.prepare(`INSERT INTO ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE} (message_id) VALUES (?)`).run(message.id)
+    const lookup = db.prepare(`
+        SELECT search_rowid
+        FROM ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE}
+        WHERE message_id = ?
+    `).get(message.id) as DbSearchLookupRow | undefined
+    if (!lookup) throw new Error('Failed to create message content search lookup')
+
     db.prepare(`
         INSERT INTO ${MESSAGE_CONTENT_SEARCH_TABLE} (
-            searchable_text, message_id, session_id, seq, created_at, role
-        ) VALUES (?, ?, ?, ?, ?, ?)
-    `).run(message.text, message.id, message.sessionId, message.seq, message.createdAt, message.role)
+            rowid, searchable_text, message_id, session_id, seq, created_at, role
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+        lookup.search_rowid,
+        message.text,
+        message.id,
+        message.sessionId,
+        message.seq,
+        message.createdAt,
+        message.role
+    )
 }
 
 export function indexMessageContent(db: Database, message: IndexableMessage): void {
@@ -112,19 +182,45 @@ export function rebuildMessageContentSearch(db: Database): void {
     })()
 }
 
+function removeMessageContentSearchRowsForSessions(db: Database, sessionIds: string[]): void {
+    if (sessionIds.length === 0) return
+    const placeholders = sessionIds.map(() => '?').join(', ')
+    const messageIds = `SELECT id FROM messages WHERE session_id IN (${placeholders})`
+    db.prepare(`
+        DELETE FROM ${MESSAGE_CONTENT_SEARCH_TABLE}
+        WHERE rowid IN (
+            SELECT search_rowid
+            FROM ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE}
+            WHERE message_id IN (${messageIds})
+        )
+    `).run(...sessionIds)
+    db.prepare(`
+        DELETE FROM ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE}
+        WHERE message_id IN (${messageIds})
+    `).run(...sessionIds)
+}
+
 function rebuildMessageContentSearchInternal(db: Database, sessionIds?: string[]): void {
     createMessageContentSearchTable(db)
 
+    const insertLookup = db.prepare(`
+        INSERT INTO ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE} (message_id) VALUES (?)
+    `)
+    const getLookup = db.prepare(`
+        SELECT search_rowid
+        FROM ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE}
+        WHERE message_id = ?
+    `)
     const insert = db.prepare(`
         INSERT INTO ${MESSAGE_CONTENT_SEARCH_TABLE} (
-            searchable_text, message_id, session_id, seq, created_at, role
-        ) VALUES (?, ?, ?, ?, ?, ?)
+            rowid, searchable_text, message_id, session_id, seq, created_at, role
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `)
 
     let selectBatch: ReturnType<Database['prepare']>
     if (sessionIds) {
         const placeholders = sessionIds.map(() => '?').join(', ')
-        db.prepare(`DELETE FROM ${MESSAGE_CONTENT_SEARCH_TABLE} WHERE session_id IN (${placeholders})`).run(...sessionIds)
+        removeMessageContentSearchRowsForSessions(db, sessionIds)
         selectBatch = db.prepare(`
             SELECT rowid AS row_id, id, session_id, content, created_at, seq, invoked_at
             FROM messages
@@ -136,6 +232,7 @@ function rebuildMessageContentSearchInternal(db: Database, sessionIds?: string[]
         `)
     } else {
         db.exec(`DELETE FROM ${MESSAGE_CONTENT_SEARCH_TABLE}`)
+        db.exec(`DELETE FROM ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE}`)
         selectBatch = db.prepare(`
             SELECT rowid AS row_id, id, session_id, content, created_at, seq, invoked_at
             FROM messages
@@ -156,7 +253,11 @@ function rebuildMessageContentSearchInternal(db: Database, sessionIds?: string[]
         for (const row of rows) {
             const searchable = extractSearchableMessageText(decodeMessageContent(row.content))
             if (!searchable) continue
+            insertLookup.run(row.id)
+            const lookup = getLookup.get(row.id) as DbSearchLookupRow | undefined
+            if (!lookup) throw new Error('Failed to create message content search lookup')
             insert.run(
+                lookup.search_rowid,
                 searchable.text,
                 row.id,
                 row.session_id,
@@ -186,7 +287,7 @@ export function rebuildMessageContentSearchForSessions(
 
 export function removeMessageContentSearchForSession(db: Database, sessionId: string): void {
     ensureMessageContentSearchTable(db)
-    db.prepare(`DELETE FROM ${MESSAGE_CONTENT_SEARCH_TABLE} WHERE session_id = ?`).run(sessionId)
+    removeMessageContentSearchRowsForSessions(db, [sessionId])
 }
 
 function normalizeSearchQuery(query: string): string {
