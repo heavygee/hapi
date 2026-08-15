@@ -15,7 +15,9 @@ Guidance:
 - status: pick the closest value; use "blocked" if unsure.
 - action: concrete next step (required when status is "done" and follow-up
   remains); 12 words or fewer. This field drives phone/voice TTS - write it
-  for a human who is not looking at a session list.
+  for a human who is not looking at a session list. When nothing remains,
+  **omit the action key entirely** — never emit `"action":""` (Cursor drops a
+  quote and breaks JSON).
 - summary: one-line triage of what this turn did (also operator-facing via
   FCM / notify body). Same human-language bar as action.
 - Keep it as the very last line of every response.

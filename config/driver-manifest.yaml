@@ -708,10 +708,10 @@ layers:
   # Do NOT open upstream PR until operator dogfood OK (incl. Lidarr self-attach).
   - branch: driver/session-attached-jobs
 
-  # Thin delta on live soup tip (driver/integration @ 6d198c645) — fat base above is tip-forward skipped.
-  # Worktree: ~/coding/hapi/worktrees/session-jobs-soup-refresh @ driver/session-jobs-delta
-  # Tip: 882082b7d — MCP not_found recipe (instanceof-safe); on 0053806dc steer hints
-  - branch: driver/session-jobs-delta
+  # Thin delta on live soup tip — session-jobs steer + MCP instanceof + cursor notify overlay.
+  # Worktree: ~/coding/hapi/worktrees/cursor-notify-soup @ driver/cursor-notify-rule-delta
+  # Tip: c5840c9b7 — skip clobber tracked hapi-session.mdc; omit action key (never "")
+  - branch: driver/cursor-notify-rule-delta
 
   # tiann/hapi#1489 — wake owning session when attached job completes/fails (opt-in).
   # Thin tip on driver/session-attached-jobs. Upstream PR tip: feat/job-complete-wake
