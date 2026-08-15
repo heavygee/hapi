@@ -40,7 +40,7 @@ import { getMachinePlatform, presentMachineHealth } from '@/lib/machineHealth'
 import { MachineFilterBar, MachineFilterMenu } from '@/components/MachineFilterBar'
 import { useSessionListMachineFilter } from '@/hooks/useSessionListMachineFilter'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
-import { useFeatures } from '@/hooks/queries/useFeatures'
+import { useFeatures, type FeaturesResponse } from '@/hooks/queries/useFeatures'
 import { useMinuteTick } from '@/hooks/useMinuteTick'
 import { SessionRowSummary } from '@/components/SessionRowSummary'
 import {
@@ -903,6 +903,8 @@ function SessionItem(props: {
     onSelect: (sessionId: string) => void
     showPath?: boolean
     api: ApiClient | null
+    features: FeaturesResponse | null
+    prNowMs: number
     titleSuggestionAvailable?: boolean
     selected?: boolean
     showDetailedStatus?: boolean
@@ -917,6 +919,8 @@ function SessionItem(props: {
         onSelect,
         showPath = true,
         api,
+        features,
+        prNowMs,
         titleSuggestionAvailable = false,
         selected = false,
         showDetailedStatus = false,
@@ -932,7 +936,6 @@ function SessionItem(props: {
     const [exportOpen, setExportOpen] = useState(false)
     const [archiveOpen, setArchiveOpen] = useState(false)
     const [deleteOpen, setDeleteOpen] = useState(false)
-    const { features } = useFeatures(api)
     const githubPrAwarenessEnabled = Boolean(features?.githubPrAwareness.enabled)
     const prChipDisplay = features?.prChipDisplay
     const {
@@ -1015,20 +1018,17 @@ function SessionItem(props: {
 
     const sessionName = getSessionTitle(s)
     const primaryPrRef = getPrimaryGithubPrRef(s.metadata?.externalRefs)
-    const prClockTick = useMinuteTick(githubPrAwarenessEnabled && Boolean(primaryPrRef))
     const linkedPr = useMemo(() => {
         if (!githubPrAwarenessEnabled || !primaryPrRef) return null
-        void prClockTick
-        const nowMs = Date.now()
         const profile = prChipDisplay ?? DEFAULT_PR_CHIP_DISPLAY
-        const display = resolveGithubPrChipDisplay(primaryPrRef, profile, nowMs)
+        const display = resolveGithubPrChipDisplay(primaryPrRef, profile, prNowMs)
         const parts = formatGithubPrChipDetailParts(primaryPrRef, display, t)
         return {
             glyph: parts.glyph,
             detail: parts.detail,
             href: primaryPrRef.url
         }
-    }, [githubPrAwarenessEnabled, primaryPrRef, prChipDisplay, prClockTick, t])
+    }, [githubPrAwarenessEnabled, primaryPrRef, prChipDisplay, prNowMs, t])
     const attention = useMemo(
         () => showDetailedStatus
             ? classifySessionAttention(s, {
@@ -1063,6 +1063,7 @@ function SessionItem(props: {
                     scheduleTooltipId={scheduleId}
                     githubPrAwarenessEnabled={githubPrAwarenessEnabled}
                     prChipDisplay={prChipDisplay}
+                    prNowMs={prNowMs}
                     inRunningSection={inRunningSection}
                     projectLabel={projectLabel}
                     machineLabel={machineLabel}
@@ -1226,6 +1227,11 @@ export function SessionList(props: {
         machinesById = {},
         onNewSessionInDirectory
     } = props
+    const { features } = useFeatures(api)
+    const githubPrAwarenessEnabled = Boolean(features?.githubPrAwareness.enabled)
+    const prClockTick = useMinuteTick(githubPrAwarenessEnabled)
+    void prClockTick
+    const prNowMs = Date.now()
     const { sessionPreviewLimit } = useSessionPreviewLimit()
     const { sessionListStatusMode } = useSessionListStatusMode()
     const { showActiveSessionsOnly } = useShowActiveSessionsOnly()
@@ -1535,6 +1541,8 @@ export function SessionList(props: {
                                     onSelect={props.onSelect}
                                     showPath={false}
                                     api={api}
+                                    features={features}
+                                    prNowMs={prNowMs}
                                     titleSuggestionAvailable={titleSuggestionAvailable}
                                     selected={s.id === selectedSessionId}
                                     showDetailedStatus={showDetailedStatus}
@@ -1897,6 +1905,8 @@ export function SessionList(props: {
                                             onSelect={props.onSelect}
                                             showPath={false}
                                             api={api}
+                                            features={features}
+                                            prNowMs={prNowMs}
                                             titleSuggestionAvailable={titleSuggestionAvailable}
                                             selected={s.id === selectedSessionId}
                                             showDetailedStatus={showDetailedStatus}
@@ -1959,6 +1969,8 @@ export function SessionList(props: {
                                                     onSelect={props.onSelect}
                                                     showPath={false}
                                                     api={api}
+                                                    features={features}
+                                                    prNowMs={prNowMs}
                                                     titleSuggestionAvailable={titleSuggestionAvailable}
                                                     selected={s.id === selectedSessionId}
                                                     showDetailedStatus={showDetailedStatus}

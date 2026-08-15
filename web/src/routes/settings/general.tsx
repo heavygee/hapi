@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
 import { useTranslation, type Locale } from '@/lib/use-translation'
 import { useAppContext } from '@/lib/app-context'
 import { CompanionPairing } from '@/components/settings/CompanionPairing'
@@ -33,6 +34,7 @@ export default function SettingsGeneralPage() {
     const { setGithubPrAwareness, isPending } = usePatchFeatures(api)
     const awareness = features?.githubPrAwareness
     const envPinned = awareness?.source === 'env'
+    const [featureError, setFeatureError] = useState<string | null>(null)
 
     const hubSettingsQuery = useQuery({
         queryKey: queryKeys.hubSettings,
@@ -64,13 +66,18 @@ export default function SettingsGeneralPage() {
             <SettingsSection title={t('settings.general.githubPrAwareness')}>
                 <SettingsSwitch
                     label={t('settings.general.githubPrAwareness')}
-                    description={envPinned
-                        ? t('settings.general.githubPrAwareness.envPinned')
-                        : t('settings.general.githubPrAwareness.desc')}
+                    description={featureError
+                        ?? (envPinned
+                            ? t('settings.general.githubPrAwareness.envPinned')
+                            : t('settings.general.githubPrAwareness.desc'))}
                     checked={Boolean(awareness?.enabled)}
                     disabled={envPinned || isPending}
                     onChange={(checked) => {
                         void setGithubPrAwareness(checked)
+                            .then(() => setFeatureError(null))
+                            .catch((error) => {
+                                setFeatureError(error instanceof Error ? error.message : t('dialog.error.default'))
+                            })
                     }}
                 />
             </SettingsSection>

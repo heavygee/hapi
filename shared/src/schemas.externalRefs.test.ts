@@ -75,6 +75,12 @@ describe('ExternalRefSchema', () => {
     it('rejects invalid repo shape', () => {
         expect(ExternalRefSchema.safeParse({ ...validPr, repo: 'not-a-repo' }).success).toBe(false)
         expect(ExternalRefSchema.safeParse({ ...validPr, repo: '/hapi' }).success).toBe(false)
+        const overlongRepo = `${'a'.repeat(70)}/${'b'.repeat(71)}`
+        expect(ExternalRefSchema.safeParse({
+            ...validPr,
+            repo: overlongRepo,
+            url: `https://github.com/${overlongRepo}/pull/1160`
+        }).success).toBe(false)
     })
 
     it('rejects non-positive PR numbers', () => {

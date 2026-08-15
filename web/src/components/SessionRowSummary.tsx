@@ -116,6 +116,8 @@ export function SessionRowSummary(props: {
     /** When enabled, show primary GitHub PR chip left of the time column (ADR D8). */
     githubPrAwarenessEnabled?: boolean
     prChipDisplay?: PrChipDisplayProfile
+    /** Shared minute clock from the session list (avoids per-row timers). */
+    prNowMs?: number
     /** Rows inside the pinned "in progress" section skip the text label (dot only). */
     inRunningSection?: boolean
     /** Short project name shown under the title (pinned "in progress" rows). */
@@ -134,6 +136,7 @@ export function SessionRowSummary(props: {
         className,
         githubPrAwarenessEnabled = false,
         prChipDisplay,
+        prNowMs,
         inRunningSection = false,
         projectLabel,
         machineLabel,
@@ -281,6 +284,7 @@ export function SessionRowSummary(props: {
                         <SessionPrChip
                             refs={s.metadata?.externalRefs}
                             displayProfile={prChipDisplay}
+                            nowMs={prNowMs}
                             interactive={false}
                         />
                     ) : null}
