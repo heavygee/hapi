@@ -15,6 +15,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HOOKS_JSON="${REPO_ROOT}/.cursor/hooks.json"
 PRODUCT_GUARD="${REPO_ROOT}/scripts/tooling/hapi-product-code-guard.sh"
+SESSION_RULE_GUARD="${REPO_ROOT}/scripts/tooling/hapi-session-rule-guard.sh"
 SYSTEMCTL_GUARD="${REPO_ROOT}/scripts/tooling/hapi-systemctl-guard.sh"
 MUTATION_GUARD="${REPO_ROOT}/scripts/tooling/hapi-production-mutation-guard.sh"
 MIRROR_HYGIENE_GUARD="${REPO_ROOT}/scripts/tooling/hapi-mirror-hygiene-guard.sh"
@@ -24,7 +25,7 @@ SOUP_DOGFOOD_RULE="${REPO_ROOT}/scripts/tooling/cursor-rules/hapi-driver-soup-do
 TOOLING_COMMIT_RULE="${REPO_ROOT}/.cursor/rules/hapi-tooling-commit-hygiene.mdc"
 USER_RULES="${HOME}/.cursor/rules"
 
-for s in "$PRODUCT_GUARD" "$SYSTEMCTL_GUARD" "$MUTATION_GUARD" "$MIRROR_HYGIENE_GUARD" "$TOOLING_COMMIT_GUARD" "$REMAT_HOLD_GUARD"; do
+for s in "$PRODUCT_GUARD" "$SESSION_RULE_GUARD" "$SYSTEMCTL_GUARD" "$MUTATION_GUARD" "$MIRROR_HYGIENE_GUARD" "$TOOLING_COMMIT_GUARD" "$REMAT_HOLD_GUARD"; do
     if [ ! -x "$s" ]; then
         echo "ERROR: ${s} missing or not executable" >&2
         exit 1
@@ -48,6 +49,10 @@ cat > "$HOOKS_JSON" <<'JSON'
   "version": 1,
   "hooks": {
     "preToolUse": [
+      {
+        "command": "./scripts/tooling/hapi-session-rule-guard.sh",
+        "matcher": "Write|Edit|StrReplace|MultiEdit|EditNotebook"
+      },
       {
         "command": "./scripts/tooling/hapi-product-code-guard.sh",
         "matcher": "Write|Edit|StrReplace|MultiEdit|EditNotebook"
@@ -96,6 +101,7 @@ JSON
 
 echo "Wrote ${HOOKS_JSON}"
 echo "Hooks installed:"
+echo "  hapi-session-rule-guard.sh       -> blocks agent edits to .cursor/rules/hapi-session.mdc (ping Meta)"
 echo "  hapi-product-code-guard.sh       -> blocks edits to cli/, hub/, web/, shared/ outside ~/coding/hapi/worktrees/"
 echo "  hapi-mirror-hygiene-guard.sh     -> blocks bun install / lockfile+e2e writes on primary mirror (soup utensils)"
 echo "  hapi-systemctl-guard.sh          -> blocks 'sudo systemctl <destructive-verb> hapi-{hub,runner,runner-watchdog}.service'"
