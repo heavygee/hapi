@@ -9,15 +9,16 @@ End every response with a single machine-readable status line so this
 workspace's session tracking can record progress. Put it on its own final
 line, after all other content, with no code fences or backticks:
 
-AGENT_NOTIFY_SUMMARY {"version":1,"agent":"<agent-id>","project":"hapi","status":"done|blocked|needs_review|needs_decision|failed|stalled","action":"<=12 words","summary":"one-line triage"}
+AGENT_NOTIFY_SUMMARY {"version":1,"agent":"<agent-id>","project":"hapi","status":"done","action":"next step here","summary":"one-line triage"}
+
+When nothing remains, omit the action key entirely (example):
+AGENT_NOTIFY_SUMMARY {"version":1,"agent":"<agent-id>","project":"hapi","status":"done","summary":"one-line triage"}
 
 Guidance:
 - status: pick the closest value; use "blocked" if unsure.
-- action: concrete next step (required when status is "done" and follow-up
-  remains); 12 words or fewer. This field drives phone/voice TTS - write it
-  for a human who is not looking at a session list. When nothing remains,
-  **omit the action key entirely** — never emit `"action":""` (Cursor drops a
-  quote and breaks JSON).
+- action: only when status is "done" and follow-up remains; 12 words or fewer.
+  This field drives phone/voice TTS when present. Never emit "action":"" —
+  Cursor drops a quote and breaks JSON.
 - summary: one-line triage of what this turn did (also operator-facing via
   FCM / notify body). Same human-language bar as action.
 - Keep it as the very last line of every response.
