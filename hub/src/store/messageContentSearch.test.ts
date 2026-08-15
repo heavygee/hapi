@@ -1,0 +1,108 @@
+import { describe, expect, it } from 'bun:test'
+import { Store } from './index'
+
+function makeSession(store: Store, tag: string, namespace = 'default') {
+    return store.sessions.getOrCreateSession(tag, { path: `/tmp/${tag}` }, null, namespace)
+}
+
+describe('message content search', () => {
+    it('indexes visible user and assistant prose, including compressed messages', () => {
+        const store = new Store(':memory:')
+        const session = makeSession(store, 'content-search')
+        store.messages.addMessage(session.id, {
+            role: 'user',
+            content: { type: 'text', text: 'How do I rotate the cache key?' }
+        })
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: { type: 'codex', data: { type: 'message', message: 'Use the key rotation command.' } }
+        })
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: { type: 'codex', data: { type: 'tool-call', input: { text: 'cache key' } } }
+        })
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: { type: 'message', message: `long answer ${'cache rotation '.repeat(40)}` }
+            }
+        })
+
+        expect(store.messages.searchContent('rotate the cache', 'default').map((result) => result.sessionId))
+            .toEqual([session.id])
+        expect(store.messages.searchContent('rotation command', 'default')[0]?.role).toBe('assistant')
+        expect(store.messages.searchContent('cache key', 'default')[0]?.role).toBe('user')
+        expect(store.messages.searchContent('cache key', 'default')[0]?.snippet).toContain('cache')
+    })
+
+    it('uses a LIKE fallback for short CJK queries and isolates namespaces', () => {
+        const store = new Store(':memory:')
+        const defaultSession = makeSession(store, 'cjk-default')
+        const otherSession = makeSession(store, 'cjk-other', 'other')
+        store.messages.addMessage(defaultSession.id, {
+            role: 'user',
+            content: { type: 'text', text: '中文缓存搜索测试' }
+        })
+        store.messages.addMessage(otherSession.id, {
+            role: 'user',
+            content: { type: 'text', text: '中文缓存搜索测试' }
+        })
+
+        expect(store.messages.searchContent('搜索', 'default').map((result) => result.sessionId))
+            .toEqual([defaultSession.id])
+        expect(store.messages.searchContent('搜索', 'other').map((result) => result.sessionId))
+            .toEqual([otherSession.id])
+    })
+
+    it('returns message-level matches and the full count for one session', () => {
+        const store = new Store(':memory:')
+        const session = makeSession(store, 'message-level-search')
+        const older = store.messages.addMessage(session.id, {
+            role: 'user',
+            content: { type: 'text', text: 'needle in the older message' }
+        })
+        const newer = store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: { type: 'codex', data: { type: 'message', message: 'needle in the newer message' } }
+        })
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: { type: 'codex', data: { type: 'message', message: 'unrelated' } }
+        })
+
+        const result = store.messages.searchContentInSession('needle', 'default', session.id)
+        expect(result.total).toBe(2)
+        expect(result.matches.map((match) => match.messageId)).toEqual([newer.id, older.id])
+        expect(result.matches.map((match) => match.sessionId)).toEqual([session.id, session.id])
+    })
+
+    it('does not expose queued messages until they are invoked', () => {
+        const store = new Store(':memory:')
+        const session = makeSession(store, 'queued-content')
+        store.messages.addMessage(session.id, {
+            role: 'user',
+            content: { type: 'text', text: 'queued secret phrase' }
+        }, 'queued-1')
+
+        expect(store.messages.searchContent('secret phrase', 'default')).toEqual([])
+        store.messages.markMessagesInvoked(session.id, ['queued-1'], 123)
+        expect(store.messages.searchContent('secret phrase', 'default')[0]?.sessionId).toBe(session.id)
+    })
+
+    it('keeps the derived index in sync with deletion and session merge', () => {
+        const store = new Store(':memory:')
+        const from = makeSession(store, 'merge-from')
+        const to = makeSession(store, 'merge-to')
+        const message = store.messages.addMessage(from.id, {
+            role: 'agent',
+            content: { type: 'codex', data: { type: 'message', message: 'mergeable result' } }
+        })
+
+        expect(store.messages.searchContent('mergeable', 'default')[0]?.messageId).toBe(message.id)
+        store.messages.mergeSessionMessages(from.id, to.id)
+        expect(store.messages.searchContent('mergeable', 'default')[0]?.sessionId).toBe(to.id)
+        store.sessions.deleteSession(to.id, 'default')
+        expect(store.messages.searchContent('mergeable', 'default')).toEqual([])
+    })
+})

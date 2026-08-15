@@ -53,3 +53,78 @@ export function buildConversationOutline(blocks: readonly ChatBlock[]): Conversa
 export function getConversationMessageAnchorId(messageId: string): string {
     return `hapi-message-${messageId}`
 }
+
+/**
+ * Find a case-insensitive, whitespace-normalized query within one rendered
+ * message part. The returned range can cross Markdown text nodes, so callers
+ * can scroll to the actual matching phrase instead of centering a long card.
+ */
+export function findConversationMessageTextRange(anchor: HTMLElement, query: string): Range | null {
+    const normalizedQuery = query.trim().replace(/\s+/g, ' ').toLocaleLowerCase()
+    if (!normalizedQuery) return null
+
+    const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT)
+    const positions: Array<{ node: Text; offset: number }> = []
+    let normalizedText = ''
+    let current: Node | null
+    while ((current = walker.nextNode())) {
+        const node = current as Text
+        for (let offset = 0; offset < node.data.length; offset += 1) {
+            const character = node.data[offset]!
+            if (/\s/.test(character)) {
+                if (normalizedText.endsWith(' ')) continue
+                normalizedText += ' '
+            } else {
+                normalizedText += character.toLocaleLowerCase()
+            }
+            positions.push({ node, offset })
+        }
+    }
+
+    const matchAt = normalizedText.indexOf(normalizedQuery)
+    if (matchAt < 0) return null
+    const start = positions[matchAt]
+    const end = positions[matchAt + normalizedQuery.length - 1]
+    if (!start || !end) return null
+
+    const range = document.createRange()
+    range.setStart(start.node, start.offset)
+    range.setEnd(end.node, end.offset + 1)
+    return range
+}
+
+/**
+ * Resolve an anchor for either a rendered assistant-ui message id or a raw
+ * HAPI message id. Assistant blocks append their source id after the block
+ * kind (for example, `agent-text:<message-id>:0`), so a raw search result
+ * does not always have the exact DOM id returned by getConversationMessageAnchorId.
+ */
+export function findConversationMessageAnchor(messageId: string): HTMLElement | null {
+    for (const element of document.querySelectorAll<HTMLElement>('[data-hapi-source-message-id]')) {
+        if (element.getAttribute('data-hapi-source-message-id') === messageId) return element
+    }
+
+    const direct = document.getElementById(getConversationMessageAnchorId(messageId))
+    if (direct) return direct
+
+    for (const element of document.querySelectorAll<HTMLElement>('[data-hapi-source-message-ids]')) {
+        const sourceIds = element.getAttribute('data-hapi-source-message-ids')?.split(/\s+/) ?? []
+        if (sourceIds.includes(messageId)) return element
+    }
+
+    const sourceMarker = `:${messageId}`
+    for (const element of document.querySelectorAll<HTMLElement>('[id]')) {
+        const candidate = element.id
+        if (
+            candidate.startsWith('hapi-message-')
+            && (
+                candidate.endsWith(sourceMarker)
+                || candidate.includes(`${sourceMarker}:`)
+            )
+        ) {
+            return element
+        }
+    }
+
+    return null
+}

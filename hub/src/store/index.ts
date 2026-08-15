@@ -13,6 +13,7 @@ import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
 import { UsageStore } from './usageStore'
 import { WorkGraphStore } from './workGraphStore'
+import { createMessageContentSearchTable, rebuildMessageContentSearch } from './messageContentSearch'
 
 export type {
     StoredMachine,
@@ -40,11 +41,12 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 23
+const SCHEMA_VERSION: number = 24
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
     'messages',
+    'message_content_search',
     'message_epochs',
     'users',
     'push_subscriptions',
@@ -302,6 +304,7 @@ export class Store {
             20: () => this.migrateFromV20ToV21(),
             21: () => this.migrateFromV21ToV22(),
             22: () => this.migrateFromV22ToV23(),
+            23: () => this.migrateFromV23ToV24(),
         })
 
         if (currentVersion === 0) {
@@ -545,6 +548,7 @@ export class Store {
             CREATE INDEX IF NOT EXISTS idx_event_links_namespace_to
                 ON event_links(namespace, to_event_id);
         `)
+        createMessageContentSearchTable(this.db)
     }
 
     private migrateLegacySchemaIfNeeded(): void {
@@ -970,6 +974,13 @@ export class Store {
             CREATE INDEX IF NOT EXISTS idx_event_links_namespace_to
                 ON event_links(namespace, to_event_id);
         `)
+    }
+
+    /** Derived FTS index for opt-in session message-content search. */
+    private migrateFromV23ToV24(): void {
+        createMessageContentSearchTable(this.db)
+        if (this.getMessageColumnNames().size === 0) return
+        rebuildMessageContentSearch(this.db)
     }
 
     private getSessionColumnNames(): Set<string> {

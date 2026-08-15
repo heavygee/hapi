@@ -126,6 +126,82 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         return c.json({ sessions })
     })
 
+    app.get('/sessions/content-search', (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const query = c.req.query('query')?.trim() ?? ''
+        if (!query) return c.json({ results: [] })
+
+        const limitRaw = Number(c.req.query('limit'))
+        const limit = Number.isFinite(limitRaw)
+            ? Math.min(100, Math.max(1, Math.floor(limitRaw)))
+            : 50
+        const namespace = c.get('namespace')
+        const sessionsById = new Map(
+            engine.getSessionsByNamespace(namespace).map((session) => [session.id, session])
+        )
+        const matches = engine.searchSessionContent(query.slice(0, 200), namespace, limit)
+        const matchedSessionIds = matches.map((match) => match.sessionId)
+        const scheduledCounts = engine.getFutureScheduledMessageCounts(matchedSessionIds)
+        const nextScheduledAt = engine.getNextScheduledAtBySessionIds(matchedSessionIds)
+        const results = matches
+            .flatMap((match) => {
+                const session = sessionsById.get(match.sessionId)
+                if (!session) return []
+                const summary = toSessionSummary(session)
+                return [{
+                    session: {
+                        ...summary,
+                        futureScheduledMessageCount: scheduledCounts.get(session.id) ?? 0,
+                        nextScheduledAt: nextScheduledAt.get(session.id) ?? null
+                    },
+                    match: {
+                        messageId: match.messageId,
+                        role: match.role,
+                        seq: match.seq,
+                        createdAt: match.createdAt,
+                        snippet: match.snippet
+                    }
+                }]
+            })
+
+        return c.json({ results })
+    })
+
+    app.get('/sessions/:id/content-search', (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const query = c.req.query('query')?.trim() ?? ''
+        if (!query) return c.json({ matches: [], total: 0 })
+
+        const limitRaw = Number(c.req.query('limit'))
+        const limit = Number.isFinite(limitRaw)
+            ? Math.min(1000, Math.max(1, Math.floor(limitRaw)))
+            : 500
+        const result = engine.searchSessionContentMatches(
+            query.slice(0, 200),
+            c.get('namespace'),
+            sessionResult.session.id,
+            limit
+        )
+
+        return c.json({
+            matches: result.matches.map(({ sessionId: _sessionId, ...match }) => match),
+            total: result.total
+        })
+    })
+
     app.get('/sessions/:id/export', (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)
         if (engine instanceof Response) {

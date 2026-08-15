@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ApiClient } from '@/api/client'
-import type { DecryptedMessage, MessagesResponse } from '@/types/api'
+import type { DecryptedMessage, MessageContextResponse, MessagesResponse } from '@/types/api'
 import {
     HISTORY_WINDOW_SIZE,
     VISIBLE_WINDOW_SIZE,
@@ -11,9 +11,11 @@ import {
     getMessageWindowState,
     getQueuedReconcileCandidateLocalIds,
     ingestIncomingMessages,
+    loadMessageContext,
     markMessagesConsumed,
     reconcileQueuedLocalIds,
     removeOptimisticMessage,
+    setMessageWindowTargetLock,
     setMessageViewMode,
     syncTailMessages,
     updateMessageStatus,
@@ -207,7 +209,33 @@ function beforeResponse(
 }
 
 function createApi(getMessages: ApiClient['getMessages']): ApiClient {
-    return { getMessages } as ApiClient
+    return { getMessages, getMessageContext: async () => null } as unknown as ApiClient
+}
+
+function contextResponse(
+    messages: DecryptedMessage[],
+    options: {
+        epoch?: number
+        hasMore?: boolean
+        nextBeforeAt: number
+        nextBeforeSeq: number
+        snapshotHeadAt: number
+        snapshotHeadSeq: number
+        targetMessageId: string
+    }
+): MessageContextResponse {
+    return {
+        messages,
+        targetMessageId: options.targetMessageId,
+        page: {
+            epoch: options.epoch ?? 0,
+            hasMore: options.hasMore ?? false,
+            nextBeforeAt: options.nextBeforeAt,
+            nextBeforeSeq: options.nextBeforeSeq,
+            snapshotHeadAt: options.snapshotHeadAt,
+            snapshotHeadSeq: options.snapshotHeadSeq
+        }
+    }
 }
 
 function deferred<T>() {
@@ -222,6 +250,7 @@ function deferred<T>() {
 
 afterEach(() => {
     for (const id of touchedSessions) {
+        setMessageWindowTargetLock(id, false)
         clearMessageWindow(id)
     }
     touchedSessions.clear()
@@ -230,6 +259,40 @@ afterEach(() => {
 })
 
 describe('message tail synchronization', () => {
+    it('lets a historical target cancel and block background tail synchronization', async () => {
+        const id = sessionId('target-lock')
+        const response = deferred<MessagesResponse>()
+        const getMessages = vi.fn(async () => await response.promise)
+        const syncing = syncTailMessages(createApi(getMessages), id)
+
+        setMessageWindowTargetLock(id, true)
+        expect(getMessageWindowState(id).isSyncingTail).toBe(false)
+        await syncTailMessages(createApi(vi.fn(async () => latestResponse([]))), id)
+        expect(getMessages).toHaveBeenCalledTimes(1)
+
+        response.resolve(latestResponse([
+            makeAgentMessage({ id: 'stale-tail', seq: 1, at: 1_000 })
+        ]))
+        await syncing
+        expect(getMessageWindowState(id).messages).toEqual([])
+
+        setMessageWindowTargetLock(id, false)
+    })
+
+    it('does not reactivate a retained historical window into tail mode while locked', () => {
+        const id = sessionId('target-lock-preserves-history')
+        ingestIncomingMessages(id, [
+            makeAgentMessage({ id: 'historical', seq: 1, at: 1_000 })
+        ])
+        setMessageViewMode(id, 'history')
+        setMessageWindowTargetLock(id, true)
+
+        activateMessageWindow(id)
+
+        expect(getMessageWindowState(id).viewMode).toBe('history')
+        setMessageWindowTargetLock(id, false)
+    })
+
     it('renders a persisted window immediately, activates tail mode, then requests only missed messages', async () => {
         const id = sessionId('reentry')
         const cached = makeAgentMessage({ id: 'cached', seq: 10, at: 1_000 })
@@ -1065,6 +1128,133 @@ describe('history view and older pagination', () => {
         ])
 
         expect(getMessageWindowState(id).messages.some((message) => message.id === 'root')).toBe(true)
+    })
+})
+
+describe('search-target message context', () => {
+    it('lets an initial tail sync register before requesting search context', async () => {
+        const id = sessionId('search-context-initial-tail-race')
+        const latest = makeAgentMessage({ id: 'latest', seq: 100, at: 100_000 })
+        const target = makeAgentMessage({ id: 'target', seq: 40, at: 40_000 })
+        const tailResponse = deferred<MessagesResponse>()
+        const getMessages = vi.fn(async () => await tailResponse.promise)
+        const getMessageContext = vi.fn(async () => contextResponse([target], {
+            epoch: 7,
+            hasMore: false,
+            nextBeforeAt: 40_000,
+            nextBeforeSeq: 40,
+            snapshotHeadAt: 100_000,
+            snapshotHeadSeq: 100,
+            targetMessageId: 'target'
+        }))
+        const api = createApi(getMessages)
+        api.getMessageContext = getMessageContext
+
+        const loading = loadMessageContext(api, id, 'target')
+        const syncing = syncTailMessages(api, id)
+        await Promise.resolve()
+        expect(getMessageContext).not.toHaveBeenCalled()
+
+        tailResponse.resolve(latestResponse([latest], { epoch: 7 }))
+        await syncing
+        await expect(loading).resolves.toBe(true)
+        expect(getMessageContext).toHaveBeenCalledWith(id, 'target')
+    })
+
+    it('waits for an active tail reconciliation before loading the searched context', async () => {
+        const id = sessionId('search-context-tail-race')
+        const latest = makeAgentMessage({ id: 'latest', seq: 100, at: 100_000 })
+        const target = makeAgentMessage({ id: 'target', seq: 40, at: 40_000 })
+        const tailResponse = deferred<MessagesResponse>()
+        const getMessages = vi.fn(async () => await tailResponse.promise)
+        const getMessageContext = vi.fn(async () => contextResponse([target], {
+            epoch: 7,
+            hasMore: false,
+            nextBeforeAt: 40_000,
+            nextBeforeSeq: 40,
+            snapshotHeadAt: 100_000,
+            snapshotHeadSeq: 100,
+            targetMessageId: 'target'
+        }))
+        const api = createApi(getMessages)
+        api.getMessageContext = getMessageContext
+
+        const syncing = syncTailMessages(api, id)
+        await vi.waitFor(() => expect(getMessageWindowState(id).isSyncingTail).toBe(true))
+        const loading = loadMessageContext(api, id, 'target')
+        await Promise.resolve()
+        expect(getMessageContext).not.toHaveBeenCalled()
+
+        tailResponse.resolve(latestResponse([latest], { epoch: 7 }))
+        await syncing
+        await expect(loading).resolves.toBe(true)
+        expect(getMessageContext).toHaveBeenCalledWith(id, 'target')
+    })
+
+    it('loads a bounded context, enters history mode, and preserves the latest reset boundary', async () => {
+        const id = sessionId('search-context')
+        const latest = makeAgentMessage({ id: 'latest', seq: 100, at: 100_000 })
+        const target = makeAgentMessage({ id: 'target', seq: 40, at: 40_000 })
+        const before = makeAgentMessage({ id: 'before', seq: 39, at: 39_000 })
+        const after = makeAgentMessage({ id: 'after', seq: 41, at: 41_000 })
+        const getMessages = vi.fn(async () => latestResponse([latest], { epoch: 7 }))
+        const getMessageContext = vi.fn(async () => contextResponse([before, target, after], {
+            epoch: 7,
+            hasMore: true,
+            nextBeforeAt: 39_000,
+            nextBeforeSeq: 39,
+            snapshotHeadAt: 100_000,
+            snapshotHeadSeq: 100,
+            targetMessageId: 'target'
+        }))
+        const api = createApi(getMessages)
+        api.getMessageContext = getMessageContext
+
+        await syncTailMessages(api, id)
+        const historyVersion = getMessageWindowState(id).historyVersion
+
+        await expect(loadMessageContext(api, id, 'target')).resolves.toBe(true)
+
+        expect(getMessageContext).toHaveBeenCalledWith(id, 'target')
+        expect(getMessageWindowState(id)).toMatchObject({
+            messages: [before, target, after],
+            hasMore: true,
+            viewMode: 'history',
+            isLoadingMore: false,
+            historyVersion: historyVersion + 1
+        })
+
+        setMessageViewMode(id, 'tail')
+        expect(getMessageWindowState(id)).toMatchObject({
+            viewMode: 'tail',
+            epoch: null
+        })
+    })
+
+    it('does not replace the current window when the target disappeared', async () => {
+        const id = sessionId('search-context-missing')
+        const latest = makeAgentMessage({ id: 'latest', seq: 1, at: 1_000 })
+        const getMessages = vi.fn(async () => latestResponse([latest], { epoch: 1 }))
+        const getMessageContext = vi.fn(async () => contextResponse([latest], {
+            epoch: 1,
+            hasMore: false,
+            nextBeforeAt: 1_000,
+            nextBeforeSeq: 1,
+            snapshotHeadAt: 1_000,
+            snapshotHeadSeq: 1,
+            targetMessageId: 'missing'
+        }))
+        const api = createApi(getMessages)
+        api.getMessageContext = getMessageContext
+
+        await syncTailMessages(api, id)
+        await expect(loadMessageContext(api, id, 'missing')).resolves.toBe(false)
+
+        expect(getMessageWindowState(id)).toMatchObject({
+            messages: [latest],
+            isLoadingMore: false,
+            viewMode: 'tail'
+        })
     })
 })
 

@@ -236,9 +236,15 @@ function SessionsPage() {
                         key={initializedHub === baseUrl ? 'last-seen-ready' : 'last-seen-pending'}
                         sessions={sessions}
                         selectedSessionId={selectedSessionId}
-                        onSelect={(sessionId) => navigate({
+                        onSelect={(sessionId, targetMessageId, targetMessageQuery) => navigate({
                             to: '/sessions/$sessionId',
                             params: { sessionId },
+                            ...(targetMessageId ? {
+                                search: {
+                                    messageId: targetMessageId,
+                                    ...(targetMessageQuery ? { messageQuery: targetMessageQuery } : {})
+                                }
+                            } : {}),
                         })}
                         onNewSession={() => navigate({ to: '/sessions/new' })}
                         onNewSessionInDirectory={handleNewSessionInDirectory}
@@ -336,7 +342,23 @@ function SessionPage() {
     const queryClient = useQueryClient()
     const { addToast } = useToast()
     const { sessionId } = useParams({ from: '/sessions/$sessionId' })
-    const { outline } = useSearch({ from: '/sessions/$sessionId' })
+    const { outline, messageId, messageQuery } = useSearch({ from: '/sessions/$sessionId' })
+    const [consumedMessageTarget, setConsumedMessageTarget] = useState<{
+        sessionId: string
+        messageId: string
+        messageQuery?: string
+    } | null>(null)
+    const retainedMessageTarget = consumedMessageTarget?.sessionId === sessionId
+        ? consumedMessageTarget
+        : null
+    // Keep the target alive for the mounted session after replacing the URL
+    // without its search parameters. Otherwise the route update can make the
+    // chat briefly remount without a target and reclaim the latest tail before
+    // the historical window has finished settling.
+    const effectiveInitialMessageId = messageId ?? retainedMessageTarget?.messageId
+    const effectiveInitialMessageQuery = messageId
+        ? messageQuery
+        : retainedMessageTarget?.messageQuery
     const {
         session,
         error: sessionError,
@@ -357,11 +379,14 @@ function SessionPage() {
         loadMore: loadMoreMessages,
         cancelLoadMore: cancelLoadMoreMessages,
         refetch: refetchMessages,
+        loadMessageContext: loadMessageContextForSession,
         viewMode: messagesViewMode,
         messagesVersion,
         historyVersion,
         setViewMode,
-    } = useMessages(api, sessionId)
+    } = useMessages(api, sessionId, {
+        skipInitialTailSync: Boolean(effectiveInitialMessageId?.trim())
+    })
 
     // Tracks the most recent send the hub rejected (4xx/5xx/network), keyed
     // by the session the failed POST actually targeted (post-resolveSessionId).
@@ -740,6 +765,30 @@ function SessionPage() {
         })
     }, [navigate, sessionId])
 
+    const handleInitialMessageConsumed = useCallback(() => {
+        if (messageId) {
+            setConsumedMessageTarget({
+                sessionId,
+                messageId,
+                messageQuery,
+            })
+        }
+        navigate({
+            to: '/sessions/$sessionId',
+            params: { sessionId },
+            replace: true,
+        })
+    }, [messageId, messageQuery, navigate, sessionId])
+
+    const handleSearchTargetDismissed = useCallback(() => {
+        setConsumedMessageTarget(null)
+        navigate({
+            to: '/sessions/$sessionId',
+            params: { sessionId },
+            replace: true,
+        })
+    }, [navigate, sessionId])
+
     if (!session) {
         if (sessionError) {
             return (
@@ -805,6 +854,11 @@ function SessionPage() {
             onSuppressSendErrorRestore={suppressSendErrorRestore}
             initialOutlineOpen={outline}
             onInitialOutlineConsumed={handleInitialOutlineConsumed}
+            initialTargetMessageId={effectiveInitialMessageId}
+            initialTargetMessageQuery={effectiveInitialMessageQuery}
+            onLoadMessageContext={loadMessageContextForSession}
+            onInitialTargetConsumed={handleInitialMessageConsumed}
+            onSearchTargetDismissed={handleSearchTargetDismissed}
             onAbortRestore={(text) => {
                 sendErrorIdRef.current += 1
                 setSendErrors((prev) => ({
@@ -1031,9 +1085,19 @@ const sessionsIndexRoute = createRoute({
 const sessionDetailRoute = createRoute({
     getParentRoute: () => sessionsRoute,
     path: '$sessionId',
-    validateSearch: (search: Record<string, unknown>): { outline?: boolean } => {
+    validateSearch: (search: Record<string, unknown>): { outline?: boolean; messageId?: string; messageQuery?: string } => {
         const outline = search.outline === true || search.outline === 'true'
-        return outline ? { outline: true } : {}
+        const messageId = typeof search.messageId === 'string' && search.messageId.length > 0
+            ? search.messageId
+            : undefined
+        const messageQuery = typeof search.messageQuery === 'string' && search.messageQuery.length > 0
+            ? search.messageQuery
+            : undefined
+        return {
+            ...(outline ? { outline: true } : {}),
+            ...(messageId ? { messageId } : {}),
+            ...(messageQuery ? { messageQuery } : {})
+        }
     },
     component: SessionDetailRoute,
 })

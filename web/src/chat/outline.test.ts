@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentEvent, ChatBlock } from '@/chat/types'
-import { buildConversationOutline, truncateOutlineLabel } from '@/chat/outline'
+import {
+    buildConversationOutline,
+    findConversationMessageAnchor,
+    findConversationMessageTextRange,
+    truncateOutlineLabel
+} from '@/chat/outline'
 
 function userBlock(
     id: string,
@@ -82,5 +87,42 @@ describe('conversation outline', () => {
             'outline:user-text:first',
             'outline:user-text:second'
         ])
+    })
+
+    it('finds rendered block anchors for raw HAPI message ids', () => {
+        const direct = document.createElement('div')
+        direct.id = 'hapi-message-user-text:direct'
+        const rendered = document.createElement('div')
+        rendered.id = 'hapi-message-agent-text:raw-message:0'
+        const joined = document.createElement('div')
+        joined.id = 'hapi-message-tool-call:tool-1'
+        joined.setAttribute('data-hapi-source-message-ids', 'tool-source raw-message-2')
+        const fragment = document.createElement('div')
+        fragment.setAttribute('data-hapi-source-message-id', 'raw-message-3')
+        joined.append(fragment)
+        document.body.append(direct, rendered, joined)
+
+        expect(findConversationMessageAnchor('direct')).toBe(direct)
+        expect(findConversationMessageAnchor('raw-message')).toBe(rendered)
+        expect(findConversationMessageAnchor('raw-message-2')).toBe(joined)
+        expect(findConversationMessageAnchor('raw-message-3')).toBe(fragment)
+
+        direct.remove()
+        rendered.remove()
+        joined.remove()
+    })
+
+    it('finds a normalized search phrase across rendered text nodes', () => {
+        const anchor = document.createElement('div')
+        anchor.append('KV ', document.createElement('strong'))
+        anchor.querySelector('strong')!.textContent = 'Cache'
+        anchor.append(' is reusable')
+        document.body.append(anchor)
+
+        const range = findConversationMessageTextRange(anchor, '  kv   cache ')
+
+        expect(range).not.toBeNull()
+        expect(range!.toString()).toBe('KV Cache')
+        anchor.remove()
     })
 })

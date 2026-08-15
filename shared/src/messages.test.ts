@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import {
     extractAssistantPlainText,
+    extractSearchableMessageText,
+    extractUserPlainText,
     extractNotifySummary,
     isRedundantGoalStatusEventContent,
     splitNotifySummary,
@@ -107,6 +109,34 @@ describe('extractAssistantPlainText', () => {
     test('returns null for unknown content shapes', () => {
         expect(extractAssistantPlainText({ type: 'event', data: {} })).toBeNull()
         expect(extractAssistantPlainText({ type: 'text' })).toBeNull()
+    })
+})
+
+describe('extractSearchableMessageText', () => {
+    test('extracts user text and normalizes whitespace', () => {
+        expect(extractUserPlainText([{ type: 'text', text: ' hello\nworld ' }, { type: 'image' }]))
+            .toBe('hello world')
+        expect(extractSearchableMessageText({
+            role: 'user',
+            content: { type: 'text', text: 'Find this prompt' }
+        })).toEqual({ role: 'user', text: 'Find this prompt' })
+    })
+
+    test('extracts assistant prose but excludes tool and reasoning records', () => {
+        expect(extractSearchableMessageText({
+            role: 'agent',
+            content: { type: 'codex', data: { type: 'message', message: 'Visible answer' } }
+        })).toEqual({ role: 'assistant', text: 'Visible answer' })
+        expect(extractSearchableMessageText({ role: 'agent', content: 'Legacy visible answer' }))
+            .toEqual({ role: 'assistant', text: 'Legacy visible answer' })
+        expect(extractSearchableMessageText({
+            role: 'agent',
+            content: { type: 'codex', data: { type: 'tool-call', input: { secret: 'do not index' } } }
+        })).toBeNull()
+        expect(extractSearchableMessageText({
+            role: 'agent',
+            content: { type: 'output', data: { type: 'user', message: { content: 'not assistant prose' } } }
+        })).toBeNull()
     })
 })
 

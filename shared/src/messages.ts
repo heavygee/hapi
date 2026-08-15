@@ -120,6 +120,9 @@ export function extractAssistantPlainText(content: unknown): string | null {
 
         if (data.type !== 'assistant') return null
         const message = isObject(data.message) ? data.message : null
+        if (typeof data.message === 'string' && data.message.trim().length > 0) {
+            return data.message
+        }
         const blocks = Array.isArray(message?.content) ? message.content : null
         if (!blocks) return null
         const textParts: string[] = []
@@ -131,6 +134,59 @@ export function extractAssistantPlainText(content: unknown): string | null {
         }
         if (textParts.length === 0) return null
         return textParts.join('\n')
+    }
+
+    return null
+}
+
+function normalizeSearchablePlainText(value: string): string | null {
+    const text = value.trim().replace(/\s+/g, ' ')
+    return text.length > 0 ? text : null
+}
+
+export function extractUserPlainText(content: unknown): string | null {
+    if (typeof content === 'string') {
+        return normalizeSearchablePlainText(content)
+    }
+
+    const blocks = Array.isArray(content) ? content : [content]
+    const textParts = blocks
+        .map((block) => {
+            if (!isObject(block) || block.type !== 'text' || typeof block.text !== 'string') {
+                return null
+            }
+            return block.text
+        })
+        .filter((text): text is string => text !== null)
+
+    return normalizeSearchablePlainText(textParts.join(' '))
+}
+
+export type SearchableMessage = {
+    role: 'user' | 'assistant'
+    text: string
+}
+
+/** Extract only user-visible user/assistant prose from a stored role envelope. */
+export function extractSearchableMessageText(value: unknown): SearchableMessage | null {
+    const record = unwrapRoleWrappedRecordEnvelope(value)
+    if (!record) return null
+
+    if (record.role === 'user') {
+        const text = extractUserPlainText(record.content)
+        return text ? { role: 'user', text } : null
+    }
+
+    if (record.role === 'agent' || record.role === 'assistant') {
+        const directText = typeof record.content === 'string'
+            ? record.content
+            : isObject(record.content)
+                && record.content.type === 'text'
+                && typeof record.content.text === 'string'
+                ? record.content.text
+                : null
+        const text = normalizeSearchablePlainText(directText ?? extractAssistantPlainText(record.content) ?? '')
+        return text ? { role: 'assistant', text } : null
     }
 
     return null
