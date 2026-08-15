@@ -1309,12 +1309,16 @@ export class SessionCache {
         }
 
         const oldMetadataForMerge = oldStored.metadata
-        if (oldMetadataForMerge !== null) {
-            for (let attempt = 0; attempt < 2; attempt += 1) {
+        let metadataMerged = oldMetadataForMerge === null
+        if (!metadataMerged) {
+            for (let attempt = 0; !metadataMerged && attempt < METADATA_RETRY_ATTEMPTS; attempt += 1) {
                 const latest = this.store.sessions.getSessionByNamespace(newSessionId, namespace)
-                if (!latest) break
+                if (!latest) {
+                    throw new Error('Merge target disappeared during metadata merge')
+                }
                 const merged = this.mergeSessionMetadata(oldMetadataForMerge, latest.metadata)
                 if (merged === null || merged === latest.metadata) {
+                    metadataMerged = true
                     break
                 }
                 const result = this.store.sessions.updateSessionMetadata(
@@ -1325,11 +1329,13 @@ export class SessionCache {
                     { touchUpdatedAt: false }
                 )
                 if (result.result === 'success') {
-                    break
+                    metadataMerged = true
+                } else if (result.result === 'error') {
+                    throw new Error('Failed to merge session metadata')
                 }
-                if (result.result === 'error') {
-                    break
-                }
+            }
+            if (!metadataMerged) {
+                throw new Error('Session metadata changed concurrently during merge')
             }
         }
 

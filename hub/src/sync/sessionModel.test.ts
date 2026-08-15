@@ -379,6 +379,49 @@ describe('session model', () => {
         expect(refs).toEqual(healthRefs)
     })
 
+    it('retains source session when metadata merge exhausts version retries', async () => {
+        const store = new Store(':memory:')
+        const events: SyncEvent[] = []
+        const cache = new SessionCache(store, createPublisher(events))
+
+        const oldRefs = [{
+            kind: 'github_pr' as const,
+            repo: 'tiann/hapi',
+            number: 2,
+            url: 'https://github.com/tiann/hapi/pull/2',
+            role: 'primary' as const,
+            source: 'user' as const,
+            linkedAt: 1
+        }]
+
+        const oldSession = cache.getOrCreateSession(
+            'session-merge-retry-old',
+            { path: '/tmp/project', host: 'localhost', flavor: 'codex', externalRefs: oldRefs },
+            null,
+            'default'
+        )
+        const newSession = cache.getOrCreateSession(
+            'session-merge-retry-new',
+            { path: '/tmp/project', host: 'localhost', flavor: 'codex' },
+            null,
+            'default'
+        )
+
+        const originalUpdate = store.sessions.updateSessionMetadata.bind(store.sessions)
+        store.sessions.updateSessionMetadata = (...args) => {
+            if (args[0] === newSession.id) {
+                return { result: 'version-mismatch', version: 1, value: args[1] }
+            }
+            return originalUpdate(...args)
+        }
+
+        await expect(
+            cache.mergeSessions(oldSession.id, newSession.id, 'default')
+        ).rejects.toThrow('Session metadata changed concurrently during merge')
+
+        expect(store.sessions.getSessionByNamespace(oldSession.id, 'default')).not.toBeNull()
+    })
+
     it('preserves global pin from old session when merging into resumed session', async () => {
         const store = new Store(':memory:')
         const events: SyncEvent[] = []
