@@ -42,6 +42,7 @@ import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStat
 import { useFeatures } from '@/hooks/queries/useFeatures'
 import { getPrimaryGithubPrRef } from '@hapi/protocol'
 import { SessionRowSummary } from '@/components/SessionRowSummary'
+import { KitchenStatusChip } from '@/components/KitchenStatusChip'
 import { Spinner } from '@/components/Spinner'
 import { useToast } from '@/lib/toast-context'
 import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
@@ -1854,6 +1855,7 @@ export function SessionList(props: {
                                     )}
                                 />
                             </button>
+                            <KitchenStatusChip api={api} />
                             {renderHeader ? (
                                 <button
                                     type="button"

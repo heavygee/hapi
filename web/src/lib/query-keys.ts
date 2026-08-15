@@ -37,4 +37,5 @@ export const queryKeys = {
     scratchlist: (sessionId: string) => ['scratchlist', sessionId] as const,
     sessionSystemEvents: (sessionId: string, filter: string) => ['session-system-events', sessionId, filter] as const,
     features: ['features'] as const,
+    kitchenStatus: ['kitchen-status'] as const,
 }
