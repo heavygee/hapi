@@ -15,8 +15,9 @@ describe('buildNotifyRuleContent', () => {
         expect(content.startsWith('---\nalwaysApply: true\n---')).toBe(true);
         expect(content).toContain(HAPI_SESSION_RULE_SENTINEL);
         expect(content).toContain('AGENT_NOTIFY_SUMMARY {"version":1,');
-        expect(content).toContain('"status":"done|blocked|needs_review|needs_decision|failed|stalled"');
-        expect(content.toLowerCase()).toContain('omit action');
+        expect(content).toContain('"status":"done"');
+        expect(content).toContain('Never emit "action":""');
+        expect(content.toLowerCase()).toContain('omit the action key');
     });
 
     it('bakes in project and agent id when provided', () => {

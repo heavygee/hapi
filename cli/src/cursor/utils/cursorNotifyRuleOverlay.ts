@@ -62,7 +62,8 @@ export interface InstallCursorNotifyRuleOverlayOptions {
 export function buildNotifyRuleContent(opts: { project?: string | null; agentId?: string | null } = {}): string {
     const project = sanitizeToken(opts.project) ?? '<project>';
     const agentId = sanitizeToken(opts.agentId) ?? '<agent-id>';
-    const exampleLine = `AGENT_NOTIFY_SUMMARY {"version":1,"agent":"${agentId}","project":"${project}","status":"done|blocked|needs_review|needs_decision|failed|stalled","action":"<=12 words","summary":"one-line triage"}`;
+    const exampleWithAction = `AGENT_NOTIFY_SUMMARY {"version":1,"agent":"${agentId}","project":"${project}","status":"done","action":"next step here","summary":"one-line triage"}`;
+    const exampleNoAction = `AGENT_NOTIFY_SUMMARY {"version":1,"agent":"${agentId}","project":"${project}","status":"done","summary":"one-line triage"}`;
 
     return [
         '---',
@@ -76,12 +77,15 @@ export function buildNotifyRuleContent(opts: { project?: string | null; agentId?
         "workspace's session tracking can record progress. Put it on its own final",
         'line, after all other content, with no code fences or backticks:',
         '',
-        exampleLine,
+        exampleWithAction,
+        '',
+        'When nothing remains, omit the action key entirely (example):',
+        exampleNoAction,
         '',
         'Guidance:',
         '- status: pick the closest value; use "blocked" if unsure.',
-        '- action: concrete next step when status is "done" and follow-up remains;',
-        '  12 words or fewer. Omit action (empty) when nothing remains.',
+        '- action: only when status is "done" and follow-up remains; 12 words or fewer.',
+        '  Never emit "action":"" — Cursor drops a quote and breaks JSON.',
         '- summary: one-line triage of what this turn did.',
         '- Keep it as the very last line of every response.',
         ''
