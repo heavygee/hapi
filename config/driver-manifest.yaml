@@ -829,3 +829,10 @@ layers:
   # Tip: 1b9480192
   - branch: feat/display-links
 
+  # tiann/hapi#1594 — long-press the collapsed session-search chip to dictate
+  # into the query (whichever transcription provider is configured), replacing
+  # the old long-press-to-dismiss gesture. Web-only.
+  # Worktree: ~/coding/hapi/worktrees/session-search-longpress-dismiss @ fix/session-search-longpress-dismiss
+  # Tip: 3a99d876a
+  - branch: fix/session-search-longpress-dismiss
+
