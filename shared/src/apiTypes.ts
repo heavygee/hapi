@@ -899,3 +899,27 @@ export type UsageSummaryResponse = {
     byModel: UsageSummaryBucket[]
     updatedAt: number
 }
+
+// Fork/estate-only: hub-host kitchen hygiene snapshot from
+// scripts/tooling/hapi-kitchen-status.sh --json. Not applicable outside this
+// estate's soup workflow, so the shape mirrors the script's own fields.
+export type KitchenStatusResponse =
+    | {
+        available: true
+        status: string
+        driverHead: string
+        driverLayers: number | string
+        mirror: string
+        mirrorDirty: boolean
+        forkAhead: number
+        forkBehind: number
+        working: string
+        holdActive: boolean
+        holdReason: string
+        lease: string
+        driverBusy: boolean
+        ruleChopped: boolean
+        oneliner: string
+        checkedAt: number
+    }
+    | { available: false }

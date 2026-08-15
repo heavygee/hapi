@@ -47,6 +47,7 @@ import { MachineFilterBar, MachineFilterMenu } from '@/components/MachineFilterB
 import { useSessionListMachineFilter } from '@/hooks/useSessionListMachineFilter'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
 import { SessionRowSummary } from '@/components/SessionRowSummary'
+import { KitchenStatusChip } from '@/components/KitchenStatusChip'
 import { Spinner } from '@/components/Spinner'
 import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 import { useToast } from '@/lib/toast-context'
@@ -1772,6 +1773,7 @@ export function SessionList(props: {
                                     )}
                                 />
                             </button>
+                            <KitchenStatusChip api={api} />
                             {renderHeader ? (
                                 <button
                                     type="button"

@@ -9,6 +9,7 @@ import { getConfiguration } from '../configuration'
 import { PROTOCOL_VERSION } from '@hapi/protocol'
 import { buildGeminiLiveSetupMessage, QWEN_REALTIME_MODEL } from '@hapi/protocol/voice'
 import { getProviderEnvironment } from '../config/providerCredentials'
+import { readTitleProviderConfig } from '../sync/titleSuggestion'
 import { createQwenProxyWebSocketHandler } from './qwenProxyHandler'
 import { decodeVoiceSystemPromptParam } from '../voiceSystemPromptParam'
 import type { SyncEngine } from '../sync/syncEngine'
@@ -16,21 +17,32 @@ import { createAuthMiddleware, type WebAppEnv } from './middleware/auth'
 import { createAuthRoutes } from './routes/auth'
 import { createBindRoutes } from './routes/bind'
 import { createEventsRoutes } from './routes/events'
+import { createFeaturesRoutes } from './routes/features'
 import { createSessionsRoutes } from './routes/sessions'
 import { createMessagesRoutes } from './routes/messages'
 import { createPermissionsRoutes } from './routes/permissions'
 import { createMachinesRoutes } from './routes/machines'
 import { createStorageRoutes } from './routes/storage'
 import { createUsageRoutes } from './routes/usage'
+import { createUpgradeRoutes, createUpgradeCliRoutes } from './routes/upgrade'
 import { createGitRoutes } from './routes/git'
 import { createCliRoutes } from './routes/cli'
 import { createCodexDesktopRoutes } from './routes/codexDesktop'
+import { createClaudeDesktopRoutes } from './routes/claudeDesktop'
+import { createCursorImportRoutes } from './routes/cursorImport'
 import { createPiSessionRoutes } from './routes/piSessions'
 import { createPushRoutes } from './routes/push'
 import { createDevicesRoutes } from './routes/devices'
 import { createVoiceRoutes } from './routes/voice'
+import { createSystemEventsRoutes } from './routes/systemEvents'
+import { createInboxItemsRoutes } from './routes/inboxItems'
+import { createOverseerRoutes } from './routes/overseer'
 import { createHubSettingsRoutes } from './routes/hubSettings'
 import { createWorkGraphRoutes } from './routes/workGraph'
+import { createHapiInlineRoutes } from './hapi-inline/routes'
+import { loadHapiInlineConfig } from './hapi-inline/config'
+import { createDoctorRoutes } from './routes/doctor'
+import { createKitchenStatusRoutes } from './routes/kitchenStatus'
 import type { SSEManager } from '../sse/sseManager'
 import type { VisibilityTracker } from '../visibility/visibilityTracker'
 import type { Server as BunServer, ServerWebSocket } from 'bun'
@@ -46,6 +58,10 @@ import type { Store } from '../store'
 // Normalise upstream close codes before forwarding to the browser client.
 // Codes 1005/1006/1015 are reserved and cannot be sent in a close frame;
 // abnormal upstream drops commonly produce 1006, which would throw on clientWs.close().
+function isSpaPassthroughPath(path: string): boolean {
+    return path.startsWith('/api') || path.startsWith('/cli') || path.startsWith('/hapi')
+}
+
 function toClientCloseCode(code: number): number {
     return code >= 1000 && code <= 4999 && code !== 1005 && code !== 1006 && code !== 1015
         ? code
@@ -232,26 +248,37 @@ function createWebApp(options: {
 
     app.use('*', logger())
 
-    // Health check endpoint (no auth required).
-    // capabilities.workGraph is additive: old clients ignore unknown fields.
-    app.get('/health', (c) => c.json({
-        status: 'ok',
-        protocolVersion: PROTOCOL_VERSION,
-        capabilities: { workGraph: true }
-    }))
-
     const configuration = getConfiguration()
     const corsOrigins = options.corsOrigins ?? configuration.corsOrigins
     const corsOriginOption = corsOrigins.includes('*') ? '*' : corsOrigins
     const corsMiddleware = cors({
         origin: corsOriginOption,
+        // PUT: fleet upgrade policy route (this PR).
         allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
         // last-event-id: browsers attach it to EventSource reconnects for
         // SSE replay; allow it in case a browser preflights the request.
         allowHeaders: ['authorization', 'content-type', 'last-event-id']
     })
+    app.use('/health', corsMiddleware)
     app.use('/api/*', corsMiddleware)
     app.use('/cli/*', corsMiddleware)
+    app.use('/hapi/*', cors({
+        origin: corsOriginOption,
+        allowMethods: ['GET', 'POST', 'OPTIONS'],
+        allowHeaders: ['content-type', 'x-hapi-inline-secret', 'x-operator-mic-secret']
+    }))
+    app.route('/hapi', createHapiInlineRoutes({ config: loadHapiInlineConfig() }))
+
+    // Health check endpoint (no auth required).
+    // Capabilities are additive so older clients can ignore unknown fields.
+    app.get('/health', (c) => c.json({
+        status: 'ok',
+        protocolVersion: PROTOCOL_VERSION,
+        capabilities: {
+            workGraph: true,
+            titleSuggestion: readTitleProviderConfig() !== null
+        }
+    }))
 
     // Gzip JSON API responses. Over the relay tunnel every byte is metered
     // twice (the SNI proxy copies in both directions), and API payloads are
@@ -274,12 +301,14 @@ function createWebApp(options: {
         return next()
     })
 
-    app.route('/cli', createCliRoutes(options.getSyncEngine))
+    app.route('/cli', createCliRoutes(options.getSyncEngine, options.jwtSecret))
+    app.route('/cli', createUpgradeCliRoutes())
 
     app.route('/api', createAuthRoutes(options.jwtSecret, options.store))
     app.route('/api', createBindRoutes(options.jwtSecret, options.store))
 
     app.use('/api/*', createAuthMiddleware(options.jwtSecret))
+    app.route('/api', createFeaturesRoutes())
     app.route('/api', createEventsRoutes(options.getSseManager, options.getSyncEngine, options.getVisibilityTracker))
     app.route('/api', createSessionsRoutes(options.getSyncEngine))
     app.route('/api', createMessagesRoutes(options.getSyncEngine))
@@ -288,9 +317,21 @@ function createWebApp(options: {
     app.route('/api', createStorageRoutes(configuration.dbPath))
     app.route('/api', createHubSettingsRoutes(configuration.dataDir))
     app.route('/api', createUsageRoutes(options.store))
+    app.route('/api', createUpgradeRoutes(options.getSyncEngine))
+    app.route('/api', createKitchenStatusRoutes())
     app.route('/api', createGitRoutes(options.getSyncEngine))
     // 中文注释：这里提供两类 Codex 辅助能力：扫描本地 transcript 以导入到 Hapi，以及按需重启 Codex Desktop 客户端。
     app.route('/api', createCodexDesktopRoutes({
+        store: options.store,
+        getSyncEngine: options.getSyncEngine
+    }))
+    // 中文注释：与 Codex 对称，扫描本地 ~/.claude/projects transcript 以导入 Hapi（复用同一套导入引擎）。
+    app.route('/api', createClaudeDesktopRoutes({
+        store: options.store,
+        getSyncEngine: options.getSyncEngine
+    }))
+    // Cursor flavor of the multi-agent session import surface (ACP verify-probe).
+    app.route('/api', createCursorImportRoutes({
         store: options.store,
         getSyncEngine: options.getSyncEngine
     }))
@@ -301,8 +342,14 @@ function createWebApp(options: {
     app.route('/api', createPushRoutes(options.store, options.vapidPublicKey))
     app.route('/api', createDevicesRoutes(options.store))
     app.route('/api', createVoiceRoutes({ dataDir: configuration.dataDir }))
+    // Soup: Session Log / inbox / overseer (overseer-readonly-entity). Lost on
+    // tip-forward #1392 absorb — same class as features remount (heal 99).
+    app.route('/api', createSystemEventsRoutes(options.getSyncEngine))
+    app.route('/api', createInboxItemsRoutes(options.getSyncEngine))
+    app.route('/api', createOverseerRoutes(options.getSyncEngine))
     // Path is intentionally NOT `/api/events` — that route is the SSE stream.
     app.route('/api', createWorkGraphRoutes(options.store))
+    app.route('/api', createDoctorRoutes(options.getSyncEngine))
 
     // Skip static serving in relay mode, show helpful message on root
     if (options.relayMode) {
@@ -344,7 +391,7 @@ from GitHub Pages instead of through the relay tunnel.
         }
 
         app.use('*', async (c, next) => {
-            if (c.req.path.startsWith('/api')) {
+            if (isSpaPassthroughPath(c.req.path)) {
                 return await next()
             }
 
@@ -361,7 +408,7 @@ from GitHub Pages instead of through the relay tunnel.
         })
 
         app.get('*', async (c, next) => {
-            if (c.req.path.startsWith('/api')) {
+            if (isSpaPassthroughPath(c.req.path)) {
                 await next()
                 return
             }
@@ -387,7 +434,7 @@ from GitHub Pages instead of through the relay tunnel.
     app.use('/assets/*', serveStatic({ root: distDir }))
 
     app.use('*', async (c, next) => {
-        if (c.req.path.startsWith('/api')) {
+        if (isSpaPassthroughPath(c.req.path)) {
             await next()
             return
         }
@@ -396,7 +443,7 @@ from GitHub Pages instead of through the relay tunnel.
     })
 
     app.get('*', async (c, next) => {
-        if (c.req.path.startsWith('/api')) {
+        if (isSpaPassthroughPath(c.req.path)) {
             await next()
             return
         }
