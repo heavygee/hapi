@@ -713,6 +713,12 @@ layers:
   # Tip: c5840c9b7 — skip clobber tracked hapi-session.mdc; omit action key (never "")
   - branch: driver/cursor-notify-rule-delta
 
+  # Fork-only — kitchen hygiene chip in session list header (GET /api/kitchen-status).
+  # Worktree: ~/coding/hapi/worktrees/kitchen-status-soup @ driver/kitchen-status-session-list
+  # Tip: b6f132d3e — cherry-pick 099e775cd onto c5840c9b7 (resolved server.ts + query-keys.ts)
+  # Peer: 0fd8ac8f. Queued 2026-08-15; remat blocked until hold clears.
+  - branch: driver/kitchen-status-session-list
+
   # tiann/hapi#1489 — wake owning session when attached job completes/fails (opt-in).
   # Thin tip on driver/session-attached-jobs. Upstream PR tip: feat/job-complete-wake
   # (stacked on feat/session-attached-jobs with runId claim fence).
