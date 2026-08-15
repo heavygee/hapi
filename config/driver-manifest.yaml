@@ -710,7 +710,7 @@ layers:
 
   # Thin delta on live soup tip (driver/integration @ 6d198c645) — fat base above is tip-forward skipped.
   # Worktree: ~/coding/hapi/worktrees/session-jobs-soup-refresh @ driver/session-jobs-delta
-  # Tip: 0053806dc — agent steer hints (#1424 UX); cherry-pick 5389fc5cb onto live driver tip
+  # Tip: 882082b7d — MCP not_found recipe (instanceof-safe); on 0053806dc steer hints
   - branch: driver/session-jobs-delta
 
   # tiann/hapi#1489 — wake owning session when attached job completes/fails (opt-in).
