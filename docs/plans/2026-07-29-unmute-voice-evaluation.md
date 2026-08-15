@@ -1,6 +1,6 @@
 # Free/local agentic voice overseer — Unmute & peers evaluation
 
-> **Status:** research / recommendation only (revised 2026-07-29 after operator framing correction). No deploy, no product code.
+> **Status:** research / recommendation only (revised 2026-07-29; Sayna addendum 2026-08-12). No deploy, no product code.
 > **Handoff from:** 🔁overseer prep (`/sessions/a492a270-514f-4cd9-88c1-d6c07744a245`)
 > **Correction:** Prior draft wrongly treated ElevenLabs as the destination benchmark ("stay on paid"). Wrong axis. This revision compares **free/local candidates against each other** toward an **agentic voice-enabled overseer**. Cloud/paid (ElevenLabs, Gemini Live, DashScope/Qwen-cloud, OpenRouter-paid) appear only as **temporary bridges**, never as the end state.
 
@@ -97,9 +97,28 @@ Drop cloud/paid from the destination set. Bridges noted in italics.
 | **HAPI hub mode-machine + overseer tools** | Brain policy / agency | **Yes (our code)** | Must exist on every path; Unmute does not replace this |
 | **Qwen3-Omni / CosyVoice local** | Partial E2E or TTS | **Weights open; realtime E2E not really** | [2603.05413](https://arxiv.org/html/2603.05413v2): DashScope realtime ~702ms but **not self-hostable**; local vLLM serves Thinker only; full Transformers ~146s. **HAPI's `qwen-realtime` backend today = DashScope cloud = bridge, not destination.** CosyVoice can be local TTS alternate |
 | **Logica Voice / voice-agent-starter / Pipecat-class** | Duplex orchestrator + tools | **Yes (immature / BYO models)** | Option X reference implementations; less proven than Unmute; tool passthrough sometimes native |
+| **Sayna** ([SaynaAI/sayna](https://github.com/SaynaAI/sayna)) | Voice *layer* (WS/REST/LiveKit/SIP) + local VAD/turn-detect DSP | **Server OSS; STT/TTS = paid cloud only** | See §3.1 — not a free/local destination |
 | *ElevenLabs ConvAI / TTS* | Bridge mouth (+ paid duplex brain) | **No — bridge only** | Live readback today; **exit ASAP** |
 | *Gemini Live* | Bridge duplex + tools | **No — bridge only** | In pluggable switcher; cloud |
 | *OpenRouter / paid OpenAI* | Bridge brain in Unmute demos | **No — bridge only** | Fine for latency spikes; not destination |
+
+### 3.1 Sayna — open-source shell, cloud mouths/ears (2026-08-12)
+
+Operator question: could Sayna be considered? Is there real OSS capability underneath, or is it API keys to frontier services?
+
+**Verdict: consider only as Option-X *glue/reference*, not as free/local destination.** Your instinct is right.
+
+| Layer | What Sayna actually is |
+|-------|------------------------|
+| **Repo** | Apache-2.0 Rust server (self-hostable Docker). Tagline: "unified Voice Layer for AI Agents" integrating with *existing* agent frameworks — **not** an all-in-one local voice agent. |
+| **Ears / Mouth** | **100% paid cloud connectors.** STT/TTS enums: Deepgram, ElevenLabs, Cartesia, Google Cloud, Azure. Docs: "Outbound HTTPS is required; provide the relevant API keys." Quickstart assumes Deepgram/ElevenLabs keys. No Whisper, Speaches, Kyutai, Chatterbox, Piper, or OpenAI-compatible local speech backend in tree. |
+| **Turn-taking** | **Local OSS DSP:** Silero-VAD + ML end-of-turn (`stt-vad`), optional DeepFilterNet noise filter. This part is genuinely free/local. |
+| **Brain** | **Out of scope by design.** No LLM slot. You bring the agent; Sayna streams `stt_result` / accepts `speak`. |
+| **Audio-disabled mode** | Can run with `audio: false` and no keys — control-plane only; proves the point that speech path is optional/keyed. |
+
+**Where it might still matter for HAPI:** LiveKit/WebRTC + SIP trunking + a clean WS voice control plane + local VAD/turn-detect patterns to steal for Option X. It does **not** move Phase 0–2 (free mouth/ears/brain). Wiring Sayna without writing a local provider connector just re-centers ElevenLabs/Deepgram — the bridge we are exiting.
+
+**Do not** put Sayna in the free/local candidate bake-off next to Speaches/Chatterbox/Unmute/Kyutai unless someone lands a local provider plugin (unlikely from upstream; would be a fork).
 
 ---
 
@@ -295,6 +314,7 @@ ElevenLabs = **bridge only** in phase 0; exit criterion is local mouth on the ov
 Speaches+CB+GW   ●        ●        ◐ estate GW    ○ needs local LLM
 Kyutai moshi     ●        ●        ○              ○
 Full Unmute      ●        ●        ●              ○ via #77 + local LLM
+Sayna           ○        ○        ◐ VAD only     ○ (by design; cloud STT/TTS)
 Local vLLM/Oll.  ○        ○        ○              ● (crux)
 HAPI overseer    ○        ○        mode policy    ● tools+state
 Qwen local E2E   ◐        ◐        ✗ realtime     ◐ thinker-only local
