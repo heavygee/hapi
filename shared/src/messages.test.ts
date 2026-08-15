@@ -138,6 +138,24 @@ describe('extractSearchableMessageText', () => {
             content: { type: 'output', data: { type: 'user', message: { content: 'not assistant prose' } } }
         })).toBeNull()
     })
+
+    test('excludes a trailing notify summary footer from assistant search text', () => {
+        expect(extractSearchableMessageText({
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'message',
+                    message: 'Visible answer.\n\nAGENT_NOTIFY_SUMMARY {"status":"done","summary":"Hidden footer"}'
+                }
+            }
+        })).toEqual({ role: 'assistant', text: 'Visible answer.' })
+
+        expect(extractSearchableMessageText({
+            role: 'agent',
+            content: 'AGENT_NOTIFY_SUMMARY {"status":"done","summary":"Only footer"}'
+        })).toBeNull()
+    })
 })
 
 describe('extractNotifySummary', () => {

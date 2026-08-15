@@ -112,6 +112,22 @@ describe('conversation outline', () => {
         joined.remove()
     })
 
+    it('selects the rendered block containing the search query when a message is split', () => {
+        const first = document.createElement('div')
+        first.setAttribute('data-hapi-source-message-id', 'raw-message')
+        first.textContent = 'Earlier block'
+        const second = document.createElement('div')
+        second.setAttribute('data-hapi-source-message-id', 'raw-message')
+        second.textContent = 'The matching phrase is here'
+        document.body.append(first, second)
+
+        expect(findConversationMessageAnchor('raw-message')).toBe(first)
+        expect(findConversationMessageAnchor('raw-message', 'matching phrase')).toBe(second)
+
+        first.remove()
+        second.remove()
+    })
+
     it('finds a normalized search phrase across rendered text nodes', () => {
         const anchor = document.createElement('div')
         anchor.append('KV ', document.createElement('strong'))

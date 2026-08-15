@@ -185,7 +185,9 @@ export function extractSearchableMessageText(value: unknown): SearchableMessage 
                 && typeof record.content.text === 'string'
                 ? record.content.text
                 : null
-        const text = normalizeSearchablePlainText(directText ?? extractAssistantPlainText(record.content) ?? '')
+        const text = normalizeSearchablePlainText(
+            stripNotifySummaryFooter(directText ?? extractAssistantPlainText(record.content) ?? '')
+        )
         return text ? { role: 'assistant', text } : null
     }
 

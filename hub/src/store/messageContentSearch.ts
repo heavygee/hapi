@@ -30,6 +30,7 @@ type IndexableMessage = {
 }
 
 type DbMessageRow = {
+    row_id: number
     id: string
     session_id: string
     content: string | Uint8Array
@@ -37,6 +38,8 @@ type DbMessageRow = {
     seq: number
     invoked_at: number | null
 }
+
+const SEARCH_REBUILD_BATCH_SIZE = 500
 
 type DbSearchRow = {
     message_id: string
@@ -118,35 +121,52 @@ function rebuildMessageContentSearchInternal(db: Database, sessionIds?: string[]
         ) VALUES (?, ?, ?, ?, ?, ?)
     `)
 
-    let rows: DbMessageRow[]
+    let selectBatch: ReturnType<Database['prepare']>
     if (sessionIds) {
         const placeholders = sessionIds.map(() => '?').join(', ')
         db.prepare(`DELETE FROM ${MESSAGE_CONTENT_SEARCH_TABLE} WHERE session_id IN (${placeholders})`).run(...sessionIds)
-        rows = db.prepare(`
-            SELECT id, session_id, content, created_at, seq, invoked_at
+        selectBatch = db.prepare(`
+            SELECT rowid AS row_id, id, session_id, content, created_at, seq, invoked_at
             FROM messages
-            WHERE session_id IN (${placeholders}) AND invoked_at IS NOT NULL
-        `).all(...sessionIds) as DbMessageRow[]
+            WHERE session_id IN (${placeholders})
+              AND invoked_at IS NOT NULL
+              AND rowid > ?
+            ORDER BY rowid ASC
+            LIMIT ?
+        `)
     } else {
         db.exec(`DELETE FROM ${MESSAGE_CONTENT_SEARCH_TABLE}`)
-        rows = db.prepare(`
-            SELECT id, session_id, content, created_at, seq, invoked_at
+        selectBatch = db.prepare(`
+            SELECT rowid AS row_id, id, session_id, content, created_at, seq, invoked_at
             FROM messages
             WHERE invoked_at IS NOT NULL
-        `).all() as DbMessageRow[]
+              AND rowid > ?
+            ORDER BY rowid ASC
+            LIMIT ?
+        `)
     }
 
-    for (const row of rows) {
-        const searchable = extractSearchableMessageText(decodeMessageContent(row.content))
-        if (!searchable) continue
-        insert.run(
-            searchable.text,
-            row.id,
-            row.session_id,
-            row.seq,
-            row.created_at,
-            searchable.role
-        )
+    let afterRowId = 0
+    while (true) {
+        const rows = (sessionIds
+            ? selectBatch.all(...sessionIds, afterRowId, SEARCH_REBUILD_BATCH_SIZE)
+            : selectBatch.all(afterRowId, SEARCH_REBUILD_BATCH_SIZE)) as DbMessageRow[]
+        if (rows.length === 0) break
+
+        for (const row of rows) {
+            const searchable = extractSearchableMessageText(decodeMessageContent(row.content))
+            if (!searchable) continue
+            insert.run(
+                searchable.text,
+                row.id,
+                row.session_id,
+                row.seq,
+                row.created_at,
+                searchable.role
+            )
+        }
+
+        afterRowId = rows[rows.length - 1]!.row_id
     }
 }
 

@@ -99,17 +99,24 @@ export function findConversationMessageTextRange(anchor: HTMLElement, query: str
  * kind (for example, `agent-text:<message-id>:0`), so a raw search result
  * does not always have the exact DOM id returned by getConversationMessageAnchorId.
  */
-export function findConversationMessageAnchor(messageId: string): HTMLElement | null {
-    for (const element of document.querySelectorAll<HTMLElement>('[data-hapi-source-message-id]')) {
-        if (element.getAttribute('data-hapi-source-message-id') === messageId) return element
+function getConversationMessageCandidates(messageId: string): HTMLElement[] {
+    const candidates: HTMLElement[] = []
+    const seen = new Set<HTMLElement>()
+    const add = (element: HTMLElement | null) => {
+        if (!element || seen.has(element)) return
+        seen.add(element)
+        candidates.push(element)
     }
 
-    const direct = document.getElementById(getConversationMessageAnchorId(messageId))
-    if (direct) return direct
+    for (const element of document.querySelectorAll<HTMLElement>('[data-hapi-source-message-id]')) {
+        if (element.getAttribute('data-hapi-source-message-id') === messageId) add(element)
+    }
+
+    add(document.getElementById(getConversationMessageAnchorId(messageId)))
 
     for (const element of document.querySelectorAll<HTMLElement>('[data-hapi-source-message-ids]')) {
         const sourceIds = element.getAttribute('data-hapi-source-message-ids')?.split(/\s+/) ?? []
-        if (sourceIds.includes(messageId)) return element
+        if (sourceIds.includes(messageId)) add(element)
     }
 
     const sourceMarker = `:${messageId}`
@@ -122,9 +129,18 @@ export function findConversationMessageAnchor(messageId: string): HTMLElement | 
                 || candidate.includes(`${sourceMarker}:`)
             )
         ) {
-            return element
+            add(element)
         }
     }
 
-    return null
+    return candidates
+}
+
+export function findConversationMessageAnchor(messageId: string, query?: string): HTMLElement | null {
+    const candidates = getConversationMessageCandidates(messageId)
+    if (query) {
+        const matching = candidates.find((element) => findConversationMessageTextRange(element, query) !== null)
+        if (matching) return matching
+    }
+    return candidates[0] ?? null
 }

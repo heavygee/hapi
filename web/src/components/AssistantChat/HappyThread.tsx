@@ -860,7 +860,7 @@ export function HappyThread(props: {
     ) => {
         clearSearchTargetScrollTimers()
         searchTargetScrollTimersRef.current = SEARCH_TARGET_SCROLL_DELAYS_MS.map((delay) => window.setTimeout(() => {
-            const targetAnchor = findConversationMessageAnchor(targetMessageId) ?? fallbackTarget
+            const targetAnchor = findConversationMessageAnchor(targetMessageId, query) ?? fallbackTarget
             let target = targetAnchor
             if (query) {
                 const existingMarker = document.querySelector<HTMLElement>(
@@ -1504,7 +1504,7 @@ export function HappyThread(props: {
             return
         }
 
-        const target = findConversationMessageAnchor(targetMessageId)
+        const target = findConversationMessageAnchor(targetMessageId, targetSearchQuery)
         if (target instanceof HTMLElement) {
             const targetRange = targetSearchQuery
                 ? findConversationMessageTextRange(target, targetSearchQuery)
