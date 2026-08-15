@@ -36,6 +36,7 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 | Meta wave after peers ack cleanup | **Skim** retros; apply **Promote?**; **emit** judgment via `hapi-emit-exit-reflection`; then archive. `skip: timebox` OK | Lifecycle § Exit reflection **Meta wave job** |
 | Long babysit PR **empty vs main** after upstream lands a superseding merge | Close as superseded; retarget chip to absorber; drop soup; exit reflection; idle — do not keep resolving forever | [`2026-08-08-cross-flavor-inline-images-babysit-retro.md`](../plans/2026-08-08-cross-flavor-inline-images-babysit-retro.md) (#958 → #1405) |
 | Session title / PR health | Title = workstream only (no `PR #N:` once chipped); identity+health on **chip**; attach via `hapi link-pr` / MCP `link_pr` | Lifecycle [§ Session titles and PR chips](../tooling/feature-work-lifecycle.md#session-titles-and-pr-chips) |
+| Human maintainer comment on a Lane A PR (`@tiann` / hold-login) | **Stop.** Operator work, not babysit. Hourly Meta still does **not** latch `🛑` — that is Track A WIP | Plan [`2026-08-11-operator-hold-chip.md`](../plans/2026-08-11-operator-hold-chip.md); § Meta PR watcher (hold is not in live yaml) |
 | Local Pi coding agent (5090 / oos-linux) | New Session → **Pi**; backend `oos-llm` VIP | [`pi-local-coding-agent.md`](./pi-local-coding-agent.md) |
 | Agent mangles `tiann`/`oos-linux`/MagicDNS doubles | Free-recall / tokenization hazard - not HAPI pipe. **Outside-Cursor control done (2026-07-24): native claude+codex 0/27 drops** | [`2026-07-22-doubled-character-free-recall.md`](../plans/2026-07-22-doubled-character-free-recall.md) + [outside-cursor results](../plans/2026-07-22-doubled-character-free-recall-outside-cursor-results.md) |
 | Blocked on a missing host diagnostic (`strace`, `lsof`, `bpftrace`, …) | **Install it** (`sudo apt-get install -y …`), tell the operator you did, continue — estate-wide, every agent/flavor on this host; not a per-session courtesy | Keep installs scoped to the missing tool; no drive-by package museums |
@@ -211,9 +212,9 @@ sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh
 | Timer | When | Command |
 |-------|------|---------|
 | `hapi-meta-daily.timer` | **hourly :00 Europe/London** (+ up to 2m random; BST/GMT) | full Meta (peer pings + wave-clear unlock) |
-| `hapi-meta-daily-refresh.timer` | every **45m 24/7** (`OnBootSec=3min` + `OnUnitActiveSec=45min`) | `--no-ping --emit-events` |
+| `hapi-meta-daily-refresh.timer` | **retired 2026-08-04** (unit kept for `install --disable`) | do not enable; escape hatch `hapi-meta-daily.sh --no-ping --emit-events` |
 
-Quiet chip-only refresh (45m) was retired 2026-08-04 — hourly London `:00` refreshes chips and may ping peers / unlock Meta tooling for rematerialize. Chip UI mutes to `?` when `statusCheckedAt` is older than **3h** (`config/pr-chip-states.yaml` / `$HAPI_HOME/pr-chip-display.json` staleMs). Host TZ on oos may stay `Etc/UTC`; the timer unit suffixes `Europe/London` so the hour is operator-local, not UTC. Units: `scripts/tooling/systemd/hapi-meta-daily*`. Optional env: `~/.hapi/meta-daily.env` (`HAPI_META_SESSION_ID` = Meta watcher **full UUID** so hourly pings get a verified chip, `HAPI_META_TOOLING_SESSION_ID` = wave-clear unlock **target**, `HAPI_META_WAVE_COLLECT_SECS`). Chip UI never live-queries GitHub. Logs: `journalctl -u hapi-meta-daily`.
+Hourly London `:00` is the only live tick — chips, policy-ping, wave-clear unlock. Chip UI mutes to `?` when `statusCheckedAt` is older than **3h** (`config/pr-chip-states.yaml` / `$HAPI_HOME/pr-chip-display.json` staleMs). Host TZ on oos may stay `Etc/UTC`; the timer unit suffixes `Europe/London` so the hour is operator-local, not UTC. Units: `scripts/tooling/systemd/hapi-meta-daily*`. Optional env: `~/.hapi/meta-daily.env` (`HAPI_META_SESSION_ID` = Meta watcher **full UUID** so hourly pings get a verified chip, `HAPI_META_TOOLING_SESSION_ID` = wave-clear unlock **target**, `HAPI_META_WAVE_COLLECT_SECS`). Chip UI never live-queries GitHub. Logs: `journalctl -u hapi-meta-daily`.
 
 What it does, idempotently:
 
@@ -237,6 +238,10 @@ What it does, idempotently:
 | 🔧 `merged` | merged; cleanup still owed (or Gate A clean, archive pending) | drop soup/wt/branch → **exit reflection** (or `skip:`) → ack + idle; Meta archives (peers: **no mid-turn self-archive**) |
 | 🧹 `complete` | fully cleaned (layer DROPPED, no worktree/branch, session archived) | **never** (babysit ended) |
 | `?` `unknown` | GitHub data unavailable this run | **chip left at last good status; never pinged** |
+
+**Overlays / not a new chip (live hourly):** `status:blocked-upstream` stays ⚠️ `needs_work` but Meta **must not** hourly-nag the coding peer (`blockedUpstream` in classifier JSON, #128). Co-attached 🔧 cleanup still pings.
+
+**Hold `🛑` `needs_operator` / `babysit.hold` — not live on the hourly timer.** Plan: [`2026-08-11-operator-hold-chip.md`](../plans/2026-08-11-operator-hold-chip.md) (Tiann trim on #1108 while chip stayed ✅). Rank + never-ping-peer exists in `lib/pr-emoji-core.sh`; latch + ack live in worktree `operator-hold-chip` (fork #121 / classifier #124), not in this file's yaml table and **not** in `hapi-meta-daily.sh` on fork `main`. Soup layer `driver/operator-hold-chip` is UI pulse only. Until latch ships: a `@tiann` comment is still a stdout `NEW GITHUB COMMS` line, not a chip.
 
 Chip thread count excludes GraphQL `isOutdated` unresolved threads (#847: leftover bot Majors on old lines must not keep ⚠️ after Findings:None + green CI on tip). Mid-hour, a green tip can still show cached ⚠️ until the :00 classify; peers should cite `hapi-pr-status` / live `hapi-pr-emoji-batch`, not sit on the stale chip. Classify is **per `chip.repo`** (2026-08-11): fork numbers must not inherit tiann lane-A copy (`wait on tiann` on a heavygee-only overseer PR is a bug).
 
