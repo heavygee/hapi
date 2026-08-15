@@ -15,13 +15,14 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 | Any local feature / soup / peer work | Read lifecycle first | [`feature-work-lifecycle.md`](../tooling/feature-work-lifecycle.md) (sole workflow) |
 | Message another HAPI session | **PATH tooling only** + **identify yourself** (see § Peer message identity) | `hapi-ping-peer …` / `hapi ping-peer …`; open with `From: /sessions/<your-id>` (auto-stamped when `HAPI_SESSION_ID` is set) |
 | Peer close-the-loop / status | **Spawn parent only** — never CC Meta PR watcher | § quieter Meta (2026-08-10); intake §0 + spawn-peer skill |
+| Local soup / remat / kitchen / process feedback | Ping **tooling meta-bot** (`HAPI_META_TOOLING_SESSION_ID` / `config/remat-escalate.yaml`) — **never** PR watcher | § Two Meta sessions (2026-08-15) |
 | Read another HAPI session | Same — no JWT+curl | `hapi inspect-peer <id>` / MCP `inspect_peer` (read-only, no resume). Citations: `[title](/sessions/<id>)` → pass `<id>` |
 | Proof / screenshots / clips for operator | **Inline into HAPI chat** — do not only paste paths | **Estate default (this host only):** `~/coding/server-setup/docs/operator-visible-proof.md`. Off-host / other-repo peers: skill **`localize-estate-guidance`**. HAPI deep dive: lifecycle [§ Proof tiers](../tooling/feature-work-lifecycle.md#proof-tiers-images-and-video). **Playwright videos:** annotated pointer + `clickForHuman` (dwell on result) — raw `recordVideo` is a fail. Default branch language: **main**. MCP `display_image` / `display_video`, or `bun scripts/tooling/hapi-display-image.mjs <session-prefix> <abs-path> [title]` |
 | Stale Cursor `mcp.json` / hub-move MCP panic | **Hub ≠ MCP URL.** Strip project `hapi`/`hapi-*` sidecars; never rewrite `--url` to `:3006`. Live HAPI Cursor sessions overlay **user-level** `~/.cursor/mcp.json` → loopback `hapiMcpUrl` | [`cursor-hapi-mcp.md`](../tooling/cursor-hapi-mcp.md); prune: `hapi-prune-stale-cursor-mcp` |
 | Cursor ACP `Authentication required` / account flip on proxmox (or after auth switch) | **oos `~/.config/cursor/auth.json` is source of truth** — derive `api-key.env` + `~/.hapi/cursor.env`, `chattr +i`, restart **runner only**; no commented dual-key museums | [`cursor-auth-fleet-sync.md`](../tooling/cursor-auth-fleet-sync.md) |
 | Link operator to a file/doc in HAPI chat | Write path as **bare text** — no `[](...)`, no backticks | HAPI auto-links bare paths → in-app file viewer (`remarkFilePathLinks`). Only allowlisted extensions link; **wrap `.mmd`/exotic in a `.md`** so it's clickable + previewable. Tracking: [tiann/hapi#1120](https://github.com/tiann/hapi/issues/1120) |
 | New behavior intake / peer spawn | Follow intake §0; **`hapi-spawn-peer`** until upstream [#1509](https://github.com/tiann/hapi/issues/1509) (`spawn_peer` MCP + CLI). Spawn HTTP ≠ handoff | [`new-feature-intake.md`](../tooling/new-feature-intake.md); postmortem [`2026-08-11-spawn-peer-empty-shell-postmortem.md`](../plans/2026-08-11-spawn-peer-empty-shell-postmortem.md) |
-| Touch `:3006` soup | `hapi-driver-status --quiet` first (0 idle / 75 busy / **76 remat-hold**); no stack-switch from agent shell; on remat failure **stop** — Meta owns escalation (`hapi-remat-hold status`); **never park peer layers** to unblock rematerialize | Lifecycle § Agent permission matrix; [`driver-soup.md`](../tooling/driver-soup.md) § Remat escalation hold |
+| Touch `:3006` soup | `hapi-driver-status --quiet` first (0 idle / 75 busy / **76 remat-hold**); no stack-switch from agent shell; on remat failure **stop** — ping **tooling meta-bot** / remat owner (`hapi-remat-hold status`, `config/remat-escalate.yaml`); **never park peer layers** to unblock rematerialize | Lifecycle § Agent permission matrix; [`driver-soup.md`](../tooling/driver-soup.md) § Remat escalation hold |
 | Resume fails after hub/runner restart (`spawn-happy-session` / `No machine online`) or ACP `agent` not on PATH | Machine id re-enroll orphaned sessions (#1473 gap) and/or multi-runner soup — **not** Quest | Runbook [`machine-reenroll-resume-runbook.md`](../tooling/machine-reenroll-resume-runbook.md); postmortem [`2026-08-10-1473-provenance-dogfood-machine-id-postmortem.md`](../plans/2026-08-10-1473-provenance-dogfood-machine-id-postmortem.md) |
 | Remat conflict on `playwright.config.ts` | Keep soup/fork peer-stack file; cherry-pick tip `testIgnore` only — **never** ask upstreamable tips to absorb annotated-video / fork Playwright | [`peer-stack.md`](../tooling/peer-stack.md#meta-remat-playwrightconfigts-conflicts-2026-07-28) |
 | Re-thin a soup layer after remat conflict | **Not** onto `origin/driver/integration` — use `upstream/main` or the exact pre-layer SHA Meta names; each remat mint may differ | [`driver-soup.md`](../tooling/driver-soup.md#re-thin-bases-2026-07-29--awareness-remat) |
@@ -165,9 +166,24 @@ If @tiann narrows or expands scope, revise this section.
 
 ---
 
+## Two Meta sessions — do not conflate (2026-08-15)
+
+**"Meta" names two different sessions.** Agents ping the wrong one constantly — stop.
+
+| Session | Role | Agents ping? |
+|---------|------|--------------|
+| **Tooling meta-bot** (`HAPI_META_TOOLING_SESSION_ID`; remat owner in `config/remat-escalate.yaml`, currently prefix `05d9f0f2`) | **Local kitchen:** soup remat, manifest hygiene, remat-hold escalation, wave-clear **execution**, fork tooling | **Yes** — for any local soup/kitchen/remat/process-feedback |
+| **PR watcher** (`HAPI_META_SESSION_ID`; `meta - PR watcher`, currently prefix `9f5f7e1d`) | **Upstream/outward:** `tiann/hapi` PR health, chips, CI/threads, merge timeliness, hourly classify queue | **No** — agents must **not** consult or ping PR watcher |
+
+**One line:** tooling meta-bot owns all **local soup orchestration**; PR watcher is **upstream-facing** and must **not** be described as kitchen controller.
+
+PR watcher **may** ping tooling meta-bot outbound (wave-clear unlock, merged-cleanup nudge when a peer failed Gate A). That is PR watcher → tooling meta-bot only. **Reverse pings are forbidden:** feature peers, dogfood peers, and remat escalation must **never** `ping_peer` PR watcher for soup status, remat acks, process feedback, drain updates, or "thanks".
+
+---
+
 ## Meta orchestration volume (quieter Meta — 2026-08-09; tightened 2026-08-10)
 
-Meta (`meta - PR watcher`) is **dispatch + queue**, not a party line. Peers must **not** CC Meta by default.
+PR watcher (`meta - PR watcher`) is **upstream dispatch + queue**, not a party line. Peers must **not** CC PR watcher by default — and must **not** treat it as local soup helpdesk (see § Two Meta sessions).
 
 **Hard rule (operator 2026-08-10):** a peer's close-the-loop / status pings go to the **session that spawned them** (originator), **at most**. Do **not** ping Meta PR watcher for IDLE acks, dogfood progress, hub-flip yells, "thanks", or polite status. Meta must **not** solicit those replies ("Yell when…", "please IDLE and ack", "ping me when ready").
 
@@ -176,7 +192,7 @@ Meta (`meta - PR watcher`) is **dispatch + queue**, not a party line. Peers must
 | One-shot handoff to a **single owning peer** (feature peer or PR-chip babysitter) | Require every cold/implementer ping to Meta |
 | Spawn a babysit peer onto a PR chip and step away | Stay in the loop for every freeze / Sol / race ACK |
 | Take **one** rollup when Ready YES/NO or blocked for operator judgment | Be CC on close-the-loop (unless Meta **was** the spawn parent) |
-| Remat hold → ping **remat owner** (`config/remat-escalate.yaml` / soup-stabilize), not PR watcher | Treat "ping Meta" as "ping PR watcher" for every soup hiccup |
+| Remat hold → ping **tooling meta-bot** / remat owner (`config/remat-escalate.yaml`), not PR watcher | Treat "ping Meta" as "ping PR watcher" for every soup hiccup |
 
 **Full court press:** orchestrator (or Meta) may spawn pass 1, then **devolve** — implementer owns subsequent cold spawns, fix loops, and freeze discipline. Cold peers ping **implementer only**. Meta PR watcher gets pinged once at Ready YES (upstream draft) or hard block needing **operator** judgment — not for routine peer↔peer coordination. Standing cyber-flag recovery still applies to whoever owns the press (`pr-review-loop.md` § Provider cyber-flag recovery).
 
@@ -187,6 +203,8 @@ Meta (`meta - PR watcher`) is **dispatch + queue**, not a party line. Peers must
 ---
 
 ## Meta PR watcher (daily PR sweep — "the dance")
+
+**Inbound policy (agents):** PR watcher is **outbound + hourly timer only** for peer agents. Do **not** ping this session for local soup, remat, kitchen state, dogfood results, or process feedback — ping **tooling meta-bot** (§ Two Meta sessions). PR watcher may ping *you* when upstream merge cleanup needs action or when wave-clear unlocks remat.
 
 **Entrypoint: `scripts/tooling/hapi-meta-daily.sh`.** One deterministic command for the whole morning routine. Do **not** hand-reconstruct the sweep each day, and do **not** reach straight for the low-level scripts — this wraps them.
 
