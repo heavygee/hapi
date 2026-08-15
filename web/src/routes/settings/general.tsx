@@ -68,8 +68,8 @@ export default function SettingsGeneralPage() {
                         ? t('settings.general.githubPrAwareness.envPinned')
                         : t('settings.general.githubPrAwareness.desc')}
                     checked={Boolean(awareness?.enabled)}
+                    disabled={envPinned || isPending}
                     onChange={(checked) => {
-                        if (envPinned || isPending) return
                         void setGithubPrAwareness(checked)
                     }}
                 />

@@ -1,4 +1,5 @@
 import type { ClientToServerEvents } from '@hapi/protocol'
+import { ExternalRefsSchema } from '@hapi/protocol/schemas'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
 import type { CopilotAgentMode } from '@hapi/protocol'
@@ -24,6 +25,17 @@ function gateExternalRefs(metadata: unknown): unknown {
         awarenessEnabled = false
     }
     return stripExternalRefsWhenAwarenessDisabled(metadata, awarenessEnabled)
+}
+
+function externalRefsInMetadataValid(metadata: unknown): boolean {
+    if (!metadata || typeof metadata !== 'object') {
+        return true
+    }
+    const refs = (metadata as Record<string, unknown>).externalRefs
+    if (refs === undefined) {
+        return true
+    }
+    return ExternalRefsSchema.safeParse(refs).success
 }
 
 type SessionAlivePayload = {
@@ -246,6 +258,10 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
         }
 
         const gatedMetadata = gateExternalRefs(metadata)
+        if (!externalRefsInMetadataValid(gatedMetadata)) {
+            cb({ result: 'error' })
+            return
+        }
 
         const result = store.sessions.updateSessionMetadata(
             sid,

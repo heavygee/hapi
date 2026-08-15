@@ -149,6 +149,17 @@ describe('MetadataSchema.externalRefs', () => {
             externalRefs: [primaryA, primaryB]
         }).success).toBe(false)
     })
+
+    it('rejects more than MAX_EXTERNAL_REFS entries', () => {
+        const refs = Array.from({ length: 33 }, (_, index) => ({
+            kind: 'github_pr' as const,
+            repo: 'tiann/hapi',
+            number: index + 1,
+            url: `https://github.com/tiann/hapi/pull/${index + 1}`,
+            role: 'secondary' as const
+        }))
+        expect(ExternalRefsSchema.safeParse(refs).success).toBe(false)
+    })
 })
 
 describe('getPrimaryGithubPrRef', () => {

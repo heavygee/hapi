@@ -121,8 +121,12 @@ export type GithubPrExternalRef = z.infer<typeof GithubPrExternalRefSchema>
 export const ExternalRefSchema = GithubPrExternalRefSchema
 export type ExternalRef = z.infer<typeof ExternalRefSchema>
 
-/** Array boundary: at most one github_pr with role primary. */
-export const ExternalRefsSchema = z.array(ExternalRefSchema).superRefine((refs, ctx) => {
+export const MAX_EXTERNAL_REFS = 32
+
+/** Array boundary: at most one github_pr with role primary; bounded count. */
+export const ExternalRefsSchema = z.array(ExternalRefSchema)
+    .max(MAX_EXTERNAL_REFS, `at most ${MAX_EXTERNAL_REFS} external refs are allowed`)
+    .superRefine((refs, ctx) => {
     if (refs.filter((ref) => ref.kind === 'github_pr' && ref.role === 'primary').length > 1) {
         ctx.addIssue({
             code: 'custom',
