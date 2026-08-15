@@ -91,4 +91,19 @@ describe('sessionJobMcp', () => {
         expect(result.text).toMatch(/sleep stub/)
     })
 
+    it('steers when not_found loses instanceof across MCP bundle boundaries', async () => {
+        const { updateSessionJob } = await import('./sessionJob')
+        vi.mocked(updateSessionJob).mockRejectedValueOnce(
+            Object.assign(new Error('job not found'), {
+                name: 'SessionJobError',
+                code: 'not_found'
+            })
+        )
+        const result = await handleSessionJobTool(
+            { action: 'update', jobKey: 'beets', remaining: 2 },
+            'sid-1'
+        )
+        expect(result.isError).toBe(true)
+        expect(result.text).toMatch(/hapi job run/)
+    })
 })
