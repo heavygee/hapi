@@ -151,7 +151,7 @@ function SettingsIcon(props: { className?: string }) {
 }
 
 function SessionsPage() {
-    const { api, baseUrl } = useAppContext()
+    const { api, baseUrl, titleSuggestionAvailable = false } = useAppContext()
     const navigate = useNavigate()
     const pathname = useLocation({ select: location => location.pathname })
     const matchRoute = useMatchRoute()
@@ -283,6 +283,7 @@ function SessionsPage() {
                             </div>
                         )}
                         api={api}
+                        titleSuggestionAvailable={titleSuggestionAvailable}
                         machineLabelsById={machineLabelsById}
                         machinesById={machinesById}
                     />
@@ -335,7 +336,7 @@ function classifySendError(
 }
 
 function SessionPage() {
-    const { api } = useAppContext()
+    const { api, titleSuggestionAvailable = false } = useAppContext()
     const { t } = useTranslation()
     const goBack = useAppGoBack()
     const navigate = useNavigate()
@@ -824,6 +825,7 @@ function SessionPage() {
     return (
         <SessionChat
             api={api}
+            titleSuggestionAvailable={titleSuggestionAvailable}
             session={session}
             cursorChatOnDisk={cursorChatStoreStatus?.onDisk}
             reopenDisabledReason={cursorReopenDisabledReason}

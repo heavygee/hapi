@@ -25,8 +25,10 @@ import type {
     SpawnResponse,
     VisibilityPayload,
     HapiSessionExport,
+    HubHealthResponse,
     SessionResponse,
     SessionContentMatchesResponse,
+    SessionTitleSuggestionResponse,
     SessionsResponse,
     SessionContentSearchResponse
 } from '@/types/api'
@@ -248,6 +250,10 @@ export class ApiClient {
 
     async getSessions(): Promise<SessionsResponse> {
         return await this.request<SessionsResponse>('/api/sessions')
+    }
+
+    async getHealth(): Promise<HubHealthResponse> {
+        return await this.request<HubHealthResponse>('/health')
     }
 
     async searchSessionContent(query: string, limit: number = 50, signal?: AbortSignal): Promise<SessionContentSearchResponse> {
@@ -965,6 +971,20 @@ export class ApiClient {
         await this.request(`/api/sessions/${encodeURIComponent(sessionId)}`, {
             method: 'PATCH',
             body: JSON.stringify({ name })
+        })
+    }
+
+    async suggestSessionTitle(sessionId: string): Promise<SessionTitleSuggestionResponse> {
+        return await this.request<SessionTitleSuggestionResponse>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/title-suggestion`,
+            { method: 'POST' }
+        )
+    }
+
+    async updateSessionSummary(sessionId: string, text: string): Promise<void> {
+        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/summary`, {
+            method: 'PATCH',
+            body: JSON.stringify({ text })
         })
     }
 
