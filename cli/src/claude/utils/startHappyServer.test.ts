@@ -245,7 +245,6 @@ describe('startHappyServer link_pr', () => {
             repo: 'tiann/hapi',
             number: 1163
         }))
-        expect(sessionClient.updateMetadata).toHaveBeenCalled()
         expect(sessionClient.flushMetadata).not.toHaveBeenCalled()
     })
 
@@ -289,9 +288,12 @@ describe('startHappyServer link_pr', () => {
         }) as ToolResult
 
         expect(result.isError).toBe(false)
-        expect(sessionClient.getMetadata()).toEqual({
-            externalRefs: [existing, secondary]
-        })
+        expect(mockUpsertSessionExternalRef).toHaveBeenCalledWith('sess-1', expect.objectContaining({
+            repo: 'tiann/hapi',
+            number: 1163,
+            role: 'secondary'
+        }))
+        expect(sessionClient.flushMetadata).not.toHaveBeenCalled()
     })
 
     it('preserves cached health when re-linking the same PR', async () => {
@@ -330,7 +332,8 @@ describe('startHappyServer link_pr', () => {
         }) as ToolResult
 
         expect(result.isError).toBe(false)
-        expect(sessionClient.getMetadata()).toEqual({ externalRefs: [existing] })
+        expect(mockUpsertSessionExternalRef).toHaveBeenCalledOnce()
+        expect(sessionClient.flushMetadata).not.toHaveBeenCalled()
     })
 
     it('errors when the hub does not persist the linked ref', async () => {

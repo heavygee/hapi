@@ -36,6 +36,7 @@ import type { WebAppEnv } from '../middleware/auth'
 import { loadScratchlistAttachmentLimitsFromEnv } from '../../config/scratchlistAttachmentLimits'
 import { validateScratchlistAttachmentsForWrite, scratchlistSessionBytesBeforeForPut } from '../../scratchlistAttachments/validate'
 import { TitleSuggestionError } from '../../sync/titleSuggestion'
+import { mapExternalRefRouteError } from '../../sync/externalRefErrors'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
@@ -228,11 +229,8 @@ export function createSessionsRoutes(
             await engine.setSessionExternalRefs(sessionResult.sessionId, parsed.data.externalRefs)
             return c.json({ ok: true, externalRefs: parsed.data.externalRefs })
         } catch (error) {
-            const message = error instanceof Error ? error.message : 'Failed to update external refs'
-            if (message.includes('concurrently') || message.includes('version')) {
-                return c.json({ error: message }, 409)
-            }
-            return c.json({ error: message }, 500)
+            const mapped = mapExternalRefRouteError(error, 'Failed to update external refs')
+            return c.json({ error: mapped.message }, mapped.status)
         }
     })
 
@@ -267,11 +265,8 @@ export function createSessionsRoutes(
             )
             return c.json({ ok: true, externalRefs })
         } catch (error) {
-            const message = error instanceof Error ? error.message : 'Failed to upsert external ref'
-            if (message.includes('concurrently') || message.includes('version')) {
-                return c.json({ error: message }, 409)
-            }
-            return c.json({ error: message }, 500)
+            const mapped = mapExternalRefRouteError(error, 'Failed to upsert external ref')
+            return c.json({ error: mapped.message }, mapped.status)
         }
     })
 
@@ -299,11 +294,8 @@ export function createSessionsRoutes(
             )
             return c.json({ ok: true, externalRefs })
         } catch (error) {
-            const message = error instanceof Error ? error.message : 'Failed to remove primary external ref'
-            if (message.includes('concurrently') || message.includes('version')) {
-                return c.json({ error: message }, 409)
-            }
-            return c.json({ error: message }, 500)
+            const mapped = mapExternalRefRouteError(error, 'Failed to remove primary external ref')
+            return c.json({ error: mapped.message }, mapped.status)
         }
     })
 

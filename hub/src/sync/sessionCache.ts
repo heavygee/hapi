@@ -5,6 +5,9 @@ import { clampAliveTime } from './aliveTime'
 import { EventPublisher } from './eventPublisher'
 import { extractTodoWriteTodosFromMessageContent, TodosSchema } from './todos'
 import { extractBackgroundTaskDelta } from './backgroundTasks'
+import { InvalidExternalRefsError } from './externalRefErrors'
+
+export { InvalidExternalRefsError } from './externalRefErrors'
 
 const QUEUED_MESSAGE_THINKING_GRACE_MS = 15_000
 // tiann/hapi#919: metadata writers (renameSession, clearSessionArchiveMetadata,
@@ -955,7 +958,9 @@ export class SessionCache {
                 : []
             const parsedRefs = ExternalRefsSchema.safeParse(mutate(currentRefs))
             if (!parsedRefs.success) {
-                throw new Error(parsedRefs.error.issues[0]?.message ?? 'Invalid external refs')
+                throw new InvalidExternalRefsError(
+                    parsedRefs.error.issues[0]?.message ?? 'Invalid external refs'
+                )
             }
             const externalRefs = parsedRefs.data
             const newMetadata = { ...currentMetadata, externalRefs }
@@ -1303,14 +1308,18 @@ export class SessionCache {
             this.emitScratchlistChanged(oldSessionId)
         }
 
-        const mergedMetadata = this.mergeSessionMetadata(oldStored.metadata, newStored.metadata)
-        if (mergedMetadata !== null && mergedMetadata !== newStored.metadata) {
+        const oldMetadataForMerge = oldStored.metadata
+        if (oldMetadataForMerge !== null) {
             for (let attempt = 0; attempt < 2; attempt += 1) {
                 const latest = this.store.sessions.getSessionByNamespace(newSessionId, namespace)
                 if (!latest) break
+                const merged = this.mergeSessionMetadata(oldMetadataForMerge, latest.metadata)
+                if (merged === null || merged === latest.metadata) {
+                    break
+                }
                 const result = this.store.sessions.updateSessionMetadata(
                     newSessionId,
-                    mergedMetadata,
+                    merged,
                     latest.metadataVersion,
                     namespace,
                     { touchUpdatedAt: false }

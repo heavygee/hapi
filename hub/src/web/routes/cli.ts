@@ -13,6 +13,7 @@ import {
 import { getConfiguration } from '../../configuration'
 import { readSessionSummaryContractEnabled } from '../../config/sessionSummaryContract'
 import { stripExternalRefsWhenAwarenessDisabled } from '../../sync/externalRefsPolicy'
+import { mapExternalRefRouteError } from '../../sync/externalRefErrors'
 import { constantTimeEquals } from '../../utils/crypto'
 import { parseAccessToken } from '../../utils/accessToken'
 import type { Machine, Session, SyncEngine } from '../../sync/syncEngine'
@@ -401,11 +402,8 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
             )
             return c.json({ ok: true, externalRefs })
         } catch (error) {
-            const message = error instanceof Error ? error.message : 'Failed to upsert external ref'
-            if (message.includes('concurrently') || message.includes('version')) {
-                return c.json({ error: message }, 409)
-            }
-            return c.json({ error: message }, 500)
+            const mapped = mapExternalRefRouteError(error, 'Failed to upsert external ref')
+            return c.json({ error: mapped.message }, mapped.status)
         }
     })
 
@@ -436,11 +434,8 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
             )
             return c.json({ ok: true, externalRefs })
         } catch (error) {
-            const message = error instanceof Error ? error.message : 'Failed to remove primary external ref'
-            if (message.includes('concurrently') || message.includes('version')) {
-                return c.json({ error: message }, 409)
-            }
-            return c.json({ error: message }, 500)
+            const mapped = mapExternalRefRouteError(error, 'Failed to remove primary external ref')
+            return c.json({ error: mapped.message }, mapped.status)
         }
     })
 

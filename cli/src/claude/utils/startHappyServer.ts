@@ -248,12 +248,6 @@ function createHapiMcpServer(
                 if (!persisted) {
                     throw new Error('Hub did not persist the PR link (awareness may be disabled)')
                 }
-                if (response.externalRefs) {
-                    client.updateMetadata((metadata) => ({
-                        ...metadata,
-                        externalRefs: response.externalRefs,
-                    }))
-                }
                 return {
                     content: [{
                         type: 'text' as const,

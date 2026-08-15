@@ -65,6 +65,7 @@ function createApp(session: Session, opts?: {
     archiveSession?: (sessionId: string) => Promise<void>
     getCursorChatStoreStatus?: SyncEngine['getCursorChatStoreStatus']
     setSessionExternalRefs?: SyncEngine['setSessionExternalRefs']
+    mutateSessionExternalRefs?: SyncEngine['mutateSessionExternalRefs']
     githubPrAwarenessEnabled?: boolean
     listCodexModelsForSession?: SyncEngine['listCodexModelsForSession']
     forkConversation?: SyncEngine['forkConversation']
@@ -148,6 +149,7 @@ function createApp(session: Session, opts?: {
         })),
         archiveSession: archiveSessionMock,
         setSessionExternalRefs: opts?.setSessionExternalRefs ?? (async () => {}),
+        mutateSessionExternalRefs: opts?.mutateSessionExternalRefs ?? (async (_sessionId, mutate) => mutate([])),
         setSessionPinned: opts?.setSessionPinned ?? (() => {}),
         setSessionPinMode: opts?.setSessionPinMode ?? (() => {}),
         getSessionExport: opts?.getSessionExport ?? (() => ({
@@ -293,6 +295,32 @@ describe('sessions routes', () => {
         })
 
         expect(response.status).toBe(400)
+    })
+
+    it('returns 400 when upsert exceeds MAX_EXTERNAL_REFS', async () => {
+        const { InvalidExternalRefsError } = await import('../../sync/externalRefErrors')
+        const { app } = createApp(createSession(), {
+            mutateSessionExternalRefs: async () => {
+                throw new InvalidExternalRefsError('at most 32 external refs are allowed')
+            }
+        })
+
+        const response = await app.request('/api/sessions/session-1/external-refs/upsert', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                ref: {
+                    kind: 'github_pr',
+                    repo: 'tiann/hapi',
+                    number: 99,
+                    url: 'https://github.com/tiann/hapi/pull/99',
+                    role: 'secondary'
+                }
+            })
+        })
+
+        expect(response.status).toBe(400)
+        expect(await response.json()).toMatchObject({ error: 'at most 32 external refs are allowed' })
     })
 
     it('allows PUT empty externalRefs to unlink', async () => {
