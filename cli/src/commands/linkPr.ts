@@ -1,31 +1,9 @@
-import axios from 'axios'
 import chalk from 'chalk'
 import { buildGithubPrExternalRef, parseGithubPrInput } from '@hapi/protocol'
-import { configuration } from '@/configuration'
-import { getAuthToken } from '@/api/auth'
-import { buildHubRequestHeaders } from '@/api/hubExtraHeaders'
+import { upsertSessionExternalRef } from '@/api/upsertSessionExternalRef'
 import { HAPI_SESSION_ID_ENV } from '@/agent/hapiSessionEnv'
 import { initializeToken } from '@/ui/tokenInit'
 import type { CommandDefinition } from './types'
-
-function authHeaders() {
-    return buildHubRequestHeaders({
-        Authorization: `Bearer ${getAuthToken()}`,
-        'Content-Type': 'application/json'
-    })
-}
-
-async function upsertExternalRef(sessionId: string, ref: ReturnType<typeof buildGithubPrExternalRef>) {
-    return await axios.post(
-        `${configuration.apiUrl}/cli/sessions/${encodeURIComponent(sessionId)}/external-refs/upsert`,
-        { ref },
-        {
-            headers: authHeaders(),
-            timeout: 30_000,
-            validateStatus: () => true
-        }
-    )
-}
 
 export const linkPrCommand: CommandDefinition = {
     name: 'link-pr',
@@ -63,16 +41,13 @@ export const linkPrCommand: CommandDefinition = {
         })
 
         try {
-            const response = await upsertExternalRef(sessionId, ref)
+            const response = await upsertSessionExternalRef(sessionId, ref)
             if (response.status === 403) {
                 console.error(chalk.red('Error:'), 'GitHub PR awareness is disabled on the hub (enable in Settings → General).')
                 process.exit(1)
             }
-            if (response.status < 200 || response.status >= 300) {
-                const message = typeof response.data?.error === 'string'
-                    ? response.data.error
-                    : `HTTP ${response.status}`
-                console.error(chalk.red('Error:'), message)
+            if (!response.ok) {
+                console.error(chalk.red('Error:'), response.error ?? `HTTP ${response.status}`)
                 process.exit(1)
             }
             console.log(chalk.green(`Linked ${parsed.repo}#${parsed.number} to session ${sessionId}`))

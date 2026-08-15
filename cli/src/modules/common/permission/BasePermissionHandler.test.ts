@@ -132,6 +132,16 @@ describe('resolveToolAutoApprovalDecision link_pr', () => {
         )).toBeNull()
     })
 
+    it('keeps untrusted link_pr pending in read-only mode', () => {
+        expect(resolveToolAutoApprovalDecision(
+            'read-only',
+            'link_pr',
+            'call-1',
+            undefined,
+            { trustedHapiMcp: false }
+        )).toBeNull()
+    })
+
     it('does not approve a different tool whose name only contains link_pr', () => {
         expect(resolveToolAutoApprovalDecision(
             'default',

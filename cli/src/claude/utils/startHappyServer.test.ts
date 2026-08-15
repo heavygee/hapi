@@ -5,7 +5,14 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ApiSessionClient } from '@/api/apiSession'
+import { upsertSessionExternalRef } from '@/api/upsertSessionExternalRef'
 import { startHappyServer, toClaudeAllowedHapiMcpTools } from './startHappyServer'
+
+vi.mock('@/api/upsertSessionExternalRef', () => ({
+    upsertSessionExternalRef: vi.fn()
+}))
+
+const mockUpsertSessionExternalRef = vi.mocked(upsertSessionExternalRef)
 
 type ToolResult = {
     content?: Array<{ type: string; text?: string }>
@@ -191,6 +198,7 @@ describe('startHappyServer link_pr', () => {
         stopServer?.()
         mcp = null
         stopServer = null
+        mockUpsertSessionExternalRef.mockReset()
     })
 
     async function connectWithClient(sessionClient: ApiSessionClient): Promise<Client> {
@@ -201,14 +209,26 @@ describe('startHappyServer link_pr', () => {
         return mcp
     }
 
-    it('reports success only when flushMetadata persists the ref', async () => {
-        const refHolder: { current: unknown } = { current: null }
+    it('reports success when hub upsert persists the ref', async () => {
+        const linkedRef = {
+            kind: 'github_pr' as const,
+            repo: 'tiann/hapi',
+            number: 1163,
+            url: 'https://github.com/tiann/hapi/pull/1163',
+            role: 'primary' as const,
+            source: 'agent' as const,
+            linkedAt: 1_700_000_000_000
+        }
+        mockUpsertSessionExternalRef.mockResolvedValue({
+            ok: true,
+            status: 200,
+            externalRefs: [linkedRef]
+        })
         const sessionClient = {
-            updateMetadata: vi.fn((updater: (metadata: Record<string, unknown>) => Record<string, unknown>) => {
-                refHolder.current = updater({}).externalRefs
-            }),
+            sessionId: 'sess-1',
+            updateMetadata: vi.fn(),
             flushMetadata: vi.fn(async () => true),
-            getMetadata: vi.fn(() => ({ externalRefs: refHolder.current })),
+            getMetadata: vi.fn(() => ({ externalRefs: [linkedRef] })),
             sendAgentMessage: vi.fn(),
             sendClaudeSessionMessage: vi.fn()
         } as unknown as ApiSessionClient
@@ -221,7 +241,12 @@ describe('startHappyServer link_pr', () => {
 
         expect(result.isError).toBe(false)
         expect(result.content?.[0]?.text).toContain('Linked tiann/hapi#1163')
-        expect(sessionClient.flushMetadata).toHaveBeenCalled()
+        expect(mockUpsertSessionExternalRef).toHaveBeenCalledWith('sess-1', expect.objectContaining({
+            repo: 'tiann/hapi',
+            number: 1163
+        }))
+        expect(sessionClient.updateMetadata).toHaveBeenCalled()
+        expect(sessionClient.flushMetadata).not.toHaveBeenCalled()
     })
 
     it('upserts without wiping other github_pr refs', async () => {
@@ -234,13 +259,25 @@ describe('startHappyServer link_pr', () => {
             source: 'user' as const,
             linkedAt: 1
         }
-        let stored: unknown[] = [existing]
+        const secondary = {
+            kind: 'github_pr' as const,
+            repo: 'tiann/hapi',
+            number: 1163,
+            url: 'https://github.com/tiann/hapi/pull/1163',
+            role: 'secondary' as const,
+            source: 'agent' as const,
+            linkedAt: 2
+        }
+        mockUpsertSessionExternalRef.mockResolvedValue({
+            ok: true,
+            status: 200,
+            externalRefs: [existing, secondary]
+        })
         const sessionClient = {
-            updateMetadata: vi.fn((updater: (metadata: { externalRefs?: unknown[] }) => { externalRefs?: unknown[] }) => {
-                stored = updater({ externalRefs: stored }).externalRefs ?? []
-            }),
+            sessionId: 'sess-1',
+            updateMetadata: vi.fn(),
             flushMetadata: vi.fn(async () => true),
-            getMetadata: vi.fn(() => ({ externalRefs: stored })),
+            getMetadata: vi.fn(() => ({ externalRefs: [existing, secondary] })),
             sendAgentMessage: vi.fn(),
             sendClaudeSessionMessage: vi.fn()
         } as unknown as ApiSessionClient
@@ -252,11 +289,9 @@ describe('startHappyServer link_pr', () => {
         }) as ToolResult
 
         expect(result.isError).toBe(false)
-        expect(stored).toHaveLength(2)
-        expect(stored).toEqual(expect.arrayContaining([
-            existing,
-            expect.objectContaining({ repo: 'tiann/hapi', number: 1163, role: 'secondary' })
-        ]))
+        expect(sessionClient.getMetadata()).toEqual({
+            externalRefs: [existing, secondary]
+        })
     })
 
     it('preserves cached health when re-linking the same PR', async () => {
@@ -266,21 +301,24 @@ describe('startHappyServer link_pr', () => {
             number: 1163,
             url: 'https://github.com/tiann/hapi/pull/1163',
             role: 'primary' as const,
-            source: 'user' as const,
-            linkedAt: 100,
+            source: 'agent' as const,
+            linkedAt: 300,
             openState: 'open' as const,
             checks: 'pending' as const,
             merge: 'unstable' as const,
             statusCheckedAt: 200,
             estateCode: 'ci_pending'
         }
-        let stored: unknown[] = [existing]
+        mockUpsertSessionExternalRef.mockResolvedValue({
+            ok: true,
+            status: 200,
+            externalRefs: [existing]
+        })
         const sessionClient = {
-            updateMetadata: vi.fn((updater: (metadata: { externalRefs?: unknown[] }) => { externalRefs?: unknown[] }) => {
-                stored = updater({ externalRefs: stored }).externalRefs ?? []
-            }),
+            sessionId: 'sess-1',
+            updateMetadata: vi.fn(),
             flushMetadata: vi.fn(async () => true),
-            getMetadata: vi.fn(() => ({ externalRefs: stored })),
+            getMetadata: vi.fn(() => ({ externalRefs: [existing] })),
             sendAgentMessage: vi.fn(),
             sendClaudeSessionMessage: vi.fn()
         } as unknown as ApiSessionClient
@@ -292,15 +330,17 @@ describe('startHappyServer link_pr', () => {
         }) as ToolResult
 
         expect(result.isError).toBe(false)
-        expect(stored).toEqual([{
-            ...existing,
-            source: 'agent',
-            linkedAt: expect.any(Number)
-        }])
+        expect(sessionClient.getMetadata()).toEqual({ externalRefs: [existing] })
     })
 
     it('errors when the hub does not persist the linked ref', async () => {
+        mockUpsertSessionExternalRef.mockResolvedValue({
+            ok: true,
+            status: 200,
+            externalRefs: []
+        })
         const sessionClient = {
+            sessionId: 'sess-1',
             updateMetadata: vi.fn(),
             flushMetadata: vi.fn(async () => true),
             getMetadata: vi.fn(() => ({ externalRefs: [] })),
@@ -316,6 +356,33 @@ describe('startHappyServer link_pr', () => {
 
         expect(result.isError).toBe(true)
         expect(result.content?.[0]?.text).toContain('Hub did not persist the PR link')
+    })
+
+    it('fails once at MAX_EXTERNAL_REFS without queueing metadata retries', async () => {
+        mockUpsertSessionExternalRef.mockResolvedValue({
+            ok: false,
+            status: 400,
+            error: 'at most 32 external refs are allowed'
+        })
+        const sessionClient = {
+            sessionId: 'sess-1',
+            updateMetadata: vi.fn(),
+            flushMetadata: vi.fn(async () => true),
+            getMetadata: vi.fn(() => ({ externalRefs: [] })),
+            sendAgentMessage: vi.fn(),
+            sendClaudeSessionMessage: vi.fn()
+        } as unknown as ApiSessionClient
+
+        const client = await connectWithClient(sessionClient)
+        const result = await client.callTool({
+            name: 'link_pr',
+            arguments: { url: 'https://github.com/tiann/hapi/pull/1163' }
+        }) as ToolResult
+
+        expect(result.isError).toBe(true)
+        expect(result.content?.[0]?.text).toContain('at most 32 external refs')
+        expect(mockUpsertSessionExternalRef).toHaveBeenCalledOnce()
+        expect(sessionClient.flushMetadata).not.toHaveBeenCalled()
     })
 })
 

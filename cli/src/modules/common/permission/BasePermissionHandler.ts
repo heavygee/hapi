@@ -55,10 +55,13 @@ const HAPI_LINK_PR_TOOL_NAMES = new Set([
 ]);
 
 function isVerifiedHapiLinkPrTool(toolName: string, context?: AutoApprovalContext): boolean {
-    if (!context?.trustedHapiMcp) {
-        return false;
+    if (!HAPI_LINK_PR_TOOL_NAMES.has(toolName.toLowerCase())) {
+        return false
     }
-    return HAPI_LINK_PR_TOOL_NAMES.has(toolName.toLowerCase());
+    if (context?.trustedHapiMcp) {
+        return true
+    }
+    return false
 }
 // ping_peer / inspect_peer intentionally omitted from always-approve: they can
 // resume+inject into another session or read peer histories, so permission
@@ -101,6 +104,10 @@ export function resolveToolAutoApprovalDecision(
 
     if (isVerifiedHapiLinkPrTool(lowerTool, context)) {
         return decisionForMode;
+    }
+
+    if (HAPI_LINK_PR_TOOL_NAMES.has(lowerTool) && mode === 'read-only') {
+        return null;
     }
 
     if (

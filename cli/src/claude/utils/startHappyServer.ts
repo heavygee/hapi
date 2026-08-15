@@ -27,8 +27,9 @@ import {
     SESSION_ID_PREFIX_PARAM_DESCRIPTION,
 } from '@hapi/protocol/sessionCitation'
 import { PingPeerError, formatInspectPeerReport, formatPeerSessionsList, inspectPeer, listPeerSessions, peerListFetchLimit, pingPeer } from "@/modules/pingPeer/pingPeer";
-import { buildGithubPrExternalRef, isSameGithubPrIdentity, parseGithubPrInput, upsertGithubPrIntoExternalRefs } from "@hapi/protocol";
+import { buildGithubPrExternalRef, isSameGithubPrIdentity, parseGithubPrInput } from "@hapi/protocol";
 import { fetchGithubPrAwarenessEnabled } from "@/api/fetchGithubPrAwareness";
+import { upsertSessionExternalRef } from "@/api/upsertSessionExternalRef";
 
 type StartHappyServerOptions = {
     emitTitleSummary?: boolean;
@@ -236,18 +237,22 @@ function createHapiMcpServer(
             })
 
             try {
-                client.updateMetadata((metadata) => ({
-                    ...metadata,
-                    externalRefs: upsertGithubPrIntoExternalRefs(metadata.externalRefs ?? [], ref),
-                }))
-                const flushed = await client.flushMetadata(5_000)
-                const persisted = client.getMetadata()?.externalRefs?.some((candidate) =>
+                const response = await upsertSessionExternalRef(client.sessionId, ref)
+                if (!response.ok) {
+                    throw new Error(response.error ?? `HTTP ${response.status}`)
+                }
+                const persisted = response.externalRefs?.some((candidate) =>
                     isSameGithubPrIdentity(candidate, ref.repo, ref.number)
                     && candidate.role === ref.role
-                    && candidate.linkedAt === ref.linkedAt
                 )
-                if (!flushed || !persisted) {
+                if (!persisted) {
                     throw new Error('Hub did not persist the PR link (awareness may be disabled)')
+                }
+                if (response.externalRefs) {
+                    client.updateMetadata((metadata) => ({
+                        ...metadata,
+                        externalRefs: response.externalRefs,
+                    }))
                 }
                 return {
                     content: [{
