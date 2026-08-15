@@ -5,8 +5,8 @@ import { useCallback, useEffect, useState } from 'react'
  *
  * Degree of float, not a yes/no:
  * - off  — everything stays in project directories
- * - jobs — only sessions with a running attachedJob (outliving work)
- * - all  — jobs + agent working/pending (legacy maximalist pin)
+ * - jobs — running attachedJob (outliving work) + fresh operator-hold PR chips
+ * - all  — those + agent working/pending (legacy maximalist pin)
  *
  * Unset / never configured defaults to `jobs` — the product stand for this capability.
  */

@@ -51,6 +51,16 @@ export function isGithubPrHoldPulse(display: GithubPrChipDisplay): boolean {
     return display.status === 'needs_operator' && !display.stale
 }
 
+/** Fresh 🛑 hold — same honesty as the chip pulse (stale cache does not count). */
+export function sessionHasUrgentPrHold(
+    session: { metadata?: { externalRefs?: readonly ExternalRef[] | null } | null },
+    nowMs: number = Date.now()
+): boolean {
+    const ref = getPrimaryGithubPrRef(session.metadata?.externalRefs)
+    if (!ref) return false
+    return isGithubPrHoldPulse(resolveGithubPrChipDisplay(ref, nowMs))
+}
+
 /**
  * Compact chip glyph: status emoji only (or `PR` when uncached).
  * Full `repo#N` + status copy lives in the tooltip / action-menu header.

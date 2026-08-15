@@ -4,7 +4,8 @@ import {
     formatGithubPrChipTitle,
     GITHUB_PR_CHIP_STALE_MS,
     isGithubPrHoldPulse,
-    resolveGithubPrChipDisplay
+    resolveGithubPrChipDisplay,
+    sessionHasUrgentPrHold
 } from './SessionPrChip'
 import { getPrimaryGithubPrRef, githubPrStatusFromEmoji, githubPrStatusEmoji } from '@hapi/protocol'
 import type { GithubPrExternalRef } from '@/types/api'
@@ -106,6 +107,28 @@ describe('SessionPrChip helpers', () => {
             status: 'needs_operator',
             statusCheckedAt: 1_700_000_000_000
         }), 1_700_000_000_000 + GITHUB_PR_CHIP_STALE_MS + 1))).toBe(false)
+    })
+
+    it('treats a session as urgent hold only while the chip would pulse', () => {
+        const now = 1_700_000_000_000 + 60_000
+        const session = {
+            metadata: {
+                externalRefs: [baseRef({
+                    status: 'needs_operator',
+                    statusCheckedAt: 1_700_000_000_000
+                })]
+            }
+        }
+        expect(sessionHasUrgentPrHold(session, now)).toBe(true)
+        expect(sessionHasUrgentPrHold({
+            metadata: {
+                externalRefs: [baseRef({
+                    status: 'needs_work',
+                    statusCheckedAt: 1_700_000_000_000
+                })]
+            }
+        }, now)).toBe(false)
+        expect(sessionHasUrgentPrHold(session, 1_700_000_000_000 + GITHUB_PR_CHIP_STALE_MS + 1)).toBe(false)
     })
 
     it('uses relative ago in chip title (tooltip already - no absolute nest)', () => {

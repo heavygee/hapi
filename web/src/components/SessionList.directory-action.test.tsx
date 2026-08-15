@@ -591,6 +591,77 @@ describe('SessionList collapse behavior', () => {
         expect(screen.getByRole('button', { name: /Thinking agent/ })).toBeInTheDocument()
     })
 
+    it('pins idle sessions with a fresh operator-hold chip when mode is jobs', () => {
+        localStorage.setItem('hapi-pin-in-progress-sessions', 'jobs')
+        const now = Date.now()
+        const sessions = [
+            makeSession({
+                id: 'session-hold',
+                active: false,
+                updatedAt: 100,
+                metadata: {
+                    path: '/work/held',
+                    name: 'Held PR',
+                    flavor: 'cursor',
+                    externalRefs: [{
+                        kind: 'github_pr',
+                        repo: 'heavygee/hapi',
+                        number: 124,
+                        url: 'https://github.com/heavygee/hapi/pull/124',
+                        role: 'primary',
+                        status: 'needs_operator',
+                        statusCheckedAt: now,
+                        statusAction: 'HOLD — operator ack',
+                    }],
+                },
+            }),
+            makeSession({
+                id: 'session-thinking',
+                active: true,
+                thinking: true,
+                updatedAt: 90,
+                metadata: { path: '/work/hapi', name: 'Thinking agent', flavor: 'codex' },
+            }),
+        ]
+        render(renderSessionList(sessions, null))
+
+        expect(screen.getByTitle('In progress')).toBeInTheDocument()
+        expect(screen.getByText(/Jobs \(1\)/)).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /Held PR/ })).toBeInTheDocument()
+        expect(screen.getByTitle('/work/hapi')).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /Thinking agent/ })).toBeInTheDocument()
+    })
+
+    it('does not float a stale operator-hold chip in jobs mode', () => {
+        localStorage.setItem('hapi-pin-in-progress-sessions', 'jobs')
+        const sessions = [
+            makeSession({
+                id: 'session-stale-hold',
+                active: false,
+                updatedAt: 100,
+                metadata: {
+                    path: '/work/held',
+                    name: 'Stale hold',
+                    flavor: 'cursor',
+                    externalRefs: [{
+                        kind: 'github_pr',
+                        repo: 'heavygee/hapi',
+                        number: 124,
+                        url: 'https://github.com/heavygee/hapi/pull/124',
+                        role: 'primary',
+                        status: 'needs_operator',
+                        statusCheckedAt: Date.now() - (4 * 60 * 60 * 1000),
+                    }],
+                },
+            }),
+        ]
+        render(renderSessionList(sessions, null))
+
+        expect(screen.queryByTitle('In progress')).toBeNull()
+        expect(screen.getByTitle('/work/held')).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /Stale hold/ })).toBeInTheDocument()
+    })
+
     it('puts ambient thinking with attached job in Jobs not Running (#1553)', () => {
         localStorage.setItem('hapi-pin-in-progress-sessions', 'all')
         const sessions = [

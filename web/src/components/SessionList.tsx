@@ -8,7 +8,7 @@ import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { SessionExportDialog } from '@/components/SessionExportDialog'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { LinkPrDialog } from '@/components/LinkPrDialog'
-import { SessionPrChip, formatGithubPrChipDetailParts, resolveGithubPrChipDisplay } from '@/components/SessionPrChip'
+import { SessionPrChip, formatGithubPrChipDetailParts, resolveGithubPrChipDisplay, sessionHasUrgentPrHold } from '@/components/SessionPrChip'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { CopyIcon, CheckIcon } from '@/components/icons'
 import { cn } from '@/lib/utils'
@@ -89,7 +89,8 @@ function hasAgentInProgressActivity(session: SessionSummary): boolean {
 
 /**
  * Sessions that float into the pinned In progress section.
- * Mode is a degree: off → jobs (outliving attachedJob) → all (jobs + agent activity).
+ * Mode is a degree: off → jobs (outliving attachedJob + fresh operator-hold)
+ * → all (those + agent activity).
  */
 export function isPinnedInProgressSession(
     session: SessionSummary,
@@ -102,10 +103,11 @@ export function isPinnedInProgressSession(
     if (session.pinned || session.globalPinned) {
         return false
     }
+    const urgentHold = sessionHasUrgentPrHold(session)
     if (mode === 'jobs') {
-        return hasRunningAttachedJob(session)
+        return hasRunningAttachedJob(session) || urgentHold
     }
-    return hasRunningAttachedJob(session) || hasAgentInProgressActivity(session)
+    return hasRunningAttachedJob(session) || hasAgentInProgressActivity(session) || urgentHold
 }
 
 export type SessionTimeRange = {
@@ -1414,7 +1416,7 @@ export function SessionList(props: {
             } else if (agentPending) {
                 // Operator action outranks the Jobs meter when both apply.
                 buckets.pending.push(session)
-            } else if (hasRunningAttachedJob(session)) {
+            } else if (hasRunningAttachedJob(session) || sessionHasUrgentPrHold(session)) {
                 buckets.jobs.push(session)
             }
         }
