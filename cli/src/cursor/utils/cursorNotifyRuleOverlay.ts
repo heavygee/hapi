@@ -15,15 +15,21 @@
  * Non-clobbering discipline (mirrors how a config overlay behaves): if the user
  * already has a file at the same path we back up its contents and restore them on
  * cleanup; a file that already carries our sentinel is one of ours (a prior or
- * concurrent session in the same cwd), so we never treat it as user content. All
- * fs work is fail-open — a missing rule must never crash a session.
+ * concurrent session in the same cwd), so we never treat it as user content —
+ * UNLESS git tracks that path (headset canon on the hapi mirror) or the file
+ * already contains the operator-facing identity section. All fs work is fail-open
+ * — a missing rule must never crash a session.
  */
 
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { logger } from '@/ui/logger';
 
 const RULE_FILENAME = 'hapi-session.mdc';
+const RULE_RELPATH = join('.cursor', 'rules', RULE_FILENAME);
+/** Extra canon beyond the stub: chip wire format + TTS (do not strip). */
+const TRACKED_IDENTITY_MARKER = '## Operator-facing session identity';
 
 /**
  * Hidden marker identifying files this overlay owns. Lets us distinguish a
@@ -100,6 +106,8 @@ export function installCursorNotifyRuleOverlay(
     // Verbatim contents of a user's pre-existing file, restored on cleanup.
     let preExistingContent: string | null = null;
     let cleaned = false;
+    // Git-tracked (or identity-section) file: leave it alone on install and cleanup.
+    let preserveTracked = false;
 
     try {
         if (!existsSync(cursorDir)) {
@@ -111,19 +119,20 @@ export function installCursorNotifyRuleOverlay(
             createdDirs.push(rulesDir);
         }
 
-        if (existsSync(rulePath)) {
-            const existing = safeRead(rulePath);
-            // A file that already carries our sentinel belongs to HAPI (prior or
-            // concurrent session) — do not treat it as user content to preserve.
+        const existing = existsSync(rulePath) ? safeRead(rulePath) : null;
+        preserveTracked = shouldPreserveTrackedSessionRule(opts.cwd, existing);
+
+        if (preserveTracked) {
+            logger.debug(`[cursor-notify-rule] skip clobber of tracked ${rulePath}`);
+        } else {
             if (existing !== null && !existing.includes(HAPI_SESSION_RULE_SENTINEL)) {
                 preExistingContent = existing;
             }
+            writeFileSync(rulePath, buildNotifyRuleContent(opts), 'utf-8');
+            // File-only (debug) so journal/dogfood can prove the alwaysApply rule
+            // landed before cursor-agent spawn without spamming the TUI.
+            logger.debug(`[cursor-notify-rule] installed alwaysApply rule at ${rulePath}`);
         }
-
-        writeFileSync(rulePath, buildNotifyRuleContent(opts), 'utf-8');
-        // File-only (debug) so journal/dogfood can prove the alwaysApply rule
-        // landed before cursor-agent spawn without spamming the TUI.
-        logger.debug(`[cursor-notify-rule] installed alwaysApply rule at ${rulePath}`);
     } catch (error) {
         logger.debug('[cursor-notify-rule] install failed', error);
     }
@@ -132,6 +141,9 @@ export function installCursorNotifyRuleOverlay(
         if (cleaned) return;
         cleaned = true;
         try {
+            if (preserveTracked) {
+                return;
+            }
             if (preExistingContent !== null) {
                 // Restore the user's file exactly as it was.
                 writeFileSync(rulePath, preExistingContent, 'utf-8');
@@ -159,6 +171,17 @@ export function installCursorNotifyRuleOverlay(
     };
 
     return { rulePath, cleanup };
+}
+
+function shouldPreserveTrackedSessionRule(cwd: string, existing: string | null): boolean {
+    if (existing !== null && existing.includes(TRACKED_IDENTITY_MARKER)) {
+        return true;
+    }
+    const probe = spawnSync('git', ['-C', cwd, 'ls-files', '--error-unmatch', RULE_RELPATH], {
+        encoding: 'utf-8',
+        stdio: ['ignore', 'ignore', 'ignore']
+    });
+    return probe.status === 0;
 }
 
 function safeRead(path: string): string | null {

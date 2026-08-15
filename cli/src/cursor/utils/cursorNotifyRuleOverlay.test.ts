@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -108,6 +109,32 @@ describe('installCursorNotifyRuleOverlay', () => {
         overlay.cleanup();
         // removed, not "restored" — the sentinel file was ours
         expect(existsSync(rulePath)).toBe(false);
+    });
+
+    it('does not clobber or delete a git-tracked hapi-session.mdc', () => {
+        const rulePath = rulePathOf(cwd);
+        mkdirSync(join(cwd, '.cursor', 'rules'), { recursive: true });
+        const tracked = [
+            '---',
+            'alwaysApply: true',
+            '---',
+            HAPI_SESSION_RULE_SENTINEL,
+            '',
+            '# Session status summary',
+            '',
+            '## Operator-facing session identity (mandatory)',
+            '',
+            'Bare hashes forbidden.',
+            ''
+        ].join('\n');
+        writeFileSync(rulePath, tracked, 'utf-8');
+        execFileSync('git', ['init'], { cwd });
+        execFileSync('git', ['add', '.cursor/rules/hapi-session.mdc'], { cwd });
+
+        const overlay = installCursorNotifyRuleOverlay({ cwd, project: 'should-not-bake' });
+        expect(readFileSync(rulePath, 'utf-8')).toBe(tracked);
+        overlay.cleanup();
+        expect(readFileSync(rulePath, 'utf-8')).toBe(tracked);
     });
 
     it('never deletes a user file that replaced ours mid-session', () => {
