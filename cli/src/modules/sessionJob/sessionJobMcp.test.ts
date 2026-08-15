@@ -91,28 +91,19 @@ describe('sessionJobMcp', () => {
         expect(result.text).toMatch(/sleep stub/)
     })
 
-    it('forwards null remaining so done/total can take over after a leftover meter', async () => {
+    it('steers when not_found loses instanceof across MCP bundle boundaries', async () => {
         const { updateSessionJob } = await import('./sessionJob')
-        vi.mocked(updateSessionJob).mockClear()
-        const result = await handleSessionJobTool(
-            {
-                action: 'update',
-                jobKey: 'beets',
-                remaining: null,
-                done: 3,
-                total: 10
-            },
-            'sid-1'
-        )
-        expect(result.isError).toBe(false)
-        expect(updateSessionJob).toHaveBeenCalledWith(
-            expect.objectContaining({
-                body: expect.objectContaining({
-                    remaining: null,
-                    done: 3,
-                    total: 10
-                })
+        vi.mocked(updateSessionJob).mockRejectedValueOnce(
+            Object.assign(new Error('job not found'), {
+                name: 'SessionJobError',
+                code: 'not_found'
             })
         )
+        const result = await handleSessionJobTool(
+            { action: 'update', jobKey: 'beets', remaining: 2 },
+            'sid-1'
+        )
+        expect(result.isError).toBe(true)
+        expect(result.text).toMatch(/hapi job run/)
     })
 })
