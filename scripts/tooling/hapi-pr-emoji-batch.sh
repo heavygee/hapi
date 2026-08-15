@@ -103,28 +103,31 @@ fetch_latest_bot_body() {
 
 # Emit the per-PR JSON blob. All signal bits are 0/1 strings; jq converts.
 # Optional mergeLane (maintainer|self_merge) for ✅ PRs — chip stays health-only.
+# blockedUpstream (18) forces stickyPing:false while emoji stays ⚠️ (#128).
 _emit_pr_json() {
     local out="$1" emoji="$2" action="$3" exists="$4" merged="$5" closed="$6" \
         prepr="$7" data_unavail="$8" threads="$9" checks_ok="${10}" \
         checks_pending="${11}" checks_seen="${12}" bot_clean="${13}" \
         bot_major="${14}" merge_state="${15}" merge_lane="${16:-}" \
-        head_ref="${17:-}" blocked_upstream="${18:-0}"
-    local in_queue=true
+        head_ref="${17:-}" blocked_up="${18:-0}"
+    local in_queue=true sticky
     [[ "$exists" == "1" && "$merged" == "0" && "$closed" == "0" && "$data_unavail" == "0" ]] || in_queue=false
     b() { [[ "$1" == "1" ]] && echo true || echo false; }
+    sticky="$(pec_default_sticky_ping "$emoji" "$blocked_up")"
     jq -n \
         --arg emoji "$emoji" --arg action "$action" --arg merge "$merge_state" \
         --arg mergeLane "$merge_lane" --arg headRef "$head_ref" \
         --argjson exists "$(b "$exists")" --argjson merged "$(b "$merged")" \
         --argjson closed "$(b "$closed")" --argjson prePr "$(b "$prepr")" \
         --argjson dataUnavailable "$(b "$data_unavail")" \
-        --argjson blockedUpstream "$(b "$blocked_upstream")" \
         --argjson inQueue "$in_queue" --argjson open "$in_queue" \
         --argjson threads "$threads" \
         --argjson checksOk "$(b "$checks_ok")" --argjson checksPending "$(b "$checks_pending")" \
         --argjson checksSeen "$(b "$checks_seen")" \
         --argjson botClean "$(b "$bot_clean")" --argjson botMajor "$(b "$bot_major")" \
-        '{emoji:$emoji,exists:$exists,inQueue:$inQueue,open:$inQueue,prePr:$prePr,merged:$merged,closed:$closed,dataUnavailable:$dataUnavailable,blockedUpstream:$blockedUpstream,threads:$threads,checksOk:$checksOk,checksPending:$checksPending,checksSeen:$checksSeen,botClean:$botClean,botMajor:$botMajor,mergeState:$merge,action:$action}
+        --argjson blockedUpstream "$(b "$blocked_up")" \
+        --argjson stickyPing "$sticky" \
+        '{emoji:$emoji,exists:$exists,inQueue:$inQueue,open:$inQueue,prePr:$prePr,merged:$merged,closed:$closed,dataUnavailable:$dataUnavailable,threads:$threads,checksOk:$checksOk,checksPending:$checksPending,checksSeen:$checksSeen,botClean:$botClean,botMajor:$botMajor,mergeState:$merge,action:$action,blockedUpstream:$blockedUpstream,stickyPing:$stickyPing}
          + (if ($mergeLane|length)>0 then {mergeLane:$mergeLane} else {} end)
          + (if ($headRef|length)>0 then {headRef:$headRef} else {} end)' \
         >"$out"
@@ -312,18 +315,12 @@ classify_one() {
     fi
 
     # Draft / blocked-upstream before CI/bot can invent ✅ (heavygee/hapi#127).
-    local gate gate_emoji gate_action gate_prepr
+    # blockedUpstream bit is structured for Meta stickyPing=false (#128).
+    local gate gate_emoji gate_action gate_prepr gate_blocked
     gate="$(pec_gate_draft_blocked "$draft_flag" "$labels_csv" "$pr_body")"
     if [[ -n "$gate" ]]; then
-        gate_emoji="${gate%%$'\t'*}"
-        gate="${gate#*$'\t'}"
-        gate_action="${gate%%$'\t'*}"
-        gate_prepr="${gate#*$'\t'}"
-        local gate_blocked_upstream=0
-        if pec_labels_csv_has "$labels_csv" "status:blocked-upstream"; then
-            gate_blocked_upstream=1
-        fi
-        _emit_pr_json "$out" "$gate_emoji" "$gate_action" 1 0 0 "$gate_prepr" 0 -1 0 0 0 0 0 "$merge_state" "" "$head_ref" "$gate_blocked_upstream"
+        IFS=$'\t' read -r gate_emoji gate_action gate_prepr gate_blocked <<<"$gate"
+        _emit_pr_json "$out" "$gate_emoji" "$gate_action" 1 0 0 "$gate_prepr" 0 -1 0 0 0 0 0 "$merge_state" "" "$head_ref" "${gate_blocked:-0}"
         return
     fi
 
@@ -385,6 +382,7 @@ export REPO OWNER NAME TIMEOUT TMPDIR WALL_LIMIT MERGE_POLICY_JSON
 export -f classify_one gh_t fetch_latest_bot_body _emit_pr_json _apply_merge_lane \
     pec_decide_emoji pec_gate_draft_blocked pec_labels_csv_has \
     pec_blocked_upstream_action pec_blocked_upstream_dep_from_body \
+    pec_default_sticky_ping \
     pmp_classify pmp_action_for_lane pmp_load_policy \
     pmp_default_policy_json \
     _gh_check_signals _fetch_review_signals _bot_body_findings_clean \

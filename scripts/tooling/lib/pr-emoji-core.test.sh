@@ -406,29 +406,44 @@ eq "dep from body missing" \
 GATE_DRAFT="$(pec_gate_draft_blocked true "enhancement" "")"
 eq "draft alone → 📝" "$(printf '%s' "$GATE_DRAFT" | cut -f1)" "📝"
 eq "draft alone → prePr 1" "$(printf '%s' "$GATE_DRAFT" | cut -f3)" "1"
+eq "draft alone → blockedUpstream 0" "$(printf '%s' "$GATE_DRAFT" | cut -f4)" "0"
 GATE_BLOCK="$(pec_gate_draft_blocked false "status:blocked-upstream" "blocked on #1473")"
 eq "ready + blocked-upstream → ⚠️" "$(printf '%s' "$GATE_BLOCK" | cut -f1)" "⚠️"
 eq "ready + blocked-upstream → prePr 0" "$(printf '%s' "$GATE_BLOCK" | cut -f3)" "0"
+eq "ready + blocked-upstream → blockedUpstream 1" "$(printf '%s' "$GATE_BLOCK" | cut -f4)" "1"
 eq "ready + blocked-upstream names dep" \
     "$(printf '%s' "$GATE_BLOCK" | cut -f2 | grep -q '#1473' && echo yes || echo no)" "yes"
 GATE_BOTH="$(pec_gate_draft_blocked true "enhancement|status:blocked-upstream" "blocked by #99")"
 eq "draft + blocked-upstream → ⚠️ wins" "$(printf '%s' "$GATE_BOTH" | cut -f1)" "⚠️"
 eq "draft + blocked-upstream → prePr 0" "$(printf '%s' "$GATE_BOTH" | cut -f3)" "0"
+eq "draft + blocked-upstream → blockedUpstream 1" "$(printf '%s' "$GATE_BOTH" | cut -f4)" "1"
 eq "no gate when ready and unlabeled" \
     "$(pec_gate_draft_blocked false "enhancement" "" | wc -c | tr -d ' ')" "0"
+
+eq "stickyPing default ⚠️" "$(pec_default_sticky_ping '⚠️')" "true"
+eq "stickyPing default 🔧" "$(pec_default_sticky_ping '🔧')" "true"
+eq "stickyPing default ✅" "$(pec_default_sticky_ping '✅')" "false"
+eq "stickyPing blockedUpstream forces false" "$(pec_default_sticky_ping '⚠️' 1)" "false"
+eq "stickyPing blockedUpstream true string" "$(pec_default_sticky_ping '⚠️' true)" "false"
+
+eq "ping never on blockedUpstream sticky=false first sight" \
+    "$(pec_should_ping "⚠️" "" "$FP_A" "" 0 300 86400 0 false || true)" "no"
+eq "ping never on blockedUpstream sticky=false window" \
+    "$(pec_should_ping "⚠️" "⚠️" "$FP_A" "$FP_A" 200 300 86400 1 false || true)" "no"
+eq "ping never on blockedUpstream sticky=false fingerprint" \
+    "$(pec_should_ping "⚠️" "⚠️" "$FP_B" "$FP_A" 200 300 86400 0 false || true)" "no"
+eq "ping never on blockedUpstream sticky=false reminder" \
+    "$(pec_should_ping "⚠️" "⚠️" "$FP_A" "$FP_A" 100 100000 86400 0 false || true)" "no"
+eq "emit none when sticky=false window" \
+    "$(pec_emit_reason "⚠️" "⚠️" "$FP_A" "$FP_A" 200 300 86400 1 false || true)" "none"
+eq "emit none when sticky=false transition" \
+    "$(pec_emit_reason "⚠️" "✅" "$FP_A" "x" 100 200 86400 0 false || true)" "none"
+eq "ping sticky still yes when sticky=true window" \
+    "$(pec_should_ping "⚠️" "⚠️" "$FP_A" "$FP_A" 200 300 86400 1 true)" "yes"
 
 # complete never pings (incl. transition from 🔧)
 eq "ping never on complete" "$(pec_should_ping "🧹" "🔧" "a" "b" 0 100 10 1 || true)" "no"
 eq "ping sticky 🔧 on window" "$(pec_should_ping "🔧" "🔧" "a" "a" 0 100 10 1 || true)" "yes"
-
-# #128 blocked-upstream: visible ⚠️ but never ping/rouse the coding peer
-eq "blocked-upstream transition → no ping" "$(pec_should_ping "⚠️" "✅" "$FP_A" "x" 0 300 86400 0 1 || true)" "no"
-eq "blocked-upstream window rouse → no ping" "$(pec_should_ping "⚠️" "⚠️" "$FP_A" "$FP_A" 200 300 86400 1 1 || true)" "no"
-eq "blocked-upstream fingerprint change → no ping" "$(pec_should_ping "⚠️" "⚠️" "$FP_B" "$FP_A" 200 300 86400 0 1 || true)" "no"
-eq "blocked-upstream reminder → no ping" "$(pec_should_ping "⚠️" "⚠️" "$FP_A" "$FP_A" 100 100000 86400 0 1 || true)" "no"
-eq "blocked-upstream emit window → none" "$(pec_emit_reason "⚠️" "⚠️" "$FP_A" "$FP_A" 200 300 86400 1 1 || true)" "none"
-eq "blocked-upstream emit transition → transition" "$(pec_emit_reason "⚠️" "✅" "$FP_A" "x" 0 300 86400 0 1 || true)" "transition"
-eq "actionable ⚠️ still window-roused" "$(pec_should_ping "⚠️" "⚠️" "$FP_A" "$FP_A" 200 300 86400 1 0 || true)" "yes"
 eq "emit none on complete" "$(pec_emit_reason "🧹" "🔧" "a" "b" 0 100 10 1 || true)" "none"
 
 echo ""

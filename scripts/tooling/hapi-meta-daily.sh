@@ -75,6 +75,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 # shellcheck source=lib/pr-emoji-core.sh
 source "$SCRIPT_DIR/lib/pr-emoji-core.sh"
+# shellcheck source=lib/pr-hold-core.sh
+source "$SCRIPT_DIR/lib/pr-hold-core.sh"
 # shellcheck source=lib/meta-wave.sh
 source "$SCRIPT_DIR/lib/meta-wave.sh"
 # shellcheck source=lib/require-gh-version.sh
@@ -87,6 +89,28 @@ FORK_REPO="${HAPI_FORK_REPO:-heavygee/hapi}"
 HAPI_HOST="${HAPI_HOST:-http://localhost:3006}"
 SETTINGS="${HAPI_SETTINGS:-$HOME/.hapi/settings.json}"
 STATE_FILE="${HAPI_META_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/hapi/meta-daily.json}"
+# Serialize against hold-ack. Must run before argv is shifted. Skip only when
+# parent flock already holds THIS lock file (systemd ExecStart); a bare
+# "parent is named flock" check would skip while locking a different path
+# (HAPI_META_STATE / HAPI_META_LOCK redirect) and race hold-ack.
+if [[ "${BASH_SOURCE[0]}" == "${0}" && -z "${HAPI_META_LOCKED:-}" ]]; then
+    _md_lock="${HAPI_META_LOCK:-$(dirname "$STATE_FILE")/meta-daily.lock}"
+    _md_parent_comm="$(ps -o comm= -p "${PPID:-0}" 2>/dev/null || true)"
+    _md_parent_comm="${_md_parent_comm##*/}"
+    _md_skip_lock=0
+    if [[ "$_md_parent_comm" == "flock" ]]; then
+        _md_parent_args="$(ps -o args= -p "${PPID:-0}" 2>/dev/null || true)"
+        # Token match so a shorter path cannot substring-spoof the lock.
+        if [[ " ${_md_parent_args} " == *" ${_md_lock} "* ]]; then
+            _md_skip_lock=1
+        fi
+    fi
+    if [[ "$_md_skip_lock" -eq 0 ]]; then
+        mkdir -p "$(dirname "$_md_lock")"
+        export HAPI_META_LOCKED=1
+        exec flock -w 600 "$_md_lock" "$0" "$@"
+    fi
+fi
 GH_BIN="${HAPI_META_GH_BIN:-gh}"
 CURL_BIN="${HAPI_META_CURL_BIN:-curl}"
 # Low-level tools live beside this script in the mirror, but soup/driver
@@ -162,7 +186,7 @@ fi
 
 md_state_default() {
     jq -cn --arg up "$UPSTREAM_REPO" --arg fork "$FORK_REPO" \
-        '{schema:1,last_run:null,notif_cursor:{($up):null,($fork):null},sessions:{},orphan_prs:{},notif_seen:{},wave:{status:"idle",id:"w-empty",members:[],collect_started_at:null,collect_deadline_at:null}}'
+        '{schema:1,last_run:null,notif_cursor:{($up):null,($fork):null},sessions:{},orphan_prs:{},notif_seen:{},hold:{},wave:{status:"idle",id:"w-empty",members:[],collect_started_at:null,collect_deadline_at:null}}'
 }
 
 md_load_state() {
@@ -320,6 +344,7 @@ md_refs_apply_status() {
                        elif $emoji == "🔧" then {openState:"merged"}
                        elif $emoji == "🧹" then {openState:"merged"}
                        elif $emoji == "📝" then {openState:"draft"}
+                       elif $emoji == "🛑" then {}
                        else {} end)
                 )
             else . end
@@ -539,31 +564,140 @@ md_combined_emoji() {
     printf '%s' "$combined"
 }
 
-# md_plan_ping <new_emoji> <new_fp> <prev_emoji> <prev_fp> <prev_ping> <now> <reminder> [window_rouse] [blocked_upstream_only]
+# md_plan_ping <new_emoji> <new_fp> <prev_emoji> <prev_fp> <prev_ping> <now> <reminder> [window_rouse] [sticky_ping]
 #   → "yes"/"no" (wraps pec_should_ping; kept for test clarity)
 md_plan_ping() {
-    pec_should_ping "$1" "$3" "$2" "$4" "${5:-0}" "$6" "$7" "${8:-0}" "${9:-0}"
+    pec_should_ping "$1" "$3" "$2" "$4" "${5:-0}" "$6" "$7" "${8:-0}" "${9:-}"
 }
 
-# md_session_blocked_upstream_only SID8 COMBINED PR...
-# Session is blocked-upstream-only when combined is ⚠️ and every contributing
-# ⚠️ PR has blockedUpstream from the classifier (#128).
-# Any co-attached 🔧 (merged cleanup) is still actionable even when ⚠️ wins
-# pec_worst_emoji — do not suppress ping/emit for that case.
-md_session_blocked_upstream_only() {
-    local sid8="$1" combined="$2"
-    shift 2
-    [[ "$combined" == "⚠️" ]] || return 1
-    local saw_warn=0 p emoji bu
-    for p in "$@"; do
-        emoji="${SESS_PR_EMOJI[$sid8:$p]:-${PR_EMOJI[$p]:-?}}"
-        [[ "$emoji" == "🔧" ]] && return 1
-        [[ "$emoji" == "⚠️" ]] || continue
-        saw_warn=1
-        bu="${PR_BLOCKED_UPSTREAM[$p]:-false}"
-        [[ "$bu" == "true" ]] || return 1
+# md_session_sticky_peer_ping <sid8> <prs-space-joined>
+# true if any ⚠️/🔧 contribution has stickyPing=true (actionable work).
+# blockedUpstream-only sessions return false (#128).
+# 🔧 merged-cleanup always restores normal policy even when combined emoji is
+# ⚠️ (pec_worst_emoji ranks ⚠️ above 🔧) — do not skip non-⚠️ rows (#128 edge).
+md_session_sticky_peer_ping() {
+    local sid8="$1" prs="$2" p e sticky
+    for p in $prs; do
+        e="${SESS_PR_EMOJI[$sid8:$p]:-}"
+        case "$e" in
+            🔧)
+                return 0
+                ;;
+            ⚠️)
+                sticky="${SESS_PR_STICKY[$sid8:$p]:-}"
+                if [[ -z "$sticky" ]]; then
+                    sticky="$(pec_default_sticky_ping "$e" 0)"
+                fi
+                [[ "$sticky" == "true" ]] && return 0
+                ;;
+        esac
     done
-    [[ "$saw_warn" -eq 1 ]]
+    return 1
+}
+
+# Hold-login CSV: env HAPI_PR_HOLD_LOGINS, else ~/.hapi/pr-hold.json, else tiann.
+md_hold_logins() {
+    local cfg="${HAPI_PR_HOLD_CONFIG:-$HOME/.hapi/pr-hold.json}" file_json=""
+    if [[ -f "$cfg" ]]; then
+        file_json="$(cat "$cfg" 2>/dev/null || true)"
+    fi
+    pec_hold_logins_csv "${HAPI_PR_HOLD_LOGINS:-}" "$file_json"
+}
+
+# md_hold_events_json <repo> <number> → JSON array of
+# {id,login,type,surface,body,url,created_at}
+# Flatten gh --paginate --slurp (array-of-pages) or a single page array.
+md_hold_flatten_pages() {
+    jq -c 'if type == "array" then
+            if length == 0 then .
+            elif (.[0] | type) == "array" then add
+            else .
+            end
+          else [] end' 2>/dev/null || echo '[]'
+}
+
+md_hold_events_json() {
+    local repo="$1" number="$2" comments reviews
+    comments="$("$GH_BIN" api --paginate --slurp "repos/${repo}/issues/${number}/comments?per_page=100" 2>/dev/null | md_hold_flatten_pages || true)"
+    reviews="$("$GH_BIN" api --paginate --slurp "repos/${repo}/pulls/${number}/reviews?per_page=100" 2>/dev/null | md_hold_flatten_pages || true)"
+    [[ -n "$comments" ]] || comments='[]'
+    [[ -n "$reviews" ]] || reviews='[]'
+    printf '%s\n%s\n' "$comments" "$reviews" | jq -s '
+        (.[0] // []) as $c | (.[1] // []) as $r
+        | [
+            ($c[]? | {
+                id: (.id | tostring),
+                login: (.user.login // ""),
+                type: (.user.type // "User"),
+                surface: "issue_comment",
+                body: (.body // ""),
+                url: (.html_url // ""),
+                created_at: (.created_at // "")
+            }),
+            ($r[]? | {
+                id: (.id | tostring),
+                login: (.user.login // ""),
+                type: (.user.type // "User"),
+                surface: "review_body",
+                body: (.body // ""),
+                url: (.html_url // ""),
+                created_at: (.submitted_at // .created_at // "")
+            })
+          ]
+        | sort_by(.created_at)
+    ' 2>/dev/null || echo '[]'
+}
+
+# md_hold_ingest <state_json> <repo> <number> <logins_csv>
+# Prints updated state. Latches the newest qualifying event if new fingerprint.
+md_hold_ingest() {
+    local state="$1" repo="$2" number="$3" csv="$4"
+    local events ev_id login type surface body url created_at
+    events="$(md_hold_events_json "$repo" "$number")"
+    # Walk newest-first; first qualifying new-or-current latch wins.
+    while IFS= read -r ev; do
+        [[ -z "$ev" || "$ev" == "null" ]] && continue
+        surface="$(jq -r '.surface' <<<"$ev")"
+        login="$(jq -r '.login' <<<"$ev")"
+        type="$(jq -r '.type' <<<"$ev")"
+        body="$(jq -r '.body // ""' <<<"$ev")"
+        ev_id="$(jq -r '.id' <<<"$ev")"
+        url="$(jq -r '.url // ""' <<<"$ev")"
+        created_at="$(jq -r '.created_at // ""' <<<"$ev")"
+        pec_hold_should_latch "$surface" "$login" "$type" "$body" "$csv" || continue
+        if pec_hold_is_new_latch "$state" "$repo" "$number" "$surface" "$ev_id" "$created_at"; then
+            local next
+            next="$(pec_hold_upsert_state "$state" "$repo" "$number" "$surface" "$ev_id" "$login" "$url" "$body" "$created_at" || true)"
+            if [[ -n "$next" ]] && printf '%s' "$next" | jq -e . >/dev/null 2>&1; then
+                printf '%s' "$next"
+            else
+                err "hold upsert failed for ${repo}#${number}; keeping prior state"
+                printf '%s' "$state"
+            fi
+            return 0
+        fi
+        # Not a new latch. If this exact fingerprint is the current *unacked*
+        # hold, keep the row and stop. If it was already acknowledged (or is an
+        # older/equal non-matching event), keep scanning so a same-second
+        # sibling (surface,id) can still reach pec_hold_is_new_latch.
+        local key
+        key="$(pec_hold_state_key "$repo" "$number")"
+        if printf '%s' "$state" | jq -e \
+            --arg k "$key" --arg id "$ev_id" --arg surface "$surface" '
+            (.hold[$k] | type) == "object"
+            and .hold[$k].acked == false
+            and (.hold[$k].comment_id // "") == $id
+            and (
+                (.hold[$k].surface // "") == ""
+                or (.hold[$k].surface // "") == $surface
+            )
+        ' >/dev/null 2>&1; then
+            printf '%s' "$state"
+            return 0
+        fi
+        continue
+    done < <(printf '%s' "$events" | jq -c 'reverse | .[]' 2>/dev/null || true)
+    printf '%s' "$state"
 }
 
 # ---------------------------------------------------------------------------
@@ -601,11 +735,13 @@ main() {
     # HARD RULE (2026-08-06 Sparling): session titles are decorative. Meta tracks a
     # session iff metadata.externalRefs has github_pr on tiann/hapi | heavygee/hapi.
     # Linked → hapi or not. Unlinked → invisible to Meta. No Peer/PR/# title scrape.
-    declare -A SESS_ID SESS_ACTIVE SESS_NAME SESS_PRS SESS_REFS SESS_PATH SESS_LIFECYCLE SESS_THINKING
+    declare -A SESS_ID SESS_ACTIVE SESS_NAME SESS_PRS SESS_REFS SESS_PATH SESS_LIFECYCLE SESS_THINKING SESS_PR_REPO
     declare -A PR_SESSIONS      # pr -> "sid8,sid8"
+    declare -A PAIR_OWNED       # repo#number -> 1 (session chips that exact pair)
     declare -A ALL_PR           # pr -> 1
     declare -A MERGED_TITLE
     declare -A PR_REPO          # pr -> owner/name (from chip; prefer tiann/hapi)
+    declare -A UPSTREAM_DISCOVERED  # pr -> 1 (gh open/merged on UPSTREAM_REPO)
 
     # NDJSON rows — NOT @tsv. Bash IFS=$'\t' collapses consecutive tabs, so an
     # empty metadata.name shifts fields and Meta drops ownership (estate: #1383).
@@ -652,6 +788,8 @@ main() {
                 | first // empty
             ' 2>/dev/null || true)"
             if [[ -n "$chip_repo" ]]; then
+                SESS_PR_REPO["$sid8:$p"]="$chip_repo"
+                PAIR_OWNED["$chip_repo#$p"]=1
                 if [[ "${PR_REPO[$p]:-}" != "$UPSTREAM_REPO" ]]; then
                     PR_REPO["$p"]="$chip_repo"
                 fi
@@ -692,10 +830,14 @@ main() {
         ALL_PR=(["$PR_ONLY"]=1)
     else
         local p
-        for p in $(gh_open_pr_numbers); do ALL_PR["$p"]=1; done
+        for p in $(gh_open_pr_numbers); do
+            ALL_PR["$p"]=1
+            UPSTREAM_DISCOVERED["$p"]=1
+        done
         while IFS=$'\t' read -r num title _mergedAt; do
             [[ -z "$num" ]] && continue
             ALL_PR["$num"]=1
+            UPSTREAM_DISCOVERED["$num"]=1
             MERGED_TITLE["$num"]="$title"
         done < <(gh_merged_recent "$merged_since")
     fi
@@ -706,16 +848,43 @@ main() {
     IFS=$'\n' pr_list=($(sort -n <<<"${pr_list[*]}")); unset IFS
 
     vlog "classifying ${#pr_list[@]} PR(s): ${pr_list[*]}"
-    declare -A PR_EMOJI PR_ACTION PR_PREPR PR_HEADREF PR_BLOCKED_UPSTREAM
-    declare -A SESS_PR_EMOJI SESS_PR_ACTION
-    # Per chip.repo, not one tiann batch. Number collision (heavygee#124 vs
-    # tiann#124 closed-unmerged) must not inherit upstream closed-without-merge.
-    local batch_json r
+    declare -A PR_EMOJI PR_ACTION PR_PREPR PR_HEADREF PR_EXISTS
+    declare -A PR_BY_REPO_EMOJI PR_BY_REPO_ACTION PR_BY_REPO_PREPR PR_BY_REPO_HEADREF PR_BY_REPO_EXISTS
+    declare -A PR_BY_REPO_BLOCKED PR_BY_REPO_STICKY
+    declare -A SESS_PR_EMOJI SESS_PR_ACTION SESS_PR_STICKY
+    # Per (chip.repo, number), not one tiann batch keyed by number. Dual chips
+    # heavygee#124 + tiann#124 must keep independent classify results.
+    local batch_json r pair_key
     local -a classify_prs
-    declare -A REPO_PR_LIST
+    declare -A REPO_PR_LIST PAIR_SEEN
+    md_add_classify_pair() {
+        local _r="$1" _n="$2"
+        local _k="${_r}#${_n}"
+        [[ -n "${PAIR_SEEN[$_k]:-}" ]] && return 0
+        PAIR_SEEN["$_k"]=1
+        REPO_PR_LIST["$_r"]="${REPO_PR_LIST[$_r]:+${REPO_PR_LIST[$_r]} }$_n"
+    }
+    local sid8_c
+    for sid8_c in "${!SESS_ID[@]}"; do
+        local p_c
+        for p_c in ${SESS_PRS[$sid8_c]}; do
+            if [[ -n "$PR_ONLY" && "$p_c" != "$PR_ONLY" ]]; then
+                continue
+            fi
+            r="${SESS_PR_REPO[$sid8_c:$p_c]:-${PR_REPO[$p_c]:-$UPSTREAM_REPO}}"
+            md_add_classify_pair "$r" "$p_c"
+        done
+    done
     for p in "${pr_list[@]}"; do
-        r="${PR_REPO[$p]:-$UPSTREAM_REPO}"
-        REPO_PR_LIST["$r"]="${REPO_PR_LIST[$r]:+${REPO_PR_LIST[$r]} }$p"
+        md_add_classify_pair "${PR_REPO[$p]:-$UPSTREAM_REPO}" "$p"
+    done
+    # Authored open/merged live on UPSTREAM_REPO even when a fork chip already
+    # claimed PR_REPO[N]. Number collision must still classify tiann#N.
+    for p in "${!UPSTREAM_DISCOVERED[@]}"; do
+        if [[ -n "$PR_ONLY" && "$p" != "$PR_ONLY" ]]; then
+            continue
+        fi
+        md_add_classify_pair "$UPSTREAM_REPO" "$p"
     done
     for r in "${!REPO_PR_LIST[@]}"; do
         classify_prs=()
@@ -724,11 +893,23 @@ main() {
         batch_json="$(HAPI_PR_REPO="$r" "$BATCH_BIN" --repo "$r" "${classify_prs[@]}")" \
             || die "batch classify failed for $r"
         for p in "${classify_prs[@]}"; do
-            PR_EMOJI["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].emoji // "?"')"
-            PR_ACTION["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].action // ""')"
-            PR_PREPR["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].prePr // false')"
-            PR_HEADREF["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].headRef // ""')"
-            PR_BLOCKED_UPSTREAM["$p"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].blockedUpstream // false')"
+            pair_key="$r#$p"
+            PR_BY_REPO_EMOJI["$pair_key"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].emoji // "?"')"
+            PR_BY_REPO_ACTION["$pair_key"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].action // ""')"
+            PR_BY_REPO_PREPR["$pair_key"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].prePr // false')"
+            PR_BY_REPO_HEADREF["$pair_key"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].headRef // ""')"
+            PR_BY_REPO_EXISTS["$pair_key"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '
+                if (.[$p] | has("exists")) then (.[$p].exists | tostring) else "true" end
+            ')"
+            PR_BY_REPO_BLOCKED["$pair_key"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].blockedUpstream // false | tostring')"
+            PR_BY_REPO_STICKY["$pair_key"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '
+                if (.[$p] | has("stickyPing")) then (.[$p].stickyPing | tostring) else empty end
+            ')"
+            PR_EMOJI["$p"]="${PR_BY_REPO_EMOJI[$pair_key]}"
+            PR_ACTION["$p"]="${PR_BY_REPO_ACTION[$pair_key]}"
+            PR_PREPR["$p"]="${PR_BY_REPO_PREPR[$pair_key]}"
+            PR_HEADREF["$p"]="${PR_BY_REPO_HEADREF[$pair_key]}"
+            PR_EXISTS["$p"]="${PR_BY_REPO_EXISTS[$pair_key]}"
         done
     done
 
@@ -743,10 +924,28 @@ main() {
 
     # --- per-session: rename + policy ping; build next state ---
     local new_state="$state"
-    local -a Q_WARN Q_MERGED Q_COMPLETE Q_ORPHAN Q_INACTIVE Q_PINGED Q_RENAMED Q_STATUS Q_WAIT_TIANN Q_WAIT_FORK Q_SELF_MERGE Q_SKIP_RUNNING
+    local -a Q_WARN Q_MERGED Q_COMPLETE Q_ORPHAN Q_INACTIVE Q_PINGED Q_RENAMED Q_STATUS Q_WAIT_TIANN Q_WAIT_FORK Q_SELF_MERGE Q_SKIP_RUNNING Q_HOLD
     local -a PLAN_ROWS   # for --json
     MD_EMIT_FAILURES=0
     local now_ms=$(( now * 1000 ))
+
+    # Ingest 🛑 from chipped (repo, number) pairs only. PAIR_SEEN also
+    # includes authored upstream numbers that collide with a fork chip;
+    # PR_SESSIONS is number-only and would ingest the unlinked repo.
+    # Skip only when the PR does not exist (true 404 pre-PR). Drafts also
+    # set prePr=true (#127) but exists=true — maintainer comments on drafts
+    # must still latch 🛑.
+    local hold_csv hrepo over hold_action pair_key_h p_h
+    hold_csv="$(md_hold_logins)"
+    vlog "hold logins: $hold_csv"
+    for pair_key_h in "${!PAIR_SEEN[@]}"; do
+        hrepo="${pair_key_h%\#*}"
+        p_h="${pair_key_h##*\#}"
+        [[ -n "${PAIR_OWNED[$pair_key_h]:-}" ]] || continue
+        # Explicit false only (fixtures without exists still ingest).
+        [[ "${PR_BY_REPO_EXISTS[$pair_key_h]:-true}" == "false" ]] && continue
+        new_state="$(md_hold_ingest "$new_state" "$hrepo" "$p_h" "$hold_csv")"
+    done
 
     local sid8
     for sid8 in "${!SESS_ID[@]}"; do
@@ -768,8 +967,16 @@ main() {
         local emojis=() acts="" combined pre=0 first_pr=""
         for p in $prs; do
             # Per-session 🔧→🧹 when estate complete predicates hold (config/pr-chip-states.yaml).
-            local emoji_sess="${PR_EMOJI[$p]:-?}"
-            local action_sess="${PR_ACTION[$p]:-}"
+            local crepo="${SESS_PR_REPO[$sid8:$p]:-${PR_REPO[$p]:-$UPSTREAM_REPO}}"
+            local pair_sess="$crepo#$p"
+            local emoji_sess="${PR_BY_REPO_EMOJI[$pair_sess]:-${PR_EMOJI[$p]:-?}}"
+            local action_sess="${PR_BY_REPO_ACTION[$pair_sess]:-${PR_ACTION[$p]:-}}"
+            over="$(pec_hold_overlay_emoji "$emoji_sess" "$new_state" "$crepo" "$p")"
+            if [[ "$over" == "🛑" ]]; then
+                emoji_sess="🛑"
+                hold_action="$(pec_hold_action_from_state "$new_state" "$crepo" "$p")"
+                [[ -n "$hold_action" ]] && action_sess="$hold_action"
+            fi
             if [[ "$emoji_sess" == "🔧" ]]; then
                 local complete_reason="" gate_a_reason=""
                 if complete_reason="$(mw_member_complete \
@@ -778,7 +985,7 @@ main() {
                     "$p" \
                     "${SESS_LIFECYCLE[$sid8]:-}" \
                     "$HAPI_PRIMARY" \
-                    "${PR_HEADREF[$p]:-}")"; then
+                    "${PR_BY_REPO_HEADREF[$pair_sess]:-${PR_HEADREF[$p]:-}}")"; then
                     emoji_sess="🧹"
                     action_sess="fully cleaned — babysit ended"
                 else
@@ -807,6 +1014,17 @@ main() {
             # Stash per-session emoji for chip write (may differ from PR_EMOJI global).
             SESS_PR_EMOJI["$sid8:$p"]="$emoji_sess"
             SESS_PR_ACTION["$sid8:$p"]="$action_sess"
+            # stickyPing: classifier JSON wins; else derive. Hold always false.
+            local sticky_sess blocked_sess
+            sticky_sess="${PR_BY_REPO_STICKY[$pair_sess]:-}"
+            blocked_sess="${PR_BY_REPO_BLOCKED[$pair_sess]:-false}"
+            if [[ -z "$sticky_sess" ]]; then
+                sticky_sess="$(pec_default_sticky_ping "$emoji_sess" "$blocked_sess")"
+            fi
+            if [[ "$emoji_sess" == "🛑" ]]; then
+                sticky_sess="false"
+            fi
+            SESS_PR_STICKY["$sid8:$p"]="$sticky_sess"
         done
         combined="$(md_combined_emoji "${emojis[@]}")"
         [[ -z "$combined" ]] && combined="?"
@@ -854,10 +1072,15 @@ main() {
         # ping policy (actuator cursor: emoji/fp/last_ping)
         # Ping windows (DO_PING=1): force-rouse sticky ⚠️/🔧 ("are you done yet?").
         # Quiet --no-ping refresh: never pings; emit still uses non-window policy.
-        local action_fp prev_emoji prev_fp prev_ping decision window_rouse=0 blocked_only=0
+        # blockedUpstream-only sessions: stickyPing=false → no peer ping (#128).
+        local action_fp prev_emoji prev_fp prev_ping decision window_rouse=0 session_sticky=true
         [[ "$DO_PING" -eq 1 ]] && window_rouse=1
-        if md_session_blocked_upstream_only "$sid8" "$combined" $prs; then
-            blocked_only=1
+        if ! md_session_sticky_peer_ping "$sid8" "$prs"; then
+            # No actionable sticky ⚠️/🔧 (e.g. only blocked-upstream, or only ✅/📝).
+            # Pass sticky=false only when combined is a work emoji that would otherwise nag.
+            case "$combined" in
+                ⚠️|🔧) session_sticky=false ;;
+            esac
         fi
         action_fp="$(pec_action_fingerprint "$combined" "$acts")"
         prev_emoji="$(md_prev "$state" "$sid" "emoji")"
@@ -865,11 +1088,19 @@ main() {
         prev_ping="$(md_prev "$state" "$sid" "last_ping")"
         [[ -z "$prev_ping" ]] && prev_ping=0
         # md_plan_ping/pec_should_ping return 1 for "no"; capture text, ignore rc.
-        decision="$(md_plan_ping "$combined" "$action_fp" "$prev_emoji" "$prev_fp" "$prev_ping" "$now" "$REMINDER_SECS" "$window_rouse" "$blocked_only" || true)"
+        decision="$(md_plan_ping "$combined" "$action_fp" "$prev_emoji" "$prev_fp" "$prev_ping" "$now" "$REMINDER_SECS" "$window_rouse" "$session_sticky" || true)"
         # Gate A clean + archive pending is Meta's job. Hourly ping-peer resumes
         # the row, mw_member_complete fails not_archived, chip flips 🧹→🔧, and
         # the next window pings again. Never rouse for that remainder.
         if [[ "$combined" == "🔧" ]] && printf '%s' "$acts" | grep -q 'Gate A clean'; then
+            decision="no"
+        fi
+        # Operator-hold: never hourly-ping (or transition-ping) the coding peer.
+        if [[ "$combined" == "🛑" ]]; then
+            decision="no"
+        fi
+        # blocked-upstream-only: chip stays ⚠️ in queue, but never peer-nag (#128).
+        if [[ "$session_sticky" == "false" ]]; then
             decision="no"
         fi
         # In-turn skip: session.thinking means the agent is emitting / in a
@@ -907,15 +1138,51 @@ main() {
 
             # Channel emit uses a separate emitted_* cursor so a failed POST
             # remains retryable even when rename/ping state advances.
-            if [[ "$EMIT_EVENTS" -eq 1 ]]; then
+            # Hold latch notify is independent of --emit-events: hourly timer
+            # does not pass that flag (refresh timer is disabled).
+            if [[ "$combined" == "🛑" ]]; then
+                local emit_date_h emit_body_h emit_repo_h emit_pr_h
+                emit_date_h="$(date -u +%Y-%m-%d)"
+                for p in $prs; do
+                    emit_repo_h="${SESS_PR_REPO[$sid8:$p]:-${PR_REPO[$p]:-$UPSTREAM_REPO}}"
+                    if ! printf '%s' "$new_state" | jq -e --arg k "$(pec_hold_state_key "$emit_repo_h" "$p")" \
+                        '.hold[$k].acked == false and (.hold[$k].notified != true)' >/dev/null 2>&1; then
+                        continue
+                    fi
+                    emit_pr_h="$p"
+                    emit_body_h="$(pec_build_channel_event_body \
+                        --repo "$emit_repo_h" \
+                        --number "$emit_pr_h" \
+                        --emoji "🛑" \
+                        --action "${SESS_PR_ACTION[$sid8:$p]:-${PR_ACTION[$p]:-}}" \
+                        --fingerprint "$action_fp" \
+                        --session-id "$sid" \
+                        --reason transition \
+                        --date "$emit_date_h")"
+                    if hub_emit_event "$jwt" "$emit_body_h"; then
+                        new_state="$(printf '%s' "$new_state" | jq -c \
+                            --arg s "$sid" --arg e "$combined" --arg f "$action_fp" --argjson le "$now" \
+                            '.sessions[$s] = ((.sessions[$s] // {}) + {emitted_emoji:$e, emitted_fp:$f, last_emitted:$le})')"
+                        new_state="$(pec_hold_mark_notified "$new_state" "$emit_repo_h" "$p")"
+                        vlog "emit-events $sid8 🛑 $emit_repo_h#$p"
+                    else
+                        MD_EMIT_FAILURES=$((MD_EMIT_FAILURES + 1))
+                    fi
+                done
+            elif [[ "$EMIT_EVENTS" -eq 1 ]]; then
                 local emit_reason prev_emitted_e prev_emitted_fp prev_emitted_at
                 prev_emitted_e="$(md_prev "$state" "$sid" "emitted_emoji")"
                 prev_emitted_fp="$(md_prev "$state" "$sid" "emitted_fp")"
                 prev_emitted_at="$(md_prev "$state" "$sid" "last_emitted")"
                 [[ -z "$prev_emitted_at" ]] && prev_emitted_at=0
-                emit_reason="$(pec_emit_reason "$combined" "$prev_emitted_e" "$action_fp" "$prev_emitted_fp" "$prev_emitted_at" "$now" "$REMINDER_SECS" "$window_rouse" "$blocked_only" || true)"
+                emit_reason="$(pec_emit_reason "$combined" "$prev_emitted_e" "$action_fp" "$prev_emitted_fp" "$prev_emitted_at" "$now" "$REMINDER_SECS" "$window_rouse" "$session_sticky" || true)"
+                if [[ "$session_sticky" == "false" ]]; then
+                    # No window/reminder/fingerprint/transition channel nags for
+                    # blocked-upstream-only (#128). Queue row still lists the PR.
+                    emit_reason="none"
+                fi
                 if [[ "$emit_reason" != "none" && -n "$emit_reason" ]]; then
-                    local emit_date emit_pr emit_body
+                    local emit_date emit_pr emit_body emit_repo
                     # Window emits key by London hour so 3 daily windows don't collide.
                     if [[ "$emit_reason" == "window" ]]; then
                         emit_date="$(TZ=Europe/London date +%Y-%m-%dT%H)"
@@ -923,8 +1190,9 @@ main() {
                         emit_date="$(date -u +%Y-%m-%d)"
                     fi
                     emit_pr="${first_pr}"
+                    emit_repo="${SESS_PR_REPO[$sid8:$emit_pr]:-${PR_REPO[$emit_pr]:-$UPSTREAM_REPO}}"
                     emit_body="$(pec_build_channel_event_body \
-                        --repo "$UPSTREAM_REPO" \
+                        --repo "$emit_repo" \
                         --number "$emit_pr" \
                         --emoji "$combined" \
                         --action "$(echo "$acts" | head -1 | sed 's/^#[0-9]*: //')" \
@@ -952,6 +1220,7 @@ main() {
 
         # action queue rows
         case "$combined" in
+            🛑) Q_HOLD+=("#$(echo "$prs" | tr ' ' ',') [$sid8] $(echo "$acts" | tr '\n' ' ' | sed 's/ *$//')") ;;
             ⚠️) Q_WARN+=("#$(echo "$prs" | tr ' ' ',') [$sid8] $(echo "$acts" | tr '\n' ' ' | sed 's/ *$//')") ;;
             🔧)
                 if printf '%s' "$acts" | grep -q 'Gate A clean'; then
@@ -980,37 +1249,47 @@ main() {
             '{sid:$sid,emoji:$emoji,prs:$prs,ping:$ping,title:$title,renamed:$renamed}')")
     done
 
-    # --- orphan PRs (tracked/open/merged but no session) ---
-    for p in "${pr_list[@]}"; do
-        [[ -n "${PR_SESSIONS[$p]:-}" ]] && continue
-        local e="${PR_EMOJI[$p]:-?}"
+    # --- orphan PRs (tracked/open/merged but no session for that repo#number) ---
+    local pair_o r_o
+    for pair_o in "${!PAIR_SEEN[@]}"; do
+        r_o="${pair_o%\#*}"
+        p="${pair_o##*\#}"
+        [[ -n "${PAIR_OWNED[$pair_o]:-}" ]] && continue
+        local e="${PR_BY_REPO_EMOJI[$pair_o]:-${PR_EMOJI[$p]:-?}}"
         case "$e" in
-            🔧) Q_ORPHAN+=("#$p 🔧 merged, no owning session — confirm wave cleanup done / archive") ;;
+            🔧) Q_ORPHAN+=("$r_o#$p 🔧 merged, no owning session — confirm wave cleanup done / archive") ;;
             📝|"?") : ;;
-            *) Q_ORPHAN+=("#$p $e open, NO HAPI session — assign an owner or spawn a peer") ;;
+            *) Q_ORPHAN+=("$r_o#$p $e open, NO HAPI session — assign an owner or spawn a peer") ;;
         esac
         # Orphan ⚠️ emits needs_decision with null relatedSessionId (inbox stays quiet).
         # State-gated like sessions so steady re-runs stay silent.
         if [[ "$EMIT_EVENTS" -eq 1 && "$e" == "⚠️" ]]; then
-            local orphan_fp orphan_prev_e orphan_prev_fp orphan_reason orphan_body orphan_date
+            local orphan_fp orphan_prev_e orphan_prev_fp orphan_reason orphan_body orphan_date orphan_sticky
             orphan_date="$(date -u +%Y-%m-%d)"
-            orphan_fp="$(pec_action_fingerprint "$e" "${PR_ACTION[$p]}")"
-            orphan_prev_e="$(printf '%s' "$state" | jq -r --arg p "$p" '(.orphan_prs // {})[$p].emoji // ""')"
-            orphan_prev_fp="$(printf '%s' "$state" | jq -r --arg p "$p" '(.orphan_prs // {})[$p].fp // ""')"
-            orphan_reason="$(pec_emit_reason "$e" "$orphan_prev_e" "$orphan_fp" "$orphan_prev_fp" 0 "$now" "$REMINDER_SECS" || true)"
+            orphan_fp="$(pec_action_fingerprint "$e" "${PR_BY_REPO_ACTION[$pair_o]:-${PR_ACTION[$p]:-}}")"
+            orphan_prev_e="$(printf '%s' "$state" | jq -r --arg p "$pair_o" '(.orphan_prs // {})[$p].emoji // ""')"
+            orphan_prev_fp="$(printf '%s' "$state" | jq -r --arg p "$pair_o" '(.orphan_prs // {})[$p].fp // ""')"
+            orphan_sticky="${PR_BY_REPO_STICKY[$pair_o]:-}"
+            if [[ -z "$orphan_sticky" ]]; then
+                orphan_sticky="$(pec_default_sticky_ping "$e" "${PR_BY_REPO_BLOCKED[$pair_o]:-false}")"
+            fi
+            orphan_reason="$(pec_emit_reason "$e" "$orphan_prev_e" "$orphan_fp" "$orphan_prev_fp" 0 "$now" "$REMINDER_SECS" 0 "$orphan_sticky" || true)"
+            if [[ "$orphan_sticky" == "false" ]]; then
+                orphan_reason="none"
+            fi
             if [[ "$orphan_reason" != "none" && -n "$orphan_reason" ]]; then
                 orphan_body="$(pec_build_channel_event_body \
-                    --repo "$UPSTREAM_REPO" \
+                    --repo "$r_o" \
                     --number "$p" \
                     --emoji "$e" \
-                    --action "${PR_ACTION[$p]}" \
+                    --action "${PR_BY_REPO_ACTION[$pair_o]:-${PR_ACTION[$p]:-}}" \
                     --fingerprint "$orphan_fp" \
                     --session-id "" \
                     --reason "$orphan_reason" \
                     --date "$orphan_date")"
                 if hub_emit_event "$jwt" "$orphan_body"; then
                     new_state="$(printf '%s' "$new_state" | jq -c \
-                        --arg p "$p" --arg e "$e" --arg f "$orphan_fp" \
+                        --arg p "$pair_o" --arg e "$e" --arg f "$orphan_fp" \
                         '.orphan_prs = ((.orphan_prs // {}) + {($p): {emoji:$e, fp:$f}})')"
                 else
                     MD_EMIT_FAILURES=$((MD_EMIT_FAILURES + 1))
@@ -1035,13 +1314,28 @@ main() {
         prs="${SESS_PRS[$sid8]}"
         local emojis_w=() combined_w
         for p in $prs; do
-            emojis_w+=("${PR_EMOJI[$p]:-?}")
+            local crepo_w="${SESS_PR_REPO[$sid8:$p]:-${PR_REPO[$p]:-$UPSTREAM_REPO}}"
+            # Prefer session-loop emoji (hold overlay already applied). Fall back
+            # to classifier + pec_hold_overlay so an unacked 🛑 cannot look like 🔧
+            # and join/clear a merge wave (Codex P1 on #124).
+            local emoji_w="${SESS_PR_EMOJI[$sid8:$p]:-}"
+            if [[ -z "$emoji_w" ]]; then
+                emoji_w="${PR_BY_REPO_EMOJI[$crepo_w#$p]:-${PR_EMOJI[$p]:-?}}"
+                emoji_w="$(pec_hold_overlay_emoji "$emoji_w" "$new_state" "$crepo_w" "$p")"
+            fi
+            emojis_w+=("$emoji_w")
         done
         combined_w="$(md_combined_emoji "${emojis_w[@]}")"
         [[ "$combined_w" == "🔧" ]] || continue
         # One member row per PR on this session that is merged.
         for p in $prs; do
-            [[ "${PR_EMOJI[$p]:-}" == "🔧" ]] || continue
+            local crepo_w="${SESS_PR_REPO[$sid8:$p]:-${PR_REPO[$p]:-$UPSTREAM_REPO}}"
+            local emoji_wp="${SESS_PR_EMOJI[$sid8:$p]:-}"
+            if [[ -z "$emoji_wp" ]]; then
+                emoji_wp="${PR_BY_REPO_EMOJI[$crepo_w#$p]:-${PR_EMOJI[$p]:-?}}"
+                emoji_wp="$(pec_hold_overlay_emoji "$emoji_wp" "$new_state" "$crepo_w" "$p")"
+            fi
+            [[ "$emoji_wp" == "🔧" ]] || continue
             local reason_w clean_json=false
             if reason_w="$(mw_wave_member_clean "$manifest_text" "${SESS_PATH[$sid8]:-}" "$p")"; then
                 clean_json=true
@@ -1173,7 +1467,7 @@ main() {
         echo "  [dry-run] state NOT written; no renames/pings performed"
     fi
 
-    if [[ "$EMIT_EVENTS" -eq 1 && "$MD_EMIT_FAILURES" -gt 0 ]]; then
+    if [[ "$MD_EMIT_FAILURES" -gt 0 ]]; then
         err "emit-events: $MD_EMIT_FAILURES POST(s) failed — emit cursor not advanced for those; will retry next run"
         return 1
     fi
@@ -1291,6 +1585,7 @@ _do_ping() {  # <sid8> <emoji> <prs> <acts>
             fi
             ;;
         🧹) state_desc="COMPLETE - fully cleaned; babysit ended"; rouse="" ;;
+        🛑) state_desc="OPERATOR HOLD — do not thin, do not push; wait for ack"; rouse="" ;;
         *) state_desc="see title" ;;
     esac
     local msg="Meta daily — PR status is now **${emoji}** (${state_desc}).${rouse}
@@ -1299,7 +1594,7 @@ Tracked PR(s): #$(echo "$prs" | tr ' ' ',')
 
 ${acts}
 Status lives on the **session PR chip** (\`externalRefs.status\`), not in the title. Do **not** put ✅/🔁/⚠️/📝/🔧/🧹 in your session title; leave the title as workstream-only. If the chip is missing, run \`hapi link-pr <url>\` (or MCP \`link_pr\`) with awareness on.
-Legend: ✅ green (lane A wait / lane B self-merge) · 🔁 CI in flight · ⚠️ fix threads/CI/rebase · 📝 pre-PR · 🔧 merged (cleanup owed) · 🧹 complete (babysit ended — no further Meta pings).
+Legend: ✅ green (lane A wait / lane B self-merge) · 🔁 CI in flight · ⚠️ fix threads/CI/rebase · 📝 pre-PR · 🔧 merged (cleanup owed) · 🧹 complete (babysit ended — no further Meta pings) · 🛑 operator hold (never ping the coding peer).
 Canon: docs/operator/AGENTS.md § Meta PR watcher + feature-work-lifecycle.md § Session titles and PR chips"
     if [[ "$DRY_RUN" -eq 1 ]]; then
         echo "    [dry-run] ping $sid8 ($emoji)" >&2
@@ -1310,18 +1605,21 @@ Canon: docs/operator/AGENTS.md § Meta PR watcher + feature-work-lifecycle.md §
 
 _print_section() {  # <title> <array-name>
     local title="$1"; shift
-    local -a items=("$@")
+    local -a items=()
+    local it
+    for it in "$@"; do
+        [[ -n "$it" ]] && items+=("$it")
+    done
     [[ ${#items[@]} -eq 0 ]] && return 0
     echo ""
     echo "$title"
-    local it
     for it in "${items[@]}"; do
-        [[ -z "$it" ]] && continue
         echo "  - $it"
     done
 }
 
 _print_queue() {
+    _print_section "🛑  OPERATOR HOLD (ack only — do not ping the peer):" "${Q_HOLD[@]:-}"
     _print_section "⚠️  NEEDS WORK (yours to unblock / direct the peer):" "${Q_WARN[@]:-}"
     _print_section "🔧  MERGED — advise wave cleanup:" "${Q_MERGED[@]:-}"
     _print_section "🧹  COMPLETE — babysit ended:" "${Q_COMPLETE[@]:-}"

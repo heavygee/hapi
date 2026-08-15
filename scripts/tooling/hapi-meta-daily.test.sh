@@ -110,6 +110,8 @@ cat >"$WORK/manifest.yaml" <<'EOF'
 - branch: feat/shipped-thing
 EOF
 
+echo '{"logins":["tiann"]}' >"$WORK/pr-hold.json"
+
 run() {
     rm -f "$WORK/pings.log"
     HAPI_META_GH_BIN="$WORK/gh" \
@@ -120,8 +122,33 @@ run() {
     HAPI_META_MANIFEST="$WORK/manifest.yaml" \
     HAPI_META_DRIVER_STATUS_BIN="$WORK/driver-status" \
     HAPI_SETTINGS="$WORK/settings.json" \
+    HAPI_PR_HOLD_CONFIG="$WORK/pr-hold.json" \
+    HAPI_PR_HOLD_LOGINS="" \
     HAPI_HOST="http://mock" \
     bash "$SCRIPT" "$@"
+}
+
+# Operator-only hold-ack; tests have no controlling tty.
+# Unset HAPI_AGENT_CONTEXT so harness runs under a live agent session do not
+# inherit the production refuse (explicit agent tests set it themselves).
+# Sidecar cookie + ALLOW_NO_TTY is required; env alone must not clear holds.
+hold_ack() {
+    local state="" prev="" abs
+    prev=""
+    for a in "$@"; do
+        if [[ "$prev" == "--state" ]]; then
+            state="$a"
+        fi
+        prev="$a"
+    done
+    [[ -n "$state" ]] || {
+        echo "hold_ack harness: missing --state" >&2
+        return 2
+    }
+    mkdir -p "$(dirname -- "$state")"
+    abs="$(cd -- "$(dirname -- "$state")" && pwd -P)/$(basename -- "$state")"
+    printf '%s' "$abs" >"${state}.hold-ack-test"
+    HAPI_HOLD_ACK_ALLOW_NO_TTY=1 HAPI_AGENT_CONTEXT= bash "$DIR/hapi-hold-ack.sh" "$@"
 }
 
 # ============ 1. dry-run writes no state ============
@@ -786,6 +813,70 @@ check "wave no-tooling-id: no unlock to tooling" "! grep -q '^meta-tool' <<<\"\$
 check "wave no-tooling-id: stay ready" "jq -e '.wave.status == \"ready\"' '$WORK/state.json' >/dev/null"
 check "wave no-tooling-id: hints env var" "grep -q 'HAPI_META_TOOLING_SESSION_ID' <<<\"\$out\""
 
+# Unacked operator hold on a merged PR must not join/clear the wave (Codex P1).
+rm -f "$WORK/state.json" "$WORK/pings.log" "$WORK/events.log"
+cat >"$WORK/gh" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+if [[ "$args" == *"pr list"* && "$args" == *"--state open"* ]]; then
+    exit 0
+fi
+if [[ "$args" == *"pr list"* && "$args" == *"merged"* ]]; then
+    printf '300\tfix: shipped thing\t2026-07-24T02:52:06Z\n'; exit 0
+fi
+if [[ "$args" == *"issues/300/comments"* ]]; then
+    cat <<'JSON'
+[{"id":9001,"user":{"login":"tiann","type":"User"},"body":"hold — do not remat yet","html_url":"https://github.com/tiann/hapi/pull/300#issuecomment-9001","created_at":"2026-08-13T12:00:00Z"}]
+JSON
+    exit 0
+fi
+if [[ "$args" == *"/reviews"* ]]; then
+    echo '[]'; exit 0
+fi
+exit 0
+EOF
+chmod +x "$WORK/gh"
+cat >"$WORK/batch" <<'EOF'
+#!/usr/bin/env bash
+j='{}'
+for a in "$@"; do
+    case "$a" in
+        300) j="$(echo "$j" | jq -c '. + {"300":{emoji:"🔧",action:"MERGED — clean up",prePr:false,merged:true}}')" ;;
+    esac
+done
+echo "$j"
+EOF
+chmod +x "$WORK/batch"
+cat >"$WORK/curl" <<EOF
+#!/usr/bin/env bash
+args="\$*"
+if [[ "\$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
+if [[ "\$args" == *"-X PATCH"* ]]; then echo '{"ok":true}'; exit 0; fi
+if [[ "\$args" == *"-X PUT"* && "\$args" == *"/external-refs"* ]]; then
+    echo '{"ok":true,"externalRefs":[]}'; exit 0
+fi
+if [[ "\$args" == *"/api/system-events"* && "\$args" == *"-X POST"* ]]; then
+    echo "\$args" >> "$WORK/events.log"
+    echo '{"event":{"id":1},"deduped":false}'; exit 0
+fi
+if [[ "\$args" == *"/api/sessions?limit=500"* ]]; then
+cat <<'JSON'
+{"sessions":[
+ {"id":"cccccccc-3333","active":true,"metadata":{"name":"merged but held","path":"/tmp/not-a-worktree","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":300,"url":"https://github.com/tiann/hapi/pull/300","role":"primary","source":"agent","linkedAt":1}]}}
+]}
+JSON
+exit 0
+fi
+echo '{}'; exit 0
+EOF
+chmod +x "$WORK/curl"
+out="$(HAPI_META_TOOLING_SESSION_ID=meta-tooling-9999 run --emit-events 2>&1)" || true
+pings_hold_w="$(cat "$WORK/pings.log" 2>/dev/null || true)"
+check "wave hold: OPERATOR HOLD listed" "grep -q 'OPERATOR HOLD' <<<\"\$out\""
+check "wave hold: no tooling unlock" "! grep -q '^meta-tool' <<<\"\$pings_hold_w\""
+check "wave hold: wave idle or empty members" "jq -e '(.wave.members // []) | length == 0 or .wave.status == \"idle\"' '$WORK/state.json' >/dev/null"
+check "wave hold: not dispatched" "! jq -e '.wave.status == \"dispatched\"' '$WORK/state.json' >/dev/null"
+
 # ============ 19. Sparling estate fence (2026-08-06) — bare #395 must not latch ============
 # Foreign path + bare #NNN title must NEVER classify as tiann/hapi PR or get 🔧 pings.
 rm -f "$WORK/state.json" "$WORK/pings.log"
@@ -970,8 +1061,99 @@ check "display title: named session kept" "grep -q 'Keep Me' <<<\"\$out\""
 check "display title: never blank-name heal" "! grep -qE 'heal blank name|blank-name heal' <<<\"\$out\""
 check "display title: dry-run never PATCHes" "! grep -q 'UNEXPECTED PATCH' <<<\"\$out\""
 
-# ============ fork chip repo wins when the number collides with tiann ============
+# ============ 22. operator hold: tiann comment latches 🛑; bots never; ack clears ============
+rm -f "$WORK/state.json" "$WORK/pings.log" "$WORK/events.log"
+cat >"$WORK/batch" <<'EOF'
+#!/usr/bin/env bash
+j='{}'
+for a in "$@"; do
+    case "$a" in
+        100) j="$(echo "$j" | jq -c '. + {"100":{emoji:"⚠️",action:"resolve 1 open thread(s)",prePr:false,merged:false,closed:false,dataUnavailable:false}}')" ;;
+        200) j="$(echo "$j" | jq -c '. + {"200":{emoji:"✅",action:"full green - wait on tiann",prePr:false,merged:false}}')" ;;
+    esac
+done
+echo "$j"
+EOF
+chmod +x "$WORK/batch"
+cat >"$WORK/gh" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+if [[ "$args" == *"pr list"* && "$args" == *"--state open"* ]]; then
+    printf '100\n200\n'; exit 0
+fi
+if [[ "$args" == *"pr list"* && "$args" == *"merged"* ]]; then
+    exit 0
+fi
+if [[ "$args" == *"issues/100/comments"* ]]; then
+    cat <<'JSON'
+[{"id":5154418101,"user":{"login":"tiann","type":"User"},"body":"please trim the upgrade stack","html_url":"https://github.com/tiann/hapi/pull/100#issuecomment-5154418101","created_at":"2026-08-02T01:26:00Z"}]
+JSON
+    exit 0
+fi
+if [[ "$args" == *"issues/200/comments"* ]]; then
+    cat <<'JSON'
+[{"id":99,"user":{"login":"github-actions[bot]","type":"Bot"},"body":"**Findings**\n- [Major] nit","html_url":"https://github.com/tiann/hapi/pull/200#issuecomment-99","created_at":"2026-08-02T01:26:00Z"}]
+JSON
+    exit 0
+fi
+if [[ "$args" == *"/reviews"* ]]; then
+    echo '[]'; exit 0
+fi
+if [[ "$args" == *"notifications"* ]]; then
+    exit 0
+fi
+exit 0
+EOF
+chmod +x "$WORK/gh"
+cat >"$WORK/curl" <<EOF
+#!/usr/bin/env bash
+args="\$*"
+if [[ "\$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
+if [[ "\$args" == *"-X PATCH"* ]]; then echo '{"ok":true}'; exit 0; fi
+if [[ "\$args" == *"/api/system-events"* && "\$args" == *"-X POST"* ]]; then
+    echo "\$args" >> "$WORK/events.log"
+    echo '{"event":{"id":1},"deduped":false}'; exit 0
+fi
+if [[ "\$args" == *"/api/sessions?limit=500"* ]]; then
+cat <<'JSON'
+{"sessions":[
+ {"id":"aaaaaaaa-1111","active":true,"metadata":{"name":"needs work","path":"/home/heavygee/coding/hapi/worktrees/foo","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":100,"url":"https://github.com/tiann/hapi/pull/100","role":"primary"}]}},
+ {"id":"bbbbbbbb-2222","active":true,"metadata":{"name":"green thing","path":"/home/heavygee/coding/hapi/worktrees/bar","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":200,"url":"https://github.com/tiann/hapi/pull/200","role":"primary"}]}}
+]}
+JSON
+exit 0
+fi
+echo '{}'; exit 0
+EOF
+chmod +x "$WORK/curl"
+
+out="$(run 2>&1)"
+pings_h="$(cat "$WORK/pings.log" 2>/dev/null || true)"
+check "hold: queue lists OPERATOR HOLD for #100" "grep -A6 'OPERATOR HOLD' <<<\"\$out\" | grep -q '#100'"
+check "hold: tiann comment latched in state" "jq -e --arg k 'tiann/hapi#100' '.hold[\$k].acked == false' '$WORK/state.json' >/dev/null"
+check "hold: tiann comment id stored" "jq -e --arg k 'tiann/hapi#100' '.hold[\$k].comment_id == \"5154418101\"' '$WORK/state.json' >/dev/null"
+check "hold: coding peer aaaaaaaa NOT pinged" "! grep -q '^aaaaaaaa' <<<\"\$pings_h\""
+check "hold: bot Findings on #200 did not latch" "! jq -e --arg k 'tiann/hapi#200' '.hold[\$k].acked == false' '$WORK/state.json' >/dev/null"
+check "hold: latch emits without --emit-events (hourly timer path)" "[[ -f '$WORK/events.log' ]] && grep -q 'aaaaaaaa-1111' '$WORK/events.log'"
+
+rm -f "$WORK/pings.log" "$WORK/events.log"
+out="$(run 2>&1)"
+pings_h2="$(cat "$WORK/pings.log" 2>/dev/null || true)"
+check "hold: second run still does not ping peer" "! grep -q '^aaaaaaaa' <<<\"\$pings_h2\""
+check "hold: second run no new emit (silence)" "[[ ! -f '$WORK/events.log' ]]"
+
+hold_ack --state "$WORK/state.json" --repo tiann/hapi 100
+check "hold-ack: acked true" "jq -e --arg k 'tiann/hapi#100' '.hold[\$k].acked == true' '$WORK/state.json' >/dev/null"
+
+rm -f "$WORK/pings.log"
+out="$(run 2>&1)"
+pings_h3="$(cat "$WORK/pings.log" 2>/dev/null || true)"
+check "hold-ack: next run returns to live ⚠️ ping" "grep -q '^aaaaaaaa' <<<\"\$pings_h3\""
+check "hold-ack: OPERATOR HOLD gone from queue" "! grep -q 'OPERATOR HOLD' <<<\"\$out\""
+
+# ============ 23. fork chip repo wins when the number collides with tiann ============
 # heavygee/hapi#124 (open) vs tiann/hapi#124 (closed Jan 2026, no merge).
+# Classifying every number against UPSTREAM_REPO sticky-pings "closed WITHOUT merge".
 rm -f "$WORK/state.json" "$WORK/pings.log" "$WORK/batch.args"
 cat >"$WORK/batch" <<'EOF'
 #!/usr/bin/env bash
@@ -1040,24 +1222,67 @@ check "fork chip: batch invoked with --repo heavygee/hapi" "grep -q -- '--repo h
 check "fork chip: does not inherit tiann closed-without-merge" "! grep -q 'closed WITHOUT merge' <<<\"\$out\""
 check "fork chip: live classify is fork CI/pending" "grep -q 'CI running' <<<\"\$out\""
 
-# ============ blocked-upstream #128: no peer ping on window or transition ============
-rm -f "$WORK/state.json" "$WORK/pings.log" "$WORK/events.log"
-cat >"$WORK/batch" <<'EOF'
+# Dual chips, same number: tiann#124 closed-unmerged must not paint the fork session.
+rm -f "$WORK/state.json" "$WORK/pings.log" "$WORK/batch.args"
+cat >"$WORK/curl" <<'EOF'
 #!/usr/bin/env bash
-j='{}'
-for a in "$@"; do
-    case "$a" in
-        1511) j="$(echo "$j" | jq -c '. + {"1511":{emoji:"⚠️",action:"blocked upstream — wait on #1473 (status:blocked-upstream)",prePr:false,blockedUpstream:true}}')" ;;
-    esac
-done
-echo "$j"
+args="$*"
+if [[ "$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
+if [[ "$args" == *"-X PATCH"* ]]; then echo '{"ok":true}'; exit 0; fi
+if [[ "$args" == *"/api/sessions?limit=500"* ]]; then
+cat <<'JSON'
+{"sessions":[
+ {"id":"e76e5a9f-a7e3-463b-888c-f0f294b369f9","active":true,"metadata":{"name":"Peer #121: operator hold chip","path":"/home/heavygee/coding/hapi/worktrees/operator-hold-chip","externalRefs":[{"kind":"github_pr","repo":"heavygee/hapi","number":124,"url":"https://github.com/heavygee/hapi/pull/124","role":"primary"}]}},
+ {"id":"aaaa1240-0000-4000-8000-tiannclosed01","active":true,"metadata":{"name":"env port leftover","path":"/home/heavygee/coding/hapi/worktrees/old-port","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":124,"url":"https://github.com/tiann/hapi/pull/124","role":"primary"}]}}
+]}
+JSON
+exit 0
+fi
+echo '{}'; exit 0
 EOF
-chmod +x "$WORK/batch"
+chmod +x "$WORK/curl"
+set +e
+out="$(HAPI_META_BATCH_ARGS_LOG="$WORK/batch.args" run --dry-run --no-ping 2>&1)"
+rc=$?
+set -e
+[[ $rc -eq 0 ]] || printf '%s\n' "$out" >&2
+check "dual chip: exits 0" "[[ $rc -eq 0 ]]"
+check "dual chip: classifies both repos" "grep -q -- '--repo heavygee/hapi' '$WORK/batch.args' && grep -q -- '--repo tiann/hapi' '$WORK/batch.args'"
+check "dual chip: fork session keeps CI running" "grep -A2 'e76e5a9f' <<<\"\$out\" | grep -q 'CI running' || grep -q 'e76e5a9f  →  🔁' <<<\"\$out\""
+check "dual chip: tiann session keeps closed-without-merge" "grep -q 'closed WITHOUT merge' <<<\"\$out\""
+
+# Bare hold-ack resolves unique heavygee row (not tiann default).
+cat >"$WORK/hold-only.json" <<'EOF'
+{"schema":1,"hold":{"heavygee/hapi#124":{"acked":false,"comment_id":"1","notified":true}}}
+EOF
+hold_ack --state "$WORK/hold-only.json" 124
+check "hold-ack bare number: acked heavygee row" "jq -e --arg k 'heavygee/hapi#124' '.hold[\$k].acked == true' '$WORK/hold-only.json' >/dev/null"
+
+# Dual unacked holds for the same number must refuse bare ack (no silent tiann default).
+cat >"$WORK/hold-dual.json" <<'EOF'
+{"schema":1,"hold":{
+  "tiann/hapi#124":{"acked":false,"comment_id":"1"},
+  "heavygee/hapi#124":{"acked":false,"comment_id":"2"}
+}}
+EOF
+set +e
+dual_out="$(hold_ack --state "$WORK/hold-dual.json" 124 2>&1)"
+dual_rc=$?
+set -e
+check "hold-ack ambiguous bare: nonzero" "[[ $dual_rc -ne 0 ]]"
+check "hold-ack ambiguous bare: demands --repo" "grep -qi 'ambiguous\\|pass --repo' <<<\"\$dual_out\""
+check "hold-ack ambiguous bare: neither row acked" "jq -e --arg a 'tiann/hapi#124' --arg b 'heavygee/hapi#124' '.hold[\$a].acked == false and .hold[\$b].acked == false' '$WORK/hold-dual.json' >/dev/null"
+hold_ack --state "$WORK/hold-dual.json" --repo heavygee/hapi 124
+check "hold-ack ambiguous with --repo: fork acked" "jq -e --arg k 'heavygee/hapi#124' '.hold[\$k].acked == true' '$WORK/hold-dual.json' >/dev/null"
+check "hold-ack ambiguous with --repo: tiann still held" "jq -e --arg k 'tiann/hapi#124' '.hold[\$k].acked == false' '$WORK/hold-dual.json' >/dev/null"
+
+# Authored open tiann#124 + fork chip only: classify upstream pair; orphan tiann.
+rm -f "$WORK/state.json" "$WORK/pings.log" "$WORK/batch.args"
 cat >"$WORK/gh" <<'EOF'
 #!/usr/bin/env bash
 args="$*"
 if [[ "$args" == *"pr list"* && "$args" == *"--state open"* ]]; then
-    printf '1511\n'; exit 0
+    printf '124\n'; exit 0
 fi
 if [[ "$args" == *"pr list"* && "$args" == *"merged"* ]]; then
     exit 0
@@ -1073,14 +1298,73 @@ cat >"$WORK/curl" <<'EOF'
 args="$*"
 if [[ "$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
 if [[ "$args" == *"-X PATCH"* ]]; then echo '{"ok":true}'; exit 0; fi
-if [[ "$args" == *"/api/system-events"* && "$args" == *"-X POST"* ]]; then
-    echo '{}' >> /dev/null
+if [[ "$args" == *"/api/sessions?limit=500"* ]]; then
+cat <<'JSON'
+{"sessions":[
+ {"id":"e76e5a9f-a7e3-463b-888c-f0f294b369f9","active":true,"metadata":{"name":"Peer #121: operator hold chip","path":"/home/heavygee/coding/hapi/worktrees/operator-hold-chip","externalRefs":[{"kind":"github_pr","repo":"heavygee/hapi","number":124,"url":"https://github.com/heavygee/hapi/pull/124","role":"primary"}]}}
+]}
+JSON
+exit 0
+fi
+echo '{}'; exit 0
+EOF
+chmod +x "$WORK/curl"
+set +e
+out="$(HAPI_META_BATCH_ARGS_LOG="$WORK/batch.args" run --dry-run --no-ping 2>&1)"
+rc=$?
+set -e
+[[ $rc -eq 0 ]] || printf '%s\n' "$out" >&2
+check "upstream discover: classifies tiann and fork" "grep -q -- '--repo heavygee/hapi' '$WORK/batch.args' && grep -q -- '--repo tiann/hapi' '$WORK/batch.args'"
+check "upstream discover: fork session not painted closed" "! grep -q 'e76e5a9f  →  ⚠️' <<<\"\$out\" || grep -q 'CI running' <<<\"\$out\""
+check "upstream discover: tiann#124 is orphan" "grep -q 'tiann/hapi#124' <<<\"\$out\" && grep -qi 'NO HAPI session\\|orphan' <<<\"\$out\""
+
+# Hold ingest must be pair-owned. Authored tiann#124 + fork chip on heavygee#124
+# used to pass the number-only PR_SESSIONS gate and latch a stale upstream 🛑.
+rm -f "$WORK/state.json" "$WORK/pings.log" "$WORK/events.log" "$WORK/gh.args"
+cat >"$WORK/gh" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+echo "$args" >> "${HAPI_META_GH_ARGS_LOG:-/dev/null}"
+if [[ "$args" == *"pr list"* && "$args" == *"--state open"* ]]; then
+    printf '124\n'; exit 0
+fi
+if [[ "$args" == *"pr list"* && "$args" == *"merged"* ]]; then
+    exit 0
+fi
+if [[ "$args" == *"repos/tiann/hapi/issues/124/comments"* ]]; then
+    cat <<'JSON'
+[{"id":9001,"user":{"login":"tiann","type":"User"},"body":"hold the fork work","html_url":"https://github.com/tiann/hapi/pull/124#issuecomment-9001","created_at":"2026-08-11T22:00:00Z"}]
+JSON
+    exit 0
+fi
+if [[ "$args" == *"repos/heavygee/hapi/issues/124/comments"* ]]; then
+    cat <<'JSON'
+[{"id":9002,"user":{"login":"tiann","type":"User"},"body":"please hold this fork PR","html_url":"https://github.com/heavygee/hapi/pull/124#issuecomment-9002","created_at":"2026-08-11T22:01:00Z"}]
+JSON
+    exit 0
+fi
+if [[ "$args" == *"/reviews"* ]]; then
+    echo '[]'; exit 0
+fi
+if [[ "$args" == *"notifications"* ]]; then
+    exit 0
+fi
+exit 0
+EOF
+chmod +x "$WORK/gh"
+cat >"$WORK/curl" <<EOF
+#!/usr/bin/env bash
+args="\$*"
+if [[ "\$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
+if [[ "\$args" == *"-X PATCH"* ]]; then echo '{"ok":true}'; exit 0; fi
+if [[ "\$args" == *"/api/system-events"* && "\$args" == *"-X POST"* ]]; then
+    echo "\$args" >> "$WORK/events.log"
     echo '{"event":{"id":1},"deduped":false}'; exit 0
 fi
-if [[ "$args" == *"/api/sessions?limit=500"* ]]; then
+if [[ "\$args" == *"/api/sessions?limit=500"* ]]; then
 cat <<'JSON'
 {"sessions":[
- {"id":"8e8f4e6e-f8c1-4b17-90d6-92870566a24d","active":true,"metadata":{"name":"Peer #1509: spawn-peer remit","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":1511,"url":"https://github.com/tiann/hapi/pull/1511","role":"primary"}]}}
+ {"id":"e76e5a9f-a7e3-463b-888c-f0f294b369f9","active":true,"metadata":{"name":"Peer #121: operator hold chip","path":"/home/heavygee/coding/hapi/worktrees/operator-hold-chip","externalRefs":[{"kind":"github_pr","repo":"heavygee/hapi","number":124,"url":"https://github.com/heavygee/hapi/pull/124","role":"primary"}]}}
 ]}
 JSON
 exit 0
@@ -1088,22 +1372,93 @@ fi
 echo '{}'; exit 0
 EOF
 chmod +x "$WORK/curl"
-run 2>&1 >/dev/null
-pings_bu="$(cat "$WORK/pings.log" 2>/dev/null || true)"
-check "blocked-upstream run1: no peer ping on first sight" "! grep -q '^8e8f4e6e' <<<\"\$pings_bu\""
-run 2>&1 >/dev/null
-pings_bu2="$(cat "$WORK/pings.log" 2>/dev/null || true)"
-check "blocked-upstream run2: no window-rouse peer ping" "! grep -q '^8e8f4e6e' <<<\"\$pings_bu2\""
+out="$(HAPI_META_GH_ARGS_LOG="$WORK/gh.args" run 2>&1)"
+check "hold pair-own: heavygee latch only" "jq -e --arg k 'heavygee/hapi#124' '.hold[\$k].acked == false' '$WORK/state.json' >/dev/null"
+check "hold pair-own: unlinked tiann not latched" "! jq -e --arg k 'tiann/hapi#124' '.hold | has(\$k)' '$WORK/state.json' >/dev/null"
+check "hold pair-own: skip tiann comment fetch" "! grep -q 'repos/tiann/hapi/issues/124/comments' '$WORK/gh.args'"
+check "hold pair-own: fetch owned fork comments" "grep -q 'repos/heavygee/hapi/issues/124/comments' '$WORK/gh.args'"
+check "hold pair-own: OPERATOR HOLD is fork #124" "grep -A6 'OPERATOR HOLD' <<<\"\$out\" | grep -q 'heavygee/hapi#124\\| #124'"
 
-# ============ blocked-upstream + merged 🔧: cleanup ping must not be suppressed ============
-rm -f "$WORK/state.json" "$WORK/pings.log"
+# hold-ack must not claim success when jq cannot serialize.
+mkdir -p "$WORK/jqbin"
+cat >"$WORK/jqbin/jq" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "." && $# -eq 1 ]]; then
+    exit 1
+fi
+exec /usr/bin/jq "$@"
+EOF
+chmod +x "$WORK/jqbin/jq"
+cat >"$WORK/hold-fail.json" <<'EOF'
+{"schema":1,"hold":{"heavygee/hapi#124":{"acked":false,"comment_id":"1"}}}
+EOF
+set +e
+ack_out="$(PATH="$WORK/jqbin:$PATH" hold_ack --state "$WORK/hold-fail.json" --repo heavygee/hapi 124 2>&1)"
+ack_rc=$?
+set -e
+check "hold-ack serialize fail: nonzero" "[[ $ack_rc -ne 0 ]]"
+check "hold-ack serialize fail: no success line" "! grep -q 'acked heavygee/hapi#124' <<<\"\$ack_out\""
+check "hold-ack serialize fail: row still unacked" "jq -e --arg k 'heavygee/hapi#124' '.hold[\$k].acked == false' '$WORK/hold-fail.json' >/dev/null"
+
+# Agent context must not clear holds (Codex P1) — even with the no-TTY test override.
+set +e
+agent_out="$(HAPI_AGENT_CONTEXT=1 HAPI_HOLD_ACK_ALLOW_NO_TTY= bash "$DIR/hapi-hold-ack.sh" --state "$WORK/hold-fail.json" --repo heavygee/hapi 124 2>&1)"
+agent_rc=$?
+set -e
+check "hold-ack agent context: nonzero" "[[ $agent_rc -ne 0 ]]"
+check "hold-ack agent context: refuses" "grep -qi 'agent context\\|controlling tty\\|operator' <<<\"\$agent_out\""
+check "hold-ack agent context: row still unacked" "jq -e --arg k 'heavygee/hapi#124' '.hold[\$k].acked == false' '$WORK/hold-fail.json' >/dev/null"
+set +e
+agent_bypass_out="$(HAPI_AGENT_CONTEXT=1 HAPI_HOLD_ACK_ALLOW_NO_TTY=1 bash "$DIR/hapi-hold-ack.sh" --state "$WORK/hold-fail.json" --repo heavygee/hapi 124 2>&1)"
+agent_bypass_rc=$?
+set -e
+check "hold-ack agent+ALLOW_NO_TTY: still nonzero" "[[ $agent_bypass_rc -ne 0 ]]"
+check "hold-ack agent+ALLOW_NO_TTY: refuses agent" "grep -qi 'agent context' <<<\"\$agent_bypass_out\""
+check "hold-ack agent+ALLOW_NO_TTY: row still unacked" "jq -e --arg k 'heavygee/hapi#124' '.hold[\$k].acked == false' '$WORK/hold-fail.json' >/dev/null"
+
+# Env-alone forge (unset agent marker + ALLOW_NO_TTY, no sidecar) must not ack.
+cat >"$WORK/hold-forge.json" <<'EOF'
+{"schema":1,"hold":{"heavygee/hapi#124":{"acked":false,"comment_id":"1"}}}
+EOF
+set +e
+forge_out="$(HAPI_AGENT_CONTEXT= HAPI_HOLD_ACK_ALLOW_NO_TTY=1 bash "$DIR/hapi-hold-ack.sh" --state "$WORK/hold-forge.json" --repo heavygee/hapi 124 2>&1)"
+forge_rc=$?
+set -e
+check "hold-ack env-alone forge: nonzero" "[[ $forge_rc -ne 0 ]]"
+check "hold-ack env-alone forge: wants cookie" "grep -qiE 'hold-ack-test|controlling tty|ALLOW_NO_TTY' <<<\"\$forge_out\""
+check "hold-ack env-alone forge: row still unacked" "jq -e --arg k 'heavygee/hapi#124' '.hold[\$k].acked == false' '$WORK/hold-forge.json' >/dev/null"
+
+# Live Meta path + forged sidecar + ALLOW still refuses without tty.
+LIVE_XDG="$WORK/fake-xdg"
+mkdir -p "$LIVE_XDG/hapi"
+cat >"$LIVE_XDG/hapi/meta-daily.json" <<'EOF'
+{"schema":1,"hold":{"heavygee/hapi#124":{"acked":false,"comment_id":"1"}}}
+EOF
+live_state="$LIVE_XDG/hapi/meta-daily.json"
+live_abs="$(cd -- "$(dirname -- "$live_state")" && pwd -P)/$(basename -- "$live_state")"
+printf '%s' "$live_abs" >"${live_state}.hold-ack-test"
+set +e
+live_forge_out="$(XDG_STATE_HOME="$LIVE_XDG" HAPI_AGENT_CONTEXT= HAPI_HOLD_ACK_ALLOW_NO_TTY=1 bash "$DIR/hapi-hold-ack.sh" --repo heavygee/hapi 124 2>&1)"
+live_forge_rc=$?
+set -e
+check "hold-ack live-path forge: nonzero" "[[ $live_forge_rc -ne 0 ]]"
+check "hold-ack live-path forge: refuses" "grep -qiE 'controlling tty|hold-ack-test|ALLOW_NO_TTY|live' <<<\"\$live_forge_out\""
+check "hold-ack live-path forge: row still unacked" "jq -e --arg k 'heavygee/hapi#124' '.hold[\$k].acked == false' '$live_state' >/dev/null"
+
+# ============ 26. blockedUpstream stickyPing=false — no hourly peer nags (#128) ============
+rm -f "$WORK/state.json" "$WORK/pings.log" "$WORK/events.log"
+# Gate A dirty so mixed blocked+🔧 still owes cleanup pings (not archive-only silence).
+cat >"$WORK/manifest.yaml" <<'EOF'
+- branch: feat/shipped-thing
+EOF
 cat >"$WORK/batch" <<'EOF'
 #!/usr/bin/env bash
 j='{}'
 for a in "$@"; do
     case "$a" in
-        1511) j="$(echo "$j" | jq -c '. + {"1511":{emoji:"⚠️",action:"blocked upstream — wait on #1473 (status:blocked-upstream)",prePr:false,blockedUpstream:true}}')" ;;
-        300) j="$(echo "$j" | jq -c '. + {"300":{emoji:"🔧",action:"MERGED — clean up",prePr:false,merged:true,blockedUpstream:false}}')" ;;
+        1511) j="$(echo "$j" | jq -c '. + {"1511":{emoji:"⚠️",action:"blocked upstream — wait on #1473 (status:blocked-upstream)",prePr:false,merged:false,closed:false,dataUnavailable:false,blockedUpstream:true,stickyPing:false}}')" ;;
+        1512) j="$(echo "$j" | jq -c '. + {"1512":{emoji:"⚠️",action:"resolve 1 open thread(s)",prePr:false,merged:false,closed:false,dataUnavailable:false,blockedUpstream:false,stickyPing:true}}')" ;;
+        300) j="$(echo "$j" | jq -c '. + {"300":{emoji:"🔧",action:"MERGED — clean up",prePr:false,merged:true,closed:false,blockedUpstream:false,stickyPing:true}}')" ;;
     esac
 done
 echo "$j"
@@ -1113,29 +1468,37 @@ cat >"$WORK/gh" <<'EOF'
 #!/usr/bin/env bash
 args="$*"
 if [[ "$args" == *"pr list"* && "$args" == *"--state open"* ]]; then
-    printf '1511\n'; exit 0
+    printf '1511\n1512\n'; exit 0
 fi
 if [[ "$args" == *"pr list"* && "$args" == *"merged"* ]]; then
-    printf '300\tfix: shipped thing\t2026-07-24T02:52:06Z\n'; exit 0
+    printf '300\tfix: shipped thing\t2026-07-24T02:52:06Z\n'
+    exit 0
 fi
 if [[ "$args" == *"notifications"* ]]; then
     exit 0
 fi
+if [[ "$args" == *"/comments"* || "$args" == *"/reviews"* ]]; then
+    echo '[]'; exit 0
+fi
 exit 0
 EOF
 chmod +x "$WORK/gh"
-cat >"$WORK/curl" <<'EOF'
+cat >"$WORK/curl" <<EOF
 #!/usr/bin/env bash
-args="$*"
-if [[ "$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
-if [[ "$args" == *"-X PATCH"* ]]; then echo '{"ok":true}'; exit 0; fi
-if [[ "$args" == *"/api/sessions?limit=500"* ]]; then
+args="\$*"
+if [[ "\$args" == *"/api/auth"* ]]; then echo '{"token":"JWT"}'; exit 0; fi
+if [[ "\$args" == *"-X PATCH"* ]]; then echo '{"ok":true}'; exit 0; fi
+if [[ "\$args" == *"/api/system-events"* && "\$args" == *"-X POST"* ]]; then
+    echo "\$args" >> "$WORK/events.log"
+    echo '{"event":{"id":1},"deduped":false}'; exit 0
+fi
+if [[ "\$args" == *"/api/sessions?limit=500"* ]]; then
 cat <<'JSON'
 {"sessions":[
- {"id":"8e8f4e6e-f8c1-4b17-90d6-92870566a24d","active":true,"metadata":{"name":"Peer #1509: spawn-peer remit","externalRefs":[
-  {"kind":"github_pr","repo":"tiann/hapi","number":1511,"url":"https://github.com/tiann/hapi/pull/1511","role":"primary"},
-  {"kind":"github_pr","repo":"tiann/hapi","number":300,"url":"https://github.com/tiann/hapi/pull/300","role":"secondary"}
- ]}}
+ {"id":"bbbbbbbb-1511","active":true,"metadata":{"name":"spawn-peer remit blocked","path":"/tmp/wt-1511","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":1511,"url":"https://github.com/tiann/hapi/pull/1511","role":"primary"}]}},
+ {"id":"cccccccc-1512","active":true,"metadata":{"name":"actionable warn","path":"/tmp/wt-1512","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":1512,"url":"https://github.com/tiann/hapi/pull/1512","role":"primary"}]}},
+ {"id":"dddddddd-both","active":true,"metadata":{"name":"mixed blocked+actionable","path":"/tmp/wt-both","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":1511,"url":"https://github.com/tiann/hapi/pull/1511","role":"primary"},{"kind":"github_pr","repo":"tiann/hapi","number":1512,"url":"https://github.com/tiann/hapi/pull/1512","role":"primary"}]}},
+ {"id":"eeeeeeee-clean","active":true,"metadata":{"name":"mixed blocked+cleanup","path":"/tmp/wt-clean","externalRefs":[{"kind":"github_pr","repo":"tiann/hapi","number":1511,"url":"https://github.com/tiann/hapi/pull/1511","role":"related"},{"kind":"github_pr","repo":"tiann/hapi","number":300,"url":"https://github.com/tiann/hapi/pull/300","role":"primary"}]}}
 ]}
 JSON
 exit 0
@@ -1143,12 +1506,42 @@ fi
 echo '{}'; exit 0
 EOF
 chmod +x "$WORK/curl"
-run 2>&1 >/dev/null
-pings_mix="$(cat "$WORK/pings.log" 2>/dev/null || true)"
-check "blocked+merged run1: peer ping on first sight (🔧 actionable)" "grep -q '^8e8f4e6e' <<<\"\$pings_mix\""
-run 2>&1 >/dev/null
-pings_mix2="$(cat "$WORK/pings.log" 2>/dev/null || true)"
-check "blocked+merged run2: window-rouse peer ping (not suppressed)" "grep -q '^8e8f4e6e' <<<\"\$pings_mix2\""
+
+out="$(run --emit-events 2>&1)"
+pings_b1="$(cat "$WORK/pings.log" 2>/dev/null || true)"
+check "blockedUpstream: still in NEEDS WORK queue" "grep -A20 'NEEDS WORK' <<<\"\$out\" | grep -q '#1511'"
+check "blockedUpstream: first window does NOT ping blocked-only peer" "! grep -q '^bbbbbbbb' <<<\"\$pings_b1\""
+check "blockedUpstream: actionable sibling session still pinged" "grep -q '^cccccccc' <<<\"\$pings_b1\""
+check "blockedUpstream: mixed session still pinged (actionable ⚠️)" "grep -q '^dddddddd' <<<\"\$pings_b1\""
+check "blockedUpstream: mixed blocked+🔧 still pinged (cleanup)" "grep -q '^eeeeeeee' <<<\"\$pings_b1\""
+check "blockedUpstream: no transition emit for blocked-only" "! grep -q 'bbbbbbbb-1511' '$WORK/events.log' 2>/dev/null"
+
+rm -f "$WORK/pings.log" "$WORK/events.log"
+out="$(run --emit-events 2>&1)"
+pings_b2="$(cat "$WORK/pings.log" 2>/dev/null || true)"
+check "blockedUpstream: second window still zero peer pings" "! grep -q '^bbbbbbbb' <<<\"\$pings_b2\""
+check "blockedUpstream: second window no window emit for blocked-only" "! grep -q 'bbbbbbbb-1511' '$WORK/events.log' 2>/dev/null"
+check "blockedUpstream: second window still rouses actionable" "grep -q '^cccccccc' <<<\"\$pings_b2\""
+check "blockedUpstream: second window still rouses blocked+🔧" "grep -q '^eeeeeeee' <<<\"\$pings_b2\""
+
+# Label cleared → stickyPing true restores normal first-sight/window policy
+cat >"$WORK/batch" <<'EOF'
+#!/usr/bin/env bash
+j='{}'
+for a in "$@"; do
+    case "$a" in
+        1511) j="$(echo "$j" | jq -c '. + {"1511":{emoji:"⚠️",action:"resolve 1 open thread(s)",prePr:false,merged:false,closed:false,blockedUpstream:false,stickyPing:true}}')" ;;
+        1512) j="$(echo "$j" | jq -c '. + {"1512":{emoji:"⚠️",action:"resolve 1 open thread(s)",prePr:false,merged:false,closed:false,blockedUpstream:false,stickyPing:true}}')" ;;
+        300) j="$(echo "$j" | jq -c '. + {"300":{emoji:"🔧",action:"MERGED — clean up",prePr:false,merged:true,blockedUpstream:false,stickyPing:true}}')" ;;
+    esac
+done
+echo "$j"
+EOF
+chmod +x "$WORK/batch"
+rm -f "$WORK/pings.log"
+out="$(run 2>&1)"
+pings_b3="$(cat "$WORK/pings.log" 2>/dev/null || true)"
+check "blockedUpstream cleared: peer ping resumes" "grep -q '^bbbbbbbb' <<<\"\$pings_b3\""
 
 echo ""
 echo "hapi-meta-daily.test.sh: $PASS passed, $FAIL failed"

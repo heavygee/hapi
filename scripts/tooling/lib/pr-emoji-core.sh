@@ -492,8 +492,10 @@ pec_blocked_upstream_action() {
 }
 
 # pec_gate_draft_blocked DRAFT LABELS_CSV [BODY]
-# Prints "emoji\taction\tprePr" when a gate fires; empty if no gate.
-# Precedence: status:blocked-upstream (⚠️, prePr=0) beats draft alone (📝, prePr=1).
+# Prints "emoji\taction\tprePr\tblockedUpstream" when a gate fires; empty if no gate.
+# Precedence: status:blocked-upstream (⚠️, prePr=0, blockedUpstream=1) beats draft alone
+# (📝, prePr=1, blockedUpstream=0). blockedUpstream is structured — never infer from
+# statusAction prose (heavygee/hapi#128).
 pec_gate_draft_blocked() {
     local draft="${1:-0}" labels_csv="${2:-}" body="${3:-}"
     local is_draft=0
@@ -501,14 +503,31 @@ pec_gate_draft_blocked() {
         1|true|yes) is_draft=1 ;;
     esac
     if pec_labels_csv_has "$labels_csv" "status:blocked-upstream"; then
-        printf '%s\t%s\t%s' "⚠️" "$(pec_blocked_upstream_action "$body")" "0"
+        printf '%s\t%s\t%s\t%s' "⚠️" "$(pec_blocked_upstream_action "$body")" "0" "1"
         return 0
     fi
     if [[ "$is_draft" -eq 1 ]]; then
-        printf '%s\t%s\t%s' "📝" "draft PR — not ready for green; mark ready when unblocked" "1"
+        printf '%s\t%s\t%s\t%s' "📝" "draft PR — not ready for green; mark ready when unblocked" "1" "0"
         return 0
     fi
     printf ''
+}
+
+# pec_default_sticky_ping EMOJI [BLOCKED_UPSTREAM]
+# Estate stickyPing for peer nags (config/pr-chip-states.yaml). blockedUpstream
+# forces false while keeping ⚠️ / needs_work visible (#128).
+pec_default_sticky_ping() {
+    local emoji="$1" blocked="${2:-0}"
+    case "${blocked,,}" in
+        1|true|yes)
+            printf 'false'
+            return 0
+            ;;
+    esac
+    case "$emoji" in
+        ⚠️|🔧) printf 'true' ;;
+        *) printf 'false' ;;
+    esac
 }
 
 # ---------------------------------------------------------------------------
@@ -522,14 +541,14 @@ pec_action_fingerprint() {
 }
 
 # Decide whether to ping a session, given its previous recorded state.
-#   pec_should_ping NEW_EMOJI PREV_EMOJI NEW_FP PREV_FP LAST_PING_EPOCH NOW_EPOCH REMINDER_SECS [WINDOW_ROUSE] [BLOCKED_UPSTREAM_ONLY]
+#   pec_should_ping NEW_EMOJI PREV_EMOJI NEW_FP PREV_FP LAST_PING_EPOCH NOW_EPOCH REMINDER_SECS [WINDOW_ROUSE] [STICKY_PING]
 # Prints "yes" / "no" and returns 0/1 respectively.
 #
 # Rules:
 #   - "?" (unknown)                     → never ping
 #   - 🧹 (complete)                     → never ping (incl. 🔧→🧹 transition)
 #   - 🛑 (needs_operator)               → never ping the coding peer (operator hold)
-#   - BLOCKED_UPSTREAM_ONLY=1           → never ping (known ext dep; #128)
+#   - STICKY_PING=0|false               → never ping (blocked-upstream-only, #128)
 #   - emoji changed vs recorded state   → ping (transition)
 #   - sticky ⚠️ or 🔧:
 #       - WINDOW_ROUSE=1 (Meta ping windows) → always yes ("are you done yet?")
@@ -537,17 +556,23 @@ pec_action_fingerprint() {
 #       - reminder interval elapsed          → ping (nag)
 #       - otherwise                          → no
 #   - unchanged ✅ / 🔁 / 📝            → no (even on ping windows)
+#
+# STICKY_PING empty → treat as true for ⚠️/🔧 (legacy). Meta aggregates per-PR
+# stickyPing flags before calling; a session with any actionable sticky ⚠️/🔧
+# keeps normal policy even when a sibling PR is blockedUpstream.
 pec_should_ping() {
     local new_emoji="$1" prev_emoji="$2" new_fp="$3" prev_fp="$4" \
         last_ping="${5:-0}" now="${6:-0}" reminder="${7:-86400}" window_rouse="${8:-0}" \
-        blocked_upstream_only="${9:-0}"
+        sticky_ping="${9:-}"
 
-    if [[ "$blocked_upstream_only" == "1" ]]; then
-        echo "no"; return 1
-    fi
     if [[ "$new_emoji" == "?" || "$new_emoji" == "🧹" || "$new_emoji" == "🛑" ]]; then
         echo "no"; return 1
     fi
+    case "${sticky_ping,,}" in
+        0|false|no)
+            echo "no"; return 1
+            ;;
+    esac
     if [[ "$new_emoji" != "$prev_emoji" ]]; then
         echo "yes"; return 0
     fi
@@ -582,24 +607,24 @@ pec_should_rename() {
 # Channel event emit helpers (ContributionState → POST /api/system-events)
 # ---------------------------------------------------------------------------
 
-# pec_emit_reason NEW_EMOJI PREV_EMOJI NEW_FP PREV_FP LAST_PING NOW REMINDER [WINDOW_ROUSE] [BLOCKED_UPSTREAM_ONLY]
+# pec_emit_reason NEW_EMOJI PREV_EMOJI NEW_FP PREV_FP LAST_PING NOW REMINDER [WINDOW_ROUSE] [STICKY_PING]
 # → transition | fingerprint | reminder | window | none
 # Same triggers as pec_should_ping, but returns why (reminder/window need key suffix).
-# BLOCKED_UPSTREAM_ONLY suppresses window/fingerprint/reminder nag emits (#128).
+# STICKY_PING=0|false → none (no window/reminder/fingerprint/transition nags for
+# blocked-upstream-only sessions; #128).
 pec_emit_reason() {
     local new_emoji="$1" prev_emoji="$2" new_fp="$3" prev_fp="$4" \
         last_ping="${5:-0}" now="${6:-0}" reminder="${7:-86400}" window_rouse="${8:-0}" \
-        blocked_upstream_only="${9:-0}"
+        sticky_ping="${9:-}"
 
-    if [[ "$blocked_upstream_only" == "1" ]]; then
-        if [[ -n "$prev_emoji" && "$new_emoji" != "$prev_emoji" ]]; then
-            echo "transition"; return 0
-        fi
-        echo "none"; return 1
-    fi
     if [[ "$new_emoji" == "?" || "$new_emoji" == "🧹" ]]; then
         echo "none"; return 1
     fi
+    case "${sticky_ping,,}" in
+        0|false|no)
+            echo "none"; return 1
+            ;;
+    esac
     if [[ "$new_emoji" != "$prev_emoji" ]]; then
         echo "transition"; return 0
     fi
