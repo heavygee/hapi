@@ -184,6 +184,20 @@ export function hapiMcpGitExcludeMarker(leaseId: string): string {
     return `${HAPI_MCP_GIT_EXCLUDE_MARKER_PREFIX} ${leaseId}`;
 }
 
+/** Lease id embeds owner PID so crash recovery can prune dead markers. */
+export function makeExcludeLeaseId(pid: number = process.pid): string {
+    return `${pid}:${randomUUID()}`;
+}
+
+export function parseExcludeLeasePid(leaseId: string): number | null {
+    const match = /^(\d+):/.exec(leaseId);
+    if (!match) {
+        return null;
+    }
+    const pid = Number(match[1]);
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+
 /** Normalize a repo-relative path for gitignore / exclude (always `/`). */
 export function toGitExcludePattern(relPath: string): string {
     return relPath.replaceAll('\\', '/');
@@ -217,6 +231,7 @@ export function appendExcludeLease(
 ): boolean {
     let added = false;
     withMcpJsonLock(`${excludePath}.hapi.lock`, () => {
+        pruneDeadExcludeLeasesUnlocked(excludePath);
         added = appendExcludeLeaseUnlocked(excludePath, pattern, leaseId);
     });
     return added;
@@ -286,6 +301,42 @@ export function removeExcludeLeaseUnlocked(
     writeFileSync(excludePath, body, { encoding: 'utf-8', mode: 0o644 });
 }
 
+/**
+ * Drop lease blocks whose owner PID is confirmed dead (SIGKILL / power-loss recovery).
+ * Callers must hold `${excludePath}.hapi.lock`.
+ */
+export function pruneDeadExcludeLeasesUnlocked(excludePath: string): void {
+    if (!existsSync(excludePath)) {
+        return;
+    }
+    const lines = readFileSync(excludePath, 'utf-8').split(/\r?\n/);
+    const out: string[] = [];
+    let removed = false;
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]!;
+        if (line.startsWith(`${HAPI_MCP_GIT_EXCLUDE_MARKER_PREFIX} `)) {
+            const leaseId = line.slice(HAPI_MCP_GIT_EXCLUDE_MARKER_PREFIX.length + 1).trim();
+            const pid = parseExcludeLeasePid(leaseId);
+            if (pid !== null && !isProcessAlive(pid)) {
+                removed = true;
+                if (lines[i + 1] !== undefined) {
+                    i += 1;
+                }
+                continue;
+            }
+        }
+        out.push(line);
+    }
+    if (!removed) {
+        return;
+    }
+    while (out.length > 0 && out[out.length - 1] === '') {
+        out.pop();
+    }
+    const body = out.length === 0 ? '' : `${out.join('\n')}\n`;
+    writeFileSync(excludePath, body, { encoding: 'utf-8', mode: 0o644 });
+}
+
 /** @deprecated Use {@link removeExcludeLease}. */
 export function removeExactExcludeBlock(excludePath: string, pattern: string): void {
     withMcpJsonLock(`${excludePath}.hapi.lock`, () => {
@@ -317,6 +368,7 @@ export function removeExactExcludeBlock(excludePath: string, pattern: string): v
  * Keep the session mailbox out of accidental commits: local exclude for
  * untracked `.cursor/mcp.json`, and `skip-worktree` when the file is already tracked
  * and was not already skipped. Undo reverses only what this call introduced.
+ * Throws when Git shielding cannot be installed so callers can roll back the mailbox write.
  */
 export function shieldProjectMcpJsonFromGit(cwd: string, mcpJsonPath: string): () => void {
     const top = spawnSync('git', ['rev-parse', '--show-toplevel'], {
@@ -335,16 +387,22 @@ export function shieldProjectMcpJsonFromGit(cwd: string, mcpJsonPath: string): (
         return () => {};
     }
     const gitRelativePath = toGitExcludePattern(relRaw);
-    const leaseId = randomUUID();
+    const leaseId = makeExcludeLeaseId();
+
+    const excludePath = resolveGitExcludePath(root);
+    if (!excludePath) {
+        throw new Error(`Cannot resolve Git exclude path for ${gitRelativePath}`);
+    }
 
     let addedExclude = false;
-    const excludePath = resolveGitExcludePath(root);
-    if (excludePath) {
-        try {
-            addedExclude = appendExcludeLease(excludePath, gitRelativePath, leaseId);
-        } catch (error) {
-            logger.debug('[cursor-acp] failed to append mcp.json to git exclude', error);
-        }
+    try {
+        addedExclude = appendExcludeLease(excludePath, gitRelativePath, leaseId);
+    } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to exclude ${gitRelativePath}: ${detail}`);
+    }
+    if (!addedExclude) {
+        throw new Error(`Failed to exclude ${gitRelativePath}`);
     }
 
     const tracked = spawnSync('git', ['ls-files', '--error-unmatch', '--', gitRelativePath], {
@@ -364,7 +422,18 @@ export function shieldProjectMcpJsonFromGit(cwd: string, mcpJsonPath: string): (
                 cwd: root,
                 encoding: 'utf-8',
             });
-            setSkipWorktree = skip.status === 0;
+            if (skip.status !== 0) {
+                try {
+                    removeExcludeLease(excludePath, gitRelativePath, leaseId);
+                } catch {
+                    // best-effort undo of exclude before rethrow
+                }
+                const detail = (skip.stderr || skip.stdout || '').trim();
+                throw new Error(
+                    `Failed to mark ${gitRelativePath} skip-worktree${detail ? `: ${detail}` : ''}`,
+                );
+            }
+            setSkipWorktree = true;
         }
     }
 
@@ -679,7 +748,34 @@ export function installCursorMcpOverlay(
         writeMcpJsonAtomic(mcpJsonPath, config);
     });
 
-    const unshieldGit = shieldProjectMcpJsonFromGit(cwd, mcpJsonPath);
+    let unshieldGit: () => void = () => {};
+    try {
+        unshieldGit = shieldProjectMcpJsonFromGit(cwd, mcpJsonPath);
+    } catch (error) {
+        // Roll back the mailbox write so we do not leave an unshielded runtime config.
+        try {
+            withMcpJsonLock(lockPath, () => {
+                if (!existsSync(mcpJsonPath)) {
+                    return;
+                }
+                if (!hadFile) {
+                    rmSync(mcpJsonPath, { force: true });
+                    return;
+                }
+                const current = readMcpJson(mcpJsonPath);
+                current.mcpServers ??= {};
+                if (hadServer && previousServer) {
+                    current.mcpServers[serverId] = previousServer;
+                } else {
+                    delete current.mcpServers[serverId];
+                }
+                writeMcpJsonAtomic(mcpJsonPath, current);
+            });
+        } catch (rollbackError) {
+            logger.debug('[cursor-acp] rollback after git-shield failure failed', rollbackError);
+        }
+        throw error;
+    }
 
     const cleanup = (): void => {
         let safeToUnshield = false;
