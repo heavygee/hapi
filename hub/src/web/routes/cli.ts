@@ -407,11 +407,11 @@ export function createCliRoutes(
             return c.json({ error: 'Source machine not found' }, 404)
         }
         const sourceTag = typeof fromAuth.tag === 'string' ? fromAuth.tag : ''
-        // Pre-tag (v23) machines have tag NULL. Allow that legacy source to
-        // migrate onto a proven destination; if the source already has a tag,
-        // it must match the destination tag (same physical host rotation).
-        if (sourceTag && !constantTimeEquals(sourceTag, machineTag)) {
-            return c.json({ error: 'Source machine tag mismatch' }, 403)
+        // Untagged (v23) sources cannot prove continuity on this namespace endpoint —
+        // any proven destination could absorb their sessions (#1473 Blocker).
+        // Legacy recovery needs an operator-trusted path, not migrate-sessions.
+        if (!sourceTag || !constantTimeEquals(sourceTag, machineTag)) {
+            return c.json({ error: 'Source machine continuity not proven' }, 403)
         }
         try {
             const migrated = engine.migrateSessionsMachineId(fromMachineId, newMachineId, namespace)
