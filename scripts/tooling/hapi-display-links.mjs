@@ -109,9 +109,44 @@ if (!token) {
     console.error('missing CLI_API_TOKEN env and no cliApiToken in settings')
     process.exit(2)
 }
+
+function loadExtraHeaders() {
+    const envRaw = process.env.HAPI_EXTRA_HEADERS_JSON
+    if (envRaw !== undefined) {
+        try {
+            const parsed = JSON.parse(envRaw)
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                return Object.fromEntries(
+                    Object.entries(parsed).filter((entry) => typeof entry[1] === 'string'),
+                )
+            }
+        } catch {
+            // ignore malformed env JSON; match CLI parseExtraHeaders fail-closed-to-empty
+        }
+        return {}
+    }
+    try {
+        const settings = JSON.parse(readFileSync(SETTINGS, 'utf8'))
+        const extra = settings.extraHeaders
+        if (extra && typeof extra === 'object' && !Array.isArray(extra)) {
+            return Object.fromEntries(
+                Object.entries(extra).filter((entry) => typeof entry[1] === 'string'),
+            )
+        }
+    } catch {
+        // settings already parsed for token; missing extraHeaders is fine
+    }
+    return {}
+}
+
+const extraHeaders = loadExtraHeaders()
+function withHubHeaders(base) {
+    return { ...extraHeaders, ...base }
+}
+
 const authRes = await fetch(`${HAPI_HOST}/api/auth`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: withHubHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ accessToken: token }),
 })
 if (!authRes.ok) {
@@ -119,7 +154,7 @@ if (!authRes.ok) {
     process.exit(3)
 }
 const { token: jwt } = await authRes.json()
-const authHeaders = { Authorization: `Bearer ${jwt}` }
+const authHeaders = withHubHeaders({ Authorization: `Bearer ${jwt}` })
 
 async function fetchSessionDetail(sessionId) {
     const detailRes = await fetch(`${HAPI_HOST}/api/sessions/${encodeURIComponent(sessionId)}`, {
