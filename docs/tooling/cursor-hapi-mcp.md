@@ -7,10 +7,11 @@
 ```text
 HAPI Cursor ACP session (CLI wrap)
   ├─ starts HappyServer → metadata.hapiMcpUrl = http://127.0.0.1:<ephemeral>/
-  ├─ installs stdio bridge into user-level Cursor MCP config:
-  │     ~/.cursor/mcp.json  →  key hapi-<sessionId>
+  ├─ installs stdio bridge into **project** Cursor MCP config:
+  │     <cwd>/.cursor/mcp.json  →  key `hapi` (one mailbox)
   │     command: hapi mcp --url <hapiMcpUrl> --tools …
-  ├─ runs `agent mcp enable hapi-<sessionId>` (cwd = session path)
+  │     strips PID-stamped hapi* keys from ~/.cursor/mcp.json (no union load)
+  ├─ runs `agent mcp enable hapi` (cwd = session path)
   └─ on session end: removes only that key (PID-stamped crash recovery on next install)
 
 Hub URL (HAPI_API_URL / :3006)  ≠  MCP --url
@@ -24,7 +25,7 @@ Runner                         ≠  MCP --url
 | `hapi mcp --url …` | Stdio MCP bridge Cursor loads from `mcp.json` |
 | `hapi-display-image.mjs` | Out-of-band POST to a session's `hapiMcpUrl` (no Cursor mcp.json needed) |
 
-Upstream context: Cursor ACP historically ignored `mcpServers` on `session/new` ([forum](https://forum.cursor.com/t/acp-agent-silently-ignores-mcpservers-in-session-new/153623)); HAPI therefore overlays native `~/.cursor/mcp.json`. Project `.cursor/mcp.json` is **intentionally avoided** so ephemeral `hapi-*` bridges are not git-added.
+Upstream context: Cursor ACP historically ignored `mcpServers` on `session/new`. Overlay remains because Cursor **merges** user + project mcp.json. Isolation is project-local `hapi` plus stripping user-level `hapi-*` keys. Gitignore ephemeral `.cursor/mcp.json` so the mailbox is not committed.
 
 ## What agents must not do
 
@@ -45,7 +46,7 @@ Standalone Cursor does not get a HappyServer sidecar. Keeping a pinned loopback 
 - Cursor state lives under `/var/lib/hapi/cursor` with `~/.cursor` → that path (disk hygiene; see janus-oos phase-q). Overlay must **follow** that symlink (fix branch `fix/cursor-mcp-overlay-follow-home-symlink`); a hard refuse of symlinked config dirs breaks install on this host.
 - Optional explicit dir: `HAPI_CURSOR_MCP_CONFIG_DIR=/var/lib/hapi/cursor`.
 - Pre-user-level overlay left **project** `*/.cursor/mcp.json` piles of stale `127.0.0.1:<port>` entries across `~/coding`. Prune with `hapi-prune-stale-cursor-mcp` (below). Live PID-stamped `hapi-*` keys are kept until the owning process exits.
-- **Live multiplex (2026-08-16, provenance dogfood):** user-level `mcp.json` merges **every live** `hapi-<uuid>` sidecar. A Cursor agent in session A can call `ping_peer` on session B's HappyServer. Hub `meta.peer.sourceSessionId` then names the **sidecar process**, not the speaking session. Volumes looked like discord-heavygee / wrong peer while P0.5 chips still verified. Kill-criterion: Jessica (or any) agent `ping_peer` lands with `sourceSessionId` ≠ that agent's session id. Fix is overlay isolation (one enabled `hapi-*` per ACP process), not #1473 provenance code.
+- **Live multiplex (fixed on provenance branch):** unique `hapi-<uuid>` keys in user-level `mcp.json` union-load every sidecar into every Cursor agent. Overlay now writes one `hapi` mailbox to **project** `<cwd>/.cursor/mcp.json` and strips PID-stamped `hapi*` keys from the user file. Same-cwd second live session fails closed. Kill-criterion: `agent mcp list-tools` in a Cursor session shows one HAPI server, and outbound `sourceSessionId` equals that session.
 
 ## Binary skew
 
