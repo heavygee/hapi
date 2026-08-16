@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, mock } from 'bun:test'
 import { Store, type StoredSession } from '../../../store'
 import type { SyncEvent } from '../../../sync/syncEngine'
 import type { CliSocketWithData } from '../../socketTypes'
@@ -6,6 +6,7 @@ import { registerSessionHandlers } from './sessionHandlers'
 
 class FakeSocket {
     readonly roomEvents: Array<{ room: string; event: string; data: unknown }> = []
+    readonly data: { sessionRpcAuthorizedId?: string } = {}
     private readonly handlers = new Map<string, (data: unknown, ack?: (response: unknown) => void) => void>()
 
     on(event: string, handler: (data: unknown, ack?: (response: unknown) => void) => void): this {
@@ -420,5 +421,51 @@ describe('cli session handlers', () => {
             machineId: 'victim-machine',
             name: 'still-allowed',
         })
+    })
+
+    it('ignores session-alive from namespace-only sockets (#1473)', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('alive-gate', {
+            path: '/tmp/project',
+            machineId: 'machine-1',
+        }, null, 'default')
+        const onSessionAlive = mock(() => {})
+        const emitAccessError = mock(() => {})
+        const socket = new FakeSocket()
+        registerSessionHandlers(socket as unknown as CliSocketWithData, {
+            store,
+            resolveSessionAccess: () => ({ ok: true, value: session as StoredSession }),
+            emitAccessError,
+            onSessionAlive,
+        })
+
+        socket.trigger('session-alive', { sid: session.id, time: Date.now() })
+
+        expect(onSessionAlive).not.toHaveBeenCalled()
+        expect(emitAccessError).toHaveBeenCalledWith('session', session.id, 'access-denied')
+    })
+
+    it('forwards session-alive only when sessionRpcAuthorizedId matches (#1473)', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('alive-ok', {
+            path: '/tmp/project',
+            machineId: 'machine-1',
+        }, null, 'default')
+        const onSessionAlive = mock(() => {})
+        const emitAccessError = mock(() => {})
+        const socket = new FakeSocket()
+        socket.data.sessionRpcAuthorizedId = session.id
+        registerSessionHandlers(socket as unknown as CliSocketWithData, {
+            store,
+            resolveSessionAccess: () => ({ ok: true, value: session as StoredSession }),
+            emitAccessError,
+            onSessionAlive,
+        })
+
+        const payload = { sid: session.id, time: 1_700_000_000_000 }
+        socket.trigger('session-alive', payload)
+
+        expect(emitAccessError).not.toHaveBeenCalled()
+        expect(onSessionAlive).toHaveBeenCalledWith(payload)
     })
 })

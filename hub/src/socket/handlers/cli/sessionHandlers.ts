@@ -380,6 +380,13 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             emitAccessError('session', data.sid, sessionAccess.reason)
             return
         }
+        // Heartbeat refreshes `active` used by archive veto — only session-RPC-
+        // authorized sockets may refresh it. Namespace token alone must not
+        // keep a victim session un-archivable forever (#1473).
+        if (socket.data.sessionRpcAuthorizedId !== data.sid) {
+            emitAccessError('session', data.sid, 'access-denied')
+            return
+        }
         onSessionAlive?.(data)
     })
 

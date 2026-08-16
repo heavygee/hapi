@@ -139,7 +139,7 @@ describe('resumeCommand', () => {
         })
     })
 
-    it('continues unattributed when runner local-resume grant fails (#1473)', async () => {
+    it('fails closed when runner local-resume grant fails for an active session (#1473)', async () => {
         delete process.env.HAPI_PEER_CAP_INJECT
         requestRunnerLocalResumeCapabilityMock.mockRejectedValue(new Error('No peercred local-resume grant'))
         getLocalResumeTargetMock.mockResolvedValue({
@@ -155,11 +155,46 @@ describe('resumeCommand', () => {
             collaborationMode: 'default'
         })
 
-        await resumeCommand.run(createContext(['hapi-session-active']))
+        const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never)
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+        try {
+            await resumeCommand.run(createContext(['hapi-session-active']))
+            expect(exitSpy).toHaveBeenCalledWith(1)
+            expect(errorSpy).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.stringContaining('Cannot hand off active session without a resume capability'),
+            )
+            expect(requestRunnerLocalResumeCapabilityMock).toHaveBeenCalledWith('hapi-session-active')
+            expect(armDirectResumeCapabilityMock).not.toHaveBeenCalled()
+            expect(handoffSessionToLocalMock).not.toHaveBeenCalled()
+            expect(runCodexMock).not.toHaveBeenCalled()
+        } finally {
+            exitSpy.mockRestore()
+            errorSpy.mockRestore()
+        }
+    })
 
-        expect(requestRunnerLocalResumeCapabilityMock).toHaveBeenCalledWith('hapi-session-active')
+    it('continues unattributed when runner local-resume grant fails for an inactive session (#1473)', async () => {
+        delete process.env.HAPI_PEER_CAP_INJECT
+        requestRunnerLocalResumeCapabilityMock.mockRejectedValue(new Error('No peercred local-resume grant'))
+        getLocalResumeTargetMock.mockResolvedValue({
+            sessionId: 'hapi-session-inactive',
+            flavor: 'codex',
+            directory: '/tmp/project',
+            machineId: 'machine-1',
+            active: false,
+            thinking: false,
+            controlledByUser: false,
+            agentSessionId: 'codex-thread-1',
+            permissionMode: 'default',
+            collaborationMode: 'default'
+        })
+
+        await resumeCommand.run(createContext(['hapi-session-inactive']))
+
+        expect(requestRunnerLocalResumeCapabilityMock).toHaveBeenCalledWith('hapi-session-inactive')
         expect(armDirectResumeCapabilityMock).not.toHaveBeenCalled()
-        expect(handoffSessionToLocalMock).toHaveBeenCalledWith('hapi-session-active')
+        expect(handoffSessionToLocalMock).not.toHaveBeenCalled()
         expect(runCodexMock).toHaveBeenCalled()
     })
 

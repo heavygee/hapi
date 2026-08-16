@@ -1864,11 +1864,10 @@ export class SyncEngine {
             }
         }
 
-        // Unproven in-flight CLIs keep session-alive without KillSession.
-        // Counting raw room sockets is attacker-controlled (#1473 review).
-        // Counting only sessionRpcAuthorizedId sockets misses this CLI.
-        // Heartbeat is the hub-side liveness signal; expireInactive (~30s)
-        // clears it when the process is actually gone (#916).
+        // Unproven in-flight CLIs used to keep session-alive without KillSession.
+        // session-alive is now gated on sessionRpcAuthorizedId (#1473); active
+        // still means a proven owner refreshed liveness. expireInactive (~30s)
+        // clears it when that process is actually gone (#916).
         const latest = this.sessionCache.getSession(sessionId)
         if (latest?.active) {
             throw new SessionArchiveUncontrollableError(sessionId)
