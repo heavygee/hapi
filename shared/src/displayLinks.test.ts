@@ -5,6 +5,7 @@ import {
     parseDisplayLinksInput,
     parseDisplayLinksToolInput,
     parseDisplayTextsInput,
+    assertBoundDisplayLinksSession,
     safeParseDisplayLinksInput,
     safeParseDisplayTextsInput,
 } from './displayLinks'
@@ -165,5 +166,23 @@ describe('buildDisplayLinksPayload', () => {
         expect(payload.texts[0]?.value).toBe(value)
         expect(JSON.stringify(payload)).toContain('VKK')
         expect(JSON.stringify(payload)).not.toMatch(/"VK"/)
+    })
+})
+
+describe('assertBoundDisplayLinksSession', () => {
+    const bound = 'cc4c5807-34ce-4f2f-b8c1-b18ddc191ff0'
+
+    it('accepts an exact match', () => {
+        expect(() => assertBoundDisplayLinksSession(bound, bound)).not.toThrow()
+    })
+
+    it('rejects a missing caller id', () => {
+        expect(() => assertBoundDisplayLinksSession(bound, undefined)).toThrow(/requires sessionId/)
+        expect(() => assertBoundDisplayLinksSession(bound, '')).toThrow(/requires sessionId/)
+    })
+
+    it('rejects a Kinrupt id on a Sparling-bound server', () => {
+        const kinrupt = '472632df-0000-0000-0000-000000000000'
+        expect(() => assertBoundDisplayLinksSession(bound, kinrupt)).toThrow(/wrong-session/)
     })
 })

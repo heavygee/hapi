@@ -159,6 +159,28 @@ export function parseDisplayLinksToolInput(input: unknown): {
     return { urls, texts }
 }
 
+/**
+ * Cursor routes duplicate MCP tool names to one server when many `hapi-*`
+ * entries share `display_links`. Require the caller session id so a mis-routed
+ * call cannot silently paint another chat.
+ */
+export function assertBoundDisplayLinksSession(boundSessionId: string, callerSessionId: unknown): void {
+    const bound = boundSessionId.trim()
+    if (!bound) {
+        throw new Error('display_links refused: this MCP server has no bound session id')
+    }
+    if (typeof callerSessionId !== 'string' || callerSessionId.trim() === '') {
+        throw new Error(
+            'display_links requires sessionId matching this HAPI session (Cursor may route duplicate MCP tool names to the wrong server)',
+        )
+    }
+    if (callerSessionId.trim() !== bound) {
+        throw new Error(
+            'display_links refused: sessionId does not match this MCP server (wrong-session routing)',
+        )
+    }
+}
+
 export function parseDisplayLinksInput(input: unknown): DisplayLink[] {
     if (!Array.isArray(input)) {
         throw new Error('display_links requires urls: [{ href, title? }]')

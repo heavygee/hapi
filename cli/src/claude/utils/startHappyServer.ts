@@ -20,7 +20,7 @@ import {
 } from "@/modules/common/generatedImages";
 import type { InlineMediaSource } from "@/modules/common/inlineMediaSource";
 import { DISPLAY_IMAGE_PROMPT_CURSOR, DISPLAY_LINKS_PROMPT_CURSOR, DISPLAY_MEDIA_PROMPT_CURSOR, DISPLAY_VIDEO_PROMPT_CURSOR } from "@/modules/common/displayImagePrompt";
-import { buildDisplayLinksPayload, parseDisplayLinksToolInput } from "@hapi/protocol";
+import { buildDisplayLinksPayload, parseDisplayLinksToolInput, assertBoundDisplayLinksSession } from "@hapi/protocol";
 import { resolveSkill } from "@/modules/common/skills";
 import {
     INSPECT_PEER_TOOL_DESCRIPTION,
@@ -137,6 +137,7 @@ function createHapiMcpServer(
             }),
             z.string().min(1).max(8192),
         ])).min(1).max(20).optional().describe('Optional exact-copy strings (secrets, tokens, SHAs, tags, MagicDNS labels)'),
+        sessionId: z.string().min(1).optional().describe('This chat\'s HAPI session id (required at runtime). Cursor routes duplicate MCP tool names to one server; a mismatch means the call landed on the wrong session MCP.'),
     });
 
     const pingPeerInputSchema: z.ZodTypeAny = z.object({
@@ -330,10 +331,21 @@ function createHapiMcpServer(
         }, async (args: {
             urls?: Array<{ href: string; title?: string } | string>
             texts?: Array<{ value: string; title?: string } | string>
+            sessionId?: string
         }) => {
-            logger.debug('[hapiMCP] Display links: urls=', args.urls?.length ?? 0, 'texts=', args.texts?.length ?? 0);
+            logger.debug(
+                '[hapiMCP] Display links: bound=',
+                client.sessionId,
+                'caller=',
+                args.sessionId,
+                'urls=',
+                args.urls?.length ?? 0,
+                'texts=',
+                args.texts?.length ?? 0,
+            );
 
             try {
+                assertBoundDisplayLinksSession(client.sessionId, args.sessionId);
                 const parsed = parseDisplayLinksToolInput(args);
                 client.sendAgentMessage(buildDisplayLinksPayload({
                     urls: parsed.urls,
