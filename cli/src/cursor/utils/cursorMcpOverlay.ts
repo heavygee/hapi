@@ -174,6 +174,75 @@ export type CursorMcpOverlayHandle = {
     cleanup: () => void;
 };
 
+/** Marker line in `.git/info/exclude` for session-local project mcp.json. */
+export const HAPI_MCP_GIT_EXCLUDE_MARKER = '# hapi-cursor-mcp-overlay (do not commit session mailbox)';
+
+/**
+ * Keep the session mailbox out of accidental commits: local exclude for
+ * untracked `.cursor/mcp.json`, and `skip-worktree` when the file is already tracked.
+ * Returns an undo that clears skip-worktree (exclude line is left — harmless).
+ */
+export function shieldProjectMcpJsonFromGit(cwd: string, mcpJsonPath: string): () => void {
+    const top = spawnSync('git', ['rev-parse', '--show-toplevel'], {
+        cwd,
+        encoding: 'utf-8',
+    });
+    if (top.status !== 0) {
+        return () => {};
+    }
+    const root = top.stdout.trim();
+    if (!root) {
+        return () => {};
+    }
+    const rel = relative(root, mcpJsonPath);
+    if (!rel || rel.startsWith('..') || isAbsolute(rel)) {
+        return () => {};
+    }
+
+    const gitDirProc = spawnSync('git', ['rev-parse', '--git-dir'], {
+        cwd: root,
+        encoding: 'utf-8',
+    });
+    if (gitDirProc.status === 0) {
+        const gitDirRaw = gitDirProc.stdout.trim();
+        const gitDir = isAbsolute(gitDirRaw) ? gitDirRaw : resolvePath(root, gitDirRaw);
+        const excludePath = join(gitDir, 'info', 'exclude');
+        try {
+            mkdirSync(join(gitDir, 'info'), { recursive: true });
+            const existing = existsSync(excludePath) ? readFileSync(excludePath, 'utf-8') : '';
+            if (!existing.split(/\r?\n/).includes(rel)) {
+                const prefix = existing.length === 0 || existing.endsWith('\n') ? '' : '\n';
+                writeFileSync(
+                    excludePath,
+                    `${prefix}${HAPI_MCP_GIT_EXCLUDE_MARKER}\n${rel}\n`,
+                    { encoding: 'utf-8', mode: 0o644 },
+                );
+            }
+        } catch (error) {
+            logger.debug('[cursor-acp] failed to append mcp.json to git exclude', error);
+        }
+    }
+
+    const tracked = spawnSync('git', ['ls-files', '--error-unmatch', '--', rel], {
+        cwd: root,
+        encoding: 'utf-8',
+    });
+    if (tracked.status !== 0) {
+        return () => {};
+    }
+
+    spawnSync('git', ['update-index', '--skip-worktree', '--', rel], {
+        cwd: root,
+        encoding: 'utf-8',
+    });
+    return () => {
+        spawnSync('git', ['update-index', '--no-skip-worktree', '--', rel], {
+            cwd: root,
+            encoding: 'utf-8',
+        });
+    };
+}
+
 type EnableCursorMcpResult = {
     status: number | null;
     stdout?: string | null;
@@ -468,7 +537,14 @@ export function installCursorMcpOverlay(
         writeMcpJsonAtomic(mcpJsonPath, config);
     });
 
+    const unshieldGit = shieldProjectMcpJsonFromGit(cwd, mcpJsonPath);
+
     const cleanup = (): void => {
+        try {
+            unshieldGit();
+        } catch (error) {
+            logger.debug('[cursor-acp] cursor MCP overlay git unshield failed', error);
+        }
         try {
             withMcpJsonLock(lockPath, () => {
                 if (!existsSync(mcpJsonPath)) {
