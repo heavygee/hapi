@@ -31,6 +31,11 @@ Dogfood result: every live Cursor session's HAPI MCP tools union-load into every
 2. Two concurrent sessions in the **same** cwd: second fails closed (no dual `hapi` owners)
 3. Stale `hapi-<uuid>` user entries for dead PIDs are pruned; live ones not nuked mid-flight
 4. Symlinked project `.cursor` → refuse install (no escape to user dir)
+5. Estate `~/coding → /work/coding`: realpath cwd + symlink-prefix `mcpConfigDir` must still install (fixed `1794f48cf`)
+
+## Dogfood log
+
+- 2026-08-16 remat `ebe4658f8`: FAIL — overlay refused (`escapes session cwd`) on first ACP in `cursor-mcp-isolation` because `.cursor` did not exist yet under symlink prefix. Tip `1794f48cf` fixes; awaiting remat.
 
 ## Test
 
