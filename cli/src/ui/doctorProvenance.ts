@@ -87,6 +87,14 @@ export async function fetchProvenanceDiagnostics(
     return await res.json() as ProvenanceDiagnostics
 }
 
+/** Strip C0/C1 controls so stored peer/session labels cannot hijack the TTY (#1473). */
+export function safeTerminalText(value: string): string {
+    return Array.from(value, (char) => {
+        const code = char.charCodeAt(0)
+        return code < 0x20 || (code >= 0x7f && code <= 0x9f) ? ' ' : char
+    }).join('')
+}
+
 function formatIssues(issues: ProvenanceIssueCode[]): string {
     if (issues.length === 0) {
         return chalk.green('ok')
@@ -95,7 +103,7 @@ function formatIssues(issues: ProvenanceIssueCode[]): string {
 }
 
 function formatSessionRow(row: SessionProvenanceRow): string {
-    const label = row.name ?? row.sessionId.slice(0, 8)
+    const label = safeTerminalText(row.name ?? row.sessionId.slice(0, 8))
     const pid = row.hostPid !== null ? ` pid=${row.hostPid}` : ''
     const machine = row.machineId ? ` machine=${row.machineId.slice(0, 8)}` : ''
     const lifecycle = row.lifecycleState ? ` lifecycle=${row.lifecycleState}` : ''
@@ -110,22 +118,22 @@ function formatSessionRow(row: SessionProvenanceRow): string {
 }
 
 function formatMachineRow(row: MachineProvenanceRow): string {
-    const label = row.displayName ?? row.host ?? row.machineId.slice(0, 8)
+    const label = safeTerminalText(row.displayName ?? row.host ?? row.machineId.slice(0, 8))
     const spawn = row.hasSpawnRpc ? chalk.green('spawn') : chalk.red('no-spawn')
     const proof = row.hasRunnerProof ? chalk.green('proof') : chalk.red('no-proof')
-    const version = row.happyCliVersion ? ` cli=${row.happyCliVersion}` : ''
+    const version = row.happyCliVersion ? ` cli=${safeTerminalText(row.happyCliVersion)}` : ''
     return [
         `  ${chalk.blue(label)} (${row.machineId.slice(0, 8)})`,
-        `    host=${row.host ?? '(unknown)'}${version}`,
+        `    host=${safeTerminalText(row.host ?? '(unknown)')}${version}`,
         `  rpc=${spawn} proof=${proof}  ${formatIssues(row.issues)}`,
     ].join('\n')
 }
 
 function formatUnverifiedMessageRow(row: UnverifiedPeerMessageRow): string {
-    const sessionLabel = row.sessionName ?? row.sessionId.slice(0, 8)
+    const sessionLabel = safeTerminalText(row.sessionName ?? row.sessionId.slice(0, 8))
     const claimed = row.claimedPeerHeaderInText ? chalk.yellow(' prose-From:') : ''
     const preview = row.textPreview
-        ? ` "${row.textPreview}"`
+        ? ` "${safeTerminalText(row.textPreview)}"`
         : ''
     return [
         `  ${chalk.yellow('peer?')} ${chalk.cyan(sessionLabel)} seq=${row.seq}`,
