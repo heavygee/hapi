@@ -687,6 +687,8 @@ This app **vendors** [`heavygee/hapi-inline`](https://github.com/heavygee/hapi-i
 
 Canon: `hapi-inline` → `docs/CONSUMER_CONTRACT.md`. App mic router: `docs/APP_ROUTER_AGENT.md`. Package gate session title: **hapi-inline ownership**.
 
+**Package checkout / spawn host (2026-08-16):** `~/coding/hapi-inline` on **oos-linux** (hub/runner). Do not spawn package peers onto proxmox/homelab. The old ownership session on proxmox is archive context only.
+
 ## hapi-inline — app router (this project)
 
 This app's operator mic targets **this** session as the **app router** (not a global cross-app dispatcher). Default pin: `HAPI_INLINE_SESSION` (Peer #120: hapi-inline in HAPI web). Picker lists sessions whose `metadata.path` is under `/home/heavygee/coding/hapi`.
