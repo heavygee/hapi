@@ -24,7 +24,7 @@ import {
     writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { isAbsolute, join, relative, resolve as resolvePath } from 'node:path';
+import { basename, isAbsolute, join, relative, resolve as resolvePath } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { logger } from '@/ui/logger';
@@ -75,6 +75,11 @@ function resolveExistingPath(path: string): string {
  * Project `.cursor` is untrusted (repo can ship a symlink to ~/.cursor).
  * Refuse links / realpaths that escape the session cwd. Operator user-dir
  * may follow estate-disk symlinks via {@link resolveExistingPath}.
+ *
+ * Canonicalize via the parent of `.cursor` before the containment check so
+ * estate layouts like `~/coding -> /work/coding` do not false-positive when
+ * `session.path` is already realpath'd but `mcpConfigDir` still uses the
+ * symlink prefix (common on first install when `.cursor` does not exist yet).
  */
 export function resolveProjectCursorConfigDir(cwd: string, mcpConfigDir: string): string {
     const lexical = resolvePath(resolveCursorMcpConfigDir(mcpConfigDir));
@@ -85,20 +90,22 @@ export function resolveProjectCursorConfigDir(cwd: string, mcpConfigDir: string)
         );
     }
     const realCwd = resolveExistingPath(resolvePath(cwd));
-    const lexicalRel = relative(realCwd, lexical);
-    if (lexicalRel.startsWith('..') || isAbsolute(lexicalRel)) {
+    const realParent = resolveExistingPath(resolvePath(lexical, '..'));
+    const candidate = join(realParent, basename(lexical));
+    const candidateRel = relative(realCwd, candidate);
+    if (candidateRel.startsWith('..') || isAbsolute(candidateRel)) {
         throw new Error(
             `Project Cursor config dir escapes session cwd: ${lexical}`,
         );
     }
-    if (!existsSync(lexical)) {
-        return lexical;
+    if (!existsSync(candidate)) {
+        return candidate;
     }
     let resolved: string;
     try {
-        resolved = realpathSync(lexical);
+        resolved = realpathSync(candidate);
     } catch {
-        return lexical;
+        return candidate;
     }
     const rel = relative(realCwd, resolved);
     if (rel.startsWith('..') || isAbsolute(rel)) {
