@@ -24,7 +24,6 @@ import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
 import { UsageStore } from './usageStore'
 import { WorkGraphStore } from './workGraphStore'
-import { bindReenrollGrantDb } from '../utils/reenrollGrant'
 import { scanUnverifiedPeerMessages as scanUnverifiedPeerMessagesInDb } from './provenanceMessageScan'
 import type { ProvenanceMessageScanOptions } from '@hapi/protocol/provenanceMessageAudit'
 
@@ -142,7 +141,6 @@ export class Store {
         this.db.exec('PRAGMA foreign_keys = ON')
         this.db.exec('PRAGMA busy_timeout = 5000')
         this.initSchema()
-        bindReenrollGrantDb(this.db)
 
         // Soup tip keeps SCHEMA_VERSION=23 (tolerate-ahead). Wake columns for
         // #1489 are additive and must exist even when user_version is already ahead.
@@ -488,6 +486,7 @@ export class Store {
             );
             CREATE INDEX IF NOT EXISTS idx_machines_namespace ON machines(namespace);
 
+            -- Orphaned: reenroll-grant HTTP paths return 410; no TS writers (#1473).
             CREATE TABLE IF NOT EXISTS machine_reenroll_grants (
                 grant_hash TEXT PRIMARY KEY,
                 machine_id TEXT NOT NULL,

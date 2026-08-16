@@ -367,22 +367,21 @@ function tryReceiveOnce(
 /**
  * Authorize a peer-cap inject client for an armed `deliverTo(childPid, …)`.
  *
- * Linux/macOS require SO_PEERCRED and a descendant of `expectedChildPid`.
- * Bun on Windows exposes named-pipe `_handle.fd === -1`, so
- * `GetNamedPipeClientProcessId` cannot run (Teemo 2026-08-11: every resume
- * hit `auth_failed` → `peer capability inject timed out`). When credentials
- * are unavailable on win32, possession of the ephemeral pipe path (set only
- * in the child env) is the auth — still requires an armed deliverTo.
+ * Requires peer credentials (SO_PEERCRED / GetNamedPipeClientProcessId) and a
+ * descendant of `expectedChildPid`. Fail closed when credentials are missing —
+ * including Bun-on-Windows where named-pipe `_handle.fd === -1` so client pid
+ * cannot be read. Possession of an enumerable `\\.\pipe\*` path is not auth
+ * (#1473 cold Major); Windows then stays unattributed until peercred works.
  */
 export function authorizePeerCapInjectClient(
     cred: PeerCredentials | null,
     expectedChildPid: number,
-    platform: NodeJS.Platform = process.platform,
+    _platform: NodeJS.Platform = process.platform,
 ): boolean {
-    if (cred) {
-        return isProcessDescendant(cred.pid, expectedChildPid)
+    if (!cred) {
+        return false
     }
-    return platform === 'win32'
+    return isProcessDescendant(cred.pid, expectedChildPid)
 }
 
 /** Windows client → verify named-pipe server PID (#1473 Major). */

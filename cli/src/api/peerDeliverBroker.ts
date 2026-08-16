@@ -254,21 +254,19 @@ function readSocketLine(socket: Socket): Promise<string> {
 /**
  * Child verifies the broker listener.
  *
- * Linux/macOS: SO_PEERCRED and ancestor (or exported server PID).
- * Win32: Bun named-pipe `_handle.fd === -1`, so GetNamedPipeServerProcessId
- * never runs. Null cred + possession of the ephemeral pipe path (env) is the
- * auth — same as inject. Mapping that to `auth_failed` strands `hapi ping-peer`
- * on Teemo; `broker_unavailable` would drop every live Windows broker to
- * unattributed.
+ * Requires peer credentials identifying the broker process. Fail closed when
+ * credentials are missing (including Bun-on-Windows fd=-1 named pipes) —
+ * pipe-path possession is not auth (#1473 cold Major). Windows then surfaces
+ * `auth_failed` / unattributed delivery until peercred works.
  */
 export function authorizeBrokerListener(
     cred: PeerCredentials | null,
     expectedServerPid: number | undefined,
     childPid: number = process.pid,
-    platform: NodeJS.Platform = process.platform,
+    _platform: NodeJS.Platform = process.platform,
 ): boolean {
     if (!cred) {
-        return platform === 'win32'
+        return false
     }
     if (expectedServerPid !== undefined) {
         return cred.pid === expectedServerPid
