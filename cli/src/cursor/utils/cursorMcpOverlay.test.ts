@@ -25,6 +25,7 @@ import {
     isProcessAlive,
     readLockOwner,
     resolveCursorMcpConfigDir,
+    resolveProjectCursorConfigDir,
     withMcpJsonLock,
     writeMcpJsonAtomic,
 } from './cursorMcpOverlay';
@@ -455,6 +456,38 @@ describe('installCursorMcpOverlay', () => {
             enableCursorMcp: noopEnable,
             mcpConfigDir: join(cwd, '.cursor'),
         })).toThrow(/Refusing a symlinked project Cursor config dir/);
+    });
+
+    it('accepts symlink-prefix mcpConfigDir when cwd is already realpath (estate ~/coding → /work/coding)', () => {
+        // Mimic oos: session.path realpath'd under /work/..., mcpConfigDir still via ~/coding symlink.
+        const root = join(tmpdir(), `hapi-coding-link-${randomUUID()}`);
+        const workRoot = join(root, 'work', 'proj');
+        const homeCoding = join(root, 'home', 'coding');
+        mkdirSync(workRoot, { recursive: true });
+        mkdirSync(join(root, 'home'), { recursive: true });
+        symlinkSync(join(root, 'work'), homeCoding);
+        const symlinkCwd = join(homeCoding, 'proj');
+        const realCwd = workRoot;
+        const viaSymlinkCursor = join(symlinkCwd, '.cursor');
+
+        expect(resolveProjectCursorConfigDir(realCwd, viaSymlinkCursor)).toBe(join(realCwd, '.cursor'));
+
+        const handle = installCursorMcpOverlay(realCwd, {
+            command: '/bin/hapi',
+            args: ['mcp', '--url', 'http://127.0.0.1:12345/'],
+        }, {
+            serverId: CURSOR_HAPI_MCP_SERVER_ID,
+            overlaySessionId: 'session-a',
+            enableCursorMcp: noopEnable,
+            mcpConfigDir: viaSymlinkCursor,
+        });
+        expect(existsSync(join(realCwd, '.cursor', 'mcp.json'))).toBe(true);
+        const written = JSON.parse(readFileSync(join(realCwd, '.cursor', 'mcp.json'), 'utf-8')) as {
+            mcpServers: Record<string, unknown>;
+        };
+        expect(written.mcpServers[CURSOR_HAPI_MCP_SERVER_ID]).toBeTruthy();
+        handle.cleanup();
+        rmSync(root, { recursive: true, force: true });
     });
 
     it('refuses a symlinked .cursor/mcp.json and leaves the external target unchanged', () => {
