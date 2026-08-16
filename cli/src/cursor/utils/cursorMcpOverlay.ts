@@ -208,8 +208,22 @@ function resolveGitExcludePath(root: string): string | null {
  * Append a per-install lease block (marker + pattern). Multiple live overlays
  * may share the same pattern across linked worktrees; each keeps its own lease
  * line so cleanup is reference-counted by presence of remaining leases.
+ * Serialized via {@link withMcpJsonLock} on `${excludePath}.hapi.lock`.
  */
 export function appendExcludeLease(
+    excludePath: string,
+    pattern: string,
+    leaseId: string,
+): boolean {
+    let added = false;
+    withMcpJsonLock(`${excludePath}.hapi.lock`, () => {
+        added = appendExcludeLeaseUnlocked(excludePath, pattern, leaseId);
+    });
+    return added;
+}
+
+/** Unlocked RMW — callers must hold `${excludePath}.hapi.lock`. */
+export function appendExcludeLeaseUnlocked(
     excludePath: string,
     pattern: string,
     leaseId: string,
@@ -241,6 +255,17 @@ export function removeExcludeLease(
     pattern: string,
     leaseId: string,
 ): void {
+    withMcpJsonLock(`${excludePath}.hapi.lock`, () => {
+        removeExcludeLeaseUnlocked(excludePath, pattern, leaseId);
+    });
+}
+
+/** Unlocked RMW — callers must hold `${excludePath}.hapi.lock`. */
+export function removeExcludeLeaseUnlocked(
+    excludePath: string,
+    pattern: string,
+    leaseId: string,
+): void {
     if (!existsSync(excludePath)) {
         return;
     }
@@ -263,27 +288,29 @@ export function removeExcludeLease(
 
 /** @deprecated Use {@link removeExcludeLease}. */
 export function removeExactExcludeBlock(excludePath: string, pattern: string): void {
-    if (!existsSync(excludePath)) {
-        return;
-    }
-    const lines = readFileSync(excludePath, 'utf-8').split(/\r?\n/);
-    const out: string[] = [];
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i]!;
-        if (
-            line.startsWith(`${HAPI_MCP_GIT_EXCLUDE_MARKER_PREFIX} `)
-            && lines[i + 1] === pattern
-        ) {
-            i += 1;
-            continue;
+    withMcpJsonLock(`${excludePath}.hapi.lock`, () => {
+        if (!existsSync(excludePath)) {
+            return;
         }
-        out.push(line);
-    }
-    while (out.length > 0 && out[out.length - 1] === '') {
-        out.pop();
-    }
-    const body = out.length === 0 ? '' : `${out.join('\n')}\n`;
-    writeFileSync(excludePath, body, { encoding: 'utf-8', mode: 0o644 });
+        const lines = readFileSync(excludePath, 'utf-8').split(/\r?\n/);
+        const out: string[] = [];
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i]!;
+            if (
+                line.startsWith(`${HAPI_MCP_GIT_EXCLUDE_MARKER_PREFIX} `)
+                && lines[i + 1] === pattern
+            ) {
+                i += 1;
+                continue;
+            }
+            out.push(line);
+        }
+        while (out.length > 0 && out[out.length - 1] === '') {
+            out.pop();
+        }
+        const body = out.length === 0 ? '' : `${out.join('\n')}\n`;
+        writeFileSync(excludePath, body, { encoding: 'utf-8', mode: 0o644 });
+    });
 }
 
 /**
