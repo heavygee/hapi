@@ -255,9 +255,11 @@ export async function loadServerSettings(dataDir: string): Promise<ServerSetting
                 settings.githubPrAwareness = githubPrAwareness
                 needsSave = true
             }
-        } else if (settings.githubPrAwareness !== undefined) {
-            githubPrAwareness = Boolean(settings.githubPrAwareness)
+        } else if (typeof settings.githubPrAwareness === 'boolean') {
+            githubPrAwareness = settings.githubPrAwareness
             sources.githubPrAwareness = 'file'
+        } else if (settings.githubPrAwareness !== undefined) {
+            throw new Error('githubPrAwareness must be a boolean')
         }
 
         return {

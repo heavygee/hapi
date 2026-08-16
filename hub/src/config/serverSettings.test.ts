@@ -63,6 +63,15 @@ describe('loadServerSettings', () => {
         }
     })
 
+    it('rejects a non-boolean githubPrAwareness setting', async () => {
+        dir = makeTempDir()
+        writeFileSync(join(dir, 'settings.json'), JSON.stringify({
+            githubPrAwareness: 'false'
+        }))
+
+        await expect(loadServerSettings(dir)).rejects.toThrow('githubPrAwareness must be a boolean')
+    })
+
     it('defaults ServerChan background-only mode to disabled', async () => {
         dir = makeTempDir()
 
