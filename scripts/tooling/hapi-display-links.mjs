@@ -8,7 +8,8 @@
  * Usage:
  *   # inside a wrapped session (self-targets via $HAPI_SESSION_ID — no list):
  *   bun scripts/tooling/hapi-display-links.mjs <href> [title]
- *   bun scripts/tooling/hapi-display-links.mjs self <href> [title]
+ *   bun scripts/tooling/hapi-display-links.mjs --text-stdin [title]
+ *   printf '%s' "$secret" | bun scripts/tooling/hapi-display-links.mjs --text-stdin
  * Other-session / cross-runner targeting is refused (loopback MCP).
  *
  * Construct landmine hosts by concatenation in the calling script ("tia"+"nn"),
@@ -68,8 +69,24 @@ let sessionArg
 let href
 let title
 let texts
+const stdinIndex = args.indexOf('--text-stdin')
 const textIndex = args.indexOf('--text')
-if (textIndex >= 0) {
+if (stdinIndex >= 0) {
+    if (textIndex >= 0) {
+        console.error('use --text or --text-stdin, not both')
+        process.exit(2)
+    }
+    const before = args.slice(0, stdinIndex)
+    sessionArg = before[0] && !looksLikeHref(before[0]) ? before[0] : null
+    href = null
+    title = args[stdinIndex + 1]
+    const value = (await Bun.stdin.text()).replace(/\r?\n$/, '')
+    if (!value.trim()) {
+        console.error('usage: hapi-display-links.mjs [self] --text-stdin [title]')
+        process.exit(2)
+    }
+    texts = title ? [{ value, title }] : [{ value }]
+} else if (textIndex >= 0) {
     const value = args[textIndex + 1]
     if (!value) {
         console.error('usage: hapi-display-links.mjs [self] --text <value> [title]')
@@ -93,6 +110,7 @@ if (textIndex >= 0) {
 if (!href && !(texts && texts.length > 0)) {
     console.error('usage: hapi-display-links.mjs [self] <href> [title]')
     console.error('  or: hapi-display-links.mjs [self] --text <value> [title]')
+    console.error('  or: hapi-display-links.mjs [self] --text-stdin [title]  (secrets: not on argv)')
     console.error('  or: HAPI_SESSION_ID=<uuid> hapi-display-links.mjs <href> [title]')
     process.exit(2)
 }
