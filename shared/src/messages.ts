@@ -139,6 +139,19 @@ export function extractAssistantPlainText(content: unknown): string | null {
     return null
 }
 
+// AGY sometimes echoes an async task's raw result into its own PLANNER_RESPONSE
+// prose. The web renderer strips this block and renders the corresponding task
+// result separately, so keep it out of the searchable assistant text as well.
+export function stripAgyEchoedTaskResult(text: string): string {
+    return text.replace(/\n*\[Message\]\s+timestamp=[\s\S]*$/, '').trim()
+}
+
+// AGY's transitional task-log narration is rendered as a compact tool chip,
+// not an assistant text bubble. Return its task number for renderer/index parity.
+export function getAgyTaskLogId(text: string): string | null {
+    return text.match(/^Inside the task-(\d+) log\b/)?.[1] ?? null
+}
+
 function normalizeSearchablePlainText(value: string): string | null {
     const text = value.trim().replace(/\s+/g, ' ')
     return text.length > 0 ? text : null
@@ -212,6 +225,10 @@ export function extractSearchableMessageText(value: unknown): SearchableMessage 
     if (record.role === 'agent' || record.role === 'assistant') {
         if (isHiddenAssistantOutput(record.content)) return null
         const renderKey = getMessageRenderKey(record.content)
+        const isAgyPlannerMessage = isObject(record.content)
+            && record.content.type === 'output'
+            && isObject(record.content.data)
+            && record.content.data.type === 'agy_message'
         const directText = typeof record.content === 'string'
             ? record.content
             : isObject(record.content)
@@ -220,9 +237,14 @@ export function extractSearchableMessageText(value: unknown): SearchableMessage 
                 ? record.content.text
                 : null
         const text = normalizeSearchablePlainText(
-            stripNotifySummaryFooter(directText ?? extractAssistantPlainText(record.content) ?? '')
+            stripNotifySummaryFooter(
+                isAgyPlannerMessage
+                    ? stripAgyEchoedTaskResult(directText ?? extractAssistantPlainText(record.content) ?? '')
+                    : (directText ?? extractAssistantPlainText(record.content) ?? '')
+            )
         )
-        return text ? { role: 'assistant', text, ...(renderKey ? { renderKey } : {}) } : null
+        if (!text || (isAgyPlannerMessage && getAgyTaskLogId(text))) return null
+        return { role: 'assistant', text, ...(renderKey ? { renderKey } : {}) }
     }
 
     return null

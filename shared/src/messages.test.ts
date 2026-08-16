@@ -5,8 +5,10 @@ import {
     extractSearchableMessageText,
     extractUserPlainText,
     extractNotifySummary,
+    getAgyTaskLogId,
     isRedundantGoalStatusEventContent,
     splitNotifySummary,
+    stripAgyEchoedTaskResult,
     stripNotifySummaryFooter,
     type NotifySummary
 } from './messages'
@@ -180,6 +182,34 @@ describe('extractSearchableMessageText', () => {
         expect(extractSearchableMessageText({
             role: 'agent',
             content: 'AGENT_NOTIFY_SUMMARY {"status":"done","summary":"Only footer"}'
+        })).toBeNull()
+    })
+
+    test('matches the rendered AGY text by removing echoed task results', () => {
+        expect(stripAgyEchoedTaskResult(
+            'Inside the task-246 log...\n[Message] timestamp=2026-07-08T06:04:31Z sender=u/task-246 content=Task finished with result:\nHidden task output'
+        )).toBe('Inside the task-246 log...')
+
+        expect(extractSearchableMessageText({
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'agy_message',
+                    content: 'Visible planner prose\n[Message] timestamp=2026-07-08T06:04:31Z content=Hidden task output'
+                }
+            }
+        })).toEqual({ role: 'assistant', text: 'Visible planner prose' })
+    })
+
+    test('excludes AGY task-log narration rendered as a tool chip', () => {
+        expect(getAgyTaskLogId('Inside the task-246 log...')).toBe('246')
+        expect(extractSearchableMessageText({
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: { type: 'agy_message', content: 'Inside the task-246 log...\n[Message] timestamp=2026-07-08T06:04:31Z content=Hidden task output' }
+            }
         })).toBeNull()
     })
 })

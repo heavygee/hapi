@@ -61,6 +61,36 @@ describe('message content search', () => {
         expect(store.messages.searchContent('hidden cache rotation', 'default')).toEqual([])
     })
 
+    it('indexes only visible AGY planner prose', () => {
+        const store = new Store(':memory:')
+        const session = makeSession(store, 'agy-content-search')
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'agy_message',
+                    content: 'Visible planner answer\n[Message] timestamp=2026-07-08T06:04:31Z content=Hidden background task payload'
+                }
+            }
+        })
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'agy_message',
+                    content: 'Inside the task-246 log...\n[Message] timestamp=2026-07-08T06:04:31Z content=Another hidden task payload'
+                }
+            }
+        })
+
+        expect(store.messages.searchContent('Visible planner', 'default'))
+            .toMatchObject([{ sessionId: session.id }])
+        expect(store.messages.searchContent('Hidden background', 'default')).toEqual([])
+        expect(store.messages.searchContent('Another hidden', 'default')).toEqual([])
+    })
+
     it('uses the indexed short-query path for CJK queries and isolates namespaces', () => {
         const store = new Store(':memory:')
         const defaultSession = makeSession(store, 'cjk-default')
