@@ -3,6 +3,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { parseDisplayLinksToolInput } from '@hapi/protocol'
 import { getAuthToken } from '@/api/auth'
+import { buildHubRequestHeaders } from '@/api/hubExtraHeaders'
 import { configuration } from '@/configuration'
 import { initializeToken } from '@/ui/tokenInit'
 import type { CommandDefinition } from './types'
@@ -132,11 +133,19 @@ function sessionMatchesPrefix(session: { id?: string; metadata?: Record<string, 
     return agentIds.some((id) => typeof id === 'string' && id.startsWith(prefix))
 }
 
+export function displayLinksAuthRequestHeaders(): Record<string, string> {
+    return buildHubRequestHeaders({ 'Content-Type': 'application/json' })
+}
+
+export function displayLinksSessionRequestHeaders(jwt: string): Record<string, string> {
+    return buildHubRequestHeaders({ Authorization: `Bearer ${jwt}` })
+}
+
 async function authHeaders(): Promise<Record<string, string>> {
     const accessToken = getAuthToken()
     const authRes = await fetch(`${configuration.apiUrl}/api/auth`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: displayLinksAuthRequestHeaders(),
         body: JSON.stringify({ accessToken }),
     })
     if (!authRes.ok) {
@@ -146,7 +155,7 @@ async function authHeaders(): Promise<Record<string, string>> {
     if (!body.token) {
         throw new Error('auth failed (missing JWT)')
     }
-    return { Authorization: `Bearer ${body.token}` }
+    return displayLinksSessionRequestHeaders(body.token)
 }
 
 async function fetchSessionDetail(sessionId: string, headers: Record<string, string>): Promise<Record<string, unknown> | null> {
