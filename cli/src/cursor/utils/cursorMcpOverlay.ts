@@ -174,8 +174,15 @@ export type CursorMcpOverlayHandle = {
     cleanup: () => void;
 };
 
-/** Marker line in `.git/info/exclude` for session-local project mcp.json. */
-export const HAPI_MCP_GIT_EXCLUDE_MARKER = '# hapi-cursor-mcp-overlay (do not commit session mailbox)';
+/** Prefix for `.git/info/exclude` lease markers (do not commit session mailbox). */
+export const HAPI_MCP_GIT_EXCLUDE_MARKER_PREFIX = '# hapi-cursor-mcp-overlay';
+
+/** @deprecated Prefer {@link hapiMcpGitExcludeMarker} with a lease id. */
+export const HAPI_MCP_GIT_EXCLUDE_MARKER = `${HAPI_MCP_GIT_EXCLUDE_MARKER_PREFIX} (do not commit session mailbox)`;
+
+export function hapiMcpGitExcludeMarker(leaseId: string): string {
+    return `${HAPI_MCP_GIT_EXCLUDE_MARKER_PREFIX} ${leaseId}`;
+}
 
 /** Normalize a repo-relative path for gitignore / exclude (always `/`). */
 export function toGitExcludePattern(relPath: string): string {
@@ -197,24 +204,64 @@ function resolveGitExcludePath(root: string): string | null {
     return isAbsolute(raw) ? raw : resolvePath(root, raw);
 }
 
-/** Append marker + pattern when missing. Returns true if this call wrote them. */
-export function appendExcludeIfMissing(excludePath: string, pattern: string): boolean {
+/**
+ * Append a per-install lease block (marker + pattern). Multiple live overlays
+ * may share the same pattern across linked worktrees; each keeps its own lease
+ * line so cleanup is reference-counted by presence of remaining leases.
+ */
+export function appendExcludeLease(
+    excludePath: string,
+    pattern: string,
+    leaseId: string,
+): boolean {
+    const marker = hapiMcpGitExcludeMarker(leaseId);
     const existing = existsSync(excludePath) ? readFileSync(excludePath, 'utf-8') : '';
     const lines = existing.split(/\r?\n/);
-    if (lines.includes(pattern)) {
+    if (lines.includes(marker)) {
         return false;
     }
     mkdirSync(dirname(excludePath), { recursive: true });
     const prefix = existing.length === 0 || existing.endsWith('\n') ? '' : '\n';
     writeFileSync(
         excludePath,
-        `${prefix}${HAPI_MCP_GIT_EXCLUDE_MARKER}\n${pattern}\n`,
+        `${existing}${prefix}${marker}\n${pattern}\n`,
         { encoding: 'utf-8', mode: 0o644 },
     );
     return true;
 }
 
-/** Remove one marker+pattern block we added (exact lines only). */
+/** @deprecated Use {@link appendExcludeLease}. */
+export function appendExcludeIfMissing(excludePath: string, pattern: string): boolean {
+    return appendExcludeLease(excludePath, pattern, randomUUID());
+}
+
+/** Remove one lease block (exact marker + pattern lines only). */
+export function removeExcludeLease(
+    excludePath: string,
+    pattern: string,
+    leaseId: string,
+): void {
+    if (!existsSync(excludePath)) {
+        return;
+    }
+    const marker = hapiMcpGitExcludeMarker(leaseId);
+    const lines = readFileSync(excludePath, 'utf-8').split(/\r?\n/);
+    const out: string[] = [];
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i] === marker && lines[i + 1] === pattern) {
+            i += 1;
+            continue;
+        }
+        out.push(lines[i]!);
+    }
+    while (out.length > 0 && out[out.length - 1] === '') {
+        out.pop();
+    }
+    const body = out.length === 0 ? '' : `${out.join('\n')}\n`;
+    writeFileSync(excludePath, body, { encoding: 'utf-8', mode: 0o644 });
+}
+
+/** @deprecated Use {@link removeExcludeLease}. */
 export function removeExactExcludeBlock(excludePath: string, pattern: string): void {
     if (!existsSync(excludePath)) {
         return;
@@ -222,14 +269,15 @@ export function removeExactExcludeBlock(excludePath: string, pattern: string): v
     const lines = readFileSync(excludePath, 'utf-8').split(/\r?\n/);
     const out: string[] = [];
     for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]!;
         if (
-            lines[i] === HAPI_MCP_GIT_EXCLUDE_MARKER
+            line.startsWith(`${HAPI_MCP_GIT_EXCLUDE_MARKER_PREFIX} `)
             && lines[i + 1] === pattern
         ) {
             i += 1;
             continue;
         }
-        out.push(lines[i]!);
+        out.push(line);
     }
     while (out.length > 0 && out[out.length - 1] === '') {
         out.pop();
@@ -260,12 +308,13 @@ export function shieldProjectMcpJsonFromGit(cwd: string, mcpJsonPath: string): (
         return () => {};
     }
     const gitRelativePath = toGitExcludePattern(relRaw);
+    const leaseId = randomUUID();
 
     let addedExclude = false;
     const excludePath = resolveGitExcludePath(root);
     if (excludePath) {
         try {
-            addedExclude = appendExcludeIfMissing(excludePath, gitRelativePath);
+            addedExclude = appendExcludeLease(excludePath, gitRelativePath, leaseId);
         } catch (error) {
             logger.debug('[cursor-acp] failed to append mcp.json to git exclude', error);
         }
@@ -301,7 +350,7 @@ export function shieldProjectMcpJsonFromGit(cwd: string, mcpJsonPath: string): (
         }
         if (addedExclude && excludePath) {
             try {
-                removeExactExcludeBlock(excludePath, gitRelativePath);
+                removeExcludeLease(excludePath, gitRelativePath, leaseId);
             } catch (error) {
                 logger.debug('[cursor-acp] failed to remove mcp.json from git exclude', error);
             }
@@ -606,14 +655,11 @@ export function installCursorMcpOverlay(
     const unshieldGit = shieldProjectMcpJsonFromGit(cwd, mcpJsonPath);
 
     const cleanup = (): void => {
-        try {
-            unshieldGit();
-        } catch (error) {
-            logger.debug('[cursor-acp] cursor MCP overlay git unshield failed', error);
-        }
+        let safeToUnshield = false;
         try {
             withMcpJsonLock(lockPath, () => {
                 if (!existsSync(mcpJsonPath)) {
+                    safeToUnshield = true;
                     return;
                 }
 
@@ -622,6 +668,7 @@ export function installCursorMcpOverlay(
 
                 const currentServer = current.mcpServers[serverId];
                 if (!sameMcpEntry(currentServer, installedHapi)) {
+                    safeToUnshield = true;
                     return;
                 }
 
@@ -639,13 +686,22 @@ export function installCursorMcpOverlay(
                     && Object.keys(otherTopLevel).length === 0
                 ) {
                     rmSync(mcpJsonPath, { force: true });
+                    safeToUnshield = true;
                     return;
                 }
 
                 writeMcpJsonAtomic(mcpJsonPath, current);
+                safeToUnshield = true;
             });
         } catch (error) {
             logger.debug('[cursor-acp] cursor MCP overlay cleanup failed', error);
+        }
+        if (safeToUnshield) {
+            try {
+                unshieldGit();
+            } catch (error) {
+                logger.debug('[cursor-acp] cursor MCP overlay git unshield failed', error);
+            }
         }
     };
 

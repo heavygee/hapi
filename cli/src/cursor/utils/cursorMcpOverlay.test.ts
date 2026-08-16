@@ -21,7 +21,7 @@ import {
     HAPI_MCP_OVERLAY_PID_ENV,
     cursorHapiMcpServerId,
     HAPI_MCP_OVERLAY_SESSION_ENV,
-    HAPI_MCP_GIT_EXCLUDE_MARKER,
+    HAPI_MCP_GIT_EXCLUDE_MARKER_PREFIX,
     installCursorMcpOverlay,
     isProcessAlive,
     readLockOwner,
@@ -513,7 +513,7 @@ describe('installCursorMcpOverlay', () => {
         });
 
         const exclude = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf-8');
-        expect(exclude).toContain(HAPI_MCP_GIT_EXCLUDE_MARKER);
+        expect(exclude).toContain(HAPI_MCP_GIT_EXCLUDE_MARKER_PREFIX);
         expect(exclude).toContain('.cursor/mcp.json');
         const check = spawnSync('git', ['check-ignore', '-v', '--', '.cursor/mcp.json'], {
             cwd: root,
@@ -523,9 +523,95 @@ describe('installCursorMcpOverlay', () => {
 
         handle.cleanup();
         const after = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf-8');
-        expect(after).not.toContain(HAPI_MCP_GIT_EXCLUDE_MARKER);
+        expect(after).not.toContain(HAPI_MCP_GIT_EXCLUDE_MARKER_PREFIX);
         expect(after).not.toContain('.cursor/mcp.json');
         rmSync(root, { recursive: true, force: true });
+    });
+
+    it('preserves pre-existing .git/info/exclude rules across install and cleanup', () => {
+        const root = join(tmpdir(), `hapi-mcp-git-preserve-${randomUUID()}`);
+        mkdirSync(root, { recursive: true });
+        spawnSync('git', ['init'], { cwd: root, encoding: 'utf-8' });
+        spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
+        spawnSync('git', ['config', 'user.name', 'test'], { cwd: root });
+        writeFileSync(join(root, 'README'), 'x\n');
+        spawnSync('git', ['add', 'README'], { cwd: root });
+        spawnSync('git', ['commit', '-m', 'init'], { cwd: root });
+        mkdirSync(join(root, '.git', 'info'), { recursive: true });
+        writeFileSync(join(root, '.git', 'info', 'exclude'), 'local-secret.txt\n*.local.bak\n', 'utf-8');
+
+        const handle = installCursorMcpOverlay(root, {
+            command: '/bin/hapi',
+            args: ['mcp', '--url', 'http://127.0.0.1:12345/'],
+        }, {
+            serverId: CURSOR_HAPI_MCP_SERVER_ID,
+            overlaySessionId: 'session-a',
+            enableCursorMcp: noopEnable,
+            mcpConfigDir: join(root, '.cursor'),
+        });
+
+        const mid = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf-8');
+        expect(mid).toContain('local-secret.txt');
+        expect(mid).toContain('*.local.bak');
+        expect(mid).toContain('.cursor/mcp.json');
+
+        handle.cleanup();
+        const after = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf-8');
+        expect(after).toContain('local-secret.txt');
+        expect(after).toContain('*.local.bak');
+        expect(after).not.toContain(HAPI_MCP_GIT_EXCLUDE_MARKER_PREFIX);
+        expect(after).not.toContain('.cursor/mcp.json');
+        rmSync(root, { recursive: true, force: true });
+    });
+
+    it('keeps shared exclude while a sibling worktree lease is still live', () => {
+        const root = join(tmpdir(), `hapi-mcp-git-lease-main-${randomUUID()}`);
+        const linked = join(tmpdir(), `hapi-mcp-git-lease-link-${randomUUID()}`);
+        mkdirSync(root, { recursive: true });
+        spawnSync('git', ['init'], { cwd: root, encoding: 'utf-8' });
+        spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
+        spawnSync('git', ['config', 'user.name', 'test'], { cwd: root });
+        writeFileSync(join(root, 'README'), 'x\n');
+        spawnSync('git', ['add', 'README'], { cwd: root });
+        spawnSync('git', ['commit', '-m', 'init'], { cwd: root });
+        expect(spawnSync('git', ['worktree', 'add', linked, 'HEAD'], {
+            cwd: root,
+            encoding: 'utf-8',
+        }).status).toBe(0);
+
+        const handleA = installCursorMcpOverlay(root, {
+            command: '/bin/hapi',
+            args: ['mcp', '--url', 'http://127.0.0.1:12345/'],
+        }, {
+            serverId: CURSOR_HAPI_MCP_SERVER_ID,
+            overlaySessionId: 'session-a',
+            enableCursorMcp: noopEnable,
+            mcpConfigDir: join(root, '.cursor'),
+        });
+        const handleB = installCursorMcpOverlay(linked, {
+            command: '/bin/hapi',
+            args: ['mcp', '--url', 'http://127.0.0.1:12345/'],
+        }, {
+            serverId: CURSOR_HAPI_MCP_SERVER_ID,
+            overlaySessionId: 'session-b',
+            enableCursorMcp: noopEnable,
+            mcpConfigDir: join(linked, '.cursor'),
+        });
+
+        handleA.cleanup();
+        const mid = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf-8');
+        expect(mid).toContain('.cursor/mcp.json');
+        expect(spawnSync('git', ['check-ignore', '-v', '--', '.cursor/mcp.json'], {
+            cwd: linked,
+            encoding: 'utf-8',
+        }).status).toBe(0);
+
+        handleB.cleanup();
+        const after = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf-8');
+        expect(after).not.toContain('.cursor/mcp.json');
+        spawnSync('git', ['worktree', 'remove', '--force', linked], { cwd: root, encoding: 'utf-8' });
+        rmSync(root, { recursive: true, force: true });
+        rmSync(linked, { recursive: true, force: true });
     });
 
     it('writes exclude via --git-path so linked worktrees share the common exclude', () => {
