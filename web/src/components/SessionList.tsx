@@ -1523,12 +1523,12 @@ export function SessionList(props: {
         [machineFilteredSessions]
     )
     const actionOnlyGroups = useMemo(() => {
-        if (!pinInProgressSessions) {
+        if (pinInProgressMode === 'off') {
             return []
         }
         const visibleKeys = new Set(groups.map((group) => group.key))
         return allDirectoryGroups.filter((group) => !visibleKeys.has(group.key))
-    }, [groups, allDirectoryGroups, pinInProgressSessions])
+    }, [groups, allDirectoryGroups, pinInProgressMode])
     const [collapseOverrides, setCollapseOverrides] = useState<Map<string, boolean>>(
         () => new Map()
     )
