@@ -181,6 +181,35 @@ export function assertBoundDisplayLinksSession(boundSessionId: string, callerSes
     }
 }
 
+export const DISPLAY_LINKS_REDACTED_VALUE = '[omitted]' as const
+
+export function isDisplayLinksToolName(name: unknown): boolean {
+    if (typeof name !== 'string') return false
+    const normalized = name.trim().toLowerCase().replace(/[\s-]+/g, '_')
+    return normalized === 'display_links'
+        || normalized.endsWith('_display_links')
+        || normalized.endsWith('/display_links')
+}
+
+/** Strip exact-copy bytes from a tool-call input record (hub/export must not store secrets). */
+export function redactDisplayLinksToolInput(input: unknown): unknown {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return input
+    const record = input as Record<string, unknown>
+    if (!Array.isArray(record.texts)) return input
+    return {
+        ...record,
+        texts: record.texts.map((item) => {
+            if (typeof item === 'string') return DISPLAY_LINKS_REDACTED_VALUE
+            if (!item || typeof item !== 'object' || Array.isArray(item)) return item
+            const row = item as Record<string, unknown>
+            const next = { ...row }
+            if (typeof row.value === 'string') next.value = DISPLAY_LINKS_REDACTED_VALUE
+            if (typeof row.text === 'string') next.text = DISPLAY_LINKS_REDACTED_VALUE
+            return next
+        }),
+    }
+}
+
 export function parseDisplayLinksInput(input: unknown): DisplayLink[] {
     if (!Array.isArray(input)) {
         throw new Error('display_links requires urls: [{ href, title? }]')
