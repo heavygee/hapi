@@ -247,6 +247,7 @@ export async function handleDisplayLinksCommand(args: string[]): Promise<void> {
             arguments: {
                 ...(toolArgs.urls.length > 0 ? { urls: toolArgs.urls } : {}),
                 ...(toolArgs.texts.length > 0 ? { texts: toolArgs.texts } : {}),
+                sessionId,
             },
         })
         console.log(JSON.stringify(result, null, 2))
