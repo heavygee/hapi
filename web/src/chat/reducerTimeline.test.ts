@@ -1513,6 +1513,7 @@ describe('reduceTimeline', () => {
                 content: [{
                     type: 'display-links',
                     urls: [{ href, title: 'Issue 1516' }],
+                    texts: [],
                     uuid: 'u-links',
                     parentUUID: null
                 }],
@@ -1526,5 +1527,30 @@ describe('reduceTimeline', () => {
             urls: [{ href: 'https://github.com/tiann/hapi/issues/1516', title: 'Issue 1516' }]
         })
         expect(blocks[0].kind).not.toBe('user-text')
+    })
+
+    it('renders display-links exact-copy texts on the timeline block', () => {
+        const value = 'VK' + 'K'
+        const { blocks } = reduceTimeline([
+            {
+                id: 'msg-text',
+                localId: null,
+                createdAt: 1_700_000_000_000,
+                role: 'agent',
+                content: [{
+                    type: 'display-links',
+                    urls: [],
+                    texts: [{ value, title: 'gate' }],
+                    uuid: 'u-text',
+                    parentUUID: null
+                }],
+                isSidechain: false
+            } as TracedMessage
+        ], makeContext())
+
+        expect(blocks[0]).toMatchObject({
+            kind: 'display-links',
+            texts: [{ value: 'VKK', title: 'gate' }]
+        })
     })
 })

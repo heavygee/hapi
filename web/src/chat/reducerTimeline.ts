@@ -823,6 +823,7 @@ export function reduceTimeline(
                         createdAt: msg.createdAt,
                         invokedAt: msg.invokedAt,
                         urls: c.urls,
+                        texts: c.texts ?? [],
                         meta: msg.meta
                     })
                     continue

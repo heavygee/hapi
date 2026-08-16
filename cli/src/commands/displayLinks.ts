@@ -1,7 +1,7 @@
 import chalk from 'chalk'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import { parseDisplayLinksInput } from '@hapi/protocol'
+import { parseDisplayLinksToolInput } from '@hapi/protocol'
 import { getAuthToken } from '@/api/auth'
 import { configuration } from '@/configuration'
 import { initializeToken } from '@/ui/tokenInit'
@@ -33,52 +33,84 @@ type ParsedDisplayLinksArgs = {
     help: boolean
     sessionArg: string | null
     href: string
+    texts: Array<{ value: string; title?: string }>
     title?: string
 }
 
 export function parseDisplayLinksArgs(args: string[]): ParsedDisplayLinksArgs {
     if (args.includes('--help') || args.includes('-h')) {
-        return { help: true, sessionArg: null, href: '' }
-    }
-    if (args.length === 0) {
-        throw new Error('missing href; usage: hapi display-links [<session>|self] <href> [title]')
+        return { help: true, sessionArg: null, href: '', texts: [] }
     }
 
-    const firstLooksLikeHref = /^https?:\/\//i.test(args[0] ?? '')
+    const textIndex = args.indexOf('--text')
+    if (textIndex >= 0) {
+        const value = args[textIndex + 1]
+        if (!value) {
+            throw new Error('missing --text value; usage: hapi display-links [self] --text <value> [title]')
+        }
+        const before = args.slice(0, textIndex)
+        const after = args.slice(textIndex + 2)
+        if (before.length > 1) {
+            throw new Error('usage: hapi display-links [self] --text <value> [title]')
+        }
+        const session = before[0] && !looksLikeHref(before[0]) ? before[0] : null
+        const title = after[0]
+        return {
+            help: false,
+            sessionArg: session,
+            href: '',
+            texts: title ? [{ value, title }] : [{ value }],
+        }
+    }
+
+    if (args.length === 0) {
+        throw new Error('missing href or --text; usage: hapi display-links [<session>|self] <href> [title]')
+    }
+
+    const firstLooksLikeHref = looksLikeHref(args[0] ?? '')
     if (firstLooksLikeHref) {
         return {
             help: false,
             sessionArg: null,
             href: args[0]!,
+            texts: [],
             title: args[1],
         }
     }
 
     if (args.length < 2) {
-        throw new Error('missing href; usage: hapi display-links [<session>|self] <href> [title]')
+        throw new Error('missing href or --text; usage: hapi display-links [<session>|self] <href> [title]')
     }
 
     return {
         help: false,
         sessionArg: args[0] ?? null,
         href: args[1]!,
+        texts: [],
         title: args[2],
     }
 }
 
+function looksLikeHref(value: string): boolean {
+    return /^https?:\/\//i.test(value)
+}
+
 function showHelp(): void {
     console.log(`
-${chalk.bold('hapi display-links')} - Paint tappable http(s) URL cards into a HAPI session
+${chalk.bold('hapi display-links')} - Paint tappable URL / exact-copy cards into a HAPI session
 
 ${chalk.bold('Usage:')}
   hapi display-links <href> [title]
   hapi display-links self <href> [title]
+  hapi display-links --text <value> [title]
+  hapi display-links self --text <value> [title]
 
 ${chalk.bold('Notes:')}
   Uses this process's session MCP bridge (loopback hapiMcpUrl). Does not create a user turn.
   Other-session / cross-runner targeting is refused — run the command on the runner that owns the session.
-  Construct landmine hosts by concatenation in the calling script ("tia"+"nn"), never from model prose.
-  http/https only. javascript/data/vbscript/file are rejected.
+  Construct landmine hosts and exact strings by concatenation in the calling script ("tia"+"nn", "VK"+"K"), never from model prose.
+  urls are http/https only. javascript/data/vbscript/file are rejected.
+  Do not print secrets in assistant prose; the card is the copy path.
 
 ${chalk.bold('Env:')}
   HAPI_SESSION_ID (self-target), HAPI_API_URL / CLI_API_TOKEN
@@ -174,9 +206,12 @@ export async function handleDisplayLinksCommand(args: string[]): Promise<void> {
         return
     }
 
-    const urls = parseDisplayLinksInput(
-        parsed.title ? [{ href: parsed.href, title: parsed.title }] : [{ href: parsed.href }]
-    )
+    const toolArgs = parseDisplayLinksToolInput({
+        ...(parsed.href ? {
+            urls: parsed.title ? [{ href: parsed.href, title: parsed.title }] : [{ href: parsed.href }],
+        } : {}),
+        ...(parsed.texts.length > 0 ? { texts: parsed.texts } : {}),
+    })
 
     assertLocalDisplayLinksTarget(parsed.sessionArg)
 
@@ -200,7 +235,10 @@ export async function handleDisplayLinksCommand(args: string[]): Promise<void> {
     try {
         const result = await client.callTool({
             name: 'display_links',
-            arguments: { urls },
+            arguments: {
+                ...(toolArgs.urls.length > 0 ? { urls: toolArgs.urls } : {}),
+                ...(toolArgs.texts.length > 0 ? { texts: toolArgs.texts } : {}),
+            },
         })
         console.log(JSON.stringify(result, null, 2))
     } finally {

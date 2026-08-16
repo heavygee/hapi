@@ -205,6 +205,27 @@ describe('startHappyServer skill_lookup', () => {
         expect(payload.urls[0]?.href).not.toContain('tian/hapi')
     })
 
+    it('paints display_links exact-copy texts without echoing the value in the tool result', async () => {
+        const mcp = await connect(false, { enableDisplayLinks: true })
+        const value = 'VK' + 'K'
+
+        const result = await mcp.callTool({
+            name: 'display_links',
+            arguments: { texts: [{ value, title: 'gate' }] }
+        }) as ToolResult
+
+        expect(result.isError).toBe(false)
+        expect(result.content?.[0]?.text).toContain('exact-copy')
+        expect(result.content?.[0]?.text).not.toContain(value)
+        expect(sendAgentMessage).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'display-links',
+            texts: [{ value: 'VKK', title: 'gate' }],
+        }))
+        const payload = sendAgentMessage.mock.calls[0]?.[0] as { texts: Array<{ value: string }> }
+        expect(payload.texts[0]?.value).toBe(value)
+        expect(payload.texts[0]?.value).not.toBe('VK')
+    })
+
     it('rejects javascript hrefs without emitting an agent message', async () => {
         const mcp = await connect(false, { enableDisplayLinks: true })
         const result = await mcp.callTool({

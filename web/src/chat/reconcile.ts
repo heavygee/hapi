@@ -159,6 +159,14 @@ function areDisplayLinksBlocksEqual(left: DisplayLinksBlock, right: DisplayLinks
             return false
         }
     }
+    if ((left.texts?.length ?? 0) !== (right.texts?.length ?? 0)) return false
+    const leftTexts = left.texts ?? []
+    const rightTexts = right.texts ?? []
+    for (let i = 0; i < leftTexts.length; i += 1) {
+        if (leftTexts[i]?.value !== rightTexts[i]?.value || leftTexts[i]?.title !== rightTexts[i]?.title) {
+            return false
+        }
+    }
     return true
 }
 
