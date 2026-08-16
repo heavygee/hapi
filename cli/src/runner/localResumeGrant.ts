@@ -2,8 +2,9 @@
  * Peercred-authenticated local resume grant socket (#1473 Major).
  *
  * Terminal `hapi resume` has no HAPI_PEER_CAP_INJECT. Tracked session
- * children may redeem a peercred grant here; operator/Windows resume
- * continues unattributed (no forgeable HTTP mint — #1473 Blocker).
+ * children may redeem a peercred grant here. Unrelated operator shells
+ * fail closed (cannot satisfy descendant check / no Windows grant server)
+ * — attributed resume stays on hub/web → runner spawn with inject (#1473).
  */
 
 import { createServer, createConnection, type Server } from 'node:net'
