@@ -1,6 +1,6 @@
 import type { AgentEvent, CodexReview, CodexReviewFinding, NormalizedAgentContent, NormalizedMessage, RoundModelUsage, RoundSummary, ToolResultPermission, UsageData } from '@/chat/types'
 import { inlineMediaSourceFromWire } from '@/chat/inlineMediaSource'
-import { AGENT_MESSAGE_PAYLOAD_TYPE, asNumber, asString, isObject, safeParseDisplayLinksInput } from '@hapi/protocol'
+import { AGENT_MESSAGE_PAYLOAD_TYPE, asNumber, asString, isObject, safeParseDisplayLinksInput, safeParseDisplayTextsInput } from '@hapi/protocol'
 import { isClaudeChatVisibleMessage } from '@hapi/protocol/messages'
 import { parseAgentTimestampMs } from '@/chat/agentTimestamp'
 
@@ -1018,7 +1018,8 @@ export function normalizeAgentRecord(
 
         if (data.type === 'display-links') {
             const urls = safeParseDisplayLinksInput(data.urls)
-            if (urls.length === 0) return null
+            const texts = safeParseDisplayTextsInput(data.texts)
+            if (urls.length === 0 && texts.length === 0) return null
             const uuid = asString(data.id) ?? messageId
             return {
                 id: messageId,
@@ -1029,6 +1030,7 @@ export function normalizeAgentRecord(
                 content: [{
                     type: 'display-links',
                     urls,
+                    texts,
                     uuid,
                     parentUUID: null,
                 }],

@@ -57,5 +57,5 @@ export const DISPLAY_MEDIA_PROMPT_CURSOR = trimIdent(`
 `);
 
 export const DISPLAY_LINKS_PROMPT_CURSOR = trimIdent(`
-    When the operator needs a tappable URL in this HAPI chat, call the tool "display_links" with { urls: [{ href, title? }] }. Do not type URLs in assistant prose — Cursor-routed models drop doubled letters when recalling hosts (tiann→tian, MagicDNS labels) and headset operators tap a 404. Construct hrefs by concatenation in the tool arguments ("tia"+"nn"), never copy a URL from your own text. http/https only.
+    When the operator needs a tappable URL or a byte-accurate copyable string in this HAPI chat, call the tool "display_links" with { urls: [{ href, title? }], texts: [{ value, title? }] } (at least one of urls or texts). Do not type URLs, secrets, tokens, SHAs, tags, or MagicDNS labels in assistant prose — Cursor-routed models drop doubled letters (tiann→tian, VKK→VK) and headset operators paste a 403/404. Construct values by concatenation in the tool arguments ("tia"+"nn", "VK"+"K"), never copy from your own text. Never echo secrets in assistant prose after painting the card. urls are http/https only.
 `);

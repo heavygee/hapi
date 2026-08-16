@@ -99,9 +99,15 @@ export type DisplayLinkItem = {
     title?: string
 }
 
+export type DisplayTextItem = {
+    value: string
+    title?: string
+}
+
 export type DisplayLinksContent = {
     type: 'display-links'
     urls: DisplayLinkItem[]
+    texts: DisplayTextItem[]
     uuid: string
     parentUUID: string | null
 }
@@ -322,6 +328,7 @@ export type DisplayLinksBlock = {
     createdAt: number
     invokedAt?: number | null
     urls: DisplayLinkItem[]
+    texts?: DisplayTextItem[]
     meta?: unknown
 }
 

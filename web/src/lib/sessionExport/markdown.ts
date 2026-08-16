@@ -93,8 +93,11 @@ function formatAgentContentBlock(block: NormalizedAgentContent): string | null {
         }
         case 'generated-image':
             return `- Generated image: ${block.fileName}`
-        case 'display-links':
-            return block.urls.map((url) => `- Link: ${url.title ? `${url.title} (${url.href})` : url.href}`).join('\n')
+        case 'display-links': {
+            const links = block.urls.map((url) => `- Link: ${url.title ? `${url.title} (${url.href})` : url.href}`)
+            const texts = (block.texts ?? []).map((text) => `- Copy: ${text.title ? `${text.title} (${text.value})` : text.value}`)
+            return [...links, ...texts].join('\n') || null
+        }
         case 'codex-review':
             return `- Codex review: ${block.review.overallCorrectness ?? 'review'} (${block.review.findings.length} findings)`
         case 'summary':
