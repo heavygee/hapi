@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { assertLocalDisplayLinksTarget, parseDisplayLinksArgs } from './displayLinks'
+import { configuration } from '@/configuration'
+import {
+    assertLocalDisplayLinksTarget,
+    displayLinksAuthRequestHeaders,
+    displayLinksSessionRequestHeaders,
+    parseDisplayLinksArgs,
+} from './displayLinks'
 
 describe('parseDisplayLinksArgs', () => {
     it('treats a leading http(s) href as self-target', () => {
@@ -100,5 +106,23 @@ describe('assertLocalDisplayLinksTarget', () => {
     it('refuses an explicit prefix when HAPI_SESSION_ID is unset', () => {
         delete process.env.HAPI_SESSION_ID
         expect(() => assertLocalDisplayLinksTarget('9b46cfe7')).toThrow(/current local session/)
+    })
+})
+
+describe('display-links hub extra headers', () => {
+    afterEach(() => {
+        configuration._setExtraHeaders({})
+    })
+
+    it('includes configured extraHeaders on auth and session requests', () => {
+        configuration._setExtraHeaders({ Cookie: 'CF_Authorization=from-settings' })
+        expect(displayLinksAuthRequestHeaders()).toEqual({
+            Cookie: 'CF_Authorization=from-settings',
+            'Content-Type': 'application/json',
+        })
+        expect(displayLinksSessionRequestHeaders('jwt-token')).toEqual({
+            Cookie: 'CF_Authorization=from-settings',
+            Authorization: 'Bearer jwt-token',
+        })
     })
 })
