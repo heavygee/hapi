@@ -201,8 +201,8 @@ describe('PeerDeliverBroker', () => {
         }
     })
 
-    it('authorizeBrokerListener: win32 allows null cred (Bun fd=-1)', () => {
-        expect(authorizeBrokerListener(null, process.pid, process.pid, 'win32')).toBe(true)
+    it('authorizeBrokerListener: fails closed when peercred is null (incl. win32)', () => {
+        expect(authorizeBrokerListener(null, process.pid, process.pid, 'win32')).toBe(false)
         expect(authorizeBrokerListener(null, undefined, process.pid, 'linux')).toBe(false)
         expect(authorizeBrokerListener(
             { pid: process.pid, uid: 0, gid: 0 },
@@ -218,7 +218,7 @@ describe('PeerDeliverBroker', () => {
         )).toBe(false)
     })
 
-    it('delivers on win32 when named-pipe peer pid is unavailable', async () => {
+    it('rejects win32 broker deliver when named-pipe peer pid is unavailable', async () => {
         Object.defineProperty(process, 'platform', { value: 'win32', configurable: true })
         process.env[HAPI_SESSION_ID_ENV] = '6212dae5-8a60-4284-b7a5-c09aa3571ce4'
         const dir = mkdtempSync(join(tmpdir(), 'hapi-peer-broker-'))
@@ -238,17 +238,13 @@ describe('PeerDeliverBroker', () => {
         })
         await broker.start()
         try {
-            const result = await requestParentPeerDeliver({
+            await expect(requestParentPeerDeliver({
                 sessionIdPrefix: '05d9f0f2',
                 message: 'teemo ping',
                 socketPath,
                 readPeerCred: () => null,
-            })
-            expect(result.sessionId).toBe('05d9f0f2-9273-4137-933c-07459a1146a2')
-            expect(pingPeerMock).toHaveBeenCalledWith(expect.objectContaining({
-                sessionCapability: 'cap-win32',
-                message: 'teemo ping',
-            }))
+            })).rejects.toMatchObject({ code: 'auth_failed' })
+            expect(pingPeerMock).not.toHaveBeenCalled()
         } finally {
             broker.stop()
         }

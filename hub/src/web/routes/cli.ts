@@ -307,8 +307,9 @@ export function createCliRoutes(
 
     /**
      * Removed: file-backed reenroll grants break same-UID isolation (#1473 Blocker).
-     * Cold recovery uses in-place proof rebind (same machineId) or migrate-sessions
-     * after rotate without the dead machine's proof.
+     * Hub grant helpers deleted; `machine_reenroll_*` tables remain from v25/v26
+     * migrations but have no writers. Cold recovery uses in-place proof rebind
+     * (same machineId) or migrate-sessions after rotate.
      */
     app.post('/machines/:id/reenroll-grant', async (c) => {
         return c.json({

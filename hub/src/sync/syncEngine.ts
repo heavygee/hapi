@@ -3164,8 +3164,12 @@ export class SyncEngine {
             // self-reported, so a same-namespace tagged machine can spoof the
             // victim host and steal the mint (#1473 Blocker). Exact machineId
             // match only; host-fallback resume stays unattributed.
-            const recordedMachineId = typeof metadata.machineId === 'string'
-                ? metadata.machineId.trim()
+            // Re-read machineId after awaited probes — a concurrent
+            // migrateSessionsMachineId must not arm against a stale snapshot
+            // (#1473 cold Major).
+            const latestMetadata = this.sessionCache.getSession(access.sessionId)?.metadata
+            const recordedMachineId = typeof latestMetadata?.machineId === 'string'
+                ? latestMetadata.machineId.trim()
                 : ''
             const resumePeerMintNonce = (
                 recordedMachineId

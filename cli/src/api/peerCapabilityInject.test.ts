@@ -151,8 +151,8 @@ describe('peerCapabilityInject (#1203 pass 2h)', () => {
         }
     })
 
-    it('authorizePeerCapInjectClient: win32 allows null cred (Bun fd=-1)', () => {
-        expect(authorizePeerCapInjectClient(null, process.pid, 'win32')).toBe(true)
+    it('authorizePeerCapInjectClient: fails closed when peercred is null (incl. win32)', () => {
+        expect(authorizePeerCapInjectClient(null, process.pid, 'win32')).toBe(false)
         expect(authorizePeerCapInjectClient(null, process.pid, 'linux')).toBe(false)
         expect(authorizePeerCapInjectClient(
             { pid: process.pid, uid: 0, gid: 0 },
@@ -161,7 +161,7 @@ describe('peerCapabilityInject (#1203 pass 2h)', () => {
         )).toBe(true)
     })
 
-    it('delivers on win32 when server cannot read named-pipe client pid', async () => {
+    it('rejects win32 inject when server cannot read named-pipe client pid', async () => {
         Object.defineProperty(process, 'platform', {
             value: 'win32',
             configurable: true,
@@ -178,11 +178,12 @@ describe('peerCapabilityInject (#1203 pass 2h)', () => {
             const capability = await receivePeerCapabilityFromRunner({
                 socketPath,
                 ownerPid: process.pid,
-                attempts: 20,
+                attempts: 5,
                 readPeerCred: () => null,
             })
-            await deliver
-            expect(capability).toBe('cap-win32-null-cred')
+            expect(capability).toBeUndefined()
+            server!.close()
+            await expect(deliver).rejects.toThrow(/closed|timed out/)
         } finally {
             server!.close()
         }
