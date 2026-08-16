@@ -1043,7 +1043,7 @@ describe('Pi prompt preparation', () => {
                 },
             });
             expect(peerAttributed.message).toBe(
-                'From: /sessions/6212dae5-8a60-4284-b7a5-c09aa3571ce4 (Orchestrator)\n\nhandoff body'
+                'From: /sessions/6212dae5-8a60-4284-b7a5-c09aa3571ce4\nName: Orchestrator\n\nhandoff body'
             );
 
             const peerSkill = await preparePiUserMessage('$brave-search explain', [], [{ name: 'skill:brave-search', source: 'skill' }], {

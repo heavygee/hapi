@@ -39,9 +39,12 @@ function peerProvenanceLine(meta: MessageMeta): string {
     if (!id) {
         return 'From: peer (unattributed)'
     }
-    const name = meta.peer?.sourceName?.trim() ?? ''
+    const name = meta.peer?.sourceName
+        ?.replace(/[\r\n\u2028\u2029]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim() ?? ''
     return name
-        ? `From: /sessions/${id} (${name})`
+        ? `From: /sessions/${id}\nName: ${name}`
         : `From: /sessions/${id}`
 }
 
