@@ -36,6 +36,11 @@ Dogfood result: every live Cursor session's HAPI MCP tools union-load into every
 ## Dogfood log
 
 - 2026-08-16 remat `ebe4658f8`: FAIL — overlay refused (`escapes session cwd`) on first ACP in `cursor-mcp-isolation` because `.cursor` did not exist yet under symlink prefix. Tip `1794f48cf` fixes; awaiting remat.
+- 2026-08-16 remat `fcf6f6329` (= `1794f48cf`): **PASS**
+  - Project keys `['hapi']` owner `1a1cec28` (Dogfood4)
+  - Same-cwd second live mailbox fail-closed (Dogfood3 while Dogfood2 held)
+  - Attributed ping: `sentFrom=peer`, `sourceSessionId=1a1cec28-…` === speaker
+  - #1613 marked ready-for-review (not merged)
 
 ## Test
 
