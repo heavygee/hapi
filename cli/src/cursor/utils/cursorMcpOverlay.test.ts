@@ -21,11 +21,13 @@ import {
     HAPI_MCP_OVERLAY_PID_ENV,
     cursorHapiMcpServerId,
     HAPI_MCP_OVERLAY_SESSION_ENV,
+    HAPI_MCP_GIT_EXCLUDE_MARKER,
     installCursorMcpOverlay,
     isProcessAlive,
     readLockOwner,
     resolveCursorMcpConfigDir,
     resolveProjectCursorConfigDir,
+    shieldProjectMcpJsonFromGit,
     withMcpJsonLock,
     writeMcpJsonAtomic,
 } from './cursorMcpOverlay';
@@ -487,6 +489,76 @@ describe('installCursorMcpOverlay', () => {
         };
         expect(written.mcpServers[CURSOR_HAPI_MCP_SERVER_ID]).toBeTruthy();
         handle.cleanup();
+        rmSync(root, { recursive: true, force: true });
+    });
+
+    it('adds project mcp.json to .git/info/exclude so git add -A will not scoop the mailbox', () => {
+        const root = join(tmpdir(), `hapi-mcp-git-shield-${randomUUID()}`);
+        mkdirSync(root, { recursive: true });
+        spawnSync('git', ['init'], { cwd: root, encoding: 'utf-8' });
+        spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
+        spawnSync('git', ['config', 'user.name', 'test'], { cwd: root });
+        writeFileSync(join(root, 'README'), 'x\n');
+        spawnSync('git', ['add', 'README'], { cwd: root });
+        spawnSync('git', ['commit', '-m', 'init'], { cwd: root });
+
+        const handle = installCursorMcpOverlay(root, {
+            command: '/bin/hapi',
+            args: ['mcp', '--url', 'http://127.0.0.1:12345/'],
+        }, {
+            serverId: CURSOR_HAPI_MCP_SERVER_ID,
+            overlaySessionId: 'session-a',
+            enableCursorMcp: noopEnable,
+            mcpConfigDir: join(root, '.cursor'),
+        });
+
+        const exclude = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf-8');
+        expect(exclude).toContain(HAPI_MCP_GIT_EXCLUDE_MARKER);
+        expect(exclude).toContain('.cursor/mcp.json');
+        const check = spawnSync('git', ['check-ignore', '-v', '--', '.cursor/mcp.json'], {
+            cwd: root,
+            encoding: 'utf-8',
+        });
+        expect(check.status).toBe(0);
+
+        handle.cleanup();
+        rmSync(root, { recursive: true, force: true });
+    });
+
+    it('skip-worktrees a tracked project mcp.json for the session lifetime', () => {
+        const root = join(tmpdir(), `hapi-mcp-git-skip-${randomUUID()}`);
+        mkdirSync(join(root, '.cursor'), { recursive: true });
+        spawnSync('git', ['init'], { cwd: root, encoding: 'utf-8' });
+        spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
+        spawnSync('git', ['config', 'user.name', 'test'], { cwd: root });
+        writeFileSync(join(root, '.cursor', 'mcp.json'), `${JSON.stringify({
+            mcpServers: { other: { command: 'echo', args: ['x'] } },
+        }, null, 2)}\n`);
+        spawnSync('git', ['add', '.cursor/mcp.json'], { cwd: root });
+        spawnSync('git', ['commit', '-m', 'track mcp'], { cwd: root });
+
+        const handle = installCursorMcpOverlay(root, {
+            command: '/bin/hapi',
+            args: ['mcp', '--url', 'http://127.0.0.1:12345/'],
+        }, {
+            serverId: CURSOR_HAPI_MCP_SERVER_ID,
+            overlaySessionId: 'session-a',
+            enableCursorMcp: noopEnable,
+            mcpConfigDir: join(root, '.cursor'),
+        });
+
+        const skipped = spawnSync('git', ['ls-files', '-v', '--', '.cursor/mcp.json'], {
+            cwd: root,
+            encoding: 'utf-8',
+        });
+        expect(skipped.stdout.trim().startsWith('S ')).toBe(true);
+
+        handle.cleanup();
+        const after = spawnSync('git', ['ls-files', '-v', '--', '.cursor/mcp.json'], {
+            cwd: root,
+            encoding: 'utf-8',
+        });
+        expect(after.stdout.trim().startsWith('S ')).toBe(false);
         rmSync(root, { recursive: true, force: true });
     });
 
