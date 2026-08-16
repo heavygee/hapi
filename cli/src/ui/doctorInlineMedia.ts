@@ -228,10 +228,10 @@ export async function runDoctorInlineMedia(): Promise<number> {
         ))
         console.log(chalk.gray('  Tool names are bare: display_image, display_video, display_media, display_links (Cursor-only), change_title (not hapi_display_image).'))
         for (const session of cursorSessions) {
-            const cwdHint = session.path ? ` (cwd ${session.path})` : ''
-            console.log(chalk.gray(
-                `  Verify (${session.prefix})${cwdHint}: agent mcp list-tools ${CURSOR_HAPI_MCP_SERVER_ID}`,
-            ))
+            const verify = session.path
+                ? `cd ${shellSingleQuote(session.path)} && agent mcp list-tools ${CURSOR_HAPI_MCP_SERVER_ID}`
+                : `agent mcp list-tools ${CURSOR_HAPI_MCP_SERVER_ID}`
+            console.log(chalk.gray(`  Verify (${session.prefix}): ${verify}`))
         }
     }
 
