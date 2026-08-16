@@ -1,4 +1,4 @@
-import { safeStringify } from '@hapi/protocol'
+import { safeStringify, isDisplayLinksToolName, redactDisplayLinksToolInput } from '@hapi/protocol'
 import { normalizeDecryptedMessage } from '@/chat/normalize'
 import { renderEventLabel } from '@/chat/presentation'
 import type { NormalizedAgentContent, NormalizedMessage } from '@/chat/types'
@@ -72,9 +72,10 @@ function truncate(value: string, maxLength: number): string {
     return `${value.slice(0, maxLength - 1)}…`
 }
 
-function formatToolInput(input: unknown): string {
-    if (input == null) return ''
-    const text = safeStringify(input).trim()
+function formatToolInput(name: string, input: unknown): string {
+    const safeInput = isDisplayLinksToolName(name) ? redactDisplayLinksToolInput(input) : input
+    if (safeInput == null) return ''
+    const text = safeStringify(safeInput).trim()
     return text ? ` — ${truncate(text.replace(/\s+/g, ' '), 160)}` : ''
 }
 
@@ -85,7 +86,7 @@ function formatAgentContentBlock(block: NormalizedAgentContent): string | null {
         case 'reasoning':
             return `> Reasoning: ${block.text}`
         case 'tool-call':
-            return `- Tool: ${block.name}${formatToolInput(block.input)}`
+            return `- Tool: ${block.name}${formatToolInput(block.name, block.input)}`
         case 'tool-result': {
             const label = block.is_error ? 'Tool error' : 'Tool result'
             const content = safeStringify(block.content).trim()

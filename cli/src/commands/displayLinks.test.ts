@@ -16,6 +16,7 @@ describe('parseDisplayLinksArgs', () => {
             href,
             texts: [],
             title: 'Issue 1516',
+            readTextFromStdin: false,
         })
     })
 
@@ -26,6 +27,7 @@ describe('parseDisplayLinksArgs', () => {
             href: 'https://example.com',
             texts: [],
             title: 'Example',
+            readTextFromStdin: false,
         })
     })
 
@@ -36,6 +38,7 @@ describe('parseDisplayLinksArgs', () => {
             href: 'https://example.com',
             texts: [],
             title: undefined,
+            readTextFromStdin: false,
         })
     })
 
@@ -51,6 +54,7 @@ describe('parseDisplayLinksArgs', () => {
             href: '',
             texts: [{ value, title: 'gate' }],
             title: undefined,
+            readTextFromStdin: false,
         })
     })
 
@@ -62,7 +66,16 @@ describe('parseDisplayLinksArgs', () => {
             href: '',
             texts: [{ value }],
             title: undefined,
+            readTextFromStdin: false,
         })
+    })
+
+    it('parses --text-stdin without putting the secret on argv-derived texts', () => {
+        const parsed = parseDisplayLinksArgs(['--text-stdin', 'gate'])
+        expect(parsed.readTextFromStdin).toBe(true)
+        expect(parsed.texts).toEqual([])
+        expect(parsed.title).toBe('gate')
+        expect(JSON.stringify(parsed)).not.toContain('SENTINEL')
     })
 
     it('throws when href and --text are missing', () => {
