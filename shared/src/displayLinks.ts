@@ -10,6 +10,7 @@ export const DISPLAY_LINKS_PAYLOAD_TYPE = 'display-links' as const
 export const MAX_DISPLAY_LINKS = 20
 export const MAX_DISPLAY_LINK_HREF_LENGTH = 2048
 export const MAX_DISPLAY_LINK_TITLE_LENGTH = 255
+export const MAX_DISPLAY_TEXT_LENGTH = 8192
 
 const DENY_SCHEMES = new Set(['javascript', 'data', 'vbscript', 'file'])
 
@@ -18,9 +19,15 @@ export type DisplayLink = {
     title?: string
 }
 
+export type DisplayText = {
+    value: string
+    title?: string
+}
+
 export type DisplayLinksPayload = {
     type: typeof DISPLAY_LINKS_PAYLOAD_TYPE
     urls: DisplayLink[]
+    texts: DisplayText[]
     id: string
 }
 
@@ -87,6 +94,71 @@ export function parseDisplayLink(input: unknown): DisplayLink | null {
     return title ? { href, title } : { href }
 }
 
+export function parseDisplayText(input: unknown): DisplayText | null {
+    if (typeof input === 'string') {
+        if (input.length === 0 || input.length > MAX_DISPLAY_TEXT_LENGTH) return null
+        if (input.trim().length === 0) return null
+        return { value: input }
+    }
+    if (!input || typeof input !== 'object') return null
+    const record = input as Record<string, unknown>
+    const rawValue = record.value ?? record.text
+    if (typeof rawValue !== 'string') return null
+    if (rawValue.length === 0 || rawValue.length > MAX_DISPLAY_TEXT_LENGTH) return null
+    if (rawValue.trim().length === 0) return null
+    const title = normalizeTitle(record.title)
+    return title ? { value: rawValue, title } : { value: rawValue }
+}
+
+export function parseDisplayTextsInput(input: unknown): DisplayText[] {
+    if (!Array.isArray(input)) {
+        throw new Error('display_links requires texts: [{ value, title? }]')
+    }
+    if (input.length === 0) {
+        throw new Error('display_links requires at least one exact-copy string')
+    }
+    if (input.length > MAX_DISPLAY_LINKS) {
+        throw new Error(`display_links accepts at most ${MAX_DISPLAY_LINKS} exact-copy strings`)
+    }
+    const texts: DisplayText[] = []
+    for (const item of input) {
+        const parsed = parseDisplayText(item)
+        if (!parsed) {
+            throw new Error('display_links rejected an exact-copy string (empty or too long)')
+        }
+        texts.push(parsed)
+    }
+    return texts
+}
+
+export function safeParseDisplayTextsInput(input: unknown): DisplayText[] {
+    if (!Array.isArray(input)) return []
+    const texts: DisplayText[] = []
+    for (const item of input.slice(0, MAX_DISPLAY_LINKS)) {
+        const parsed = parseDisplayText(item)
+        if (parsed) texts.push(parsed)
+    }
+    return texts
+}
+
+export function parseDisplayLinksToolInput(input: unknown): {
+    urls: DisplayLink[]
+    texts: DisplayText[]
+} {
+    const record = input && typeof input === 'object' ? input as Record<string, unknown> : {}
+    const hasUrls = Array.isArray(record.urls)
+    const hasTexts = Array.isArray(record.texts)
+    if (!hasUrls && !hasTexts) {
+        throw new Error('display_links requires urls: [{ href, title? }] and/or texts: [{ value, title? }]')
+    }
+    const urls = hasUrls ? parseDisplayLinksInput(record.urls) : []
+    const texts = hasTexts ? parseDisplayTextsInput(record.texts) : []
+    if (urls.length === 0 && texts.length === 0) {
+        throw new Error('display_links requires urls: [{ href, title? }] and/or texts: [{ value, title? }]')
+    }
+    return { urls, texts }
+}
+
 export function parseDisplayLinksInput(input: unknown): DisplayLink[] {
     if (!Array.isArray(input)) {
         throw new Error('display_links requires urls: [{ href, title? }]')
@@ -120,11 +192,13 @@ export function safeParseDisplayLinksInput(input: unknown): DisplayLink[] {
 
 export function buildDisplayLinksPayload(args: {
     urls: DisplayLink[]
+    texts?: DisplayText[]
     id: string
 }): DisplayLinksPayload {
     return {
         type: DISPLAY_LINKS_PAYLOAD_TYPE,
         urls: args.urls,
+        texts: args.texts ?? [],
         id: args.id,
     }
 }

@@ -20,7 +20,7 @@ import {
 } from "@/modules/common/generatedImages";
 import type { InlineMediaSource } from "@/modules/common/inlineMediaSource";
 import { DISPLAY_IMAGE_PROMPT_CURSOR, DISPLAY_LINKS_PROMPT_CURSOR, DISPLAY_MEDIA_PROMPT_CURSOR, DISPLAY_VIDEO_PROMPT_CURSOR } from "@/modules/common/displayImagePrompt";
-import { buildDisplayLinksPayload, parseDisplayLinksInput } from "@hapi/protocol";
+import { buildDisplayLinksPayload, parseDisplayLinksToolInput } from "@hapi/protocol";
 import { resolveSkill } from "@/modules/common/skills";
 import {
     INSPECT_PEER_TOOL_DESCRIPTION,
@@ -129,7 +129,14 @@ function createHapiMcpServer(
                 title: z.string().trim().min(1).max(255).optional().describe('Optional link label shown on the card'),
             }),
             z.string(),
-        ])).min(1).max(20).describe('One or more http(s) URLs to paint as tappable cards'),
+        ])).min(1).max(20).optional().describe('Optional http(s) URLs to paint as tappable cards'),
+        texts: z.array(z.union([
+            z.object({
+                value: z.string().min(1).max(8192).describe('Exact string to paint for copy. Construct by concatenation (VK+K), never copy from model prose.'),
+                title: z.string().trim().min(1).max(255).optional().describe('Optional label shown on the copy card'),
+            }),
+            z.string().min(1).max(8192),
+        ])).min(1).max(20).optional().describe('Optional exact-copy strings (secrets, tokens, SHAs, tags, MagicDNS labels)'),
     });
 
     const pingPeerInputSchema: z.ZodTypeAny = z.object({
@@ -317,24 +324,35 @@ function createHapiMcpServer(
 
     if (enableDisplayLinks) {
         mcp.registerTool<any, any>('display_links', {
-            description: `Paint clickable http(s) URL cards into the current HAPI chat without a fake user turn. Cursor-only: other flavors type URLs fine. ${DISPLAY_LINKS_PROMPT_CURSOR}`,
+            description: `Paint clickable http(s) URL cards and/or exact-copy strings into the current HAPI chat without a fake user turn. Cursor-only: other flavors type URLs and secrets fine. ${DISPLAY_LINKS_PROMPT_CURSOR}`,
             title: 'Display Links',
             inputSchema: displayLinksInputSchema,
-        }, async (args: { urls: Array<{ href: string; title?: string } | string> }) => {
-            logger.debug('[hapiMCP] Display links:', args.urls);
+        }, async (args: {
+            urls?: Array<{ href: string; title?: string } | string>
+            texts?: Array<{ value: string; title?: string } | string>
+        }) => {
+            logger.debug('[hapiMCP] Display links: urls=', args.urls?.length ?? 0, 'texts=', args.texts?.length ?? 0);
 
             try {
-                const urls = parseDisplayLinksInput(args.urls);
+                const parsed = parseDisplayLinksToolInput(args);
                 client.sendAgentMessage(buildDisplayLinksPayload({
-                    urls,
+                    urls: parsed.urls,
+                    texts: parsed.texts,
                     id: randomUUID(),
                 }));
 
+                const parts: string[] = [];
+                if (parsed.urls.length > 0) {
+                    parts.push(`${parsed.urls.length} link${parsed.urls.length === 1 ? '' : 's'}`);
+                }
+                if (parsed.texts.length > 0) {
+                    parts.push(`${parsed.texts.length} exact-copy card${parsed.texts.length === 1 ? '' : 's'}`);
+                }
                 return {
                     content: [
                         {
                             type: 'text' as const,
-                            text: `Displayed ${urls.length} link${urls.length === 1 ? '' : 's'}`,
+                            text: `Displayed ${parts.join(', ')}`,
                         },
                     ],
                     isError: false,

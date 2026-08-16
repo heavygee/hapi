@@ -209,14 +209,21 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
           title: z.string().trim().min(1).max(255).optional().describe('Optional link label shown on the card'),
         }),
         z.string(),
-      ])).min(1).max(20).describe('One or more http(s) URLs to paint as tappable cards'),
+      ])).min(1).max(20).optional().describe('Optional http(s) URLs to paint as tappable cards'),
+      texts: z.array(z.union([
+        z.object({
+          value: z.string().min(1).max(8192).describe('Exact string to paint for copy. Construct by concatenation (VK+K), never copy from model prose.'),
+          title: z.string().trim().min(1).max(255).optional().describe('Optional label shown on the copy card'),
+        }),
+        z.string().min(1).max(8192),
+      ])).min(1).max(20).optional().describe('Optional exact-copy strings (secrets, tokens, SHAs, tags, MagicDNS labels)'),
     });
 
     if (toolNames.has('display_links')) {
       server.registerTool<any, any>(
         'display_links',
         {
-          description: `Paint clickable http(s) URL cards into the current HAPI chat. ${DISPLAY_LINKS_PROMPT_CURSOR}`,
+          description: `Paint clickable http(s) URL cards and/or exact-copy strings into the current HAPI chat. ${DISPLAY_LINKS_PROMPT_CURSOR}`,
           title: 'Display Links',
           inputSchema: displayLinksInputSchema,
         },
