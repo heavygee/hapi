@@ -71,7 +71,13 @@ const updateStateSchema = z.object({
     agentState: z.unknown().nullable()
 })
 
-const HUB_OWNED_METADATA_KEYS = ['supersededBySessionId', 'opencodeClearOperation'] as const
+const HUB_OWNED_METADATA_KEYS = [
+    'supersededBySessionId',
+    'opencodeClearOperation',
+    // machineId gates local-resume-capability mint (#1473). Client-writable
+    // rewrite would let a sibling redirect the mint to its own proven machine.
+    'machineId',
+] as const
 
 function preserveHubOwnedMetadata(incoming: unknown, current: unknown): unknown {
     if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return incoming
