@@ -125,6 +125,7 @@ function renderSearchThread(options: {
     initialTargetMessageQuery?: string
     onLoadMessageContext: (messageId: string) => Promise<boolean>
     onInitialTargetConsumed: () => void
+    onSearchTargetDismissed?: () => void
     onViewModeChange?: (mode: 'tail' | 'history') => void
     messagesVersion: number
     historyVersion: number
@@ -179,6 +180,7 @@ function renderSearchThread(options: {
                     initialTargetMessageQuery={options.initialTargetMessageQuery}
                     onLoadMessageContext={options.onLoadMessageContext}
                     onInitialTargetConsumed={options.onInitialTargetConsumed}
+                    onSearchTargetDismissed={options.onSearchTargetDismissed}
                 />
             </I18nProvider>
         </QueryClientProvider>
@@ -601,6 +603,44 @@ describe('search target loading', () => {
 
         expect(onLoadMessageContext).toHaveBeenCalledTimes(2)
         expect(onInitialTargetConsumed).toHaveBeenCalledTimes(1)
+    })
+
+    it('dismisses the route target after terminal context-load failure', async () => {
+        const onLoadMessageContext = vi.fn().mockResolvedValue(false)
+        const onInitialTargetConsumed = vi.fn()
+        const onSearchTargetDismissed = vi.fn()
+        searchTargetTestState.extras = { messagesVersion: 1, historyVersion: 0 }
+        searchTargetTestState.renderMessages = () => null
+
+        const options = {
+            initialTargetMessageId: 'target-message',
+            onLoadMessageContext,
+            onInitialTargetConsumed,
+            onSearchTargetDismissed,
+            messagesVersion: 1,
+            historyVersion: 0,
+            rawMessagesCount: 1
+        }
+        const { renderHappyThread } = renderSearchThread(options)
+        render(renderHappyThread())
+
+        await act(async () => {
+            await Promise.resolve()
+        })
+        expect(onLoadMessageContext).toHaveBeenCalledTimes(1)
+
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+            act(() => {
+                vi.advanceTimersByTime(75)
+            })
+            await act(async () => {
+                await Promise.resolve()
+            })
+        }
+
+        expect(onLoadMessageContext).toHaveBeenCalledTimes(4)
+        expect(onSearchTargetDismissed).toHaveBeenCalledTimes(1)
+        expect(onInitialTargetConsumed).not.toHaveBeenCalled()
     })
 
     it('resets a consumed target so the same result can be opened again', async () => {

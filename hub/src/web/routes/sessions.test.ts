@@ -1498,10 +1498,11 @@ describe('sessions routes', () => {
             getSessionsByNamespace: () => [session],
             getFutureScheduledMessageCounts: (ids: string[]) => new Map(ids.map((id) => [id, 0])),
             getNextScheduledAtBySessionIds: (ids: string[]) => new Map(ids.map((id) => [id, null])),
-            searchSessionContent: (query: string, namespace: string, limit: number) => {
+            searchSessionContent: (query: string, namespace: string, limit: number, sessionIds?: readonly string[]) => {
                 expect(query).toBe('needle')
                 expect(namespace).toBe('default')
                 expect(limit).toBe(7)
+                expect(sessionIds).toEqual([session.id, 'unknown-session'])
                 return [{
                     sessionId: session.id,
                     messageId: 'message-1',
@@ -1519,7 +1520,9 @@ describe('sessions routes', () => {
         })
         app.route('/api', createSessionsRoutes(() => engine as SyncEngine))
 
-        const response = await app.request('/api/sessions/content-search?query=needle&limit=7')
+        const response = await app.request(
+            `/api/sessions/content-search?query=needle&limit=7&sessionId=${session.id}&sessionId=unknown-session&sessionId=${session.id}`
+        )
         expect(response.status).toBe(200)
         expect(await response.json()).toEqual({
             results: [{

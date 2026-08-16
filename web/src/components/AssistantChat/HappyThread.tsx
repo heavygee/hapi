@@ -1550,9 +1550,8 @@ export function HappyThread(props: {
             || appliedHistoryVersion !== props.historyVersion
         ) {
             if (searchTargetRenderRetryCountRef.current >= MAX_SEARCH_TARGET_RENDER_RETRIES) {
-                searchTargetHistoryLockRef.current = false
                 jump.phase = 'failed'
-                setIsLocatingSearchTarget(false)
+                dismissSearchTarget()
                 return
             }
             jump.phase = 'waiting-runtime'
@@ -1605,9 +1604,8 @@ export function HappyThread(props: {
         // do not issue a second context request during this hand-off window.
         if (jump.phase === 'waiting-render') {
             if (searchTargetRenderRetryCountRef.current >= MAX_SEARCH_TARGET_RENDER_RETRIES) {
-                searchTargetHistoryLockRef.current = false
                 jump.phase = 'failed'
-                setIsLocatingSearchTarget(false)
+                dismissSearchTarget()
                 return
             }
             searchTargetRenderRetryCountRef.current += 1
@@ -1616,9 +1614,8 @@ export function HappyThread(props: {
         }
 
         if (!props.onLoadMessageContext) {
-            searchTargetHistoryLockRef.current = false
             jump.phase = 'failed'
-            setIsLocatingSearchTarget(false)
+            dismissSearchTarget()
             return
         }
 
@@ -1636,9 +1633,8 @@ export function HappyThread(props: {
                     current.phase = 'idle'
                     scheduleSearchTargetRetry(SEARCH_TARGET_QUERY_RETRY_DELAY_MS)
                 } else {
-                    searchTargetHistoryLockRef.current = false
                     current.phase = 'failed'
-                    setIsLocatingSearchTarget(false)
+                    dismissSearchTarget()
                 }
                 return
             }
@@ -1653,9 +1649,8 @@ export function HappyThread(props: {
                 current.phase = 'idle'
                 scheduleSearchTargetRetry(SEARCH_TARGET_QUERY_RETRY_DELAY_MS)
             } else {
-                searchTargetHistoryLockRef.current = false
                 current.phase = 'failed'
-                setIsLocatingSearchTarget(false)
+                dismissSearchTarget()
             }
         })
     }, [
@@ -1664,6 +1659,7 @@ export function HappyThread(props: {
         clearSearchTargetMarker,
         clearSearchTargetRetryTimer,
         clearSearchTargetScrollTimers,
+        dismissSearchTarget,
         releaseSearchTargetHistoryLock,
         scheduleSearchTargetRetry,
         scheduleSearchTargetScroll,

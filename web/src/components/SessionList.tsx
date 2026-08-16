@@ -1288,42 +1288,6 @@ export function SessionList(props: {
         && Array.from(normalizedQuery).length >= MIN_CONTENT_SEARCH_QUERY_LENGTH
 
     useEffect(() => {
-        if (!contentSearchReady || !api) {
-            setContentSearchResponse(null)
-            setContentSearchLoading(false)
-            setContentSearchError(false)
-            return
-        }
-
-        // Do not leave the previous query's targets clickable while the new
-        // request is waiting for its debounce window.
-        setContentSearchResponse(null)
-        setContentSearchError(false)
-        const controller = new AbortController()
-        const timer = window.setTimeout(() => {
-            setContentSearchLoading(true)
-            void api.searchSessionContent(normalizedQuery, 50, controller.signal)
-                .then((response) => {
-                    if (controller.signal.aborted) return
-                    setContentSearchResponse(response)
-                })
-                .catch(() => {
-                    if (controller.signal.aborted) return
-                    setContentSearchResponse({ results: [] })
-                    setContentSearchError(true)
-                })
-                .finally(() => {
-                    if (!controller.signal.aborted) setContentSearchLoading(false)
-                })
-        }, 180)
-
-        return () => {
-            window.clearTimeout(timer)
-            controller.abort()
-        }
-    }, [api, contentSearchReady, normalizedQuery])
-
-    useEffect(() => {
         // 中文注释：监听导入标记变化，让列表在“导入完成”或“用户已在 Hapi 中继续会话”后立即刷新时间文案。
         return subscribeCodexImportedSessions(() => {
             setCodexImportedSessionsVersion((value) => value + 1)
@@ -1420,6 +1384,75 @@ export function SessionList(props: {
         && machineFilters.some(mg => (mg.machineId ?? UNKNOWN_MACHINE_ID) === machineFilter)
         ? machineFilter
         : null
+    const contentSearchCandidateSessions = useMemo(() => {
+        const timeFiltered = allSessions.filter(session => sessionMatchesTimeRange(session, timeRange))
+        const lastSeenById = showUnreadOnly ? getSessionLastSeenSnapshot() : null
+        const unreadFiltered = showUnreadOnly
+            ? filterUnreadSessionsOnly(
+                timeFiltered,
+                selectedSessionId,
+                id => lastSeenById?.[id] ?? 0
+            )
+            : timeFiltered
+        return activeMachineFilter === null
+            ? unreadFiltered
+            : unreadFiltered.filter(session =>
+                (session.metadata?.machineId ?? UNKNOWN_MACHINE_ID) === activeMachineFilter
+            )
+    }, [allSessions, activeMachineFilter, selectedSessionId, showUnreadOnly, timeRange?.start, timeRange?.end])
+    const contentSearchSessionIds = useMemo(
+        () => contentSearchCandidateSessions.map(session => session.id),
+        [contentSearchCandidateSessions]
+    )
+
+    useEffect(() => {
+        if (!contentSearchReady || !api) {
+            setContentSearchResponse(null)
+            setContentSearchLoading(false)
+            setContentSearchError(false)
+            return
+        }
+
+        // Do not leave the previous query's targets clickable while the new
+        // request is waiting for its debounce window.
+        setContentSearchResponse(null)
+        setContentSearchError(false)
+        if (contentSearchSessionIds.length === 0) {
+            setContentSearchResponse({ results: [] })
+            setContentSearchLoading(false)
+            return
+        }
+
+        const controller = new AbortController()
+        const timer = window.setTimeout(() => {
+            setContentSearchLoading(true)
+            const limit = Math.min(100, Math.max(50, contentSearchSessionIds.length))
+            void api.searchSessionContent(
+                normalizedQuery,
+                limit,
+                controller.signal,
+                contentSearchSessionIds
+            )
+                .then((response) => {
+                    if (controller.signal.aborted) return
+                    setContentSearchResponse(response)
+                })
+                .catch(() => {
+                    if (controller.signal.aborted) return
+                    setContentSearchResponse({ results: [] })
+                    setContentSearchError(true)
+                })
+                .finally(() => {
+                    if (!controller.signal.aborted) setContentSearchLoading(false)
+                })
+        }, 180)
+
+        return () => {
+            window.clearTimeout(timer)
+            controller.abort()
+        }
+    }, [api, contentSearchReady, contentSearchSessionIds, normalizedQuery])
+
     // Unread after search/time, before machine scope — so machineFilters (from allSessions)
     // stay stable. Filtering unread into allSessions would drop machines with zero unread
     // and clear a persisted machine selection (showing other machines' unread instead).

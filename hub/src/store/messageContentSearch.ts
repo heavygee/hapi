@@ -406,7 +406,8 @@ export function searchMessageContent(
     db: Database,
     query: string,
     namespace: string,
-    limit: number = 50
+    limit: number = 50,
+    sessionIds?: readonly string[]
 ): MessageContentSearchMatch[] {
     ensureMessageContentSearchTable(db)
     const normalizedQuery = normalizeSearchQuery(query)
@@ -415,6 +416,13 @@ export function searchMessageContent(
     const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(100, Math.floor(limit))) : 50
     const queryLength = [...normalizedQuery].length
     if (queryLength < MIN_INDEXED_QUERY_LENGTH) return []
+    const scopedSessionIds = sessionIds === undefined
+        ? undefined
+        : [...new Set(sessionIds.map((sessionId) => sessionId.trim()).filter(Boolean))]
+    if (scopedSessionIds?.length === 0) return []
+    const sessionScope = scopedSessionIds === undefined
+        ? ''
+        : ` AND f.session_id IN (${scopedSessionIds.map(() => '?').join(', ')})`
     const useShortIndex = queryLength === MIN_INDEXED_QUERY_LENGTH
     const rows = useShortIndex
         ? db.prepare(`
@@ -439,13 +447,14 @@ export function searchMessageContent(
                     ON short.search_rowid = f.rowid AND short.gram = ?
                 INNER JOIN sessions AS s
                     ON s.id = f.session_id AND s.namespace = ?
+                WHERE 1 = 1${sessionScope}
             )
             SELECT message_id, session_id, role, seq, created_at, searchable_text
             FROM ranked_matches
             WHERE session_rank = 1
             ORDER BY updated_at DESC, CAST(seq AS INTEGER) DESC
             LIMIT ?
-        `).all(normalizedQuery.toLocaleLowerCase(), namespace, safeLimit) as DbSearchRow[]
+        `).all(normalizedQuery.toLocaleLowerCase(), namespace, ...(scopedSessionIds ?? []), safeLimit) as DbSearchRow[]
         : db.prepare(`
             WITH ranked_matches AS (
                 SELECT
@@ -465,7 +474,7 @@ export function searchMessageContent(
                 FROM ${MESSAGE_CONTENT_SEARCH_TABLE} AS f
                 INNER JOIN sessions AS s
                     ON s.id = f.session_id AND s.namespace = ?
-                WHERE ${MESSAGE_CONTENT_SEARCH_TABLE} MATCH ?
+                WHERE ${MESSAGE_CONTENT_SEARCH_TABLE} MATCH ?${sessionScope}
             )
             SELECT ranked.message_id, ranked.session_id, ranked.role, ranked.seq, ranked.created_at,
                    snippet(${MESSAGE_CONTENT_SEARCH_TABLE}, 0, '', '', '…', 24) AS snippet
@@ -475,7 +484,7 @@ export function searchMessageContent(
             WHERE ranked.session_rank = 1
             ORDER BY ranked.updated_at DESC, CAST(ranked.seq AS INTEGER) DESC
             LIMIT ?
-        `).all(namespace, escapeFtsPhrase(normalizedQuery), safeLimit) as DbSearchRow[]
+        `).all(namespace, escapeFtsPhrase(normalizedQuery), ...(scopedSessionIds ?? []), safeLimit) as DbSearchRow[]
 
     return rows.map((row) => ({
         sessionId: row.session_id,

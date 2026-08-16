@@ -142,10 +142,17 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             ? Math.min(100, Math.max(1, Math.floor(limitRaw)))
             : 50
         const namespace = c.get('namespace')
+        const searchUrl = new URL(c.req.url)
+        const requestedSessionIds = searchUrl.searchParams.getAll('sessionId')
+            .map((sessionId) => sessionId.trim())
+            .filter(Boolean)
+        const sessionIds = searchUrl.searchParams.has('sessionId')
+            ? [...new Set(requestedSessionIds)]
+            : undefined
         const sessionsById = new Map(
             engine.getSessionsByNamespace(namespace).map((session) => [session.id, session])
         )
-        const matches = engine.searchSessionContent(query.slice(0, 200), namespace, limit)
+        const matches = engine.searchSessionContent(query.slice(0, 200), namespace, limit, sessionIds)
         const matchedSessionIds = matches.map((match) => match.sessionId)
         const scheduledCounts = engine.getFutureScheduledMessageCounts(matchedSessionIds)
         const nextScheduledAt = engine.getNextScheduledAtBySessionIds(matchedSessionIds)

@@ -323,8 +323,13 @@ export class SyncEngine {
         return this.sessionCache.getSessionsByNamespace(namespace)
     }
 
-    searchSessionContent(query: string, namespace: string, limit: number = 50): MessageContentSearchMatch[] {
-        return this.store.messages.searchContent(query, namespace, limit)
+    searchSessionContent(
+        query: string,
+        namespace: string,
+        limit: number = 50,
+        sessionIds?: readonly string[]
+    ): MessageContentSearchMatch[] {
+        return this.store.messages.searchContent(query, namespace, limit, sessionIds)
     }
 
     searchSessionContentMatches(

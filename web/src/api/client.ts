@@ -256,8 +256,17 @@ export class ApiClient {
         return await this.request<HubHealthResponse>('/health')
     }
 
-    async searchSessionContent(query: string, limit: number = 50, signal?: AbortSignal): Promise<SessionContentSearchResponse> {
+    async searchSessionContent(
+        query: string,
+        limit: number = 50,
+        signal?: AbortSignal,
+        sessionIds?: readonly string[]
+    ): Promise<SessionContentSearchResponse> {
         const params = new URLSearchParams({ query: query.trim(), limit: String(limit) })
+        for (const sessionId of new Set(sessionIds ?? [])) {
+            const trimmed = sessionId.trim()
+            if (trimmed) params.append('sessionId', trimmed)
+        }
         return await this.request<SessionContentSearchResponse>(
             `/api/sessions/content-search?${params.toString()}`,
             { signal }

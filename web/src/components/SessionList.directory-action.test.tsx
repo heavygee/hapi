@@ -1036,6 +1036,60 @@ describe('SessionList search toggle', () => {
         }
     })
 
+    it('passes the filtered sidebar session scope before applying the content result limit', async () => {
+        localStorage.setItem('hapi-show-active-sessions-only', 'true')
+        vi.useFakeTimers()
+        try {
+            const activeMatch = makeSession({
+                id: 'active-content-match',
+                active: true,
+                updatedAt: 100,
+                metadata: { path: '/work/hapi', name: 'Active content match', flavor: 'codex' },
+            })
+            const inactiveMatch = makeSession({
+                id: 'inactive-content-match',
+                updatedAt: 90,
+                metadata: { path: '/work/hapi', name: 'Inactive content match', flavor: 'codex' },
+            })
+            const api = {
+                searchSessionContent: vi.fn().mockResolvedValue({ results: [] }),
+            } as unknown as ApiClient
+
+            renderWithProviders(
+                <SessionList
+                    sessions={[activeMatch, inactiveMatch]}
+                    selectedSessionId={null}
+                    onSelect={vi.fn()}
+                    onNewSession={vi.fn()}
+                    onRefresh={vi.fn()}
+                    isLoading={false}
+                    renderHeader={false}
+                    api={api}
+                />
+            )
+
+            fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
+            fireEvent.click(screen.getByRole('button', { name: 'Search scope' }))
+            fireEvent.click(screen.getByRole('button', { name: 'Content' }))
+            fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'content' } })
+
+            await act(async () => {
+                vi.advanceTimersByTime(180)
+                await Promise.resolve()
+            })
+
+            expect(api.searchSessionContent).toHaveBeenCalledWith(
+                'content',
+                50,
+                expect.any(AbortSignal),
+                ['active-content-match']
+            )
+        } finally {
+            vi.useRealTimers()
+            localStorage.removeItem('hapi-show-active-sessions-only')
+        }
+    })
+
     it('does not issue a corpus search for a one-character content query', async () => {
         vi.useFakeTimers()
         try {

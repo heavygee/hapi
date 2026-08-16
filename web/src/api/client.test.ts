@@ -272,15 +272,17 @@ describe('ApiClient error mapping', () => {
 })
 
 describe('ApiClient session content search', () => {
-    it('uses the opt-in content-search endpoint with encoded query and limit', async () => {
+    it('uses the opt-in content-search endpoint with encoded query, limit, and session scope', async () => {
         const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
             new Response(JSON.stringify({ results: [] }), { status: 200 })
         )
         try {
             const api = new ApiClient('test-token')
-            await api.searchSessionContent(' cache search ', 12)
+            await api.searchSessionContent(' cache search ', 12, undefined, ['session /?#', 'session /?#', 'other'])
             const request = fetchMock.mock.calls[0]?.[0]
             expect(String(request)).toContain('/api/sessions/content-search?query=cache+search&limit=12')
+            expect(String(request)).toContain('sessionId=session+%2F%3F%23')
+            expect(String(request)).toContain('sessionId=other')
         } finally {
             fetchMock.mockRestore()
         }

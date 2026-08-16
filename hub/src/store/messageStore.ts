@@ -162,8 +162,13 @@ export class MessageStore {
         return countMessages(this.db, sessionId)
     }
 
-    searchContent(query: string, namespace: string, limit: number = 50): MessageContentSearchMatch[] {
-        return searchMessageContent(this.db, query, namespace, limit)
+    searchContent(
+        query: string,
+        namespace: string,
+        limit: number = 50,
+        sessionIds?: readonly string[]
+    ): MessageContentSearchMatch[] {
+        return searchMessageContent(this.db, query, namespace, limit, sessionIds)
     }
 
     searchContentInSession(

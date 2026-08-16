@@ -93,6 +93,22 @@ describe('message content search', () => {
             .toEqual([busySession.id, otherSession.id])
     })
 
+    it('restricts global content search to requested sessions before applying the limit', () => {
+        const store = new Store(':memory:')
+        const first = makeSession(store, 'content-search-scope-first')
+        const second = makeSession(store, 'content-search-scope-second')
+        for (const session of [first, second]) {
+            store.messages.addMessage(session.id, {
+                role: 'user',
+                content: { type: 'text', text: 'scoped needle' }
+            })
+        }
+
+        expect(store.messages.searchContent('scoped needle', 'default', 1, [second.id])
+            .map((result) => result.sessionId))
+            .toEqual([second.id])
+    })
+
     it('returns message-level matches and the full count for one session', () => {
         const store = new Store(':memory:')
         const session = makeSession(store, 'message-level-search')
