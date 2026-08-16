@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -74,6 +75,31 @@ describe('peerCapabilityInject (#1203 pass 2h)', () => {
             expect(proof).toBe('proof-handoff')
         } finally {
             server!.close()
+        }
+    })
+
+    it('does not hang when a listener accepts then ends without a newline', async () => {
+        const socketPath = tempSock()
+        const server = createServer((socket) => {
+            socket.end()
+        })
+        await new Promise<void>((resolve, reject) => {
+            server.once('error', reject)
+            server.listen(socketPath, () => resolve())
+        })
+        try {
+            const started = Date.now()
+            const proof = await receiveRunnerProofFromHandoff({
+                socketPath,
+                ownerPid: process.pid,
+                attempts: 2,
+                readPeerCred: () => ({ pid: process.pid, uid: 0, gid: 0 }),
+            })
+            expect(proof).toBeUndefined()
+            // Without end/close/timeout settling, the first tryReceiveOnce hangs forever.
+            expect(Date.now() - started).toBeLessThan(8_000)
+        } finally {
+            await new Promise<void>((resolve) => server.close(() => resolve()))
         }
     })
 
