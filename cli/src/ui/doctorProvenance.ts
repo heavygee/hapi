@@ -105,14 +105,14 @@ function formatIssues(issues: ProvenanceIssueCode[]): string {
 function formatSessionRow(row: SessionProvenanceRow): string {
     const label = safeTerminalText(row.name ?? row.sessionId.slice(0, 8))
     const pid = row.hostPid !== null ? ` pid=${row.hostPid}` : ''
-    const machine = row.machineId ? ` machine=${row.machineId.slice(0, 8)}` : ''
-    const lifecycle = row.lifecycleState ? ` lifecycle=${row.lifecycleState}` : ''
+    const machine = row.machineId ? ` machine=${safeTerminalText(row.machineId).slice(0, 8)}` : ''
+    const lifecycle = row.lifecycleState ? ` lifecycle=${safeTerminalText(row.lifecycleState)}` : ''
     const kill = row.hasKillSessionRpc ? chalk.green('killSession') : chalk.red('no-kill')
     const active = row.active ? chalk.yellow('active') : chalk.gray('idle')
     return [
         `  ${active} ${chalk.cyan(label)}`,
-        `    id=${row.sessionId}`,
-        `    flavor=${row.flavor ?? '(unknown)'}${machine}${pid}${lifecycle}`,
+        `    id=${safeTerminalText(row.sessionId)}`,
+        `    flavor=${safeTerminalText(row.flavor ?? '(unknown)')}${machine}${pid}${lifecycle}`,
         `  rpc=${kill}  ${formatIssues(row.issues)}`,
     ].join('\n')
 }
@@ -123,7 +123,7 @@ function formatMachineRow(row: MachineProvenanceRow): string {
     const proof = row.hasRunnerProof ? chalk.green('proof') : chalk.red('no-proof')
     const version = row.happyCliVersion ? ` cli=${safeTerminalText(row.happyCliVersion)}` : ''
     return [
-        `  ${chalk.blue(label)} (${row.machineId.slice(0, 8)})`,
+        `  ${chalk.blue(label)} (${safeTerminalText(row.machineId).slice(0, 8)})`,
         `    host=${safeTerminalText(row.host ?? '(unknown)')}${version}`,
         `  rpc=${spawn} proof=${proof}  ${formatIssues(row.issues)}`,
     ].join('\n')
@@ -137,8 +137,8 @@ function formatUnverifiedMessageRow(row: UnverifiedPeerMessageRow): string {
         : ''
     return [
         `  ${chalk.yellow('peer?')} ${chalk.cyan(sessionLabel)} seq=${row.seq}`,
-        `    session=${row.sessionId}`,
-        `    message=${row.messageId}${claimed}`,
+        `    session=${safeTerminalText(row.sessionId)}`,
+        `    message=${safeTerminalText(row.messageId)}${claimed}`,
         `    ${preview}`,
     ].join('\n')
 }
