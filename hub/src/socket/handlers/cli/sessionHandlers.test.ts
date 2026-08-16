@@ -341,7 +341,7 @@ describe('cli session handlers', () => {
         expect(uuids).toEqual(['msg-1', 'msg-2'])
     })
 
-    it.each(['supersededBySessionId', 'opencodeClearOperation'] as const)(
+    it.each(['supersededBySessionId', 'opencodeClearOperation', 'machineId'] as const)(
         'ignores a forged hub-owned %s addition from CLI metadata',
         (field) => {
             const store = new Store(':memory:')
@@ -359,7 +359,9 @@ describe('cli session handlers', () => {
                     path: '/tmp/project',
                     [field]: field === 'supersededBySessionId'
                         ? 'foreign-session'
-                        : { replacementSessionId: 'foreign-session', state: 'reserved', updatedAt: Date.now() }
+                        : field === 'machineId'
+                            ? 'attacker-machine'
+                            : { replacementSessionId: 'foreign-session', state: 'reserved', updatedAt: Date.now() }
                 }
             }, () => {})
             expect(store.sessions.getSessionByNamespace(session.id, 'default')?.metadata).not.toHaveProperty(field)
@@ -389,6 +391,34 @@ describe('cli session handlers', () => {
         }, () => {})
         expect(store.sessions.getSessionByNamespace(session.id, 'default')?.metadata).toMatchObject({
             supersededBySessionId: 'owned-target', opencodeClearOperation: operation, lifecycleState: 'archived'
+        })
+    })
+
+    it('rejects sibling rewrite of recorded machineId via update-metadata', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('preserve-machine', {
+            path: '/tmp/project',
+            machineId: 'victim-machine',
+        }, null, 'default')
+        const socket = new FakeSocket()
+        registerSessionHandlers(socket as unknown as CliSocketWithData, {
+            store,
+            resolveSessionAccess: () => ({ ok: true, value: session as StoredSession }),
+            emitAccessError: () => { throw new Error('unexpected access error') }
+        })
+        socket.trigger('update-metadata', {
+            sid: session.id,
+            expectedVersion: session.metadataVersion,
+            metadata: {
+                path: '/tmp/project',
+                machineId: 'attacker-machine',
+                name: 'still-allowed',
+            }
+        }, () => {})
+        expect(store.sessions.getSessionByNamespace(session.id, 'default')?.metadata).toMatchObject({
+            path: '/tmp/project',
+            machineId: 'victim-machine',
+            name: 'still-allowed',
         })
     })
 })

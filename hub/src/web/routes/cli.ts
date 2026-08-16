@@ -407,7 +407,10 @@ export function createCliRoutes(
             return c.json({ error: 'Source machine not found' }, 404)
         }
         const sourceTag = typeof fromAuth.tag === 'string' ? fromAuth.tag : ''
-        if (!sourceTag || !constantTimeEquals(sourceTag, machineTag)) {
+        // Pre-tag (v23) machines have tag NULL. Allow that legacy source to
+        // migrate onto a proven destination; if the source already has a tag,
+        // it must match the destination tag (same physical host rotation).
+        if (sourceTag && !constantTimeEquals(sourceTag, machineTag)) {
             return c.json({ error: 'Source machine tag mismatch' }, 403)
         }
         try {

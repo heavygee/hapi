@@ -517,3 +517,95 @@ describe('POST /cli/sessions/:id/peer-messages', () => {
         expect(response.status).toBe(409)
     })
 })
+
+describe('cli migrate-sessions', () => {
+    it('migrates sessions from a pre-tag (untagged) source machine', async () => {
+        const { hashRunnerProof } = await import('../../utils/runnerProof')
+        const proof = 'runner-proof-legacy'
+        const tag = 'dest-tag'
+        let migratedArgs: [string, string, string] | null = null
+        const app = createApp({
+            getMachineAuthMaterial: (id: string) => {
+                if (id === 'new-machine') {
+                    return {
+                        namespace: 'default',
+                        tag,
+                        runnerProofHash: hashRunnerProof(proof),
+                    }
+                }
+                if (id === 'old-machine') {
+                    return {
+                        namespace: 'default',
+                        tag: null,
+                        runnerProofHash: null,
+                    }
+                }
+                return null
+            },
+            migrateSessionsMachineId: (from: string, to: string, ns: string) => {
+                migratedArgs = [from, to, ns]
+                return 2
+            },
+        } as never)
+
+        const response = await app.request('/cli/machines/new-machine/migrate-sessions', {
+            method: 'POST',
+            headers: {
+                ...authHeaders(),
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+                fromMachineId: 'old-machine',
+                machineTag: tag,
+                runnerProof: proof,
+            }),
+        })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ migrated: 2 })
+        expect(migratedArgs).toEqual(['old-machine', 'new-machine', 'default'])
+    })
+
+    it('rejects migrate when a tagged source does not match destination tag', async () => {
+        const { hashRunnerProof } = await import('../../utils/runnerProof')
+        const proof = 'runner-proof-mismatch'
+        const app = createApp({
+            getMachineAuthMaterial: (id: string) => {
+                if (id === 'new-machine') {
+                    return {
+                        namespace: 'default',
+                        tag: 'dest-tag',
+                        runnerProofHash: hashRunnerProof(proof),
+                    }
+                }
+                if (id === 'old-machine') {
+                    return {
+                        namespace: 'default',
+                        tag: 'other-tag',
+                        runnerProofHash: null,
+                    }
+                }
+                return null
+            },
+            migrateSessionsMachineId: () => {
+                throw new Error('should not migrate')
+            },
+        } as never)
+
+        const response = await app.request('/cli/machines/new-machine/migrate-sessions', {
+            method: 'POST',
+            headers: {
+                ...authHeaders(),
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+                fromMachineId: 'old-machine',
+                machineTag: 'dest-tag',
+                runnerProof: proof,
+            }),
+        })
+
+        expect(response.status).toBe(403)
+        expect(await response.json()).toEqual({ error: 'Source machine tag mismatch' })
+    })
+})
