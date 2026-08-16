@@ -13,7 +13,7 @@ import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
 import { UsageStore } from './usageStore'
 import { WorkGraphStore } from './workGraphStore'
-import { createMessageContentSearchTable, rebuildMessageContentSearch } from './messageContentSearch'
+import { backfillMessageContentSearchLookup, createMessageContentSearchTable, rebuildMessageContentSearch } from './messageContentSearch'
 
 export type {
     StoredMachine,
@@ -988,6 +988,7 @@ export class Store {
     /** Complete the derived message-content index lookup added after v24. */
     private migrateFromV24ToV25(): void {
         createMessageContentSearchTable(this.db)
+        backfillMessageContentSearchLookup(this.db)
     }
 
     private getSessionColumnNames(): Set<string> {

@@ -39,7 +39,7 @@ import type { Session } from '@/types/api'
 
 const originalScrollTo = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollTo')
 
-function renderThread(onViewModeChange = vi.fn()) {
+function renderThread(onViewModeChange = vi.fn(), onJumpToTail?: () => void) {
     const queryClient = new QueryClient({
         defaultOptions: { queries: { retry: false } }
     })
@@ -54,6 +54,7 @@ function renderThread(onViewModeChange = vi.fn()) {
                     disabled={false}
                     onRefresh={vi.fn()}
                     onViewModeChange={onViewModeChange}
+                    onJumpToTail={onJumpToTail}
                     isSyncingTail={false}
                     messagesWarning={null}
                     hasMoreMessages={false}
@@ -186,6 +187,18 @@ function renderSearchThread(options: {
 }
 
 describe('mobile initial scroll settling', () => {
+    it('uses the explicit tail transition when a send requests a forced scroll', () => {
+        const onViewModeChange = vi.fn()
+        const onJumpToTail = vi.fn()
+        const { rerenderThread } = renderThread(onViewModeChange, onJumpToTail)
+        onViewModeChange.mockClear()
+
+        rerenderThread(1)
+
+        expect(onJumpToTail).toHaveBeenCalledTimes(1)
+        expect(onViewModeChange).not.toHaveBeenCalledWith('tail')
+    })
+
     it('does not snap back after pointer cancellation ends a touch swipe', () => {
         const { viewport, onViewModeChange } = renderThread()
         expect(viewport.scrollTop).toBe(702)

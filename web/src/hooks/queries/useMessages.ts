@@ -50,6 +50,7 @@ export function useMessages(
     cancelLoadMore: () => void
     refetch: () => Promise<void>
     setViewMode: (mode: MessageViewMode) => void
+    jumpToTail: () => void
 } {
     const initialSyncKey = api && sessionId ? sessionId : null
     const [initialSyncReadyKey, setInitialSyncReadyKey] = useState<string | null>(null)
@@ -121,9 +122,17 @@ export function useMessages(
 
     const setViewMode = useCallback((mode: MessageViewMode) => {
         if (!sessionId) return
-        const previousMode = getMessageWindowState(sessionId).viewMode
+        const previous = getMessageWindowState(sessionId)
         setMessageViewMode(sessionId, mode)
-        if (mode === 'tail' && previousMode !== 'tail' && api) {
+        if (mode === 'tail' && api && (previous.viewMode !== 'tail' || previous.requiresLatestReset)) {
+            void syncTailMessages(api, sessionId, { ensureAfterCurrent: true })
+        }
+    }, [api, sessionId])
+
+    const jumpToTail = useCallback(() => {
+        if (!sessionId) return
+        setMessageViewMode(sessionId, 'tail')
+        if (api) {
             void syncTailMessages(api, sessionId, { ensureAfterCurrent: true })
         }
     }, [api, sessionId])
@@ -153,5 +162,6 @@ export function useMessages(
         cancelLoadMore,
         refetch,
         setViewMode,
+        jumpToTail,
     }
 }

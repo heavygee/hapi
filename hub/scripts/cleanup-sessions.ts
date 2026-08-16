@@ -34,6 +34,7 @@ import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 
 import { decodeMessageContent } from '../src/store/contentCodec'
+import { removeMessageContentSearchForSessions } from '../src/store/messageContentSearch'
 
 // Format timestamp as human-readable date
 function formatDate(timestamp: number): string {
@@ -307,6 +308,11 @@ function deleteSessions(db: Database, ids: string[]): number {
     if (ids.length === 0) return 0
 
     const placeholders = ids.map(() => '?').join(', ')
+    // This script intentionally deletes in bulk instead of going through the
+    // Store wrapper. Remove derived message-content rows first, while the
+    // messages still exist for the session-id lookup, so deleted text cannot
+    // remain searchable in the FTS index.
+    removeMessageContentSearchForSessions(db, ids)
     db.run(`DELETE FROM sessions WHERE id IN (${placeholders})`, ids)
     return ids.length
 }

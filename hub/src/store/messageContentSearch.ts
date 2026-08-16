@@ -58,7 +58,8 @@ type DbSearchLookupRow = {
     search_rowid: number
 }
 
-function backfillMessageContentSearchLookup(db: Database): void {
+export function backfillMessageContentSearchLookup(db: Database): void {
+    ensureMessageContentSearchTable(db)
     const select = db.prepare(`
         SELECT rowid AS search_rowid, message_id
         FROM ${MESSAGE_CONTENT_SEARCH_TABLE}
@@ -109,7 +110,8 @@ export function createMessageContentSearchTable(db: Database): void {
     // FTS5 UNINDEXED columns are intentionally not searchable, but SQLite
     // still has to scan the virtual table when deleting by one of them. Keep
     // an ordinary indexed message-id lookup so the write path stays bounded.
-    backfillMessageContentSearchLookup(db)
+    // Existing rows are backfilled explicitly by the v24→v25 migration. Do
+    // not scan the FTS table on every database reopen or first search.
     initializedDatabases.add(db)
 }
 
@@ -286,9 +288,13 @@ export function rebuildMessageContentSearchForSessions(
     }
 }
 
-export function removeMessageContentSearchForSession(db: Database, sessionId: string): void {
+export function removeMessageContentSearchForSessions(db: Database, sessionIds: string[]): void {
     ensureMessageContentSearchTable(db)
-    removeMessageContentSearchRowsForSessions(db, [sessionId])
+    removeMessageContentSearchRowsForSessions(db, sessionIds)
+}
+
+export function removeMessageContentSearchForSession(db: Database, sessionId: string): void {
+    removeMessageContentSearchForSessions(db, [sessionId])
 }
 
 function normalizeSearchQuery(query: string): string {

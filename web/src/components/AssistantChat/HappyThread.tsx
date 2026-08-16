@@ -561,6 +561,7 @@ export function HappyThread(props: {
     onRewindConversation?: (messageLocalId: string) => Promise<void>
     isLatestCompletedBoundary?: (messageId: string) => boolean
     onViewModeChange: (mode: 'tail' | 'history') => void
+    onJumpToTail?: () => void
     isSyncingTail: boolean
     messagesWarning: string | null
     hasMoreMessages: boolean
@@ -1307,11 +1308,17 @@ export function HappyThread(props: {
             lastScrollTopRef.current = viewport.scrollTop
         }
         autoScrollEnabledRef.current = true
-        if (!atBottomRef.current) {
-            atBottomRef.current = true
+        atBottomRef.current = true
+        if (props.onJumpToTail) {
+            // A historical search window can look like it is already at the
+            // bottom after a clamped/programmatic scroll. Always use the
+            // explicit tail transition so the bounded window is reconciled
+            // with the server's latest messages before the next turn renders.
+            props.onJumpToTail()
+        } else {
             onViewModeChangeRef.current('tail')
         }
-    }, [releaseSearchTargetHistoryLock])
+    }, [props.onJumpToTail, releaseSearchTargetHistoryLock])
 
     // Reset state when session changes
     useLayoutEffect(() => {

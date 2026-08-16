@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test'
+import type { Database } from 'bun:sqlite'
 import { Store } from './index'
+import { removeMessageContentSearchForSessions } from './messageContentSearch'
 
 function makeSession(store: Store, tag: string, namespace = 'default') {
     return store.sessions.getOrCreateSession(tag, { path: `/tmp/${tag}` }, null, namespace)
@@ -137,5 +139,23 @@ describe('message content search', () => {
         expect(store.messages.searchContent('mergeable', 'default')[0]?.sessionId).toBe(to.id)
         store.sessions.deleteSession(to.id, 'default')
         expect(store.messages.searchContent('mergeable', 'default')).toEqual([])
+    })
+
+    it('cleans derived rows before a bulk session deletion', () => {
+        const store = new Store(':memory:')
+        const first = makeSession(store, 'bulk-delete-first')
+        const second = makeSession(store, 'bulk-delete-second')
+        for (const session of [first, second]) {
+            store.messages.addMessage(session.id, {
+                role: 'user',
+                content: { type: 'text', text: 'bulk cleanup phrase' }
+            })
+        }
+
+        const db = (store as unknown as { db: Database }).db
+        removeMessageContentSearchForSessions(db, [first.id, second.id])
+        db.prepare('DELETE FROM sessions WHERE id IN (?, ?)').run(first.id, second.id)
+
+        expect(store.messages.searchContent('bulk cleanup phrase', 'default')).toEqual([])
     })
 })

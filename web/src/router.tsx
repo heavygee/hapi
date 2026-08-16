@@ -385,6 +385,7 @@ function SessionPage() {
         messagesVersion,
         historyVersion,
         setViewMode,
+        jumpToTail,
     } = useMessages(api, sessionId, {
         skipInitialTailSync: Boolean(effectiveInitialMessageId?.trim())
     })
@@ -848,6 +849,7 @@ function SessionPage() {
             resolveSessionIdForUpload={async (id) => (await resolveSessionId(id)).sessionId}
             onUploadSessionResolved={handleSessionResolved}
             onViewModeChange={setViewMode}
+            onJumpToTail={jumpToTail}
             onRetryMessage={retryMessage}
             autocompleteSuggestions={getAutocompleteSuggestions}
             availableSlashCommands={slashCommands}
