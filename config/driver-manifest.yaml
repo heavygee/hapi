@@ -723,7 +723,7 @@ layers:
   # Thin tip on driver/session-attached-jobs. Upstream PR tip: feat/job-complete-wake
   # (stacked on feat/session-attached-jobs with runId claim fence).
   # Worktree: ~/coding/hapi/worktrees/job-complete-wake @ driver/job-complete-wake
-  # Tip: 17c109fd9 — wakeOnTerminal + resume→send; SCHEMA 23 tolerate-ahead column ensure
+  # Tip: 479c8bf90 — parse --wake-on-terminal/--wake-prompt (help was ahead of argv)
   - branch: driver/job-complete-wake
 
   # DROPPED 2026-08-11: feat/share-native-fileurl (was driver/share-native-deeplink)
