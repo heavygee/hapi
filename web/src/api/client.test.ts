@@ -280,9 +280,14 @@ describe('ApiClient session content search', () => {
             const api = new ApiClient('test-token')
             await api.searchSessionContent(' cache search ', 12, undefined, ['session /?#', 'session /?#', 'other'])
             const request = fetchMock.mock.calls[0]?.[0]
-            expect(String(request)).toContain('/api/sessions/content-search?query=cache+search&limit=12')
-            expect(String(request)).toContain('sessionId=session+%2F%3F%23')
-            expect(String(request)).toContain('sessionId=other')
+            const init = fetchMock.mock.calls[0]?.[1]
+            expect(String(request)).toBe('/api/sessions/content-search')
+            expect(init?.method).toBe('POST')
+            expect(init?.body).toBe(JSON.stringify({
+                query: 'cache search',
+                limit: 12,
+                sessionIds: ['session /?#', 'other']
+            }))
         } finally {
             fetchMock.mockRestore()
         }

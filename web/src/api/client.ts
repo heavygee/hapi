@@ -262,11 +262,23 @@ export class ApiClient {
         signal?: AbortSignal,
         sessionIds?: readonly string[]
     ): Promise<SessionContentSearchResponse> {
-        const params = new URLSearchParams({ query: query.trim(), limit: String(limit) })
-        for (const sessionId of new Set(sessionIds ?? [])) {
-            const trimmed = sessionId.trim()
-            if (trimmed) params.append('sessionId', trimmed)
+        const normalizedQuery = query.trim()
+        if (sessionIds !== undefined) {
+            const normalizedSessionIds = [...new Set(sessionIds.map((sessionId) => sessionId.trim()).filter(Boolean))]
+            return await this.request<SessionContentSearchResponse>(
+                '/api/sessions/content-search',
+                {
+                    method: 'POST',
+                    signal,
+                    body: JSON.stringify({
+                        query: normalizedQuery,
+                        limit,
+                        sessionIds: normalizedSessionIds
+                    })
+                }
+            )
         }
+        const params = new URLSearchParams({ query: normalizedQuery, limit: String(limit) })
         return await this.request<SessionContentSearchResponse>(
             `/api/sessions/content-search?${params.toString()}`,
             { signal }

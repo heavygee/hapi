@@ -128,27 +128,16 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         return c.json({ sessions })
     })
 
-    app.get('/sessions/content-search', (c) => {
-        const engine = requireSyncEngine(c, getSyncEngine)
-        if (engine instanceof Response) {
-            return engine
-        }
-
-        const query = c.req.query('query')?.trim() ?? ''
+    const respondToSessionContentSearch = (
+        c: Context<WebAppEnv>,
+        engine: SyncEngine,
+        query: string,
+        limit: number,
+        sessionIds?: readonly string[]
+    ) => {
         if (!query) return c.json({ results: [] })
 
-        const limitRaw = Number(c.req.query('limit'))
-        const limit = Number.isFinite(limitRaw)
-            ? Math.min(100, Math.max(1, Math.floor(limitRaw)))
-            : 50
         const namespace = c.get('namespace')
-        const searchUrl = new URL(c.req.url)
-        const requestedSessionIds = searchUrl.searchParams.getAll('sessionId')
-            .map((sessionId) => sessionId.trim())
-            .filter(Boolean)
-        const sessionIds = searchUrl.searchParams.has('sessionId')
-            ? [...new Set(requestedSessionIds)]
-            : undefined
         const sessionsById = new Map(
             engine.getSessionsByNamespace(namespace).map((session) => [session.id, session])
         )
@@ -178,6 +167,66 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             })
 
         return c.json({ results })
+    }
+
+    app.get('/sessions/content-search', (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const query = c.req.query('query')?.trim() ?? ''
+        const limitRaw = Number(c.req.query('limit'))
+        const limit = Number.isFinite(limitRaw)
+            ? Math.min(100, Math.max(1, Math.floor(limitRaw)))
+            : 50
+        const searchUrl = new URL(c.req.url)
+        const requestedSessionIds = searchUrl.searchParams.getAll('sessionId')
+            .map((sessionId) => sessionId.trim())
+            .filter(Boolean)
+        const sessionIds = searchUrl.searchParams.has('sessionId')
+            ? [...new Set(requestedSessionIds)]
+            : undefined
+        return respondToSessionContentSearch(c, engine, query, limit, sessionIds)
+    })
+
+    app.post('/sessions/content-search', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const body = await c.req.json().catch(() => null) as {
+            query?: unknown
+            limit?: unknown
+            sessionIds?: unknown
+        } | null
+        if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+            return c.json({ error: 'Invalid body' }, 400)
+        }
+        if (body.query !== undefined && typeof body.query !== 'string') {
+            return c.json({ error: 'Invalid query' }, 400)
+        }
+        if (body.sessionIds !== undefined && (
+            !Array.isArray(body.sessionIds)
+            || body.sessionIds.some((sessionId) => typeof sessionId !== 'string')
+        )) {
+            return c.json({ error: 'Invalid sessionIds' }, 400)
+        }
+
+        const query = typeof body.query === 'string' ? body.query.trim() : ''
+        const limitRaw = Number(body.limit)
+        const limit = Number.isFinite(limitRaw)
+            ? Math.min(100, Math.max(1, Math.floor(limitRaw)))
+            : 50
+        const sessionIds = body.sessionIds === undefined
+            ? undefined
+            : [...new Set(
+                (body.sessionIds as string[])
+                    .map((sessionId) => sessionId.trim())
+                    .filter(Boolean)
+            )]
+        return respondToSessionContentSearch(c, engine, query, limit, sessionIds)
     })
 
     app.get('/sessions/:id/content-search', (c) => {

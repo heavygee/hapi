@@ -1520,9 +1520,15 @@ describe('sessions routes', () => {
         })
         app.route('/api', createSessionsRoutes(() => engine as SyncEngine))
 
-        const response = await app.request(
-            `/api/sessions/content-search?query=needle&limit=7&sessionId=${session.id}&sessionId=unknown-session&sessionId=${session.id}`
-        )
+        const response = await app.request('/api/sessions/content-search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                query: 'needle',
+                limit: 7,
+                sessionIds: [session.id, 'unknown-session', session.id]
+            })
+        })
         expect(response.status).toBe(200)
         expect(await response.json()).toEqual({
             results: [{
