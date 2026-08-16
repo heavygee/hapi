@@ -45,6 +45,7 @@ Standalone Cursor does not get a HappyServer sidecar. Keeping a pinned loopback 
 - Cursor state lives under `/var/lib/hapi/cursor` with `~/.cursor` → that path (disk hygiene; see janus-oos phase-q). Overlay must **follow** that symlink (fix branch `fix/cursor-mcp-overlay-follow-home-symlink`); a hard refuse of symlinked config dirs breaks install on this host.
 - Optional explicit dir: `HAPI_CURSOR_MCP_CONFIG_DIR=/var/lib/hapi/cursor`.
 - Pre-user-level overlay left **project** `*/.cursor/mcp.json` piles of stale `127.0.0.1:<port>` entries across `~/coding`. Prune with `hapi-prune-stale-cursor-mcp` (below). Live PID-stamped `hapi-*` keys are kept until the owning process exits.
+- **Live multiplex (2026-08-16, provenance dogfood):** user-level `mcp.json` merges **every live** `hapi-<uuid>` sidecar. A Cursor agent in session A can call `ping_peer` on session B's HappyServer. Hub `meta.peer.sourceSessionId` then names the **sidecar process**, not the speaking session. Volumes looked like discord-heavygee / wrong peer while P0.5 chips still verified. Kill-criterion: Jessica (or any) agent `ping_peer` lands with `sourceSessionId` ≠ that agent's session id. Fix is overlay isolation (one enabled `hapi-*` per ACP process), not #1473 provenance code.
 
 ## Binary skew
 
@@ -67,3 +68,4 @@ hapi-prune-stale-cursor-mcp
 - If Cursor native MCP tools work after overlay install **and** `hapiMcpUrl` answers on loopback → wiring is correct.
 - If someone "fixes" MCP by setting `--url` to `:3006` → reject; that is the wrong layer.
 - If project mcp.json is the only place live `hapi-*` appears on oos → user-level overlay is still broken (symlink refuse / missing follow); do not normalize on project files.
+- If a session's outbound ping has verified chips but `meta.peer.sourceSessionId` is another live HAPI uuid → multiplex, not hub scramble. Do not "fix" by rewriting provenance on the victim PR.
