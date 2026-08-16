@@ -24,7 +24,7 @@ import {
     writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, isAbsolute, join, relative, resolve as resolvePath } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { logger } from '@/ui/logger';
@@ -177,10 +177,71 @@ export type CursorMcpOverlayHandle = {
 /** Marker line in `.git/info/exclude` for session-local project mcp.json. */
 export const HAPI_MCP_GIT_EXCLUDE_MARKER = '# hapi-cursor-mcp-overlay (do not commit session mailbox)';
 
+/** Normalize a repo-relative path for gitignore / exclude (always `/`). */
+export function toGitExcludePattern(relPath: string): string {
+    return relPath.replaceAll('\\', '/');
+}
+
+function resolveGitExcludePath(root: string): string | null {
+    const excludeProc = spawnSync('git', ['rev-parse', '--git-path', 'info/exclude'], {
+        cwd: root,
+        encoding: 'utf-8',
+    });
+    if (excludeProc.status !== 0) {
+        return null;
+    }
+    const raw = excludeProc.stdout.trim();
+    if (!raw) {
+        return null;
+    }
+    return isAbsolute(raw) ? raw : resolvePath(root, raw);
+}
+
+/** Append marker + pattern when missing. Returns true if this call wrote them. */
+export function appendExcludeIfMissing(excludePath: string, pattern: string): boolean {
+    const existing = existsSync(excludePath) ? readFileSync(excludePath, 'utf-8') : '';
+    const lines = existing.split(/\r?\n/);
+    if (lines.includes(pattern)) {
+        return false;
+    }
+    mkdirSync(dirname(excludePath), { recursive: true });
+    const prefix = existing.length === 0 || existing.endsWith('\n') ? '' : '\n';
+    writeFileSync(
+        excludePath,
+        `${prefix}${HAPI_MCP_GIT_EXCLUDE_MARKER}\n${pattern}\n`,
+        { encoding: 'utf-8', mode: 0o644 },
+    );
+    return true;
+}
+
+/** Remove one marker+pattern block we added (exact lines only). */
+export function removeExactExcludeBlock(excludePath: string, pattern: string): void {
+    if (!existsSync(excludePath)) {
+        return;
+    }
+    const lines = readFileSync(excludePath, 'utf-8').split(/\r?\n/);
+    const out: string[] = [];
+    for (let i = 0; i < lines.length; i++) {
+        if (
+            lines[i] === HAPI_MCP_GIT_EXCLUDE_MARKER
+            && lines[i + 1] === pattern
+        ) {
+            i += 1;
+            continue;
+        }
+        out.push(lines[i]!);
+    }
+    while (out.length > 0 && out[out.length - 1] === '') {
+        out.pop();
+    }
+    const body = out.length === 0 ? '' : `${out.join('\n')}\n`;
+    writeFileSync(excludePath, body, { encoding: 'utf-8', mode: 0o644 });
+}
+
 /**
  * Keep the session mailbox out of accidental commits: local exclude for
- * untracked `.cursor/mcp.json`, and `skip-worktree` when the file is already tracked.
- * Returns an undo that clears skip-worktree (exclude line is left — harmless).
+ * untracked `.cursor/mcp.json`, and `skip-worktree` when the file is already tracked
+ * and was not already skipped. Undo reverses only what this call introduced.
  */
 export function shieldProjectMcpJsonFromGit(cwd: string, mcpJsonPath: string): () => void {
     const top = spawnSync('git', ['rev-parse', '--show-toplevel'], {
@@ -194,52 +255,57 @@ export function shieldProjectMcpJsonFromGit(cwd: string, mcpJsonPath: string): (
     if (!root) {
         return () => {};
     }
-    const rel = relative(root, mcpJsonPath);
-    if (!rel || rel.startsWith('..') || isAbsolute(rel)) {
+    const relRaw = relative(root, mcpJsonPath);
+    if (!relRaw || relRaw.startsWith('..') || isAbsolute(relRaw)) {
         return () => {};
     }
+    const gitRelativePath = toGitExcludePattern(relRaw);
 
-    const gitDirProc = spawnSync('git', ['rev-parse', '--git-dir'], {
-        cwd: root,
-        encoding: 'utf-8',
-    });
-    if (gitDirProc.status === 0) {
-        const gitDirRaw = gitDirProc.stdout.trim();
-        const gitDir = isAbsolute(gitDirRaw) ? gitDirRaw : resolvePath(root, gitDirRaw);
-        const excludePath = join(gitDir, 'info', 'exclude');
+    let addedExclude = false;
+    const excludePath = resolveGitExcludePath(root);
+    if (excludePath) {
         try {
-            mkdirSync(join(gitDir, 'info'), { recursive: true });
-            const existing = existsSync(excludePath) ? readFileSync(excludePath, 'utf-8') : '';
-            if (!existing.split(/\r?\n/).includes(rel)) {
-                const prefix = existing.length === 0 || existing.endsWith('\n') ? '' : '\n';
-                writeFileSync(
-                    excludePath,
-                    `${prefix}${HAPI_MCP_GIT_EXCLUDE_MARKER}\n${rel}\n`,
-                    { encoding: 'utf-8', mode: 0o644 },
-                );
-            }
+            addedExclude = appendExcludeIfMissing(excludePath, gitRelativePath);
         } catch (error) {
             logger.debug('[cursor-acp] failed to append mcp.json to git exclude', error);
         }
     }
 
-    const tracked = spawnSync('git', ['ls-files', '--error-unmatch', '--', rel], {
+    const tracked = spawnSync('git', ['ls-files', '--error-unmatch', '--', gitRelativePath], {
         cwd: root,
         encoding: 'utf-8',
     });
-    if (tracked.status !== 0) {
-        return () => {};
-    }
-
-    spawnSync('git', ['update-index', '--skip-worktree', '--', rel], {
-        cwd: root,
-        encoding: 'utf-8',
-    });
-    return () => {
-        spawnSync('git', ['update-index', '--no-skip-worktree', '--', rel], {
+    let setSkipWorktree = false;
+    if (tracked.status === 0) {
+        const listFiles = spawnSync('git', ['ls-files', '-v', '--', gitRelativePath], {
             cwd: root,
             encoding: 'utf-8',
         });
+        const wasSkipped = listFiles.status === 0
+            && listFiles.stdout.trimStart().startsWith('S ');
+        if (!wasSkipped) {
+            const skip = spawnSync('git', ['update-index', '--skip-worktree', '--', gitRelativePath], {
+                cwd: root,
+                encoding: 'utf-8',
+            });
+            setSkipWorktree = skip.status === 0;
+        }
+    }
+
+    return () => {
+        if (setSkipWorktree) {
+            spawnSync('git', ['update-index', '--no-skip-worktree', '--', gitRelativePath], {
+                cwd: root,
+                encoding: 'utf-8',
+            });
+        }
+        if (addedExclude && excludePath) {
+            try {
+                removeExactExcludeBlock(excludePath, gitRelativePath);
+            } catch (error) {
+                logger.debug('[cursor-acp] failed to remove mcp.json from git exclude', error);
+            }
+        }
     };
 }
 
