@@ -763,8 +763,14 @@ layers:
   # Web PeerSenderChip + hub peer attribution; schema ladder tip 27 on branch
   # (soup remat unions with current dual-ledger V24+). Chip ✅ lane A wait.
   # Worktree: ~/coding/hapi/worktrees/a2a-p05-peer-provenance @ feat/a2a-p05-peer-provenance
-  # Tip: 905c7e5f8 (origin/feat/a2a-p05-peer-provenance) — cold proof rebind + unverified peer chip UX
+  # Tip: 865bb2fc9 — resume mint log redact + fail-closed inject client (#1473)
   - branch: feat/a2a-p05-peer-provenance
+
+  # tiann/hapi#1613 (draft) — Cursor MCP overlay isolation: project `.cursor/mcp.json`
+  # single `hapi` key + dead-PID prune (fixes live multiplex N hapi-<uuid> user keys).
+  # Worktree: ~/coding/hapi/worktrees/cursor-mcp-isolation @ fix/cursor-mcp-overlay-isolation
+  # Tip: 4b2fa0f5c — dogfood with #1473 tip above for attributed ping_peer kill-criterion.
+  - branch: fix/cursor-mcp-overlay-isolation
 
   # #1473 estate upload blindness — peer-cap inject early-connect hold +
   # webhook default 25s + redeem settings-token fallback.
