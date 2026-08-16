@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
     existsSync,
     linkSync,
@@ -14,6 +14,7 @@ import {
     writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { homedir, tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import {
@@ -22,15 +23,21 @@ import {
     cursorHapiMcpServerId,
     HAPI_MCP_OVERLAY_SESSION_ENV,
     HAPI_MCP_GIT_EXCLUDE_MARKER_PREFIX,
+    appendExcludeLease,
+    appendExcludeLeaseUnlocked,
+    hapiMcpGitExcludeMarker,
     installCursorMcpOverlay,
     isProcessAlive,
     readLockOwner,
+    removeExcludeLease,
     resolveCursorMcpConfigDir,
     resolveProjectCursorConfigDir,
     shieldProjectMcpJsonFromGit,
     withMcpJsonLock,
     writeMcpJsonAtomic,
 } from './cursorMcpOverlay';
+
+const overlayModulePath = fileURLToPath(new URL('./cursorMcpOverlay.ts', import.meta.url));
 
 describe('installCursorMcpOverlay', () => {
     const roots: string[] = [];
@@ -613,6 +620,70 @@ describe('installCursorMcpOverlay', () => {
         rmSync(root, { recursive: true, force: true });
         rmSync(linked, { recursive: true, force: true });
     });
+
+    it('serializes concurrent exclude lease updates across processes', async () => {
+        const root = join(tmpdir(), `hapi-mcp-git-race-${randomUUID()}`);
+        mkdirSync(join(root, '.git', 'info'), { recursive: true });
+        const excludePath = join(root, '.git', 'info', 'exclude');
+        writeFileSync(excludePath, 'keep-me.txt\n', 'utf-8');
+        const lockPath = `${excludePath}.hapi.lock`;
+        const donePath = join(root, 'child-done');
+        const errPath = join(root, 'child-err');
+        const leaseA = 'lease-a';
+        const leaseB = 'lease-b';
+
+        // Hold the lock first so the child must wait mid-flight.
+        const childExit = new Promise<number>((resolve, reject) => {
+            withMcpJsonLock(lockPath, () => {
+                appendExcludeLeaseUnlocked(excludePath, '.cursor/mcp.json', leaseA);
+                const child = spawn('bun', [
+                    '-e',
+                    `
+                        import { appendExcludeLease } from ${JSON.stringify(overlayModulePath)};
+                        try {
+                            appendExcludeLease(${JSON.stringify(excludePath)}, '.cursor/mcp.json', ${JSON.stringify(leaseB)});
+                            await Bun.write(${JSON.stringify(donePath)}, 'ok');
+                            process.exit(0);
+                        } catch (error) {
+                            await Bun.write(${JSON.stringify(errPath)}, String(error));
+                            process.exit(1);
+                        }
+                    `,
+                ], {
+                    cwd: root,
+                    stdio: 'ignore',
+                });
+                child.on('error', reject);
+                child.on('exit', (code) => resolve(code ?? 1));
+                // Keep holding until the child has had time to enter the wait loop.
+                const end = Date.now() + 400;
+                while (Date.now() < end) {
+                    // busy-wait
+                }
+            });
+        });
+
+        const code = await childExit;
+        if (existsSync(errPath)) {
+            throw new Error(`child failed: ${readFileSync(errPath, 'utf-8')}`);
+        }
+        expect(code).toBe(0);
+        expect(existsSync(donePath)).toBe(true);
+
+        const both = readFileSync(excludePath, 'utf-8');
+        expect(both).toContain('keep-me.txt');
+        expect(both).toContain(hapiMcpGitExcludeMarker(leaseA));
+        expect(both).toContain(hapiMcpGitExcludeMarker(leaseB));
+
+        removeExcludeLease(excludePath, '.cursor/mcp.json', leaseA);
+        const afterA = readFileSync(excludePath, 'utf-8');
+        expect(afterA).toContain(hapiMcpGitExcludeMarker(leaseB));
+        expect(afterA).toContain('keep-me.txt');
+        expect(afterA).not.toContain(hapiMcpGitExcludeMarker(leaseA));
+
+        removeExcludeLease(excludePath, '.cursor/mcp.json', leaseB);
+        rmSync(root, { recursive: true, force: true });
+    }, 20_000);
 
     it('writes exclude via --git-path so linked worktrees share the common exclude', () => {
         const root = join(tmpdir(), `hapi-mcp-git-wt-main-${randomUUID()}`);
