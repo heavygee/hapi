@@ -522,7 +522,50 @@ describe('installCursorMcpOverlay', () => {
         expect(check.status).toBe(0);
 
         handle.cleanup();
+        const after = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf-8');
+        expect(after).not.toContain(HAPI_MCP_GIT_EXCLUDE_MARKER);
+        expect(after).not.toContain('.cursor/mcp.json');
         rmSync(root, { recursive: true, force: true });
+    });
+
+    it('writes exclude via --git-path so linked worktrees share the common exclude', () => {
+        const root = join(tmpdir(), `hapi-mcp-git-wt-main-${randomUUID()}`);
+        const linked = join(tmpdir(), `hapi-mcp-git-wt-link-${randomUUID()}`);
+        mkdirSync(root, { recursive: true });
+        spawnSync('git', ['init'], { cwd: root, encoding: 'utf-8' });
+        spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
+        spawnSync('git', ['config', 'user.name', 'test'], { cwd: root });
+        writeFileSync(join(root, 'README'), 'x\n');
+        spawnSync('git', ['add', 'README'], { cwd: root });
+        spawnSync('git', ['commit', '-m', 'init'], { cwd: root });
+        const addWt = spawnSync('git', ['worktree', 'add', linked, 'HEAD'], {
+            cwd: root,
+            encoding: 'utf-8',
+        });
+        expect(addWt.status).toBe(0);
+
+        const handle = installCursorMcpOverlay(linked, {
+            command: '/bin/hapi',
+            args: ['mcp', '--url', 'http://127.0.0.1:12345/'],
+        }, {
+            serverId: CURSOR_HAPI_MCP_SERVER_ID,
+            overlaySessionId: 'session-a',
+            enableCursorMcp: noopEnable,
+            mcpConfigDir: join(linked, '.cursor'),
+        });
+
+        const commonExclude = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf-8');
+        expect(commonExclude).toContain('.cursor/mcp.json');
+        const check = spawnSync('git', ['check-ignore', '-v', '--', '.cursor/mcp.json'], {
+            cwd: linked,
+            encoding: 'utf-8',
+        });
+        expect(check.status).toBe(0);
+
+        handle.cleanup();
+        spawnSync('git', ['worktree', 'remove', '--force', linked], { cwd: root, encoding: 'utf-8' });
+        rmSync(root, { recursive: true, force: true });
+        rmSync(linked, { recursive: true, force: true });
     });
 
     it('skip-worktrees a tracked project mcp.json for the session lifetime', () => {
@@ -559,6 +602,41 @@ describe('installCursorMcpOverlay', () => {
             encoding: 'utf-8',
         });
         expect(after.stdout.trim().startsWith('S ')).toBe(false);
+        rmSync(root, { recursive: true, force: true });
+    });
+
+    it('preserves a pre-existing skip-worktree bit on tracked mcp.json', () => {
+        const root = join(tmpdir(), `hapi-mcp-git-preskip-${randomUUID()}`);
+        mkdirSync(join(root, '.cursor'), { recursive: true });
+        spawnSync('git', ['init'], { cwd: root, encoding: 'utf-8' });
+        spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
+        spawnSync('git', ['config', 'user.name', 'test'], { cwd: root });
+        writeFileSync(join(root, '.cursor', 'mcp.json'), `${JSON.stringify({
+            mcpServers: { other: { command: 'echo', args: ['x'] } },
+        }, null, 2)}\n`);
+        spawnSync('git', ['add', '.cursor/mcp.json'], { cwd: root });
+        spawnSync('git', ['commit', '-m', 'track mcp'], { cwd: root });
+        spawnSync('git', ['update-index', '--skip-worktree', '--', '.cursor/mcp.json'], {
+            cwd: root,
+            encoding: 'utf-8',
+        });
+
+        const handle = installCursorMcpOverlay(root, {
+            command: '/bin/hapi',
+            args: ['mcp', '--url', 'http://127.0.0.1:12345/'],
+        }, {
+            serverId: CURSOR_HAPI_MCP_SERVER_ID,
+            overlaySessionId: 'session-a',
+            enableCursorMcp: noopEnable,
+            mcpConfigDir: join(root, '.cursor'),
+        });
+
+        handle.cleanup();
+        const after = spawnSync('git', ['ls-files', '-v', '--', '.cursor/mcp.json'], {
+            cwd: root,
+            encoding: 'utf-8',
+        });
+        expect(after.stdout.trim().startsWith('S ')).toBe(true);
         rmSync(root, { recursive: true, force: true });
     });
 
