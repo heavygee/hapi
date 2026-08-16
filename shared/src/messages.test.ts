@@ -424,12 +424,16 @@ describe('extractNotifySummary (corruption-tolerant end-to-end)', () => {
 })
 
 describe('isRedundantGoalStatusEventContent (regression-guard for messages.ts edits)', () => {
-    test('still detects goal-active events', () => {
+    test.each([
+        'Goal active · build the thing',
+        'Goal blocked',
+        'Goal limited by usage · 8016 tokens'
+    ])('detects redundant goal status event: %s', (message) => {
         const value = {
             role: 'agent',
             content: {
                 type: 'event',
-                data: { type: 'message', message: 'Goal active · build the thing' }
+                data: { type: 'message', message }
             }
         }
         expect(isRedundantGoalStatusEventContent(value)).toBe(true)

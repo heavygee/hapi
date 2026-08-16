@@ -197,8 +197,10 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     if (config.serverChanSendKey) {
         const source = formatSource(config.sources.serverChanSendKey)
         const notificationSource = formatSource(config.sources.serverChanNotification)
+        const backgroundOnlySource = formatSource(config.sources.serverChanBackgroundOnly)
         console.log(`[Hub] ServerChan: enabled (${source})`)
         console.log(`[Hub] ServerChan notifications: ${config.serverChanNotification ? 'enabled' : 'disabled'} (${notificationSource})`)
+        console.log(`[Hub] ServerChan background-only: ${config.serverChanBackgroundOnly ? 'enabled' : 'disabled'} (${backgroundOnlySource})`)
     } else {
         console.log('[Hub] ServerChan: disabled (no SERVERCHAN_SENDKEY)')
     }
@@ -306,7 +308,12 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     )
 
     if (config.serverChanSendKey && config.serverChanNotification) {
-        notificationChannels.push(new ServerChanChannel(config.serverChanSendKey, config.publicUrl))
+        notificationChannels.push(new ServerChanChannel(
+            config.serverChanSendKey,
+            config.publicUrl,
+            visibilityTracker,
+            config.serverChanBackgroundOnly
+        ))
     }
 
     // Initialize Telegram bot (optional)

@@ -17,6 +17,7 @@ export interface ServerSettings {
     telegramNotification: boolean
     serverChanSendKey: string | null
     serverChanNotification: boolean
+    serverChanBackgroundOnly: boolean
     listenHost: string
     listenPort: number
     publicUrl: string
@@ -31,6 +32,7 @@ export interface ServerSettingsResult {
         telegramNotification: 'env' | 'file' | 'default'
         serverChanSendKey: 'env' | 'file' | 'default'
         serverChanNotification: 'env' | 'file' | 'default'
+        serverChanBackgroundOnly: 'env' | 'file' | 'default'
         listenHost: 'env' | 'file' | 'default'
         listenPort: 'env' | 'file' | 'default'
         publicUrl: 'env' | 'file' | 'default'
@@ -102,6 +104,7 @@ export async function loadServerSettings(dataDir: string): Promise<ServerSetting
             telegramNotification: 'default',
             serverChanSendKey: 'default',
             serverChanNotification: 'default',
+            serverChanBackgroundOnly: 'default',
             listenHost: 'default',
             listenPort: 'default',
             publicUrl: 'default',
@@ -162,6 +165,22 @@ export async function loadServerSettings(dataDir: string): Promise<ServerSetting
         } else if (settings.serverChanNotification !== undefined) {
             serverChanNotification = settings.serverChanNotification
             sources.serverChanNotification = 'file'
+        }
+
+        // serverChanBackgroundOnly: env > file > false
+        let serverChanBackgroundOnly = false
+        if (process.env.SERVERCHAN_BACKGROUND_ONLY !== undefined) {
+            serverChanBackgroundOnly = process.env.SERVERCHAN_BACKGROUND_ONLY === 'true'
+            sources.serverChanBackgroundOnly = 'env'
+            if (settings.serverChanBackgroundOnly === undefined) {
+                settings.serverChanBackgroundOnly = serverChanBackgroundOnly
+                needsSave = true
+            }
+        } else if (typeof settings.serverChanBackgroundOnly === 'boolean') {
+            serverChanBackgroundOnly = settings.serverChanBackgroundOnly
+            sources.serverChanBackgroundOnly = 'file'
+        } else if (settings.serverChanBackgroundOnly !== undefined) {
+            throw new Error('serverChanBackgroundOnly must be a boolean')
         }
 
         // listenHost: env > file > default
@@ -250,6 +269,7 @@ export async function loadServerSettings(dataDir: string): Promise<ServerSetting
                     telegramNotification,
                     serverChanSendKey,
                     serverChanNotification,
+                    serverChanBackgroundOnly,
                     listenHost,
                     listenPort,
                     publicUrl,
