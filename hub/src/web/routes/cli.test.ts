@@ -523,7 +523,7 @@ describe('cli migrate-sessions', () => {
         const { hashRunnerProof } = await import('../../utils/runnerProof')
         const proof = 'runner-proof-legacy'
         const tag = 'dest-tag'
-        let migratedArgs: [string, string, string] | null = null
+        const migratedCalls: Array<[string, string, string]> = []
         const app = createApp({
             getMachineAuthMaterial: (id: string) => {
                 if (id === 'new-machine') {
@@ -543,7 +543,7 @@ describe('cli migrate-sessions', () => {
                 return null
             },
             migrateSessionsMachineId: (from: string, to: string, ns: string) => {
-                migratedArgs = [from, to, ns]
+                migratedCalls.push([from, to, ns])
                 return 2
             },
         } as never)
@@ -563,7 +563,7 @@ describe('cli migrate-sessions', () => {
 
         expect(response.status).toBe(200)
         expect(await response.json()).toEqual({ migrated: 2 })
-        expect(migratedArgs).toEqual(['old-machine', 'new-machine', 'default'])
+        expect(migratedCalls).toEqual([['old-machine', 'new-machine', 'default']])
     })
 
     it('rejects migrate when a tagged source does not match destination tag', async () => {
