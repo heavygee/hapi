@@ -107,56 +107,58 @@ describe('installCursorMcpOverlay', () => {
         expect(after.mcpServers[serverId]).toBeUndefined();
     });
 
-    it('enables this session and disables sibling hapi MCP ids (Cursor duplicate-tool routing)', () => {
+    it('keeps live sibling hapi overlays enabled when a second session installs', () => {
         const cwd = makeProjectDir(JSON.stringify({
             mcpServers: {
                 other: { command: 'echo', args: ['x'] },
-                hapi: { command: 'echo', args: ['legacy'] },
+                'hapi-docs': { command: 'echo', args: ['user-owned'] },
             },
         }, null, 2));
         const idA = cursorHapiMcpServerId('session-a');
         const idB = cursorHapiMcpServerId('session-b');
         const enabled: string[] = [];
-        const disabled: string[] = [];
         const recordEnable = (_cwd: string, id: string) => {
             enabled.push(id);
             return { status: 0 };
         };
-        const recordDisable = (_cwd: string, id: string) => {
-            disabled.push(id);
-            return { status: 0 };
-        };
 
-        installCursorMcpOverlay(cwd, {
+        const handleA = installCursorMcpOverlay(cwd, {
             command: '/bin/hapi',
             args: ['mcp', '--url', 'http://127.0.0.1:1111/'],
         }, {
             serverId: idA,
             enableCursorMcp: recordEnable,
-            disableCursorMcp: recordDisable,
             mcpConfigDir: join(cwd, '.cursor'),
         });
 
-        expect(enabled).toEqual([idA]);
-        expect(disabled.sort()).toEqual(['hapi']);
-
-        enabled.length = 0;
-        disabled.length = 0;
-
-        installCursorMcpOverlay(cwd, {
+        const handleB = installCursorMcpOverlay(cwd, {
             command: '/bin/hapi',
             args: ['mcp', '--url', 'http://127.0.0.1:2222/'],
         }, {
             serverId: idB,
             enableCursorMcp: recordEnable,
-            disableCursorMcp: recordDisable,
             mcpConfigDir: join(cwd, '.cursor'),
         });
 
-        expect(enabled).toEqual([idB]);
-        expect(disabled.sort()).toEqual(['hapi', idA].sort());
-        expect(disabled).not.toContain(idB);
-        expect(disabled).not.toContain('other');
+        const mcpPath = join(cwd, '.cursor', 'mcp.json');
+        const both = JSON.parse(readFileSync(mcpPath, 'utf-8')) as {
+            mcpServers: Record<string, unknown>;
+        };
+        expect(enabled).toEqual([idA, idB]);
+        expect(both.mcpServers[idA]).toBeDefined();
+        expect(both.mcpServers[idB]).toBeDefined();
+        expect(both.mcpServers['hapi-docs']).toEqual({ command: 'echo', args: ['user-owned'] });
+        expect(both.mcpServers.other).toEqual({ command: 'echo', args: ['x'] });
+
+        handleB.cleanup();
+        const afterB = JSON.parse(readFileSync(mcpPath, 'utf-8')) as {
+            mcpServers: Record<string, unknown>;
+        };
+        expect(afterB.mcpServers[idA]).toBeDefined();
+        expect(afterB.mcpServers[idB]).toBeUndefined();
+        expect(afterB.mcpServers['hapi-docs']).toEqual({ command: 'echo', args: ['user-owned'] });
+
+        handleA.cleanup();
     });
 
     it('leaves a newer session bridge intact when an older session cleans up first', () => {

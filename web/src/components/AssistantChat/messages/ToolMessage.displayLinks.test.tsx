@@ -72,6 +72,7 @@ describe('DisplayLinksCard', () => {
         expect(copyButton.getAttribute('data-copy-value')).toBe(value)
         expect(copyButton.getAttribute('data-copy-value')).not.toBe('VK')
         expect(screen.getByTestId('display-links-text')).toHaveTextContent('VKK')
+        expect(copyButton.closest('li')).toHaveAttribute('data-hapi-share-exclude', 'true')
 
         fireEvent.click(copyButton)
         await waitFor(() => {

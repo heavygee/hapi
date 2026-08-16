@@ -107,26 +107,12 @@ type EnableCursorMcpResult = {
 };
 
 export type EnableCursorMcp = (cwd: string, id: string) => EnableCursorMcpResult;
-export type DisableCursorMcp = EnableCursorMcp;
-
-/** Overlay ids that all expose the same bare tool names (`display_links`, …). */
-export function isHapiCursorMcpServerId(id: string): boolean {
-    return id === CURSOR_HAPI_MCP_SERVER_ID || id.startsWith('hapi-');
-}
 
 const LOCK_RETRY_INTERVAL_MS = 50;
 const MAX_LOCK_ATTEMPTS = 100;
 
 function defaultEnableCursorMcp(cwd: string, id: string): EnableCursorMcpResult {
     return spawnSync('agent', ['mcp', 'enable', id], {
-        cwd,
-        encoding: 'utf-8',
-        timeout: 30_000,
-    });
-}
-
-function defaultDisableCursorMcp(cwd: string, id: string): EnableCursorMcpResult {
-    return spawnSync('agent', ['mcp', 'disable', id], {
         cwd,
         encoding: 'utf-8',
         timeout: 30_000,
@@ -309,11 +295,10 @@ function sameMcpEntry(a: McpServerEntry | undefined, b: McpServerEntry | undefin
  * Merge the per-session HAPI stdio bridge into `~/.cursor/mcp.json` (or
  * `options.mcpConfigDir`) and approve it for Cursor's native MCP loader.
  *
- * Cursor routes duplicate tool names (`display_links`, `display_image`, …) to one
- * server when many `hapi-*` entries are enabled (forum 148059). After enabling
- * this session's id, sibling `hapi` / `hapi-*` servers are disabled so only one
- * HAPI MCP is approved. mcp.json still lists live siblings for crash-recovery;
- * last Cursor session to install wins the exclusive enable.
+ * Concurrent `hapi-*` entries stay enabled. Cursor may route duplicate bare tool
+ * names to the wrong server (forum 148059); `display_links` fail-closes when
+ * `sessionId` does not match this HappyServer. Do not `agent mcp disable`
+ * siblings — cleanup never re-enables them, which strands a live session.
  *
  * Cleanup undoes only the exact entry this session installed under `serverId` (or restores a
  * pre-existing value for that same id). Concurrent edits to other mcpServers keys — and to
@@ -328,7 +313,6 @@ export function installCursorMcpOverlay(
     options: {
         serverId: string;
         enableCursorMcp?: EnableCursorMcp;
-        disableCursorMcp?: DisableCursorMcp;
         /** Override config dir (tests). Production uses `~/.cursor`. */
         mcpConfigDir?: string;
     },
@@ -353,7 +337,6 @@ export function installCursorMcpOverlay(
     let hadFile = false;
     let hadServer = false;
     let previousServer: McpServerEntry | undefined;
-    const siblingHapiIds: string[] = [];
 
     withMcpJsonLock(lockPath, () => {
         hadFile = existsSync(mcpJsonPath);
@@ -381,12 +364,6 @@ export function installCursorMcpOverlay(
 
         hadServer = Object.prototype.hasOwnProperty.call(previous.mcpServers, serverId);
         previousServer = hadServer ? previous.mcpServers[serverId] : undefined;
-
-        for (const id of Object.keys(previous.mcpServers)) {
-            if (id !== serverId && isHapiCursorMcpServerId(id)) {
-                siblingHapiIds.push(id);
-            }
-        }
 
         const config: CursorMcpJson = {
             ...previous,
@@ -446,17 +423,6 @@ export function installCursorMcpOverlay(
         throw new Error(
             `agent mcp enable ${serverId} failed (status=${enable.status ?? 'null'}${detail ? `: ${detail}` : ''})`
         );
-    }
-
-    const disable = options.disableCursorMcp ?? defaultDisableCursorMcp;
-    for (const siblingId of siblingHapiIds) {
-        const disabled = disable(cwd, siblingId);
-        if (disabled.status !== 0) {
-            const detail = (disabled.stderr || disabled.stdout || '').trim();
-            logger.debug(
-                `[cursor-acp] agent mcp disable ${siblingId} failed (status=${disabled.status ?? 'null'}${detail ? `: ${detail}` : ''})`,
-            );
-        }
     }
 
     logger.debug(`[cursor-acp] enabled native MCP server ${serverId} via ${mcpJsonPath}`);
