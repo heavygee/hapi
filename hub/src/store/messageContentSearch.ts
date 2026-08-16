@@ -104,34 +104,36 @@ function getShortSearchGrams(text: string): string[] {
 }
 
 export function backfillMessageContentSearchShortIndex(db: Database): void {
-    ensureMessageContentSearchTable(db)
-    const select = db.prepare(`
-        SELECT rowid AS search_rowid, searchable_text
-        FROM ${MESSAGE_CONTENT_SEARCH_TABLE}
-        WHERE rowid > ?
-        ORDER BY rowid ASC
-        LIMIT ?
-    `)
-    const insert = db.prepare(`
-        INSERT OR IGNORE INTO ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} (gram, search_rowid)
-        VALUES (?, ?)
-    `)
+    db.transaction(() => {
+        ensureMessageContentSearchTable(db)
+        const select = db.prepare(`
+            SELECT rowid AS search_rowid, searchable_text
+            FROM ${MESSAGE_CONTENT_SEARCH_TABLE}
+            WHERE rowid > ?
+            ORDER BY rowid ASC
+            LIMIT ?
+        `)
+        const insert = db.prepare(`
+            INSERT OR IGNORE INTO ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} (gram, search_rowid)
+            VALUES (?, ?)
+        `)
 
-    let afterRowId = 0
-    while (true) {
-        const rows = select.all(afterRowId, SEARCH_LOOKUP_BACKFILL_BATCH_SIZE) as Array<{
-            search_rowid: number
-            searchable_text: string
-        }>
-        if (rows.length === 0) break
+        let afterRowId = 0
+        while (true) {
+            const rows = select.all(afterRowId, SEARCH_LOOKUP_BACKFILL_BATCH_SIZE) as Array<{
+                search_rowid: number
+                searchable_text: string
+            }>
+            if (rows.length === 0) break
 
-        for (const row of rows) {
-            for (const gram of getShortSearchGrams(row.searchable_text)) {
-                insert.run(gram, row.search_rowid)
+            for (const row of rows) {
+                for (const gram of getShortSearchGrams(row.searchable_text)) {
+                    insert.run(gram, row.search_rowid)
+                }
             }
+            afterRowId = rows[rows.length - 1]!.search_rowid
         }
-        afterRowId = rows[rows.length - 1]!.search_rowid
-    }
+    })()
 }
 
 export function createMessageContentSearchTable(db: Database): void {
@@ -160,6 +162,10 @@ export function createMessageContentSearchTable(db: Database): void {
             search_rowid INTEGER NOT NULL,
             PRIMARY KEY (gram, search_rowid)
         ) WITHOUT ROWID
+    `)
+    db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_message_content_search_short_rowid
+        ON ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} (search_rowid)
     `)
     // FTS5 UNINDEXED columns are intentionally not searchable, but SQLite
     // still has to scan the virtual table when deleting by one of them. Keep
