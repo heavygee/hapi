@@ -41,14 +41,14 @@ describe('schema migration from v22', () => {
 
             expect(events?.name).toBe('events')
             expect(links?.name).toBe('event_links')
-            expect(version.user_version).toBe(24)
+            expect(version.user_version).toBe(25)
         } finally {
             migrated.close()
         }
     })
 })
 
-describe('schema migration v23 to v24', () => {
+describe('schema migration v23 to v25', () => {
     it('creates and backfills the message content search index', () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v24-'))
         tempDirs.push(dir)
@@ -63,7 +63,11 @@ describe('schema migration v23 to v24', () => {
         initial.close()
 
         const legacy = new Database(dbPath)
-        legacy.exec('DROP TABLE IF EXISTS message_content_search; PRAGMA user_version = 23;')
+        legacy.exec(`
+            DROP TABLE IF EXISTS message_content_search;
+            DROP TABLE IF EXISTS message_content_search_lookup;
+            PRAGMA user_version = 23;
+        `)
         legacy.close()
 
         const migrated = new Store(dbPath)
@@ -71,7 +75,39 @@ describe('schema migration v23 to v24', () => {
             expect(migrated.messages.searchContent('backfill this', 'default')[0]?.sessionId).toBe(session.id)
             const internalDb = (migrated as unknown as { db: Database }).db
             const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
-            expect(version.user_version).toBe(24)
+            expect(version.user_version).toBe(25)
+        } finally {
+            migrated.close()
+        }
+    })
+
+    it('adds the indexed message lookup to an existing v24 search schema', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v25-'))
+        tempDirs.push(dir)
+        const dbPath = join(dir, 'hapi.db')
+
+        const initial = new Store(dbPath)
+        const session = initial.sessions.getOrCreateSession('migration-lookup', { path: '/tmp/migration-lookup' }, null, 'default')
+        initial.messages.addMessage(session.id, {
+            role: 'user',
+            content: { type: 'text', text: 'backfill the lookup table' }
+        })
+        initial.close()
+
+        const legacy = new Database(dbPath)
+        legacy.exec('DROP TABLE IF EXISTS message_content_search_lookup; PRAGMA user_version = 24;')
+        legacy.close()
+
+        const migrated = new Store(dbPath)
+        try {
+            expect(migrated.messages.searchContent('lookup table', 'default')[0]?.sessionId).toBe(session.id)
+            const internalDb = (migrated as unknown as { db: Database }).db
+            const lookup = internalDb.prepare(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'message_content_search_lookup'"
+            ).get() as { name: string } | null
+            const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
+            expect(lookup?.name).toBe('message_content_search_lookup')
+            expect(version.user_version).toBe(25)
         } finally {
             migrated.close()
         }

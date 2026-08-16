@@ -44,6 +44,7 @@ const SEARCH_REBUILD_BATCH_SIZE = 500
 const SEARCH_LOOKUP_BACKFILL_BATCH_SIZE = 500
 
 type DbSearchRow = {
+    search_rowid?: number
     message_id: string
     session_id: string
     role: 'user' | 'assistant'
@@ -330,6 +331,7 @@ export function searchMessageContent(
         ? db.prepare(`
             WITH ranked_matches AS (
                 SELECT
+                    f.rowid AS search_rowid,
                     f.message_id,
                     f.session_id,
                     f.role,
@@ -357,6 +359,7 @@ export function searchMessageContent(
         : db.prepare(`
             WITH ranked_matches AS (
                 SELECT
+                    f.rowid AS search_rowid,
                     f.message_id,
                     f.session_id,
                     f.role,
@@ -378,7 +381,7 @@ export function searchMessageContent(
                    snippet(${MESSAGE_CONTENT_SEARCH_TABLE}, 0, '', '', '…', 24) AS snippet
             FROM ranked_matches AS ranked
             INNER JOIN ${MESSAGE_CONTENT_SEARCH_TABLE} AS f
-                ON f.message_id = ranked.message_id
+                ON f.rowid = ranked.search_rowid
             WHERE ranked.session_rank = 1
             ORDER BY ranked.updated_at DESC, CAST(ranked.seq AS INTEGER) DESC
             LIMIT ?

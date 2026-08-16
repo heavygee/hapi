@@ -41,12 +41,13 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 24
+const SCHEMA_VERSION: number = 25
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
     'messages',
     'message_content_search',
+    'message_content_search_lookup',
     'message_epochs',
     'users',
     'push_subscriptions',
@@ -305,6 +306,7 @@ export class Store {
             21: () => this.migrateFromV21ToV22(),
             22: () => this.migrateFromV22ToV23(),
             23: () => this.migrateFromV23ToV24(),
+            24: () => this.migrateFromV24ToV25(),
         })
 
         if (currentVersion === 0) {
@@ -981,6 +983,11 @@ export class Store {
         createMessageContentSearchTable(this.db)
         if (this.getMessageColumnNames().size === 0) return
         rebuildMessageContentSearch(this.db)
+    }
+
+    /** Complete the derived message-content index lookup added after v24. */
+    private migrateFromV24ToV25(): void {
+        createMessageContentSearchTable(this.db)
     }
 
     private getSessionColumnNames(): Set<string> {

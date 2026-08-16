@@ -1353,7 +1353,11 @@ export function SessionList(props: {
         () => {
             if (contentSearchActive) {
                 const results = contentSearchResponse?.results.map((result) => result.session) ?? []
-                return results.filter(session => sessionMatchesTimeRange(session, timeRange))
+                const prepared = prepareSidebarSessions(results, selectedSessionId)
+                const sidebarSessions = showActiveSessionsOnly
+                    ? filterActiveSessionsOnly(prepared, selectedSessionId)
+                    : prepared
+                return sidebarSessions.filter(session => sessionMatchesTimeRange(session, timeRange))
             }
             return isFiltering
                 ? allSessions.filter(session => (
@@ -1366,7 +1370,7 @@ export function SessionList(props: {
                 ))
                 : allSessions
         },
-        [allSessions, contentSearchActive, contentSearchResponse, isFiltering, normalizedQuery, timeRange?.start, timeRange?.end, machineLabelsById] // eslint-disable-line react-hooks/exhaustive-deps
+        [allSessions, contentSearchActive, contentSearchResponse, isFiltering, normalizedQuery, selectedSessionId, showActiveSessionsOnly, timeRange?.start, timeRange?.end, machineLabelsById] // eslint-disable-line react-hooks/exhaustive-deps
     )
     const contentSnippetBySessionId = useMemo(() => {
         const snippets = new Map<string, string>()
