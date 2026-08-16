@@ -45,19 +45,6 @@ function isLegacyMachineReenrollError(error: unknown): boolean {
         || message === LEGACY_MACHINE_REENROLL_MESSAGE
 }
 
-/** Hub refuses untagged / tag-mismatched migrate-sessions (#1473 Blocker). */
-function isMigrateSourceContinuityError(error: unknown): boolean {
-    if (!axios.isAxiosError(error) || error.response?.status !== 403) {
-        return false
-    }
-    const body = error.response.data
-    if (!body || typeof body !== 'object') {
-        return false
-    }
-    const message = (body as { error?: unknown }).error
-    return message === 'Source machine continuity not proven'
-}
-
 export class ApiClient {
     static async create(): Promise<ApiClient> {
         return new ApiClient(getAuthToken())
@@ -293,38 +280,14 @@ export class ApiClient {
                 machineTag: rotated.machineTag,
             })
             // Proof mismatch always rotates (no tag-only in-place rebind —
-            // settings.json tag is same-UID readable, #1473 Blocker). Pull
-            // sessions onto the new id without the dead machine's proof.
-            if (
-                opts.runnerProof
-                && rotated.machineTag
-                && machine.id !== fromMachineId
-            ) {
-                try {
-                    await this.migrateSessionsAfterReenroll({
-                        fromMachineId,
-                        toMachineId: machine.id,
-                        machineTag: rotated.machineTag,
-                        runnerProof: opts.runnerProof,
-                    })
-                } catch (migrateError) {
-                    // Untagged v23 sources cannot prove continuity on the
-                    // namespace migrate route (takeover hole). Keep the new
-                    // machine identity; leave legacy sessions on the old id
-                    // until an operator-trusted remap exists (#1473 Major).
-                    if (isMigrateSourceContinuityError(migrateError)) {
-                        logger.warn(
-                            `[API] Re-enrolled as ${machine.id}; sessions on ${fromMachineId} need operator-approved migration`
-                        )
-                        return machine
-                    }
-                    const message = migrateError instanceof Error
-                        ? migrateError.message
-                        : String(migrateError)
-                    throw new Error(
-                        `Re-enrolled as ${machine.id} but session migrate failed: ${message}`
-                    )
-                }
+            // settings.json tag is same-UID readable, #1473 Blocker). Do not
+            // auto-migrate: migrate-sessions requires the lost source
+            // runnerProof, so cold restart leaves sessions on the old id until
+            // an operator-trusted remap (#1473 Blocker).
+            if (machine.id !== fromMachineId) {
+                logger.warn(
+                    `[API] Re-enrolled as ${machine.id}; sessions on ${fromMachineId} need operator-approved migration`
+                )
             }
             return machine
         }
@@ -515,6 +478,7 @@ export class ApiClient {
         toMachineId: string
         machineTag: string
         runnerProof: string
+        sourceRunnerProof: string
     }): Promise<number> {
         const response = await axios.post(
             `${configuration.apiUrl}/cli/machines/${encodeURIComponent(opts.toMachineId)}/migrate-sessions`,
@@ -522,6 +486,7 @@ export class ApiClient {
                 fromMachineId: opts.fromMachineId,
                 machineTag: opts.machineTag,
                 runnerProof: opts.runnerProof,
+                sourceRunnerProof: opts.sourceRunnerProof,
             },
             {
                 headers: this.authHeaders(),

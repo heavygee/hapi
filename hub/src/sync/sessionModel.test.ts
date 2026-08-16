@@ -1467,7 +1467,7 @@ describe('session model', () => {
         }
     })
 
-    it('does not arm resume peer mint when routing via host-spoofed machine (#1473)', async () => {
+    it('does not spawn when routing via host-spoofed machine (#1473)', async () => {
         const store = new Store(':memory:')
         const engine = new SyncEngine(
             store,
@@ -1500,20 +1500,21 @@ describe('session model', () => {
             )
             engine.handleMachineAlive({ machineId: 'machine-attacker', time: Date.now() })
 
-            let capturedMint: string | undefined
-            let capturedMachineId: string | undefined
-            ;(engine as any).rpcGateway.spawnSession = async (...args: unknown[]) => {
-                capturedMachineId = args[0] as string
-                capturedMint = args[17] as string | undefined
+            let spawnCalled = false
+            ;(engine as any).rpcGateway.spawnSession = async () => {
+                spawnCalled = true
                 return { type: 'success', sessionId: session.id }
             }
             ;(engine as any).waitForSessionActive = async () => true
 
             const result = await engine.resumeSession(session.id, 'default')
 
-            expect(result).toEqual({ type: 'success', sessionId: session.id })
-            expect(capturedMachineId).toBe('machine-attacker')
-            expect(capturedMint).toBeUndefined()
+            expect(result).toEqual({
+                type: 'error',
+                message: 'Recorded machine is offline; migrate the session before resuming',
+                code: 'resume_unavailable',
+            })
+            expect(spawnCalled).toBe(false)
         } finally {
             engine.stop()
         }

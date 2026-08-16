@@ -3159,23 +3159,22 @@ export class SyncEngine {
         try {
             // Arm nonce for runner redeem only — never mint on first /cli connect
             // (pass 2h B1 TOCTOU). Nonce travels on machine spawn RPC.
-            // Fail closed on host-fallback routing: metadata.host is
-            // self-reported, so a same-namespace tagged machine can spoof the
-            // victim host and steal the mint (#1473 Blocker). Exact machineId
-            // match only; host-fallback resume stays unattributed.
-            // Re-read machineId after awaited probes — a concurrent
-            // migrateSessionsMachineId must not arm against a stale snapshot
-            // (#1473 cold Major).
+            // Fail closed when the recorded machine is offline: host-fallback
+            // spawn without a mint leaves an uncontrollable child after the
+            // sessionRpcAuthorizedId gate (#1473 Major). Exact machineId only;
+            // remap sessions before resume when the host changes.
             const latestMetadata = this.sessionCache.getSession(access.sessionId)?.metadata
             const recordedMachineId = typeof latestMetadata?.machineId === 'string'
                 ? latestMetadata.machineId.trim()
                 : ''
-            const resumePeerMintNonce = (
-                recordedMachineId
-                && targetMachine.id === recordedMachineId
-            )
-                ? armResumePeerMint(access.sessionId)
-                : undefined
+            if (!recordedMachineId || targetMachine.id !== recordedMachineId) {
+                return {
+                    type: 'error',
+                    message: 'Recorded machine is offline; migrate the session before resuming',
+                    code: 'resume_unavailable',
+                }
+            }
+            const resumePeerMintNonce = armResumePeerMint(access.sessionId)
             const spawnResult = await this.rpcGateway.spawnSession(
                 targetMachine.id,
                 directory,

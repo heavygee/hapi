@@ -325,10 +325,11 @@ export function createCliRoutes(
 
     /**
      * Remap session metadata.machineId after forced machine re-enroll (#1473).
-     * Destination must present live runnerProof + machineTag. Source proof is
-     * not required: cold rotate already discarded the memory-only proof, and
-     * file grants are gone. Same-namespace ownership of the destination bind
-     * is the gate (best-effort provenance).
+     * Destination must present live runnerProof + machineTag. Source must also
+     * present its runnerProof — machineTag alone is same-UID readable from
+     * settings.json, so a sibling must not absorb sessions onto a machine it
+     * controls. Cold restart that lost the memory-only proof cannot use this
+     * route; operator-trusted remap is required instead.
      */
     app.post('/machines/:id/migrate-sessions', async (c) => {
         const engine = getSyncEngine()
@@ -347,9 +348,12 @@ export function createCliRoutes(
         const runnerProof = body && typeof body === 'object' && typeof (body as { runnerProof?: unknown }).runnerProof === 'string'
             ? (body as { runnerProof: string }).runnerProof.trim()
             : ''
-        if (!fromMachineId || !machineTag || !runnerProof) {
+        const sourceRunnerProof = body && typeof body === 'object' && typeof (body as { sourceRunnerProof?: unknown }).sourceRunnerProof === 'string'
+            ? (body as { sourceRunnerProof: string }).sourceRunnerProof.trim()
+            : ''
+        if (!fromMachineId || !machineTag || !runnerProof || !sourceRunnerProof) {
             return c.json({
-                error: 'fromMachineId, machineTag, and runnerProof required',
+                error: 'fromMachineId, machineTag, runnerProof, and sourceRunnerProof required',
             }, 400)
         }
         const authMaterial = engine.getMachineAuthMaterial(newMachineId)
@@ -373,6 +377,9 @@ export function createCliRoutes(
         // Legacy recovery needs an operator-trusted path, not migrate-sessions.
         if (!sourceTag || !constantTimeEquals(sourceTag, machineTag)) {
             return c.json({ error: 'Source machine continuity not proven' }, 403)
+        }
+        if (!verifyRunnerProof(sourceRunnerProof, fromAuth.runnerProofHash)) {
+            return c.json({ error: 'Source machine proof mismatch' }, 403)
         }
         try {
             const migrated = engine.migrateSessionsMachineId(fromMachineId, newMachineId, namespace)

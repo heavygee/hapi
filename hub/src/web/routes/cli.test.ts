@@ -556,6 +556,7 @@ describe('cli migrate-sessions', () => {
                 fromMachineId: 'old-machine',
                 machineTag: tag,
                 runnerProof: proof,
+                sourceRunnerProof: 'any-source-proof',
             }),
         })
 
@@ -599,6 +600,7 @@ describe('cli migrate-sessions', () => {
                 fromMachineId: 'old-machine',
                 machineTag: 'dest-tag',
                 runnerProof: proof,
+                sourceRunnerProof: 'any-source-proof',
             }),
         })
 
@@ -606,9 +608,10 @@ describe('cli migrate-sessions', () => {
         expect(await response.json()).toEqual({ error: 'Source machine continuity not proven' })
     })
 
-    it('migrates when source and destination share the same create-time tag', async () => {
+    it('migrates when destination and source proofs both verify (#1473)', async () => {
         const { hashRunnerProof } = await import('../../utils/runnerProof')
-        const proof = 'runner-proof-ok'
+        const destProof = 'runner-proof-ok'
+        const sourceProof = 'old-proof'
         const tag = 'shared-tag'
         const migratedCalls: Array<[string, string, string]> = []
         const app = createApp({
@@ -617,14 +620,14 @@ describe('cli migrate-sessions', () => {
                     return {
                         namespace: 'default',
                         tag,
-                        runnerProofHash: hashRunnerProof(proof),
+                        runnerProofHash: hashRunnerProof(destProof),
                     }
                 }
                 if (id === 'old-machine') {
                     return {
                         namespace: 'default',
                         tag,
-                        runnerProofHash: hashRunnerProof('old-proof'),
+                        runnerProofHash: hashRunnerProof(sourceProof),
                     }
                 }
                 return null
@@ -644,12 +647,71 @@ describe('cli migrate-sessions', () => {
             body: JSON.stringify({
                 fromMachineId: 'old-machine',
                 machineTag: tag,
-                runnerProof: proof,
+                runnerProof: destProof,
+                sourceRunnerProof: sourceProof,
             }),
         })
 
         expect(response.status).toBe(200)
         expect(await response.json()).toEqual({ migrated: 1 })
         expect(migratedCalls).toEqual([['old-machine', 'new-machine', 'default']])
+    })
+
+    it('rejects migrate when destination uses a copied source tag without source proof (#1473)', async () => {
+        const { hashRunnerProof } = await import('../../utils/runnerProof')
+        const destProof = 'forged-dest-proof'
+        const tag = 'stolen-tag'
+        const app = createApp({
+            getMachineAuthMaterial: (id: string) => {
+                if (id === 'new-machine') {
+                    return {
+                        namespace: 'default',
+                        tag,
+                        runnerProofHash: hashRunnerProof(destProof),
+                    }
+                }
+                if (id === 'old-machine') {
+                    return {
+                        namespace: 'default',
+                        tag,
+                        runnerProofHash: hashRunnerProof('victim-proof'),
+                    }
+                }
+                return null
+            },
+            migrateSessionsMachineId: () => {
+                throw new Error('should not migrate without source proof')
+            },
+        } as never)
+
+        const missingSource = await app.request('/cli/machines/new-machine/migrate-sessions', {
+            method: 'POST',
+            headers: {
+                ...authHeaders(),
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+                fromMachineId: 'old-machine',
+                machineTag: tag,
+                runnerProof: destProof,
+            }),
+        })
+        expect(missingSource.status).toBe(400)
+
+        const wrongSource = await app.request('/cli/machines/new-machine/migrate-sessions', {
+            method: 'POST',
+            headers: {
+                ...authHeaders(),
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+                fromMachineId: 'old-machine',
+                machineTag: tag,
+                runnerProof: destProof,
+                sourceRunnerProof: 'wrong-source-proof',
+            }),
+        })
+        expect(wrongSource.status).toBe(403)
+        expect(await wrongSource.json()).toEqual({ error: 'Source machine proof mismatch' })
     })
 })
