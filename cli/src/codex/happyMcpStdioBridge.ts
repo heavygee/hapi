@@ -216,8 +216,9 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
           title: z.string().trim().min(1).max(255).optional().describe('Optional label shown on the copy card'),
         }),
         z.string().min(1).max(8192),
-      ])).min(1).max(20).optional().describe('Optional exact-copy strings (secrets, tokens, SHAs, tags, MagicDNS labels)'),
-    });
+        ])).min(1).max(20).optional().describe('Optional exact-copy strings (secrets, tokens, SHAs, tags, MagicDNS labels)'),
+        sessionId: z.string().min(1).optional().describe('This chat\'s HAPI session id (required at runtime). Cursor routes duplicate MCP tool names to one server; a mismatch means the call landed on the wrong session MCP.'),
+      });
 
     if (toolNames.has('display_links')) {
       server.registerTool<any, any>(
