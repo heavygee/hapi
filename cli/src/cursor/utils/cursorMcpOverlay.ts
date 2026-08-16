@@ -1,9 +1,13 @@
 /**
- * Cursor ACP does not connect MCP servers passed on session/new (upstream limitation).
- * The working path is user-level `~/.cursor/mcp.json` + `agent mcp enable <id>` (spawned
- * with the session cwd). Project `.cursor/mcp.json` is intentionally avoided so ephemeral
- * `hapi-<sessionId>` bridges cannot be `git add`ed from the checked-out tree.
- * See https://forum.cursor.com/t/acp-agent-silently-ignores-mcpservers-in-session-new/153623
+ * Cursor ACP historically ignored mcpServers on session/new, so HAPI overlays
+ * native mcp.json. Cursor **merges** user `~/.cursor/mcp.json` with project
+ * `<cwd>/.cursor/mcp.json`. Unique `hapi-<uuid>` keys in the user file therefore
+ * union-load every live session's ping_peer into every agent (wrong sender +
+ * N copies of the tool schema).
+ *
+ * Isolation: write one stable `hapi` mailbox into the **project** file, and strip
+ * PID-stamped `hapi` / `hapi-*` keys from the user file. Same-cwd second live
+ * mailbox fails closed rather than multiplexing.
  */
 
 import {
@@ -12,6 +16,7 @@ import {
     lstatSync,
     mkdirSync,
     readFileSync,
+    realpathSync,
     renameSync,
     rmSync,
     statSync,
@@ -19,18 +24,18 @@ import {
     writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, relative, resolve as resolvePath } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { logger } from '@/ui/logger';
 
-/** Historical fixed id — prefer {@link cursorHapiMcpServerId} so concurrent sessions do not share one key. */
+/** Stable project mcp.json key — one mailbox per Cursor cwd. */
 export const CURSOR_HAPI_MCP_SERVER_ID = 'hapi';
 
 /**
- * Per-session MCP server id for user-level `~/.cursor/mcp.json`.
- * Concurrent sessions must not share a single `hapi` key — cleanup of an
- * older session would otherwise restore a dead loopback URL over a newer live bridge.
+ * Historical unique id shape (`hapi-<session>`). Production install uses
+ * {@link CURSOR_HAPI_MCP_SERVER_ID} only; keep this helper for tests / crash
+ * recovery of older overlays still present on disk.
  */
 export function cursorHapiMcpServerId(sessionId: string): string {
     const trimmed = sessionId.trim();
@@ -40,11 +45,11 @@ export function cursorHapiMcpServerId(sessionId: string): string {
     return `hapi-${trimmed}`;
 }
 
-/** Resolve the Cursor MCP config directory (override for tests; default `~/.cursor`). */
-export function resolveCursorMcpConfigDir(override?: string): string {
-    const trimmed = override?.trim();
-    return trimmed && trimmed.length > 0 ? trimmed : join(homedir(), '.cursor');
-}
+/** Marks HAPI-owned overlay entries so a later launch can prune dead PIDs. */
+export const HAPI_MCP_OVERLAY_PID_ENV = 'HAPI_MCP_OVERLAY_PID';
+
+/** Session that owns this mailbox — used to refuse a second live overlay in one cwd. */
+export const HAPI_MCP_OVERLAY_SESSION_ENV = 'HAPI_MCP_OVERLAY_SESSION';
 
 type McpServerEntry = {
     command: string;
@@ -52,8 +57,102 @@ type McpServerEntry = {
     env?: Record<string, string>;
 };
 
-/** Marks HAPI-owned overlay entries so a later launch can prune dead PIDs. */
-export const HAPI_MCP_OVERLAY_PID_ENV = 'HAPI_MCP_OVERLAY_PID';
+/** Resolve the Cursor MCP config directory (override for tests; default `~/.cursor`). */
+export function resolveCursorMcpConfigDir(override?: string): string {
+    const trimmed = override?.trim();
+    return trimmed && trimmed.length > 0 ? trimmed : join(homedir(), '.cursor');
+}
+
+function resolveExistingPath(path: string): string {
+    try {
+        return realpathSync(path);
+    } catch {
+        return path;
+    }
+}
+
+/**
+ * Project `.cursor` is untrusted (repo can ship a symlink to ~/.cursor).
+ * Refuse links / realpaths that escape the session cwd. Operator user-dir
+ * may follow estate-disk symlinks via {@link resolveExistingPath}.
+ */
+export function resolveProjectCursorConfigDir(cwd: string, mcpConfigDir: string): string {
+    const lexical = resolvePath(resolveCursorMcpConfigDir(mcpConfigDir));
+    const entry = lstatSync(lexical, { throwIfNoEntry: false });
+    if (entry?.isSymbolicLink()) {
+        throw new Error(
+            `Refusing a symlinked project Cursor config dir: ${lexical}`,
+        );
+    }
+    const realCwd = resolveExistingPath(resolvePath(cwd));
+    const lexicalRel = relative(realCwd, lexical);
+    if (lexicalRel.startsWith('..') || isAbsolute(lexicalRel)) {
+        throw new Error(
+            `Project Cursor config dir escapes session cwd: ${lexical}`,
+        );
+    }
+    if (!existsSync(lexical)) {
+        return lexical;
+    }
+    let resolved: string;
+    try {
+        resolved = realpathSync(lexical);
+    } catch {
+        return lexical;
+    }
+    const rel = relative(realCwd, resolved);
+    if (rel.startsWith('..') || isAbsolute(rel)) {
+        throw new Error(
+            `Project Cursor config dir escapes session cwd: ${resolved}`,
+        );
+    }
+    return resolved;
+}
+
+function isHapiOverlayKey(id: string): boolean {
+    return id === CURSOR_HAPI_MCP_SERVER_ID || id.startsWith('hapi-');
+}
+
+function overlayPid(entry: McpServerEntry | undefined): number | null {
+    const pidRaw = entry?.env?.[HAPI_MCP_OVERLAY_PID_ENV];
+    if (typeof pidRaw !== 'string' || pidRaw.trim() === '') {
+        return null;
+    }
+    const pid = Number(pidRaw);
+    if (!Number.isSafeInteger(pid) || pid <= 0) {
+        return null;
+    }
+    return pid;
+}
+
+function isDeadPidStampedOverlay(entry: McpServerEntry | undefined): boolean {
+    const pid = overlayPid(entry);
+    return pid !== null && !isProcessAlive(pid);
+}
+
+/**
+ * Drop PID-stamped HAPI overlay keys whose owner PID is confirmed dead.
+ * Live stamped entries stay (driver-soup: a new CLI must not sever still-running
+ * old-binary Cursor sessions sharing the user mcp.json). `keepId` is exempt.
+ * User-owned keys without the PID stamp stay.
+ */
+export function stripPidStampedHapiOverlays(
+    servers: Record<string, McpServerEntry>,
+    keepId?: string,
+): void {
+    for (const [id, entry] of Object.entries(servers)) {
+        if (keepId && id === keepId) {
+            continue;
+        }
+        if (!isHapiOverlayKey(id)) {
+            continue;
+        }
+        if (!isDeadPidStampedOverlay(entry)) {
+            continue;
+        }
+        delete servers[id];
+    }
+}
 
 type CursorMcpJson = {
     mcpServers?: Record<string, McpServerEntry>;
@@ -260,24 +359,21 @@ function sameMcpEntry(a: McpServerEntry | undefined, b: McpServerEntry | undefin
 }
 
 /**
- * Merge the per-session HAPI stdio bridge into `~/.cursor/mcp.json` (or
- * `options.mcpConfigDir`) and approve it for Cursor's native MCP loader.
- *
- * Cleanup undoes only the exact entry this session installed under `serverId` (or restores a
- * pre-existing value for that same id). Concurrent edits to other mcpServers keys — and to
- * this id when it no longer matches the installed overlay — survive the session.
- *
- * Install and cleanup serialize via a lockfile and write mcp.json atomically so concurrent
- * CLI processes cannot clobber each other's `hapi-*` entries.
+ * Write one HAPI stdio bridge into the **project** `.cursor/mcp.json` and approve it.
+ * When `userMcpConfigDir` is set, strip PID-stamped `hapi` / `hapi-*` keys from that
+ * user-level file so Cursor cannot merge sibling session mailboxes into this agent.
  */
 export function installCursorMcpOverlay(
     cwd: string,
     bridge: { command: string; args: string[] },
     options: {
         serverId: string;
+        overlaySessionId?: string;
         enableCursorMcp?: EnableCursorMcp;
-        /** Override config dir (tests). Production uses `~/.cursor`. */
+        /** Project Cursor config dir. Default `<cwd>/.cursor`. */
         mcpConfigDir?: string;
+        /** User-level Cursor config dir to strip multiplex `hapi-*` keys from. */
+        userMcpConfigDir?: string;
     },
 ): CursorMcpOverlayHandle {
     const serverId = options.serverId.trim();
@@ -285,20 +381,40 @@ export function installCursorMcpOverlay(
         throw new Error('serverId is required for Cursor HAPI MCP overlay');
     }
 
-    const cursorDir = resolveCursorMcpConfigDir(options.mcpConfigDir);
+    const cursorDir = resolveProjectCursorConfigDir(
+        cwd,
+        options.mcpConfigDir ?? join(cwd, '.cursor'),
+    );
     const mcpJsonPath = join(cursorDir, 'mcp.json');
     const lockPath = `${mcpJsonPath}.hapi.lock`;
-    const cursorDirEntry = lstatSync(cursorDir, { throwIfNoEntry: false });
-    if (cursorDirEntry?.isSymbolicLink()) {
-        throw new Error(`Refusing to use a symlinked Cursor config directory: ${cursorDir}`);
-    }
     mkdirSync(cursorDir, { recursive: true });
 
+    const overlaySessionId = options.overlaySessionId?.trim() || undefined;
     const installedHapi: McpServerEntry = {
         command: bridge.command,
         args: [...bridge.args],
-        env: { [HAPI_MCP_OVERLAY_PID_ENV]: String(process.pid) },
+        env: {
+            [HAPI_MCP_OVERLAY_PID_ENV]: String(process.pid),
+            ...(overlaySessionId ? { [HAPI_MCP_OVERLAY_SESSION_ENV]: overlaySessionId } : {}),
+        },
     };
+
+    const userDirRaw = options.userMcpConfigDir?.trim();
+    if (userDirRaw) {
+        // User dir is operator-trusted — follow estate-disk symlinks.
+        const userDir = resolveExistingPath(resolveCursorMcpConfigDir(userDirRaw));
+        if (userDir !== cursorDir) {
+            const userJsonPath = join(userDir, 'mcp.json');
+            if (existsSync(userJsonPath) && !lstatSync(userJsonPath).isSymbolicLink()) {
+                withMcpJsonLock(`${userJsonPath}.hapi.lock`, () => {
+                    const userConfig = readMcpJson(userJsonPath);
+                    userConfig.mcpServers ??= {};
+                    stripPidStampedHapiOverlays(userConfig.mcpServers);
+                    writeMcpJsonAtomic(userJsonPath, userConfig);
+                });
+            }
+        }
+    }
 
     let hadFile = false;
     let hadServer = false;
@@ -309,27 +425,31 @@ export function installCursorMcpOverlay(
         const previous = hadFile ? readMcpJson(mcpJsonPath) : { mcpServers: {} as Record<string, McpServerEntry> };
         previous.mcpServers ??= {};
 
-        // Crash recovery: drop prior hapi-* overlays whose owner PID is gone.
-        // Only prune entries we stamped with HAPI_MCP_OVERLAY_PID — never user-owned keys.
-        for (const [id, entry] of Object.entries(previous.mcpServers)) {
-            if (!id.startsWith('hapi-')) {
-                continue;
-            }
-            const pidRaw = entry.env?.[HAPI_MCP_OVERLAY_PID_ENV];
-            if (typeof pidRaw !== 'string' || pidRaw.trim() === '') {
-                continue;
-            }
-            const pid = Number(pidRaw);
-            if (!Number.isSafeInteger(pid) || pid <= 0) {
-                continue;
-            }
-            if (!isProcessAlive(pid)) {
-                delete previous.mcpServers[id];
-            }
+        stripPidStampedHapiOverlays(previous.mcpServers, serverId);
+
+        const existing = previous.mcpServers[serverId];
+        const existingPid = overlayPid(existing);
+        const existingSession = existing?.env?.[HAPI_MCP_OVERLAY_SESSION_ENV];
+        if (
+            overlaySessionId
+            && existingPid !== null
+            && isProcessAlive(existingPid)
+            && typeof existingSession === 'string'
+            && existingSession.length > 0
+            && existingSession !== overlaySessionId
+        ) {
+            throw new Error(
+                `Cannot install a second live HAPI MCP mailbox in this workspace (held by session ${existingSession}).`,
+            );
         }
 
         hadServer = Object.prototype.hasOwnProperty.call(previous.mcpServers, serverId);
         previousServer = hadServer ? previous.mcpServers[serverId] : undefined;
+        // Crash left a dead PID-stamped slot — do not restore it on cleanup.
+        if (hadServer && isDeadPidStampedOverlay(previousServer)) {
+            hadServer = false;
+            previousServer = undefined;
+        }
 
         const config: CursorMcpJson = {
             ...previous,
@@ -353,7 +473,6 @@ export function installCursorMcpOverlay(
 
                 const currentServer = current.mcpServers[serverId];
                 if (!sameMcpEntry(currentServer, installedHapi)) {
-                    // User/Cursor replaced or removed our overlay entry — leave alone.
                     return;
                 }
 
