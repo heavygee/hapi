@@ -223,7 +223,7 @@ export async function runDoctorInlineMedia(): Promise<number> {
     const cursorSessions = withBridge.filter((b) => b.flavor === 'cursor')
     if (cursorSessions.length > 0) {
         console.log(chalk.bold('\nCursor ACP'))
-        console.log(chalk.gray('  Cursor ignores session/new mcpServers. Remote sessions use ~/.cursor/mcp.json + `agent mcp enable hapi-<sessionId>` (siblings are disabled: Cursor routes duplicate tool names to one server).'))
+        console.log(chalk.gray('  Cursor ignores session/new mcpServers. Remote sessions use ~/.cursor/mcp.json + `agent mcp enable hapi-<sessionId>`.'))
         console.log(chalk.gray('  Tool names are bare: display_image, display_video, display_media, display_links (Cursor-only; requires sessionId), change_title (not hapi_display_image).'))
         for (const session of cursorSessions) {
             const serverId = cursorHapiMcpServerId(session.id)

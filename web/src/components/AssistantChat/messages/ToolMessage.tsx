@@ -77,7 +77,7 @@ function DisplayLinksCopyRow(props: { value: string; title?: string }) {
     }, [props.value])
 
     return (
-        <li className="min-w-0">
+        <li className="min-w-0" data-hapi-share-exclude="true">
             <button
                 type="button"
                 onClick={() => { void handleCopy() }}
