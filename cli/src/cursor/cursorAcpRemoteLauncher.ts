@@ -104,6 +104,7 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         this.happyServer = happyServer;
 
         const hapiBridge = mcpServers.hapi;
+        let overlayInstalled = false;
         if (hapiBridge) {
             try {
                 this.cursorMcpOverlay = installCursorMcpOverlay(session.path, {
@@ -115,6 +116,7 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                     mcpConfigDir: join(session.path, '.cursor'),
                     userMcpConfigDir: resolveCursorMcpConfigDir(),
                 });
+                overlayInstalled = true;
             } catch (error) {
                 const detail = error instanceof Error ? error.message : String(error);
                 logger.warn(
@@ -238,12 +240,16 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         const resumeSessionId = session.sessionId;
         // Overlay isolates one project `hapi` mailbox. Also pass ACP mcpServers so a
         // Cursor build that honors session/new attaches the same HappyServer (same name).
-        const mcpServerList: McpServerStdio[] = Object.entries(mcpServers).map(([name, entry]) => ({
-            name,
-            command: entry.command,
-            args: entry.args,
-            env: [],
-        }));
+        // Fail closed on overlay install failure: do not attach ACP MCP either — otherwise
+        // a same-cwd collision can still bridge while project `hapi` belongs to another session.
+        const mcpServerList: McpServerStdio[] = (!hapiBridge || overlayInstalled)
+            ? Object.entries(mcpServers).map(([name, entry]) => ({
+                name,
+                command: entry.command,
+                args: entry.args,
+                env: [],
+            }))
+            : [];
         let acpSessionId: string | undefined;
 
         for (let loadAttempt = 0; loadAttempt < 2; loadAttempt += 1) {
