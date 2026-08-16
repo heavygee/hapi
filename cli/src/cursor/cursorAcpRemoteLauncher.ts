@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import React from 'react';
 import { randomUUID } from 'node:crypto';
 import { logger } from '@/ui/logger';
@@ -36,8 +37,9 @@ import type { AcpSdkBackend } from '@/agent/backends/acp';
 import type { AcpStderrError } from '@/agent/backends/acp/AcpStdioTransport';
 import { registerAcpSessionTitleSync } from '@/agent/acpSessionTitle';
 import {
-    cursorHapiMcpServerId,
+    CURSOR_HAPI_MCP_SERVER_ID,
     installCursorMcpOverlay,
+    resolveCursorMcpConfigDir,
     type CursorMcpOverlayHandle,
 } from './utils/cursorMcpOverlay';
 import {
@@ -108,12 +110,20 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                     command: hapiBridge.command,
                     args: hapiBridge.args,
                 }, {
-                    serverId: cursorHapiMcpServerId(session.client.sessionId),
+                    serverId: CURSOR_HAPI_MCP_SERVER_ID,
+                    overlaySessionId: session.client.sessionId,
+                    mcpConfigDir: join(session.path, '.cursor'),
+                    userMcpConfigDir: resolveCursorMcpConfigDir(),
                 });
             } catch (error) {
+                const detail = error instanceof Error ? error.message : String(error);
                 logger.warn(
                     '[cursor-acp] failed to install HAPI MCP overlay; continuing without inline media',
                     error,
+                );
+                messageBuffer.addMessage(
+                    `HAPI MCP overlay unavailable (${detail}). Inline media / peer MCP tools disabled for this session.`,
+                    'status',
                 );
                 this.cursorMcpOverlay = { cleanup: () => {} };
             }
@@ -226,8 +236,14 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         );
 
         const resumeSessionId = session.sessionId;
-        // Cursor ACP ignores session/new|load mcpServers; native ~/.cursor/mcp.json is wired above.
-        const mcpServerList: McpServerStdio[] = [];
+        // Overlay isolates one project `hapi` mailbox. Also pass ACP mcpServers so a
+        // Cursor build that honors session/new attaches the same HappyServer (same name).
+        const mcpServerList: McpServerStdio[] = Object.entries(mcpServers).map(([name, entry]) => ({
+            name,
+            command: entry.command,
+            args: entry.args,
+            env: [],
+        }));
         let acpSessionId: string | undefined;
 
         for (let loadAttempt = 0; loadAttempt < 2; loadAttempt += 1) {
