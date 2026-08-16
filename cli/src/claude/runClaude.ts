@@ -379,15 +379,19 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
         }
 
         // Peer delivery must stay literal text — never receiver control syntax (#1473).
-        const specialCommand = message.meta?.sentFrom === 'peer'
+        const isPeerDelivery = message.meta?.sentFrom === 'peer'
+        const specialCommand = isPeerDelivery
             ? { type: null }
             : parseSpecialCommand(message.content.text);
 
         // Native slash skills must stay at the start of the prompt. Regular
-        // messages keep the existing attachment-first format.
+        // messages keep the existing attachment-first format. Peer text must
+        // not run expandSkillReference ($skill → /skill) either.
         const attachmentText = formatAttachmentsForClaude(message.content.attachments);
-        const expandedText = currentSessionRef.current?.expandSkillReference(message.content.text, attachmentText)
-            ?? message.content.text;
+        const expandedText = isPeerDelivery
+            ? message.content.text
+            : (currentSessionRef.current?.expandSkillReference(message.content.text, attachmentText)
+                ?? message.content.text);
         const formattedText = annotatePeerDeliveryForAgent(
             expandedText !== message.content.text
                 ? expandedText
