@@ -173,4 +173,36 @@ describe('serializeSessionMarkdown', () => {
         expect(markdown).not.toContain('sys-init')
         expect(markdown).toContain('- Tool: Bash')
     })
+
+    it('omits exact-copy values from display-links export markdown', () => {
+        const secret = 'SENTINEL_SECRET_VK' + 'K'
+        const href = 'https://example.com/public'
+        const markdown = serializeSessionMarkdown(makeExport([
+            {
+                id: 'links-1',
+                seq: 1,
+                localId: null,
+                createdAt: Date.UTC(2026, 5, 5, 10, 3, 0),
+                invokedAt: Date.UTC(2026, 5, 5, 10, 3, 0),
+                scheduledAt: null,
+                content: {
+                    role: 'agent',
+                    content: {
+                        type: 'codex',
+                        data: {
+                            type: 'display-links',
+                            id: 'dl-1',
+                            urls: [{ href, title: 'Public' }],
+                            texts: [{ value: secret, title: 'gate' }],
+                        }
+                    }
+                }
+            }
+        ]))
+
+        expect(markdown).toContain('Public')
+        expect(markdown).toContain(href)
+        expect(markdown).toContain('Exact-copy: gate (value omitted)')
+        expect(markdown).not.toContain(secret)
+    })
 })

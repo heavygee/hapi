@@ -95,7 +95,7 @@ function formatAgentContentBlock(block: NormalizedAgentContent): string | null {
             return `- Generated image: ${block.fileName}`
         case 'display-links': {
             const links = block.urls.map((url) => `- Link: ${url.title ? `${url.title} (${url.href})` : url.href}`)
-            const texts = (block.texts ?? []).map((text) => `- Copy: ${text.title ? `${text.title} (${text.value})` : text.value}`)
+            const texts = (block.texts ?? []).map((text) => `- Exact-copy: ${text.title?.trim() || 'card'} (value omitted)`)
             return [...links, ...texts].join('\n') || null
         }
         case 'codex-review':
