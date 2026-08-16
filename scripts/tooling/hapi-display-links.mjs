@@ -59,13 +59,28 @@ function looksLikeHref(value) {
 }
 
 // Arg shapes:
-//   <href> [title]              → self-target current session
-//   <self-token> <href> [title] → self-target, explicit
+//   <href> [title]
+//   <self-token> <href> [title]
+//   --text <value> [title]
+//   <self-token> --text <value> [title]
 const args = process.argv.slice(2)
 let sessionArg
 let href
 let title
-if (args.length > 0 && looksLikeHref(args[0]) && !SELF_TOKENS.has(args[0])) {
+let texts
+const textIndex = args.indexOf('--text')
+if (textIndex >= 0) {
+    const value = args[textIndex + 1]
+    if (!value) {
+        console.error('usage: hapi-display-links.mjs [self] --text <value> [title]')
+        process.exit(2)
+    }
+    const before = args.slice(0, textIndex)
+    sessionArg = before[0] && !looksLikeHref(before[0]) ? before[0] : null
+    href = null
+    title = args[textIndex + 2]
+    texts = title ? [{ value, title }] : [{ value }]
+} else if (args.length > 0 && looksLikeHref(args[0]) && !SELF_TOKENS.has(args[0])) {
     sessionArg = null
     href = args[0]
     title = args[1]
@@ -75,8 +90,9 @@ if (args.length > 0 && looksLikeHref(args[0]) && !SELF_TOKENS.has(args[0])) {
     title = args[2]
 }
 
-if (!href) {
+if (!href && !(texts && texts.length > 0)) {
     console.error('usage: hapi-display-links.mjs [self] <href> [title]')
+    console.error('  or: hapi-display-links.mjs [self] --text <value> [title]')
     console.error('  or: HAPI_SESSION_ID=<uuid> hapi-display-links.mjs <href> [title]')
     process.exit(2)
 }
@@ -175,7 +191,10 @@ const transport = new StreamableHTTPClientTransport(new URL(mcpUrl))
 await client.connect(transport)
 const result = await client.callTool({
     name: 'display_links',
-    arguments: { urls: title ? [{ href, title }] : [{ href }] },
+    arguments: {
+        ...(href ? { urls: title ? [{ href, title }] : [{ href }] } : {}),
+        ...(texts && texts.length > 0 ? { texts } : {}),
+    },
 })
 await client.close()
 console.log(JSON.stringify(result, null, 2))

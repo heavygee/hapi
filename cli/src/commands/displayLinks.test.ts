@@ -8,6 +8,7 @@ describe('parseDisplayLinksArgs', () => {
             help: false,
             sessionArg: null,
             href,
+            texts: [],
             title: 'Issue 1516',
         })
     })
@@ -17,6 +18,7 @@ describe('parseDisplayLinksArgs', () => {
             help: false,
             sessionArg: 'abc12345',
             href: 'https://example.com',
+            texts: [],
             title: 'Example',
         })
     })
@@ -26,6 +28,7 @@ describe('parseDisplayLinksArgs', () => {
             help: false,
             sessionArg: 'self',
             href: 'https://example.com',
+            texts: [],
             title: undefined,
         })
     })
@@ -34,9 +37,31 @@ describe('parseDisplayLinksArgs', () => {
         expect(parseDisplayLinksArgs(['--help']).help).toBe(true)
     })
 
-    it('throws when href is missing', () => {
-        expect(() => parseDisplayLinksArgs([])).toThrow(/missing href/)
-        expect(() => parseDisplayLinksArgs(['self'])).toThrow(/missing href/)
+    it('parses --text exact-copy value by concatenation', () => {
+        const value = 'VK' + 'K'
+        expect(parseDisplayLinksArgs(['--text', value, 'gate'])).toEqual({
+            help: false,
+            sessionArg: null,
+            href: '',
+            texts: [{ value, title: 'gate' }],
+            title: undefined,
+        })
+    })
+
+    it('parses self --text', () => {
+        const value = 'dead' + 'beef'
+        expect(parseDisplayLinksArgs(['self', '--text', value])).toEqual({
+            help: false,
+            sessionArg: 'self',
+            href: '',
+            texts: [{ value }],
+            title: undefined,
+        })
+    })
+
+    it('throws when href and --text are missing', () => {
+        expect(() => parseDisplayLinksArgs([])).toThrow(/missing href|--text/)
+        expect(() => parseDisplayLinksArgs(['self'])).toThrow(/missing href|--text/)
     })
 })
 

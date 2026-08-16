@@ -125,6 +125,26 @@ describe('runHappyMcpStdioBridge tool forwarding', () => {
         })
     })
 
+    it('forwards display_links texts arguments unchanged', async () => {
+        await runHappyMcpStdioBridge([
+            '--url',
+            'http://127.0.0.1:43006',
+            '--tools',
+            'display_links'
+        ])
+
+        const handler = harness.tools.get('display_links')
+        const value = 'VK' + 'K'
+        await expect(handler?.({ texts: [{ value, title: 'gate' }] })).resolves.toEqual({
+            content: [{ type: 'text', text: 'forwarded' }],
+            isError: false
+        })
+        expect(harness.callTool).toHaveBeenCalledWith({
+            name: 'display_links',
+            arguments: { texts: [{ value, title: 'gate' }] }
+        })
+    })
+
     it('forwards display_media arguments unchanged', async () => {
         await runHappyMcpStdioBridge([
             '--url',
