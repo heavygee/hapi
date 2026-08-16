@@ -44,6 +44,7 @@ describe('startHappyServer skill_lookup', () => {
     async function connect(enableSkillLookup = true, extra: { enableDisplayLinks?: boolean; flavor?: string } = {}): Promise<Client> {
         sendAgentMessage = vi.fn()
         const sessionClient = {
+            sessionId: 'happy-server-test-session',
             updateMetadata: vi.fn(),
             sendAgentMessage,
             sendClaudeSessionMessage: vi.fn()
@@ -191,7 +192,7 @@ describe('startHappyServer skill_lookup', () => {
 
         const result = await mcp.callTool({
             name: 'display_links',
-            arguments: { urls: [{ href, title: 'Issue 1516' }] }
+            arguments: { urls: [{ href, title: 'Issue 1516' }], sessionId: 'happy-server-test-session' }
         }) as ToolResult
 
         expect(result.isError).toBe(false)
@@ -211,7 +212,7 @@ describe('startHappyServer skill_lookup', () => {
 
         const result = await mcp.callTool({
             name: 'display_links',
-            arguments: { texts: [{ value, title: 'gate' }] }
+            arguments: { texts: [{ value, title: 'gate' }], sessionId: 'happy-server-test-session' }
         }) as ToolResult
 
         expect(result.isError).toBe(false)
@@ -226,11 +227,36 @@ describe('startHappyServer skill_lookup', () => {
         expect(payload.texts[0]?.value).not.toBe('VK')
     })
 
+    it('refuses display_links when sessionId does not match the bound MCP session', async () => {
+        const mcp = await connect(false, { enableDisplayLinks: true })
+        const href = 'https://example.com/kinrupt'
+        const result = await mcp.callTool({
+            name: 'display_links',
+            arguments: { urls: [{ href, title: 'Kinrupt' }], sessionId: '472632df-wrong-session' }
+        }) as ToolResult
+
+        expect(result.isError).toBe(true)
+        expect(result.content?.[0]?.text).toMatch(/wrong-session/)
+        expect(sendAgentMessage).not.toHaveBeenCalled()
+    })
+
+    it('refuses display_links when sessionId is omitted', async () => {
+        const mcp = await connect(false, { enableDisplayLinks: true })
+        const result = await mcp.callTool({
+            name: 'display_links',
+            arguments: { urls: [{ href: 'https://example.com/x' }] }
+        }) as ToolResult
+
+        expect(result.isError).toBe(true)
+        expect(result.content?.[0]?.text).toMatch(/requires sessionId/)
+        expect(sendAgentMessage).not.toHaveBeenCalled()
+    })
+
     it('rejects javascript hrefs without emitting an agent message', async () => {
         const mcp = await connect(false, { enableDisplayLinks: true })
         const result = await mcp.callTool({
             name: 'display_links',
-            arguments: { urls: [{ href: 'javascript:alert(1)' }] }
+            arguments: { urls: [{ href: 'javascript:alert(1)' }], sessionId: 'happy-server-test-session' }
         }) as ToolResult
 
         expect(result.isError).toBe(true)
@@ -239,6 +265,7 @@ describe('startHappyServer skill_lookup', () => {
 
     it('does not expose change_title when native ACP titles are enabled', async () => {
         const sessionClient = {
+            sessionId: 'happy-server-test-session',
             updateMetadata: vi.fn(),
             sendAgentMessage: vi.fn(),
             sendClaudeSessionMessage: vi.fn()

@@ -229,6 +229,7 @@ const result = await client.callTool({
     arguments: {
         ...(href ? { urls: title ? [{ href, title }] : [{ href }] } : {}),
         ...(texts && texts.length > 0 ? { texts } : {}),
+        sessionId: session.id,
     },
 })
 await client.close()
