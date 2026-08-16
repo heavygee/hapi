@@ -165,6 +165,32 @@ export function extractUserPlainText(content: unknown): string | null {
 export type SearchableMessage = {
     role: 'user' | 'assistant'
     text: string
+    /** Stable renderer identity used to coalesce streamed assistant snapshots. */
+    renderKey?: string
+}
+
+function getMessageRenderKey(content: unknown): string | undefined {
+    if (!isObject(content)) return undefined
+
+    if (content.type === 'codex') {
+        const data = isObject(content.data) ? content.data : null
+        if (data?.type === 'message' && typeof data.id === 'string' && data.id.length > 0) {
+            return data.id
+        }
+    }
+
+    if (content.type === 'text' && typeof content.streamId === 'string' && content.streamId.length > 0) {
+        return content.streamId
+    }
+
+    return undefined
+}
+
+/** Return the renderer identity for a visible message, even when it has no text. */
+export function extractMessageRenderKey(value: unknown): string | null {
+    const record = unwrapRoleWrappedRecordEnvelope(value)
+    if (!record || (record.role !== 'agent' && record.role !== 'assistant')) return null
+    return getMessageRenderKey(record.content) ?? null
 }
 
 function isHiddenAssistantOutput(content: unknown): boolean {
@@ -185,6 +211,7 @@ export function extractSearchableMessageText(value: unknown): SearchableMessage 
 
     if (record.role === 'agent' || record.role === 'assistant') {
         if (isHiddenAssistantOutput(record.content)) return null
+        const renderKey = getMessageRenderKey(record.content)
         const directText = typeof record.content === 'string'
             ? record.content
             : isObject(record.content)
@@ -195,7 +222,7 @@ export function extractSearchableMessageText(value: unknown): SearchableMessage 
         const text = normalizeSearchablePlainText(
             stripNotifySummaryFooter(directText ?? extractAssistantPlainText(record.content) ?? '')
         )
-        return text ? { role: 'assistant', text } : null
+        return text ? { role: 'assistant', text, ...(renderKey ? { renderKey } : {}) } : null
     }
 
     return null

@@ -125,14 +125,24 @@ describe('schema migration v23 to v26', () => {
 
         const initial = new Store(dbPath)
         const session = initial.sessions.getOrCreateSession('migration-short-query', { path: '/tmp/migration-short-query' }, null, 'default')
-        initial.messages.addMessage(session.id, {
+        const message = initial.messages.addMessage(session.id, {
             role: 'user',
             content: { type: 'text', text: '你好，短查询索引' }
         })
         initial.close()
 
         const legacy = new Database(dbPath)
-        legacy.exec('DROP TABLE IF EXISTS message_content_search_short; PRAGMA user_version = 25;')
+        legacy.exec(`
+            DROP TABLE IF EXISTS message_content_search_lookup;
+            CREATE TABLE message_content_search_lookup (
+                search_rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_id TEXT NOT NULL UNIQUE
+            );
+            INSERT INTO message_content_search_lookup (search_rowid, message_id)
+            SELECT rowid, message_id FROM message_content_search;
+            DROP TABLE IF EXISTS message_content_search_short;
+            PRAGMA user_version = 25;
+        `)
         legacy.close()
 
         const migrated = new Store(dbPath)
@@ -142,8 +152,16 @@ describe('schema migration v23 to v26', () => {
             const shortIndex = internalDb.prepare(
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'message_content_search_short'"
             ).get() as { name: string } | null
+            const lookupColumns = internalDb.prepare(
+                'PRAGMA table_info(message_content_search_lookup)'
+            ).all() as Array<{ name: string }>
+            const target = internalDb.prepare(
+                'SELECT target_message_id FROM message_content_search_lookup WHERE message_id = ?'
+            ).get(message.id) as { target_message_id: string } | undefined
             const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
             expect(shortIndex?.name).toBe('message_content_search_short')
+            expect(lookupColumns.map((column) => column.name)).toContain('target_message_id')
+            expect(target?.target_message_id).toBe(message.id)
             expect(version.user_version).toBe(26)
         } finally {
             migrated.close()

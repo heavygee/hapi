@@ -157,6 +157,50 @@ describe('message content search', () => {
         expect(result.matches.map((match) => match.sessionId)).toEqual([session.id, session.id])
     })
 
+    it('collapses streamed assistant snapshots to the latest rendered message', () => {
+        const store = new Store(':memory:')
+        const session = makeSession(store, 'streamed-content-search')
+        const firstSnapshot = store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: { type: 'message', id: 'stream-1', message: 'old streamed needle' }
+            }
+        })
+        const latestSnapshot = store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: { type: 'message', id: 'stream-1', message: 'latest streamed answer' }
+            }
+        })
+
+        expect(store.messages.searchContent('old streamed', 'default')).toEqual([])
+        expect(store.messages.searchContent('latest streamed', 'default')[0]?.messageId)
+            .toBe(latestSnapshot.id)
+        expect(store.messages.searchContentInSession('streamed', 'default', session.id))
+            .toMatchObject({ total: 1, matches: [{ messageId: latestSnapshot.id }] })
+
+        const emptySnapshot = store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: { type: 'message', id: 'stream-2', message: 'temporary streamed phrase' }
+            }
+        })
+        expect(store.messages.searchContent('temporary streamed', 'default')[0]?.messageId)
+            .toBe(emptySnapshot.id)
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: { type: 'message', id: 'stream-2', message: '' }
+            }
+        })
+        expect(store.messages.searchContent('temporary streamed', 'default')).toEqual([])
+        expect(firstSnapshot.id).not.toBe(latestSnapshot.id)
+    })
+
     it('does not expose queued messages until they are invoked', () => {
         const store = new Store(':memory:')
         const session = makeSession(store, 'queued-content')

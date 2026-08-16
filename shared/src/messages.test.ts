@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
     extractAssistantPlainText,
+    extractMessageRenderKey,
     extractSearchableMessageText,
     extractUserPlainText,
     extractNotifySummary,
@@ -125,8 +126,8 @@ describe('extractSearchableMessageText', () => {
     test('extracts assistant prose but excludes tool and reasoning records', () => {
         expect(extractSearchableMessageText({
             role: 'agent',
-            content: { type: 'codex', data: { type: 'message', message: 'Visible answer' } }
-        })).toEqual({ role: 'assistant', text: 'Visible answer' })
+            content: { type: 'codex', data: { type: 'message', id: 'stream-1', message: 'Visible answer' } }
+        })).toEqual({ role: 'assistant', text: 'Visible answer', renderKey: 'stream-1' })
         expect(extractSearchableMessageText({ role: 'agent', content: 'Legacy visible answer' }))
             .toEqual({ role: 'assistant', text: 'Legacy visible answer' })
         expect(extractSearchableMessageText({
@@ -137,6 +138,15 @@ describe('extractSearchableMessageText', () => {
             role: 'agent',
             content: { type: 'output', data: { type: 'user', message: { content: 'not assistant prose' } } }
         })).toBeNull()
+    })
+
+    test('keeps the stream identity even when a snapshot has no searchable text', () => {
+        const emptySnapshot = {
+            role: 'agent',
+            content: { type: 'codex', data: { type: 'message', id: 'stream-1', message: '' } }
+        }
+        expect(extractSearchableMessageText(emptySnapshot)).toBeNull()
+        expect(extractMessageRenderKey(emptySnapshot)).toBe('stream-1')
     })
 
     test('excludes assistant metadata and compact-summary output', () => {
