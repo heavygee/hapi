@@ -2148,7 +2148,7 @@ export function SessionList(props: {
                     onToggle: () => setRunningSectionCollapsed((value) => !value),
                     pulse: true,
                     count: runningSessionTotal,
-                    bucketKeys: ['working', 'pending'],
+                    bucketKeys: ['jobs', 'working', 'pending'],
                 })}
                 {renderPinnedSection({
                     sectionKey: 'active-section',
