@@ -128,7 +128,7 @@ describe('peerCapabilityInject (#1203 pass 2h)', () => {
         }
     })
 
-    it('still receives when client peercred is null on connect (Bun race)', async () => {
+    it('still receives when client peercred is null only on connect (Bun race)', async () => {
         const socketPath = tempSock()
         const server = await startPeerCapabilityInjectServer({
             socketPath,
@@ -137,15 +137,43 @@ describe('peerCapabilityInject (#1203 pass 2h)', () => {
         expect(server).not.toBeNull()
         try {
             const deliver = server!.deliverTo(process.pid, { sessionCapability: 'cap-null-cred' })
+            let credReads = 0
             const capability = await receivePeerCapabilityFromRunner({
                 socketPath,
                 ownerPid: process.pid,
                 attempts: 20,
-                // Simulate SO_PEERCRED unavailable on the client connect path.
-                readPeerCred: () => null,
+                // Connect-time null, then peercred available before accepting payload.
+                readPeerCred: () => {
+                    credReads += 1
+                    if (credReads === 1) {
+                        return null
+                    }
+                    return { pid: process.pid, uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 }
+                },
             })
             await deliver
             expect(capability).toBe('cap-null-cred')
+        } finally {
+            server!.close()
+        }
+    })
+
+    it('rejects inject when client peercred stays null through payload', async () => {
+        const socketPath = tempSock()
+        const server = await startPeerCapabilityInjectServer({
+            socketPath,
+            readPeerCred: () => ({ pid: process.pid, uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 }),
+        })
+        expect(server).not.toBeNull()
+        try {
+            void server!.deliverTo(process.pid, { sessionCapability: 'cap-never-cred' })
+            const capability = await receivePeerCapabilityFromRunner({
+                socketPath,
+                ownerPid: process.pid,
+                attempts: 5,
+                readPeerCred: () => null,
+            })
+            expect(capability).toBeUndefined()
         } finally {
             server!.close()
         }
