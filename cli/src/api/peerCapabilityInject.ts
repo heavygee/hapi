@@ -314,11 +314,23 @@ function tryReceiveOnce(
                         runnerProof?: string
                     }
                     const value = parsed[field]
-                    finish(
-                        parsed.ok && typeof value === 'string'
-                            ? value.trim() || undefined
-                            : undefined
-                    )
+                    if (!parsed.ok || typeof value !== 'string' || !value.trim()) {
+                        finish(undefined)
+                        return
+                    }
+                    // Re-check peercred before accepting secrets — connect-time
+                    // null cred must not bypass server auth (#1473 Codex Major).
+                    const cred = readPeerCred(socket)
+                    if (expectedServerPid !== undefined) {
+                        if (!cred || cred.pid !== expectedServerPid) {
+                            finish(undefined)
+                            return
+                        }
+                    } else if (!cred || !isProcessDescendant(ownerPid, cred.pid)) {
+                        finish(undefined)
+                        return
+                    }
+                    finish(value.trim())
                 } catch {
                     finish(undefined)
                 }
@@ -326,10 +338,8 @@ function tryReceiveOnce(
         })
         socket.on('connect', () => {
             const cred = readPeerCred(socket)
-            // Bun/Linux: SO_PEERCRED can be briefly unavailable on connect.
-            // Treat missing cred as "wait for server push", not hard fail —
-            // aborting here lets the server still mark deliverTo complete and
-            // unlink the socket while we retry into ENOENT (#1473).
+            // Hard-reject a wrong peer immediately. Missing cred may be a brief
+            // Bun SO_PEERCRED race — data handler re-checks before accepting.
             if (expectedServerPid !== undefined) {
                 if (cred && cred.pid !== expectedServerPid) {
                     finish(undefined)
@@ -339,7 +349,6 @@ function tryReceiveOnce(
             if (cred && !isProcessDescendant(ownerPid, cred.pid)) {
                 finish(undefined)
             }
-            // Server pushes secret on accept when armed.
         })
     })
 }

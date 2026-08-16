@@ -539,7 +539,13 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     // Spawn a new session (sessionId reserved for future --resume functionality)
     let spawnSession!: SpawnDeduplicator;
     const spawnSessionOnce = async (options: SpawnSessionOptions): Promise<SpawnSessionResult> => {
-      logger.debugLargeJson('[RUNNER RUN] Spawning session', options);
+      // Never log resumePeerMintNonce / OAuth token — same-UID siblings can
+      // tail DEBUG logs and redeem first (#1473 Codex Blocker).
+      logger.debugLargeJson('[RUNNER RUN] Spawning session', {
+        ...options,
+        resumePeerMintNonce: options.resumePeerMintNonce ? '[redacted]' : undefined,
+        token: options.token ? '[redacted]' : undefined,
+      });
 
       const { directory, sessionId, machineId, approvedNewDirectoryCreation = true } = options;
       const agent = options.agent ?? 'claude';
