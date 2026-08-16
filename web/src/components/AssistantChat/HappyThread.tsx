@@ -1300,7 +1300,11 @@ export function HappyThread(props: {
 
     // Scroll to bottom handler for the indicator button
     const scrollToBottom = useCallback(() => {
-        releaseSearchTargetHistoryLock()
+        if (activeSearchTargetId) {
+            dismissSearchTarget()
+        } else {
+            releaseSearchTargetHistoryLock()
+        }
         const viewport = viewportRef.current
         if (viewport) {
             tailScrollInProgressRef.current = true
@@ -1318,7 +1322,7 @@ export function HappyThread(props: {
         } else {
             onViewModeChangeRef.current('tail')
         }
-    }, [props.onJumpToTail, releaseSearchTargetHistoryLock])
+    }, [activeSearchTargetId, dismissSearchTarget, props.onJumpToTail, releaseSearchTargetHistoryLock])
 
     // Reset state when session changes
     useLayoutEffect(() => {

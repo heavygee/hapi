@@ -50,7 +50,7 @@ describe('message content search', () => {
         expect(store.messages.searchContent('hidden cache rotation', 'default')).toEqual([])
     })
 
-    it('uses a LIKE fallback for short CJK queries and isolates namespaces', () => {
+    it('uses the indexed short-query path for CJK queries and isolates namespaces', () => {
         const store = new Store(':memory:')
         const defaultSession = makeSession(store, 'cjk-default')
         const otherSession = makeSession(store, 'cjk-other', 'other')

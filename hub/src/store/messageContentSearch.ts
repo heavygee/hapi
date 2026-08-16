@@ -5,6 +5,7 @@ import { decodeMessageContent } from './contentCodec'
 
 export const MESSAGE_CONTENT_SEARCH_TABLE = 'message_content_search'
 const MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE = 'message_content_search_lookup'
+const MESSAGE_CONTENT_SEARCH_SHORT_TABLE = 'message_content_search_short'
 const initializedDatabases = new WeakSet<object>()
 
 export type MessageContentSearchMatch = {
@@ -42,6 +43,7 @@ type DbMessageRow = {
 
 const SEARCH_REBUILD_BATCH_SIZE = 500
 const SEARCH_LOOKUP_BACKFILL_BATCH_SIZE = 500
+const MIN_INDEXED_QUERY_LENGTH = 3
 
 type DbSearchRow = {
     search_rowid?: number
@@ -87,6 +89,51 @@ export function backfillMessageContentSearchLookup(db: Database): void {
     }
 }
 
+function getShortSearchGrams(text: string): string[] {
+    const characters = Array.from(text.toLocaleLowerCase())
+    const grams = new Set<string>()
+
+    for (let index = 0; index < characters.length; index += 1) {
+        grams.add(characters[index]!)
+        if (index + 1 < characters.length) {
+            grams.add(`${characters[index]!}${characters[index + 1]!}`)
+        }
+    }
+
+    return [...grams]
+}
+
+export function backfillMessageContentSearchShortIndex(db: Database): void {
+    ensureMessageContentSearchTable(db)
+    const select = db.prepare(`
+        SELECT rowid AS search_rowid, searchable_text
+        FROM ${MESSAGE_CONTENT_SEARCH_TABLE}
+        WHERE rowid > ?
+        ORDER BY rowid ASC
+        LIMIT ?
+    `)
+    const insert = db.prepare(`
+        INSERT OR IGNORE INTO ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} (gram, search_rowid)
+        VALUES (?, ?)
+    `)
+
+    let afterRowId = 0
+    while (true) {
+        const rows = select.all(afterRowId, SEARCH_LOOKUP_BACKFILL_BATCH_SIZE) as Array<{
+            search_rowid: number
+            searchable_text: string
+        }>
+        if (rows.length === 0) break
+
+        for (const row of rows) {
+            for (const gram of getShortSearchGrams(row.searchable_text)) {
+                insert.run(gram, row.search_rowid)
+            }
+        }
+        afterRowId = rows[rows.length - 1]!.search_rowid
+    }
+}
+
 export function createMessageContentSearchTable(db: Database): void {
     if (initializedDatabases.has(db)) return
 
@@ -107,11 +154,18 @@ export function createMessageContentSearchTable(db: Database): void {
             message_id TEXT NOT NULL UNIQUE
         )
     `)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} (
+            gram TEXT NOT NULL,
+            search_rowid INTEGER NOT NULL,
+            PRIMARY KEY (gram, search_rowid)
+        ) WITHOUT ROWID
+    `)
     // FTS5 UNINDEXED columns are intentionally not searchable, but SQLite
     // still has to scan the virtual table when deleting by one of them. Keep
     // an ordinary indexed message-id lookup so the write path stays bounded.
-    // Existing rows are backfilled explicitly by the v24→v25 migration. Do
-    // not scan the FTS table on every database reopen or first search.
+    // Existing rows are backfilled explicitly by schema migrations. Do not
+    // scan the FTS table on every database reopen or first search.
     initializedDatabases.add(db)
 }
 
@@ -130,6 +184,7 @@ export function removeMessageContentSearchIndex(db: Database, messageId: string)
     `).get(messageId) as DbSearchLookupRow | undefined
     if (!lookup) return
 
+    db.prepare(`DELETE FROM ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} WHERE search_rowid = ?`).run(lookup.search_rowid)
     db.prepare(`DELETE FROM ${MESSAGE_CONTENT_SEARCH_TABLE} WHERE rowid = ?`).run(lookup.search_rowid)
     db.prepare(`DELETE FROM ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE} WHERE search_rowid = ?`).run(lookup.search_rowid)
 }
@@ -159,6 +214,13 @@ function insertMessageContentSearchIndex(
         message.createdAt,
         message.role
     )
+    const insertShortGram = db.prepare(`
+        INSERT INTO ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} (gram, search_rowid)
+        VALUES (?, ?)
+    `)
+    for (const gram of getShortSearchGrams(message.text)) {
+        insertShortGram.run(gram, lookup.search_rowid)
+    }
 }
 
 export function indexMessageContent(db: Database, message: IndexableMessage): void {
@@ -189,6 +251,14 @@ function removeMessageContentSearchRowsForSessions(db: Database, sessionIds: str
     if (sessionIds.length === 0) return
     const placeholders = sessionIds.map(() => '?').join(', ')
     const messageIds = `SELECT id FROM messages WHERE session_id IN (${placeholders})`
+    db.prepare(`
+        DELETE FROM ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE}
+        WHERE search_rowid IN (
+            SELECT search_rowid
+            FROM ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE}
+            WHERE message_id IN (${messageIds})
+        )
+    `).run(...sessionIds)
     db.prepare(`
         DELETE FROM ${MESSAGE_CONTENT_SEARCH_TABLE}
         WHERE rowid IN (
@@ -236,6 +306,7 @@ function rebuildMessageContentSearchInternal(db: Database, sessionIds?: string[]
     } else {
         db.exec(`DELETE FROM ${MESSAGE_CONTENT_SEARCH_TABLE}`)
         db.exec(`DELETE FROM ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE}`)
+        db.exec(`DELETE FROM ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE}`)
         selectBatch = db.prepare(`
             SELECT rowid AS row_id, id, session_id, content, created_at, seq, invoked_at
             FROM messages
@@ -268,6 +339,13 @@ function rebuildMessageContentSearchInternal(db: Database, sessionIds?: string[]
                 row.created_at,
                 searchable.role
             )
+            const insertShortGram = db.prepare(`
+                INSERT INTO ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} (gram, search_rowid)
+                VALUES (?, ?)
+            `)
+            for (const gram of getShortSearchGrams(searchable.text)) {
+                insertShortGram.run(gram, lookup.search_rowid)
+            }
         }
 
         afterRowId = rows[rows.length - 1]!.row_id
@@ -305,10 +383,6 @@ function escapeFtsPhrase(query: string): string {
     return `"${query.replaceAll('"', '""')}"`
 }
 
-function escapeLikePattern(value: string): string {
-    return value.replace(/[\\%_]/g, (character) => `\\${character}`)
-}
-
 function makeLikeSnippet(text: string, query: string): string {
     const lowerText = text.toLocaleLowerCase()
     const lowerQuery = query.toLocaleLowerCase()
@@ -332,8 +406,8 @@ export function searchMessageContent(
     if (!normalizedQuery) return []
 
     const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(100, Math.floor(limit))) : 50
-    const useLike = [...normalizedQuery].length < 3
-    const rows = useLike
+    const useShortIndex = [...normalizedQuery].length < MIN_INDEXED_QUERY_LENGTH
+    const rows = useShortIndex
         ? db.prepare(`
             WITH ranked_matches AS (
                 SELECT
@@ -352,16 +426,17 @@ export function searchMessageContent(
                                  f.message_id DESC
                     ) AS session_rank
                 FROM ${MESSAGE_CONTENT_SEARCH_TABLE} AS f
+                INNER JOIN ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} AS short
+                    ON short.search_rowid = f.rowid AND short.gram = ?
                 INNER JOIN sessions AS s
                     ON s.id = f.session_id AND s.namespace = ?
-                WHERE f.searchable_text LIKE ? ESCAPE '\\'
             )
             SELECT message_id, session_id, role, seq, created_at, searchable_text
             FROM ranked_matches
             WHERE session_rank = 1
             ORDER BY updated_at DESC, CAST(seq AS INTEGER) DESC
             LIMIT ?
-        `).all(namespace, `%${escapeLikePattern(normalizedQuery)}%`, safeLimit) as DbSearchRow[]
+        `).all(normalizedQuery.toLocaleLowerCase(), namespace, safeLimit) as DbSearchRow[]
         : db.prepare(`
             WITH ranked_matches AS (
                 SELECT
@@ -399,7 +474,7 @@ export function searchMessageContent(
         role: row.role,
         seq: Number(row.seq),
         createdAt: Number(row.created_at),
-        snippet: useLike
+        snippet: useShortIndex
             ? makeLikeSnippet(row.searchable_text ?? '', normalizedQuery)
             : String(row.snippet ?? '').replace(/\s+/g, ' ').trim()
     }))
@@ -424,16 +499,17 @@ export function searchMessageContentInSession(
     if (!normalizedQuery) return { matches: [], total: 0 }
 
     const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(1000, Math.floor(limit))) : 500
-    const useLike = [...normalizedQuery].length < 3
-    const countRow = useLike
+    const useShortIndex = [...normalizedQuery].length < MIN_INDEXED_QUERY_LENGTH
+    const countRow = useShortIndex
         ? db.prepare(`
             SELECT COUNT(*) AS count
             FROM ${MESSAGE_CONTENT_SEARCH_TABLE} AS f
+            INNER JOIN ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} AS short
+                ON short.search_rowid = f.rowid AND short.gram = ?
             INNER JOIN sessions AS s
                 ON s.id = f.session_id AND s.namespace = ?
             WHERE f.session_id = ?
-              AND f.searchable_text LIKE ? ESCAPE '\\'
-        `).get(namespace, sessionId, `%${escapeLikePattern(normalizedQuery)}%`) as { count: number | string }
+        `).get(normalizedQuery.toLocaleLowerCase(), namespace, sessionId) as { count: number | string }
         : db.prepare(`
             SELECT COUNT(*) AS count
             FROM ${MESSAGE_CONTENT_SEARCH_TABLE} AS f
@@ -443,17 +519,18 @@ export function searchMessageContentInSession(
               AND ${MESSAGE_CONTENT_SEARCH_TABLE} MATCH ?
         `).get(namespace, sessionId, escapeFtsPhrase(normalizedQuery)) as { count: number | string }
 
-    const rows = useLike
+    const rows = useShortIndex
         ? db.prepare(`
             SELECT f.message_id, f.session_id, f.role, f.seq, f.created_at, f.searchable_text
             FROM ${MESSAGE_CONTENT_SEARCH_TABLE} AS f
+            INNER JOIN ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} AS short
+                ON short.search_rowid = f.rowid AND short.gram = ?
             INNER JOIN sessions AS s
                 ON s.id = f.session_id AND s.namespace = ?
             WHERE f.session_id = ?
-              AND f.searchable_text LIKE ? ESCAPE '\\'
             ORDER BY CAST(f.seq AS INTEGER) DESC
             LIMIT ?
-        `).all(namespace, sessionId, `%${escapeLikePattern(normalizedQuery)}%`, safeLimit) as DbSearchRow[]
+        `).all(normalizedQuery.toLocaleLowerCase(), namespace, sessionId, safeLimit) as DbSearchRow[]
         : db.prepare(`
             SELECT f.message_id, f.session_id, f.role, f.seq, f.created_at,
                    snippet(${MESSAGE_CONTENT_SEARCH_TABLE}, 0, '', '', '…', 24) AS snippet
@@ -473,7 +550,7 @@ export function searchMessageContentInSession(
             role: row.role,
             seq: Number(row.seq),
             createdAt: Number(row.created_at),
-            snippet: useLike
+            snippet: useShortIndex
                 ? makeLikeSnippet(row.searchable_text ?? '', normalizedQuery)
                 : String(row.snippet ?? '').replace(/\s+/g, ' ').trim()
         })),

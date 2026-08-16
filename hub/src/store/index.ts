@@ -13,7 +13,12 @@ import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
 import { UsageStore } from './usageStore'
 import { WorkGraphStore } from './workGraphStore'
-import { backfillMessageContentSearchLookup, createMessageContentSearchTable, rebuildMessageContentSearch } from './messageContentSearch'
+import {
+    backfillMessageContentSearchLookup,
+    backfillMessageContentSearchShortIndex,
+    createMessageContentSearchTable,
+    rebuildMessageContentSearch
+} from './messageContentSearch'
 
 export type {
     StoredMachine,
@@ -41,13 +46,14 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 25
+const SCHEMA_VERSION: number = 26
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
     'messages',
     'message_content_search',
     'message_content_search_lookup',
+    'message_content_search_short',
     'message_epochs',
     'users',
     'push_subscriptions',
@@ -307,6 +313,7 @@ export class Store {
             22: () => this.migrateFromV22ToV23(),
             23: () => this.migrateFromV23ToV24(),
             24: () => this.migrateFromV24ToV25(),
+            25: () => this.migrateFromV25ToV26(),
         })
 
         if (currentVersion === 0) {
@@ -989,6 +996,12 @@ export class Store {
     private migrateFromV24ToV25(): void {
         createMessageContentSearchTable(this.db)
         backfillMessageContentSearchLookup(this.db)
+    }
+
+    /** Add the indexed short-query n-gram table to the message-content index. */
+    private migrateFromV25ToV26(): void {
+        createMessageContentSearchTable(this.db)
+        backfillMessageContentSearchShortIndex(this.db)
     }
 
     private getSessionColumnNames(): Set<string> {
