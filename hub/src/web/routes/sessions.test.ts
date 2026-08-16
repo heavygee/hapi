@@ -1577,6 +1577,30 @@ describe('sessions routes', () => {
         expect(receivedSessionIds).toEqual(sessions.map((session) => session.id))
     })
 
+    it('rejects an oversized content-search body before JSON parsing', async () => {
+        const engine = {
+            getSessionsByNamespace: () => [],
+            getFutureScheduledMessageCounts: () => new Map(),
+            getNextScheduledAtBySessionIds: () => new Map(),
+            searchSessionContent: () => []
+        } as unknown as Partial<SyncEngine>
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createSessionsRoutes(() => engine as SyncEngine))
+
+        const response = await app.request('/api/sessions/content-search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: 'x'.repeat(300 * 1024)
+        })
+
+        expect(response.status).toBe(413)
+        expect(await response.json()).toEqual({ error: 'Content search request too large' })
+    })
+
     it('lists all content matches for an opened session without exposing its session id', async () => {
         const session = createSession({ id: 'content-session-matches' })
         const engine = {

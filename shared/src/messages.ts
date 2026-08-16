@@ -209,7 +209,7 @@ export function extractMessageRenderKey(value: unknown): string | null {
 function isHiddenAssistantOutput(content: unknown): boolean {
     if (!isObject(content) || content.type !== 'output') return false
     const data = isObject(content.data) ? content.data : null
-    return Boolean(data?.isMeta) || Boolean(data?.isCompactSummary)
+    return Boolean(data?.isMeta) || Boolean(data?.isCompactSummary) || Boolean(data?.isSidechain)
 }
 
 /** Extract only user-visible user/assistant prose from a stored role envelope. */

@@ -52,6 +52,17 @@ describe('message content search', () => {
                 }
             }
         })
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    isSidechain: true,
+                    message: { content: [{ type: 'text', text: 'hidden sidechain prose' }] }
+                }
+            }
+        })
 
         expect(store.messages.searchContent('rotate the cache', 'default').map((result) => result.sessionId))
             .toEqual([session.id])
@@ -59,6 +70,7 @@ describe('message content search', () => {
         expect(store.messages.searchContent('cache key', 'default')[0]?.role).toBe('user')
         expect(store.messages.searchContent('cache key', 'default')[0]?.snippet).toContain('cache')
         expect(store.messages.searchContent('hidden cache rotation', 'default')).toEqual([])
+        expect(store.messages.searchContent('hidden sidechain prose', 'default')).toEqual([])
     })
 
     it('indexes only visible AGY planner prose', () => {

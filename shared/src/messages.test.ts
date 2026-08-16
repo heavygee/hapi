@@ -151,8 +151,8 @@ describe('extractSearchableMessageText', () => {
         expect(extractMessageRenderKey(emptySnapshot)).toBe('stream-1')
     })
 
-    test('excludes assistant metadata and compact-summary output', () => {
-        for (const flag of ['isMeta', 'isCompactSummary'] as const) {
+    test('excludes hidden assistant metadata, compact-summary, and sidechain output', () => {
+        for (const flag of ['isMeta', 'isCompactSummary', 'isSidechain'] as const) {
             expect(extractSearchableMessageText({
                 role: 'agent',
                 content: {
