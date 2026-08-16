@@ -293,17 +293,28 @@ function tryReceiveOnce(
     return new Promise<string | undefined>((resolve) => {
         const chunks: Buffer[] = []
         const socket = createConnection(socketPath)
+        let settled = false
         const finish = (value: string | undefined) => {
+            if (settled) {
+                return
+            }
+            settled = true
+            clearTimeout(timer)
             socket.removeAllListeners()
             socket.on('error', () => {})
             try {
-                socket.end()
+                socket.destroy()
             } catch {
                 // ignore
             }
             resolve(value)
         }
+        // Accept + clean close without a newline emits end/close, not error.
+        // Bound silence so the outer retry loop can continue (#1473 Codex).
+        const timer = setTimeout(() => finish(undefined), 1_000)
         socket.on('error', () => finish(undefined))
+        socket.on('end', () => finish(undefined))
+        socket.on('close', () => finish(undefined))
         socket.on('data', (data) => {
             chunks.push(Buffer.isBuffer(data) ? data : Buffer.from(data))
             if (Buffer.concat(chunks).includes(0x0a)) {
