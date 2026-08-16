@@ -694,9 +694,11 @@ export function installCursorMcpOverlay(
     let hadServer = false;
     let previousServer: McpServerEntry | undefined;
 
-    withMcpJsonLock(lockPath, () => {
+    const prepareOverlayMutation = (): CursorMcpJson => {
         hadFile = existsSync(mcpJsonPath);
-        const previous = hadFile ? readMcpJson(mcpJsonPath) : { mcpServers: {} as Record<string, McpServerEntry> };
+        const previous = hadFile
+            ? readMcpJson(mcpJsonPath)
+            : { mcpServers: {} as Record<string, McpServerEntry> };
         previous.mcpServers ??= {};
 
         stripPidStampedHapiOverlays(previous.mcpServers, serverId);
@@ -729,46 +731,34 @@ export function installCursorMcpOverlay(
             hadServer = false;
             previousServer = undefined;
         }
+        return previous;
+    };
 
-        const config: CursorMcpJson = {
-            ...previous,
-            mcpServers: {
-                ...previous.mcpServers,
-                [serverId]: installedHapi,
-            },
-        };
-        writeMcpJsonAtomic(mcpJsonPath, config);
+    // Validate under lock without writing — Git shield must land before the mailbox mutate.
+    withMcpJsonLock(lockPath, () => {
+        prepareOverlayMutation();
     });
 
-    let unshieldGit: () => void = () => {};
+    // Exclude lease before any mcp.json write so a crash cannot leave an unignored mailbox.
+    const unshieldGit = shieldProjectMcpJsonFromGit(cwd, mcpJsonPath);
+
     try {
-        unshieldGit = shieldProjectMcpJsonFromGit(cwd, mcpJsonPath);
+        withMcpJsonLock(lockPath, () => {
+            const previous = prepareOverlayMutation();
+            const config: CursorMcpJson = {
+                ...previous,
+                mcpServers: {
+                    ...previous.mcpServers,
+                    [serverId]: installedHapi,
+                },
+            };
+            writeMcpJsonAtomic(mcpJsonPath, config);
+        });
     } catch (error) {
-        // Roll back the mailbox write so we do not leave an unshielded runtime config.
         try {
-            withMcpJsonLock(lockPath, () => {
-                if (!existsSync(mcpJsonPath)) {
-                    return;
-                }
-                if (!hadFile) {
-                    rmSync(mcpJsonPath, { force: true });
-                    return;
-                }
-                const current = readMcpJson(mcpJsonPath);
-                current.mcpServers ??= {};
-                const currentServer = current.mcpServers[serverId];
-                if (!sameMcpEntry(currentServer, installedHapi)) {
-                    return;
-                }
-                if (hadServer && previousServer) {
-                    current.mcpServers[serverId] = previousServer;
-                } else {
-                    delete current.mcpServers[serverId];
-                }
-                writeMcpJsonAtomic(mcpJsonPath, current);
-            });
-        } catch (rollbackError) {
-            logger.debug('[cursor-acp] rollback after git-shield failure failed', rollbackError);
+            unshieldGit();
+        } catch (unshieldError) {
+            logger.debug('[cursor-acp] unshield after mcp.json write failure failed', unshieldError);
         }
         throw error;
     }
