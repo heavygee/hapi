@@ -409,47 +409,34 @@ export function shieldProjectMcpJsonFromGit(cwd: string, mcpJsonPath: string): (
         cwd: root,
         encoding: 'utf-8',
     });
-    let setSkipWorktree = false;
+    // Skip-worktree is not crash-safe (bit lives only in-process). Refuse tracked
+    // mailboxes; untracked + exclude lease is the supported path.
     if (tracked.status === 0) {
-        const listFiles = spawnSync('git', ['ls-files', '-v', '--', gitRelativePath], {
-            cwd: root,
-            encoding: 'utf-8',
-        });
-        const wasSkipped = listFiles.status === 0
-            && listFiles.stdout.trimStart().startsWith('S ');
-        if (!wasSkipped) {
-            const skip = spawnSync('git', ['update-index', '--skip-worktree', '--', gitRelativePath], {
-                cwd: root,
-                encoding: 'utf-8',
-            });
-            if (skip.status !== 0) {
-                try {
-                    removeExcludeLease(excludePath, gitRelativePath, leaseId);
-                } catch {
-                    // best-effort undo of exclude before rethrow
-                }
-                const detail = (skip.stderr || skip.stdout || '').trim();
-                throw new Error(
-                    `Failed to mark ${gitRelativePath} skip-worktree${detail ? `: ${detail}` : ''}`,
-                );
-            }
-            setSkipWorktree = true;
+        try {
+            removeExcludeLease(excludePath, gitRelativePath, leaseId);
+        } catch {
+            // best-effort undo
         }
+        throw new Error(
+            `Refusing runtime overlay for tracked ${gitRelativePath} `
+            + '(untrack it or gitignore project .cursor/mcp.json)',
+        );
+    }
+    if (tracked.status !== 1) {
+        try {
+            removeExcludeLease(excludePath, gitRelativePath, leaseId);
+        } catch {
+            // best-effort undo
+        }
+        const detail = (tracked.stderr || tracked.stdout || '').trim();
+        throw new Error(`git ls-files failed${detail ? `: ${detail}` : ''}`);
     }
 
     return () => {
-        if (setSkipWorktree) {
-            spawnSync('git', ['update-index', '--no-skip-worktree', '--', gitRelativePath], {
-                cwd: root,
-                encoding: 'utf-8',
-            });
-        }
-        if (addedExclude && excludePath) {
-            try {
-                removeExcludeLease(excludePath, gitRelativePath, leaseId);
-            } catch (error) {
-                logger.debug('[cursor-acp] failed to remove mcp.json from git exclude', error);
-            }
+        try {
+            removeExcludeLease(excludePath, gitRelativePath, leaseId);
+        } catch (error) {
+            logger.debug('[cursor-acp] failed to remove mcp.json from git exclude', error);
         }
     };
 }
@@ -716,6 +703,11 @@ export function installCursorMcpOverlay(
 
         const existing = previous.mcpServers[serverId];
         const existingPid = overlayPid(existing);
+        if (existing && existingPid === null) {
+            throw new Error(
+                `Project MCP server "${serverId}" already exists (refusing to overwrite a non-HAPI entry)`,
+            );
+        }
         const existingSession = existing?.env?.[HAPI_MCP_OVERLAY_SESSION_ENV];
         if (
             overlaySessionId
@@ -764,6 +756,10 @@ export function installCursorMcpOverlay(
                 }
                 const current = readMcpJson(mcpJsonPath);
                 current.mcpServers ??= {};
+                const currentServer = current.mcpServers[serverId];
+                if (!sameMcpEntry(currentServer, installedHapi)) {
+                    return;
+                }
                 if (hadServer && previousServer) {
                     current.mcpServers[serverId] = previousServer;
                 } else {
