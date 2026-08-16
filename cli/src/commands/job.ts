@@ -191,6 +191,21 @@ export function parseJobArgs(args: string[]): ParsedJobArgs {
             result.startedAt = parseOptionalNumber('--started-at', arg.slice('--started-at='.length))
             continue
         }
+        if (arg === '--wake-on-terminal') {
+            result.wakeOnTerminal = true
+            continue
+        }
+        if (arg === '--wake-prompt') {
+            result.wakePrompt = flagArgs[++i]
+            if (result.wakePrompt === undefined) {
+                throw new SessionJobError('bad_args', '--wake-prompt requires a value')
+            }
+            continue
+        }
+        if (arg.startsWith('--wake-prompt=')) {
+            result.wakePrompt = arg.slice('--wake-prompt='.length)
+            continue
+        }
         if (arg.startsWith('-')) {
             throw new SessionJobError('bad_args', `unexpected flag: ${arg}`)
         }
@@ -369,7 +384,9 @@ export async function handleJobCommand(args: string[]): Promise<void> {
         ...(parsed.total !== undefined ? { total: parsed.total } : {}),
         ...(parsed.remaining !== undefined ? { remaining: parsed.remaining } : {}),
         ...(parsed.unit !== undefined ? { unit: parsed.unit } : {}),
-        ...(parsed.detail !== undefined ? { detail: parsed.detail } : {})
+        ...(parsed.detail !== undefined ? { detail: parsed.detail } : {}),
+        ...(parsed.wakeOnTerminal !== undefined ? { wakeOnTerminal: parsed.wakeOnTerminal } : {}),
+        ...(parsed.wakePrompt !== undefined ? { wakePrompt: parsed.wakePrompt } : {})
     }
     if (Object.keys(body).length === 0) {
         throw new SessionJobError('bad_args', 'update requires at least one field')
