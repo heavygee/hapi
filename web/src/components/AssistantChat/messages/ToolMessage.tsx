@@ -63,8 +63,9 @@ function isDisplayLinksBlock(value: unknown): value is DisplayLinksBlock {
 }
 
 function DisplayLinksCopyRow(props: { value: string; title?: string }) {
+    const { t } = useTranslation()
     const [copied, setCopied] = useState(false)
-    const label = props.title?.trim() || 'Copy exact string'
+    const label = props.title?.trim() || t('displayLinks.exactString')
     const handleCopy = useCallback(async () => {
         try {
             await safeCopyToClipboard(props.value)
@@ -82,7 +83,7 @@ function DisplayLinksCopyRow(props: { value: string; title?: string }) {
                 onClick={() => { void handleCopy() }}
                 data-testid="display-links-text"
                 data-copy-value={props.value}
-                aria-label={`Copy ${label}`}
+                aria-label={t('displayLinks.copyAria', { label })}
                 className="block w-full rounded-xl bg-[var(--app-subtle-bg)] px-3 py-2 text-left"
             >
                 {props.title ? (
@@ -94,7 +95,7 @@ function DisplayLinksCopyRow(props: { value: string; title?: string }) {
                     {props.value}
                 </span>
                 <span className="mt-1 block text-xs text-[var(--app-hint)]">
-                    {copied ? 'Copied' : 'Tap to copy'}
+                    {copied ? t('displayLinks.copied') : t('displayLinks.tapToCopy')}
                 </span>
             </button>
         </li>
@@ -103,25 +104,32 @@ function DisplayLinksCopyRow(props: { value: string; title?: string }) {
 
 /** Exported for display-links renderer tests. */
 export function DisplayLinksCard(props: { block: DisplayLinksBlock }) {
+    const { t } = useTranslation()
     const texts = props.block.texts ?? []
     const showLinks = props.block.urls.length > 0
     const showTexts = texts.length > 0
+    const heading = showLinks && showTexts
+        ? t('displayLinks.heading.both')
+        : showTexts
+            ? t('displayLinks.heading.texts')
+            : t('displayLinks.heading.links')
     return (
         <div
             data-testid="display-links-card"
             className="max-w-[92%] rounded-2xl border border-[var(--app-border)] bg-[var(--app-tool-card-bg)] p-3"
         >
             <div className="mb-2 min-w-0 truncate text-xs font-medium text-[var(--app-hint)]">
-                {showLinks && showTexts ? 'Links and exact copy' : showTexts ? 'Exact copy' : 'Links'}
+                {heading}
             </div>
             {showLinks ? (
                 <ul className="flex flex-col gap-2">
-                    {props.block.urls.map((url) => {
+                    {props.block.urls.map((url, index) => {
+                        const rowKey = `${url.href}:${index}`
                         const navigable = isDisplayableHttpHref(url.href)
                         const label = url.title?.trim() || url.href
                         if (!navigable) {
                             return (
-                                <li key={url.href} className="min-w-0">
+                                <li key={rowKey} className="min-w-0">
                                     <span
                                         title={url.href}
                                         className="block truncate text-sm text-[var(--app-hint)]"
@@ -132,7 +140,7 @@ export function DisplayLinksCard(props: { block: DisplayLinksBlock }) {
                             )
                         }
                         return (
-                            <li key={url.href} className="min-w-0">
+                            <li key={rowKey} className="min-w-0">
                                 <a
                                     href={url.href}
                                     target="_blank"
