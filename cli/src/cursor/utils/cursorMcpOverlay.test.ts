@@ -571,6 +571,47 @@ describe('installCursorMcpOverlay', () => {
         rmSync(root, { recursive: true, force: true });
     });
 
+    it('prunes dead-owner exclude leases on the next install', () => {
+        const root = join(tmpdir(), `hapi-mcp-git-dead-lease-${randomUUID()}`);
+        mkdirSync(root, { recursive: true });
+        spawnSync('git', ['init'], { cwd: root, encoding: 'utf-8' });
+        spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
+        spawnSync('git', ['config', 'user.name', 'test'], { cwd: root });
+        writeFileSync(join(root, 'README'), 'x\n');
+        spawnSync('git', ['add', 'README'], { cwd: root });
+        spawnSync('git', ['commit', '-m', 'init'], { cwd: root });
+        mkdirSync(join(root, '.git', 'info'), { recursive: true });
+        const deadPid = spawnSync(process.execPath, ['-e', ''], { encoding: 'utf-8' }).pid!;
+        const deadLease = `${deadPid}:${randomUUID()}`;
+        writeFileSync(
+            join(root, '.git', 'info', 'exclude'),
+            `${hapiMcpGitExcludeMarker(deadLease)}\n.cursor/mcp.json\nkeep-me.txt\n`,
+            'utf-8',
+        );
+
+        const handle = installCursorMcpOverlay(root, {
+            command: '/bin/hapi',
+            args: ['mcp', '--url', 'http://127.0.0.1:12345/'],
+        }, {
+            serverId: CURSOR_HAPI_MCP_SERVER_ID,
+            overlaySessionId: 'session-a',
+            enableCursorMcp: noopEnable,
+            mcpConfigDir: join(root, '.cursor'),
+        });
+
+        const mid = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf-8');
+        expect(mid).toContain('keep-me.txt');
+        expect(mid).not.toContain(hapiMcpGitExcludeMarker(deadLease));
+        expect(mid).toContain('.cursor/mcp.json');
+        expect(mid).toMatch(new RegExp(`${HAPI_MCP_GIT_EXCLUDE_MARKER_PREFIX} ${process.pid}:`));
+
+        handle.cleanup();
+        const after = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf-8');
+        expect(after).toContain('keep-me.txt');
+        expect(after).not.toContain('.cursor/mcp.json');
+        rmSync(root, { recursive: true, force: true });
+    });
+
     it('keeps shared exclude while a sibling worktree lease is still live', () => {
         const root = join(tmpdir(), `hapi-mcp-git-lease-main-${randomUUID()}`);
         const linked = join(tmpdir(), `hapi-mcp-git-lease-link-${randomUUID()}`);

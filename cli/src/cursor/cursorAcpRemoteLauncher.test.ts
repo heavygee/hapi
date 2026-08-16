@@ -1001,7 +1001,7 @@ describe('cursorAcpRemoteLauncher', () => {
         });
     });
 
-    it('surfaces overlay install failure as a status message instead of failing closed silently', async () => {
+    it('surfaces overlay install failure as a status message and omits ACP mcpServers', async () => {
         const { MessageBuffer } = await import('@/ui/ink/messageBuffer');
         const addSpy = vi.spyOn(MessageBuffer.prototype, 'addMessage');
         harness.overlayInstallError = new Error(
@@ -1015,6 +1015,7 @@ describe('cursorAcpRemoteLauncher', () => {
             expect.stringContaining('HAPI MCP overlay unavailable'),
             'status',
         );
+        expect(harness.newSessionConfig?.mcpServers).toEqual([]);
         addSpy.mockRestore();
     });
 
