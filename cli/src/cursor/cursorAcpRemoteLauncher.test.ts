@@ -17,7 +17,6 @@ const harness = vi.hoisted(() => ({
     newSessionAttempts: 0,
     promptCalls: 0,
     prompts: [] as unknown[][],
-    deferPrompt: null as Promise<void> | null,
     deferSoftSteer: null as Promise<void> | null,
     softSteerDispatchError: null as Error | null,
     deferSoftSteerDispatch: null as Promise<void> | null,
@@ -25,7 +24,6 @@ const harness = vi.hoisted(() => ({
     promptMessages: [] as AgentMessage[],
     promptMessageBatches: [] as AgentMessage[][],
     promptStderrErrors: [] as Array<{ type: string; message: string; raw: string }>,
-    releasePrompt: null as (() => void) | null,
     backendArgs: null as { command: string; args?: string[] } | null,
     modelOptionValues: [
         'default[]',

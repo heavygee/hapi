@@ -86,8 +86,6 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
     private unregisterModelApplyHandler: (() => void) | null = null;
     private readonly modelApplyLock = new AsyncLock();
     private activePromptModeHash: string | null = null;
-    /** True while a backend.prompt turn is in flight. */
-    private promptInFlight = false;
     /** Concurrent soft-steer session/prompt RPCs still running after kickoff. */
     private softSteerWaiters: Promise<void>[] = [];
     /** True when ACP process was spawned with `--auto-review`. */
@@ -101,7 +99,6 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
     private pendingRetryableFromStderr = false;
     private pendingInlineRetryableError = false;
     private attemptProducedToolActivity = false;
-    private userAbortRequested = false;
     private lastAssistantText: string | null = null;
     private turnHasModelError = false;
     /**
@@ -712,8 +709,6 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             this.promptInFlight = true;
             session.client.updateAgentState?.((state) => ({ ...state, steeringActive: true }));
             this.activePromptModeHash = batch.hash;
-
-            this.promptInFlight = true;
             try {
                 const settleFailure = (error: unknown) => {
                     const rpcFailure = classifyAcpRpcRejection(error);
