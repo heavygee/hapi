@@ -205,4 +205,45 @@ describe('serializeSessionMarkdown', () => {
         expect(markdown).toContain('Exact-copy: gate (value omitted)')
         expect(markdown).not.toContain(secret)
     })
+
+    it('omits exact-copy values from a display_links tool-call input in export markdown', () => {
+        const secret = 'SENTINEL_TOOLCALL_VK' + 'K'
+        const markdown = serializeSessionMarkdown(makeExport([
+            {
+                id: 'tool-links',
+                seq: 1,
+                localId: null,
+                createdAt: Date.UTC(2026, 5, 5, 10, 4, 0),
+                invokedAt: Date.UTC(2026, 5, 5, 10, 4, 0),
+                scheduledAt: null,
+                content: {
+                    role: 'agent',
+                    content: {
+                        type: 'output',
+                        data: {
+                            type: 'assistant',
+                            uuid: 'assistant-links',
+                            message: {
+                                content: [
+                                    {
+                                        type: 'tool_use',
+                                        id: 'toolu_links',
+                                        name: 'display_links',
+                                        input: {
+                                            texts: [{ value: secret, title: 'gate' }],
+                                            sessionId: 'abc',
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        ]))
+
+        expect(markdown).toContain('display_links')
+        expect(markdown).not.toContain(secret)
+        expect(markdown).toContain('[omitted]')
+    })
 })

@@ -36,18 +36,41 @@ type ParsedDisplayLinksArgs = {
     href: string
     texts: Array<{ value: string; title?: string }>
     title?: string
+    readTextFromStdin: boolean
 }
 
 export function parseDisplayLinksArgs(args: string[]): ParsedDisplayLinksArgs {
     if (args.includes('--help') || args.includes('-h')) {
-        return { help: true, sessionArg: null, href: '', texts: [] }
+        return { help: true, sessionArg: null, href: '', texts: [], readTextFromStdin: false }
+    }
+
+    const stdinIndex = args.indexOf('--text-stdin')
+    if (stdinIndex >= 0) {
+        if (args.includes('--text')) {
+            throw new Error('use --text or --text-stdin, not both')
+        }
+        const before = args.slice(0, stdinIndex)
+        const after = args.slice(stdinIndex + 1)
+        if (before.length > 1) {
+            throw new Error('usage: hapi display-links [self] --text-stdin [title]')
+        }
+        const session = before[0] && !looksLikeHref(before[0]) ? before[0] : null
+        const title = after[0]
+        return {
+            help: false,
+            sessionArg: session,
+            href: '',
+            texts: [],
+            title,
+            readTextFromStdin: true,
+        }
     }
 
     const textIndex = args.indexOf('--text')
     if (textIndex >= 0) {
         const value = args[textIndex + 1]
         if (!value) {
-            throw new Error('missing --text value; usage: hapi display-links [self] --text <value> [title]')
+            throw new Error('missing --text value; usage: hapi display-links [self] --text <value> [title] (secrets: --text-stdin)')
         }
         const before = args.slice(0, textIndex)
         const after = args.slice(textIndex + 2)
@@ -61,6 +84,7 @@ export function parseDisplayLinksArgs(args: string[]): ParsedDisplayLinksArgs {
             sessionArg: session,
             href: '',
             texts: title ? [{ value, title }] : [{ value }],
+            readTextFromStdin: false,
         }
     }
 
@@ -76,6 +100,7 @@ export function parseDisplayLinksArgs(args: string[]): ParsedDisplayLinksArgs {
             href: args[0]!,
             texts: [],
             title: args[1],
+            readTextFromStdin: false,
         }
     }
 
@@ -89,6 +114,7 @@ export function parseDisplayLinksArgs(args: string[]): ParsedDisplayLinksArgs {
         href: args[1]!,
         texts: [],
         title: args[2],
+        readTextFromStdin: false,
     }
 }
 
@@ -104,12 +130,15 @@ ${chalk.bold('Usage:')}
   hapi display-links <href> [title]
   hapi display-links self <href> [title]
   hapi display-links --text <value> [title]
+  hapi display-links --text-stdin [title]
   hapi display-links self --text <value> [title]
+  hapi display-links self --text-stdin [title]
 
 ${chalk.bold('Notes:')}
   Uses this process's session MCP bridge (loopback hapiMcpUrl). Does not create a user turn.
   Other-session / cross-runner targeting is refused — run the command on the runner that owns the session.
   Construct landmine hosts and exact strings by concatenation in the calling script ("tia"+"nn", "VK"+"K"), never from model prose.
+  Secrets/tokens: use --text-stdin (value is not on argv). --text is for non-sensitive strings only.
   urls are http/https only. javascript/data/vbscript/file are rejected.
   Do not print secrets in assistant prose; the card is the copy path.
 
@@ -215,11 +244,20 @@ export async function handleDisplayLinksCommand(args: string[]): Promise<void> {
         return
     }
 
+    let texts = parsed.texts
+    if (parsed.readTextFromStdin) {
+        const value = (await Bun.stdin.text()).replace(/\r?\n$/, '')
+        if (!value.trim()) {
+            throw new Error('missing stdin exact-copy value; usage: hapi display-links --text-stdin [title]')
+        }
+        texts = parsed.title ? [{ value, title: parsed.title }] : [{ value }]
+    }
+
     const toolArgs = parseDisplayLinksToolInput({
         ...(parsed.href ? {
             urls: parsed.title ? [{ href: parsed.href, title: parsed.title }] : [{ href: parsed.href }],
         } : {}),
-        ...(parsed.texts.length > 0 ? { texts: parsed.texts } : {}),
+        ...(texts.length > 0 ? { texts } : {}),
     })
 
     assertLocalDisplayLinksTarget(parsed.sessionArg)

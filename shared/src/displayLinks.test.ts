@@ -6,6 +6,8 @@ import {
     parseDisplayLinksToolInput,
     parseDisplayTextsInput,
     assertBoundDisplayLinksSession,
+    redactDisplayLinksToolInput,
+    isDisplayLinksToolName,
     safeParseDisplayLinksInput,
     safeParseDisplayTextsInput,
 } from './displayLinks'
@@ -184,5 +186,27 @@ describe('assertBoundDisplayLinksSession', () => {
     it('rejects a Kinrupt id on a Sparling-bound server', () => {
         const kinrupt = '472632df-0000-0000-0000-000000000000'
         expect(() => assertBoundDisplayLinksSession(bound, kinrupt)).toThrow(/wrong-session/)
+    })
+})
+
+describe('redactDisplayLinksToolInput', () => {
+    it('replaces exact-copy values and leaves urls intact', () => {
+        const secret = 'SENTINEL_SECRET_VK' + 'K'
+        const href = 'https://example.com/public'
+        const redacted = redactDisplayLinksToolInput({
+            urls: [{ href, title: 'Public' }],
+            texts: [{ value: secret, title: 'gate' }],
+            sessionId: 'abc',
+        }) as { texts: Array<{ value: string }>; urls: Array<{ href: string }> }
+        expect(JSON.stringify(redacted)).not.toContain(secret)
+        expect(redacted.texts[0]?.value).toBe('[omitted]')
+        expect(redacted.urls[0]?.href).toBe(href)
+    })
+
+    it('recognizes Cursor-prefixed display_links tool names', () => {
+        expect(isDisplayLinksToolName('display_links')).toBe(true)
+        expect(isDisplayLinksToolName('Display Links')).toBe(true)
+        expect(isDisplayLinksToolName('mcp__hapi__display_links')).toBe(true)
+        expect(isDisplayLinksToolName('Bash')).toBe(false)
     })
 })
