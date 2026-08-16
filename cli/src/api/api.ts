@@ -292,9 +292,9 @@ export class ApiClient {
                 machineId: rotated.machineId,
                 machineTag: rotated.machineTag,
             })
-            // Tagged cold path should rebind in place (no rotate). If we still
-            // rotated (untagged legacy / tag conflict), pull sessions onto the
-            // new id without the dead machine's proof (#1473 merge gate).
+            // Proof mismatch always rotates (no tag-only in-place rebind —
+            // settings.json tag is same-UID readable, #1473 Blocker). Pull
+            // sessions onto the new id without the dead machine's proof.
             if (
                 opts.runnerProof
                 && rotated.machineTag

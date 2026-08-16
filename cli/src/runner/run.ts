@@ -1203,11 +1203,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     const workspaceRoots = resolveWorkspaceRoots(options.workspaceRoots);
     logger.debug(`[RUNNER RUN] Workspace roots: ${workspaceRoots?.join(', ') ?? '(not set)'}`);
 
-    // Register machine. Cold start may 409 (lost memory-only proof). Prefer
-    // hub in-place proof rebind (same machineId) when machineTag matches so
-    // Cursor/Pi exact-id resume survives restart (#1473 merge gate). Untagged
-    // legacy / true tag conflict still rotates; CLI then migrates sessions
-    // onto the new id without the dead machine's proof.
+    // Register machine. Cold start may 409 (lost memory-only proof). Hub no
+    // longer rebinds proof via machineTag alone (same-UID settings.json theft
+    // #1473 Blocker) — rotate to a new machine id, then migrate sessions onto
+    // it. Handoff keeps allowLegacyReenroll false so a bad proof cannot escape.
     clearReenrollGrant()
     let machine
     try {

@@ -162,7 +162,7 @@ describe('resumeCommand', () => {
             expect(exitSpy).toHaveBeenCalledWith(1)
             expect(errorSpy).toHaveBeenCalledWith(
                 expect.anything(),
-                expect.stringContaining('Cannot hand off active session without a resume capability'),
+                expect.stringContaining('Cannot resume session without a resume capability'),
             )
             expect(requestRunnerLocalResumeCapabilityMock).toHaveBeenCalledWith('hapi-session-active')
             expect(armDirectResumeCapabilityMock).not.toHaveBeenCalled()
@@ -174,7 +174,7 @@ describe('resumeCommand', () => {
         }
     })
 
-    it('continues unattributed when runner local-resume grant fails for an inactive session (#1473)', async () => {
+    it('fails closed when runner local-resume grant fails for an inactive session (#1473)', async () => {
         delete process.env.HAPI_PEER_CAP_INJECT
         requestRunnerLocalResumeCapabilityMock.mockRejectedValue(new Error('No peercred local-resume grant'))
         getLocalResumeTargetMock.mockResolvedValue({
@@ -190,12 +190,23 @@ describe('resumeCommand', () => {
             collaborationMode: 'default'
         })
 
-        await resumeCommand.run(createContext(['hapi-session-inactive']))
-
-        expect(requestRunnerLocalResumeCapabilityMock).toHaveBeenCalledWith('hapi-session-inactive')
-        expect(armDirectResumeCapabilityMock).not.toHaveBeenCalled()
-        expect(handoffSessionToLocalMock).not.toHaveBeenCalled()
-        expect(runCodexMock).toHaveBeenCalled()
+        const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never)
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+        try {
+            await resumeCommand.run(createContext(['hapi-session-inactive']))
+            expect(exitSpy).toHaveBeenCalledWith(1)
+            expect(errorSpy).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.stringContaining('Cannot resume session without a resume capability'),
+            )
+            expect(requestRunnerLocalResumeCapabilityMock).toHaveBeenCalledWith('hapi-session-inactive')
+            expect(armDirectResumeCapabilityMock).not.toHaveBeenCalled()
+            expect(handoffSessionToLocalMock).not.toHaveBeenCalled()
+            expect(runCodexMock).not.toHaveBeenCalled()
+        } finally {
+            exitSpy.mockRestore()
+            errorSpy.mockRestore()
+        }
     })
 
     it('redeems a runner local-resume grant for terminal resume without inject (#1473)', async () => {

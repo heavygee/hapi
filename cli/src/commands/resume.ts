@@ -275,8 +275,9 @@ export const resumeCommand: CommandDefinition = {
             // Attributed resume needs a session capability for RPC auth.
             // Runner-spawned children get inject env; terminal `hapi resume`
             // may redeem a peercred grant when the peer is a tracked child.
-            // Active handoff without a capability leaves an unproven session —
-            // fail closed. Inactive sessions may still resume unattributed.
+            // Without a capability the CLI cannot refresh session-alive or
+            // register KillSession (sessionRpcAuthorizedId gate) — fail closed
+            // for active and inactive alike (#1473).
             if (!process.env.HAPI_PEER_CAP_INJECT?.trim()) {
                 try {
                     const { requestRunnerLocalResumeCapability } = await import('@/runner/localResumeGrant')
@@ -284,13 +285,11 @@ export const resumeCommand: CommandDefinition = {
                     const capability = await requestRunnerLocalResumeCapability(target.sessionId)
                     armDirectResumeCapability(capability)
                 } catch (error) {
-                    if (target.active) {
-                        throw new Error(
-                            `Cannot hand off active session without a resume capability: ${
-                                error instanceof Error ? error.message : String(error)
-                            }`
-                        )
-                    }
+                    throw new Error(
+                        `Cannot resume session without a resume capability: ${
+                            error instanceof Error ? error.message : String(error)
+                        }`
+                    )
                 }
             }
 
