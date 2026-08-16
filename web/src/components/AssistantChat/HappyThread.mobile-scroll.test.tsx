@@ -397,6 +397,42 @@ describe('search target loading', () => {
         expect(target).not.toHaveClass('hapi-message-search-target')
     })
 
+    it('visibly highlights a markdown match spanning rendered text nodes', async () => {
+        const onLoadMessageContext = vi.fn().mockResolvedValue(true)
+        const onInitialTargetConsumed = vi.fn()
+        searchTargetTestState.extras = { messagesVersion: 1, historyVersion: 0 }
+        searchTargetTestState.renderMessages = () => (
+            <div data-hapi-source-message-id="target-message">
+                KV <strong>Cache</strong>
+            </div>
+        )
+
+        const { renderHappyThread } = renderSearchThread({
+            initialTargetMessageId: 'target-message',
+            initialTargetMessageQuery: 'KV Cache',
+            onLoadMessageContext,
+            onInitialTargetConsumed,
+            messagesVersion: 1,
+            historyVersion: 0,
+            rawMessagesCount: 1
+        })
+        const result = render(renderHappyThread())
+
+        await act(async () => {
+            await Promise.resolve()
+        })
+
+        const markers = result.container.querySelectorAll<HTMLElement>(
+            '[data-hapi-source-search-match="true"]'
+        )
+        expect(markers.length).toBeGreaterThan(1)
+        expect(Array.from(markers).map((marker) => marker.textContent).join(''))
+            .toContain('KV Cache')
+        expect(result.container.querySelector('strong [data-hapi-source-search-match="true"]'))
+            .toBeInTheDocument()
+        expect(onInitialTargetConsumed).toHaveBeenCalledTimes(1)
+    })
+
     it('loads context after the runtime catches up when the target is not in the latest window', () => {
         const onLoadMessageContext = vi.fn().mockResolvedValue(true)
         const onInitialTargetConsumed = vi.fn()

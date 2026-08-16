@@ -78,6 +78,7 @@ export default {
   'sessions.search.content.placeholder': '搜索消息内容',
   'sessions.search.content.loading': '正在搜索消息内容…',
   'sessions.search.content.error': '消息内容搜索失败。',
+  'sessions.search.content.minQuery': '搜索消息内容至少需要输入 2 个字符。',
   'sessions.search.content.noResults': '没有消息匹配搜索内容。',
   'sessions.unreadFilter.toggle': '仅显示未读',
   'sessions.timeFilter.label': '按最后活动时间筛选会话',

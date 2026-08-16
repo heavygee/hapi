@@ -43,7 +43,7 @@ type DbMessageRow = {
 
 const SEARCH_REBUILD_BATCH_SIZE = 500
 const SEARCH_LOOKUP_BACKFILL_BATCH_SIZE = 500
-const MIN_INDEXED_QUERY_LENGTH = 3
+const MIN_INDEXED_QUERY_LENGTH = 2
 
 type DbSearchRow = {
     search_rowid?: number
@@ -93,11 +93,8 @@ function getShortSearchGrams(text: string): string[] {
     const characters = Array.from(text.toLocaleLowerCase())
     const grams = new Set<string>()
 
-    for (let index = 0; index < characters.length; index += 1) {
-        grams.add(characters[index]!)
-        if (index + 1 < characters.length) {
-            grams.add(`${characters[index]!}${characters[index + 1]!}`)
-        }
+    for (let index = 0; index + 1 < characters.length; index += 1) {
+        grams.add(`${characters[index]!}${characters[index + 1]!}`)
     }
 
     return [...grams]
@@ -106,6 +103,10 @@ function getShortSearchGrams(text: string): string[] {
 export function backfillMessageContentSearchShortIndex(db: Database): void {
     db.transaction(() => {
         ensureMessageContentSearchTable(db)
+        // A failed pre-v26 startup may have left a partially populated short
+        // index behind. Remove obsolete unigram rows while preserving any
+        // completed bigrams so a retry can resume without a full reset.
+        db.exec(`DELETE FROM ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} WHERE length(gram) < 2`)
         const select = db.prepare(`
             SELECT rowid AS search_rowid, searchable_text
             FROM ${MESSAGE_CONTENT_SEARCH_TABLE}
@@ -412,7 +413,9 @@ export function searchMessageContent(
     if (!normalizedQuery) return []
 
     const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(100, Math.floor(limit))) : 50
-    const useShortIndex = [...normalizedQuery].length < MIN_INDEXED_QUERY_LENGTH
+    const queryLength = [...normalizedQuery].length
+    if (queryLength < MIN_INDEXED_QUERY_LENGTH) return []
+    const useShortIndex = queryLength === MIN_INDEXED_QUERY_LENGTH
     const rows = useShortIndex
         ? db.prepare(`
             WITH ranked_matches AS (
@@ -505,7 +508,9 @@ export function searchMessageContentInSession(
     if (!normalizedQuery) return { matches: [], total: 0 }
 
     const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(1000, Math.floor(limit))) : 500
-    const useShortIndex = [...normalizedQuery].length < MIN_INDEXED_QUERY_LENGTH
+    const queryLength = [...normalizedQuery].length
+    if (queryLength < MIN_INDEXED_QUERY_LENGTH) return { matches: [], total: 0 }
+    const useShortIndex = queryLength === MIN_INDEXED_QUERY_LENGTH
     const countRow = useShortIndex
         ? db.prepare(`
             SELECT COUNT(*) AS count

@@ -253,23 +253,69 @@ export async function locateOutlineTargetMessage(options: LocateOutlineTargetOpt
     return target
 }
 
-function createSearchMatchMarker(range: Range, sourceMessageId: string | null): HTMLElement | null {
+function createSearchMatchMarkerElement(sourceMessageId: string | null): HTMLElement {
     const marker = document.createElement('mark')
     marker.className = SEARCH_TARGET_HIGHLIGHT_CLASS
     marker.setAttribute(SEARCH_TARGET_MATCH_ATTRIBUTE, 'true')
     if (sourceMessageId) {
         marker.setAttribute('data-hapi-source-message-id', sourceMessageId)
     }
-    marker.textContent = '\u200b'
+    return marker
+}
+
+function getSearchMatchTextSegments(range: Range): Array<{ node: Text; start: number; end: number }> {
+    const segments: Array<{ node: Text; start: number; end: number }> = []
+    const root = range.commonAncestorContainer.nodeType === Node.TEXT_NODE
+        ? range.commonAncestorContainer.parentNode
+        : range.commonAncestorContainer
+    if (!root) return segments
+
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+    let current: Node | null
+    while ((current = walker.nextNode())) {
+        const node = current as Text
+        if (!range.intersectsNode(node)) continue
+        const start = node === range.startContainer ? range.startOffset : 0
+        const end = node === range.endContainer ? range.endOffset : node.data.length
+        if (end > start) segments.push({ node, start, end })
+    }
+    return segments
+}
+
+function createSearchMatchMarker(range: Range, sourceMessageId: string | null): HTMLElement | null {
+    const marker = createSearchMatchMarkerElement(sourceMessageId)
 
     try {
         range.surroundContents(marker)
+        return marker
     } catch {
-        const collapsed = range.cloneRange()
-        collapsed.collapse(true)
-        collapsed.insertNode(marker)
+        // Markdown can split one logical match across several text nodes,
+        // such as `KV <strong>Cache</strong>`. Wrapping the entire range then
+        // throws because it would partially contain the strong element. Wrap
+        // each intersecting text segment instead so the matched text remains
+        // visibly highlighted without disturbing the markdown structure.
+        const markers: HTMLElement[] = []
+        for (const segment of getSearchMatchTextSegments(range)) {
+            const segmentMarker = createSearchMatchMarkerElement(sourceMessageId)
+            const segmentRange = document.createRange()
+            segmentRange.setStart(segment.node, segment.start)
+            segmentRange.setEnd(segment.node, segment.end)
+            try {
+                segmentRange.surroundContents(segmentMarker)
+                markers.push(segmentMarker)
+            } catch {
+                // Continue with other text nodes; a class-only card fallback
+                // below still keeps the target visibly identifiable.
+            }
+        }
+        if (markers.length > 0) return markers[0]!
+
+        const fallback = range.commonAncestorContainer instanceof HTMLElement
+            ? range.commonAncestorContainer
+            : range.commonAncestorContainer.parentElement
+        fallback?.classList.add(SEARCH_TARGET_HIGHLIGHT_CLASS)
+        return fallback
     }
-    return marker
 }
 
 function findScrollableAncestor(element: HTMLElement): HTMLElement | null {

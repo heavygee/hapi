@@ -78,6 +78,7 @@ export default {
   'sessions.search.content.placeholder': 'Search message content',
   'sessions.search.content.loading': 'Searching message content…',
   'sessions.search.content.error': 'Message content search failed.',
+  'sessions.search.content.minQuery': 'Enter at least 2 characters to search message content.',
   'sessions.search.content.noResults': 'No messages match your search.',
   'sessions.unreadFilter.toggle': 'Unread only',
   'sessions.timeFilter.label': 'Filter sessions by last activity',

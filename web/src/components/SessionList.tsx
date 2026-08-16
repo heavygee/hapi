@@ -57,6 +57,8 @@ type SessionGroup = {
     hasPinnedSession: boolean
 }
 
+const MIN_CONTENT_SEARCH_QUERY_LENGTH = 2
+
 const RUNNING_BUCKETS = [
     { key: 'working', labelKey: 'session.item.running', colorClass: 'text-[var(--app-badge-success-text)]', pulse: true },
     { key: 'pending', labelKey: 'session.item.pending', colorClass: 'text-[var(--app-badge-warning-text)]', pulse: true },
@@ -1282,9 +1284,11 @@ export function SessionList(props: {
     const timeRange = getSessionTimeRange(customStart, customEnd)
     const isFiltering = normalizedQuery.length > 0 || timeRange !== null
     const contentSearchActive = searchMode === 'content' && normalizedQuery.length > 0
+    const contentSearchReady = contentSearchActive
+        && Array.from(normalizedQuery).length >= MIN_CONTENT_SEARCH_QUERY_LENGTH
 
     useEffect(() => {
-        if (!contentSearchActive || !api) {
+        if (!contentSearchReady || !api) {
             setContentSearchResponse(null)
             setContentSearchLoading(false)
             setContentSearchError(false)
@@ -1317,7 +1321,7 @@ export function SessionList(props: {
             window.clearTimeout(timer)
             controller.abort()
         }
-    }, [api, contentSearchActive, normalizedQuery])
+    }, [api, contentSearchReady, normalizedQuery])
 
     useEffect(() => {
         // 中文注释：监听导入标记变化，让列表在“导入完成”或“用户已在 Hapi 中继续会话”后立即刷新时间文案。
@@ -1972,7 +1976,11 @@ export function SessionList(props: {
 
                 {props.sessions.length > 0 && !contentSearchLoading && !contentSearchError && (isFiltering || activeMachineFilter !== null || showUnreadOnly) && groups.length === 0 && runningSessionTotal === 0 && globalPinnedSessions.length === 0 ? (
                     <div className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
-                        {contentSearchActive ? t('sessions.search.content.noResults') : t('sessions.search.noResults')}
+                        {contentSearchActive
+                            ? contentSearchReady
+                                ? t('sessions.search.content.noResults')
+                                : t('sessions.search.content.minQuery')
+                            : t('sessions.search.noResults')}
                     </div>
                 ) : null}
 

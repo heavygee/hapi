@@ -67,6 +67,9 @@ describe('message content search', () => {
             .toEqual([defaultSession.id])
         expect(store.messages.searchContent('搜索', 'other').map((result) => result.sessionId))
             .toEqual([otherSession.id])
+        expect(store.messages.searchContent('搜', 'default')).toEqual([])
+        expect(store.messages.searchContentInSession('搜', 'default', defaultSession.id))
+            .toEqual({ matches: [], total: 0 })
     })
 
     it('applies the result limit after deduplicating matching sessions', () => {
