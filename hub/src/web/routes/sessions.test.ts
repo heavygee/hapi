@@ -1502,7 +1502,7 @@ describe('sessions routes', () => {
                 expect(query).toBe('needle')
                 expect(namespace).toBe('default')
                 expect(limit).toBe(7)
-                expect(sessionIds).toEqual([session.id, 'unknown-session'])
+                expect(sessionIds).toEqual([session.id])
                 return [{
                     sessionId: session.id,
                     messageId: 'message-1',
@@ -1542,6 +1542,36 @@ describe('sessions routes', () => {
                 }
             }]
         })
+    })
+
+    it('rejects an oversized scoped content-search request before calling the engine', async () => {
+        let searchCalled = false
+        const engine = {
+            getSessionsByNamespace: () => [],
+            searchSessionContent: () => {
+                searchCalled = true
+                return []
+            }
+        } as unknown as Partial<SyncEngine>
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createSessionsRoutes(() => engine as SyncEngine))
+
+        const response = await app.request('/api/sessions/content-search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                query: 'needle',
+                sessionIds: Array.from({ length: 501 }, (_, index) => `session-${index}`)
+            })
+        })
+
+        expect(response.status).toBe(400)
+        expect(await response.json()).toEqual({ error: 'Too many sessionIds' })
+        expect(searchCalled).toBe(false)
     })
 
     it('lists all content matches for an opened session without exposing its session id', async () => {

@@ -7,6 +7,17 @@ function makeSession(store: Store, tag: string, namespace = 'default') {
     return store.sessions.getOrCreateSession(tag, { path: `/tmp/${tag}` }, null, namespace)
 }
 
+function failSessionDelete(store: Store): void {
+    const db = (store as unknown as { db: Database }).db
+    db.exec(`
+        CREATE TRIGGER fail_session_delete
+        BEFORE DELETE ON sessions
+        BEGIN
+            SELECT RAISE(ABORT, 'forced session delete failure');
+        END
+    `)
+}
+
 describe('message content search', () => {
     it('indexes visible user and assistant prose, including compressed messages', () => {
         const store = new Store(':memory:')
@@ -158,6 +169,22 @@ describe('message content search', () => {
         expect(store.messages.searchContent('mergeable', 'default')[0]?.sessionId).toBe(to.id)
         store.sessions.deleteSession(to.id, 'default')
         expect(store.messages.searchContent('mergeable', 'default')).toEqual([])
+    })
+
+    it('keeps searchable content when session deletion fails after index cleanup starts', () => {
+        const store = new Store(':memory:')
+        const session = makeSession(store, 'delete-index-rollback')
+        const message = store.messages.addMessage(session.id, {
+            role: 'user',
+            content: { type: 'text', text: 'delete rollback phrase' }
+        })
+        failSessionDelete(store)
+
+        expect(() => store.sessions.deleteSession(session.id, 'default'))
+            .toThrow('forced session delete failure')
+        expect(store.sessions.getSession(session.id)).not.toBeNull()
+        expect(store.messages.searchContent('delete rollback', 'default')[0]?.messageId)
+            .toBe(message.id)
     })
 
     it('cleans derived rows before a bulk session deletion', () => {

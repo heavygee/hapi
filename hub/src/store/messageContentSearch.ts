@@ -4,6 +4,9 @@ import { extractSearchableMessageText } from '@hapi/protocol/messages'
 import { decodeMessageContent } from './contentCodec'
 
 export const MESSAGE_CONTENT_SEARCH_TABLE = 'message_content_search'
+// Leave room for the query, namespace, and limit bindings under SQLite's
+// default variable limit when building a scoped IN clause.
+export const MAX_CONTENT_SEARCH_SESSION_IDS = 500
 const MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE = 'message_content_search_lookup'
 const MESSAGE_CONTENT_SEARCH_SHORT_TABLE = 'message_content_search_short'
 const initializedDatabases = new WeakSet<object>()
@@ -420,6 +423,7 @@ export function searchMessageContent(
         ? undefined
         : [...new Set(sessionIds.map((sessionId) => sessionId.trim()).filter(Boolean))]
     if (scopedSessionIds?.length === 0) return []
+    if (scopedSessionIds && scopedSessionIds.length > MAX_CONTENT_SEARCH_SESSION_IDS) return []
     const sessionScope = scopedSessionIds === undefined
         ? ''
         : ` AND f.session_id IN (${scopedSessionIds.map(() => '?').join(', ')})`
