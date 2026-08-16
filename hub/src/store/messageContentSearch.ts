@@ -4,9 +4,9 @@ import { extractSearchableMessageText } from '@hapi/protocol/messages'
 import { decodeMessageContent } from './contentCodec'
 
 export const MESSAGE_CONTENT_SEARCH_TABLE = 'message_content_search'
-// Leave room for the query, namespace, and limit bindings under SQLite's
-// default variable limit when building a scoped IN clause.
-export const MAX_CONTENT_SEARCH_SESSION_IDS = 500
+// Bind scoped session IDs as one JSON value instead of expanding them into
+// one SQLite variable per ID. Keep a byte bound for defensive request sizing.
+export const MAX_CONTENT_SEARCH_SESSION_SCOPE_BYTES = 256 * 1024
 const MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE = 'message_content_search_lookup'
 const MESSAGE_CONTENT_SEARCH_SHORT_TABLE = 'message_content_search_short'
 const initializedDatabases = new WeakSet<object>()
@@ -61,6 +61,13 @@ type DbSearchRow = {
 
 type DbSearchLookupRow = {
     search_rowid: number
+}
+
+export function serializeContentSearchSessionIds(sessionIds: readonly string[]): string | null {
+    const serialized = JSON.stringify(sessionIds)
+    return new TextEncoder().encode(serialized).byteLength <= MAX_CONTENT_SEARCH_SESSION_SCOPE_BYTES
+        ? serialized
+        : null
 }
 
 export function backfillMessageContentSearchLookup(db: Database): void {
@@ -423,10 +430,14 @@ export function searchMessageContent(
         ? undefined
         : [...new Set(sessionIds.map((sessionId) => sessionId.trim()).filter(Boolean))]
     if (scopedSessionIds?.length === 0) return []
-    if (scopedSessionIds && scopedSessionIds.length > MAX_CONTENT_SEARCH_SESSION_IDS) return []
+    const serializedSessionIds = scopedSessionIds === undefined
+        ? undefined
+        : serializeContentSearchSessionIds(scopedSessionIds)
+    if (serializedSessionIds === null) return []
     const sessionScope = scopedSessionIds === undefined
         ? ''
-        : ` AND f.session_id IN (${scopedSessionIds.map(() => '?').join(', ')})`
+        : ' AND f.session_id IN (SELECT value FROM json_each(?))'
+    const sessionScopeParams: string[] = serializedSessionIds === undefined ? [] : [serializedSessionIds]
     const useShortIndex = queryLength === MIN_INDEXED_QUERY_LENGTH
     const rows = useShortIndex
         ? db.prepare(`
@@ -458,7 +469,7 @@ export function searchMessageContent(
             WHERE session_rank = 1
             ORDER BY updated_at DESC, CAST(seq AS INTEGER) DESC
             LIMIT ?
-        `).all(normalizedQuery.toLocaleLowerCase(), namespace, ...(scopedSessionIds ?? []), safeLimit) as DbSearchRow[]
+        `).all(normalizedQuery.toLocaleLowerCase(), namespace, ...sessionScopeParams, safeLimit) as DbSearchRow[]
         : db.prepare(`
             WITH ranked_matches AS (
                 SELECT
@@ -488,7 +499,7 @@ export function searchMessageContent(
             WHERE ranked.session_rank = 1
             ORDER BY ranked.updated_at DESC, CAST(ranked.seq AS INTEGER) DESC
             LIMIT ?
-        `).all(namespace, escapeFtsPhrase(normalizedQuery), ...(scopedSessionIds ?? []), safeLimit) as DbSearchRow[]
+        `).all(namespace, escapeFtsPhrase(normalizedQuery), ...sessionScopeParams, safeLimit) as DbSearchRow[]
 
     return rows.map((row) => ({
         sessionId: row.session_id,

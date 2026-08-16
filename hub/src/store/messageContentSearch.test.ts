@@ -120,6 +120,21 @@ describe('message content search', () => {
             .toEqual([second.id])
     })
 
+    it('supports scoped content search beyond SQLite variable limits', () => {
+        const store = new Store(':memory:')
+        const sessions = Array.from({ length: 1001 }, (_, index) =>
+            makeSession(store, `large-content-scope-${index}`)
+        )
+        const target = sessions.at(-1)!
+        const message = store.messages.addMessage(target.id, {
+            role: 'user',
+            content: { type: 'text', text: 'large scoped needle' }
+        })
+
+        expect(store.messages.searchContent('large scoped needle', 'default', 1, sessions.map((session) => session.id)))
+            .toMatchObject([{ sessionId: target.id, messageId: message.id }])
+    })
+
     it('returns message-level matches and the full count for one session', () => {
         const store = new Store(':memory:')
         const session = makeSession(store, 'message-level-search')

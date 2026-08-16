@@ -32,7 +32,7 @@ import type { WebAppEnv } from '../middleware/auth'
 import { loadScratchlistAttachmentLimitsFromEnv } from '../../config/scratchlistAttachmentLimits'
 import { validateScratchlistAttachmentsForWrite, scratchlistSessionBytesBeforeForPut } from '../../scratchlistAttachments/validate'
 import { TitleSuggestionError } from '../../sync/titleSuggestion'
-import { MAX_CONTENT_SEARCH_SESSION_IDS } from '../../store/messageContentSearch'
+import { serializeContentSearchSessionIds } from '../../store/messageContentSearch'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
@@ -145,10 +145,10 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         const normalizedSessionIds = sessionIds === undefined
             ? undefined
             : [...new Set(sessionIds.map((sessionId) => sessionId.trim()).filter(Boolean))]
-        if (normalizedSessionIds && normalizedSessionIds.length > MAX_CONTENT_SEARCH_SESSION_IDS) {
-            return c.json({ error: 'Too many sessionIds' }, 400)
-        }
         const scopedSessionIds = normalizedSessionIds?.filter((sessionId) => sessionsById.has(sessionId))
+        if (scopedSessionIds && serializeContentSearchSessionIds(scopedSessionIds) === null) {
+            return c.json({ error: 'sessionIds too large' }, 400)
+        }
         const matches = engine.searchSessionContent(query.slice(0, 200), namespace, limit, scopedSessionIds)
         const matchedSessionIds = matches.map((match) => match.sessionId)
         const scheduledCounts = engine.getFutureScheduledMessageCounts(matchedSessionIds)

@@ -1544,12 +1544,15 @@ describe('sessions routes', () => {
         })
     })
 
-    it('rejects an oversized scoped content-search request before calling the engine', async () => {
-        let searchCalled = false
+    it('allows scoped content-search requests with more than 500 session IDs', async () => {
+        const sessions = Array.from({ length: 501 }, (_, index) => createSession({ id: `session-${index}` }))
+        let receivedSessionIds: readonly string[] | undefined
         const engine = {
-            getSessionsByNamespace: () => [],
-            searchSessionContent: () => {
-                searchCalled = true
+            getSessionsByNamespace: () => sessions,
+            getFutureScheduledMessageCounts: (ids: string[]) => new Map(ids.map((id) => [id, 0])),
+            getNextScheduledAtBySessionIds: (ids: string[]) => new Map(ids.map((id) => [id, null])),
+            searchSessionContent: (_query: string, _namespace: string, _limit: number, sessionIds?: readonly string[]) => {
+                receivedSessionIds = sessionIds
                 return []
             }
         } as unknown as Partial<SyncEngine>
@@ -1569,9 +1572,9 @@ describe('sessions routes', () => {
             })
         })
 
-        expect(response.status).toBe(400)
-        expect(await response.json()).toEqual({ error: 'Too many sessionIds' })
-        expect(searchCalled).toBe(false)
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ results: [] })
+        expect(receivedSessionIds).toEqual(sessions.map((session) => session.id))
     })
 
     it('lists all content matches for an opened session without exposing its session id', async () => {

@@ -370,9 +370,15 @@ function getSourceMessageIdsForBlock(block: VisibleChatBlock): string[] {
     if (
         block.kind === 'agent-text'
         || block.kind === 'agent-reasoning'
-        || block.kind === 'codex-review'
-        || block.kind === 'generated-image'
     ) {
+        if (block.sourceMessageIds && block.sourceMessageIds.length > 0) {
+            return block.sourceMessageIds
+        }
+        const separator = block.id.lastIndexOf(':')
+        return [separator > 0 ? block.id.slice(0, separator) : block.id]
+    }
+
+    if (block.kind === 'codex-review' || block.kind === 'generated-image') {
         const separator = block.id.lastIndexOf(':')
         return [separator > 0 ? block.id.slice(0, separator) : block.id]
     }
