@@ -8,7 +8,8 @@
  * Usage:
  *   # inside a wrapped session (self-targets via $HAPI_SESSION_ID — no list):
  *   bun scripts/tooling/hapi-display-links.mjs <href> [title]
- *   bun scripts/tooling/hapi-display-links.mjs self <href> [title]
+ *   bun scripts/tooling/hapi-display-links.mjs --text-stdin [title]
+ *   printf '%s' "$secret" | bun scripts/tooling/hapi-display-links.mjs --text-stdin
  * Other-session / cross-runner targeting is refused (loopback MCP).
  *
  * Construct landmine hosts by concatenation in the calling script ("tia"+"nn"),
@@ -59,13 +60,44 @@ function looksLikeHref(value) {
 }
 
 // Arg shapes:
-//   <href> [title]              → self-target current session
-//   <self-token> <href> [title] → self-target, explicit
+//   <href> [title]
+//   <self-token> <href> [title]
+//   --text <value> [title]
+//   <self-token> --text <value> [title]
 const args = process.argv.slice(2)
 let sessionArg
 let href
 let title
-if (args.length > 0 && looksLikeHref(args[0]) && !SELF_TOKENS.has(args[0])) {
+let texts
+const stdinIndex = args.indexOf('--text-stdin')
+const textIndex = args.indexOf('--text')
+if (stdinIndex >= 0) {
+    if (textIndex >= 0) {
+        console.error('use --text or --text-stdin, not both')
+        process.exit(2)
+    }
+    const before = args.slice(0, stdinIndex)
+    sessionArg = before[0] && !looksLikeHref(before[0]) ? before[0] : null
+    href = null
+    title = args[stdinIndex + 1]
+    const value = (await Bun.stdin.text()).replace(/\r?\n$/, '')
+    if (!value.trim()) {
+        console.error('usage: hapi-display-links.mjs [self] --text-stdin [title]')
+        process.exit(2)
+    }
+    texts = title ? [{ value, title }] : [{ value }]
+} else if (textIndex >= 0) {
+    const value = args[textIndex + 1]
+    if (!value) {
+        console.error('usage: hapi-display-links.mjs [self] --text <value> [title]')
+        process.exit(2)
+    }
+    const before = args.slice(0, textIndex)
+    sessionArg = before[0] && !looksLikeHref(before[0]) ? before[0] : null
+    href = null
+    title = args[textIndex + 2]
+    texts = title ? [{ value, title }] : [{ value }]
+} else if (args.length > 0 && looksLikeHref(args[0]) && !SELF_TOKENS.has(args[0])) {
     sessionArg = null
     href = args[0]
     title = args[1]
@@ -75,8 +107,10 @@ if (args.length > 0 && looksLikeHref(args[0]) && !SELF_TOKENS.has(args[0])) {
     title = args[2]
 }
 
-if (!href) {
+if (!href && !(texts && texts.length > 0)) {
     console.error('usage: hapi-display-links.mjs [self] <href> [title]')
+    console.error('  or: hapi-display-links.mjs [self] --text <value> [title]')
+    console.error('  or: hapi-display-links.mjs [self] --text-stdin [title]  (secrets: not on argv)')
     console.error('  or: HAPI_SESSION_ID=<uuid> hapi-display-links.mjs <href> [title]')
     process.exit(2)
 }
@@ -93,9 +127,44 @@ if (!token) {
     console.error('missing CLI_API_TOKEN env and no cliApiToken in settings')
     process.exit(2)
 }
+
+function loadExtraHeaders() {
+    const envRaw = process.env.HAPI_EXTRA_HEADERS_JSON
+    if (envRaw !== undefined) {
+        try {
+            const parsed = JSON.parse(envRaw)
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                return Object.fromEntries(
+                    Object.entries(parsed).filter((entry) => typeof entry[1] === 'string'),
+                )
+            }
+        } catch {
+            // ignore malformed env JSON; match CLI parseExtraHeaders fail-closed-to-empty
+        }
+        return {}
+    }
+    try {
+        const settings = JSON.parse(readFileSync(SETTINGS, 'utf8'))
+        const extra = settings.extraHeaders
+        if (extra && typeof extra === 'object' && !Array.isArray(extra)) {
+            return Object.fromEntries(
+                Object.entries(extra).filter((entry) => typeof entry[1] === 'string'),
+            )
+        }
+    } catch {
+        // settings already parsed for token; missing extraHeaders is fine
+    }
+    return {}
+}
+
+const extraHeaders = loadExtraHeaders()
+function withHubHeaders(base) {
+    return { ...extraHeaders, ...base }
+}
+
 const authRes = await fetch(`${HAPI_HOST}/api/auth`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: withHubHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ accessToken: token }),
 })
 if (!authRes.ok) {
@@ -103,7 +172,7 @@ if (!authRes.ok) {
     process.exit(3)
 }
 const { token: jwt } = await authRes.json()
-const authHeaders = { Authorization: `Bearer ${jwt}` }
+const authHeaders = withHubHeaders({ Authorization: `Bearer ${jwt}` })
 
 async function fetchSessionDetail(sessionId) {
     const detailRes = await fetch(`${HAPI_HOST}/api/sessions/${encodeURIComponent(sessionId)}`, {
@@ -175,7 +244,11 @@ const transport = new StreamableHTTPClientTransport(new URL(mcpUrl))
 await client.connect(transport)
 const result = await client.callTool({
     name: 'display_links',
-    arguments: { urls: title ? [{ href, title }] : [{ href }] },
+    arguments: {
+        ...(href ? { urls: title ? [{ href, title }] : [{ href }] } : {}),
+        ...(texts && texts.length > 0 ? { texts } : {}),
+        sessionId: session.id,
+    },
 })
 await client.close()
 console.log(JSON.stringify(result, null, 2))

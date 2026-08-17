@@ -3,7 +3,13 @@ import {
     buildDisplayLinksPayload,
     isDisplayableHttpHref,
     parseDisplayLinksInput,
+    parseDisplayLinksToolInput,
+    parseDisplayTextsInput,
+    assertBoundDisplayLinksSession,
+    redactDisplayLinksToolInput,
+    isDisplayLinksToolName,
     safeParseDisplayLinksInput,
+    safeParseDisplayTextsInput,
 } from './displayLinks'
 
 describe('isDisplayableHttpHref', () => {
@@ -82,6 +88,63 @@ describe('safeParseDisplayLinksInput', () => {
     })
 })
 
+describe('parseDisplayTextsInput', () => {
+    it('round-trips a concatenated doubled-letter secret as stored bytes', () => {
+        const value = 'VK' + 'K'
+        const texts = parseDisplayTextsInput([{ value, title: 'gate' }])
+        expect(texts).toEqual([{ value: 'VKK', title: 'gate' }])
+        expect(texts[0]?.value).toBe(value)
+        expect(texts[0]?.value).not.toBe('VK')
+    })
+
+    it('accepts a bare string in the texts array', () => {
+        const value = 'abc' + 'c' + 'def'
+        expect(parseDisplayTextsInput([value])).toEqual([{ value }])
+    })
+
+    it('throws when texts is missing or empty', () => {
+        expect(() => parseDisplayTextsInput(undefined)).toThrow(/texts/)
+        expect(() => parseDisplayTextsInput([])).toThrow(/at least one/)
+    })
+
+    it('throws on empty values instead of storing blanks', () => {
+        expect(() => parseDisplayTextsInput([{ value: '   ' }])).toThrow(/rejected/)
+    })
+})
+
+describe('safeParseDisplayTextsInput', () => {
+    it('drops empty entries instead of throwing (untrusted stored payloads)', () => {
+        const value = 'VK' + 'K'
+        expect(safeParseDisplayTextsInput([
+            { value: '' },
+            { value },
+            { value: '  ' },
+        ])).toEqual([{ value }])
+    })
+})
+
+describe('parseDisplayLinksToolInput', () => {
+    it('accepts texts without urls', () => {
+        const value = 'dead' + 'beef'
+        expect(parseDisplayLinksToolInput({ texts: [{ value, title: 'sha' }] })).toEqual({
+            urls: [],
+            texts: [{ value, title: 'sha' }],
+        })
+    })
+
+    it('accepts urls without texts', () => {
+        const href = 'https://example.com/a'
+        expect(parseDisplayLinksToolInput({ urls: [{ href }] })).toEqual({
+            urls: [{ href }],
+            texts: [],
+        })
+    })
+
+    it('throws when both urls and texts are missing', () => {
+        expect(() => parseDisplayLinksToolInput({})).toThrow(/urls|texts/)
+    })
+})
+
 describe('buildDisplayLinksPayload', () => {
     it('stores caller href bytes on the wire payload', () => {
         const href = 'https://github.com/tia' + 'nn' + '/hapi/issues/1516'
@@ -93,5 +156,57 @@ describe('buildDisplayLinksPayload', () => {
         expect(payload.urls[0]?.href).toBe(href)
         expect(JSON.stringify(payload)).toContain('tiann/hapi')
         expect(JSON.stringify(payload)).not.toContain('tian/hapi')
+    })
+
+    it('stores concatenated exact-copy bytes without echoing a mangled sibling', () => {
+        const value = 'VK' + 'K'
+        const payload = buildDisplayLinksPayload({
+            urls: [],
+            texts: [{ value, title: 'gate' }],
+            id: 'text-1',
+        })
+        expect(payload.texts[0]?.value).toBe(value)
+        expect(JSON.stringify(payload)).toContain('VKK')
+        expect(JSON.stringify(payload)).not.toMatch(/"VK"/)
+    })
+})
+
+describe('assertBoundDisplayLinksSession', () => {
+    const bound = 'cc4c5807-34ce-4f2f-b8c1-b18ddc191ff0'
+
+    it('accepts an exact match', () => {
+        expect(() => assertBoundDisplayLinksSession(bound, bound)).not.toThrow()
+    })
+
+    it('rejects a missing caller id', () => {
+        expect(() => assertBoundDisplayLinksSession(bound, undefined)).toThrow(/requires sessionId/)
+        expect(() => assertBoundDisplayLinksSession(bound, '')).toThrow(/requires sessionId/)
+    })
+
+    it('rejects a Kinrupt id on a Sparling-bound server', () => {
+        const kinrupt = '472632df-0000-0000-0000-000000000000'
+        expect(() => assertBoundDisplayLinksSession(bound, kinrupt)).toThrow(/wrong-session/)
+    })
+})
+
+describe('redactDisplayLinksToolInput', () => {
+    it('replaces exact-copy values and leaves urls intact', () => {
+        const secret = 'SENTINEL_SECRET_VK' + 'K'
+        const href = 'https://example.com/public'
+        const redacted = redactDisplayLinksToolInput({
+            urls: [{ href, title: 'Public' }],
+            texts: [{ value: secret, title: 'gate' }],
+            sessionId: 'abc',
+        }) as { texts: Array<{ value: string }>; urls: Array<{ href: string }> }
+        expect(JSON.stringify(redacted)).not.toContain(secret)
+        expect(redacted.texts[0]?.value).toBe('[omitted]')
+        expect(redacted.urls[0]?.href).toBe(href)
+    })
+
+    it('recognizes Cursor-prefixed display_links tool names', () => {
+        expect(isDisplayLinksToolName('display_links')).toBe(true)
+        expect(isDisplayLinksToolName('Display Links')).toBe(true)
+        expect(isDisplayLinksToolName('mcp__hapi__display_links')).toBe(true)
+        expect(isDisplayLinksToolName('Bash')).toBe(false)
     })
 })

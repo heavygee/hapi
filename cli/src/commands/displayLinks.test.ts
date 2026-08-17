@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { assertLocalDisplayLinksTarget, parseDisplayLinksArgs } from './displayLinks'
+import { configuration } from '@/configuration'
+import {
+    assertLocalDisplayLinksTarget,
+    displayLinksAuthRequestHeaders,
+    displayLinksSessionRequestHeaders,
+    parseDisplayLinksArgs,
+} from './displayLinks'
 
 describe('parseDisplayLinksArgs', () => {
     it('treats a leading http(s) href as self-target', () => {
@@ -8,7 +14,9 @@ describe('parseDisplayLinksArgs', () => {
             help: false,
             sessionArg: null,
             href,
+            texts: [],
             title: 'Issue 1516',
+            readTextFromStdin: false,
         })
     })
 
@@ -17,7 +25,9 @@ describe('parseDisplayLinksArgs', () => {
             help: false,
             sessionArg: 'abc12345',
             href: 'https://example.com',
+            texts: [],
             title: 'Example',
+            readTextFromStdin: false,
         })
     })
 
@@ -26,7 +36,9 @@ describe('parseDisplayLinksArgs', () => {
             help: false,
             sessionArg: 'self',
             href: 'https://example.com',
+            texts: [],
             title: undefined,
+            readTextFromStdin: false,
         })
     })
 
@@ -34,9 +46,41 @@ describe('parseDisplayLinksArgs', () => {
         expect(parseDisplayLinksArgs(['--help']).help).toBe(true)
     })
 
-    it('throws when href is missing', () => {
-        expect(() => parseDisplayLinksArgs([])).toThrow(/missing href/)
-        expect(() => parseDisplayLinksArgs(['self'])).toThrow(/missing href/)
+    it('parses --text exact-copy value by concatenation', () => {
+        const value = 'VK' + 'K'
+        expect(parseDisplayLinksArgs(['--text', value, 'gate'])).toEqual({
+            help: false,
+            sessionArg: null,
+            href: '',
+            texts: [{ value, title: 'gate' }],
+            title: undefined,
+            readTextFromStdin: false,
+        })
+    })
+
+    it('parses self --text', () => {
+        const value = 'dead' + 'beef'
+        expect(parseDisplayLinksArgs(['self', '--text', value])).toEqual({
+            help: false,
+            sessionArg: 'self',
+            href: '',
+            texts: [{ value }],
+            title: undefined,
+            readTextFromStdin: false,
+        })
+    })
+
+    it('parses --text-stdin without putting the secret on argv-derived texts', () => {
+        const parsed = parseDisplayLinksArgs(['--text-stdin', 'gate'])
+        expect(parsed.readTextFromStdin).toBe(true)
+        expect(parsed.texts).toEqual([])
+        expect(parsed.title).toBe('gate')
+        expect(JSON.stringify(parsed)).not.toContain('SENTINEL')
+    })
+
+    it('throws when href and --text are missing', () => {
+        expect(() => parseDisplayLinksArgs([])).toThrow(/missing href|--text/)
+        expect(() => parseDisplayLinksArgs(['self'])).toThrow(/missing href|--text/)
     })
 })
 
@@ -75,5 +119,23 @@ describe('assertLocalDisplayLinksTarget', () => {
     it('refuses an explicit prefix when HAPI_SESSION_ID is unset', () => {
         delete process.env.HAPI_SESSION_ID
         expect(() => assertLocalDisplayLinksTarget('9b46cfe7')).toThrow(/current local session/)
+    })
+})
+
+describe('display-links hub extra headers', () => {
+    afterEach(() => {
+        configuration._setExtraHeaders({})
+    })
+
+    it('includes configured extraHeaders on auth and session requests', () => {
+        configuration._setExtraHeaders({ Cookie: 'CF_Authorization=from-settings' })
+        expect(displayLinksAuthRequestHeaders()).toEqual({
+            Cookie: 'CF_Authorization=from-settings',
+            'Content-Type': 'application/json',
+        })
+        expect(displayLinksSessionRequestHeaders('jwt-token')).toEqual({
+            Cookie: 'CF_Authorization=from-settings',
+            Authorization: 'Bearer jwt-token',
+        })
     })
 })

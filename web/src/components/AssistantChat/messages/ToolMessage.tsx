@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import type { ToolCallMessagePartProps } from '@assistant-ui/react'
 import type { ChatBlock } from '@/chat/types'
 import type { DisplayLinksBlock, GeneratedImageBlock, ToolCallBlock } from '@/chat/types'
 import type { ToolGroupBlock } from '@/chat/toolGroups'
-import { isDisplayableHttpHref, isObject, safeStringify, stripAgentContract } from '@hapi/protocol'
+import { isDisplayableHttpHref, isObject, safeStringify } from '@hapi/protocol'
+import { safeCopyToClipboard } from '@/lib/clipboard'
 import { isSubagentToolName } from '@/chat/subagentTool'
 import { ToolGroupCard } from '@/components/ToolCard/ToolGroupCard'
 import { getEventPresentation } from '@/chat/presentation'
@@ -18,7 +19,6 @@ import { ImagePreview } from '@/components/ImagePreview'
 import { FileIcon } from '@/components/FileIcon'
 import { useTranslation } from '@/lib/use-translation'
 import { inlineMediaLabelKey, isInlineAudioMimeType, isInlineImageMimeType, isInlineVideoMimeType } from '@/lib/generatedInlineMedia'
-import { useShowAgentContract } from '@/hooks/useShowAgentContract'
 
 function isToolCallBlock(value: unknown): value is ToolCallBlock {
     if (!isObject(value)) return false
@@ -58,56 +58,120 @@ function isDisplayLinksBlock(value: unknown): value is DisplayLinksBlock {
     if (value.kind !== 'display-links') return false
     if (typeof value.id !== 'string') return false
     if (!Array.isArray(value.urls)) return false
+    if (value.texts != null && !Array.isArray(value.texts)) return false
     return true
+}
+
+function DisplayLinksCopyRow(props: { value: string; title?: string }) {
+    const { t } = useTranslation()
+    const [copied, setCopied] = useState(false)
+    const label = props.title?.trim() || t('displayLinks.exactString')
+    const handleCopy = useCallback(async () => {
+        try {
+            await safeCopyToClipboard(props.value)
+            setCopied(true)
+            window.setTimeout(() => setCopied(false), 1500)
+        } catch {
+            // Clipboard unavailable; the exact bytes remain visible to copy manually.
+        }
+    }, [props.value])
+
+    return (
+        <li className="min-w-0" data-hapi-share-exclude="true">
+            <button
+                type="button"
+                onClick={() => { void handleCopy() }}
+                data-testid="display-links-text"
+                data-copy-value={props.value}
+                aria-label={t('displayLinks.copyAria', { label })}
+                className="block w-full rounded-xl bg-[var(--app-subtle-bg)] px-3 py-2 text-left"
+            >
+                {props.title ? (
+                    <span className="mb-0.5 block truncate text-xs font-medium text-[var(--app-hint)]">
+                        {props.title}
+                    </span>
+                ) : null}
+                <span className="block break-all font-mono text-sm text-[var(--app-text)]">
+                    {props.value}
+                </span>
+                <span className="mt-1 block text-xs text-[var(--app-hint)]">
+                    {copied ? t('displayLinks.copied') : t('displayLinks.tapToCopy')}
+                </span>
+            </button>
+        </li>
+    )
 }
 
 /** Exported for display-links renderer tests. */
 export function DisplayLinksCard(props: { block: DisplayLinksBlock }) {
+    const { t } = useTranslation()
+    const texts = props.block.texts ?? []
+    const showLinks = props.block.urls.length > 0
+    const showTexts = texts.length > 0
+    const heading = showLinks && showTexts
+        ? t('displayLinks.heading.both')
+        : showTexts
+            ? t('displayLinks.heading.texts')
+            : t('displayLinks.heading.links')
     return (
         <div
             data-testid="display-links-card"
             className="max-w-[92%] rounded-2xl border border-[var(--app-border)] bg-[var(--app-tool-card-bg)] p-3"
         >
             <div className="mb-2 min-w-0 truncate text-xs font-medium text-[var(--app-hint)]">
-                Links
+                {heading}
             </div>
-            <ul className="flex flex-col gap-2">
-                {props.block.urls.map((url) => {
-                    const navigable = isDisplayableHttpHref(url.href)
-                    const label = url.title?.trim() || url.href
-                    if (!navigable) {
+            {showLinks ? (
+                <ul className="flex flex-col gap-2">
+                    {props.block.urls.map((url, index) => {
+                        const rowKey = `${url.href}:${index}`
+                        const navigable = isDisplayableHttpHref(url.href)
+                        const label = url.title?.trim() || url.href
+                        if (!navigable) {
+                            return (
+                                <li key={rowKey} className="min-w-0">
+                                    <span
+                                        title={url.href}
+                                        className="block truncate text-sm text-[var(--app-hint)]"
+                                    >
+                                        {label}
+                                    </span>
+                                </li>
+                            )
+                        }
                         return (
-                            <li key={url.href} className="min-w-0">
-                                <span
-                                    title={url.href}
-                                    className="block truncate text-sm text-[var(--app-hint)]"
+                            <li key={rowKey} className="min-w-0">
+                                <a
+                                    href={url.href}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    data-testid="display-links-href"
+                                    data-href={url.href}
+                                    className="block rounded-xl bg-[var(--app-subtle-bg)] px-3 py-2 font-medium text-[var(--app-link)] underline decoration-[color:var(--app-link-muted)] underline-offset-3"
                                 >
-                                    {label}
-                                </span>
+                                    <span className="block truncate">{label}</span>
+                                    {url.title ? (
+                                        <span className="mt-0.5 block truncate text-xs font-normal text-[var(--app-hint)] no-underline">
+                                            {url.href}
+                                        </span>
+                                    ) : null}
+                                </a>
                             </li>
                         )
-                    }
-                    return (
-                        <li key={url.href} className="min-w-0">
-                            <a
-                                href={url.href}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                data-testid="display-links-href"
-                                data-href={url.href}
-                                className="block rounded-xl bg-[var(--app-subtle-bg)] px-3 py-2 font-medium text-[var(--app-link)] underline decoration-[color:var(--app-link-muted)] underline-offset-3"
-                            >
-                                <span className="block truncate">{label}</span>
-                                {url.title ? (
-                                    <span className="mt-0.5 block truncate text-xs font-normal text-[var(--app-hint)] no-underline">
-                                        {url.href}
-                                    </span>
-                                ) : null}
-                            </a>
-                        </li>
-                    )
-                })}
-            </ul>
+                    })}
+                </ul>
+            ) : null}
+            {showTexts ? (
+                <ul className={showLinks ? 'mt-2 flex flex-col gap-2' : 'flex flex-col gap-2'}>
+                    {texts.map((text, index) => (
+                        <DisplayLinksCopyRow
+                            key={`${text.title ?? 'text'}:${index}`}
+                            value={text.value}
+                            title={text.title}
+                        />
+                    ))}
+                </ul>
+            ) : null}
         </div>
     )
 }
@@ -280,7 +344,6 @@ function HappyNestedBlockList(props: {
     blocks: ChatBlock[]
 }) {
     const ctx = useHappyChatContext()
-    const { showAgentContract } = useShowAgentContract()
 
     return (
         <div className="flex flex-col gap-3">
@@ -310,7 +373,7 @@ function HappyNestedBlockList(props: {
                 if (block.kind === 'agent-text') {
                     return (
                         <div key={`agent:${block.id}`} className="px-1">
-                            <MarkdownRenderer content={showAgentContract ? block.text : stripAgentContract(block.text)} />
+                            <MarkdownRenderer content={block.text} />
                         </div>
                     )
                 }
