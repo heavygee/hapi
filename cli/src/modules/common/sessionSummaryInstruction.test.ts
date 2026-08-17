@@ -14,14 +14,13 @@ const PREVIOUS_SESSION_SUMMARY_INSTRUCTION = [
     'End every response with a single machine-readable status line (no backticks)',
     'so this workspace\'s session tracking can record progress. Put it on its own',
     'final line after all other content:',
-    'AGENT_NOTIFY_SUMMARY {"version":1,"agent":"<agent-id>","project":"<project>","status":"done|blocked|needs_review|needs_decision|failed|stalled","action":"<=12 words","summary":"one-line triage"}',
-    'Use status "blocked" if unsure. Keep action to 12 words or fewer when status',
-    'is "done" and follow-up remains.'
-].join('\n')
-
-const USER_LANGUAGE_INSTRUCTION = [
+    SESSION_SUMMARY_CONTRACT_LINE,
     'Use the language used by the user in the current conversation for the',
-    'human-readable "action" and "summary" values.'
+    'human-readable "action" and "summary" values.',
+    'Use status "blocked" if unsure. When status is "done" and follow-up remains,',
+    'keep action to 12 words or fewer. Omit the action key when nothing remains —',
+    'never emit "action":"" (Cursor drops a quote and breaks JSON).',
+    'Omit agent and project fields.',
 ].join('\n')
 
 describe('sessionSummaryInstruction', () => {
@@ -68,25 +67,18 @@ describe('sessionSummaryInstruction', () => {
         expect(body).not.toContain('<agent-id>')
         expect(SESSION_SUMMARY_CONTRACT_LINE).not.toContain('"agent"')
         expect(SESSION_SUMMARY_CONTRACT_LINE).not.toContain('"project"')
-        expect(body.toLowerCase()).toContain('omit action')
+        expect(body.toLowerCase()).toContain('omit the action key')
     })
 
     it('adds user-language guidance without changing the existing prompt contract', () => {
         applyHubSessionSummaryContract(true)
         const body = sessionSummaryInstructionOrEmpty({})
-        const previousLines = PREVIOUS_SESSION_SUMMARY_INSTRUCTION.split('\n')
-        const expected = [
-            ...previousLines.slice(0, 5),
-            USER_LANGUAGE_INSTRUCTION,
-            ...previousLines.slice(5)
-        ].join('\n')
-
-        expect(body).toBe(expected)
+        expect(body).toBe(PREVIOUS_SESSION_SUMMARY_INSTRUCTION)
     })
 
     it('preserves the exact machine-readable footer format', () => {
         expect(SESSION_SUMMARY_CONTRACT_LINE).toBe(
-            'AGENT_NOTIFY_SUMMARY {"version":1,"agent":"<agent-id>","project":"<project>","status":"done|blocked|needs_review|needs_decision|failed|stalled","action":"<=12 words","summary":"one-line triage"}'
+            'AGENT_NOTIFY_SUMMARY {"version":1,"status":"done|blocked|needs_review|needs_decision|failed|stalled","action":"<=12 words","summary":"one-line triage"}'
         )
     })
 

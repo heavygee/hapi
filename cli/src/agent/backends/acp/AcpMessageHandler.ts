@@ -1,16 +1,46 @@
-import type { AgentMessage, PlanItem } from '@/agent/types';
 import { randomUUID } from 'node:crypto';
-import { asString, isObject } from '@hapi/protocol';
+import { logger } from '@/ui/logger';
+import type { AgentMessage, PlanItem } from '@/agent/types';
+import { registerGeneratedImageFromAcpBlock } from '@/modules/common/generatedImages';
+import type { InlineMediaSource } from '@/modules/common/inlineMediaSource';
+import { asString, isObject, isDisplayLinksToolName, redactDisplayLinksToolInput } from '@hapi/protocol';
 import { deriveToolNameWithSource, isPlaceholderToolName } from '@/agent/utils';
 import { parseRateLimitText } from '@/agent/rateLimitParser';
 import { isInternalEventJson } from '@/agent/internalEventFilter';
 import { ACP_SESSION_UPDATE_TYPES } from './constants';
+
+function redactIfDisplayLinks(name: string, input: unknown): unknown {
+    return isDisplayLinksToolName(name) ? redactDisplayLinksToolInput(input) : input;
+}
 
 function normalizeStatus(status: unknown): 'pending' | 'in_progress' | 'completed' | 'failed' {
     if (status === 'in_progress' || status === 'completed' || status === 'failed') {
         return status;
     }
     return 'pending';
+}
+
+/**
+ * OpenCode ACP often emits `rawInput: {}` on tool start / permission requests
+ * before (or after) the real arguments arrive. An empty object is not usable
+ * tool input — treating it as valid blocks kind+title/content fallbacks and can
+ * clobber a previously captured non-empty input.
+ */
+function isUsableRawInput(value: unknown): boolean {
+    if (value == null) return false;
+    if (isObject(value) && Object.keys(value).length === 0) return false;
+    return true;
+}
+
+function resolveToolInputFallbacks(
+    kind: string | null,
+    title: string | null,
+    locations: unknown,
+    content: unknown
+): unknown {
+    const fromKindTitle = deriveInputFromKindAndTitle(kind, title, locations);
+    if (fromKindTitle) return fromKindTitle;
+    return extractJsonInputFromContent(content);
 }
 
 type DerivedToolName = ReturnType<typeof deriveToolNameWithSource>;
@@ -91,7 +121,6 @@ function looksLikePath(value: string): boolean {
     const v = value.trim();
     if (!v || isDisplayOnlyToolTitle(v)) return false;
     if (v.includes('/') || v.includes('\\')) return true;
-    // Bare filenames with an extension (README.md, foo.ts).
     if (/\.[A-Za-z0-9]{1,12}$/.test(v)) return true;
     return false;
 }
@@ -104,17 +133,6 @@ function extractPathFromLocations(locations: unknown): string | null {
         if (path && looksLikePath(path)) return path;
     }
     return null;
-}
-
-/**
- * Cursor ACP often sends `rawInput: {}` (empty object) instead of omitting the
- * field. Treating that as "present" blocked locations/title fallbacks and left
- * every Read/Edit File tool-call pathless in the hub.
- */
-function isUsefulRawInput(rawInput: unknown): boolean {
-    if (rawInput == null) return false;
-    if (!isObject(rawInput)) return true;
-    return Object.keys(rawInput).length > 0;
 }
 
 function hasUsableFilePath(input: unknown): boolean {
@@ -151,7 +169,6 @@ function needsInputEnrichment(
 ): boolean {
     if (existingInput == null) return true;
     if (isObject(existingInput) && Object.keys(existingInput).length === 0) return true;
-    // Garbage path from a display-only title (e.g. {file_path: "Read File"}).
     if (isObject(existingInput)) {
         for (const key of ['file_path', 'path', 'filePath'] as const) {
             const value = existingInput[key];
@@ -474,9 +491,9 @@ export class AcpMessageHandler {
 
     constructor(
         private readonly onMessage: (message: AgentMessage) => void,
-        options: { textChunkMode?: AcpTextChunkMode } = {}
+        private readonly options: { textChunkMode?: AcpTextChunkMode; flavor?: string } = {}
     ) {
-        this.textChunkMode = options.textChunkMode ?? 'dedupe';
+        this.textChunkMode = this.options.textChunkMode ?? 'dedupe';
     }
 
     /**
@@ -484,6 +501,14 @@ export class AcpMessageHandler {
      * buffer. Callers must treat this as a text-segment boundary: it is
      * invoked internally before tool_call / plan events and externally at
      * turn boundaries by AcpSdkBackend.
+     *
+     * The internal-event check in `handleUpdate` only sees one chunk at a
+     * time, so it cannot recognise an envelope that arrived in pieces — in
+     * `delta` mode (OpenCode) every chunk is a fragment and none of them
+     * parses as JSON on its own. This flush boundary is the first place the
+     * reassembled text exists, so it is the only place a split envelope can
+     * be caught. Re-checking here is what makes the filter complete rather
+     * than merely likely to fire.
      */
     flushText(): void {
         if (!this.bufferedText) {
@@ -491,6 +516,9 @@ export class AcpMessageHandler {
         }
         const text = this.bufferedText;
         this.bufferedText = '';
+        if (isInternalEventJson(text)) {
+            return;
+        }
         this.onMessage({ type: 'text', text });
     }
 
@@ -631,7 +659,7 @@ export class AcpMessageHandler {
         this.reasoningSnapshotEmitted = false;
     }
 
-    handleUpdate(update: unknown): void {
+    async handleUpdate(update: unknown): Promise<void> {
         if (!isObject(update)) return;
         const updateType = asString(update.sessionUpdate);
         if (!updateType) return;
@@ -657,6 +685,12 @@ export class AcpMessageHandler {
 
         if (updateType === ACP_SESSION_UPDATE_TYPES.agentMessageChunk) {
             const content = update.content;
+            if (isObject(content) && content.type === 'image') {
+                this.flushReasoning();
+                this.flushText();
+                await this.emitGeneratedImageFromAcpContent(content);
+                return;
+            }
             const text = extractTextContent(content);
             if (text) {
                 // Check once whether the buffered text is a prefix of this
@@ -732,6 +766,35 @@ export class AcpMessageHandler {
         }
     }
 
+    private async emitGeneratedImageFromAcpContent(content: Record<string, unknown>): Promise<void> {
+        try {
+            const image = await registerGeneratedImageFromAcpBlock(content);
+            if (!image) {
+                return;
+            }
+            this.onMessage({
+                type: 'generated_image',
+                imageId: image.id,
+                fileName: image.fileName,
+                mimeType: image.mimeType,
+                source: this.buildAcpInlineMediaSource(),
+            });
+        } catch (error) {
+            logger.debug(
+                '[AcpMessageHandler] Failed to register ACP image block:',
+                error instanceof Error ? error.message : String(error)
+            );
+        }
+    }
+
+    private buildAcpInlineMediaSource(): InlineMediaSource {
+        const source: InlineMediaSource = { ingress: 'acp' };
+        if (this.options?.flavor) {
+            source.flavor = this.options.flavor;
+        }
+        return source;
+    }
+
     private handleToolCall(update: Record<string, unknown>): void {
         const toolCallId = asString(update.toolCallId);
         if (!toolCallId) return;
@@ -746,28 +809,22 @@ export class AcpMessageHandler {
             metaKind: null
         });
         const name = derivedName.name;
-        // Priority: useful rawInput > kind+title/locations fallback > content JSON.
-        // Cursor ACP often sends rawInput: {} (empty) — treat that as absent so
-        // locations/title fallbacks can still populate a path.
+        // Priority: usable rawInput > kind+title fallback > content JSON fallback.
+        // Empty `{}` is treated as missing (OpenCode tool-start / permission clobber).
         // Kimi ACP streams tool arguments as JSON text in the content array
         // instead of rawInput/kind. Try all three sources.
-        let input: unknown;
-        if (isUsefulRawInput(update.rawInput)) {
-            input = update.rawInput;
-        } else {
-            const fromKindTitle = deriveInputFromKindAndTitle(asString(update.kind), asString(update.title), update.locations);
-            if (fromKindTitle) {
-                input = fromKindTitle;
-            } else {
-                const fromContent = extractJsonInputFromContent(update.content);
-                input = fromContent;
-            }
-        }
-        // Overlay locations path whenever raw/derived input still lacks one
-        // (Cursor: empty {} + locations; Gemini: locations-only edits).
+        const candidate = isUsableRawInput(update.rawInput)
+            ? update.rawInput
+            : resolveToolInputFallbacks(
+                asString(update.kind),
+                asString(update.title),
+                update.locations,
+                update.content
+            );
+        let input = redactIfDisplayLinks(name, isUsableRawInput(candidate) ? candidate : null);
         const locPath = extractPathFromLocations(update.locations);
         if (locPath && !hasUsableFilePath(input)) {
-            input = enrichInputWithPath(input, locPath);
+            input = redactIfDisplayLinks(name, enrichInputWithPath(input, locPath));
         }
         const status = normalizeStatus(update.status);
 
@@ -778,7 +835,9 @@ export class AcpMessageHandler {
             id: toolCallId,
             name,
             input,
-            status
+            status,
+            ...(asString(update.title) ? { title: asString(update.title)! } : {}),
+            ...(asString(update.kind) ? { kind: asString(update.kind)! } : {})
         });
     }
 
@@ -788,14 +847,18 @@ export class AcpMessageHandler {
 
         const status = normalizeStatus(update.status);
         const existing = this.toolCalls.get(toolCallId);
+        const presentation = {
+            ...(asString(update.title) ? { title: asString(update.title)! } : {}),
+            ...(asString(update.kind) ? { kind: asString(update.kind)! } : {})
+        };
 
-        if (isUsefulRawInput(update.rawInput)) {
+        if (isUsableRawInput(update.rawInput)) {
             const derivedName = deriveToolNameFromUpdate(update);
             const name = this.selectToolNameForUpdate(existing?.name ?? null, derivedName);
-            let input: unknown = update.rawInput;
+            let input = redactIfDisplayLinks(name, update.rawInput);
             const locPath = extractPathFromLocations(update.locations);
             if (locPath && !hasUsableFilePath(input)) {
-                input = enrichInputWithPath(input, locPath);
+                input = redactIfDisplayLinks(name, enrichInputWithPath(input, locPath));
             }
             this.toolCalls.set(toolCallId, { name, input });
             this.onMessage({
@@ -803,42 +866,47 @@ export class AcpMessageHandler {
                 id: toolCallId,
                 name,
                 input,
-                status
+                status,
+                ...presentation
             });
         } else if (existing) {
-            // Enrich existing.input from update's kind+title/locations when
-            // initial tool_call had empty/absent rawInput. Re-emit when we just
-            // enriched the input or when the call is still active.
+            // Enrich existing.input from update's kind+title when initial tool_call
+            // had neither usable rawInput nor a hoistable thought. Never let an
+            // empty `rawInput: {}` (OpenCode permission / start) clobber a good input.
+            // Re-emit when we just enriched the input or when the call is still active.
             let input = existing.input;
             let name = existing.name;
             let rederived = false;
             const updateTitle = asString(update.title);
             if (needsInputEnrichment(input, updateTitle, asString(update.kind))) {
-                const fallback = deriveInputFromKindAndTitle(asString(update.kind), updateTitle, update.locations);
-                if (fallback) {
-                    input = fallback;
+                const fallback = resolveToolInputFallbacks(
+                    asString(update.kind),
+                    updateTitle,
+                    update.locations,
+                    update.content
+                );
+                if (isUsableRawInput(fallback)) {
                     const derivedName = deriveToolNameFromUpdate(update);
                     name = this.selectToolNameForUpdate(existing.name ?? null, derivedName);
+                    input = redactIfDisplayLinks(name, fallback);
                     this.toolCalls.set(toolCallId, { name, input });
                     rederived = true;
                 }
             }
             const locPath = extractPathFromLocations(update.locations);
             if (locPath && !hasUsableFilePath(input)) {
-                input = enrichInputWithPath(input, locPath);
+                input = redactIfDisplayLinks(name, enrichInputWithPath(input, locPath));
                 const derivedName = deriveToolNameFromUpdate(update);
                 name = this.selectToolNameForUpdate(existing.name ?? null, derivedName);
                 this.toolCalls.set(toolCallId, { name, input });
                 rederived = true;
             }
-            // Kimi ACP streams tool arguments as JSON text in the content array.
-            // If we still don't have a useful input, try to parse the content.
             if (!rederived && needsInputEnrichment(input, updateTitle, asString(update.kind))) {
                 const fromContent = extractJsonInputFromContent(update.content);
                 if (fromContent && isObject(fromContent)) {
-                    input = fromContent;
                     const derivedName = deriveToolNameFromUpdate(update);
                     name = this.selectToolNameForUpdate(existing.name ?? null, derivedName);
+                    input = redactIfDisplayLinks(name, fromContent);
                     this.toolCalls.set(toolCallId, { name, input });
                     rederived = true;
                 }
@@ -850,7 +918,8 @@ export class AcpMessageHandler {
                     id: toolCallId,
                     name,
                     input,
-                    status
+                    status,
+                    ...presentation
                 });
             }
         }
@@ -866,8 +935,8 @@ export class AcpMessageHandler {
             //
             // Only runs on status=completed (not failed): a failed write_file must never
             // promote the tool name to Write/Edit, as no diff was actually applied.
-            // Empty rawInput ({}) is treated as absent so Cursor + Gemini both hoist.
-            if (status === 'completed' && !isUsefulRawInput(update.rawInput) && existing) {
+            // Skip when a usable rawInput already supplied the input above.
+            if (status === 'completed' && !isUsableRawInput(update.rawInput) && existing) {
                 const hoisted = hoistDiffContentIntoInput(update.content);
                 if (hoisted) {
                     this.toolCalls.set(toolCallId, { name: hoisted.name, input: hoisted.input });
@@ -876,7 +945,8 @@ export class AcpMessageHandler {
                         id: toolCallId,
                         name: hoisted.name,
                         input: hoisted.input,
-                        status
+                        status,
+                        ...presentation
                     });
                 }
             }
@@ -893,26 +963,24 @@ export class AcpMessageHandler {
                 output = normalized !== null ? normalized : update.content;
             }
 
-            // Cursor Edit File: path arrives on rawOutput, not rawInput. Backfill
-            // the tool_call so Flow / tool cards see the path (re-emit before result).
             const current = this.toolCalls.get(toolCallId) ?? existing;
             if (current && !hasUsableFilePath(current.input)) {
                 const pathFromOut = extractPathFromToolOutput(output);
                 const pathFromLoc = extractPathFromLocations(update.locations);
                 const path = pathFromOut ?? pathFromLoc;
                 if (path) {
-                    const input = enrichInputWithPath(current.input, path);
-                    this.toolCalls.set(toolCallId, { name: current.name, input });
+                    const enrichedInput = enrichInputWithPath(current.input, path);
+                    this.toolCalls.set(toolCallId, { name: current.name, input: enrichedInput });
                     this.onMessage({
                         type: 'tool_call',
                         id: toolCallId,
                         name: current.name,
-                        input,
-                        status
+                        input: enrichedInput,
+                        status,
+                        ...presentation
                     });
                 }
             }
-
             this.onMessage({
                 type: 'tool_result',
                 id: toolCallId,
