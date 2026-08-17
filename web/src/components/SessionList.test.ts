@@ -690,12 +690,26 @@ describe('resolveSessionGroupDirectory', () => {
         })).toBe('/home/heavygee/coding/server-setup')
     })
 
-    it('prefers the path spelling when basePath is a realpath of a symlink prefix', () => {
-        // Estate: ~/coding -> /work/coding. CLI stores realpath basePath but path still uses ~/coding.
+    it('rewrites logical path spelling when realpathed worktreePath sits under basePath', () => {
+        // Estate: CLI realpaths worktreePath/basePath; metadata.path may keep ~/coding.
         expect(resolveSessionGroupDirectory({
             path: '/home/heavygee/coding/hapi/worktrees/cursor-mcp-isolation',
-            worktree: { basePath: '/work/coding/hapi' },
+            worktree: {
+                basePath: '/work/coding/hapi',
+                worktreePath: '/work/coding/hapi/worktrees/cursor-mcp-isolation',
+            },
         })).toBe('/home/heavygee/coding/hapi')
+    })
+
+    it('keeps an external same-suffix worktree under basePath', () => {
+        // worktreePath is NOT under basePath — no alias evidence.
+        expect(resolveSessionGroupDirectory({
+            path: '/home/me/org/repo/worktrees/feature',
+            worktree: {
+                basePath: '/mnt/clone/org/repo',
+                worktreePath: '/home/me/org/repo/worktrees/feature',
+            },
+        })).toBe('/mnt/clone/org/repo')
     })
 
     it('keeps a pure realpath session under the realpath root', () => {
@@ -703,6 +717,31 @@ describe('resolveSessionGroupDirectory', () => {
             path: '/work/coding/hapi',
             worktree: { basePath: '/work/coding/hapi' },
         })).toBe('/work/coding/hapi')
+    })
+
+    it('preserves POSIX and Windows filesystem roots', () => {
+        expect(resolveSessionGroupDirectory({ path: '/' })).toBe('/')
+        expect(resolveSessionGroupDirectory({ path: 'C:\\' })).toBe('C:\\')
+        expect(resolveSessionGroupDirectory({
+            path: 'C:\\',
+            worktree: { basePath: 'C:\\' },
+        })).toBe('C:\\')
+    })
+
+    it('preserves trailing whitespace in filesystem paths', () => {
+        expect(resolveSessionGroupDirectory({
+            path: '/srv/project ',
+        })).toBe('/srv/project ')
+        expect(resolveSessionGroupDirectory({
+            path: '/srv/project /worktrees/feature',
+            worktree: { basePath: '/srv/project ' },
+        })).toBe('/srv/project ')
+    })
+
+    it('preserves trailing backslash on POSIX paths', () => {
+        expect(resolveSessionGroupDirectory({
+            path: '/srv/project\\',
+        })).toBe('/srv/project\\')
     })
 
     it('returns Other when neither path nor basePath is set', () => {
@@ -737,7 +776,7 @@ describe('groupSessionsByDirectory symlink coalesce', () => {
                     basePath: '/work/coding/hapi',
                     branch: 'feat/x',
                     name: 'feat-x',
-                    worktreePath: '/home/heavygee/coding/hapi/worktrees/feat-x',
+                    worktreePath: '/work/coding/hapi/worktrees/feat-x',
                 },
             },
         })
@@ -747,5 +786,65 @@ describe('groupSessionsByDirectory symlink coalesce', () => {
         expect(groups[0]?.directory).toBe('/home/heavygee/coding/hapi')
         expect(groups[0]?.displayName).toBe('coding/hapi')
         expect(groups[0]?.sessions.map((s) => s.id).sort()).toEqual(['home', 'work'])
+    })
+
+    it('does not invent a home root for an external same-suffix worktree alone', () => {
+        const external = makeSession({
+            id: 'external-wt',
+            updatedAt: 1,
+            metadata: {
+                machineId: 'machine-oos',
+                path: '/home/me/org/repo/worktrees/feature',
+                worktree: {
+                    basePath: '/mnt/clone/org/repo',
+                    branch: 'feature',
+                    name: 'feature',
+                    worktreePath: '/home/me/org/repo/worktrees/feature',
+                },
+            },
+        })
+
+        const groups = groupSessionsByDirectory([external])
+        expect(groups).toHaveLength(1)
+        expect(groups[0]?.directory).toBe('/mnt/clone/org/repo')
+        expect(groups[0]?.displayName).toBe('org/repo')
+    })
+
+    it('keeps an external worktree separate from an unrelated same-suffix clone', () => {
+        const unrelatedClone = makeSession({
+            id: 'clone',
+            updatedAt: 2,
+            metadata: {
+                machineId: 'machine-oos',
+                path: '/home/me/org/repo',
+                worktree: {
+                    basePath: '/home/me/org/repo',
+                    branch: 'main',
+                    name: 'main',
+                    worktreePath: '/home/me/org/repo',
+                },
+            },
+        })
+        const external = makeSession({
+            id: 'external-wt',
+            updatedAt: 1,
+            metadata: {
+                machineId: 'machine-oos',
+                path: '/home/me/org/repo/worktrees/feature',
+                worktree: {
+                    basePath: '/mnt/clone/org/repo',
+                    branch: 'feature',
+                    name: 'feature',
+                    worktreePath: '/home/me/org/repo/worktrees/feature',
+                },
+            },
+        })
+
+        const groups = groupSessionsByDirectory([unrelatedClone, external])
+        expect(groups).toHaveLength(2)
+        expect(groups.map((g) => g.directory).sort()).toEqual([
+            '/home/me/org/repo',
+            '/mnt/clone/org/repo',
+        ])
     })
 })

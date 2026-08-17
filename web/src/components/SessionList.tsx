@@ -207,33 +207,50 @@ type MachineGroup = {
     latestUpdatedAt: number
 }
 
+function usesWindowsSeparators(path: string): boolean {
+    return /^[A-Za-z]:[\\/]/.test(path) || /^\\\\/.test(path)
+}
+
 function stripTrailingSeparators(path: string): string {
-    return path.replace(/[/\\]+$/, '')
+    if (!usesWindowsSeparators(path)) {
+        if (/^\/+$/.test(path)) return '/'
+        return path.replace(/\/+$/, '')
+    }
+    if (/^[A-Za-z]:[\\/]+$/.test(path)) return path.slice(0, 3)
+    return path.replace(/[\\/]+$/, '')
+}
+
+function normalizePathForCompare(path: string): string {
+    const stripped = stripTrailingSeparators(path)
+    return usesWindowsSeparators(path) ? stripped.replace(/\\/g, '/') : stripped
 }
 
 function pathIsUnder(parent: string, child: string): boolean {
-    const parentNorm = stripTrailingSeparators(parent).replace(/\\/g, '/')
-    const childNorm = stripTrailingSeparators(child).replace(/\\/g, '/')
+    const parentNorm = normalizePathForCompare(parent)
+    const childNorm = normalizePathForCompare(child)
     return childNorm === parentNorm || childNorm.startsWith(`${parentNorm}/`)
 }
 
 export type SessionGroupDirectorySource = {
     path?: string | null
-    worktree?: { basePath?: string | null } | null
+    worktree?: { basePath?: string | null; worktreePath?: string | null } | null
 }
 
 /**
  * Directory used as the sidebar project-group key.
  *
  * Prefer worktree.basePath when the session path lives under it. When basePath
- * is a realpath of a symlink prefix (path still uses the logical spelling,
- * e.g. ~/coding → /work/coding), derive the group root from path so both
- * spellings share one header instead of two identical `coding/hapi · machine`
- * rows.
+ * is a realpath of a symlink prefix (CLI realpaths worktreePath/basePath while
+ * metadata.path may still use the logical spelling), require worktreePath to
+ * sit under basePath before rewriting the group root from path — display-name
+ * collision alone is not alias evidence.
  */
 export function resolveSessionGroupDirectory(source: SessionGroupDirectorySource): string {
-    const path = source.path?.trim() || ''
-    const basePath = source.worktree?.basePath?.trim() || ''
+    // Do not trim(): trailing/leading spaces are valid POSIX path characters and
+    // group.directory feeds Copy Path / New Session.
+    const path = source.path ?? ''
+    const basePath = source.worktree?.basePath ?? ''
+    const worktreePath = source.worktree?.worktreePath ?? ''
     if (!basePath && !path) return 'Other'
     if (!basePath) return stripTrailingSeparators(path)
     if (!path) return stripTrailingSeparators(basePath)
@@ -243,17 +260,26 @@ export function resolveSessionGroupDirectory(source: SessionGroupDirectorySource
         return normBase
     }
 
-    const display = getGroupDisplayName(normBase)
-    if (!display || display === 'Other') return normBase
-
-    const pathNorm = path.replace(/\\/g, '/')
-    const needle = `/${display.replace(/\\/g, '/')}`
-    const underIdx = pathNorm.indexOf(`${needle}/`)
-    if (underIdx !== -1) {
-        return pathNorm.slice(0, underIdx + needle.length)
+    // Alias evidence: realpathed worktreePath under realpathed basePath, while
+    // path still uses a logical spelling of the same checkout.
+    if (!worktreePath || !pathIsUnder(normBase, worktreePath)) {
+        return normBase
     }
-    if (pathNorm.endsWith(needle)) {
-        return pathNorm
+
+    const baseNorm = normalizePathForCompare(normBase)
+    const worktreeNorm = normalizePathForCompare(worktreePath)
+    const pathNorm = normalizePathForCompare(path)
+    const suffix = worktreeNorm.slice(baseNorm.length)
+    if (!suffix) return normBase
+
+    const suffixIndex = pathNorm.lastIndexOf(`${suffix}/`)
+    if (suffixIndex !== -1) {
+        const logicalRoot = pathNorm.slice(0, suffixIndex)
+        return usesWindowsSeparators(path) ? logicalRoot.replace(/\//g, '\\') : logicalRoot
+    }
+    if (pathNorm.endsWith(suffix)) {
+        const logicalRoot = pathNorm.slice(0, -suffix.length) || normBase
+        return usesWindowsSeparators(path) ? logicalRoot.replace(/\//g, '\\') : logicalRoot
     }
     return normBase
 }
