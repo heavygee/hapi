@@ -31,9 +31,26 @@ describe('ensureOverseerEventsSchema', () => {
                 severity INTEGER
             );
             CREATE UNIQUE INDEX idx_events_dedupe_key ON events(dedupe_key) WHERE dedupe_key IS NOT NULL;
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                namespace TEXT NOT NULL DEFAULT 'default'
+            );
+            INSERT INTO sessions (id, namespace) VALUES ('legacy-foreign-sess', 'other-ns');
+            INSERT INTO events (
+                ts, source_kind, event_type, attention_candidate, summary,
+                related_session_id, dedupe_key, provenance
+            ) VALUES (
+                1, 'channel', 'blocked', 1, 'legacy foreign event',
+                'legacy-foreign-sess', 'contrib:tiann/hapi#1:blocked', 'test'
+            );
         `)
 
         expect(() => ensureOverseerEventsSchema(db)).not.toThrow()
+
+        const row = db.prepare(
+            `SELECT namespace FROM events WHERE dedupe_key = 'contrib:tiann/hapi#1:blocked'`
+        ).get() as { namespace: string }
+        expect(row.namespace).toBe('other-ns')
 
         const columns = db.prepare('PRAGMA table_info(events)').all() as Array<{ name: string }>
         expect(columns.some((column) => column.name === 'namespace')).toBe(true)

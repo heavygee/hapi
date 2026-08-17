@@ -373,6 +373,14 @@ function ensureEventsNamespaceColumn(db: Database): void {
     }
     if (!columns.has('namespace')) {
         db.exec(`ALTER TABLE events ADD COLUMN namespace TEXT NOT NULL DEFAULT 'default'`)
+        db.exec(`
+            UPDATE events
+            SET namespace = COALESCE(
+                (SELECT sessions.namespace FROM sessions WHERE sessions.id = events.related_session_id),
+                namespace
+            )
+            WHERE related_session_id IS NOT NULL
+        `)
     }
     db.exec(`
         DROP INDEX IF EXISTS idx_events_dedupe_key;
