@@ -85,8 +85,8 @@ export class MachineCache {
         tag?: string,
         runnerProof?: string
     ): Machine {
-        // Cold restart keeps machineId by re-presenting durable runnerProof
-        // (CLI ~/.hapi/runner.proof). Hub never tag-only rebinds (#1473 Blocker).
+        // Hub never tag-only rebinds (#1473 Blocker). CLI keeps runnerProof
+        // memory-only; cold restart may rotate machine id instead.
         const stored = this.store.machines.getOrCreateMachine(
             id,
             metadata,

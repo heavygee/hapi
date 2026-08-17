@@ -142,8 +142,8 @@ export function getOrCreateMachine(
         // refuse late bind — re-enroll with a new machine id (INSERT binds hash).
         // Wrong proof always fails closed — no tag-only offline rebind (Codex
         // Blocker: same-UID siblings can read machineTag from settings.json).
-        // Cold restart keeps machineId by re-presenting a durable runnerProof
-        // from ~/.hapi/runner.proof on the CLI side.
+        // Runner proof stays memory-only on the CLI; cold restart may rotate
+        // machine id rather than rebind from a disk bearer.
         if (current.runnerProofHash) {
             if (!presentedProof || !verifyRunnerProof(presentedProof, current.runnerProofHash)) {
                 throw new MachineTagConflictError(
