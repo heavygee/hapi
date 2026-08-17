@@ -633,7 +633,7 @@ Vitest; `*.test.ts` next to source; hub + cli tests; no web tests currently.
 2. Unsure: read more code; ask w/ short options.
 3. Conflicts: call out; pick safer path.
 4. Unrecognized changes: assume other agent; focus your changes.
-5. **Upstream first** - general fixes → upstream PR.
+5. **Upstreamable shape, estate dogfood first** - write the fix on an `upstream/main` worktree so the PR stays clean, but **soup-promote + operator dogfood on `:3006` before** opening the upstream PR. "Upstream first" never means skip dogfood.
 6. **Maintainer canon read-only** - never PR edits to `AGENTS.md`, `CONTRIBUTING.md`, root `README.md`.
 7. **Fork agent doc is here only** - root `AGENTS.md` must not exist on fork `main`.
 
