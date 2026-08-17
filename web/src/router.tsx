@@ -56,6 +56,7 @@ import { useSessionBrowserTitle } from '@/hooks/useSessionBrowserTitle'
 import { clearCodexImportedSession } from '@/lib/codexImportedSessions'
 import { getSupersedingSessionId, prepareFollowSupersedingSession, shouldFollowSupersedingSession } from '@/routes/sessions/followSupersedingSession'
 import { migrateSuppressedSendError } from '@/lib/suppressed-send-error'
+import { useConsumedMessageTarget } from '@/lib/useConsumedMessageTarget'
 import FilesPage from '@/routes/sessions/files'
 import FilePage from '@/routes/sessions/file'
 import TerminalPage from '@/routes/sessions/terminal'
@@ -359,22 +360,12 @@ function SessionPage() {
     const { addToast } = useToast()
     const { sessionId } = useParams({ from: '/sessions/$sessionId' })
     const { outline, messageId, messageQuery } = useSearch({ from: '/sessions/$sessionId' })
-    const [consumedMessageTarget, setConsumedMessageTarget] = useState<{
-        sessionId: string
-        messageId: string
-        messageQuery?: string
-    } | null>(null)
-    const retainedMessageTarget = consumedMessageTarget?.sessionId === sessionId
-        ? consumedMessageTarget
-        : null
-    // Keep the target alive for the mounted session after replacing the URL
-    // without its search parameters. Otherwise the route update can make the
-    // chat briefly remount without a target and reclaim the latest tail before
-    // the historical window has finished settling.
-    const effectiveInitialMessageId = messageId ?? retainedMessageTarget?.messageId
-    const effectiveInitialMessageQuery = messageId
-        ? messageQuery
-        : retainedMessageTarget?.messageQuery
+    const {
+        effectiveMessageId: effectiveInitialMessageId,
+        effectiveMessageQuery: effectiveInitialMessageQuery,
+        consume: consumeMessageTarget,
+        clear: clearConsumedMessageTarget,
+    } = useConsumedMessageTarget(sessionId, messageId, messageQuery)
     const {
         session,
         error: sessionError,
@@ -788,27 +779,23 @@ function SessionPage() {
 
     const handleInitialMessageConsumed = useCallback(() => {
         if (messageId) {
-            setConsumedMessageTarget({
-                sessionId,
-                messageId,
-                messageQuery,
-            })
+            consumeMessageTarget()
         }
         navigate({
             to: '/sessions/$sessionId',
             params: { sessionId },
             replace: true,
         })
-    }, [messageId, messageQuery, navigate, sessionId])
+    }, [consumeMessageTarget, messageId, navigate, sessionId])
 
     const handleSearchTargetDismissed = useCallback(() => {
-        setConsumedMessageTarget(null)
+        clearConsumedMessageTarget()
         navigate({
             to: '/sessions/$sessionId',
             params: { sessionId },
             replace: true,
         })
-    }, [navigate, sessionId])
+    }, [clearConsumedMessageTarget, navigate, sessionId])
 
     if (!session) {
         if (sessionError) {

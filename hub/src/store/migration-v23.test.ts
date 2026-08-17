@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Store } from './index'
+import { MAX_INDEXED_MESSAGE_CHARACTERS } from './messageContentSearch'
 
 const tempDirs: string[] = []
 
@@ -125,9 +126,12 @@ describe('schema migration v23 to v26', () => {
 
         const initial = new Store(dbPath)
         const session = initial.sessions.getOrCreateSession('migration-short-query', { path: '/tmp/migration-short-query' }, null, 'default')
+        const text = `你好，短查询索引 ${Array.from({ length: MAX_INDEXED_MESSAGE_CHARACTERS + 1024 }, (_, index) =>
+            String.fromCodePoint(0x1000 + index)
+        ).join('')}`
         const message = initial.messages.addMessage(session.id, {
             role: 'user',
-            content: { type: 'text', text: '你好，短查询索引' }
+            content: { type: 'text', text }
         })
         initial.close()
 
@@ -158,10 +162,14 @@ describe('schema migration v23 to v26', () => {
             const target = internalDb.prepare(
                 'SELECT target_message_id FROM message_content_search_lookup WHERE message_id = ?'
             ).get(message.id) as { target_message_id: string } | undefined
+            const indexed = internalDb.prepare(
+                'SELECT searchable_text FROM message_content_search WHERE message_id = ?'
+            ).get(message.id) as { searchable_text: string } | undefined
             const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
             expect(shortIndex?.name).toBe('message_content_search_short')
             expect(lookupColumns.map((column) => column.name)).toContain('target_message_id')
             expect(target?.target_message_id).toBe(message.id)
+            expect(indexed?.searchable_text.length).toBeLessThanOrEqual(MAX_INDEXED_MESSAGE_CHARACTERS)
             expect(version.user_version).toBe(26)
         } finally {
             migrated.close()

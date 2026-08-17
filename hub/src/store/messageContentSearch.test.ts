@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import type { Database } from 'bun:sqlite'
 import { Store } from './index'
 import {
-    MAX_SHORT_INDEX_CHARACTERS,
+    MAX_INDEXED_MESSAGE_CHARACTERS,
     removeMessageContentSearchForSessions
 } from './messageContentSearch'
 
@@ -131,7 +131,7 @@ describe('message content search', () => {
     it('bounds per-message short-index work for long high-entropy text', () => {
         const store = new Store(':memory:')
         const session = makeSession(store, 'bounded-short-index')
-        const text = Array.from({ length: MAX_SHORT_INDEX_CHARACTERS + 1024 }, (_, index) =>
+        const text = Array.from({ length: MAX_INDEXED_MESSAGE_CHARACTERS + 1024 }, (_, index) =>
             String.fromCodePoint(0x1000 + index)
         ).join('')
 
@@ -146,13 +146,19 @@ describe('message content search', () => {
             FROM message_content_search
             LIMIT 1
         `).get() as { search_rowid: number }
+        const indexedText = db.prepare(`
+            SELECT searchable_text
+            FROM message_content_search
+            WHERE rowid = ?
+        `).get(row.search_rowid) as { searchable_text: string }
         const count = db.prepare(`
             SELECT COUNT(*) AS count
             FROM message_content_search_short
             WHERE search_rowid = ?
         `).get(row.search_rowid) as { count: number | string }
 
-        expect(Number(count.count)).toBeLessThanOrEqual(MAX_SHORT_INDEX_CHARACTERS - 1)
+        expect(indexedText.searchable_text.length).toBeLessThanOrEqual(MAX_INDEXED_MESSAGE_CHARACTERS)
+        expect(Number(count.count)).toBeLessThanOrEqual(MAX_INDEXED_MESSAGE_CHARACTERS - 1)
     })
 
     it('matches visible Markdown text rather than source delimiters', () => {

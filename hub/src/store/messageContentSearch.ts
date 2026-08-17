@@ -47,7 +47,7 @@ type DbMessageRow = {
 const SEARCH_REBUILD_BATCH_SIZE = 500
 const SEARCH_LOOKUP_BACKFILL_BATCH_SIZE = 500
 const MIN_INDEXED_QUERY_LENGTH = 2
-export const MAX_SHORT_INDEX_CHARACTERS = 16_384
+export const MAX_INDEXED_MESSAGE_CHARACTERS = 16_384
 
 type DbSearchRow = {
     search_rowid?: number
@@ -112,15 +112,17 @@ function getShortSearchGrams(text: string): string[] {
     return [...grams]
 }
 
-function getBoundedShortSearchGrams(text: string): string[] {
+function boundSearchableText(text: string): string {
     // Slice before converting to code points so a very large message cannot
-    // allocate an Array for its entire contents just to index its prefix.
-    let boundedText = text.slice(0, MAX_SHORT_INDEX_CHARACTERS)
+    // allocate an Array for its entire contents just to index its prefix. The
+    // cap is intentionally expressed in UTF-16 code units to keep this work
+    // bounded even for messages containing only astral characters.
+    let boundedText = text.slice(0, MAX_INDEXED_MESSAGE_CHARACTERS)
     const lastCodeUnit = boundedText.charCodeAt(boundedText.length - 1)
     if (lastCodeUnit >= 0xd800 && lastCodeUnit <= 0xdbff) {
         boundedText = boundedText.slice(0, -1)
     }
-    return getShortSearchGrams(boundedText)
+    return boundedText
 }
 
 export function backfillMessageContentSearchShortIndex(db: Database): void {
@@ -131,7 +133,9 @@ export function backfillMessageContentSearchShortIndex(db: Database): void {
         // completed bigrams so a retry can resume without a full reset.
         db.exec(`DELETE FROM ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} WHERE length(gram) < 2`)
         const select = db.prepare(`
-            SELECT rowid AS search_rowid, searchable_text
+            SELECT rowid AS search_rowid,
+                   substr(searchable_text, 1, ?) AS searchable_text,
+                   length(searchable_text) AS searchable_text_length
             FROM ${MESSAGE_CONTENT_SEARCH_TABLE}
             WHERE rowid > ?
             ORDER BY rowid ASC
@@ -141,17 +145,32 @@ export function backfillMessageContentSearchShortIndex(db: Database): void {
             INSERT OR IGNORE INTO ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} (gram, search_rowid)
             VALUES (?, ?)
         `)
+        const updateSearchableText = db.prepare(`
+            UPDATE ${MESSAGE_CONTENT_SEARCH_TABLE}
+            SET searchable_text = ?
+            WHERE rowid = ?
+        `)
 
         let afterRowId = 0
         while (true) {
-            const rows = select.all(afterRowId, SEARCH_LOOKUP_BACKFILL_BATCH_SIZE) as Array<{
+            const rows = select.all(
+                MAX_INDEXED_MESSAGE_CHARACTERS,
+                afterRowId,
+                SEARCH_LOOKUP_BACKFILL_BATCH_SIZE
+            ) as Array<{
                 search_rowid: number
                 searchable_text: string
+                searchable_text_length: number
             }>
             if (rows.length === 0) break
 
             for (const row of rows) {
-                for (const gram of getBoundedShortSearchGrams(row.searchable_text)) {
+                const searchableText = boundSearchableText(row.searchable_text)
+                if (row.searchable_text_length > MAX_INDEXED_MESSAGE_CHARACTERS
+                    || searchableText !== row.searchable_text) {
+                    updateSearchableText.run(searchableText, row.search_rowid)
+                }
+                for (const gram of getShortSearchGrams(searchableText)) {
                     insert.run(gram, row.search_rowid)
                 }
             }
@@ -270,6 +289,7 @@ function insertMessageContentSearchIndex(
         WHERE message_id = ?
     `).get(message.id) as DbSearchLookupRow | undefined
     if (!lookup) throw new Error('Failed to create message content search lookup')
+    const searchableText = boundSearchableText(message.text)
 
     db.prepare(`
         INSERT INTO ${MESSAGE_CONTENT_SEARCH_TABLE} (
@@ -277,7 +297,7 @@ function insertMessageContentSearchIndex(
         ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(
         lookup.search_rowid,
-        message.text,
+        searchableText,
         message.targetMessageId,
         message.sessionId,
         message.seq,
@@ -288,7 +308,7 @@ function insertMessageContentSearchIndex(
         INSERT INTO ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} (gram, search_rowid)
         VALUES (?, ?)
     `)
-    for (const gram of getBoundedShortSearchGrams(message.text)) {
+    for (const gram of getShortSearchGrams(searchableText)) {
         insertShortGram.run(gram, lookup.search_rowid)
     }
 }
@@ -407,12 +427,13 @@ function rebuildMessageContentSearchInternal(db: Database, sessionIds?: string[]
             if (searchKey !== row.id) removeMessageContentSearchIndexByKey(db, searchKey)
             const searchable = extractSearchableMessageText(decodedContent)
             if (!searchable) continue
+            const searchableText = boundSearchableText(searchable.text)
             insertLookup.run(searchKey, row.id)
             const lookup = getLookup.get(searchKey) as DbSearchLookupRow | undefined
             if (!lookup) throw new Error('Failed to create message content search lookup')
             insert.run(
                 lookup.search_rowid,
-                searchable.text,
+                searchableText,
                 row.id,
                 row.session_id,
                 row.seq,
@@ -423,7 +444,7 @@ function rebuildMessageContentSearchInternal(db: Database, sessionIds?: string[]
                 INSERT INTO ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} (gram, search_rowid)
                 VALUES (?, ?)
             `)
-            for (const gram of getBoundedShortSearchGrams(searchable.text)) {
+            for (const gram of getShortSearchGrams(searchableText)) {
                 insertShortGram.run(gram, lookup.search_rowid)
             }
         }
