@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { SessionListScrollAnchor } from './SessionListScrollAnchor'
 import type { SessionSummary } from '@/types/api'
-import { SESSION_LIFECYCLE_IDLE } from '@hapi/protocol'
 import type { ApiClient } from '@/api/client'
 import {
     buildSessionSearchScoreIndex,
@@ -87,15 +86,11 @@ const RUNNING_BUCKETS = [
     { key: 'jobs', labelKey: 'session.item.attachedJob', colorClass: 'text-[var(--app-badge-success-text)]', pulse: true },
     { key: 'working', labelKey: 'session.item.running', colorClass: 'text-[var(--app-badge-success-text)]', pulse: true },
     { key: 'pending', labelKey: 'session.item.pending', colorClass: 'text-[var(--app-badge-warning-text)]', pulse: true },
-    { key: 'active', labelKey: 'session.item.active', colorClass: 'text-[var(--app-hint)]', pulse: false },
-    // tiann/hapi#1820: connected, but the hub has seen nothing except
-    // keepalives for the configured window. Split out so a fleet of zombies
-    // does not read as a fleet of ready sessions.
-    { key: 'idle', labelKey: 'session.item.idle', colorClass: 'text-[var(--app-hint)]', pulse: false },
 ] as const
 
 type RunningBucketKey = (typeof RUNNING_BUCKETS)[number]['key']
 
+/** True when the agent is working or waiting on the operator — not merely connected. */
 function hasAgentInProgressActivity(session: SessionSummary): boolean {
     if (!session.active) {
         return false
@@ -105,7 +100,7 @@ function hasAgentInProgressActivity(session: SessionSummary): boolean {
 }
 
 export function emptyRunningBuckets(): Record<RunningBucketKey, SessionSummary[]> {
-    return { jobs: [], working: [], pending: [], active: [], idle: [] }
+    return { jobs: [], working: [], pending: [] }
 }
 
 /**
@@ -140,13 +135,10 @@ export function bucketRunningSessions(
             // Operator action outranks the Jobs meter when both apply.
             buckets.pending.push(session)
         } else if (hasRunningAttachedJob(session)) {
-            // Idle outliving work — not "Running" agent activity.
+            // Outliving job while agent is idle — not foreground "Running".
             buckets.jobs.push(session)
-        } else if (session.metadata?.lifecycleState === SESSION_LIFECYCLE_IDLE) {
-            buckets.idle.push(session)
-        } else {
-            buckets.active.push(session)
         }
+        // Quiet connected never reaches here: isPinnedInProgressSession excludes it.
     }
     for (const key of Object.keys(buckets) as RunningBucketKey[]) {
         buckets[key].sort(compare)
@@ -156,7 +148,9 @@ export function bucketRunningSessions(
 
 /**
  * Sessions that float into the pinned In progress section.
- * Mode is a degree: off → jobs (outliving attachedJob) → all (jobs + agent activity).
+ * Mode is a degree: off → jobs (outliving attachedJob) → all (jobs + working + pending).
+ * Quiet connected (socket up, not working, not pending) never floats — that is not
+ * in-progress work. Storage key `all` is historical; UI copy says Working & pending.
  */
 export function isPinnedInProgressSession(
     session: SessionSummary,
@@ -1445,7 +1439,6 @@ export function SessionList(props: {
     const runningSessionTotal = runningSessions.jobs.length
         + runningSessions.working.length
         + runningSessions.pending.length
-    const activeSessionTotal = runningSessions.active.length + runningSessions.idle.length
     const groups = useMemo(
         () => {
             const grouped = groupSessionsByDirectory(
@@ -1492,7 +1485,6 @@ export function SessionList(props: {
         () => new Map()
     )
     const [runningSectionCollapsed, setRunningSectionCollapsed] = useState(false)
-    const [activeSectionCollapsed, setActiveSectionCollapsed] = useState(false)
     const [pinnedSectionCollapsed, setPinnedSectionCollapsed] = useState(false)
     const autoExpandedSelectedSessionKeyRef = useRef<string | null>(null)
     const isGroupCollapsed = (group: SessionGroup): boolean => {
@@ -2101,7 +2093,7 @@ export function SessionList(props: {
                     />
                 ) : null}
 
-                {props.sessions.length > 0 && (isFiltering || activeMachineFilter !== null || showUnreadOnly) && groups.length === 0 && runningSessionTotal === 0 && activeSessionTotal === 0 && globalPinnedSessions.length === 0 ? (
+                {props.sessions.length > 0 && (isFiltering || activeMachineFilter !== null || showUnreadOnly) && groups.length === 0 && runningSessionTotal === 0 && globalPinnedSessions.length === 0 ? (
                     <div className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
                         {t('sessions.search.noResults')}
                     </div>
@@ -2168,15 +2160,6 @@ export function SessionList(props: {
                     pulse: true,
                     count: runningSessionTotal,
                     bucketKeys: ['jobs', 'working', 'pending'],
-                })}
-                {renderPinnedSection({
-                    sectionKey: 'active-section',
-                    titleKey: 'sessions.activeSection',
-                    collapsed: activeSectionCollapsed,
-                    onToggle: () => setActiveSectionCollapsed((value) => !value),
-                    pulse: false,
-                    count: activeSessionTotal,
-                    bucketKeys: ['active', 'idle'],
                 })}
                 {groups.map(renderDirectoryGroup)}
                 {actionOnlyGroups.map(renderActionOnlyGroupHeader)}
