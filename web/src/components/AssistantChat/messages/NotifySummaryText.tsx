@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import type { TextMessagePartComponent, TextMessagePartProps } from '@assistant-ui/react'
 import type { ReactNode } from 'react'
 import { splitNotifySummary, stripNotifySummaryFooter, type NotifySummary } from '@hapi/protocol/messages'
@@ -119,18 +120,39 @@ export const NotifySummaryText: TextMessagePartComponent = (props) => {
     const { text, status } = props
     const sourceMessageId = (props as SourceAwareTextMessagePartProps).sourceMessageId
     const showInChat = useSessionSummaryInChat()
+    const previousTextRef = useRef(text)
+    const runStartedWithRunningRef = useRef(status.type === 'running')
+    const hasTextChangedDuringRunRef = useRef(false)
+
+    // The runtime keeps already-materialized history complete while a session
+    // is being resumed or a new turn is waiting for its first assistant block.
+    // Once this part is actually running, keep assistant-ui's typewriter
+    // enabled from its first paint. A status-only complete -> running change
+    // with unchanged text is still treated as hydration, not new output.
+    if (status.type !== 'running') {
+        runStartedWithRunningRef.current = false
+        hasTextChangedDuringRunRef.current = false
+    } else if (
+        text !== previousTextRef.current
+    ) {
+        hasTextChangedDuringRunRef.current = true
+    }
+    const smooth = status.type === 'running'
+        && (runStartedWithRunningRef.current || hasTextChangedDuringRunRef.current)
+
+    previousTextRef.current = text
 
     if (!showInChat) {
         const stripped = stripNotifySummaryFooter(text)
         if (!stripped) return null
-        if (stripped === text) return withSearchSourceMarker(sourceMessageId, <MarkdownText />)
+        if (stripped === text) return withSearchSourceMarker(sourceMessageId, <MarkdownText smooth={smooth} />)
         return withSearchSourceMarker(sourceMessageId, <MarkdownRenderer content={stripped} />)
     }
 
-    if (status.type !== 'complete') return withSearchSourceMarker(sourceMessageId, <MarkdownText />)
+    if (status.type !== 'complete') return withSearchSourceMarker(sourceMessageId, <MarkdownText smooth={smooth} />)
 
     const display = splitNotifySummary(text)
-    if (!display) return withSearchSourceMarker(sourceMessageId, <MarkdownText />)
+    if (!display) return withSearchSourceMarker(sourceMessageId, <MarkdownText smooth={smooth} />)
 
     const hasDisplayableSummary = Boolean(
         display.summary.summary?.trim()

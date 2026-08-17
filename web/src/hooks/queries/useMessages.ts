@@ -30,6 +30,7 @@ export const EMPTY_STATE: MessageWindowState = {
     requiresLatestReset: false,
     messagesVersion: 0,
     historyVersion: 0,
+    tailRevision: 0,
 }
 
 export function useMessages(
@@ -45,6 +46,7 @@ export function useMessages(
     viewMode: MessageViewMode
     messagesVersion: number
     historyVersion: number
+    tailRevision: number
     loadMore: (onBeforeApply?: (historyVersion: number) => boolean) => Promise<OlderLoadOutcome>
     loadMessageContext: (messageId: string) => Promise<boolean>
     cancelLoadMore: () => void
@@ -157,6 +159,7 @@ export function useMessages(
         viewMode: state.viewMode,
         messagesVersion: state.messagesVersion,
         historyVersion: state.historyVersion,
+        tailRevision: state.tailRevision,
         loadMore,
         loadMessageContext: loadMessageContextForSession,
         cancelLoadMore,
