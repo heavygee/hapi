@@ -759,25 +759,22 @@ layers:
   # DROPPED 2026-08-11: feat/agent-harness-session-wake MERGED as tiann/hapi#1487
   # (Path A only; Path B for #1470 still open — no soup layer until Path B lands)
 
-  # tiann/hapi#1473 / Peer #1203 — A2A P0.5 peer delivery provenance UI.
-  # Web PeerSenderChip + hub peer attribution; schema ladder tip 27 on branch
-  # (soup remat unions with current dual-ledger V24+). Chip ✅ lane A wait.
-  # Worktree: ~/coding/hapi/worktrees/a2a-p05-peer-provenance @ feat/a2a-p05-peer-provenance
-  # Tip: 865bb2fc9 — resume mint log redact + fail-closed inject client (#1473)
-  - branch: feat/a2a-p05-peer-provenance
+  # DROPPED 2026-08-17: feat/a2a-p05-peer-provenance — tiann/hapi#1473 CLOSED
+  # without merge (product regroup → nametag-only #1618). Not empty-vs-main;
+  # chip unlinked; do not remat fortress tip. Worktree retained for archaeology.
+  # Was: tip 865bb2fc9 @ ~/coding/hapi/worktrees/a2a-p05-peer-provenance
+  # - branch: feat/a2a-p05-peer-provenance
 
-  # tiann/hapi#1613 (draft) — Cursor MCP overlay isolation: project `.cursor/mcp.json`
+  # tiann/hapi#1613 — Cursor MCP overlay isolation: project `.cursor/mcp.json`
   # single `hapi` key + dead-PID prune (fixes live multiplex N hapi-<uuid> user keys).
   # Worktree: ~/coding/hapi/worktrees/cursor-mcp-isolation @ fix/cursor-mcp-overlay-isolation
-  # Tip: 4b2fa0f5c — dogfood with #1473 tip above for attributed ping_peer kill-criterion.
+  # Tip: 4b2fa0f5c — was dogfood-paired with #1473; now independent of nametag #1618
   - branch: fix/cursor-mcp-overlay-isolation
 
-  # #1473 estate upload blindness — peer-cap inject early-connect hold +
-  # webhook default 25s + redeem settings-token fallback.
-  # Soup tip on feat/a2a-p05-peer-provenance (inject lives in that stack).
-  # Worktree: ~/coding/hapi/worktrees/peer-cap-inject-early-connect
-  # Tip: 4ff262ba6 — early-connect not_armed hold; deliverTo 20s; webhook 25s
-  - branch: fix/peer-cap-inject-early-connect
+  # DROPPED 2026-08-17 with #1473: fix/peer-cap-inject-early-connect was estate
+  # upload-blindness soup for the fortress path (inject on a2a-p05 stack).
+  # Was: tip 4ff262ba6 @ ~/coding/hapi/worktrees/peer-cap-inject-early-connect
+  # - branch: fix/peer-cap-inject-early-connect
 
   # EMERGENCY 2026-08-11: tiann/hapi#1502 / PR #1503 — Cursor ACP state_update
   # chatter flips hub thinking every ~1–2s after the harness-wake merge (session-list spinner dance).
