@@ -15,9 +15,11 @@ import {
     getSessionDedupKey,
     getWorktreeSessionLabel,
     getVisibleSessionPreview,
+    groupSessionsByDirectory,
     isSidebarEmptySessionStub,
     normalizeSearch,
     prepareSidebarSessions,
+    resolveSessionGroupDirectory,
     sessionMatchesQuery,
     sessionMatchesTimeRange,
     shouldShowPinnedDivider,
@@ -651,5 +653,80 @@ describe('getPullRefreshIndicatorRotation', () => {
     it('turns the pull indicator upward once refresh is ready', () => {
         expect(getPullRefreshIndicatorRotation('pulling')).toBe(0)
         expect(getPullRefreshIndicatorRotation('ready')).toBe(180)
+    })
+})
+
+
+describe('resolveSessionGroupDirectory', () => {
+    it('uses worktree.basePath when the session path lives under it', () => {
+        expect(resolveSessionGroupDirectory({
+            path: '/home/heavygee/coding/hapi/worktrees/feat-x',
+            worktree: { basePath: '/home/heavygee/coding/hapi' },
+        })).toBe('/home/heavygee/coding/hapi')
+    })
+
+    it('falls back to metadata.path when basePath is missing', () => {
+        expect(resolveSessionGroupDirectory({
+            path: '/home/heavygee/coding/server-setup',
+        })).toBe('/home/heavygee/coding/server-setup')
+    })
+
+    it('prefers the path spelling when basePath is a realpath of a symlink prefix', () => {
+        // Estate: ~/coding -> /work/coding. CLI stores realpath basePath but path still uses ~/coding.
+        expect(resolveSessionGroupDirectory({
+            path: '/home/heavygee/coding/hapi/worktrees/cursor-mcp-isolation',
+            worktree: { basePath: '/work/coding/hapi' },
+        })).toBe('/home/heavygee/coding/hapi')
+    })
+
+    it('keeps a pure realpath session under the realpath root', () => {
+        expect(resolveSessionGroupDirectory({
+            path: '/work/coding/hapi',
+            worktree: { basePath: '/work/coding/hapi' },
+        })).toBe('/work/coding/hapi')
+    })
+
+    it('returns Other when neither path nor basePath is set', () => {
+        expect(resolveSessionGroupDirectory({})).toBe('Other')
+    })
+})
+
+describe('groupSessionsByDirectory symlink coalesce', () => {
+    it('places symlink-prefix and realpath basePath sessions in one project group', () => {
+        const homeSpelling = makeSession({
+            id: 'home',
+            updatedAt: 2,
+            metadata: {
+                machineId: 'machine-oos',
+                path: '/home/heavygee/coding/hapi',
+                worktree: {
+                    basePath: '/home/heavygee/coding/hapi',
+                    branch: 'main',
+                    name: 'driver',
+                    worktreePath: '/home/heavygee/coding/hapi/driver',
+                },
+            },
+        })
+        const realpathBase = makeSession({
+            id: 'work',
+            updatedAt: 1,
+            active: true,
+            metadata: {
+                machineId: 'machine-oos',
+                path: '/home/heavygee/coding/hapi/worktrees/feat-x',
+                worktree: {
+                    basePath: '/work/coding/hapi',
+                    branch: 'feat/x',
+                    name: 'feat-x',
+                    worktreePath: '/home/heavygee/coding/hapi/worktrees/feat-x',
+                },
+            },
+        })
+
+        const groups = groupSessionsByDirectory([homeSpelling, realpathBase])
+        expect(groups).toHaveLength(1)
+        expect(groups[0]?.directory).toBe('/home/heavygee/coding/hapi')
+        expect(groups[0]?.displayName).toBe('coding/hapi')
+        expect(groups[0]?.sessions.map((s) => s.id).sort()).toEqual(['home', 'work'])
     })
 })

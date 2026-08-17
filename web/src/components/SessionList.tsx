@@ -177,6 +177,57 @@ function getGroupDisplayName(directory: string): string {
     return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`
 }
 
+function stripTrailingSeparators(path: string): string {
+    return path.replace(/[/\\]+$/, '')
+}
+
+function pathIsUnder(parent: string, child: string): boolean {
+    const parentNorm = stripTrailingSeparators(parent).replace(/\\/g, '/')
+    const childNorm = stripTrailingSeparators(child).replace(/\\/g, '/')
+    return childNorm === parentNorm || childNorm.startsWith(`${parentNorm}/`)
+}
+
+export type SessionGroupDirectorySource = {
+    path?: string | null
+    worktree?: { basePath?: string | null } | null
+}
+
+/**
+ * Directory used as the sidebar project-group key.
+ *
+ * Prefer worktree.basePath when the session path lives under it. When basePath
+ * is a realpath of a symlink prefix (path still uses the logical spelling,
+ * e.g. ~/coding → /work/coding), derive the group root from path so both
+ * spellings share one header instead of two identical `coding/hapi · machine`
+ * rows.
+ */
+export function resolveSessionGroupDirectory(source: SessionGroupDirectorySource): string {
+    const path = source.path?.trim() || ''
+    const basePath = source.worktree?.basePath?.trim() || ''
+    if (!basePath && !path) return 'Other'
+    if (!basePath) return stripTrailingSeparators(path)
+    if (!path) return stripTrailingSeparators(basePath)
+
+    const normBase = stripTrailingSeparators(basePath)
+    if (pathIsUnder(normBase, path)) {
+        return normBase
+    }
+
+    const display = getGroupDisplayName(normBase)
+    if (!display || display === 'Other') return normBase
+
+    const pathNorm = path.replace(/\\/g, '/')
+    const needle = `/${display.replace(/\\/g, '/')}`
+    const underIdx = pathNorm.indexOf(`${needle}/`)
+    if (underIdx !== -1) {
+        return pathNorm.slice(0, underIdx + needle.length)
+    }
+    if (pathNorm.endsWith(needle)) {
+        return pathNorm
+    }
+    return normBase
+}
+
 export const UNKNOWN_MACHINE_ID = '__unknown__'
 export const GROUP_SESSION_PREVIEW_LIMIT = DEFAULT_SESSION_PREVIEW_LIMIT
 
@@ -275,11 +326,11 @@ export function getPreviousSessionVisibleCount(current: number, step: number): n
     return Math.max(normalizedStep, current - normalizedStep)
 }
 
-function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGroup[] {
+export function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGroup[] {
     const groups = new Map<string, { directory: string; machineId: string | null; sessions: SessionSummary[] }>()
 
     sessions.forEach(session => {
-        const path = session.metadata?.worktree?.basePath ?? session.metadata?.path ?? 'Other'
+        const path = resolveSessionGroupDirectory(session.metadata ?? {})
         const machineId = session.metadata?.machineId ?? null
         const key = `${machineId ?? UNKNOWN_MACHINE_ID}::${path}`
         if (!groups.has(key)) {
@@ -1522,7 +1573,7 @@ export function SessionList(props: {
                                             selected={s.id === selectedSessionId}
                                             showDetailedStatus={showDetailedStatus}
                                             inRunningSection
-                                            projectLabel={getGroupDisplayName(s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')}
+                                            projectLabel={getGroupDisplayName(resolveSessionGroupDirectory(s.metadata ?? {}))}
                                             machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
                                         />
                                     ))}
@@ -2013,7 +2064,7 @@ export function SessionList(props: {
                                             selected={s.id === selectedSessionId}
                                             showDetailedStatus={showDetailedStatus}
                                             inRunningSection
-                                            projectLabel={getGroupDisplayName(s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')}
+                                            projectLabel={getGroupDisplayName(resolveSessionGroupDirectory(s.metadata ?? {}))}
                                             machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
                                         />
                                     ))}
