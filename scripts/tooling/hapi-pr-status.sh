@@ -54,6 +54,10 @@ CHECKS_OK=true
 THREADS_OK=true
 BOT_OK=true
 
+# Operator override — fetch once; also softens CI when GH returns empty rollup / 503.
+HAS_CLEAN_LABEL=$(gh pr view "$PR" --repo "$REPO" --json labels \
+    --jq '[.labels[].name] | contains(["cold-review-clean"])' 2>/dev/null || echo "false")
+
 echo ""
 echo "  PR #${PR} — ${REPO}"
 echo "  ══════════════════════════════════════"
@@ -66,20 +70,32 @@ echo "  1. CI checks"
 CHECKS_ERR="$(mktemp)"
 CHECKS_JSON="$(gh pr checks "$PR" --repo "$REPO" --json name,bucket 2>"$CHECKS_ERR" || true)"
 if ! printf '%s' "$CHECKS_JSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
-    echo "     ✗ could not read checks (gh pr checks --json failed)"
-    sed 's/^/       /' "$CHECKS_ERR" >&2 || true
-    rm -f "$CHECKS_ERR"
-    echo "     → FAIL (no check data — refuse to invent PASS)"
-    CHECKS_OK=false
-    PASS=1
+    if [[ "$HAS_CLEAN_LABEL" == "true" ]]; then
+        echo "     ~ could not read checks (gh outage / transport)"
+        sed 's/^/       /' "$CHECKS_ERR" >&2 || true
+        rm -f "$CHECKS_ERR"
+        echo "     → PASS (cold-review-clean — operator attested; no rollup)"
+    else
+        echo "     ✗ could not read checks (gh pr checks --json failed)"
+        sed 's/^/       /' "$CHECKS_ERR" >&2 || true
+        rm -f "$CHECKS_ERR"
+        echo "     → FAIL (no check data — refuse to invent PASS)"
+        CHECKS_OK=false
+        PASS=1
+    fi
 else
     rm -f "$CHECKS_ERR"
     CHECK_COUNT="$(printf '%s' "$CHECKS_JSON" | jq 'length')"
     if [[ "$CHECK_COUNT" -eq 0 ]]; then
-        echo "     ✗ zero checks returned"
-        echo "     → FAIL (empty rollup — refuse to invent PASS)"
-        CHECKS_OK=false
-        PASS=1
+        if [[ "$HAS_CLEAN_LABEL" == "true" ]]; then
+            echo "     ~ zero checks returned (empty rollup)"
+            echo "     → PASS (cold-review-clean — operator attested; no rollup)"
+        else
+            echo "     ✗ zero checks returned"
+            echo "     → FAIL (empty rollup — refuse to invent PASS)"
+            CHECKS_OK=false
+            PASS=1
+        fi
     else
         while IFS= read -r row; do
             cname=$(echo "$row" | jq -r '.name')
@@ -174,10 +190,6 @@ fi
 # forces PASS on either surface (manual override after addressing/accepting findings).
 echo ""
 echo "  3. Latest bot verdict"
-
-# Check for operator-applied override label first (cheap, decisive)
-HAS_CLEAN_LABEL=$(gh pr view "$PR" --repo "$REPO" --json labels \
-    --jq '[.labels[].name] | contains(["cold-review-clean"])' 2>/dev/null || echo "false")
 
 if [[ "$HAS_CLEAN_LABEL" == "true" ]]; then
     echo "     ✓ cold-review-clean label present (operator override)"

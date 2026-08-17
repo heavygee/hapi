@@ -324,7 +324,16 @@ classify_one() {
         return
     fi
 
+    local has_crc=0
+    if pec_labels_csv_has "$labels_csv" "cold-review-clean"; then
+        has_crc=1
+    fi
+
     read -r checks_ok checks_pending checks_seen pr_review_ok < <(_gh_check_signals "$n")
+    # Invalid-json / 503 path returns 0 0 0 0 — with CRC, treat as rollup-unavailable not failing CI.
+    if [[ "$has_crc" -eq 1 && "$checks_seen" -eq 0 && "$checks_ok" -eq 0 ]]; then
+        checks_ok=1
+    fi
 
     IFS=$'\t' read -r threads_n review_decision < <(_fetch_review_signals "$n")
     if [[ -z "$threads_n" || ! "$threads_n" =~ ^-?[0-9]+$ ]]; then
@@ -335,6 +344,7 @@ classify_one() {
     bot_body="$(fetch_latest_bot_body "$n")"
     if [[ "$bot_body" == "__CLEAN_LABEL__" ]]; then
         bot_clean=1
+        has_crc=1
         bot_body=""
     fi
     [[ -n "$bot_body" ]] && bot_has_body=1
@@ -360,7 +370,7 @@ classify_one() {
     fi
 
     decided="$(pec_decide_emoji 1 0 0 "$checks_ok" "$checks_pending" "$checks_seen" \
-        "$threads_n" "$bot_clean" "$bot_major" "$bot_has_body" "$merge_bad" 0 "$review_changes")"
+        "$threads_n" "$bot_clean" "$bot_major" "$bot_has_body" "$merge_bad" 0 "$review_changes" 0 "$has_crc")"
     emoji="${decided%%$'\t'*}"
     action="${decided#*$'\t'}"
     local merge_lane=""

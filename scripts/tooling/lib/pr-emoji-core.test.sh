@@ -137,6 +137,15 @@ eq "closed superseded hint action" "$(action_of "$r" | grep -c 'closed supersede
 r="$(pec_decide_emoji 1 0 0 1 0 0 0 1 0 0 0 0)"
 eq "no CI checks seen → NOT ✅" "$(emoji_of "$r")" "🔁"
 
+r="$(pec_decide_emoji 1 0 0 0 0 0 0 1 0 0 0 0 0 0 1)"
+eq "CRC + no rollup (503 path) → ✅ not ⚠️" "$(emoji_of "$r")" "✅"
+[[ "$(action_of "$r")" == *"cold-review-clean"* ]] && PASS=$((PASS + 1)) \
+    || { echo "FAIL: CRC+no rollup action should mention cold-review-clean (got: $(action_of "$r"))" >&2; FAIL=$((FAIL + 1)); }
+
+r="$(pec_decide_emoji 1 0 0 0 0 0 0 0 0 0 0 0 0 0 1)"
+eq "CRC + no rollup + bot not clean → 🔁 not push nag" "$(emoji_of "$r")" "🔁"
+[[ "$(action_of "$r")" == *"push to trigger"* ]] && { echo "FAIL: CRC path should not nag push (got: $(action_of "$r"))" >&2; FAIL=$((FAIL + 1)); } || PASS=$((PASS + 1))
+
 r="$(pec_decide_emoji 1 0 0 1 0 1 -1 1 0 0 0 0)"
 eq "green but thread count unavailable → 🔁" "$(emoji_of "$r")" "🔁"
 

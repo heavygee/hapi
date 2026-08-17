@@ -353,7 +353,7 @@ pec_leading_emoji() {
 # Usage:
 #   pec_decide_emoji EXISTS MERGED CLOSED CHECKS_OK CHECKS_PENDING CHECKS_SEEN \
 #                    THREADS_N BOT_CLEAN BOT_MAJOR BOT_HAS_BODY MERGE_BAD DATA_UNAVAILABLE \
-#                    [REVIEW_CHANGES_REQUESTED] [SUPERSEDED_HINT]
+#                    [REVIEW_CHANGES_REQUESTED] [SUPERSEDED_HINT] [CRC_ATTESTED]
 #   → prints "<emoji>\t<action>"
 #
 # THREADS_N: >=0 actionable unresolved count (caller excludes isOutdated — #847), -1 = unavailable.
@@ -365,7 +365,7 @@ pec_decide_emoji() {
     local exists="$1" merged="$2" closed="$3" checks_ok="$4" checks_pending="$5" \
         checks_seen="$6" threads_n="$7" bot_clean="$8" bot_major="$9" \
         bot_has_body="${10}" merge_bad="${11}" data_unavailable="${12}" \
-        review_changes="${13:-0}" superseded_hint="${14:-0}"
+        review_changes="${13:-0}" superseded_hint="${14:-0}" crc_attested="${15:-0}"
 
     if [[ "$data_unavailable" == "1" ]]; then
         printf '%s\t%s' "?" "GitHub data unavailable this run — retry sweep (title unchanged)"
@@ -404,7 +404,7 @@ pec_decide_emoji() {
     [[ "$review_changes" == "1" ]] && parts+=("address CHANGES_REQUESTED review")
     if [[ "$checks_ok" == "0" && "$checks_pending" == "1" ]]; then
         parts+=("CI running")
-    elif [[ "$checks_ok" == "0" ]]; then
+    elif [[ "$checks_ok" == "0" && ! ( "$crc_attested" == "1" && "$checks_seen" == "0" ) ]]; then
         parts+=("fix failing CI")
     fi
     [[ "$threads_n" -gt 0 ]] 2>/dev/null && parts+=("resolve ${threads_n} open thread(s)")
@@ -416,7 +416,7 @@ pec_decide_emoji() {
             : # receiving — skip sticky body-grep bot nag until pr-review finishes
         elif [[ "$bot_has_body" == "1" ]]; then
             parts+=("address latest bot review")
-        elif [[ "$review_changes" != "1" ]]; then
+        elif [[ "$review_changes" != "1" && "$crc_attested" != "1" ]]; then
             parts+=("push to trigger bot review")
         fi
     elif [[ "$bot_major_actionable" == "1" ]]; then
@@ -432,6 +432,12 @@ pec_decide_emoji() {
         && "$bot_clean" == "1" && "$bot_major_actionable" == "0" \
         && "$merge_bad" == "0" && "$review_changes" == "0" ]]; then
         emoji="✅"; action="full green - wait on tiann"
+    elif [[ "$crc_attested" == "1" && "$checks_seen" == "0" && "$threads_n" == "0" \
+        && "$bot_clean" == "1" && "$bot_major_actionable" == "0" \
+        && "$merge_bad" == "0" && "$review_changes" == "0" ]]; then
+        # cold-review-clean + merge clean but GH returned empty rollup / 503 — do not
+        # invent ⚠️ or "push to trigger bot review" (#91 / #132 flake noise).
+        emoji="✅"; action="cold-review-clean — CI rollup empty/unavailable (merge clean)"
     elif [[ "$checks_seen" == "0" && "$merge_bad" == "0" && "$bot_major_actionable" == "0" && "$review_changes" == "0" ]]; then
         # No CI evidence yet: never call it green. Nudge instead of false ✅.
         emoji="🔁"; action="no CI checks visible yet — push/retry then re-sweep"
