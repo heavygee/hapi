@@ -4,7 +4,7 @@ import { MachineTagConflictError, mergeMachineMetadata } from './machines'
 import { hashRunnerProof } from '../utils/runnerProof'
 
 describe('machine tag enrollment (#1473)', () => {
-    it('binds runnerProofHash on create and refuses tag-only proof rebind (#1473)', () => {
+    it('binds runnerProofHash on create and allows offline tag-matched proof rebind (#1473)', () => {
         const store = new Store(':memory:')
         const first = store.machines.getOrCreateMachine(
             'machine-proof',
@@ -16,18 +16,30 @@ describe('machine tag enrollment (#1473)', () => {
         )
         expect(first.runnerProofHash).toBe(hashRunnerProof('proof-a'))
 
-        // Matching tag + wrong proof must not overwrite the hash (settings.json
-        // tag is same-UID readable; sibling must not mint local-resume).
-        expect(() => store.machines.getOrCreateMachine(
+        // Offline rebind keeps machineId (cold restart kill-criterion).
+        const rebound = store.machines.getOrCreateMachine(
             'machine-proof',
             { host: 'h2' },
             null,
             'ns',
             'secret-tag',
-            'proof-b'
+            'proof-b',
+            { allowOfflineProofRebind: true }
+        )
+        expect(rebound.id).toBe('machine-proof')
+        expect(rebound.runnerProofHash).toBe(hashRunnerProof('proof-b'))
+        expect(rebound.metadata).toEqual({ host: 'h2' })
+
+        // Live path (no offline flag) still refuses forged proof (#1473 Blocker).
+        expect(() => store.machines.getOrCreateMachine(
+            'machine-proof',
+            { host: 'hijack' },
+            null,
+            'ns',
+            'secret-tag',
+            'proof-forged'
         )).toThrow(/runner proof mismatch/)
-        expect(store.machines.getMachine('machine-proof')?.runnerProofHash).toBe(hashRunnerProof('proof-a'))
-        expect(store.machines.getMachine('machine-proof')?.metadata).toEqual({ host: 'h' })
+        expect(store.machines.getMachine('machine-proof')?.runnerProofHash).toBe(hashRunnerProof('proof-b'))
 
         const unbound = store.machines.getOrCreateMachine(
             'machine-unbound',
@@ -46,20 +58,17 @@ describe('machine tag enrollment (#1473)', () => {
             'proof-late'
         )).toThrow(/runner proof missing/)
 
-        // Bound rows reject omitted proof (#1473 Major) — must not refresh metadata.
         expect(() => store.machines.getOrCreateMachine(
             'machine-proof',
-            { host: 'hijack' },
+            { host: 'omit' },
             null,
             'ns',
             'secret-tag'
         )).toThrow(/runner proof mismatch/)
-        expect(store.machines.getMachine('machine-proof')?.metadata).toEqual({ host: 'h' })
         store.close()
     })
 
-    it('refuses proof mismatch even when the machine row is still marked active', () => {
-        // Sticky DB active must not unlock tag-only rebind (#1473 Blocker).
+    it('refuses proof rebind for a live machine even with allowOfflineProofRebind false', () => {
         const store = new Store(':memory:')
         store.machines.getOrCreateMachine(
             'machine-live',
@@ -87,10 +96,21 @@ describe('machine tag enrollment (#1473)', () => {
             'proof-restart'
         )).toThrow(/runner proof mismatch/)
         expect(store.machines.getMachine('machine-live')?.runnerProofHash).toBe(hashRunnerProof('proof-a'))
+        // Explicit offline flag still works even if DB active sticks.
+        const rebound = store.machines.getOrCreateMachine(
+            'machine-live',
+            { host: 'h' },
+            null,
+            'ns',
+            'secret-tag',
+            'proof-restart',
+            { allowOfflineProofRebind: true }
+        )
+        expect(rebound.runnerProofHash).toBe(hashRunnerProof('proof-restart'))
         store.close()
     })
 
-    it('keeps local-resume mint unavailable after rejected tag/wrong-proof re-registration', () => {
+    it('keeps local-resume mint unavailable after rejected live tag/wrong-proof re-registration', () => {
         const store = new Store(':memory:')
         store.machines.getOrCreateMachine(
             'machine-mint',
@@ -111,7 +131,6 @@ describe('machine tag enrollment (#1473)', () => {
         const row = store.machines.getMachine('machine-mint')
         expect(row?.runnerProofHash).toBe(hashRunnerProof('proof-owner'))
         expect(row?.metadata).toEqual({ host: 'h' })
-        // Hub mint path verifies against stored hash — forged proof still fails.
         expect(row?.runnerProofHash).not.toBe(hashRunnerProof('proof-forged'))
         store.close()
     })

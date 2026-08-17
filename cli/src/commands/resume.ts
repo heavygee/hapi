@@ -273,23 +273,30 @@ export const resumeCommand: CommandDefinition = {
             }
 
             // Attributed resume needs a session capability for RPC auth.
-            // Runner-spawned children get inject env; terminal `hapi resume`
-            // may redeem a peercred grant when the peer is a tracked child.
-            // Without a capability the CLI cannot refresh session-alive or
-            // register KillSession (sessionRpcAuthorizedId gate) — fail closed
-            // for active and inactive alike (#1473).
+            // Prefer inject env (runner child) or peercred grant (tracked
+            // descendant). Unrelated operator shells cannot mint — ask the
+            // runner to spawn via hub resume so capability stays inside the
+            // runner-tracked child (#1473 kill-criterion).
             if (!process.env.HAPI_PEER_CAP_INJECT?.trim()) {
                 try {
                     const { requestRunnerLocalResumeCapability } = await import('@/runner/localResumeGrant')
                     const { armDirectResumeCapability } = await import('@/api/peerCapabilityInject')
                     const capability = await requestRunnerLocalResumeCapability(target.sessionId)
                     armDirectResumeCapability(capability)
-                } catch (error) {
-                    throw new Error(
-                        `Cannot resume session without a resume capability: ${
-                            error instanceof Error ? error.message : String(error)
-                        }`
+                } catch {
+                    if (target.flavor === 'agy' && target.active) {
+                        throw new Error('Antigravity is active. Stop it before resuming.')
+                    }
+                    if (target.active) {
+                        await api.handoffSessionToLocal(target.sessionId)
+                    }
+                    await api.resumeSessionViaRunner(target.sessionId)
+                    console.log(
+                        chalk.green(
+                            `Resumed ${target.sessionId} via runner (capability stays in runner child). Continue in the web UI.`
+                        )
                     )
+                    return
                 }
             }
 

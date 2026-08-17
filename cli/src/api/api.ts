@@ -279,16 +279,9 @@ export class ApiClient {
                 machineId: rotated.machineId,
                 machineTag: rotated.machineTag,
             })
-            // Proof mismatch always rotates (no tag-only in-place rebind —
-            // settings.json tag is same-UID readable, #1473 Blocker). Do not
-            // auto-migrate: migrate-sessions requires the lost source
-            // runnerProof, so cold restart leaves sessions on the old id until
-            // an operator-trusted remap (#1473 Blocker).
-            if (machine.id !== fromMachineId) {
-                logger.warn(
-                    `[API] Re-enrolled as ${machine.id}; sessions on ${fromMachineId} need operator-approved migration`
-                )
-            }
+            // Offline cold-restart rebind keeps machineId when the hub allows
+            // it (machineCache gates live runners). Sessions stay attached —
+            // no migrate needed (#1473 kill-criterion).
             return machine
         }
     }
@@ -396,6 +389,31 @@ export class ApiClient {
         if (!parsed.success || !parsed.data.ok) {
             throw apiValidationError('Invalid /cli/sessions/:id/handoff-local response', response)
         }
+    }
+
+    /**
+     * Ask the hub/runner to spawn an attributed resume (web-equivalent path).
+     * Used when terminal `hapi resume` cannot redeem a peercred grant (#1473).
+     */
+    async resumeSessionViaRunner(sessionId: string): Promise<void> {
+        const response = await axios.post(
+            `${configuration.apiUrl}/cli/sessions/${encodeURIComponent(sessionId)}/resume`,
+            {},
+            {
+                headers: this.authHeaders(),
+                timeout: 120_000,
+                validateStatus: () => true,
+            }
+        )
+        if (response.data?.type === 'success') {
+            return
+        }
+        const detail = typeof response.data?.error === 'string'
+            ? response.data.error
+            : typeof response.data?.code === 'string'
+                ? response.data.code
+                : `HTTP ${response.status}`
+        throw new Error(`Runner resume failed: ${detail}`)
     }
 
     /** Mint a short-lived cold-restart migrate grant while runnerProof is live (#1473). */

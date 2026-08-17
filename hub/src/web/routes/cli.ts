@@ -210,6 +210,31 @@ export function createCliRoutes(
         return c.json({ ok: true })
     })
 
+    /**
+     * Terminal `hapi resume` without inject env asks the runner to spawn with
+     * a hub-minted capability (same path as web resume). Capability stays inside
+     * the runner-tracked child — unrelated shells must not receive a mint (#1473).
+     */
+    app.post('/sessions/:id/resume', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not ready' }, 503)
+        }
+
+        const namespace = c.get('namespace')
+        const result = await engine.resumeSession(c.req.param('id'), namespace)
+        if (result.type === 'error') {
+            const status = result.code === 'no_machine_online' ? 503
+                : result.code === 'access_denied' ? 403
+                    : result.code === 'session_not_found' ? 404
+                        : result.code === 'resume_unavailable' ? 409
+                            : 500
+            return c.json({ error: result.message, code: result.code }, status)
+        }
+
+        return c.json({ type: 'success', sessionId: result.sessionId })
+    })
+
     app.post('/sessions/:id/clear-opencode', async (c) => {
         const engine = getSyncEngine()
         if (!engine) {

@@ -24,9 +24,19 @@ export class MachineStore {
         runnerState: unknown,
         namespace: string,
         tag?: string,
-        runnerProof?: string
+        runnerProof?: string,
+        options?: { allowOfflineProofRebind?: boolean }
     ): StoredMachine {
-        return getOrCreateMachine(this.db, id, metadata, runnerState, namespace, tag, runnerProof)
+        return getOrCreateMachine(
+            this.db,
+            id,
+            metadata,
+            runnerState,
+            namespace,
+            tag,
+            runnerProof,
+            options
+        )
     }
 
     updateMachineMetadata(

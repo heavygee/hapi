@@ -3,8 +3,8 @@
  *
  * Terminal `hapi resume` has no HAPI_PEER_CAP_INJECT. Tracked session
  * children may redeem a peercred grant here. Unrelated operator shells
- * fail closed (cannot satisfy descendant check / no Windows grant server)
- * — attributed resume stays on hub/web → runner spawn with inject (#1473).
+ * fall through to hub/runner resume (`POST /cli/sessions/:id/resume`) so
+ * the capability stays inside a runner-tracked child (#1473).
  */
 
 import { createServer, createConnection, type Server } from 'node:net'
