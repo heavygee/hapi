@@ -40,8 +40,8 @@ export class EventStore {
         return getSystemEventByIdempotencyKey(this.db, idempotencyKey)
     }
 
-    getByDedupeKey(dedupeKey: string): StoredSystemEvent | null {
-        return getSystemEventByDedupeKey(this.db, dedupeKey)
+    getByDedupeKey(dedupeKey: string, namespace = 'default'): StoredSystemEvent | null {
+        return getSystemEventByDedupeKey(this.db, dedupeKey, namespace)
     }
 
     count(): number {

@@ -434,23 +434,27 @@ export class SyncEngine {
      * the operator inbox. Deduped replays return the prior row without
      * re-promoting or mutating inbox.
      */
-    insertChannelSystemEvent(input: InsertSystemEventInput): { event: StoredSystemEvent; deduped: boolean } | null {
+    insertChannelSystemEvent(
+        namespace: string,
+        input: InsertSystemEventInput
+    ): { event: StoredSystemEvent; deduped: boolean } | null {
         if (input.sourceKind !== 'channel') {
             throw new Error('insertChannelSystemEvent requires sourceKind channel')
         }
-        if (input.idempotencyKey) {
-            const existing = this.store.events.getByIdempotencyKey(input.idempotencyKey)
+        const namespacedInput = { ...input, namespace }
+        if (namespacedInput.idempotencyKey) {
+            const existing = this.store.events.getByIdempotencyKey(namespacedInput.idempotencyKey)
             if (existing) {
                 return { event: existing, deduped: true }
             }
         }
-        if (input.dedupeKey) {
-            const existing = this.store.events.getByDedupeKey(input.dedupeKey)
+        if (namespacedInput.dedupeKey) {
+            const existing = this.store.events.getByDedupeKey(namespacedInput.dedupeKey, namespace)
             if (existing) {
                 return { event: existing, deduped: true }
             }
         }
-        const event = this.store.events.insert(input)
+        const event = this.store.events.insert(namespacedInput)
         if (!event) {
             return null
         }

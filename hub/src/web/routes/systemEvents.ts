@@ -116,7 +116,7 @@ export function createSystemEventsRoutes(getSyncEngine: () => SyncEngine | null)
             }
         }
 
-        const result = engine.insertChannelSystemEvent({
+        const result = engine.insertChannelSystemEvent(c.get('namespace'), {
             ts: data.ts ?? Date.now(),
             sourceKind: 'channel',
             sourceRef: data.sourceRef,
