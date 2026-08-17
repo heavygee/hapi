@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'bun:test'
 import type { Database } from 'bun:sqlite'
 import { Store } from './index'
-import { removeMessageContentSearchForSessions } from './messageContentSearch'
+import {
+    MAX_SHORT_INDEX_CHARACTERS,
+    removeMessageContentSearchForSessions
+} from './messageContentSearch'
 
 function makeSession(store: Store, tag: string, namespace = 'default') {
     return store.sessions.getOrCreateSession(tag, { path: `/tmp/${tag}` }, null, namespace)
@@ -123,6 +126,48 @@ describe('message content search', () => {
         expect(store.messages.searchContent('搜', 'default')).toEqual([])
         expect(store.messages.searchContentInSession('搜', 'default', defaultSession.id))
             .toEqual({ matches: [], total: 0 })
+    })
+
+    it('bounds per-message short-index work for long high-entropy text', () => {
+        const store = new Store(':memory:')
+        const session = makeSession(store, 'bounded-short-index')
+        const text = Array.from({ length: MAX_SHORT_INDEX_CHARACTERS + 1024 }, (_, index) =>
+            String.fromCodePoint(0x1000 + index)
+        ).join('')
+
+        store.messages.addMessage(session.id, {
+            role: 'user',
+            content: { type: 'text', text }
+        })
+
+        const db = (store as unknown as { db: Database }).db
+        const row = db.prepare(`
+            SELECT rowid AS search_rowid
+            FROM message_content_search
+            LIMIT 1
+        `).get() as { search_rowid: number }
+        const count = db.prepare(`
+            SELECT COUNT(*) AS count
+            FROM message_content_search_short
+            WHERE search_rowid = ?
+        `).get(row.search_rowid) as { count: number | string }
+
+        expect(Number(count.count)).toBeLessThanOrEqual(MAX_SHORT_INDEX_CHARACTERS - 1)
+    })
+
+    it('matches visible Markdown text rather than source delimiters', () => {
+        const store = new Store(':memory:')
+        const session = makeSession(store, 'markdown-content-search')
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: { type: 'message', message: 'Use **KV Cache** for this path.' }
+            }
+        })
+
+        expect(store.messages.searchContent('KV Cache', 'default'))
+            .toMatchObject([{ sessionId: session.id }])
     })
 
     it('applies the result limit after deduplicating matching sessions', () => {

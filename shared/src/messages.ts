@@ -1,3 +1,5 @@
+import { fromMarkdown } from 'mdast-util-from-markdown'
+import { toString } from 'mdast-util-to-string'
 import { isObject } from './utils'
 
 type RoleWrappedRecord = {
@@ -157,6 +159,16 @@ function normalizeSearchablePlainText(value: string): string | null {
     return text.length > 0 ? text : null
 }
 
+function normalizeSearchableMarkdownText(value: string): string | null {
+    try {
+        return normalizeSearchablePlainText(toString(fromMarkdown(value)))
+    } catch {
+        // Keep indexing malformed/incomplete streamed Markdown rather than
+        // dropping otherwise visible assistant text.
+        return normalizeSearchablePlainText(value)
+    }
+}
+
 export function extractUserPlainText(content: unknown): string | null {
     if (typeof content === 'string') {
         return normalizeSearchablePlainText(content)
@@ -236,14 +248,13 @@ export function extractSearchableMessageText(value: unknown): SearchableMessage 
                 && typeof record.content.text === 'string'
                 ? record.content.text
                 : null
-        const text = normalizeSearchablePlainText(
-            stripNotifySummaryFooter(
-                isAgyPlannerMessage
-                    ? stripAgyEchoedTaskResult(directText ?? extractAssistantPlainText(record.content) ?? '')
-                    : (directText ?? extractAssistantPlainText(record.content) ?? '')
-            )
+        const rawText = stripNotifySummaryFooter(
+            isAgyPlannerMessage
+                ? stripAgyEchoedTaskResult(directText ?? extractAssistantPlainText(record.content) ?? '')
+                : (directText ?? extractAssistantPlainText(record.content) ?? '')
         )
-        if (!text || (isAgyPlannerMessage && getAgyTaskLogId(text))) return null
+        const text = normalizeSearchableMarkdownText(rawText)
+        if (!text || (isAgyPlannerMessage && getAgyTaskLogId(normalizeSearchablePlainText(rawText) ?? ''))) return null
         return { role: 'assistant', text, ...(renderKey ? { renderKey } : {}) }
     }
 

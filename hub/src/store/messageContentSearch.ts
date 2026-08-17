@@ -47,6 +47,7 @@ type DbMessageRow = {
 const SEARCH_REBUILD_BATCH_SIZE = 500
 const SEARCH_LOOKUP_BACKFILL_BATCH_SIZE = 500
 const MIN_INDEXED_QUERY_LENGTH = 2
+export const MAX_SHORT_INDEX_CHARACTERS = 16_384
 
 type DbSearchRow = {
     search_rowid?: number
@@ -111,6 +112,17 @@ function getShortSearchGrams(text: string): string[] {
     return [...grams]
 }
 
+function getBoundedShortSearchGrams(text: string): string[] {
+    // Slice before converting to code points so a very large message cannot
+    // allocate an Array for its entire contents just to index its prefix.
+    let boundedText = text.slice(0, MAX_SHORT_INDEX_CHARACTERS)
+    const lastCodeUnit = boundedText.charCodeAt(boundedText.length - 1)
+    if (lastCodeUnit >= 0xd800 && lastCodeUnit <= 0xdbff) {
+        boundedText = boundedText.slice(0, -1)
+    }
+    return getShortSearchGrams(boundedText)
+}
+
 export function backfillMessageContentSearchShortIndex(db: Database): void {
     db.transaction(() => {
         ensureMessageContentSearchTable(db)
@@ -139,7 +151,7 @@ export function backfillMessageContentSearchShortIndex(db: Database): void {
             if (rows.length === 0) break
 
             for (const row of rows) {
-                for (const gram of getShortSearchGrams(row.searchable_text)) {
+                for (const gram of getBoundedShortSearchGrams(row.searchable_text)) {
                     insert.run(gram, row.search_rowid)
                 }
             }
@@ -276,7 +288,7 @@ function insertMessageContentSearchIndex(
         INSERT INTO ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} (gram, search_rowid)
         VALUES (?, ?)
     `)
-    for (const gram of getShortSearchGrams(message.text)) {
+    for (const gram of getBoundedShortSearchGrams(message.text)) {
         insertShortGram.run(gram, lookup.search_rowid)
     }
 }
@@ -411,7 +423,7 @@ function rebuildMessageContentSearchInternal(db: Database, sessionIds?: string[]
                 INSERT INTO ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} (gram, search_rowid)
                 VALUES (?, ?)
             `)
-            for (const gram of getShortSearchGrams(searchable.text)) {
+            for (const gram of getBoundedShortSearchGrams(searchable.text)) {
                 insertShortGram.run(gram, lookup.search_rowid)
             }
         }

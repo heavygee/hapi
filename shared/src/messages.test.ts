@@ -142,6 +142,16 @@ describe('extractSearchableMessageText', () => {
         })).toBeNull()
     })
 
+    test('normalizes assistant Markdown to the rendered text', () => {
+        expect(extractSearchableMessageText({
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: { type: 'message', message: 'Use **KV Cache** and [the docs](https://example.com).' }
+            }
+        })).toEqual({ role: 'assistant', text: 'Use KV Cache and the docs.' })
+    })
+
     test('keeps the stream identity even when a snapshot has no searchable text', () => {
         const emptySnapshot = {
             role: 'agent',
