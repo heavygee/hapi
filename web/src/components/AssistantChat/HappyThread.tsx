@@ -828,7 +828,7 @@ export function HappyThread(props: {
                         <SessionLogPanel
                             api={props.api}
                             sessionId={props.sessionId}
-                            title={props.outlineTitle}
+                            title={props.metadata?.name ?? props.metadata?.summary?.text ?? props.metadata?.path ?? props.sessionId.slice(0, 8)}
                             onClose={() => props.onSessionLogOpenChange?.(false)}
                         />
                     </>
