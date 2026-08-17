@@ -4,6 +4,7 @@ import {
     extractMessageRenderKey,
     extractSearchableMessageText,
     extractUserPlainText,
+    isLiveStreamSnapshot,
     extractNotifySummary,
     getAgyTaskLogId,
     isRedundantGoalStatusEventContent,
@@ -116,6 +117,27 @@ describe('extractAssistantPlainText', () => {
 })
 
 describe('extractSearchableMessageText', () => {
+    test('identifies live stream snapshots without treating terminal snapshots as live', () => {
+        expect(isLiveStreamSnapshot({
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: { type: 'message', streamSnapshot: true, live: true, message: 'partial' }
+            }
+        })).toBe(true)
+        expect(isLiveStreamSnapshot({
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: { type: 'message', streamSnapshot: true, message: 'complete' }
+            }
+        })).toBe(false)
+        expect(isLiveStreamSnapshot({
+            role: 'agent',
+            content: { type: 'text', streamSnapshot: true, live: true, text: 'partial' }
+        })).toBe(true)
+    })
+
     test('extracts user text and normalizes whitespace', () => {
         expect(extractUserPlainText([{ type: 'text', text: ' hello\nworld ' }, { type: 'image' }]))
             .toBe('hello world')

@@ -128,7 +128,7 @@ describe('schema migration v23 to v26', () => {
         const session = initial.sessions.getOrCreateSession('migration-short-query', { path: '/tmp/migration-short-query' }, null, 'default')
         const text = `你好，短查询索引 ${Array.from({ length: MAX_INDEXED_MESSAGE_CHARACTERS + 1024 }, (_, index) =>
             String.fromCodePoint(0x1000 + index)
-        ).join('')}`
+        ).join('')} tail-migration-needle`
         const message = initial.messages.addMessage(session.id, {
             role: 'user',
             content: { type: 'text', text }
@@ -136,6 +136,9 @@ describe('schema migration v23 to v26', () => {
         initial.close()
 
         const legacy = new Database(dbPath)
+        legacy.prepare(
+            'UPDATE message_content_search SET searchable_text = ? WHERE message_id = ?'
+        ).run(text, message.id)
         legacy.exec(`
             DROP TABLE IF EXISTS message_content_search_lookup;
             CREATE TABLE message_content_search_lookup (
@@ -152,6 +155,8 @@ describe('schema migration v23 to v26', () => {
         const migrated = new Store(dbPath)
         try {
             expect(migrated.messages.searchContent('你好', 'default')[0]?.sessionId).toBe(session.id)
+            expect(migrated.messages.searchContent('tail-migration-needle', 'default')[0]?.sessionId)
+                .toBe(session.id)
             const internalDb = (migrated as unknown as { db: Database }).db
             const shortIndex = internalDb.prepare(
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'message_content_search_short'"
@@ -170,6 +175,7 @@ describe('schema migration v23 to v26', () => {
             expect(lookupColumns.map((column) => column.name)).toContain('target_message_id')
             expect(target?.target_message_id).toBe(message.id)
             expect(indexed?.searchable_text.length).toBeLessThanOrEqual(MAX_INDEXED_MESSAGE_CHARACTERS)
+            expect(indexed?.searchable_text).toContain('tail-migration-needle')
             expect(version.user_version).toBe(26)
         } finally {
             migrated.close()

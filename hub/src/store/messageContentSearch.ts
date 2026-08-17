@@ -1,6 +1,10 @@
 import type { Database } from 'bun:sqlite'
 
-import { extractMessageRenderKey, extractSearchableMessageText } from '@hapi/protocol/messages'
+import {
+    extractMessageRenderKey,
+    extractSearchableMessageText,
+    isLiveStreamSnapshot
+} from '@hapi/protocol/messages'
 import { decodeMessageContent } from './contentCodec'
 
 export const MESSAGE_CONTENT_SEARCH_TABLE = 'message_content_search'
@@ -48,6 +52,13 @@ const SEARCH_REBUILD_BATCH_SIZE = 500
 const SEARCH_LOOKUP_BACKFILL_BATCH_SIZE = 500
 const MIN_INDEXED_QUERY_LENGTH = 2
 export const MAX_INDEXED_MESSAGE_CHARACTERS = 16_384
+const INDEXED_TEXT_SEPARATOR = ' '
+const INDEXED_TEXT_HEAD_CHARACTERS = Math.floor(
+    (MAX_INDEXED_MESSAGE_CHARACTERS - INDEXED_TEXT_SEPARATOR.length) / 2
+)
+const INDEXED_TEXT_TAIL_CHARACTERS = MAX_INDEXED_MESSAGE_CHARACTERS
+    - INDEXED_TEXT_SEPARATOR.length
+    - INDEXED_TEXT_HEAD_CHARACTERS
 
 type DbSearchRow = {
     search_rowid?: number
@@ -113,16 +124,23 @@ function getShortSearchGrams(text: string): string[] {
 }
 
 function boundSearchableText(text: string): string {
+    if (text.length <= MAX_INDEXED_MESSAGE_CHARACTERS) return text
+
     // Slice before converting to code points so a very large message cannot
-    // allocate an Array for its entire contents just to index its prefix. The
-    // cap is intentionally expressed in UTF-16 code units to keep this work
-    // bounded even for messages containing only astral characters.
-    let boundedText = text.slice(0, MAX_INDEXED_MESSAGE_CHARACTERS)
-    const lastCodeUnit = boundedText.charCodeAt(boundedText.length - 1)
-    if (lastCodeUnit >= 0xd800 && lastCodeUnit <= 0xdbff) {
-        boundedText = boundedText.slice(0, -1)
+    // allocate an Array for its entire contents just to index its head and
+    // tail. The cap is intentionally expressed in UTF-16 code units to keep
+    // this work bounded even for messages containing only astral characters.
+    let head = text.slice(0, INDEXED_TEXT_HEAD_CHARACTERS)
+    let tail = text.slice(text.length - INDEXED_TEXT_TAIL_CHARACTERS)
+    const headLastCodeUnit = head.charCodeAt(head.length - 1)
+    if (headLastCodeUnit >= 0xd800 && headLastCodeUnit <= 0xdbff) {
+        head = head.slice(0, -1)
     }
-    return boundedText
+    const tailFirstCodeUnit = tail.charCodeAt(0)
+    if (tailFirstCodeUnit >= 0xdc00 && tailFirstCodeUnit <= 0xdfff) {
+        tail = tail.slice(1)
+    }
+    return `${head}${INDEXED_TEXT_SEPARATOR}${tail}`
 }
 
 export function backfillMessageContentSearchShortIndex(db: Database): void {
@@ -134,7 +152,10 @@ export function backfillMessageContentSearchShortIndex(db: Database): void {
         db.exec(`DELETE FROM ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} WHERE length(gram) < 2`)
         const select = db.prepare(`
             SELECT rowid AS search_rowid,
-                   substr(searchable_text, 1, ?) AS searchable_text,
+                   CASE WHEN length(searchable_text) <= ?
+                        THEN searchable_text
+                        ELSE substr(searchable_text, 1, ?) || ? || substr(searchable_text, -?)
+                   END AS searchable_text,
                    length(searchable_text) AS searchable_text_length
             FROM ${MESSAGE_CONTENT_SEARCH_TABLE}
             WHERE rowid > ?
@@ -155,6 +176,9 @@ export function backfillMessageContentSearchShortIndex(db: Database): void {
         while (true) {
             const rows = select.all(
                 MAX_INDEXED_MESSAGE_CHARACTERS,
+                INDEXED_TEXT_HEAD_CHARACTERS,
+                INDEXED_TEXT_SEPARATOR,
+                INDEXED_TEXT_TAIL_CHARACTERS,
                 afterRowId,
                 SEARCH_LOOKUP_BACKFILL_BATCH_SIZE
             ) as Array<{
@@ -314,6 +338,10 @@ function insertMessageContentSearchIndex(
 }
 
 export function indexMessageContent(db: Database, message: IndexableMessage): void {
+    // Pi emits cumulative live snapshots every 250 ms. They are deliberately
+    // not indexed; the explicit terminal snapshot carries the same render key
+    // and is indexed once when the stream finishes.
+    if (isLiveStreamSnapshot(message.content)) return
     ensureMessageContentSearchTable(db)
     const renderKey = extractMessageRenderKey(message.content)
     const searchKey = renderKey ? `${message.sessionId}:${renderKey}` : message.id
@@ -421,6 +449,7 @@ function rebuildMessageContentSearchInternal(db: Database, sessionIds?: string[]
 
         for (const row of rows) {
             const decodedContent = decodeMessageContent(row.content)
+            if (isLiveStreamSnapshot(decodedContent)) continue
             const renderKey = extractMessageRenderKey(decodedContent)
             const searchKey = renderKey ? `${row.session_id}:${renderKey}` : row.id
             removeMessageContentSearchIndex(db, row.id)

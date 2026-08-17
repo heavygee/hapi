@@ -131,9 +131,9 @@ describe('message content search', () => {
     it('bounds per-message short-index work for long high-entropy text', () => {
         const store = new Store(':memory:')
         const session = makeSession(store, 'bounded-short-index')
-        const text = Array.from({ length: MAX_INDEXED_MESSAGE_CHARACTERS + 1024 }, (_, index) =>
+        const text = `${Array.from({ length: MAX_INDEXED_MESSAGE_CHARACTERS + 1024 }, (_, index) =>
             String.fromCodePoint(0x1000 + index)
-        ).join('')
+        ).join('')} tail-search-needle`
 
         store.messages.addMessage(session.id, {
             role: 'user',
@@ -158,7 +158,52 @@ describe('message content search', () => {
         `).get(row.search_rowid) as { count: number | string }
 
         expect(indexedText.searchable_text.length).toBeLessThanOrEqual(MAX_INDEXED_MESSAGE_CHARACTERS)
+        expect(indexedText.searchable_text).toContain('tail-search-needle')
         expect(Number(count.count)).toBeLessThanOrEqual(MAX_INDEXED_MESSAGE_CHARACTERS - 1)
+        expect(store.messages.searchContent('tail-search-needle', 'default'))
+            .toMatchObject([{ sessionId: session.id }])
+    })
+
+    it('defers live stream snapshots until the explicit terminal snapshot', () => {
+        const store = new Store(':memory:')
+        const session = makeSession(store, 'live-stream-index')
+        const db = (store as unknown as { db: Database }).db
+        const liveContent = (message: string) => ({
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'message',
+                    id: 'pi-stream-1',
+                    message,
+                    streamSnapshot: true,
+                    live: true
+                }
+            }
+        })
+
+        store.messages.addMessage(session.id, liveContent('partial response 1'))
+        store.messages.addMessage(session.id, liveContent('partial response 2'))
+        expect(Number((db.prepare('SELECT COUNT(*) AS count FROM message_content_search').get() as { count: number | string }).count))
+            .toBe(0)
+
+        const terminal = store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'message',
+                    id: 'pi-stream-1',
+                    message: 'complete terminal response',
+                    streamSnapshot: true
+                }
+            }
+        })
+
+        expect(Number((db.prepare('SELECT COUNT(*) AS count FROM message_content_search').get() as { count: number | string }).count))
+            .toBe(1)
+        expect(store.messages.searchContent('terminal response', 'default'))
+            .toMatchObject([{ sessionId: session.id, messageId: terminal.id }])
     })
 
     it('matches visible Markdown text rather than source delimiters', () => {

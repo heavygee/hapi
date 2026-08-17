@@ -232,6 +232,22 @@ export function extractMessageRenderKey(value: unknown): string | null {
     return getMessageRenderKey(record.content) ?? null
 }
 
+/** Return whether a message is a cumulative live stream snapshot. */
+export function isLiveStreamSnapshot(value: unknown): boolean {
+    const record = unwrapRoleWrappedRecordEnvelope(value)
+    if (!record || (record.role !== 'agent' && record.role !== 'assistant')) return false
+    if (!isObject(record.content)) return false
+
+    if (record.content.type === 'codex') {
+        const data = isObject(record.content.data) ? record.content.data : null
+        return data?.type === 'message' && data.streamSnapshot === true && data.live === true
+    }
+
+    return record.content.type === 'text'
+        && record.content.streamSnapshot === true
+        && record.content.live === true
+}
+
 function isHiddenAssistantOutput(content: unknown): boolean {
     if (!isObject(content) || content.type !== 'output') return false
     const data = isObject(content.data) ? content.data : null
