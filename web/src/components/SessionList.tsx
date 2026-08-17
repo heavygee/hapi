@@ -189,43 +189,49 @@ function pathIsUnder(parent: string, child: string): boolean {
 
 export type SessionGroupDirectorySource = {
     path?: string | null
-    worktree?: { basePath?: string | null } | null
+    worktree?: { basePath?: string | null; worktreePath?: string | null } | null
 }
 
 /**
- * Directory used as the sidebar project-group key.
+ * Per-session directory used as the initial sidebar project-group key.
  *
- * Prefer worktree.basePath when the session path lives under it. When basePath
- * is a realpath of a symlink prefix (path still uses the logical spelling,
- * e.g. ~/coding → /work/coding), derive the group root from path so both
- * spellings share one header instead of two identical `coding/hapi · machine`
- * rows.
+ * Prefer worktree.basePath when set. Do **not** rewrite basePath from a
+ * last-two-segment display match in `path` — that invents a sibling root for
+ * legitimate external worktrees (e.g. base `/mnt/clone/org/repo` + path under
+ * `/home/me/org/repo/worktrees/...`). Symlink-alias piles (same machine, path
+ * under another session's group root) are joined in
+ * `groupSessionsByDirectory`.
  */
 export function resolveSessionGroupDirectory(source: SessionGroupDirectorySource): string {
     const path = source.path?.trim() || ''
     const basePath = source.worktree?.basePath?.trim() || ''
     if (!basePath && !path) return 'Other'
     if (!basePath) return stripTrailingSeparators(path)
-    if (!path) return stripTrailingSeparators(basePath)
+    return stripTrailingSeparators(basePath)
+}
 
-    const normBase = stripTrailingSeparators(basePath)
-    if (pathIsUnder(normBase, path)) {
-        return normBase
+/**
+ * When another group root on the same machine is a path prefix of this
+ * session's path / worktreePath, prefer that root (longest wins). That joins
+ * realpath-`basePath` sessions into a logical spelling group without treating
+ * display-name collision alone as alias proof.
+ */
+export function coalesceSessionGroupDirectory(
+    source: SessionGroupDirectorySource,
+    directoriesOnMachine: readonly string[],
+): string {
+    const natural = resolveSessionGroupDirectory(source)
+    const path = source.path?.trim() || ''
+    const worktreePath = source.worktree?.worktreePath?.trim() || ''
+    let best: string | null = null
+    for (const directory of directoriesOnMachine) {
+        if (!directory || directory === 'Other') continue
+        const underPath = path !== '' && pathIsUnder(directory, path)
+        const underWorktree = worktreePath !== '' && pathIsUnder(directory, worktreePath)
+        if (!underPath && !underWorktree) continue
+        if (!best || directory.length > best.length) best = directory
     }
-
-    const display = getGroupDisplayName(normBase)
-    if (!display || display === 'Other') return normBase
-
-    const pathNorm = path.replace(/\\/g, '/')
-    const needle = `/${display.replace(/\\/g, '/')}`
-    const underIdx = pathNorm.indexOf(`${needle}/`)
-    if (underIdx !== -1) {
-        return pathNorm.slice(0, underIdx + needle.length)
-    }
-    if (pathNorm.endsWith(needle)) {
-        return pathNorm
-    }
-    return normBase
+    return best ?? natural
 }
 
 export const UNKNOWN_MACHINE_ID = '__unknown__'
@@ -329,10 +335,24 @@ export function getPreviousSessionVisibleCount(current: number, step: number): n
 export function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGroup[] {
     const groups = new Map<string, { directory: string; machineId: string | null; sessions: SessionSummary[] }>()
 
+    const naturalByMachine = new Map<string, Set<string>>()
+    for (const session of sessions) {
+        const machineId = session.metadata?.machineId ?? UNKNOWN_MACHINE_ID
+        const natural = resolveSessionGroupDirectory(session.metadata ?? {})
+        let set = naturalByMachine.get(machineId)
+        if (!set) {
+            set = new Set()
+            naturalByMachine.set(machineId, set)
+        }
+        set.add(natural)
+    }
+
     sessions.forEach(session => {
-        const path = resolveSessionGroupDirectory(session.metadata ?? {})
         const machineId = session.metadata?.machineId ?? null
-        const key = `${machineId ?? UNKNOWN_MACHINE_ID}::${path}`
+        const machineKey = machineId ?? UNKNOWN_MACHINE_ID
+        const directories = [...(naturalByMachine.get(machineKey) ?? [])]
+        const path = coalesceSessionGroupDirectory(session.metadata ?? {}, directories)
+        const key = `${machineKey}::${path}`
         if (!groups.has(key)) {
             groups.set(key, {
                 directory: path,
