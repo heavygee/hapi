@@ -204,9 +204,11 @@ export type SessionGroupDirectorySource = {
  * collision alone is not alias evidence.
  */
 export function resolveSessionGroupDirectory(source: SessionGroupDirectorySource): string {
-    const path = source.path?.trim() || ''
-    const basePath = source.worktree?.basePath?.trim() || ''
-    const worktreePath = source.worktree?.worktreePath?.trim() || ''
+    // Do not trim(): trailing/leading spaces are valid POSIX path characters and
+    // group.directory feeds Copy Path / New Session.
+    const path = source.path ?? ''
+    const basePath = source.worktree?.basePath ?? ''
+    const worktreePath = source.worktree?.worktreePath ?? ''
     if (!basePath && !path) return 'Other'
     if (!basePath) return stripTrailingSeparators(path)
     if (!path) return stripTrailingSeparators(basePath)

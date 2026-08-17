@@ -709,6 +709,16 @@ describe('resolveSessionGroupDirectory', () => {
         })).toBe('C:\\')
     })
 
+    it('preserves trailing whitespace in filesystem paths', () => {
+        expect(resolveSessionGroupDirectory({
+            path: '/srv/project ',
+        })).toBe('/srv/project ')
+        expect(resolveSessionGroupDirectory({
+            path: '/srv/project /worktrees/feature',
+            worktree: { basePath: '/srv/project ' },
+        })).toBe('/srv/project ')
+    })
+
     it('returns Other when neither path nor basePath is set', () => {
         expect(resolveSessionGroupDirectory({})).toBe('Other')
     })
