@@ -719,6 +719,12 @@ describe('resolveSessionGroupDirectory', () => {
         })).toBe('/srv/project ')
     })
 
+    it('preserves trailing backslash on POSIX paths', () => {
+        expect(resolveSessionGroupDirectory({
+            path: '/srv/project\\',
+        })).toBe('/srv/project\\')
+    })
+
     it('returns Other when neither path nor basePath is set', () => {
         expect(resolveSessionGroupDirectory({})).toBe('Other')
     })

@@ -177,15 +177,27 @@ function getGroupDisplayName(directory: string): string {
     return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`
 }
 
+function usesWindowsSeparators(path: string): boolean {
+    return /^[A-Za-z]:[\\/]/.test(path) || /^\\\\/.test(path)
+}
+
 function stripTrailingSeparators(path: string): string {
-    if (/^[/\\]+$/.test(path)) return path[0] ?? path
-    if (/^[A-Za-z]:[/\\]+$/.test(path)) return path.slice(0, 3)
-    return path.replace(/[/\\]+$/, '')
+    if (!usesWindowsSeparators(path)) {
+        if (/^\/+$/.test(path)) return '/'
+        return path.replace(/\/+$/, '')
+    }
+    if (/^[A-Za-z]:[\\/]+$/.test(path)) return path.slice(0, 3)
+    return path.replace(/[\\/]+$/, '')
+}
+
+function normalizePathForCompare(path: string): string {
+    const stripped = stripTrailingSeparators(path)
+    return usesWindowsSeparators(path) ? stripped.replace(/\\/g, '/') : stripped
 }
 
 function pathIsUnder(parent: string, child: string): boolean {
-    const parentNorm = stripTrailingSeparators(parent).replace(/\\/g, '/')
-    const childNorm = stripTrailingSeparators(child).replace(/\\/g, '/')
+    const parentNorm = normalizePathForCompare(parent)
+    const childNorm = normalizePathForCompare(child)
     return childNorm === parentNorm || childNorm.startsWith(`${parentNorm}/`)
 }
 
@@ -224,15 +236,21 @@ export function resolveSessionGroupDirectory(source: SessionGroupDirectorySource
         return normBase
     }
 
-    const baseNorm = normBase.replace(/\\/g, '/')
-    const worktreeNorm = stripTrailingSeparators(worktreePath).replace(/\\/g, '/')
-    const pathNorm = stripTrailingSeparators(path).replace(/\\/g, '/')
+    const baseNorm = normalizePathForCompare(normBase)
+    const worktreeNorm = normalizePathForCompare(worktreePath)
+    const pathNorm = normalizePathForCompare(path)
     const suffix = worktreeNorm.slice(baseNorm.length)
     if (!suffix) return normBase
 
     const suffixIndex = pathNorm.lastIndexOf(`${suffix}/`)
-    if (suffixIndex !== -1) return pathNorm.slice(0, suffixIndex)
-    if (pathNorm.endsWith(suffix)) return pathNorm.slice(0, -suffix.length) || normBase
+    if (suffixIndex !== -1) {
+        const logicalRoot = pathNorm.slice(0, suffixIndex)
+        return usesWindowsSeparators(path) ? logicalRoot.replace(/\//g, '\\') : logicalRoot
+    }
+    if (pathNorm.endsWith(suffix)) {
+        const logicalRoot = pathNorm.slice(0, -suffix.length) || normBase
+        return usesWindowsSeparators(path) ? logicalRoot.replace(/\//g, '\\') : logicalRoot
+    }
     return normBase
 }
 
