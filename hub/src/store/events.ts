@@ -410,8 +410,6 @@ export function ensureOverseerEventsSchema(db: Database): void {
         );
         CREATE INDEX IF NOT EXISTS idx_events_session_ts ON events(related_session_id, ts DESC);
         CREATE INDEX IF NOT EXISTS idx_events_type_ts ON events(event_type, ts DESC);
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_events_namespace_dedupe_key
-            ON events(namespace, dedupe_key) WHERE dedupe_key IS NOT NULL;
         CREATE UNIQUE INDEX IF NOT EXISTS idx_events_idempotency_key ON events(idempotency_key) WHERE idempotency_key IS NOT NULL;
 
         CREATE TABLE IF NOT EXISTS event_links (
