@@ -13,7 +13,7 @@ import { configuration } from '@/configuration';
 import packageJson from '../../package.json';
 import { getEnvironmentInfo } from '@/ui/doctor';
 import { spawnHappyCLI } from '@/utils/spawnHappyCLI';
-import { writeRunnerState, RunnerLocallyPersistedState, readRunnerState, acquireRunnerLock, releaseRunnerLock, readPersistedRunnerProof, writePersistedRunnerProof } from '@/persistence';
+import { writeRunnerState, RunnerLocallyPersistedState, readRunnerState, acquireRunnerLock, releaseRunnerLock } from '@/persistence';
 import { getCliArgs } from '@/utils/cliArgs';
 import { getProcessStartMarker, isProcessAlive, isWindows, killProcess, killProcessByChildProcess, killProcessTreeByPid } from '@/utils/process';
 import { PERMISSION_MODES } from '@hapi/protocol/modes';
@@ -1169,23 +1169,17 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     // (Codex review #814 [Major] - controlClient.ts:192 fix).
     const startedWithVersionHandoffDisabled = process.env.HAPI_DISABLE_VERSION_HANDOFF === '1';
 
-    // Durable runner-generation proof (#1473). Persisted under ~/.hapi/runner.proof
-    // (0600) so cold restart re-presents the same secret and keeps machineId —
-    // no tag-only proof rebind (Codex Blocker). Same-UID can read the file like
-    // CLI_API_TOKEN; inventing a new proof from machineTag alone cannot.
-    // Version handoff still prefers the PID-checked socket secret.
+    // Memory-only runner-generation proof (#1473 Blocker). Same-UID siblings can
+    // read anything under HAPI_HOME — do not persist the proof. Version handoff
+    // keeps the same machine via PID-checked socket; cold start without handoff
+    // mints a new proof and may rotate machine id (accepted residual until
+    // operator-trusted remap / #1486).
     if (isAuthorizedHandoff && !handoffRunnerProof) {
       throw new Error(
         'Authorized runner handoff missing runnerProof from PID-checked socket'
       )
     }
-    const persistedProof = handoffRunnerProof ? null : readPersistedRunnerProof()
-    const runnerProof = handoffRunnerProof
-      ?? persistedProof
-      ?? randomBytes(32).toString('base64url')
-    // Always refresh the durable file after we know the generation secret —
-    // including handoff — so a later cold start does not mint a conflicting proof.
-    writePersistedRunnerProof(runnerProof)
+    const runnerProof = handoffRunnerProof ?? randomBytes(32).toString('base64url')
 
     // Write initial runner state (no lock needed for state file)
     const fileState: RunnerLocallyPersistedState = {
@@ -1220,9 +1214,9 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     const workspaceRoots = resolveWorkspaceRoots(options.workspaceRoots);
     logger.debug(`[RUNNER RUN] Workspace roots: ${workspaceRoots?.join(', ') ?? '(not set)'}`);
 
-    // Register machine. Cold start reloads durable runnerProof so the same
-    // machineId stays bound (#1473). Hub refuses wrong proof / tag-only rebind.
-    // Handoff keeps allowLegacyReenroll false so a bad proof cannot escape.
+    // Register machine. Cold start may 409 (lost memory-only proof) and rotate.
+    // Hub refuses tag-only proof rebind (#1473 Blocker). Handoff keeps
+    // allowLegacyReenroll false so a bad proof cannot escape.
     clearReenrollGrant()
     let machine
     try {
@@ -1264,8 +1258,6 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       machineId = machine.id;
       const rotated = await authAndSetupMachineIfNeeded();
       machineTag = rotated.machineTag;
-      // Re-enroll binds a fresh generation — persist the proof we just registered.
-      writePersistedRunnerProof(runnerProof);
       fileState.startedWithMachineId = machineId;
       writeRunnerState(fileState);
       logger.debug(`[RUNNER RUN] Re-enrolled machine as ${machineId}`);

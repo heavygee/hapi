@@ -6,7 +6,7 @@
 
 import { FileHandle } from 'node:fs/promises'
 import { readFile, writeFile, mkdir, open, unlink, rename, chmod } from 'node:fs/promises'
-import { existsSync, writeFileSync, readFileSync, unlinkSync, renameSync, chmodSync, mkdirSync } from 'node:fs'
+import { existsSync, writeFileSync, readFileSync, unlinkSync } from 'node:fs'
 import { withSettingsFileLock } from '@hapi/protocol/settingsFileLock'
 import { configuration } from '@/configuration'
 import { isProcessAlive } from '@/utils/process';
@@ -166,41 +166,6 @@ export async function clearMachineId(): Promise<void> {
     ...settings,
     machineId: undefined
   }));
-}
-
-/**
- * Durable runnerProof for cold restart + terminal local-resume mint (#1473).
- * Same-UID can read this file (like CLI_API_TOKEN); it must not be inventable
- * from machineTag alone — that was the offline-rebind Blocker.
- */
-export function readPersistedRunnerProof(): string | null {
-  try {
-    if (!existsSync(configuration.runnerProofFile)) {
-      return null
-    }
-    const proof = readFileSync(configuration.runnerProofFile, 'utf-8').trim()
-    return proof || null
-  } catch {
-    return null
-  }
-}
-
-export function writePersistedRunnerProof(proof: string): void {
-  const trimmed = proof.trim()
-  if (!trimmed) {
-    throw new Error('Refusing to persist empty runnerProof')
-  }
-  if (!existsSync(configuration.happyHomeDir)) {
-    mkdirSync(configuration.happyHomeDir, { recursive: true, mode: 0o700 })
-  }
-  const tmpFile = `${configuration.runnerProofFile}.tmp`
-  writeFileSync(tmpFile, `${trimmed}\n`, { encoding: 'utf-8', mode: 0o600 })
-  renameSync(tmpFile, configuration.runnerProofFile)
-  try {
-    chmodSync(configuration.runnerProofFile, 0o600)
-  } catch {
-    // best effort
-  }
 }
 
 /**

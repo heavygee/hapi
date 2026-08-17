@@ -11,8 +11,6 @@ const {
     requestRunnerLocalResumeCapabilityMock,
     armDirectResumeCapabilityMock,
     readSettingsMock,
-    readPersistedRunnerProofMock,
-    mintLocalResumeCapabilityMock,
     renderMock,
     runCodexMock,
     runClaudeMock,
@@ -31,9 +29,7 @@ const {
     resumeSessionViaRunnerMock: vi.fn(async () => {}),
     requestRunnerLocalResumeCapabilityMock: vi.fn(async () => 'cap-from-runner'),
     armDirectResumeCapabilityMock: vi.fn(),
-    readSettingsMock: vi.fn(async () => ({ machineId: 'machine-1', machineTag: 'tag-1', previousMachineIds: [] })),
-    readPersistedRunnerProofMock: vi.fn(() => 'proof-on-disk'),
-    mintLocalResumeCapabilityMock: vi.fn(async () => 'cap-from-disk-proof'),
+    readSettingsMock: vi.fn(async () => ({ machineId: 'machine-1', previousMachineIds: [] })),
     renderMock: vi.fn(),
     runCodexMock: vi.fn(async () => {}),
     runClaudeMock: vi.fn(async () => {}),
@@ -47,18 +43,14 @@ const {
 vi.mock('@/ui/tokenInit', () => ({ initializeToken: initializeTokenMock }))
 vi.mock('@/utils/autoStartServer', () => ({ maybeAutoStartServer: maybeAutoStartServerMock }))
 vi.mock('@/ui/auth', () => ({ authAndSetupMachineIfNeeded: authAndSetupMachineIfNeededMock }))
-vi.mock('@/persistence', () => ({
-    readSettings: readSettingsMock,
-    readPersistedRunnerProof: readPersistedRunnerProofMock,
-}))
+vi.mock('@/persistence', () => ({ readSettings: readSettingsMock }))
 vi.mock('@/api/api', () => ({
     ApiClient: {
         create: async () => ({
             listResumableSessions: listResumableSessionsMock,
             getLocalResumeTarget: getLocalResumeTargetMock,
             handoffSessionToLocal: handoffSessionToLocalMock,
-            resumeSessionViaRunner: resumeSessionViaRunnerMock,
-            mintLocalResumeCapability: mintLocalResumeCapabilityMock,
+            resumeSessionViaRunner: resumeSessionViaRunnerMock
         })
     }
 }))
@@ -103,11 +95,6 @@ describe('resumeCommand', () => {
         requestRunnerLocalResumeCapabilityMock.mockResolvedValue('cap-from-runner')
         armDirectResumeCapabilityMock.mockClear()
         readSettingsMock.mockClear()
-        readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'tag-1', previousMachineIds: [] })
-        readPersistedRunnerProofMock.mockClear()
-        readPersistedRunnerProofMock.mockReturnValue('proof-on-disk')
-        mintLocalResumeCapabilityMock.mockClear()
-        mintLocalResumeCapabilityMock.mockResolvedValue('cap-from-disk-proof')
         renderMock.mockReset()
         renderMock.mockImplementation((element: { props?: { onSelect?: (sessionId: string) => void } }) => {
             queueMicrotask(() => element.props?.onSelect?.('picked-session'))
@@ -156,7 +143,7 @@ describe('resumeCommand', () => {
         })
     })
 
-    it('mints via durable runnerProof and opens local terminal when peercred grant fails (#1473)', async () => {
+    it('fails closed when local-resume grant fails for an active session (#1473 residual)', async () => {
         delete process.env.HAPI_PEER_CAP_INJECT
         requestRunnerLocalResumeCapabilityMock.mockRejectedValue(new Error('No peercred local-resume grant'))
         getLocalResumeTargetMock.mockResolvedValue({
@@ -172,20 +159,28 @@ describe('resumeCommand', () => {
             collaborationMode: 'default'
         })
 
-        await resumeCommand.run(createContext(['hapi-session-active']))
-        expect(requestRunnerLocalResumeCapabilityMock).toHaveBeenCalledWith('hapi-session-active')
-        expect(mintLocalResumeCapabilityMock).toHaveBeenCalledWith({
-            sessionId: 'hapi-session-active',
-            machineTag: 'tag-1',
-            runnerProof: 'proof-on-disk',
-        })
-        expect(armDirectResumeCapabilityMock).toHaveBeenCalledWith('cap-from-disk-proof')
-        expect(handoffSessionToLocalMock).toHaveBeenCalledWith('hapi-session-active')
-        expect(resumeSessionViaRunnerMock).not.toHaveBeenCalled()
-        expect(runCodexMock).toHaveBeenCalled()
+        const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+        const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+            throw new Error(`process.exit:${code ?? 'undefined'}`)
+        }) as never)
+        try {
+            await expect(resumeCommand.run(createContext(['hapi-session-active']))).rejects.toThrow('process.exit:1')
+            expect(requestRunnerLocalResumeCapabilityMock).toHaveBeenCalledWith('hapi-session-active')
+            expect(armDirectResumeCapabilityMock).not.toHaveBeenCalled()
+            expect(handoffSessionToLocalMock).not.toHaveBeenCalled()
+            expect(resumeSessionViaRunnerMock).not.toHaveBeenCalled()
+            expect(runCodexMock).not.toHaveBeenCalled()
+            expect(consoleErrorSpy).toHaveBeenCalledWith(
+                expect.any(String),
+                expect.stringContaining('Local resume requires inject env')
+            )
+        } finally {
+            consoleErrorSpy.mockRestore()
+            exitSpy.mockRestore()
+        }
     })
 
-    it('mints via durable runnerProof for inactive sessions when peercred grant fails (#1473)', async () => {
+    it('fails closed when local-resume grant fails for an inactive session (#1473 residual)', async () => {
         delete process.env.HAPI_PEER_CAP_INJECT
         requestRunnerLocalResumeCapabilityMock.mockRejectedValue(new Error('No peercred local-resume grant'))
         getLocalResumeTargetMock.mockResolvedValue({
@@ -201,17 +196,21 @@ describe('resumeCommand', () => {
             collaborationMode: 'default'
         })
 
-        await resumeCommand.run(createContext(['hapi-session-inactive']))
-        expect(requestRunnerLocalResumeCapabilityMock).toHaveBeenCalledWith('hapi-session-inactive')
-        expect(mintLocalResumeCapabilityMock).toHaveBeenCalledWith({
-            sessionId: 'hapi-session-inactive',
-            machineTag: 'tag-1',
-            runnerProof: 'proof-on-disk',
-        })
-        expect(armDirectResumeCapabilityMock).toHaveBeenCalledWith('cap-from-disk-proof')
-        expect(handoffSessionToLocalMock).not.toHaveBeenCalled()
-        expect(resumeSessionViaRunnerMock).not.toHaveBeenCalled()
-        expect(runCodexMock).toHaveBeenCalled()
+        const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+        const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+            throw new Error(`process.exit:${code ?? 'undefined'}`)
+        }) as never)
+        try {
+            await expect(resumeCommand.run(createContext(['hapi-session-inactive']))).rejects.toThrow('process.exit:1')
+            expect(requestRunnerLocalResumeCapabilityMock).toHaveBeenCalledWith('hapi-session-inactive')
+            expect(armDirectResumeCapabilityMock).not.toHaveBeenCalled()
+            expect(handoffSessionToLocalMock).not.toHaveBeenCalled()
+            expect(resumeSessionViaRunnerMock).not.toHaveBeenCalled()
+            expect(runCodexMock).not.toHaveBeenCalled()
+        } finally {
+            consoleErrorSpy.mockRestore()
+            exitSpy.mockRestore()
+        }
     })
 
     it('redeems a runner local-resume grant for terminal resume without inject (#1473)', async () => {

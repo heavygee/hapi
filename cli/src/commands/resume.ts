@@ -274,33 +274,22 @@ export const resumeCommand: CommandDefinition = {
 
             // Attributed resume needs a session capability for RPC auth.
             // Prefer inject env (runner child) or peercred grant (tracked
-            // descendant). Unrelated operator shells mint via durable
-            // runnerProof (~/.hapi/runner.proof) + machineTag — same bearer
-            // class as machine registration, then open the local terminal
-            // (README `hapi resume`; #1473 Major vs web-only runner fallback).
+            // descendant). Unrelated operator shells fail closed — minting to
+            // any same-UID shell (or via a disk bearer proof) reopens the
+            // Blocker. Accepted residual until operator-trusted remap (#1486).
             if (!process.env.HAPI_PEER_CAP_INJECT?.trim()) {
                 try {
                     const { requestRunnerLocalResumeCapability } = await import('@/runner/localResumeGrant')
                     const { armDirectResumeCapability } = await import('@/api/peerCapabilityInject')
                     const capability = await requestRunnerLocalResumeCapability(target.sessionId)
                     armDirectResumeCapability(capability)
-                } catch {
-                    const { readPersistedRunnerProof } = await import('@/persistence')
-                    const { armDirectResumeCapability } = await import('@/api/peerCapabilityInject')
-                    const runnerProof = readPersistedRunnerProof()
-                    const machineTag = settings.machineTag?.trim() || ''
-                    if (!runnerProof || !machineTag) {
-                        throw new Error(
-                            'No durable runner proof for local resume '
-                            + '(start the runner once to write ~/.hapi/runner.proof)'
-                        )
-                    }
-                    const capability = await api.mintLocalResumeCapability({
-                        sessionId: target.sessionId,
-                        machineTag,
-                        runnerProof,
-                    })
-                    armDirectResumeCapability(capability)
+                } catch (error) {
+                    const detail = error instanceof Error ? error.message : String(error)
+                    throw new Error(
+                        'Local resume requires inject env or a peercred grant from a '
+                        + `tracked session tree (${detail}). Use the web UI to resume, `
+                        + 'or resume from a descendant of the runner child.'
+                    )
                 }
             }
 
