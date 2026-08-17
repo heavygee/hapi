@@ -7,7 +7,6 @@ import { registerLocalHandoffHandler } from '@/agent/localHandoff';
 import { createRunnerLifecycle, createModeChangeHandler, setControlledByUser } from '@/agent/runnerLifecycle';
 import { getInvokedCwd } from '@/utils/invokedCwd';
 import { PiTransport } from './piTransport';
-import { getAgentLaunchCommand } from '@/agent/agentLaunchCommand';
 import { PiSession } from './session';
 import { PiConversationHistory, PiHistoryRestoreError } from './conversationHistory';
 import { parsePiModels, parsePiCommands, PiRpcTimeoutError, sendPiRpcAndWait, wireTransportEvents } from './loop';
@@ -151,14 +150,14 @@ export async function preparePiUserMessage(
     options: {
         authorizeImagePath: (path: string) => boolean;
         authorizeOpenedImage: (path: string, identity: UploadFileIdentity) => boolean;
-        /** Peer provenance meta (#1203); prefix so peer cannot trigger first-line slash/skills (#1473). */
+        /** Peer provenance meta (#1203); annotated as a suffix so slash/skills stay first-line. */
         meta?: MessageMeta | null;
     },
 ): Promise<PiPromptPreparation> {
     const formattedMessage = annotatePeerDeliveryForAgent(
         formatPiUserMessage(message, attachments, commands),
         options.meta ?? undefined,
-        options.meta?.sentFrom === 'peer' ? 'prefix' : 'suffix',
+        'suffix',
     );
     const images: PiImageContent[] = [];
     const imageReadErrors: string[] = [];
@@ -251,7 +250,7 @@ export async function runPi(opts: {
         transportArgs.push('--session', opts.resumeSessionId);
     }
     const transport = new PiTransport({
-        command: getAgentLaunchCommand('pi'),
+        command: 'pi',
         args: transportArgs,
         cwd: workingDirectory,
         env: { ...process.env, PI_RPC_EMIT_TITLE: '1' },
@@ -1123,7 +1122,7 @@ export async function runPi(opts: {
                 return;
             }
 
-            // Peer deliveries stay literal text — never receiver /compact etc. (#1473).
+            // Peer deliveries stay literal text — never receiver /compact etc. (#1203).
             const isPeerDelivery = message.meta?.sentFrom === 'peer';
             const name = isPeerDelivery ? null : parseLeadingSlashName(message.content.text);
             // Discovered extension commands / prompt templates win over HAPI
