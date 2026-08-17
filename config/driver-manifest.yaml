@@ -848,3 +848,9 @@ layers:
   # Tip: 2a5bafdfc — rebased onto upstream/main @ 901f17d0c (was fat conflict vs #1545 collapsed-chip rework)
   - branch: fix/session-search-longpress-dismiss
 
+
+  # tiann/hapi#1619 / draft PR #1620 — coalesce ~/coding vs /work/coding session-list groups.
+  # Dogfood on :3006 BEFORE marking upstream PR ready (opened early by mistake; now draft).
+  # Worktree: ~/coding/hapi/worktrees/session-group-symlink-paths @ fix/session-group-symlink-paths
+  # Tip: 3541681a5
+  - branch: fix/session-group-symlink-paths

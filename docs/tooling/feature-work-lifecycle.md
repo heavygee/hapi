@@ -424,12 +424,14 @@ Peers **must** assess tier before capture ([`peer-stack.md` § Evidence modality
 
 ## Commits and PRs — order of operations
 
+**Hard rule:** dogfood on soup `:3006` **before** opening an upstream PR. Never `gh pr create` → `tiann/hapi` until the operator has click-tested (or explicitly waived). Draft parking after a premature open is recovery, not the happy path.
+
 1. **Implement** in worktree; conventional commits on feature branch
 2. **Push** feature branch to `heavygee/hapi` (or fork remote)
-3. **Peer gates** (§6) — all green before operator browser test (`hapi-pr-status <N>` once a PR exists)
-4. **Operator dogfood** (§7) — explicit approval
-5. **Upstream PR** (§8) — `gh pr create` → `tiann/hapi` `main`, `Fixes #NNN`, cold review, post-push monitor. Then **attach** to this HAPI session (`hapi link-pr …` / MCP `link_pr` / Link PR dialog). Title = workstream only (no `PR #N:` — chip shows identity + health after Meta classify).
-6. **Soup promotion** (optional / parallel) — manifest layer + rebuild tree above — **after** branch is merge-ready, not instead of peer proof
+3. **Peer gates** (§6) — peer-stack proof when UI needs isolated Playwright
+4. **Soup promotion** — manifest layer + `hapi-driver-rebuild --build-web [--verify]` so `:3006` carries the tip (**not optional** for estate dogfood; peer stack is not a substitute)
+5. **Operator dogfood** (§7) — explicit approval on `:3006`
+6. **Upstream PR** (§8) — only after dogfood approval — `hapi-pr-create` → `tiann/hapi` `main`, `Fixes #NNN`, cold review, post-push monitor. Then **attach** to this HAPI session (`hapi link-pr …` / MCP `link_pr` / Link PR dialog). Title = workstream only (no `PR #N:` — chip shows identity + health after Meta classify).
 
 **Fork-only files never in upstream PR:** `docs/operator/`, `docs/plans/`, `CLAUDE.md`, `.cursor/`, operator tooling under `scripts/tooling/` unless upstreamable separately.
 
