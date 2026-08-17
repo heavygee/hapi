@@ -142,6 +142,33 @@ describe('systemEvents routes', () => {
         expect(body.events[0]?.summary).toBe('CI failed on upstream PR')
     })
 
+    it('dedupes on same dedupeKey with different idempotencyKey', async () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('dedupe-key-sess', { flavor: 'codex', path: '/tmp' }, null, 'default')
+        const app = createApp(createEngine(store))
+        const sharedDedupe = 'exit-reflection:dedupe-key-sess:986'
+
+        const first = await postEvent(app, validChannelBody({
+            relatedSessionId: session.id,
+            summary: 'Exit reflection skip: timebox: long reason',
+            dedupeKey: sharedDedupe,
+            idempotencyKey: 'exit-reflection:dedupe-key-sess:986:hash-a'
+        }))
+        expect(first.status).toBe(201)
+
+        const second = await postEvent(app, validChannelBody({
+            relatedSessionId: session.id,
+            summary: 'Exit reflection skip: timebox',
+            dedupeKey: sharedDedupe,
+            idempotencyKey: 'exit-reflection:dedupe-key-sess:986:hash-b'
+        }))
+        expect(second.status).toBe(200)
+        const secondJson = await second.json() as { event: { id: number }; deduped: boolean }
+        expect(secondJson.deduped).toBe(true)
+
+        expect(store.events.count()).toBe(1)
+    })
+
     it('dedupes on same idempotencyKey', async () => {
         const store = new Store(':memory:')
         const app = createApp(createEngine(store))

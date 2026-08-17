@@ -2,6 +2,7 @@ import type { Database } from 'bun:sqlite'
 import {
     countSystemEvents,
     getSystemEventById,
+    getSystemEventByDedupeKey,
     getSystemEventByIdempotencyKey,
     insertEventLink,
     insertSystemEvent,
@@ -37,6 +38,10 @@ export class EventStore {
 
     getByIdempotencyKey(idempotencyKey: string): StoredSystemEvent | null {
         return getSystemEventByIdempotencyKey(this.db, idempotencyKey)
+    }
+
+    getByDedupeKey(dedupeKey: string): StoredSystemEvent | null {
+        return getSystemEventByDedupeKey(this.db, dedupeKey)
     }
 
     count(): number {

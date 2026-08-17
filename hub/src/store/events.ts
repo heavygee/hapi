@@ -153,11 +153,15 @@ export function repointSessionEvents(db: Database, fromSessionId: string, toSess
 
 export function insertSystemEvent(db: Database, input: InsertSystemEventInput): StoredSystemEvent | null {
     if (input.idempotencyKey) {
-        const existing = db.prepare(
-            'SELECT id FROM events WHERE idempotency_key = ? LIMIT 1'
-        ).get(input.idempotencyKey) as { id: number } | undefined
+        const existing = getSystemEventByIdempotencyKey(db, input.idempotencyKey)
         if (existing) {
-            return getSystemEventById(db, existing.id)
+            return existing
+        }
+    }
+    if (input.dedupeKey) {
+        const existing = getSystemEventByDedupeKey(db, input.dedupeKey)
+        if (existing) {
+            return existing
         }
     }
 
@@ -248,6 +252,13 @@ export function getSystemEventByIdempotencyKey(db: Database, idempotencyKey: str
     const row = db.prepare(
         'SELECT * FROM events WHERE idempotency_key = ? LIMIT 1'
     ).get(idempotencyKey) as SystemEventRow | undefined
+    return row ? mapRow(row) : null
+}
+
+export function getSystemEventByDedupeKey(db: Database, dedupeKey: string): StoredSystemEvent | null {
+    const row = db.prepare(
+        'SELECT * FROM events WHERE dedupe_key = ? LIMIT 1'
+    ).get(dedupeKey) as SystemEventRow | undefined
     return row ? mapRow(row) : null
 }
 

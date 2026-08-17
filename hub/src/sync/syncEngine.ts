@@ -444,6 +444,12 @@ export class SyncEngine {
                 return { event: existing, deduped: true }
             }
         }
+        if (input.dedupeKey) {
+            const existing = this.store.events.getByDedupeKey(input.dedupeKey)
+            if (existing) {
+                return { event: existing, deduped: true }
+            }
+        }
         const event = this.store.events.insert(input)
         if (!event) {
             return null
