@@ -206,21 +206,32 @@ export async function runCodex(opts: {
                 syncCurrentConfigFromSession();
                 let text = message.content.text;
                 let isolatedCommandText: string | null = null;
-                const isPeerDelivery = message.meta?.sentFrom === 'peer'
-                const commands = await listSlashCommands('codex', workingDirectory).catch(() => []);
-                // Peer delivery must stay literal text — never receiver control syntax (#1473).
-                const slash = isPeerDelivery
-                    ? ({ kind: 'passthrough' } as const)
-                    : resolveCodexSlashCommand(text, {
-                        commands,
-                        permissionMode: currentPermissionMode,
-                        collaborationMode: currentCollaborationMode,
+                // Peer delivery must stay literal text — never receiver control syntax (#1203).
+                if (message.meta?.sentFrom === 'peer') {
+                    text = formatUserMessageForAgent(text, message.content.attachments, message.meta);
+                    const enhancedMode: EnhancedMode = {
+                        permissionMode: currentPermissionMode ?? 'default',
                         model: currentModel,
                         modelReasoningEffort: currentModelReasoningEffort ?? undefined,
-                        serviceTier: currentServiceTier,
+                        collaborationMode: currentCollaborationMode,
                         proactiveMultiAgent: currentProactiveMultiAgent,
+                        serviceTier: currentServiceTier,
                         personality: currentPersonality
-                    });
+                    };
+                    messageQueue.push(text, enhancedMode, localId);
+                    return;
+                }
+                const commands = await listSlashCommands('codex', workingDirectory).catch(() => []);
+                const slash = resolveCodexSlashCommand(text, {
+                    commands,
+                    permissionMode: currentPermissionMode,
+                    collaborationMode: currentCollaborationMode,
+                    model: currentModel,
+                    modelReasoningEffort: currentModelReasoningEffort ?? undefined,
+                    serviceTier: currentServiceTier,
+                    proactiveMultiAgent: currentProactiveMultiAgent,
+                    personality: currentPersonality
+                });
                 if (slash.kind === 'goal') {
                     if (slash.message) {
                         session.sendAgentMessage({
@@ -258,7 +269,7 @@ export async function runCodex(opts: {
                         return;
                     }
                     text = slash.text;
-                } else if (!isPeerDelivery) {
+                } else {
                     const specialCommand = parseCodexSpecialCommand(message.content.text);
                     if (specialCommand.type) {
                         logger.debug(`[Codex] Detected special command: ${specialCommand.type}`);
