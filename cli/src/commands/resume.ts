@@ -274,9 +274,10 @@ export const resumeCommand: CommandDefinition = {
 
             // Attributed resume needs a session capability for RPC auth.
             // Prefer inject env (runner child) or peercred grant (tracked
-            // descendant). Unrelated operator shells cannot mint — ask the
-            // runner to spawn via hub resume so capability stays inside the
-            // runner-tracked child (#1473 kill-criterion).
+            // descendant). Unrelated operator shells mint via durable
+            // runnerProof (~/.hapi/runner.proof) + machineTag — same bearer
+            // class as machine registration, then open the local terminal
+            // (README `hapi resume`; #1473 Major vs web-only runner fallback).
             if (!process.env.HAPI_PEER_CAP_INJECT?.trim()) {
                 try {
                     const { requestRunnerLocalResumeCapability } = await import('@/runner/localResumeGrant')
@@ -284,19 +285,22 @@ export const resumeCommand: CommandDefinition = {
                     const capability = await requestRunnerLocalResumeCapability(target.sessionId)
                     armDirectResumeCapability(capability)
                 } catch {
-                    if (target.flavor === 'agy' && target.active) {
-                        throw new Error('Antigravity is active. Stop it before resuming.')
-                    }
-                    if (target.active) {
-                        await api.handoffSessionToLocal(target.sessionId)
-                    }
-                    await api.resumeSessionViaRunner(target.sessionId)
-                    console.log(
-                        chalk.green(
-                            `Resumed ${target.sessionId} via runner (capability stays in runner child). Continue in the web UI.`
+                    const { readPersistedRunnerProof } = await import('@/persistence')
+                    const { armDirectResumeCapability } = await import('@/api/peerCapabilityInject')
+                    const runnerProof = readPersistedRunnerProof()
+                    const machineTag = settings.machineTag?.trim() || ''
+                    if (!runnerProof || !machineTag) {
+                        throw new Error(
+                            'No durable runner proof for local resume '
+                            + '(start the runner once to write ~/.hapi/runner.proof)'
                         )
-                    )
-                    return
+                    }
+                    const capability = await api.mintLocalResumeCapability({
+                        sessionId: target.sessionId,
+                        machineTag,
+                        runnerProof,
+                    })
+                    armDirectResumeCapability(capability)
                 }
             }
 

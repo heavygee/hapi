@@ -13,7 +13,7 @@ import { configuration } from '@/configuration';
 import packageJson from '../../package.json';
 import { getEnvironmentInfo } from '@/ui/doctor';
 import { spawnHappyCLI } from '@/utils/spawnHappyCLI';
-import { writeRunnerState, RunnerLocallyPersistedState, readRunnerState, acquireRunnerLock, releaseRunnerLock } from '@/persistence';
+import { writeRunnerState, RunnerLocallyPersistedState, readRunnerState, acquireRunnerLock, releaseRunnerLock, readPersistedRunnerProof, writePersistedRunnerProof } from '@/persistence';
 import { getCliArgs } from '@/utils/cliArgs';
 import { getProcessStartMarker, isProcessAlive, isWindows, killProcess, killProcessByChildProcess, killProcessTreeByPid } from '@/utils/process';
 import { PERMISSION_MODES } from '@hapi/protocol/modes';
@@ -672,17 +672,23 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         // Resume peer provenance (#1203 pass 2h): hub sends a spawn-RPC nonce;
         // runner redeems capability and injects via PID-checked unix socket.
         // Never put mint-proof on child fds/env (pidfd_getfd / environ / TOCTOU).
+        // Redeem + deliver are on the awaited spawn success path — fire-and-forget
+        // left children unable to authorize session-alive (#1473 Major).
         const resumePeerMintNonce = options.resumePeerMintNonce?.trim()
         const resumeSessionId = (options.existingSessionId || options.sessionId)?.trim()
         let peerCapInject: PeerCapabilityInjectServer | null = null
         if (resumePeerMintNonce && resumeSessionId) {
           peerCapInject = await startPeerCapabilityInjectServer()
-          if (peerCapInject) {
-            extraEnv = {
-              ...extraEnv,
-              [HAPI_PEER_CAP_INJECT_ENV]: peerCapInject.path,
-              [HAPI_PEER_CAP_INJECT_SERVER_PID_ENV]: String(process.pid),
+          if (!peerCapInject) {
+            return {
+              type: 'error',
+              errorMessage: 'Capability inject unavailable',
             }
+          }
+          extraEnv = {
+            ...extraEnv,
+            [HAPI_PEER_CAP_INJECT_ENV]: peerCapInject.path,
+            [HAPI_PEER_CAP_INJECT_SERVER_PID_ENV]: String(process.pid),
           }
         }
 
@@ -719,26 +725,32 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
 
         if (peerCapInject && happyProcess.pid && resumePeerMintNonce && resumeSessionId) {
           const inject = peerCapInject
-          const childPid = happyProcess.pid
-          void (async () => {
-            try {
-              const capability = await redeemResumePeerCapabilityFromHub(
-                resumeSessionId,
-                resumePeerMintNonce
-              )
-              if (!capability) {
-                logger.debug('[RUNNER RUN] resume peer capability redeem returned empty')
-                return
+          peerCapInject = null
+          try {
+            const capability = await redeemResumePeerCapabilityFromHub(
+              resumeSessionId,
+              resumePeerMintNonce
+            )
+            if (!capability) {
+              await killProcessByChildProcess(happyProcess)
+              return {
+                type: 'error',
+                errorMessage: 'Capability redeem failed',
               }
-              await inject.deliverTo(childPid, { sessionCapability: capability })
-            } catch (error) {
-              logger.debug('[RUNNER RUN] resume peer capability inject failed', error)
-            } finally {
-              inject.close()
             }
-          })()
+            await inject.deliverTo(happyProcess.pid, { sessionCapability: capability })
+          } catch (error) {
+            await killProcessByChildProcess(happyProcess)
+            return {
+              type: 'error',
+              errorMessage: `Capability delivery failed: ${error instanceof Error ? error.message : String(error)}`,
+            }
+          } finally {
+            inject.close()
+          }
         } else {
           peerCapInject?.close()
+          peerCapInject = null
         }
 
         happyProcess.stderr?.on('data', (data) => {
@@ -1157,18 +1169,23 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     // (Codex review #814 [Major] - controlClient.ts:192 fix).
     const startedWithVersionHandoffDisabled = process.env.HAPI_DISABLE_VERSION_HANDOFF === '1';
 
-    // Memory-only runner-generation proof (#1473 Blocker). Same-UID keyrings
-    // are exportable bearers — do not persist the proof. Version handoff keeps
-    // the same machine via PID-checked socket; cold start (kill/restart, CI
-    // beforeEach, systemd without handoff) mints a new proof and, on hub 409,
-    // rotates to a new machine id. That is re-enroll, not unbound mint against
-    // the prior hash (hub still refuses wrong proof on the old row).
+    // Durable runner-generation proof (#1473). Persisted under ~/.hapi/runner.proof
+    // (0600) so cold restart re-presents the same secret and keeps machineId —
+    // no tag-only proof rebind (Codex Blocker). Same-UID can read the file like
+    // CLI_API_TOKEN; inventing a new proof from machineTag alone cannot.
+    // Version handoff still prefers the PID-checked socket secret.
     if (isAuthorizedHandoff && !handoffRunnerProof) {
       throw new Error(
         'Authorized runner handoff missing runnerProof from PID-checked socket'
       )
     }
-    const runnerProof = handoffRunnerProof ?? randomBytes(32).toString('base64url')
+    const persistedProof = handoffRunnerProof ? null : readPersistedRunnerProof()
+    const runnerProof = handoffRunnerProof
+      ?? persistedProof
+      ?? randomBytes(32).toString('base64url')
+    // Always refresh the durable file after we know the generation secret —
+    // including handoff — so a later cold start does not mint a conflicting proof.
+    writePersistedRunnerProof(runnerProof)
 
     // Write initial runner state (no lock needed for state file)
     const fileState: RunnerLocallyPersistedState = {
@@ -1203,10 +1220,9 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     const workspaceRoots = resolveWorkspaceRoots(options.workspaceRoots);
     logger.debug(`[RUNNER RUN] Workspace roots: ${workspaceRoots?.join(', ') ?? '(not set)'}`);
 
-    // Register machine. Cold start may 409 (lost memory-only proof). Hub no
-    // longer rebinds proof via machineTag alone (same-UID settings.json theft
-    // #1473 Blocker) — rotate to a new machine id, then migrate sessions onto
-    // it. Handoff keeps allowLegacyReenroll false so a bad proof cannot escape.
+    // Register machine. Cold start reloads durable runnerProof so the same
+    // machineId stays bound (#1473). Hub refuses wrong proof / tag-only rebind.
+    // Handoff keeps allowLegacyReenroll false so a bad proof cannot escape.
     clearReenrollGrant()
     let machine
     try {
@@ -1248,6 +1264,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       machineId = machine.id;
       const rotated = await authAndSetupMachineIfNeeded();
       machineTag = rotated.machineTag;
+      // Re-enroll binds a fresh generation — persist the proof we just registered.
+      writePersistedRunnerProof(runnerProof);
       fileState.startedWithMachineId = machineId;
       writeRunnerState(fileState);
       logger.debug(`[RUNNER RUN] Re-enrolled machine as ${machineId}`);

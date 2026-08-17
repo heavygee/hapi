@@ -85,23 +85,15 @@ export class MachineCache {
         tag?: string,
         runnerProof?: string
     ): Machine {
-        // Offline-only proof rebind: refuse while this machine still looks live
-        // in cache (recent heartbeat). Prevents same-UID tag theft from
-        // overwriting a running runner's proof (#1473 Blocker) while allowing
-        // cold restart to keep machineId (#1473 kill-criterion).
-        const cached = this.machines.get(id)
-        const MACHINE_OFFLINE_MS = 90_000
-        const allowOfflineProofRebind = !cached
-            || !cached.active
-            || (Date.now() - cached.activeAt) > MACHINE_OFFLINE_MS
+        // Cold restart keeps machineId by re-presenting durable runnerProof
+        // (CLI ~/.hapi/runner.proof). Hub never tag-only rebinds (#1473 Blocker).
         const stored = this.store.machines.getOrCreateMachine(
             id,
             metadata,
             runnerState,
             namespace,
             tag,
-            runnerProof,
-            { allowOfflineProofRebind }
+            runnerProof
         )
         return this.refreshMachine(stored.id) ?? (() => { throw new Error('Failed to load machine') })()
     }

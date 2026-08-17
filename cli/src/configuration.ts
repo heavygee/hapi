@@ -75,6 +75,11 @@ class Configuration {
     public readonly privateKeyFile: string
     public readonly runnerStateFile: string
     public readonly runnerLockFile: string
+    /**
+     * Durable runner-generation proof (#1473). Mode 0600; same-UID readable like
+     * the CLI token — not inventable from machineTag alone (offline rebind Blocker).
+     */
+    public readonly runnerProofFile: string
     public readonly currentCliVersion: string
 
     public readonly isExperimentalEnabled: boolean
@@ -97,6 +102,7 @@ class Configuration {
         this.privateKeyFile = join(this.happyHomeDir, 'access.key')
         this.runnerStateFile = join(this.happyHomeDir, 'runner.state.json')
         this.runnerLockFile = join(this.happyHomeDir, 'runner.state.json.lock')
+        this.runnerProofFile = join(this.happyHomeDir, 'runner.proof')
 
         this.isExperimentalEnabled = ['true', '1', 'yes'].includes(process.env.HAPI_EXPERIMENTAL?.toLowerCase() || '')
 

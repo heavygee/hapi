@@ -4,7 +4,7 @@ import { MachineTagConflictError, mergeMachineMetadata } from './machines'
 import { hashRunnerProof } from '../utils/runnerProof'
 
 describe('machine tag enrollment (#1473)', () => {
-    it('binds runnerProofHash on create and allows offline tag-matched proof rebind (#1473)', () => {
+    it('binds runnerProofHash on create and refuses tag-only proof rebind (#1473)', () => {
         const store = new Store(':memory:')
         const first = store.machines.getOrCreateMachine(
             'machine-proof',
@@ -16,30 +16,29 @@ describe('machine tag enrollment (#1473)', () => {
         )
         expect(first.runnerProofHash).toBe(hashRunnerProof('proof-a'))
 
-        // Offline rebind keeps machineId (cold restart kill-criterion).
-        const rebound = store.machines.getOrCreateMachine(
+        // Cold restart must re-present the same durable proof — inventing a new
+        // proof from machineTag alone is the Blocker.
+        expect(() => store.machines.getOrCreateMachine(
             'machine-proof',
             { host: 'h2' },
             null,
             'ns',
             'secret-tag',
-            'proof-b',
-            { allowOfflineProofRebind: true }
-        )
-        expect(rebound.id).toBe('machine-proof')
-        expect(rebound.runnerProofHash).toBe(hashRunnerProof('proof-b'))
-        expect(rebound.metadata).toEqual({ host: 'h2' })
+            'proof-b'
+        )).toThrow(/runner proof mismatch/)
+        expect(store.machines.getMachine('machine-proof')?.runnerProofHash).toBe(hashRunnerProof('proof-a'))
 
-        // Live path (no offline flag) still refuses forged proof (#1473 Blocker).
-        expect(() => store.machines.getOrCreateMachine(
+        const sameProof = store.machines.getOrCreateMachine(
             'machine-proof',
-            { host: 'hijack' },
+            { host: 'h2' },
             null,
             'ns',
             'secret-tag',
-            'proof-forged'
-        )).toThrow(/runner proof mismatch/)
-        expect(store.machines.getMachine('machine-proof')?.runnerProofHash).toBe(hashRunnerProof('proof-b'))
+            'proof-a'
+        )
+        expect(sameProof.id).toBe('machine-proof')
+        expect(sameProof.runnerProofHash).toBe(hashRunnerProof('proof-a'))
+        expect(sameProof.metadata).toEqual({ host: 'h2' })
 
         const unbound = store.machines.getOrCreateMachine(
             'machine-unbound',
@@ -68,7 +67,7 @@ describe('machine tag enrollment (#1473)', () => {
         store.close()
     })
 
-    it('refuses proof rebind for a live machine even with allowOfflineProofRebind false', () => {
+    it('refuses wrong-proof re-registration for a live machine', () => {
         const store = new Store(':memory:')
         store.machines.getOrCreateMachine(
             'machine-live',
@@ -96,17 +95,6 @@ describe('machine tag enrollment (#1473)', () => {
             'proof-restart'
         )).toThrow(/runner proof mismatch/)
         expect(store.machines.getMachine('machine-live')?.runnerProofHash).toBe(hashRunnerProof('proof-a'))
-        // Explicit offline flag still works even if DB active sticks.
-        const rebound = store.machines.getOrCreateMachine(
-            'machine-live',
-            { host: 'h' },
-            null,
-            'ns',
-            'secret-tag',
-            'proof-restart',
-            { allowOfflineProofRebind: true }
-        )
-        expect(rebound.runnerProofHash).toBe(hashRunnerProof('proof-restart'))
         store.close()
     })
 

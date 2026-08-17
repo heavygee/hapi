@@ -24,8 +24,7 @@ export class MachineStore {
         runnerState: unknown,
         namespace: string,
         tag?: string,
-        runnerProof?: string,
-        options?: { allowOfflineProofRebind?: boolean }
+        runnerProof?: string
     ): StoredMachine {
         return getOrCreateMachine(
             this.db,
@@ -34,8 +33,7 @@ export class MachineStore {
             runnerState,
             namespace,
             tag,
-            runnerProof,
-            options
+            runnerProof
         )
     }
 

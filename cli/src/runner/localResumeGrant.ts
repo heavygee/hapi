@@ -2,9 +2,9 @@
  * Peercred-authenticated local resume grant socket (#1473 Major).
  *
  * Terminal `hapi resume` has no HAPI_PEER_CAP_INJECT. Tracked session
- * children may redeem a peercred grant here. Unrelated operator shells
- * fall through to hub/runner resume (`POST /cli/sessions/:id/resume`) so
- * the capability stays inside a runner-tracked child (#1473).
+ * children may redeem a peercred grant here. Unrelated operator shells mint via
+ * durable `~/.hapi/runner.proof` + `/cli/sessions/:id/local-resume-capability`
+ * and open the local terminal (#1473).
  */
 
 import { createServer, createConnection, type Server } from 'node:net'

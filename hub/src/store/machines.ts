@@ -114,15 +114,7 @@ export function getOrCreateMachine(
     runnerState: unknown,
     namespace: string,
     tag?: string,
-    runnerProof?: string,
-    options?: {
-        /**
-         * When true, a matching create-time tag may replace runnerProofHash for an
-         * offline machine (cold restart). Live machines must never allow this —
-         * same-UID siblings can steal the tag from settings.json (#1473 Blocker).
-         */
-        allowOfflineProofRebind?: boolean
-    }
+    runnerProof?: string
 ): StoredMachine {
     const presentedTag = typeof tag === 'string' ? tag.trim() : ''
     const presentedProof = typeof runnerProof === 'string' ? runnerProof.trim() : ''
@@ -148,42 +140,15 @@ export function getOrCreateMachine(
         // Bound rows require the runner proof on every registration (#1473 Major).
         // Omitting proof must not refresh metadata/capabilities. Null-hash rows
         // refuse late bind — re-enroll with a new machine id (INSERT binds hash).
-        //
-        // Offline cold-restart rebind (#1473 kill-criterion): when the machine is
-        // not live and create-time tag matches, accept a new memory-only proof in
-        // place so Cursor/Pi exact-id resume survives crash/reboot without
-        // stranding sessions. Live machines still fail closed — tag theft must
-        // not overwrite a running runner's proof (#1473 Blocker).
+        // Wrong proof always fails closed — no tag-only offline rebind (Codex
+        // Blocker: same-UID siblings can read machineTag from settings.json).
+        // Cold restart keeps machineId by re-presenting a durable runnerProof
+        // from ~/.hapi/runner.proof on the CLI side.
         if (current.runnerProofHash) {
             if (!presentedProof || !verifyRunnerProof(presentedProof, current.runnerProofHash)) {
-                const tagOk = Boolean(
-                    presentedTag
-                    && current.tag
-                    && constantTimeEquals(current.tag, presentedTag)
+                throw new MachineTagConflictError(
+                    'Machine runner proof mismatch; re-enroll with a new machine id'
                 )
-                if (presentedProof && tagOk && options?.allowOfflineProofRebind) {
-                    const now = Date.now()
-                    db.prepare(`
-                        UPDATE machines
-                        SET runner_proof_hash = @runner_proof_hash,
-                            updated_at = @updated_at,
-                            seq = seq + 1
-                        WHERE id = @id
-                    `).run({
-                        runner_proof_hash: hashRunnerProof(presentedProof),
-                        updated_at: now,
-                        id,
-                    })
-                    const rebound = getMachine(db, id)
-                    if (!rebound) {
-                        throw new Error('Failed to rebind machine runner proof')
-                    }
-                    current = rebound
-                } else {
-                    throw new MachineTagConflictError(
-                        'Machine runner proof mismatch; re-enroll with a new machine id'
-                    )
-                }
             }
         } else if (presentedProof) {
             throw new MachineTagConflictError(
