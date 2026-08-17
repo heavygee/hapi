@@ -170,6 +170,25 @@ describe('message content search', () => {
             .toMatchObject([{ sessionId: session.id }])
     })
 
+    it('indexes visible non-sidechain Claude user records', () => {
+        const store = new Store(':memory:')
+        const session = makeSession(store, 'claude-user-content-search')
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'user',
+                    isSidechain: false,
+                    message: { content: [{ type: 'text', text: 'Find this Claude prompt.' }] }
+                }
+            }
+        })
+
+        expect(store.messages.searchContent('Claude prompt', 'default'))
+            .toMatchObject([{ sessionId: session.id }])
+    })
+
     it('applies the result limit after deduplicating matching sessions', () => {
         const store = new Store(':memory:')
         const otherSession = makeSession(store, 'content-search-other')

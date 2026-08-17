@@ -187,6 +187,20 @@ export function extractUserPlainText(content: unknown): string | null {
     return normalizeSearchablePlainText(textParts.join(' '))
 }
 
+function extractClaudeUserPlainText(content: unknown): string | null {
+    if (!isObject(content) || content.type !== 'output') return null
+    const data = isObject(content.data) ? content.data : null
+    if (!data || data.type !== 'user' || Boolean(data.isSidechain)) return null
+
+    const message = isObject(data.message) ? data.message : null
+    const blocks = Array.isArray(message?.content) ? message.content : null
+    if (!blocks || blocks.length === 0 || !blocks.every((block) => (
+        isObject(block) && block.type === 'text' && typeof block.text === 'string'
+    ))) return null
+
+    return extractUserPlainText(blocks)
+}
+
 export type SearchableMessage = {
     role: 'user' | 'assistant'
     text: string
@@ -236,6 +250,8 @@ export function extractSearchableMessageText(value: unknown): SearchableMessage 
 
     if (record.role === 'agent' || record.role === 'assistant') {
         if (isHiddenAssistantOutput(record.content)) return null
+        const claudeUserText = extractClaudeUserPlainText(record.content)
+        if (claudeUserText) return { role: 'user', text: claudeUserText }
         const renderKey = getMessageRenderKey(record.content)
         const isAgyPlannerMessage = isObject(record.content)
             && record.content.type === 'output'

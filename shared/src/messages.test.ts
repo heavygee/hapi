@@ -142,6 +142,36 @@ describe('extractSearchableMessageText', () => {
         })).toBeNull()
     })
 
+    test('extracts visible non-sidechain Claude user records', () => {
+        expect(extractSearchableMessageText({
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'user',
+                    isSidechain: false,
+                    message: {
+                        content: [
+                            { type: 'text', text: 'Find this Claude prompt.' },
+                            { type: 'text', text: 'Keep searching.' }
+                        ]
+                    }
+                }
+            }
+        })).toEqual({ role: 'user', text: 'Find this Claude prompt. Keep searching.' })
+        expect(extractSearchableMessageText({
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'user',
+                    isSidechain: true,
+                    message: { content: [{ type: 'text', text: 'Hidden prompt.' }] }
+                }
+            }
+        })).toBeNull()
+    })
+
     test('normalizes assistant Markdown to the rendered text', () => {
         expect(extractSearchableMessageText({
             role: 'agent',
