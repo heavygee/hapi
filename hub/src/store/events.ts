@@ -24,6 +24,7 @@ export type InsertSystemEventInput = {
     idempotencyKey?: string | null
     confidence?: number | null
     severity?: number | null
+    namespace?: string | null
 }
 
 export type StoredSystemEvent = {
@@ -49,6 +50,7 @@ export type StoredSystemEvent = {
     idempotencyKey: string | null
     confidence: number | null
     severity: number | null
+    namespace: string
 }
 
 export type ListSystemEventsOptions = {
@@ -96,6 +98,7 @@ type SystemEventRow = {
     idempotency_key: string | null
     confidence: number | null
     severity: number | null
+    namespace: string
 }
 
 function mapRow(row: SystemEventRow): StoredSystemEvent {
@@ -121,7 +124,8 @@ function mapRow(row: SystemEventRow): StoredSystemEvent {
         provenance: row.provenance,
         idempotencyKey: row.idempotency_key,
         confidence: row.confidence,
-        severity: row.severity
+        severity: row.severity,
+        namespace: row.namespace
     }
 }
 
@@ -152,12 +156,17 @@ export function repointSessionEvents(db: Database, fromSessionId: string, toSess
 }
 
 export function insertSystemEvent(db: Database, input: InsertSystemEventInput): StoredSystemEvent | null {
+    const namespace = input.namespace ?? 'default'
     if (input.idempotencyKey) {
-        const existing = db.prepare(
-            'SELECT id FROM events WHERE idempotency_key = ? LIMIT 1'
-        ).get(input.idempotencyKey) as { id: number } | undefined
+        const existing = getSystemEventByIdempotencyKey(db, input.idempotencyKey)
         if (existing) {
-            return getSystemEventById(db, existing.id)
+            return existing
+        }
+    }
+    if (input.dedupeKey) {
+        const existing = getSystemEventByDedupeKey(db, input.dedupeKey, namespace)
+        if (existing) {
+            return existing
         }
     }
 
@@ -167,13 +176,13 @@ export function insertSystemEvent(db: Database, input: InsertSystemEventInput): 
             event_type, attention_candidate, operator_action_required, risk_detected,
             summary, payload_json, artifact_refs, tags,
             related_session_id, related_event_id, dedupe_key, expires_at,
-            provenance, idempotency_key, confidence, severity
+            provenance, idempotency_key, confidence, severity, namespace
         ) VALUES (
             ?, ?, ?, ?, ?,
             ?, ?, ?, ?,
             ?, ?, ?, ?,
             ?, ?, ?, ?,
-            ?, ?, ?, ?
+            ?, ?, ?, ?, ?
         )
     `)
 
@@ -198,7 +207,8 @@ export function insertSystemEvent(db: Database, input: InsertSystemEventInput): 
         input.provenance ?? null,
         input.idempotencyKey ?? null,
         input.confidence ?? null,
-        input.severity ?? null
+        input.severity ?? null,
+        namespace
     )
 
     const id = Number(result.lastInsertRowid)
@@ -248,6 +258,17 @@ export function getSystemEventByIdempotencyKey(db: Database, idempotencyKey: str
     const row = db.prepare(
         'SELECT * FROM events WHERE idempotency_key = ? LIMIT 1'
     ).get(idempotencyKey) as SystemEventRow | undefined
+    return row ? mapRow(row) : null
+}
+
+export function getSystemEventByDedupeKey(
+    db: Database,
+    dedupeKey: string,
+    namespace = 'default'
+): StoredSystemEvent | null {
+    const row = db.prepare(
+        'SELECT * FROM events WHERE dedupe_key = ? AND namespace = ? LIMIT 1'
+    ).get(dedupeKey, namespace) as SystemEventRow | undefined
     return row ? mapRow(row) : null
 }
 
@@ -340,6 +361,34 @@ export function countSystemEvents(db: Database): number {
  * Idempotent Overseer events DDL — runs on every Store init, NOT gated on SCHEMA_VERSION.
  * Additive Overseer tables must never own a version step (soup composability).
  */
+function getEventsColumnNames(db: Database): Set<string> {
+    const rows = db.prepare('PRAGMA table_info(events)').all() as Array<{ name: string }>
+    return new Set(rows.map((row) => row.name))
+}
+
+function ensureEventsNamespaceColumn(db: Database): void {
+    const columns = getEventsColumnNames(db)
+    if (columns.size === 0) {
+        return
+    }
+    if (!columns.has('namespace')) {
+        db.exec(`ALTER TABLE events ADD COLUMN namespace TEXT NOT NULL DEFAULT 'default'`)
+        db.exec(`
+            UPDATE events
+            SET namespace = COALESCE(
+                (SELECT sessions.namespace FROM sessions WHERE sessions.id = events.related_session_id),
+                namespace
+            )
+            WHERE related_session_id IS NOT NULL
+        `)
+    }
+    db.exec(`
+        DROP INDEX IF EXISTS idx_events_dedupe_key;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_events_namespace_dedupe_key
+            ON events(namespace, dedupe_key) WHERE dedupe_key IS NOT NULL;
+    `)
+}
+
 export function ensureOverseerEventsSchema(db: Database): void {
     db.exec(`
         CREATE TABLE IF NOT EXISTS events (
@@ -364,11 +413,11 @@ export function ensureOverseerEventsSchema(db: Database): void {
             provenance TEXT,
             idempotency_key TEXT,
             confidence REAL,
-            severity INTEGER
+            severity INTEGER,
+            namespace TEXT NOT NULL DEFAULT 'default'
         );
         CREATE INDEX IF NOT EXISTS idx_events_session_ts ON events(related_session_id, ts DESC);
         CREATE INDEX IF NOT EXISTS idx_events_type_ts ON events(event_type, ts DESC);
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_events_dedupe_key ON events(dedupe_key) WHERE dedupe_key IS NOT NULL;
         CREATE UNIQUE INDEX IF NOT EXISTS idx_events_idempotency_key ON events(idempotency_key) WHERE idempotency_key IS NOT NULL;
 
         CREATE TABLE IF NOT EXISTS event_links (
@@ -411,6 +460,8 @@ export function ensureOverseerEventsSchema(db: Database): void {
             VALUES (new.id, new.summary, COALESCE(new.tags, ''), COALESCE(new.payload_json, ''));
         END;
     `)
+
+    ensureEventsNamespaceColumn(db)
 }
 
 /** @deprecated use ensureOverseerEventsSchema */
@@ -466,6 +517,7 @@ export function dropOverseerEventsSchema(db: Database): void {
         DROP INDEX IF EXISTS idx_event_links_to;
         DROP INDEX IF EXISTS idx_event_links_from;
         DROP TABLE IF EXISTS event_links;
+        DROP INDEX IF EXISTS idx_events_namespace_dedupe_key;
         DROP INDEX IF EXISTS idx_events_dedupe_key;
         DROP INDEX IF EXISTS idx_events_type_ts;
         DROP INDEX IF EXISTS idx_events_session_ts;

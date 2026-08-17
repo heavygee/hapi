@@ -142,6 +142,70 @@ describe('systemEvents routes', () => {
         expect(body.events[0]?.summary).toBe('CI failed on upstream PR')
     })
 
+    it('dedupes on same dedupeKey with different idempotencyKey', async () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('dedupe-key-sess', { flavor: 'codex', path: '/tmp' }, null, 'default')
+        const app = createApp(createEngine(store))
+        const sharedDedupe = 'exit-reflection:dedupe-key-sess:986'
+
+        const first = await postEvent(app, validChannelBody({
+            relatedSessionId: session.id,
+            summary: 'Exit reflection skip: timebox: long reason',
+            dedupeKey: sharedDedupe,
+            idempotencyKey: 'exit-reflection:dedupe-key-sess:986:hash-a'
+        }))
+        expect(first.status).toBe(201)
+
+        const second = await postEvent(app, validChannelBody({
+            relatedSessionId: session.id,
+            summary: 'Exit reflection skip: timebox',
+            dedupeKey: sharedDedupe,
+            idempotencyKey: 'exit-reflection:dedupe-key-sess:986:hash-b'
+        }))
+        expect(second.status).toBe(200)
+        const secondJson = await second.json() as { event: { id: number }; deduped: boolean }
+        expect(secondJson.deduped).toBe(true)
+
+        expect(store.events.count()).toBe(1)
+    })
+
+    it('scopes dedupeKey to request namespace', async () => {
+        const store = new Store(':memory:')
+        const defaultSession = store.sessions.getOrCreateSession(
+            'dedupe-ns-default',
+            { flavor: 'codex', path: '/tmp' },
+            null,
+            'default'
+        )
+        const otherSession = store.sessions.getOrCreateSession(
+            'dedupe-ns-other',
+            { flavor: 'codex', path: '/tmp' },
+            null,
+            'other-ns'
+        )
+        const defaultApp = createApp(createEngine(store), 'default')
+        const otherApp = createApp(createEngine(store), 'other-ns')
+        const sharedDedupe = 'contrib:tiann/hapi#999:blocked'
+
+        const first = await postEvent(defaultApp, validChannelBody({
+            relatedSessionId: defaultSession.id,
+            dedupeKey: sharedDedupe,
+            idempotencyKey: 'contrib:tiann/hapi#999:fp-default'
+        }))
+        expect(first.status).toBe(201)
+
+        const second = await postEvent(otherApp, validChannelBody({
+            relatedSessionId: otherSession.id,
+            dedupeKey: sharedDedupe,
+            idempotencyKey: 'contrib:tiann/hapi#999:fp-other'
+        }))
+        expect(second.status).toBe(201)
+        const secondJson = await second.json() as { deduped: boolean }
+        expect(secondJson.deduped).toBe(false)
+
+        expect(store.events.count()).toBe(2)
+    })
+
     it('dedupes on same idempotencyKey', async () => {
         const store = new Store(':memory:')
         const app = createApp(createEngine(store))
