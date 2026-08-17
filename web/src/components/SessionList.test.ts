@@ -671,20 +671,19 @@ describe('resolveSessionGroupDirectory', () => {
         })).toBe('/home/heavygee/coding/server-setup')
     })
 
-    it('keeps basePath when path is not under it (no display-suffix rewrite)', () => {
-        // Realpath basePath + logical path: per-session resolve stays on basePath.
-        // Cross-session coalesce in groupSessionsByDirectory joins alias piles.
+    it('rewrites logical path spelling when realpathed worktreePath sits under basePath', () => {
+        // Estate: CLI realpaths worktreePath/basePath; metadata.path may keep ~/coding.
         expect(resolveSessionGroupDirectory({
             path: '/home/heavygee/coding/hapi/worktrees/cursor-mcp-isolation',
             worktree: {
                 basePath: '/work/coding/hapi',
-                worktreePath: '/home/heavygee/coding/hapi/worktrees/cursor-mcp-isolation',
+                worktreePath: '/work/coding/hapi/worktrees/cursor-mcp-isolation',
             },
-        })).toBe('/work/coding/hapi')
+        })).toBe('/home/heavygee/coding/hapi')
     })
 
     it('keeps an external same-suffix worktree under basePath', () => {
-        // Major: display `org/repo` alone must not reassign to /home/me/org/repo.
+        // worktreePath is NOT under basePath — no alias evidence.
         expect(resolveSessionGroupDirectory({
             path: '/home/me/org/repo/worktrees/feature',
             worktree: {
@@ -699,6 +698,15 @@ describe('resolveSessionGroupDirectory', () => {
             path: '/work/coding/hapi',
             worktree: { basePath: '/work/coding/hapi' },
         })).toBe('/work/coding/hapi')
+    })
+
+    it('preserves POSIX and Windows filesystem roots', () => {
+        expect(resolveSessionGroupDirectory({ path: '/' })).toBe('/')
+        expect(resolveSessionGroupDirectory({ path: 'C:\\' })).toBe('C:\\')
+        expect(resolveSessionGroupDirectory({
+            path: 'C:\\',
+            worktree: { basePath: 'C:\\' },
+        })).toBe('C:\\')
     })
 
     it('returns Other when neither path nor basePath is set', () => {
@@ -733,7 +741,7 @@ describe('groupSessionsByDirectory symlink coalesce', () => {
                     basePath: '/work/coding/hapi',
                     branch: 'feat/x',
                     name: 'feat-x',
-                    worktreePath: '/home/heavygee/coding/hapi/worktrees/feat-x',
+                    worktreePath: '/work/coding/hapi/worktrees/feat-x',
                 },
             },
         })
@@ -765,5 +773,43 @@ describe('groupSessionsByDirectory symlink coalesce', () => {
         expect(groups).toHaveLength(1)
         expect(groups[0]?.directory).toBe('/mnt/clone/org/repo')
         expect(groups[0]?.displayName).toBe('org/repo')
+    })
+
+    it('keeps an external worktree separate from an unrelated same-suffix clone', () => {
+        const unrelatedClone = makeSession({
+            id: 'clone',
+            updatedAt: 2,
+            metadata: {
+                machineId: 'machine-oos',
+                path: '/home/me/org/repo',
+                worktree: {
+                    basePath: '/home/me/org/repo',
+                    branch: 'main',
+                    name: 'main',
+                    worktreePath: '/home/me/org/repo',
+                },
+            },
+        })
+        const external = makeSession({
+            id: 'external-wt',
+            updatedAt: 1,
+            metadata: {
+                machineId: 'machine-oos',
+                path: '/home/me/org/repo/worktrees/feature',
+                worktree: {
+                    basePath: '/mnt/clone/org/repo',
+                    branch: 'feature',
+                    name: 'feature',
+                    worktreePath: '/home/me/org/repo/worktrees/feature',
+                },
+            },
+        })
+
+        const groups = groupSessionsByDirectory([unrelatedClone, external])
+        expect(groups).toHaveLength(2)
+        expect(groups.map((g) => g.directory).sort()).toEqual([
+            '/home/me/org/repo',
+            '/mnt/clone/org/repo',
+        ])
     })
 })
