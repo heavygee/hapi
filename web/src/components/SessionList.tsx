@@ -112,7 +112,11 @@ export function isPinnedInProgressSession(
     if (mode === 'jobs') {
         return hasRunningAttachedJob(session)
     }
-    return hasRunningAttachedJob(session) || hasAgentInProgressActivity(session)
+    return hasRunningAttachedJob(session)
+        || hasAgentInProgressActivity(session)
+        || (session.active === true
+            && !hasAgentForegroundWork(session)
+            && (session.pendingRequestsCount ?? 0) === 0)
 }
 
 export type SessionTimeRange = {
@@ -2268,7 +2272,7 @@ export function SessionList(props: {
                     onToggle: () => setRunningSectionCollapsed((value) => !value),
                     pulse: true,
                     count: runningSessionTotal,
-                    bucketKeys: ['working', 'pending'],
+                    bucketKeys: ['jobs', 'working', 'pending'],
                 })}
                 {renderPinnedSection({
                     sectionKey: 'active-section',

@@ -1011,7 +1011,7 @@ export function ComposerButtons(props: {
                     <PerSessionSettingsButton
                         onToggle={props.onSettingsToggle}
                         buttonRef={props.settingsButtonRef}
-                        disabled={props.controlsDisabled}
+                        disabled={props.settingsDisabled ?? props.controlsDisabled}
                     />
                 ) : null}
                 </ToolbarItemSlot>

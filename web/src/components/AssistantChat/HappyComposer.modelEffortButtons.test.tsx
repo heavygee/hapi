@@ -225,6 +225,7 @@ describe('HappyComposer generic model/effort value buttons', () => {
         runtime.narrowViewport = true
         runtime.snapshot.thread.isDisabled = true
         renderComposer('pi', {
+            active: true,
             piModels: [
                 { provider: 'gemini', modelId: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', reasoning: true },
             ],

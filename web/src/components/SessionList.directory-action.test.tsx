@@ -697,10 +697,9 @@ describe('SessionList collapse behavior', () => {
         expect(screen.getByText(/Running \(1\)/)).toBeInTheDocument()
         expect(screen.getByText(/pending \(1\)/)).toBeInTheDocument()
         expect(screen.queryByText(/Idle \(/)).toBeNull()
-        // Quiet active stays under its project directory, not an Idle pin bucket.
-        expect(screen.getByTitle('/work/hapi')).toBeInTheDocument()
+        // Quiet active floats to Active sessions in all mode; running stays in In progress.
+        expect(screen.getByTitle('Active sessions')).toBeInTheDocument()
         expect(screen.getByRole('button', { name: /Quiet task/ })).toBeInTheDocument()
-        expect(getProjectPanel().getAttribute('data-open')).toBe('true')
     })
 
     it('keeps new-session-in-directory actions for projects whose rows all floated', () => {
