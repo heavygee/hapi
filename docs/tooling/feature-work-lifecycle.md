@@ -231,7 +231,7 @@ When a PR merges on `tiann/hapi`, do **not** stop at "congrats, archive yourself
 
 ```text
 1. Meta daily notifies the responsible HAPI session (chip status → merged; ping)
-2. That peer drops their layer(s) from ~/.config/hapi/driver-manifest.yaml
+2. That peer drops their layer(s) from **repo** `config/driver-manifest.yaml` (mirror to ~/.config via `hapi-manifest-mirror-to-config.sh` if needed)
 3. That peer cleans worktree + local/remote branch
 4. When ALL merged peers in the wave report cleanup done → ONE rematerialize
 ```
@@ -239,7 +239,7 @@ When a PR merges on `tiann/hapi`, do **not** stop at "congrats, archive yourself
 | Step | Who | What |
 |------|-----|------|
 | **1. Notify** | Meta / orchestrator on sweep | Reopen named PR session if archived; post MERGED brief (chip already shows `merged` / 🔧). Keep workstream title — **do not** rename to `🔧PR #N MERGED: …`. Classifier action string encodes the cleanup checklist. |
-| **2. Drop soup layer(s)** | **Feature peer** (owner of the layer) | Edit `~/.config/hapi/driver-manifest.yaml`: remove the `- branch:` entry (leave a `# DROPPED YYYY-MM-DD: … MERGED as #N` comment). If remat SKIP forced a **rescue thin** layer (`driver/<feature>-delta` beside fat `driver/<feature>`), drop **both** when the upstream PR merges. Do **not** hand-edit `~/coding/hapi/driver`. Do **not** each fire a full rebuild during a multi-PR merge wave. |
+| **2. Drop soup layer(s)** | **Feature peer** (owner of the layer) | Edit **repo** `config/driver-manifest.yaml`: remove the `- branch:` entry (leave a `# DROPPED YYYY-MM-DD: … MERGED as #N` comment). Mirror to ~/.config with `scripts/tooling/hapi-manifest-mirror-to-config.sh` if your workflow reads ~/.config. Pre-commit runs `hapi-manifest-drop-gate.sh` — refuses dropping layers whose `heavygee/hapi` PR is still OPEN unless operator names the branch (`HAPI_MANIFEST_DROP_OPEN_PR=1` + TTY). If remat SKIP forced a **rescue thin** layer (`driver/<feature>-delta` beside fat `driver/<feature>`), drop **both** when the upstream PR merges. Do **not** hand-edit `~/coding/hapi/driver`. Do **not** each fire a full rebuild during a multi-PR merge wave. |
 | **3. Clean worktree + branch** | **Feature peer** | From mirror: `git worktree remove ~/coding/hapi/worktrees/<name>` (or `--force` if dirty junk only); delete local branch; `git push origin --delete <branch>` when the remote tip is fully in `upstream/main`. Confirm with `hapi-branch-audit --quiet` (expect no `MERGED` row for that branch). |
 | **4. Rematerialize soup** | Meta tooling bot (unlocked by Meta daily) **or** operator — **once per wave** | Gate A: owned peers only (layer gone + worktree gone). Orphans never block. Meta daily collects ~30m then unlock-pings Meta tooling on the hourly Europe/London ping windows. Manual mid-window rebuilds are fine — unlock defers while `hapi-driver-status --quiet` is busy (75). Then: `hapi-sync-fork-main` + `git push origin main` → `hapi-driver-status --quiet` → `hapi-driver-rebuild --build-web --verify` → `hapi-verify-web-dist` → `hapi-restart-hub` if hub/cli changed. Meta CLI never rebuilds itself. |
 | **5. Exit reflection** | **Feature peer** (while context still hot) | See **§ Exit reflection** below — write retro (or honest `skip:`), then ack. |
@@ -349,7 +349,7 @@ Manifest / rebuild mechanics: [`driver-soup.md`](./driver-soup.md) § When upstr
 | **Upstream PR work** | `~/coding/hapi/worktrees/<name>/` | `upstream/main` (+ optional `--after` merge train) | `feat/…` / `fix/…` on origin | PR from `driver/integration` |
 | **Fork docs / tooling** | `~/coding/hapi/` mirror | `main` (fork) | `heavygee/hapi` main | In upstream PR diff |
 | **Soup integration** | `~/coding/hapi/driver/` | `driver/integration` (rebuilt only) | **No hand commits** — manifest merge only | Agent `git commit` in driver |
-| **Manifest** | `~/.config/hapi/driver-manifest.yaml` | n/a | Operator notes / fork docs | Committed secrets |
+| **Manifest** | **Repo** `config/driver-manifest.yaml` (recipe); `~/.config/hapi/driver-manifest.yaml` is generated mirror | n/a | Commit recipe on fork `main` same turn | Copy ~/.config → repo (inverted sync) |
 
 **Create worktree (canonical):**
 
@@ -379,7 +379,7 @@ Peer stack and soup are **both** required for normal feature work. They solve di
 ### 2. Soup — daily driver on `:3006` (**always promote**)
 
 - **When:** tip is ready for operator dogfood (after or in parallel with peer-stack proof). **Default. Not optional.**
-- **Agent-owned:** edit `~/.config/hapi/driver-manifest.yaml` (and commit `config/driver-manifest.yaml` on mirror), then `hapi-driver-rebuild --build-web [--verify]`, `hapi-verify-web-dist`, **`hapi-restart-hub`** if hub/cli/shared changed
+- **Agent-owned:** edit **repo** `config/driver-manifest.yaml` (commit on mirror same turn; optional `hapi-manifest-mirror-to-config.sh`), then `hapi-driver-rebuild --build-web [--verify]`, `hapi-verify-web-dist`, **`hapi-restart-hub`** if hub/cli/shared changed
 - **Conflicts:** trial-merge first; write `scripts/tooling/soup-heals/*.patch` or a `driver/<feature>` union tip — **do not** leave the feature out of soup
 - **Agent-forbidden:** `hapi-use-driver`, `hapi-use-worktree`, `hapi-driver-rebuild --activate`, raw `sudo systemctl restart hapi-hub`
 - **Web-only layer:** atomic `web/dist` swap + hard-reload — no hub restart
@@ -466,7 +466,7 @@ Peers **must** assess tier before capture ([`peer-stack.md` § Evidence modality
 **Allowed**
 
 - Edit product code in `~/coding/hapi/worktrees/<name>/`
-- **`~/.config/hapi/driver-manifest.yaml`** — add/update your feature layer when the tip is ready for `:3006` dogfood (peer-stack proof does not replace this)
+- **Repo** `config/driver-manifest.yaml` — add/update your feature layer when the tip is ready for `:3006` dogfood (commit on mirror same turn; optional `hapi-manifest-mirror-to-config.sh` for ~/.config)
 - `hapi-peer-stack up|down|status|doctor`
 - `hapi-driver-status --quiet` → **`hapi-driver-rebuild --build-web [--verify]`** (manifest merge **and** atomic `web/dist` — the supported soup promotion path)
 - `hapi-driver-build-web`, `hapi-verify-web-dist`
@@ -504,7 +504,7 @@ Peers **must** assess tier before capture ([`peer-stack.md` § Evidence modality
 **Peer sequence (from mirror `~/coding/hapi`):**
 
 ```bash
-# 1. Edit ~/.config/hapi/driver-manifest.yaml — add branch: feat/your-feature
+# 1. Edit config/driver-manifest.yaml — add branch: feat/your-feature (commit on mirror; optional hapi-manifest-mirror-to-config.sh)
 #    (or driver/<name> union tip when thin upstream tip conflicts with soup)
 #    Commit config/driver-manifest.yaml on mirror the same turn (mess-maker rule).
 # 2. One rebuild owner at a time (hapi-driver-status --quiet; exit 75 = wait; exit 76 = remat hold → Meta)

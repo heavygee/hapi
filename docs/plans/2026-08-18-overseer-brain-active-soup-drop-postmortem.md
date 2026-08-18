@@ -99,7 +99,7 @@ Not the PR watcher (`9f5f7e1d`). Kitchen, not upstream classify.
 - Surgical remat onto live `driver/integration` (did **not** absorb 108 upstream native-app commits)
 - Live verify: `PUT` openai/`gpt-4o` → 200; `GET /brains.active` matches; unknown profile → 400
 
-`~/.config/hapi/driver-manifest.yaml` still **lacks** `driver/overseer-brain-active`. A repeat "align repo to live" would drop it again.
+`~/.config/hapi/driver-manifest.yaml` was stale through 2026-08-17; mirrored from repo 2026-08-18 via `hapi-manifest-mirror-to-config.sh`. A repeat "align repo to live" would have dropped `driver/overseer-brain-active` again.
 
 ## Kill criteria (estate)
 
@@ -109,13 +109,15 @@ Not the PR watcher (`9f5f7e1d`). Kitchen, not upstream classify.
 - `GET /brains/:id/models` 200 + `PUT /brain/active` 404 → **split-brain**, not "OpenAI is down."
 - Claiming dogfood green for `/overseer` Set active without curling the PUT → **unverified**.
 
-## Remediation (tooling meta-bot owns 1-4)
+## Remediation (tooling meta-bot owns 1-4) — landed 2026-08-18
 
-1. **Stop inverted sync.** Repo `config/driver-manifest.yaml` is the recipe. `~/.config` is a stale override. Do not copy live → repo in a way that deletes layers. Either delete the override, or make it a generated mirror of repo (one writer).
-2. **Fix leftover defaults** that still point at `~/.config`: `probe-remat-tip-forward.sh`, dogfood Cursor rule, `hapi-use-worktree` help, Gate A paste, `driver-soup.md` rebuild-owner line, `hapi-sync-fork-main.sh` "Next:".
-3. **Drop gate:** refuse to remove a `- branch:` whose fork PR is OPEN (gh), unless `HAPI_MANIFEST_DROP_OPEN_PR=1` + TTY / named branch.
-4. **Handler needles** when a soup-only route grows a dogfood-critical verb (pattern: heal 103). Mount-only checks are not enough.
+1. **Stop inverted sync.** Repo `config/driver-manifest.yaml` is the recipe. `scripts/tooling/hapi-manifest-mirror-to-config.sh` mirrors repo → `~/.config` only. `hapi-mirror-hygiene-guard.sh` blocks `cp ~/.config/...` → repo. Manifest header + docs updated.
+2. **Fix leftover defaults** — `probe-remat-tip-forward.sh`, dogfood Cursor rule, `hapi-use-worktree` help, Gate A paste (`docs/operator/AGENTS.md`), `driver-soup.md` rebuild-owner, `hapi-sync-fork-main.sh` "Next:", `feature-work-lifecycle.md`, `new-feature-intake.md`.
+3. **Drop gate** — `scripts/tooling/hapi-manifest-drop-gate.sh` + pre-commit `staged` check; `HAPI_MANIFEST_DROP_OPEN_PR=1` + named branch + TTY override.
+4. **Handler needles** — heal `103-restore-overseer-brain-active.patch` + `REQUIRED_HANDLERS_IN_MODULE` in `hapi-soup-route-mounts-check.mjs` (2026-08-18).
 5. **Do not** re-stack fat `feat/overseer-admin-console` as the soup layer - the thin restore is the dogfood contract. #103/#104/#106 still need a real absorb-or-close decision; that is product, not this 404.
+
+`~/.config` mirrored 2026-08-18 — includes `driver/overseer-brain-active`.
 
 ## Not this incident
 

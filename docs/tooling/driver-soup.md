@@ -62,7 +62,7 @@ Since Phase P, **soup foundry + production dogfood hub** live on the **oos-linux
 
 ## Daily driver (soup)
 
-**Manifest:** `config/driver-manifest.yaml` in the fork (tracked). Rebuild reads it via `hapi-manifest-path.sh`; legacy override: `~/.config/hapi/driver-manifest.yaml` or `HAPI_DRIVER_MANIFEST`.
+**Manifest:** **Repo** `config/driver-manifest.yaml` is the recipe (tracked, commit on fork `main`). Rebuild reads it via `hapi-manifest-path.sh`. `~/.config/hapi/driver-manifest.yaml` is a **generated mirror** (`scripts/tooling/hapi-manifest-mirror-to-config.sh`). Legacy override: `HAPI_DRIVER_MANIFEST` env only.
 
 **Composed soup tree:** `~/coding/hapi/driver` on branch `driver/integration` — output of rebuild, not a substitute for the manifest when adding layers.
 
@@ -337,7 +337,7 @@ hapi-driver-rebuild --build-web --verify
 # HAPI_DRIVER_WAIT_BUSY_SECS=600 hapi-driver-rebuild --build-web --verify
 ```
 
-**Soup rebuild owner (policy):** one agent/session owns manifest + rebuild at a time (`hapi-driver-status` flock). When the tip is ready for `:3006` dogfood, the **feature peer** edits `~/.config/hapi/driver-manifest.yaml` and runs `hapi-driver-rebuild --build-web --verify` — do not ping operator/orchestrator to add the layer, and do not wait for a separate "approve soup" gate. Meta session (`8c6b5a7d`) is for **manifest-only** cron rebuilds, stack hygiene, and **remat escalation**. Do not run rebuilds in parallel hoping flock saves you.
+**Soup rebuild owner (policy):** one agent/session owns manifest + rebuild at a time (`hapi-driver-status` flock). When the tip is ready for `:3006` dogfood, the **feature peer** edits **repo** `config/driver-manifest.yaml` (commit on mirror same turn), mirrors to `~/.config` via `hapi-manifest-mirror-to-config.sh` if needed, and runs `hapi-driver-rebuild --build-web --verify` — do not ping operator/orchestrator to add the layer, and do not wait for a separate "approve soup" gate. Meta session (`8c6b5a7d`) is for **manifest-only** cron rebuilds, stack hygiene, and **remat escalation**. Do not run rebuilds in parallel hoping flock saves you.
 
 ### Remat escalation hold (2026-07-30)
 
@@ -414,8 +414,8 @@ Sweep `1d4644037` ("sync manifest drops", claimed merged #897) copied stale `~/.
 
 **Must:**
 
-1. Recipe is **repo** `config/driver-manifest.yaml`. Do not "align repo to ~/.config" in a way that deletes `- branch:` lines.
-2. Do not drop a layer whose `heavygee/hapi` PR is OPEN unless the operator names that branch this turn.
+1. Recipe is **repo** `config/driver-manifest.yaml`. Do not "align repo to ~/.config" in a way that deletes `- branch:` lines. Refresh runtime copy with `scripts/tooling/hapi-manifest-mirror-to-config.sh` (repo → ~/.config only).
+2. Pre-commit runs `hapi-manifest-drop-gate.sh staged` — refuses removing a layer whose `heavygee/hapi` PR is OPEN unless operator names the branch (`HAPI_MANIFEST_DROP_OPEN_PR=1` + TTY).
 3. A soup heal that restores a web client for a hub route the module no longer defines is incomplete. Handler needles (`REQUIRED_HANDLERS_IN_MODULE` in `hapi-soup-route-mounts-check.mjs`) — mount-only is not enough.
 4. `GET` models 200 + `PUT` active 404 is split-brain, not "the LLM is down."
 
@@ -700,9 +700,9 @@ The hub's SQLite store has **forward step-migrations only** (v1 -> v2 -> ... -> 
 ## First-time setup
 
 ```bash
-mkdir -p ~/.config/hapi
-cp ~/coding/hapi/docs/tooling/driver-manifest.example.yaml ~/.config/hapi/driver-manifest.yaml
-# edit layers
+# Recipe: edit config/driver-manifest.yaml in the fork (commit on main).
+# Optional runtime mirror for tools that still read ~/.config:
+scripts/tooling/hapi-manifest-mirror-to-config.sh
 
 hapi-driver-rebuild --build-web --verify
 hapi-verify-web-dist

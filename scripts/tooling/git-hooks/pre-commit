@@ -116,6 +116,14 @@ if [[ -x "$LEAK_CHECK" ]]; then
     fi
 fi
 
+MANIFEST_DROP_GATE="$PRIMARY/scripts/tooling/hapi-manifest-drop-gate.sh"
+[[ -x "$MANIFEST_DROP_GATE" ]] || MANIFEST_DROP_GATE="$ROOT/scripts/tooling/hapi-manifest-drop-gate.sh"
+if [[ -x "$MANIFEST_DROP_GATE" ]] && printf '%s\n' "$STAGED" | grep -qx 'config/driver-manifest.yaml'; then
+    if ! "$MANIFEST_DROP_GATE" staged "$ROOT"; then
+        FAIL=1
+    fi
+fi
+
 if [[ "$FAIL" -ne 0 ]]; then
     echo "" >&2
     fork_policy_github_safe_paths >&2

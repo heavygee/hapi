@@ -276,7 +276,7 @@ Only after (1)-(4): send operator **links**, **what to click**, **declared tier 
 
 Operator validates in browser. Iterate in the worktree; re-run gates after each round. **Do not** open upstream PR until explicit approval. Inline Playwright proof ([§6.4d](#4d--inline-in-hapi-chat-mandatory-for-4b4c-operator-reads-sessions-in-the-web-app)) satisfies **ready for operator** handoff — it does **not** substitute for operator click-test on `:3006` or unilateral PR open unless the operator says otherwise in chat.
 
-**Soup promotion on `:3006` (default — peer-owned):** the **feature peer** edits `~/.config/hapi/driver-manifest.yaml`, commits `config/driver-manifest.yaml` on mirror, then `hapi-driver-rebuild --build-web --verify`, `hapi-verify-web-dist`, and `hapi-restart-hub` if hub/cli/shared changed. See [feature-work-lifecycle.md § Soup promotion](./feature-work-lifecycle.md#soup-promotion-peer-owned--default-not-optional). **Do not** ask the operator to add manifest layers or grant permission to soup-promote.
+**Soup promotion on `:3006` (default — peer-owned):** the **feature peer** edits **repo** `config/driver-manifest.yaml`, commits on mirror same turn, optionally mirrors to ~/.config via `scripts/tooling/hapi-manifest-mirror-to-config.sh`, then `hapi-driver-rebuild --build-web --verify`, `hapi-verify-web-dist`, and `hapi-restart-hub` if hub/cli/shared changed. See [feature-work-lifecycle.md § Soup promotion](./feature-work-lifecycle.md#soup-promotion-peer-owned--default-not-optional). **Do not** ask the operator to add manifest layers or grant permission to soup-promote.
 
 ### 8 — Upstream PR (after approval)
 

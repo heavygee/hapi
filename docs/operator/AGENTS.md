@@ -274,7 +274,7 @@ Chip thread count excludes GraphQL `isOutdated` unresolved threads (#847: leftov
 PR #<N> merged (<tip SHA if known>). Chip shows merged / 🔧 — leave the workstream title alone.
 
 Please:
-1. Drop your soup layer(s) from ~/.config/hapi/driver-manifest.yaml (# DROPPED comment OK)
+1. Drop your soup layer(s) from **repo** `config/driver-manifest.yaml` (# DROPPED comment OK); then `hapi-manifest-mirror-to-config.sh` if you use ~/.config
 2. Remove worktree + delete local/remote branch (hapi-branch-audit until clean)
 3. Exit reflection: copy docs/plans/retros/TEMPLATE-exit-reflection.md →
    docs/plans/retros/YYYY-MM-DD-<slug>-exit.md (or honest skip: <reason> / skip: timebox)

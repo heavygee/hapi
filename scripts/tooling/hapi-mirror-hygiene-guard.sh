@@ -156,6 +156,21 @@ if [ -z "$CMD" ]; then
     exit 0
 fi
 
+# Inverted manifest sync (~/.config → repo) dropped open-PR soup layers (heavygee#133, 2026-08-18).
+if printf '%s' "$CMD" | grep -qiE '(^|[[:space:]|&;])(cp|rsync|mv|tee)([[:space:]|&;]|$)'; then
+    if printf '%s' "$CMD" | grep -qE '\.config/hapi/driver-manifest(\.yaml)?'; then
+        if printf '%s' "$CMD" | grep -qE '(^|[[:space:]|&;<>])(config/driver-manifest\.yaml|'"$HAPI_ROOT"'/config/driver-manifest\.yaml)'; then
+            _deny "Blocked: copying ~/.config/hapi/driver-manifest.yaml → repo config/driver-manifest.yaml (inverted sync).
+
+Recipe is repo config/driver-manifest.yaml. Mirror the other way:
+  scripts/tooling/hapi-manifest-mirror-to-config.sh
+
+Canon: docs/plans/2026-08-18-overseer-brain-active-soup-drop-postmortem.md" \
+                "Blocked: do not copy ~/.config driver-manifest into the repo. Edit config/driver-manifest.yaml and use hapi-manifest-mirror-to-config.sh."
+        fi
+    fi
+fi
+
 CWD_ABS=""
 if [ -n "$CWD" ]; then
     CWD_ABS=$(_abs_norm "$CWD")

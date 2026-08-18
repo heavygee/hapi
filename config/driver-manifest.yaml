@@ -1,5 +1,9 @@
-# Daily driver manifest - operator-local copy lives at ~/.config/hapi/driver-manifest.yaml
+# Daily driver manifest — CANONICAL RECIPE (edit here, commit on fork main).
+# Runtime mirror: ~/.config/hapi/driver-manifest.yaml via hapi-manifest-mirror-to-config.sh
 # Rebuild: hapi-driver-rebuild [--build-web] [--verify] [--activate]
+#
+# NEVER copy ~/.config → this file (inverted sync dropped open-PR layers — see
+# docs/plans/2026-08-18-overseer-brain-active-soup-drop-postmortem.md).
 #
 # Layer order matters. Each layer merges into driver/integration on top of base.
 # Top layer = last entry in this list.

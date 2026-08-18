@@ -76,7 +76,7 @@ fi
 
 echo ""
 echo "Synced: $(git -C "$PRIMARY" log -1 --oneline)"
-echo "Next: review ~/.config/hapi/driver-manifest.yaml — drop layers now on upstream/main"
+echo "Next: review config/driver-manifest.yaml — drop layers now on upstream/main (mirror-to-config if you use ~/.config)"
 echo "      hapi-driver-rebuild --build-web --verify  (if soup layers changed)"
 
 # Post-sync branch hygiene check: just-merged upstream may have absorbed some of

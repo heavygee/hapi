@@ -146,9 +146,10 @@ your own dev worktree kills your own running session as a side effect.
 
 Correct workflow for testing a feature branch on the live hub:
 
-    1. Add the branch to ~/.config/hapi/driver-manifest.yaml:
+    1. Add the branch to repo config/driver-manifest.yaml (commit on mirror):
          layers:
            - branch: <your-branch>
+       Optional: scripts/tooling/hapi-manifest-mirror-to-config.sh
     2. hapi-driver-rebuild --build-web --verify
        (merges into driver/integration, builds, runs typecheck + tests;
         does NOT touch live hub.)

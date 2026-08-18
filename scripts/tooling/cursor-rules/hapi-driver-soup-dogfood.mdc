@@ -19,7 +19,7 @@ When dogfooding on `:3006` (driver/integration + manifest layers):
 - `hapi-driver-rebuild` without `--build-web` (manifest merge without dist — agent guard refuses)
 
 **ONLY (soup promotion after operator approves dogfood on :3006)**
-- Edit `~/.config/hapi/driver-manifest.yaml` (add your feature branch layer)
+- Edit **repo** `config/driver-manifest.yaml` (commit on mirror same turn); mirror to ~/.config with `scripts/tooling/hapi-manifest-mirror-to-config.sh` if your workflow reads ~/.config
 - `hapi-driver-rebuild --build-web [--verify]` when driver should include your layer
 - `hapi-driver-build-web` (builds from `driver/web` source on current driver HEAD)
 - `hapi-verify-web-dist` to audit (no build)

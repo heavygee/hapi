@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# Resolve driver-manifest.yaml: repo canonical path, legacy ~/.config override.
+# Resolve driver-manifest.yaml.
+# Canonical recipe: <repo>/config/driver-manifest.yaml (tracked in fork main).
+# ~/.config/hapi/driver-manifest.yaml is a generated runtime mirror — refresh with
+#   scripts/tooling/hapi-manifest-mirror-to-config.sh
+# Do NOT copy ~/.config → repo (inverted sync deleted open-PR layers in 1d4644037).
 
 hapi_manifest_path() {
     local primary="${1:-${HAPI_PRIMARY:-$HOME/coding/hapi}}"

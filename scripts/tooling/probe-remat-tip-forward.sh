@@ -7,7 +7,10 @@ set +e
 set -uo pipefail
 
 REPO="${HAPI_REPO:-/home/heavygee/coding/hapi}"
-MANIFEST="${HAPI_DRIVER_MANIFEST:-/home/heavygee/.config/hapi/driver-manifest.yaml}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/hapi-manifest-path.sh
+source "$SCRIPT_DIR/lib/hapi-manifest-path.sh"
+MANIFEST="$(hapi_manifest_path "$REPO")"
 DRIVER="${HAPI_DRIVER:-$REPO/driver}"
 OUT="/tmp/remat-tip-forward-probe"
 while [[ $# -gt 0 ]]; do
