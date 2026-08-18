@@ -442,7 +442,8 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/share-target-session-search
   # Playwright: localdocs/playwright-runs/share-target-session-search.png
   # Topmost for cheap rollback via hapi-driver-rollback-web. Drop when upstream PR merges.
-  - branch: feat/share-target-session-search
+  # DROPPED 2026-08-18: remote branch deleted; already ancestor of soup tip (remat resume).
+  # - branch: feat/share-target-session-search
 
   # #878 - full inline model error detect (CLI classifier + ACP hooks + hub
   # notify + web banner). Upstream #871 merged WEB WARNING STYLING ONLY — this
@@ -742,7 +743,8 @@ layers:
   # Do NOT open upstream PR until operator dogfood OK on :3006.
   # Worktree: ~/coding/hapi/worktrees/markdown-file-link-failclosed @ fix/markdown-file-link-failclosed
   # Tip: 35d59fee2 (origin/fix/markdown-file-link-failclosed)
-  - branch: fix/markdown-file-link-failclosed
+  # DROPPED 2026-08-18: remote branch deleted; already ancestor of soup tip (remat resume).
+  # - branch: fix/markdown-file-link-failclosed
 
   # DROPPED 2026-08-09: fix/project-pin-intra-group-only MERGED as tiann/hapi#1458
   # (b8a765d4e — keep project pin inside groups below In progress; Fixes #1457)
