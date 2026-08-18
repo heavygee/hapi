@@ -1,0 +1,115 @@
+diff --git a/hub/src/web/routes/overseer.ts b/hub/src/web/routes/overseer.ts
+index 9ca10a9e4..85bb5bead 100644
+--- a/hub/src/web/routes/overseer.ts
++++ b/hub/src/web/routes/overseer.ts
+@@ -246,6 +246,14 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
+             if (error instanceof BrainUnavailableError) {
+                 // Reachable-but-failed (http 4xx/5xx, malformed body) is a converse
+                 // bug, not an offline brain — do not mislabel it as GPU/VR downtime.
++                // Log the upstream detail — the operator reply stays short, but the
++                // hub journal must name the real failure (e.g. invalid_function_parameters).
++                console.warn('[Overseer][Converse] brain unavailable', {
++                    kind: error.kind,
++                    status: error.status,
++                    reachable: error.reachable,
++                    message: error.message.slice(0, 500)
++                })
+                 const reply = error.reachable
+                     ? 'I reached the Overseer brain but could not complete the tool conversation (request error). This is a converse-loop issue, not the brain being offline — please retry, and flag it if it persists.'
+                     : 'The Overseer brain is offline right now (the GPU may be in use for VR). Try again shortly — your events and inbox are still being captured.'
+diff --git a/shared/src/overseerConverse.test.ts b/shared/src/overseerConverse.test.ts
+new file mode 100644
+index 000000000..6d7cbd026
+--- /dev/null
++++ b/shared/src/overseerConverse.test.ts
+@@ -0,0 +1,35 @@
++import { describe, expect, it } from 'vitest'
++import {
++    buildOverseerOpenAiTools,
++    hasOpenAiForbiddenToolParamRoot,
++    OPENAI_FORBIDDEN_TOOL_PARAM_ROOT_KEYS
++} from './overseerConverse'
++
++describe('buildOverseerOpenAiTools OpenAI compatibility', () => {
++    it('never puts anyOf/oneOf/allOf/enum/const/not at the root of function.parameters', () => {
++        const tools = buildOverseerOpenAiTools()
++        expect(tools.length).toBeGreaterThan(0)
++        for (const tool of tools) {
++            const params = tool.function.parameters
++            expect(params.type).toBe('object')
++            for (const key of OPENAI_FORBIDDEN_TOOL_PARAM_ROOT_KEYS) {
++                expect(params, `${tool.function.name} must not have top-level ${key}`).not.toHaveProperty(key)
++            }
++            expect(hasOpenAiForbiddenToolParamRoot(params)).toBe(false)
++        }
++    })
++
++    it('keeps ping_session as a plain object with required message only', () => {
++        const ping = buildOverseerOpenAiTools().find((t) => t.function.name === 'ping_session')
++        expect(ping).toBeDefined()
++        const params = ping!.function.parameters
++        expect(params.type).toBe('object')
++        expect(params.required).toEqual(['message'])
++        expect(params).not.toHaveProperty('anyOf')
++        expect(params.properties).toMatchObject({
++            sessionId: expect.objectContaining({ type: 'string' }),
++            itemId: expect.objectContaining({ type: 'integer' }),
++            message: expect.objectContaining({ type: 'string' })
++        })
++    })
++})
+diff --git a/shared/src/overseerConverse.ts b/shared/src/overseerConverse.ts
+index e98702f52..d58f09e14 100644
+--- a/shared/src/overseerConverse.ts
++++ b/shared/src/overseerConverse.ts
+@@ -190,21 +190,36 @@ const OVERSEER_TOOL_PARAMS: Record<OverseerToolName, JsonSchema> = {
+         feedback: { type: 'string', description: 'Optional operator note / learning label to freeze with the disposition.' },
+         snoozedUntil: { type: 'integer', minimum: 1, description: 'Required for snooze: epoch ms to sleep the item until.' }
+     }, ['itemId', 'action']),
+-    // anyOf mirrors runtime Zod: message plus at least one of sessionId|itemId.
+-    ping_session: {
+-        type: 'object',
+-        properties: {
+-            sessionId: { type: 'string', description: 'Worker session id (full UUID or unique prefix).' },
+-            itemId: { type: 'integer', minimum: 1, description: 'Inbox item id — resolves its relatedSessionId when sessionId omitted.' },
+-            message: { type: 'string', description: 'Operator-directed message to relay to that session.' }
++    // OpenAI Chat Completions rejects top-level anyOf/oneOf/allOf/enum/const/not on
++    // function parameters (invalid_function_parameters). Advertise both targets as
++    // optional; Zod `pingSessionArgsSchema` still requires message + sessionId|itemId.
++    ping_session: obj({
++        sessionId: {
++            type: 'string',
++            description: 'Worker session id (full UUID or unique prefix). Provide this and/or itemId (at least one required at runtime).'
+         },
+-        required: ['message'],
+-        anyOf: [
+-            { required: ['sessionId'] },
+-            { required: ['itemId'] }
+-        ],
+-        additionalProperties: false
+-    }
++        itemId: {
++            type: 'integer',
++            minimum: 1,
++            description: 'Inbox item id — resolves its relatedSessionId when sessionId omitted. Provide this and/or sessionId (at least one required at runtime).'
++        },
++        message: { type: 'string', description: 'Operator-directed message to relay to that session.' }
++    }, ['message'])
++}
++
++/** Keys OpenAI forbids at the root of `function.parameters` (Chat Completions / Responses). */
++export const OPENAI_FORBIDDEN_TOOL_PARAM_ROOT_KEYS = [
++    'anyOf',
++    'oneOf',
++    'allOf',
++    'enum',
++    'const',
++    'not'
++] as const
++
++/** True when a tool parameters object would be rejected by OpenAI as invalid_function_parameters. */
++export function hasOpenAiForbiddenToolParamRoot(parameters: Record<string, unknown>): boolean {
++    return OPENAI_FORBIDDEN_TOOL_PARAM_ROOT_KEYS.some((key) => key in parameters)
+ }
+ 
+ /** The Overseer tool catalog (reads + disposition + relay writes) as an OpenAI `tools` array. */
