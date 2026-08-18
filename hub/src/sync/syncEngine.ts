@@ -26,7 +26,7 @@ import type { ExternalRef, AgentFlavor, CodexCollaborationMode, CopilotAgentMode
 import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
 import type { Server } from 'socket.io'
 import { randomUUID } from 'node:crypto'
-import type { Store, CancelQueuedMessageResult } from '../store'
+import type { Store, SettingsStore, CancelQueuedMessageResult } from '../store'
 import type { HapiSessionExportResult } from '@hapi/protocol/sessionExport'
 import type { RpcRegistry } from '../socket/rpcRegistry'
 import { clearAgentTerminalBuffer } from '../socket/agentTerminalBuffer'
@@ -667,6 +667,11 @@ export class SyncEngine {
             this.overseerByNamespace.set(key, entity)
         }
         return entity
+    }
+
+    /** Hub settings KV (persisted active brain, etc.) — see SettingsStore. */
+    getSettings(): SettingsStore {
+        return this.store.settings
     }
 
     private createOverseerForNamespace(namespace: string): OverseerEntity {
