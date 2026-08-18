@@ -112,4 +112,43 @@ describe('SyncEngine fleet upgrade startup sweep', () => {
             engine.stop()
         }
     })
+
+    it('clears auto cooldown when hub targetGeneration moves', async () => {
+        let targetGeneration = 'gen-old'
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never,
+            {
+                getUpgradeOffer: () => ({ ...TEST_OFFER, targetGeneration }),
+                getFleetUpgradePolicy: () => 'auto',
+            },
+        )
+        const upgraded: string[] = []
+        engine.upgradeMachineRunner = mock(async (machineId: string) => {
+            upgraded.push(machineId)
+            return { type: 'success', message: 'ok', response: { status: 'started' } }
+        })
+        const maybeUpgrade = (engine as unknown as {
+            maybeFleetUpgradeMachine(id: string): Promise<void>
+        }).maybeFleetUpgradeMachine.bind(engine)
+
+        try {
+            registerSkewedRunner(engine, 'homelab')
+            upgraded.length = 0
+            const internals = engine as unknown as { fleetUpgradeAttemptAt: Map<string, number> }
+            internals.fleetUpgradeAttemptAt.set('homelab', Date.now())
+
+            await maybeUpgrade('homelab')
+            expect(upgraded).toEqual([])
+
+            targetGeneration = 'gen-new'
+            await maybeUpgrade('homelab')
+            expect(upgraded).toEqual(['homelab'])
+        } finally {
+            engine.stop()
+        }
+    })
 })

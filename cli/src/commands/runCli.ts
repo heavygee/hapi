@@ -18,6 +18,8 @@ import { isProcessAlive, killProcessByChildProcess } from '@/utils/process'
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import crossSpawn from 'cross-spawn'
+import { formatVersionIdentity } from './versionIdentity'
+import { currentCliExecutable } from './version'
 
 /** Wait for delegated child exit; reject on spawn error so caller can clear the marker. */
 export function waitForDelegatedRunner(child: ChildProcess): Promise<number> {
@@ -245,7 +247,14 @@ export async function runCli(): Promise<void> {
     }
 
     if (args.includes('-v') || args.includes('--version')) {
-        console.log(`hapi version: ${packageJson.version}`)
+        const marker = readUpgradeTarget()
+        console.log(formatVersionIdentity({
+            version: packageJson.version,
+            generation: marker?.targetGeneration ?? null,
+            hubTarget: null,
+            executable: currentCliExecutable(),
+            durableTarget: marker?.path ?? null,
+        }).trimEnd())
         process.exit(0)
     }
 

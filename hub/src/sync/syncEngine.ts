@@ -229,6 +229,7 @@ export class SyncEngine {
     /** Serialize fork/rewind per session so concurrent native rollbacks cannot stack. */
     private readonly historyActionsInFlight = new Set<string>()
     private readonly fleetUpgradeAttemptAt = new Map<string, number>()
+    private lastAutoUpgradeOfferKey: string | null = null
     private fleetUpgradeStartupSweepTimer: ReturnType<typeof setTimeout> | null = null
     private static readonly FLEET_UPGRADE_COOLDOWN_MS = 15 * 60_000
     /** Let runners reconnect + rpc-register after a patient hub restart before sweeping. */
@@ -1348,6 +1349,23 @@ export class SyncEngine {
     }
 
     /**
+     * Auto cooldown is per-machine wall clock. When the hub's offer moves
+     * (soup fingerprint) a successful upgrade of the previous target must not
+     * block chasing the new one for 15 minutes.
+     */
+    private clearFleetUpgradeCooldownIfTargetMoved(offer: HubUpgradeOffer): void {
+        const key = `${offer.channel}:${offer.targetVersion}:${offer.targetGeneration ?? ''}`
+        if (this.lastAutoUpgradeOfferKey !== null && this.lastAutoUpgradeOfferKey !== key) {
+            this.fleetUpgradeAttemptAt.clear()
+            console.warn('[fleet-upgrade] target moved; cleared auto cooldown', {
+                from: this.lastAutoUpgradeOfferKey,
+                to: key,
+            })
+        }
+        this.lastAutoUpgradeOfferKey = key
+    }
+
+    /**
      * When a connected runner is missing required capabilities, ask it to
      * self-upgrade to the hub's generation (npm or hub-artifact).
      */
@@ -1367,6 +1385,7 @@ export class SyncEngine {
         if (offer.channel === 'off') {
             return
         }
+        this.clearFleetUpgradeCooldownIfTargetMoved(offer)
         const machine = this.machineCache.getMachine(machineId)
         if (!machine?.active || !machine.metadata) {
             return
