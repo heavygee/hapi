@@ -20,9 +20,11 @@ import { linkPrCommand } from './linkPr'
 import { hubCommand } from './hub'
 import { pingPeerCommand } from './pingPeer'
 import { inspectPeerCommand } from './inspectPeer'
+import { helpCommand } from './help'
 import { jobCommand } from './job'
 import { spawnPeerCommand } from './spawnPeer'
 import { displayLinksCommand } from './displayLinks'
+import { versionCommand } from './version'
 import type { CommandContext, CommandDefinition } from './types'
 
 // Gemini CLI was sunset (Google stopped serving the consumer Gemini CLI on
@@ -66,7 +68,9 @@ const COMMANDS: CommandDefinition[] = [
     inspectPeerCommand,
     jobCommand,
     spawnPeerCommand,
-    displayLinksCommand
+    displayLinksCommand,
+    helpCommand,
+    versionCommand,
 ]
 
 const commandMap = new Map<string, CommandDefinition>()
@@ -74,8 +78,23 @@ for (const command of COMMANDS) {
     commandMap.set(command.name, command)
 }
 
+const HELP_TOKENS = new Set(['help', '-h', '--help'])
+const VERSION_TOKENS = new Set(['version'])
+
 export function resolveCommand(args: string[]): { command: CommandDefinition; context: CommandContext } {
     const subcommand = args[0]
+    if (subcommand && HELP_TOKENS.has(subcommand)) {
+        return {
+            command: helpCommand,
+            context: { args, subcommand, commandArgs: args.slice(1) },
+        }
+    }
+    if (subcommand && VERSION_TOKENS.has(subcommand)) {
+        return {
+            command: versionCommand,
+            context: { args, subcommand, commandArgs: args.slice(1) },
+        }
+    }
     const command = subcommand ? commandMap.get(subcommand) : undefined
     const resolvedCommand = command ?? claudeCommand
     const commandArgs = command ? args.slice(1) : args
