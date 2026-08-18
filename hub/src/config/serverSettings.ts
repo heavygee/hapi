@@ -12,6 +12,24 @@ import { getSettingsFile, updateSettings } from './settings'
 
 const OLD_SETTINGS_FIELDS = ['webappHost', 'webappPort', 'webappUrl'] as const
 
+/**
+ * Push delivery settings: all nullable strings under the same
+ * env > file > null rule (defaults and validation live in the resolvers,
+ * fcmConfig.ts / iosPushConfig.ts).
+ */
+const PUSH_SETTING_KEYS = [
+    ['fcmServiceAccountPath', 'FCM_SERVICE_ACCOUNT_PATH'],
+    ['iosPushMode', 'HAPI_IOS_PUSH'],
+    ['iosPushRelayUrl', 'HAPI_PUSH_RELAY_URL'],
+    ['apnsKeyP8Path', 'APNS_KEY_P8_PATH'],
+    ['apnsKeyId', 'APNS_KEY_ID'],
+    ['apnsTeamId', 'APNS_TEAM_ID'],
+    ['apnsBundleId', 'APNS_BUNDLE_ID'],
+    ['apnsEnv', 'APNS_ENV'],
+] as const
+
+export type PushSettingKey = (typeof PUSH_SETTING_KEYS)[number][0]
+
 export interface ServerSettings {
     telegramBotToken: string | null
     telegramNotification: boolean

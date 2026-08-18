@@ -28,6 +28,7 @@ import { scanUnverifiedPeerMessages as scanUnverifiedPeerMessagesInDb } from './
 import type { ProvenanceMessageScanOptions } from '@hapi/protocol/provenanceMessageAudit'
 
 export type {
+    NativeDevicePlatform,
     StoredMachine,
     StoredMessage,
     StoredPushSubscription,
@@ -556,6 +557,7 @@ export class Store {
                 token TEXT NOT NULL,
                 platform TEXT NOT NULL,
                 device_id TEXT NOT NULL,
+                push_key TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
                 UNIQUE(namespace, device_id, platform)

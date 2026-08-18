@@ -22,6 +22,12 @@ import type {
 } from '@/types/api'
 import { queryKeys } from '@/lib/query-keys'
 import { clearMessageWindow, getMessageWindowState, ingestIncomingMessages, markMessagesConsumed, removeOptimisticMessage, updateMessageStatus } from '@/lib/message-window-store'
+import { applySessionDetailPatch } from '@/lib/sessionPatch'
+
+// Pure patch-application rules live in @/lib/sessionPatch (React-free, shared
+// with the fixture generator); re-exported here so hook consumers and existing
+// tests keep their import site.
+export { applySessionDetailPatch, isNewerVersionedPatch, isRenderIrrelevantSessionPatch } from '@/lib/sessionPatch'
 
 type SSESubscription = {
     all?: boolean
@@ -44,16 +50,6 @@ export function isGlobalScopedMessageStreamEvent(scope: SSEScope, eventType: Syn
 
 export function shouldInvalidateSessionListForEvent(scope: SSEScope, eventType: SyncEvent['type']): boolean {
     return scope === 'global' && eventType === 'messages-invalidated'
-}
-
-// Version-monotonicity gate for structured patches carrying metadata or
-// agentState. SSE reconnects + per-query invalidation can leave the cache
-// holding state that's NEWER than a buffered older patch about to replay;
-// applying that older patch would regress resume / session-id / pending-
-// requests state. Mirrors the CLI room handler contract: strictly newer
-// only. Exported so the rule is unit-testable in isolation from the hook.
-export function isNewerVersionedPatch(patchVersion: number, currentVersion: number): boolean {
-    return patchVersion > currentVersion
 }
 
 /**
