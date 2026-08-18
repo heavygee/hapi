@@ -59,6 +59,20 @@ const REQUIRED_IF_MODULE_PRESENT = [
     },
 ]
 
+/**
+ * Handlers inside a soup-only route module that remat has dropped while leaving
+ * the module (and its server.ts mount) in place. Classic: web UI survived,
+ * PUT /overseer/brain/active did not (heavygee/hapi#133).
+ */
+const REQUIRED_HANDLERS_IN_MODULE = [
+    {
+        module: 'hub/src/web/routes/overseer.ts',
+        needle: "app.put('/overseer/brain/active'",
+        heal: '103-restore-overseer-brain-active.patch',
+        why: 'Overseer Brain Set active; web client PUT /api/overseer/brain/active',
+    },
+]
+
 const serverPath = join(tree, 'hub/src/web/server.ts')
 if (!existsSync(serverPath)) {
     console.error(`hapi-soup-route-mounts-check: FAIL — missing ${serverPath}`)
@@ -80,18 +94,34 @@ for (const entry of REQUIRED_IF_MODULE_PRESENT) {
     }
 }
 
+for (const entry of REQUIRED_HANDLERS_IN_MODULE) {
+    const modulePath = join(tree, entry.module)
+    if (!existsSync(modulePath)) {
+        continue
+    }
+    const src = readFileSync(modulePath, 'utf8')
+    if (!src.includes(entry.needle)) {
+        failures.push({ ...entry, call: entry.needle, inModule: true })
+    }
+}
+
 if (failures.length > 0) {
     console.error('hapi-soup-route-mounts-check: FAIL')
-    console.error('  hub/src/web/server.ts is missing soup-critical route mount(s):')
+    console.error('  soup-critical route mount(s) or handler(s) missing:')
     for (const f of failures) {
-        console.error(`    - ${f.call}  (module ${f.module} present)`)
+        if (f.inModule) {
+            console.error(`    - ${f.call}  missing from ${f.module}`)
+        } else {
+            console.error(`    - ${f.call}  (module ${f.module} present, server.ts mount missing)`)
+        }
         console.error(`      why: ${f.why}`)
         console.error(`      heal: scripts/tooling/soup-heals/${f.heal}`)
     }
-    console.error('  Tip-forward likely dropped mounts; re-apply heal or remount before promote.')
+    console.error('  Tip-forward likely dropped mounts/handlers; re-apply heal before promote.')
     console.error('  Canon: docs/tooling/driver-soup.md § Soup-critical route mounts.')
     process.exit(1)
 }
 
 const checked = REQUIRED_IF_MODULE_PRESENT.filter((e) => existsSync(join(tree, e.module))).length
-console.log(`hapi-soup-route-mounts-check: OK (${checked} soup-critical module(s) mounted)`)
+const handlerChecked = REQUIRED_HANDLERS_IN_MODULE.filter((e) => existsSync(join(tree, e.module))).length
+console.log(`hapi-soup-route-mounts-check: OK (${checked} soup-critical module(s) mounted, ${handlerChecked} handler gate(s))`)

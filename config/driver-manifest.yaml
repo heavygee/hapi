@@ -851,3 +851,11 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/session-group-symlink-paths @ fix/session-group-symlink-paths
   # Tip: 3541681a5
   - branch: fix/session-group-symlink-paths
+
+  # heavygee/hapi#133 — restore PUT/GET /overseer/brain/active dropped from soup.
+  # Web Brain panel survived remat (heal a786d6a8e); hub handlers + getSettings()
+  # did not. Thin collision-repair on live driver/integration. Last so overseer.ts
+  # / syncEngine getSettings survive later absorbs. Heal 103 + mounts-check needle.
+  # Worktree: ~/coding/hapi/worktrees/overseer-brain-active @ driver/overseer-brain-active
+  # Tip: 498430d3c
+  - branch: driver/overseer-brain-active
