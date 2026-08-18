@@ -14,7 +14,12 @@
 # Options:
 #   --agent cursor|claude|…     (default cursor)
 #   --session-type simple|worktree  (default worktree when dir looks like a worktree)
+#   --machine ID|hostname       (default: this host's settings.machineId)
 #   --yolo / --no-yolo          (default yolo on)
+#
+# Machine-to-machine: pass --machine oos-linux (or UUID) so spawn hits that
+# runner. --dir must exist on the TARGET host. When --machine != local, the
+# local [[ -d ]] check is skipped (target path is the contract).
 set -euo pipefail
 
 err() { echo "hapi-spawn-peer: $*" >&2; }
@@ -26,6 +31,7 @@ MESSAGE_FILE=""
 AGENT="cursor"
 SESSION_TYPE=""
 YOLO=1
+MACHINE_ARG=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -34,10 +40,11 @@ while [[ $# -gt 0 ]]; do
         --message-file) MESSAGE_FILE="$2"; shift 2 ;;
         --agent) AGENT="$2"; shift 2 ;;
         --session-type) SESSION_TYPE="$2"; shift 2 ;;
+        --machine) MACHINE_ARG="$2"; shift 2 ;;
         --yolo) YOLO=1; shift ;;
         --no-yolo) YOLO=0; shift ;;
         --help|-h)
-            sed -n '2,18p' "$0"
+            sed -n '2,22p' "$0"
             exit 0
             ;;
         *) die "unexpected arg: $1" ;;
@@ -47,7 +54,6 @@ done
 [[ -n "$DIR" ]] || die "missing --dir"
 [[ -n "$NAME" ]] || die "missing --name"
 [[ -n "$MESSAGE_FILE" ]] || die "missing --message-file (use - for stdin)"
-[[ -d "$DIR" ]] || die "directory not found: $DIR"
 
 if [[ -z "$SESSION_TYPE" ]]; then
     if [[ "$DIR" == */worktrees/* ]]; then
@@ -61,9 +67,9 @@ HAPI_HOST="${HAPI_HOST:-${HAPI_HUB_URL:-http://127.0.0.1:3006}}"
 SETTINGS="${HAPI_SETTINGS:-$HOME/.hapi/settings.json}"
 [[ -f "$SETTINGS" ]] || die "settings file not found: $SETTINGS"
 RAW_TOKEN=$(jq -r '.cliApiToken // empty' "$SETTINGS")
-MACHINE=$(jq -r '.machineId // empty' "$SETTINGS")
+LOCAL_MACHINE=$(jq -r '.machineId // empty' "$SETTINGS")
 [[ -n "$RAW_TOKEN" ]] || die "no cliApiToken in $SETTINGS"
-[[ -n "$MACHINE" ]] || die "no machineId in $SETTINGS"
+[[ -n "$LOCAL_MACHINE" ]] || die "no machineId in $SETTINGS"
 
 JWT=$(curl -sS --max-time 5 -X POST -H 'Content-Type: application/json' \
     -d "$(jq -cn --arg t "$RAW_TOKEN:default" '{accessToken:$t}')" \
@@ -72,10 +78,56 @@ JWT=$(curl -sS --max-time 5 -X POST -H 'Content-Type: application/json' \
 
 AUTH=(-H "Authorization: Bearer $JWT" -H 'Content-Type: application/json')
 
+resolve_machine() {
+    local want="$1"
+    if [[ -z "$want" ]]; then
+        echo "$LOCAL_MACHINE"
+        return
+    fi
+    # Exact UUID
+    if [[ "$want" =~ ^[0-9a-fA-F-]{36}$ ]]; then
+        echo "$want"
+        return
+    fi
+    # Hostname / metadata.host match (e.g. oos-linux, proxmox)
+    local machines
+    machines=$(curl -sS --max-time 10 "${AUTH[@]}" "$HAPI_HOST/api/machines") || die "GET /api/machines failed"
+    local resolved
+    resolved=$(echo "$machines" | jq -r --arg w "$want" '
+      (.machines // .) as $m
+      | ($m | if type=="array" then . else [] end)
+      | map(select(
+          (.id|tostring)==$w
+          or ((.metadata.host // .hostname // .host // "")|tostring)==$w
+          or ((.metadata.name // "")|tostring)==$w
+        ))
+      | .[0].id // empty
+    ')
+    [[ -n "$resolved" ]] || die "no hub machine matched --machine=$want (try UUID or hostname from GET /api/machines)"
+    echo "$resolved"
+}
+
+MACHINE=$(resolve_machine "$MACHINE_ARG")
+CROSS_HOST=0
+if [[ "$MACHINE" != "$LOCAL_MACHINE" ]]; then
+    CROSS_HOST=1
+    err "cross-machine spawn: local=$LOCAL_MACHINE target=$MACHINE (dir must exist on TARGET)"
+fi
+
+if [[ "$CROSS_HOST" -eq 0 ]]; then
+    [[ -d "$DIR" ]] || die "directory not found on this host: $DIR"
+else
+    if [[ -d "$DIR" ]]; then
+        err "note: $DIR also exists locally; spawn still targets machine $MACHINE"
+    else
+        err "skipping local dir check (cross-machine); ensure $DIR exists on target"
+    fi
+fi
+
 YOLO_JSON=true
 [[ "$YOLO" == "1" ]] || YOLO_JSON=false
 
-err "spawning agent=$AGENT type=$SESSION_TYPE dir=$DIR"
+err "spawning agent=$AGENT type=$SESSION_TYPE dir=$DIR machine=$MACHINE"
 SPAWN=$(curl -sS --max-time 60 -X POST "${AUTH[@]}" \
     -d "$(jq -n \
         --arg dir "$DIR" \
