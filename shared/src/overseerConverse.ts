@@ -190,21 +190,36 @@ const OVERSEER_TOOL_PARAMS: Record<OverseerToolName, JsonSchema> = {
         feedback: { type: 'string', description: 'Optional operator note / learning label to freeze with the disposition.' },
         snoozedUntil: { type: 'integer', minimum: 1, description: 'Required for snooze: epoch ms to sleep the item until.' }
     }, ['itemId', 'action']),
-    // anyOf mirrors runtime Zod: message plus at least one of sessionId|itemId.
-    ping_session: {
-        type: 'object',
-        properties: {
-            sessionId: { type: 'string', description: 'Worker session id (full UUID or unique prefix).' },
-            itemId: { type: 'integer', minimum: 1, description: 'Inbox item id — resolves its relatedSessionId when sessionId omitted.' },
-            message: { type: 'string', description: 'Operator-directed message to relay to that session.' }
+    // OpenAI Chat Completions rejects top-level anyOf/oneOf/allOf/enum/const/not on
+    // function parameters (invalid_function_parameters). Advertise both targets as
+    // optional; Zod `pingSessionArgsSchema` still requires message + sessionId|itemId.
+    ping_session: obj({
+        sessionId: {
+            type: 'string',
+            description: 'Worker session id (full UUID or unique prefix). Provide this and/or itemId (at least one required at runtime).'
         },
-        required: ['message'],
-        anyOf: [
-            { required: ['sessionId'] },
-            { required: ['itemId'] }
-        ],
-        additionalProperties: false
-    }
+        itemId: {
+            type: 'integer',
+            minimum: 1,
+            description: 'Inbox item id — resolves its relatedSessionId when sessionId omitted. Provide this and/or sessionId (at least one required at runtime).'
+        },
+        message: { type: 'string', description: 'Operator-directed message to relay to that session.' }
+    }, ['message'])
+}
+
+/** Keys OpenAI forbids at the root of `function.parameters` (Chat Completions / Responses). */
+export const OPENAI_FORBIDDEN_TOOL_PARAM_ROOT_KEYS = [
+    'anyOf',
+    'oneOf',
+    'allOf',
+    'enum',
+    'const',
+    'not'
+] as const
+
+/** True when a tool parameters object would be rejected by OpenAI as invalid_function_parameters. */
+export function hasOpenAiForbiddenToolParamRoot(parameters: Record<string, unknown>): boolean {
+    return OPENAI_FORBIDDEN_TOOL_PARAM_ROOT_KEYS.some((key) => key in parameters)
 }
 
 /** The Overseer tool catalog (reads + disposition + relay writes) as an OpenAI `tools` array. */

@@ -246,6 +246,14 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
             if (error instanceof BrainUnavailableError) {
                 // Reachable-but-failed (http 4xx/5xx, malformed body) is a converse
                 // bug, not an offline brain — do not mislabel it as GPU/VR downtime.
+                // Log the upstream detail — the operator reply stays short, but the
+                // hub journal must name the real failure (e.g. invalid_function_parameters).
+                console.warn('[Overseer][Converse] brain unavailable', {
+                    kind: error.kind,
+                    status: error.status,
+                    reachable: error.reachable,
+                    message: error.message.slice(0, 500)
+                })
                 const reply = error.reachable
                     ? 'I reached the Overseer brain but could not complete the tool conversation (request error). This is a converse-loop issue, not the brain being offline — please retry, and flag it if it persists.'
                     : 'The Overseer brain is offline right now (the GPU may be in use for VR). Try again shortly — your events and inbox are still being captured.'
