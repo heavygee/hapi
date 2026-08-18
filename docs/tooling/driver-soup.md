@@ -406,6 +406,21 @@ Incident: `driver/session-attached-jobs` stayed fat; tip-forward SKIP WARN (57c/
 
 Manifest lint (refuse layer if commit-count vs tip > fat-gate threshold) is **not** shipped — fat-tip gate already skips at remat. Lint would catch the miss earlier; file a tooling issue if SKIP WARN keeps getting ignored. Do not `HAPI_REMAT_ABSORB_FAT=1` to hide a fat layer.
 
+### Manifest drop is not absorb (2026-08-18, heavygee#133)
+
+Incident: `/overseer` Set active → hub `PUT /api/overseer/brain/active` 404. Web panel + `GET …/models` survived; the write handler did not.
+
+Sweep `1d4644037` ("sync manifest drops", claimed merged #897) copied stale `~/.config/hapi/driver-manifest.yaml` onto repo `config/driver-manifest.yaml` and **deleted** `feat/overseer-admin-console` + relay-ping + converse-context. Those fork PRs (#103 / #104 / #106) were **still OPEN**. Next remat omitted the merges. Heals `a786d6a8e` / `3d47e56b3` restored web + `SettingsStore` for typecheck, not the PUT.
+
+**Must:**
+
+1. Recipe is **repo** `config/driver-manifest.yaml`. Do not "align repo to ~/.config" in a way that deletes `- branch:` lines.
+2. Do not drop a layer whose `heavygee/hapi` PR is OPEN unless the operator names that branch this turn.
+3. A soup heal that restores a web client for a hub route the module no longer defines is incomplete. Handler needles (`REQUIRED_HANDLERS_IN_MODULE` in `hapi-soup-route-mounts-check.mjs`) — mount-only is not enough.
+4. `GET` models 200 + `PUT` active 404 is split-brain, not "the LLM is down."
+
+Full writeup: [`2026-08-18-overseer-brain-active-soup-drop-postmortem.md`](../plans/2026-08-18-overseer-brain-active-soup-drop-postmortem.md).
+
 ### externalRefs wipe — mid-stack hub + sparse metadata (2026-07-30)
 
 **Where they went:** nowhere recoverable — SQLite `sessions.metadata` was overwritten. The three active peer sessions lost `metadata.externalRefs` (PR chips). Overseer `link_seen` events still mentioned the PRs; that is not the chip source.
