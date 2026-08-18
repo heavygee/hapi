@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { filterChatModels, listBrainProfiles, resolveBrainConfig } from './brainClient'
+import { filterChatModels, isKnownBrainProfile, listBrainProfiles, resolveBrainConfig, resolveBrainSelection } from './brainClient'
 
 const baseEnv = {
     OVERSEER_BRAIN_URL: 'http://local.test/v1/',
@@ -32,12 +32,46 @@ describe('resolveBrainConfig', () => {
         expect(cfg).toMatchObject({ baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o', apiKey: 'sk-test' })
     })
 
-    it('falls back to default for an unknown profile', () => {
-        expect(resolveBrainConfig(multiEnv, { profile: 'nope' })?.baseUrl).toBe('http://local.test/v1')
+    it('returns null for an unknown named profile (no silent fallback to env default)', () => {
+        expect(resolveBrainConfig(multiEnv, { profile: 'nope' })).toBeNull()
+    })
+
+    it('uses only the env default when profile is explicitly default', () => {
+        const cfg = resolveBrainConfig(multiEnv, { profile: 'default' })
+        expect(cfg).toMatchObject({ baseUrl: 'http://local.test/v1', model: 'main' })
     })
 
     it('model override wins over the selected profile model', () => {
         expect(resolveBrainConfig(multiEnv, { profile: 'openai', model: 'gpt-4o-mini' })?.model).toBe('gpt-4o-mini')
+    })
+})
+
+describe('resolveBrainSelection', () => {
+    it('falls through to env default when nothing is set', () => {
+        expect(resolveBrainSelection(null)).toEqual({ model: undefined })
+    })
+
+    it('uses the persisted active brain when no per-request override', () => {
+        expect(resolveBrainSelection({ profile: 'openai', model: 'gpt-4o' })).toEqual({ profile: 'openai', model: 'gpt-4o' })
+    })
+
+    it('per-request profile overrides the active profile wholesale', () => {
+        expect(resolveBrainSelection({ profile: 'openai', model: 'gpt-4o' }, { profile: 'default' }))
+            .toEqual({ profile: 'default', model: undefined })
+    })
+
+    it('per-request model alone re-skins the active profile', () => {
+        expect(resolveBrainSelection({ profile: 'openai', model: 'gpt-4o' }, { model: 'gpt-4o-mini' }))
+            .toEqual({ profile: 'openai', model: 'gpt-4o-mini' })
+    })
+
+    it('active profile with null model resolves to profile default', () => {
+        expect(resolveBrainSelection({ profile: 'local', model: null })).toEqual({ profile: 'local', model: undefined })
+    })
+
+    it('composes with resolveBrainConfig so the active brain becomes the effective config', () => {
+        const cfg = resolveBrainConfig(multiEnv, resolveBrainSelection({ profile: 'openai', model: 'gpt-4o-mini' }))
+        expect(cfg).toMatchObject({ baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', apiKey: 'sk-test' })
     })
 })
 
@@ -52,6 +86,14 @@ describe('listBrainProfiles', () => {
 
     it('is empty when no brain is configured', () => {
         expect(listBrainProfiles({} as NodeJS.ProcessEnv)).toEqual([])
+    })
+})
+
+describe('isKnownBrainProfile', () => {
+    it('returns true for configured profile ids and false otherwise', () => {
+        expect(isKnownBrainProfile('default', multiEnv)).toBe(true)
+        expect(isKnownBrainProfile('openai', multiEnv)).toBe(true)
+        expect(isKnownBrainProfile('ghost', multiEnv)).toBe(false)
     })
 })
 
