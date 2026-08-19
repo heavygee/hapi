@@ -33,7 +33,11 @@ describe('useVoiceInputPreferences', () => {
         expect(available).not.toHaveBeenCalled()
     })
 
-    it('does not expose or probe partial browser-local speech APIs on Android', async () => {
+    it('excludes on-device browser-local but exposes browser-cloud on Android', async () => {
+        // Android has no bundled on-device models and no trustworthy desktop UA-CH,
+        // so browser-local must stay hidden. But the same `SpeechRecognition` global
+        // is a valid classic/cloud constructor, so browser-cloud should appear —
+        // this is the actual mobile parity path, not a relaxation of the on-device gate.
         const available = installPartialSpeechRecognition()
         vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Linux; Android 15; WebView)', language: 'en-US' })
         const api = {
@@ -44,8 +48,10 @@ describe('useVoiceInputPreferences', () => {
 
         const { result } = renderHook(() => useVoiceInputPreferences(api as unknown as ApiClient))
 
-        await waitFor(() => expect(result.current.provider).toBe('openai'))
-        expect(result.current.providers).toHaveLength(1)
+        await waitFor(() => expect(result.current.providers).toHaveLength(2))
+        const ids = result.current.providers.map((provider) => provider.id)
+        expect(ids).toEqual(['openai', 'browser-cloud'])
+        expect(result.current.provider).toBe('openai')
         expect(available).not.toHaveBeenCalled()
     })
 })

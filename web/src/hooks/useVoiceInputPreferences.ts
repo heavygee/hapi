@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { ApiClient } from '@/api/client'
 import {
+    BROWSER_CLOUD_TRANSCRIPTION_PROVIDER,
     BROWSER_LOCAL_TRANSCRIPTION_PROVIDER,
     type TranscriptionMode,
     type TranscriptionProvider,
     type TranscriptionProviderInfo,
     type VoiceMode
 } from '@hapi/protocol/voice'
+import { hasBrowserCloudSpeechSupport } from './browserCloudSpeech'
 import { hasBrowserLocalSpeechSupport } from './browserLocalSpeech'
 
 const VOICE_MODE_KEY = 'hapi-voice-mode'
@@ -49,12 +51,15 @@ export function useVoiceInputPreferences(api: ApiClient | null) {
         if (!api) return
         let cancelled = false
         const browserLocal = hasBrowserLocalSpeechSupport()
+        const browserCloud = hasBrowserCloudSpeechSupport()
         const load = () => {
             api.fetchTranscriptionProviders().then(({ providers: configured }) => {
                 if (cancelled) return
-                const available = browserLocal
-                    ? [...configured, BROWSER_LOCAL_TRANSCRIPTION_PROVIDER]
-                    : configured
+                const available = [
+                    ...configured,
+                    ...(browserLocal ? [BROWSER_LOCAL_TRANSCRIPTION_PROVIDER] : []),
+                    ...(browserCloud ? [BROWSER_CLOUD_TRANSCRIPTION_PROVIDER] : [])
+                ]
                 setProviders(available)
                 const selectedProvider = resolveProvider(available, localStorage.getItem(TRANSCRIPTION_PROVIDER_KEY))
                 setProviderState(selectedProvider)

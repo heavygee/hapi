@@ -102,6 +102,7 @@ function getTranscriptionConfig(provider: TranscriptionProvider): {
                 : null
         }
         case 'browser-local':
+        case 'browser-cloud':
             return null
     }
 }

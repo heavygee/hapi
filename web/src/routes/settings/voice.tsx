@@ -20,7 +20,7 @@ export default function SettingsVoicePage() {
     const [showCredentials, setShowCredentials] = useState(false)
     const selectedLanguage = voice.voiceLanguages.find((language) => language.code === voice.voiceLanguage)
     const selectedVoice = voice.voices.find((option) => option.id === voice.voiceId)
-    const hubProviders = voice.providers.filter((provider) => provider.id !== 'browser-local')
+    const hubProviders = voice.providers.filter((provider) => provider.id !== 'browser-local' && provider.id !== 'browser-cloud')
     const canManageCredentials = getNamespaceFromToken(token) === 'default'
     const needsDictationOnboard = voice.voiceMode === 'dictation' && hubProviders.length === 0
     const needsAssistantOnboard = voice.voiceMode === 'assistant' && voice.configuredBackends.length === 0

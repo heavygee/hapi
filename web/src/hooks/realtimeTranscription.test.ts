@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
     BROWSER_LOCAL_AVAILABILITY_TIMEOUT_MS,
     getBrowserLocalAvailabilityProbeSubscriberCountForTesting,
+    startBrowserCloudTranscription,
     startBrowserLocalTranscription,
     startDeepgramRealtimeTranscription,
     startOpenAIRealtimeTranscription
@@ -184,6 +185,138 @@ describe('browser-local realtime transcription', () => {
         await expect(startBrowserLocalTranscription({ language: 'en-US', callbacks: browserLocalCallbacks() }))
             .rejects.toThrow('not supported by this browser')
         expect(available).not.toHaveBeenCalled()
+    })
+})
+
+function installBrowserCloudSpeechRecognition(onConstruct = vi.fn()) {
+    class MockCloudSpeechRecognition extends EventTarget {
+        continuous = false
+        interimResults = false
+        lang = ''
+        onresult: ((event: Event) => void) | null = null
+        onerror: ((event: Event) => void) | null = null
+        onend: (() => void) | null = null
+        start = vi.fn()
+        stop = vi.fn()
+        abort = vi.fn()
+        constructor() {
+            super()
+            onConstruct()
+        }
+    }
+    vi.stubGlobal('SpeechRecognition', MockCloudSpeechRecognition)
+    vi.stubGlobal('navigator', { language: 'en-US' })
+    return { onConstruct, constructor: MockCloudSpeechRecognition }
+}
+
+describe('browser-cloud realtime transcription', () => {
+    afterEach(() => vi.unstubAllGlobals())
+
+    it('starts immediately with no available() probe and never sets processLocally', async () => {
+        const { constructor } = installBrowserCloudSpeechRecognition()
+        const callbacks = browserLocalCallbacks()
+
+        const session = await startBrowserCloudTranscription({ language: 'en-US', callbacks })
+
+        expect(callbacks.onConnected).toHaveBeenCalledOnce()
+        expect('available' in constructor).toBe(false)
+        session.cancel()
+    })
+
+    it('reports interim and final transcripts', async () => {
+        let active: EventTarget & {
+            onresult: ((event: unknown) => void) | null
+        } | null = null
+        class MockCloudSpeechRecognition extends EventTarget {
+            continuous = false
+            interimResults = false
+            lang = ''
+            onresult: ((event: unknown) => void) | null = null
+            onerror: ((event: Event) => void) | null = null
+            onend: (() => void) | null = null
+            start = vi.fn()
+            stop = vi.fn()
+            abort = vi.fn()
+            constructor() {
+                super()
+                active = this
+            }
+        }
+        vi.stubGlobal('SpeechRecognition', MockCloudSpeechRecognition)
+        vi.stubGlobal('navigator', { language: 'en-US' })
+
+        const callbacks = browserLocalCallbacks()
+        const session = await startBrowserCloudTranscription({ language: 'en-US', callbacks })
+
+        const emit = (transcript: string, isFinal: boolean) => {
+            const result = Object.assign([{ transcript }], { isFinal })
+            active!.onresult?.({ results: { length: 1, 0: result } })
+        }
+        emit('live words', false)
+        expect(callbacks.onPartial).toHaveBeenCalledWith('live words')
+        emit('final words', true)
+        expect(callbacks.onPartial).toHaveBeenCalledWith('final words')
+        session.cancel()
+    })
+
+    it('falls back to the vendor-prefixed webkitSpeechRecognition when unprefixed is absent', async () => {
+        class MockWebkitSpeechRecognition extends EventTarget {
+            continuous = false
+            interimResults = false
+            lang = ''
+            onresult: ((event: Event) => void) | null = null
+            onerror: ((event: Event) => void) | null = null
+            onend: (() => void) | null = null
+            start = vi.fn()
+            stop = vi.fn()
+            abort = vi.fn()
+        }
+        vi.stubGlobal('webkitSpeechRecognition', MockWebkitSpeechRecognition)
+        vi.stubGlobal('navigator', { language: 'en-US' })
+        const callbacks = browserLocalCallbacks()
+
+        const session = await startBrowserCloudTranscription({ language: 'en-US', callbacks })
+        expect(callbacks.onConnected).toHaveBeenCalledOnce()
+        session.cancel()
+    })
+
+    it('works with mobile Android UA-CH signals — no desktop UA gating applies', async () => {
+        installBrowserCloudSpeechRecognition()
+        vi.stubGlobal('navigator', {
+            userAgent: 'Mozilla/5.0 (Linux; Android 15; wv)',
+            userAgentData: { platform: 'Android', mobile: true },
+            language: 'en-US'
+        })
+        const callbacks = browserLocalCallbacks()
+
+        const session = await startBrowserCloudTranscription({ language: 'en-US', callbacks })
+        expect(callbacks.onConnected).toHaveBeenCalledOnce()
+        session.cancel()
+    })
+
+    it('rejects when no classic Web Speech API constructor exists (e.g. Firefox)', async () => {
+        vi.stubGlobal('navigator', { language: 'en-US' })
+        await expect(startBrowserCloudTranscription({ language: 'en-US', callbacks: browserLocalCallbacks() }))
+            .rejects.toThrow('not supported by this browser')
+    })
+
+    it('surfaces a non-aborted recognition error and treats a stopping-time abort as a clean stop', async () => {
+        const { constructor } = installBrowserCloudSpeechRecognition()
+        const callbacks = browserLocalCallbacks()
+        let active: InstanceType<typeof constructor> | null = null
+        const OriginalCtor = constructor
+        vi.stubGlobal('SpeechRecognition', class extends OriginalCtor {
+            constructor() {
+                super()
+                active = this
+            }
+        })
+
+        await startBrowserCloudTranscription({ language: 'en-US', callbacks })
+        active!.onerror?.({ error: 'network' } as unknown as Event)
+        expect(callbacks.onError).toHaveBeenCalledWith(expect.objectContaining({
+            message: expect.stringContaining('Browser cloud transcription failed: network')
+        }))
     })
 })
 

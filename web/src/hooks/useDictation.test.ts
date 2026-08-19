@@ -112,4 +112,51 @@ describe('useDictation', () => {
         await waitFor(() => expect(onTextChange).toHaveBeenCalledWith('existing draft final words'))
         expect(result.current.partialTranscript).toBe('')
     })
+
+    it('shows browser-cloud partial text and inserts only the final transcript, on a mobile UA', async () => {
+        // No UA-CH desktop signal at all — this is the mobile-parity path
+        // browser-local cannot reach. The classic API needs no such gate.
+        vi.stubGlobal('navigator', {
+            userAgent: 'Mozilla/5.0 (Linux; Android 15; wv) AppleWebKit/537.36 Chrome/140.0 Mobile Safari/537.36',
+            userAgentData: { platform: 'Android', mobile: true },
+            language: 'en-US'
+        })
+        let recognition: MockCloudSpeechRecognition | null = null
+        class MockCloudSpeechRecognition {
+            continuous = false
+            interimResults = false
+            lang = ''
+            onresult: ((event: Event & { results: unknown }) => void) | null = null
+            onerror: ((event: Event) => void) | null = null
+            onend: (() => void) | null = null
+            constructor() { recognition = this }
+            start() {}
+            stop() { this.onend?.() }
+            abort() {}
+            emit(text: string, isFinal: boolean) {
+                const result = Object.assign([{ transcript: text }], { isFinal })
+                this.onresult?.({ results: [result] } as unknown as Event & { results: unknown })
+            }
+        }
+        vi.stubGlobal('SpeechRecognition', MockCloudSpeechRecognition)
+
+        const onTextChange = vi.fn()
+        const { result } = renderHook(() => useDictation({
+            api: {} as ApiClient,
+            provider: 'browser-cloud',
+            mode: 'realtime',
+            getCurrentText: () => 'existing draft',
+            onTextChange
+        }))
+
+        await act(() => result.current.toggle())
+        act(() => recognition?.emit('live words', false))
+        expect(result.current.partialTranscript).toBe('live words')
+        expect(onTextChange).not.toHaveBeenCalled()
+        act(() => recognition?.emit('final words', true))
+        await act(() => result.current.toggle())
+
+        await waitFor(() => expect(onTextChange).toHaveBeenCalledWith('existing draft final words'))
+        expect(result.current.partialTranscript).toBe('')
+    })
 })

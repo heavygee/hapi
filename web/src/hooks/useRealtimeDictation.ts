@@ -8,6 +8,7 @@ import {
 import type { ApiClient } from '@/api/client'
 import type { ConversationStatus } from '@/realtime/types'
 import {
+    startBrowserCloudTranscription,
     startBrowserLocalTranscription,
     startDeepgramRealtimeTranscription,
     startOpenAIRealtimeTranscription,
@@ -17,7 +18,7 @@ import {
 
 function realtimeBrowserSupport(provider: TranscriptionProvider | null): boolean {
     if (typeof navigator === 'undefined') return false
-    if (provider === 'browser-local') return true
+    if (provider === 'browser-local' || provider === 'browser-cloud') return true
     if (typeof navigator.mediaDevices?.getUserMedia !== 'function') return false
     if (provider === 'openai') return typeof RTCPeerConnection !== 'undefined'
     if (provider === 'deepgram') return typeof WebSocket !== 'undefined' && typeof MediaRecorder !== 'undefined'
@@ -32,7 +33,7 @@ export function useRealtimeDictation(config: {
 }) {
     const supported = config.api !== null
         && config.mode === 'realtime'
-        && ['openai', 'elevenlabs', 'deepgram', 'browser-local'].includes(config.provider ?? '')
+        && ['openai', 'elevenlabs', 'deepgram', 'browser-local', 'browser-cloud'].includes(config.provider ?? '')
         && realtimeBrowserSupport(config.provider)
     const [status, setStatus] = useState<ConversationStatus>('disconnected')
     const [error, setError] = useState<string | null>(null)
@@ -191,7 +192,9 @@ export function useRealtimeDictation(config: {
                 ? await startOpenAIRealtimeTranscription({ getToken, signal: controller.signal, callbacks })
                 : provider === 'deepgram'
                     ? await startDeepgramRealtimeTranscription({ getToken, language, signal: controller.signal, callbacks })
-                    : await startBrowserLocalTranscription({ language, signal: controller.signal, callbacks })
+                    : provider === 'browser-cloud'
+                        ? await startBrowserCloudTranscription({ language, signal: controller.signal, callbacks })
+                        : await startBrowserLocalTranscription({ language, signal: controller.signal, callbacks })
             if (operationRef.current !== operation) session.cancel()
             else sessionRef.current = session
         } catch (startError) {

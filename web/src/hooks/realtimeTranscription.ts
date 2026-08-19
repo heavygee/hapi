@@ -1,5 +1,8 @@
 import { DEEPGRAM_TRANSCRIPTION_MODEL } from '@hapi/protocol/voice'
 import {
+    getBrowserCloudSpeechSupport
+} from './browserCloudSpeech'
+import {
     getBrowserLocalSpeechSupport,
     type LocalSpeechRecognition,
     type LocalSpeechRecognitionAvailability,
@@ -506,6 +509,85 @@ export async function startBrowserLocalTranscription(options: {
         else if (!finished) {
             finished = true
             options.callbacks.onError(new Error('On-device transcription stopped'))
+        }
+    }
+    recognition.start()
+    options.callbacks.onConnected()
+
+    return {
+        stop: async () => {
+            if (finished || stopping) return
+            stopping = true
+            recognition.stop()
+            await new Promise<void>((resolve) => {
+                const timeout = setTimeout(() => {
+                    clearInterval(check)
+                    finish()
+                    resolve()
+                }, 2_500)
+                const check = setInterval(() => {
+                    if (!finished) return
+                    clearInterval(check)
+                    clearTimeout(timeout)
+                    resolve()
+                }, 25)
+            })
+        },
+        cancel: () => {
+            if (finished) return
+            finished = true
+            recognition.abort()
+        }
+    }
+}
+
+export async function startBrowserCloudTranscription(options: {
+    language?: string
+    signal?: AbortSignal
+    callbacks: RealtimeTranscriptionCallbacks
+}): Promise<RealtimeTranscriptionSession> {
+    options.signal?.throwIfAborted()
+    const constructor = getBrowserCloudSpeechSupport()
+    if (!constructor) throw new Error('Browser cloud speech recognition is not supported by this browser')
+
+    // Deliberately no `available()` probe and no `processLocally` — this is the
+    // classic Web Speech API, which always uses the browser vendor's cloud
+    // recognizer and never touches the on-device bridge that caused #1348.
+    const recognition = new constructor()
+    recognition.continuous = true
+    recognition.interimResults = true
+    recognition.lang = options.language || navigator.language
+    let current = ''
+    let finished = false
+    let stopping = false
+
+    const finish = () => {
+        if (finished) return
+        finished = true
+        options.callbacks.onFinal(current)
+    }
+    recognition.onresult = (event) => {
+        const finalParts: string[] = []
+        const interimParts: string[] = []
+        for (let index = 0; index < event.results.length; index += 1) {
+            const result = event.results[index]
+            const transcript = result?.[0]?.transcript ?? ''
+            if (result?.isFinal) finalParts.push(transcript)
+            else interimParts.push(transcript)
+        }
+        current = joinTranscriptParts(...finalParts, ...interimParts)
+        options.callbacks.onPartial(current)
+    }
+    recognition.onerror = (event) => {
+        if (event.error === 'aborted' && stopping) return
+        finished = true
+        options.callbacks.onError(new Error(event.error ? `Browser cloud transcription failed: ${event.error}` : 'Browser cloud transcription failed'))
+    }
+    recognition.onend = () => {
+        if (stopping) finish()
+        else if (!finished) {
+            finished = true
+            options.callbacks.onError(new Error('Browser cloud transcription stopped'))
         }
     }
     recognition.start()
