@@ -60,9 +60,27 @@ const SAFE_DESKTOP_PLATFORMS = new Set(['Windows', 'macOS', 'Linux', 'Chrome OS'
 
 /**
  * The experimental on-device speech API is eligible only with explicit,
- * trustworthy User-Agent Client Hints that identify a desktop platform. Android
- * WebViews can expose a partial shape whose native `available()` call crashes
- * the renderer, so missing, unknown, and mobile environments fail closed.
+ * trustworthy User-Agent Client Hints that identify a desktop platform.
+ * Mobile is excluded for two independent reasons, not one:
+ *
+ * 1. Some Android WebView/OEM runtimes expose a partial shape whose native
+ *    `available()` call crashes the renderer rather than rejecting a promise
+ *    (github.com/tiann/hapi issue #1348) — this is a genuine crash risk
+ *    specific to embedded WebView engines, not to "mobile" as a category.
+ * 2. Independently, as of this writing Chromium has not shipped bundled
+ *    on-device speech models on Android at all: real Chrome for Android
+ *    exposes this API shape but `available({processLocally: true})` always
+ *    resolves "unavailable". iOS Safari and Firefox for Android don't
+ *    implement the on-device extension (no UA-CH either, so they already
+ *    fail this gate on shape/signal grounds).
+ *
+ * Because of (2), narrowing this gate to exclude only WebView engines
+ * (e.g. via the "Android WebView" UA-CH brand) would not unlock any real
+ * capability today, while (1) means getting that narrowing wrong would
+ * reopen a renderer-crashing regression for no benefit. Revisit only once
+ * Chromium ships bundled on-device models for Android — at that point
+ * WebView-specific brand detection is the right next step, not a blanket
+ * mobile allowance.
  */
 export function isConfirmedDesktopSpeechEnvironment(
     _userAgent: string,
