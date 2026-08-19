@@ -915,7 +915,7 @@ export default {
   'settings.voice.inputMode.dictation': 'Dictation',
   'settings.voice.inputMode.dictation.hint': 'Speech-to-text input only',
   'settings.voice.transcriptionProvider': 'Transcription provider',
-  'settings.voice.noTranscriptionProvider': 'No hub transcription provider yet — add OpenAI, ElevenLabs, or Groq below (or use Browser on-device if available).',
+  'settings.voice.noTranscriptionProvider': 'No hub transcription provider yet — add OpenAI, ElevenLabs, or Groq below (or use a Browser on-device / Browser cloud speech option if available).',
   'settings.voice.noVoiceBackend': 'No voice assistant backend is configured on the hub — add one below.',
   'settings.voice.credentials.hint': 'Choose OpenAI, ElevenLabs, or Groq. Keys stay on the hub; the browser never keeps long-lived provider secrets.',
   'settings.voice.credentials.assistantHint': 'Add an ElevenLabs, Gemini Live, or Qwen Realtime key. Keys stay on the hub.',

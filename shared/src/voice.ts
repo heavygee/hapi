@@ -276,6 +276,13 @@ const TRANSCRIPTION_PROVIDERS: Record<TranscriptionProvider, TranscriptionProvid
 export const BROWSER_LOCAL_TRANSCRIPTION_PROVIDER = TRANSCRIPTION_PROVIDERS['browser-local']
 export const BROWSER_CLOUD_TRANSCRIPTION_PROVIDER = TRANSCRIPTION_PROVIDERS['browser-cloud']
 
+/** Providers implemented client-side in the browser, with no hub credential. */
+const BROWSER_TRANSCRIPTION_PROVIDER_IDS: ReadonlySet<TranscriptionProvider> = new Set(['browser-local', 'browser-cloud'])
+
+export function isBrowserTranscriptionProvider(provider: TranscriptionProvider | null | undefined): boolean {
+    return provider !== null && provider !== undefined && BROWSER_TRANSCRIPTION_PROVIDER_IDS.has(provider)
+}
+
 /** Transcription providers whose startup environment is complete. */
 export function listConfiguredTranscriptionProviders(env: VoiceBackendEnv): TranscriptionProviderInfo[] {
     const providers: TranscriptionProvider[] = []

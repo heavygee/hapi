@@ -318,6 +318,66 @@ describe('browser-cloud realtime transcription', () => {
             message: expect.stringContaining('Browser cloud transcription failed: network')
         }))
     })
+
+    it('finishes gracefully (no error) when recognition ends on its own, e.g. Safari auto-stop on silence', async () => {
+        const { constructor } = installBrowserCloudSpeechRecognition()
+        const callbacks = browserLocalCallbacks()
+        let active: InstanceType<typeof constructor> | null = null
+        vi.stubGlobal('SpeechRecognition', class extends constructor {
+            constructor() {
+                super()
+                active = this
+            }
+        })
+
+        await startBrowserCloudTranscription({ language: 'en-US', callbacks })
+        const result = Object.assign([{ transcript: 'hello world' }], { isFinal: true })
+        active!.onresult?.({ results: { length: 1, 0: result } } as unknown as Event & { results: unknown })
+        active!.onend?.()
+
+        expect(callbacks.onFinal).toHaveBeenCalledWith('hello world')
+        expect(callbacks.onError).not.toHaveBeenCalled()
+    })
+
+    it('ignores a no-speech error and finishes gracefully on the end event that follows it', async () => {
+        const { constructor } = installBrowserCloudSpeechRecognition()
+        const callbacks = browserLocalCallbacks()
+        let active: InstanceType<typeof constructor> | null = null
+        vi.stubGlobal('SpeechRecognition', class extends constructor {
+            constructor() {
+                super()
+                active = this
+            }
+        })
+
+        await startBrowserCloudTranscription({ language: 'en-US', callbacks })
+        active!.onerror?.({ error: 'no-speech' } as unknown as Event)
+        expect(callbacks.onError).not.toHaveBeenCalled()
+        active!.onend?.()
+        expect(callbacks.onFinal).toHaveBeenCalledWith('')
+        expect(callbacks.onError).not.toHaveBeenCalled()
+    })
+
+    it('ignores a result that arrives after the session already finished', async () => {
+        const { constructor } = installBrowserCloudSpeechRecognition()
+        const callbacks = browserLocalCallbacks()
+        let active: InstanceType<typeof constructor> | null = null
+        vi.stubGlobal('SpeechRecognition', class extends constructor {
+            constructor() {
+                super()
+                active = this
+            }
+        })
+
+        await startBrowserCloudTranscription({ language: 'en-US', callbacks })
+        active!.onend?.()
+        expect(callbacks.onFinal).toHaveBeenCalledWith('')
+        callbacks.onPartial.mockClear()
+
+        const result = Object.assign([{ transcript: 'late words' }], { isFinal: true })
+        active!.onresult?.({ results: { length: 1, 0: result } } as unknown as Event & { results: unknown })
+        expect(callbacks.onPartial).not.toHaveBeenCalled()
+    })
 })
 
 describe('OpenAI realtime transcription', () => {

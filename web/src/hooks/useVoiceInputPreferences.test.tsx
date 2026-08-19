@@ -54,4 +54,18 @@ describe('useVoiceInputPreferences', () => {
         expect(result.current.provider).toBe('openai')
         expect(available).not.toHaveBeenCalled()
     })
+
+    it('exposes only hub-configured providers when neither browser API exists (e.g. Firefox)', async () => {
+        vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0', language: 'en-US' })
+        const api = {
+            fetchTranscriptionProviders: vi.fn(async () => ({
+                providers: [{ id: 'openai', label: 'OpenAI', modes: ['standard', 'realtime'] }]
+            }))
+        }
+
+        const { result } = renderHook(() => useVoiceInputPreferences(api as unknown as ApiClient))
+
+        await waitFor(() => expect(result.current.provider).toBe('openai'))
+        expect(result.current.providers.map((provider) => provider.id)).toEqual(['openai'])
+    })
 })

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { CommitStrategy, useScribe } from '@elevenlabs/react'
 import {
     ELEVENLABS_REALTIME_TRANSCRIPTION_MODEL,
+    isBrowserTranscriptionProvider,
     type TranscriptionMode,
     type TranscriptionProvider
 } from '@hapi/protocol/voice'
@@ -18,7 +19,7 @@ import {
 
 function realtimeBrowserSupport(provider: TranscriptionProvider | null): boolean {
     if (typeof navigator === 'undefined') return false
-    if (provider === 'browser-local' || provider === 'browser-cloud') return true
+    if (isBrowserTranscriptionProvider(provider)) return true
     if (typeof navigator.mediaDevices?.getUserMedia !== 'function') return false
     if (provider === 'openai') return typeof RTCPeerConnection !== 'undefined'
     if (provider === 'deepgram') return typeof WebSocket !== 'undefined' && typeof MediaRecorder !== 'undefined'
@@ -33,7 +34,7 @@ export function useRealtimeDictation(config: {
 }) {
     const supported = config.api !== null
         && config.mode === 'realtime'
-        && ['openai', 'elevenlabs', 'deepgram', 'browser-local', 'browser-cloud'].includes(config.provider ?? '')
+        && (['openai', 'elevenlabs', 'deepgram'].includes(config.provider ?? '') || isBrowserTranscriptionProvider(config.provider))
         && realtimeBrowserSupport(config.provider)
     const [status, setStatus] = useState<ConversationStatus>('disconnected')
     const [error, setError] = useState<string | null>(null)
@@ -188,13 +189,18 @@ export function useRealtimeDictation(config: {
                 if (operationRef.current !== operation) throw new Error('Realtime transcription cancelled')
                 return result.token
             }
-            const session = provider === 'openai'
-                ? await startOpenAIRealtimeTranscription({ getToken, signal: controller.signal, callbacks })
-                : provider === 'deepgram'
-                    ? await startDeepgramRealtimeTranscription({ getToken, language, signal: controller.signal, callbacks })
-                    : provider === 'browser-cloud'
-                        ? await startBrowserCloudTranscription({ language, signal: controller.signal, callbacks })
-                        : await startBrowserLocalTranscription({ language, signal: controller.signal, callbacks })
+            let session: RealtimeTranscriptionSession
+            if (provider === 'openai') {
+                session = await startOpenAIRealtimeTranscription({ getToken, signal: controller.signal, callbacks })
+            } else if (provider === 'deepgram') {
+                session = await startDeepgramRealtimeTranscription({ getToken, language, signal: controller.signal, callbacks })
+            } else if (provider === 'browser-cloud') {
+                session = await startBrowserCloudTranscription({ language, signal: controller.signal, callbacks })
+            } else if (provider === 'browser-local') {
+                session = await startBrowserLocalTranscription({ language, signal: controller.signal, callbacks })
+            } else {
+                throw new Error(`Unsupported realtime transcription provider: ${provider}`)
+            }
             if (operationRef.current !== operation) session.cancel()
             else sessionRef.current = session
         } catch (startError) {

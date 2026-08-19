@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
+import { isBrowserTranscriptionProvider } from '@hapi/protocol/voice'
 import { VOICE_BACKEND_LABELS } from '@hapi/protocol/voicePickerCatalog'
 import { getLanguageDisplayName } from '@/lib/languages'
 import { useTranslation } from '@/lib/use-translation'
@@ -20,7 +21,7 @@ export default function SettingsVoicePage() {
     const [showCredentials, setShowCredentials] = useState(false)
     const selectedLanguage = voice.voiceLanguages.find((language) => language.code === voice.voiceLanguage)
     const selectedVoice = voice.voices.find((option) => option.id === voice.voiceId)
-    const hubProviders = voice.providers.filter((provider) => provider.id !== 'browser-local' && provider.id !== 'browser-cloud')
+    const hubProviders = voice.providers.filter((provider) => !isBrowserTranscriptionProvider(provider.id))
     const canManageCredentials = getNamespaceFromToken(token) === 'default'
     const needsDictationOnboard = voice.voiceMode === 'dictation' && hubProviders.length === 0
     const needsAssistantOnboard = voice.voiceMode === 'assistant' && voice.configuredBackends.length === 0

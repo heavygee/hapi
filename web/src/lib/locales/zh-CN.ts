@@ -914,7 +914,7 @@ export default {
   'settings.voice.inputMode.dictation': '语音输入',
   'settings.voice.inputMode.dictation.hint': '只做语音转文字',
   'settings.voice.transcriptionProvider': '转录提供商',
-  'settings.voice.noTranscriptionProvider': 'Hub 尚未配置转录提供商 — 请在下方添加 OpenAI、ElevenLabs 或 Groq（或在可用时使用浏览器本地识别）。',
+  'settings.voice.noTranscriptionProvider': 'Hub 尚未配置转录提供商 — 请在下方添加 OpenAI、ElevenLabs 或 Groq（或在可用时使用浏览器本地识别 / 浏览器云端语音识别）。',
   'settings.voice.noVoiceBackend': 'Hub 尚未配置语音助手后端 — 请在下方添加。',
   'settings.voice.credentials.hint': '可选择 OpenAI、ElevenLabs 或 Groq。密钥保存在 Hub 上，浏览器不会长期保存提供商密钥。',
   'settings.voice.credentials.assistantHint': '添加 ElevenLabs、Gemini Live 或 Qwen Realtime 密钥。密钥保存在 Hub 上。',

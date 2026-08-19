@@ -456,28 +456,50 @@ async function checkBrowserLocalSpeechAvailability(options: {
     })
 }
 
-export async function startBrowserLocalTranscription(options: {
-    language?: string
-    signal?: AbortSignal
-    callbacks: RealtimeTranscriptionCallbacks
-}): Promise<RealtimeTranscriptionSession> {
-    options.signal?.throwIfAborted()
-    const support = getBrowserLocalSpeechSupport()
-    if (!support) throw new Error('On-device speech recognition is not supported by this browser')
-    const language = options.language || navigator.language
-    // `available()` is deferred to a microtask so an abort between start and
-    // native invocation detaches its only consumer before touching the API.
-    options.signal?.throwIfAborted()
-    if (await checkBrowserLocalSpeechAvailability({ ...support, language, signal: options.signal }) !== 'available') {
-        throw new Error(`On-device speech recognition is not installed for ${language}`)
-    }
-    options.signal?.throwIfAborted()
+interface WebSpeechRecognitionResultLike {
+    readonly isFinal: boolean
+    readonly 0: { readonly transcript: string }
+}
 
-    const recognition = new support.constructor()
-    recognition.continuous = true
-    recognition.interimResults = true
-    recognition.lang = language
-    recognition.processLocally = true
+interface WebSpeechRecognitionEventLike extends Event {
+    readonly results: { readonly length: number; readonly [index: number]: WebSpeechRecognitionResultLike }
+}
+
+interface WebSpeechRecognitionLike {
+    onresult: ((event: WebSpeechRecognitionEventLike) => void) | null
+    onerror: ((event: Event & { error?: string }) => void) | null
+    onend: (() => void) | null
+    start: () => void
+    stop: () => void
+    abort: () => void
+}
+
+/**
+ * Shared event-adapter and stop/cancel lifecycle for any Web Speech API
+ * variant (on-device or classic/cloud) once it has been constructed and
+ * configured by its caller. `errorLabel` distinguishes error messages
+ * between variants (e.g. "On-device transcription" vs "Browser cloud
+ * transcription") without duplicating this ~60-line adapter per variant.
+ *
+ * `softEndErrorCodes` and `treatUnexpectedEndAsFinish` default to the
+ * original on-device behavior (any unexpected error/end is fatal), which
+ * matches desktop Chrome's continuous on-device recognizer never stopping
+ * itself. The classic/cloud variant opts into softer handling because
+ * mobile browsers legitimately stop recognition on their own mid-session
+ * (Safari auto-stops on silence; `no-speech` is a routine timeout, not a
+ * failure) — treating those as fatal would break the exact continuous
+ * mobile dictation this provider exists to support.
+ */
+function runWebSpeechRecognitionSession(
+    recognition: WebSpeechRecognitionLike,
+    callbacks: RealtimeTranscriptionCallbacks,
+    options: {
+        errorLabel: string
+        softEndErrorCodes?: ReadonlySet<string>
+        treatUnexpectedEndAsFinish?: boolean
+    }
+): RealtimeTranscriptionSession {
+    const { errorLabel, softEndErrorCodes, treatUnexpectedEndAsFinish } = options
     let current = ''
     let finished = false
     let stopping = false
@@ -485,9 +507,14 @@ export async function startBrowserLocalTranscription(options: {
     const finish = () => {
         if (finished) return
         finished = true
-        options.callbacks.onFinal(current)
+        callbacks.onFinal(current)
     }
     recognition.onresult = (event) => {
+        // A result can arrive after `stop()`'s timeout already finalized the
+        // session (e.g. a slow cloud round-trip on a mobile network) — once
+        // finished, ignore late events instead of resurrecting stale partial
+        // text into a UI that already moved on.
+        if (finished) return
         const finalParts: string[] = []
         const interimParts: string[] = []
         for (let index = 0; index < event.results.length; index += 1) {
@@ -497,22 +524,23 @@ export async function startBrowserLocalTranscription(options: {
             else interimParts.push(transcript)
         }
         current = joinTranscriptParts(...finalParts, ...interimParts)
-        options.callbacks.onPartial(current)
+        callbacks.onPartial(current)
     }
     recognition.onerror = (event) => {
         if (event.error === 'aborted' && stopping) return
+        if (event.error && softEndErrorCodes?.has(event.error)) return
         finished = true
-        options.callbacks.onError(new Error(event.error ? `On-device transcription failed: ${event.error}` : 'On-device transcription failed'))
+        callbacks.onError(new Error(event.error ? `${errorLabel} failed: ${event.error}` : `${errorLabel} failed`))
     }
     recognition.onend = () => {
-        if (stopping) finish()
+        if (stopping || treatUnexpectedEndAsFinish) finish()
         else if (!finished) {
             finished = true
-            options.callbacks.onError(new Error('On-device transcription stopped'))
+            callbacks.onError(new Error(`${errorLabel} stopped`))
         }
     }
     recognition.start()
-    options.callbacks.onConnected()
+    callbacks.onConnected()
 
     return {
         stop: async () => {
@@ -541,6 +569,33 @@ export async function startBrowserLocalTranscription(options: {
     }
 }
 
+export async function startBrowserLocalTranscription(options: {
+    language?: string
+    signal?: AbortSignal
+    callbacks: RealtimeTranscriptionCallbacks
+}): Promise<RealtimeTranscriptionSession> {
+    options.signal?.throwIfAborted()
+    const support = getBrowserLocalSpeechSupport()
+    if (!support) throw new Error('On-device speech recognition is not supported by this browser')
+    const language = options.language || navigator.language
+    // `available()` is deferred to a microtask so an abort between start and
+    // native invocation detaches its only consumer before touching the API.
+    options.signal?.throwIfAborted()
+    if (await checkBrowserLocalSpeechAvailability({ ...support, language, signal: options.signal }) !== 'available') {
+        throw new Error(`On-device speech recognition is not installed for ${language}`)
+    }
+    options.signal?.throwIfAborted()
+
+    const recognition = new support.constructor()
+    recognition.continuous = true
+    recognition.interimResults = true
+    recognition.lang = language
+    recognition.processLocally = true
+    return runWebSpeechRecognitionSession(recognition, options.callbacks, { errorLabel: 'On-device transcription' })
+}
+
+const BROWSER_CLOUD_SOFT_END_ERROR_CODES = new Set(['no-speech'])
+
 export async function startBrowserCloudTranscription(options: {
     language?: string
     signal?: AbortSignal
@@ -557,65 +612,9 @@ export async function startBrowserCloudTranscription(options: {
     recognition.continuous = true
     recognition.interimResults = true
     recognition.lang = options.language || navigator.language
-    let current = ''
-    let finished = false
-    let stopping = false
-
-    const finish = () => {
-        if (finished) return
-        finished = true
-        options.callbacks.onFinal(current)
-    }
-    recognition.onresult = (event) => {
-        const finalParts: string[] = []
-        const interimParts: string[] = []
-        for (let index = 0; index < event.results.length; index += 1) {
-            const result = event.results[index]
-            const transcript = result?.[0]?.transcript ?? ''
-            if (result?.isFinal) finalParts.push(transcript)
-            else interimParts.push(transcript)
-        }
-        current = joinTranscriptParts(...finalParts, ...interimParts)
-        options.callbacks.onPartial(current)
-    }
-    recognition.onerror = (event) => {
-        if (event.error === 'aborted' && stopping) return
-        finished = true
-        options.callbacks.onError(new Error(event.error ? `Browser cloud transcription failed: ${event.error}` : 'Browser cloud transcription failed'))
-    }
-    recognition.onend = () => {
-        if (stopping) finish()
-        else if (!finished) {
-            finished = true
-            options.callbacks.onError(new Error('Browser cloud transcription stopped'))
-        }
-    }
-    recognition.start()
-    options.callbacks.onConnected()
-
-    return {
-        stop: async () => {
-            if (finished || stopping) return
-            stopping = true
-            recognition.stop()
-            await new Promise<void>((resolve) => {
-                const timeout = setTimeout(() => {
-                    clearInterval(check)
-                    finish()
-                    resolve()
-                }, 2_500)
-                const check = setInterval(() => {
-                    if (!finished) return
-                    clearInterval(check)
-                    clearTimeout(timeout)
-                    resolve()
-                }, 25)
-            })
-        },
-        cancel: () => {
-            if (finished) return
-            finished = true
-            recognition.abort()
-        }
-    }
+    return runWebSpeechRecognitionSession(recognition, options.callbacks, {
+        errorLabel: 'Browser cloud transcription',
+        softEndErrorCodes: BROWSER_CLOUD_SOFT_END_ERROR_CODES,
+        treatUnexpectedEndAsFinish: true
+    })
 }
