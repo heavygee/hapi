@@ -42,16 +42,16 @@ describe('schema migration from v22', () => {
 
             expect(events?.name).toBe('events')
             expect(links?.name).toBe('event_links')
-            expect(version.user_version).toBe(26)
+            expect(version.user_version).toBe(27)
         } finally {
             migrated.close()
         }
     })
 })
 
-describe('schema migration v23 to v26', () => {
+describe('schema migrations through v27', () => {
     it('creates and backfills the message content search index', () => {
-        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v24-'))
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v25-'))
         tempDirs.push(dir)
         const dbPath = join(dir, 'hapi.db')
 
@@ -68,7 +68,7 @@ describe('schema migration v23 to v26', () => {
             DROP TABLE IF EXISTS message_content_search;
             DROP TABLE IF EXISTS message_content_search_lookup;
             DROP TABLE IF EXISTS message_content_search_short;
-            PRAGMA user_version = 23;
+            PRAGMA user_version = 24;
         `)
         legacy.close()
 
@@ -77,14 +77,14 @@ describe('schema migration v23 to v26', () => {
             expect(migrated.messages.searchContent('backfill this', 'default')[0]?.sessionId).toBe(session.id)
             const internalDb = (migrated as unknown as { db: Database }).db
             const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
-            expect(version.user_version).toBe(26)
+            expect(version.user_version).toBe(27)
         } finally {
             migrated.close()
         }
     })
 
-    it('adds the indexed message lookup to an existing v24 search schema', () => {
-        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v25-'))
+    it('adds the indexed message lookup to an existing v25 search schema', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v26-'))
         tempDirs.push(dir)
         const dbPath = join(dir, 'hapi.db')
 
@@ -100,7 +100,7 @@ describe('schema migration v23 to v26', () => {
         legacy.exec(`
             DROP TABLE IF EXISTS message_content_search_lookup;
             DROP TABLE IF EXISTS message_content_search_short;
-            PRAGMA user_version = 24;
+            PRAGMA user_version = 25;
         `)
         legacy.close()
 
@@ -113,14 +113,14 @@ describe('schema migration v23 to v26', () => {
             ).get() as { name: string } | null
             const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
             expect(lookup?.name).toBe('message_content_search_lookup')
-            expect(version.user_version).toBe(26)
+            expect(version.user_version).toBe(27)
         } finally {
             migrated.close()
         }
     })
 
-    it('backfills indexed short-query grams for an existing v25 search schema', () => {
-        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v26-'))
+    it('backfills indexed short-query grams for an existing v26 search schema', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v27-'))
         tempDirs.push(dir)
         const dbPath = join(dir, 'hapi.db')
 
@@ -148,7 +148,7 @@ describe('schema migration v23 to v26', () => {
             INSERT INTO message_content_search_lookup (search_rowid, message_id)
             SELECT rowid, message_id FROM message_content_search;
             DROP TABLE IF EXISTS message_content_search_short;
-            PRAGMA user_version = 25;
+            PRAGMA user_version = 26;
         `)
         legacy.close()
 
@@ -176,7 +176,7 @@ describe('schema migration v23 to v26', () => {
             expect(target?.target_message_id).toBe(message.id)
             expect(indexed?.searchable_text.length).toBeLessThanOrEqual(MAX_INDEXED_MESSAGE_CHARACTERS)
             expect(indexed?.searchable_text).toContain('tail-migration-needle')
-            expect(version.user_version).toBe(26)
+            expect(version.user_version).toBe(27)
         } finally {
             migrated.close()
         }

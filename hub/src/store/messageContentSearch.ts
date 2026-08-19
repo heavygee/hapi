@@ -146,7 +146,7 @@ function boundSearchableText(text: string): string {
 export function backfillMessageContentSearchShortIndex(db: Database): void {
     db.transaction(() => {
         ensureMessageContentSearchTable(db)
-        // A failed pre-v26 startup may have left a partially populated short
+        // A failed pre-v27 startup may have left a partially populated short
         // index behind. Remove obsolete unigram rows while preserving any
         // completed bigrams so a retry can resume without a full reset.
         db.exec(`DELETE FROM ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} WHERE length(gram) < 2`)
@@ -237,8 +237,8 @@ export function createMessageContentSearchTable(db: Database): void {
     `)
     const lookupColumns = db.prepare(`PRAGMA table_info(${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE})`).all() as Array<{ name: string }>
     if (!lookupColumns.some((column) => column.name === 'target_message_id')) {
-        // V24/V25 databases created the lookup without a separate target ID.
-        // Keep schema v26 compatible by upgrading the derived table in place.
+        // V25/V26 databases created the lookup without a separate target ID.
+        // Keep schema v27 compatible by upgrading the derived table in place.
         db.exec(`ALTER TABLE ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE} ADD COLUMN target_message_id TEXT`)
     }
     db.exec(`
