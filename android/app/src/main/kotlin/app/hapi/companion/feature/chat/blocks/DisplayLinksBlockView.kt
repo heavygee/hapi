@@ -3,8 +3,6 @@ package app.hapi.companion.feature.chat.blocks
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -20,6 +18,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
+import app.hapi.companion.feature.chat.openUrl
 import app.hapi.companion.ui.theme.hapi
 import app.hapi.protocol.chat.DisplayLinksBlock
 
@@ -54,7 +54,7 @@ fun DisplayLinksBlockView(block: DisplayLinksBlock, modifier: Modifier = Modifie
             for (url in block.urls) {
                 val urlTitle = url.title
                 val navigable = runCatching {
-                    val uri = Uri.parse(url.href)
+                    val uri = url.href.toUri()
                     uri.scheme.equals("http", ignoreCase = true) ||
                         uri.scheme.equals("https", ignoreCase = true)
                 }.getOrDefault(false)
@@ -62,11 +62,7 @@ fun DisplayLinksBlockView(block: DisplayLinksBlock, modifier: Modifier = Modifie
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable {
-                                context.startActivity(
-                                    Intent(Intent.ACTION_VIEW, Uri.parse(url.href))
-                                )
-                            }
+                            .clickable { context.openUrl(url.href) }
                             .padding(10.dp),
                     ) {
                         Text(
