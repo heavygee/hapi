@@ -152,6 +152,11 @@ object MessageRetention {
             "agent-run-start", "agent-run-update", "agent-run-trace" -> true
             "generated-image" ->
                 !asString(coalesce(prop(data, "imageId"), prop(data, "image_id"))).isNullOrEmpty()
+            "display-links" -> {
+                val urls = prop(data, "urls")
+                val texts = prop(data, "texts")
+                (urls is JsonArray && urls.isNotEmpty()) || (texts is JsonArray && texts.isNotEmpty())
+            }
             "error" -> prop(data, "message").stringOrNull != null
             "message" -> prop(data, "message").stringOrNull != null
             "reasoning" -> prop(data, "message").stringOrNull != null

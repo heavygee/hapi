@@ -1,0 +1,127 @@
+package app.hapi.companion.feature.chat.blocks
+
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import app.hapi.companion.ui.theme.hapi
+import app.hapi.protocol.chat.DisplayLinksBlock
+
+/**
+ * Port of web `DisplayLinksCard`: tappable http(s) rows plus exact-copy strings.
+ */
+@Composable
+fun DisplayLinksBlockView(block: DisplayLinksBlock, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val hasUrls = block.urls.isNotEmpty()
+    val hasTexts = block.texts.isNotEmpty()
+    val heading = when {
+        hasUrls && hasTexts -> "Links & copy"
+        hasTexts -> "Copy"
+        else -> "Links"
+    }
+
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        tonalElevation = 1.dp,
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = heading,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.hapi.hint,
+            )
+            for (url in block.urls) {
+                val navigable = runCatching {
+                    val uri = Uri.parse(url.href)
+                    uri.scheme.equals("http", ignoreCase = true) ||
+                        uri.scheme.equals("https", ignoreCase = true)
+                }.getOrDefault(false)
+                if (navigable) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW, Uri.parse(url.href))
+                                )
+                            }
+                            .padding(10.dp),
+                    ) {
+                        Text(
+                            text = url.title?.takeIf { it.isNotBlank() } ?: url.href,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (!url.title.isNullOrBlank()) {
+                            Text(
+                                text = url.href,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.hapi.hint,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                } else {
+                    Text(
+                        text = url.title?.takeIf { it.isNotBlank() } ?: url.href,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.hapi.hint,
+                    )
+                }
+            }
+            for (text in block.texts) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText(text.title ?: "copy", text.value))
+                        }
+                        .padding(10.dp),
+                ) {
+                    if (!text.title.isNullOrBlank()) {
+                        Text(
+                            text = text.title,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.hapi.hint,
+                        )
+                    }
+                    Text(
+                        text = text.value,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = "Tap to copy",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.hapi.hint,
+                    )
+                }
+            }
+        }
+    }
+}
