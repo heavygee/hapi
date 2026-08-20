@@ -295,10 +295,11 @@ function sameMcpEntry(a: McpServerEntry | undefined, b: McpServerEntry | undefin
  * Merge the per-session HAPI stdio bridge into `~/.cursor/mcp.json` (or
  * `options.mcpConfigDir`) and approve it for Cursor's native MCP loader.
  *
- * Concurrent `hapi-*` entries stay enabled. Cursor may route duplicate bare tool
- * names to the wrong server (forum 148059); `display_links` fail-closes when
- * `sessionId` does not match this HappyServer. Do not `agent mcp disable`
- * siblings — cleanup never re-enables them, which strands a live session.
+ * Concurrent `hapi-*` entries stay enabled. Each Cursor HappyServer registers a
+ * per-session `hapi_<sessionId>_display_links` tool so bare-name collisions
+ * (forum 148059) cannot paint the wrong chat; `assertBoundDisplayLinksSession`
+ * remains defense-in-depth. Do not `agent mcp disable` siblings — cleanup never
+ * re-enables them, which strands a live session.
  *
  * Cleanup undoes only the exact entry this session installed under `serverId` (or restores a
  * pre-existing value for that same id). Concurrent edits to other mcpServers keys — and to
