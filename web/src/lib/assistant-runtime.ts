@@ -39,6 +39,7 @@ export type HappyChatMessageMetadata = {
     source?: CliOutputBlock['source']
     attachments?: AttachmentMetadata[]
     invokedAt?: number | null
+    steered?: boolean
     durationMs?: number
     usage?: UsageData
     model?: string | null
@@ -584,7 +585,8 @@ function toThreadMessageLike(
                     localId: block.localId,
                     originalText: block.originalText,
                     attachments: block.attachments,
-                    invokedAt: block.invokedAt
+                    invokedAt: block.invokedAt,
+                    steered: block.steered
                 } satisfies HappyChatMessageMetadata
             }
         }
