@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import {
     buildDisplayLinksPayload,
+    buildDisplayLinksToolName,
     isDisplayableHttpHref,
     parseDisplayLinksInput,
     parseDisplayLinksToolInput,
@@ -207,6 +208,13 @@ describe('redactDisplayLinksToolInput', () => {
         expect(isDisplayLinksToolName('display_links')).toBe(true)
         expect(isDisplayLinksToolName('Display Links')).toBe(true)
         expect(isDisplayLinksToolName('mcp__hapi__display_links')).toBe(true)
+        expect(isDisplayLinksToolName('hapi_2acd2599_525c_4774_825f_09ce7802549d_display_links')).toBe(true)
         expect(isDisplayLinksToolName('Bash')).toBe(false)
+    })
+
+    it('builds a per-session display_links tool name', () => {
+        expect(buildDisplayLinksToolName('2acd2599-525c-4774-825f-09ce7802549d')).toBe(
+            'hapi_2acd2599_525c_4774_825f_09ce7802549d_display_links',
+        )
     })
 })

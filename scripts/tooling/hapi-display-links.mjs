@@ -38,6 +38,15 @@ function assertLocalDisplayLinksTarget(sessionArg) {
     throw new Error(LOCAL_SESSION_ONLY_ERROR)
 }
 
+/** Mirror shared `buildDisplayLinksToolName` — keep in sync with displayLinks.ts. */
+function buildDisplayLinksToolName(sessionId) {
+    const id = String(sessionId ?? '').trim().replaceAll('-', '_')
+    if (!id) {
+        throw new Error('display_links tool name requires a non-empty session id')
+    }
+    return `hapi_${id}_display_links`
+}
+
 function sessionMatchesPrefix(session, prefix) {
     if (typeof session.id === 'string' && session.id.startsWith(prefix)) {
         return true
@@ -243,7 +252,7 @@ const client = new Client({ name: 'hapi-display-links', version: '1.0.0' }, { ca
 const transport = new StreamableHTTPClientTransport(new URL(mcpUrl))
 await client.connect(transport)
 const result = await client.callTool({
-    name: 'display_links',
+    name: buildDisplayLinksToolName(session.id),
     arguments: {
         ...(href ? { urls: title ? [{ href, title }] : [{ href }] } : {}),
         ...(texts && texts.length > 0 ? { texts } : {}),
