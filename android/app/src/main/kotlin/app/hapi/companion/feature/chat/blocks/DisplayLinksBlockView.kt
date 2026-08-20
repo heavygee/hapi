@@ -52,6 +52,7 @@ fun DisplayLinksBlockView(block: DisplayLinksBlock, modifier: Modifier = Modifie
                 color = MaterialTheme.hapi.hint,
             )
             for (url in block.urls) {
+                val urlTitle = url.title
                 val navigable = runCatching {
                     val uri = Uri.parse(url.href)
                     uri.scheme.equals("http", ignoreCase = true) ||
@@ -69,13 +70,13 @@ fun DisplayLinksBlockView(block: DisplayLinksBlock, modifier: Modifier = Modifie
                             .padding(10.dp),
                     ) {
                         Text(
-                            text = url.title?.takeIf { it.isNotBlank() } ?: url.href,
+                            text = urlTitle?.takeIf { it.isNotBlank() } ?: url.href,
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.primary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        if (!url.title.isNullOrBlank()) {
+                        if (!urlTitle.isNullOrBlank()) {
                             Text(
                                 text = url.href,
                                 style = MaterialTheme.typography.labelSmall,
@@ -87,25 +88,26 @@ fun DisplayLinksBlockView(block: DisplayLinksBlock, modifier: Modifier = Modifie
                     }
                 } else {
                     Text(
-                        text = url.title?.takeIf { it.isNotBlank() } ?: url.href,
+                        text = urlTitle?.takeIf { it.isNotBlank() } ?: url.href,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.hapi.hint,
                     )
                 }
             }
             for (text in block.texts) {
+                val textTitle = text.title
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText(text.title ?: "copy", text.value))
+                            clipboard.setPrimaryClip(ClipData.newPlainText(textTitle ?: "copy", text.value))
                         }
                         .padding(10.dp),
                 ) {
-                    if (!text.title.isNullOrBlank()) {
+                    if (!textTitle.isNullOrBlank()) {
                         Text(
-                            text = text.title,
+                            text = textTitle,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.hapi.hint,
                         )
