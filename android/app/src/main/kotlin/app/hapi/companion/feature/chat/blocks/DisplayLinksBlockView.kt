@@ -1,8 +1,10 @@
 package app.hapi.companion.feature.chat.blocks
 
 import android.content.ClipData
+import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.PersistableBundle
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -97,7 +99,12 @@ fun DisplayLinksBlockView(block: DisplayLinksBlock, modifier: Modifier = Modifie
                         .fillMaxWidth()
                         .clickable {
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText(textTitle ?: "copy", text.value))
+                            val clip = ClipData.newPlainText(textTitle ?: "copy", text.value).apply {
+                                description.extras = PersistableBundle().apply {
+                                    putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
+                                }
+                            }
+                            clipboard.setPrimaryClip(clip)
                         }
                         .padding(10.dp),
                 ) {
