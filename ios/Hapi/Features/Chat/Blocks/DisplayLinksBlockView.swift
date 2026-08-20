@@ -1,6 +1,7 @@
 import HapiProtocol
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 /// Port of web `DisplayLinksCard`: tappable http(s) rows plus exact-copy strings.
 struct DisplayLinksBlockView: View {
@@ -39,7 +40,7 @@ struct DisplayLinksBlockView: View {
             }
             ForEach(Array(block.texts.enumerated()), id: \.offset) { _, text in
                 Button {
-                    UIPasteboard.general.string = text.value
+                    copyExactValue(text.value)
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         if let title = text.title, !title.isEmpty {
@@ -76,5 +77,16 @@ struct DisplayLinksBlockView: View {
         if hasUrls && hasTexts { return "Links & copy" }
         if hasTexts { return "Copy" }
         return "Links"
+    }
+
+    /// Local-only + short TTL — exact-copy cards may hold secrets/tokens.
+    private func copyExactValue(_ value: String) {
+        UIPasteboard.general.setItems(
+            [[UTType.utf8PlainText.identifier: value]],
+            options: [
+                .localOnly: true,
+                .expirationDate: Date().addingTimeInterval(120),
+            ]
+        )
     }
 }

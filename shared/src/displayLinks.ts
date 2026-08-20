@@ -206,7 +206,10 @@ export function isDisplayLinksToolName(name: unknown): boolean {
 
 /** Strip exact-copy bytes from a tool-call input record (hub/export must not store secrets). */
 export function redactDisplayLinksToolInput(input: unknown): unknown {
-    if (!input || typeof input !== 'object' || Array.isArray(input)) return input
+    if (input == null) return input
+    if (typeof input !== 'object' || Array.isArray(input)) {
+        return DISPLAY_LINKS_REDACTED_VALUE
+    }
     const record = input as Record<string, unknown>
     const safe: Record<string, unknown> = {}
     if (Object.prototype.hasOwnProperty.call(record, 'urls')) {
