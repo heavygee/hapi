@@ -93,6 +93,26 @@ describe('canBridgeModelError', () => {
             bridgeable: false
         })).toBe(false);
     });
+
+    it('blocks invalid_argument Continues loop via transient=false (#1522)', () => {
+        // Soft kinds (canceled, unavailable, …) stay bridgeable when transient.
+        expect(canBridgeModelError({
+            transient: true,
+            eventId: 'evt-canceled-1'
+        })).toBe(true);
+        // Classifier marks invalid_argument transient:false so auto-bridge / Continues stop.
+        expect(canBridgeModelError({
+            transient: false,
+            eventId: 'evt-invalid-1'
+        })).toBe(false);
+        // A new eventId after a failed bridge still cannot loop when non-transient.
+        expect(canBridgeModelError({
+            transient: false,
+            eventId: 'evt-invalid-2',
+            bridgedForEventId: 'evt-invalid-1',
+            retriedAndFailed: true
+        })).toBe(false);
+    });
 });
 
 describe('mergeBridgeGateFields', () => {
