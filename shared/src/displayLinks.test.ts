@@ -198,10 +198,27 @@ describe('redactDisplayLinksToolInput', () => {
             urls: [{ href, title: 'Public' }],
             texts: [{ value: secret, title: 'gate' }],
             sessionId: 'abc',
-        }) as { texts: Array<{ value: string }>; urls: Array<{ href: string }> }
+        }) as { texts: Array<{ value: string; title?: string }>; urls: Array<{ href: string }> }
         expect(JSON.stringify(redacted)).not.toContain(secret)
         expect(redacted.texts[0]?.value).toBe('[omitted]')
+        expect(redacted.texts[0]?.title).toBe('gate')
         expect(redacted.urls[0]?.href).toBe(href)
+    })
+
+    it('fail-closes when texts is malformed or carries extra secret fields', () => {
+        const secret = 'SENTINEL_BACKUP_VK' + 'K'
+        const objectTexts = redactDisplayLinksToolInput({
+            texts: { value: secret },
+        }) as { texts: string }
+        expect(objectTexts.texts).toBe('[omitted]')
+        expect(JSON.stringify(objectTexts)).not.toContain(secret)
+
+        const withBackup = redactDisplayLinksToolInput({
+            texts: [{ value: secret, backup: secret, title: 't' }],
+        }) as { texts: Array<Record<string, unknown>> }
+        expect(withBackup.texts[0]).toEqual({ value: '[omitted]', title: 't' })
+        expect(JSON.stringify(withBackup)).not.toContain(secret)
+        expect(withBackup.texts[0]).not.toHaveProperty('backup')
     })
 
     it('recognizes Cursor-prefixed display_links tool names', () => {
