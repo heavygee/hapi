@@ -208,20 +208,28 @@ export function isDisplayLinksToolName(name: unknown): boolean {
 export function redactDisplayLinksToolInput(input: unknown): unknown {
     if (!input || typeof input !== 'object' || Array.isArray(input)) return input
     const record = input as Record<string, unknown>
-    if (!Object.prototype.hasOwnProperty.call(record, 'texts')) return input
-    const texts = Array.isArray(record.texts)
-        ? record.texts.map((item) => {
-            if (typeof item === 'string') return DISPLAY_LINKS_REDACTED_VALUE
-            const row = item && typeof item === 'object' && Array.isArray(item) === false
-                ? item as Record<string, unknown>
-                : null
-            const title = typeof row?.title === 'string' ? row.title : undefined
-            return title === undefined
-                ? { value: DISPLAY_LINKS_REDACTED_VALUE }
-                : { value: DISPLAY_LINKS_REDACTED_VALUE, title }
-        })
-        : DISPLAY_LINKS_REDACTED_VALUE
-    return { ...record, texts }
+    const safe: Record<string, unknown> = {}
+    if (Object.prototype.hasOwnProperty.call(record, 'urls')) {
+        safe.urls = safeParseDisplayLinksInput(record.urls)
+    }
+    if (Object.prototype.hasOwnProperty.call(record, 'texts')) {
+        safe.texts = Array.isArray(record.texts)
+            ? record.texts.map((item) => {
+                if (typeof item === 'string') return DISPLAY_LINKS_REDACTED_VALUE
+                const row = item && typeof item === 'object' && !Array.isArray(item)
+                    ? item as Record<string, unknown>
+                    : null
+                const title = typeof row?.title === 'string' ? row.title : undefined
+                return title === undefined
+                    ? { value: DISPLAY_LINKS_REDACTED_VALUE }
+                    : { value: DISPLAY_LINKS_REDACTED_VALUE, title }
+            })
+            : DISPLAY_LINKS_REDACTED_VALUE
+    }
+    if (typeof record.sessionId === 'string') {
+        safe.sessionId = record.sessionId
+    }
+    return safe
 }
 
 export function parseDisplayLinksInput(input: unknown): DisplayLink[] {
