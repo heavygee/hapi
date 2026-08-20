@@ -1,5 +1,7 @@
 package app.hapi.protocol.window
 
+import app.hapi.protocol.chat.parseDisplayLinksInput
+import app.hapi.protocol.chat.parseDisplayTextsInput
 import app.hapi.protocol.wire.stringOrNull
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -152,11 +154,9 @@ object MessageRetention {
             "agent-run-start", "agent-run-update", "agent-run-trace" -> true
             "generated-image" ->
                 !asString(coalesce(prop(data, "imageId"), prop(data, "image_id"))).isNullOrEmpty()
-            "display-links" -> {
-                val urls = prop(data, "urls")
-                val texts = prop(data, "texts")
-                (urls is JsonArray && urls.isNotEmpty()) || (texts is JsonArray && texts.isNotEmpty())
-            }
+            "display-links" ->
+                parseDisplayLinksInput(prop(data, "urls")).isNotEmpty() ||
+                    parseDisplayTextsInput(prop(data, "texts")).isNotEmpty()
             "error" -> prop(data, "message").stringOrNull != null
             "message" -> prop(data, "message").stringOrNull != null
             "reasoning" -> prop(data, "message").stringOrNull != null
