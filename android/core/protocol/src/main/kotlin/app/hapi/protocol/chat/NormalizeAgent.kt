@@ -37,7 +37,7 @@ private fun normalizeToolResultPermissions(value: JsonElement?): ToolResultPermi
 }
 
 /** Port of shared `isDisplayableHttpHref` (http/https only). */
-private fun isDisplayableHttpHref(href: String): Boolean {
+internal fun isDisplayableHttpHref(href: String): Boolean {
     val trimmed = href.trim()
     if (trimmed.isEmpty() || trimmed.length > 2048) return false
     return try {
@@ -50,7 +50,7 @@ private fun isDisplayableHttpHref(href: String): Boolean {
 }
 
 /** Port of shared `safeParseDisplayLinksInput`. */
-private fun parseDisplayLinksInput(value: JsonElement?): List<NormalizedAgentContent.DisplayLinkItem> {
+internal fun parseDisplayLinksInput(value: JsonElement?): List<NormalizedAgentContent.DisplayLinkItem> {
     val items = value as? JsonArray ?: return emptyList()
     val urls = mutableListOf<NormalizedAgentContent.DisplayLinkItem>()
     for (item in items.take(20)) {
@@ -75,7 +75,7 @@ private fun parseDisplayLinksInput(value: JsonElement?): List<NormalizedAgentCon
 }
 
 /** Port of shared `safeParseDisplayTextsInput`. */
-private fun parseDisplayTextsInput(value: JsonElement?): List<NormalizedAgentContent.DisplayTextItem> {
+internal fun parseDisplayTextsInput(value: JsonElement?): List<NormalizedAgentContent.DisplayTextItem> {
     val items = value as? JsonArray ?: return emptyList()
     val texts = mutableListOf<NormalizedAgentContent.DisplayTextItem>()
     for (item in items.take(20)) {
