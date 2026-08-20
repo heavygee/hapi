@@ -215,10 +215,14 @@ describe('redactDisplayLinksToolInput', () => {
 
         const withBackup = redactDisplayLinksToolInput({
             texts: [{ value: secret, backup: secret, title: 't' }],
-        }) as { texts: Array<Record<string, unknown>> }
+            backup: secret,
+            urls: [{ href: 'https://example.com', backup: secret }],
+        }) as { texts: Array<Record<string, unknown>>; urls: unknown[]; backup?: unknown }
         expect(withBackup.texts[0]).toEqual({ value: '[omitted]', title: 't' })
+        expect(withBackup).not.toHaveProperty('backup')
         expect(JSON.stringify(withBackup)).not.toContain(secret)
         expect(withBackup.texts[0]).not.toHaveProperty('backup')
+        expect(JSON.stringify(withBackup.urls)).not.toContain('backup')
     })
 
     it('recognizes Cursor-prefixed display_links tool names', () => {
