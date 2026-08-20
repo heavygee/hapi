@@ -20,7 +20,7 @@ import {
 } from "@/modules/common/generatedImages";
 import type { InlineMediaSource } from "@/modules/common/inlineMediaSource";
 import { DISPLAY_IMAGE_PROMPT_CURSOR, DISPLAY_LINKS_PROMPT_CURSOR, DISPLAY_MEDIA_PROMPT_CURSOR, DISPLAY_VIDEO_PROMPT_CURSOR } from "@/modules/common/displayImagePrompt";
-import { buildDisplayLinksPayload, parseDisplayLinksToolInput, assertBoundDisplayLinksSession } from "@hapi/protocol";
+import { buildDisplayLinksPayload, buildDisplayLinksToolName, parseDisplayLinksToolInput, assertBoundDisplayLinksSession } from "@hapi/protocol";
 import { resolveSkill } from "@/modules/common/skills";
 import {
     INSPECT_PEER_TOOL_DESCRIPTION,
@@ -324,8 +324,9 @@ function createHapiMcpServer(
     });
 
     if (enableDisplayLinks) {
-        mcp.registerTool<any, any>('display_links', {
-            description: `Paint clickable http(s) URL cards and/or exact-copy strings into the current HAPI chat without a fake user turn. Cursor-only: other flavors type URLs and secrets fine. ${DISPLAY_LINKS_PROMPT_CURSOR}`,
+        const displayLinksToolName = buildDisplayLinksToolName(client.sessionId);
+        mcp.registerTool<any, any>(displayLinksToolName, {
+            description: `Paint clickable http(s) URL cards and/or exact-copy strings into the current HAPI chat without a fake user turn. Cursor-only: other flavors type URLs and secrets fine. Per-session tool name (ends with _display_links) so concurrent hapi-* MCP overlays do not collide. ${DISPLAY_LINKS_PROMPT_CURSOR}`,
             title: 'Display Links',
             inputSchema: displayLinksInputSchema,
         }, async (args: {
@@ -632,7 +633,7 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
         ? ['change_title', 'display_image', 'display_video', 'display_media']
         : ['display_image', 'display_video', 'display_media'];
     if (enableDisplayLinks) {
-        toolNames.push('display_links');
+        toolNames.push(buildDisplayLinksToolName(client.sessionId));
     }
     toolNames.push('list_peers', 'ping_peer', 'inspect_peer');
     if (options.skillLookup) {

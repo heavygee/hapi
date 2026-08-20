@@ -105,42 +105,44 @@ describe('runHappyMcpStdioBridge tool forwarding', () => {
         expect([...harness.tools.keys()]).toEqual(['change_title', 'display_image', 'display_video'])
     })
 
-    it('forwards display_links arguments unchanged', async () => {
+    it('forwards per-session display_links tool names unchanged', async () => {
+        const toolName = 'hapi_2acd2599_525c_4774_825f_09ce7802549d_display_links'
         await runHappyMcpStdioBridge([
             '--url',
             'http://127.0.0.1:43006',
             '--tools',
-            'display_links'
+            toolName
         ])
 
-        const handler = harness.tools.get('display_links')
+        const handler = harness.tools.get(toolName)
         const href = 'https://github.com/tia' + 'nn' + '/hapi/issues/1516'
         await expect(handler?.({ urls: [{ href, title: 'Issue 1516' }] })).resolves.toEqual({
             content: [{ type: 'text', text: 'forwarded' }],
             isError: false
         })
         expect(harness.callTool).toHaveBeenCalledWith({
-            name: 'display_links',
+            name: toolName,
             arguments: { urls: [{ href, title: 'Issue 1516' }] }
         })
     })
 
-    it('forwards display_links texts arguments unchanged', async () => {
+    it('forwards per-session display_links texts arguments unchanged', async () => {
+        const toolName = 'hapi_2acd2599_525c_4774_825f_09ce7802549d_display_links'
         await runHappyMcpStdioBridge([
             '--url',
             'http://127.0.0.1:43006',
             '--tools',
-            'display_links'
+            toolName
         ])
 
-        const handler = harness.tools.get('display_links')
+        const handler = harness.tools.get(toolName)
         const value = 'VK' + 'K'
         await expect(handler?.({ texts: [{ value, title: 'gate' }] })).resolves.toEqual({
             content: [{ type: 'text', text: 'forwarded' }],
             isError: false
         })
         expect(harness.callTool).toHaveBeenCalledWith({
-            name: 'display_links',
+            name: toolName,
             arguments: { texts: [{ value, title: 'gate' }] }
         })
     })

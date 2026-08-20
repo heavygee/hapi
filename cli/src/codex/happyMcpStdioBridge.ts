@@ -18,6 +18,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { z } from 'zod';
 import { DISPLAY_IMAGE_PROMPT_CURSOR, DISPLAY_LINKS_PROMPT_CURSOR, DISPLAY_MEDIA_PROMPT_CURSOR, DISPLAY_VIDEO_PROMPT_CURSOR } from '@/modules/common/displayImagePrompt';
+import { isDisplayLinksToolName } from '@hapi/protocol';
 import {
   INSPECT_PEER_TOOL_DESCRIPTION,
   PING_PEER_TOOL_DESCRIPTION,
@@ -220,9 +221,10 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
         sessionId: z.string().min(1).optional().describe('This chat\'s HAPI session id (required at runtime). Cursor routes duplicate MCP tool names to one server; a mismatch means the call landed on the wrong session MCP.'),
       });
 
-    if (toolNames.has('display_links')) {
+    if (toolNames.has('display_links') || [...toolNames].some((name) => isDisplayLinksToolName(name))) {
+      const displayLinksToolName = [...toolNames].find((name) => isDisplayLinksToolName(name)) ?? 'display_links';
       server.registerTool<any, any>(
-        'display_links',
+        displayLinksToolName,
         {
           description: `Paint clickable http(s) URL cards and/or exact-copy strings into the current HAPI chat. ${DISPLAY_LINKS_PROMPT_CURSOR}`,
           title: 'Display Links',
@@ -231,7 +233,7 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
         async (args: Record<string, unknown>) => {
           try {
             const client = await ensureHttpClient();
-            return await client.callTool({ name: 'display_links', arguments: args }) as any;
+            return await client.callTool({ name: displayLinksToolName, arguments: args }) as any;
           } catch (error) {
             return {
               content: [{ type: 'text' as const, text: `Failed to display links: ${error instanceof Error ? error.message : String(error)}` }],

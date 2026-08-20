@@ -1,7 +1,7 @@
 import chalk from 'chalk'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import { parseDisplayLinksToolInput } from '@hapi/protocol'
+import { buildDisplayLinksToolName, parseDisplayLinksToolInput } from '@hapi/protocol'
 import { getAuthToken } from '@/api/auth'
 import { buildHubRequestHeaders } from '@/api/hubExtraHeaders'
 import { configuration } from '@/configuration'
@@ -281,7 +281,7 @@ export async function handleDisplayLinksCommand(args: string[]): Promise<void> {
     await client.connect(transport)
     try {
         const result = await client.callTool({
-            name: 'display_links',
+            name: buildDisplayLinksToolName(sessionId),
             arguments: {
                 ...(toolArgs.urls.length > 0 ? { urls: toolArgs.urls } : {}),
                 ...(toolArgs.texts.length > 0 ? { texts: toolArgs.texts } : {}),

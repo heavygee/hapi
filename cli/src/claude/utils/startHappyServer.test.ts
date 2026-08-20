@@ -5,7 +5,11 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ApiSessionClient } from '@/api/apiSession'
+import { buildDisplayLinksToolName } from '@hapi/protocol'
 import { startHappyServer, toClaudeAllowedHapiMcpTools } from './startHappyServer'
+
+const TEST_SESSION_ID = 'happy-server-test-session'
+const TEST_DISPLAY_LINKS_TOOL = buildDisplayLinksToolName(TEST_SESSION_ID)
 
 type ToolResult = {
     content?: Array<{ type: string; text?: string }>
@@ -44,7 +48,7 @@ describe('startHappyServer skill_lookup', () => {
     async function connect(enableSkillLookup = true, extra: { enableDisplayLinks?: boolean; flavor?: string } = {}): Promise<Client> {
         sendAgentMessage = vi.fn()
         const sessionClient = {
-            sessionId: 'happy-server-test-session',
+            sessionId: TEST_SESSION_ID,
             updateMetadata: vi.fn(),
             sendAgentMessage,
             sendClaudeSessionMessage: vi.fn()
@@ -180,10 +184,11 @@ describe('startHappyServer skill_lookup', () => {
         expect(tools.tools.map((tool) => tool.name)).not.toContain('display_links')
     })
 
-    it('exposes display_links for cursor flavor', async () => {
+    it('exposes a per-session display_links tool for cursor flavor', async () => {
         const mcp = await connect(true, { flavor: 'cursor' })
         const tools = await mcp.listTools()
-        expect(tools.tools.map((tool) => tool.name)).toContain('display_links')
+        expect(tools.tools.map((tool) => tool.name)).toContain(TEST_DISPLAY_LINKS_TOOL)
+        expect(tools.tools.map((tool) => tool.name)).not.toContain('display_links')
     })
 
     it('paints display_links via sendAgentMessage with concatenated href bytes', async () => {
@@ -191,8 +196,8 @@ describe('startHappyServer skill_lookup', () => {
         const href = 'https://github.com/tia' + 'nn' + '/hapi/issues/1516'
 
         const result = await mcp.callTool({
-            name: 'display_links',
-            arguments: { urls: [{ href, title: 'Issue 1516' }], sessionId: 'happy-server-test-session' }
+            name: TEST_DISPLAY_LINKS_TOOL,
+            arguments: { urls: [{ href, title: 'Issue 1516' }], sessionId: TEST_SESSION_ID }
         }) as ToolResult
 
         expect(result.isError).toBe(false)
@@ -211,8 +216,8 @@ describe('startHappyServer skill_lookup', () => {
         const value = 'VK' + 'K'
 
         const result = await mcp.callTool({
-            name: 'display_links',
-            arguments: { texts: [{ value, title: 'gate' }], sessionId: 'happy-server-test-session' }
+            name: TEST_DISPLAY_LINKS_TOOL,
+            arguments: { texts: [{ value, title: 'gate' }], sessionId: TEST_SESSION_ID }
         }) as ToolResult
 
         expect(result.isError).toBe(false)
@@ -231,7 +236,7 @@ describe('startHappyServer skill_lookup', () => {
         const mcp = await connect(false, { enableDisplayLinks: true })
         const href = 'https://example.com/kinrupt'
         const result = await mcp.callTool({
-            name: 'display_links',
+            name: TEST_DISPLAY_LINKS_TOOL,
             arguments: { urls: [{ href, title: 'Kinrupt' }], sessionId: '472632df-wrong-session' }
         }) as ToolResult
 
@@ -243,7 +248,7 @@ describe('startHappyServer skill_lookup', () => {
     it('refuses display_links when sessionId is omitted', async () => {
         const mcp = await connect(false, { enableDisplayLinks: true })
         const result = await mcp.callTool({
-            name: 'display_links',
+            name: TEST_DISPLAY_LINKS_TOOL,
             arguments: { urls: [{ href: 'https://example.com/x' }] }
         }) as ToolResult
 
@@ -255,8 +260,8 @@ describe('startHappyServer skill_lookup', () => {
     it('rejects javascript hrefs without emitting an agent message', async () => {
         const mcp = await connect(false, { enableDisplayLinks: true })
         const result = await mcp.callTool({
-            name: 'display_links',
-            arguments: { urls: [{ href: 'javascript:alert(1)' }], sessionId: 'happy-server-test-session' }
+            name: TEST_DISPLAY_LINKS_TOOL,
+            arguments: { urls: [{ href: 'javascript:alert(1)' }], sessionId: TEST_SESSION_ID }
         }) as ToolResult
 
         expect(result.isError).toBe(true)

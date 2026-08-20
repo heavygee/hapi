@@ -183,6 +183,19 @@ export function assertBoundDisplayLinksSession(boundSessionId: string, callerSes
 
 export const DISPLAY_LINKS_REDACTED_VALUE = '[omitted]' as const
 
+/**
+ * Per-session MCP tool name so concurrent Cursor `hapi-*` overlays do not
+ * collide on bare `display_links` (forum 148059). Redaction matchers already
+ * accept names ending in `_display_links`.
+ */
+export function buildDisplayLinksToolName(sessionId: string): string {
+    const id = sessionId.trim().replaceAll('-', '_')
+    if (!id) {
+        throw new Error('display_links tool name requires a non-empty session id')
+    }
+    return `hapi_${id}_display_links`
+}
+
 export function isDisplayLinksToolName(name: unknown): boolean {
     if (typeof name !== 'string') return false
     const normalized = name.trim().toLowerCase().replace(/[\s-]+/g, '_')

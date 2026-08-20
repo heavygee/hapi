@@ -9,6 +9,7 @@ import { startHappyServer } from '@/claude/utils/startHappyServer';
 import { getHappyCliCommand } from '@/utils/spawnHappyCLI';
 import type { ApiSessionClient } from '@/api/apiSession';
 import { exportHapiSessionEnv } from '@/agent/hapiSessionEnv';
+import { isDisplayLinksToolName } from '@hapi/protocol';
 
 /**
  * MCP server entry configuration.
@@ -103,10 +104,11 @@ export async function buildHapiMcpBridge(
             approval_mode: 'prompt'
         }
     };
-    // Cursor-only (#1516) — no local-file read; auto-approve so the model uses it
+    // Cursor-only (#1516) — per-session tool name; auto-approve so the model uses it
     // instead of typing doubled-letter-mangled URLs.
-    if (happyServer.toolNames.includes('display_links')) {
-        tools.display_links = {
+    const displayLinksToolName = happyServer.toolNames.find((name) => isDisplayLinksToolName(name));
+    if (displayLinksToolName) {
+        tools[displayLinksToolName] = {
             approval_mode: 'approve'
         };
     }
