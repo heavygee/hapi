@@ -109,7 +109,9 @@ export function projectChatBlock(block: ChatBlock): JsonObject {
         case 'display-links':
             projected.localId = block.localId
             projected.urls = block.urls
-            withOptional(projected, 'texts', block.texts)
+            if (block.texts && block.texts.length > 0) {
+                projected.texts = block.texts
+            }
             return projected
         case 'agent-event':
             // Normalized AgentEvent objects are wire-semantic by construction:
