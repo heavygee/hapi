@@ -225,6 +225,13 @@ describe('redactDisplayLinksToolInput', () => {
         expect(JSON.stringify(withBackup.urls)).not.toContain('backup')
     })
 
+    it('fail-closes for primitive and array tool inputs', () => {
+        const secret = 'SENTINEL_PRIMITIVE_VK' + 'K'
+        expect(redactDisplayLinksToolInput(secret)).toBe('[omitted]')
+        expect(redactDisplayLinksToolInput([secret])).toBe('[omitted]')
+        expect(redactDisplayLinksToolInput(null)).toBeNull()
+    })
+
     it('recognizes Cursor-prefixed display_links tool names', () => {
         expect(isDisplayLinksToolName('display_links')).toBe(true)
         expect(isDisplayLinksToolName('Display Links')).toBe(true)
