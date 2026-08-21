@@ -18,6 +18,18 @@ import type { SessionSummary } from './sessionSummary'
 
 export const CreateOrLoadMachineRequestSchema = z.object({
     id: z.string().min(1),
+    /**
+     * Create-time machine secret (#1203). Required to bind machine-scoped RPC
+     * (including resume peer-mint nonce delivery). Client-generated; hub stores
+     * on first bind and requires a match thereafter. Never echoed on GET.
+     */
+    tag: z.string().min(1).optional(),
+    /**
+     * Memory/runner-local generation proof (#1473). Hub stores only sha256(proof)
+     * on first bind; websocket auth proves it and never first-claims a new hash.
+     * Never echoed on GET.
+     */
+    runnerProof: z.string().min(1).optional(),
     metadata: z.unknown(),
     runnerState: z.unknown().nullable().optional()
 })
@@ -52,7 +64,13 @@ export type CliMessagesResponse = z.infer<typeof CliMessagesResponseSchema>
 export const CreateSessionResponseSchema = z.object({
     session: SessionSchema,
     /** Hub opt-in for AGENT_NOTIFY_SUMMARY prompt injection (default off when omitted). */
-    sessionSummaryContract: z.boolean().optional()
+    sessionSummaryContract: z.boolean().optional(),
+    /**
+     * Session-scoped peer-delivery capability (#1203). HMAC over hub JWT secret;
+     * required for attributed `POST /cli/sessions/:id/peer-messages`. Never an
+     * agent/env/tool argument — only the creating ApiSessionClient holds it.
+     */
+    sessionCapability: z.string().min(1).optional()
 })
 
 export type CreateSessionResponse = z.infer<typeof CreateSessionResponseSchema>
@@ -521,12 +539,58 @@ export type MessagesQuery = z.infer<typeof MessagesQuerySchema>
 export const MessageDeliveryModeSchema = z.enum(['queue', 'steer'])
 export type MessageDeliveryMode = z.infer<typeof MessageDeliveryModeSchema>
 
+/**
+ * Peer-delivery provenance stored on user-message meta (#1203 / A2A Layer 0.1).
+ *
+ * Authoritative `sourceSessionId` is never taken from the web JWT send body.
+ * Attributed delivery uses {@link CliPeerDeliverRequestSchema} on
+ * `POST /cli/sessions/:sourceSessionId/peer-messages` with
+ * {@link HAPI_SESSION_CAPABILITY_HEADER} (HMAC capability minted at CLI
+ * create/load). Path id alone + shared CLI token is not sufficient.
+ * The web path may still set `sentFrom: peer` via {@link HAPI_PEER_DELIVERY_HEADER}
+ * for unattributed outside-session CLI sends; any body `peer` field is ignored.
+ *
+ * `sourceName` is a delivery-time snapshot from the hub session store (titles
+ * can change later; the link still resolves to the live session).
+ */
+export const PeerDeliveryMetaSchema = z.object({
+    sourceSessionId: z.string().trim().min(1).max(128).optional(),
+    sourceName: z.string().trim().min(1).max(255).optional()
+})
+export type PeerDeliveryMeta = z.infer<typeof PeerDeliveryMetaSchema>
+
+/** Lower-case header name; HTTP headers are case-insensitive. */
+export const HAPI_PEER_DELIVERY_HEADER = 'x-hapi-peer-delivery'
+export const HAPI_PEER_DELIVERY_HEADER_VALUE = '1'
+
+/** Session-scoped capability for attributed peer delivery (CLI create/load mint). */
+export const HAPI_SESSION_CAPABILITY_HEADER = 'x-hapi-session-capability'
+
+/**
+ * Attributed peer deliver: source id is the CLI route path param, accepted only
+ * with a matching session capability header (never a tool argument / web body).
+ */
+export const CliPeerDeliverRequestSchema = z.object({
+    targetSessionId: z.string().trim().min(1).max(128),
+    text: z.string().min(1),
+    localId: z.string().min(1).optional(),
+    deliveryMode: MessageDeliveryModeSchema.optional()
+})
+export type CliPeerDeliverRequest = z.infer<typeof CliPeerDeliverRequestSchema>
+
+/** Hub session ids are UUIDs today; single validator for CLI provenance gates. */
+export function isSessionId(value: string): boolean {
+    return z.string().uuid().safeParse(value).success
+}
+
 export const SendMessageRequestSchema = z.object({
     text: z.string(),
     localId: z.string().min(1).optional(),
     attachments: z.array(AttachmentMetadataSchema).optional(),
     scheduledAt: z.number().int().positive().nullable().optional(),
-    deliveryMode: MessageDeliveryModeSchema.optional()
+    deliveryMode: MessageDeliveryModeSchema.optional(),
+    // Ignored by hub on the web JWT path (kill criterion: not authoritative).
+    peer: PeerDeliveryMetaSchema.optional()
 }).refine(
     (data) => data.scheduledAt == null || typeof data.localId === 'string',
     { message: 'scheduledAt requires localId', path: ['localId'] }

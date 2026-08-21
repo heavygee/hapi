@@ -9,7 +9,14 @@
  */
 
 import axios, { type AxiosInstance } from 'axios'
-import { extractAssistantPlainText, isObject } from '@hapi/protocol'
+import {
+    extractAssistantPlainText,
+    HAPI_PEER_DELIVERY_HEADER,
+    HAPI_PEER_DELIVERY_HEADER_VALUE,
+    HAPI_SESSION_CAPABILITY_HEADER,
+    isObject,
+    isSessionId
+} from '@hapi/protocol'
 import { normalizeSessionIdPrefix } from '@hapi/protocol/sessionCitation'
 import { configuration } from '@/configuration'
 import { getAuthToken } from '@/api/auth'
@@ -18,6 +25,7 @@ import { buildHubRequestHeaders } from '@/api/hubExtraHeaders'
 export type PingPeerErrorCode =
     | 'bad_args'
     | 'auth_failed'
+    | 'broker_unavailable'
     | 'not_found'
     | 'ambiguous'
     | 'resume_failed'
@@ -55,6 +63,16 @@ export type PingPeerOptions = {
     waitActiveSecs?: number
     apiUrl?: string
     accessToken?: string
+    /**
+     * Calling session id from ApiSessionClient (MCP inside a wrapped session).
+     * When set, delivery MUST be attributed via {@link sessionCapability} and
+     * `POST /cli/sessions/:source/peer-messages` — never silently fall back to
+     * unattributed web JWT (pass 2c M3). Bare `hapi ping-peer` omits this and
+     * sends unattributed peer rows.
+     */
+    authenticatedSourceSessionId?: string
+    /** Hub-minted HMAC from CLI create/load; required when attributing. */
+    sessionCapability?: string
     http?: AxiosInstance
     sleep?: (ms: number) => Promise<void>
     now?: () => number
@@ -340,18 +358,59 @@ async function waitForPiReady(
     )
 }
 
-async function sendMessage(
+/** Unattributed peer send (bare CLI / no session client). Web JWT + peer header. */
+async function sendUnattributedPeerMessage(
     apiUrl: string,
     jwt: string,
-    sessionId: string,
+    targetSessionId: string,
     message: string,
     http: AxiosInstance
 ): Promise<void> {
     const response = await http.post(
-        `${apiUrl}/api/sessions/${encodeURIComponent(sessionId)}/messages`,
+        `${apiUrl}/api/sessions/${encodeURIComponent(targetSessionId)}/messages`,
         { text: message },
         {
-            headers: authHeaders(jwt),
+            headers: {
+                ...authHeaders(jwt),
+                [HAPI_PEER_DELIVERY_HEADER]: HAPI_PEER_DELIVERY_HEADER_VALUE
+            },
+            timeout: 30_000,
+            validateStatus: () => true
+        }
+    )
+    if (response.status >= 200 && response.status < 300 && response.data?.ok === true) {
+        return
+    }
+    const detail = typeof response.data?.error === 'string'
+        ? response.data.error
+        : typeof response.data?.code === 'string'
+            ? response.data.code
+            : `HTTP ${response.status}`
+    throw new PingPeerError('send_failed', `send failed: ${detail}`)
+}
+
+/**
+ * Attributed peer send: CLI token + path source id. Hub ignores any body
+ * sourceSessionId and fills sourceName from the store.
+ */
+async function sendAttributedPeerMessage(
+    apiUrl: string,
+    cliToken: string,
+    sourceSessionId: string,
+    sessionCapability: string,
+    targetSessionId: string,
+    message: string,
+    http: AxiosInstance
+): Promise<void> {
+    const response = await http.post(
+        `${apiUrl}/cli/sessions/${encodeURIComponent(sourceSessionId)}/peer-messages`,
+        { targetSessionId, text: message },
+        {
+            headers: buildHubRequestHeaders({
+                Authorization: `Bearer ${cliToken}`,
+                'Content-Type': 'application/json',
+                [HAPI_SESSION_CAPABILITY_HEADER]: sessionCapability
+            }),
             timeout: 30_000,
             validateStatus: () => true
         }
@@ -515,8 +574,34 @@ export async function pingPeer(options: PingPeerOptions): Promise<PingPeerResult
         }
     }
 
-    onProgress?.(`sending message (${message.length} chars)...`)
-    await sendMessage(apiUrl, jwt, matched.id, message, http)
+    const sourceId = options.authenticatedSourceSessionId?.trim() ?? ''
+    const capability = options.sessionCapability?.trim() ?? ''
+    if (sourceId) {
+        if (!isSessionId(sourceId)) {
+            throw new PingPeerError('bad_args', 'authenticatedSourceSessionId must be a full session UUID')
+        }
+        if (!capability) {
+            // Fail closed: wrapping sessions must not silently downgrade to
+            // unattributed while claiming a source id (pass 2c M3).
+            throw new PingPeerError(
+                'auth_failed',
+                'session capability not ready for attributed peer delivery; retry after hub peer-capability'
+            )
+        }
+        onProgress?.(`sending message (${message.length} chars, attributed)...`)
+        await sendAttributedPeerMessage(
+            apiUrl,
+            accessToken,
+            sourceId,
+            capability,
+            matched.id,
+            message,
+            http
+        )
+    } else {
+        onProgress?.(`sending message (${message.length} chars, unattributed)...`)
+        await sendUnattributedPeerMessage(apiUrl, jwt, matched.id, message, http)
+    }
 
     return {
         sessionId: matched.id,
@@ -529,6 +614,7 @@ export function exitCodeForPingPeerError(error: PingPeerError): number {
     switch (error.code) {
         case 'bad_args':
         case 'auth_failed':
+        case 'broker_unavailable':
         case 'not_found':
         case 'ambiguous':
             return 2

@@ -1,8 +1,45 @@
 import { Hono } from 'hono'
-import { MessagesQuerySchema, QueuedStateRequestSchema, SendMessageRequestSchema } from '@hapi/protocol'
+import {
+    HAPI_PEER_DELIVERY_HEADER,
+    HAPI_PEER_DELIVERY_HEADER_VALUE,
+    MessagesQuerySchema,
+    QueuedStateRequestSchema,
+    SendMessageRequestSchema,
+    type PeerDeliveryMeta
+} from '@hapi/protocol'
 import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
+
+function isPeerDeliveryRequest(c: { req: { header: (name: string) => string | undefined } }): boolean {
+    const raw = c.req.header(HAPI_PEER_DELIVERY_HEADER)
+    return (raw?.trim().toLowerCase() ?? '') === HAPI_PEER_DELIVERY_HEADER_VALUE
+}
+
+/**
+ * Build stored peer meta from a hub-known source session id (CLI path param).
+ * Never use a web JWT request-body claim here (#1203 kill criterion).
+ * `sourceName` is a delivery-time snapshot from session metadata.
+ */
+export function resolvePeerMetaFromSourceSession(
+    engine: SyncEngine,
+    namespace: string,
+    sourceSessionId: string
+): PeerDeliveryMeta | undefined {
+    const claimedId = sourceSessionId.trim()
+    if (!claimedId) {
+        return undefined
+    }
+    const access = engine.resolveSessionAccess(claimedId, namespace)
+    if (!access.ok) {
+        return undefined
+    }
+    const sourceName = access.session.metadata?.name?.trim() ?? ''
+    return {
+        sourceSessionId: access.sessionId,
+        ...(sourceName ? { sourceName: sourceName.slice(0, 255) } : {})
+    }
+}
 
 export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
@@ -125,11 +162,16 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Message requires text or attachments' }, 400)
         }
 
+        // Peer header marks outside-session / unattributed peer delivery.
+        // Body `peer` / sourceSessionId is never authoritative on this JWT path
+        // (#1203 kill criterion) — attributed sends use /cli/.../peer-messages.
+        const peerDelivery = isPeerDeliveryRequest(c)
         await engine.sendMessage(sessionId, {
             text: parsed.data.text,
             localId: parsed.data.localId,
             attachments: parsed.data.attachments,
-            sentFrom: 'webapp',
+            sentFrom: peerDelivery ? 'peer' : 'webapp',
+            peer: undefined,
             scheduledAt: parsed.data.scheduledAt,
             deliveryMode: parsed.data.deliveryMode
         })

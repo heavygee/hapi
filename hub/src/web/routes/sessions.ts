@@ -27,7 +27,7 @@ import {
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type { SlashCommand } from '@hapi/protocol/apiTypes'
 import { Hono, type Context } from 'hono'
-import type { SyncEngine, Session } from '../../sync/syncEngine'
+import { SessionArchiveUncontrollableError, type SyncEngine, type Session } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { loadScratchlistAttachmentLimitsFromEnv } from '../../config/scratchlistAttachmentLimits'
 import { validateScratchlistAttachmentsForWrite, scratchlistSessionBytesBeforeForPut } from '../../scratchlistAttachments/validate'
@@ -445,7 +445,17 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Session is inactive' }, 409)
         }
 
-        await engine.archiveSession(sessionResult.sessionId)
+        try {
+            await engine.archiveSession(sessionResult.sessionId)
+        } catch (error) {
+            if (error instanceof SessionArchiveUncontrollableError) {
+                return c.json({
+                    error: error.message,
+                    code: 'session_uncontrollable'
+                }, 409)
+            }
+            throw error
+        }
         return c.json({ ok: true })
     })
 

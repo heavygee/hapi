@@ -4,6 +4,10 @@ import type { DefaultEventsMap, Server, Socket } from 'socket.io'
 export type SocketData = {
     namespace?: string
     userId?: number
+    /** Set when handshake proved machine tag + active runner lease (#1203 / #1473). */
+    machineRpcAuthorizedId?: string
+    /** Set when handshake resolved namespace session access (#1473). */
+    sessionRpcAuthorizedId?: string
 }
 
 export type SocketServer = Server<DefaultEventsMap, DefaultEventsMap, DefaultEventsMap, SocketData>

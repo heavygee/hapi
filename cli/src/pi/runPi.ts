@@ -18,7 +18,8 @@ import { getBuiltinSlashCommands, mergeSlashCommands } from '@hapi/protocol/slas
 import type { ListPiModelsResponse, PiCommandSummary, PiModelSummary, SlashCommand, SlashCommandsResponse } from '@hapi/protocol/apiTypes';
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
 import type { ListSkillsResponse, SkillSummary } from '@/modules/common/skills';
-import type { AttachmentMetadata } from '@/api/types';
+import type { AttachmentMetadata, MessageMeta } from '@/api/types';
+import { annotatePeerDeliveryForAgent } from '@/utils/attachmentFormatter';
 import { readBoundedAttachmentFile } from '@/modules/common/attachmentFile';
 import { MAX_UPLOAD_BYTES } from '@/modules/common/attachmentLimits';
 import { isAuthorizedUploadFile, isPathWithinUploadDir, type UploadFileIdentity } from '@/modules/common/handlers/uploads';
@@ -147,9 +148,15 @@ export async function preparePiUserMessage(
     options: {
         authorizeImagePath: (path: string) => boolean;
         authorizeOpenedImage: (path: string, identity: UploadFileIdentity) => boolean;
+        /** Peer provenance meta (#1203); prefix so peer cannot trigger first-line slash/skills (#1473). */
+        meta?: MessageMeta | null;
     },
 ): Promise<PiPromptPreparation> {
-    const formattedMessage = formatPiUserMessage(message, attachments, commands);
+    const formattedMessage = annotatePeerDeliveryForAgent(
+        formatPiUserMessage(message, attachments, commands),
+        options.meta ?? undefined,
+        options.meta?.sentFrom === 'peer' ? 'prefix' : 'suffix',
+    );
     const images: PiImageContent[] = [];
     const imageReadErrors: string[] = [];
     let totalImageBytes = 0;
@@ -1106,7 +1113,9 @@ export async function runPi(opts: {
                 return;
             }
 
-            const name = parseLeadingSlashName(message.content.text);
+            // Peer deliveries stay literal text — never receiver /compact etc. (#1473).
+            const isPeerDelivery = message.meta?.sentFrom === 'peer';
+            const name = isPeerDelivery ? null : parseLeadingSlashName(message.content.text);
             // Discovered extension commands / prompt templates win over HAPI
             // builtins: the menu already lets them override same-name entries,
             // so a user extension named "compact" must keep executing instead
@@ -1121,7 +1130,7 @@ export async function runPi(opts: {
                 return;
             }
             const isCustomCommand = Boolean(name && discovered.some((item) => item.name.toLowerCase() === name.toLowerCase()));
-            const specialCommand = isCustomCommand
+            const specialCommand = isPeerDelivery || isCustomCommand
                 ? null
                 : parsePiSpecialCommand(message.content.text);
             if (specialCommand) {
@@ -1151,6 +1160,7 @@ export async function runPi(opts: {
                 {
                     authorizeImagePath: (path) => isPathWithinUploadDir(path, apiSession.sessionId),
                     authorizeOpenedImage: (path, identity) => isAuthorizedUploadFile(path, apiSession.sessionId, identity),
+                    meta: message.meta,
                 },
             );
             if (localId) {

@@ -60,6 +60,13 @@ import {
 } from './rpcGateway'
 import { SessionCache } from './sessionCache'
 import { ingestNotifySummaryFromMessage } from './workGraphNotifyIngest'
+import { armResumePeerMint, clearResumePeerMint } from '../web/pendingResumePeerMint'
+import { buildProvenanceDiagnostics } from './provenanceDiagnostics'
+import type { ProvenanceDiagnostics } from '@hapi/protocol/provenanceDiagnostics'
+import {
+    defaultProvenanceMessageScanOptions,
+    type ProvenanceMessageScanOptions,
+} from '@hapi/protocol/provenanceMessageAudit'
 
 type PiResumeAttempt = NonNullable<NonNullable<Session['metadata']>['piResumeAttempt']>
 type PtyResumeAttempt = NonNullable<NonNullable<Session['metadata']>['ptyResumeAttempt']>
@@ -108,6 +115,17 @@ export type LocalResumeTargetResult =
 export type LocalHandoffResult =
     | { type: 'success' }
     | { type: 'error'; message: string; code: 'session_not_found' | 'access_denied' | 'already_local' | 'handoff_failed' }
+
+/** Archive refused: CLI is still connected (or runner says still alive) but session RPC is missing. */
+export class SessionArchiveUncontrollableError extends Error {
+    readonly sessionId: string
+
+    constructor(sessionId: string) {
+        super('Session is connected but not controllable. Reopen or restart the CLI on that machine.')
+        this.name = 'SessionArchiveUncontrollableError'
+        this.sessionId = sessionId
+    }
+}
 
 export type ClearOpencodeSessionResult =
     | { type: 'success'; sessionId: string }
@@ -384,6 +402,27 @@ export class SyncEngine {
 
     getOnlineMachinesByNamespace(namespace: string): Machine[] {
         return this.machineCache.getOnlineMachinesByNamespace(namespace)
+    }
+
+    getProvenanceDiagnostics(
+        namespace: string,
+        options?: { messageScan?: ProvenanceMessageScanOptions | false }
+    ): ProvenanceDiagnostics {
+        const scanOptions = options?.messageScan === false
+            ? null
+            : (options?.messageScan ?? defaultProvenanceMessageScanOptions())
+        const messageAudit = scanOptions
+            ? this.store.scanUnverifiedPeerMessages(namespace, scanOptions)
+            : null
+
+        return buildProvenanceDiagnostics({
+            sessions: this.getSessionsByNamespace(namespace),
+            machines: this.getOnlineMachinesByNamespace(namespace),
+            getStoredMachine: (machineId) => this.store.machines.getMachineByNamespace(machineId, namespace),
+            hasLiveRpcHandler: (method) => this.rpcGateway.hasLiveHandler(method),
+            unverifiedPeerMessages: messageAudit?.rows,
+            messageScan: messageAudit?.meta ?? null,
+        })
     }
 
     async renameMachine(machineId: string, displayName: string): Promise<void> {
@@ -990,8 +1029,131 @@ export class SyncEngine {
         )
     }
 
-    getOrCreateMachine(id: string, metadata: unknown, runnerState: unknown, namespace: string): Machine {
-        return this.machineCache.getOrCreateMachine(id, metadata, runnerState, namespace)
+    getOrCreateMachine(
+        id: string,
+        metadata: unknown,
+        runnerState: unknown,
+        namespace: string,
+        tag?: string,
+        runnerProof?: string
+    ): Machine {
+        return this.machineCache.getOrCreateMachine(
+            id,
+            metadata,
+            runnerState,
+            namespace,
+            tag,
+            runnerProof
+        )
+    }
+
+    /** Hub-private machine auth fields (tag + proof hash) not on the API Machine DTO. */
+    getMachineAuthMaterial(machineId: string): {
+        namespace: string
+        tag: string | null
+        runnerProofHash: string | null
+    } | null {
+        const stored = this.store.machines.getMachine(machineId)
+        if (!stored) {
+            return null
+        }
+        return {
+            namespace: stored.namespace,
+            tag: stored.tag,
+            runnerProofHash: stored.runnerProofHash,
+        }
+    }
+
+    /**
+     * After machine-id re-enroll, rewrite session metadata.machineId so remote
+     * resume / provenance routing stay attached (#1473 Major).
+     * All remaps commit in one SQLite transaction so a hub crash cannot leave
+     * a partial move onto an abandoned intermediate machine id.
+     */
+    migrateSessionsMachineId(
+        fromMachineId: string,
+        toMachineId: string,
+        namespace: string
+    ): number {
+        const from = fromMachineId.trim()
+        const to = toMachineId.trim()
+        if (!from || !to || from === to) {
+            return 0
+        }
+        const migratedIds: string[] = []
+        this.store.runInTransaction(() => {
+            for (const stored of this.store.sessions.getSessionsByNamespace(namespace)) {
+                let attempts = 0
+                while (attempts < 5) {
+                    attempts += 1
+                    const current = this.store.sessions.getSessionByNamespace(stored.id, namespace)
+                    if (!current) {
+                        break
+                    }
+                    const metadata = (current.metadata && typeof current.metadata === 'object')
+                        ? current.metadata as Record<string, unknown>
+                        : {}
+                    const currentId = typeof metadata.machineId === 'string'
+                        ? metadata.machineId.trim()
+                        : ''
+                    if (currentId !== from) {
+                        break
+                    }
+                    const result = this.store.sessions.updateSessionMetadata(
+                        current.id,
+                        { ...metadata, machineId: to },
+                        current.metadataVersion,
+                        namespace,
+                        { touchUpdatedAt: false }
+                    )
+                    if (result.result === 'success') {
+                        migratedIds.push(current.id)
+                        break
+                    }
+                    if (result.result === 'error' || attempts >= 5) {
+                        throw new Error(
+                            `session migration conflicted for ${current.id} `
+                            + `(${from} → ${to})`
+                        )
+                    }
+                }
+            }
+            const remaining = this.store.sessions.getSessionsByNamespace(namespace).filter((session) => {
+                const metadata = (session.metadata && typeof session.metadata === 'object')
+                    ? session.metadata as Record<string, unknown>
+                    : {}
+                const currentId = typeof metadata.machineId === 'string'
+                    ? metadata.machineId.trim()
+                    : ''
+                return currentId === from
+            })
+            if (remaining.length > 0) {
+                throw new Error(
+                    `session migration incomplete: ${remaining.length} session(s) still on ${from}`
+                )
+            }
+        })
+        for (const id of migratedIds) {
+            this.sessionCache.refreshSession(id)
+        }
+        return migratedIds.length
+    }
+
+    /** Count namespace sessions whose metadata.machineId still equals machineId. */
+    countSessionsOnMachine(machineId: string, namespace: string): number {
+        const target = machineId.trim()
+        if (!target) {
+            return 0
+        }
+        return this.store.sessions.getSessionsByNamespace(namespace).filter((session) => {
+            const metadata = (session.metadata && typeof session.metadata === 'object')
+                ? session.metadata as Record<string, unknown>
+                : {}
+            const currentId = typeof metadata.machineId === 'string'
+                ? metadata.machineId.trim()
+                : ''
+            return currentId === target
+        }).length
     }
 
     async sendMessage(
@@ -1007,7 +1169,11 @@ export class SyncEngine {
                 path: string
                 previewUrl?: string
             }>
-            sentFrom?: 'telegram-bot' | 'webapp'
+            sentFrom?: 'telegram-bot' | 'webapp' | 'peer'
+            peer?: {
+                sourceSessionId?: string
+                sourceName?: string
+            }
             scheduledAt?: number | null
             deliveryMode?: MessageDeliveryMode
         }
@@ -1651,24 +1817,63 @@ export class SyncEngine {
     }
 
     async archiveSession(sessionId: string): Promise<void> {
-        // tiann/hapi#916: when the CLI is already gone (e.g. after a
-        // hub-restart cascade SIGTERMed the runner but the in-memory
-        // `active` flag has not been reconciled yet) the kill-RPC throws
-        // and the route used to surface that as HTTP 500. Treat the
-        // missing target as a benign condition: still flip the session's
-        // lifecycleState to `archived` in the hub-side metadata so the
-        // UI does not see a half-cleaned zombie, and continue to mark
-        // it inactive in the cache. Real RPC errors (timeout, protocol
-        // failure) still propagate as 5xx.
+        // tiann/hapi#916: missing KillSession used to mean "CLI already gone".
+        // After #1203, an in-flight pre-proof CLI can stay connected without
+        // registering `${sessionId}:killSession`. Do not stamp archived while
+        // that process is still alive: try runner StopSession, then refuse if
+        // the session is still heartbeating.
         try {
             await this.rpcGateway.killSession(sessionId)
+            this.handleSessionEnd({ sid: sessionId, time: Date.now() })
+            return
         } catch (error) {
-            if (error instanceof RpcTargetMissingError) {
-                this.sessionCache.markSessionArchivedFromHub(sessionId, 'Archived from hub (CLI unreachable)')
-            } else {
+            if (!(error instanceof RpcTargetMissingError)) {
                 throw error
             }
         }
+
+        const session = this.sessionCache.getSession(sessionId)
+        const machineId = typeof session?.metadata?.machineId === 'string'
+            ? session.metadata.machineId.trim()
+            : ''
+
+        if (machineId) {
+            try {
+                const status = await this.rpcGateway.stopRunnerSession(machineId, sessionId)
+                if (status === 'still_alive') {
+                    throw new SessionArchiveUncontrollableError(sessionId)
+                }
+                if (status === 'stopped') {
+                    this.sessionCache.markSessionArchivedFromHub(
+                        sessionId,
+                        'Archived from hub (CLI unreachable)'
+                    )
+                    this.handleSessionEnd({ sid: sessionId, time: Date.now() })
+                    return
+                }
+                // already_gone: runner does not have the pid. Fall through to
+                // the heartbeat check — do not trust `/cli` room membership
+                // (namespace token joins that room before tag/capability).
+            } catch (error) {
+                if (error instanceof SessionArchiveUncontrollableError) {
+                    throw error
+                }
+                if (!(error instanceof RpcTargetMissingError)) {
+                    throw error
+                }
+            }
+        }
+
+        // Unproven in-flight CLIs used to keep session-alive without KillSession.
+        // session-alive is now gated on sessionRpcAuthorizedId (#1473); active
+        // still means a proven owner refreshed liveness. expireInactive (~30s)
+        // clears it when that process is actually gone (#916).
+        const latest = this.sessionCache.getSession(sessionId)
+        if (latest?.active) {
+            throw new SessionArchiveUncontrollableError(sessionId)
+        }
+
+        this.sessionCache.markSessionArchivedFromHub(sessionId, 'Archived from hub (CLI unreachable)')
         this.handleSessionEnd({ sid: sessionId, time: Date.now() })
     }
 
@@ -2952,6 +3157,24 @@ export class SyncEngine {
         }
         let piResumeSucceeded = false
         try {
+            // Arm nonce for runner redeem only — never mint on first /cli connect
+            // (pass 2h B1 TOCTOU). Nonce travels on machine spawn RPC.
+            // Fail closed when the recorded machine is offline: host-fallback
+            // spawn without a mint leaves an uncontrollable child after the
+            // sessionRpcAuthorizedId gate (#1473 Major). Exact machineId only;
+            // remap sessions before resume when the host changes.
+            const latestMetadata = this.sessionCache.getSession(access.sessionId)?.metadata
+            const recordedMachineId = typeof latestMetadata?.machineId === 'string'
+                ? latestMetadata.machineId.trim()
+                : ''
+            if (!recordedMachineId || targetMachine.id !== recordedMachineId) {
+                return {
+                    type: 'error',
+                    message: 'Recorded machine is offline; migrate the session before resuming',
+                    code: 'resume_unavailable',
+                }
+            }
+            const resumePeerMintNonce = armResumePeerMint(access.sessionId)
             const spawnResult = await this.rpcGateway.spawnSession(
                 targetMachine.id,
                 directory,
@@ -2968,10 +3191,13 @@ export class SyncEngine {
                 access.sessionId,
                 session.collaborationMode ?? undefined,
                 session.copilotAgentMode ?? undefined,
-                resumedStartingMode
+                resumedStartingMode,
+                undefined,
+                resumePeerMintNonce
             )
 
             if (spawnResult.type !== 'success') {
+                clearResumePeerMint(access.sessionId)
                 if (requiresPiNativeReady) {
                     const stopped = await this.terminateInPlacePiResume(
                         targetMachine.id,

@@ -13,6 +13,8 @@ import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
 import { UsageStore } from './usageStore'
 import { WorkGraphStore } from './workGraphStore'
+import { scanUnverifiedPeerMessages as scanUnverifiedPeerMessagesInDb } from './provenanceMessageScan'
+import type { ProvenanceMessageScanOptions } from '@hapi/protocol/provenanceMessageAudit'
 
 export type {
     StoredMachine,
@@ -40,10 +42,12 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 23
+const SCHEMA_VERSION: number = 27
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
+    'machine_reenroll_grants',
+    'machine_reenroll_replays',
     'messages',
     'message_epochs',
     'users',
@@ -78,6 +82,10 @@ export class Store {
      */
     get dbPath(): string {
         return this._dbPath
+    }
+
+    scanUnverifiedPeerMessages(namespace: string, options: ProvenanceMessageScanOptions) {
+        return scanUnverifiedPeerMessagesInDb(this.db, namespace, options)
     }
 
     constructor(dbPath: string) {
@@ -124,6 +132,11 @@ export class Store {
         this.scratchlist = new ScratchlistStore(this.db)
         this.usage = new UsageStore(this.db)
         this.workGraph = new WorkGraphStore(this.db)
+    }
+
+    /** Run `fn` inside a single SQLite transaction (nested calls become savepoints). */
+    runInTransaction<T>(fn: () => T): T {
+        return this.db.transaction(fn)()
     }
 
     /**
@@ -302,6 +315,10 @@ export class Store {
             20: () => this.migrateFromV20ToV21(),
             21: () => this.migrateFromV21ToV22(),
             22: () => this.migrateFromV22ToV23(),
+            23: () => this.migrateFromV23ToV24(),
+            24: () => this.migrateFromV24ToV25(),
+            25: () => this.migrateFromV25ToV26(),
+            26: () => this.migrateFromV26ToV27(),
         })
 
         if (currentVersion === 0) {
@@ -390,6 +407,8 @@ export class Store {
             CREATE TABLE IF NOT EXISTS machines (
                 id TEXT PRIMARY KEY,
                 namespace TEXT NOT NULL DEFAULT 'default',
+                tag TEXT,
+                runner_proof_hash TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
                 metadata TEXT,
@@ -401,6 +420,23 @@ export class Store {
                 seq INTEGER DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_machines_namespace ON machines(namespace);
+
+            -- Orphaned: reenroll-grant HTTP paths return 410; no TS writers (#1473).
+            CREATE TABLE IF NOT EXISTS machine_reenroll_grants (
+                grant_hash TEXT PRIMARY KEY,
+                machine_id TEXT NOT NULL,
+                namespace TEXT NOT NULL,
+                expires_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_machine_reenroll_grants_machine
+                ON machine_reenroll_grants(machine_id);
+
+            CREATE TABLE IF NOT EXISTS machine_reenroll_replays (
+                grant_hash TEXT PRIMARY KEY,
+                from_machine_id TEXT NOT NULL,
+                to_machine_id TEXT NOT NULL,
+                namespace TEXT NOT NULL
+            );
 
             CREATE TABLE IF NOT EXISTS messages (
                 id TEXT PRIMARY KEY,
@@ -979,6 +1015,47 @@ export class Store {
                 ON event_links(namespace, from_event_id);
             CREATE INDEX IF NOT EXISTS idx_event_links_namespace_to
                 ON event_links(namespace, to_event_id);
+        `)
+    }
+
+    /** Machine tag for RPC auth (#1473). Upstream v23 is work-graph; tag is v24. */
+    private migrateFromV23ToV24(): void {
+        const columns = this.getMachineColumnNames()
+        if (columns.size === 0) return
+        if (!columns.has('tag')) {
+            this.db.exec('ALTER TABLE machines ADD COLUMN tag TEXT')
+        }
+    }
+
+    private migrateFromV24ToV25(): void {
+        const columns = this.getMachineColumnNames()
+        if (columns.size === 0) return
+        if (!columns.has('runner_proof_hash')) {
+            this.db.exec('ALTER TABLE machines ADD COLUMN runner_proof_hash TEXT')
+        }
+    }
+
+    private migrateFromV25ToV26(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS machine_reenroll_grants (
+                grant_hash TEXT PRIMARY KEY,
+                machine_id TEXT NOT NULL,
+                namespace TEXT NOT NULL,
+                expires_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_machine_reenroll_grants_machine
+                ON machine_reenroll_grants(machine_id);
+        `)
+    }
+
+    private migrateFromV26ToV27(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS machine_reenroll_replays (
+                grant_hash TEXT PRIMARY KEY,
+                from_machine_id TEXT NOT NULL,
+                to_machine_id TEXT NOT NULL,
+                namespace TEXT NOT NULL
+            );
         `)
     }
 

@@ -234,6 +234,12 @@ export interface ServerToClientEvents {
     // Sent to the CLI when the last agent-terminal viewer leaves, so it stops
     // streaming PTY output to the hub until someone subscribes again.
     'agent-terminal:idle': (data: AgentTerminalRefreshPayload) => void
+    /**
+     * Session-scoped peer-delivery capability (#1203). Emitted when a CLI socket
+     * joins its handshake session room so resume paths (GET has no capability)
+     * can attribute ping_peer without exposing mint via namespace-token GET.
+     */
+    'peer-capability': (data: { sessionId: string; sessionCapability: string }) => void
     error: (data: { message: string; code?: SocketErrorReason; scope?: 'session' | 'machine'; id?: string }) => void
 }
 

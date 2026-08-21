@@ -1,22 +1,35 @@
 import type { Socket } from 'socket.io'
 
+/**
+ * Maps RPC method names → owning socket.
+ *
+ * Last-writer-wins would let a second same-namespace machine socket steal
+ * `spawn-happy-session`. Refuse overwrite while another socket still owns the
+ * method (#1203 pass 2e-alt M4).
+ */
 export class RpcRegistry {
     private readonly methodToSocketId: Map<string, string> = new Map()
     private readonly socketIdToMethods: Map<string, Set<string>> = new Map()
 
-    register(socket: Socket, method: string): void {
+    register(socket: Socket, method: string): boolean {
         if (!method) {
-            return
+            return false
+        }
+
+        const existing = this.methodToSocketId.get(method)
+        if (existing && existing !== socket.id) {
+            return false
         }
 
         this.methodToSocketId.set(method, socket.id)
 
-        const existing = this.socketIdToMethods.get(socket.id)
-        if (existing) {
-            existing.add(method)
+        const owned = this.socketIdToMethods.get(socket.id)
+        if (owned) {
+            owned.add(method)
         } else {
             this.socketIdToMethods.set(socket.id, new Set([method]))
         }
+        return true
     }
 
     unregister(socket: Socket, method: string): void {
@@ -52,4 +65,3 @@ export class RpcRegistry {
         return this.methodToSocketId.get(method) ?? null
     }
 }
-

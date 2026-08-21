@@ -39,6 +39,7 @@ function chatValue(): HappyChatContextValue {
         sessionId: 'fixture-session',
         metadata: { path: '/home/ada/coding/hapi', host: 'local' },
         terminalToolDisplayMode: 'compact',
+        showSessionSummaryInChat: false,
         disabled: false,
         onRefresh: () => {},
         hasMoreMessages: false,

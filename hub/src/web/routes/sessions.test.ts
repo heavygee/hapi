@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { Hono } from 'hono'
-import type { Session, SyncEngine } from '../../sync/syncEngine'
+import { SessionArchiveUncontrollableError, type Session, type SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { createSessionsRoutes } from './sessions'
 
@@ -1329,6 +1329,23 @@ describe('sessions routes', () => {
 
             expect(response.status).toBe(200)
             expect(await response.json()).toEqual({ ok: true })
+        })
+
+        it('returns 409 when archiveSession refuses a connected unproven CLI (#1203)', async () => {
+            const session = createSession({ active: true })
+            const { app } = createApp(session, {
+                archiveSession: async () => {
+                    throw new SessionArchiveUncontrollableError(session.id)
+                }
+            })
+
+            const response = await app.request('/api/sessions/session-1/archive', { method: 'POST' })
+
+            expect(response.status).toBe(409)
+            expect(await response.json()).toEqual({
+                error: 'Session is connected but not controllable. Reopen or restart the CLI on that machine.',
+                code: 'session_uncontrollable'
+            })
         })
 
         it('still surfaces a 5xx for non-RPC errors (e.g. DB write failure)', async () => {

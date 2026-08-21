@@ -15,6 +15,7 @@ import type { AgentEvent, ToolCallBlock } from '@/chat/types'
 import type { ToolGroupBlock, VisibleChatBlock } from '@/chat/toolGroups'
 import { visibleBlockRole } from '@/chat/toolGroups'
 import type { AttachmentMetadata, MessageStatus as HappyMessageStatus, Session } from '@/types/api'
+import { getPeerDeliveryInfo, isPeerDeliveryMeta } from '@/chat/peerDelivery'
 
 /**
  * Aggregated metadata for a multi-turn response group, surfaced on the
@@ -43,6 +44,12 @@ export type HappyChatMessageMetadata = {
     usage?: UsageData
     model?: string | null
     review?: CodexReview
+    /** Peer delivery provenance from hub message meta (#1203). */
+    sentFrom?: string
+    peer?: {
+        sourceSessionId?: string
+        sourceName?: string
+    }
     /**
      * Distinct turn count when this block carries an aggregated response
      * group footer. Single-turn blocks omit this field so the existing
@@ -456,12 +463,23 @@ function containsActiveAssistantOutput(
         ))
 }
 
-function toThreadMessageLike(
+/** Exported for unit tests covering peer meta → custom mapping (#1203). */
+export function toThreadMessageLike(
     block: VisibleChatBlock,
     threadMessageId: string,
     timestamp: number
 ): ThreadMessageLike {
     if (block.kind === 'user-text') {
+        const peerInfo = getPeerDeliveryInfo(block.meta)
+        const sentFrom = isPeerDeliveryMeta(block.meta)
+            ? 'peer'
+            : undefined
+        const peer = peerInfo && (peerInfo.sourceSessionId || peerInfo.sourceName)
+            ? {
+                ...(peerInfo.sourceSessionId ? { sourceSessionId: peerInfo.sourceSessionId } : {}),
+                ...(peerInfo.sourceName ? { sourceName: peerInfo.sourceName } : {})
+            }
+            : undefined
         return {
             role: 'user',
             id: threadMessageId,
@@ -474,7 +492,9 @@ function toThreadMessageLike(
                     localId: block.localId,
                     originalText: block.originalText,
                     attachments: block.attachments,
-                    invokedAt: block.invokedAt
+                    invokedAt: block.invokedAt,
+                    ...(sentFrom ? { sentFrom } : {}),
+                    ...(peer ? { peer } : {})
                 } satisfies HappyChatMessageMetadata
             }
         }

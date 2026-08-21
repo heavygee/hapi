@@ -15,6 +15,13 @@ interface Settings {
   // This ID is used as the actual database ID on the server
   // All machine operations use this ID
   machineId?: string
+  /**
+   * Create-time secret for machine-scoped /cli auth + RPC registration (#1203).
+   * Analogous to session tag — namespace token + machineId alone is not binding.
+   */
+  machineTag?: string
+  /** Prior machine ids after legacy re-enroll (#1473) — keep local resume working. */
+  previousMachineIds?: string[]
   machineIdConfirmedByServer?: boolean
   runnerAutoStartWhenRunningHappy?: boolean
   cliApiToken?: string
@@ -64,6 +71,8 @@ export interface RunnerLocallyPersistedState {
    * mid-rebuild stop. Persisting this fixes that.
    */
   startedWithVersionHandoffDisabled?: boolean;
+  /** Unix socket for peercred terminal local-resume grants (#1473). */
+  localResumeSocket?: string;
 }
 
 export async function readSettings(): Promise<Settings> {

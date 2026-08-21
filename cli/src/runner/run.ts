@@ -1,4 +1,5 @@
 import fs from 'fs/promises';
+import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import os from 'os';
 
@@ -22,14 +23,28 @@ import { isRetryableConnectionError } from '@/utils/errorUtils';
 
 import { cleanupRunnerState, getInstalledCliMtimeMs, isRunnerRunningCurrentlyInstalledHappyVersion, stopRunner, waitForRunnerHandoff } from './controlClient';
 import { startRunnerControlServer } from './controlServer';
+import { startLocalResumeGrantServer } from './localResumeGrant';
+import { isProcessDescendant } from '@/api/processDescendant'
+import { join } from 'node:path'
 import { createWorktree, removeWorktree, type WorktreeInfo } from './worktree';
 import { validateWorkspaceDirectory } from './validateWorkspaceDirectory';
-import { join } from 'path';
 import { buildMachineMetadata } from '@/agent/sessionFactory';
 import { resolveWorkspaceRoots } from '@/utils/workspaceRoot';
 import { hashRunnerCliApiToken, hashRunnerExtraHeaders } from './runnerIdentity';
 import { scheduleCursorModelsPrewarm } from '@/modules/common/cursorModelsPrewarm';
 import { isLinkedGitWorktree } from '@/utils/isLinkedGitWorktree';
+import {
+  HAPI_PEER_CAP_INJECT_ENV,
+  HAPI_PEER_CAP_INJECT_SERVER_PID_ENV,
+  HAPI_RUNNER_HANDOFF_SOCKET_ENV,
+  receiveRunnerProofFromHandoff,
+  startPeerCapabilityInjectServer,
+  type PeerCapabilityInjectServer,
+} from '@/api/peerCapabilityInject';
+import { buildHubRequestHeaders } from '@/api/hubExtraHeaders';
+import {
+  clearReenrollGrant,
+} from './reenrollGrantStore';
 
 /**
  * Deduplicates a preallocated HAPI-row spawn only while its child is alive.
@@ -223,6 +238,13 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       logger.debug(`[RUNNER RUN] HAPI_RUNNER_HANDOFF_FROM_PID=${handoffFromPidRaw} set but no matching live parent in state (state.pid=${existingState?.pid ?? 'none'}); ignoring handoff signal`);
     }
   }
+  // PID-checked socket handoff only — never put runnerProof in env (#1473).
+  let handoffRunnerProof: string | undefined
+  if (isAuthorizedHandoff) {
+    handoffRunnerProof = await receiveRunnerProofFromHandoff()
+  } else {
+    delete process.env[HAPI_RUNNER_HANDOFF_SOCKET_ENV]
+  }
 
   if (!isAuthorizedHandoff) {
     // Check if already running
@@ -262,7 +284,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
 
   try {
     // Ensure auth and machine registration BEFORE anything else
-    const { machineId } = await authAndSetupMachineIfNeeded();
+    let { machineId, machineTag } = await authAndSetupMachineIfNeeded();
     logger.debug('[RUNNER RUN] Auth and machine setup complete');
 
     // Setup state - key by PID
@@ -495,7 +517,13 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     // Spawn a new session (sessionId reserved for future --resume functionality)
     let spawnSession!: SpawnDeduplicator;
     const spawnSessionOnce = async (options: SpawnSessionOptions): Promise<SpawnSessionResult> => {
-      logger.debugLargeJson('[RUNNER RUN] Spawning session', options);
+      // Never log resumePeerMintNonce / OAuth token — same-UID siblings can
+      // tail DEBUG logs and redeem first (#1473 Codex Blocker).
+      logger.debugLargeJson('[RUNNER RUN] Spawning session', {
+        ...options,
+        resumePeerMintNonce: options.resumePeerMintNonce ? '[redacted]' : undefined,
+        token: options.token ? '[redacted]' : undefined,
+      });
 
       const { directory, sessionId, machineId, approvedNewDirectoryCreation = true } = options;
       const agent = options.agent ?? 'claude';
@@ -641,6 +669,29 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           };
         }
 
+        // Resume peer provenance (#1203 pass 2h): hub sends a spawn-RPC nonce;
+        // runner redeems capability and injects via PID-checked unix socket.
+        // Never put mint-proof on child fds/env (pidfd_getfd / environ / TOCTOU).
+        // Redeem + deliver are on the awaited spawn success path — fire-and-forget
+        // left children unable to authorize session-alive (#1473 Major).
+        const resumePeerMintNonce = options.resumePeerMintNonce?.trim()
+        const resumeSessionId = (options.existingSessionId || options.sessionId)?.trim()
+        let peerCapInject: PeerCapabilityInjectServer | null = null
+        if (resumePeerMintNonce && resumeSessionId) {
+          peerCapInject = await startPeerCapabilityInjectServer()
+          if (!peerCapInject) {
+            return {
+              type: 'error',
+              errorMessage: 'Capability inject unavailable',
+            }
+          }
+          extraEnv = {
+            ...extraEnv,
+            [HAPI_PEER_CAP_INJECT_ENV]: peerCapInject.path,
+            [HAPI_PEER_CAP_INJECT_SERVER_PID_ENV]: String(process.pid),
+          }
+        }
+
         const args = buildCliArgs(agent, options, yolo);
 
         // sessionId reserved for future use
@@ -672,6 +723,36 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             ...extraEnv
           }
         });
+
+        if (peerCapInject && happyProcess.pid && resumePeerMintNonce && resumeSessionId) {
+          const inject = peerCapInject
+          peerCapInject = null
+          try {
+            const capability = await redeemResumePeerCapabilityFromHub(
+              resumeSessionId,
+              resumePeerMintNonce
+            )
+            if (!capability) {
+              await killProcessByChildProcess(happyProcess)
+              return {
+                type: 'error',
+                errorMessage: 'Capability redeem failed',
+              }
+            }
+            await inject.deliverTo(happyProcess.pid, { sessionCapability: capability })
+          } catch (error) {
+            await killProcessByChildProcess(happyProcess)
+            return {
+              type: 'error',
+              errorMessage: `Capability delivery failed: ${error instanceof Error ? error.message : String(error)}`,
+            }
+          } finally {
+            inject.close()
+          }
+        } else {
+          peerCapInject?.close()
+          peerCapInject = null
+        }
 
         happyProcess.stderr?.on('data', (data) => {
           stderrTail = appendTail(stderrTail, data);
@@ -1043,12 +1124,16 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     };
 
     // Start control server
+    let mintLocalResumeCapability:
+      | ((sessionId: string) => Promise<string>)
+      | null = null
+    let stopLocalResumeGrantServer: (() => void) | null = null
     const { port: controlPort, stop: stopControlServer } = await startRunnerControlServer({
       getChildren: getCurrentChildren,
       stopSession,
       spawnSession,
       requestShutdown: () => requestShutdown('hapi-cli'),
-      onHappySessionWebhook
+      onHappySessionWebhook,
     });
 
     // Baseline mtime at runner-process start. Immutable: per Codex review #814
@@ -1085,6 +1170,18 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     // (Codex review #814 [Major] - controlClient.ts:192 fix).
     const startedWithVersionHandoffDisabled = process.env.HAPI_DISABLE_VERSION_HANDOFF === '1';
 
+    // Memory-only runner-generation proof (#1473 Blocker). Same-UID siblings can
+    // read anything under HAPI_HOME — do not persist the proof. Version handoff
+    // keeps the same machine via PID-checked socket; cold start without handoff
+    // mints a new proof and may rotate machine id (accepted residual until
+    // operator-trusted remap / #1486).
+    if (isAuthorizedHandoff && !handoffRunnerProof) {
+      throw new Error(
+        'Authorized runner handoff missing runnerProof from PID-checked socket'
+      )
+    }
+    const runnerProof = handoffRunnerProof ?? randomBytes(32).toString('base64url')
+
     // Write initial runner state (no lock needed for state file)
     const fileState: RunnerLocallyPersistedState = {
       pid: process.pid,
@@ -1118,32 +1215,87 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     const workspaceRoots = resolveWorkspaceRoots(options.workspaceRoots);
     logger.debug(`[RUNNER RUN] Workspace roots: ${workspaceRoots?.join(', ') ?? '(not set)'}`);
 
-    // Get or create machine (with retry for transient connection errors)
-    const machine = await withRetry(
-      () => api.getOrCreateMachine({
-        machineId,
-        metadata: buildMachineMetadata({
+    // Register machine. Cold start may 409 (lost memory-only proof) and rotate.
+    // Hub refuses tag-only proof rebind (#1473 Blocker). Handoff keeps
+    // allowLegacyReenroll false so a bad proof cannot escape.
+    clearReenrollGrant()
+    let machine
+    try {
+      machine = await withRetry(
+        () => api.getOrCreateMachine({
+          machineId,
+          machineTag,
+          runnerProof,
+          metadata: buildMachineMetadata({
             workspaceRoots,
             startedCliMtimeMs: startedWithCliMtimeMs,
             asRunner: true,
+          }),
+          runnerState: initialRunnerState,
+          allowLegacyReenroll: !handoffRunnerProof,
         }),
-        runnerState: initialRunnerState
-      }),
-      {
-        maxAttempts: 60,
-        minDelay: 1000,
-        maxDelay: 30000,
-        shouldRetry: isRetryableConnectionError,
-        onRetry: (error, attempt, nextDelayMs) => {
-          const errorMsg = error instanceof Error ? error.message : String(error)
-          logger.debug(`[RUNNER RUN] Failed to register machine (attempt ${attempt}), retrying in ${nextDelayMs}ms: ${errorMsg}`)
+        {
+          maxAttempts: 60,
+          minDelay: 1000,
+          maxDelay: 30000,
+          shouldRetry: isRetryableConnectionError,
+          onRetry: (error, attempt, nextDelayMs) => {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            logger.debug(`[RUNNER RUN] Failed to register machine (attempt ${attempt}), retrying in ${nextDelayMs}ms: ${errorMsg}`)
+          }
         }
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (handoffRunnerProof && /runner proof|re-enroll|tag mismatch/i.test(message)) {
+        throw new Error(
+          'Handoff runnerProof rejected by hub; refusing silent machine re-enroll '
+          + 'that would break the PID-checked generation binding.'
+        )
       }
-    );
+      throw error
+    }
+    if (machine.id !== machineId) {
+      machineId = machine.id;
+      const rotated = await authAndSetupMachineIfNeeded();
+      machineTag = rotated.machineTag;
+      fileState.startedWithMachineId = machineId;
+      writeRunnerState(fileState);
+      logger.debug(`[RUNNER RUN] Re-enrolled machine as ${machineId}`);
+    }
     logger.debug(`[RUNNER RUN] Machine registered: ${machine.id}`);
 
+    mintLocalResumeCapability = async (sessionId: string) => {
+      return await api.mintLocalResumeCapability({
+        sessionId,
+        machineTag,
+        runnerProof,
+      })
+    }
+    const resolveTrackedSessionIdForPeer = (peerPid: number): string | null => {
+      for (const child of getCurrentChildren()) {
+        if (!isProcessDescendant(peerPid, child.pid)) {
+          continue
+        }
+        const sessionId = child.happySessionId?.trim()
+          || child.requestedHappySessionId?.trim()
+          || ''
+        return sessionId || null
+      }
+      return null
+    }
+    const localResumeGrant = await startLocalResumeGrantServer({
+      mintCapability: (sessionId) => mintLocalResumeCapability!(sessionId),
+      resolveTrackedSessionId: resolveTrackedSessionIdForPeer,
+    })
+    if (localResumeGrant) {
+      stopLocalResumeGrantServer = localResumeGrant.close
+      fileState.localResumeSocket = localResumeGrant.path
+      writeRunnerState(fileState)
+    }
+
     // Create realtime machine session
-    const apiMachine = api.machineSyncClient(machine, { workspaceRoots });
+    const apiMachine = api.machineSyncClient(machine, { workspaceRoots, machineTag, runnerProof });
 
     // Set RPC handlers
     apiMachine.setRPCHandlers({
@@ -1323,19 +1475,33 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           // the child knows it is an authorized handoff and must NOT call
           // stopRunner() against us before writing its own state.
           // Codex review #814 [Major] on run.ts:892.
+          // runnerProof travels on a PID-checked unix socket (path in env only).
+          // Never put the proof in child environ — same-UID siblings can read it (#1473).
+          let proofHandoff: PeerCapabilityInjectServer | null = null
           try {
-            spawnHappyCLI(handoffArgv, {
+            proofHandoff = await startPeerCapabilityInjectServer()
+            if (!proofHandoff) {
+              throw new Error('runner proof handoff socket unavailable')
+            }
+            const child = spawnHappyCLI(handoffArgv, {
               detached: true,
               stdio: 'ignore',
               env: {
                 ...process.env,
-                HAPI_RUNNER_HANDOFF_FROM_PID: String(process.pid)
+                HAPI_RUNNER_HANDOFF_FROM_PID: String(process.pid),
+                [HAPI_RUNNER_HANDOFF_SOCKET_ENV]: proofHandoff.path,
               }
             });
+            if (!child.pid) {
+              throw new Error('replacement runner spawn returned no pid')
+            }
+            await proofHandoff.deliverTo(child.pid, { runnerProof })
           } catch (error) {
             logger.debug(`[RUNNER RUN] Failed to spawn replacement runner; staying alive to avoid an offline machine. Next handoff attempt in ${Math.round(HANDOFF_RETRY_BACKOFF_MS / 1000)}s.`, error);
             deferHandoffRetry();
             return;
+          } finally {
+            proofHandoff?.close()
           }
 
           // Release the lock so the child can acquire it. The child is
@@ -1407,6 +1573,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           startedWithExtraHeadersHash: fileState.startedWithExtraHeadersHash,
           startedWithArgv,
           startedWithVersionHandoffDisabled,
+          localResumeSocket: fileState.localResumeSocket,
           lastHeartbeat: new Date().toLocaleString(),
           runnerLogPath: fileState.runnerLogPath
         };
@@ -1443,6 +1610,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       await new Promise(resolve => setTimeout(resolve, 100));
 
       apiMachine.shutdown();
+      stopLocalResumeGrantServer?.()
       await stopControlServer();
       await cleanupRunnerState();
       await releaseRunnerLock(runnerLockHandle);
@@ -1566,3 +1734,35 @@ export function buildCliArgs(
   }
   return args;
 }
+
+async function redeemResumePeerCapabilityFromHub(
+  sessionId: string,
+  nonce: string
+): Promise<string | undefined> {
+  const apiUrl = configuration.apiUrl
+  const accessToken = configuration.cliApiToken
+  if (!apiUrl || !accessToken) {
+    return undefined
+  }
+  // /cli routes authenticate with the namespace CLI token (not a web JWT).
+  const redeemResponse = await fetch(
+    `${apiUrl}/cli/sessions/${encodeURIComponent(sessionId)}/resume-peer-capability`,
+    {
+      method: 'POST',
+      headers: buildHubRequestHeaders({
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      }),
+      body: JSON.stringify({ nonce }),
+    }
+  )
+  if (!redeemResponse.ok) {
+    return undefined
+  }
+  const redeemBody = await redeemResponse.json() as { sessionCapability?: string }
+  const capability = typeof redeemBody.sessionCapability === 'string'
+    ? redeemBody.sessionCapability.trim()
+    : ''
+  return capability || undefined
+}
+

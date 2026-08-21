@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, mock } from 'bun:test'
 import { Store, type StoredSession } from '../../../store'
 import type { SyncEvent } from '../../../sync/syncEngine'
 import type { CliSocketWithData } from '../../socketTypes'
@@ -6,6 +6,7 @@ import { registerSessionHandlers } from './sessionHandlers'
 
 class FakeSocket {
     readonly roomEvents: Array<{ room: string; event: string; data: unknown }> = []
+    readonly data: { sessionRpcAuthorizedId?: string } = {}
     private readonly handlers = new Map<string, (data: unknown, ack?: (response: unknown) => void) => void>()
 
     on(event: string, handler: (data: unknown, ack?: (response: unknown) => void) => void): this {
@@ -341,7 +342,7 @@ describe('cli session handlers', () => {
         expect(uuids).toEqual(['msg-1', 'msg-2'])
     })
 
-    it.each(['supersededBySessionId', 'opencodeClearOperation'] as const)(
+    it.each(['supersededBySessionId', 'opencodeClearOperation', 'machineId'] as const)(
         'ignores a forged hub-owned %s addition from CLI metadata',
         (field) => {
             const store = new Store(':memory:')
@@ -359,7 +360,9 @@ describe('cli session handlers', () => {
                     path: '/tmp/project',
                     [field]: field === 'supersededBySessionId'
                         ? 'foreign-session'
-                        : { replacementSessionId: 'foreign-session', state: 'reserved', updatedAt: Date.now() }
+                        : field === 'machineId'
+                            ? 'attacker-machine'
+                            : { replacementSessionId: 'foreign-session', state: 'reserved', updatedAt: Date.now() }
                 }
             }, () => {})
             expect(store.sessions.getSessionByNamespace(session.id, 'default')?.metadata).not.toHaveProperty(field)
@@ -390,5 +393,79 @@ describe('cli session handlers', () => {
         expect(store.sessions.getSessionByNamespace(session.id, 'default')?.metadata).toMatchObject({
             supersededBySessionId: 'owned-target', opencodeClearOperation: operation, lifecycleState: 'archived'
         })
+    })
+
+    it('rejects sibling rewrite of recorded machineId via update-metadata', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('preserve-machine', {
+            path: '/tmp/project',
+            machineId: 'victim-machine',
+        }, null, 'default')
+        const socket = new FakeSocket()
+        registerSessionHandlers(socket as unknown as CliSocketWithData, {
+            store,
+            resolveSessionAccess: () => ({ ok: true, value: session as StoredSession }),
+            emitAccessError: () => { throw new Error('unexpected access error') }
+        })
+        socket.trigger('update-metadata', {
+            sid: session.id,
+            expectedVersion: session.metadataVersion,
+            metadata: {
+                path: '/tmp/project',
+                machineId: 'attacker-machine',
+                name: 'still-allowed',
+            }
+        }, () => {})
+        expect(store.sessions.getSessionByNamespace(session.id, 'default')?.metadata).toMatchObject({
+            path: '/tmp/project',
+            machineId: 'victim-machine',
+            name: 'still-allowed',
+        })
+    })
+
+    it('ignores session-alive from namespace-only sockets (#1473)', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('alive-gate', {
+            path: '/tmp/project',
+            machineId: 'machine-1',
+        }, null, 'default')
+        const onSessionAlive = mock(() => {})
+        const emitAccessError = mock(() => {})
+        const socket = new FakeSocket()
+        registerSessionHandlers(socket as unknown as CliSocketWithData, {
+            store,
+            resolveSessionAccess: () => ({ ok: true, value: session as StoredSession }),
+            emitAccessError,
+            onSessionAlive,
+        })
+
+        socket.trigger('session-alive', { sid: session.id, time: Date.now() })
+
+        expect(onSessionAlive).not.toHaveBeenCalled()
+        expect(emitAccessError).toHaveBeenCalledWith('session', session.id, 'access-denied')
+    })
+
+    it('forwards session-alive only when sessionRpcAuthorizedId matches (#1473)', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('alive-ok', {
+            path: '/tmp/project',
+            machineId: 'machine-1',
+        }, null, 'default')
+        const onSessionAlive = mock(() => {})
+        const emitAccessError = mock(() => {})
+        const socket = new FakeSocket()
+        socket.data.sessionRpcAuthorizedId = session.id
+        registerSessionHandlers(socket as unknown as CliSocketWithData, {
+            store,
+            resolveSessionAccess: () => ({ ok: true, value: session as StoredSession }),
+            emitAccessError,
+            onSessionAlive,
+        })
+
+        const payload = { sid: session.id, time: 1_700_000_000_000 }
+        socket.trigger('session-alive', payload)
+
+        expect(emitAccessError).not.toHaveBeenCalled()
+        expect(onSessionAlive).toHaveBeenCalledWith(payload)
     })
 })

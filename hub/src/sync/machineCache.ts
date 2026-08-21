@@ -77,8 +77,24 @@ export class MachineCache {
         return this.getMachinesByNamespace(namespace).filter((machine) => machine.active)
     }
 
-    getOrCreateMachine(id: string, metadata: unknown, runnerState: unknown, namespace: string): Machine {
-        const stored = this.store.machines.getOrCreateMachine(id, metadata, runnerState, namespace)
+    getOrCreateMachine(
+        id: string,
+        metadata: unknown,
+        runnerState: unknown,
+        namespace: string,
+        tag?: string,
+        runnerProof?: string
+    ): Machine {
+        // Hub never tag-only rebinds (#1473 Blocker). CLI keeps runnerProof
+        // memory-only; cold restart may rotate machine id instead.
+        const stored = this.store.machines.getOrCreateMachine(
+            id,
+            metadata,
+            runnerState,
+            namespace,
+            tag,
+            runnerProof
+        )
         return this.refreshMachine(stored.id) ?? (() => { throw new Error('Failed to load machine') })()
     }
 

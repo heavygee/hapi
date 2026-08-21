@@ -15,6 +15,7 @@ import type {
 } from '@hapi/protocol/types'
 import { ApiClient } from '@/api/api'
 import type { ReasoningEffort } from '@/codex/appServerTypes'
+import { readSettings } from '@/persistence'
 import { authAndSetupMachineIfNeeded } from '@/ui/auth'
 import { initializeToken } from '@/ui/tokenInit'
 import { maybeAutoStartServer } from '@/utils/autoStartServer'
@@ -50,11 +51,14 @@ async function selectSession(sessions: ResumableSession[]): Promise<string> {
     })
 }
 
-function assertTargetMachine(target: LocalResumeTarget, machineId: string): void {
+function assertTargetMachine(
+    target: LocalResumeTarget,
+    ownedMachineIds: ReadonlySet<string>
+): void {
     if (!target.machineId) {
         throw new Error('Session metadata missing machine id')
     }
-    if (target.machineId !== machineId) {
+    if (!ownedMachineIds.has(target.machineId)) {
         throw new Error(`Session belongs to another machine (${target.machineId})`)
     }
 }
@@ -210,13 +214,18 @@ async function dispatchLocalResume(target: LocalResumeTarget): Promise<void> {
     })
 }
 
-async function resolveSessionId(api: ApiClient, machineId: string, args: string[]): Promise<string> {
+async function resolveSessionId(
+    api: ApiClient,
+    ownedMachineIds: ReadonlySet<string>,
+    args: string[]
+): Promise<string> {
     const explicit = args[0]
     if (explicit) {
         return explicit
     }
 
-    const sessions = await api.listResumableSessions(machineId)
+    const sessions = (await api.listResumableSessions())
+        .filter((session) => session.machineId && ownedMachineIds.has(session.machineId))
     if (sessions.length === 0) {
         throw new Error('No resumable sessions found for this machine')
     }
@@ -239,11 +248,16 @@ export const resumeCommand: CommandDefinition = {
             await initializeToken()
             await maybeAutoStartServer()
             const { machineId } = await authAndSetupMachineIfNeeded()
+            const settings = await readSettings()
+            const ownedMachineIds = new Set<string>([
+                machineId,
+                ...(settings.previousMachineIds ?? []),
+            ])
             const api = await ApiClient.create()
-            const sessionId = await resolveSessionId(api, machineId, commandArgs)
+            const sessionId = await resolveSessionId(api, ownedMachineIds, commandArgs)
             const target = await api.getLocalResumeTarget(sessionId)
 
-            assertTargetMachine(target, machineId)
+            assertTargetMachine(target, ownedMachineIds)
             assertDirectoryExists(target)
 
             // Gemini CLI is no longer launchable (Google sunset the consumer
@@ -256,6 +270,27 @@ export const resumeCommand: CommandDefinition = {
 
             if (target.active && target.controlledByUser) {
                 throw new Error('Session is already controlled by a local terminal')
+            }
+
+            // Attributed resume needs a session capability for RPC auth.
+            // Prefer inject env (runner child) or peercred grant (tracked
+            // descendant). Unrelated operator shells fail closed — minting to
+            // any same-UID shell (or via a disk bearer proof) reopens the
+            // Blocker. Accepted residual until operator-trusted remap (#1486).
+            if (!process.env.HAPI_PEER_CAP_INJECT?.trim()) {
+                try {
+                    const { requestRunnerLocalResumeCapability } = await import('@/runner/localResumeGrant')
+                    const { armDirectResumeCapability } = await import('@/api/peerCapabilityInject')
+                    const capability = await requestRunnerLocalResumeCapability(target.sessionId)
+                    armDirectResumeCapability(capability)
+                } catch (error) {
+                    const detail = error instanceof Error ? error.message : String(error)
+                    throw new Error(
+                        'Local resume requires inject env or a peercred grant from a '
+                        + `tracked session tree (${detail}). Use the web UI to resume, `
+                        + 'or resume from a descendant of the runner child.'
+                    )
+                }
             }
 
             // AGY is remote-only with per-turn spawns: an in-flight turn cannot
@@ -271,7 +306,6 @@ export const resumeCommand: CommandDefinition = {
             if (target.active) {
                 await api.handoffSessionToLocal(target.sessionId)
             }
-
             await dispatchLocalResume(target)
         } catch (error) {
             console.error(chalk.red('Error:'), error instanceof Error ? error.message : 'Unknown error')

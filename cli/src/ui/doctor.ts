@@ -228,6 +228,7 @@ export async function runDoctorCommand(filter?: 'all' | 'runner'): Promise<void>
         if (filter === 'all' && allProcesses.length > 1) { // More than just current process
             console.log(chalk.bold('\n💡 Process Management'));
             console.log(chalk.gray('To clean up runaway processes: hapi doctor clean'));
+            console.log(chalk.gray('Cross-machine provenance audit: hapi doctor provenance'));
         }
     } catch (error) {
         console.log(chalk.red('❌ Error checking runner status'));

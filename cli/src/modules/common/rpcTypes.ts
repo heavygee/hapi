@@ -10,6 +10,11 @@ export interface SpawnSessionOptions {
     // with `--hapi-session-id` so the child reuses the existing hub row (stable
     // id) instead of minting a new one. Set only by the hub reopen/resume path.
     existingSessionId?: string
+    /**
+     * Hub-armed one-shot nonce; runner redeems for peer capability and injects
+     * into the child via a PID-checked unix socket (pass 2h B1).
+     */
+    resumePeerMintNonce?: string
     resumeSessionId?: string
     approvedNewDirectoryCreation?: boolean
     agent?: AgentFlavor

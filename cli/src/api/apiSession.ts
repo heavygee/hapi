@@ -40,6 +40,8 @@ import { cleanupUploadDir } from '../modules/common/handlers/uploads'
 import { TerminalManager } from '@/terminal/TerminalManager'
 import { applyVersionedAck } from './versionedUpdate'
 import { buildHubRequestHeaders, buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
+import { PeerDeliverBroker } from './peerDeliverBroker'
+import { receivePeerCapabilityFromRunner } from './peerCapabilityInject'
 
 /**
  * XML tags that Claude Code injects as `type:'user'` messages.
@@ -172,8 +174,17 @@ export type PendingSessionSnapshot = {
 }
 
 export type ApiSessionClientOptions = {
-    materialize?: (snapshot: PendingSessionSnapshot, signal: AbortSignal) => Promise<Session>
+    materialize?: (snapshot: PendingSessionSnapshot, signal: AbortSignal) => Promise<
+        Session & { sessionCapability?: string }
+    >
     onMaterialized?: (session: Session, snapshot: PendingSessionSnapshot) => void
+    /** Hub-minted HMAC for attributed peer delivery (#1203). Not agent-visible. */
+    sessionCapability?: string
+    /**
+     * Create-time session tag (not in public Session schema). Required for hub
+     * to re-mint peer-capability on the CLI socket — siblings cannot guess it.
+     */
+    sessionTag?: string
 }
 
 type PendingOutboundEvent = {
@@ -233,6 +244,17 @@ function hasSameJsonValue(left: unknown, right: unknown): boolean {
 export class ApiSessionClient extends EventEmitter {
     private readonly token: string
     readonly sessionId: string
+    /** Session-scoped peer capability from hub create/load; never exported to agent env. */
+    private sessionCapability: string | null
+    /** Create-time tag for tag-gated peer-capability mint on the CLI socket. */
+    private sessionTag: string | null
+    private peerCapabilityWaiters: Array<{
+        resolve: (capability: string | null) => void
+        timer: ReturnType<typeof setTimeout>
+    }> = []
+    /** Parent-only broker so child `hapi ping-peer` never handles the bearer. */
+    private peerDeliverBroker: PeerDeliverBroker | null = null
+    private peerBrokerReady: Promise<void> | null = null
     private metadata: Metadata | null
     private metadataVersion: number
     private agentState: AgentState | null
@@ -278,10 +300,104 @@ export class ApiSessionClient extends EventEmitter {
     private readonly pendingOutboundEvents: PendingOutboundEvent[] = []
     private didWarnPendingQueueFull = false
 
+    /** Capability for attributed peer delivery; null outside a hub-minted session. */
+    getPeerSessionCapability(): string | null {
+        return this.sessionCapability
+    }
+
+    /**
+     * Wait until a peer-delivery capability is available (create/load/socket),
+     * or until timeout. Used so resumed MCP ping_peer does not snapshot null
+     * and silently send unattributed (pass 2c M3).
+     */
+    async waitForPeerSessionCapability(options?: { timeoutMs?: number }): Promise<string | null> {
+        let capability = this.sessionCapability
+        if (!capability) {
+            const timeoutMs = options?.timeoutMs ?? 5_000
+            capability = await new Promise<string | null>((resolve) => {
+                const timer = setTimeout(() => {
+                    this.peerCapabilityWaiters = this.peerCapabilityWaiters.filter((waiter) => waiter.timer !== timer)
+                    resolve(this.sessionCapability)
+                }, timeoutMs)
+                this.peerCapabilityWaiters.push({ resolve, timer })
+            })
+        }
+        if (!capability) {
+            return null
+        }
+        // Broker env must be exported before agents snapshot process.env (#1473).
+        await this.ensurePeerDeliverBrokerReady()
+        return capability
+    }
+
+    private applyPeerSessionCapability(capability: string, source: 'options' | 'materialize' | 'socket'): void {
+        const trimmed = capability.trim()
+        if (!trimmed) return
+        const wasUnset = !this.sessionCapability
+        this.sessionCapability = trimmed
+        // Never persist tag/capability under shared HAPI_HOME — same-UID siblings
+        // can read mode-0600 files (pass 2d B3). Keep bearer in parent memory only
+        // and expose delivery via PeerDeliverBroker.
+        void this.ensurePeerDeliverBrokerReady()
+        if (source === 'socket') {
+            logger.debug(`[API] Peer session capability recovered for ${this.sessionId}`)
+        }
+        // Resume inject lands after the first connect; refresh socket auth and
+        // reconnect so hub grants sessionRpcAuthorizedId (#1473 Major).
+        if (wasUnset && this.socket) {
+            const auth = this.socket.auth
+            if (auth && typeof auth === 'object') {
+                this.socket.auth = { ...auth, sessionCapability: trimmed }
+            }
+            if (this.socket.connected) {
+                this.socket.disconnect()
+                this.socket.connect()
+            }
+        }
+        const waiters = this.peerCapabilityWaiters.splice(0)
+        for (const waiter of waiters) {
+            clearTimeout(waiter.timer)
+            waiter.resolve(trimmed)
+        }
+    }
+
+    private ensurePeerDeliverBrokerReady(): Promise<void> {
+        if (this.peerBrokerReady) {
+            return this.peerBrokerReady
+        }
+        const capability = this.sessionCapability
+        if (!capability) {
+            return Promise.resolve()
+        }
+        this.peerBrokerReady = (async () => {
+            try {
+                if (!this.peerDeliverBroker) {
+                    this.peerDeliverBroker = new PeerDeliverBroker({
+                        sessionId: this.sessionId,
+                        sessionCapability: capability,
+                    })
+                }
+                await this.peerDeliverBroker.start()
+            } catch (error) {
+                this.peerDeliverBroker = null
+                this.peerBrokerReady = null
+                logger.debug(`[API] Peer deliver broker failed to start for ${this.sessionId}`, error)
+                // Propagate so launchers do not spawn with a missing broker env (#1473).
+                throw error
+            }
+        })()
+        return this.peerBrokerReady
+    }
+
     constructor(token: string, session: Session, options: ApiSessionClientOptions = {}) {
         super()
         this.token = token
         this.sessionId = session.id
+        this.sessionTag = options.sessionTag?.trim() || null
+        this.sessionCapability = null
+        if (options.sessionCapability?.trim()) {
+            this.applyPeerSessionCapability(options.sessionCapability, 'options')
+        }
         this.metadata = session.metadata
         this.metadataVersion = session.metadataVersion
         this.agentState = session.agentState
@@ -303,7 +419,9 @@ export class ApiSessionClient extends EventEmitter {
             auth: {
                 token: this.token,
                 clientType: 'session-scoped' as const,
-                sessionId: this.sessionId
+                sessionId: this.sessionId,
+                ...(this.sessionTag ? { sessionTag: this.sessionTag } : {}),
+                ...(this.sessionCapability ? { sessionCapability: this.sessionCapability } : {}),
             },
             path: '/socket.io/',
             reconnection: true,
@@ -420,6 +538,25 @@ export class ApiSessionClient extends EventEmitter {
             // Last viewer left — stop streaming the PTY to the hub.
             this.agentTerminalActive = false
         }))
+
+        // Resume recovery (#1203 pass 2h): runner redeems spawn nonce and
+        // injects capability over a PID-checked unix socket — not /cli connect.
+        void receivePeerCapabilityFromRunner().then((capability) => {
+            if (capability) {
+                this.applyPeerSessionCapability(capability, 'options')
+            }
+        })
+
+        // Create-path recovery: hub mints when handshake carries create-time tag.
+        this.socket.on('peer-capability', (data) => {
+            if (!data || typeof data !== 'object') return
+            if (data.sessionId !== this.sessionId) return
+            const capability = typeof data.sessionCapability === 'string'
+                ? data.sessionCapability.trim()
+                : ''
+            if (!capability) return
+            this.applyPeerSessionCapability(capability, 'socket')
+        })
 
         this.socket.on('update', (data: Update, ack?: (response: { removed: boolean }) => void) => {
             try {
@@ -545,6 +682,11 @@ export class ApiSessionClient extends EventEmitter {
                 this.metadataVersion = materialized.metadataVersion
                 this.agentState = materialized.agentState
                 this.agentStateVersion = materialized.agentStateVersion
+                if (typeof materialized.sessionCapability === 'string' && materialized.sessionCapability.trim()) {
+                    this.applyPeerSessionCapability(materialized.sessionCapability, 'materialize')
+                    // Lazy Codex/MCP spawn races broker listen otherwise (#1473 Major).
+                    await this.ensurePeerDeliverBrokerReady()
+                }
                 this.state = 'active'
 
                 if (shouldSyncMetadata && latestMetadata) {
@@ -1449,6 +1591,8 @@ export class ApiSessionClient extends EventEmitter {
         this.materializationRetryAbortController = null
         this.awaitingMaterializedConnection = false
         this.pendingOutboundEvents.length = 0
+        this.peerDeliverBroker?.stop()
+        this.peerDeliverBroker = null
         this.rpcHandlerManager.onSocketDisconnect()
         this.terminalManager.closeAll()
         this.socket.disconnect()

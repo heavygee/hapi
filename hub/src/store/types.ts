@@ -27,6 +27,13 @@ export type StoredSession = {
 export type StoredMachine = {
     id: string
     namespace: string
+    /** Create-time secret for machine-scoped socket/RPC auth (#1203). */
+    tag: string | null
+    /**
+     * sha256(runnerProof) bound at HTTP register. Socket auth may prove this
+     * generation but must not first-claim a new one (#1473 Blocker).
+     */
+    runnerProofHash: string | null
     createdAt: number
     updatedAt: number
     metadata: unknown | null

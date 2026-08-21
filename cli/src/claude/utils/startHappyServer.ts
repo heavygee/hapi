@@ -298,10 +298,23 @@ function createHapiMcpServer(
     }, async (args: { sessionIdPrefix: string; message: string }) => {
         logger.debug('[hapiMCP] ping_peer:', args.sessionIdPrefix);
         try {
-            const result = await pingPeer({
-                sessionIdPrefix: args.sessionIdPrefix,
-                message: args.message,
-            });
+            // Await capability so runner resume does not snapshot null and
+            // silently send unattributed (pass 2c M3). Terminal resume never
+            // receives a mint tag (pass 2e-alt M2) — fall back to unattributed
+            // peer mark rather than permanent auth_failed.
+            const sessionCapability = await client.waitForPeerSessionCapability({ timeoutMs: 5_000 })
+            const result = sessionCapability
+                ? await pingPeer({
+                    sessionIdPrefix: args.sessionIdPrefix,
+                    message: args.message,
+                    // Hub binds provenance to this session via capability-gated CLI route.
+                    authenticatedSourceSessionId: client.sessionId,
+                    sessionCapability,
+                })
+                : await pingPeer({
+                    sessionIdPrefix: args.sessionIdPrefix,
+                    message: args.message,
+                });
             return {
                 content: [
                     {

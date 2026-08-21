@@ -39,6 +39,10 @@ export type MachineHandlersDeps = {
     onWebappEvent?: (event: SyncEvent) => void
 }
 
+function isSocketBoundToMachine(socket: CliSocketWithData, machineId: string): boolean {
+    return socket.data.machineRpcAuthorizedId === machineId
+}
+
 export function registerMachineHandlers(socket: CliSocketWithData, deps: MachineHandlersDeps): void {
     const { store, resolveMachineAccess, emitAccessError, onMachineAlive, onWebappEvent } = deps
 
@@ -49,6 +53,11 @@ export function registerMachineHandlers(socket: CliSocketWithData, deps: Machine
         const machineAccess = resolveMachineAccess(data.machineId)
         if (!machineAccess.ok) {
             emitAccessError('machine', data.machineId, machineAccess.reason)
+            return
+        }
+        // Namespace token is not possession of this runner generation (#1473).
+        if (!isSocketBoundToMachine(socket, data.machineId)) {
+            emitAccessError('machine', data.machineId, 'access-denied')
             return
         }
         onMachineAlive?.(data)
@@ -65,6 +74,10 @@ export function registerMachineHandlers(socket: CliSocketWithData, deps: Machine
         const machineAccess = resolveMachineAccess(id)
         if (!machineAccess.ok) {
             cb({ result: 'error', reason: machineAccess.reason })
+            return
+        }
+        if (!isSocketBoundToMachine(socket, id)) {
+            cb({ result: 'error', reason: 'access-denied' })
             return
         }
 
@@ -105,6 +118,10 @@ export function registerMachineHandlers(socket: CliSocketWithData, deps: Machine
         const machineAccess = resolveMachineAccess(id)
         if (!machineAccess.ok) {
             cb({ result: 'error', reason: machineAccess.reason })
+            return
+        }
+        if (!isSocketBoundToMachine(socket, id)) {
+            cb({ result: 'error', reason: 'access-denied' })
             return
         }
 

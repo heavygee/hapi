@@ -3,7 +3,10 @@ import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
 import type { CopilotAgentMode } from '@hapi/protocol'
 import type { AgentState, CodexCollaborationMode, Metadata, PermissionMode } from '@hapi/protocol/types'
-import { isRedundantGoalStatusEventContent } from '@hapi/protocol/messages'
+import {
+    isRedundantGoalStatusEventContent,
+    unwrapRoleWrappedRecordEnvelope,
+} from '@hapi/protocol/messages'
 import type { Store, StoredSession } from '../../../store'
 import type { SyncEvent } from '../../../sync/syncEngine'
 import { extractTodoWriteTodosFromMessageContent } from '../../../sync/todos'
@@ -68,7 +71,13 @@ const updateStateSchema = z.object({
     agentState: z.unknown().nullable()
 })
 
-const HUB_OWNED_METADATA_KEYS = ['supersededBySessionId', 'opencodeClearOperation'] as const
+const HUB_OWNED_METADATA_KEYS = [
+    'supersededBySessionId',
+    'opencodeClearOperation',
+    // machineId gates local-resume-capability mint (#1473). Client-writable
+    // rewrite would let a sibling redirect the mint to its own proven machine.
+    'machineId',
+] as const
 
 function preserveHubOwnedMetadata(incoming: unknown, current: unknown): unknown {
     if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return incoming
@@ -130,6 +139,28 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
         const session = sessionAccess.value
 
         if (isRedundantGoalStatusEventContent(content)) {
+            return
+        }
+
+        // Trusted peer provenance is minted only via the capability HTTP route.
+        // Generic CLI `message` must not forge meta.sentFrom === 'peer' (#1473).
+        // Unwrap envelopes the web path accepts (`message` / `data.message` /
+        // `payload.message`) before the check — top-level-only was bypassable.
+        const peerProvenanceRecord = unwrapRoleWrappedRecordEnvelope(content)
+        const peerMeta = peerProvenanceRecord?.meta
+        if (
+            peerProvenanceRecord?.role === 'user'
+            && peerMeta
+            && typeof peerMeta === 'object'
+            && !Array.isArray(peerMeta)
+            && (peerMeta as { sentFrom?: unknown }).sentFrom === 'peer'
+        ) {
+            socket.emit('error', {
+                message: 'Peer provenance requires the capability route',
+                code: 'access-denied',
+                scope: 'session',
+                id: sid,
+            })
             return
         }
 
@@ -347,6 +378,13 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
         const sessionAccess = resolveSessionAccess(data.sid)
         if (!sessionAccess.ok) {
             emitAccessError('session', data.sid, sessionAccess.reason)
+            return
+        }
+        // Heartbeat refreshes `active` used by archive veto — only session-RPC-
+        // authorized sockets may refresh it. Namespace token alone must not
+        // keep a victim session un-archivable forever (#1473).
+        if (socket.data.sessionRpcAuthorizedId !== data.sid) {
+            emitAccessError('session', data.sid, 'access-denied')
             return
         }
         onSessionAlive?.(data)

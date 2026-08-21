@@ -44,7 +44,7 @@ hapi resume
 hapi resume <session-id>
 ```
 
-`hapi resume` lists resumable sessions for the current machine. `hapi resume <session-id>` hands off an active remote session and opens the same HAPI session in the local terminal.
+`hapi resume` lists resumable sessions for the current machine. `hapi resume <session-id>` hands off an active remote session and opens the same HAPI session in the local terminal when inject env or a peercred grant from a tracked session tree is available; otherwise resume from the web UI (same-UID provenance fails closed for unrelated shells).
 
 ### Authentication
 
