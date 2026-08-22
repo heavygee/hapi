@@ -69,4 +69,4 @@ hapi-prune-stale-cursor-mcp
 - If Cursor native MCP tools work after overlay install **and** `hapiMcpUrl` answers on loopback → wiring is correct.
 - If someone "fixes" MCP by setting `--url` to `:3006` → reject; that is the wrong layer.
 - If project mcp.json is the only place live `hapi-*` appears on oos → user-level overlay is still broken (symlink refuse / missing follow); do not normalize on project files.
-- If a session's outbound ping has verified chips but `meta.peer.sourceSessionId` is another live HAPI uuid → multiplex, not hub scramble. Do not "fix" by rewriting provenance on the victim PR.
+- If a session's outbound ping shows a nametag chip but `meta.peer.sourceSessionId` is another live HAPI uuid → MCP multiplex (user `hapi-*` keys), not hub scramble. Do not "fix" by adding session-proof HMAC on the victim PR — see [#1613](https://github.com/tiann/hapi/pull/1613).

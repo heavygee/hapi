@@ -26,7 +26,17 @@ Copy and fill this block (do not spawn a peer with only "implement X"):
 
 ```markdown
 ## Parent
-- Orchestrator session: <cursor-session-id or HAPI session URL>
+- Orchestrator: `Name: <session display name>` + `agentSessionId: <metadata.agentSessionId>`
+  (**durable identity — do NOT write a bare hub session id here.** Hub ids are ephemeral: a relaunch
+  presents a new tag, `sessionCache` merges state onto a new row and **deletes** the old, so any id
+  pasted into this brief goes dead and the peer's loop-closure ping fails silently with "Session not
+  found". `agentSessionId` survives that merge. A hub id/URL may be included as a convenience copy,
+  but must be labelled ephemeral and never used as the return address. Note this is an **addressing
+  hint for resolution, not an identity assertion** — soft peer nametag comes from hub
+  `meta.peer.sourceSessionId` (CLI path + namespace-token trust; **not** verified / not capability
+  HMAC). Client-written `From:` text is a reply hint only. See `docs/operator/AGENTS.md` § Peer
+  message identity and its kill criterion: never pass a session id as a tool argument or body field
+  expecting crypto-authenticated identity.)
 - Operator request: <verbatim>
 
 ## Intake status (orchestrator completed)
@@ -45,7 +55,7 @@ Copy and fill this block (do not spawn a peer with only "implement X"):
 - Before operator browser test: pass §6 (typecheck, test, cold review, Playwright + visual evidence)
 - Report back to orchestrator with: demo URLs, **visual evidence inline in HAPI chat** (§6.4 — use `display_image` / `hapi-display-image.mjs`; PNG always for UI; GIF or short MP4 when interaction tier applies), test output, diff stat
 - **Session title:** workstream only — e.g. `opt-in awareness`. Pre-PR incubating may use `Peer #<issue>: <slug>`. **No** status emoji (✅🔁⚠️📝🔧) and **no** `PR #N:` once a PR exists (chip owns identity). After the upstream PR exists, attach with `hapi link-pr <url>` / MCP `link_pr` / Link PR dialog (lifecycle § Session titles and PR chips).
-- **Close the loop (mandatory):** when done or blocked, `hapi ping-peer` / MCP `ping_peer` the **orchestrator HAPI session id** above (**spawn parent only** — never CC Meta PR watcher unless that session **is** the parent). Message **must** open with `From: /sessions/<your-id>` (and optional `Name:`) then verdict + pointer to this peer — see [`docs/operator/AGENTS.md`](../operator/AGENTS.md) § Peer message identity + quieter Meta. Then emit `AGENT_NOTIFY_SUMMARY`. Do **not** treat the summary line alone as notification. "Ping only if blocked" is for mid-task escalation, not for signaling completion.
+- **Close the loop (mandatory):** when done or blocked, resolve the orchestrator to its **current** id first — `scripts/tooling/hapi-overseer-call.sh resolve '<name or agentSessionId above>'` (TSV `hubId<TAB>active|idle<TAB>agentSessionId<TAB>name`, take line 1) — then `hapi ping-peer` / MCP `ping_peer` **that** id (**spawn parent only** — never CC Meta PR watcher unless that session **is** the parent). Message **must** open with `From:` your **name** (and `agentSessionId` if known) rather than a bare `/sessions/<id>` — read `$HAPI_SESSION_ID` fresh if you quote a hub id at all, never a value cached from earlier in your own transcript then verdict + pointer to this peer — see [`docs/operator/AGENTS.md`](../operator/AGENTS.md) § Peer message identity + quieter Meta. Then emit `AGENT_NOTIFY_SUMMARY`. Do **not** treat the summary line alone as notification. "Ping only if blocked" is for mid-task escalation, not for signaling completion.
 
 ## Links
 - Issue: ...

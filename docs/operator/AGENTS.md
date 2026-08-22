@@ -19,7 +19,7 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 | Local soup / remat / kitchen / process feedback | Ping **tooling meta-bot** (`HAPI_META_TOOLING_SESSION_ID` / `config/remat-escalate.yaml`) — **never** PR watcher | § Two Meta sessions (2026-08-15) |
 | Read another HAPI session | Same — no JWT+curl | `hapi inspect-peer <id>` / MCP `inspect_peer` (read-only, no resume). Citations: `[title](/sessions/<id>)` → pass `<id>` |
 | Proof / screenshots / clips for operator | **Inline into HAPI chat** — do not only paste paths | **Estate default (this host only):** `~/coding/server-setup/docs/operator-visible-proof.md`. Off-host / other-repo peers: skill **`localize-estate-guidance`**. HAPI deep dive: lifecycle [§ Proof tiers](../tooling/feature-work-lifecycle.md#proof-tiers-images-and-video). **Playwright videos:** annotated pointer + `clickForHuman` (dwell on result) — raw `recordVideo` is a fail. Default branch language: **main**. MCP `display_image` / `display_video`, or `bun scripts/tooling/hapi-display-image.mjs <session-prefix> <abs-path> [title]` |
-| Stale Cursor `mcp.json` / hub-move MCP panic | **Hub ≠ MCP URL.** Strip project `hapi`/`hapi-*` sidecars; never rewrite `--url` to `:3006`. Live HAPI Cursor sessions overlay **user-level** `~/.cursor/mcp.json` → loopback `hapiMcpUrl`. **Live multiplex:** N `hapi-<uuid>` keys ⇒ N `ping_peer` tools; model may invoke a *foreign* session sidecar (P0.5 chip then wrong process). Not a hub ID scramble; not a #1473 CI fix | [`cursor-hapi-mcp.md`](../tooling/cursor-hapi-mcp.md); prune: `hapi-prune-stale-cursor-mcp` |
+| Stale Cursor `mcp.json` / hub-move MCP panic | **Hub ≠ MCP URL.** Strip project `hapi`/`hapi-*` sidecars; never rewrite `--url` to `:3006`. Live HAPI Cursor sessions overlay **user-level** `~/.cursor/mcp.json` → loopback `hapiMcpUrl`. **Live multiplex:** N `hapi-<uuid>` keys ⇒ N `ping_peer` tools; model may invoke a *foreign* session sidecar (chip shows wrong session). Fix: [#1613](https://github.com/tiann/hapi/pull/1613) project `hapi` isolation — not nametag / #1618 | [`cursor-hapi-mcp.md`](../tooling/cursor-hapi-mcp.md); prune: `hapi-prune-stale-cursor-mcp` |
 | Cursor ACP `Authentication required` / account flip on proxmox (or after auth switch) | **oos `~/.config/cursor/auth.json` is source of truth** — derive `api-key.env` + `~/.hapi/cursor.env`, `chattr +i`, restart **runner only**; no commented dual-key museums | [`cursor-auth-fleet-sync.md`](../tooling/cursor-auth-fleet-sync.md) |
 | Link operator to a file/doc in HAPI chat | Write path as **bare text** — no `[](...)`, no backticks | HAPI auto-links bare paths → in-app file viewer (`remarkFilePathLinks`). Only allowlisted extensions link; **wrap `.mmd`/exotic in a `.md`** so it's clickable + previewable. Tracking: [tiann/hapi#1120](https://github.com/tiann/hapi/issues/1120) |
 | New behavior intake / peer spawn | Follow intake §0; **`hapi-spawn-peer`** until upstream [#1509](https://github.com/tiann/hapi/issues/1509) (`spawn_peer` MCP + CLI). Spawn HTTP ≠ handoff | [`new-feature-intake.md`](../tooling/new-feature-intake.md); postmortem [`2026-08-11-spawn-peer-empty-shell-postmortem.md`](../plans/2026-08-11-spawn-peer-empty-shell-postmortem.md) |
@@ -67,18 +67,29 @@ Canon also in `.cursor/rules/hapi-session.mdc` (alwaysApply).
 
 ---
 
-## Peer message identity (#1203 / soup #1473)
+## Peer message identity (#1203 — soft nametag, not verified provenance)
 
-Hub-attributed peer delivery is in the driver soup (PR [#1473](https://github.com/tiann/hapi/pull/1473), issue [#1203](https://github.com/tiann/hapi/issues/1203), A2A RFC P0.5). The chip is **verified** only when the hub stored `meta.sentFrom: "peer"` + `meta.peer.sourceSessionId` from a session capability. Client `From:` text is display-only (⚠ unverified). Bare CLI / systemd with no capability is **unknown peer**.
+**Product bet (2026-08):** [nametag-only thesis](../plans/2026-08-17-a2a-nametag-only-thesis.md). Upstream [#1473](https://github.com/tiann/hapi/pull/1473) **closed without merge** (fortress / capability / session-proof HMAC rejected). Shipping path: [#1618](https://github.com/tiann/hapi/pull/1618) → Fixes [#1203](https://github.com/tiann/hapi/issues/1203).
 
-**Kill criterion still holds:** never pass `sourceSessionId` as a tool argument or JSON body field and treat it as truth.
+**Trust model (intentional):** shared `CLI_API_TOKEN` already lets a holder act as any session in the namespace (same as every `/cli/sessions/:id/*` route). Peer nametags are **UX routing hints** (web `@session` chip + agent `From:` line) — **not** anti-impersonation, **not** session-proof HMAC, **not** in-memory capability theater. **Spoof-within-token is accepted.**
+
+| Signal | Meaning |
+|--------|---------|
+| Hub `meta.sentFrom: "peer"` + optional `meta.peer.sourceSessionId` | Soft nametag stamped from CLI path `:id` + session-row lookup (optional display name). Same namespace-token trust as other CLI session routes. |
+| Web JWT body `peer` / `sourceSessionId` | **Ignored** — browser cannot invent a nametag |
+| Agent `From: /sessions/<id>` in message text | **Reply routing hint** — not a cryptographic proof. Agents should still use it. |
+| Unattributed peer (`hapi ping-peer` outside a session) | `sentFrom: peer`, no source id → unattributed / unknown-peer chip |
 
 | Mechanism | What the recipient sees |
 |-----------|-------------------------|
-| MCP `ping_peer` inside a wrapped session | Verified `@session` chip (parent broker / in-memory capability). Still open with `From:` so agents that only read text can reply. |
-| `hapi-ping-peer` inside a wrapped session (`HAPI_SESSION_ID` + broker) | Same verified chip. Script also auto-stamps `From:` when not attributing. |
-| systemd timers (`hapi-meta-daily.timer`) | Not a broker descendant. Estate helper mints the hub HMAC for `HAPI_META_SESSION_ID` and POSTs `/cli/sessions/:source/peer-messages`. Set that full UUID in `~/.hapi/meta-daily.env`. Timer-only — agents must not copy the mint. |
-| CLI outside a session, mint unset | Unattributed peer row → **unknown peer** ⚠. If `HAPI_SESSION_ID` is set, `From:` yields an unverified chip, not a verified one. |
+| MCP `ping_peer` inside a wrapped session | Attributed nametag via `POST /cli/sessions/:source/peer-messages` (`HAPI_SESSION_ID` / MCP client session id). Still open pings with `From:` for text-only agents. |
+| `hapi ping-peer` inside a wrapped session | Same. Script auto-stamps `From:` when `HAPI_SESSION_ID` is set (skip with `HAPI_PING_PEER_SKIP_FROM=1` if body already has it). |
+| systemd timers (`hapi-meta-daily.timer`) | Estate helper POSTs `/cli/sessions/:source/peer-messages` for `HAPI_META_SESSION_ID` in `~/.hapi/meta-daily.env` — **operator automation only**; agents must not copy the mint pattern. |
+| CLI outside a session | Unattributed peer row only (no invented source id). |
+
+**Agents: do not describe nametags as "verified", "trusted provenance", or "capability-bound".** That was the rejected #1473 direction. Historical postmortems under `docs/plans/*1473*` are archaeology, not current product.
+
+**Kill criterion (still holds):** never pass `sourceSessionId` as an MCP tool argument or JSON body field and treat it as authenticated identity. Attributed delivery uses the CLI route path only.
 
 **Every agent-authored message to another HAPI session MUST still open with:**
 
@@ -87,7 +98,7 @@ From: /sessions/<your-full-or-8+-char-hapi-session-id>
 Name: <optional metadata.name>
 ```
 
-Then the body. No exceptions for "obvious from context," Meta briefs, or close-the-loop pings. `hapi-ping-peer` auto-prepends `From:` when `HAPI_SESSION_ID` is set (skip with `HAPI_PING_PEER_SKIP_FROM=1` if the body already has it). MCP `ping_peer` does not — you type the stamp.
+Then the body. No exceptions for "obvious from context," Meta briefs, or close-the-loop pings. `hapi-ping-peer` auto-prepends `From:` when `HAPI_SESSION_ID` is set. MCP `ping_peer` does not — you type the stamp.
 
 Do not invent a parallel auth protocol. Do not set `HAPI_ESTATE_PEER_ATTRIBUTE=1` from an agent shell.
 
@@ -235,7 +246,7 @@ sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh
 | `hapi-meta-daily.timer` | **hourly :00 Europe/London** (+ up to 2m random; BST/GMT) | full Meta (peer pings + wave-clear unlock) |
 | `hapi-meta-daily-refresh.timer` | **retired 2026-08-04** (unit kept for `install --disable`) | do not enable; escape hatch `hapi-meta-daily.sh --no-ping --emit-events` |
 
-Hourly London `:00` is the only live tick — chips, policy-ping, wave-clear unlock. Chip UI mutes to `?` when `statusCheckedAt` is older than **3h** (`config/pr-chip-states.yaml` / `$HAPI_HOME/pr-chip-display.json` staleMs). Host TZ on oos may stay `Etc/UTC`; the timer unit suffixes `Europe/London` so the hour is operator-local, not UTC. Units: `scripts/tooling/systemd/hapi-meta-daily*`. Optional env: `~/.hapi/meta-daily.env` (`HAPI_META_SESSION_ID` = Meta watcher **full UUID** so hourly pings get a verified chip, `HAPI_META_TOOLING_SESSION_ID` = wave-clear unlock **target**, `HAPI_META_WAVE_COLLECT_SECS`). Chip UI never live-queries GitHub. Logs: `journalctl -u hapi-meta-daily`.
+Hourly London `:00` is the only live tick — chips, policy-ping, wave-clear unlock. Chip UI mutes to `?` when `statusCheckedAt` is older than **3h** (`config/pr-chip-states.yaml` / `$HAPI_HOME/pr-chip-display.json` staleMs). Host TZ on oos may stay `Etc/UTC`; the timer unit suffixes `Europe/London` so the hour is operator-local, not UTC. Units: `scripts/tooling/systemd/hapi-meta-daily*`. Optional env: `~/.hapi/meta-daily.env` (`HAPI_META_SESSION_ID` = Meta watcher **full UUID** so hourly pings get an **attributed** nametag chip (operator automation via `/cli/.../peer-messages`, not agent crypto), `HAPI_META_TOOLING_SESSION_ID` = wave-clear unlock **target**, `HAPI_META_WAVE_COLLECT_SECS`). Chip UI never live-queries GitHub. Logs: `journalctl -u hapi-meta-daily`.
 
 What it does, idempotently:
 

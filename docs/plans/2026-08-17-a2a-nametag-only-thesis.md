@@ -27,7 +27,9 @@ When agent A talks to agent B, B (and the human) should see a light **nametag** 
 - Millions of tokens of bot↔bot churn.
 - Product disruption far beyond “nametag for replies.”
 
-**Decision:** close upstream #1473 as overweight. Regroup on nametag-only. Residual recovery ideas (if ever needed) stay optional later (#1486) - not blocking A2A hello.
+**Decision:** close upstream #1473 as overweight. Regroup on nametag-only ([#1618](https://github.com/tiann/hapi/pull/1618)). Residual recovery ideas (if ever needed) stay optional later (#1486) - not blocking A2A hello.
+
+**Operator canon (2026-08-22):** `docs/operator/AGENTS.md` § Peer message identity updated — agents must **not** describe nametags as verified/trusted/capability-bound.
 
 ---
 
