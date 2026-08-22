@@ -10,8 +10,19 @@ Related (different problem): [`cursor-hapi-mcp.md`](./cursor-hapi-mcp.md) — MC
 |------|------|-----------------------------------|
 | **oos-linux** | Hub `:3006` + local runner | `hapi-runner-oos.service` → `EnvironmentFile=-~/.hapi/cursor.env` + `~/.config/hapi-oos-agent.env` + `ExecStartPre=~/.hapi/pin-cursor-auth.sh` |
 | **proxmox** (homelab) | Fleet runner only | `hapi-runner.service.d/20-cursor-api-key.conf` → `~/.config/cursor/api-key.env`; optional `25-pin-cursor-auth.conf` → same pin script |
+| **Teemo** (Windows) | Fleet runner | `~/.hapi/cursor.env` (multi-line: HAPI + `CURSOR_API_KEY`); `start-runner-hidden.ps1` loads it; `~/.config/cursor/auth.json` |
 
 Hub JWT / CLI token is unrelated. This doc is only **Cursor Agent** login (`agent` / ACP).
+
+### SSH to Teemo from oos-linux
+
+No direct LAN route from oos → Teemo. Use the SSH config alias (ProxyJump via proxmox):
+
+```bash
+ssh teemo          # ~/.ssh/config: Host teemo → ProxyJump proxmox → 192.168.86.101 (HeavyGee)
+```
+
+From proxmox alone: `ssh HeavyGee@192.168.86.101` (LAN). Do **not** use `teemo.lan` — it does not resolve.
 
 ## Source of truth
 
@@ -39,7 +50,8 @@ Everything else is **derived** from `apiKey`:
 
 Mitigations:
 
-1. **`scripts/tooling/pin-cursor-auth.sh`** (also installed as `~/.hapi/pin-cursor-auth.sh`) — on runner start: keep `auth.json`, `api-key.env`, and `hapi-oos-agent.env` aligned with `cursor.env` (preserve oauth tokens in `auth.json` when possible).
+1. **`scripts/tooling/pin-cursor-auth.sh`** (Linux; installed as `~/.hapi/pin-cursor-auth.sh`) — on runner start: keep `auth.json`, `api-key.env`, and `hapi-oos-agent.env` aligned with `cursor.env`.
+2. **`scripts/tooling/windows/pin-cursor-auth.ps1`** (Teemo) — merge `CURSOR_API_KEY` into `~/.hapi/cursor.env` without dropping `HAPI_API_URL` / `CLI_API_TOKEN`; rewrite `api-key.env`.
 2. **Do not leave `chattr +i` on `auth.json` during normal ops.** Cursor opens the file read/write for token refresh. Immutable → `EPERM` → ACP `session/new` / `session/load` fail with opaque **`Internal error`**, and `agent -p` dies. Use `+i` only for a short window while copying/syncing if you must, then **`chattr -i` before any agent/runner work**.
 
 Pin may temporarily unlock; it must not leave the file immutable afterward if agents need to run.
@@ -112,17 +124,22 @@ Hub `POST /api/machines/:id/restart-runner` may return `restart_unavailable` on 
 ## Verify (no secrets)
 
 ```bash
-# Fleet-wide (sha12 table; exit 1 on drift, 2 if a host is unreachable):
+# Fleet-wide (sha12 table; exit 1 on drift, 2 if a probed host is unreachable):
 ~/coding/hapi/scripts/tooling/hapi-cursor-auth-audit.sh
 ~/coding/hapi/scripts/tooling/hapi-cursor-auth-audit.sh --quiet   # only problem rows
 
-# Single host:
+# Single host (oos only):
 ~/coding/hapi/scripts/tooling/hapi-cursor-auth-audit.sh --local-only
 ```
 
-Canonical for drift is **`~/.hapi/cursor.env`** (what `pin-cursor-auth.sh` enforces). Live `agent` ACP processes can rewrite `auth.json` to a stale refresh token between runner restarts — that is expected noise if `cursor.env`, `api-key.env`, and the runner still MATCH.
+Teemo is probed over `ssh teemo` (ProxyJump proxmox). Windows hosts use `scripts/tooling/windows/hapi-cursor-auth-audit.ps1`.
+
+Canonical for drift is **`~/.hapi/cursor.env`** (what `pin-cursor-auth.sh` / `.ps1` enforces). Live `agent` ACP processes can rewrite `auth.json` to a stale refresh token between runner restarts — expected noise if `cursor.env`, `api-key.env`, and the runner still MATCH.
 
 Per-host manual check:
+
+```bash
+# Same apiKey hash on both hosts; oauth fields present; envs match auth
 python3 - <<'PY'
 import json, hashlib
 from pathlib import Path

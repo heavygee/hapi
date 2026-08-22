@@ -34,12 +34,15 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# host_id|ssh_target|runner_unit|extra_env_paths (comma-separated, optional)
+# host_id|ssh_target|runner_unit|extra_env_paths|platform (linux|windows)
 FLEET_HOSTS=(
-    "oos-linux|local|hapi-runner-oos.service|.config/hapi-oos-agent.env"
-    "proxmox|heavygee@192.168.86.73|hapi-runner.service|"
-    "teemo|heavygee@teemo.lan|hapi-runner.service|"
+    "oos-linux|local|hapi-runner-oos.service|.config/hapi-oos-agent.env|linux"
+    "proxmox|heavygee@192.168.86.73|hapi-runner.service||linux"
+    "teemo|teemo|bun||windows"
 )
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WIN_AUDIT_PS1="${SCRIPT_DIR}/windows/hapi-cursor-auth-audit.ps1"
 
 AUDIT_PY=$(cat <<'PY'
 import json
@@ -175,9 +178,27 @@ run_local_audit() {
 }
 
 run_remote_audit() {
-    local host="$1" ssh_target="$2" unit="$3" extra_envs="$4"
-    if ! ssh -o ConnectTimeout=8 -o BatchMode=yes "$ssh_target" \
+    local host="$1" ssh_target="$2" unit="$3" extra_envs="$4" platform="$5"
+    if ! ssh -o ConnectTimeout=12 -o BatchMode=yes "$ssh_target" \
         "HAPI_CURSOR_RUNNER_UNIT='$unit' HAPI_CURSOR_EXTRA_ENVS='$extra_envs' python3 -c $(printf '%q' "$AUDIT_PY")" 2>/dev/null; then
+        echo "{\"canonical_sha12\":null,\"rows\":[{\"check\":\"ssh\",\"sha12\":\"-\",\"status\":\"unreachable\"}],\"drift\":true}"
+        return 1
+    fi
+}
+
+run_windows_remote_audit() {
+    local ssh_target="$1"
+    if [[ ! -f "$WIN_AUDIT_PS1" ]]; then
+        echo "hapi-cursor-auth-audit: missing $WIN_AUDIT_PS1" >&2
+        echo "{\"canonical_sha12\":null,\"rows\":[{\"check\":\"audit-script\",\"sha12\":\"-\",\"status\":\"missing\"}],\"drift\":true}"
+        return 1
+    fi
+    if ! scp -q -o ConnectTimeout=12 -o BatchMode=yes "$WIN_AUDIT_PS1" "${ssh_target}:.hapi/hapi-cursor-auth-audit.ps1" 2>/dev/null; then
+        echo "{\"canonical_sha12\":null,\"rows\":[{\"check\":\"ssh\",\"sha12\":\"-\",\"status\":\"unreachable\"}],\"drift\":true}"
+        return 1
+    fi
+    if ! ssh -o ConnectTimeout=12 -o BatchMode=yes "$ssh_target" \
+        'powershell.exe -NoProfile -ExecutionPolicy Bypass -File .hapi/hapi-cursor-auth-audit.ps1' 2>/dev/null; then
         echo "{\"canonical_sha12\":null,\"rows\":[{\"check\":\"ssh\",\"sha12\":\"-\",\"status\":\"unreachable\"}],\"drift\":true}"
         return 1
     fi
@@ -188,7 +209,8 @@ DRIFT=0
 UNREACHABLE=0
 
 for entry in "${FLEET_HOSTS[@]}"; do
-    IFS='|' read -r host_id ssh_target unit extra_envs <<<"$entry"
+    IFS='|' read -r host_id ssh_target unit extra_envs platform <<<"$entry"
+    platform="${platform:-linux}"
 
     if [[ "$LOCAL_ONLY" -eq 1 && "$ssh_target" != "local" ]]; then
         continue
@@ -200,7 +222,12 @@ for entry in "${FLEET_HOSTS[@]}"; do
         if [[ "$LOCAL_ONLY" -eq 1 ]]; then
             continue
         fi
-        if ! payload=$(run_remote_audit "$host_id" "$ssh_target" "$unit" "$extra_envs"); then
+        if [[ "$platform" == "windows" ]]; then
+            if ! payload=$(run_windows_remote_audit "$ssh_target"); then
+                UNREACHABLE=1
+                DRIFT=1
+            fi
+        elif ! payload=$(run_remote_audit "$host_id" "$ssh_target" "$unit" "$extra_envs" "$platform"); then
             UNREACHABLE=1
             DRIFT=1
         fi
