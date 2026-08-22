@@ -39,7 +39,7 @@ Everything else is **derived** from `apiKey`:
 
 Mitigations:
 
-1. **`~/.hapi/pin-cursor-auth.sh`** — on runner start: if `auth.json.apiKey` ≠ `cursor.env`, rewrite toward `cursor.env` (preserve tokens when possible). Keep derived env files equal to the intended `apiKey`.
+1. **`scripts/tooling/pin-cursor-auth.sh`** (also installed as `~/.hapi/pin-cursor-auth.sh`) — on runner start: keep `auth.json`, `api-key.env`, and `hapi-oos-agent.env` aligned with `cursor.env` (preserve oauth tokens in `auth.json` when possible).
 2. **Do not leave `chattr +i` on `auth.json` during normal ops.** Cursor opens the file read/write for token refresh. Immutable → `EPERM` → ACP `session/new` / `session/load` fail with opaque **`Internal error`**, and `agent -p` dies. Use `+i` only for a short window while copying/syncing if you must, then **`chattr -i` before any agent/runner work**.
 
 Pin may temporarily unlock; it must not leave the file immutable afterward if agents need to run.
@@ -112,7 +112,17 @@ Hub `POST /api/machines/:id/restart-runner` may return `restart_unavailable` on 
 ## Verify (no secrets)
 
 ```bash
-# Same apiKey hash on both hosts; oauth fields present; envs match auth
+# Fleet-wide (sha12 table; exit 1 on drift, 2 if a host is unreachable):
+~/coding/hapi/scripts/tooling/hapi-cursor-auth-audit.sh
+~/coding/hapi/scripts/tooling/hapi-cursor-auth-audit.sh --quiet   # only problem rows
+
+# Single host:
+~/coding/hapi/scripts/tooling/hapi-cursor-auth-audit.sh --local-only
+```
+
+Canonical for drift is **`~/.hapi/cursor.env`** (what `pin-cursor-auth.sh` enforces). Live `agent` ACP processes can rewrite `auth.json` to a stale refresh token between runner restarts — that is expected noise if `cursor.env`, `api-key.env`, and the runner still MATCH.
+
+Per-host manual check:
 python3 - <<'PY'
 import json, hashlib
 from pathlib import Path
