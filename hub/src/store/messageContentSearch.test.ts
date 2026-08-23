@@ -194,7 +194,9 @@ describe('message content search', () => {
                 data: {
                     type: 'message',
                     id: 'pi-stream-1',
-                    message: 'complete terminal response',
+                    // This terminal row is intentionally identical to the
+                    // latest live snapshot, as Pi emits it after an error.
+                    message: 'partial response 2',
                     streamSnapshot: true
                 }
             }
@@ -202,7 +204,7 @@ describe('message content search', () => {
 
         expect(Number((db.prepare('SELECT COUNT(*) AS count FROM message_content_search').get() as { count: number | string }).count))
             .toBe(1)
-        expect(store.messages.searchContent('terminal response', 'default'))
+        expect(store.messages.searchContent('partial response 2', 'default'))
             .toMatchObject([{ sessionId: session.id, messageId: terminal.id }])
     })
 

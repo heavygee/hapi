@@ -89,7 +89,9 @@ export class PiMessageAccumulator {
         if (event.type === 'message_end' || event.type === 'turn_end') {
             const wasActive = this.active;
             const errorMessage = 'message' in event ? extractPiTurnError(event.message) : null;
-            const messages = this.flush(errorMessage === null);
+            // Error-finalized turns still need a non-live terminal text row so
+            // the last visible partial response remains searchable.
+            const messages = this.flush();
             // Pi reports the failure on both message_end and turn_end; emit the
             // error once (first boundary wins) so the web shows a failed turn
             // instead of silent partial text. turn_end doubles as the safety

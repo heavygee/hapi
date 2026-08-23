@@ -106,7 +106,7 @@ describe('PiMessageAccumulator', () => {
         }))).toEqual([]);
     });
 
-    it('appends the error after flushed partial text', () => {
+    it('appends the error after a terminal snapshot of the last partial text', () => {
         let now = 0;
         const accumulator = new PiMessageAccumulator({ now: () => now, streamNonceFactory: () => 'nonce' });
         accumulator.handleEvent(event('turn_start'));
@@ -118,7 +118,12 @@ describe('PiMessageAccumulator', () => {
         }]);
         expect(accumulator.handleEvent(event('message_end', {
             message: { stopReason: 'error', errorMessage: 'stream dropped' },
-        }))).toEqual([{ type: 'error', message: 'stream dropped' }]);
+        }))).toEqual([
+            {
+                type: 'text', text: 'partial answer', id: 'pi-nonce-turn-1-message-1-text-0', streamSnapshot: true,
+            },
+            { type: 'error', message: 'stream dropped' },
+        ]);
     });
 
     it('falls back to turn_end when Pi skips message_end on stream failure', () => {
