@@ -184,6 +184,9 @@ export class ApiClient {
         if (authToken) {
             headers.set('authorization', `Bearer ${authToken}`)
         }
+        if (!headers.has('x-hapi-surface')) {
+            headers.set('x-hapi-surface', 'web')
+        }
         if (init?.body !== undefined && !(init.body instanceof FormData) && !headers.has('content-type')) {
             headers.set('content-type', 'application/json')
         }

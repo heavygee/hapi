@@ -33,6 +33,7 @@ import { loadScratchlistAttachmentLimitsFromEnv } from '../../config/scratchlist
 import { validateScratchlistAttachmentsForWrite, scratchlistSessionBytesBeforeForPut } from '../../scratchlistAttachments/validate'
 import { TitleSuggestionError } from '../../sync/titleSuggestion'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
+import { describeAbortClient } from '../abortClient'
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
@@ -359,6 +360,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return sessionResult
         }
 
+        console.log(`[abort] session=${sessionResult.sessionId} client=${describeAbortClient(c.req.raw.headers)}`)
         await engine.abortSession(sessionResult.sessionId)
         return c.json({ ok: true })
     })
