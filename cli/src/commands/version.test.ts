@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { fetchHubTargetGeneration, type FetchLike } from './version'
 
 describe('fetchHubTargetGeneration', () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { formatHapiCliHelp } from './cliHelp'
 import { resolveCommand } from './registry'
 
