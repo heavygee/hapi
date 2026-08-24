@@ -1,26 +1,23 @@
-import { afterEach, describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 
 import { resolveFcmConfig } from './fcmConfig'
 
-const tempDirs: string[] = []
-afterEach(() => {
-    for (const dir of tempDirs.splice(0)) {
-        rmSync(dir, { recursive: true, force: true })
-    }
-})
-
-function makeServiceAccountFile(
+function withServiceAccountFile(
     contents: object,
+    run: (path: string) => void,
     baseDir: string = tmpdir()
-): string {
+): void {
     const dir = mkdtempSync(join(baseDir, 'hapi-fcm-sa-'))
-    tempDirs.push(dir)
     const path = join(dir, 'service-account.json')
     writeFileSync(path, JSON.stringify(contents))
-    return path
+    try {
+        run(path)
+    } finally {
+        rmSync(dir, { recursive: true, force: true })
+    }
 }
 
 const VALID_ACCOUNT = {
@@ -40,28 +37,31 @@ describe('resolveFcmConfig', () => {
     })
 
     it('loads the service account and takes the project id from the JSON', () => {
-        const path = makeServiceAccountFile(VALID_ACCOUNT)
-        const config = resolveFcmConfig({ fcmServiceAccountPath: path })
-        expect(config).not.toBeNull()
-        expect(config?.projectId).toBe('proj-1')
-        expect(config?.serviceAccountPath).toBe(path)
-        expect(config?.serviceAccount.client_email).toBe(VALID_ACCOUNT.client_email)
+        withServiceAccountFile(VALID_ACCOUNT, (path) => {
+            const config = resolveFcmConfig({ fcmServiceAccountPath: path })
+            expect(config).not.toBeNull()
+            expect(config?.projectId).toBe('proj-1')
+            expect(config?.serviceAccountPath).toBe(path)
+            expect(config?.serviceAccount.client_email).toBe(VALID_ACCOUNT.client_email)
+        })
     })
 
     it('returns null when the JSON has no project_id', () => {
-        const path = makeServiceAccountFile({
+        withServiceAccountFile({
             client_email: VALID_ACCOUNT.client_email,
             private_key: VALID_ACCOUNT.private_key
+        }, (path) => {
+            expect(resolveFcmConfig({ fcmServiceAccountPath: path })).toBeNull()
         })
-        expect(resolveFcmConfig({ fcmServiceAccountPath: path })).toBeNull()
     })
 
     it('expands ~ in the configured path', () => {
-        const path = makeServiceAccountFile(VALID_ACCOUNT, homedir())
-        const config = resolveFcmConfig({
-            fcmServiceAccountPath: `~/${relative(homedir(), path)}`
-        })
-        expect(config?.projectId).toBe('proj-1')
-        expect(config?.serviceAccountPath).toBe(path)
+        withServiceAccountFile(VALID_ACCOUNT, (path) => {
+            const config = resolveFcmConfig({
+                fcmServiceAccountPath: `~/${relative(homedir(), path)}`
+            })
+            expect(config?.projectId).toBe('proj-1')
+            expect(config?.serviceAccountPath).toBe(path)
+        }, homedir())
     })
 })

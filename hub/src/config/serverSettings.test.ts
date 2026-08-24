@@ -11,9 +11,27 @@ function makeTempDir(): string {
 describe('loadServerSettings', () => {
     let dir: string | null = null
     const originalBackgroundOnly = process.env.SERVERCHAN_BACKGROUND_ONLY
+    const originalPushEnv: Record<string, string | undefined> = {
+        FCM_SERVICE_ACCOUNT_PATH: process.env.FCM_SERVICE_ACCOUNT_PATH,
+        HAPI_IOS_PUSH: process.env.HAPI_IOS_PUSH,
+        HAPI_PUSH_RELAY_URL: process.env.HAPI_PUSH_RELAY_URL,
+        APNS_KEY_P8_PATH: process.env.APNS_KEY_P8_PATH,
+        APNS_KEY_ID: process.env.APNS_KEY_ID,
+        APNS_TEAM_ID: process.env.APNS_TEAM_ID,
+        APNS_BUNDLE_ID: process.env.APNS_BUNDLE_ID,
+        APNS_ENV: process.env.APNS_ENV,
+    }
 
     beforeEach(() => {
         delete process.env.SERVERCHAN_BACKGROUND_ONLY
+        delete process.env.FCM_SERVICE_ACCOUNT_PATH
+        delete process.env.HAPI_IOS_PUSH
+        delete process.env.HAPI_PUSH_RELAY_URL
+        delete process.env.APNS_KEY_P8_PATH
+        delete process.env.APNS_KEY_ID
+        delete process.env.APNS_TEAM_ID
+        delete process.env.APNS_BUNDLE_ID
+        delete process.env.APNS_ENV
     })
 
     afterEach(() => {
@@ -25,6 +43,13 @@ describe('loadServerSettings', () => {
             delete process.env.SERVERCHAN_BACKGROUND_ONLY
         } else {
             process.env.SERVERCHAN_BACKGROUND_ONLY = originalBackgroundOnly
+        }
+        for (const [key, value] of Object.entries(originalPushEnv)) {
+            if (value === undefined) {
+                delete process.env[key]
+            } else {
+                process.env[key] = value
+            }
         }
     })
 

@@ -3,7 +3,6 @@ import { FcmService, type FcmSendPayload } from './fcmService'
 
 mock.module('./fcmAuth', () => ({
     getFcmAccessToken: async () => 'test-access-token',
-    loadServiceAccount: () => ({ client_email: 'x', private_key: 'y' })
 }))
 
 type FakeStore = {
