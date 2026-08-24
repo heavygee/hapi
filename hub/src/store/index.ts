@@ -554,6 +554,7 @@ export class Store {
                 local_id TEXT,
                 invoked_at INTEGER,
                 scheduled_at INTEGER,
+                delivery_state TEXT NOT NULL DEFAULT 'queued',
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq);
@@ -1154,6 +1155,10 @@ export class Store {
      * Also rehomes soup Overseer ledger off the `events` name (work-graph owns it).
      */
     private migrateFromV23ToV24(): void {
+        const fcmColumns = this.db.prepare('PRAGMA table_info(fcm_devices)').all() as Array<{ name: string }>
+        if (fcmColumns.length > 0 && !fcmColumns.some((column) => column.name === 'push_key')) {
+            this.db.exec('ALTER TABLE fcm_devices ADD COLUMN push_key TEXT')
+        }
         rehomeOverseerEventsAwayFromWorkGraphCollision(this.db)
         this.migrateFromV22ToV23()
         this.db.exec(`
@@ -1183,6 +1188,10 @@ export class Store {
 
     /** #1473 machine tag for RPC auth — remapped past soup dual-ledger V24. */
     private migrateFromV24ToV25(): void {
+        const messageColumns = this.getMessageColumnNames()
+        if (messageColumns.size > 0 && !messageColumns.has('delivery_state')) {
+            this.db.exec("ALTER TABLE messages ADD COLUMN delivery_state TEXT NOT NULL DEFAULT 'queued'")
+        }
         const columns = this.getMachineColumnNames()
         if (columns.size === 0) return
         if (!columns.has('tag')) {
