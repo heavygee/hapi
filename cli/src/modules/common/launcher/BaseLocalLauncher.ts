@@ -91,8 +91,11 @@ export class BaseLocalLauncher {
 
             rpcHandlerManager.registerHandler(RPC_METHODS.Abort, doAbort)
             rpcHandlerManager.registerHandler(RPC_METHODS.Switch, doSwitch)
+            // Follow-ups stay queued until this local process finishes.
+            // Abort/Switch RPCs still kill immediately; do not treat inbound
+            // hub messages as an implicit mode switch.
             queue.setOnMessage(() => {
-                void doSwitch()
+                logger.debug(`[${label}]: inbound message queued until local launch finishes`)
             })
 
             if (this.exitReason) {
@@ -116,7 +119,7 @@ export class BaseLocalLauncher {
                     }
 
                     if (!this.exitReason) {
-                        this.exitReason = 'exit'
+                        this.exitReason = queue.size() > 0 ? 'switch' : 'exit'
                         break
                     }
                 } catch (error) {
