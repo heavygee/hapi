@@ -116,36 +116,6 @@ function sortSessionSummaries(left: SessionSummary, right: SessionSummary): numb
     return right.updatedAt - left.updatedAt
 }
 
-/**
- * True when applying `patch` to `session` would change nothing that renders.
- *
- * Keep-alive patches re-send fields about every ~10s. SessionHeader reads
- * `activeAt` for relative age, but `formatRelativeTime` only changes at
- * minute boundaries (`just now` while delta < 60s). Sub-minute `activeAt`
- * moves are therefore skipped here so the detail cache does not replace the
- * Session object (and re-render SessionChat / HappyThread) six times a
- * minute for an invisible label change. A delta of ≥60s is still
- * render-relevant so the header stays on `just now` for live sessions.
- * The session-list path still uses {@link isRenderIrrelevantPatch}, which
- * ignores `activeAt` entirely.
- */
-export function isRenderIrrelevantSessionPatch(session: Session, patch: SessionPatch): boolean {
-    const current = session as unknown as Record<string, unknown>
-    for (const [key, value] of Object.entries(patch)) {
-        if (
-            key === 'activeAt'
-            && typeof value === 'number'
-            && Math.abs(value - session.activeAt) < 60_000
-        ) {
-            continue
-        }
-        if (current[key] !== value) {
-            return false
-        }
-    }
-    return true
-}
-
 function isSessionRecord(value: unknown): value is Session {
     return SessionSchema.safeParse(value).success
 }

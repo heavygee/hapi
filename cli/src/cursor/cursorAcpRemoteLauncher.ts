@@ -54,19 +54,19 @@ import {
     type CursorNotifyRuleOverlay
 } from './utils/cursorNotifyRuleOverlay';
 import {
+    RPC_METHODS,
     classifyAcpRpcRejection,
     classifyCursorAgentMessage,
     isCompletionClaim,
     mapAcpStderrToFailure,
     type CursorAgentStreamFailure
-} from './cursorAgentMessageClassifier';
+} from '@hapi/protocol';
 import {
     buildModelErrorBridgePrompt,
     canBridgeModelError,
     truncateLastUserMessage
 } from './cursorModelErrorBridge';
 import { getAutoBridgeTransientModelErrors } from './cursorModelErrorBridgePrefs';
-import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
 import {
     CURSOR_AUTO_RETRY_LIMIT,
     isRetryableCursorError,
