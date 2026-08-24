@@ -3,8 +3,7 @@ import type { ModelErrorNotification, ModelErrorSendOutcome, NotificationChannel
 import type { NotificationSendContext } from '../notifications/notificationSendContext'
 import { formatModelErrorBody, formatModelErrorTitle } from '../notifications/modelErrorCopy'
 import { getAgentName, getSessionName } from '../notifications/sessionInfo'
-import { formatToolArgumentsCompact, formatToolArgumentsDetailed } from '../notifications/toolArgs'
-import { extractAssistantPlainText, extractNotifySummary, unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
+import { NATIVE_CONTRACT_VERSION, NativeNotificationComposer, type ComposedNativeNotification } from '../notifications/nativeNotificationComposer'
 import type { Store } from '../store'
 import type { SSEManager } from '../sse/sseManager'
 import type { VisibilityTracker } from '../visibility/visibilityTracker'
@@ -59,9 +58,9 @@ export class FcmNotificationChannel implements NotificationChannel {
         const sessionName = getSessionName(session)
         const title = formatModelErrorTitle(notification.kind)
         const body = formatModelErrorBody(notification, { agentName, sessionName })
-        const path = this.buildSessionPath(session.id)
+        const path = `/sessions/${session.id}`
 
-        const payload = this.buildPayload({
+        const payload = this.buildModelErrorPayload({
             title,
             body,
             tag: `model-error-${session.id}-${notification.atTs}`,
@@ -69,24 +68,14 @@ export class FcmNotificationChannel implements NotificationChannel {
             sessionId: session.id,
             sessionName,
             url: path,
-            severity: 'error'
+            severity: 'error',
         })
 
         await this.deliver(session, payload, ctx)
         return 'delivered'
     }
 
-    private buildPayload(input: {
-        title: string
-        body: string
-        tag?: string
-        type: string
-        sessionId: string
-        sessionName: string
-        url: string
-        requestId?: string
-        severity?: 'info' | 'success' | 'warning' | 'error'
-    }): FcmSendPayload {
+    private toFcmPayload(composed: ComposedNativeNotification): FcmSendPayload {
         return {
             title: composed.title,
             body: composed.body,
@@ -103,6 +92,35 @@ export class FcmNotificationChannel implements NotificationChannel {
                 severity: composed.severity,
                 ...(composed.notifySummary ? { notifySummary: composed.notifySummary } : {})
             }
+        }
+    }
+
+    private buildModelErrorPayload(input: {
+        title: string
+        body: string
+        tag?: string
+        type: string
+        sessionId: string
+        sessionName: string
+        url: string
+        requestId?: string
+        severity?: 'info' | 'success' | 'warning' | 'error'
+    }): FcmSendPayload {
+        return {
+            title: input.title,
+            body: input.body,
+            tag: input.tag,
+            data: {
+                type: input.type,
+                sessionId: input.sessionId,
+                sessionName: input.sessionName,
+                url: input.url,
+                requestId: input.requestId,
+                title: input.title,
+                body: input.body,
+                contractVersion: NATIVE_CONTRACT_VERSION,
+                severity: input.severity,
+            },
         }
     }
 

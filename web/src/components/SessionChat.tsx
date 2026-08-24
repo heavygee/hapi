@@ -72,7 +72,7 @@ import {
     type ScratchlistParkResult,
 } from '@/lib/scratchlistAttachmentFlow'
 import type { ScratchlistEntry } from '@/lib/scratchlist'
-import { isHubScratchlistAttachmentPath, type MessageDeliveryMode } from '@hapi/protocol'
+import { isHubScratchlistAttachmentPath } from '@hapi/protocol'
 import { consumeSharePendingTransfer } from '@/lib/sharePendingState'
 import { deleteShareTransfer, getShareTransfer } from '@/lib/shareTransfer'
 import { getDraft } from '@/lib/composer-drafts'
@@ -81,11 +81,6 @@ import {
 } from '@/lib/composer-attachment-drafts'
 import { useTranslation } from '@/lib/use-translation'
 import type { SendMessageAcceptance, SendMessageSettlement } from '@/hooks/mutations/useSendMessage'
-import {
-    getRestoredComposerSendIntent,
-    resolveMessageDeliveryMode,
-    type ComposerSendIntent,
-} from '@/lib/messageDelivery'
 import { handoffComposerDraft, transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 import { SessionHeader } from '@/components/SessionHeader'
 import { SessionFlowPanel } from '@/components/SessionFlowPanel'

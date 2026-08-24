@@ -305,7 +305,7 @@ export function aggregateResponseGroups(
 
         const roundSummary = block.kind === 'tool-group'
             ? block.roundSummary
-            : block.kind === 'user-text' || block.kind === 'agent-event'
+            : block.kind === 'user-text' || block.kind === 'agent-event' || block.kind === 'display-links'
                 ? undefined
                 : block.roundSummary
         groupRoundSummary ??= roundSummary

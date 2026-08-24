@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'bun:test'
-import { fetchHubTargetGeneration } from './version'
+import { fetchHubTargetGeneration, type FetchLike } from './version'
 
 describe('fetchHubTargetGeneration', () => {
     it('returns hub targetGeneration after JWT exchange', async () => {
-        const fetchImpl: typeof fetch = async (input, init) => {
+        const fetchImpl: FetchLike = async (input, init) => {
             const url = String(input)
             if (url.endsWith('/api/auth')) {
                 expect(init?.method).toBe('POST')

@@ -38,7 +38,6 @@ import type { AcpSdkBackend } from '@/agent/backends/acp';
 import type { AcpStderrError } from '@/agent/backends/acp/AcpStdioTransport';
 import { isAcpIndeterminateError } from '@/agent/backends/acp/AcpStdioTransport';
 import { registerAcpSessionTitleSync } from '@/agent/acpSessionTitle';
-import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
 import {
     CURSOR_HAPI_MCP_SERVER_ID,
     installCursorMcpOverlay,

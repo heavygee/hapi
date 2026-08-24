@@ -28,8 +28,6 @@
  *   direct-APNs credentials (settings: apnsKeyP8Path, apnsKeyId, apnsTeamId, apnsBundleId, apnsEnv)
  * - HAPI_HOME: Data directory (default: ~/.hapi)
  * - DB_PATH: SQLite database path (default: {HAPI_HOME}/hapi.db)
- * - HAPI_OVERSEER_LLM_FALLBACK: Opt-in hub LLM summary fallback when AGENT_NOTIFY_SUMMARY is missing (default: off)
- * - HAPI_OVERSEER_LLM_BASE_URL / _MODEL / _API_KEY / _API / _TIMEOUT_MS: OpenAI-compatible endpoint for that fallback
  */
 
 import { existsSync, mkdirSync } from 'node:fs'
@@ -52,6 +50,14 @@ export interface ConfigSources {
     listenPort: ConfigSource
     publicUrl: ConfigSource
     corsOrigins: ConfigSource
+    fcmServiceAccountPath: ConfigSource
+    iosPushMode: ConfigSource
+    iosPushRelayUrl: ConfigSource
+    apnsKeyP8Path: ConfigSource
+    apnsKeyId: ConfigSource
+    apnsTeamId: ConfigSource
+    apnsBundleId: ConfigSource
+    apnsEnv: ConfigSource
     githubPrAwareness: ConfigSource
     cliApiToken: 'env' | 'file' | 'generated'
 }
@@ -105,6 +111,17 @@ class Configuration {
     /** Allowed CORS origins for Mini App + Socket.IO (comma-separated env override) */
     public readonly corsOrigins: string[]
 
+    // Push delivery (FCM + iOS/APNs) — nullable strings interpreted by
+    // fcm/fcmConfig.ts and push-ios/iosPushConfig.ts.
+    public readonly fcmServiceAccountPath: string | null
+    public readonly iosPushMode: string | null
+    public readonly iosPushRelayUrl: string | null
+    public readonly apnsKeyP8Path: string | null
+    public readonly apnsKeyId: string | null
+    public readonly apnsTeamId: string | null
+    public readonly apnsBundleId: string | null
+    public readonly apnsEnv: string | null
+
     /**
      * Opt-in GitHub PR awareness (session↔PR attach + chip). Mutable via PATCH /api/features
      * unless pinned by HAPI_GITHUB_PR_AWARENESS. tiann/hapi#1162.
@@ -136,6 +153,14 @@ class Configuration {
         this.listenPort = serverSettings.listenPort
         this.publicUrl = serverSettings.publicUrl
         this.corsOrigins = serverSettings.corsOrigins
+        this.fcmServiceAccountPath = serverSettings.fcmServiceAccountPath
+        this.iosPushMode = serverSettings.iosPushMode
+        this.iosPushRelayUrl = serverSettings.iosPushRelayUrl
+        this.apnsKeyP8Path = serverSettings.apnsKeyP8Path
+        this.apnsKeyId = serverSettings.apnsKeyId
+        this.apnsTeamId = serverSettings.apnsTeamId
+        this.apnsBundleId = serverSettings.apnsBundleId
+        this.apnsEnv = serverSettings.apnsEnv
         this.githubPrAwareness = serverSettings.githubPrAwareness
 
         // CLI API token - will be set by _setCliApiToken() before create() returns

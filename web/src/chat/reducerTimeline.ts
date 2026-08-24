@@ -1,4 +1,4 @@
-import type { AgentEventBlock, AgentReasoningBlock, AgentTextBlock, ChatBlock, CliOutputBlock, CodexReviewBlock, RoundSummary, ToolCallBlock, ToolPermission, UserTextBlock } from '@/chat/types'
+import type { AgentEventBlock, AgentReasoningBlock, AgentTextBlock, ChatBlock, CliOutputBlock, CodexReviewBlock, DisplayLinksBlock, RoundSummary, ToolCallBlock, ToolPermission, UserTextBlock } from '@/chat/types'
 import type { TracedMessage } from '@/chat/tracer'
 import { createCliOutputBlock, isCliOutputText, mergeCliOutputBlocks } from '@/chat/reducerCliOutput'
 import { parseMessageAsEvent } from '@/chat/reducerEvents'
@@ -485,10 +485,11 @@ export function reduceTimeline(
             }
             if (msg.content.type === 'turn-summary') {
                 const summary = msg.content.summary as RoundSummary
-                type SummaryTargetBlock = Exclude<ChatBlock, UserTextBlock | AgentEventBlock>
+                type SummaryTargetBlock = Exclude<ChatBlock, UserTextBlock | AgentEventBlock | DisplayLinksBlock>
                 const isSummaryTarget = (block: ChatBlock): block is SummaryTargetBlock =>
                     block.kind !== 'user-text'
                     && block.kind !== 'agent-event'
+                    && block.kind !== 'display-links'
                     && !(block.kind === 'cli-output' && block.source === 'user')
                 let firstIndex = -1
                 for (let index = blocks.length - 1; index >= 0; index -= 1) {

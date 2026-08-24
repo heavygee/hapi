@@ -141,7 +141,7 @@ describe('SyncEngine fleet upgrade startup sweep', () => {
         const upgraded: string[] = []
         engine.upgradeMachineRunner = mock(async (machineId: string) => {
             upgraded.push(machineId)
-            return { type: 'success', message: 'ok', response: { status: 'started' } }
+            return { type: 'success' as const, message: 'ok', response: { status: 'started' as const, message: 'ok' } }
         })
         const maybeUpgrade = (engine as unknown as {
             maybeFleetUpgradeMachine(id: string): Promise<void>
