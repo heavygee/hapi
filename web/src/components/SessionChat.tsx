@@ -48,6 +48,13 @@ import { getSessionLastSeenAt } from '@/lib/sessionLastSeen'
 import { formatRelativeTime } from '@/lib/relativeTime'
 import { ScratchlistMigrationBanner } from '@/components/AssistantChat/ScratchlistMigrationBanner'
 import { findLatestCompletedBoundaryId, useHappyRuntime } from '@/lib/assistant-runtime'
+import {
+    getRestoredComposerSendIntent,
+    resolveMessageDeliveryMode,
+    type ComposerSendIntent,
+} from '@/lib/messageDelivery'
+import type { MessageDeliveryMode } from '@hapi/protocol'
+import { isSteeringSupportedForSession } from '@hapi/protocol'
 import type { OlderLoadOutcome } from '@/lib/message-window-store'
 import { createAttachmentAdapter } from '@/lib/attachmentAdapter'
 import { ShareSeedConsumer } from '@/components/ShareSeedConsumer'
@@ -317,6 +324,14 @@ export function shouldRouteToScratchlist(
     // uploads made before scratchlist mode was enabled still have normal
     // CLI paths; the hub rejects those as scratchlist metadata.
     return (attachments ?? []).every((att) => isHubScratchlistAttachmentPath(att.path))
+}
+
+export function mergeStagedAttachmentsInOrder(
+    attachments: readonly AttachmentMetadata[],
+    staged: readonly AttachmentMetadata[],
+): AttachmentMetadata[] {
+    const stagedById = new Map(staged.map((attachment) => [attachment.id, attachment]))
+    return attachments.map((attachment) => stagedById.get(attachment.id) ?? attachment)
 }
 
 function isUninvokedScheduledMessage(message: DecryptedMessage): boolean {
@@ -839,13 +854,18 @@ function SessionChatInner(props: SessionChatProps) {
             const list = attachments ?? []
             const hubItems = list.filter((att) => isHubScratchlistAttachmentPath(att.path))
             if (hubItems.length > 0) {
-                const normalItems = list.filter((att) => !isHubScratchlistAttachmentPath(att.path))
                 const staged = await stageScratchlistAttachmentsForComposeSend(
                     props.api,
                     props.session.id,
                     hubItems,
                 )
-                const accepted = await props.onSend(text, [...normalItems, ...staged], scheduledAt, deliveryMode)
+                const ordered = mergeStagedAttachmentsInOrder(list, staged)
+                const accepted = await props.onSend(
+                    text,
+                    ordered,
+                    scheduledAt,
+                    deliveryMode,
+                )
                 if (accepted) {
                     // Hub blobs were copied into the normal upload dir; drop the
                     // scratchlist copies so they stop counting against the session cap.
@@ -1692,6 +1712,7 @@ function SessionChatInner(props: SessionChatProps) {
     // turn, so explicit or retry-safe queue intents never stick to later
     // ordinary sends.
     const pendingSendIntentRef = useRef<ComposerSendIntent>('default')
+    const attachmentOrderRef = useRef<string[]>([])
     const restoredSendErrorIdRef = useRef<number | null>(null)
 
     useEffect(() => {
@@ -1838,6 +1859,7 @@ function SessionChatInner(props: SessionChatProps) {
         isSending: props.isSending,
         isRunning: props.session.thinking || hasRunningChildAgent,
         onSendMessage: handleSend,
+        attachmentOrderRef,
         onAbort: handleAbort,
         attachmentAdapter,
         allowSendWhenInactive: true,
@@ -2006,6 +2028,11 @@ function SessionChatInner(props: SessionChatProps) {
                                     // Restore the schedule so the clock button re-activates
                                     updatePendingSchedule(restored)
                                 }}
+                                canSteer={isSteeringSupportedForSession(props.session.metadata)
+                                    && (agentFlavor === 'pi'
+                                        ? props.session.thinking
+                                        : props.session.agentState?.steeringActive === true)
+                                    && !controlledByUser}
                             />
                         </div>
 
@@ -2016,6 +2043,7 @@ function SessionChatInner(props: SessionChatProps) {
                         onUploadDraftSnapshot={(text, attachments) => {
                             uploadDraftSnapshotRef.current = { text, attachments }
                         }}
+                        attachmentOrderRef={attachmentOrderRef}
                         resolveSessionMentionTooltip={resolveSessionMentionTooltip}
                         disabled={props.isSending}
                         pendingSchedule={pendingSchedule}

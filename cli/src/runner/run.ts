@@ -1732,11 +1732,13 @@ export function buildCliArgs(
             ? 'copilot'
             : agent === 'opencode'
             ? 'opencode'
-            : agent === 'pi'
-              ? 'pi'
-              : agent === 'agy'
-                ? 'agy'
-                : 'claude';
+            : agent === 'dsh'
+              ? 'dsh'
+              : agent === 'pi'
+                ? 'pi'
+                : agent === 'agy'
+                  ? 'agy'
+                  : 'claude';
   const args = [agentCommand];
   if (options.resumeSessionId) {
     if (agent === 'codex') {
@@ -1763,6 +1765,7 @@ export function buildCliArgs(
   if (agent === 'codex' || agent === 'cursor' || agent === 'pi'
       || agent === 'opencode'
       || agent === 'agy'
+      || agent === 'dsh'
       || (agentCommand === 'claude' && options.forkSession)) {
     const existingSessionId = options.existingSessionId ?? options.sessionId;
     if (existingSessionId) {
@@ -1796,7 +1799,7 @@ export function buildCliArgs(
   }
   // Pi RPC mode has no permission switching; never pass these flags to it
   // (the Pi parser rejects --permission-mode and ignores --yolo).
-  if (agent !== 'pi') {
+  if (agent !== 'pi' && agent !== 'dsh') {
     if (options.permissionMode && (PERMISSION_MODES as readonly string[]).includes(options.permissionMode)) {
       args.push('--permission-mode', options.permissionMode);
     } else if (yolo) {

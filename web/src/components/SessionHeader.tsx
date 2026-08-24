@@ -36,6 +36,7 @@ import { resolveSessionProjectLabel } from '@/lib/sessionProjectLabel'
 import { useMinuteTick } from '@/hooks/useMinuteTick'
 import { disableAllFue, useFue } from '@/lib/use-fue'
 import { FueCallout, FueDot } from '@/components/Fue'
+import { markSessionUnread } from '@/lib/sessionLastSeen'
 
 /** Same preference order as session-list chips: display label → host → short id. */
 export function resolveSessionHeaderMachineLabel(
@@ -667,6 +668,7 @@ export function SessionHeader(props: {
                 onRename={() => setRenameOpen(true)}
                 onLinkPr={githubPrAwarenessEnabled ? () => setLinkPrOpen(true) : undefined}
                 linkedPr={linkedPr}
+                onMarkUnread={() => markSessionUnread(session.id, session.updatedAt)}
                 onSetPinMode={api ? (mode) => void handleSetPinMode(mode) : undefined}
                 onExport={() => setExportOpen(true)}
                 onSyncCodex={api && codexSessionId ? handleSyncCodex : undefined}

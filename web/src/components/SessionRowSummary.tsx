@@ -5,7 +5,7 @@ import { ScheduleIcon } from '@/components/icons'
 import { HoverTooltip, SESSION_ROW_TOOLTIP_FOCUS_CLASS, useSessionRowTooltipIds } from '@/components/HoverTooltip'
 import { getAttentionLabel, SessionAttentionIndicator } from '@/components/SessionAttentionIndicator'
 import { classifySessionAttention } from '@/lib/sessionAttention'
-import { getSessionLastSeenAt } from '@/lib/sessionLastSeen'
+import { getSessionLastSeenAt, getSessionManualUnreadAt } from '@/lib/sessionLastSeen'
 import { formatRelativeTime } from '@/lib/relativeTime'
 import { formatScheduledTooltipDetail } from '@/lib/scheduledTime'
 import { getCodexImportedAt } from '@/lib/codexImportedSessions'
@@ -114,6 +114,8 @@ export function SessionRowSummary(props: {
     nestedTooltips?: boolean
     /** Pass from parent when the parent owns `aria-describedby` (session list). */
     attentionTooltipId?: string
+    /** Recompute local unread attention when the session-list watermark changes. */
+    lastSeenVersion?: number
     scheduleTooltipId?: string
     className?: string
     /** Rendered inline in the trailing meta row (before the time label) — e.g. PR chip. */
@@ -132,6 +134,7 @@ export function SessionRowSummary(props: {
         selected = false,
         nestedTooltips = true,
         attentionTooltipId: attentionTooltipIdProp,
+        lastSeenVersion,
         scheduleTooltipId: scheduleTooltipIdProp,
         className,
         trailing,
@@ -148,9 +151,10 @@ export function SessionRowSummary(props: {
             ? classifySessionAttention(s, {
                 selected,
                 lastSeenAt: getSessionLastSeenAt(s.id),
+                manualUnreadAt: getSessionManualUnreadAt(s.id),
             })
             : null,
-        [s, selected, showDetailedStatus]
+        [s, selected, showDetailedStatus, lastSeenVersion]
     )
     const attentionLabel = attention ? getAttentionLabel(attention, t) : null
     const urgentAttention = attention !== null
@@ -190,7 +194,20 @@ export function SessionRowSummary(props: {
                     >
                         {sessionName}
                     </div>
-                    {isAgentForegroundThinking(s) ? (
+                    {attention?.kind === 'unread' && nestedTooltips && attentionId ? (
+                        <SessionAttentionIndicator
+                            attention={attention}
+                            summary={s}
+                            label={attentionLabel ?? ''}
+                            tooltipId={attentionId}
+                        />
+                    ) : attention?.kind === 'unread' ? (
+                        <span
+                            className={`inline-flex h-2 w-2 shrink-0 rounded-full ${ATTENTION_DOT_CLASS.unread}`}
+                            title={attentionLabel ?? undefined}
+                            aria-label={attentionLabel ?? undefined}
+                        />
+                    ) : isAgentForegroundThinking(s) ? (
                         <LoaderIcon className="h-3.5 w-3.5 shrink-0 animate-spin-slow text-[var(--app-badge-success-text)]" />
                     ) : urgentAttention && nestedTooltips && attentionId ? (
                         <SessionAttentionIndicator
