@@ -34,12 +34,18 @@ WATERMARK_FILE="${HAPI_OVERSEER_WATCH_STATE:-${XDG_STATE_HOME:-$HOME/.local/stat
 mkdir -p "$(dirname "$WATERMARK_FILE")"
 [ -f "$WATERMARK_FILE" ] || echo '{"lastMaxId": 0}' > "$WATERMARK_FILE"
 
-RESULT="$("$CALL_BIN" tool query_inbox '{"status":["new","surfaced"],"category":["ERROR","BLOCKED"],"limit":50}')"
+# NOTE: query_inbox's `category` arg takes a single STRING, not an array, so the
+# category filter is applied client-side below rather than server-side. (An array
+# here is rejected with "expected string, received array".)
+RESULT="$("$CALL_BIN" tool query_inbox '{"statuses":["new","surfaced"],"limit":200}')"
 LAST_MAX="$(jq -r '.lastMaxId' "$WATERMARK_FILE")"
 
-NEW_ITEMS="$(echo "$RESULT" | jq --argjson last "$LAST_MAX" '[.result.items[]? | select(.id > $last)]')"
+WATCHED_CATEGORIES='["ERROR","BLOCKED"]'
+NEW_ITEMS="$(echo "$RESULT" | jq --argjson last "$LAST_MAX" --argjson cats "$WATCHED_CATEGORIES" \
+    '[.result.items[]? | select(.id > $last) | select(.category as $c | $cats | index($c))]')"
 NEW_COUNT="$(echo "$NEW_ITEMS" | jq 'length')"
-CURRENT_MAX="$(echo "$RESULT" | jq '[.result.items[]?.id] | max // 0')"
+CURRENT_MAX="$(echo "$RESULT" | jq --argjson cats "$WATCHED_CATEGORIES" \
+    '[.result.items[]? | select(.category as $c | $cats | index($c)) | .id] | max // 0')"
 ADVANCE_TO=$(( CURRENT_MAX > LAST_MAX ? CURRENT_MAX : LAST_MAX ))
 
 if [ "$NEW_COUNT" -gt 0 ]; then

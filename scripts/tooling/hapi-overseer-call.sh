@@ -27,10 +27,31 @@
 #
 # Usage:
 #   hapi-overseer-call.sh identity
-#   hapi-overseer-call.sh tool query_inbox '{"status":["new","surfaced"],"limit":10}'
+#   hapi-overseer-call.sh tool query_inbox '{"statuses":["new","surfaced"],"limit":10}'
 #   hapi-overseer-call.sh tool query_events '{"limit":10}'
+#   hapi-overseer-call.sh resolve 'Peer #1593'        # name -> CURRENT session id
 #   hapi-overseer-call.sh converse "dismiss the html2canvas oklch item" [relatedSessionId]
 #   hapi-overseer-call.sh ntfy "2 new BLOCKED: foo, bar" [priority] [title]
+#
+# `resolve` exists because **the hub session id is ephemeral**. `cli/src/agent/
+# sessionFactory.ts` does `options.tag ?? randomUUID()`, so each CLI launch presents
+# a fresh tag; `getOrCreateSession` finds no row for it and mints a new hub id.
+# One peer moved 9b23ed0b -> 044295ca -> 0fac9738 in an hour. Stale ids return
+# "Session not found", indistinguishable from deletion.
+#
+# THE DURABLE HANDLE IS `metadata.agentSessionId` (== claudeSessionId for claude
+# flavor) — the underlying agent/transcript id. Verified: peer #1593 kept
+# agentSessionId 8e1f4fd4 across all three hub-id rotations. Coverage is also
+# better than name (502 vs 476 of 611 sessions). Record THAT for anything you need
+# to find again later; it survives hub-row churn and resume. It does change if the
+# agent is relaunched from scratch (no --resume), so it is durable, not eternal —
+# fall back to name, then path.
+#
+# `resolve <needle>` matches case-insensitively against name, agentSessionId, hub
+# id, and path. Output is TSV `hubId<TAB>active|idle<TAB>agentSessionId<TAB>name`,
+# best match first (exact field match before substring, then active before idle,
+# then most recently updated). Take the first
+# line's hubId to act NOW; store its agentSessionId to find it again later.
 #
 # `ntfy` is the out-of-band proactive channel (Claude Code's own PushNotification
 # tool needs "Remote Control" paired to this Anthropic account, which the operator
@@ -110,10 +131,30 @@ case "$1" in
     tool)
         [ $# -ge 2 ] || { echo "error: 'tool' requires a tool name" >&2; usage; }
         TOOL_NAME="$2"
-        ARGS_JSON="${3:-{}}"
+        # NOTE: do NOT use "${3:-{}}" here — bash parses that as ${3:-{} plus a
+        # literal }, appending a stray brace to every supplied argument. The hub
+        # route swallows malformed JSON as an empty body, so args vanish silently.
+        if [ $# -ge 3 ]; then ARGS_JSON="$3"; else ARGS_JSON='{}'; fi
         curl -sS -X POST "$HAPI_HOST/api/overseer/tools/$TOOL_NAME" \
             -H "Authorization: Bearer $JWT" -H "Content-Type: application/json" \
             -d "$ARGS_JSON"
+        ;;
+    resolve)
+        [ $# -ge 2 ] || { echo "error: 'resolve' requires a name fragment" >&2; usage; }
+        [ -n "$2" ] || { echo "error: 'resolve' needle must not be empty" >&2; usage; }
+        curl -sS "$HAPI_HOST/api/sessions" -H "Authorization: Bearer $JWT" \
+            | jq -r --arg needle "$2" '
+                (if type=="array" then . else (.sessions // []) end)
+                | map(select(.metadata != null))
+                | map(. + { _fields: (
+                    [ (.metadata.name // ""), (.metadata.agentSessionId // ""),
+                      (.id // ""), (.metadata.path // "") ] | map(ascii_downcase)) })
+                | map(select(._fields | map(contains($needle | ascii_downcase)) | any))
+                | map(. + { _exact: (._fields | map(. == ($needle | ascii_downcase)) | any) })
+                | sort_by([(if ._exact then 0 else 1 end), (if .active then 0 else 1 end), -(.updatedAt // 0)])
+                | .[]
+                | "\(.id)\t\(if .active then "active" else "idle" end)\t\(.metadata.agentSessionId // "-")\t\(.metadata.name // "?")"
+              '
         ;;
     converse)
         [ $# -ge 2 ] || { echo "error: 'converse' requires a message" >&2; usage; }

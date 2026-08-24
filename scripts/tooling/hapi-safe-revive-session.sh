@@ -69,6 +69,8 @@ DRIVER_CLI="${HAPI_DRIVER_CLI:-$ACTIVE/cli}"
 LOG="/tmp/revive-${HAPI_SESSION_ID:0:8}-${LABEL}.log"
 PIDFILE="/tmp/revive-${HAPI_SESSION_ID:0:8}.pid"
 
+export WORKING_DIR DRIVER_CLI HAPI_SESSION_ID CURSOR_SESSION_ID
+
 run_cursor() {
     cd "$WORKING_DIR"
     exec bun --cwd "$DRIVER_CLI" -e "
