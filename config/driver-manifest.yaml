@@ -865,3 +865,9 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/overseer-brain-active @ driver/overseer-brain-active
   # Tip: 498430d3c
   - branch: driver/overseer-brain-active
+
+  # tiann/hapi#1686 — local TUI: queue hub follow-ups until process exit (no implicit doSwitch).
+  # Worktree: ~/coding/hapi/worktrees/local-followup-abort @ fix/local-followup-queue
+  # Tip: f2f12bdf5 (origin/fix/local-followup-queue). CLI-only; BaseLocalLauncher untouched by other soup layers.
+  - branch: fix/local-followup-queue
+
