@@ -1165,3 +1165,12 @@ export function truncateMessagesFromLocalId(
         return { deleted: deleted.changes, inserted, epoch }
     })()
 }
+
+/** Defensive ALTER for soup tips that reached user_version 28 before delivery_state landed. */
+export function ensureMessageDeliveryStateColumn(db: Database): void {
+    const cols = db.prepare('PRAGMA table_info(messages)').all() as Array<{ name: string }>
+    if (cols.length === 0) return
+    if (!cols.some((col) => col.name === 'delivery_state')) {
+        db.exec("ALTER TABLE messages ADD COLUMN delivery_state TEXT NOT NULL DEFAULT 'queued'")
+    }
+}

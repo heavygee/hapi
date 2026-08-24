@@ -4,7 +4,7 @@ import { dirname } from 'node:path'
 
 import { MachineStore } from './machineStore'
 import { MessageStore } from './messageStore'
-import { addMessage } from './messages'
+import { addMessage, ensureMessageDeliveryStateColumn } from './messages'
 import type { StoredMessage } from './types'
 import { PushStore } from './pushStore'
 import { FcmStore } from './fcmStore'
@@ -146,6 +146,7 @@ export class Store {
         // Soup tip keeps SCHEMA_VERSION=23 (tolerate-ahead). Wake columns for
         // #1489 are additive and must exist even when user_version is already ahead.
         ensureSessionJobWakeColumns(this.db)
+        ensureMessageDeliveryStateColumn(this.db)
 
         if (dbPath !== ':memory:' && !dbPath.startsWith('file::memory:')) {
             for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
