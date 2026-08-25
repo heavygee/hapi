@@ -10,6 +10,40 @@ import {
 } from './codexUsage';
 
 describe('normalizeCodexUsage', () => {
+    it('parses camelCase app-server RateLimitWindow fields', () => {
+        const usage = normalizeCodexUsage({
+            rate_limits: {
+                primary: {
+                    usedPercent: 12,
+                    windowDurationMins: 300,
+                    resetsAt: 1_774_278_000
+                },
+                secondary: {
+                    usedPercent: 4,
+                    windowDurationMins: 10080,
+                    resetsAt: 1_775_140_800
+                },
+                credits: { hasCredits: true, unlimited: false, balance: '0.0000000000' }
+            }
+        }, { now: 1_000_000 });
+
+        expect(usage).toMatchObject({
+            rateLimits: {
+                fiveHour: {
+                    usedPercent: 12,
+                    windowMinutes: 300,
+                    resetAt: 1_774_278_000_000
+                },
+                weekly: {
+                    usedPercent: 4,
+                    windowMinutes: 10080,
+                    resetAt: 1_775_140_800_000
+                }
+            },
+            credits: { hasCredits: true, unlimited: false, balance: '0.0000000000' }
+        });
+    });
+
     it('parses app-server token usage with context and rate-limit buckets', () => {
         const usage = normalizeCodexUsage({
             model_context_window: 200_000,
@@ -271,9 +305,10 @@ describe('normalizeCodexUsage', () => {
     it('accepts rate-limits-only / null snapshots so clears still apply', () => {
         expect(normalizeCodexUsageUpdate({
             info: { rate_limits: null }
-        })).toEqual({
+        })).toMatchObject({
             usage: { rateLimits: {} },
-            hasRateLimitSnapshot: true
+            hasRateLimitSnapshot: true,
+            presentRateLimitBuckets: { fiveHour: true, weekly: true }
         });
 
         expect(normalizeCodexUsageUpdate({
@@ -283,14 +318,15 @@ describe('normalizeCodexUsage', () => {
                     secondary: { used_percent: 12, window_minutes: 10080 }
                 }
             }
-        })).toEqual({
+        })).toMatchObject({
             usage: {
                 rateLimits: {
                     fiveHour: { usedPercent: 55, windowMinutes: 300 },
                     weekly: { usedPercent: 12, windowMinutes: 10080 }
                 }
             },
-            hasRateLimitSnapshot: true
+            hasRateLimitSnapshot: true,
+            presentRateLimitBuckets: { fiveHour: true, weekly: true }
         });
     });
 

@@ -53,7 +53,7 @@ function normalizeTokenUsage(value: unknown): CodexTokenUsage | undefined {
 }
 
 function parseResetAt(record: Record<string, unknown>, now: number): number | undefined {
-    const direct = record.reset_at ?? record.resetAt;
+    const direct = record.resets_at ?? record.resetsAt ?? record.reset_at ?? record.resetAt;
     if (typeof direct === 'string') {
         const parsed = Date.parse(direct);
         if (Number.isFinite(parsed)) return parsed;
@@ -81,7 +81,14 @@ function normalizeRateLimit(value: unknown, now: number): CodexUsageRateLimit | 
     if (!record) return undefined;
 
     const usedPercent = firstNumber(record, ['used_percent', 'usedPercent', 'percent', 'usage_percent', 'usagePercent']);
-    const windowMinutes = firstNumber(record, ['window_minutes', 'windowMinutes', 'window', 'minutes']);
+    const windowMinutes = firstNumber(record, [
+        'window_duration_mins',
+        'windowDurationMins',
+        'window_minutes',
+        'windowMinutes',
+        'window',
+        'minutes'
+    ]);
     if (usedPercent === null || windowMinutes === null) {
         return undefined;
     }
@@ -102,6 +109,10 @@ function collectRateLimitCandidates(value: unknown): unknown[] {
     const directRecord = asRecord(direct);
     if (Array.isArray(direct)) return direct;
     if (directRecord) {
+        const named: unknown[] = [];
+        if ('primary' in directRecord) named.push(directRecord.primary);
+        if ('secondary' in directRecord) named.push(directRecord.secondary);
+        if (named.length > 0) return named;
         return Object.values(directRecord);
     }
 
@@ -117,6 +128,20 @@ function extractRateLimitsRoot(value: unknown): Record<string, unknown> | null {
     if (!record) return null;
     const direct = asRecord(record.rate_limits ?? record.rateLimits);
     return direct ?? record;
+}
+
+function extractRawRateLimits(value: unknown): unknown {
+    const record = asRecord(value);
+    if (!record) return undefined;
+    if ('rate_limits' in record) return record.rate_limits;
+    if ('rateLimits' in record) return record.rateLimits;
+    const info = asRecord(record.info);
+    if (info && 'rate_limits' in info) return info.rate_limits;
+    if (info && 'rateLimits' in info) return info.rateLimits;
+    const tokenUsage = asRecord(record.tokenUsage ?? record.token_usage);
+    if (tokenUsage && 'rate_limits' in tokenUsage) return tokenUsage.rate_limits;
+    if (tokenUsage && 'rateLimits' in tokenUsage) return tokenUsage.rateLimits;
+    return undefined;
 }
 
 function normalizeCredits(value: unknown): CodexUsageCredits | undefined {
@@ -178,30 +203,82 @@ function unwrapUsagePayload(value: unknown): Record<string, unknown> | null {
 export type CodexUsageUpdate = {
     usage: CodexUsage;
     hasRateLimitSnapshot: boolean;
+    presentRateLimitBuckets: {
+        fiveHour: boolean;
+        weekly: boolean;
+    };
+    presentAccountFields: {
+        credits: boolean;
+        rateLimitReachedType: boolean;
+        planType: boolean;
+        limitId: boolean;
+    };
 };
 
+function emptyAccountPresence(): CodexUsageUpdate['presentAccountFields'] {
+    return {
+        credits: false,
+        rateLimitReachedType: false,
+        planType: false,
+        limitId: false
+    };
+}
+
+function inspectRateLimitPresence(value: unknown): Pick<
+    CodexUsageUpdate,
+    'hasRateLimitSnapshot' | 'presentRateLimitBuckets' | 'presentAccountFields'
+> {
+    const raw = extractRawRateLimits(value);
+    if (raw === undefined) {
+        return {
+            hasRateLimitSnapshot: false,
+            presentRateLimitBuckets: { fiveHour: false, weekly: false },
+            presentAccountFields: emptyAccountPresence()
+        };
+    }
+    if (raw === null || typeof raw !== 'object') {
+        return {
+            hasRateLimitSnapshot: true,
+            presentRateLimitBuckets: { fiveHour: true, weekly: true },
+            presentAccountFields: {
+                credits: true,
+                rateLimitReachedType: true,
+                planType: true,
+                limitId: true
+            }
+        };
+    }
+    const root = raw as Record<string, unknown>;
+    return {
+        hasRateLimitSnapshot: true,
+        presentRateLimitBuckets: {
+            fiveHour: 'primary' in root || 'fiveHour' in root || 'five_hour' in root,
+            weekly: 'secondary' in root || 'weekly' in root
+        },
+        presentAccountFields: {
+            credits: 'credits' in root,
+            rateLimitReachedType: 'rate_limit_reached_type' in root || 'rateLimitReachedType' in root,
+            planType: 'plan_type' in root || 'planType' in root,
+            limitId: 'limit_id' in root || 'limitId' in root
+        }
+    };
+}
+
 function payloadHasRateLimitSnapshot(value: unknown): boolean {
-    const record = asRecord(value);
-    if (!record) return false;
-    if ('rate_limits' in record || 'rateLimits' in record) return true;
-    const info = asRecord(record.info);
-    if (info && ('rate_limits' in info || 'rateLimits' in info)) return true;
-    const tokenUsage = asRecord(record.tokenUsage ?? record.token_usage);
-    if (tokenUsage && ('rate_limits' in tokenUsage || 'rateLimits' in tokenUsage)) return true;
-    return false;
+    return inspectRateLimitPresence(value).hasRateLimitSnapshot;
 }
 
 export function normalizeCodexUsageUpdate(value: unknown, options: NormalizerOptions = {}): CodexUsageUpdate | null {
-    const hasRateLimitSnapshot = payloadHasRateLimitSnapshot(value);
+    const presence = inspectRateLimitPresence(value);
     const usage = normalizeCodexUsage(value, options);
     if (usage) {
-        return { usage, hasRateLimitSnapshot };
+        return { usage, ...presence };
     }
     // Explicit empty/null rate-limit snapshots still need to clear stale buckets.
-    if (hasRateLimitSnapshot) {
+    if (presence.hasRateLimitSnapshot) {
         return {
             usage: { rateLimits: {} },
-            hasRateLimitSnapshot: true
+            ...presence
         };
     }
     return null;

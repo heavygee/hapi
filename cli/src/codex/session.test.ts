@@ -180,4 +180,71 @@ describe('CodexSession.resetCodexThread', () => {
         });
         expect((metadata.codexUsage as { rateLimits: Record<string, unknown> }).rateLimits.fiveHour).toBeUndefined();
     });
+
+    it('keeps weekly and credits when a primary-only account update arrives', () => {
+        let metadata: Record<string, unknown> = {
+            path: '/tmp/project',
+            host: 'example',
+            flavor: 'codex',
+            codexUsage: {
+                rateLimits: {
+                    fiveHour: { usedPercent: 10, windowMinutes: 300, resetAt: 2 },
+                    weekly: { usedPercent: 40, windowMinutes: 10080, resetAt: 3 }
+                },
+                credits: { hasCredits: true, unlimited: false, balance: '12' },
+                planType: 'pro',
+                limitId: 'premium'
+            }
+        };
+        const updateMetadata = vi.fn((updater: (current: Record<string, unknown>) => Record<string, unknown>) => {
+            metadata = updater(metadata);
+        });
+
+        const session = new CodexSession({
+            api: {} as never,
+            client: {
+                keepAlive: vi.fn(),
+                updateMetadata,
+                sendAgentMessage: vi.fn(),
+                emitMessagesConsumed: vi.fn(),
+                sendSessionEvent: vi.fn()
+            } as never,
+            path: '/tmp/project',
+            logPath: '/tmp/log',
+            sessionId: 'thread-1',
+            messageQueue: new MessageQueue2<EnhancedMode>(() => 'default'),
+            onModeChange: () => undefined,
+            startedBy: 'terminal',
+            startingMode: 'remote'
+        });
+        sessions.push(session);
+
+        session.recordCodexUsage({
+            type: 'token_count',
+            usage_scope: 'account',
+            info: {
+                rate_limits: {
+                    primary: {
+                        usedPercent: 22,
+                        windowDurationMins: 300,
+                        resetsAt: 1_774_278_000
+                    }
+                }
+            }
+        });
+
+        expect(metadata.codexUsage).toMatchObject({
+            rateLimits: {
+                fiveHour: {
+                    usedPercent: 22,
+                    windowMinutes: 300,
+                    resetAt: 1_774_278_000_000
+                },
+                weekly: { usedPercent: 40, windowMinutes: 10080, resetAt: 3 }
+            },
+            credits: { hasCredits: true, unlimited: false, balance: '12' },
+            planType: 'pro',
+            limitId: 'premium'
+        });
+    });
 });

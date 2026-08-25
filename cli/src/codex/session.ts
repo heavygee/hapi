@@ -6,11 +6,48 @@ import type { CodexCliOverrides } from './utils/codexCliOverrides';
 import type { LocalLaunchExitReason } from '@/agent/localLaunchPolicy';
 import type { Metadata, SessionModel, SessionModelReasoningEffort } from '@/api/types';
 import { normalizeCodexUsageUpdate } from './utils/codexUsage';
+import type { CodexUsage } from '@hapi/protocol/types';
 
 type LocalLaunchFailure = {
     message: string;
     exitReason: LocalLaunchExitReason;
 };
+
+function mergeRateLimitBuckets(
+    previous: CodexUsage['rateLimits'] | undefined,
+    next: CodexUsage['rateLimits'] | undefined,
+    present: { fiveHour: boolean; weekly: boolean }
+): CodexUsage['rateLimits'] {
+    if (present.fiveHour && present.weekly) {
+        return next ?? {};
+    }
+    const merged: NonNullable<CodexUsage['rateLimits']> = { ...previous };
+    if (present.fiveHour) {
+        if (next?.fiveHour) merged.fiveHour = next.fiveHour;
+        else delete merged.fiveHour;
+    }
+    if (present.weekly) {
+        if (next?.weekly) merged.weekly = next.weekly;
+        else delete merged.weekly;
+    }
+    return merged;
+}
+
+function applyPresentAccountField(
+    merged: Record<string, unknown>,
+    previous: CodexUsage | undefined,
+    usage: CodexUsage,
+    present: { credits: boolean; rateLimitReachedType: boolean; planType: boolean; limitId: boolean },
+    field: 'credits' | 'rateLimitReachedType' | 'planType' | 'limitId'
+): void {
+    if (!present[field]) {
+        if (previous?.[field] !== undefined) merged[field] = previous[field];
+        else delete merged[field];
+        return;
+    }
+    if (usage[field] !== undefined) merged[field] = usage[field];
+    else delete merged[field];
+}
 
 export class CodexSession extends AgentSessionBase<EnhancedMode> {
     transcriptPath: string | null = null;
@@ -166,26 +203,21 @@ export class CodexSession extends AgentSessionBase<EnhancedMode> {
         if (!update) {
             return;
         }
-        const { usage, hasRateLimitSnapshot } = update;
+        const { usage, hasRateLimitSnapshot, presentRateLimitBuckets, presentAccountFields } = update;
         this.client.updateMetadata((metadata) => {
             const previous = metadata.codexUsage;
+            const nextRateLimits = !hasRateLimitSnapshot
+                ? previous?.rateLimits ?? usage.rateLimits
+                : mergeRateLimitBuckets(previous?.rateLimits, usage.rateLimits, presentRateLimitBuckets);
             const merged = {
                 ...previous,
                 ...usage,
-                rateLimits: hasRateLimitSnapshot
-                    ? usage.rateLimits
-                    : previous?.rateLimits ?? usage.rateLimits
+                rateLimits: nextRateLimits
             };
-            if (hasRateLimitSnapshot) {
-                if (usage.credits !== undefined) merged.credits = usage.credits;
-                else delete merged.credits;
-                if (usage.rateLimitReachedType !== undefined) merged.rateLimitReachedType = usage.rateLimitReachedType;
-                else delete merged.rateLimitReachedType;
-                if (usage.planType !== undefined) merged.planType = usage.planType;
-                else delete merged.planType;
-                if (usage.limitId !== undefined) merged.limitId = usage.limitId;
-                else delete merged.limitId;
-            }
+            applyPresentAccountField(merged, previous, usage, presentAccountFields, 'credits');
+            applyPresentAccountField(merged, previous, usage, presentAccountFields, 'rateLimitReachedType');
+            applyPresentAccountField(merged, previous, usage, presentAccountFields, 'planType');
+            applyPresentAccountField(merged, previous, usage, presentAccountFields, 'limitId');
             return {
                 ...metadata,
                 codexUsage: merged
