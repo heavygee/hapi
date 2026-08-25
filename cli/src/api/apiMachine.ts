@@ -377,14 +377,10 @@ export class ApiMachineClient {
                 }
             }
 
-            if (agent === 'codex' && resumeSessionId && this.normalizedWorkspaceRoots?.length) {
+            if (agent === 'codex' && resumeSessionId) {
                 const codexSessionPath = await findCodexSessionPath(resumeSessionId)
-                if (!codexSessionPath) {
+                if (!(await this.isLocalSessionWithinWorkspaceRoots({ cwd: codexSessionPath }))) {
                     return { type: 'error', errorMessage: 'Codex session path is unavailable or outside workspace roots' }
-                }
-                const resolvedCodexSessionPath = await this.resolveForWorkspaceCheck(codexSessionPath)
-                if (!this.isWithinWorkspaceRoots(resolvedCodexSessionPath)) {
-                    return { type: 'error', errorMessage: 'Codex session is outside this machine\'s workspace roots' }
                 }
             }
 
