@@ -330,6 +330,24 @@ describe('normalizeCodexUsage', () => {
         });
     });
 
+    it('treats array rate_limits snapshots as a full bucket replace', () => {
+        expect(normalizeCodexUsageUpdate({
+            rate_limits: [
+                { used_percent: 20, window_minutes: 300 },
+                { used_percent: 8, window_minutes: 10080 }
+            ]
+        })).toMatchObject({
+            hasRateLimitSnapshot: true,
+            presentRateLimitBuckets: { fiveHour: true, weekly: true },
+            usage: {
+                rateLimits: {
+                    fiveHour: { usedPercent: 20, windowMinutes: 300 },
+                    weekly: { usedPercent: 8, windowMinutes: 10080 }
+                }
+            }
+        });
+    });
+
     it('coalesces replay samples by dimension while preserving order', () => {
         const accumulator = createReplayUsageAccumulator();
         const tokensOnly = {

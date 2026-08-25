@@ -248,6 +248,13 @@ function inspectRateLimitPresence(value: unknown): Pick<
             }
         };
     }
+    if (Array.isArray(raw)) {
+        return {
+            hasRateLimitSnapshot: true,
+            presentRateLimitBuckets: { fiveHour: true, weekly: true },
+            presentAccountFields: emptyAccountPresence()
+        };
+    }
     const root = raw as Record<string, unknown>;
     return {
         hasRateLimitSnapshot: true,
