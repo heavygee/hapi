@@ -89,11 +89,13 @@ export function registerCliHandlers(socket: CliSocketWithData, deps: CliHandlers
     const auth = socket.handshake.auth as Record<string, unknown> | undefined
     const sessionId = typeof auth?.sessionId === 'string' ? auth.sessionId : null
     if (sessionId && resolveSessionAccess(sessionId).ok) {
+        socket.data.sessionRpcAuthorizedId = sessionId
         socket.join(`session:${sessionId}`)
     }
 
     const machineId = typeof auth?.machineId === 'string' ? auth.machineId : null
     if (machineId && resolveMachineAccess(machineId).ok) {
+        socket.data.machineRpcAuthorizedId = machineId
         socket.join(`machine:${machineId}`)
     }
 
