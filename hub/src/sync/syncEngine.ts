@@ -1673,6 +1673,36 @@ export class SyncEngine {
             await this.rpcGateway.killSession(sessionId)
         } catch (error) {
             if (error instanceof RpcTargetMissingError) {
+                // `killSession` addresses the CLI's own session-scoped socket
+                // registration (`${sessionId}:KillSession`). That registration
+                // can go stale independently of the actual runner child
+                // process — e.g. SessionCache.mergeSessions rotates the
+                // hub's canonical session id on resume without the CLI
+                // re-registering under it, or the socket is mid-reconnect —
+                // so a missing target does NOT by itself prove the process
+                // is dead. Before trusting that, ask the runner directly via
+                // the machine-level StopSession RPC, which resolves the
+                // child by PID and checks both the requested and confirmed
+                // session ids (see `stopSession` in cli/src/runner/run.ts),
+                // so it survives the exact id mismatch that just defeated
+                // `killSession`. Without this check, a live orphaned child
+                // gets marked `archived` and loses all runner-side
+                // supervision while continuing to run.
+                const machineId = this.sessionCache.getSession(sessionId)?.metadata?.machineId
+                if (machineId) {
+                    let status: 'stopped' | 'already_gone' | 'still_alive'
+                    try {
+                        status = await this.rpcGateway.stopRunnerSession(machineId, sessionId)
+                    } catch {
+                        // Machine itself unreachable; no stronger signal available
+                        // than the original RpcTargetMissingError, so fall back
+                        // to the prior best-effort behavior.
+                        status = 'already_gone'
+                    }
+                    if (status === 'still_alive') {
+                        throw new Error('Session process is still running and could not be stopped')
+                    }
+                }
                 this.sessionCache.markSessionArchivedFromHub(sessionId, 'Archived from hub (CLI unreachable)')
             } else {
                 throw error
