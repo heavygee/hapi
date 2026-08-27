@@ -11,7 +11,15 @@ import { isKnownFlavor, type LocalResumeTarget, type ResumableSession, type Sess
 import {
     cliBinaryUpdatedOnDisk,
     isMachineCapabilitySkewed,
+    MACHINE_CAPABILITIES,
 } from '@hapi/protocol/runnerCapabilities'
+import {
+    DEFAULT_FLEET_UPGRADE_POLICY,
+    machineTrailsUpgradeOffer,
+    type FleetUpgradePolicy,
+    type HubUpgradeOffer,
+    type RunnerSelfUpgradeResponse,
+} from '@hapi/protocol/upgradeChannel'
 import type { CursorChatStoreStatus, CursorMigrateOutcome, CursorMigrateToAcpRequest, MessageDeliveryMode, MessagesResponse, QueuedStateResponse, SlashCommandsResponse } from '@hapi/protocol/apiTypes'
 import type { SteerQueuedMessageResponse } from '@hapi/protocol/schemas'
 import type { ExternalRef, AgentFlavor, CodexCollaborationMode, CopilotAgentMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
@@ -30,6 +38,7 @@ import {
     isTerminalJobStatus,
     waitUntilSessionActive,
 } from './sessionJobWake'
+import { isTransientArtifactBuildFailure } from '../upgrade/cliArtifact'
 
 import { executeSessionRelay } from './sessionRelay'
 import { EventPublisher, type SyncEventListener } from './eventPublisher'
@@ -74,10 +83,6 @@ import { ingestNotifySummaryFromMessage } from './workGraphNotifyIngest'
 import { armResumePeerMint, clearResumePeerMint } from '../web/pendingResumePeerMint'
 import { buildProvenanceDiagnostics } from './provenanceDiagnostics'
 import type { ProvenanceDiagnostics } from '@hapi/protocol/provenanceDiagnostics'
-import {
-    defaultProvenanceMessageScanOptions,
-    type ProvenanceMessageScanOptions,
-} from '@hapi/protocol/provenanceMessageAudit'
 
 type PiResumeAttempt = NonNullable<NonNullable<Session['metadata']>['piResumeAttempt']>
 type PtyResumeAttempt = NonNullable<NonNullable<Session['metadata']>['ptyResumeAttempt']>
@@ -186,6 +191,16 @@ function extractClaudeUserMessageTextFromAgentOutput(content: unknown): string |
     return extractUserMessageText(message.content)
 }
 
+export type SyncEngineOptions = {
+    /** Resolve the current hub upgrade offer (channel + version + optional artifact). */
+    getUpgradeOffer?: () => HubUpgradeOffer
+    /** Ensure hub-artifact bytes exist; returns offer with sha256 filled. */
+    prepareArtifactOffer?: (offer: HubUpgradeOffer, platform: string, arch: string) => Promise<HubUpgradeOffer>
+    /** Operator policy: only `auto` lets the hub auto-fire fleet upgrades. */
+    getFleetUpgradePolicy?: () => FleetUpgradePolicy
+    /** Data dir for cooldowns only — optional. */
+}
+
 export class SyncEngine {
     private readonly eventPublisher: EventPublisher
     private readonly sessionCache: SessionCache
@@ -213,6 +228,26 @@ export class SyncEngine {
     private readonly opencodeClearTails = new Map<string, Promise<ClearOpencodeSessionResult>>()
     /** Serialize fork/rewind per session so concurrent native rollbacks cannot stack. */
     private readonly historyActionsInFlight = new Set<string>()
+    private readonly fleetUpgradeAttemptAt = new Map<string, number>()
+    private lastAutoUpgradeOfferKey: string | null = null
+    private fleetUpgradeStartupSweepTimer: ReturnType<typeof setTimeout> | null = null
+    private static readonly FLEET_UPGRADE_COOLDOWN_MS = 15 * 60_000
+    /** Let runners reconnect + rpc-register after a patient hub restart before sweeping. */
+    private static readonly FLEET_UPGRADE_STARTUP_SWEEP_DELAY_MS = 15_000
+    /**
+     * Coalesce concurrent auto + banner Upgrade calls for the same machine so
+     * the runner's "already in progress" reply is not toasted as upgrade_failed.
+     */
+    private readonly fleetUpgradeInFlight = new Map<
+        string,
+        Promise<
+            | { type: 'success'; message: string; response: RunnerSelfUpgradeResponse }
+            | { type: 'error'; message: string; code: 'machine_not_found' | 'machine_offline' | 'upgrade_unavailable' | 'upgrade_deferred' | 'upgrade_failed' }
+        >
+    >()
+    private readonly getUpgradeOffer: (() => HubUpgradeOffer) | null
+    private readonly prepareArtifactOffer: SyncEngineOptions['prepareArtifactOffer']
+    private readonly getFleetUpgradePolicy: () => FleetUpgradePolicy
     /**
      * Hub owner id for accountable work-graph principals (A2A P1/P3).
      * Defaults to "1" for unit tests; startHub overwrites with getOrCreateOwnerId().
@@ -224,7 +259,11 @@ export class SyncEngine {
         private readonly io: Server,
         rpcRegistry: RpcRegistry,
         sseManager: SSEManager,
+        options?: SyncEngineOptions,
     ) {
+        this.getUpgradeOffer = options?.getUpgradeOffer ?? null
+        this.prepareArtifactOffer = options?.prepareArtifactOffer
+        this.getFleetUpgradePolicy = options?.getFleetUpgradePolicy ?? (() => DEFAULT_FLEET_UPGRADE_POLICY)
         this.eventPublisher = new EventPublisher(sseManager, (event) => this.resolveNamespace(event))
         this.sessionCache = new SessionCache(store, this.eventPublisher)
         this.machineCache = new MachineCache(store, this.eventPublisher, rpcRegistry)
@@ -267,6 +306,10 @@ export class SyncEngine {
         if (this.inactivityTimer) {
             clearInterval(this.inactivityTimer)
             this.inactivityTimer = null
+        }
+        if (this.fleetUpgradeStartupSweepTimer) {
+            clearTimeout(this.fleetUpgradeStartupSweepTimer)
+            this.fleetUpgradeStartupSweepTimer = null
         }
     }
 
@@ -427,24 +470,12 @@ export class SyncEngine {
         return this.machineCache.getOnlineMachinesByNamespace(namespace)
     }
 
-    getProvenanceDiagnostics(
-        namespace: string,
-        options?: { messageScan?: ProvenanceMessageScanOptions | false }
-    ): ProvenanceDiagnostics {
-        const scanOptions = options?.messageScan === false
-            ? null
-            : (options?.messageScan ?? defaultProvenanceMessageScanOptions())
-        const messageAudit = scanOptions
-            ? this.store.scanUnverifiedPeerMessages(namespace, scanOptions)
-            : null
-
+    getProvenanceDiagnostics(namespace: string): ProvenanceDiagnostics {
         return buildProvenanceDiagnostics({
             sessions: this.getSessionsByNamespace(namespace),
             machines: this.getOnlineMachinesByNamespace(namespace),
             getStoredMachine: (machineId) => this.store.machines.getMachineByNamespace(machineId, namespace),
             hasLiveRpcHandler: (method) => this.rpcGateway.hasLiveHandler(method),
-            unverifiedPeerMessages: messageAudit?.rows,
-            messageScan: messageAudit?.meta ?? null,
         })
     }
 
@@ -544,6 +575,9 @@ export class SyncEngine {
 
         if (event.type === 'machine-updated' && event.machineId) {
             this.machineCache.refreshMachine(event.machineId)
+            void this.maybeFleetUpgradeMachine(event.machineId).catch((error) => {
+                console.warn('[fleet-upgrade] offer resolution failed', error)
+            })
             return
         }
 
@@ -1251,16 +1285,181 @@ export class SyncEngine {
 
     handleMachineAlive(payload: { machineId: string; time: number; health?: unknown }): void {
         this.machineCache.handleMachineAlive(payload)
+        void this.maybeFleetUpgradeMachine(payload.machineId).catch((error) => {
+            console.warn('[fleet-upgrade] offer resolution failed', error)
+        })
     }
 
     /**
-     * Manual stop-runner for supervised hosts only (banner Restart).
-     * Detached `hapi runner start` has no supervisor — stop would leave the
-     * host offline. Require `metadata.supervisedRestart` (HAPI_RUNNER_SUPERVISED=1).
+     * After hub startup (post-remat / patient restart), sweep once for runners
+     * that trail the hub offer. Heartbeat auto-upgrade alone can miss the
+     * window when a successful upgrade lands on the pre-restart generation and
+     * the 15m cooldown blocks chasing the new hub fingerprint.
+     */
+    scheduleFleetUpgradeStartupSweep(): void {
+        if (this.fleetUpgradeStartupSweepTimer) {
+            clearTimeout(this.fleetUpgradeStartupSweepTimer)
+        }
+        this.fleetUpgradeStartupSweepTimer = setTimeout(() => {
+            this.fleetUpgradeStartupSweepTimer = null
+            void this.runFleetUpgradeStartupSweep().catch((error) => {
+                console.warn('[fleet-upgrade] startup sweep failed', error)
+            })
+        }, SyncEngine.FLEET_UPGRADE_STARTUP_SWEEP_DELAY_MS)
+    }
+
+    private async runFleetUpgradeStartupSweep(): Promise<void> {
+        if (!this.getUpgradeOffer || this.getFleetUpgradePolicy() !== 'auto') {
+            return
+        }
+        const offer = this.getUpgradeOffer()
+        if (offer.channel === 'off') {
+            return
+        }
+
+        const skewed = this.getMachines().filter((machine) => {
+            if (!machine.active || !machine.metadata) {
+                return false
+            }
+            if (machine.metadata.versionHandoffDisabled === true) {
+                return false
+            }
+            return machineTrailsUpgradeOffer(
+                offer,
+                machine.metadata.happyCliVersion,
+                machine.metadata.capabilities,
+                machine.metadata.cliArtifactGeneration,
+            )
+        })
+
+        if (skewed.length === 0) {
+            console.log('[fleet-upgrade] startup sweep: no skewed runners')
+            return
+        }
+
+        console.warn('[fleet-upgrade] startup sweep', {
+            count: skewed.length,
+            hosts: skewed.map((machine) => machine.metadata?.host ?? machine.metadata?.displayName ?? machine.id),
+            targetGeneration: offer.targetGeneration?.slice(0, 16),
+        })
+
+        await Promise.all(skewed.map((machine) =>
+            this.maybeFleetUpgradeMachine(machine.id, { bypassCooldown: true, source: 'startup-sweep' })
+        ))
+    }
+
+    /**
+     * Auto cooldown is per-machine wall clock. When the hub's offer moves
+     * (soup fingerprint) a successful upgrade of the previous target must not
+     * block chasing the new one for 15 minutes.
+     */
+    private clearFleetUpgradeCooldownIfTargetMoved(offer: HubUpgradeOffer): void {
+        const key = `${offer.channel}:${offer.targetVersion}:${offer.targetGeneration ?? ''}`
+        if (this.lastAutoUpgradeOfferKey !== null && this.lastAutoUpgradeOfferKey !== key) {
+            this.fleetUpgradeAttemptAt.clear()
+            console.warn('[fleet-upgrade] target moved; cleared auto cooldown', {
+                from: this.lastAutoUpgradeOfferKey,
+                to: key,
+            })
+        }
+        this.lastAutoUpgradeOfferKey = key
+    }
+
+    /**
+     * When a connected runner is missing required capabilities, ask it to
+     * self-upgrade to the hub's generation (npm or hub-artifact).
+     */
+    private async maybeFleetUpgradeMachine(
+        machineId: string,
+        options?: { bypassCooldown?: boolean; source?: 'machine-alive' | 'machine-updated' | 'startup-sweep' },
+    ): Promise<void> {
+        // Policy-first: default `alert` must not resolve (and fingerprint) the
+        // upgrade offer on every machine-alive heartbeat.
+        if (!this.getUpgradeOffer) {
+            return
+        }
+        if (this.getFleetUpgradePolicy() !== 'auto') {
+            return
+        }
+        const offer = this.getUpgradeOffer()
+        if (offer.channel === 'off') {
+            return
+        }
+        this.clearFleetUpgradeCooldownIfTargetMoved(offer)
+        const machine = this.machineCache.getMachine(machineId)
+        if (!machine?.active || !machine.metadata) {
+            return
+        }
+        // Honor runner opt-out: operators with HAPI_DISABLE_VERSION_HANDOFF=1
+        // must not get hub-initiated upgrade/stop churn (mtime handoff sibling).
+        if (machine.metadata.versionHandoffDisabled === true) {
+            return
+        }
+        // Auto-fire on capability skew OR pure semver drift ("set and forget"):
+        // a runner behind the hub's target version is nudged even when it's
+        // missing no required capability. The 0.0.0/off guards live in the helper.
+        if (!machineTrailsUpgradeOffer(
+            offer,
+            machine.metadata.happyCliVersion,
+            machine.metadata.capabilities,
+            machine.metadata.cliArtifactGeneration,
+        )) {
+            return
+        }
+        if (!options?.bypassCooldown) {
+            const last = this.fleetUpgradeAttemptAt.get(machineId) ?? 0
+            if (Date.now() - last < SyncEngine.FLEET_UPGRADE_COOLDOWN_MS) {
+                return
+            }
+        }
+        this.fleetUpgradeAttemptAt.set(machineId, Date.now())
+        const host = machine.metadata.host ?? machine.metadata.displayName ?? machineId
+        try {
+            const result = await this.upgradeMachineRunner(machineId, machine.namespace)
+            console.warn('[fleet-upgrade] auto attempt', {
+                machineId,
+                host,
+                channel: offer.channel,
+                source: options?.source ?? 'machine-alive',
+                result,
+            })
+            // Only toast hard upgrade failures. `upgrade_deferred` is mid-soup
+            // bun compile (Teemo 2026-08-04); `upgrade_unavailable` is expected
+            // opt-out / channel-off / missing capability. Permanent artifact
+            // prep failures are classified as `upgrade_failed` so they stay visible
+            // under auto (banner hides self-upgrade-capable hosts).
+            if (result.type === 'error' && result.code === 'upgrade_failed') {
+                this.eventPublisher.sendToast(
+                    machine.namespace,
+                    'Runner upgrade failed',
+                    `${host}: ${result.message}`,
+                )
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            console.warn('[fleet-upgrade] auto attempt failed', {
+                machineId,
+                message,
+            })
+            // Unexpected throw — still toast; prepare/compile paths return
+            // typed errors instead of throwing into this catch.
+            this.eventPublisher.sendToast(
+                machine.namespace,
+                'Runner upgrade failed',
+                `${host}: ${message}`,
+            )
+        }
+    }
+
+    /**
+     * Manual stop-runner (banner Restart). Only safe when the runner advertised
+     * `supervisedRestart` (HAPI_RUNNER_SUPERVISED=1) — an external supervisor
+     * relaunches. `versionHandoffDisabled` alone is not proof of a supervisor
+     * (detached `hapi runner start` can set that flag with nothing to relaunch).
      */
     async restartMachineRunner(machineId: string, namespace: string): Promise<
         | { type: 'success'; message: string }
-        | { type: 'error'; message: string; code: 'machine_not_found' | 'machine_offline' | 'restart_unsupported' | 'restart_failed' }
+        | { type: 'error'; message: string; code: 'machine_not_found' | 'machine_offline' | 'restart_unavailable' | 'restart_failed' }
     > {
         const machine = this.machineCache.getMachineByNamespace(machineId, namespace)
             ?? this.machineCache.refreshMachine(machineId)
@@ -1270,16 +1469,27 @@ export class SyncEngine {
         if (!machine.active) {
             return { type: 'error', message: 'Machine is offline', code: 'machine_offline' }
         }
+        // Banner Restart is stop-only. Gate on explicit supervisedRestart so a
+        // direct/stale client cannot stop-runner an unsupervised host. Also
+        // require a newer on-disk CLI — otherwise Restart just relaunches the
+        // same bytes and cannot clear skew.
         if (machine.metadata?.supervisedRestart !== true) {
             return {
                 type: 'error',
-                message: 'Restart requires a supervised runner (HAPI_RUNNER_SUPERVISED=1); unsupervised stop would leave the host offline',
-                code: 'restart_unsupported',
+                message: 'Restart requires an external runner supervisor (HAPI_RUNNER_SUPERVISED=1); use Upgrade instead',
+                code: 'restart_unavailable',
+            }
+        }
+        if (!cliBinaryUpdatedOnDisk(machine.metadata)) {
+            return {
+                type: 'error',
+                message: 'No newer CLI is installed; use Upgrade first',
+                code: 'restart_unavailable',
             }
         }
         try {
             await this.rpcGateway.stopRunner(machineId)
-            return { type: 'success', message: 'Runner stop requested; supervisor will relaunch' }
+            return { type: 'success', message: 'Runner restart requested' }
         } catch (error) {
             return {
                 type: 'error',
@@ -1287,6 +1497,183 @@ export class SyncEngine {
                 code: 'restart_failed',
             }
         }
+    }
+
+    /**
+     * Ask a remote runner to upgrade to the hub's offered generation.
+     * Concurrent callers for the same machine share one in-flight attempt.
+     */
+    async upgradeMachineRunner(machineId: string, namespace: string): Promise<
+        | { type: 'success'; message: string; response: RunnerSelfUpgradeResponse }
+        | { type: 'error'; message: string; code: 'machine_not_found' | 'machine_offline' | 'upgrade_unavailable' | 'upgrade_deferred' | 'upgrade_failed' }
+    > {
+        const existing = this.fleetUpgradeInFlight.get(machineId)
+        if (existing) {
+            return await existing
+        }
+        const task = this.upgradeMachineRunnerUnlocked(machineId, namespace)
+        this.fleetUpgradeInFlight.set(machineId, task)
+        try {
+            return await task
+        } finally {
+            if (this.fleetUpgradeInFlight.get(machineId) === task) {
+                this.fleetUpgradeInFlight.delete(machineId)
+            }
+        }
+    }
+
+    private async upgradeMachineRunnerUnlocked(machineId: string, namespace: string): Promise<
+        | { type: 'success'; message: string; response: RunnerSelfUpgradeResponse }
+        | { type: 'error'; message: string; code: 'machine_not_found' | 'machine_offline' | 'upgrade_unavailable' | 'upgrade_deferred' | 'upgrade_failed' }
+    > {
+        if (!this.getUpgradeOffer) {
+            return { type: 'error', message: 'Upgrade offer not configured', code: 'upgrade_unavailable' }
+        }
+        const machine = this.machineCache.getMachineByNamespace(machineId, namespace)
+            ?? this.machineCache.refreshMachine(machineId)
+        if (!machine || machine.namespace !== namespace) {
+            return { type: 'error', message: 'Machine not found', code: 'machine_not_found' }
+        }
+        if (!machine.active) {
+            return { type: 'error', message: 'Machine is offline', code: 'machine_offline' }
+        }
+
+        let offer = this.getUpgradeOffer()
+        if (offer.channel === 'off') {
+            return { type: 'error', message: 'Fleet upgrade disabled (HAPI_UPGRADE_CHANNEL=off)', code: 'upgrade_unavailable' }
+        }
+
+        // Soup / rebuild-only hosts (and any runner with HAPI_DISABLE_VERSION_HANDOFF=1)
+        // opt out of hub-initiated Upgrade. Fail closed on the manual path too so the
+        // UI cannot "succeed" while systemd keeps the soup entrypoint.
+        if (machine.metadata?.versionHandoffDisabled === true) {
+            return {
+                type: 'error',
+                message: 'Runner opted out of version handoff (soup/rebuild-only or HAPI_DISABLE_VERSION_HANDOFF=1); rematerialize soup or clear the opt-out',
+                code: 'upgrade_unavailable',
+            }
+        }
+
+        // Live-RPC overlay is already applied by MachineCache.getMachineByNamespace.
+        // Skewed runners that predate this RPC cannot self-upgrade remotely — fail
+        // closed with a clear code so the UI can steer operators to a manual path.
+        //
+        // Also require the *live* RpcRegistry entry. Advertised metadata alone is
+        // a lie after hub restart when fire-and-forget `rpc-register` is dropped
+        // but `machine-alive` keeps the row active (Teemo/proxmox 2026-08-10).
+        const capabilities = machine.metadata?.capabilities ?? []
+        const liveSelfUpgrade = this.machineCache.hasLiveRpc(
+            machineId,
+            MACHINE_CAPABILITIES.RunnerSelfUpgrade,
+        )
+        if (!liveSelfUpgrade) {
+            if (capabilities.includes(MACHINE_CAPABILITIES.RunnerSelfUpgrade)) {
+                return {
+                    type: 'error',
+                    message:
+                        'Runner advertises self-upgrade but the RPC is not registered on the live socket; '
+                        + 'restart the runner (or wait for keepalive re-register) then retry',
+                    code: 'upgrade_unavailable',
+                }
+            }
+            return {
+                type: 'error',
+                message: 'Runner does not support self-upgrade; upgrade the CLI manually and restart the runner',
+                code: 'upgrade_unavailable',
+            }
+        }
+
+        if (offer.channel === 'hub-artifact') {
+            if (!this.prepareArtifactOffer) {
+                return { type: 'error', message: 'Artifact builder not configured', code: 'upgrade_unavailable' }
+            }
+            const platform = machine.metadata?.platform
+            const arch = machine.metadata?.arch
+            if (!platform || !arch) {
+                return {
+                    type: 'error',
+                    message: 'Machine platform/arch unavailable for hub-artifact upgrade',
+                    code: 'upgrade_unavailable',
+                }
+            }
+            try {
+                offer = await this.prepareArtifactOffer(
+                    offer,
+                    platform,
+                    arch,
+                )
+            } catch (error) {
+                const message = error instanceof Error ? error.message : 'Failed to prepare CLI artifact'
+                // Mid-soup unresolved imports → deferred (no auto toast). Permanent
+                // prep failures → upgrade_failed so auto policy still surfaces them.
+                if (isTransientArtifactBuildFailure(error)) {
+                    return { type: 'error', message, code: 'upgrade_deferred' }
+                }
+                return { type: 'error', message, code: 'upgrade_failed' }
+            }
+            if (!offer.artifact?.sha256) {
+                return { type: 'error', message: 'Artifact missing sha256', code: 'upgrade_unavailable' }
+            }
+        }
+
+        try {
+            const raw = await this.rpcGateway.runnerSelfUpgrade(machineId, offer)
+            const response = raw as RunnerSelfUpgradeResponse
+            if (response?.status === 'failed' || response?.status === 'unsupported') {
+                return {
+                    type: 'error',
+                    message: response.message || `Upgrade ${response.status}`,
+                    code: 'upgrade_failed',
+                }
+            }
+            // Pre-generation runners (and any future gap) can reply already-current
+            // at the same semver while the hub still trails on targetGeneration /
+            // capabilities. That is not success — treating it as one stuck the
+            // banner in a forever "Already at X" loop.
+            if (
+                response?.status === 'already-current'
+                && machineTrailsUpgradeOffer(
+                    offer,
+                    machine.metadata?.happyCliVersion,
+                    machine.metadata?.capabilities,
+                    machine.metadata?.cliArtifactGeneration,
+                )
+            ) {
+                return {
+                    type: 'error',
+                    message:
+                        'Runner reported already-current but still trails the hub offer '
+                        + '(generation or capabilities). Install the hub CLI artifact once '
+                        + 'on that machine, or upgrade to a generation-aware runner.',
+                    code: 'upgrade_failed',
+                }
+            }
+            return {
+                type: 'success',
+                message: response?.message || 'Upgrade started',
+                response,
+            }
+        } catch (error) {
+            // Belt-and-suspenders: registry can race-clear between the live
+            // gate and the emit. Treat missing handler as unavailable (no auto
+            // toast) rather than a hard upgrade_failed.
+            if (error instanceof RpcTargetMissingError) {
+                return {
+                    type: 'error',
+                    message: error.message,
+                    code: 'upgrade_unavailable',
+                }
+            }
+            return {
+                type: 'error',
+                message: error instanceof Error ? error.message : 'Fleet upgrade RPC failed',
+                code: 'upgrade_failed',
+            }
+        }
+    }
+
+    getHubUpgradeOffer(): HubUpgradeOffer | null {
+        return this.getUpgradeOffer?.() ?? null
     }
 
     private expireInactive(): void {
@@ -1580,9 +1967,6 @@ export class SyncEngine {
         if (!localId) {
             return { status: 'failed', error: 'Message has no localId', localId: null }
         }
-        // Reject every scheduled row — mature ones included. A matured row is
-        // released by the scheduled-FIFO path moments later anyway, and the web
-        // never offers Steer on scheduled rows.
         if (scheduledAt != null) {
             return { status: 'failed', error: 'Scheduled messages cannot be steered', localId }
         }

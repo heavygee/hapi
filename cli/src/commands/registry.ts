@@ -1,4 +1,5 @@
 import chalk from 'chalk'
+import { agyCommand } from './agy'
 import { authCommand } from './auth'
 import { claudeCommand } from './claude'
 import { codexCommand } from './codex'
@@ -8,6 +9,7 @@ import { runnerCommand } from './runner'
 import { resumeCommand } from './resume'
 import { doctorCommand } from './doctor'
 import { kimiCommand } from './kimi'
+import { copilotCommand } from './copilot'
 import { grokCommand } from './grok'
 import { opencodeCommand } from './opencode'
 import { piCommand } from './pi'
@@ -17,6 +19,11 @@ import { notifyCommand } from './notify'
 import { linkPrCommand } from './linkPr'
 import { hubCommand } from './hub'
 import { pingPeerCommand } from './pingPeer'
+import { inspectPeerCommand } from './inspectPeer'
+import { helpCommand } from './help'
+import { jobCommand } from './job'
+import { spawnPeerCommand } from './spawnPeer'
+import { versionCommand } from './version'
 import type { CommandContext, CommandDefinition } from './types'
 
 // Gemini CLI was sunset (Google stopped serving the consumer Gemini CLI on
@@ -36,6 +43,7 @@ const removedGeminiCommand: CommandDefinition = {
 }
 
 const COMMANDS: CommandDefinition[] = [
+    agyCommand,
     authCommand,
     connectCommand,
     codexCommand,
@@ -43,6 +51,7 @@ const COMMANDS: CommandDefinition[] = [
     removedGeminiCommand,
     grokCommand,
     kimiCommand,
+    copilotCommand,
     opencodeCommand,
     piCommand,
     mcpCommand,
@@ -54,7 +63,12 @@ const COMMANDS: CommandDefinition[] = [
     runnerCommand,
     notifyCommand,
     linkPrCommand,
-    pingPeerCommand
+    pingPeerCommand,
+    inspectPeerCommand,
+    jobCommand,
+    spawnPeerCommand,
+    helpCommand,
+    versionCommand,
 ]
 
 const commandMap = new Map<string, CommandDefinition>()
@@ -62,8 +76,23 @@ for (const command of COMMANDS) {
     commandMap.set(command.name, command)
 }
 
+const HELP_TOKENS = new Set(['help', '-h', '--help'])
+const VERSION_TOKENS = new Set(['version'])
+
 export function resolveCommand(args: string[]): { command: CommandDefinition; context: CommandContext } {
     const subcommand = args[0]
+    if (subcommand && HELP_TOKENS.has(subcommand)) {
+        return {
+            command: helpCommand,
+            context: { args, subcommand, commandArgs: args.slice(1) },
+        }
+    }
+    if (subcommand && VERSION_TOKENS.has(subcommand)) {
+        return {
+            command: versionCommand,
+            context: { args, subcommand, commandArgs: args.slice(1) },
+        }
+    }
     const command = subcommand ? commandMap.get(subcommand) : undefined
     const resolvedCommand = command ?? claudeCommand
     const commandArgs = command ? args.slice(1) : args

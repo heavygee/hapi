@@ -72,6 +72,12 @@ export const claudeCommand: CommandDefinition = {
                 unknownArgs.push('--effort', effort)
             } else if (arg === '--started-by') {
                 options.startedBy = args[++i] as 'runner' | 'terminal'
+            } else if (arg === '--existing-session-id') {
+                const sessionId = args[++i]
+                if (!sessionId) {
+                    throw new Error('Missing --existing-session-id value')
+                }
+                options.existingSessionId = sessionId
             } else {
                 unknownArgs.push(arg)
                 if (i + 1 < args.length && !args[i + 1].startsWith('-')) {
@@ -86,37 +92,24 @@ export const claudeCommand: CommandDefinition = {
 
         if (showHelp) {
             console.log(`
-${chalk.bold('hapi')} - Claude Code On the Go
+${chalk.bold('hapi claude')} - start a Claude Code session through HAPI
 
 ${chalk.bold('Usage:')}
-  hapi [options]         Start Claude with Telegram control (direct-connect)
-  hapi auth              Manage authentication
-  hapi codex             Start Codex mode
-  hapi cursor            Start Cursor Agent mode
-  hapi opencode          Start OpenCode ACP mode
-  hapi resume [id]       Resume an existing HAPI session locally
-  hapi mcp               Start MCP stdio bridge
-  hapi connect           (not available in direct-connect mode)
-  hapi notify            (not available in direct-connect mode)
-  hapi hub               Start the API + web hub
-  hapi hub --relay       Start with public relay
-  hapi server            Alias for hapi hub
-  hapi runner            Manage background service that allows
-                            to spawn new sessions away from your computer
-  hapi doctor            System diagnostics & troubleshooting
+  hapi [options]         Start Claude (default command; same as \`hapi claude\`)
+  hapi claude [options]  Explicit Claude session
+
+For HAPI product commands (\`job\`, \`ping-peer\`, \`version\`, \`auth\`, \`runner\`), run:
+  hapi --help
+  hapi version
 
 ${chalk.bold('Examples:')}
   hapi                    Start session (will prompt for token if not set)
-  hapi auth login         Configure CLI_API_TOKEN interactively
   hapi --yolo             Start with bypassing permissions
                             hapi sugar for --dangerously-skip-permissions
-  hapi auth status        Show direct-connect status
-  hapi doctor             Run diagnostics
+  hapi --resume           Resume most recent Claude session
 
 ${chalk.bold('hapi supports ALL Claude options!')}
-  Use any claude flag with hapi as you would with claude. Our favorite:
-
-  hapi --resume
+  Use any claude flag with hapi as you would with claude.
 
 ${chalk.gray('─'.repeat(60))}
 ${chalk.bold.cyan('Claude Code Options (from `claude --help`):')}

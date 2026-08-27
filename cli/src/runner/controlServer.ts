@@ -16,10 +16,10 @@ export function startRunnerControlServer({
   stopSession,
   spawnSession,
   requestShutdown,
-  onHappySessionWebhook
+  onHappySessionWebhook,
 }: {
   getChildren: () => TrackedSession[];
-  stopSession: (sessionId: string) => boolean;
+  stopSession: (sessionId: string) => Promise<'stopped' | 'already_gone' | 'still_alive'>;
   spawnSession: (options: SpawnSessionOptions) => Promise<SpawnSessionResult>;
   requestShutdown: () => void;
   onHappySessionWebhook: (sessionId: string, metadata: Metadata) => void;
@@ -91,7 +91,7 @@ export function startRunnerControlServer({
         }),
         response: {
           200: z.object({
-            success: z.boolean()
+            status: z.enum(['stopped', 'already_gone', 'still_alive'])
           })
         }
       }
@@ -99,8 +99,8 @@ export function startRunnerControlServer({
       const { sessionId } = request.body;
 
       logger.debug(`[CONTROL SERVER] Stop session request: ${sessionId}`);
-      const success = stopSession(sessionId);
-      return { success };
+      const status = await stopSession(sessionId);
+      return { status };
     });
 
     // Spawn new session
@@ -189,6 +189,26 @@ export function startRunnerControlServer({
       }, 50);
 
       return { status: 'stopping' };
+    });
+
+    // Loopback HTTP cannot authenticate a caller as the operator vs a
+    // reparented helper (#1473 Blocker). Capability mint stays on the
+    // peercred unix socket (tracked session trees only). Keep a hard 403
+    // so older clients fail closed instead of minting.
+    typed.post('/prepare-local-resume', {
+      schema: {
+        body: z.object({
+          sessionId: z.string()
+        }),
+        response: {
+          403: z.object({
+            error: z.string()
+          })
+        }
+      }
+    }, async (_request, reply) => {
+      reply.code(403);
+      return { error: 'Unauthenticated loopback cannot mint session capabilities' };
     });
 
     app.listen({ port: 0, host: '127.0.0.1' }, (err, address) => {
