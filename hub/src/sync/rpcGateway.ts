@@ -1,4 +1,4 @@
-import type { AgentFlavor, CodexCollaborationMode, PermissionMode } from '@hapi/protocol/types'
+import type { AgentFlavor, CodexCollaborationMode, CopilotAgentMode, PermissionMode } from '@hapi/protocol/types'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import {
     ArchiveCodexSessionRpcResponseSchema,
@@ -6,9 +6,11 @@ import {
     ListCodexSessionsRpcResponseSchema,
     ListClaudeSessionsRpcResponseSchema,
     ListCursorImportableSessionsRpcResponseSchema,
+    ListPiSessionsRpcResponseSchema,
     PrepareCursorImportRpcResponseSchema
 } from '@hapi/protocol/apiTypes'
 import type {
+    AgyModelsResponse,
     CodexModelSummary,
     CodexModelsResponse,
     CommandResponse,
@@ -19,12 +21,14 @@ import type {
     DirectoryEntry,
     FileReadResponse,
     GeneratedImageResponse,
+    CopilotModelsResponse,
     GrokModelsResponse,
     GrokReasoningEffortResponse,
     ListDirectoryResponse,
     ListCodexSessionsRpcResponse,
     ListClaudeSessionsRpcResponse,
     ListCursorImportableSessionsRpcResponse,
+    ListPiSessionsRpcResponse,
     PrepareCursorImportRpcResponse,
     ArchiveCodexSessionRpcResponse,
     OpencodeModelsResponse,
@@ -81,8 +85,10 @@ export type RpcCursorChatStoreStatus = CursorChatStoreStatus
 export type RpcOpencodeModel = OpencodeModelSummary
 export type RpcListOpencodeModelsResponse = OpencodeModelsResponse
 export type RpcListGrokModelsResponse = GrokModelsResponse
+export type RpcListCopilotModelsResponse = CopilotModelsResponse
 export type RpcListGrokReasoningEffortOptionsResponse = GrokReasoningEffortResponse
 export type RpcListOpencodeReasoningEffortOptionsResponse = OpencodeReasoningEffortResponse
+export type RpcListAgyModelsResponse = AgyModelsResponse
 
 export class RpcGateway {
     constructor(
@@ -138,6 +144,7 @@ export class RpcGateway {
             effort?: string | null
             collaborationMode?: CodexCollaborationMode
             autoBridgeTransientModelErrors?: boolean
+            copilotAgentMode?: CopilotAgentMode
         }
     ): Promise<unknown> {
         return await this.sessionRpc(sessionId, RPC_METHODS.SetSessionConfig, config)
@@ -145,6 +152,13 @@ export class RpcGateway {
 
     async killSession(sessionId: string): Promise<void> {
         await this.sessionRpc(sessionId, RPC_METHODS.KillSession, {})
+    }
+
+    async stopRunnerSession(machineId: string, sessionId: string): Promise<'stopped' | 'already_gone' | 'still_alive'> {
+        const result = await this.machineRpc(machineId, RPC_METHODS.StopSession, { sessionId })
+        const status = result && typeof result === 'object' ? (result as { status?: unknown }).status : undefined
+        if (status === 'stopped' || status === 'already_gone' || status === 'still_alive') return status
+        throw new Error('Unexpected stop-session response')
     }
 
     async handoffSessionToLocal(sessionId: string): Promise<void> {
@@ -184,7 +198,15 @@ export class RpcGateway {
         permissionMode?: PermissionMode,
         serviceTier?: string,
         existingSessionId?: string,
-        collaborationMode?: CodexCollaborationMode
+        collaborationMode?: CodexCollaborationMode,
+        copilotAgentMode?: CopilotAgentMode,
+        startingMode?: 'remote' | 'pty',
+        // Hub session id to reuse for this spawn. When set, the runner boots the
+        // CLI with `--hapi-session-id`, so the child reuses the existing hub
+        // session row (same id) instead of minting a new one.
+        forkSession?: boolean,
+        /** One-shot nonce for runner to redeem resume peer capability (pass 2h). */
+        resumePeerMintNonce?: string
     ): Promise<{ type: 'success'; sessionId: string } | { type: 'error'; message: string }> {
         try {
             const result = await this.machineRpc(
@@ -205,7 +227,11 @@ export class RpcGateway {
                     serviceTier,
                     existingSessionId,
                     sessionId: existingSessionId,
-                    collaborationMode
+                    collaborationMode,
+                    copilotAgentMode,
+                    startingMode,
+                    forkSession: forkSession === true,
+                    resumePeerMintNonce
                 }
             )
             if (result && typeof result === 'object') {
@@ -241,8 +267,8 @@ export class RpcGateway {
         }
     }
 
-    async listMachineDirectory(machineId: string, path: string): Promise<RpcListDirectoryResponse> {
-        const result = await this.machineRpc(machineId, RPC_METHODS.ListMachineDirectory, { path }) as RpcListDirectoryResponse | unknown
+    async listMachineDirectory(machineId: string, path: string, includeHidden?: boolean): Promise<RpcListDirectoryResponse> {
+        const result = await this.machineRpc(machineId, RPC_METHODS.ListMachineDirectory, { path, includeHidden }) as RpcListDirectoryResponse | unknown
         if (!result || typeof result !== 'object') {
             return { success: false, error: 'Unexpected list-directory result' }
         }
@@ -283,11 +309,6 @@ export class RpcGateway {
 
     async stopRunner(machineId: string): Promise<void> {
         await this.machineRpc(machineId, RPC_METHODS.StopRunner, {})
-    }
-
-    async runnerSelfUpgrade(machineId: string, offer: unknown): Promise<unknown> {
-        // Upgrades can take minutes (npm install / artifact download).
-        return await this.machineRpc(machineId, RPC_METHODS.RunnerSelfUpgrade, { offer }, 10 * 60_000)
     }
 
     async getGitStatus(sessionId: string, cwd?: string): Promise<RpcCommandResponse> {
@@ -346,6 +367,10 @@ export class RpcGateway {
         }
     }
 
+    async listCodexModelsForSession(sessionId: string): Promise<RpcListCodexModelsResponse> {
+        return await this.sessionRpc(sessionId, RPC_METHODS.ListCodexModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListCodexModelsResponse
+    }
+
     async listCodexModelsForMachine(machineId: string): Promise<RpcListCodexModelsResponse> {
         return await this.machineRpc(machineId, RPC_METHODS.ListCodexModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListCodexModelsResponse
     }
@@ -358,6 +383,11 @@ export class RpcGateway {
     async listClaudeSessionsForMachine(machineId: string, cwd?: string | null, sessionIds?: string[]): Promise<ListClaudeSessionsRpcResponse> {
         const result = await this.machineRpc(machineId, RPC_METHODS.ListClaudeSessions, { cwd: cwd ?? null, sessionIds }, MODEL_LIST_RPC_TIMEOUT_MS)
         return ListClaudeSessionsRpcResponseSchema.parse(result)
+    }
+
+    async listPiSessionsForMachine(machineId: string, cwd?: string | null, sessionIds?: string[]): Promise<ListPiSessionsRpcResponse> {
+        const result = await this.machineRpc(machineId, RPC_METHODS.ListPiSessions, { cwd: cwd ?? null, sessionIds }, MODEL_LIST_RPC_TIMEOUT_MS)
+        return ListPiSessionsRpcResponseSchema.parse(result)
     }
 
     async listCursorImportableSessionsForMachine(
@@ -421,14 +451,74 @@ export class RpcGateway {
         return await this.sessionRpc(sessionId, RPC_METHODS.ListGrokReasoningEffortOptions, {}) as RpcListGrokReasoningEffortOptionsResponse
     }
 
+    async listCopilotModelsForCwd(machineId: string, cwd: string): Promise<RpcListCopilotModelsResponse> {
+        return await this.machineRpc(
+            machineId,
+            RPC_METHODS.ListCopilotModelsForCwd,
+            { cwd },
+            MODEL_LIST_RPC_TIMEOUT_MS
+        ) as RpcListCopilotModelsResponse
+    }
+
+    async listCopilotModelsForSession(sessionId: string): Promise<RpcListCopilotModelsResponse> {
+        return await this.sessionRpc(
+            sessionId,
+            RPC_METHODS.ListCopilotModels,
+            {},
+            MODEL_LIST_RPC_TIMEOUT_MS
+        ) as RpcListCopilotModelsResponse
+    }
+
     /** Generic Pi RPC call — routes all Pi-specific session RPCs through
      *  a single entry point instead of per-method wrappers. */
     async callPiRpc<T = unknown>(sessionId: string, method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<T> {
         return await this.sessionRpc(sessionId, method, params ?? {}, timeoutMs ?? DEFAULT_RPC_TIMEOUT_MS) as T
     }
 
+    /**
+     * Ask the CLI to deliver one queued message into the active Pi turn
+     * (Pi native steer). Only the pi flavor registers this handler.
+     */
+    async steerQueuedMessage(
+        sessionId: string,
+        localId: string
+    ): Promise<{ steered: boolean; error?: string }> {
+        return await this.sessionRpc(sessionId, RPC_METHODS.SteerQueuedMessage, { localId }) as {
+            steered: boolean
+            error?: string
+        }
+    }
+
+    async forkConversation(
+        sessionId: string,
+        params: { messageLocalId?: string }
+    ): Promise<import('@hapi/protocol/apiTypes').ForkConversationRpcResult> {
+        return await this.sessionRpc(
+            sessionId,
+            RPC_METHODS.ForkConversation,
+            params,
+            120_000
+        ) as import('@hapi/protocol/apiTypes').ForkConversationRpcResult
+    }
+
+    async rewindConversation(
+        sessionId: string,
+        params: { messageLocalId: string }
+    ): Promise<import('@hapi/protocol/apiTypes').RewindConversationRpcResult> {
+        return await this.sessionRpc(
+            sessionId,
+            RPC_METHODS.RewindConversation,
+            params,
+            120_000
+        ) as import('@hapi/protocol/apiTypes').RewindConversationRpcResult
+    }
+
     async listOpencodeReasoningEffortOptionsForSession(sessionId: string): Promise<RpcListOpencodeReasoningEffortOptionsResponse> {
         return await this.sessionRpc(sessionId, RPC_METHODS.ListOpencodeReasoningEffortOptions, {}) as RpcListOpencodeReasoningEffortOptionsResponse
+    }
+
+    async listAgyModelsForMachine(machineId: string): Promise<RpcListAgyModelsResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.ListAgyModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListAgyModelsResponse
     }
 
     private async sessionRpc(
@@ -447,6 +537,15 @@ export class RpcGateway {
         timeoutMs: number = DEFAULT_RPC_TIMEOUT_MS
     ): Promise<unknown> {
         return await this.rpcCall(`${machineId}:${method}`, params, timeoutMs)
+    }
+
+    /** True when a live /cli socket owns the RPC method (hub-side provenance signal). */
+    hasLiveHandler(method: string): boolean {
+        const socketId = this.rpcRegistry.getSocketIdForMethod(method)
+        if (!socketId) {
+            return false
+        }
+        return this.io.of('/cli').sockets.has(socketId)
     }
 
     private async rpcCall(method: string, params: unknown, timeoutMs: number = DEFAULT_RPC_TIMEOUT_MS): Promise<unknown> {

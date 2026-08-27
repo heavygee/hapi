@@ -64,7 +64,19 @@ describe('classifyCursorAgentMessage', () => {
         const result = classifyCursorAgentMessage('Error: T: [some_new_error] weird thing happened')
         expect(result).not.toBeNull()
         expect(result?.kind).toBe('unknown_t_prefix')
-        expect(result?.transient).toBe(true)
+        // #1522: catch-all must not auto-bridge (estate soup used to be transient:true).
+        expect(result?.transient).toBe(false)
+    })
+
+    it('classifies invalid_argument as own non-transient kind (#1522)', () => {
+        const exactWire = 'Error: RetriableError: [invalid_argument] Error'
+        const result = classifyCursorAgentMessage(exactWire)
+        expect(result).not.toBeNull()
+        expect(result?.kind).toBe('invalid_argument')
+        expect(result?.transient).toBe(false)
+        expect(result?.raw).toBe(exactWire)
+        expect(classifyCursorAgentMessage('Error: T: [invalid_argument] Error')?.kind)
+            .toBe('invalid_argument')
     })
 
     it('preserves raw text', () => {
@@ -240,37 +252,44 @@ describe('classifyCursorAgentMessage', () => {
 describe('mapAcpStderrToFailure (structural stderr signal)', () => {
     it('maps rate_limit -> rate_limited (transient)', () => {
         const out = mapAcpStderrToFailure({ type: 'rate_limit', raw: 'status 429 ratelimitexceeded' })
-        expect(out.kind).toBe('rate_limited')
-        expect(out.transient).toBe(true)
-        expect(out.source).toBe('stderr')
-        expect(out.raw).toBe('status 429 ratelimitexceeded')
+        expect(out).not.toBeNull()
+        expect(out!.kind).toBe('rate_limited')
+        expect(out!.transient).toBe(true)
+        expect(out!.source).toBe('stderr')
+        expect(out!.raw).toBe('status 429 ratelimitexceeded')
     })
 
     it('maps quota_exceeded -> quota_exhausted (non-transient)', () => {
         const out = mapAcpStderrToFailure({ type: 'quota_exceeded', raw: 'resource exhausted' })
-        expect(out.kind).toBe('quota_exhausted')
-        expect(out.transient).toBe(false)
-        expect(out.source).toBe('stderr')
+        expect(out).not.toBeNull()
+        expect(out!.kind).toBe('quota_exhausted')
+        expect(out!.transient).toBe(false)
+        expect(out!.source).toBe('stderr')
     })
 
     it('maps authentication -> auth_failed (non-transient)', () => {
         const out = mapAcpStderrToFailure({ type: 'authentication', raw: 'status 401 unauthenticated' })
-        expect(out.kind).toBe('auth_failed')
-        expect(out.transient).toBe(false)
-        expect(out.source).toBe('stderr')
+        expect(out).not.toBeNull()
+        expect(out!.kind).toBe('auth_failed')
+        expect(out!.transient).toBe(false)
+        expect(out!.source).toBe('stderr')
     })
 
     it('maps model_not_found -> model_not_found (non-transient)', () => {
         const out = mapAcpStderrToFailure({ type: 'model_not_found', raw: 'status 404 model not found' })
-        expect(out.kind).toBe('model_not_found')
-        expect(out.transient).toBe(false)
+        expect(out).not.toBeNull()
+        expect(out!.kind).toBe('model_not_found')
+        expect(out!.transient).toBe(false)
     })
 
-    it('maps unknown -> unknown_stderr', () => {
+    it('returns null for unknown (status-only stderr)', () => {
         const out = mapAcpStderrToFailure({ type: 'unknown', raw: 'unexpected exception in agent' })
-        expect(out.kind).toBe('unknown_stderr')
-        expect(out.transient).toBe(false)
-        expect(out.source).toBe('stderr')
+        expect(out).toBeNull()
+    })
+
+    it('returns null for weak authentication substring', () => {
+        const out = mapAcpStderrToFailure({ type: 'authentication', raw: 'authentication provider initialized' })
+        expect(out).toBeNull()
     })
 })
 
