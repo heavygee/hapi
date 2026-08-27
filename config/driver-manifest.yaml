@@ -871,3 +871,9 @@ layers:
   # Tip: f2f12bdf5 (origin/fix/local-followup-queue). CLI-only; BaseLocalLauncher untouched by other soup layers.
   - branch: fix/local-followup-queue
 
+  # tiann/hapi#1705 — archiveSession false-archive when session socket id is stale but runner child lives.
+  # PR: tiann/hapi#1706 fix/archive-verify-runner-before-marking-gone
+  # Worktree: ~/coding/hapi/worktrees/runner-lifecycle
+  # Tip: 26c1615ae
+  - branch: fix/archive-verify-runner-before-marking-gone
+
