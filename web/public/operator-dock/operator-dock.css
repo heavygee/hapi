@@ -1,0 +1,435 @@
+/* Operator Dock — floating mic affordance. Scoped under .opdock* so it never
+   fights host layout (Quest panels, gallery grids, chat composer). */
+
+.opdock {
+  position: fixed;
+  /* #107: flush bottom-right so HAPI composer Send stays clear. Safe-area alone (0 when absent). */
+  right: env(safe-area-inset-right, 0px);
+  bottom: env(safe-area-inset-bottom, 0px);
+  z-index: 2147483300; /* above markup overlay so hub + fan stay clickable (#115) */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: none; /* only the button / open fan plate are interactive */
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.opdock-btn {
+  /* #144: stay above open fan hit plate so H always toggles retract */
+  position: relative;
+  z-index: 2;
+  pointer-events: auto;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: #6b21a8; /* neutral operator-purple; not a Jessica brand colour */
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  transition: transform 0.12s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+.opdock-btn:hover { transform: translateY(-1px); }
+.opdock-btn:active { transform: scale(0.94); }
+
+/* #155: known-bad / missing gate — hide H + fan; secret sheet stays interactive */
+.opdock--gate-locked .opdock-btn {
+  display: none;
+}
+.opdock--gate-locked .opdock-cluster {
+  display: none;
+}
+
+.opdock--listening .opdock-btn {
+  background: #dc2626;
+  animation: opdock-pulse 1.2s infinite;
+}
+.opdock--busy .opdock-btn { background: #4338ca; }
+
+@keyframes opdock-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.55); }
+  70%  { box-shadow: 0 0 0 14px rgba(220, 38, 38, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+}
+
+/* #134 / #166: absolute left of the hub. Must set min-width — shrink-to-fit +
+   word-break:break-word collapses to a one-glyph vertical pill on desktop. */
+.opdock-label {
+  pointer-events: none;
+  position: absolute;
+  right: 64px;
+  bottom: 8px;
+  z-index: 2;
+  box-sizing: border-box;
+  min-width: 196px;
+  width: max-content;
+  max-width: min(56vw, 280px);
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(17, 17, 17, 0.92);
+  color: #f5f5f5;
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: normal;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(220, 38, 38, 0.45);
+}
+
+.opdock-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 88px;
+  transform: translate(-50%, 12px);
+  z-index: 2147483400; /* above overlay so 403 toasts stay visible (#115) */
+  max-width: 80vw;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font: 13px/1.4 ui-sans-serif, system-ui, sans-serif;
+  color: #fff;
+  background: #1f2937;
+  opacity: 0;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  pointer-events: none;
+}
+.opdock-toast--show { opacity: 1; transform: translate(-50%, 0); }
+.opdock-toast--ok  { background: #15803d; }
+.opdock-toast--err { background: #b91c1c; }
+
+/* --- annotation overlay --------------------------------------------------------------- */
+.opdock-noscroll { overflow: hidden !important; }
+
+.opdock-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483200;
+  /* #115: do not dim an already-dim Quest/HAPI view. Hub sits above this layer. */
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  touch-action: none;
+  pointer-events: none;
+}
+.opdock-toolbar,
+.opdock-draw,
+.opdock-foot {
+  pointer-events: auto;
+}
+.opdock-stage { position: absolute; inset: 0; pointer-events: none; }
+.opdock-shot {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+  pointer-events: none;
+}
+/* #154: do not cover Cancel/Send — Quest WebView canvases steal laser hits
+ * even when a higher z-index foot paints on top. Keep draw clear of .opdock-foot. */
+.opdock-draw {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  bottom: 140px;
+  width: 100%;
+  height: auto;
+  cursor: crosshair;
+  touch-action: none;
+  pointer-events: auto;
+  z-index: 1;
+}
+
+.opdock-toolbar {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(17, 17, 20, 0.92);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  z-index: 2;
+}
+.opdock-swatch {
+  width: 26px; height: 26px; border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  cursor: pointer; padding: 0;
+}
+.opdock-swatch--on { border-color: #fff; transform: scale(1.15); }
+.opdock-tool {
+  border: none; cursor: pointer;
+  background: rgba(255, 255, 255, 0.12); color: #f5f5f5;
+  font-size: 13px; padding: 6px 10px; border-radius: 8px;
+}
+.opdock-tool:hover { background: rgba(255, 255, 255, 0.22); }
+
+.opdock-foot {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  /* Clear the floating mic FAB (web dock + native host) at bottom-end. */
+  padding: 12px max(84px, calc(16px + env(safe-area-inset-right) + 64px))
+           max(84px, calc(16px + env(safe-area-inset-bottom) + 64px))
+           max(12px, env(safe-area-inset-left));
+  background: linear-gradient(to top, rgba(6, 8, 14, 0.95), rgba(6, 8, 14, 0.0));
+  display: flex; flex-direction: column; gap: 8px;
+  /* #154: above .opdock-draw; manipulation so Quest laser/touch lands on Cancel/Send */
+  z-index: 20;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+.opdock-interim { min-height: 16px; color: #a5b4fc; font-size: 13px; font-style: italic; }
+.opdock-listening {
+  align-self: flex-start;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 12px; border-radius: 999px;
+  background: #dc2626; color: #fff; font-size: 13px; font-weight: 600;
+  box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.6);
+  animation: opdock-pulse 1.2s infinite;
+}
+.opdock-listening--warn {
+  background: #b45309;
+  animation: none;
+  box-shadow: none;
+}
+.opdock-transcript {
+  width: 100%; box-sizing: border-box;
+  min-height: 60px; max-height: 28vh; resize: vertical;
+  border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(17, 17, 20, 0.9); color: #f5f5f5;
+  padding: 10px 12px; font: 14px/1.4 ui-sans-serif, system-ui, sans-serif;
+}
+.opdock-actions { display: flex; justify-content: flex-start; flex-wrap: wrap; gap: 10px; }
+.opdock-btn2 {
+  border: none; cursor: pointer; font-size: 15px; font-weight: 600;
+  padding: 12px 22px; border-radius: 10px;
+  /* #154: Quest laser / touch plate — not a skinny text chip */
+  min-height: 48px;
+  min-width: 48px;
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.opdock-cancel { background: rgba(255, 255, 255, 0.14); color: #e5e7eb; }
+/* #139: secondary credential CTA next to primary Done */
+.opdock-secondary { background: rgba(255, 255, 255, 0.14); color: #e5e7eb; }
+.opdock-secondary:hover { background: rgba(255, 255, 255, 0.22); }
+.opdock-send { background: #6b21a8; color: #fff; }
+.opdock-send:hover { background: #7c3aed; }
+.opdock-send:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* --- read-back replies panel ---------------------------------------------------------- */
+.opdock-replies {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: 84px;
+  width: min(380px, 88vw);
+  max-height: 60vh;
+  z-index: 2147483100;
+  display: flex; flex-direction: column;
+  border-radius: 14px; overflow: hidden;
+  background: #0f1117; color: #e5e7eb;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.opdock-replies-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 10px 12px; background: #16181f; font-size: 13px; font-weight: 600;
+  cursor: pointer;
+}
+.opdock-replies-title { flex: 1; min-width: 0; }
+.opdock-replies-unread {
+  display: inline-flex;
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: #a78bfa; /* HAPI unread attention dot (h-2 w-2) */
+  box-shadow: 0 0 0 2px #16181f;
+}
+.opdock-replies-unread[hidden] { display: none !important; }
+.opdock-replies-close { background: none; border: none; color: #9ca3af; font-size: 15px; cursor: pointer; }
+.opdock-replies-body { padding: 10px 12px; overflow-y: auto; font-size: 13px; line-height: 1.4; flex: 1; min-height: 0; }
+.opdock-replies-compose {
+  flex-shrink: 0;
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  padding: 8px 10px 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: #16181f;
+  pointer-events: auto;
+}
+.opdock-replies-compose textarea {
+  flex: 1;
+  min-height: 40px;
+  max-height: 96px;
+  resize: vertical;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: #0f1117;
+  color: #e5e7eb;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.35;
+  padding: 8px 10px;
+}
+.opdock-replies-compose textarea:focus { outline: 2px solid #7c3aed; outline-offset: 0; }
+.opdock-replies-compose .opdock-send {
+  flex-shrink: 0;
+  min-width: 52px;
+  min-height: 40px;
+  padding: 8px 12px;
+}
+.opdock-replies--min {
+  right: max(80px, calc(env(safe-area-inset-right) + 72px));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  width: 44px;
+  height: 44px;
+  max-height: none;
+  border-radius: 50%;
+  overflow: visible;
+}
+.opdock-replies--min .opdock-replies-body { display: none; }
+.opdock-replies--min .opdock-replies-compose { display: none; }
+.opdock-replies--min .opdock-replies-head {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 50%;
+  background: #6b21a8;
+  color: #f5f5f5;
+}
+.opdock-replies--min .opdock-replies-title { flex: none; font-size: 18px; line-height: 1; }
+.opdock-replies--min .opdock-replies-close { display: none; }
+.opdock-replies--min .opdock-replies-unread {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  box-shadow: 0 0 0 2px #6b21a8;
+}
+.opdock-msg { margin-bottom: 10px; }
+.opdock-msg-role { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: #9ca3af; margin-bottom: 2px; }
+.opdock-msg-text { white-space: pre-wrap; word-break: break-word; }
+.opdock-msg--agent .opdock-msg-text { background: rgba(124, 58, 237, 0.16); padding: 8px 10px; border-radius: 8px; }
+.opdock-msg--user .opdock-msg-text { color: #cbd5e1; }
+
+/* --- tool cluster (#105 / #107 click-toggle) ----------------------------------------- */
+.opdock-cluster {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 56px;
+  height: 56px;
+  pointer-events: none;
+}
+.opdock-sat {
+  pointer-events: none;
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: #4c1d95;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transform: translate(0, 0) scale(0.4);
+  transition: transform 0.16s ease, opacity 0.16s ease;
+  z-index: 1;
+}
+.opdock-sat svg { display: block; }
+/* #107: expanded footprint is a continuous hit plate (hub + tools + gaps). No hover-open.
+ * #112: positions from (R, count, arc) — JS sets --opdock-sat-tx/ty; CSS values below are
+ * fallback only (R=108, 90°→180°, tx=R cos θ, ty=-R sin θ). Do not hand-pile new sats. */
+.opdock--cluster-open .opdock-cluster {
+  width: 168px;
+  height: 168px;
+  pointer-events: auto;
+  background: rgba(15, 17, 23, 0.02);
+}
+.opdock--cluster-open .opdock-sat {
+  pointer-events: auto;
+  opacity: 1;
+  transform: translate(var(--opdock-sat-tx, 0px), var(--opdock-sat-ty, 0px)) scale(1);
+}
+.opdock--cluster-open .opdock-sat[data-tool="sessions"] { --opdock-sat-tx: 0px; --opdock-sat-ty: -108px; }
+.opdock--cluster-open .opdock-sat[data-tool="markup"] { --opdock-sat-tx: -54px; --opdock-sat-ty: -94px; }
+.opdock--cluster-open .opdock-sat[data-tool="mic"] { --opdock-sat-tx: -94px; --opdock-sat-ty: -54px; }
+.opdock--cluster-open .opdock-sat[data-tool="settings"] { --opdock-sat-tx: -108px; --opdock-sat-ty: 0px; }
+
+.opdock-sheet {
+  pointer-events: auto;
+  position: absolute;
+  right: 0;
+  bottom: 68px;
+  width: min(280px, 78vw);
+  max-height: min(50vh, 360px);
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #0f1117;
+  color: #e5e7eb;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  z-index: 3;
+  font-size: 13px;
+}
+.opdock-sheet h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #a78bfa;
+}
+.opdock-sheet label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+  cursor: pointer;
+}
+.opdock-session-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  padding: 8px;
+  border-radius: 8px;
+  margin: 4px 0;
+  cursor: pointer;
+}
+.opdock-session-row:hover { background: rgba(124, 58, 237, 0.18); }
+.opdock-session-row--on { outline: 1px solid #7c3aed; }
+.opdock-session-meta { font-size: 11px; color: #9ca3af; }
+.opdock-unread-dot {
+  width: 8px; height: 8px; border-radius: 999px; background: #a78bfa; flex-shrink: 0;
+}
+.opdock-unread-dot[hidden] { display: none !important; }
+.opdock-secret-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 6px 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(17, 17, 20, 0.9);
+  color: #f5f5f5;
+  font: 14px/1.4 ui-sans-serif, system-ui, sans-serif;
+}
+.opdock-secret-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }

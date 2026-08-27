@@ -98,12 +98,21 @@
             html[data-theme="dark"] { background: #1c1c1e; color-scheme: dark }
             html[data-theme="oled"] { background: #000; color-scheme: dark }
             html[data-color-theme]:not([data-color-theme="default"]) { background: inherit }
+            html[data-hapi-operator-dock="off"] .opdock,
+            html[data-hapi-operator-dock="off"] .opdock-toast,
+            html[data-hapi-operator-dock="off"] .opdock-overlay,
+            html[data-hapi-operator-dock="off"] .opdock-replies,
+            html[data-hapi-operator-dock="off"] .opdock-listening { display: none !important; }
         </style>
 
         <title>HAPI</title>
+        <link rel="stylesheet" href="/operator-dock/operator-dock.css?v=0.12.3" />
     </head>
     <body>
         <div id="root"></div>
+        <script src="/operator-dock/vendor/html2canvas.min.js?v=0.12.3"></script>
+        <script src="/operator-dock/operator-dock.js?v=0.12.3"></script>
+        <script src="/operator-dock/hapi-boot.js?v=0.12.3"></script>
         <script type="module" src="/src/main.tsx"></script>
     </body>
 </html>
