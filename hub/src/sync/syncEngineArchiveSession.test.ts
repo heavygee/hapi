@@ -4,6 +4,7 @@ import { RpcRegistry } from '../socket/rpcRegistry'
 import { SyncEngine } from './syncEngine'
 import { RpcTargetMissingError } from './rpcGateway'
 import type { SessionCache } from './sessionCache'
+import type { MachineCache } from './machineCache'
 
 /**
  * `archiveSession`'s only kill mechanism is `rpcGateway.killSession`, a
@@ -31,6 +32,15 @@ describe('SyncEngine.archiveSession RpcTargetMissingError fallback', () => {
         return (engine as unknown as { sessionCache: SessionCache }).sessionCache
     }
 
+    function machineCache(): MachineCache {
+        return (engine as unknown as { machineCache: MachineCache }).machineCache
+    }
+
+    function registerOnlineMachine(machineId: string): void {
+        machineCache().getOrCreateMachine(machineId, {}, {}, NAMESPACE)
+        machineCache().handleMachineAlive({ machineId, time: Date.now() })
+    }
+
     function insertActiveSession(tag: string, machineId?: string): string {
         const created = cache().getOrCreateSession(
             tag,
@@ -53,6 +63,7 @@ describe('SyncEngine.archiveSession RpcTargetMissingError fallback', () => {
     })
 
     it('does not archive a session the runner confirms is still alive', async () => {
+        registerOnlineMachine('machine-x')
         const sessionId = insertActiveSession('sess-still-alive', 'machine-x')
         setKillSessionMissingTarget()
         ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
@@ -66,6 +77,7 @@ describe('SyncEngine.archiveSession RpcTargetMissingError fallback', () => {
     })
 
     it('archives the session once the runner confirms the process is gone', async () => {
+        registerOnlineMachine('machine-x')
         const sessionId = insertActiveSession('sess-confirmed-gone', 'machine-x')
         setKillSessionMissingTarget()
         let calledWith: [string, string] | undefined
@@ -98,16 +110,40 @@ describe('SyncEngine.archiveSession RpcTargetMissingError fallback', () => {
         expect(session?.metadata?.lifecycleState).toBe('archived')
     })
 
-    it('archives best-effort when the machine itself is unreachable', async () => {
-        const sessionId = insertActiveSession('sess-machine-unreachable', 'machine-x')
+    it('falls back to archiving when the known machine has never connected', async () => {
+        // Deliberately does NOT register 'machine-x' in machineCache, so it
+        // is not online — mirrors the #916 hub-restart-cascade scenario the
+        // fallback was originally built for. There is no runner to ask, so
+        // this is the one case where "already gone" is the right guess.
+        const sessionId = insertActiveSession('sess-machine-never-connected', 'machine-x')
         setKillSessionMissingTarget()
+        let stopRunnerSessionCalled = false
         ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
-            async () => { throw new Error('machine offline') }
+            async () => { stopRunnerSessionCalled = true; return 'already_gone' }
 
         await engine.archiveSession(sessionId)
 
+        expect(stopRunnerSessionCalled).toBe(false)
         const session = cache().getSession(sessionId)
         expect(session?.active).toBe(false)
         expect(session?.metadata?.lifecycleState).toBe('archived')
+    })
+
+    it('does NOT archive when the machine is online but the StopSession RPC itself fails', async () => {
+        // Regression guard: an online machine whose RPC call throws (ack
+        // timeout, protocol error) must NOT be coerced into "already gone" —
+        // that would silently archive a session whose runner simply didn't
+        // answer in time, reproducing this fix's own bug one RPC layer down.
+        registerOnlineMachine('machine-x')
+        const sessionId = insertActiveSession('sess-machine-online-rpc-fails', 'machine-x')
+        setKillSessionMissingTarget()
+        ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
+            async () => { throw new Error('ack timeout') }
+
+        await expect(engine.archiveSession(sessionId)).rejects.toThrow()
+
+        const session = cache().getSession(sessionId)
+        expect(session?.active).toBe(true)
+        expect(session?.metadata?.lifecycleState).not.toBe('archived')
     })
 })

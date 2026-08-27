@@ -1691,13 +1691,28 @@ export class SyncEngine {
                 const machineId = this.sessionCache.getSession(sessionId)?.metadata?.machineId
                 if (machineId) {
                     let status: 'stopped' | 'already_gone' | 'still_alive'
-                    try {
-                        status = await this.rpcGateway.stopRunnerSession(machineId, sessionId)
-                    } catch {
-                        // Machine itself unreachable; no stronger signal available
-                        // than the original RpcTargetMissingError, so fall back
-                        // to the prior best-effort behavior.
+                    if (this.machineCache.getMachine(machineId)?.active !== true) {
+                        // No runner connected to ask at all; nothing stronger to
+                        // check than the original RpcTargetMissingError, so fall
+                        // back to the prior best-effort behavior.
                         status = 'already_gone'
+                    } else {
+                        try {
+                            status = await this.rpcGateway.stopRunnerSession(machineId, sessionId)
+                        } catch {
+                            // The machine IS connected but the RPC itself failed
+                            // (ack timeout, protocol error). Unlike an offline
+                            // machine, that does NOT mean the process is gone —
+                            // treat it as still alive, mirroring the conservative
+                            // default `terminateInPlacePiResume` /
+                            // `terminateUnexpectedPiTemp` use for the same RPC
+                            // elsewhere in this file. Coercing an ambiguous
+                            // failure to "already gone" here would silently
+                            // archive a session whose runner just didn't answer
+                            // in time — the exact bug this fallback exists to
+                            // prevent, one RPC layer down.
+                            status = 'still_alive'
+                        }
                     }
                     if (status === 'still_alive') {
                         throw new Error('Session process is still running and could not be stopped')
