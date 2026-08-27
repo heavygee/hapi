@@ -8,6 +8,7 @@ import {
     exitCodeForPingPeerError,
     pingPeer,
     resolveSessionByPrefix,
+    resolvePeerSessionTarget,
     type PingPeerSessionSummary
 } from './pingPeer'
 
@@ -71,6 +72,60 @@ describe('resolveSessionByPrefix', () => {
 
     it('refuses unknown prefixes', () => {
         expect(() => resolveSessionByPrefix(sessions, 'zzzz')).toThrowError(/no session matching/)
+    })
+})
+
+describe('resolvePeerSessionTarget', () => {
+    const oldId = '36985b00-e7ba-448c-812c-9eb4f611ff6e'
+    const newId = '0b350082-d60d-4705-b0ab-d0d80a861660'
+
+    it('follows supersededBySessionId on a list match', async () => {
+        const sessions: PingPeerSessionSummary[] = [
+            {
+                id: oldId,
+                active: false,
+                metadata: { name: 'Antevorta setup', supersededBySessionId: newId }
+            },
+            {
+                id: newId,
+                active: true,
+                metadata: { name: 'Antevorta setup' }
+            }
+        ]
+        const resolved = await resolvePeerSessionTarget(sessions, oldId)
+        expect(resolved.id).toBe(newId)
+    })
+
+    it('falls back to citation title when the cited id was merged away', async () => {
+        const sessions: PingPeerSessionSummary[] = [
+            {
+                id: newId,
+                active: true,
+                metadata: { name: 'Antevorta setup' }
+            }
+        ]
+        const resolved = await resolvePeerSessionTarget(
+            sessions,
+            oldId,
+            { rawCitation: `[Antevorta setup](/sessions/${oldId})` }
+        )
+        expect(resolved.id).toBe(newId)
+    })
+
+    it('mentions list_peers when id and title fallback both miss', async () => {
+        await expect(
+            resolvePeerSessionTarget([], oldId, { rawCitation: `[Antevorta setup](/sessions/${oldId})` })
+        ).rejects.toThrow(/list_peers/)
+    })
+
+    it('refuses ambiguous title matches', async () => {
+        const sessions: PingPeerSessionSummary[] = [
+            { id: 'aaaaaaaa-1111-1111-1111-111111111111', active: true, metadata: { name: 'Antevorta setup' } },
+            { id: 'bbbbbbbb-2222-2222-2222-222222222222', active: true, metadata: { name: 'Antevorta setup' } }
+        ]
+        await expect(
+            resolvePeerSessionTarget(sessions, oldId, { rawCitation: `[Antevorta setup](/sessions/${oldId})` })
+        ).rejects.toMatchObject({ code: 'ambiguous' })
     })
 })
 
