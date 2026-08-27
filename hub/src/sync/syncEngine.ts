@@ -1697,28 +1697,29 @@ export class SyncEngine {
                 const machineId = this.sessionCache.getSession(sessionId)?.metadata?.machineId
                 if (machineId) {
                     let status: 'stopped' | 'already_gone' | 'still_alive' | 'unknown'
-                    if (this.machineCache.getMachine(machineId)?.active !== true) {
-                        // No runner connected to ask at all; nothing stronger to
-                        // check than the original RpcTargetMissingError, so fall
-                        // back to the prior best-effort behavior.
-                        status = 'already_gone'
-                    } else {
-                        try {
-                            status = await this.rpcGateway.stopRunnerSession(machineId, sessionId)
-                        } catch {
-                            // The machine IS connected but the RPC itself failed
-                            // (ack timeout, protocol error). Unlike an offline
-                            // machine, that does NOT mean the process is gone —
-                            // treat it as still alive, mirroring the conservative
-                            // default `terminateInPlacePiResume` /
-                            // `terminateUnexpectedPiTemp` use for the same RPC
-                            // elsewhere in this file. Coercing an ambiguous
-                            // failure to "already gone" here would silently
-                            // archive a session whose runner just didn't answer
-                            // in time — the exact bug this fallback exists to
-                            // prevent, one RPC layer down.
-                            status = 'still_alive'
-                        }
+                    try {
+                        status = await this.rpcGateway.stopRunnerSession(machineId, sessionId)
+                    } catch (stopError) {
+                        // `MachineCache.active` is a 45s heartbeat-derived
+                        // heuristic (machineCache.ts's expireInactive), NOT the
+                        // same signal as "this machine's RPC target is
+                        // registered" — a socket only deregisters on actual
+                        // disconnect (rpcRegistry.unregisterAll). A delayed
+                        // heartbeat can leave `active` false while the socket,
+                        // and this exact RPC, are still perfectly reachable.
+                        // So don't pre-check `active` at all — just attempt the
+                        // call and let its own failure mode tell us what
+                        // happened: `RpcTargetMissingError` means the machine
+                        // genuinely has no RPC target (nothing stronger to
+                        // check than the original error), while any other
+                        // failure (ack timeout, protocol error) means the
+                        // machine IS reachable but this particular call didn't
+                        // resolve — which does NOT mean the process is gone.
+                        // Coercing that ambiguous case to "already gone" would
+                        // silently archive a session whose runner just didn't
+                        // answer in time — the exact bug this fallback exists
+                        // to prevent, one RPC layer down.
+                        status = stopError instanceof RpcTargetMissingError ? 'already_gone' : 'still_alive'
                     }
                     // `'unknown'` means the runner has no PID and no verified-exit
                     // tombstone for this id at all (cli/src/runner/run.ts's
