@@ -4,6 +4,7 @@ import {
     SPAWN_PEER_TOOL_DESCRIPTION,
     buildSessionCitationSteerInstruction,
     extractSessionCitationIds,
+    extractSessionCitationLabel,
     normalizeSessionIdPrefix,
 } from './sessionCitation'
 
@@ -95,6 +96,22 @@ describe('normalizeSessionIdPrefix', () => {
                 `See session "A" (/sessions/${UUID}) for context and [B](/sessions/${other})`
             )
         ).toBe('')
+    })
+})
+
+describe('extractSessionCitationLabel', () => {
+    it('extracts title from markdown composer chip form', () => {
+        expect(extractSessionCitationLabel(`[Antevorta setup](/sessions/${UUID})`)).toBe('Antevorta setup')
+    })
+
+    it('extracts title from Copy-reference prose', () => {
+        expect(extractSessionCitationLabel(`See session "Antevorta setup" (/sessions/${UUID}) for context`))
+            .toBe('Antevorta setup')
+    })
+
+    it('returns null for bare id pastes', () => {
+        expect(extractSessionCitationLabel(UUID)).toBeNull()
+        expect(extractSessionCitationLabel(`/sessions/${UUID}`)).toBeNull()
     })
 })
 

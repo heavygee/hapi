@@ -16,7 +16,7 @@ import {
     isObject,
     isSessionId
 } from '@hapi/protocol'
-import { normalizeSessionIdPrefix } from '@hapi/protocol/sessionCitation'
+import { normalizeSessionIdPrefix, extractSessionCitationLabel } from '@hapi/protocol/sessionCitation'
 import { configuration } from '@/configuration'
 import { getAuthToken } from '@/api/auth'
 import { buildHubRequestHeaders } from '@/api/hubExtraHeaders'
@@ -51,23 +51,15 @@ export type PingPeerSessionSummary = {
         path?: string | null
         lifecycleState?: string | null
         piSessionId?: string
+        supersededBySessionId?: string
         summary?: { text?: string } | null
     } | null
 }
 
 export type PingPeerOptions = {
-    sessionIdPrefix?: string
-    /** When set, skip list+prefix resolve and load this session directly. */
-    sessionId?: string
+    sessionIdPrefix: string
     message: string
     waitActiveSecs?: number
-    /**
-     * Fresh spawn: poll until active instead of POST /resume on the first
-     * inactive snapshot. Machine spawn can return before the hub row is
-     * active; resume would launch a second child (no existingSessionId on
-     * the original spawn, so runner dedupe does not coalesce).
-     */
-    waitForInitialActive?: boolean
     apiUrl?: string
     accessToken?: string
     /**
@@ -213,6 +205,126 @@ export function resolveSessionByPrefix(
     return matches[0]!
 }
 
+function normalizePeerLabel(label: string): string {
+    return label.replace(/\s+/g, ' ').trim().toLowerCase()
+}
+
+function buildPeerSessionNotFoundError(prefix: string, rawCitation?: string): PingPeerError {
+    const label = rawCitation ? extractSessionCitationLabel(rawCitation) : null
+    if (label) {
+        return new PingPeerError(
+            'not_found',
+            `session id '${prefix}' not found (may have been merged or deleted). `
+                + `No live session matches citation title '${label}'. Try list_peers.`
+        )
+    }
+    return new PingPeerError(
+        'not_found',
+        `no session matching prefix '${prefix}'. The id may have been merged or superseded — `
+            + 'try list_peers, or pass the full citation [title](/sessions/id) for name fallback.'
+    )
+}
+
+function resolvePeerSessionByCitationLabel(
+    sessions: PingPeerSessionSummary[],
+    prefix: string,
+    rawCitation?: string
+): PingPeerSessionSummary | null {
+    const label = rawCitation ? extractSessionCitationLabel(rawCitation) : null
+    if (!label) {
+        return null
+    }
+    const target = normalizePeerLabel(label)
+    const byName = sessions.filter(
+        (session) => normalizePeerLabel(resolvePeerSessionLabel(session)) === target
+    )
+    if (byName.length === 1) {
+        return byName[0]!
+    }
+    if (byName.length > 1) {
+        const sample = byName.slice(0, 3).map((session) => session.id.slice(0, 8)).join(', ')
+        throw new PingPeerError(
+            'ambiguous',
+            `session id '${prefix}' is gone; citation title '${label}' matches ${byName.length} live sessions `
+                + `(${sample}${byName.length > 3 ? ', ...' : ''}); use list_peers and a full id`
+        )
+    }
+    return null
+}
+
+async function followSupersessionChain(
+    session: PingPeerSessionSummary,
+    sessions: PingPeerSessionSummary[],
+    fetchSession?: (sessionId: string) => Promise<PingPeerSessionSummary | null>
+): Promise<PingPeerSessionSummary> {
+    let current = session
+    for (let depth = 0; depth < 10; depth += 1) {
+        const replacement = current.metadata?.supersededBySessionId?.trim()
+        if (!replacement || replacement === current.id) {
+            return current
+        }
+        const inList = sessions.find((row) => row.id === replacement)
+        if (inList) {
+            current = inList
+            continue
+        }
+        if (fetchSession) {
+            const fetched = await fetchSession(replacement)
+            if (fetched) {
+                current = fetched
+                continue
+            }
+        }
+        return current
+    }
+    return current
+}
+
+export type ResolvePeerSessionTargetOptions = {
+    rawCitation?: string
+    fetchSession?: (sessionId: string) => Promise<PingPeerSessionSummary | null>
+}
+
+/**
+ * Resolve a peer session for inspect_peer / ping_peer: list prefix, direct GET
+ * for exact UUIDs, citation-title fallback after merge/delete, then supersession chain.
+ */
+export async function resolvePeerSessionTarget(
+    sessions: PingPeerSessionSummary[],
+    prefix: string,
+    options: ResolvePeerSessionTargetOptions = {}
+): Promise<PingPeerSessionSummary> {
+    let matched: PingPeerSessionSummary | null = null
+
+    try {
+        matched = resolveSessionByPrefix(sessions, prefix)
+    } catch (error) {
+        if (!(error instanceof PingPeerError)) {
+            throw error
+        }
+        if (error.code === 'ambiguous') {
+            throw error
+        }
+        if (error.code !== 'not_found') {
+            throw error
+        }
+    }
+
+    if (!matched && isSessionId(prefix) && options.fetchSession) {
+        matched = await options.fetchSession(prefix)
+    }
+
+    if (!matched) {
+        matched = resolvePeerSessionByCitationLabel(sessions, prefix, options.rawCitation)
+    }
+
+    if (!matched) {
+        throw buildPeerSessionNotFoundError(prefix, options.rawCitation)
+    }
+
+    return followSupersessionChain(matched, sessions, options.fetchSession)
+}
+
 async function listSessions(
     apiUrl: string,
     jwt: string,
@@ -278,6 +390,22 @@ async function getSession(
         throw new PingPeerError('not_found', `failed to load session ${sessionId} (${detail})`)
     }
     return response.data.session as PingPeerSessionSummary
+}
+
+async function tryGetSession(
+    apiUrl: string,
+    jwt: string,
+    sessionId: string,
+    http: AxiosInstance
+): Promise<PingPeerSessionSummary | null> {
+    try {
+        return await getSession(apiUrl, jwt, sessionId, http)
+    } catch (error) {
+        if (error instanceof PingPeerError && error.code === 'not_found') {
+            return null
+        }
+        throw error
+    }
 }
 
 async function resumeSession(
@@ -517,10 +645,10 @@ export function formatPeerSessionsList(
 }
 
 export async function pingPeer(options: PingPeerOptions): Promise<PingPeerResult> {
-    const knownSessionId = (options.sessionId ?? '').trim()
-    const prefix = knownSessionId ? '' : normalizeSessionIdPrefix(options.sessionIdPrefix ?? '')
+    const rawCitation = options.sessionIdPrefix ?? ''
+    const prefix = normalizeSessionIdPrefix(rawCitation)
     const message = options.message ?? ''
-    if (!knownSessionId && !prefix) {
+    if (!prefix) {
         throw new PingPeerError('bad_args', 'session id prefix is required')
     }
     if (!message) {
@@ -540,11 +668,15 @@ export async function pingPeer(options: PingPeerOptions): Promise<PingPeerResult
     const onProgress = options.onProgress
 
     const jwt = await exchangeJwt(apiUrl, accessToken, http)
-    const matched = knownSessionId
-        ? await getSession(apiUrl, jwt, knownSessionId, http)
-        : resolveSessionByPrefix(await listSessions(apiUrl, jwt, http), prefix)
+    const sessions = await listSessions(apiUrl, jwt, http)
+    const fetchSession = (sessionId: string) => tryGetSession(apiUrl, jwt, sessionId, http)
+    const matched = await resolvePeerSessionTarget(sessions, prefix, { rawCitation, fetchSession })
     const name = resolvePeerSessionLabel(matched)
-    onProgress?.(`resolved ${matched.id}  active=${matched.active}  name="${name}"`)
+    onProgress?.(
+        matched.id === prefix
+            ? `resolved ${matched.id}  active=${matched.active}  name="${name}"`
+            : `resolved ${matched.id} (from cited ${prefix})  active=${matched.active}  name="${name}"`
+    )
 
     let resumed = false
     const ensureActive = async (progressMessage: string): Promise<PingPeerSessionSummary> => {
@@ -563,13 +695,7 @@ export async function pingPeer(options: PingPeerOptions): Promise<PingPeerResult
     // Prefer the list snapshot for the first resume decision, then re-check before
     // send so a flip to inactive between list and POST cannot 409 (#1195).
     if (!matched.active) {
-        if (options.waitForInitialActive) {
-            onProgress?.('waiting for newly spawned session to become active...')
-            await waitUntilActive(apiUrl, jwt, matched.id, waitActiveSecs, http, sleep, now, onProgress)
-            onProgress?.('session active')
-        } else {
-            await ensureActive('requesting resume...')
-        }
+        await ensureActive('requesting resume...')
     }
 
     let live = await ensureActive('session went inactive before send; requesting resume...')
@@ -745,7 +871,8 @@ async function fetchSessionMessages(
  * Read-only: never resumes inactive sessions (unlike `pingPeer`).
  */
 export async function inspectPeer(options: InspectPeerOptions): Promise<InspectPeerResult> {
-    const prefix = normalizeSessionIdPrefix(options.sessionIdPrefix ?? '')
+    const rawCitation = options.sessionIdPrefix ?? ''
+    const prefix = normalizeSessionIdPrefix(rawCitation)
     if (!prefix) {
         throw new PingPeerError('bad_args', 'session id prefix is required')
     }
@@ -757,7 +884,8 @@ export async function inspectPeer(options: InspectPeerOptions): Promise<InspectP
 
     const jwt = await exchangeJwt(apiUrl, accessToken, http)
     const sessions = await listSessions(apiUrl, jwt, http)
-    const matched = resolveSessionByPrefix(sessions, prefix)
+    const fetchSession = (sessionId: string) => tryGetSession(apiUrl, jwt, sessionId, http)
+    const matched = await resolvePeerSessionTarget(sessions, prefix, { rawCitation, fetchSession })
     const live = await getSession(apiUrl, jwt, matched.id, http)
     const meta = live.metadata ?? matched.metadata ?? null
     const messages = await fetchSessionMessages(apiUrl, jwt, matched.id, messageLimit, http)
