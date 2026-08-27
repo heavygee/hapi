@@ -120,24 +120,26 @@ describe('SyncEngine.archiveSession RpcTargetMissingError fallback', () => {
         expect(session?.metadata?.lifecycleState).toBe('archived')
     })
 
-    it('archives a stale row when the reachable machine no longer tracks this session id at all', async () => {
+    it('does NOT archive when the runner reports the session id as unknown', async () => {
         // cli/src/runner/run.ts's stopSession returns 'unknown' — not
         // 'still_alive' — when no PID matches this id anywhere and there is
-        // no verified-exit tombstone (e.g. a row whose original runner
-        // generation rotated its bookkeeping long ago). That is NOT
-        // confirmation of a live process, so it must not be treated like a
-        // genuine 'still_alive' — this is exactly the stale-row case this
-        // fallback exists to unblock.
+        // no verified-exit tombstone. That is NOT confirmation the process
+        // is gone: terminal-started sessions are tracked only in-memory
+        // (never persisted across a runner restart), so a still-alive
+        // terminal session can return 'unknown' right after this exact
+        // runner process restarts — indistinguishable, from this RPC alone,
+        // from a row this runner generation genuinely never knew about.
+        // Treat it conservatively, the same as 'still_alive'.
         const sessionId = insertActiveSession('sess-unknown-to-runner', 'machine-x')
         setKillSessionMissingTarget()
         ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
             async () => 'unknown'
 
-        await engine.archiveSession(sessionId)
+        await expect(engine.archiveSession(sessionId)).rejects.toThrow()
 
         const session = cache().getSession(sessionId)
-        expect(session?.active).toBe(false)
-        expect(session?.metadata?.lifecycleState).toBe('archived')
+        expect(session?.active).toBe(true)
+        expect(session?.metadata?.lifecycleState).not.toBe('archived')
     })
 
     it('does NOT archive when the StopSession RPC fails ambiguously (not a target-missing error)', async () => {

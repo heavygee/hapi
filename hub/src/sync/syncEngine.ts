@@ -1724,14 +1724,19 @@ export class SyncEngine {
                     // `'unknown'` means the runner has no PID and no verified-exit
                     // tombstone for this id at all (cli/src/runner/run.ts's
                     // stopSession fail-closed default) — it is NOT confirmation
-                    // that a process is running, just that this runner instance
-                    // never tracked it. That's exactly the shape of an old, stale
-                    // row whose original runner generation has long since rotated
-                    // its bookkeeping, which is the archival case this whole
-                    // fallback exists to unblock — so treat it like the
-                    // machine-offline branch above, not like a confirmed-alive
-                    // `'still_alive'`.
-                    if (status === 'still_alive') {
+                    // that a process is running, but it is also NOT confirmation
+                    // that it's gone: terminal-started sessions are tracked only
+                    // in-memory (pidToTrackedSession), never persisted, so a
+                    // still-alive terminal session can return 'unknown' right
+                    // after this exact runner process restarts and loses that
+                    // in-memory tracking — indistinguishable, from this RPC
+                    // alone, from a session this runner generation never knew
+                    // about at all. Given that ambiguity, treat it the same as
+                    // `'still_alive'` — conservative, matching every other
+                    // stopRunnerSession call site in this file — rather than
+                    // risk silently archiving a session that's actually still
+                    // running.
+                    if (status === 'still_alive' || status === 'unknown') {
                         throw new Error('Session process is still running and could not be stopped')
                     }
                 }
