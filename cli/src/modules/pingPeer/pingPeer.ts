@@ -205,51 +205,19 @@ export function resolveSessionByPrefix(
     return matches[0]!
 }
 
-function normalizePeerLabel(label: string): string {
-    return label.replace(/\s+/g, ' ').trim().toLowerCase()
-}
-
 function buildPeerSessionNotFoundError(prefix: string, rawCitation?: string): PingPeerError {
     const label = rawCitation ? extractSessionCitationLabel(rawCitation) : null
     if (label) {
         return new PingPeerError(
             'not_found',
             `session id '${prefix}' not found (may have been merged or deleted). `
-                + `No live session matches citation title '${label}'. Try list_peers.`
+                + `Citation title '${label}' is not used for auto-routing — call list_peers for the current id.`
         )
     }
     return new PingPeerError(
         'not_found',
-        `no session matching prefix '${prefix}'. The id may have been merged or superseded — `
-            + 'try list_peers, or pass the full citation [title](/sessions/id) for name fallback.'
+        `no session matching prefix '${prefix}'. The id may have been merged or superseded — try list_peers.`
     )
-}
-
-function resolvePeerSessionByCitationLabel(
-    sessions: PingPeerSessionSummary[],
-    prefix: string,
-    rawCitation?: string
-): PingPeerSessionSummary | null {
-    const label = rawCitation ? extractSessionCitationLabel(rawCitation) : null
-    if (!label) {
-        return null
-    }
-    const target = normalizePeerLabel(label)
-    const byName = sessions.filter(
-        (session) => normalizePeerLabel(resolvePeerSessionLabel(session)) === target
-    )
-    if (byName.length === 1) {
-        return byName[0]!
-    }
-    if (byName.length > 1) {
-        const sample = byName.slice(0, 3).map((session) => session.id.slice(0, 8)).join(', ')
-        throw new PingPeerError(
-            'ambiguous',
-            `session id '${prefix}' is gone; citation title '${label}' matches ${byName.length} live sessions `
-                + `(${sample}${byName.length > 3 ? ', ...' : ''}); use list_peers and a full id`
-        )
-    }
-    return null
 }
 
 async function followSupersessionChain(
@@ -287,7 +255,8 @@ export type ResolvePeerSessionTargetOptions = {
 
 /**
  * Resolve a peer session for inspect_peer / ping_peer: list prefix, direct GET
- * for exact UUIDs, citation-title fallback after merge/delete, then supersession chain.
+ * for exact UUIDs, then supersession chain. Name/title matching is intentionally
+ * not used — labels are not stable identities.
  */
 export async function resolvePeerSessionTarget(
     sessions: PingPeerSessionSummary[],
@@ -312,10 +281,6 @@ export async function resolvePeerSessionTarget(
 
     if (!matched && isSessionId(prefix) && options.fetchSession) {
         matched = await options.fetchSession(prefix)
-    }
-
-    if (!matched) {
-        matched = resolvePeerSessionByCitationLabel(sessions, prefix, options.rawCitation)
     }
 
     if (!matched) {
