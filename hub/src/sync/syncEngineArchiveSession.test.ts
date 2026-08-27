@@ -129,6 +129,27 @@ describe('SyncEngine.archiveSession RpcTargetMissingError fallback', () => {
         expect(session?.metadata?.lifecycleState).toBe('archived')
     })
 
+    it('archives a stale row when the online machine no longer tracks this session id at all', async () => {
+        // cli/src/runner/run.ts's stopSession returns 'unknown' — not
+        // 'still_alive' — when no PID matches this id anywhere and there is
+        // no verified-exit tombstone (e.g. a row whose original runner
+        // generation rotated its bookkeeping long ago). That is NOT
+        // confirmation of a live process, so it must not be treated like a
+        // genuine 'still_alive' — this is exactly the stale-row case this
+        // fallback exists to unblock.
+        registerOnlineMachine('machine-x')
+        const sessionId = insertActiveSession('sess-unknown-to-runner', 'machine-x')
+        setKillSessionMissingTarget()
+        ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
+            async () => 'unknown'
+
+        await engine.archiveSession(sessionId)
+
+        const session = cache().getSession(sessionId)
+        expect(session?.active).toBe(false)
+        expect(session?.metadata?.lifecycleState).toBe('archived')
+    })
+
     it('does NOT archive when the machine is online but the StopSession RPC itself fails', async () => {
         // Regression guard: an online machine whose RPC call throws (ack
         // timeout, protocol error) must NOT be coerced into "already gone" —
