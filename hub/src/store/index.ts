@@ -4,15 +4,29 @@ import { dirname } from 'node:path'
 
 import { MachineStore } from './machineStore'
 import { MessageStore } from './messageStore'
+import { addMessage } from './messages'
+import type { StoredMessage } from './types'
 import { PushStore } from './pushStore'
 import { FcmStore } from './fcmStore'
 import { ScratchlistStore } from './scratchlistStore'
-import { SessionStore } from './sessionStore'
-import { UserStore } from './userStore'
 import { EventStore } from './eventStore'
 import { InboxStore } from './inboxStore'
-import { ensureOverseerEventsSchema, ensureDeletedSessionsSchema } from './events'
+import { SettingsStore, ensureOverseerSettingsSchema } from './settingsStore'
+import {
+    ensureOverseerEventsSchema,
+    ensureDeletedSessionsSchema,
+    rehomeOverseerEventsAwayFromWorkGraphCollision,
+} from './events'
 import { ensureOverseerInboxSchema } from './inboxItems'
+import { SessionJobsStore } from './sessionJobsStore'
+import { ensureSessionJobWakeColumns } from './sessionJobs'
+import { SessionStore } from './sessionStore'
+import { UserStore } from './userStore'
+import { UsageStore } from './usageStore'
+import { WorkGraphStore } from './workGraphStore'
+import { bindReenrollGrantDb } from '../utils/reenrollGrant'
+import { scanUnverifiedPeerMessages as scanUnverifiedPeerMessagesInDb } from './provenanceMessageScan'
+import type { ProvenanceMessageScanOptions } from '@hapi/protocol/provenanceMessageAudit'
 
 export type {
     StoredMachine,
@@ -20,6 +34,7 @@ export type {
     StoredPushSubscription,
     StoredFcmDevice,
     StoredScratchlistEntry,
+    StoredSessionJob,
     StoredSession,
     StoredUser,
     VersionedUpdateResult
@@ -30,30 +45,45 @@ export { MessageStore } from './messageStore'
 export { PushStore } from './pushStore'
 export { FcmStore } from './fcmStore'
 export { ScratchlistStore } from './scratchlistStore'
-export { SessionStore } from './sessionStore'
-export { UserStore } from './userStore'
 export { EventStore } from './eventStore'
 export { InboxStore } from './inboxStore'
+export { SettingsStore } from './settingsStore'
+export type { ActiveBrainSetting } from './settingsStore'
 export type { InsertSystemEventInput, ListSystemEventsOptions, StoredSystemEvent } from './eventStore'
 export type { ListInboxItemsOptions, StoredInboxItem } from './inboxStore'
+export { SessionJobsStore } from './sessionJobsStore'
+export { SessionStore } from './sessionStore'
+export { UserStore } from './userStore'
+export { UsageStore } from './usageStore'
+export { WorkGraphStore } from './workGraphStore'
+export {
+    WorkGraphNotFoundError,
+    WorkGraphPrincipalError,
+    WorkGraphValidationError
+} from './workGraph'
 
-const SCHEMA_VERSION: number = 15
+const SCHEMA_VERSION: number = 28
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
+    'machine_reenroll_grants',
+    'machine_reenroll_replays',
     'messages',
     'message_epochs',
     'users',
     'push_subscriptions',
     'fcm_devices',
     'session_scratchlist',
+    'session_jobs',
+    'usage_events',
+    'usage_scan_state',
     'events',
     'event_links',
     'deleted_sessions',
     'inbox_items',
     'inbox_item_source_events',
     'inbox_operator_actions',
-] as const
+    'overseer_settings'] as const
 
 export class Store {
     private db: Database
@@ -69,6 +99,10 @@ export class Store {
     readonly scratchlist: ScratchlistStore
     readonly events: EventStore
     readonly inbox: InboxStore
+    readonly settings: SettingsStore
+    readonly sessionJobs: SessionJobsStore
+    readonly usage: UsageStore
+    readonly workGraph: WorkGraphStore
 
     /**
      * Filesystem path of the underlying SQLite database, or ':memory:' for
@@ -77,6 +111,10 @@ export class Store {
      */
     get dbPath(): string {
         return this._dbPath
+    }
+
+    scanUnverifiedPeerMessages(namespace: string, options: ProvenanceMessageScanOptions) {
+        return scanUnverifiedPeerMessagesInDb(this.db, namespace, options)
     }
 
     constructor(dbPath: string) {
@@ -104,6 +142,11 @@ export class Store {
         this.db.exec('PRAGMA foreign_keys = ON')
         this.db.exec('PRAGMA busy_timeout = 5000')
         this.initSchema()
+        bindReenrollGrantDb(this.db)
+
+        // Soup tip keeps SCHEMA_VERSION=23 (tolerate-ahead). Wake columns for
+        // #1489 are additive and must exist even when user_version is already ahead.
+        ensureSessionJobWakeColumns(this.db)
 
         if (dbPath !== ':memory:' && !dbPath.startsWith('file::memory:')) {
             for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
@@ -123,6 +166,148 @@ export class Store {
         this.scratchlist = new ScratchlistStore(this.db)
         this.events = new EventStore(this.db)
         this.inbox = new InboxStore(this.db)
+        this.settings = new SettingsStore(this.db)
+        this.sessionJobs = new SessionJobsStore(this.db)
+        this.usage = new UsageStore(this.db)
+        this.workGraph = new WorkGraphStore(this.db)
+    }
+
+    /** Run `fn` inside a single SQLite transaction (nested calls become savepoints). */
+    runInTransaction<T>(fn: () => T): T {
+        return this.db.transaction(fn)()
+    }
+
+    /**
+     * Atomically records a CLI prompt-consumption acknowledgement and returns
+     * the persisted session activity timestamp. A duplicate or sibling-stamped
+     * acknowledgement leaves the session untouched while returning its existing
+     * timestamp for replay-safe in-memory cache synchronization.
+     */
+    recordMessagesConsumed(
+        sessionId: string,
+        localIds: string[],
+        invokedAt: number,
+        namespace: string
+    ): number {
+        return this.db.transaction(() => {
+            const changes = this.messages.markMessagesInvoked(sessionId, localIds, invokedAt)
+            if (changes > 0) {
+                this.sessions.touchSessionUpdatedAt(sessionId, invokedAt, namespace)
+            }
+
+            const session = this.sessions.getSessionByNamespace(sessionId, namespace)
+            if (!session) {
+                throw new Error('session not found after messages-consumed transition')
+            }
+            if (changes > 0 && session.updatedAt < invokedAt) {
+                throw new Error('session activity was not persisted after messages-consumed transition')
+            }
+
+            return session.updatedAt
+        })()
+    }
+
+    /** Resolve a durable OpenCode clear reservation and insert in one SQLite transaction. */
+    addMessageForCurrentSession(
+        sessionId: string,
+        content: unknown,
+        localId?: string,
+        scheduledAt?: number | null
+    ): { sessionId: string; message: StoredMessage; inserted: boolean } {
+        return this.db.transaction(() => {
+            const row = this.db.prepare('SELECT namespace, metadata FROM sessions WHERE id = ?').get(sessionId) as { namespace: string; metadata: string | null } | undefined
+            if (!row) throw new Error('Message source session not found')
+            let targetSessionId = sessionId
+            if (row?.metadata) {
+                const metadata = JSON.parse(row.metadata) as { opencodeClearOperation?: { replacementSessionId?: string; state?: string }, supersededBySessionId?: string }
+                targetSessionId = metadata.supersededBySessionId
+                    ?? (metadata.opencodeClearOperation?.state !== 'aborted'
+                        ? metadata.opencodeClearOperation?.replacementSessionId
+                        : undefined)
+                    ?? sessionId
+            }
+            if (targetSessionId !== sessionId) {
+                const target = this.db.prepare('SELECT 1 FROM sessions WHERE id = ? AND namespace = ?')
+                    .get(targetSessionId, row.namespace)
+                if (!target) throw new Error('OpenCode clear redirect target is unavailable in the source namespace')
+            }
+            const alreadyExists = localId
+                ? Boolean(this.db.prepare('SELECT 1 FROM messages WHERE session_id = ? AND local_id = ? LIMIT 1')
+                    .get(targetSessionId, localId))
+                : false
+            return {
+                sessionId: targetSessionId,
+                message: addMessage(this.db, targetSessionId, content, localId, scheduledAt),
+                inserted: !alreadyExists
+            }
+        })()
+    }
+
+    /** Durable delivery gate for a preallocated replacement owned by an unfinished clear. */
+    isOpenCodeClearDeliveryGated(sessionId: string): boolean {
+        const target = this.db.prepare('SELECT namespace FROM sessions WHERE id = ?')
+            .get(sessionId) as { namespace: string } | undefined
+        if (!target) return false
+        const rows = this.db.prepare('SELECT metadata FROM sessions WHERE namespace = ? AND metadata IS NOT NULL')
+            .all(target.namespace) as Array<{ metadata: string }>
+        return rows.some((row) => {
+            try {
+                const operation = (JSON.parse(row.metadata) as {
+                    opencodeClearOperation?: { replacementSessionId?: string; state?: string }
+                }).opencodeClearOperation
+                return operation?.replacementSessionId === sessionId
+                    && operation.state !== 'completed'
+                    && operation.state !== 'aborted'
+            } catch {
+                return false
+            }
+        })
+    }
+
+    abortOpenCodeClearOperation(
+        sessionId: string,
+        replacementSessionId: string,
+        metadata: unknown,
+        expectedVersion: number,
+        namespace: string,
+        expected?: { replacementSessionId: string; state: string; requireInactive?: boolean }
+    ) {
+        return this.db.transaction(() => {
+            const current = this.sessions.getSessionByNamespace(sessionId, namespace)
+            const operation = current?.metadata && typeof current.metadata === 'object'
+                ? (current.metadata as { opencodeClearOperation?: { replacementSessionId?: string; state?: string } }).opencodeClearOperation
+                : undefined
+            if (expected && (!current
+                || (expected.requireInactive === true && current.active)
+                || operation?.replacementSessionId !== expected.replacementSessionId
+                || operation.state !== expected.state)) {
+                return { result: 'version-mismatch' as const }
+            }
+            const result = this.sessions.updateSessionMetadata(sessionId, metadata, expectedVersion, namespace, { touchUpdatedAt: false })
+            if (result.result === 'success') this.messages.moveUninvokedMessages(replacementSessionId, sessionId)
+            return result
+        })()
+    }
+
+    transitionOpenCodeClearOperation(
+        sessionId: string,
+        metadata: unknown,
+        expectedVersion: number,
+        namespace: string,
+        expected: { replacementSessionId: string; state: string }
+    ) {
+        return this.db.transaction(() => {
+            const current = this.sessions.getSessionByNamespace(sessionId, namespace)
+            const operation = current?.metadata && typeof current.metadata === 'object'
+                ? (current.metadata as { opencodeClearOperation?: { replacementSessionId?: string; state?: string } }).opencodeClearOperation
+                : undefined
+            if (!current
+                || operation?.replacementSessionId !== expected.replacementSessionId
+                || operation.state !== expected.state) {
+                return { result: 'version-mismatch' as const }
+            }
+            return this.sessions.updateSessionMetadata(sessionId, metadata, expectedVersion, namespace, { touchUpdatedAt: false })
+        })()
     }
 
     close(): void {
@@ -160,6 +345,22 @@ export class Store {
             12: () => this.migrateFromV12ToV13(),
             13: () => this.migrateFromV13ToV14(),
             14: () => this.migrateFromV14ToV15(),
+            15: () => this.migrateFromV15ToV16(),
+            16: () => this.migrateFromV16ToV17(),
+            17: () => this.migrateFromV17ToV18(),
+            18: () => this.migrateFromV18ToV19(),
+            19: () => this.migrateFromV19ToV20(),
+            20: () => this.migrateFromV20ToV21(),
+            // Upstream #1115 dual-pin columns at v21→v22; upstream work graph
+            // at v22→v23; V24 unions the independently-shipped soup jobs table.
+            21: () => this.migrateFromV21ToV22(),
+            22: () => this.migrateFromV22ToV23(),
+            23: () => this.migrateFromV23ToV24(),
+            // #1473 peer provenance machine auth — remapped past soup dual-ledger V24
+            24: () => this.migrateFromV24ToV25(),
+            25: () => this.migrateFromV25ToV26(),
+            26: () => this.migrateFromV26ToV27(),
+            27: () => this.migrateFromV27ToV28(),
         })
 
         if (currentVersion === 0) {
@@ -202,7 +403,17 @@ export class Store {
         }
 
         if (currentVersion !== SCHEMA_VERSION) {
-            throw this.buildSchemaMismatchError(currentVersion)
+            if (
+                currentVersion > SCHEMA_VERSION &&
+                process.env.HAPI_STORE_ALLOW_NEWER_SCHEMA === '1'
+            ) {
+                console.warn(
+                    `[store] tolerating DB schema ahead of source (db=${currentVersion} > source=${SCHEMA_VERSION}); ` +
+                        `proceeding because HAPI_STORE_ALLOW_NEWER_SCHEMA=1. Newer columns/tables are invisible to this build.`
+                )
+            } else {
+                throw this.buildSchemaMismatchError(currentVersion)
+            }
         }
 
         this.finishSchemaInit()
@@ -210,10 +421,24 @@ export class Store {
 
     /** Idempotent Overseer self-heal + loud missing-table check on every boot path. */
     private finishSchemaInit(): void {
+        // Soup DBs that already passed v22 with single-column pin still need global_pinned.
+        this.ensureSessionPinColumns()
         ensureOverseerEventsSchema(this.db)
         ensureDeletedSessionsSchema(this.db)
         ensureOverseerInboxSchema(this.db)
+        ensureOverseerSettingsSchema(this.db)
         this.assertRequiredTablesPresent()
+    }
+
+    private ensureSessionPinColumns(): void {
+        const columns = this.getSessionColumnNames()
+        if (columns.size === 0) return
+        if (!columns.has('pinned')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0')
+        }
+        if (!columns.has('global_pinned')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN global_pinned INTEGER NOT NULL DEFAULT 0')
+        }
     }
 
     private createSchema(): void {
@@ -237,6 +462,8 @@ export class Store {
                 todos_updated_at INTEGER,
                 team_state TEXT,
                 team_state_updated_at INTEGER,
+                pinned INTEGER NOT NULL DEFAULT 0,
+                global_pinned INTEGER NOT NULL DEFAULT 0,
                 active INTEGER DEFAULT 0,
                 active_at INTEGER,
                 seq INTEGER DEFAULT 0
@@ -247,6 +474,8 @@ export class Store {
             CREATE TABLE IF NOT EXISTS machines (
                 id TEXT PRIMARY KEY,
                 namespace TEXT NOT NULL DEFAULT 'default',
+                tag TEXT,
+                runner_proof_hash TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
                 metadata TEXT,
@@ -258,6 +487,22 @@ export class Store {
                 seq INTEGER DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_machines_namespace ON machines(namespace);
+
+            CREATE TABLE IF NOT EXISTS machine_reenroll_grants (
+                grant_hash TEXT PRIMARY KEY,
+                machine_id TEXT NOT NULL,
+                namespace TEXT NOT NULL,
+                expires_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_machine_reenroll_grants_machine
+                ON machine_reenroll_grants(machine_id);
+
+            CREATE TABLE IF NOT EXISTS machine_reenroll_replays (
+                grant_hash TEXT PRIMARY KEY,
+                from_machine_id TEXT NOT NULL,
+                to_machine_id TEXT NOT NULL,
+                namespace TEXT NOT NULL
+            );
 
             CREATE TABLE IF NOT EXISTS messages (
                 id TEXT PRIMARY KEY,
@@ -331,6 +576,108 @@ export class Store {
             );
             CREATE INDEX IF NOT EXISTS idx_session_scratchlist_session_created
                 ON session_scratchlist(session_id, created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS session_jobs (
+                session_id TEXT NOT NULL,
+                job_key TEXT NOT NULL,
+                label TEXT NOT NULL,
+                status TEXT NOT NULL,
+                done REAL,
+                total REAL,
+                remaining REAL,
+                unit TEXT,
+                detail TEXT,
+                wake_on_terminal INTEGER NOT NULL DEFAULT 0,
+                wake_prompt TEXT,
+                wake_emitted_run_id TEXT,
+                heartbeat_at INTEGER NOT NULL,
+                started_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (session_id, job_key),
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_session_jobs_session_status_updated
+                ON session_jobs(session_id, status, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS usage_events (
+                session_id TEXT NOT NULL,
+                source_key TEXT NOT NULL,
+                source_seq INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                agent TEXT NOT NULL,
+                model TEXT,
+                kind TEXT NOT NULL CHECK (kind IN ('delta', 'cumulative')),
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+                last_input_tokens INTEGER,
+                last_output_tokens INTEGER,
+                last_cache_read_tokens INTEGER,
+                last_cache_creation_tokens INTEGER,
+                PRIMARY KEY (session_id, source_key),
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_usage_events_session_created
+                ON usage_events(session_id, created_at, source_seq);
+            CREATE INDEX IF NOT EXISTS idx_usage_events_created
+                ON usage_events(created_at);
+
+            CREATE TABLE IF NOT EXISTS usage_scan_state (
+                session_id TEXT PRIMARY KEY,
+                message_epoch INTEGER NOT NULL DEFAULT 0,
+                last_seq INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS events (
+                id TEXT PRIMARY KEY,
+                ts INTEGER NOT NULL,
+                source_kind TEXT NOT NULL,
+                source_ref TEXT NOT NULL,
+                sink_kind TEXT,
+                sink_ref TEXT,
+                event_type TEXT NOT NULL,
+                summary TEXT,
+                payload_json TEXT,
+                artifact_refs TEXT NOT NULL DEFAULT '[]',
+                tags TEXT NOT NULL DEFAULT '[]',
+                related_session_id TEXT,
+                related_event_id TEXT,
+                provenance TEXT,
+                idempotency_key TEXT,
+                dedupe_key TEXT,
+                confidence REAL,
+                severity TEXT,
+                expires_at INTEGER,
+                namespace TEXT NOT NULL,
+                principal_json TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_events_namespace_ts
+                ON events(namespace, ts DESC);
+            CREATE INDEX IF NOT EXISTS idx_events_namespace_related_session
+                ON events(namespace, related_session_id, ts DESC);
+            CREATE INDEX IF NOT EXISTS idx_events_namespace_expires
+                ON events(namespace, expires_at);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_events_namespace_idempotency
+                ON events(namespace, idempotency_key)
+                WHERE idempotency_key IS NOT NULL;
+
+            CREATE TABLE IF NOT EXISTS event_links (
+                id TEXT PRIMARY KEY,
+                from_event_id TEXT NOT NULL,
+                to_event_id TEXT NOT NULL,
+                relation_type TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                metadata_json TEXT,
+                namespace TEXT NOT NULL,
+                FOREIGN KEY (from_event_id) REFERENCES events(id) ON DELETE CASCADE,
+                FOREIGN KEY (to_event_id) REFERENCES events(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_event_links_namespace_from
+                ON event_links(namespace, from_event_id);
+            CREATE INDEX IF NOT EXISTS idx_event_links_namespace_to
+                ON event_links(namespace, to_event_id);
         `)
     }
 
@@ -592,6 +939,245 @@ export class Store {
         if (!columns.some((col) => col.name === 'attachments')) {
             this.db.exec(`ALTER TABLE session_scratchlist ADD COLUMN attachments TEXT DEFAULT NULL`)
         }
+    }
+
+    /**
+     * V16 has no DDL change: messages.content may now hold zstd-compressed
+     * BLOBs alongside legacy plaintext JSON TEXT (see contentCodec.ts). The
+     * version bump exists so an older hub build refuses to open the DB with a
+     * schema-mismatch error instead of silently rendering every compressed
+     * message as null.
+     */
+    private migrateFromV15ToV16(): void {}
+
+    private migrateFromV16ToV17(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS usage_events (
+                session_id TEXT NOT NULL,
+                source_key TEXT NOT NULL,
+                source_seq INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                agent TEXT NOT NULL,
+                model TEXT,
+                kind TEXT NOT NULL CHECK (kind IN ('delta', 'cumulative')),
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (session_id, source_key),
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_usage_events_session_created
+                ON usage_events(session_id, created_at, source_seq);
+            CREATE INDEX IF NOT EXISTS idx_usage_events_created
+                ON usage_events(created_at);
+        `)
+    }
+
+    private migrateFromV17ToV18(): void {
+        // Usage events are a rebuildable index; v18 changes their source key
+        // and baseline semantics, so stale rows must not be mixed with new ones.
+        const columns = new Set(
+            (this.db.prepare('PRAGMA table_info(usage_events)').all() as Array<{ name: string }>)
+                .map((column) => column.name)
+        )
+        for (const name of [
+            'last_input_tokens',
+            'last_output_tokens',
+            'last_cache_read_tokens',
+            'last_cache_creation_tokens'
+        ]) {
+            if (!columns.has(name)) {
+                this.db.exec(`ALTER TABLE usage_events ADD COLUMN ${name} INTEGER`)
+            }
+        }
+        this.db.exec('DELETE FROM usage_events')
+    }
+
+    private migrateFromV18ToV19(): void {
+        // Cumulative event keys are stable in v19, so repeated transcript
+        // imports collapse to one snapshot. Rebuild the derived index once.
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS usage_scan_state (
+                session_id TEXT PRIMARY KEY,
+                message_epoch INTEGER NOT NULL DEFAULT 0,
+                last_seq INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            DELETE FROM usage_events;
+            DELETE FROM usage_scan_state;
+        `)
+    }
+
+    private migrateFromV19ToV20(): void {
+        // tiann/hapi#1359 stamps a stable session-model fallback onto usage
+        // events that predate model attribution. That only helps events
+        // indexed after the upgrade, so clear the scan state once to force
+        // usageService's lazy re-index to re-derive every event. The events
+        // table is left alone: the re-index replaces each session's rows and
+        // reuses any previously indexed explicit models.
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS usage_scan_state (
+                session_id TEXT PRIMARY KEY,
+                message_epoch INTEGER NOT NULL DEFAULT 0,
+                last_seq INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            DELETE FROM usage_scan_state;
+        `)
+    }
+
+    private migrateFromV20ToV21(): void {
+        // Usage events and scan cursors are a derived index. v21 moves cache
+        // normalization to parse time, so every row must be rebuilt under the
+        // same inclusive-input invariant rather than mixing old and new rows.
+        this.db.exec(`
+            DELETE FROM usage_events;
+            DELETE FROM usage_scan_state;
+        `)
+    }
+
+    private migrateFromV21ToV22(): void {
+        // Upstream #1115 dual-pin (their SCHEMA 22) remapped onto soup ladder.
+        const columns = this.getSessionColumnNames()
+        if (columns.size === 0) return
+        if (!columns.has('pinned')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0')
+        }
+        if (!columns.has('global_pinned')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN global_pinned INTEGER NOT NULL DEFAULT 0')
+        }
+    }
+
+    /**
+     * A2A Layer 1 / P1 (#1374) + P3 substrate: hub work-graph ledger tables.
+     * Namespace + principal_json required on every events row.
+     */
+    private migrateFromV22ToV23(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS events (
+                id TEXT PRIMARY KEY,
+                ts INTEGER NOT NULL,
+                source_kind TEXT NOT NULL,
+                source_ref TEXT NOT NULL,
+                sink_kind TEXT,
+                sink_ref TEXT,
+                event_type TEXT NOT NULL,
+                summary TEXT,
+                payload_json TEXT,
+                artifact_refs TEXT NOT NULL DEFAULT '[]',
+                tags TEXT NOT NULL DEFAULT '[]',
+                related_session_id TEXT,
+                related_event_id TEXT,
+                provenance TEXT,
+                idempotency_key TEXT,
+                dedupe_key TEXT,
+                confidence REAL,
+                severity TEXT,
+                expires_at INTEGER,
+                namespace TEXT NOT NULL,
+                principal_json TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_events_namespace_ts
+                ON events(namespace, ts DESC);
+            CREATE INDEX IF NOT EXISTS idx_events_namespace_related_session
+                ON events(namespace, related_session_id, ts DESC);
+            CREATE INDEX IF NOT EXISTS idx_events_namespace_expires
+                ON events(namespace, expires_at);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_events_namespace_idempotency
+                ON events(namespace, idempotency_key)
+                WHERE idempotency_key IS NOT NULL;
+
+            CREATE TABLE IF NOT EXISTS event_links (
+                id TEXT PRIMARY KEY,
+                from_event_id TEXT NOT NULL,
+                to_event_id TEXT NOT NULL,
+                relation_type TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                metadata_json TEXT,
+                namespace TEXT NOT NULL,
+                FOREIGN KEY (from_event_id) REFERENCES events(id) ON DELETE CASCADE,
+                FOREIGN KEY (to_event_id) REFERENCES events(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_event_links_namespace_from
+                ON event_links(namespace, from_event_id);
+            CREATE INDEX IF NOT EXISTS idx_event_links_namespace_to
+                ON event_links(namespace, to_event_id);
+        `)
+    }
+
+    /**
+     * V23 was independently used by the soup job table and upstream work graph.
+     * Upgrade either historical shape to their additive union.
+     * Also rehomes soup Overseer ledger off the `events` name (work-graph owns it).
+     */
+    private migrateFromV23ToV24(): void {
+        rehomeOverseerEventsAwayFromWorkGraphCollision(this.db)
+        this.migrateFromV22ToV23()
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS session_jobs (
+                session_id TEXT NOT NULL,
+                job_key TEXT NOT NULL,
+                label TEXT NOT NULL,
+                status TEXT NOT NULL,
+                done REAL,
+                total REAL,
+                remaining REAL,
+                unit TEXT,
+                detail TEXT,
+                wake_on_terminal INTEGER NOT NULL DEFAULT 0,
+                wake_prompt TEXT,
+                wake_emitted_run_id TEXT,
+                heartbeat_at INTEGER NOT NULL,
+                started_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (session_id, job_key),
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_session_jobs_session_status_updated
+                ON session_jobs(session_id, status, updated_at DESC);
+        `)
+    }
+
+    /** #1473 machine tag for RPC auth — remapped past soup dual-ledger V24. */
+    private migrateFromV24ToV25(): void {
+        const columns = this.getMachineColumnNames()
+        if (columns.size === 0) return
+        if (!columns.has('tag')) {
+            this.db.exec('ALTER TABLE machines ADD COLUMN tag TEXT')
+        }
+    }
+
+    private migrateFromV25ToV26(): void {
+        const columns = this.getMachineColumnNames()
+        if (columns.size === 0) return
+        if (!columns.has('runner_proof_hash')) {
+            this.db.exec('ALTER TABLE machines ADD COLUMN runner_proof_hash TEXT')
+        }
+    }
+
+    private migrateFromV26ToV27(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS machine_reenroll_grants (
+                grant_hash TEXT PRIMARY KEY,
+                machine_id TEXT NOT NULL,
+                namespace TEXT NOT NULL,
+                expires_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_machine_reenroll_grants_machine
+                ON machine_reenroll_grants(machine_id);
+        `)
+    }
+
+    private migrateFromV27ToV28(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS machine_reenroll_replays (
+                grant_hash TEXT PRIMARY KEY,
+                from_machine_id TEXT NOT NULL,
+                to_machine_id TEXT NOT NULL,
+                namespace TEXT NOT NULL
+            );
+        `)
     }
 
     private getSessionColumnNames(): Set<string> {
