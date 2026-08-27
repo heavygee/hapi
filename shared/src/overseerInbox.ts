@@ -38,6 +38,8 @@ export type ArtifactRef = {
     url?: string
     title?: string
     ref?: string
+    repo?: string
+    number?: number
 }
 
 const TITLE_PRIORITY_KINDS = [
@@ -48,8 +50,15 @@ const TITLE_PRIORITY_KINDS = [
     'deploy_id'
 ] as const
 
-/** Fixed coarse rank — lower number = higher priority (v1, not learned). */
-export function computeCoarseBasePriority(eventType: string): number {
+/**
+ * External channel notifications (e.g. the GitHub PR watcher) are routine and
+ * must never outrank genuine worker/system attention items. Demoting the whole
+ * channel band below the worker/system band (which maxes at 70) keeps a flood
+ * of upstream PR notifications from dominating triage.
+ */
+export const CHANNEL_PRIORITY_OFFSET = 100
+
+function coarseRankForEventType(eventType: string): number {
     switch (eventType) {
         case 'approval_requested':
         case 'permission_request':
@@ -66,9 +75,23 @@ export function computeCoarseBasePriority(eventType: string): number {
             return 50
         case 'stale':
             return 60
+        case 'progress':
+            return 65
         default:
             return 70
     }
+}
+
+/**
+ * Fixed coarse rank — lower number = higher priority (v1, not learned).
+ * `sourceKind === 'channel'` items (external GitHub/PR notifications) are
+ * demoted below every worker/system item via {@link CHANNEL_PRIORITY_OFFSET},
+ * so genuine operator items (blocked workers, needs_decision, failures) always
+ * rank above routine PR notifications while preserving order within each band.
+ */
+export function computeCoarseBasePriority(eventType: string, sourceKind?: string | null): number {
+    const rank = coarseRankForEventType(eventType)
+    return sourceKind === 'channel' ? rank + CHANNEL_PRIORITY_OFFSET : rank
 }
 
 export function mapEventTypeToInboxCategory(eventType: string): InboxCategory {
@@ -104,16 +127,41 @@ export function parseArtifactRefs(raw: string | null | undefined): ArtifactRef[]
     }
 }
 
+const GITHUB_REF_URL_RE = /github\.com\/([^/\s]+)\/([^/\s]+)\/(?:pull|issues)\/(\d+)/i
+
+/** "owner/repo#123" from a GitHub PR/issue URL, else null. */
+export function parseGithubRefFromUrl(url: string | null | undefined): string | null {
+    if (!url) return null
+    const match = GITHUB_REF_URL_RE.exec(url)
+    if (!match) return null
+    return `${match[1]}/${match[2]}#${match[3]}`
+}
+
+/** Compact human ref for an artifact ("owner/repo#123"), never a bare URL. */
+function shortRepoRef(ref: ArtifactRef): string | null {
+    if (ref.repo?.trim() && typeof ref.number === 'number') {
+        return `${ref.repo.trim()}#${ref.number}`
+    }
+    return parseGithubRefFromUrl(ref.url)
+}
+
 export function pickPrimaryArtifactTitle(artifactRefs: ArtifactRef[]): string | null {
     for (const kind of TITLE_PRIORITY_KINDS) {
         const match = artifactRefs.find((ref) => ref.kind === kind)
         if (!match) continue
-        if (match.title?.trim()) return match.title.trim()
+        const shortRef = shortRepoRef(match)
+        const title = match.title?.trim()
+        if (title && shortRef) return `${shortRef}: ${title}`
+        if (title) return title
+        if (shortRef) return shortRef
         if (match.ref?.trim()) return match.ref.trim()
-        if (match.url?.trim()) return match.url.trim()
+        // Deliberately do NOT fall through to a bare match.url — a naked
+        // "https://github.com/…/pull/987" title is exactly the wall we kill.
     }
     for (const ref of artifactRefs) {
         if (ref.title?.trim()) return ref.title.trim()
+        const shortRef = shortRepoRef(ref)
+        if (shortRef) return shortRef
         if (ref.ref?.trim()) return ref.ref.trim()
     }
     return null

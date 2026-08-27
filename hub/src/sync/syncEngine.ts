@@ -564,6 +564,9 @@ export class SyncEngine {
         // Piggybacked on the inactivity tick; not a logical part of expireInactive
         // but shares its 5s cadence (avoids a second timer).
         this.messageService.releaseMatureScheduledMessages(Date.now())
+        // Terminal inbox items are context, not attention — auto-dispose the
+        // decayed ones so a backlog of finished work stops crowding triage.
+        this.store.inbox.sweepDecayedTerminal()
     }
 
     private reloadAll(): void {

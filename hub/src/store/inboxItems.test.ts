@@ -3,6 +3,7 @@ import { buildOverseerSessionIdentity, mergeEventPayloadWithSession } from '@hap
 import { Store } from './index'
 import type { StoredSession } from './types'
 import { deleteSession } from './sessions'
+import { backfillInboxDerivedFields, sweepDecayedTerminalItems, FINALE_DECAY_WINDOW_MS } from './inboxItems'
 import { Database } from 'bun:sqlite'
 
 function payloadForSession(session: StoredSession, extra: Record<string, unknown> = {}): string {
@@ -135,6 +136,143 @@ describe('Overseer inbox schema (init-gated, not SCHEMA_VERSION)', () => {
         const item = store.inbox.list()[0]
         expect(item?.title).toBe('feat: inbox substrate')
         expect(item?.reasonForPriority).toContain('QUESTION tier')
+    })
+
+    it('demotes external channel PR items and titles them repo#number', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('pr-babysit', { name: 'peer-x' }, null, 'default')
+        const refs = JSON.stringify([
+            { kind: 'github_pr', url: 'https://github.com/tiann/hapi/pull/987', repo: 'tiann/hapi', number: 987, source: 'external' }
+        ])
+        const channelBlocked = store.events.insert({
+            ts: 1000,
+            sourceKind: 'channel',
+            sourceRef: 'contrib-state:tiann/hapi',
+            eventType: 'blocked',
+            attentionCandidate: 1,
+            summary: 'resolve 1 open thread(s)',
+            artifactRefs: refs,
+            relatedSessionId: session.id,
+            payloadJson: payloadForSession(session),
+            provenance: 'contrib-state@meta-daily'
+        })
+        const item = store.inbox.promoteAttentionEvent(channelBlocked!)
+        // Title is a human ref, never the bare URL.
+        expect(item?.title).toBe('tiann/hapi#987')
+        // Channel band = worker rank (20) + offset (100).
+        expect(item?.basePriority).toBe(120)
+
+        // A genuine worker blocker on another session still ranks first.
+        const worker = store.sessions.getOrCreateSession('real-blocker', { name: 'worker' }, null, 'default')
+        const workerBlocked = store.events.insert({
+            ts: 2000,
+            sourceKind: 'worker',
+            eventType: 'blocked',
+            attentionCandidate: 1,
+            summary: 'CI failed',
+            relatedSessionId: worker.id,
+            payloadJson: payloadForSession(worker),
+            provenance: 'test'
+        })
+        store.inbox.promoteAttentionEvent(workerBlocked!)
+        const ordered = store.inbox.list({ activeOnly: true })
+        expect(ordered[0]?.title).toBe('worker')
+        expect(ordered[ordered.length - 1]?.title).toBe('tiann/hapi#987')
+    })
+
+    it('backfill repairs legacy bare-URL titles and worker-band priority', () => {
+        const store = new Store(':memory:')
+        const db: Database = (store as unknown as { db: Database }).db
+        const session = store.sessions.getOrCreateSession('legacy', { name: 'legacy' }, null, 'default')
+        const refs = JSON.stringify([
+            { kind: 'github_pr', url: 'https://github.com/tiann/hapi/pull/958', repo: 'tiann/hapi', number: 958, source: 'external' }
+        ])
+        const event = store.events.insert({
+            ts: 1000,
+            sourceKind: 'channel',
+            sourceRef: 'contrib-state:tiann/hapi',
+            eventType: 'blocked',
+            attentionCandidate: 1,
+            summary: 'fix failing CI',
+            artifactRefs: refs,
+            relatedSessionId: session.id,
+            payloadJson: payloadForSession(session),
+            provenance: 'contrib-state@meta-daily'
+        })
+        // Simulate a row promoted BEFORE this change: bare-URL title, worker-band priority.
+        const inserted = db.prepare(`
+            INSERT INTO inbox_items (
+                status, priority, base_priority, source_event_ids, related_inbox_ids,
+                artifact_refs, attention_class, created_at, updated_at, related_session_id,
+                title, category, summary
+            ) VALUES (
+                'surfaced', 20, 20, ?, '[]', ?, 'live', 1, 1, ?,
+                'https://github.com/tiann/hapi/pull/958', 'BLOCKED', 'fix failing CI'
+            )
+        `).run(JSON.stringify([event!.id]), refs, session.id)
+        const id = Number(inserted.lastInsertRowid)
+
+        backfillInboxDerivedFields(db)
+
+        const fixed = store.inbox.getById(id)
+        expect(fixed?.title).toBe('tiann/hapi#958')
+        expect(fixed?.basePriority).toBe(120)
+        expect(fixed?.priority).toBe(120)
+        // Status untouched by backfill.
+        expect(fixed?.status).toBe('surfaced')
+    })
+
+    it('auto-resolves decayed FINALE items but keeps recent ones and non-terminal ones', () => {
+        const store = new Store(':memory:')
+        const db: Database = (store as unknown as { db: Database }).db
+        const now = 1_000_000_000_000
+        const insert = (category: string, updatedAt: number, title: string): number => {
+            const res = db.prepare(`
+                INSERT INTO inbox_items (
+                    status, priority, base_priority, source_event_ids, related_inbox_ids,
+                    attention_class, created_at, updated_at, related_session_id, title, category, summary
+                ) VALUES (
+                    'surfaced', 50, 50, '[]', '[]', 'live', 1, ?, NULL, ?, ?, 's'
+                )
+            `).run(updatedAt, title, category)
+            return Number(res.lastInsertRowid)
+        }
+        const oldDone = insert('FINALE', now - FINALE_DECAY_WINDOW_MS - 1, 'old-done')
+        const freshDone = insert('FINALE', now - 1000, 'fresh-done')
+        const blocked = insert('BLOCKED', now - FINALE_DECAY_WINDOW_MS - 1, 'still-blocked')
+
+        const disposed = sweepDecayedTerminalItems(db, now)
+        expect(disposed).toBe(1)
+        expect(store.inbox.getById(oldDone)?.status).toBe('resolved')
+        expect(store.inbox.getById(oldDone)?.resolvedAt).toBe(now)
+        expect(store.inbox.getById(freshDone)?.status).toBe('surfaced')
+        expect(store.inbox.getById(blocked)?.status).toBe('surfaced')
+
+        // Idempotent: nothing left to sweep.
+        expect(sweepDecayedTerminalItems(db, now)).toBe(0)
+    })
+
+    it('leaves STALE items alone (worker self-reported stalls share category STALE)', () => {
+        // A worker that self-reports status:"stalled" via AGENT_NOTIFY_SUMMARY lands
+        // as event_type 'stale' -> category STALE, same as the retired hub-inferred
+        // silence detection. Sweeping STALE would eat those live signals, so the
+        // sweep must ignore STALE entirely — even when well past the decay window.
+        const store = new Store(':memory:')
+        const db: Database = (store as unknown as { db: Database }).db
+        const now = 1_000_000_000_000
+        const res = db.prepare(`
+            INSERT INTO inbox_items (
+                status, priority, base_priority, source_event_ids, related_inbox_ids,
+                attention_class, created_at, updated_at, related_session_id, title, category, summary
+            ) VALUES (
+                'surfaced', 60, 60, '[]', '[]', 'live', ?, ?, NULL,
+                'worker self-reported stalled', 'STALE', 'stalled'
+            )
+        `).run(now - FINALE_DECAY_WINDOW_MS - 1, now - FINALE_DECAY_WINDOW_MS - 1)
+        const staleId = Number(res.lastInsertRowid)
+
+        expect(sweepDecayedTerminalItems(db, now)).toBe(0)
+        expect(store.inbox.getById(staleId)?.status).toBe('surfaced')
     })
 
     it('records operator actions as training labels', () => {

@@ -408,7 +408,7 @@ pec_severity_for_emoji() {
 #        --date YYYY-MM-DD [--notif] [--url]
 pec_build_channel_event_body() {
     local repo="" number="" emoji="" action="" fingerprint="" session_id="" \
-        reason="transition" date="" notif=0 url=""
+        reason="transition" date="" notif=0 url="" title=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --repo) repo="$2"; shift 2 ;;
@@ -421,6 +421,7 @@ pec_build_channel_event_body() {
             --date) date="$2"; shift 2 ;;
             --notif) notif=1; shift ;;
             --url) url="$2"; shift 2 ;;
+            --title) title="$2"; shift 2 ;;
             *) echo "pec_build_channel_event_body: unknown arg $1" >&2; return 2 ;;
         esac
     done
@@ -449,6 +450,8 @@ pec_build_channel_event_body() {
     summary="${action:-ContributionState $emoji}"
     [[ ${#summary} -gt 280 ]] && summary="${summary:0:277}..."
     [[ -z "$url" ]] && url="https://github.com/${repo}/pull/${number}"
+    # PR/issue titles run long; keep the artifact label human-scannable.
+    [[ ${#title} -gt 120 ]] && title="${title:0:117}..."
 
     local github_state="open"
     [[ "$emoji" == "🔧" ]] && github_state="merged"
@@ -471,6 +474,7 @@ pec_build_channel_event_body() {
         --arg reason "$reason" \
         --arg dedupe "$dedupe" \
         --arg idempo "$idempo" \
+        --arg title "$title" \
         --argjson severity "$severity" \
         '{
             sourceKind: "channel",
@@ -480,16 +484,18 @@ pec_build_channel_event_body() {
             operatorActionRequired: $opReq,
             summary: $summary,
             relatedSessionId: (if $sessionId == "" then null else $sessionId end),
-            artifactRefs: [{
-                kind: "github_pr",
-                url: $url,
-                repo: $repo,
-                number: $number,
-                target_id: $target,
-                control: $control,
-                github_state: $ghState,
-                source: "external"
-            }],
+            artifactRefs: [(
+                {
+                    kind: "github_pr",
+                    url: $url,
+                    repo: $repo,
+                    number: $number,
+                    target_id: $target,
+                    control: $control,
+                    github_state: $ghState,
+                    source: "external"
+                } + (if $title == "" then {} else {title: $title} end)
+            )],
             payload: { emoji: $emoji, action: $action, emitReason: $reason },
             tags: ["contrib-state"],
             dedupeKey: $dedupe,

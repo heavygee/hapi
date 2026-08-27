@@ -9,6 +9,7 @@ import {
     promoteAttentionEvent,
     recordInboxOperatorAction,
     repointSessionInboxItems,
+    sweepDecayedTerminalItems,
     type ListInboxItemsOptions,
     type StoredInboxItem
 } from './inboxItems'
@@ -49,5 +50,10 @@ export class InboxStore {
 
     repointSession(fromSessionId: string, toSessionId: string): number {
         return repointSessionInboxItems(this.db, fromSessionId, toSessionId)
+    }
+
+    /** Auto-resolve decayed terminal (completed) items. Returns rows resolved. */
+    sweepDecayedTerminal(now: number = Date.now()): number {
+        return sweepDecayedTerminalItems(this.db, now)
     }
 }

@@ -201,6 +201,15 @@ eq "body dedupeKey embeds fingerprint + session" \
 eq "body idempotencyKey embeds session" \
     "$(jq -r '.idempotencyKey' <<<"$body")" \
     "contrib:tiann/hapi#999:$FP_A:sess:aaaaaaaa-1111"
+eq "body omits artifact title when --title not given" \
+    "$(jq -r '.artifactRefs[0].title // "ABSENT"' <<<"$body")" "ABSENT"
+
+body_titled="$(pec_build_channel_event_body \
+    --repo tiann/hapi --number 1215 --emoji "⚠️" --action "fix CI" \
+    --fingerprint "$FP_A" --session-id "aaaaaaaa-1111" --reason transition \
+    --date 2026-07-25 --title "feat(web): rich composer")"
+eq "body carries artifact title when --title given" \
+    "$(jq -r '.artifactRefs[0].title' <<<"$body_titled")" "feat(web): rich composer"
 
 # Two sessions tracking the same PR + fingerprint → distinct body keys.
 body_s1="$(pec_build_channel_event_body \
