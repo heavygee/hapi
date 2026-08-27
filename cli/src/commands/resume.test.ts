@@ -7,9 +7,6 @@ const {
     listResumableSessionsMock,
     getLocalResumeTargetMock,
     handoffSessionToLocalMock,
-    requestRunnerLocalResumeCapabilityMock,
-    armDirectResumeCapabilityMock,
-    readSettingsMock,
     renderMock,
     runCodexMock,
     runClaudeMock,
@@ -25,9 +22,6 @@ const {
     listResumableSessionsMock: vi.fn(),
     getLocalResumeTargetMock: vi.fn(),
     handoffSessionToLocalMock: vi.fn(async () => {}),
-    requestRunnerLocalResumeCapabilityMock: vi.fn(async () => 'cap-from-runner'),
-    armDirectResumeCapabilityMock: vi.fn(),
-    readSettingsMock: vi.fn(async () => ({ machineId: 'machine-1', previousMachineIds: [] })),
     renderMock: vi.fn(),
     runCodexMock: vi.fn(async () => {}),
     runClaudeMock: vi.fn(async () => {}),
@@ -41,7 +35,6 @@ const {
 vi.mock('@/ui/tokenInit', () => ({ initializeToken: initializeTokenMock }))
 vi.mock('@/utils/autoStartServer', () => ({ maybeAutoStartServer: maybeAutoStartServerMock }))
 vi.mock('@/ui/auth', () => ({ authAndSetupMachineIfNeeded: authAndSetupMachineIfNeededMock }))
-vi.mock('@/persistence', () => ({ readSettings: readSettingsMock }))
 vi.mock('@/api/api', () => ({
     ApiClient: {
         create: async () => ({
@@ -50,12 +43,6 @@ vi.mock('@/api/api', () => ({
             handoffSessionToLocal: handoffSessionToLocalMock
         })
     }
-}))
-vi.mock('@/runner/localResumeGrant', () => ({
-    requestRunnerLocalResumeCapability: requestRunnerLocalResumeCapabilityMock
-}))
-vi.mock('@/api/peerCapabilityInject', () => ({
-    armDirectResumeCapability: armDirectResumeCapabilityMock
 }))
 vi.mock('ink', () => ({ render: renderMock }))
 vi.mock('@/ui/ink/ResumeSessionPicker', () => ({
@@ -87,10 +74,6 @@ describe('resumeCommand', () => {
         listResumableSessionsMock.mockReset()
         getLocalResumeTargetMock.mockReset()
         handoffSessionToLocalMock.mockClear()
-        requestRunnerLocalResumeCapabilityMock.mockReset()
-        requestRunnerLocalResumeCapabilityMock.mockResolvedValue('cap-from-runner')
-        armDirectResumeCapabilityMock.mockClear()
-        readSettingsMock.mockClear()
         renderMock.mockReset()
         renderMock.mockImplementation((element: { props?: { onSelect?: (sessionId: string) => void } }) => {
             queueMicrotask(() => element.props?.onSelect?.('picked-session'))
@@ -103,8 +86,6 @@ describe('resumeCommand', () => {
         runAgyMock.mockClear()
         assertCodexLocalSupportedMock.mockClear()
         existsSyncMock.mockReturnValue(true)
-        // Successful resume paths simulate runner-spawn inject env.
-        process.env.HAPI_PEER_CAP_INJECT = 'unix:/tmp/peer-cap.sock'
     })
 
     it('resumes a Codex target by HAPI session id', async () => {
@@ -137,51 +118,6 @@ describe('resumeCommand', () => {
             modelReasoningEffort: 'xhigh',
             collaborationMode: 'default'
         })
-    })
-
-    it('continues unattributed when runner local-resume grant fails (#1473)', async () => {
-        delete process.env.HAPI_PEER_CAP_INJECT
-        requestRunnerLocalResumeCapabilityMock.mockRejectedValue(new Error('No peercred local-resume grant'))
-        getLocalResumeTargetMock.mockResolvedValue({
-            sessionId: 'hapi-session-active',
-            flavor: 'codex',
-            directory: '/tmp/project',
-            machineId: 'machine-1',
-            active: true,
-            thinking: false,
-            controlledByUser: false,
-            agentSessionId: 'codex-thread-1',
-            permissionMode: 'default',
-            collaborationMode: 'default'
-        })
-
-        await resumeCommand.run(createContext(['hapi-session-active']))
-
-        expect(requestRunnerLocalResumeCapabilityMock).toHaveBeenCalledWith('hapi-session-active')
-        expect(armDirectResumeCapabilityMock).not.toHaveBeenCalled()
-        expect(handoffSessionToLocalMock).toHaveBeenCalledWith('hapi-session-active')
-        expect(runCodexMock).toHaveBeenCalled()
-    })
-
-    it('redeems a runner local-resume grant for terminal resume without inject (#1473)', async () => {
-        delete process.env.HAPI_PEER_CAP_INJECT
-        getLocalResumeTargetMock.mockResolvedValue({
-            sessionId: 'hapi-session-term',
-            flavor: 'codex',
-            directory: '/tmp/project',
-            machineId: 'machine-1',
-            active: false,
-            thinking: false,
-            controlledByUser: false,
-            agentSessionId: 'codex-thread-1',
-            permissionMode: 'default'
-        })
-
-        await resumeCommand.run(createContext(['hapi-session-term']))
-
-        expect(requestRunnerLocalResumeCapabilityMock).toHaveBeenCalledWith('hapi-session-term')
-        expect(armDirectResumeCapabilityMock).toHaveBeenCalledWith('cap-from-runner')
-        expect(runCodexMock).toHaveBeenCalled()
     })
 
     it('rejects resuming an active AGY session (turn could start before handoff)', async () => {

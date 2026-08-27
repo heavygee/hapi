@@ -1,11 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import chalk from 'chalk'
 import { initializeToken } from '@/ui/tokenInit'
-import { HAPI_SESSION_ID_ENV } from '@/agent/hapiSessionEnv'
-import {
-    HAPI_PEER_DELIVER_BROKER_ENV,
-    requestParentPeerDeliver,
-} from '@/api/peerDeliverBroker'
 import {
     PingPeerError,
     exitCodeForPingPeerError,
@@ -182,57 +177,12 @@ export async function handlePingPeerCommand(args: string[]): Promise<void> {
         )
     }
 
-    const waitActiveSecs = parsed.waitActiveSecs ?? envWaitActiveSecs()
-    const wrappedSessionId = process.env[HAPI_SESSION_ID_ENV]?.trim()
-    const onProgress = (line: string) => console.log(`hapi ping-peer: ${line}`)
-    // Inside a wrapped session the parent broker delivers with in-memory
-    // capability — never read a shared HAPI_HOME bearer (pass 2d B3/M4).
-    // Terminal resume / broker-less parents cannot mint (pass 2e-alt M2): fall
-    // back to unattributed peer mark rather than permanent auth_failed.
-    let result
-    if (wrappedSessionId) {
-        const brokerPath = process.env[HAPI_PEER_DELIVER_BROKER_ENV]?.trim()
-        if (!brokerPath) {
-            console.error(chalk.yellow(
-                'hapi ping-peer: peer deliver broker unavailable in this session; sending unattributed'
-            ))
-            result = await pingPeer({
-                sessionIdPrefix: parsed.sessionIdPrefix,
-                message,
-                waitActiveSecs,
-                onProgress,
-            })
-        } else {
-            try {
-                result = await requestParentPeerDeliver({
-                    sessionIdPrefix: parsed.sessionIdPrefix,
-                    message,
-                    waitActiveSecs,
-                })
-            } catch (error) {
-                if (error instanceof PingPeerError && error.code === 'broker_unavailable') {
-                    console.error(chalk.yellow(
-                        `hapi ping-peer: ${error.message}; sending unattributed`
-                    ))
-                    result = await pingPeer({
-                        sessionIdPrefix: parsed.sessionIdPrefix,
-                        message,
-                        waitActiveSecs,
-                        onProgress,
-                    })
-                } else {
-                    throw error
-                }
-            }
-        }
-    } else {
-        result = await pingPeer({
-            sessionIdPrefix: parsed.sessionIdPrefix,
-            message,
-            waitActiveSecs,
-            onProgress,
-        })
-    }
+    const result = await pingPeer({
+        sessionIdPrefix: parsed.sessionIdPrefix,
+        message,
+        waitActiveSecs: parsed.waitActiveSecs ?? envWaitActiveSecs(),
+        onProgress: (line) => console.log(`hapi ping-peer: ${line}`)
+    })
 
     console.log(chalk.green(`hapi ping-peer: OK - delivered to ${result.sessionId}`))
 }

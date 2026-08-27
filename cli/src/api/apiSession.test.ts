@@ -94,13 +94,6 @@ vi.mock('axios', () => ({
     }
 }))
 
-vi.mock('./peerDeliverBroker', () => ({
-    PeerDeliverBroker: class {
-        async start() {}
-        stop() {}
-    },
-}))
-
 import { ApiSessionClient, isExternalUserMessage, IncomingMessageFilter } from './apiSession'
 
 function createSession(overrides: Partial<Session> = {}): Session {
@@ -145,7 +138,7 @@ function triggerIncomingUserMessage(
         id?: string
         seq: number
         text: string
-        sentFrom: 'cli' | 'webapp' | 'telegram-bot' | 'peer'
+        sentFrom: 'cli' | 'webapp' | 'telegram-bot'
     }
 ): void {
     socket.trigger('update', {
@@ -169,54 +162,6 @@ function triggerIncomingUserMessage(
         }
     })
 }
-
-describe('ApiSessionClient peer-capability resume (#1203)', () => {
-    it('recovers sessionCapability from socket and ignores foreign session ids', () => {
-        socketHarness.sockets.length = 0
-        const session = createSession()
-        const client = new ApiSessionClient('token', session, {
-            sessionTag: 'tag-local-proof',
-        })
-
-        expect(client.getPeerSessionCapability()).toBeNull()
-        expect(socketHarness.sockets).toHaveLength(1)
-        const socket = socketHarness.sockets[0]!
-
-        socket.trigger('peer-capability', {
-            sessionId: '99999999-9999-4999-8999-999999999999',
-            sessionCapability: 'foreign-capability',
-        })
-        expect(client.getPeerSessionCapability()).toBeNull()
-
-        socket.trigger('peer-capability', {
-            sessionId: session.id,
-            sessionCapability: '  resumed-capability  ',
-        })
-        expect(client.getPeerSessionCapability()).toBe('resumed-capability')
-    })
-
-    it('waitForPeerSessionCapability resolves when a delayed peer-capability arrives', async () => {
-        socketHarness.sockets.length = 0
-        const session = createSession()
-        const client = new ApiSessionClient('token', session, {
-            sessionTag: 'tag-local-proof',
-        })
-        const socket = socketHarness.sockets[0]!
-
-        const pending = client.waitForPeerSessionCapability({ timeoutMs: 1_000 })
-        expect(client.getPeerSessionCapability()).toBeNull()
-
-        queueMicrotask(() => {
-            socket.trigger('peer-capability', {
-                sessionId: session.id,
-                sessionCapability: 'late-capability',
-            })
-        })
-
-        await expect(pending).resolves.toBe('late-capability')
-        expect(client.getPeerSessionCapability()).toBe('late-capability')
-    })
-})
 
 describe('ApiSessionClient lazy materialization', () => {
     it('does not connect or materialize without a real user message', async () => {
@@ -601,7 +546,7 @@ describe('ApiSessionClient incoming user messages', () => {
         client.close()
     })
 
-    it.each(['webapp', 'telegram-bot', 'peer'] as const)(
+    it.each(['webapp', 'telegram-bot'] as const)(
         'delivers %s-originated user messages',
         (sentFrom) => {
             socketHarness.sockets.length = 0

@@ -8,16 +8,13 @@ import {
     consumeComposerSendIntent,
     type ComposerSendIntent,
 } from '@/lib/messageDelivery'
-import { safeStringify, stripAgentContract } from '@hapi/protocol'
-import { useShowAgentContract } from '@/hooks/useShowAgentContract'
+import { safeStringify } from '@hapi/protocol'
 import { renderEventLabel } from '@/chat/presentation'
 import type { ChatBlock, CliOutputBlock, CodexReview, RoundSummary, UsageData } from '@/chat/types'
 import type { AgentEvent, ToolCallBlock } from '@/chat/types'
 import type { ToolGroupBlock, VisibleChatBlock } from '@/chat/toolGroups'
 import { visibleBlockRole } from '@/chat/toolGroups'
 import type { AttachmentMetadata, MessageStatus as HappyMessageStatus, Session } from '@/types/api'
-import { buildShareHiddenByMessageId } from '@/lib/shareTurnAvailability'
-import { getPeerDeliveryInfo, isPeerDeliveryMeta } from '@/chat/peerDelivery'
 import { orderItemsById } from '@/lib/attachmentOrder'
 
 /**
@@ -50,12 +47,6 @@ export type HappyChatMessageMetadata = {
     model?: string | null
     roundSummary?: RoundSummary
     review?: CodexReview
-    /** Peer delivery provenance from hub message meta (#1203). */
-    sentFrom?: string
-    peer?: {
-        sourceSessionId?: string
-        sourceName?: string
-    }
     /**
      * Distinct turn count when this block carries an aggregated response
      * group footer. Single-turn blocks omit this field so the existing
@@ -305,7 +296,7 @@ export function aggregateResponseGroups(
 
         const roundSummary = block.kind === 'tool-group'
             ? block.roundSummary
-            : block.kind === 'user-text' || block.kind === 'agent-event' || block.kind === 'display-links'
+            : block.kind === 'user-text' || block.kind === 'agent-event'
                 ? undefined
                 : block.roundSummary
         groupRoundSummary ??= roundSummary
@@ -388,15 +379,6 @@ export function assignThreadMessageIds(
 }
 
 /**
- * Human-facing text for chat cards. Default strips the machine notify contract
- * (Half A). When Settings → About → "Show AGENT_NOTIFY line" is on, leave the
- * raw text so the operator can verify emission end-to-end.
- */
-export function textForHumanRender(text: string, showAgentContract: boolean): string {
-    return showAgentContract ? text : stripAgentContract(text)
-}
-
-/**
  * Finds the latest conversation-history boundary that is safe to fork.
  * While the main agent is running, every block from the latest invoked user
  * message onward belongs to the active turn and must not become a transient
@@ -449,7 +431,6 @@ export function findLatestCompletedBoundaryId(
     return candidate
 }
 
-/** Exported for unit tests covering peer meta → custom mapping (#1203). */
 function getAssistantBlockSignatures(blocks: readonly VisibleChatBlock[]): string[] {
     return blocks
         .filter((block) => visibleBlockRole(block) === 'assistant')
@@ -489,33 +470,17 @@ function containsActiveAssistantOutput(
         ))
 }
 
-export function toThreadMessageLike(
+function toThreadMessageLike(
     block: VisibleChatBlock,
     threadMessageId: string,
-    timestamp: number,
-    showAgentContract: boolean
-
+    timestamp: number
 ): ThreadMessageLike {
     if (block.kind === 'user-text') {
-        const peerInfo = getPeerDeliveryInfo(block.meta)
-        const sentFrom = isPeerDeliveryMeta(block.meta)
-            ? 'peer'
-            : undefined
-        const peer = peerInfo && (peerInfo.sourceSessionId || peerInfo.sourceName)
-            ? {
-                ...(peerInfo.sourceSessionId ? { sourceSessionId: peerInfo.sourceSessionId } : {}),
-                ...(peerInfo.sourceName ? { sourceName: peerInfo.sourceName } : {})
-            }
-            : undefined
         return {
             role: 'user',
             id: threadMessageId,
             createdAt: new Date(timestamp),
-            // Strip the machine-only notify contract from the human render. On
-            // non-Cursor flavors the hub prepends an inline contract prefix to
-            // the stored operator message (#20); stripAgentContract removes that
-            // leading block. No-op when absent. Debug toggle keeps it visible.
-            content: [{ type: 'text', text: textForHumanRender(block.text, showAgentContract) }],
+            content: [{ type: 'text', text: block.text }],
             metadata: {
                 custom: {
                     kind: 'user',
@@ -524,8 +489,6 @@ export function toThreadMessageLike(
                     originalText: block.originalText,
                     attachments: block.attachments,
                     invokedAt: block.invokedAt,
-                    ...(sentFrom ? { sentFrom } : {}),
-                    ...(peer ? { peer } : {}),
                     steered: block.steered
                 } satisfies HappyChatMessageMetadata
             }
@@ -537,12 +500,7 @@ export function toThreadMessageLike(
             role: 'assistant',
             id: threadMessageId,
             createdAt: new Date(timestamp),
-            // Strip the trailing AGENT_NOTIFY_SUMMARY line (collapse-normalized,
-            // so Cursor's corrupted SUMARY variant strips too) so the human never
-            // sees the machine contract - unless the debug toggle is on. The raw
-            // text always stays in the store for overseer. copyText derives from
-            // this content, so the clipboard follows the same visibility rule.
-            content: [{ type: 'text', text: textForHumanRender(block.text, showAgentContract) }],
+            content: [{ type: 'text', text: block.text }],
             metadata: {
                 custom: {
                     kind: 'assistant',
@@ -564,28 +522,6 @@ export function toThreadMessageLike(
                 type: 'tool-call',
                 toolCallId: block.id,
                 toolName: 'GeneratedImage',
-                argsText: '',
-                artifact: block
-            }],
-            metadata: {
-                custom: {
-                    kind: 'tool',
-                    toolCallId: block.id,
-                    invokedAt: block.invokedAt ?? null
-                } satisfies HappyChatMessageMetadata
-            }
-        }
-    }
-
-    if (block.kind === 'display-links') {
-        return {
-            role: 'assistant',
-            id: threadMessageId,
-            createdAt: new Date(timestamp),
-            content: [{
-                type: 'tool-call',
-                toolCallId: block.id,
-                toolName: 'DisplayLinks',
                 argsText: '',
                 artifact: block
             }],
@@ -819,10 +755,14 @@ export function useHappyRuntime(props: {
     attachmentAdapter?: AttachmentAdapter
     allowSendWhenInactive?: boolean
     pendingScheduleRef?: React.RefObject<PendingSchedule | null>
+    /**
+     * Shared one-shot ref with HappyComposer. The composer marks the next
+     * `api.composer().send()`; this adapter consumes and resets the mark as
+     * soon as assistant-ui emits the corresponding AppendMessage.
+     */
     pendingSendIntentRef?: React.MutableRefObject<ComposerSendIntent>
 }) {
     const isRunning = props.isRunning ?? props.session.thinking
-    const { showAgentContract } = useShowAgentContract()
     const activeTurnStartedAt = props.session.activeTurnStartedAt ?? null
     const hydratingWindow = props.viewMode === 'history'
         || props.isSyncingTail === true
@@ -927,19 +867,12 @@ export function useHappyRuntime(props: {
     const threadIdWrapperCacheRef = useRef(
         new WeakMap<VisibleChatBlock, BlockWithThreadMessageId>()
     )
-    const lastShowAgentContractRef = useRef(showAgentContract)
-    // useExternalMessageConverter WeakMap-keys on wrapper objects. Reusing
-    // wrappers after the strip toggle flips would keep stale stripped text.
-    if (lastShowAgentContractRef.current !== showAgentContract) {
-        lastShowAgentContractRef.current = showAgentContract
-        threadIdWrapperCacheRef.current = new WeakMap()
-    }
     const blocksWithThreadIds = useMemo(
         () => assignThreadMessageIdsWithStableWrappers(
             props.blocks,
             threadIdWrapperCacheRef.current
         ),
-        [props.blocks, showAgentContract]
+        [props.blocks]
     )
 
     const aggregates = useMemo(
@@ -956,10 +889,8 @@ export function useHappyRuntime(props: {
             const message = toThreadMessageLike(
                 block,
                 threadMessageId,
-                responseGroupTimestamps.get(block) ?? getBlockPresentationTimestamp(block),
-                showAgentContract
+                responseGroupTimestamps.get(block) ?? getBlockPresentationTimestamp(block)
             )
-
             const aggregate = aggregates.get(block.id)
             if (!aggregate) return message
             const existing = message.metadata?.custom as HappyChatMessageMetadata | undefined
@@ -979,8 +910,7 @@ export function useHappyRuntime(props: {
                 }
             }
         },
-        [aggregates, responseGroupTimestamps, showAgentContract]
-
+        [aggregates, responseGroupTimestamps]
     )
 
     // Use cached message converter for performance optimization
@@ -992,6 +922,10 @@ export function useHappyRuntime(props: {
     })
 
     const onNew = useCallback(async (message: AppendMessage) => {
+        const intent = consumeComposerSendIntent(props.pendingSendIntentRef)
+        // Reset before any early return so an empty submission, extraction
+        // failure, or downstream exception cannot leak an explicit queue
+        // gesture into the next ordinary send.
         const { text, attachments } = extractMessageContent(message)
         const orderedAttachments = orderItemsById(
             attachments,
@@ -1003,7 +937,6 @@ export function useHappyRuntime(props: {
         // moment the user clicked the preset button.
         const sendNow = Date.now()
         const scheduledAt = resolvePendingSchedule(props.pendingScheduleRef?.current ?? null, sendNow)
-        const intent = consumeComposerSendIntent(props.pendingSendIntentRef)
         props.onSendMessage(
             text,
             orderedAttachments.length > 0 ? orderedAttachments : undefined,
