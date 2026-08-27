@@ -96,7 +96,7 @@ describe('resolvePeerSessionTarget', () => {
         expect(resolved.id).toBe(newId)
     })
 
-    it('falls back to citation title when the cited id was merged away', async () => {
+    it('fail-closed when cited id is gone — no title auto-routing', async () => {
         const sessions: PingPeerSessionSummary[] = [
             {
                 id: newId,
@@ -104,28 +104,19 @@ describe('resolvePeerSessionTarget', () => {
                 metadata: { name: 'Antevorta setup' }
             }
         ]
-        const resolved = await resolvePeerSessionTarget(
-            sessions,
-            oldId,
-            { rawCitation: `[Antevorta setup](/sessions/${oldId})` }
-        )
-        expect(resolved.id).toBe(newId)
+        await expect(
+            resolvePeerSessionTarget(
+                sessions,
+                oldId,
+                { rawCitation: `[Antevorta setup](/sessions/${oldId})` }
+            )
+        ).rejects.toMatchObject({ code: 'not_found' })
     })
 
-    it('mentions list_peers when id and title fallback both miss', async () => {
+    it('mentions list_peers when id is gone', async () => {
         await expect(
             resolvePeerSessionTarget([], oldId, { rawCitation: `[Antevorta setup](/sessions/${oldId})` })
         ).rejects.toThrow(/list_peers/)
-    })
-
-    it('refuses ambiguous title matches', async () => {
-        const sessions: PingPeerSessionSummary[] = [
-            { id: 'aaaaaaaa-1111-1111-1111-111111111111', active: true, metadata: { name: 'Antevorta setup' } },
-            { id: 'bbbbbbbb-2222-2222-2222-222222222222', active: true, metadata: { name: 'Antevorta setup' } }
-        ]
-        await expect(
-            resolvePeerSessionTarget(sessions, oldId, { rawCitation: `[Antevorta setup](/sessions/${oldId})` })
-        ).rejects.toMatchObject({ code: 'ambiguous' })
     })
 })
 
