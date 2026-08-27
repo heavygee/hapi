@@ -8,6 +8,7 @@ import {
     resolveToolAutoApprovalDecision,
     type AutoApprovalDecision
 } from '@/modules/common/permission/BasePermissionHandler';
+import { shouldDenyAgentShellCommand } from '@/modules/common/permission/productionMutationGuard';
 
 interface PermissionResponseMessage {
     id: string;
@@ -68,6 +69,17 @@ export class PermissionAdapter {
             rawInput: request.rawInput
         });
         const input = deriveToolInput(request);
+
+        const productionGuard = shouldDenyAgentShellCommand({
+            title: request.title,
+            kind: request.kind,
+            rawInput: request.rawInput
+        });
+        if (productionGuard.deny) {
+            void this.autoDenyProductionMutation(request, toolName, input, productionGuard.reason ?? 'Blocked');
+            return;
+        }
+
         const mode = this.getPermissionMode?.();
         const autoDecision = resolveToolAutoApprovalDecision(mode, toolName, request.toolCallId);
 
@@ -135,6 +147,39 @@ export class PermissionAdapter {
             `[ACP] Auto-${outcome.outcome === 'selected' ? 'approved' : 'cancelled'} ` +
             `${toolName} (${request.id}) with decision=${decision}`
         );
+    }
+
+    private async autoDenyProductionMutation(
+        request: PermissionRequest,
+        toolName: string,
+        input: unknown,
+        reason: string
+    ): Promise<void> {
+        const optionId = pickOptionId(request, ['reject_once', 'reject_always'], { fallbackToFirst: false });
+        const outcome: PermissionResponse = optionId
+            ? { outcome: 'selected', optionId }
+            : { outcome: 'cancelled' };
+
+        await this.backend.respondToPermission(request.sessionId, request, outcome);
+
+        const timestamp = Date.now();
+        this.session.updateAgentState((currentState) => ({
+            ...currentState,
+            completedRequests: {
+                ...currentState.completedRequests,
+                [request.id]: {
+                    tool: toolName,
+                    arguments: input,
+                    createdAt: timestamp,
+                    completedAt: timestamp,
+                    status: 'denied',
+                    reason,
+                    decision: 'denied'
+                }
+            }
+        } satisfies AgentState));
+
+        logger.warn(`[ACP] Production mutation denied for ${toolName} (${request.id}): ${reason}`);
     }
 
     private async handlePermissionResponse(response: PermissionResponseMessage): Promise<void> {
