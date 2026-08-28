@@ -3,16 +3,69 @@ import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
 import type { CopilotAgentMode } from '@hapi/protocol'
 import type { AgentState, CodexCollaborationMode, Metadata, PermissionMode } from '@hapi/protocol/types'
-import { getReasoningStreamId, isRedundantGoalStatusEventContent } from '@hapi/protocol/messages'
+import {
+    getReasoningStreamId,
+    isRedundantGoalStatusEventContent,
+    unwrapRoleWrappedRecordEnvelope,
+} from '@hapi/protocol/messages'
 import type { Store, StoredSession } from '../../../store'
 import type { SyncEvent } from '../../../sync/syncEngine'
 import { extractTodoWriteTodosFromMessageContent } from '../../../sync/todos'
 import { extractTeamStateFromMessageContent, applyTeamStateDelta } from '../../../sync/teams'
 import { extractBackgroundTaskDelta } from '../../../sync/backgroundTasks'
+import { tryPromoteCursorInlineModelErrorFromMessage } from '../../../sync/cursorInlineModelErrorBackstop'
 import { shouldRecordSessionActivity } from '../../../sync/sessionActivity'
+import { extractFailingMermaidBlocks, buildMermaidRenderIssueHint } from '../../../sync/mermaid'
 import type { CliSocketWithData } from '../../socketTypes'
 import type { SessionEndReason } from '@hapi/protocol'
 import type { AccessErrorReason, AccessResult } from './types'
+import { getConfiguration } from '../../../configuration'
+
+/**
+ * CLI `update-metadata` often sends a local cache snapshot. Empty
+ * `externalRefs: []` on that path is almost never an intentional unlink
+ * (unlink is PUT /sessions/:id/external-refs → setSessionExternalRefs).
+ * Drop the key so mergeSessionMetadata carry-forward keeps prior links.
+ *
+ * Incident 2026-07-30: mid-stack hub without CONTRIBUTION_FIELDS + sparse
+ * writes wiped PR chips; empty-[] on this socket path is the same class.
+ */
+function omitEmptyExternalRefsOnCliMetadataWrite(metadata: unknown): unknown {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+        return metadata
+    }
+    if (!Object.prototype.hasOwnProperty.call(metadata, 'externalRefs')) {
+        return metadata
+    }
+    const refs = (metadata as Record<string, unknown>).externalRefs
+    if (!Array.isArray(refs) || refs.length > 0) {
+        return metadata
+    }
+    const next = { ...(metadata as Record<string, unknown>) }
+    delete next.externalRefs
+    return next
+}
+
+function stripExternalRefsWhenAwarenessDisabled(metadata: unknown): unknown {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+        return metadata
+    }
+    let awarenessEnabled = false
+    try {
+        awarenessEnabled = getConfiguration().githubPrAwareness
+    } catch {
+        awarenessEnabled = false
+    }
+    if (awarenessEnabled) {
+        return metadata
+    }
+    if (!('externalRefs' in metadata)) {
+        return metadata
+    }
+    const next = { ...(metadata as Record<string, unknown>) }
+    delete next.externalRefs
+    return next
+}
 
 type SessionAlivePayload = {
     sid: string
@@ -50,9 +103,7 @@ const messageSchema = z.object({
     sid: z.string(),
     message: z.union([z.string(), z.unknown()]),
     localId: z.string().optional(),
-    // Client-provided origin timestamp (epoch ms) — e.g. a Claude transcript
-    // entry's own `timestamp`. Only honored for agent messages (no localId);
-    // see addMessage in messages.ts.
+    // Client-provided transcript timestamp (jsonl order). Prefer over hub receive time.
     createdAt: z.number().optional()
 })
 
@@ -68,7 +119,13 @@ const updateStateSchema = z.object({
     agentState: z.unknown().nullable()
 })
 
-const HUB_OWNED_METADATA_KEYS = ['supersededBySessionId', 'opencodeClearOperation'] as const
+const HUB_OWNED_METADATA_KEYS = [
+    'supersededBySessionId',
+    'opencodeClearOperation',
+    // machineId gates local-resume-capability mint (#1473). Client-writable
+    // rewrite would let a sibling redirect the mint to its own proven machine.
+    'machineId',
+] as const
 
 function preserveHubOwnedMetadata(incoming: unknown, current: unknown): unknown {
     if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return incoming
@@ -109,7 +166,7 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             return
         }
 
-        const { sid, localId, createdAt } = parsed.data
+        const { sid, localId, createdAt: clientCreatedAt } = parsed.data
         const raw = parsed.data.message
 
         const content = typeof raw === 'string'
@@ -133,21 +190,21 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             return
         }
 
-        // Soft peer nametag rows (#1203) are stamped only via
-        // POST /cli/sessions/:id/peer-messages. Generic CLI `message` must not
-        // set meta.sentFrom === 'peer' (UX wire shape, not a crypto boundary).
+        // Trusted peer provenance is minted only via the capability HTTP route.
+        // Generic CLI `message` must not forge meta.sentFrom === 'peer' (#1473).
+        // Unwrap envelopes the web path accepts (`message` / `data.message` /
+        // `payload.message`) before the check — top-level-only was bypassable.
+        const peerProvenanceRecord = unwrapRoleWrappedRecordEnvelope(content)
+        const peerMeta = peerProvenanceRecord?.meta
         if (
-            content
-            && typeof content === 'object'
-            && !Array.isArray(content)
-            && (content as { role?: unknown }).role === 'user'
-            && (content as { meta?: unknown }).meta
-            && typeof (content as { meta?: unknown }).meta === 'object'
-            && !Array.isArray((content as { meta: unknown }).meta)
-            && (content as { meta: { sentFrom?: unknown } }).meta.sentFrom === 'peer'
+            peerProvenanceRecord?.role === 'user'
+            && peerMeta
+            && typeof peerMeta === 'object'
+            && !Array.isArray(peerMeta)
+            && (peerMeta as { sentFrom?: unknown }).sentFrom === 'peer'
         ) {
             socket.emit('error', {
-                message: 'Peer nametag delivery requires POST /cli/sessions/:id/peer-messages',
+                message: 'Peer provenance requires the capability route',
                 code: 'access-denied',
                 scope: 'session',
                 id: sid,
@@ -155,7 +212,7 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             return
         }
 
-        const msg = store.messages.addMessage(sid, content, localId, undefined, createdAt)
+        const msg = store.messages.addMessage(sid, content, localId, undefined, clientCreatedAt)
 
         // A reasoning stream arrives as a series of growing snapshots under one
         // stable id, so a stream should cost one row rather than one per
@@ -171,6 +228,17 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
 
         if (shouldRecordSessionActivity(content)) {
             onSessionActivity?.(sid, msg.createdAt)
+        }
+
+        if (tryPromoteCursorInlineModelErrorFromMessage({
+            store,
+            sessionId: sid,
+            session,
+            content,
+            atTs: msg.createdAt,
+            messageSeq: msg.seq
+        })) {
+            onWebappEvent?.({ type: 'session-updated', sessionId: sid })
         }
 
         const todos = extractTodoWriteTodosFromMessageContent(content)
@@ -222,6 +290,31 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             onBackgroundTaskDelta?.(sid, bgDelta)
         }
 
+        const mermaidIssues = extractFailingMermaidBlocks(content)
+        if (mermaidIssues.length > 0) {
+            const hintText = buildMermaidRenderIssueHint(mermaidIssues)
+            const hintCreatedAt = Date.now()
+            socket.emit('update', {
+                id: randomUUID(),
+                seq: msg.seq,
+                createdAt: hintCreatedAt,
+                body: {
+                    t: 'new-message' as const,
+                    sid,
+                    message: {
+                        id: randomUUID(),
+                        seq: msg.seq,
+                        createdAt: hintCreatedAt,
+                        localId: null,
+                        content: {
+                            role: 'user',
+                            content: { type: 'text', text: hintText }
+                        }
+                    }
+                }
+            })
+        }
+
         const update = {
             id: randomUUID(),
             seq: msg.seq,
@@ -267,6 +360,10 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             cb({ result: 'error', reason: sessionAccess.reason })
             return
         }
+
+        const gatedMetadata = stripExternalRefsWhenAwarenessDisabled(
+            omitEmptyExternalRefsOnCliMetadataWrite(metadata)
+        )
 
         const result = store.sessions.updateSessionMetadata(
             sid,

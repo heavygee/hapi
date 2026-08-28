@@ -57,9 +57,17 @@ export type PingPeerSessionSummary = {
 }
 
 export type PingPeerOptions = {
-    sessionIdPrefix: string
+    sessionIdPrefix?: string
+    /** When set, skip list+prefix resolve and load this session directly. */
+    sessionId?: string
     message: string
     waitActiveSecs?: number
+    /**
+     * Fresh spawn: poll until active instead of POST /resume on the first
+     * inactive snapshot. Machine spawn can return before the hub row is
+     * active; resume would launch a second child.
+     */
+    waitForInitialActive?: boolean
     apiUrl?: string
     accessToken?: string
     /**
@@ -610,10 +618,11 @@ export function formatPeerSessionsList(
 }
 
 export async function pingPeer(options: PingPeerOptions): Promise<PingPeerResult> {
-    const rawCitation = options.sessionIdPrefix ?? ''
-    const prefix = normalizeSessionIdPrefix(rawCitation)
+    const knownSessionId = (options.sessionId ?? '').trim()
+    const rawCitation = knownSessionId ? '' : (options.sessionIdPrefix ?? '')
+    const prefix = knownSessionId ? '' : normalizeSessionIdPrefix(rawCitation)
     const message = options.message ?? ''
-    if (!prefix) {
+    if (!knownSessionId && !prefix) {
         throw new PingPeerError('bad_args', 'session id prefix is required')
     }
     if (!message) {
@@ -633,9 +642,14 @@ export async function pingPeer(options: PingPeerOptions): Promise<PingPeerResult
     const onProgress = options.onProgress
 
     const jwt = await exchangeJwt(apiUrl, accessToken, http)
-    const sessions = await listSessions(apiUrl, jwt, http)
     const fetchSession = (sessionId: string) => tryGetSession(apiUrl, jwt, sessionId, http)
-    const matched = await resolvePeerSessionTarget(sessions, prefix, { rawCitation, fetchSession })
+    const matched = knownSessionId
+        ? await getSession(apiUrl, jwt, knownSessionId, http)
+        : await resolvePeerSessionTarget(
+            await listSessions(apiUrl, jwt, http),
+            prefix,
+            { rawCitation, fetchSession }
+        )
     const name = resolvePeerSessionLabel(matched)
     onProgress?.(
         matched.id === prefix
@@ -660,7 +674,13 @@ export async function pingPeer(options: PingPeerOptions): Promise<PingPeerResult
     // Prefer the list snapshot for the first resume decision, then re-check before
     // send so a flip to inactive between list and POST cannot 409 (#1195).
     if (!matched.active) {
-        await ensureActive('requesting resume...')
+        if (options.waitForInitialActive) {
+            onProgress?.('waiting for newly spawned session to become active...')
+            await waitUntilActive(apiUrl, jwt, matched.id, waitActiveSecs, http, sleep, now, onProgress)
+            onProgress?.('session active')
+        } else {
+            await ensureActive('requesting resume...')
+        }
     }
 
     let live = await ensureActive('session went inactive before send; requesting resume...')

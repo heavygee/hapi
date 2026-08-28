@@ -6,9 +6,14 @@ import {
     DecryptedMessageSchema,
     MachineSchema,
     PermissionModeSchema,
-    SessionSchema
+    SessionSchema,
+    ExternalRefSchema,
 } from './schemas'
 import { AgentFlavorSchema } from './modes'
+import {
+    PeerSpawnDefaultsSchema,
+    ResolvedPeerSpawnDefaultsSchema
+} from './peerSpawnDefaults'
 import type {
     DecryptedMessage,
     Machine,
@@ -18,6 +23,18 @@ import type { SessionSummary } from './sessionSummary'
 
 export const CreateOrLoadMachineRequestSchema = z.object({
     id: z.string().min(1),
+    /**
+     * Create-time machine secret (#1203). Required to bind machine-scoped RPC
+     * (including resume peer-mint nonce delivery). Client-generated; hub stores
+     * on first bind and requires a match thereafter. Never echoed on GET.
+     */
+    tag: z.string().min(1).optional(),
+    /**
+     * Memory/runner-local generation proof (#1473). Hub stores only sha256(proof)
+     * on first bind; websocket auth proves it and never first-claims a new hash.
+     * Never echoed on GET.
+     */
+    runnerProof: z.string().min(1).optional(),
     metadata: z.unknown(),
     runnerState: z.unknown().nullable().optional()
 })
@@ -52,7 +69,13 @@ export type CliMessagesResponse = z.infer<typeof CliMessagesResponseSchema>
 export const CreateSessionResponseSchema = z.object({
     session: SessionSchema,
     /** Hub opt-in for AGENT_NOTIFY_SUMMARY prompt injection (default off when omitted). */
-    sessionSummaryContract: z.boolean().optional()
+    sessionSummaryContract: z.boolean().optional(),
+    /**
+     * Session-scoped peer-delivery capability (#1203). HMAC over hub JWT secret;
+     * required for attributed `POST /cli/sessions/:id/peer-messages`. Never an
+     * agent/env/tool argument — only the creating ApiSessionClient holds it.
+     */
+    sessionCapability: z.string().min(1).optional()
 })
 
 export type CreateSessionResponse = z.infer<typeof CreateSessionResponseSchema>
@@ -60,7 +83,8 @@ export type CreateSessionResponse = z.infer<typeof CreateSessionResponseSchema>
 export const HubSettingsResponseSchema = z.object({
     sessionSummaryContract: z.boolean(),
     /** Show compact AGENT_NOTIFY_SUMMARY in chat (default off / hide). */
-    sessionSummaryInChat: z.boolean()
+    sessionSummaryInChat: z.boolean(),
+    peerSpawnDefaults: ResolvedPeerSpawnDefaultsSchema
 })
 
 export type HubSettingsResponse = z.infer<typeof HubSettingsResponseSchema>
@@ -68,10 +92,14 @@ export type HubSettingsResponse = z.infer<typeof HubSettingsResponseSchema>
 export const UpdateHubSettingsRequestSchema = z
     .object({
         sessionSummaryContract: z.boolean().optional(),
-        sessionSummaryInChat: z.boolean().optional()
+        sessionSummaryInChat: z.boolean().optional(),
+        peerSpawnDefaults: PeerSpawnDefaultsSchema.optional()
     })
     .refine(
-        (data) => data.sessionSummaryContract !== undefined || data.sessionSummaryInChat !== undefined,
+        (data) =>
+            data.sessionSummaryContract !== undefined
+            || data.sessionSummaryInChat !== undefined
+            || data.peerSpawnDefaults !== undefined,
         { message: 'At least one hub setting field is required' }
     )
 
@@ -130,7 +158,12 @@ export type MachinesResponse = { machines: Machine[] }
 
 export type SpawnResponse =
     | { type: 'success'; sessionId: string }
-    | { type: 'error'; message: string }
+    | {
+        type: 'error'
+        message: string
+        code?: 'agent_unavailable' | 'runner_upgrade_required' | 'outside_workspace_roots'
+        agent?: z.infer<typeof AgentFlavorSchema>
+    }
 
 export const SessionPermissionModeRequestSchema = z.object({
     mode: PermissionModeSchema
@@ -224,6 +257,41 @@ export type ListCodexSessionsRpcResponse = z.infer<typeof ListCodexSessionsRpcRe
 export type ArchiveCodexSessionRpcRequest = z.infer<typeof ArchiveCodexSessionRpcRequestSchema>
 export type ArchiveCodexSessionRpcResponse = z.infer<typeof ArchiveCodexSessionRpcResponseSchema>
 
+/** Claude import messages use the same wire shape as Codex agent payloads (`type: 'codex'`). */
+
+export const SetExternalRefsRequestSchema = z.object({
+    externalRefs: z.array(ExternalRefSchema)
+})
+export type SetExternalRefsRequest = z.infer<typeof SetExternalRefsRequestSchema>
+
+export const FeaturesPatchRequestSchema = z.object({
+    githubPrAwareness: z.boolean().optional()
+}).refine((value) => value.githubPrAwareness !== undefined, {
+    message: 'at least one feature flag is required'
+})
+
+export type FeaturesPatchRequest = z.infer<typeof FeaturesPatchRequestSchema>
+
+export const ClaudeImportedMessageSchema = z.object({
+    content: CodexImportedMessageSchema,
+    createdAt: z.number().optional()
+})
+
+export const ClaudeLocalSessionSummarySchema = z.object({
+    id: z.string().min(1),
+    title: z.string(),
+    lastUserMessage: z.string().nullable().optional(),
+    cwd: z.string().nullable().optional(),
+    file: z.string().min(1),
+    modifiedAt: z.number(),
+    originator: z.string().nullable().optional(),
+    cliVersion: z.string().nullable().optional()
+})
+
+export const ClaudeLocalSessionWithMessagesSchema = ClaudeLocalSessionSummarySchema.extend({
+    messages: z.array(ClaudeImportedMessageSchema)
+})
+
 export const PiImportedMessageContentSchema = CodexImportedMessageSchema
 
 export const PiImportedMessageSchema = z.object({
@@ -268,6 +336,73 @@ export type PiLocalSessionSummary = z.infer<typeof PiLocalSessionSummarySchema>
 export type PiLocalSessionWithMessages = z.infer<typeof PiLocalSessionWithMessagesSchema>
 export type ListPiSessionsRpcRequest = z.infer<typeof ListPiSessionsRpcRequestSchema>
 export type ListPiSessionsRpcResponse = z.infer<typeof ListPiSessionsRpcResponseSchema>
+
+export const ListClaudeSessionsRpcRequestSchema = z.object({
+    cwd: z.string().nullable().optional(),
+    sessionIds: z.array(z.string().min(1)).optional()
+})
+
+export const ListClaudeSessionsRpcResponseSchema = z.union([
+    z.object({
+        success: z.literal(true),
+        sessions: z.array(z.union([ClaudeLocalSessionWithMessagesSchema, ClaudeLocalSessionSummarySchema]))
+    }),
+    z.object({ success: z.literal(false), error: z.string() })
+])
+
+export type ListClaudeSessionsRpcRequest = z.infer<typeof ListClaudeSessionsRpcRequestSchema>
+export type ListClaudeSessionsRpcResponse = z.infer<typeof ListClaudeSessionsRpcResponseSchema>
+
+export const CursorImportableSessionSummaryRpcSchema = z.object({
+    id: z.string().min(1),
+    title: z.string(),
+    firstUserMessage: z.string().nullable().optional(),
+    workspacePath: z.string().nullable().optional(),
+    storeDbPath: z.string().min(1),
+    sourceFormat: z.enum(['acp', 'legacy']),
+    modifiedAt: z.number(),
+    sizeBytes: z.number(),
+    alreadyImportedHapiSessionId: z.string().nullable().optional()
+})
+
+export const ListCursorImportableSessionsRpcRequestSchema = z.object({
+    candidateWorkspacePaths: z.array(z.string()).optional(),
+    limit: z.number().int().positive().optional()
+})
+
+export const ListCursorImportableSessionsRpcResponseSchema = z.union([
+    z.object({ success: z.literal(true), sessions: z.array(CursorImportableSessionSummaryRpcSchema) }),
+    z.object({ success: z.literal(false), error: z.string() })
+])
+
+export const PrepareCursorImportRpcRequestSchema = z.object({
+    uuid: z.string().min(1),
+    workspacePath: z.string().nullable().optional()
+})
+
+export const PrepareCursorImportRpcResponseSchema = z.union([
+    z.object({
+        success: z.literal(true),
+        uuid: z.string().min(1),
+        sourceFormat: z.enum(['acp', 'legacy']),
+        workspacePath: z.string().min(1),
+        title: z.string(),
+        hostName: z.string(),
+        durationMs: z.number()
+    }),
+    z.object({
+        success: z.literal(false),
+        uuid: z.string().min(1),
+        reason: z.string().min(1),
+        message: z.string().min(1),
+        durationMs: z.number()
+    })
+])
+
+export type ListCursorImportableSessionsRpcRequest = z.infer<typeof ListCursorImportableSessionsRpcRequestSchema>
+export type ListCursorImportableSessionsRpcResponse = z.infer<typeof ListCursorImportableSessionsRpcResponseSchema>
+export type PrepareCursorImportRpcRequest = z.infer<typeof PrepareCursorImportRpcRequestSchema>
+export type PrepareCursorImportRpcResponse = z.infer<typeof PrepareCursorImportRpcResponseSchema>
 
 export const SessionCollaborationModeRequestSchema = z.object({
     mode: CodexCollaborationModeSchema
@@ -315,8 +450,11 @@ export const SessionServiceTierRequestSchema = z.object({
 
 export type SessionServiceTierRequest = z.infer<typeof SessionServiceTierRequestSchema>
 
+/** Hub session display-name ceiling (`PATCH /api/sessions/:id`). */
+export const SESSION_NAME_MAX_LENGTH = 255
+
 export const RenameSessionRequestSchema = z.object({
-    name: z.string().min(1).max(255)
+    name: z.string().min(1).max(SESSION_NAME_MAX_LENGTH)
 })
 
 export type RenameSessionRequest = z.infer<typeof RenameSessionRequestSchema>
@@ -430,6 +568,13 @@ export const ScratchlistEntryUpdateRequestSchema = z.object({
 )
 
 export type ScratchlistEntryUpdateRequest = z.infer<typeof ScratchlistEntryUpdateRequestSchema>
+
+/** Dismiss the model-error banner for a specific displayed error (by atTs). */
+export const AcknowledgeModelErrorRequestSchema = z.object({
+    atTs: z.number()
+})
+
+export type AcknowledgeModelErrorRequest = z.infer<typeof AcknowledgeModelErrorRequestSchema>
 
 /** Per-session legacy stream-json → ACP migrator request. See tiann/hapi#824. */
 export const CursorMigrateToAcpRequestSchema = z.object({
@@ -558,7 +703,7 @@ export const CliPeerDeliverRequestSchema = z.object({
 })
 export type CliPeerDeliverRequest = z.infer<typeof CliPeerDeliverRequestSchema>
 
-/** Hub session ids are UUIDs today; shared validator for CLI session-id checks. */
+/** Hub session ids are UUIDs today; single validator for CLI provenance gates. */
 export function isSessionId(value: string): boolean {
     return z.string().uuid().safeParse(value).success
 }
@@ -677,6 +822,21 @@ export const MachinePathsExistsRequestSchema = z.object({
 
 export type MachinePathsExistsRequest = z.infer<typeof MachinePathsExistsRequestSchema>
 
+export const AgentAvailabilityReasonSchema = z.enum(['not_found', 'invalid_configuration'])
+export type AgentAvailabilityReason = z.infer<typeof AgentAvailabilityReasonSchema>
+
+export const AgentAvailabilityEntrySchema = z.object({
+    agent: AgentFlavorSchema,
+    available: z.boolean(),
+    reason: AgentAvailabilityReasonSchema.optional()
+})
+export type AgentAvailabilityEntry = z.infer<typeof AgentAvailabilityEntrySchema>
+
+export const AgentAvailabilityResponseSchema = z.object({
+    agents: z.array(AgentAvailabilityEntrySchema)
+})
+export type AgentAvailabilityResponse = z.infer<typeof AgentAvailabilityResponseSchema>
+
 export const AuthRequestSchema = z.union([
     z.object({ initData: z.string() }),
     z.object({ accessToken: z.string() })
@@ -760,6 +920,8 @@ export type MachineListDirectoryResponse = {
 
 export type PathExistsResponse = {
     exists: Record<string, boolean>
+    /** Requested paths rejected by the runner's configured workspace roots. */
+    outsideWorkspaceRoots?: string[]
 }
 
 export type MachinePathsExistsResponse = PathExistsResponse
@@ -961,3 +1123,27 @@ export type UsageSummaryResponse = {
     byModel: UsageSummaryBucket[]
     updatedAt: number
 }
+
+// Fork/estate-only: hub-host kitchen hygiene snapshot from
+// scripts/tooling/hapi-kitchen-status.sh --json. Not applicable outside this
+// estate's soup workflow, so the shape mirrors the script's own fields.
+export type KitchenStatusResponse =
+    | {
+        available: true
+        status: string
+        driverHead: string
+        driverLayers: number | string
+        mirror: string
+        mirrorDirty: boolean
+        forkAhead: number
+        forkBehind: number
+        working: string
+        holdActive: boolean
+        holdReason: string
+        lease: string
+        driverBusy: boolean
+        ruleChopped: boolean
+        oneliner: string
+        checkedAt: number
+    }
+    | { available: false }
