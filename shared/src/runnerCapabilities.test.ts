@@ -15,7 +15,8 @@ describe('runnerCapabilities', () => {
         expect(REQUIRED_MACHINE_CAPABILITIES).not.toContain(MACHINE_CAPABILITIES.CliArtifactGeneration)
     })
 
-    it('requires cursor-chat-store-status so hub features cannot fail-closed without a registry entry', () => {
+    it('requires machine RPCs that session creation hard-depends on', () => {
+        expect(REQUIRED_MACHINE_CAPABILITIES).toContain(MACHINE_CAPABILITIES.AgentAvailability)
         expect(REQUIRED_MACHINE_CAPABILITIES).toContain(MACHINE_CAPABILITIES.CursorChatStoreStatus)
         expect(CURRENT_MACHINE_CAPABILITIES).toEqual(expect.arrayContaining([
             ...REQUIRED_MACHINE_CAPABILITIES,
@@ -27,6 +28,7 @@ describe('runnerCapabilities', () => {
         expect(isMachineCapabilitySkewed(null)).toBe(true)
         expect(isMachineCapabilitySkewed([])).toBe(true)
         expect(missingRequiredCapabilities([])).toEqual([
+            MACHINE_CAPABILITIES.AgentAvailability,
             MACHINE_CAPABILITIES.CursorChatStoreStatus,
         ])
     })
@@ -34,6 +36,7 @@ describe('runnerCapabilities', () => {
     it('is not skewed when required capabilities are advertised', () => {
         expect(isMachineCapabilitySkewed([...CURRENT_MACHINE_CAPABILITIES])).toBe(false)
         expect(missingRequiredCapabilities([
+            MACHINE_CAPABILITIES.AgentAvailability,
             MACHINE_CAPABILITIES.CursorChatStoreStatus,
             'other-cap',
         ])).toEqual([])
