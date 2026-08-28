@@ -125,7 +125,6 @@ export function createSocketServer(deps: SocketServerDeps): {
         store: deps.store,
         rpcRegistry,
         terminalRegistry,
-        jwtSecret: deps.jwtSecret,
         onSessionAlive: deps.onSessionAlive,
         onSessionReady: deps.onSessionReady,
         onSessionEnd: deps.onSessionEnd,

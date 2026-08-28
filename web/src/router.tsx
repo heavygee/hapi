@@ -13,6 +13,10 @@ import {
     useSearch,
 } from '@tanstack/react-router'
 import { getScrollRestorationKey } from '@/lib/scrollRestorationKey'
+import {
+    getSessionListSelectionNavigation,
+    PRESERVE_SESSION_SIDEBAR_SCROLL,
+} from '@/lib/sessionNavigation'
 import { App } from '@/App'
 import { SessionChat } from '@/components/SessionChat'
 import { SessionList } from '@/components/SessionList'
@@ -989,6 +993,7 @@ function SessionPage() {
         viewMode: messagesViewMode,
         messagesVersion,
         historyVersion,
+        tailRevision,
         setViewMode,
     } = useMessages(api, sessionId)
 
@@ -1382,14 +1387,6 @@ function SessionPage() {
         })
     }, [navigate, sessionId])
 
-    const handleInitialSessionLogConsumed = useCallback(() => {
-        navigate({
-            to: '/sessions/$sessionId',
-            params: { sessionId },
-            replace: true,
-        })
-    }, [navigate, sessionId])
-
     if (!session) {
         if (sessionError) {
             return (
@@ -1439,6 +1436,7 @@ function SessionPage() {
             viewMode={messagesViewMode}
             messagesVersion={messagesVersion}
             historyVersion={historyVersion}
+            tailRevision={tailRevision}
             onBack={goBack}
             onRefresh={refreshSelectedSession}
             onLoadMore={loadMoreMessages}

@@ -9,8 +9,9 @@ import {
     type ComposerSendIntent,
 } from '@/lib/messageDelivery'
 import { safeStringify } from '@hapi/protocol'
+import { stripNotifySummaryFooter } from '@hapi/protocol/messages'
 import { renderEventLabel } from '@/chat/presentation'
-import type { ChatBlock, CliOutputBlock, CodexReview, RoundSummary, UsageData } from '@/chat/types'
+import type { ChatBlock, CliOutputBlock, CodexReview, DisplayLinksBlock, RoundSummary, UsageData } from '@/chat/types'
 import type { AgentEvent, ToolCallBlock } from '@/chat/types'
 import type { ToolGroupBlock, VisibleChatBlock } from '@/chat/toolGroups'
 import { visibleBlockRole } from '@/chat/toolGroups'
@@ -47,6 +48,12 @@ export type HappyChatMessageMetadata = {
     model?: string | null
     roundSummary?: RoundSummary
     review?: CodexReview
+    /** Soft peer nametag from hub message meta (#1203). */
+    sentFrom?: string
+    peer?: {
+        sourceSessionId?: string
+        sourceName?: string
+    }
     /**
      * Distinct turn count when this block carries an aggregated response
      * group footer. Single-turn blocks omit this field so the existing
@@ -296,7 +303,7 @@ export function aggregateResponseGroups(
 
         const roundSummary = block.kind === 'tool-group'
             ? block.roundSummary
-            : block.kind === 'user-text' || block.kind === 'agent-event'
+            : block.kind === 'user-text' || block.kind === 'agent-event' || block.kind === 'display-links'
                 ? undefined
                 : block.roundSummary
         groupRoundSummary ??= roundSummary
@@ -470,12 +477,14 @@ function containsActiveAssistantOutput(
         ))
 }
 
-function toThreadMessageLike(
+export function toThreadMessageLike(
     block: VisibleChatBlock,
     threadMessageId: string,
-    timestamp: number
+    timestamp: number,
+    showAgentContract = false
 ): ThreadMessageLike {
     if (block.kind === 'user-text') {
+        const peerMeta = peerProvenanceFromMeta(block.meta)
         return {
             role: 'user',
             id: threadMessageId,
@@ -489,7 +498,8 @@ function toThreadMessageLike(
                     originalText: block.originalText,
                     attachments: block.attachments,
                     invokedAt: block.invokedAt,
-                    steered: block.steered
+                    steered: block.steered,
+                    ...peerMeta,
                 } satisfies HappyChatMessageMetadata
             }
         }
@@ -500,7 +510,7 @@ function toThreadMessageLike(
             role: 'assistant',
             id: threadMessageId,
             createdAt: new Date(timestamp),
-            content: [{ type: 'text', text: block.text }],
+            content: [{ type: 'text', text: textForHumanRender(block.text, showAgentContract) }],
             metadata: {
                 custom: {
                     kind: 'assistant',
@@ -650,6 +660,29 @@ function toThreadMessageLike(
         }
     }
 
+    if (block.kind === 'display-links') {
+        const linksBlock: DisplayLinksBlock = block
+        return {
+            role: 'assistant',
+            id: threadMessageId,
+            createdAt: new Date(timestamp),
+            content: [{
+                type: 'tool-call',
+                toolCallId: linksBlock.id,
+                toolName: 'DisplayLinks',
+                argsText: '',
+                artifact: linksBlock
+            }],
+            metadata: {
+                custom: {
+                    kind: 'tool',
+                    toolCallId: linksBlock.id,
+                    invokedAt: linksBlock.invokedAt ?? null
+                } satisfies HappyChatMessageMetadata
+            }
+        }
+    }
+
     const toolBlock: ToolCallBlock = block
     const inputText = safeStringify(toolBlock.tool.input)
 
@@ -676,6 +709,31 @@ function toThreadMessageLike(
                 model: toolBlock.model
             } satisfies HappyChatMessageMetadata
         }
+    }
+}
+
+export function textForHumanRender(raw: string, showAgentContract: boolean): string {
+    if (showAgentContract) return raw
+    return stripNotifySummaryFooter(raw)
+}
+
+function peerProvenanceFromMeta(meta: unknown): Pick<HappyChatMessageMetadata, 'sentFrom' | 'peer'> {
+    if (!meta || typeof meta !== 'object') return {}
+    const record = meta as Record<string, unknown>
+    const sentFrom = typeof record.sentFrom === 'string' ? record.sentFrom : undefined
+    const peerRaw = record.peer
+    if (!peerRaw || typeof peerRaw !== 'object') {
+        return sentFrom ? { sentFrom } : {}
+    }
+    const peer = peerRaw as Record<string, unknown>
+    const sourceSessionId = typeof peer.sourceSessionId === 'string' ? peer.sourceSessionId : undefined
+    const sourceName = typeof peer.sourceName === 'string' ? peer.sourceName : undefined
+    const peerOut = sourceSessionId || sourceName
+        ? { sourceSessionId, sourceName }
+        : undefined
+    return {
+        ...(sentFrom ? { sentFrom } : {}),
+        ...(peerOut ? { peer: peerOut } : {}),
     }
 }
 

@@ -581,14 +581,10 @@ export class ApiClient {
     }
 
     sessionSyncClient(
-        session: Session & { sessionCapability?: string },
+        session: Session,
         options?: ApiSessionClientOptions
     ): ApiSessionClient {
-        return new ApiSessionClient(this.token, session, {
-            ...options,
-            sessionCapability: options?.sessionCapability ?? session.sessionCapability,
-            sessionTag: options?.sessionTag
-        })
+        return new ApiSessionClient(this.token, session, options)
     }
 
     machineSyncClient(

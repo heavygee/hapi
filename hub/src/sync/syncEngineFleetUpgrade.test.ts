@@ -12,6 +12,8 @@ const TEST_OFFER: HubUpgradeOffer = {
     targetGeneration: 'hub-generation-new',
 }
 
+type UpgradeRunner = SyncEngine['upgradeMachineRunner']
+
 function makeEngine(options?: {
     policy?: 'silent' | 'alert' | 'auto'
     offer?: HubUpgradeOffer | null
@@ -56,8 +58,12 @@ function registerSkewedRunner(
 describe('SyncEngine fleet upgrade startup sweep', () => {
     it('does nothing when fleet policy is not auto', async () => {
         const { engine } = makeEngine({ policy: 'alert' })
-        const upgrade = mock(async () => ({ type: 'success' as const, message: 'ok', response: { status: 'started' as const } }))
-        engine.upgradeMachineRunner = upgrade
+        const upgrade = mock(async (_machineId: string, _namespace: string) => ({
+            type: 'success' as const,
+            message: 'ok',
+            response: { status: 'started' as const, message: 'ok' },
+        }))
+        engine.upgradeMachineRunner = upgrade as unknown as UpgradeRunner
 
         try {
             registerSkewedRunner(engine, 'homelab')
@@ -71,17 +77,16 @@ describe('SyncEngine fleet upgrade startup sweep', () => {
     it('upgrades every active skewed runner and bypasses cooldown', async () => {
         const { engine } = makeEngine()
         const upgraded: string[] = []
-        engine.upgradeMachineRunner = mock(async (machineId: string) => {
+        engine.upgradeMachineRunner = mock(async (machineId: string, _namespace: string) => {
             upgraded.push(machineId)
-            return { type: 'success', message: 'ok', response: { status: 'started' } }
-        })
+            return { type: 'success' as const, message: 'ok', response: { status: 'started' as const } }
+        }) as unknown as UpgradeRunner
 
         try {
             registerSkewedRunner(engine, 'homelab')
             registerSkewedRunner(engine, 'personal-win')
             upgraded.length = 0
 
-            // Simulate a recent heartbeat auto attempt that would block retries.
             const internals = engine as unknown as { fleetUpgradeAttemptAt: Map<string, number> }
             internals.fleetUpgradeAttemptAt.set('homelab', Date.now())
             internals.fleetUpgradeAttemptAt.set('personal-win', Date.now())
@@ -96,10 +101,10 @@ describe('SyncEngine fleet upgrade startup sweep', () => {
     it('skips versionHandoffDisabled hosts', async () => {
         const { engine } = makeEngine()
         const upgraded: string[] = []
-        engine.upgradeMachineRunner = mock(async (machineId: string) => {
+        engine.upgradeMachineRunner = mock(async (machineId: string, _namespace: string) => {
             upgraded.push(machineId)
-            return { type: 'success', message: 'ok', response: { status: 'started' } }
-        })
+            return { type: 'success' as const, message: 'ok', response: { status: 'started' as const } }
+        }) as unknown as UpgradeRunner
 
         try {
             registerSkewedRunner(engine, 'homelab')
@@ -127,10 +132,10 @@ describe('SyncEngine fleet upgrade startup sweep', () => {
             },
         )
         const upgraded: string[] = []
-        engine.upgradeMachineRunner = mock(async (machineId: string) => {
+        engine.upgradeMachineRunner = mock(async (machineId: string, _namespace: string) => {
             upgraded.push(machineId)
-            return { type: 'success', message: 'ok', response: { status: 'started' } }
-        })
+            return { type: 'success' as const, message: 'ok', response: { status: 'started' as const } }
+        }) as unknown as UpgradeRunner
         const maybeUpgrade = (engine as unknown as {
             maybeFleetUpgradeMachine(id: string): Promise<void>
         }).maybeFleetUpgradeMachine.bind(engine)
@@ -138,9 +143,6 @@ describe('SyncEngine fleet upgrade startup sweep', () => {
         try {
             registerSkewedRunner(engine, 'homelab')
             upgraded.length = 0
-            const internals = engine as unknown as { fleetUpgradeAttemptAt: Map<string, number> }
-            internals.fleetUpgradeAttemptAt.set('homelab', Date.now())
-
             await maybeUpgrade('homelab')
             expect(upgraded).toEqual([])
 

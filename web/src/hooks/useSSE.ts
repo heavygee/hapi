@@ -577,15 +577,8 @@ export function useSSE(options: {
                     nextSummary.metadata = toSessionSummaryMetadata(patch.metadata.value)
                     nextSummary.metadataVersion = patch.metadata.version
                 }
-                if (
-                    patch.attachedJob !== undefined
-                    && isNewerVersionedPatch(
-                        patch.attachedJob.version,
-                        current.attachedJobUpdatedAt ?? 0
-                    )
-                ) {
-                    nextSummary.attachedJob = patch.attachedJob.value
-                    nextSummary.attachedJobUpdatedAt = patch.attachedJob.version
+                if (patch.attachedJob !== undefined) {
+                    nextSummary.attachedJob = patch.attachedJob ?? null
                 }
 
                 patched = true

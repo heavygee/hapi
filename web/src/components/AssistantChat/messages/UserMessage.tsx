@@ -4,10 +4,38 @@ import type { HappyChatMessageMetadata } from '@/lib/assistant-runtime'
 import { MessageStatusIndicator } from '@/components/AssistantChat/messages/MessageStatusIndicator'
 import { MessageAttachments } from '@/components/AssistantChat/messages/MessageAttachments'
 import { UserBubbleContent, getUserBubbleClassName, shouldShowMessageStatus } from '@/components/AssistantChat/messages/user-bubble'
+import { PeerSenderChip } from '@/components/AssistantChat/messages/PeerSenderChip'
 import { CliOutputBlock } from '@/components/CliOutputBlock'
 import { getConversationMessageAnchorId } from '@/chat/outline'
 import { MessageActions } from '@/components/AssistantChat/messages/MessageActions'
 import { useTranslation } from '@/lib/use-translation'
+
+type AuiMessageSnapshot = {
+    message: {
+        role: string
+        metadata: { custom?: Partial<HappyChatMessageMetadata> }
+    }
+}
+
+/** Exported for Object.is stability tests (useSyncExternalStore / useAuiState). */
+export function selectIsPeerDelivery(s: AuiMessageSnapshot): boolean {
+    if (s.message.role !== 'user') return false
+    return s.message.metadata.custom?.sentFrom === 'peer'
+}
+
+export function selectPeerSourceId(s: AuiMessageSnapshot): string | null {
+    if (s.message.role !== 'user') return null
+    if (s.message.metadata.custom?.sentFrom !== 'peer') return null
+    const id = s.message.metadata.custom?.peer?.sourceSessionId
+    return typeof id === 'string' && id.trim() ? id.trim() : null
+}
+
+export function selectPeerSourceName(s: AuiMessageSnapshot): string | null {
+    if (s.message.role !== 'user') return null
+    if (s.message.metadata.custom?.sentFrom !== 'peer') return null
+    const name = s.message.metadata.custom?.peer?.sourceName
+    return typeof name === 'string' && name.trim() ? name.trim() : null
+}
 
 export function HappyUserMessage() {
     const ctx = useHappyChatContext()
@@ -34,6 +62,11 @@ export function HappyUserMessage() {
         const custom = s.message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
         return custom?.attachments
     })
+    // Primitives only — object literals from useAuiState break useSyncExternalStore
+    // Object.is caching (assistant-ui store contract).
+    const isPeerDelivery = useAuiState((s) => selectIsPeerDelivery(s))
+    const peerSourceId = useAuiState((s) => selectPeerSourceId(s))
+    const peerSourceName = useAuiState((s) => selectPeerSourceName(s))
     const isCliOutput = useAuiState((s) => {
         const custom = s.message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
         return custom?.kind === 'cli-output'
@@ -104,6 +137,14 @@ export function HappyUserMessage() {
             <div className={getUserBubbleClassName(status)}>
                 <div className="flex items-start gap-2">
                     <div className="min-w-0 flex-1">
+                        {isPeerDelivery ? (
+                            <div className="mb-1.5">
+                                <PeerSenderChip
+                                    sourceSessionId={peerSourceId}
+                                    sourceName={peerSourceName}
+                                />
+                            </div>
+                        ) : null}
                         {hasText ? <UserBubbleContent text={text} /> : null}
                         {hasAttachments ? <MessageAttachments attachments={attachments} /> : null}
                     </div>

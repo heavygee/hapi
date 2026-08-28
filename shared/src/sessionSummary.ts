@@ -1,4 +1,4 @@
-import type { AgentState, AttachedJob, Metadata, Session, TodoItem, WorktreeMetadata } from './schemas'
+import type { AgentState, AttachedJob, ExternalRef, Metadata, Session, TodoItem, WorktreeMetadata } from './schemas'
 import { isKnownFlavor } from './flavors'
 import type { AgentFlavor } from './modes'
 
@@ -40,9 +40,13 @@ export type SessionSummaryMetadata = {
     flavor?: string | null
     worktree?: WorktreeMetadata
     agentSessionId?: string
+    claudeSessionId?: string
     lifecycleState?: string
     /** Loopback MCP URL when session CLI happy server is running (#956). */
     hapiMcpUrl?: string
+    lastModelError?: Metadata['lastModelError']
+    /** Structured contribution links (GitHub PRs, …). tiann/hapi#1160. */
+    externalRefs?: ExternalRef[]
 }
 
 export type SessionSummary = {
@@ -75,9 +79,10 @@ export type SessionSummary = {
      * Primary running session-attached job (tiann/hapi#1404), or null.
      * Independent of agent `active` / thinking — work that outlives the agent.
      */
-    attachedJob: AttachedJob | null
+    /** Present on hub list rows; optional on thin test fixtures. */
+    attachedJob?: AttachedJob | null
     /** Watermark for versioned `attachedJob` SSE patches (dual EventSource race). */
-    attachedJobUpdatedAt: number
+    attachedJobUpdatedAt?: number
     model: string | null
     modelReasoningEffort?: string | null
     effort: string | null
@@ -155,7 +160,7 @@ export function computeTodoProgress(todos: TodoItem[] | undefined): SessionSumma
     }
 }
 
-const AGENT_SESSION_ID_FIELD_BY_FLAVOR = {
+const AGENT_SESSION_ID_FIELD_BY_FLAVOR: Partial<Record<AgentFlavor, keyof Metadata>> = {
     claude: 'claudeSessionId',
     codex: 'codexSessionId',
     gemini: 'geminiSessionId',
@@ -166,12 +171,13 @@ const AGENT_SESSION_ID_FIELD_BY_FLAVOR = {
     kimi: 'kimiSessionId',
     copilot: 'copilotSessionId',
     pi: 'piSessionId'
-} as const satisfies Record<AgentFlavor, keyof Metadata>
+}
 
 function getSummaryAgentSessionId(metadata: Metadata): string | undefined {
     const flavor = metadata.flavor
     if (isKnownFlavor(flavor)) {
         const flavorField = AGENT_SESSION_ID_FIELD_BY_FLAVOR[flavor]
+        if (!flavorField) return undefined
         const flavorSessionId = metadata[flavorField]
         return typeof flavorSessionId === 'string' && flavorSessionId.trim()
             ? flavorSessionId.trim()
@@ -203,8 +209,11 @@ export function toSessionSummaryMetadata(metadata: Metadata | null | undefined):
         flavor: metadata.flavor ?? null,
         worktree: metadata.worktree,
         agentSessionId: getSummaryAgentSessionId(metadata),
+        claudeSessionId: metadata.claudeSessionId ?? undefined,
         lifecycleState: metadata.lifecycleState,
-        hapiMcpUrl: metadata.hapiMcpUrl ?? undefined
+        hapiMcpUrl: metadata.hapiMcpUrl ?? undefined,
+        lastModelError: metadata.lastModelError,
+        externalRefs: metadata.externalRefs,
     }
 }
 

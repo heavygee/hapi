@@ -212,7 +212,9 @@ export class RpcGateway {
         // Hub session id to reuse for this spawn. When set, the runner boots the
         // CLI with `--hapi-session-id`, so the child reuses the existing hub
         // session row (same id) instead of minting a new one.
-        forkSession?: boolean
+        forkSession?: boolean,
+        /** One-shot nonce for runner to redeem resume peer capability (pass 2h). */
+        resumePeerMintNonce?: string
     ): Promise<
         | { type: 'success'; sessionId: string }
         | {
@@ -245,6 +247,7 @@ export class RpcGateway {
                     copilotAgentMode,
                     startingMode,
                     forkSession: forkSession === true,
+                    resumePeerMintNonce,
                 }
             )
             if (result && typeof result === 'object') {

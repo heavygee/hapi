@@ -86,6 +86,10 @@ import { ingestNotifySummaryFromMessage } from './workGraphNotifyIngest'
 import { armResumePeerMint, clearResumePeerMint } from '../web/pendingResumePeerMint'
 import { buildProvenanceDiagnostics } from './provenanceDiagnostics'
 import type { ProvenanceDiagnostics } from '@hapi/protocol/provenanceDiagnostics'
+import {
+    defaultProvenanceMessageScanOptions,
+    type ProvenanceMessageScanOptions,
+} from '@hapi/protocol/provenanceMessageAudit'
 
 type PiResumeAttempt = NonNullable<NonNullable<Session['metadata']>['piResumeAttempt']>
 type PtyResumeAttempt = NonNullable<NonNullable<Session['metadata']>['ptyResumeAttempt']>
@@ -487,12 +491,24 @@ export class SyncEngine {
         return this.machineCache.getOnlineMachinesByNamespace(namespace)
     }
 
-    getProvenanceDiagnostics(namespace: string): ProvenanceDiagnostics {
+    getProvenanceDiagnostics(
+        namespace: string,
+        options?: { messageScan?: ProvenanceMessageScanOptions | false }
+    ): ProvenanceDiagnostics {
+        const scanOptions = options?.messageScan === false
+            ? null
+            : (options?.messageScan ?? defaultProvenanceMessageScanOptions())
+        const messageAudit = scanOptions
+            ? this.store.scanUnverifiedPeerMessages(namespace, scanOptions)
+            : null
+
         return buildProvenanceDiagnostics({
             sessions: this.getSessionsByNamespace(namespace),
             machines: this.getOnlineMachinesByNamespace(namespace),
             getStoredMachine: (machineId) => this.store.machines.getMachineByNamespace(machineId, namespace),
             hasLiveRpcHandler: (method) => this.rpcGateway.hasLiveHandler(method),
+            unverifiedPeerMessages: messageAudit?.rows,
+            messageScan: messageAudit?.meta ?? null,
         })
     }
 
@@ -4047,7 +4063,7 @@ export class SyncEngine {
                 const readyResult = await this.waitForSessionReady(spawnResult.sessionId)
                 if (readyResult !== 'ready') {
                     if (resumedStartingMode === 'pty' && readyResult === 'timeout') {
-                        let status: 'stopped' | 'already_gone' | 'still_alive'
+                        let status: 'stopped' | 'already_gone' | 'still_alive' | 'unknown'
                         try {
                             status = await this.rpcGateway.stopRunnerSession(
                                 targetMachine.id,
@@ -4565,7 +4581,7 @@ export class SyncEngine {
             machineId,
             startedAt: Date.now(),
         })
-        let status: 'stopped' | 'already_gone' | 'still_alive'
+        let status: 'stopped' | 'already_gone' | 'still_alive' | 'unknown'
         try {
             status = await this.rpcGateway.stopRunnerSession(machineId, sessionId)
         } catch {
@@ -4599,7 +4615,7 @@ export class SyncEngine {
             startedAt: Date.now(),
             childSessionId: sessionId,
         })
-        let status: 'stopped' | 'already_gone' | 'still_alive'
+        let status: 'stopped' | 'already_gone' | 'still_alive' | 'unknown'
         try {
             status = await this.rpcGateway.stopRunnerSession(machineId, sessionId)
         } catch {
@@ -4777,7 +4793,7 @@ export class SyncEngine {
     private async reconcilePersistedPtyResumeAttempt(session: Session): Promise<boolean> {
         const attempt = session.metadata?.ptyResumeAttempt
         if (!attempt) return true
-        let status: 'stopped' | 'already_gone' | 'still_alive'
+        let status: 'stopped' | 'already_gone' | 'still_alive' | 'unknown'
         try {
             status = await this.rpcGateway.stopRunnerSession(attempt.machineId, session.id)
         } catch {
@@ -4803,7 +4819,7 @@ export class SyncEngine {
         const attempt = session.metadata?.piResumeAttempt
         if (!attempt) return true
         const childSessionId = attempt.childSessionId ?? session.id
-        let status: 'stopped' | 'already_gone' | 'still_alive'
+        let status: 'stopped' | 'already_gone' | 'still_alive' | 'unknown'
         try {
             status = await this.rpcGateway.stopRunnerSession(attempt.machineId, childSessionId)
         } catch {

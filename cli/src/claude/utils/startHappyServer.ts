@@ -155,11 +155,7 @@ function createHapiMcpServer(
         message: z.string().min(1).describe('Required first user message (the remit). Empty spawn is a failed spawn.'),
         name: z.string().trim().min(1).max(SESSION_NAME_MAX_LENGTH).optional().describe('Session display name'),
         agent: z.enum(CREATABLE_AGENT_FLAVORS as unknown as [string, ...string[]]).optional()
-            .describe('Agent flavor override. When omitted, uses hub peerSpawnDefaults then stock claude.'),
-        model: z.string().trim().min(1).optional()
-            .describe('Model override for the resolved agent flavor.'),
-        effort: z.string().trim().min(1).optional()
-            .describe('Effort override (flavor-dependent).'),
+            .describe('Agent flavor. Hub default if omitted. Does not silently clone the parent.'),
         sessionType: z.enum(['simple', 'worktree']).optional()
             .describe('simple or worktree. Default simple (use directory as cwd). worktree creates a new tree from directory.'),
         permissionMode: PermissionModeSchema.optional()
@@ -391,23 +387,10 @@ function createHapiMcpServer(
     }, async (args: { sessionIdPrefix: string; message: string }) => {
         logger.debug('[hapiMCP] ping_peer:', args.sessionIdPrefix);
         try {
-            // Await capability so runner resume does not snapshot null and
-            // silently send unattributed (pass 2c M3). Terminal resume never
-            // receives a mint tag (pass 2e-alt M2) — fall back to unattributed
-            // peer mark rather than permanent auth_failed.
-            const sessionCapability = await client.waitForPeerSessionCapability({ timeoutMs: 5_000 })
-            const result = sessionCapability
-                ? await pingPeer({
-                    sessionIdPrefix: args.sessionIdPrefix,
-                    message: args.message,
-                    // Hub binds provenance to this session via capability-gated CLI route.
-                    authenticatedSourceSessionId: client.sessionId,
-                    sessionCapability,
-                })
-                : await pingPeer({
-                    sessionIdPrefix: args.sessionIdPrefix,
-                    message: args.message,
-                });
+            const result = await pingPeer({
+                sessionIdPrefix: args.sessionIdPrefix,
+                message: args.message,
+            });
             return {
                 content: [
                     {
@@ -445,8 +428,6 @@ function createHapiMcpServer(
         message: string
         name?: string
         agent?: string
-        model?: string
-        effort?: string
         sessionType?: 'simple' | 'worktree'
         permissionMode?: string
     }) => {
@@ -457,8 +438,6 @@ function createHapiMcpServer(
                 message: args.message,
                 name: args.name,
                 agent: args.agent as Parameters<typeof spawnPeer>[0]['agent'],
-                model: args.model,
-                effort: args.effort,
                 sessionType: args.sessionType,
                 permissionMode: args.permissionMode as Parameters<typeof spawnPeer>[0]['permissionMode'],
             });

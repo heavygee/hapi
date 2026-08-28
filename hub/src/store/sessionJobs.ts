@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import type { Database } from 'bun:sqlite'
 import type { AttachedJob, AttachedJobPatch, AttachedJobStatus, AttachedJobUpsert } from '@hapi/protocol'
 
@@ -9,6 +8,9 @@ import type { StoredSessionJob } from './types'
  *
  * Registration-first long-running work that outlives the agent process.
  * Hub is source of truth; list chrome reads the primary `running` job.
+ *
+ * Soup tip: SCHEMA_VERSION stays 23 (tolerate-ahead). Wake columns (#1489)
+ * are ensured via ensureSessionJobWakeColumns — no schema bump required.
  */
 
 type DbJobRow = {
@@ -21,13 +23,31 @@ type DbJobRow = {
     remaining: number | null
     unit: string | null
     detail: string | null
-    run_id: string | null
+    wake_on_terminal: number | null
+    wake_prompt: string | null
+    wake_emitted_run_id: string | null
     heartbeat_at: number
     started_at: number
     updated_at: number
 }
 
-const JOB_COLUMNS = `session_id, job_key, label, status, done, total, remaining, unit, detail, run_id, heartbeat_at, started_at, updated_at`
+const JOB_COLUMNS = `session_id, job_key, label, status, done, total, remaining, unit, detail, wake_on_terminal, wake_prompt, wake_emitted_run_id, heartbeat_at, started_at, updated_at`
+
+/** Defensive ALTERs for soup tips that keep SCHEMA_VERSION behind the live DB. */
+export function ensureSessionJobWakeColumns(db: Database): void {
+    const cols = db.prepare('PRAGMA table_info(session_jobs)').all() as Array<{ name: string }>
+    if (cols.length === 0) return
+    const names = new Set(cols.map((c) => c.name))
+    if (!names.has('wake_on_terminal')) {
+        db.exec('ALTER TABLE session_jobs ADD COLUMN wake_on_terminal INTEGER NOT NULL DEFAULT 0')
+    }
+    if (!names.has('wake_prompt')) {
+        db.exec('ALTER TABLE session_jobs ADD COLUMN wake_prompt TEXT')
+    }
+    if (!names.has('wake_emitted_run_id')) {
+        db.exec('ALTER TABLE session_jobs ADD COLUMN wake_emitted_run_id TEXT')
+    }
+}
 
 function toStored(row: DbJobRow): StoredSessionJob {
     return {
@@ -40,7 +60,9 @@ function toStored(row: DbJobRow): StoredSessionJob {
         remaining: row.remaining ?? undefined,
         unit: row.unit ?? undefined,
         detail: row.detail ?? undefined,
-        runId: row.run_id ?? undefined,
+        wakeOnTerminal: row.wake_on_terminal === 1,
+        wakePrompt: row.wake_prompt ?? undefined,
+        wakeEmittedRunId: row.wake_emitted_run_id ?? undefined,
         heartbeatAt: row.heartbeat_at,
         startedAt: row.started_at,
         updatedAt: row.updated_at
@@ -57,7 +79,8 @@ export function toAttachedJob(job: StoredSessionJob): AttachedJob {
         ...(job.remaining !== undefined ? { remaining: job.remaining } : {}),
         ...(job.unit !== undefined ? { unit: job.unit } : {}),
         ...(job.detail !== undefined ? { detail: job.detail } : {}),
-        ...(job.runId !== undefined ? { runId: job.runId } : {}),
+        ...(job.wakeOnTerminal ? { wakeOnTerminal: true } : {}),
+        ...(job.wakePrompt !== undefined ? { wakePrompt: job.wakePrompt } : {}),
         heartbeatAt: job.heartbeatAt,
         startedAt: job.startedAt,
         updatedAt: job.updatedAt
@@ -119,7 +142,6 @@ export function getPrimaryRunningJobsBySessionIds(
     ).all(...sessionIds) as DbJobRow[]
 
     for (const row of rows) {
-        // First row per session wins — earliest started_at (stable primary).
         if (result.has(row.session_id)) continue
         result.set(row.session_id, toAttachedJob(toStored(row)))
     }
@@ -138,28 +160,25 @@ export function upsertSessionJob(
     now: number = Date.now()
 ): UpsertSessionJobResult {
     const existing = getSessionJob(db, sessionId, jobKey)
-    // Hub clock only — never trust client heartbeatAt (skew / future-stamp stale chrome).
-    const heartbeatAt = now
-    // Every PUT gets a unique run generation when creating or when the client
-    // supplies a new runId. Corrective PUTs without runId preserve the active
-    // generation so an in-flight supervisor keeps fencing heartbeats/terminal.
-    const runId = body.runId ?? existing?.runId ?? randomUUID()
-    // Explicit startedAt wins (late-attach correction). A new supervised runId
-    // without startedAt uses hub now (not the sticky prior generation clock).
-    // Manual PUT without runId still preserves existing.startedAt when omitted.
-    const startsNewSupervisedRun =
-        body.runId !== undefined && body.runId !== existing?.runId
+    const heartbeatAt = body.heartbeatAt ?? now
     const startedAt = body.startedAt !== undefined
         ? body.startedAt
-        : (startsNewSupervisedRun ? now : (existing?.startedAt ?? now))
+        : (existing?.startedAt ?? now)
     const status = body.status ?? 'running'
+    const wakeOnTerminal = body.wakeOnTerminal === true ? 1 : 0
+    const wakePrompt = body.wakePrompt ?? null
+    // New generation (explicit startedAt change or back to running) clears prior claim.
+    const clearWakeClaim =
+        (body.startedAt !== undefined && body.startedAt !== existing?.startedAt)
+        || (status === 'running' && existing !== null && existing.status !== 'running')
 
     try {
         db.prepare(
             `INSERT INTO session_jobs (
                 session_id, job_key, label, status, done, total, remaining, unit, detail,
-                run_id, heartbeat_at, started_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                wake_on_terminal, wake_prompt, wake_emitted_run_id,
+                heartbeat_at, started_at, updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
              ON CONFLICT(session_id, job_key) DO UPDATE SET
                 label = excluded.label,
                 status = excluded.status,
@@ -168,7 +187,12 @@ export function upsertSessionJob(
                 remaining = excluded.remaining,
                 unit = excluded.unit,
                 detail = excluded.detail,
-                run_id = excluded.run_id,
+                wake_on_terminal = excluded.wake_on_terminal,
+                wake_prompt = excluded.wake_prompt,
+                wake_emitted_run_id = CASE
+                    WHEN ? THEN NULL
+                    ELSE session_jobs.wake_emitted_run_id
+                END,
                 heartbeat_at = excluded.heartbeat_at,
                 started_at = excluded.started_at,
                 updated_at = excluded.updated_at`
@@ -182,10 +206,12 @@ export function upsertSessionJob(
             body.remaining ?? null,
             body.unit ?? null,
             body.detail ?? null,
-            runId,
+            wakeOnTerminal,
+            wakePrompt,
             heartbeatAt,
             startedAt,
-            now
+            now,
+            clearWakeClaim ? 1 : 0
         )
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
@@ -202,27 +228,15 @@ export function upsertSessionJob(
     return { outcome: 'upserted', job }
 }
 
-export type PatchSessionJobResult =
-    | { outcome: 'patched'; job: StoredSessionJob }
-    | { outcome: 'not-found' }
-    | { outcome: 'run-mismatch' }
-
 export function patchSessionJob(
     db: Database,
     sessionId: string,
     jobKey: string,
     patch: AttachedJobPatch,
     now: number = Date.now()
-): PatchSessionJobResult {
+): StoredSessionJob | null {
     const existing = getSessionJob(db, sessionId, jobKey)
-    if (!existing) return { outcome: 'not-found' }
-
-    if (
-        patch.expectedRunId !== undefined
-        && existing.runId !== patch.expectedRunId
-    ) {
-        return { outcome: 'run-mismatch' }
-    }
+    if (!existing) return null
 
     const next: StoredSessionJob = {
         ...existing,
@@ -233,17 +247,20 @@ export function patchSessionJob(
         remaining: patch.remaining === null ? undefined : (patch.remaining ?? existing.remaining),
         unit: patch.unit === null ? undefined : (patch.unit ?? existing.unit),
         detail: patch.detail === null ? undefined : (patch.detail ?? existing.detail),
-        heartbeatAt: now,
+        wakeOnTerminal: patch.wakeOnTerminal ?? existing.wakeOnTerminal,
+        wakePrompt: patch.wakePrompt === null
+            ? undefined
+            : (patch.wakePrompt ?? existing.wakePrompt),
+        heartbeatAt: patch.heartbeatAt ?? now,
         updatedAt: now
     }
 
-    // CAS in SQL too so a concurrent PUT cannot lose the race after the JS check.
-    const result = db.prepare(
+    db.prepare(
         `UPDATE session_jobs SET
             label = ?, status = ?, done = ?, total = ?, remaining = ?, unit = ?, detail = ?,
+            wake_on_terminal = ?, wake_prompt = ?,
             heartbeat_at = ?, updated_at = ?
-         WHERE session_id = ? AND job_key = ?
-           AND (? IS NULL OR run_id = ?)`
+         WHERE session_id = ? AND job_key = ?`
     ).run(
         next.label,
         next.status,
@@ -252,103 +269,53 @@ export function patchSessionJob(
         next.remaining ?? null,
         next.unit ?? null,
         next.detail ?? null,
+        next.wakeOnTerminal ? 1 : 0,
+        next.wakePrompt ?? null,
         next.heartbeatAt,
         next.updatedAt,
         sessionId,
-        jobKey,
-        patch.expectedRunId ?? null,
-        patch.expectedRunId ?? null
+        jobKey
     )
 
-    if (result.changes === 0) {
-        // Row vanished or run_id raced; distinguish for callers.
-        const still = getSessionJob(db, sessionId, jobKey)
-        if (!still) return { outcome: 'not-found' }
-        if (
-            patch.expectedRunId !== undefined
-            && still.runId !== patch.expectedRunId
-        ) {
-            return { outcome: 'run-mismatch' }
-        }
-        return { outcome: 'not-found' }
-    }
-
-    const job = getSessionJob(db, sessionId, jobKey)
-    if (!job) return { outcome: 'not-found' }
-    return { outcome: 'patched', job }
+    return getSessionJob(db, sessionId, jobKey)
 }
 
-export type DeleteSessionJobResult =
-    | { outcome: 'deleted' }
-    | { outcome: 'not-found' }
-    | { outcome: 'run-mismatch' }
-
-export function deleteSessionJob(
+/**
+ * Atomically claim a one-shot terminal wake (#1489).
+ * Claim id is startedAt-based on this soup tip (no run_id fence yet).
+ */
+export function claimSessionJobTerminalWake(
     db: Database,
     sessionId: string,
-    jobKey: string,
-    expectedRunId?: string
-): DeleteSessionJobResult {
+    jobKey: string
+): StoredSessionJob | null {
     const existing = getSessionJob(db, sessionId, jobKey)
-    if (!existing) return { outcome: 'not-found' }
-    if (
-        expectedRunId !== undefined
-        && existing.runId !== expectedRunId
-    ) {
-        return { outcome: 'run-mismatch' }
-    }
+    if (!existing) return null
+    if (!existing.wakeOnTerminal) return null
+    if (existing.status !== 'completed' && existing.status !== 'failed') return null
+    const claimId = `norun:${existing.startedAt}`
+    if (existing.wakeEmittedRunId === claimId) return null
 
     const result = db.prepare(
-        `DELETE FROM session_jobs
+        `UPDATE session_jobs SET wake_emitted_run_id = ?
          WHERE session_id = ? AND job_key = ?
-           AND (? IS NULL OR run_id = ?)`
-    ).run(
-        sessionId,
-        jobKey,
-        expectedRunId ?? null,
-        expectedRunId ?? null
-    )
+           AND wake_on_terminal = 1
+           AND status IN ('completed', 'failed')
+           AND (
+             wake_emitted_run_id IS NULL
+             OR wake_emitted_run_id != ?
+           )`
+    ).run(claimId, sessionId, jobKey, claimId)
 
-    if (result.changes === 0) {
-        const still = getSessionJob(db, sessionId, jobKey)
-        if (!still) return { outcome: 'not-found' }
-        return { outcome: 'run-mismatch' }
-    }
-    return { outcome: 'deleted' }
+    if (result.changes === 0) return null
+    return getSessionJob(db, sessionId, jobKey)
 }
 
-export type SessionJobKeyRedirect = {
-    fromKey: string
-    toKey: string
-}
-
-export type TransferSessionJobsResult = {
-    moved: number
-    collided: number
-    /** Source keys remapped on the target so two live supervisors stay isolated. */
-    keyRedirects: SessionJobKeyRedirect[]
-}
-
-const JOB_KEY_MAX = 128
-
-/** Allocate `base.<fromShort>` (then `.N`) that fits JOB_KEY_MAX and is free on target. */
-export function allocateRemappedJobKey(
-    db: Database,
-    toSessionId: string,
-    fromSessionId: string,
-    fromKey: string
-): string {
-    const short = fromSessionId.replace(/-/g, '').slice(0, 8) || 'src'
-    const suffix0 = `.${short}`
-    const base = fromKey.slice(0, Math.max(1, JOB_KEY_MAX - suffix0.length))
-    let candidate = `${base}${suffix0}`
-    let n = 0
-    while (getSessionJob(db, toSessionId, candidate)) {
-        n += 1
-        const suffix = `.${short}.${n}`
-        candidate = `${fromKey.slice(0, Math.max(1, JOB_KEY_MAX - suffix.length))}${suffix}`
-    }
-    return candidate
+export function deleteSessionJob(db: Database, sessionId: string, jobKey: string): boolean {
+    const result = db.prepare(
+        'DELETE FROM session_jobs WHERE session_id = ? AND job_key = ?'
+    ).run(sessionId, jobKey)
+    return result.changes > 0
 }
 
 /**
@@ -359,51 +326,16 @@ export function transferSessionJobs(
     db: Database,
     fromSessionId: string,
     toSessionId: string
-): TransferSessionJobsResult {
-    if (fromSessionId === toSessionId) {
-        return { moved: 0, collided: 0, keyRedirects: [] }
-    }
+): { moved: number; collided: number } {
     const rows = listSessionJobs(db, fromSessionId)
     let moved = 0
     let collided = 0
-    const keyRedirects: SessionJobKeyRedirect[] = []
 
     for (const job of rows) {
         const existing = getSessionJob(db, toSessionId, job.key)
         if (existing) {
-            const sourceRunning = job.status === 'running'
-            const targetRunning = existing.status === 'running'
-            // Two live supervisors still PATCH the pre-merge key via session
-            // redirect. Collapsing them would let the loser terminal-mark the
-            // winner — keep both under distinct keys and record a key remap.
-            if (sourceRunning && targetRunning) {
-                const toKey = allocateRemappedJobKey(db, toSessionId, fromSessionId, job.key)
-                db.prepare(
-                    `UPDATE session_jobs SET session_id = ?, job_key = ?
-                     WHERE session_id = ? AND job_key = ?`
-                ).run(toSessionId, toKey, fromSessionId, job.key)
-                keyRedirects.push({ fromKey: job.key, toKey })
-                moved += 1
-                collided += 1
-                continue
-            }
-            // Prefer a live source over a terminal target. When both are
-            // terminal (incl. completed vs failed), prefer the newer updatedAt.
-            const sourceWins =
-                (sourceRunning && !targetRunning)
-                || (!sourceRunning && !targetRunning && job.updatedAt > existing.updatedAt)
-            if (sourceWins) {
-                db.prepare('DELETE FROM session_jobs WHERE session_id = ? AND job_key = ?')
-                    .run(toSessionId, job.key)
-                db.prepare(
-                    `UPDATE session_jobs SET session_id = ?
-                     WHERE session_id = ? AND job_key = ?`
-                ).run(toSessionId, fromSessionId, job.key)
-                moved += 1
-            } else {
-                db.prepare('DELETE FROM session_jobs WHERE session_id = ? AND job_key = ?')
-                    .run(fromSessionId, job.key)
-            }
+            db.prepare('DELETE FROM session_jobs WHERE session_id = ? AND job_key = ?')
+                .run(fromSessionId, job.key)
             collided += 1
             continue
         }
@@ -414,5 +346,5 @@ export function transferSessionJobs(
         moved += 1
     }
 
-    return { moved, collided, keyRedirects }
+    return { moved, collided }
 }

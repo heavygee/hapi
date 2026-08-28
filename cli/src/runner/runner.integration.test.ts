@@ -250,7 +250,7 @@ describe.skipIf(!await isServerHealthy())('Runner Integration Tests', { timeout:
 
       // Stop serially — parallel /stop-session under load races the control
       // server and flakes with intermittent HTTP failures on busy hosts.
-      const stopResults: Array<'stopped' | 'already_gone' | 'still_alive'> = []
+      const stopResults: Array<'stopped' | 'already_gone' | 'still_alive' | 'unknown'> = []
       for (const sessionId of sessionIds) {
         stopResults.push(await stopRunnerSession(sessionId))
       }

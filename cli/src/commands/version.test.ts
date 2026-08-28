@@ -3,7 +3,7 @@ import { fetchHubTargetGeneration } from './version'
 
 describe('fetchHubTargetGeneration', () => {
     it('returns hub targetGeneration after JWT exchange', async () => {
-        const fetchImpl: typeof fetch = async (input, init) => {
+        const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
             const url = String(input)
             if (url.endsWith('/api/auth')) {
                 expect(init?.method).toBe('POST')
@@ -16,7 +16,7 @@ describe('fetchHubTargetGeneration', () => {
                 }), { status: 200 })
             }
             return new Response('no', { status: 404 })
-        }
+        }) as unknown as typeof fetch
         const gen = await fetchHubTargetGeneration({
             apiUrl: 'http://hub.example',
             accessToken: 'cli-token',
@@ -29,7 +29,7 @@ describe('fetchHubTargetGeneration', () => {
         const gen = await fetchHubTargetGeneration({
             apiUrl: 'http://hub.example',
             accessToken: '',
-            fetchImpl: async () => new Response('no', { status: 500 }),
+            fetchImpl: (async () => new Response('no', { status: 500 })) as unknown as typeof fetch,
         })
         expect(gen).toBeNull()
     })
