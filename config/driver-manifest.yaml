@@ -705,12 +705,11 @@ layers:
   - branch: feat/composer-expand-enter-newline
 
   # tiann/hapi#1404 — session-attached long-running jobs (outlive agent; list chrome).
-  # SCHEMA: soup remumber V22→V23 (#1115 pin dual-columns now on upstream at V22).
-  # Upstream feat tip keeps jobs at V21→V22 for clean PR vs upstream/main.
-  # Worktree: ~/coding/hapi/worktrees/session-jobs-soup-refresh @ driver/session-attached-jobs
-  # Soup tip: e2cb2bd09 — cherry-pick e72c1e940 + 0190bb2da + 5389fc5cb from feat/session-attached-jobs (#1424)
-  # Feat tip: 5389fc5cb — PR #1424; cherry-pick onto live soup — NEVER hard-reset
-  # Do NOT open upstream PR until operator dogfood OK (incl. Lidarr self-attach).
+  # Upstream PR: #1424 (feat/session-attached-jobs @ 67d3a037d). Wake stays #1489 / layer below.
+  # Worktree: ~/coding/hapi/worktrees/session-jobs-rethin @ driver/session-attached-jobs
+  # Soup tip: d8aa34e96 — re-thinned 2026-08-28: one commit porting #1424 delta onto
+  # driver/integration (runId fence, formatJobLine, reconcileAttachedJobs). Replaces stale
+  # e2cb2bd09 (57 commits from Aug merge-base). Drop when upstream #1424 merges.
   - branch: driver/session-attached-jobs
 
   # Thin delta on live soup tip — session-jobs steer + MCP instanceof + cursor notify overlay.
