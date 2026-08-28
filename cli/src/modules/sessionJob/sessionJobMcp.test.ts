@@ -91,6 +91,39 @@ describe('sessionJobMcp', () => {
         expect(result.text).toMatch(/sleep stub/)
     })
 
+    it('rejects list with extra job fields', async () => {
+        const result = await handleSessionJobTool(
+            { action: 'list', jobKey: 'beets' },
+            'sid-1'
+        )
+        expect(result.isError).toBe(true)
+        expect(result.text).toMatch(/does not accept job fields/)
+    })
+
+    it('rejects clear with mutation fields', async () => {
+        const result = await handleSessionJobTool(
+            { action: 'clear', jobKey: 'beets', status: 'completed' },
+            'sid-1'
+        )
+        expect(result.isError).toBe(true)
+        expect(result.text).toMatch(/only accepts jobKey and expectedRunId/)
+    })
+
+    it('treats clear on missing job as idempotent (no job run recipe)', async () => {
+        const { clearSessionJob } = await import('./sessionJob')
+        const { SessionJobError } = await import('./sessionJob')
+        vi.mocked(clearSessionJob).mockRejectedValueOnce(
+            new SessionJobError('not_found', 'job not found')
+        )
+        const result = await handleSessionJobTool(
+            { action: 'clear', jobKey: 'beets' },
+            'sid-1'
+        )
+        expect(result.isError).toBe(false)
+        expect(result.text).toMatch(/already absent/)
+        expect(result.text).not.toMatch(/hapi job run/)
+    })
+
     it('steers when not_found loses instanceof across MCP bundle boundaries', async () => {
         const { updateSessionJob } = await import('./sessionJob')
         vi.mocked(updateSessionJob).mockRejectedValueOnce(
@@ -105,5 +138,57 @@ describe('sessionJobMcp', () => {
         )
         expect(result.isError).toBe(true)
         expect(result.text).toMatch(/hapi job run/)
+    })
+
+    it('forwards null remaining so done/total can take over after a leftover meter', async () => {
+        const { updateSessionJob } = await import('./sessionJob')
+        vi.mocked(updateSessionJob).mockClear()
+        const result = await handleSessionJobTool(
+            {
+                action: 'update',
+                jobKey: 'beets',
+                remaining: null,
+                done: 3,
+                total: 10
+            },
+            'sid-1'
+        )
+        expect(result.isError).toBe(false)
+        expect(updateSessionJob).toHaveBeenCalledWith(
+            expect.objectContaining({
+                body: expect.objectContaining({
+                    remaining: null,
+                    done: 3,
+                    total: 10
+                })
+            })
+        )
+    })
+
+    it('sanitizes ANSI/OSC from MCP update text', async () => {
+        const { updateSessionJob } = await import('./sessionJob')
+        vi.mocked(updateSessionJob).mockResolvedValueOnce({
+            sessionId: 'sid-1',
+            job: {
+                key: 'beets',
+                label: '\u001b[31mimport\u001b[0m',
+                status: 'running',
+                detail: 'phase\u001b]52;c;QUFB\u0007done',
+                remaining: 11,
+                heartbeatAt: 2,
+                startedAt: 1,
+                updatedAt: 2
+            }
+        })
+        const result = await handleSessionJobTool(
+            { action: 'update', jobKey: 'beets', remaining: 11 },
+            'sid-1'
+        )
+        expect(result.isError).toBe(false)
+        expect(result.text).not.toMatch(/\u001b/)
+        expect(result.text).not.toMatch(/[\u0000-\u001f\u007f]/)
+        expect(result.text).toContain('import')
+        expect(result.text).toContain('phase')
+        expect(result.text).not.toMatch(/QUFB/)
     })
 })

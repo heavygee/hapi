@@ -8,7 +8,7 @@
  */
 
 import { z } from 'zod'
-import type { AttachedJob, AttachedJobPatch } from '@hapi/protocol'
+import type { AttachedJobPatch } from '@hapi/protocol'
 import {
     SessionJobError,
     SESSION_JOB_RUN_RECIPE,
@@ -18,6 +18,7 @@ import {
     listSessionJobs,
     updateSessionJob
 } from './sessionJob'
+import { formatJobLine } from './formatJobLine'
 
 export const SESSION_JOB_TOOL_NAME = 'session_job'
 
@@ -62,11 +63,24 @@ export const sessionJobInputSchema: z.ZodTypeAny = z.object({
     status: z.enum(['running', 'completed', 'failed']).optional().describe(
         'Job status on update (completed|failed to finish).'
     ),
-    done: z.number().nonnegative().optional().describe('Units completed (pair with total when known).'),
-    total: z.number().positive().optional().describe('Total units when both ends of a fraction exist.'),
-    remaining: z.number().nonnegative().optional().describe('Units left — prefer when operator cares about leftover.'),
-    unit: z.string().trim().min(1).max(64).optional().describe('Unit label (tracks, folders, files, …).'),
-    detail: z.string().max(500).optional().describe('Stage / current item text (not an ETA).'),
+    done: z.number().nonnegative().nullable().optional().describe(
+        'Units completed (pair with total). Pass null to clear a stale done count.'
+    ),
+    total: z.number().positive().nullable().optional().describe(
+        'Total units when both ends of a fraction exist. Pass null to clear.'
+    ),
+    remaining: z.number().nonnegative().nullable().optional().describe(
+        'Units left. Pass null to clear so done/total can take over (web prefers remaining).'
+    ),
+    unit: z.string().trim().min(1).max(64).nullable().optional().describe(
+        'Unit label (tracks, folders, files, …). Pass null to clear.'
+    ),
+    detail: z.string().max(500).nullable().optional().describe(
+        'Stage / current item text (not an ETA). Pass null to clear.'
+    ),
+    expectedRunId: z.string().min(1).max(64).optional().describe(
+        'Run generation fence for update/clear. Required when a manual wrapper stamped runId on set.'
+    ),
     startedAt: z.number().optional().describe(
         'Not used over MCP (set is refused). Correct clocks via CLI job set --started-at.'
     )
@@ -77,23 +91,40 @@ export type SessionJobToolArgs = {
     jobKey?: string
     label?: string
     status?: 'running' | 'completed' | 'failed'
-    done?: number
-    total?: number
-    remaining?: number
-    unit?: string
-    detail?: string
+    done?: number | null
+    total?: number | null
+    remaining?: number | null
+    unit?: string | null
+    detail?: string | null
+    expectedRunId?: string
     startedAt?: number
 }
 
-function formatJobLine(job: AttachedJob): string {
-    const parts = [`${job.key}`, job.label, job.status]
-    if (job.remaining !== undefined) {
-        parts.push(`${job.remaining}${job.unit ? ` ${job.unit}` : ''} left`)
-    } else if (job.done !== undefined && job.total !== undefined) {
-        parts.push(`${job.done}/${job.total}${job.unit ? ` ${job.unit}` : ''}`)
-    }
-    if (job.detail) parts.push(job.detail)
-    return parts.join(' · ')
+function sessionJobMcpMutationFieldsUsed(args: SessionJobToolArgs): boolean {
+    return [
+        args.label,
+        args.status,
+        args.done,
+        args.total,
+        args.remaining,
+        args.unit,
+        args.detail
+    ].some((value) => value !== undefined)
+}
+
+function sessionJobMcpListExtraFields(args: SessionJobToolArgs): boolean {
+    return [
+        args.jobKey,
+        args.label,
+        args.status,
+        args.done,
+        args.total,
+        args.remaining,
+        args.unit,
+        args.detail,
+        args.expectedRunId,
+        args.startedAt
+    ].some((value) => value !== undefined)
 }
 
 export async function handleSessionJobTool(
@@ -113,6 +144,10 @@ export async function handleSessionJobTool(
     // Hard footgun close: MCP must not create orphan meters (set + idle agent).
     if (args.action === 'set') {
         return { text: SESSION_JOB_SET_REFUSED_TEXT, isError: true }
+    }
+
+    if (args.action === 'list' && sessionJobMcpListExtraFields(args)) {
+        return { text: 'action=list does not accept job fields', isError: true }
     }
 
     try {
@@ -141,7 +176,19 @@ export async function handleSessionJobTool(
         }
 
         if (args.action === 'clear') {
-            const result = await clearSessionJob({ sessionIdPrefix, jobKey })
+            if (sessionJobMcpMutationFieldsUsed(args)) {
+                return {
+                    text: 'action=clear only accepts jobKey and expectedRunId',
+                    isError: true
+                }
+            }
+            const result = await clearSessionJob({
+                sessionIdPrefix,
+                jobKey,
+                ...(args.expectedRunId !== undefined
+                    ? { expectedRunId: args.expectedRunId }
+                    : {})
+            })
             return { text: `cleared ${jobKey} on ${result.sessionId}`, isError: false }
         }
 
@@ -153,7 +200,10 @@ export async function handleSessionJobTool(
             ...(args.total !== undefined ? { total: args.total } : {}),
             ...(args.remaining !== undefined ? { remaining: args.remaining } : {}),
             ...(args.unit !== undefined ? { unit: args.unit } : {}),
-            ...(args.detail !== undefined ? { detail: args.detail } : {})
+            ...(args.detail !== undefined ? { detail: args.detail } : {}),
+            ...(args.expectedRunId !== undefined
+                ? { expectedRunId: args.expectedRunId }
+                : {})
         }
         // Empty body is a heartbeat-only update; hub stamps heartbeatAt.
         const result = await updateSessionJob({ sessionIdPrefix, jobKey, body })
@@ -163,9 +213,11 @@ export async function handleSessionJobTool(
         }
     } catch (error) {
         if (isSessionJobNotFoundError(error)) {
-            const action = args.action === 'clear' ? 'clear' : 'update'
+            if (args.action === 'clear') {
+                return { text: 'job is already absent; nothing to clear', isError: false }
+            }
             return {
-                text: `session_job failed: ${formatSessionJobNotFoundHint(action)}`,
+                text: `session_job failed: ${formatSessionJobNotFoundHint('update')}`,
                 isError: true
             }
         }

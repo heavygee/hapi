@@ -11,8 +11,11 @@ import {
     setSessionJob,
     updateSessionJob
 } from '@/modules/sessionJob/sessionJob'
+import { formatJobLine } from '@/modules/sessionJob/formatJobLine'
 import { runSessionJob } from '@/modules/sessionJob/runSessionJob'
 import type { CommandDefinition } from './types'
+
+export { formatJobLine, terminalText } from '@/modules/sessionJob/formatJobLine'
 
 export type ParsedJobArgs = {
     help: boolean
@@ -21,15 +24,15 @@ export type ParsedJobArgs = {
     jobKey?: string
     label?: string
     status?: 'running' | 'completed' | 'failed'
-    done?: number
-    total?: number
-    remaining?: number
-    unit?: string
-    detail?: string
+    done?: number | null
+    total?: number | null
+    remaining?: number | null
+    unit?: string | null
+    detail?: string | null
     startedAt?: number
     heartbeatSec?: number
-    wakeOnTerminal?: boolean
-    wakePrompt?: string
+    runId?: string
+    expectedRunId?: string
     command?: string[]
 }
 
@@ -48,31 +51,34 @@ ${chalk.bold('Agent contract:')}
   Never invent a fake percent.
 
 ${chalk.bold('Usage:')}
-  hapi job run <session> <job-key> --label <text> [--wake-on-terminal] [--wake-prompt <text>] [--heartbeat-sec 300] [progress flags] -- <cmd> [args...]
-  hapi job set <session> <job-key> --label <text> [--wake-on-terminal] [--wake-prompt <text>] [--started-at MS] [--remaining N] [--done N --total N] [--unit tracks] [--detail ...]
-  hapi job update <session> <job-key> [--remaining N] [--done N] [--total N] [--status running|completed|failed] [--wake-on-terminal] [--wake-prompt <text>] [--detail ...]
-  hapi job clear <session> <job-key>
+  hapi job run <session> <job-key> --label <text> [--heartbeat-sec 300] [progress flags] -- <cmd> [args...]
+  hapi job set <session> <job-key> --label <text> [--started-at MS] [--run-id UUID] [--remaining N] [--done N --total N] [--unit tracks] [--detail ...]
+  hapi job update <session> <job-key> [--expected-run-id UUID] [--remaining N] [--done N] [--total N] [--status running|completed|failed] [--detail ...]
+                       [--clear-remaining|--clear-done|--clear-total|--clear-unit|--clear-detail]
+  hapi job clear <session> <job-key> [--expected-run-id UUID]
   hapi job list <session>
-
-${chalk.bold('Wake on terminal (tiann/hapi#1489, default off):')}
-  --wake-on-terminal   When the job hits completed/failed, hub resumes the owning
-                       session and posts a prompt so an idle agent can continue.
-  --wake-prompt TEXT   Optional prescription appended to the wake message.
 
 ${chalk.bold('Progress UI:')}
   remaining           → "N units left · 2h"
   done + total        → "P% · done/total · 2h"
   label/detail only   → "running · 2h" + indeterminate bar
   elapsed always from startedAt (wall clock) — never an ETA / time-remaining field
+  --clear-remaining   → drop leftover meter so done/total can take over (PATCH null)
 
 ${chalk.bold('startedAt / elapsed:')}
   Prefer ${chalk.bold('update')} for heartbeats/progress so the clock is never wiped.
   PATCH rejects startedAt. PUT/set without --started-at keeps the existing clock.
   Late attach or wrong clock: ${chalk.bold('set --started-at <epoch-ms>')} (explicit PUT),
   or clear then set with --started-at (works on older hubs that ignored PUT corrections).
+  Manual babysitter wrappers: mint one UUID per run (${chalk.bold('set --run-id <uuid>')}),
+  then pass the same value on every heartbeat (${chalk.bold('update --expected-run-id <uuid>')})
+  and on clear (${chalk.bold('clear --expected-run-id <uuid>')}) so a key-reuse cannot
+  steal the older wrapper's PATCHes or DELETE the newer run.
 
 ${chalk.bold('Notes:')}
-  Hub-persisted. Prefer "$HAPI_SESSION_ID" for this chat.
+  Hub-persisted. Prefer "$HAPI_SESSION_ID" when it matches the operator chat row
+  (/sessions/<id> in the web URL). Remote Cursor runner may export a worker-row id —
+  pass that URL uuid explicitly (see docs/guide/session-jobs.md).
   Needs a hub/CLI that includes the job subcommand (soup / feat build — not every npm release).
   Job key: 1-128 chars, alnum / . _ -
   Session lookup prefers exact id; prefix scan is the 500 most-recently-updated sessions.
@@ -191,19 +197,48 @@ export function parseJobArgs(args: string[]): ParsedJobArgs {
             result.startedAt = parseOptionalNumber('--started-at', arg.slice('--started-at='.length))
             continue
         }
-        if (arg === '--wake-on-terminal') {
-            result.wakeOnTerminal = true
+        if (arg === '--clear-remaining') {
+            result.remaining = null
             continue
         }
-        if (arg === '--wake-prompt') {
-            result.wakePrompt = flagArgs[++i]
-            if (result.wakePrompt === undefined) {
-                throw new SessionJobError('bad_args', '--wake-prompt requires a value')
+        if (arg === '--clear-done') {
+            result.done = null
+            continue
+        }
+        if (arg === '--clear-total') {
+            result.total = null
+            continue
+        }
+        if (arg === '--clear-unit') {
+            result.unit = null
+            continue
+        }
+        if (arg === '--clear-detail') {
+            result.detail = null
+            continue
+        }
+        if (arg === '--run-id') {
+            result.runId = flagArgs[++i]
+            if (!result.runId) throw new SessionJobError('bad_args', '--run-id requires a value')
+            continue
+        }
+        if (arg.startsWith('--run-id=')) {
+            result.runId = arg.slice('--run-id='.length)
+            if (!result.runId) throw new SessionJobError('bad_args', '--run-id requires a value')
+            continue
+        }
+        if (arg === '--expected-run-id') {
+            result.expectedRunId = flagArgs[++i]
+            if (!result.expectedRunId) {
+                throw new SessionJobError('bad_args', '--expected-run-id requires a value')
             }
             continue
         }
-        if (arg.startsWith('--wake-prompt=')) {
-            result.wakePrompt = arg.slice('--wake-prompt='.length)
+        if (arg.startsWith('--expected-run-id=')) {
+            result.expectedRunId = arg.slice('--expected-run-id='.length)
+            if (!result.expectedRunId) {
+                throw new SessionJobError('bad_args', '--expected-run-id requires a value')
+            }
             continue
         }
         if (arg.startsWith('-')) {
@@ -233,10 +268,71 @@ export function parseJobArgs(args: string[]): ParsedJobArgs {
         throw new SessionJobError('bad_args', `unexpected arg: ${arg}`)
     }
 
+    if (result.startedAt !== undefined && result.action !== undefined && result.action !== 'set') {
+        throw new SessionJobError('bad_args', '--started-at is only valid with job set')
+    }
+
+    if (
+        result.heartbeatSec !== undefined
+        && result.action !== undefined
+        && result.action !== 'run'
+    ) {
+        throw new SessionJobError('bad_args', '--heartbeat-sec is only valid with job run')
+    }
+
+    const clearUsed =
+        result.done === null
+        || result.total === null
+        || result.remaining === null
+        || result.unit === null
+        || result.detail === null
+    if (clearUsed && result.action !== undefined && result.action !== 'update') {
+        throw new SessionJobError('bad_args', '--clear-* flags are only valid with job update')
+    }
+    if (result.runId !== undefined && result.action !== undefined && result.action !== 'set') {
+        throw new SessionJobError('bad_args', '--run-id is only valid with job set')
+    }
+    if (
+        result.expectedRunId !== undefined
+        && result.action !== undefined
+        && result.action !== 'update'
+        && result.action !== 'clear'
+    ) {
+        throw new SessionJobError('bad_args', '--expected-run-id is only valid with job update or clear')
+    }
+
+    const mutationFieldsUsed = [
+        result.label,
+        result.status,
+        result.done,
+        result.total,
+        result.remaining,
+        result.unit,
+        result.detail
+    ].some((value) => value !== undefined)
+
+    if (result.action === 'list' && mutationFieldsUsed) {
+        throw new SessionJobError('bad_args', 'job list does not accept mutation flags')
+    }
+    if (result.action === 'clear' && mutationFieldsUsed) {
+        throw new SessionJobError('bad_args', 'job clear only accepts --expected-run-id')
+    }
+    if (result.action === 'run' && result.status !== undefined) {
+        throw new SessionJobError('bad_args', '--status is not valid with job run')
+    }
+
+    if (
+        result.command !== undefined
+        && result.action !== undefined
+        && result.action !== 'run'
+    ) {
+        throw new SessionJobError('bad_args', '-- <cmd> is only valid with job run')
+    }
+
     return result
 }
 
-function formatJobLine(job: {
+function formatCliJobLine(job: {
     key: string
     label: string
     status: string
@@ -245,33 +341,11 @@ function formatJobLine(job: {
     remaining?: number
     unit?: string
     detail?: string
+    runId?: string
     heartbeatAt: number
     startedAt: number
 }): string {
-    const parts = [`${job.key}`, job.label, job.status]
-    if (job.remaining !== undefined) {
-        parts.push(`${job.remaining}${job.unit ? ` ${job.unit}` : ''} left`)
-    } else if (job.done !== undefined && job.total !== undefined) {
-        parts.push(`${job.done}/${job.total}${job.unit ? ` ${job.unit}` : ''}`)
-    }
-    const elapsedSec = Math.max(0, Math.round((Date.now() - job.startedAt) / 1000))
-    if (elapsedSec < 60) {
-        parts.push(`elapsed ${elapsedSec}s`)
-    } else if (elapsedSec < 3600) {
-        parts.push(`elapsed ${Math.floor(elapsedSec / 60)}m`)
-    } else if (elapsedSec < 86400) {
-        const h = Math.floor(elapsedSec / 3600)
-        const m = Math.floor((elapsedSec % 3600) / 60)
-        parts.push(m > 0 ? `elapsed ${h}h ${m}m` : `elapsed ${h}h`)
-    } else {
-        const d = Math.floor(elapsedSec / 86400)
-        const h = Math.floor((elapsedSec % 86400) / 3600)
-        parts.push(h > 0 ? `elapsed ${d}d ${h}h` : `elapsed ${d}d`)
-    }
-    if (job.detail) parts.push(job.detail)
-    const ageSec = Math.max(0, Math.round((Date.now() - job.heartbeatAt) / 1000))
-    parts.push(`heartbeat ${ageSec}s ago`)
-    return parts.join(' · ')
+    return formatJobLine(job, { includeTiming: true })
 }
 
 export async function handleJobCommand(args: string[]): Promise<void> {
@@ -300,7 +374,7 @@ export async function handleJobCommand(args: string[]): Promise<void> {
         }
         for (const job of result.jobs) {
             const mark = result.primary?.key === job.key ? '*' : ' '
-            console.log(`${mark} ${formatJobLine(job)}`)
+            console.log(`${mark} ${formatCliJobLine(job)}`)
         }
         return
     }
@@ -309,10 +383,17 @@ export async function handleJobCommand(args: string[]): Promise<void> {
         throw new SessionJobError('bad_args', 'missing job key')
     }
 
+    if (parsed.startedAt !== undefined && parsed.action !== 'set') {
+        throw new SessionJobError('bad_args', '--started-at is only valid with job set')
+    }
+
     if (parsed.action === 'clear') {
         const result = await clearSessionJob({
             sessionIdPrefix: parsed.sessionIdPrefix,
-            jobKey: parsed.jobKey
+            jobKey: parsed.jobKey,
+            ...(parsed.expectedRunId !== undefined
+                ? { expectedRunId: parsed.expectedRunId }
+                : {})
         })
         console.log(`cleared ${parsed.jobKey} on ${result.sessionId}`)
         return
@@ -328,21 +409,20 @@ export async function handleJobCommand(args: string[]): Promise<void> {
         const body: AttachedJobUpsert = {
             label: parsed.label,
             status: parsed.status ?? 'running',
-            ...(parsed.done !== undefined ? { done: parsed.done } : {}),
-            ...(parsed.total !== undefined ? { total: parsed.total } : {}),
-            ...(parsed.remaining !== undefined ? { remaining: parsed.remaining } : {}),
-            ...(parsed.unit !== undefined ? { unit: parsed.unit } : {}),
-            ...(parsed.detail !== undefined ? { detail: parsed.detail } : {}),
+            ...(typeof parsed.done === 'number' ? { done: parsed.done } : {}),
+            ...(typeof parsed.total === 'number' ? { total: parsed.total } : {}),
+            ...(typeof parsed.remaining === 'number' ? { remaining: parsed.remaining } : {}),
+            ...(typeof parsed.unit === 'string' ? { unit: parsed.unit } : {}),
+            ...(typeof parsed.detail === 'string' ? { detail: parsed.detail } : {}),
             ...(parsed.startedAt !== undefined ? { startedAt: parsed.startedAt } : {}),
-            ...(parsed.wakeOnTerminal !== undefined ? { wakeOnTerminal: parsed.wakeOnTerminal } : {}),
-            ...(parsed.wakePrompt !== undefined ? { wakePrompt: parsed.wakePrompt } : {})
+            ...(parsed.runId !== undefined ? { runId: parsed.runId } : {})
         }
         const result = await setSessionJob({
             sessionIdPrefix: parsed.sessionIdPrefix,
             jobKey: parsed.jobKey,
             body
         })
-        console.log(`set ${formatJobLine(result.job)}`)
+        console.log(`set ${formatCliJobLine(result.job)}`)
         return
     }
 
@@ -361,13 +441,11 @@ export async function handleJobCommand(args: string[]): Promise<void> {
             ...(parsed.heartbeatSec !== undefined
                 ? { heartbeatMs: Math.max(5, parsed.heartbeatSec) * 1000 }
                 : {}),
-            ...(parsed.done !== undefined ? { done: parsed.done } : {}),
-            ...(parsed.total !== undefined ? { total: parsed.total } : {}),
-            ...(parsed.remaining !== undefined ? { remaining: parsed.remaining } : {}),
-            ...(parsed.unit !== undefined ? { unit: parsed.unit } : {}),
-            ...(parsed.detail !== undefined ? { detail: parsed.detail } : {}),
-            ...(parsed.wakeOnTerminal !== undefined ? { wakeOnTerminal: parsed.wakeOnTerminal } : {}),
-            ...(parsed.wakePrompt !== undefined ? { wakePrompt: parsed.wakePrompt } : {})
+            ...(typeof parsed.done === 'number' ? { done: parsed.done } : {}),
+            ...(typeof parsed.total === 'number' ? { total: parsed.total } : {}),
+            ...(typeof parsed.remaining === 'number' ? { remaining: parsed.remaining } : {}),
+            ...(typeof parsed.unit === 'string' ? { unit: parsed.unit } : {}),
+            ...(typeof parsed.detail === 'string' ? { detail: parsed.detail } : {})
         })
         if (exitCode !== 0) {
             process.exitCode = exitCode
@@ -385,11 +463,7 @@ export async function handleJobCommand(args: string[]): Promise<void> {
         ...(parsed.remaining !== undefined ? { remaining: parsed.remaining } : {}),
         ...(parsed.unit !== undefined ? { unit: parsed.unit } : {}),
         ...(parsed.detail !== undefined ? { detail: parsed.detail } : {}),
-        ...(parsed.wakeOnTerminal !== undefined ? { wakeOnTerminal: parsed.wakeOnTerminal } : {}),
-        ...(parsed.wakePrompt !== undefined ? { wakePrompt: parsed.wakePrompt } : {})
-    }
-    if (Object.keys(body).length === 0) {
-        throw new SessionJobError('bad_args', 'update requires at least one field')
+        ...(parsed.expectedRunId !== undefined ? { expectedRunId: parsed.expectedRunId } : {})
     }
     // Empty body is a heartbeat-only update; hub stamps heartbeatAt.
     let result
@@ -405,7 +479,7 @@ export async function handleJobCommand(args: string[]): Promise<void> {
         }
         throw error
     }
-    console.log(`updated ${formatJobLine(result.job)}`)
+    console.log(`updated ${formatCliJobLine(result.job)}`)
     if (result.job.status === 'running' && result.job.remaining === 0) {
         console.error(chalk.yellow('hapi job hint:'), SESSION_JOB_REMAINING_ZERO_HINT)
     }

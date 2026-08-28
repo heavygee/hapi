@@ -22,12 +22,17 @@ import type {
 } from '@/types/api'
 import { queryKeys } from '@/lib/query-keys'
 import { clearMessageWindow, getMessageWindowState, ingestIncomingMessages, markMessagesConsumed, markMessagesIndeterminate, markMessagesRequeued, removeOptimisticMessage, updateMessageStatus } from '@/lib/message-window-store'
-import { applySessionDetailPatch, isNewerVersionedPatch, isRenderIrrelevantSessionPatch } from '@/lib/sessionPatch'
+import {
+    applySessionDetailPatch,
+    isNewerVersionedPatch,
+    isRenderIrrelevantSessionPatch
+} from '@/lib/sessionPatch'
 
 // Pure patch-application rules live in @/lib/sessionPatch (React-free, shared
 // with the fixture generator); re-exported here so hook consumers and existing
-// tests keep their import site.
-export { applySessionDetailPatch, isNewerVersionedPatch, isRenderIrrelevantSessionPatch } from '@/lib/sessionPatch'
+// tests keep their import site. Named imports (not `export … from`) so this
+// module can call `isNewerVersionedPatch` on attachedJob list patches.
+export { applySessionDetailPatch, isNewerVersionedPatch, isRenderIrrelevantSessionPatch }
 
 type SSESubscription = {
     all?: boolean
@@ -169,6 +174,7 @@ export function isRenderIrrelevantPatch(current: SessionSummary, next: SessionSu
         && current.attachedJob?.heartbeatAt === next.attachedJob?.heartbeatAt
         && current.attachedJob?.startedAt === next.attachedJob?.startedAt
         && (current.attachedJob == null) === (next.attachedJob == null)
+        && (current.attachedJobUpdatedAt ?? 0) === (next.attachedJobUpdatedAt ?? 0)
         && current.model === next.model
         && current.modelReasoningEffort === next.modelReasoningEffort
         && current.effort === next.effort
@@ -498,6 +504,7 @@ export function useSSE(options: {
                 const summary = {
                     ...toSessionSummary(session),
                     attachedJob: existing?.attachedJob ?? null,
+                    attachedJobUpdatedAt: existing?.attachedJobUpdatedAt ?? 0,
                     futureScheduledMessageCount: existing?.futureScheduledMessageCount ?? 0,
                     nextScheduledAt: existing?.nextScheduledAt ?? null
                 }
@@ -543,9 +550,8 @@ export function useSSE(options: {
                     backgroundTaskCount: Object.prototype.hasOwnProperty.call(patch, 'backgroundTaskCount')
                         ? patch.backgroundTaskCount ?? 0
                         : current.backgroundTaskCount,
-                    attachedJob: Object.prototype.hasOwnProperty.call(patch, 'attachedJob')
-                        ? patch.attachedJob ?? null
-                        : current.attachedJob ?? null,
+                    attachedJob: current.attachedJob ?? null,
+                    attachedJobUpdatedAt: current.attachedJobUpdatedAt ?? 0,
                     model: Object.prototype.hasOwnProperty.call(patch, 'model') ? patch.model ?? null : current.model,
                     modelReasoningEffort: Object.prototype.hasOwnProperty.call(patch, 'modelReasoningEffort')
                         ? patch.modelReasoningEffort ?? null
@@ -571,6 +577,16 @@ export function useSSE(options: {
                     nextSummary.metadata = toSessionSummaryMetadata(patch.metadata.value)
                     nextSummary.metadataVersion = patch.metadata.version
                 }
+                if (
+                    patch.attachedJob !== undefined
+                    && isNewerVersionedPatch(
+                        patch.attachedJob.version,
+                        current.attachedJobUpdatedAt ?? 0
+                    )
+                ) {
+                    nextSummary.attachedJob = patch.attachedJob.value
+                    nextSummary.attachedJobUpdatedAt = patch.attachedJob.version
+                }
 
                 patched = true
                 // The keep-alive patch repeats every field every ~10s per active
@@ -594,63 +610,8 @@ export function useSSE(options: {
                     return previous
                 }
                 patched = true
-                // Keep-alive patches repeat every field every ~10s; if nothing
-                // render-relevant moved (ignore activeAt), keep the existing
-                // object identity. Still field-by-field below for structured
-                // patches — never wholesale-spread { version, value } wrappers.
-                if (isRenderIrrelevantSessionPatch(previous.session, patch)) {
-                    return previous
-                }
-                let changed = false
-                const nextSession: Session = { ...previous.session }
-                const assign = <K extends keyof Session>(key: K, value: Session[K]) => {
-                    if (nextSession[key] !== value) {
-                        nextSession[key] = value
-                        changed = true
-                    }
-                }
-                if (patch.active !== undefined) assign('active', patch.active)
-                if (patch.thinking !== undefined) assign('thinking', patch.thinking)
-                if (patch.activeAt !== undefined) assign('activeAt', patch.activeAt)
-                // Monotonic with hub applySessionPatch: a rejected stale
-                // metadata/agentState replay must not rewind updatedAt.
-                if (patch.updatedAt !== undefined) {
-                    const nextUpdatedAt = Math.max(nextSession.updatedAt, patch.updatedAt)
-                    assign('updatedAt', nextUpdatedAt)
-                }
-                if (patch.model !== undefined) assign('model', patch.model)
-                if (patch.modelReasoningEffort !== undefined) assign('modelReasoningEffort', patch.modelReasoningEffort)
-                if (patch.effort !== undefined) assign('effort', patch.effort)
-                if (Object.prototype.hasOwnProperty.call(patch, 'serviceTier')) {
-                    assign('serviceTier', patch.serviceTier ?? null)
-                }
-                if (patch.permissionMode !== undefined) assign('permissionMode', patch.permissionMode)
-                if (patch.collaborationMode !== undefined) assign('collaborationMode', patch.collaborationMode)
-                if (patch.backgroundTaskCount !== undefined) assign('backgroundTaskCount', patch.backgroundTaskCount)
-                // Version gates: dual SSE can deliver duplicates out of order.
-                // Only mark changed when a strictly newer version lands —
-                // otherwise keep previous object identity (no redundant render).
-                if (patch.todos !== undefined && isNewerVersionedPatch(patch.todos.version, nextSession.todosUpdatedAt ?? 0)) {
-                    nextSession.todos = patch.todos.value
-                    nextSession.todosUpdatedAt = patch.todos.version
-                    changed = true
-                }
-                if (patch.teamState !== undefined && isNewerVersionedPatch(patch.teamState.version, nextSession.teamStateUpdatedAt ?? 0)) {
-                    nextSession.teamState = patch.teamState.value ?? undefined
-                    nextSession.teamStateUpdatedAt = patch.teamState.version
-                    changed = true
-                }
-                if (patch.metadata !== undefined && isNewerVersionedPatch(patch.metadata.version, nextSession.metadataVersion)) {
-                    nextSession.metadata = patch.metadata.value
-                    nextSession.metadataVersion = patch.metadata.version
-                    changed = true
-                }
-                if (patch.agentState !== undefined && isNewerVersionedPatch(patch.agentState.version, nextSession.agentStateVersion)) {
-                    nextSession.agentState = patch.agentState.value
-                    nextSession.agentStateVersion = patch.agentState.version
-                    changed = true
-                }
-                if (!changed) {
+                const nextSession = applySessionDetailPatch(previous.session, patch)
+                if (!nextSession) {
                     return previous
                 }
                 return {
@@ -798,10 +759,6 @@ export function useSSE(options: {
 
             if (event.type === 'message-received') {
                 ingestIncomingMessages(event.sessionId, [event.message])
-            }
-
-            if (event.type === 'session-updated' || event.type === 'message-received' || event.type === 'session-ended') {
-                void queryClient.invalidateQueries({ queryKey: ['session-system-events', event.sessionId] })
             }
 
             if (event.type === 'session-added' || event.type === 'session-updated' || event.type === 'session-removed') {

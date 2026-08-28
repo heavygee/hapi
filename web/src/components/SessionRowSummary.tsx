@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { SessionSummary } from '@/types/api'
 import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
 import { ScheduleIcon } from '@/components/icons'
@@ -118,8 +118,6 @@ export function SessionRowSummary(props: {
     lastSeenVersion?: number
     scheduleTooltipId?: string
     className?: string
-    /** Rendered inline in the trailing meta row (before the time label) — e.g. PR chip. */
-    trailing?: ReactNode
     /** Rows inside the pinned "in progress" section skip the text label (dot only). */
     inRunningSection?: boolean
     /** Short project name shown under the title (pinned "in progress" rows). */
@@ -137,7 +135,6 @@ export function SessionRowSummary(props: {
         lastSeenVersion,
         scheduleTooltipId: scheduleTooltipIdProp,
         className,
-        trailing,
         inRunningSection = false,
         projectLabel,
         machineLabel,
@@ -181,7 +178,13 @@ export function SessionRowSummary(props: {
     }, [attachedJob?.key, attachedJob?.startedAt])
     const jobStale = attachedJob ? isAttachedJobStale(attachedJob, nowMs) : false
     const jobFraction = attachedJob ? attachedJobFraction(attachedJob) : null
-    const jobProgressLabel = attachedJob ? formatAttachedJobProgress(attachedJob, nowMs) : null
+    const jobProgressLabel = attachedJob
+        ? formatAttachedJobProgress(attachedJob, nowMs, {
+            left: t('session.item.attachedJob.left'),
+            running: t('session.item.attachedJob.running'),
+            noHeartbeat: t('session.item.attachedJob.noHeartbeat'),
+        })
+        : null
 
     return (
         <div className={`flex w-full min-w-0 flex-col gap-1 ${className ?? ''}`}>
@@ -303,7 +306,6 @@ export function SessionRowSummary(props: {
                             {t('session.item.pending')} {s.pendingRequestsCount}
                         </span>
                     ) : null}
-                    {trailing}
                     {timeLabel ? (
                         <span className="min-w-0 truncate whitespace-nowrap tabular-nums text-[var(--app-hint)]">{timeLabel}</span>
                     ) : null}
@@ -318,7 +320,9 @@ export function SessionRowSummary(props: {
                     }`}
                     title={
                         jobStale
-                            ? `${attachedJob.detail ?? attachedJob.label} — progress may be frozen (no heartbeat)`
+                            ? t('session.item.attachedJob.staleTitle', {
+                                detail: attachedJob.detail ?? attachedJob.label,
+                            })
                             : (attachedJob.detail ?? attachedJob.label)
                     }
                 >
@@ -329,7 +333,7 @@ export function SessionRowSummary(props: {
                     <span className="min-w-0 truncate font-medium">
                         {attachedJob.label}
                         {jobStale ? (
-                            <span className="font-semibold"> · stale</span>
+                            <span className="font-semibold"> · {t('session.item.attachedJob.stale')}</span>
                         ) : null}
                         <span className="font-normal opacity-80"> · {jobProgressLabel}</span>
                     </span>

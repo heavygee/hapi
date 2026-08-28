@@ -102,19 +102,6 @@ describe('toSessionSummary', () => {
         expect(summary.metadata?.agentSessionId).toBe('cursor-session-1')
     })
 
-    it('does not claim a native resume token for fresh-only DSH ACP', () => {
-        const summary = toSessionSummary(makeSession({
-            metadata: {
-                path: '/proj',
-                host: 'local',
-                flavor: 'dsh',
-                codexSessionId: 'stale-codex-id'
-            }
-        }))
-
-        expect(summary.metadata?.agentSessionId).toBeUndefined()
-    })
-
     it('does not fall back to a stale cross-agent id for a known flavor', () => {
         const summary = toSessionSummary(makeSession({
             metadata: {
@@ -196,25 +183,6 @@ describe('toSessionSummary', () => {
         }))
 
         expect(summary.metadata?.hapiMcpUrl).toBe('http://127.0.0.1:42133/')
-    })
-
-    it('includes externalRefs in summary metadata', () => {
-        const externalRefs = [{
-            kind: 'github_pr' as const,
-            repo: 'tiann/hapi',
-            number: 1160,
-            url: 'https://github.com/tiann/hapi/pull/1160',
-            role: 'primary' as const
-        }]
-        const summary = toSessionSummary(makeSession({
-            metadata: {
-                path: '/proj',
-                host: 'local',
-                externalRefs
-            }
-        }))
-
-        expect(summary.metadata?.externalRefs).toEqual(externalRefs)
     })
 
     it('includes structured pendingRequests for hover-tooltip copy', () => {
@@ -362,10 +330,12 @@ describe('summary derivation helpers', () => {
         }
         const summary = toSessionSummary(makeSession(), { attachedJob: job })
         expect(summary.attachedJob).toEqual(job)
+        expect(summary.attachedJobUpdatedAt).toBe(job.updatedAt)
     })
 
     it('defaults attachedJob to null', () => {
         expect(toSessionSummary(makeSession()).attachedJob).toBeNull()
+        expect(toSessionSummary(makeSession()).attachedJobUpdatedAt).toBe(0)
     })
 
     it('toSessionSummaryMetadata returns null for null metadata', () => {

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionSummary } from '@/types/api'
 import type { Session } from '@/types/api'
 import {
+    applySessionDetailPatch,
     canApplyVersionedSummaryPatch,
     isGlobalScopedMessageStreamEvent,
     isNewerVersionedPatch,
@@ -179,6 +180,7 @@ function makeSummary(overrides: Partial<SessionSummary> = {}): SessionSummary {
         futureScheduledMessageCount: 0,
         nextScheduledAt: null,
         attachedJob: null,
+        attachedJobUpdatedAt: 0,
         model: null,
         effort: null,
         ...overrides
@@ -325,6 +327,23 @@ describe('isRenderIrrelevantPatch', () => {
 
         expect(isRenderIrrelevantPatch(current, next)).toBe(false)
     })
+
+    it('reports attachedJob.startedAt changes as relevant', () => {
+        const job = {
+            key: 'beets',
+            label: 'beets',
+            status: 'running' as const,
+            heartbeatAt: 100,
+            startedAt: 100,
+            updatedAt: 100
+        }
+        const current = makeSummary({ attachedJob: job })
+        const next = makeSummary({
+            attachedJob: { ...job, startedAt: 50 },
+            activeAt: 11_000
+        })
+        expect(isRenderIrrelevantPatch(current, next)).toBe(false)
+    })
 })
 
 describe('isRenderIrrelevantSessionPatch', () => {
@@ -386,5 +405,49 @@ describe('isRenderIrrelevantSessionPatch', () => {
 
     it('treats an empty patch as irrelevant', () => {
         expect(isRenderIrrelevantSessionPatch(session, {})).toBe(true)
+    })
+})
+
+describe('applySessionDetailPatch (PR #897 review, Copilot keep-alive)', () => {
+    const session = {
+        id: 'session-1',
+        active: true,
+        thinking: false,
+        activeAt: 1_000,
+        updatedAt: 2_000,
+        model: 'gpt-5',
+        effort: null,
+        permissionMode: 'default',
+        collaborationMode: undefined,
+        copilotAgentMode: 'interactive',
+        serviceTier: null,
+        metadataVersion: 1,
+        agentStateVersion: 1,
+        todosUpdatedAt: 0,
+        teamStateUpdatedAt: 0
+    } as unknown as Session
+
+    it('applies a copilotAgentMode keep-alive change to the detail session', () => {
+        // Hub emits copilotAgentMode from markSessionActive keep-alives. The
+        // field-by-field mapper must copy it — otherwise detailPatched=true
+        // suppresses invalidation and SessionChat keeps the stale mode.
+        const next = applySessionDetailPatch(session, {
+            active: true,
+            thinking: false,
+            activeAt: 11_000,
+            copilotAgentMode: 'plan'
+        })
+        expect(next).not.toBeNull()
+        expect(next?.copilotAgentMode).toBe('plan')
+        expect(next?.activeAt).toBe(11_000)
+    })
+
+    it('returns null for a keep-alive that only repeats the current Copilot mode', () => {
+        expect(applySessionDetailPatch(session, {
+            active: true,
+            thinking: false,
+            activeAt: 11_000,
+            copilotAgentMode: 'interactive'
+        })).toBeNull()
     })
 })
