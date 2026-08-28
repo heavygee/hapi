@@ -795,8 +795,14 @@ layers:
   # tiann/hapi#1509 / PR #1511 — first-class spawn-peer with required remit.
   # CLI hapi spawn-peer + MCP spawn_peer; hub 400 on spawn body message/prompt/text.
   # Worktree: ~/coding/hapi/worktrees/spawn-peer-remit @ feat/spawn-peer-remit
-  # Tip: 8e3ffd9a4 (origin/feat/spawn-peer-remit)
+  # Tip: 52c51ba51 (origin/feat/spawn-peer-remit) — includes model/effort surface
   - branch: feat/spawn-peer-remit
+
+  # Soup heal: remat 47ce90965 dropped Claude Happy MCP spawn_peer model/effort
+  # (Codex bridge kept them). Restore schema + handler forwarding for Claude sessions.
+  # Worktree: ~/coding/hapi/worktrees/claude-mcp-spawn-model @ fix/claude-mcp-spawn-model-effort
+  # Tip: f0803e996
+  - branch: fix/claude-mcp-spawn-model-effort
 
   # heavygee/hapi#120 — vendor hapi-inline operator dock (fork-local, not tiann).
   # Pin v0.11.6 (#155 fail-closed + v0.11.5 capture). #123 Settings unlock + gate probe.
