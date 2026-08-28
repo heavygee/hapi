@@ -9,10 +9,11 @@ import {
     getSessionJob,
     listSessionJobs,
     patchSessionJob,
-    claimSessionJobTerminalWake,
     toAttachedJob,
     transferSessionJobs,
     upsertSessionJob,
+    type PatchSessionJobResult,
+    type TransferSessionJobsResult,
     type UpsertSessionJobResult
 } from './sessionJobs'
 
@@ -54,19 +55,19 @@ export class SessionJobsStore {
         jobKey: string,
         patch: AttachedJobPatch,
         now?: number
-    ): StoredSessionJob | null {
+    ): PatchSessionJobResult {
         return patchSessionJob(this.db, sessionId, jobKey, patch, now)
     }
 
-    claimTerminalWake(sessionId: string, jobKey: string): StoredSessionJob | null {
-        return claimSessionJobTerminalWake(this.db, sessionId, jobKey)
+    delete(
+        sessionId: string,
+        jobKey: string,
+        expectedRunId?: string
+    ): import('./sessionJobs').DeleteSessionJobResult {
+        return deleteSessionJob(this.db, sessionId, jobKey, expectedRunId)
     }
 
-    delete(sessionId: string, jobKey: string): boolean {
-        return deleteSessionJob(this.db, sessionId, jobKey)
-    }
-
-    transfer(fromSessionId: string, toSessionId: string): { moved: number; collided: number } {
+    transfer(fromSessionId: string, toSessionId: string): TransferSessionJobsResult {
         return transferSessionJobs(this.db, fromSessionId, toSessionId)
     }
 }

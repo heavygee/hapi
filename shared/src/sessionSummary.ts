@@ -1,4 +1,4 @@
-import type { AgentState, AttachedJob, ExternalRef, Metadata, Session, TodoItem, WorktreeMetadata } from './schemas'
+import type { AgentState, AttachedJob, Metadata, Session, TodoItem, WorktreeMetadata } from './schemas'
 import { isKnownFlavor } from './flavors'
 import type { AgentFlavor } from './modes'
 
@@ -40,22 +40,9 @@ export type SessionSummaryMetadata = {
     flavor?: string | null
     worktree?: WorktreeMetadata
     agentSessionId?: string
-    /** Native Claude transcript id when flavor is claude (not the flattened agentSessionId). */
-    claudeSessionId?: string
     lifecycleState?: string
     /** Loopback MCP URL when session CLI happy server is running (#956). */
     hapiMcpUrl?: string
-    lastModelError?: {
-        kind: string
-        transient: boolean
-        rawSnippet: string
-        atTs: number
-        priorAssistantClaimsDone: boolean
-        retriedAndFailed?: boolean
-        acknowledgedAt?: number
-    }
-    /** Structured contribution links (GitHub PRs, …). tiann/hapi#1160. */
-    externalRefs?: ExternalRef[]
 }
 
 export type SessionSummary = {
@@ -88,8 +75,9 @@ export type SessionSummary = {
      * Primary running session-attached job (tiann/hapi#1404), or null.
      * Independent of agent `active` / thinking — work that outlives the agent.
      */
-    /** Present on hub list rows; optional on thin test fixtures. */
-    attachedJob?: AttachedJob | null
+    attachedJob: AttachedJob | null
+    /** Watermark for versioned `attachedJob` SSE patches (dual EventSource race). */
+    attachedJobUpdatedAt: number
     model: string | null
     modelReasoningEffort?: string | null
     effort: string | null
@@ -167,7 +155,7 @@ export function computeTodoProgress(todos: TodoItem[] | undefined): SessionSumma
     }
 }
 
-const AGENT_SESSION_ID_FIELD_BY_FLAVOR: Partial<Record<AgentFlavor, keyof Metadata>> = {
+const AGENT_SESSION_ID_FIELD_BY_FLAVOR = {
     claude: 'claudeSessionId',
     codex: 'codexSessionId',
     gemini: 'geminiSessionId',
@@ -178,13 +166,12 @@ const AGENT_SESSION_ID_FIELD_BY_FLAVOR: Partial<Record<AgentFlavor, keyof Metada
     kimi: 'kimiSessionId',
     copilot: 'copilotSessionId',
     pi: 'piSessionId'
-}
+} as const satisfies Record<AgentFlavor, keyof Metadata>
 
 function getSummaryAgentSessionId(metadata: Metadata): string | undefined {
     const flavor = metadata.flavor
     if (isKnownFlavor(flavor)) {
         const flavorField = AGENT_SESSION_ID_FIELD_BY_FLAVOR[flavor]
-        if (!flavorField) return undefined
         const flavorSessionId = metadata[flavorField]
         return typeof flavorSessionId === 'string' && flavorSessionId.trim()
             ? flavorSessionId.trim()
@@ -197,6 +184,7 @@ function getSummaryAgentSessionId(metadata: Metadata): string | undefined {
         ?? metadata.geminiSessionId
         ?? metadata.opencodeSessionId
         ?? metadata.grokSessionId
+        ?? metadata.agySessionId
         ?? metadata.cursorSessionId
         ?? metadata.kimiSessionId
         ?? metadata.copilotSessionId
@@ -215,20 +203,21 @@ export function toSessionSummaryMetadata(metadata: Metadata | null | undefined):
         flavor: metadata.flavor ?? null,
         worktree: metadata.worktree,
         agentSessionId: getSummaryAgentSessionId(metadata),
-        // Native Claude id kept distinct from flattened agentSessionId (import picker).
-        claudeSessionId: metadata.claudeSessionId ?? undefined,
         lifecycleState: metadata.lifecycleState,
-        // Loopback MCP URL when session CLI happy server is running (#956).
-        hapiMcpUrl: metadata.hapiMcpUrl ?? undefined,
-        lastModelError: metadata.lastModelError,
-        externalRefs: metadata.externalRefs
+        hapiMcpUrl: metadata.hapiMcpUrl ?? undefined
     }
 }
 
 export function toSessionSummary(
     session: Session,
-    extras?: { attachedJob?: AttachedJob | null }
+    extras?: {
+        attachedJob?: AttachedJob | null
+        /** Explicit SSE/list watermark; required when attachedJob is null so
+         *  a REST refetch does not reset the client gate to 0. */
+        attachedJobUpdatedAt?: number
+    }
 ): SessionSummary {
+    const attachedJob = extras?.attachedJob ?? null
     return {
         id: session.id,
         active: session.active,
@@ -248,7 +237,10 @@ export function toSessionSummary(
         backgroundTaskCount: session.backgroundTaskCount ?? 0,
         futureScheduledMessageCount: 0,
         nextScheduledAt: null,
-        attachedJob: extras?.attachedJob ?? null,
+        attachedJob,
+        attachedJobUpdatedAt: extras?.attachedJobUpdatedAt
+            ?? attachedJob?.updatedAt
+            ?? 0,
         model: session.model,
         modelReasoningEffort: session.modelReasoningEffort,
         effort: session.effort

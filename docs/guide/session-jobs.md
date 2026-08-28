@@ -33,6 +33,20 @@ Attach a job **before** (or immediately when) you start process-shaped work that
 
 If the operator would reopen the chat only to ask "how's it doing?", it belongs here.
 
+## Which session id (contract)
+
+Attached jobs bind to the **hub session row the operator sees** — the UUID in the web URL `/sessions/<id>`, the session list tile, and the chat transcript. That row is the only target for `PUT/PATCH/DELETE /api/sessions/:id/jobs/...` and the only place `attachedJob` appears in the UI.
+
+| Surface | Session id source | Must match operator chat row |
+|---------|-------------------|------------------------------|
+| Shell `hapi job …` | First positional arg; docs use `"$HAPI_SESSION_ID"` | Yes |
+| MCP `session_job` | Owning hapi CLI `client.sessionId` (stdio bridge is not a second id) | Yes |
+| `HAPI_SESSION_ID` env | Exported by `exportHapiSessionEnv` when the session CLI bootstraps | Yes — **this chat**, not an internal worker row |
+
+**Intended:** one hub row per operator chat. Runner resume/spawn passes `existingSessionId` so bootstrap, MCP bridge, and `HAPI_SESSION_ID` all equal the row the web UI opened.
+
+**Known bug (remote Cursor runner):** shell `HAPI_SESSION_ID` can point at a runner worker row while the operator watches a different hub chat row. Jobs on the worker id update a session the operator is not viewing; MCP `session_job` on the chat row still works because the bridge is wired to the chat `client.sessionId`. Until fixed, pass the **chat URL uuid** explicitly to `hapi job` instead of trusting `$HAPI_SESSION_ID`. Hub merge/clear redirects (`jobsTransferredToSessionId`, `supersededBySessionId`) apply only when metadata links rows — not for unrelated live duplicates.
+
 ## Agent contract (specification)
 
 Treat this like `ping_peer` / `inspect_peer`: it is first-class HAPI tooling, not a docs footnote.
@@ -40,6 +54,8 @@ Treat this like `ping_peer` / `inspect_peer`: it is first-class HAPI tooling, no
 ### CLI supervisor (required for process-shaped work)
 
 ```bash
+# Prefer "$HAPI_SESSION_ID" only when it matches the operator chat URL uuid.
+# Remote Cursor runner: pass /sessions/<id> explicitly (see "Which session id").
 hapi job run "$HAPI_SESSION_ID" beets \
   --label 'beets import' \
   --remaining 150 --done 1637 --total 1787 --unit units \
@@ -66,52 +82,48 @@ Tool name: `session_job` (Claude: `mcp__hapi__session_job`; Codex: `functions.ha
 
 ### CLI manual path (self-heartbeating wrapper only)
 
-Only when you own a wrapper that calls `update` at least every ~10 minutes (not an idle agent):
+Only when you own a wrapper that calls `update` at least every ~10 minutes (not an idle agent).
+Mint one UUID per wrapper run and fence every PATCH so a key-reuse cannot steal progress:
 
 ```bash
+RUN_ID="$(uuidgen)"   # or python -c 'import uuid; print(uuid.uuid4())'
+
 hapi job set "$HAPI_SESSION_ID" beets \
   --label 'beets import' \
+  --run-id "$RUN_ID" \
   --remaining 150 --done 1637 --total 1787 --unit units \
   --detail 'album: Some Artist - Some Album'
 
-hapi job update "$HAPI_SESSION_ID" beets --remaining 149 --done 1638 --detail '…'
+hapi job update "$HAPI_SESSION_ID" beets \
+  --expected-run-id "$RUN_ID" \
+  --remaining 149 --done 1638 --detail '…'
 
-hapi job update "$HAPI_SESSION_ID" beets --status completed
+hapi job update "$HAPI_SESSION_ID" beets \
+  --expected-run-id "$RUN_ID" \
+  --status completed
 # or
-hapi job clear "$HAPI_SESSION_ID" beets
+hapi job clear "$HAPI_SESSION_ID" beets --expected-run-id "$RUN_ID"
 ```
 
 Same auth as `hapi ping-peer` (`HAPI_API_URL` / `CLI_API_TOKEN` or `hapi auth login`).
 
-## Wake owning session on terminal (opt-in, #1489)
-
-By default jobs are **meter-only**. Opt in so terminal status resumes the owning agent:
-
-```bash
-hapi job run "$HAPI_SESSION_ID" beets \
-  --label 'beets import' \
-  --wake-on-terminal \
-  --wake-prompt 'If exit looked clean, start the next album batch.' \
-  -- ./beets-import.sh
-```
-
-Hub claims a one-shot wake, resumes if inactive (same ordering as `ping-peer`), and posts a user message with job key + status + detail.
-
 ## Progress honesty (tiers)
-
 
 | What you know | What to send | What the list shows |
 |---------------|--------------|---------------------|
-| Countable leftover | `--remaining N` (+ optional `--unit`) | `150 units left · 2d 4h` |
-| Countable fraction | `--done N --total M` | `91% · 1637/1787 units · 2d 4h` |
+| Countable leftover | `--remaining N` + `--total M` (+ optional `--unit`) | `150 units left · 2d 4h` + bar fill when `total` is set |
+| Countable fraction | `--done N --total M` | `91% · 1637/1787 units · 2d 4h` + bar fill |
 | Stage only / unknown size | `--label` + `--detail` + heartbeats | `running · 2d 4h` + indeterminate bar |
+
+**Bar fill:** the byte/progress bar moves only when `total` is set and you send `--done`/`--total` or `--remaining`/`--total`. `--remaining` alone (without `total`) updates the text label only — it is not a percent and does not tick the bar. Prefer `--done`/`--total` when you want visible byte-style progress.
 
 **Elapsed** is always derived from hub `startedAt` (wall clock). It is **not** an ETA and there is no time-remaining field - operators get "how long has this been going" plus whatever honest count/detail you report, without a fake completion estimate.
 
 Rules:
 
-- Prefer **remaining** when the operator cares about "how much left".
-- Prefer **done+total** when both ends of a fraction exist (UI may derive %).
+- Prefer **remaining+total** when the operator cares about "how much left" and you know the denominator.
+- Prefer **done+total** when you want the simplest bar fill (byte-style progress).
+- Do not send **remaining alone** expecting the bar to move — include `total` or use `done`/`total`.
 - If you only know a stage name, put it in `--detail` and keep heartbeating — do **not** fake `total=100`.
 - There is **no** `--percent` flag and **no** ETA / time-remaining field. Inventing either would train agents to lie.
 
@@ -137,6 +149,7 @@ hapi job set "$HAPI_SESSION_ID" beets \
   --label 'beets import' \
   --started-at "$START_MS" \
   --remaining 0 --done 1787 --total 1787 --unit units \
+  --status completed \
   --detail 'ALL_DONE'
 
 # or, on hubs that honor explicit PUT startedAt without delete:
@@ -153,9 +166,12 @@ Then keep using `hapi job update` for counts/detail/status.
 Wrap the long process so something calls `hapi job update` on a timer (or on each unit completed). Minimum viable indeterminate job:
 
 ```bash
-hapi job set "$HAPI_SESSION_ID" rsync-backup --label 'rsync backup' --detail 'phase: copy'
+RUN_ID="$(uuidgen)"
+hapi job set "$HAPI_SESSION_ID" rsync-backup \
+  --run-id "$RUN_ID" --label 'rsync backup' --detail 'phase: copy'
 # in a loop / cron / companion script:
-hapi job update "$HAPI_SESSION_ID" rsync-backup --detail "phase: copy · $(date -u +%H:%M)Z"
+hapi job update "$HAPI_SESSION_ID" rsync-backup \
+  --expected-run-id "$RUN_ID" --detail "phase: copy · $(date -u +%H:%M)Z"
 ```
 
 When the process exits, mark completed/failed or clear. A stuck green/amber chip with a dead PID is worse than no chip.
@@ -163,9 +179,9 @@ When the process exits, mark completed/failed or clear. A stuck green/amber chip
 ## CLI / API reference
 
 ```bash
-hapi job set <session> <job-key> --label <text> [--started-at MS] [progress flags]
-hapi job update <session> <job-key> [progress flags]   # no startedAt
-hapi job clear <session> <job-key>
+hapi job set <session> <job-key> --label <text> [--started-at MS] [--run-id UUID] [progress flags]
+hapi job update <session> <job-key> [--expected-run-id UUID] [progress flags]   # no startedAt
+hapi job clear <session> <job-key> [--expected-run-id UUID]
 hapi job list <session>
 hapi job run <session> <job-key> --label <text> -- <cmd>…
 hapi job --help
@@ -176,9 +192,9 @@ Needs a hub/CLI build that includes `job` (soup / feat — global npm releases m
 | Method | Path | Notes |
 |--------|------|-------|
 | `GET` | `/api/sessions/:id/jobs` | List jobs |
-| `PUT` | `/api/sessions/:id/jobs/:jobKey` | Upsert (`AttachedJobUpsert`; optional `startedAt`) |
-| `PATCH` | `/api/sessions/:id/jobs/:jobKey` | Progress/heartbeat (`AttachedJobPatch`; **no** `startedAt`) |
-| `DELETE` | `/api/sessions/:id/jobs/:jobKey` | Clear |
+| `PUT` | `/api/sessions/:id/jobs/:jobKey` | Upsert (`AttachedJobUpsert`; optional `startedAt`, `runId`) |
+| `PATCH` | `/api/sessions/:id/jobs/:jobKey` | Progress/heartbeat (`AttachedJobPatch`; **no** `startedAt`; optional `expectedRunId`) |
+| `DELETE` | `/api/sessions/:id/jobs/:jobKey?expectedRunId=` | Clear (optional fence; 409 on run mismatch) |
 
 Primary running job is enriched onto `GET /api/sessions` as `attachedJob` and pushed on `session-updated` SSE patches.
 
@@ -190,9 +206,9 @@ Attached jobs ship with a **tri-state** "Pin in-progress sessions" control (not 
 |------|------------------------|
 | Off | Nothing |
 | Long-running jobs (default) | Sessions with a running attached job (even when the agent is idle) |
-| All activity | Jobs **plus** thinking / pending / in-agent background tasks |
+| Working & pending | Jobs **plus** thinking / pending / in-agent background tasks (storage key `all`). Quiet connected stays in project folders. |
 
-Unset preference defaults to **Long-running jobs** — that is the product stand for this capability. Legacy `true` maps to All activity; legacy `false` maps to Off.
+Unset preference defaults to **Long-running jobs** — that is the product stand for this capability. Legacy `true` maps to Working & pending; legacy `false` maps to Off.
 
 ## Related
 

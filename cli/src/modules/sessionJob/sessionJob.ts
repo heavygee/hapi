@@ -14,6 +14,7 @@ export type SessionJobErrorCode =
     | 'auth_failed'
     | 'not_found'
     | 'ambiguous'
+    | 'run_mismatch'
     | 'request_failed'
 
 export class SessionJobError extends Error {
@@ -28,7 +29,9 @@ export class SessionJobError extends Error {
 
 /** Exact Shell recipe agents should run instead of MCP set or update-before-create. */
 export const SESSION_JOB_RUN_RECIPE =
-    'hapi job run "$HAPI_SESSION_ID" <job-key> --label "<label>" [--done N --total M|--remaining N] [--unit …] -- <cmd>…'
+    'hapi job run <session-id> <job-key> --label "<label>" [--done N --total M|--remaining N] [--unit …] -- <cmd>…'
+    + ' (use "$HAPI_SESSION_ID" only when it matches the operator /sessions/<id> chat row;'
+    + ' remote Cursor: pass the URL uuid explicitly)'
 
 export function formatSessionJobNotFoundHint(action: 'update' | 'clear'): string {
     return [
@@ -376,6 +379,14 @@ export async function updateSessionJob(
             if (response.status === 404) {
                 throw new SessionJobError('not_found', 'job not found')
             }
+            if (response.status === 409) {
+                const data = response.data as { error?: string } | undefined
+                throw new SessionJobError(
+                    'run_mismatch',
+                    data?.error
+                        ?? 'job run mismatch (expectedRunId); another run reused this key'
+                )
+            }
             const data = response.data as { job?: AttachedJob; error?: string } | undefined
             if (response.status < 200 || response.status >= 300 || !data?.job) {
                 throw httpStatusError('update job', response, data?.error)
@@ -386,21 +397,34 @@ export async function updateSessionJob(
 }
 
 export async function clearSessionJob(
-    options: SessionJobClientOptions & { jobKey: string }
+    options: SessionJobClientOptions & { jobKey: string; expectedRunId?: string }
 ): Promise<{ sessionId: string }> {
     return withAuthedRequest(
         options,
-        ({ apiUrl, jwt, sessionId, http }) => http.delete(
-            `${apiUrl}/api/sessions/${sessionId}/jobs/${encodeURIComponent(options.jobKey)}`,
-            {
-                headers: authHeaders(jwt),
-                timeout: 15_000,
-                validateStatus: () => true
-            }
-        ),
+        ({ apiUrl, jwt, sessionId, http }) => {
+            const qs = options.expectedRunId
+                ? `?expectedRunId=${encodeURIComponent(options.expectedRunId)}`
+                : ''
+            return http.delete(
+                `${apiUrl}/api/sessions/${sessionId}/jobs/${encodeURIComponent(options.jobKey)}${qs}`,
+                {
+                    headers: authHeaders(jwt),
+                    timeout: 15_000,
+                    validateStatus: () => true
+                }
+            )
+        },
         (response, sessionId) => {
             if (response.status === 404) {
                 throw new SessionJobError('not_found', 'job not found')
+            }
+            if (response.status === 409) {
+                const detail = (response.data as { error?: string } | undefined)?.error
+                throw new SessionJobError(
+                    'run_mismatch',
+                    detail
+                        ?? 'job run mismatch (expectedRunId); another run reused this key'
+                )
             }
             if (response.status < 200 || response.status >= 300) {
                 throw httpStatusError('clear job', response)
@@ -420,6 +444,8 @@ export function exitCodeForSessionJobError(error: SessionJobError): number {
             return 4
         case 'ambiguous':
             return 5
+        case 'run_mismatch':
+            return 6
         default:
             return 1
     }
