@@ -13,9 +13,15 @@
 #
 # Options:
 #   --agent cursor|claude|…     (default cursor)
+#   --model ID                  (optional; forwarded to SpawnSessionRequest.model)
+#   --effort LEVEL              (optional; forwarded to SpawnSessionRequest.effort)
 #   --session-type simple|worktree  (default worktree when dir looks like a worktree)
 #   --machine ID|hostname       (default: this host's settings.machineId)
 #   --yolo / --no-yolo          (default yolo on)
+#
+# Prefer product CLI when available: `hapi spawn-peer --model … --effort …`
+# (soup via ~/.local/bin/hapi). This wrapper exists for remit fail-closed until
+# upstream #1511 merges; keep model/effort parity with hub + product CLI.
 #
 # Machine-to-machine: pass --machine oos-linux (or UUID) so spawn hits that
 # runner. --dir must exist on the TARGET host. When --machine != local, the
@@ -29,6 +35,8 @@ DIR=""
 NAME=""
 MESSAGE_FILE=""
 AGENT="cursor"
+MODEL=""
+EFFORT=""
 SESSION_TYPE=""
 YOLO=1
 MACHINE_ARG=""
@@ -39,12 +47,14 @@ while [[ $# -gt 0 ]]; do
         --name) NAME="$2"; shift 2 ;;
         --message-file) MESSAGE_FILE="$2"; shift 2 ;;
         --agent) AGENT="$2"; shift 2 ;;
+        --model) MODEL="$2"; shift 2 ;;
+        --effort) EFFORT="$2"; shift 2 ;;
         --session-type) SESSION_TYPE="$2"; shift 2 ;;
         --machine) MACHINE_ARG="$2"; shift 2 ;;
         --yolo) YOLO=1; shift ;;
         --no-yolo) YOLO=0; shift ;;
         --help|-h)
-            sed -n '2,22p' "$0"
+            sed -n '2,28p' "$0"
             exit 0
             ;;
         *) die "unexpected arg: $1" ;;
@@ -127,14 +137,18 @@ fi
 YOLO_JSON=true
 [[ "$YOLO" == "1" ]] || YOLO_JSON=false
 
-err "spawning agent=$AGENT type=$SESSION_TYPE dir=$DIR machine=$MACHINE"
+err "spawning agent=$AGENT type=$SESSION_TYPE dir=$DIR machine=$MACHINE${MODEL:+ model=$MODEL}${EFFORT:+ effort=$EFFORT}"
 SPAWN=$(curl -sS --max-time 60 -X POST "${AUTH[@]}" \
     -d "$(jq -n \
         --arg dir "$DIR" \
         --arg agent "$AGENT" \
         --arg st "$SESSION_TYPE" \
+        --arg model "$MODEL" \
+        --arg effort "$EFFORT" \
         --argjson yolo "$YOLO_JSON" \
-        '{directory:$dir, agent:$agent, sessionType:$st, yolo:$yolo}')" \
+        '{directory:$dir, agent:$agent, sessionType:$st, yolo:$yolo}
+         + (if $model == "" then {} else {model:$model} end)
+         + (if $effort == "" then {} else {effort:$effort} end)')" \
     "$HAPI_HOST/api/machines/$MACHINE/spawn")
 
 PEER_ID=$(echo "$SPAWN" | jq -r '.sessionId // empty')
