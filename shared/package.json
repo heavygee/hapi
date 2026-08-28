@@ -16,6 +16,7 @@
         "./modes": "./src/modes.ts",
         "./provenanceDiagnostics": "./src/provenanceDiagnostics.ts",
         "./provenanceMessageAudit": "./src/provenanceMessageAudit.ts",
+        "./peerSpawnDefaults": "./src/peerSpawnDefaults.ts",
         "./rpcMethods": "./src/rpcMethods.ts",
         "./runnerCapabilities": "./src/runnerCapabilities.ts",
         "./machineRegistration": "./src/machineRegistration.ts",
