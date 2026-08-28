@@ -5,6 +5,12 @@
 # has no `job` / `ping-peer`; agents that hit it think "hapi job" is Claude
 # passthrough. Soup hosts want ONLY ~/.local/bin/hapi → hapi-from-active.
 #
+# Broader trap (2026-08-28 / Arthur scout): sessions whose cwd is inside a tree
+# that depends on hapi prepend `node_modules/.bin` ahead of ~/.local/bin.
+# `command -v hapi` then resolves to the **published** prebuilt (may lack
+# `spawn-peer`). Profile PATH hygiene cannot beat cwd-injected bins — invoke
+# `~/.local/bin/hapi`, `hapi-from-active`, or `hapi-spawn-peer` by absolute name.
+#
 # Usage:
 #   hapi-cli-path-hygiene           # check + clean (default)
 #   hapi-cli-path-hygiene --check   # report only; exit 1 if dirty
@@ -19,7 +25,7 @@ case "${1:-}" in
     --check) MODE=check ;;
     --clean|'') MODE=clean ;;
     -h|--help)
-        sed -n '2,16p' "$0" | sed 's/^# \?//'
+        sed -n '2,20p' "$0" | sed 's/^# \?//'
         exit 0
         ;;
     *)
@@ -29,6 +35,7 @@ case "${1:-}" in
 esac
 
 DIRTY=0
+WARN=0
 BUN_HAPI="${HOME}/.bun/bin/hapi"
 BUN_PKG="${HOME}/.bun/install/global/node_modules/@twsxtd/hapi"
 NPM_ROOT="$(npm root -g 2>/dev/null || true)"
@@ -58,10 +65,24 @@ if [[ -n "$FIRST" && "$FIRST" == */.bun/bin/hapi ]]; then
     DIRTY=1
     report "PATH resolves hapi to bun-global first: $FIRST"
 fi
+if [[ -n "$FIRST" && "$FIRST" == */.npm-global/bin/hapi ]]; then
+    DIRTY=1
+    report "PATH resolves hapi to npm-global first: $FIRST"
+fi
+if [[ -n "$FIRST" && "$FIRST" == */node_modules/.bin/hapi ]]; then
+    # Cannot safely delete cwd node_modules bins; flag for agents.
+    WARN=1
+    report "WARN — PATH resolves hapi to node_modules/.bin (published shim): $FIRST"
+    report "WARN — use ~/.local/bin/hapi, hapi-from-active, or hapi-spawn-peer (absolute)"
+fi
 
 if [[ "$MODE" == check ]]; then
-    if [[ "$DIRTY" -eq 0 ]]; then
+    if [[ "$DIRTY" -eq 0 && "$WARN" -eq 0 ]]; then
         report "OK — no stale bun/npm global hapi; first=$(command -v hapi 2>/dev/null || echo none)"
+        exit 0
+    fi
+    if [[ "$DIRTY" -eq 0 && "$WARN" -ne 0 ]]; then
+        report "WARN-only — globals clean; node_modules/.bin shadows soup (use absolute path)"
         exit 0
     fi
     report "DIRTY — re-run without --check (or --clean) to remove"

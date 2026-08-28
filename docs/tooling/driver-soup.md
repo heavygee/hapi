@@ -318,8 +318,9 @@ Pre-push hook blocks `web/src/garden/**` on upstream-PR-bound refs — Garden is
 | `hapi-driver-db-prep <target>` | Backup DB + auto-downgrade schema to match `<target>`'s SCHEMA_VERSION; called automatically by `hapi-use-worktree` |
 | `hapi-driver-status [--json\|--quiet\|--watch]` | Read coordination state — is a rebuild/switch in flight, when did the last one finish, how many WORKING sessions right now |
 | `hapi-runner-from-active` | systemd helper — runner CLI from `hapi-active/cli` (**soup / rebuild-only**; ignores Upgrade binaries) |
-| `hapi-from-active` → `~/.local/bin/hapi` | Interactive soup CLI on PATH (`hapi ping-peer`, etc.). Beats stale `~/.bun/bin/hapi` npm global. Install: `install-hapi-local-bin.sh` |
-| `hapi-cli-path-hygiene` | Removes bun/npm global `@twsxtd/hapi` shadows that lack `job`/`ping-peer` (Peer #7 2026-08-09). `--check` / `--clean`. Run on soup hosts after bootstrap. |
+| `hapi-from-active` → `~/.local/bin/hapi` | Interactive soup CLI on PATH (`hapi ping-peer`, etc.). Beats stale `~/.bun/bin/hapi` npm global. Install: `install-hapi-local-bin.sh`. **Inside a HAPI checkout**, cwd `node_modules/.bin` often still wins — invoke this path **absolutely** for `spawn-peer` / `job` / `ping-peer`. |
+| `hapi-cli-path-hygiene` | Removes bun/npm global `@twsxtd/hapi` shadows that lack `job`/`ping-peer` (Peer #7 2026-08-09). Also **warns** when `command -v hapi` is `node_modules/.bin` (Arthur scout 2026-08-28). `--check` / `--clean`. Run on soup hosts after bootstrap. |
+| `hapi-spawn-peer` | Peer spawn + remit. Supports `--model` / `--effort`. Prefer over bare `hapi spawn-peer` when PATH may be npm-shimmed. |
 | `hapi-ping-peer` | Peer nudge / handoff. Prefers soup `hapi ping-peer`; bash fallback if soup CLI missing. **Not** ad-hoc `bun run src/index.ts` |
 | `hapi-sessions-health.sh` | Session monitor |
 
