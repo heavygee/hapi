@@ -498,6 +498,13 @@ export const AttachedJobPatchSchema = z.object({
 
 export type AttachedJobPatch = z.infer<typeof AttachedJobPatchSchema>
 
+// monotonic per-session emit watermark (not primary.updatedAt — primary
+// switches can go backwards). Lagged heartbeats cannot resurrect a clear.
+const VersionedAttachedJobPatchSchema = z.object({
+    version: z.number(),
+    value: AttachedJobSchema.nullable()
+})
+
 export const SessionPatchSchema = z.object({
     active: z.boolean().optional(),
     thinking: z.boolean().optional(),
@@ -534,8 +541,8 @@ export const SessionPatchSchema = z.object({
     // tiann/hapi#1404 — session-attached long-running jobs. Unlike
     // scratchlist (watermark → refetch), the list row needs the progress
     // payload inline, so patches carry the primary running job (or null
-    // when cleared / none remain).
-    attachedJob: AttachedJobSchema.nullable().optional()
+    // payload inline. Versioned like todos so dual-SSE reorder is safe.
+    attachedJob: VersionedAttachedJobPatchSchema.optional()
 }).strict()
 
 export type SessionPatch = z.infer<typeof SessionPatchSchema>

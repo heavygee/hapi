@@ -77,7 +77,7 @@ describe('SyncEngine.archiveSession RpcTargetMissingError fallback', () => {
         ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
             async (machineId: string, sid: string) => {
                 calledWith = [machineId, sid]
-                return 'already_gone'
+                return 'stopped'
             }
 
         await engine.archiveSession(sessionId)
@@ -90,6 +90,7 @@ describe('SyncEngine.archiveSession RpcTargetMissingError fallback', () => {
 
     it('falls back to archiving when the session has no known machine to verify against', async () => {
         const sessionId = insertActiveSession('sess-no-machine')
+        cache().handleSessionEnd({ sid: sessionId, time: Date.now() })
         setKillSessionMissingTarget()
         let stopRunnerSessionCalled = false
         ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
@@ -109,6 +110,7 @@ describe('SyncEngine.archiveSession RpcTargetMissingError fallback', () => {
         // for. There is no runner to ask, so "already gone" is the right
         // guess.
         const sessionId = insertActiveSession('sess-machine-unreachable', 'machine-x')
+        cache().handleSessionEnd({ sid: sessionId, time: Date.now() })
         setKillSessionMissingTarget()
         ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
             async () => { throw new RpcTargetMissingError('StopSession', 'handler-not-registered') }

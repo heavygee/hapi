@@ -164,7 +164,7 @@ describe('TitleSuggestionService', () => {
 
     it('reports unavailable configuration and enforces the per-session request limit', async () => {
         const { store, sessionId } = makeStore()
-        const unavailable = createTitleSuggestionService(store)
+        const unavailable = new TitleSuggestionService(store)
         await expect(unavailable.suggestTitle(sessionId)).rejects.toMatchObject({
             code: 'unavailable',
             status: 503

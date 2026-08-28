@@ -53,7 +53,10 @@ vi.mock('@/components/settings/EventsDebugControls', () => ({ EventsDebugControl
 vi.mock('@/components/settings/InboxDebugControls', () => ({ InboxDebugControls: () => null }))
 vi.mock('@/components/settings/OverseerChatDebugControls', () => ({ OverseerChatDebugControls: () => null }))
 
-vi.mock('@hapi/protocol', () => ({ PROTOCOL_VERSION: 1 }))
+vi.mock('@hapi/protocol', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('@hapi/protocol')>()
+    return { ...actual, PROTOCOL_VERSION: 1 }
+})
 
 vi.mock('@/lib/app-context', () => ({
     useAppContext: () => ({ api: null, token: context.token }),

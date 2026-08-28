@@ -85,6 +85,7 @@ export class SessionCache {
     private readonly deduplicatePending: Set<string> = new Set()
     private readonly pendingThinkingUntilBySessionId: Map<string, number> = new Map()
     private readonly runtimeConfigUpdatedAtBySessionId: Map<string, Partial<Record<RuntimeConfigKey, number>>> = new Map()
+    private readonly attachedJobEmitVersionBySessionId: Map<string, number> = new Map()
 
     constructor(
         private readonly store: Store,
@@ -670,11 +671,15 @@ export class SessionCache {
         const namespace = cached?.namespace
             ?? this.store.sessions.getSession(sessionId)?.namespace
         if (!namespace) return
+        const version = (this.attachedJobEmitVersionBySessionId.get(sessionId) ?? 0) + 1
+        this.attachedJobEmitVersionBySessionId.set(sessionId, version)
         this.publisher.emit({
             type: 'session-updated',
             sessionId,
             namespace,
-            data: { attachedJob } satisfies SessionPatch
+            data: {
+                attachedJob: { version, value: attachedJob }
+            } satisfies SessionPatch
         })
     }
 
