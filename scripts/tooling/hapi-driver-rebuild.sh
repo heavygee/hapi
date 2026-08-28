@@ -481,6 +481,17 @@ if [[ "$VERIFY" -eq 1 ]]; then
         remat_rollback_live_tip "typecheck failed"
         exit 1
     fi
+    EXCISED="$PRIMARY/scripts/tooling/hapi-soup-excised-check.mjs"
+    if [[ -f "$EXCISED" ]]; then
+        # Guards the "dropped layer, code still present" class: a layer is
+        # dropped to excise code, but other active layers re-carry it, so the
+        # drop silently achieves nothing (#1473 fortress, 2026-08-17 -> 08-27).
+        echo "Checking soup excision registry (dropped code not re-carried)..."
+        if ! "$BUN" run "$EXCISED"; then
+            remat_rollback_live_tip "soup excision check failed"
+            exit 1
+        fi
+    fi
     HOTFILES="$PRIMARY/scripts/tooling/hapi-soup-hotfiles-check.mjs"
     if [[ -f "$HOTFILES" ]]; then
         echo "Checking soup hot-file consistency (syncEngine vs rpcGateway)..."

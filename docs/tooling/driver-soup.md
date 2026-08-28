@@ -222,6 +222,44 @@ Fork `main` = **`upstream/main` + fork-only docs/plans**. After upstream merges:
 
 ---
 
+## Excision registry — dropping a layer does not remove the code
+
+**A dropped manifest layer does NOT remove code that other layers happen to re-carry.**
+
+Soup layers are cut from an integration tip, so a branch inherits whatever was in the tree when it
+was created — including code that has nothing to do with its own feature. Drop the layer that
+"owns" some code and it can still arrive via any number of unrelated fat layers, on every rebuild,
+silently.
+
+**The instance this came from (2026-08-17 → 2026-08-27):** `feat/a2a-p05-peer-provenance` was
+dropped to excise the rejected #1473 capability stack. Seven other active layers — kitchen-status,
+operator-dock, doctor-provenance, fleet-runner-upgrade, overseer-brain-active,
+cursor-notify-rule-delta, invalid-argument-bridge-gate — each carried
+`hub/src/web/peerCapability.ts` inside their own diffs. The drop was correct and achieved nothing.
+Operator canon said soft-nametag while the running hub enforced a session-id-bound HMAC for ten more
+days; it only surfaced when attributed peer messaging began failing 403 for sessions whose id had
+rotated (ids rotate often — see `sync/sessionCache.ts` merge-and-replace).
+
+**The guard:** record the excision in [`config/soup-excised.yaml`](../../config/soup-excised.yaml).
+`scripts/tooling/hapi-soup-excised-check.mjs` runs from `hapi-driver-rebuild --verify` and fails the
+rebuild if any **active** manifest layer still carries an excised path or symbol, naming the layers.
+
+```bash
+# what the rebuild runs
+bun run scripts/tooling/hapi-soup-excised-check.mjs
+# ad-hoc, without touching the registry
+bun run scripts/tooling/hapi-soup-excised-check.mjs --path hub/src/web/peerCapability.ts
+bun run scripts/tooling/hapi-soup-excised-check.mjs --symbol verifyPeerSessionCapability
+bun run scripts/tooling/hapi-soup-excised-check.mjs --json
+```
+
+Commented-out manifest lines are treated as inactive (that is the "already dropped" case), so a
+layer you have commented out will not be reported. Use `allow:` on a registry entry for the
+branch that legitimately reintroduces something — e.g. the replacement implementation.
+
+**When you excise something, add it to the registry in the same change.** Otherwise the next fat
+layer quietly puts it back and nobody finds out until behaviour contradicts the docs.
+
 ## PR formulation worktrees (clean upstream PRs)
 
 **Never** file upstream PRs from `~/coding/hapi/driver`. Work in dedicated worktrees.
