@@ -337,8 +337,8 @@ export class ApiMachineClient {
                 if (!parsed.success) return { success: false, error: 'Invalid Claude sessions request' }
                 const rawCwd = typeof parsed.data.cwd === 'string' ? parsed.data.cwd.trim() : ''
                 if (rawCwd) {
-                    const resolvedCwd = await this.resolveForWorkspaceCheck(rawCwd)
-                    if (!this.isWithinWorkspaceRoots(resolvedCwd)) {
+                    const resolvedCwd = await this.pathPolicy.resolveForCheck(rawCwd)
+                    if (!this.pathPolicy.isWithinSpawnRoots(resolvedCwd)) {
                         return { success: false, error: 'Path is outside workspace roots' }
                     }
                 }
@@ -350,7 +350,7 @@ export class ApiMachineClient {
                     : listLocalClaudeSessionSummaries()
                 const sessions = []
                 for (const session of allSessions) {
-                    if (await this.isSessionCwdWithinWorkspaceRoots(session.cwd)) {
+                    if (await this.isLocalSessionWithinWorkspaceRoots(session)) {
                         sessions.push(session)
                     }
                 }
@@ -376,7 +376,7 @@ export class ApiMachineClient {
                     : listLocalPiSessionSummaries()
                 const sessions = []
                 for (const session of allSessions) {
-                    if (await this.isSessionCwdWithinWorkspaceRoots(session.cwd)) sessions.push(session)
+                    if (await this.isLocalSessionWithinWorkspaceRoots(session)) sessions.push(session)
                 }
                 return { success: true, sessions }
             }
@@ -397,7 +397,7 @@ export class ApiMachineClient {
                 })
                 const sessions = []
                 for (const session of allSessions) {
-                    if (await this.isSessionCwdWithinWorkspaceRoots(session.workspacePath)) {
+                    if (await this.isLocalSessionWithinWorkspaceRoots({ cwd: session.workspacePath })) {
                         sessions.push(session)
                     }
                 }
@@ -423,8 +423,8 @@ export class ApiMachineClient {
                 }
                 const workspacePath = typeof parsed.data.workspacePath === 'string' ? parsed.data.workspacePath.trim() : ''
                 if (workspacePath) {
-                    const resolvedCwd = await this.resolveForWorkspaceCheck(workspacePath)
-                    if (!this.isWithinWorkspaceRoots(resolvedCwd)) {
+                    const resolvedCwd = await this.pathPolicy.resolveForCheck(workspacePath)
+                    if (!this.pathPolicy.isWithinSpawnRoots(resolvedCwd)) {
                         return {
                             success: false,
                             uuid: parsed.data.uuid,
