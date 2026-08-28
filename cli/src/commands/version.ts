@@ -9,9 +9,6 @@ import type { CommandDefinition } from './types'
 
 const HUB_LOOKUP_MS = 2_000
 
-/** Narrower than `typeof fetch` so tests avoid Bun-specific `fetch.preconnect`. */
-export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>
-
 export function currentCliExecutable(): string {
     if (process.env.HAPI_CLI_EXECUTABLE) {
         return process.env.HAPI_CLI_EXECUTABLE
@@ -25,7 +22,7 @@ export function currentCliExecutable(): string {
 export async function fetchHubTargetGeneration(deps: {
     apiUrl?: string
     accessToken?: string
-    fetchImpl?: FetchLike
+    fetchImpl?: typeof fetch
     timeoutMs?: number
 } = {}): Promise<string | null> {
     const fetchImpl = deps.fetchImpl ?? fetch

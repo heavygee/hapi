@@ -86,10 +86,6 @@ import { ingestNotifySummaryFromMessage } from './workGraphNotifyIngest'
 import { armResumePeerMint, clearResumePeerMint } from '../web/pendingResumePeerMint'
 import { buildProvenanceDiagnostics } from './provenanceDiagnostics'
 import type { ProvenanceDiagnostics } from '@hapi/protocol/provenanceDiagnostics'
-import {
-    defaultProvenanceMessageScanOptions,
-    type ProvenanceMessageScanOptions,
-} from '@hapi/protocol/provenanceMessageAudit'
 
 type PiResumeAttempt = NonNullable<NonNullable<Session['metadata']>['piResumeAttempt']>
 type PtyResumeAttempt = NonNullable<NonNullable<Session['metadata']>['ptyResumeAttempt']>
@@ -491,24 +487,12 @@ export class SyncEngine {
         return this.machineCache.getOnlineMachinesByNamespace(namespace)
     }
 
-    getProvenanceDiagnostics(
-        namespace: string,
-        options?: { messageScan?: ProvenanceMessageScanOptions | false }
-    ): ProvenanceDiagnostics {
-        const scanOptions = options?.messageScan === false
-            ? null
-            : (options?.messageScan ?? defaultProvenanceMessageScanOptions())
-        const messageAudit = scanOptions
-            ? this.store.scanUnverifiedPeerMessages(namespace, scanOptions)
-            : null
-
+    getProvenanceDiagnostics(namespace: string): ProvenanceDiagnostics {
         return buildProvenanceDiagnostics({
             sessions: this.getSessionsByNamespace(namespace),
             machines: this.getOnlineMachinesByNamespace(namespace),
             getStoredMachine: (machineId) => this.store.machines.getMachineByNamespace(machineId, namespace),
             hasLiveRpcHandler: (method) => this.rpcGateway.hasLiveHandler(method),
-            unverifiedPeerMessages: messageAudit?.rows,
-            messageScan: messageAudit?.meta ?? null,
         })
     }
 

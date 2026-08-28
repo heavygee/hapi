@@ -56,11 +56,7 @@ function registerSkewedRunner(
 describe('SyncEngine fleet upgrade startup sweep', () => {
     it('does nothing when fleet policy is not auto', async () => {
         const { engine } = makeEngine({ policy: 'alert' })
-        const upgrade = mock(async () => ({
-            type: 'success' as const,
-            message: 'ok',
-            response: { status: 'started' as const, message: 'ok' },
-        }))
+        const upgrade = mock(async () => ({ type: 'success' as const, message: 'ok', response: { status: 'started' as const } }))
         engine.upgradeMachineRunner = upgrade
 
         try {
@@ -77,11 +73,7 @@ describe('SyncEngine fleet upgrade startup sweep', () => {
         const upgraded: string[] = []
         engine.upgradeMachineRunner = mock(async (machineId: string) => {
             upgraded.push(machineId)
-            return {
-                type: 'success' as const,
-                message: 'ok',
-                response: { status: 'started' as const, message: 'ok' },
-            }
+            return { type: 'success', message: 'ok', response: { status: 'started' } }
         })
 
         try {
@@ -106,11 +98,7 @@ describe('SyncEngine fleet upgrade startup sweep', () => {
         const upgraded: string[] = []
         engine.upgradeMachineRunner = mock(async (machineId: string) => {
             upgraded.push(machineId)
-            return {
-                type: 'success' as const,
-                message: 'ok',
-                response: { status: 'started' as const, message: 'ok' },
-            }
+            return { type: 'success', message: 'ok', response: { status: 'started' } }
         })
 
         try {
@@ -141,7 +129,7 @@ describe('SyncEngine fleet upgrade startup sweep', () => {
         const upgraded: string[] = []
         engine.upgradeMachineRunner = mock(async (machineId: string) => {
             upgraded.push(machineId)
-            return { type: 'success' as const, message: 'ok', response: { status: 'started' as const, message: 'ok' } }
+            return { type: 'success', message: 'ok', response: { status: 'started' } }
         })
         const maybeUpgrade = (engine as unknown as {
             maybeFleetUpgradeMachine(id: string): Promise<void>
