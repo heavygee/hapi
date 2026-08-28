@@ -876,3 +876,9 @@ layers:
   # Tip: 26c1615ae
   - branch: fix/archive-verify-runner-before-marking-gone
 
+  # tiann/hapi#1618 — soft peer nametag (#1203 Layer 0.1). Replaces rejected
+  # #1473 fortress; CLI path attribution via HAPI_SESSION_ID + peer-messages.
+  # Worktree: ~/coding/hapi/worktrees/driver-remat @ driver/a2a-nametag-attribution
+  # Tip: c99b8393f
+  - branch: driver/a2a-nametag-attribution
+
