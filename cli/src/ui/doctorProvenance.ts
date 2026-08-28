@@ -87,14 +87,6 @@ export async function fetchProvenanceDiagnostics(
     return await res.json() as ProvenanceDiagnostics
 }
 
-/** Strip C0/C1 controls so stored peer/session labels cannot hijack the TTY (#1473). */
-export function safeTerminalText(value: string): string {
-    return Array.from(value, (char) => {
-        const code = char.charCodeAt(0)
-        return code < 0x20 || (code >= 0x7f && code <= 0x9f) ? ' ' : char
-    }).join('')
-}
-
 function formatIssues(issues: ProvenanceIssueCode[]): string {
     if (issues.length === 0) {
         return chalk.green('ok')
@@ -103,42 +95,42 @@ function formatIssues(issues: ProvenanceIssueCode[]): string {
 }
 
 function formatSessionRow(row: SessionProvenanceRow): string {
-    const label = safeTerminalText(row.name ?? row.sessionId.slice(0, 8))
+    const label = row.name ?? row.sessionId.slice(0, 8)
     const pid = row.hostPid !== null ? ` pid=${row.hostPid}` : ''
-    const machine = row.machineId ? ` machine=${safeTerminalText(row.machineId).slice(0, 8)}` : ''
-    const lifecycle = row.lifecycleState ? ` lifecycle=${safeTerminalText(row.lifecycleState)}` : ''
+    const machine = row.machineId ? ` machine=${row.machineId.slice(0, 8)}` : ''
+    const lifecycle = row.lifecycleState ? ` lifecycle=${row.lifecycleState}` : ''
     const kill = row.hasKillSessionRpc ? chalk.green('killSession') : chalk.red('no-kill')
     const active = row.active ? chalk.yellow('active') : chalk.gray('idle')
     return [
         `  ${active} ${chalk.cyan(label)}`,
-        `    id=${safeTerminalText(row.sessionId)}`,
-        `    flavor=${safeTerminalText(row.flavor ?? '(unknown)')}${machine}${pid}${lifecycle}`,
+        `    id=${row.sessionId}`,
+        `    flavor=${row.flavor ?? '(unknown)'}${machine}${pid}${lifecycle}`,
         `  rpc=${kill}  ${formatIssues(row.issues)}`,
     ].join('\n')
 }
 
 function formatMachineRow(row: MachineProvenanceRow): string {
-    const label = safeTerminalText(row.displayName ?? row.host ?? row.machineId.slice(0, 8))
+    const label = row.displayName ?? row.host ?? row.machineId.slice(0, 8)
     const spawn = row.hasSpawnRpc ? chalk.green('spawn') : chalk.red('no-spawn')
     const proof = row.hasRunnerProof ? chalk.green('proof') : chalk.red('no-proof')
-    const version = row.happyCliVersion ? ` cli=${safeTerminalText(row.happyCliVersion)}` : ''
+    const version = row.happyCliVersion ? ` cli=${row.happyCliVersion}` : ''
     return [
-        `  ${chalk.blue(label)} (${safeTerminalText(row.machineId).slice(0, 8)})`,
-        `    host=${safeTerminalText(row.host ?? '(unknown)')}${version}`,
+        `  ${chalk.blue(label)} (${row.machineId.slice(0, 8)})`,
+        `    host=${row.host ?? '(unknown)'}${version}`,
         `  rpc=${spawn} proof=${proof}  ${formatIssues(row.issues)}`,
     ].join('\n')
 }
 
 function formatUnverifiedMessageRow(row: UnverifiedPeerMessageRow): string {
-    const sessionLabel = safeTerminalText(row.sessionName ?? row.sessionId.slice(0, 8))
+    const sessionLabel = row.sessionName ?? row.sessionId.slice(0, 8)
     const claimed = row.claimedPeerHeaderInText ? chalk.yellow(' prose-From:') : ''
     const preview = row.textPreview
-        ? ` "${safeTerminalText(row.textPreview)}"`
+        ? ` "${row.textPreview}"`
         : ''
     return [
         `  ${chalk.yellow('peer?')} ${chalk.cyan(sessionLabel)} seq=${row.seq}`,
-        `    session=${safeTerminalText(row.sessionId)}`,
-        `    message=${safeTerminalText(row.messageId)}${claimed}`,
+        `    session=${row.sessionId}`,
+        `    message=${row.messageId}${claimed}`,
         `    ${preview}`,
     ].join('\n')
 }

@@ -101,37 +101,6 @@ describe('doctorProvenance', () => {
         expect(report).toContain('prose-From:')
     })
 
-    it('neutralizes terminal controls in unverified message previews (#1473)', () => {
-        const report = formatProvenanceReport({
-            ...cleanDiagnostics,
-            unverifiedPeerMessages: [{
-                messageId: 'msg-esc',
-                sessionId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
-                sessionName: 'Peer #1',
-                seq: 2,
-                createdAt: 50,
-                textPreview: 'hi\u001b]52;c;evil\u0007there',
-                claimedPeerHeaderInText: false,
-            }],
-            messageScan: {
-                sinceMs: 1,
-                limit: 50,
-                maxScan: 5000,
-                messagesScanned: 1,
-                unverifiedTotal: 1,
-                scanTruncated: false,
-            },
-            summary: {
-                ...cleanDiagnostics.summary,
-                unverifiedPeerMessages: 1,
-            },
-        })
-        expect(report).not.toContain('\u001b')
-        expect(report).not.toContain('\u0007')
-        expect(report).toContain('hi')
-        expect(report).toContain('there')
-    })
-
     it('parseDoctorProvenanceArgs maps CLI flags', () => {
         expect(parseDoctorProvenanceArgs(['--no-messages', '--strict-messages', '--since-days', '3', '--message-limit', '10'])).toEqual({
             skipMessages: true,

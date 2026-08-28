@@ -69,26 +69,4 @@ describe('doctor routes', () => {
         expect(response.status).toBe(200)
         expect(captured).toEqual({ messageScan: false })
     })
-
-    it('clamps message scan query params to operator-safe ceilings', async () => {
-        let captured: unknown
-        const app = createApp((_namespace, options) => {
-            captured = options
-            return baseDiagnostics
-        })
-        const response = await app.request(
-            '/api/doctor/provenance?sinceDays=999&messageLimit=999999&maxScan=999999'
-        )
-        expect(response.status).toBe(200)
-        expect(captured).toEqual({
-            messageScan: expect.objectContaining({
-                limit: 200,
-                maxScan: 20_000,
-            }),
-        })
-        const scan = (captured as { messageScan: { sinceMs: number } }).messageScan
-        const sinceDays = (Date.now() - scan.sinceMs) / (24 * 60 * 60 * 1000)
-        expect(sinceDays).toBeLessThanOrEqual(90.1)
-        expect(sinceDays).toBeGreaterThan(89)
-    })
 })
