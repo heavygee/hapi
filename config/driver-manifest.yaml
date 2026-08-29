@@ -890,3 +890,10 @@ layers:
   # Tip: c99b8393f
   - branch: driver/a2a-nametag-attribution
 
+  # tiann/hapi#1203 — durable agentSessionId find-key for ping-peer / MCP ping_peer.
+  # Resolves by agentSessionId (exact/prefix/substring), POSTs to current hub id.
+  # Fork PR: heavygee/hapi#137 (feat/ping-peer-agent-session-id still OPEN for upstream prep).
+  # Thin tip on live soup (union with #1618 nametag). Worktree: ping-peer-1203.
+  # Tip: 93cae0af5 — re-thin after dogfood bump if tip-forward SKIP.
+  - branch: driver/ping-peer-agent-session-id
+
