@@ -779,3 +779,28 @@ landed when it had been since Aug 28. That second mistake was also latent **insi
 shipped yesterday**, which defaulted to the legacy manifest — a guard that could report green while
 the manifest actually used for rebuilds was contaminated. Fixed in `7ac66a563`. First error today
 that shipped into tooling rather than just into a message.
+
+**2026-08-29 — positive example worth recording (this log skews toward failures).**
+
+Peer #1594 produced the evidence report this stand-in has been trying to extract from agents all
+week, unprompted:
+- Split **proven / mocked / not-done** into three explicit buckets rather than collapsing them into
+  "tests pass" (2872/2872 green, 9 dedicated `useHoldToTalk` tests with real `fireEvent` touch
+  sequences — but every dictation path mocks `getUserMedia`/`MediaRecorder`/transcription HTTP).
+- **Invalidated its own prior evidence**: volunteered that the earlier Playwright run used the same
+  mocks and therefore does not transfer to the reworked gesture. Agents almost never retract their
+  own proof.
+- Named the specific limit of the mocks — release-timing under real touch latency clipping the last
+  word or leaving a stray gap — rather than hedging generically.
+- Declined to call it verified despite green gates that would have carried the claim.
+
+Separately it hit a tip-forward conflict, diagnosed it precisely (4 files, all trivial "take mine"),
+and **did not resolve it in a worktree it does not own** — escalated to the owner with exact recovery
+commands, explicitly citing the earlier remat-hold incident as the reason. Second time in two days
+it declined to push through something outside its lane, and the first time it named a past mistake
+as the cause.
+
+Recorded because the failure modes in this log are easy to enumerate and the good behaviour is not,
+yet the good behaviour is what the process is for. Also worth the contrast: on the same day, this
+stand-in made seven unverified assertions, one of which shipped into a guard that read the wrong
+manifest and could have reported false green.
