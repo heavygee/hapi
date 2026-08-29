@@ -130,6 +130,20 @@ export type MachineTrailsOptions = {
     ignoreGenerationDrift?: boolean
 }
 
+export function inferMachineArch(platform: string | null | undefined): string | undefined {
+    if (!platform) {
+        return undefined
+    }
+    switch (platform) {
+        case 'linux':
+        case 'win32':
+        case 'darwin':
+            return 'x64'
+        default:
+            return undefined
+    }
+}
+
 /**
  * True when a runner advertising `version`/`capabilities`/`generation` is behind
  * `offer` and the hub should auto-nudge it to the hub's generation.

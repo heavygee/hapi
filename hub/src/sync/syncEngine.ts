@@ -15,6 +15,7 @@ import {
 } from '@hapi/protocol/runnerCapabilities'
 import {
     DEFAULT_FLEET_UPGRADE_POLICY,
+    inferMachineArch,
     machineTrailsUpgradeOffer,
     type FleetUpgradePolicy,
     type HubUpgradeOffer,
@@ -1626,7 +1627,7 @@ export class SyncEngine {
                 return { type: 'error', message: 'Artifact builder not configured', code: 'upgrade_unavailable' }
             }
             const platform = machine.metadata?.platform
-            const arch = machine.metadata?.arch
+            const arch = machine.metadata?.arch ?? inferMachineArch(platform)
             if (!platform || !arch) {
                 return {
                     type: 'error',

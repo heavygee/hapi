@@ -6,6 +6,8 @@ import { ApiClient } from '@/api/api'
 import type { ApiSessionClient } from '@/api/apiSession'
 import type { AgentState, MachineMetadata, Metadata, Session } from '@/api/types'
 import { getInstalledCliMtimeMs, notifyRunnerSessionStarted } from '@/runner/controlClient'
+import { isVersionHandoffDisabledByEnv } from '@/runner/versionHandoff'
+import { durableTargetGeneration, readUpgradeTarget } from '@/upgrade/upgradeTarget'
 import { readSettings } from '@/persistence'
 import { configuration } from '@/configuration'
 import { logger } from '@/ui/logger'
@@ -52,14 +54,15 @@ export function buildMachineMetadata(options?: {
      * (#1108 bot Major).
      */
     asRunner?: boolean
+    /** Snapshot from runner start; defaults to live env when omitted. */
     versionHandoffDisabled?: boolean
-    cliArtifactGeneration?: string
 }): MachineMetadata {
     const installedCliMtimeMs = getInstalledCliMtimeMs()
     const startedCliMtimeMs = options?.startedCliMtimeMs ?? installedCliMtimeMs
     const base: MachineMetadata = {
         host: process.env.HAPI_HOSTNAME || os.hostname(),
         platform: os.platform(),
+        arch: process.arch,
         happyCliVersion: packageJson.version,
         homeDir: os.homedir(),
         happyHomeDir: configuration.happyHomeDir,
@@ -69,15 +72,16 @@ export function buildMachineMetadata(options?: {
     if (!options?.asRunner) {
         return base
     }
+    const cliArtifactGeneration = durableTargetGeneration(readUpgradeTarget()) ?? undefined
     return {
         ...base,
         capabilities: [...CURRENT_MACHINE_CAPABILITIES],
         ...(typeof startedCliMtimeMs === 'number' ? { startedCliMtimeMs } : {}),
         ...(typeof installedCliMtimeMs === 'number' ? { installedCliMtimeMs } : {}),
+        ...(cliArtifactGeneration ? { cliArtifactGeneration } : {}),
+        versionHandoffDisabled: options?.versionHandoffDisabled ?? isVersionHandoffDisabledByEnv(),
         // Always boolean so hub merge can clear a prior true on unsupervised restart.
         supervisedRestart: process.env.HAPI_RUNNER_SUPERVISED === '1',
-        ...(options?.versionHandoffDisabled === true ? { versionHandoffDisabled: true } : {}),
-        ...(options?.cliArtifactGeneration ? { cliArtifactGeneration: options.cliArtifactGeneration } : {}),
     }
 }
 
