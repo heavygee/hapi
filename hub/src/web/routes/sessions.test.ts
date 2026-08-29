@@ -1564,4 +1564,84 @@ describe('sessions routes', () => {
         expect(body.sessions.map((s) => s.id)).toEqual(['new-inactive'])
     })
 
+    it('GET /sessions/search matches name/path/agentSessionId beyond recency order', async () => {
+        const sessions = [
+            createSession({
+                id: 'hot-unrelated',
+                active: true,
+                updatedAt: 1000,
+                metadata: { name: 'busy peer', path: '/tmp/a', host: 'localhost', flavor: 'codex', codexSessionId: 'cx-hot' }
+            }),
+            createSession({
+                id: 'quiet-hetzner',
+                active: false,
+                updatedAt: 10,
+                metadata: {
+                    name: 'Arthur Scout deploy (hetzner)',
+                    path: '/tmp/old',
+                    host: 'localhost',
+                    flavor: 'cursor',
+                    cursorSessionId: 'cur-quiet'
+                }
+            }),
+            createSession({
+                id: 'path-hit',
+                active: false,
+                updatedAt: 20,
+                metadata: {
+                    name: 'other',
+                    path: '/work/coding/hetzner-box',
+                    host: 'localhost',
+                    flavor: 'cursor',
+                    cursorSessionId: 'cur-path'
+                }
+            })
+        ]
+        const engine = {
+            getSessionsByNamespace: () => sessions,
+            getFutureScheduledMessageCounts: (ids: string[]) => new Map(ids.map((id) => [id, 0])),
+            getNextScheduledAtBySessionIds: (_ids: string[]) => new Map<string, number>(),
+            resolveSessionAccess: () => ({ ok: false, reason: 'not-found' as const })
+        } as unknown as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createSessionsRoutes(() => engine as SyncEngine))
+
+        const missing = await app.request('/api/sessions/search')
+        expect(missing.status).toBe(400)
+
+        const response = await app.request('/api/sessions/search?q=hetzner&limit=10')
+        expect(response.status).toBe(200)
+        const body = await response.json() as { sessions: Array<{ id: string }>; q: string }
+        expect(body.q).toBe('hetzner')
+        // Name match ranks above path; quiet session still found despite low updatedAt.
+        expect(body.sessions.map((s) => s.id)).toEqual(['quiet-hetzner', 'path-hit'])
+        expect(body.sessions.map((s) => s.id)).not.toContain('hot-unrelated')
+    })
+
+    it('GET /sessions/search is not captured by /sessions/:id', async () => {
+        const engine = {
+            getSessionsByNamespace: () => [],
+            getFutureScheduledMessageCounts: () => new Map(),
+            getNextScheduledAtBySessionIds: () => new Map(),
+            resolveSessionAccess: () => ({ ok: false, reason: 'not-found' as const })
+        } as unknown as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createSessionsRoutes(() => engine as SyncEngine))
+
+        const response = await app.request('/api/sessions/search?q=anything')
+        expect(response.status).toBe(200)
+        const body = await response.json() as { sessions: unknown[] }
+        expect(body.sessions).toEqual([])
+    })
+
 })

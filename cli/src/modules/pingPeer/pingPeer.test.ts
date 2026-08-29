@@ -672,3 +672,56 @@ describe('listSessions query params', () => {
         expect(pingParams[0]).toBeUndefined()
     })
 })
+
+describe('searchPeerSessions', () => {
+    it('GETs /api/sessions/search with q + limit', async () => {
+        const { searchPeerSessions } = await import('./pingPeer')
+        let captured: { url?: string; params?: Record<string, unknown> } = {}
+        const http = createHttpMock({
+            post: (url) => {
+                if (url.endsWith('/api/auth')) {
+                    return { status: 200, data: { token: 'jwt' } }
+                }
+                throw new Error(`unexpected POST ${url}`)
+            },
+            get: (url, config) => {
+                captured = { url, params: config?.params }
+                if (url.endsWith('/api/sessions/search')) {
+                    return {
+                        status: 200,
+                        data: {
+                            sessions: [{
+                                id: '08461427-9b0e-48c2-82cc-cbb5fad1c148',
+                                active: false,
+                                updatedAt: 10,
+                                metadata: { name: 'Arthur Scout deploy (hetzner)', path: '/tmp', flavor: 'cursor' }
+                            }],
+                            q: 'hetzner'
+                        }
+                    }
+                }
+                throw new Error(`unexpected GET ${url}`)
+            }
+        })
+        const sessions = await searchPeerSessions({
+            query: 'hetzner',
+            limit: 15,
+            apiUrl: 'http://hub.test',
+            accessToken: 'tok',
+            http: http as never
+        })
+        expect(captured.url).toBe('http://hub.test/api/sessions/search')
+        expect(captured.params).toEqual({ q: 'hetzner', limit: 15 })
+        expect(sessions).toHaveLength(1)
+        expect(sessions[0]!.id).toMatch(/^08461427/)
+    })
+
+    it('rejects empty query', async () => {
+        const { searchPeerSessions, PingPeerError } = await import('./pingPeer')
+        await expect(searchPeerSessions({
+            query: '   ',
+            apiUrl: 'http://hub.test',
+            accessToken: 'tok'
+        })).rejects.toBeInstanceOf(PingPeerError)
+    })
+})

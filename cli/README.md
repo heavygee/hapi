@@ -37,7 +37,8 @@ Run Claude Code, Codex, Cursor Agent, Grok Build, OpenCode, or DeepSeek Harness 
 - `hapi dsh` - Start DeepSeek Harness through ACP. See `src/dsh/runDsh.ts`.
   DSH is remote-only and its ACP server must be configured separately.
 - `hapi resume [sessionId]` - List resumable sessions for this machine or resume one locally.
-- `hapi ping-peer <session-id-prefix> <message>` - Resume (if needed) and message another session. Prefer this or MCP `ping_peer` / `list_peers` over reinventing JWT+curl. Also `--message-file` / `--list`.
+- `hapi ping-peer <session-id-prefix> <message>` - Resume (if needed) and message another session. Prefer this or MCP `ping_peer` / `list_peers` / `search_peers` over reinventing JWT+curl. Also `--message-file` / `--list`.
+- `hapi search-peers <query>` - Keyword search for sessions (name/path/agentSessionId) beyond `list_peers` recency. Prefer MCP `search_peers` in-session.
 - `hapi inspect-peer <session-id-or-prefix>` - Read-only peer metadata + recent message text (no resume). Prefer this or MCP `inspect_peer` when a user cites `[title](/sessions/<id>)` or Copy-reference `See session "…" (/sessions/<id>) for context`. `/sessions/<id>` is a hub path, not a local file. Optional `--limit`.
 
 ### Resume a remote session locally
