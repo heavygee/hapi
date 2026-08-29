@@ -147,18 +147,124 @@ describe('useHoldToTalk', () => {
         expect(onHoldEnd).toHaveBeenCalledOnce()
     })
 
-    it('fires onTap for a mouse click and never engages the hold gesture', () => {
+    it('fires onTap for keyboard/assistive activation (click with no mousedown/up pair)', () => {
         const onHoldStart = vi.fn()
         const onHoldEnd = vi.fn()
         const onTap = vi.fn()
         const { getByTestId } = render(<Probe onHoldStart={onHoldStart} onHoldEnd={onHoldEnd} onTap={onTap} />)
         const button = getByTestId('talk')
 
-        fireEvent.click(button)
+        fireEvent.click(button, { detail: 0 })
 
         expect(onTap).toHaveBeenCalledOnce()
         expect(onHoldStart).not.toHaveBeenCalled()
         expect(onHoldEnd).not.toHaveBeenCalled()
+    })
+
+    it('ignores a synthesized click that follows a real mouse press — no double onTap', () => {
+        // A genuine mouse click always fires `click` (detail >= 1) right after
+        // mouseup; the tap/hold decision is already made by the mousedown+
+        // mouseup pair, so onClick must not also fire onTap for it.
+        const onHoldStart = vi.fn()
+        const onHoldEnd = vi.fn()
+        const onTap = vi.fn()
+        const { getByTestId } = render(<Probe onHoldStart={onHoldStart} onHoldEnd={onHoldEnd} onTap={onTap} />)
+        const button = getByTestId('talk')
+
+        fireEvent.mouseDown(button, { button: 0, clientX: 10, clientY: 10 })
+        act(() => {
+            vi.advanceTimersByTime(200)
+        })
+        fireEvent.mouseUp(button, { button: 0, clientX: 10, clientY: 10 })
+        fireEvent.click(button, { detail: 1 })
+
+        expect(onTap).toHaveBeenCalledOnce()
+    })
+
+    it('starts and stops dictation on a mouse press-and-hold, same as touch', () => {
+        const onHoldStart = vi.fn()
+        const onHoldEnd = vi.fn()
+        const onTap = vi.fn()
+        const { getByTestId } = render(<Probe onHoldStart={onHoldStart} onHoldEnd={onHoldEnd} onTap={onTap} />)
+        const button = getByTestId('talk')
+
+        fireEvent.mouseDown(button, { button: 0, clientX: 10, clientY: 10 })
+        expect(onHoldStart).not.toHaveBeenCalled()
+        act(() => {
+            vi.advanceTimersByTime(500)
+        })
+        expect(onHoldStart).toHaveBeenCalledOnce()
+
+        fireEvent.mouseUp(button, { button: 0, clientX: 10, clientY: 10 })
+
+        expect(onHoldEnd).toHaveBeenCalledOnce()
+        expect(onTap).not.toHaveBeenCalled()
+    })
+
+    it('ignores non-left mouse buttons (right/middle click)', () => {
+        const onHoldStart = vi.fn()
+        const { getByTestId } = render(<Probe onHoldStart={onHoldStart} onHoldEnd={vi.fn()} onTap={vi.fn()} />)
+        const button = getByTestId('talk')
+
+        fireEvent.mouseDown(button, { button: 2, clientX: 10, clientY: 10 })
+        act(() => {
+            vi.advanceTimersByTime(500)
+        })
+
+        expect(onHoldStart).not.toHaveBeenCalled()
+    })
+
+    it('ends the hold when the mouse leaves the button — mouseup outside would otherwise never arrive', () => {
+        const onHoldStart = vi.fn()
+        const onHoldEnd = vi.fn()
+        const onTap = vi.fn()
+        const { getByTestId } = render(<Probe onHoldStart={onHoldStart} onHoldEnd={onHoldEnd} onTap={onTap} />)
+        const button = getByTestId('talk')
+
+        fireEvent.mouseDown(button, { button: 0, clientX: 10, clientY: 10 })
+        act(() => {
+            vi.advanceTimersByTime(500)
+        })
+        expect(onHoldStart).toHaveBeenCalledOnce()
+
+        fireEvent.mouseLeave(button)
+
+        expect(onHoldEnd).toHaveBeenCalledOnce()
+        expect(onTap).not.toHaveBeenCalled()
+    })
+
+    it('cancels a pending mouse press on mouseleave before the threshold — not a tap', () => {
+        const onHoldStart = vi.fn()
+        const onTap = vi.fn()
+        const { getByTestId } = render(<Probe onHoldStart={onHoldStart} onHoldEnd={vi.fn()} onTap={onTap} />)
+        const button = getByTestId('talk')
+
+        fireEvent.mouseDown(button, { button: 0, clientX: 10, clientY: 10 })
+        fireEvent.mouseLeave(button)
+        act(() => {
+            vi.advanceTimersByTime(500)
+        })
+
+        expect(onHoldStart).not.toHaveBeenCalled()
+        expect(onTap).not.toHaveBeenCalled()
+    })
+
+    it('suppresses the ghost mousedown/mouseup that follows a real touch tap', () => {
+        const onHoldStart = vi.fn()
+        const onTap = vi.fn()
+        const { getByTestId } = render(<Probe onHoldStart={onHoldStart} onHoldEnd={vi.fn()} onTap={onTap} />)
+        const button = getByTestId('talk')
+
+        fireEvent.touchStart(button, { touches: [{ clientX: 10, clientY: 10 }] })
+        fireEvent.touchEnd(button, { changedTouches: [{ clientX: 10, clientY: 10 }] })
+        expect(onTap).toHaveBeenCalledOnce()
+
+        // Browser-synthesized compatibility mouse events for the same tap.
+        fireEvent.mouseDown(button, { button: 0, clientX: 10, clientY: 10 })
+        fireEvent.mouseUp(button, { button: 0, clientX: 10, clientY: 10 })
+
+        expect(onTap).toHaveBeenCalledOnce()
+        expect(onHoldStart).not.toHaveBeenCalled()
     })
 
     it('cleans up the pending threshold timer on unmount', () => {

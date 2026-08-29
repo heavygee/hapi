@@ -711,6 +711,14 @@ function SessionDateRangePicker(props: {
     )
 }
 
+// On-device speech recognition (notably Android's) appends sentence-ending
+// punctuation the user never said — "Jessica" comes back as "Jessica." — which
+// then fails to substring-match anything. A search query is never a sentence,
+// so trailing `.`/`!`/`?` from dictation is always noise, not intent.
+function stripDictationTrailingPunctuation(text: string): string {
+    return text.replace(/[.!?]+\s*$/, '')
+}
+
 export function SessionListSearch(props: {
     value: string
     onChange: (value: string) => void
@@ -814,12 +822,15 @@ export function SessionListSearch(props: {
     const getCurrentValue = useCallback(() => valueRef.current, [])
 
     const voiceInput = useVoiceInputPreferences(props.api)
+    const onDictationTextChange = useCallback((text: string) => {
+        props.onChange(stripDictationTrailingPunctuation(text))
+    }, [props.onChange])
     const dictation = useDictation({
         api: props.api,
         provider: voiceInput.provider,
         mode: voiceInput.transcriptionMode,
         getCurrentText: getCurrentValue,
-        onTextChange: props.onChange
+        onTextChange: onDictationTextChange
     })
     const dictationListening = dictation.status === 'connecting' || dictation.status === 'connected'
     // Only true while a hold we actually started with dictation is still live —
