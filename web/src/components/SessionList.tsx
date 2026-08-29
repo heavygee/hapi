@@ -860,7 +860,12 @@ export function SessionListSearch(props: {
         const collapsedLabel = dictationListening
             ? t('sessions.search.dictationActive')
             : hasTextQuery ? `${searchLabel}: ${props.value}` : searchLabel
-        const showsChip = hasTextQuery || dictationListening
+        // Deliberately excludes dictationListening: resizing the button mid-hold
+        // (e.g. from a small round icon to a wider chip) reflows its bounding
+        // box under a still-pressed mouse cursor, firing a spurious mouseleave
+        // that stops the recording almost as soon as it starts. The chip only
+        // grows for an existing query, which is stable before the hold begins.
+        const showsChip = hasTextQuery
         return (
             <div className="relative flex items-center gap-1">
                 <div className={cn(
@@ -888,11 +893,11 @@ export function SessionListSearch(props: {
                         ) : (
                             <SearchIcon className="h-5 w-5 shrink-0" />
                         )}
-                        {hasTextQuery && !dictationListening ? (
+                        {hasTextQuery ? (
                             <span className="min-w-0 truncate text-xs font-medium">{props.value}</span>
                         ) : null}
                     </button>
-                    {hasTextQuery && !dictationListening ? (
+                    {hasTextQuery ? (
                         <button
                             type="button"
                             onClick={() => {

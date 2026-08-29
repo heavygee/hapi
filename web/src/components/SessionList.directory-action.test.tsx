@@ -1222,6 +1222,94 @@ describe('SessionList search toggle', () => {
         await waitFor(() => expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDER)).toHaveValue('dictated words'))
     })
 
+    it('does not resize or hide sibling content on the collapsed chip while a hold is recording', async () => {
+        // Regression for a real bug: the chip used to grow/shrink and hide its
+        // label + clear button while dictationListening was true. On desktop,
+        // resizing the pressed button's own bounding box under a still-held
+        // mouse cursor fires a spurious mouseleave — which this hook treats as
+        // a release — stopping the recording almost as soon as it started (no
+        // transcript ever applied). The fix keeps the collapsed chip's size
+        // and sibling content keyed only on whether there's an existing query,
+        // never on dictationListening. jsdom can't reproduce real hit-testing,
+        // so this test pins the JSX-level invariant instead: nothing the mouse
+        // could be resting over may disappear or resize while listening.
+        Object.defineProperty(navigator, 'mediaDevices', {
+            configurable: true,
+            value: { getUserMedia: vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })) }
+        })
+
+        class MockMediaRecorder {
+            static isTypeSupported() { return true }
+            state: RecordingState = 'inactive'
+            mimeType = 'audio/webm'
+            ondataavailable: ((event: BlobEvent) => void) | null = null
+            onerror: (() => void) | null = null
+            onstop: (() => void) | null = null
+            start() { this.state = 'recording' }
+            stop() {
+                this.state = 'inactive'
+                this.ondataavailable?.({ data: new Blob(['audio'], { type: this.mimeType }) } as BlobEvent)
+                this.onstop?.()
+            }
+        }
+        vi.stubGlobal('MediaRecorder', MockMediaRecorder)
+
+        const fetchTranscriptionProviders = vi.fn(async () => ({
+            providers: [{ id: 'openai', label: 'OpenAI', modes: ['standard'] }]
+        }))
+        const transcribeVoice = vi.fn(async () => ({ text: 'more words' }))
+        const api = { fetchTranscriptionProviders, transcribeVoice }
+
+        const sessions = [
+            makeSession({
+                id: 'session-jelly',
+                updatedAt: 100,
+                metadata: { path: '/work/hapi', name: 'jellybot task', flavor: 'codex' },
+            }),
+        ]
+
+        renderWithProviders(
+            <SessionList
+                sessions={sessions}
+                selectedSessionId={null}
+                onSelect={vi.fn()}
+                onNewSession={vi.fn()}
+                onRefresh={vi.fn()}
+                isLoading={false}
+                renderHeader={false}
+                api={api as unknown as ApiClient}
+            />
+        )
+
+        await waitFor(() => expect(fetchTranscriptionProviders).toHaveBeenCalled())
+
+        // Seed an existing query first (expand, type, collapse via blur).
+        fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
+        const input = screen.getByPlaceholderText(SEARCH_PLACEHOLDER)
+        fireEvent.change(input, { target: { value: 'jellybot' } })
+        fireEvent.blur(input)
+
+        const collapsed = screen.getByRole('button', { name: /Search sessions.*jellybot/ })
+        const clearButton = screen.getByRole('button', { name: 'Clear search' })
+
+        vi.useFakeTimers()
+        fireEvent.mouseDown(collapsed, { button: 0, clientX: 10, clientY: 10 })
+        act(() => {
+            vi.advanceTimersByTime(500)
+        })
+        vi.useRealTimers()
+        await waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalled())
+
+        // Still holding, still collapsed — the clear button and existing query
+        // text must still be exactly where they were before the hold started.
+        expect(clearButton).toBeInTheDocument()
+        expect(collapsed).toHaveTextContent('jellybot')
+
+        fireEvent.mouseUp(collapsed, { button: 0, clientX: 10, clientY: 10 })
+        expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDER)).toBeInTheDocument()
+        await waitFor(() => expect(transcribeVoice).toHaveBeenCalled())
+    })
+
     it('strips trailing sentence punctuation dictation adds — "Jessica." must still match "Jessica"', async () => {
         // On-device speech recognition (notably Android's) appends a trailing
         // period to a single dictated word. A stray "." breaks substring
