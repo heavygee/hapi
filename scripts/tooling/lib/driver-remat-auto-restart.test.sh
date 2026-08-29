@@ -46,6 +46,29 @@ if driver_remat_touched_hub_cli_shared "$tmpdir" "$base" "$base"; then
     exit 1
 fi
 
+mkdir -p "$tmpdir/hub/src/store"
+cat >"$tmpdir/hub/src/store/index.ts" <<'EOF'
+const SCHEMA_VERSION: number = 28
+EOF
+git -C "$tmpdir" add hub/src/store/index.ts
+git -C "$tmpdir" commit -q -m "schema-28"
+schema28="$(git -C "$tmpdir" rev-parse HEAD)"
+
+echo 'const SCHEMA_VERSION: number = 29' >"$tmpdir/hub/src/store/index.ts"
+git -C "$tmpdir" add hub/src/store/index.ts
+git -C "$tmpdir" commit -q -m "schema-29"
+schema29="$(git -C "$tmpdir" rev-parse HEAD)"
+
+if ! driver_remat_hub_schema_bumped "$tmpdir" "$schema28" "$schema29"; then
+    echo "FAIL: expected schema bump detected" >&2
+    exit 1
+fi
+
+if driver_remat_needs_hub_restart "$tmpdir" "$schema29" "$schema29"; then
+    echo "FAIL: identical SHAs without live DB should not need restart" >&2
+    exit 1
+fi
+
 export HAPI_DRIVER_NO_RESTART=1
 if driver_remat_auto_restart_hub "$tmpdir" "$base" "$hub_tip"; then
     echo "OK: opt-out skips restart"
