@@ -230,7 +230,62 @@ describe('SyncEngine fleet upgrade', () => {
         }
     })
 
-    it('refuses hub-artifact upgrade when machine arch is missing', async () => {
+    it('infers x64 for legacy runners missing metadata.arch on win32', async () => {
+        const offer: HubUpgradeOffer = {
+            channel: 'hub-artifact',
+            targetVersion: '0.24.0',
+            targetCapabilities: ['cursor-chat-store-status'],
+        }
+        const store = new Store(':memory:')
+        const prepareArtifactOffer = mock(async (base: HubUpgradeOffer, platform: string, arch: string) => ({
+            ...base,
+            artifact: {
+                url: '/cli/upgrade/cli-artifact',
+                sha256: 'abc',
+                platform,
+                arch,
+                sizeBytes: 10,
+            },
+        }))
+        const registry = new RpcRegistry()
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            registry,
+            { broadcast() {} } as never,
+            { getUpgradeOffer: () => offer, prepareArtifactOffer },
+        )
+
+        try {
+            const runnerSelfUpgrade = mock(async () => ({
+                status: 'started',
+                message: 'ok',
+                channel: 'hub-artifact',
+            }))
+            ;(engine as any).rpcGateway.runnerSelfUpgrade = runnerSelfUpgrade
+
+            engine.getOrCreateMachine(
+                'no-arch',
+                {
+                    host: 'teemo',
+                    platform: 'win32',
+                    happyCliVersion: '0.20.0',
+                    capabilities: ['runner-self-upgrade'],
+                },
+                null,
+                'default',
+            )
+            registerLiveSelfUpgrade(registry, 'no-arch')
+            engine.handleMachineAlive({ machineId: 'no-arch', time: Date.now() })
+            const result = await engine.upgradeMachineRunner('no-arch', 'default')
+            expect(result.type).toBe('success')
+            expect(prepareArtifactOffer).toHaveBeenCalledWith(offer, 'win32', 'x64')
+        } finally {
+            engine.stop()
+        }
+    })
+
+    it('refuses hub-artifact upgrade when platform/arch cannot be resolved', async () => {
         const offer: HubUpgradeOffer = {
             channel: 'hub-artifact',
             targetVersion: '0.24.0',
@@ -251,8 +306,8 @@ describe('SyncEngine fleet upgrade', () => {
             engine.getOrCreateMachine(
                 'no-arch',
                 {
-                    host: 'teemo',
-                    platform: 'win32',
+                    host: 'exotic',
+                    platform: 'freebsd',
                     happyCliVersion: '0.20.0',
                     capabilities: ['runner-self-upgrade'],
                 },
