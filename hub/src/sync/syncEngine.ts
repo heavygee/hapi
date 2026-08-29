@@ -7,7 +7,7 @@
  * - No E2E encryption; data is stored as JSON in SQLite
  */
 
-import { isKnownFlavor, isSteeringSupportedForSession, type LocalResumeTarget, type ResumableSession, type SessionEndReason } from '@hapi/protocol'
+import { BLOCKED_NOTIFY_STALE_MS, isKnownFlavor, isSteeringSupportedForSession, type LocalResumeTarget, type ResumableSession, type SessionEndReason } from '@hapi/protocol'
 import {
     cliBinaryUpdatedOnDisk,
     isMachineCapabilitySkewed,
@@ -83,7 +83,6 @@ import { extractAssistantPlainText } from '@hapi/protocol/messages'
 import type { InboxOperatorAction } from '@hapi/protocol'
 import type { ListSystemEventsOptions, StoredSystemEvent, InsertSystemEventInput } from '../store'
 import type { ListInboxItemsOptions, StoredInboxItem } from '../store/inboxItems'
-import { ingestNotifySummaryFromMessage } from './workGraphNotifyIngest'
 import { armResumePeerMint, clearResumePeerMint } from '../web/pendingResumePeerMint'
 import { buildProvenanceDiagnostics } from './provenanceDiagnostics'
 import type { ProvenanceDiagnostics } from '@hapi/protocol/provenanceDiagnostics'
@@ -91,6 +90,11 @@ import {
     defaultProvenanceMessageScanOptions,
     type ProvenanceMessageScanOptions,
 } from '@hapi/protocol/provenanceMessageAudit'
+import { extractSessionNotifySignal, ingestNotifySummaryFromMessage } from './workGraphNotifyIngest'
+
+/** Startup notify backfill bounds (#1717) — see `backfillRecentNotifySignals`. */
+const NOTIFY_BACKFILL_MAX_SESSIONS = 200
+const NOTIFY_BACKFILL_MESSAGE_SCAN = 6
 
 type PiResumeAttempt = NonNullable<NonNullable<Session['metadata']>['piResumeAttempt']>
 type PtyResumeAttempt = NonNullable<NonNullable<Session['metadata']>['ptyResumeAttempt']>
@@ -354,6 +358,46 @@ export class SyncEngine {
 
     getSessions(): Session[] {
         return this.sessionCache.getSessions()
+    }
+
+    /**
+     * One-shot startup backfill for the blocked session-list chrome (#1717).
+     *
+     * `lastNotify` is normally stamped as messages arrive, so a hub upgraded
+     * mid-flight would show nothing until every agent speaks again. Rather than
+     * rescan every session's history (600+ sessions x 200 messages), only look
+     * at sessions that moved inside the staleness window the UI actually
+     * renders loudly — anything older would be drawn muted anyway.
+     *
+     * Sessions with no footer in their last few messages are rescanned on each
+     * restart. That is accepted: the candidate set is already bounded by both
+     * the 24h window and `NOTIFY_BACKFILL_MAX_SESSIONS`, and a "we looked and
+     * found nothing" marker would be more state than the scan costs.
+     */
+    backfillRecentNotifySignals(options: { now?: number; maxSessions?: number } = {}): number {
+        const now = options.now ?? Date.now()
+        const maxSessions = options.maxSessions ?? NOTIFY_BACKFILL_MAX_SESSIONS
+        const candidates = this.sessionCache.getSessions()
+            .filter((session) => !session.lastNotify
+                && now - session.updatedAt <= BLOCKED_NOTIFY_STALE_MS)
+            .sort((a, b) => b.updatedAt - a.updatedAt)
+            .slice(0, maxSessions)
+
+        let stamped = 0
+        for (const session of candidates) {
+            const messages = this.store.messages.getMessages(session.id, NOTIFY_BACKFILL_MESSAGE_SCAN)
+            // Newest first: the most recent footer is the session's current
+            // self-report, and older ones have already been superseded.
+            for (let index = messages.length - 1; index >= 0; index -= 1) {
+                const message = messages[index]!
+                const signal = extractSessionNotifySignal(message.content, message.createdAt)
+                if (!signal) continue
+                this.sessionCache.setSessionLastNotify(session.id, signal)
+                stamped += 1
+                break
+            }
+        }
+        return stamped
     }
 
     private resolveOnlineMachineForSession(
@@ -643,6 +687,17 @@ export class SyncEngine {
             // Capture is independent of chat display settings (#1462/#1464).
             const session = this.getSession(event.sessionId)
             if (session) {
+                // #1717: stamp the footer onto the session first, so the
+                // blocked session-list chrome is not hostage to work-graph
+                // validation bounds failing on the same message.
+                const notifySignal = extractSessionNotifySignal(
+                    event.message.content,
+                    event.message.createdAt
+                )
+                if (notifySignal) {
+                    this.sessionCache.setSessionLastNotify(session.id, notifySignal)
+                }
+
                 try {
                     ingestNotifySummaryFromMessage({
                         store: this.store,

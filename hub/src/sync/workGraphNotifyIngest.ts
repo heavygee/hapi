@@ -4,8 +4,12 @@ import {
     WORK_GRAPH_MAX_TAGS,
     extractAssistantPlainText,
     extractNotifySummary,
+    isBlockedNotifyStatus,
+    normalizeNotifyStatus,
+    pickNotifyNote,
     unwrapRoleWrappedRecordEnvelope,
     type NotifySummary,
+    type SessionNotifySignal,
     type WorkGraphEvent,
     type WorkGraphEventCreate
 } from '@hapi/protocol'
@@ -447,6 +451,50 @@ export function buildWorkAdFromNotify(params: {
  * Ledger rows are append-only audit: deleting the related session does not
  * delete work_ad rows (cold review M1).
  */
+/**
+ * Parse an agent message down to the compact signal the session list renders
+ * (#1717 blocked chrome).
+ *
+ * Shares the agent-message gating and footer extraction with the work-graph
+ * ingest below so both surfaces agree on what counts as a footer — the list
+ * must never light up on something the ledger ignored, or vice versa.
+ *
+ * `note` is only carried for blocked statuses: it exists to give the row
+ * tooltip something actionable, and storing it for every `done` footer would
+ * grow the /sessions payload for nothing.
+ */
+export function extractSessionNotifySignal(
+    content: unknown,
+    ts: number
+): SessionNotifySignal | null {
+    if (!isAgentMessageContent(content)) {
+        return null
+    }
+
+    const agentBody = unwrapRoleWrappedRecordEnvelope(content)
+    const agentContent = agentBody?.role === 'agent' ? agentBody.content : content
+    const plainText = extractAssistantPlainText(agentContent)
+    if (!plainText) {
+        return null
+    }
+
+    const notify = extractNotifySummary(plainText)
+    if (!notify) {
+        return null
+    }
+
+    const status = normalizeNotifyStatus(notify.status)
+    if (!status) {
+        return null
+    }
+
+    return {
+        status,
+        at: ts,
+        note: isBlockedNotifyStatus(status) ? pickNotifyNote(notify) : null
+    }
+}
+
 export function ingestNotifySummaryFromMessage(input: NotifyIngestInput): NotifyIngestResult {
     if (!isAgentMessageContent(input.content)) {
         return null
