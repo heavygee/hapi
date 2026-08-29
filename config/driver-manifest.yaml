@@ -897,3 +897,13 @@ layers:
   # Tip: 93cae0af5 — re-thin after dogfood bump if tip-forward SKIP.
   - branch: driver/ping-peer-agent-session-id
 
+
+  # tiann/hapi#1717 — loud blocked session-list chrome + off-viewport counter.
+  # Blocked section / rail+chip / header jump pill + blocked-only lens, fed by a
+  # hub-persisted last AGENT_NOTIFY_SUMMARY footer (sessions.last_notify_*).
+  # Upstream-aimed thin tip: feat/blocked-list-ux-1717 (schema v25->v26).
+  # Union needed: soup already claimed v26/27/28, so this tip renumbers the
+  # migration to v28->v29 and resolves SessionList against pinInProgressMode.
+  # Worktree: /work/coding/hapi/worktrees/blocked-list-ux-soup
+  # Tip: d05e8ad21
+  - branch: driver/blocked-list-ux
