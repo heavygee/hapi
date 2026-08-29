@@ -56,7 +56,7 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 34
+const SCHEMA_VERSION: number = 35
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -397,6 +397,7 @@ export class Store {
             31: () => this.migrateFromV31ToV32(),
             32: () => this.migrateFromV32ToV33(),
             33: () => this.migrateFromV33ToV34(),
+            34: () => this.migrateFromV34ToV35(),
         })
 
         if (currentVersion === 0) {
@@ -484,6 +485,9 @@ export class Store {
                 team_state_updated_at INTEGER,
                 pinned INTEGER NOT NULL DEFAULT 0,
                 global_pinned INTEGER NOT NULL DEFAULT 0,
+                last_notify_status TEXT,
+                last_notify_at INTEGER,
+                last_notify_note TEXT,
                 active INTEGER DEFAULT 0,
                 active_at INTEGER,
                 seq INTEGER DEFAULT 0
@@ -1257,6 +1261,23 @@ export class Store {
     private migrateFromV30ToV31(): void {
         createMessageContentSearchTable(this.db)
         if (this.getMessageColumnNames().size > 0) rebuildMessageContentSearch(this.db)
+    }
+
+    /** Blocked-agent session-list chrome (#1717): persist the last
+     *  AGENT_NOTIFY_SUMMARY footer so the list can flag stuck agents without
+     *  re-reading messages. */
+    private migrateFromV34ToV35(): void {
+        const columns = this.getSessionColumnNames()
+        if (columns.size === 0) return
+        if (!columns.has('last_notify_status')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN last_notify_status TEXT')
+        }
+        if (!columns.has('last_notify_at')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN last_notify_at INTEGER')
+        }
+        if (!columns.has('last_notify_note')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN last_notify_note TEXT')
+        }
     }
 
     private getSessionColumnNames(): Set<string> {
