@@ -75,6 +75,7 @@ export default {
   'sessions.search.open': 'Search sessions (title, path, Agent, machine name, ID, and more)',
   'sessions.search.clear': 'Clear search',
   'sessions.search.dictationStop': 'Stop dictation',
+  'sessions.search.dictationActive': 'Listening…',
   'sessions.search.noResults': 'No sessions match your filters.',
   'sessions.unreadFilter.toggle': 'Unread only',
   'sessions.kitchenStatus.label': 'Kitchen hygiene needs attention',

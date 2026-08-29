@@ -1183,7 +1183,7 @@ describe('SessionList search toggle', () => {
         expect(screen.getByRole('button', { name: /Other task/ })).toBeInTheDocument()
     })
 
-    it('expands the field on long press without clearing the query when dictation is unconfigured', () => {
+    it('holding and releasing without a configured provider just expands, without clearing the query', () => {
         const sessions = [
             makeSession({
                 id: 'session-jelly',
@@ -1221,18 +1221,19 @@ describe('SessionList search toggle', () => {
         act(() => {
             vi.advanceTimersByTime(500)
         })
+        // No dictation provider is configured (api is null), so the hold has
+        // nowhere to dial in — releasing must never fall back to a clear/dismiss.
+        expect(screen.queryByPlaceholderText(SEARCH_PLACEHOLDER)).toBeNull()
         fireEvent.touchEnd(collapsed, { changedTouches: [{ clientX: 10, clientY: 10 }] })
         vi.useRealTimers()
 
-        // No dictation provider is configured (api is null), so the long press has
-        // nowhere to dial in — but it must never fall back to the old dismiss behavior.
         // The query — and its filtering — stays intact.
         expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDER)).toHaveValue('jellybot')
         expect(screen.getByRole('button', { name: /jellybot task/ })).toBeInTheDocument()
         expect(screen.queryByRole('button', { name: /Other task/ })).toBeNull()
     })
 
-    it('starts dictation into the query on long press and appends the transcript on stop', async () => {
+    it('records only while held and applies the transcript on release — no separate stop step', async () => {
         const stopTrack = vi.fn()
         Object.defineProperty(navigator, 'mediaDevices', {
             configurable: true,
@@ -1284,7 +1285,7 @@ describe('SessionList search toggle', () => {
 
         await waitFor(() => expect(fetchTranscriptionProviders).toHaveBeenCalled())
 
-        // Long-pressing works whether or not there is already a query — the old
+        // Holding works whether or not there is already a query — the old
         // `longPressEnabled: hasTextQuery` gating no longer applies.
         const collapsed = screen.getByRole('button', { name: SEARCH_LABEL })
         vi.useFakeTimers()
@@ -1292,17 +1293,71 @@ describe('SessionList search toggle', () => {
         act(() => {
             vi.advanceTimersByTime(500)
         })
+        // Real timers before any `waitFor` — its internal polling uses
+        // setTimeout too, which fake timers would intercept and never fire,
+        // hanging the test forever. The threshold has already fired above.
+        vi.useRealTimers()
+
+        // Still holding: recording has started, but the field stays collapsed —
+        // there is no "mode" to see until release applies the result.
+        await waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalled())
+        expect(screen.queryByPlaceholderText(SEARCH_PLACEHOLDER)).toBeNull()
+        expect(screen.queryByRole('button', { name: 'Stop dictation' })).toBeNull()
+        expect(screen.getByRole('button', { name: 'Listening…' })).toBeInTheDocument()
+
+        fireEvent.touchEnd(collapsed, { changedTouches: [{ clientX: 10, clientY: 10 }] })
+
+        expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDER)).toBeInTheDocument()
+        await waitFor(() => expect(transcribeVoice).toHaveBeenCalled())
+        await waitFor(() => expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDER)).toHaveValue('dictated words'))
+    })
+
+    it('a very short hold that never reaches the threshold is treated as a tap, not a stray recording', async () => {
+        const fetchTranscriptionProviders = vi.fn(async () => ({
+            providers: [{ id: 'openai', label: 'OpenAI', modes: ['standard'] }]
+        }))
+        const getUserMedia = vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] }))
+        Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia } })
+        // Dictation must be fully supported here — proves the short hold never
+        // starts recording because of the threshold timing, not because
+        // dictation happened to be unavailable for some other reason.
+        vi.stubGlobal('MediaRecorder', class { static isTypeSupported() { return true } })
+        const api = { fetchTranscriptionProviders }
+
+        const sessions = [
+            makeSession({
+                id: 'session-jelly',
+                updatedAt: 100,
+                metadata: { path: '/work/hapi', name: 'jellybot task', flavor: 'codex' },
+            }),
+        ]
+
+        renderWithProviders(
+            <SessionList
+                sessions={sessions}
+                selectedSessionId={null}
+                onSelect={vi.fn()}
+                onNewSession={vi.fn()}
+                onRefresh={vi.fn()}
+                isLoading={false}
+                renderHeader={false}
+                api={api as unknown as ApiClient}
+            />
+        )
+
+        await waitFor(() => expect(fetchTranscriptionProviders).toHaveBeenCalled())
+
+        const collapsed = screen.getByRole('button', { name: SEARCH_LABEL })
+        vi.useFakeTimers()
+        fireEvent.touchStart(collapsed, { touches: [{ clientX: 10, clientY: 10 }] })
+        act(() => {
+            vi.advanceTimersByTime(200)
+        })
         fireEvent.touchEnd(collapsed, { changedTouches: [{ clientX: 10, clientY: 10 }] })
         vi.useRealTimers()
 
         expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDER)).toBeInTheDocument()
-        await waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalled())
-
-        const stopButton = await screen.findByRole('button', { name: 'Stop dictation' })
-        fireEvent.click(stopButton)
-
-        await waitFor(() => expect(transcribeVoice).toHaveBeenCalled())
-        await waitFor(() => expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDER)).toHaveValue('dictated words'))
+        expect(getUserMedia).not.toHaveBeenCalled()
     })
 
     it('short tap still expands to normal text search', () => {

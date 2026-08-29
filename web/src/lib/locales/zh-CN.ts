@@ -75,6 +75,7 @@ export default {
   'sessions.search.open': '搜索会话（支持标题、路径、Agent、机器名、ID 等信息）',
   'sessions.search.clear': '清除搜索',
   'sessions.search.dictationStop': '停止语音输入',
+  'sessions.search.dictationActive': '正在聆听…',
   'sessions.search.noResults': '没有符合筛选条件的会话。',
   'sessions.unreadFilter.toggle': '仅显示未读',
   'sessions.kitchenStatus.label': '厨房卫生需要注意',

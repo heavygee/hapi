@@ -3,6 +3,7 @@ import type { SessionSummary } from '@/types/api'
 import { isWildcardSearch, matchesSearchQuery } from '@hapi/protocol'
 import type { ApiClient } from '@/api/client'
 import { useLongPress } from '@/hooks/useLongPress'
+import { useHoldToTalk } from '@/hooks/useHoldToTalk'
 import { useDictation } from '@/hooks/useDictation'
 import { useVoiceInputPreferences } from '@/hooks/useVoiceInputPreferences'
 import { usePlatform } from '@/hooks/usePlatform'
@@ -967,25 +968,39 @@ export function SessionListSearch(props: {
         onTextChange: props.onChange
     })
     const dictationListening = dictation.status === 'connecting' || dictation.status === 'connected'
+    // Only true while a hold we actually started with dictation is still live —
+    // guards the hold-end handler so releasing a hold that never started
+    // dictation (unconfigured provider) does not call toggle() at all.
+    const dictationHoldActiveRef = useRef(false)
 
-    const startDictation = useCallback(() => {
-        props.onExpandedChange(true)
-        if (dictation.supported) void dictation.toggle()
-    }, [dictation, props.onExpandedChange])
-
-    const collapsedSearchHandlers = useLongPress({
-        onLongPress: startDictation,
-        onClick: () => props.onExpandedChange(true),
-        interaction: 'touch-only-native-click',
+    const holdToTalkHandlers = useHoldToTalk({
+        onHoldStart: () => {
+            if (!dictation.supported) return
+            dictationHoldActiveRef.current = true
+            void dictation.toggle()
+        },
+        onHoldEnd: () => {
+            // Release is both the stop and the apply — reveal the field with
+            // whatever the transcript resolves to, no separate confirm step.
+            props.onExpandedChange(true)
+            if (dictationHoldActiveRef.current) {
+                dictationHoldActiveRef.current = false
+                void dictation.toggle()
+            }
+        },
+        onTap: () => props.onExpandedChange(true),
     })
 
     if (!props.expanded) {
-        const collapsedLabel = hasTextQuery ? `${searchLabel}: ${props.value}` : searchLabel
+        const collapsedLabel = dictationListening
+            ? t('sessions.search.dictationActive')
+            : hasTextQuery ? `${searchLabel}: ${props.value}` : searchLabel
+        const showsChip = hasTextQuery || dictationListening
         return (
             <div className="relative flex items-center gap-1">
                 <div className={cn(
                     'relative flex min-w-0 items-center rounded-full transition-colors',
-                    hasTextQuery
+                    showsChip
                         // Keep the query and its clear action inside the same compact chip.
                         ? 'max-w-[9rem] bg-[var(--app-chat-user-chip-bg)] text-[var(--app-chat-user-chip-fg)]'
                         : 'shrink-0'
@@ -993,22 +1008,26 @@ export function SessionListSearch(props: {
                     <button
                         ref={collapsedButtonRef}
                         type="button"
-                        {...collapsedSearchHandlers}
+                        {...holdToTalkHandlers}
                         className={cn(
                             'relative flex min-w-0 items-center gap-1 transition-colors',
-                            hasTextQuery
+                            showsChip
                                 ? 'flex-1 rounded-l-full bg-[var(--app-chat-user-chip-bg)] px-2 py-1 text-[var(--app-chat-user-chip-fg)] hover:opacity-90'
                                 : 'shrink-0 rounded-full p-1.5 text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
                         )}
                         title={collapsedLabel}
                         aria-label={collapsedLabel}
                     >
-                        <SearchIcon className="h-5 w-5 shrink-0" />
-                        {hasTextQuery ? (
+                        {dictationListening ? (
+                            <span className="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-[#007AFF]" aria-hidden="true" />
+                        ) : (
+                            <SearchIcon className="h-5 w-5 shrink-0" />
+                        )}
+                        {hasTextQuery && !dictationListening ? (
                             <span className="min-w-0 truncate text-xs font-medium">{props.value}</span>
                         ) : null}
                     </button>
-                    {hasTextQuery ? (
+                    {hasTextQuery && !dictationListening ? (
                         <button
                             type="button"
                             onClick={() => {
@@ -1034,8 +1053,8 @@ export function SessionListSearch(props: {
         <div
             className="relative min-w-0 flex-1"
             onBlur={(event) => {
-                // Losing focus while dictation is live must not collapse the field out
-                // from under an in-progress recording — the mic keeps listening hands-free.
+                // Losing focus while a hold's transcript is still being applied
+                // must not collapse the field out from under it.
                 if (dictationListening) return
                 if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
                     props.onExpandedChange(false)
@@ -1043,15 +1062,14 @@ export function SessionListSearch(props: {
             }}
         >
             {dictationListening ? (
-                <button
-                    type="button"
-                    onClick={() => void dictation.toggle()}
+                <div
+                    role="status"
+                    aria-live="polite"
                     className="absolute inset-y-0 left-2.5 flex items-center text-[#007AFF]"
-                    title={t('sessions.search.dictationStop')}
-                    aria-label={t('sessions.search.dictationStop')}
                 >
                     <span className="h-2 w-2 animate-pulse rounded-full bg-[#007AFF]" />
-                </button>
+                    <span className="sr-only">{t('sessions.search.dictationActive')}</span>
+                </div>
             ) : (
                 <div className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center text-[var(--app-hint)]">
                     <SearchIcon className="h-3.5 w-3.5" />
