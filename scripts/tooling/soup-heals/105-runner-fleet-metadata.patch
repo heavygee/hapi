@@ -1,0 +1,1851 @@
+diff --git a/cli/src/agent/sessionFactory.test.ts b/cli/src/agent/sessionFactory.test.ts
+index fb50342e7..ef8e0fd07 100644
+--- a/cli/src/agent/sessionFactory.test.ts
++++ b/cli/src/agent/sessionFactory.test.ts
+@@ -59,6 +59,10 @@ import {
+     buildMachineMetadata,
+     buildSessionMetadata
+ } from './sessionFactory'
++import {
++    armDirectResumeCapability,
++    takeDirectResumeCapability,
++} from '@/api/peerCapabilityInject'
+ 
+ function createSession(): Session {
+     return {
+@@ -91,6 +95,15 @@ function createSession(): Session {
+     }
+ }
+ 
++function mockInjectReadySessionClient() {
++    const sessionClient = {
++        updateMetadata: vi.fn(),
++        waitForPeerSessionCapability: vi.fn(async () => 'injected-cap'),
++    }
++    sessionSyncClientMock.mockReturnValue(sessionClient)
++    return sessionClient
++}
++
+ describe('bootstrapExistingSession', () => {
+     beforeEach(() => {
+         getSessionMock.mockReset()
+@@ -100,17 +113,55 @@ describe('bootstrapExistingSession', () => {
+         notifyRunnerSessionStartedMock.mockClear()
+         readSettingsMock.mockReset()
+         delete process.env[HAPI_SESSION_ID_ENV]
++        delete process.env.HAPI_PEER_CAP_INJECT
++        takeDirectResumeCapability()
+     })
+ 
+-    it('loads an existing HAPI session and reports it to the runner', async () => {
++    it('allows unattributed terminal resume without inject (#1473 Major)', async () => {
+         const session = createSession()
+-        const sessionClient = {
+-            updateMetadata: vi.fn()
+-        }
++        const sessionClient = mockInjectReadySessionClient()
+         getSessionMock.mockResolvedValue(session)
+-        getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
+-        sessionSyncClientMock.mockReturnValue(sessionClient)
+-        readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
++        readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
++
++        const result = await bootstrapExistingSession({
++            sessionId: 'hapi-session-1',
++            flavor: 'codex',
++            workingDirectory: '/tmp/project'
++        })
++
++        expect(result.sessionInfo.id).toBe('hapi-session-1')
++        expect(sessionSyncClientMock).toHaveBeenCalledWith(session, undefined)
++        expect(sessionClient.waitForPeerSessionCapability).not.toHaveBeenCalled()
++        expect(notifyRunnerSessionStartedMock).toHaveBeenCalled()
++    })
++
++    it('accepts in-process capability from peercred local-resume grant (#1473)', async () => {
++        armDirectResumeCapability('cap-direct-grant')
++        const session = createSession()
++        const sessionClient = mockInjectReadySessionClient()
++        getSessionMock.mockResolvedValue(session)
++        readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
++
++        const result = await bootstrapExistingSession({
++            sessionId: 'hapi-session-1',
++            flavor: 'codex',
++            workingDirectory: '/tmp/project'
++        })
++
++        expect(result.sessionInfo.id).toBe('hapi-session-1')
++        expect(sessionSyncClientMock).toHaveBeenCalledWith(
++            session,
++            { sessionCapability: 'cap-direct-grant' }
++        )
++        expect(sessionClient.waitForPeerSessionCapability).toHaveBeenCalled()
++    })
++
++    it('awaits runner inject before exporting session env (#1473)', async () => {
++        const session = createSession()
++        const sessionClient = mockInjectReadySessionClient()
++        getSessionMock.mockResolvedValue(session)
++        readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
++        process.env.HAPI_PEER_CAP_INJECT = 'unix:/tmp/peer-cap.sock'
+ 
+         const result = await bootstrapExistingSession({
+             sessionId: 'hapi-session-1',
+@@ -121,7 +172,9 @@ describe('bootstrapExistingSession', () => {
+         expect(result.sessionInfo.id).toBe('hapi-session-1')
+         expect(process.env[HAPI_SESSION_ID_ENV]).toBe('hapi-session-1')
+         expect(result.workingDirectory).toBe('/tmp/project')
+-        expect(sessionSyncClientMock).toHaveBeenCalledWith(session)
++        expect(getOrCreateMachineMock).not.toHaveBeenCalled()
++        expect(sessionSyncClientMock).toHaveBeenCalledWith(session, undefined)
++        expect(sessionClient.waitForPeerSessionCapability).toHaveBeenCalledWith({ timeoutMs: 16_000 })
+         expect(sessionClient.updateMetadata).toHaveBeenCalledOnce()
+         expect(notifyRunnerSessionStartedMock).toHaveBeenCalledWith(
+             'hapi-session-1',
+@@ -135,6 +188,26 @@ describe('bootstrapExistingSession', () => {
+         )
+     })
+ 
++    it('fails closed when runner inject times out (#1473)', async () => {
++        const session = createSession()
++        getSessionMock.mockResolvedValue(session)
++        readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
++        process.env.HAPI_PEER_CAP_INJECT = 'unix:/tmp/peer-cap.sock'
++        sessionSyncClientMock.mockReturnValue({
++            updateMetadata: vi.fn(),
++            waitForPeerSessionCapability: vi.fn(async () => null),
++        })
++
++        await expect(bootstrapExistingSession({
++            sessionId: 'hapi-session-1',
++            flavor: 'codex',
++            workingDirectory: '/tmp/project'
++        })).rejects.toThrow(/peer capability inject failed/)
++
++        expect(process.env[HAPI_SESSION_ID_ENV]).toBeUndefined()
++        expect(notifyRunnerSessionStartedMock).not.toHaveBeenCalled()
++    })
++
+     it('preserves existing native resume metadata when reactivating a session', async () => {
+         const session = createSession()
+         const existingMetadata = session.metadata
+@@ -155,31 +228,21 @@ describe('bootstrapExistingSession', () => {
+                 machineId: 'machine-1',
+                 startedAt: 123,
+             },
+-            ptyResumeAttempt: {
+-                state: 'quarantined',
+-                machineId: 'machine-1',
+-                startedAt: 456,
+-            },
+             summary: {
+                 text: 'resume me',
+                 updatedAt: 100
+             },
+             tools: ['read_file'],
+             slashCommands: ['/compact'],
+-            conversationHistoryPoints: { 'local-user-1': true },
+-            conversationHistoryEntryIds: { 'local-user-1': 'pi-entry-1' },
+             capabilities: {
+                 terminal: true,
+                 conversationHistory: { forkCurrent: true }
+             }
+         }
+-        const sessionClient = {
+-            updateMetadata: vi.fn()
+-        }
++        const sessionClient = mockInjectReadySessionClient()
+         getSessionMock.mockResolvedValue(session)
+-        getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
+-        sessionSyncClientMock.mockReturnValue(sessionClient)
+-        readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
++        readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
++        process.env.HAPI_PEER_CAP_INJECT = 'unix:/tmp/peer-cap.sock'
+ 
+         const result = await bootstrapExistingSession({
+             sessionId: 'hapi-session-1',
+@@ -187,6 +250,7 @@ describe('bootstrapExistingSession', () => {
+             workingDirectory: '/tmp/project'
+         })
+ 
++        expect(getOrCreateMachineMock).not.toHaveBeenCalled()
+         expect(result.metadata).toEqual(expect.objectContaining({
+             claudeSessionId: 'claude-thread-1',
+             codexSessionId: 'codex-thread-1',
+@@ -201,19 +265,12 @@ describe('bootstrapExistingSession', () => {
+                 machineId: 'machine-1',
+                 startedAt: 123,
+             },
+-            ptyResumeAttempt: {
+-                state: 'quarantined',
+-                machineId: 'machine-1',
+-                startedAt: 456,
+-            },
+             summary: {
+                 text: 'resume me',
+                 updatedAt: 100
+             },
+             tools: ['read_file'],
+             slashCommands: ['/compact'],
+-            conversationHistoryPoints: { 'local-user-1': true },
+-            conversationHistoryEntryIds: { 'local-user-1': 'pi-entry-1' },
+             capabilities: {
+                 terminal: true,
+                 conversationHistory: { forkCurrent: true }
+@@ -223,19 +280,93 @@ describe('bootstrapExistingSession', () => {
+         const updateHandler = sessionClient.updateMetadata.mock.calls[0][0]
+         expect(updateHandler(session.metadata)).toEqual(expect.objectContaining({
+             codexSessionId: 'codex-thread-1',
+-            grokSessionId: 'grok-thread-1',
+-            conversationHistoryEntryIds: { 'local-user-1': 'pi-entry-1' }
++            grokSessionId: 'grok-thread-1'
+         }))
+         expect(notifyRunnerSessionStartedMock).toHaveBeenCalledWith(
+             'hapi-session-1',
+             expect.objectContaining({
+                 codexSessionId: 'codex-thread-1',
+-                grokSessionId: 'grok-thread-1',
+-                conversationHistoryEntryIds: { 'local-user-1': 'pi-entry-1' }
++                grokSessionId: 'grok-thread-1'
+             })
+         )
+     })
+ 
++    it('preserves externalRefs when bootstrap rebuild omits them', async () => {
++        const session = createSession()
++        const existingMetadata = session.metadata
++        if (!existingMetadata) throw new Error('expected test session metadata')
++        const externalRefs = [{
++            kind: 'github_pr' as const,
++            repo: 'tiann/hapi',
++            number: 1160,
++            url: 'https://github.com/tiann/hapi/pull/1160',
++            role: 'primary' as const
++        }]
++        session.metadata = {
++            ...existingMetadata,
++            externalRefs
++        }
++        const sessionClient = { updateMetadata: vi.fn() }
++        getSessionMock.mockResolvedValue(session)
++        getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
++        sessionSyncClientMock.mockReturnValue(sessionClient)
++        readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
++
++        const result = await bootstrapExistingSession({
++            sessionId: 'hapi-session-1',
++            flavor: 'codex',
++            workingDirectory: '/tmp/project'
++        })
++
++        expect(result.metadata.externalRefs).toEqual(externalRefs)
++        const updateHandler = sessionClient.updateMetadata.mock.calls[0][0]
++        expect(updateHandler(session.metadata).externalRefs).toEqual(externalRefs)
++    })
++
++    it('lets metadataOverrides replace or clear externalRefs on bootstrap', async () => {
++        const session = createSession()
++        const existingMetadata = session.metadata
++        if (!existingMetadata) throw new Error('expected test session metadata')
++        session.metadata = {
++            ...existingMetadata,
++            externalRefs: [{
++                kind: 'github_pr',
++                repo: 'tiann/hapi',
++                number: 1160,
++                url: 'https://github.com/tiann/hapi/pull/1160',
++                role: 'primary'
++            }]
++        }
++        const replacement = [{
++            kind: 'github_pr' as const,
++            repo: 'owner/other',
++            number: 9,
++            url: 'https://github.com/owner/other/pull/9',
++            role: 'primary' as const
++        }]
++        const sessionClient = { updateMetadata: vi.fn() }
++        getSessionMock.mockResolvedValue(session)
++        getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
++        sessionSyncClientMock.mockReturnValue(sessionClient)
++        readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
++
++        const replaced = await bootstrapExistingSession({
++            sessionId: 'hapi-session-1',
++            flavor: 'codex',
++            workingDirectory: '/tmp/project',
++            metadataOverrides: { externalRefs: replacement }
++        })
++        expect(replaced.metadata.externalRefs).toEqual(replacement)
++
++        const cleared = await bootstrapExistingSession({
++            sessionId: 'hapi-session-1',
++            flavor: 'codex',
++            workingDirectory: '/tmp/project',
++            metadataOverrides: { externalRefs: [] }
++        })
++        expect(cleared.metadata.externalRefs).toEqual([])
++    })
++
+     it('advertises remote terminal capability in session metadata', () => {
+         const metadata = buildSessionMetadata({
+             flavor: 'codex',
+@@ -262,7 +393,7 @@ describe('bootstrapLazySession', () => {
+     it('does not export HAPI_SESSION_ID until the hub row is materialized', async () => {
+         const pendingClient = { isPending: () => true }
+         sessionSyncClientMock.mockReturnValue(pendingClient)
+-        readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
++        readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
+ 
+         const result = await bootstrapLazySession({
+             flavor: 'codex',
+@@ -288,7 +419,7 @@ describe('bootstrapLazySession', () => {
+     it('does not persist a machine or session until materialization', async () => {
+         const pendingClient = { isPending: () => true }
+         sessionSyncClientMock.mockReturnValue(pendingClient)
+-        readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
++        readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
+ 
+         const result = await bootstrapLazySession({
+             flavor: 'codex',
+@@ -327,8 +458,8 @@ describe('bootstrapLazySession', () => {
+             metadata: snapshot.metadata,
+             state: snapshot.agentState,
+             timeoutMs: 10_000,
+-            machine: expect.objectContaining({ id: 'machine-1' })
+         }))
++        expect(getOrCreateSessionMock.mock.calls[0]?.[0]?.machine).toBeUndefined()
+ 
+         options.onMaterialized(materialized, snapshot)
+         expect(notifyRunnerSessionStartedMock).toHaveBeenCalledWith(
+@@ -352,9 +483,11 @@ describe('bootstrapSession HAPI_SESSION_ID export', () => {
+         const session = createSession()
+         session.id = 'hub-session-42'
+         getOrCreateSessionMock.mockResolvedValue(session)
+-        getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
+-        sessionSyncClientMock.mockReturnValue({ isPending: () => false })
+-        readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
++        sessionSyncClientMock.mockReturnValue({
++            isPending: () => false,
++            waitForPeerSessionCapability: vi.fn(async () => 'cap-create'),
++        })
++        readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'machine-tag-1' })
+ 
+         const result = await bootstrapSession({
+             flavor: 'claude',
+@@ -363,6 +496,9 @@ describe('bootstrapSession HAPI_SESSION_ID export', () => {
+ 
+         expect(result.sessionInfo.id).toBe('hub-session-42')
+         expect(process.env[HAPI_SESSION_ID_ENV]).toBe('hub-session-42')
++        expect(getOrCreateMachineMock).not.toHaveBeenCalled()
++        expect(sessionSyncClientMock.mock.results[0]?.value.waitForPeerSessionCapability)
++            .toHaveBeenCalledWith({ timeoutMs: 16_000 })
+     })
+ })
+ 
+@@ -401,4 +537,11 @@ describe('buildMachineMetadata runner-only capabilities', () => {
+         expect(metadata.capabilities).toEqual(expect.arrayContaining(['stop-runner']))
+         expect(metadata.supervisedRestart).toBe(false)
+     })
++
++    it('advertises versionHandoffDisabled for asRunner from env or snapshot', () => {
++        delete process.env.HAPI_DISABLE_VERSION_HANDOFF
++        expect(buildMachineMetadata({ asRunner: true }).versionHandoffDisabled).toBe(false)
++        process.env.HAPI_DISABLE_VERSION_HANDOFF = '1'
++        expect(buildMachineMetadata({ asRunner: true }).versionHandoffDisabled).toBe(true)
++    })
+ })
+diff --git a/cli/src/agent/sessionFactory.ts b/cli/src/agent/sessionFactory.ts
+index 15a1d4944..c7fa879fe 100644
+--- a/cli/src/agent/sessionFactory.ts
++++ b/cli/src/agent/sessionFactory.ts
+@@ -6,6 +6,8 @@ import { ApiClient } from '@/api/api'
+ import type { ApiSessionClient } from '@/api/apiSession'
+ import type { AgentState, MachineMetadata, Metadata, Session } from '@/api/types'
+ import { getInstalledCliMtimeMs, notifyRunnerSessionStarted } from '@/runner/controlClient'
++import { isVersionHandoffDisabledByEnv } from '@/runner/versionHandoff'
++import { durableTargetGeneration, readUpgradeTarget } from '@/upgrade/upgradeTarget'
+ import { readSettings } from '@/persistence'
+ import { configuration } from '@/configuration'
+ import { logger } from '@/ui/logger'
+@@ -52,14 +54,15 @@ export function buildMachineMetadata(options?: {
+      * (#1108 bot Major).
+      */
+     asRunner?: boolean
++    /** Snapshot from runner start; defaults to live env when omitted. */
+     versionHandoffDisabled?: boolean
+-    cliArtifactGeneration?: string
+ }): MachineMetadata {
+     const installedCliMtimeMs = getInstalledCliMtimeMs()
+     const startedCliMtimeMs = options?.startedCliMtimeMs ?? installedCliMtimeMs
+     const base: MachineMetadata = {
+         host: process.env.HAPI_HOSTNAME || os.hostname(),
+         platform: os.platform(),
++        arch: process.arch,
+         happyCliVersion: packageJson.version,
+         homeDir: os.homedir(),
+         happyHomeDir: configuration.happyHomeDir,
+@@ -69,15 +72,16 @@ export function buildMachineMetadata(options?: {
+     if (!options?.asRunner) {
+         return base
+     }
++    const cliArtifactGeneration = durableTargetGeneration(readUpgradeTarget()) ?? undefined
+     return {
+         ...base,
+         capabilities: [...CURRENT_MACHINE_CAPABILITIES],
+         ...(typeof startedCliMtimeMs === 'number' ? { startedCliMtimeMs } : {}),
+         ...(typeof installedCliMtimeMs === 'number' ? { installedCliMtimeMs } : {}),
++        ...(cliArtifactGeneration ? { cliArtifactGeneration } : {}),
++        versionHandoffDisabled: options?.versionHandoffDisabled ?? isVersionHandoffDisabledByEnv(),
+         // Always boolean so hub merge can clear a prior true on unsupervised restart.
+         supervisedRestart: process.env.HAPI_RUNNER_SUPERVISED === '1',
+-        ...(options?.versionHandoffDisabled === true ? { versionHandoffDisabled: true } : {}),
+-        ...(options?.cliArtifactGeneration ? { cliArtifactGeneration: options.cliArtifactGeneration } : {}),
+     }
+ }
+ 
+@@ -147,6 +151,8 @@ function pickExistingSessionMetadata(metadata: Metadata | null | undefined): Par
+     if (metadata.piAvailableModels !== undefined) preserved.piAvailableModels = metadata.piAvailableModels
+     // Preserve provider-qualified Pi model selection (disambiguates duplicate modelIds).
+     if (metadata.piSelectedModel !== undefined) preserved.piSelectedModel = metadata.piSelectedModel
++    // Preserve structured PR links across resume/bootstrap rebuilds (tiann/hapi#1160).
++    if (metadata.externalRefs !== undefined) preserved.externalRefs = metadata.externalRefs
+     if (metadata.conversationHistoryPoints !== undefined) {
+         preserved.conversationHistoryPoints = metadata.conversationHistoryPoints
+     }
+@@ -175,15 +181,16 @@ function pickExistingSessionMetadata(metadata: Metadata | null | undefined): Par
+     return preserved
+ }
+ 
+-async function getMachineIdOrExit(): Promise<string> {
++async function getMachineCredentialsOrExit(): Promise<{ machineId: string; machineTag?: string }> {
+     const settings = await readSettings()
+     const machineId = settings?.machineId
+     if (!machineId) {
+         console.error(`[START] No machine ID found in settings, which is unexpected since authAndSetupMachineIfNeeded should have created it. Please report this issue on ${packageJson.bugs}`)
+         process.exit(1)
+     }
++    const machineTag = settings?.machineTag?.trim() || undefined
+     logger.debug(`Using machineId: ${machineId}`)
+-    return machineId
++    return { machineId, machineTag }
+ }
+ 
+ async function reportSessionStarted(sessionId: string, metadata: Metadata): Promise<void> {
+@@ -208,11 +215,11 @@ export async function bootstrapSession(options: SessionBootstrapOptions): Promis
+ 
+     const api = await ApiClient.create()
+ 
+-    const machineId = await getMachineIdOrExit()
+-    await api.getOrCreateMachine({
+-        machineId,
+-        metadata: buildMachineMetadata()
+-    })
++    const credentials = await getMachineCredentialsOrExit()
++    // Terminal/session processes must not create the machine row (#1473 Major).
++    // Only the runner INSERTs with runnerProof so the first runner start does
++    // not rotate away from sessions that already recorded machineId.
++    const machineId = credentials.machineId
+ 
+     const metadata = buildSessionMetadata({
+         flavor: options.flavor,
+@@ -231,7 +238,10 @@ export async function bootstrapSession(options: SessionBootstrapOptions): Promis
+         effort: options.effort
+     })
+ 
+-    const session = api.sessionSyncClient(sessionInfo)
++    const session = api.sessionSyncClient(sessionInfo, { sessionTag })
++
++    // Broker env must land before wrapped agents snapshot process.env (#1473).
++    await session.waitForPeerSessionCapability({ timeoutMs: 16_000 })
+ 
+     exportHapiSessionEnv(sessionInfo.id)
+ 
+@@ -256,8 +266,9 @@ export async function bootstrapLazySession(options: SessionBootstrapOptions): Pr
+     }
+ 
+     const api = await ApiClient.create()
+-    const machineId = await getMachineIdOrExit()
+-    const machineMetadata = buildMachineMetadata()
++    const credentials = await getMachineCredentialsOrExit()
++    // Do not POST /cli/machines from terminal/lazy bootstrap (#1473 Major).
++    const machineId = credentials.machineId
+     const metadata = buildSessionMetadata({
+         flavor: options.flavor,
+         startedBy,
+@@ -302,10 +313,6 @@ export async function bootstrapLazySession(options: SessionBootstrapOptions): Pr
+                 model: options.model,
+                 modelReasoningEffort: options.modelReasoningEffort,
+                 effort: options.effort,
+-                machine: {
+-                    id: machineId,
+-                    metadata: machineMetadata
+-                },
+                 timeoutMs: 10_000,
+                 signal
+             })
+@@ -314,6 +321,7 @@ export async function bootstrapLazySession(options: SessionBootstrapOptions): Pr
+             }
+             return materialized
+         },
++        sessionTag,
+         onMaterialized: (materialized, snapshot) => {
+             // Export only after the hub row exists. Exporting the provisional id at
+             // bootstrap lets agents inherit HAPI_SESSION_ID before GET /api/sessions/:id
+@@ -343,13 +351,14 @@ export async function bootstrapExistingSession(options: {
+ }): Promise<SessionBootstrapResult> {
+     const startedBy = options.startedBy ?? 'terminal'
+     const api = await ApiClient.create()
+-    const machineId = await getMachineIdOrExit()
+-
+-    await api.getOrCreateMachine({
+-        machineId,
+-        metadata: buildMachineMetadata()
+-    })
+-
++    const credentials = await getMachineCredentialsOrExit()
++    // Do not POST /cli/machines from resume either (#1473 Major) — runner owns INSERT.
++    const machineId = credentials.machineId
++
++    // GET omits sessionCapability by design (#1203). Runner resume does not
++    // receive the create-time tag (pass 2g/2h — no child fd/env mint-proof);
++    // hub arms a spawn-RPC nonce; runner redeems + PID-injects capability.
++    // Direct terminal resume without inject cannot register session RPC (#1473).
+     const sessionInfo = await api.getSession(options.sessionId)
+     const baseMetadata = buildSessionMetadata({
+         flavor: options.flavor,
+@@ -372,9 +381,30 @@ export async function bootstrapExistingSession(options: {
+     }
+     const metadata = buildUpdatedMetadata(sessionInfo.metadata)
+ 
+-    const session = api.sessionSyncClient(sessionInfo)
++    // Capture before ApiSession constructor drains HAPI_PEER_CAP_INJECT (#1473).
++    const {
++        HAPI_PEER_CAP_INJECT_ENV,
++        takeDirectResumeCapability,
++    } = await import('@/api/peerCapabilityInject')
++    const directCapability = takeDirectResumeCapability()
++    const expectsInjectedCapability = Boolean(process.env[HAPI_PEER_CAP_INJECT_ENV]?.trim())
++
++    // Host-fallback / terminal resume may be intentionally unattributed when
++    // the hub omitted resumePeerMintNonce (#1473 Major). Only fail closed when
++    // an attributed path was actually armed.
++    const session = api.sessionSyncClient(
++        sessionInfo,
++        directCapability ? { sessionCapability: directCapability } : undefined
++    )
+     session.updateMetadata(buildUpdatedMetadata)
+ 
++    if (directCapability || expectsInjectedCapability) {
++        const injected = await session.waitForPeerSessionCapability({ timeoutMs: 16_000 })
++        if (!injected) {
++            throw new Error('Cannot resume: runner peer capability inject failed')
++        }
++    }
++
+     exportHapiSessionEnv(sessionInfo.id)
+ 
+     await reportSessionStarted(sessionInfo.id, metadata)
+diff --git a/cli/src/runner/run.ts b/cli/src/runner/run.ts
+index 245dc398f..ce3984840 100644
+--- a/cli/src/runner/run.ts
++++ b/cli/src/runner/run.ts
+@@ -1,4 +1,5 @@
+ import fs from 'fs/promises';
++import { randomBytes } from 'node:crypto';
+ import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+ import os from 'os';
+ 
+@@ -12,7 +13,8 @@ import { configuration } from '@/configuration';
+ import packageJson from '../../package.json';
+ import { getEnvironmentInfo } from '@/ui/doctor';
+ import { spawnHappyCLI } from '@/utils/spawnHappyCLI';
+-import { writeRunnerState, RunnerLocallyPersistedState, readRunnerState, acquireRunnerLock, releaseRunnerLock } from '@/persistence';
++import { writeRunnerState, RunnerLocallyPersistedState, readRunnerState, readSettings, acquireRunnerLock, releaseRunnerLock } from '@/persistence';
++import { resolveVersionHandoffDisabledAtStart } from './versionHandoff';
+ import { getCliArgs } from '@/utils/cliArgs';
+ import { getProcessStartMarker, isProcessAlive, isWindows, killProcess, killProcessByChildProcess, killProcessTreeByPid } from '@/utils/process';
+ import { PERMISSION_MODES } from '@hapi/protocol/modes';
+@@ -21,16 +23,34 @@ import { withRetry } from '@/utils/time';
+ import { isRetryableConnectionError } from '@/utils/errorUtils';
+ 
+ import { cleanupRunnerState, getInstalledCliMtimeMs, isRunnerRunningCurrentlyInstalledHappyVersion, stopRunner, waitForRunnerHandoff } from './controlClient';
++import { createRunnerHandoffLockHooks, registerRunnerHandoffLockHooks, FAILED_HANDOFF_LOCK_DELAY_INCREMENT_MS, FAILED_HANDOFF_LOCK_MAX_ATTEMPTS } from './handoffLock';
+ import { startRunnerControlServer } from './controlServer';
++import { startLocalResumeGrantServer } from './localResumeGrant';
++import { isProcessDescendant } from '@/api/processDescendant'
++import { join } from 'node:path'
+ import { createWorktree, removeWorktree, type WorktreeInfo } from './worktree';
+ import { validateWorkspaceDirectory } from './validateWorkspaceDirectory';
+-import { join } from 'path';
+ import { buildMachineMetadata } from '@/agent/sessionFactory';
+ import { resolveWorkspaceRoots } from '@/utils/workspaceRoot';
++import {
++    isRunnerSelfUpgradeInFlight,
++    shouldAttemptInstalledCliMtimeHandoff,
++} from '@/upgrade/selfUpgrade'
+ import { hashRunnerCliApiToken, hashRunnerExtraHeaders } from './runnerIdentity';
+ import { scheduleCursorModelsPrewarm } from '@/modules/common/cursorModelsPrewarm';
+ import { isLinkedGitWorktree } from '@/utils/isLinkedGitWorktree';
+-import { agentUnavailableMessage, getAgentAvailability } from '@/agent/agentAvailability';
++import {
++  HAPI_PEER_CAP_INJECT_ENV,
++  HAPI_PEER_CAP_INJECT_SERVER_PID_ENV,
++  HAPI_RUNNER_HANDOFF_SOCKET_ENV,
++  receiveRunnerProofFromHandoff,
++  startPeerCapabilityInjectServer,
++  type PeerCapabilityInjectServer,
++} from '@/api/peerCapabilityInject';
++import { buildHubRequestHeaders } from '@/api/hubExtraHeaders';
++import {
++  clearReenrollGrant,
++} from './reenrollGrantStore';
+ 
+ /**
+  * Deduplicates a preallocated HAPI-row spawn only while its child is alive.
+@@ -224,6 +244,13 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}):
+       logger.debug(`[RUNNER RUN] HAPI_RUNNER_HANDOFF_FROM_PID=${handoffFromPidRaw} set but no matching live parent in state (state.pid=${existingState?.pid ?? 'none'}); ignoring handoff signal`);
+     }
+   }
++  // PID-checked socket handoff only — never put runnerProof in env (#1473).
++  let handoffRunnerProof: string | undefined
++  if (isAuthorizedHandoff) {
++    handoffRunnerProof = await receiveRunnerProofFromHandoff()
++  } else {
++    delete process.env[HAPI_RUNNER_HANDOFF_SOCKET_ENV]
++  }
+ 
+   if (!isAuthorizedHandoff) {
+     // Check if already running
+@@ -255,7 +282,12 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}):
+   // re-acquire it. After the null guard above, the initial handle is
+   // non-null; the heartbeat path's failure branches either reassign to a
+   // re-acquired handle or process.exit() before any subsequent release.
+-  let runnerLockHandle = initialLockHandle;
++  let runnerLockHandle: typeof initialLockHandle | null = initialLockHandle;
++
++  registerRunnerHandoffLockHooks(createRunnerHandoffLockHooks(
++    () => runnerLockHandle,
++    (handle) => { runnerLockHandle = handle },
++  ));
+ 
+   // At this point we should be safe to startup the runner:
+   // 1. Not have a stale runner state
+@@ -263,7 +295,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}):
+ 
+   try {
+     // Ensure auth and machine registration BEFORE anything else
+-    const { machineId } = await authAndSetupMachineIfNeeded();
++    let { machineId, machineTag } = await authAndSetupMachineIfNeeded();
+     logger.debug('[RUNNER RUN] Auth and machine setup complete');
+ 
+     // Setup state - key by PID
+@@ -381,16 +413,16 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}):
+     persistResumeProcesses();
+ 
+     // Webhook timeout tolerance. Opus 1M + --resume can legitimately take
+-    // longer than the default 15s to reach the "Session started" webhook
++    // longer than the default to reach the "Session started" webhook
+     // (observed real-world durations of 30s – 60min under rate-limit /
+-    // heavy session restore). Allow advanced users to raise this ceiling
+-    // so that slow starts no longer leave orphaned child processes which
+-    // later report back as ghost sessions.
++    // heavy session restore). Peer-cap inject wait is ~16–20s — a 15s
++    // default races resume (#1473 upload blindness). Override via
++    // HAPI_RUNNER_WEBHOOK_TIMEOUT_MS for slower starts.
+     const envWebhookTimeout = Number(process.env.HAPI_RUNNER_WEBHOOK_TIMEOUT_MS);
+     const webhookTimeoutMs =
+       Number.isFinite(envWebhookTimeout) && envWebhookTimeout > 0
+         ? envWebhookTimeout
+-        : 15_000;
++        : 25_000;
+ 
+     // Session spawning awaiter system
+     const pidToAwaiter = new Map<number, (session: TrackedSession) => void>();
+@@ -454,28 +486,39 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}):
+           logger.debug(`[RUNNER RUN] Resolved session awaiter for PID ${pid}`);
+         }
+       } else if (!existingSession) {
+-        // No tracked session for this PID. Two possibilities:
++        // No tracked session for this PID. Three possibilities:
+         //  1. The child was spawned externally from a terminal (legitimate).
+         //  2. The child was runner-spawned but already had its tracking
+         //     entry removed because its webhook arrived after the timeout
+-        //     (orphaned / ghost-session case).
++        //     (orphaned / same-runner-instance ghost-session case). The
++        //     timeout handler should have already tree-killed the PID, so
++        //     the process is dead by now.
++        //  3. The child was runner-spawned by a PRIOR runner instance and
++        //     survived a runner restart because the runner systemd unit
++        //     uses `KillMode=process` (per docs/guide/installation.md
++        //     installer; closes #915 / closes #929). The PID is alive,
++        //     legitimately wants to be re-attached.
+         //
+-        // Differentiate via the webhook's own `startedBy` field: genuine
+-        // terminal-launched children report `startedBy: 'terminal'`, so
+-        // anything claiming `'runner'` here must be the second case and
+-        // should be ignored + terminated instead of silently promoted.
++        // Differentiate cases 2 and 3 via process liveness: dead PID is
++        // case 2 (no-op, the timeout already handled it); alive PID is
++        // case 3 (adopt and re-attach).
+         if (sessionMetadata.startedBy === 'runner') {
++          if (isProcessAlive(pid)) {
++            const adoptedSession: TrackedSession = {
++              startedBy: 'runner',
++              happySessionId: sessionId,
++              happySessionMetadataFromLocalWebhook: sessionMetadata,
++              pid
++            };
++            pidToTrackedSession.set(pid, adoptedSession);
++            logger.debug(
++              `[RUNNER RUN] Adopting orphaned runner-spawned session ${sessionId} (PID ${pid}). Likely a survivor of a prior runner restart.`
++            );
++            return;
++          }
+           logger.debug(
+-            `[RUNNER RUN] Ignoring late webhook from orphaned runner-spawned PID ${pid} (session ${sessionId}). Terminating child.`
++            `[RUNNER RUN] Ignoring late webhook from dead orphaned runner-spawned PID ${pid} (session ${sessionId}). Process already gone.`
+           );
+-          // Use killProcess (SIGTERM → SIGKILL escalation) rather than a
+-          // bare process.kill() so the orphan is reliably reaped even if
+-          // it ignores SIGTERM.  We don't have a ChildProcess reference
+-          // here (tracking entry was already removed by the timeout
+-          // handler), so tree-kill via killProcessByChildProcess is not
+-          // available — but the timeout handler should have already
+-          // tree-killed the process group; this is defence-in-depth.
+-          void killProcess(pid);
+           return;
+         }
+ 
+@@ -500,27 +543,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}):
+ 
+       const { directory, sessionId, machineId, approvedNewDirectoryCreation = true } = options;
+       const agent = options.agent ?? 'claude';
+-      const availability = getAgentAvailability(agent);
+-      if (!availability.available) {
+-        const errorMessage = agentUnavailableMessage(availability);
+-        logger.debug(`[RUNNER RUN] Agent preflight failed: ${errorMessage}`);
+-        reportSpawnOutcomeToHub?.({
+-          type: 'error',
+-          details: { message: errorMessage }
+-        });
+-        return {
+-          type: 'error',
+-          errorMessage,
+-          code: 'agent_unavailable',
+-          agent
+-        };
+-      }
+-      if (options.validateDirectory && !(await options.validateDirectory(directory))) {
+-        return {
+-          type: 'error',
+-          errorMessage: 'Directory is outside this machine\'s workspace roots',
+-          code: 'outside_workspace_roots'
+-        };
++      if (agent === 'gemini') {
++        throw new Error('Gemini CLI is no longer supported and cannot be launched (Google sunset the consumer Gemini CLI on 2026-06-18). Existing Gemini sessions remain viewable in the web UI.');
+       }
+       const yolo = options.yolo === true;
+       const sessionType = options.sessionType ?? 'simple';
+@@ -567,17 +591,6 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}):
+         }
+       }
+ 
+-      // Re-check after mkdir/access so a newly materialized path or concurrent
+-      // symlink swap cannot escape the roots checked by the machine RPC layer.
+-      if (options.validateDirectory && !(await options.validateDirectory(directory))) {
+-        logger.debug(`[RUNNER RUN] Workspace directory escaped roots during validation: ${directory}`);
+-        return {
+-          type: 'error',
+-          errorMessage: 'Directory is outside this machine\'s workspace roots',
+-          code: 'outside_workspace_roots'
+-        };
+-      }
+-
+       if (sessionType === 'worktree') {
+         // Cursor Agent has native `--worktree` under ~/.cursor/worktrees/. Prefer that
+         // over HAPI's sibling-directory worktree so Cursor sandbox/skills see the same layout.
+@@ -672,6 +685,23 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}):
+           };
+         }
+ 
++        // Resume peer provenance (#1203 pass 2h): hub sends a spawn-RPC nonce;
++        // runner redeems capability and injects via PID-checked unix socket.
++        // Never put mint-proof on child fds/env (pidfd_getfd / environ / TOCTOU).
++        const resumePeerMintNonce = options.resumePeerMintNonce?.trim()
++        const resumeSessionId = (options.existingSessionId || options.sessionId)?.trim()
++        let peerCapInject: PeerCapabilityInjectServer | null = null
++        if (resumePeerMintNonce && resumeSessionId) {
++          peerCapInject = await startPeerCapabilityInjectServer()
++          if (peerCapInject) {
++            extraEnv = {
++              ...extraEnv,
++              [HAPI_PEER_CAP_INJECT_ENV]: peerCapInject.path,
++              [HAPI_PEER_CAP_INJECT_SERVER_PID_ENV]: String(process.pid),
++            }
++          }
++        }
++
+         const args = buildCliArgs(agent, options, yolo);
+ 
+         // sessionId reserved for future use
+@@ -699,10 +729,44 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}):
+           stdio: ['ignore', 'pipe', 'pipe'],  // Capture stdout/stderr for debugging
+           env: {
+             ...process.env,
++            HAPI_AGENT_CONTEXT: '1',
+             ...extraEnv
+           }
+         });
+ 
++        if (peerCapInject && happyProcess.pid && resumePeerMintNonce && resumeSessionId) {
++          const inject = peerCapInject
++          const childPid = happyProcess.pid
++          void (async () => {
++            try {
++              const capability = await redeemResumePeerCapabilityFromHub(
++                resumeSessionId,
++                resumePeerMintNonce
++              )
++              if (!capability) {
++                // Keep the inject socket up for the child receive window so the
++                // failure mode is not_armed (actionable) instead of ENOENT from
++                // an early finally-close (#1473).
++                logger.debug('[RUNNER RUN] resume peer capability redeem returned empty; holding inject socket')
++                await new Promise((r) => setTimeout(r, 16_000))
++                return
++              }
++              await inject.deliverTo(childPid, { sessionCapability: capability })
++              // deliverTo resolves when the server writes ok:true, which can race
++              // the child's receive loop (client abandoned socket / next attempt).
++              // Keep listening briefly so retries still see the armed payload
++              // instead of ENOENT (#1473 estate).
++              await new Promise((r) => setTimeout(r, 3_000))
++            } catch (error) {
++              logger.debug('[RUNNER RUN] resume peer capability inject failed', error)
++            } finally {
++              inject.close()
++            }
++          })()
++        } else {
++          peerCapInject?.close()
++        }
++
+         happyProcess.stderr?.on('data', (data) => {
+           stderrTail = appendTail(stderrTail, data);
+         });
+@@ -1073,12 +1137,16 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}):
+     };
+ 
+     // Start control server
++    let mintLocalResumeCapability:
++      | ((sessionId: string) => Promise<string>)
++      | null = null
++    let stopLocalResumeGrantServer: (() => void) | null = null
+     const { port: controlPort, stop: stopControlServer } = await startRunnerControlServer({
+       getChildren: getCurrentChildren,
+       stopSession,
+       spawnSession,
+       requestShutdown: () => requestShutdown('hapi-cli'),
+-      onHappySessionWebhook
++      onHappySessionWebhook,
+     });
+ 
+     // Baseline mtime at runner-process start. Immutable: per Codex review #814
+@@ -1113,7 +1181,21 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}):
+     // Persisted to runner.state.json so a later `hapi runner start` from a
+     // shell where the env var is NOT set can still honour the opt-out
+     // (Codex review #814 [Major] - controlClient.ts:192 fix).
+-    const startedWithVersionHandoffDisabled = process.env.HAPI_DISABLE_VERSION_HANDOFF === '1';
++    const settings = await readSettings();
++    const startedWithVersionHandoffDisabled = resolveVersionHandoffDisabledAtStart(settings);
++
++    // Memory-only runner-generation proof (#1473 Blocker). Same-UID keyrings
++    // are exportable bearers — do not persist the proof. Version handoff keeps
++    // the same machine via PID-checked socket; cold start (kill/restart, CI
++    // beforeEach, systemd without handoff) mints a new proof and, on hub 409,
++    // rotates to a new machine id. That is re-enroll, not unbound mint against
++    // the prior hash (hub still refuses wrong proof on the old row).
++    if (isAuthorizedHandoff && !handoffRunnerProof) {
++      throw new Error(
++        'Authorized runner handoff missing runnerProof from PID-checked socket'
++      )
++    }
++    const runnerProof = handoffRunnerProof ?? randomBytes(32).toString('base64url')
+ 
+     // Write initial runner state (no lock needed for state file)
+     const fileState: RunnerLocallyPersistedState = {
+@@ -1148,32 +1230,91 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}):
+     const workspaceRoots = resolveWorkspaceRoots(options.workspaceRoots);
+     logger.debug(`[RUNNER RUN] Workspace roots: ${workspaceRoots?.join(', ') ?? '(not set)'}`);
+ 
+-    // Get or create machine (with retry for transient connection errors)
+-    const machine = await withRetry(
+-      () => api.getOrCreateMachine({
+-        machineId,
+-        metadata: buildMachineMetadata({
++    // Register machine. Cold start may 409 (lost memory-only proof). Prefer
++    // hub in-place proof rebind (same machineId) when machineTag matches so
++    // Cursor/Pi exact-id resume survives restart (#1473 merge gate). Untagged
++    // legacy / true tag conflict still rotates; CLI then migrates sessions
++    // onto the new id without the dead machine's proof.
++    // asRunner: true — only the daemon may advertise caps/mtimes (#1108).
++    clearReenrollGrant()
++    let machine
++    try {
++      machine = await withRetry(
++        () => api.getOrCreateMachine({
++          machineId,
++          machineTag,
++          runnerProof,
++          metadata: buildMachineMetadata({
+             workspaceRoots,
+             startedCliMtimeMs: startedWithCliMtimeMs,
+             asRunner: true,
++            versionHandoffDisabled: startedWithVersionHandoffDisabled,
++          }),
++          runnerState: initialRunnerState,
++          allowLegacyReenroll: !handoffRunnerProof,
+         }),
+-        runnerState: initialRunnerState
+-      }),
+-      {
+-        maxAttempts: 60,
+-        minDelay: 1000,
+-        maxDelay: 30000,
+-        shouldRetry: isRetryableConnectionError,
+-        onRetry: (error, attempt, nextDelayMs) => {
+-          const errorMsg = error instanceof Error ? error.message : String(error)
+-          logger.debug(`[RUNNER RUN] Failed to register machine (attempt ${attempt}), retrying in ${nextDelayMs}ms: ${errorMsg}`)
++        {
++          maxAttempts: 60,
++          minDelay: 1000,
++          maxDelay: 30000,
++          shouldRetry: isRetryableConnectionError,
++          onRetry: (error, attempt, nextDelayMs) => {
++            const errorMsg = error instanceof Error ? error.message : String(error)
++            logger.debug(`[RUNNER RUN] Failed to register machine (attempt ${attempt}), retrying in ${nextDelayMs}ms: ${errorMsg}`)
++          }
+         }
++      );
++    } catch (error) {
++      const message = error instanceof Error ? error.message : String(error)
++      if (handoffRunnerProof && /runner proof|re-enroll|tag mismatch/i.test(message)) {
++        throw new Error(
++          'Handoff runnerProof rejected by hub; refusing silent machine re-enroll '
++          + 'that would break the PID-checked generation binding.'
++        )
+       }
+-    );
++      throw error
++    }
++    if (machine.id !== machineId) {
++      machineId = machine.id;
++      const rotated = await authAndSetupMachineIfNeeded();
++      machineTag = rotated.machineTag;
++      fileState.startedWithMachineId = machineId;
++      writeRunnerState(fileState);
++      logger.debug(`[RUNNER RUN] Re-enrolled machine as ${machineId}`);
++    }
+     logger.debug(`[RUNNER RUN] Machine registered: ${machine.id}`);
+ 
++    mintLocalResumeCapability = async (sessionId: string) => {
++      return await api.mintLocalResumeCapability({
++        sessionId,
++        machineTag,
++        runnerProof,
++      })
++    }
++    const resolveTrackedSessionIdForPeer = (peerPid: number): string | null => {
++      for (const child of getCurrentChildren()) {
++        if (!isProcessDescendant(peerPid, child.pid)) {
++          continue
++        }
++        const sessionId = child.happySessionId?.trim()
++          || child.requestedHappySessionId?.trim()
++          || ''
++        return sessionId || null
++      }
++      return null
++    }
++    const localResumeGrant = await startLocalResumeGrantServer({
++      mintCapability: (sessionId) => mintLocalResumeCapability!(sessionId),
++      resolveTrackedSessionId: resolveTrackedSessionIdForPeer,
++    })
++    if (localResumeGrant) {
++      stopLocalResumeGrantServer = localResumeGrant.close
++      fileState.localResumeSocket = localResumeGrant.path
++      writeRunnerState(fileState)
++    }
++
+     // Create realtime machine session
+-    const apiMachine = api.machineSyncClient(machine, { workspaceRoots });
++    const apiMachine = api.machineSyncClient(machine, { workspaceRoots, machineTag, runnerProof });
+ 
+     // Set RPC handlers
+     apiMachine.setRPCHandlers({
+@@ -1182,15 +1323,20 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}):
+       requestShutdown: () => requestShutdown('hapi-app')
+     });
+ 
+-    // Connect to server
+-    apiMachine.connect();
++    // Connect and wait for Socket.IO auth + RPC registration before advertising
++    // hubReadyAt. connect() alone returns before the async 'connect' event.
++    await apiMachine.connectUntilReady();
++    fileState.hubReadyAt = Date.now();
++    writeRunnerState({
++      ...fileState,
++    });
+     scheduleCursorModelsPrewarm();
+ 
+     // Visible startup banner. Use console.log so it always appears on stdout,
+     // regardless of the verbose/quiet logger setting.
+     console.log('');
+     console.log('Hapi runner started.');
+-    console.log(`  Workspace roots: ${workspaceRoots?.join(', ') ?? '(not set — browsing is limited to home)'}`);
++    console.log(`  Workspace roots: ${workspaceRoots?.join(', ') ?? '(not set — browse disabled; pass --workspace-root to enable)'}`);
+     console.log(`  Hub URL:        ${configuration.apiUrl}`);
+     console.log(`  Machine ID:     ${machine.id}`);
+     console.log(`  Control port:   ${controlPort}`);
+@@ -1302,16 +1448,20 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}):
+       // unrelated to an actual npm upgrade. HAPI_DISABLE_VERSION_HANDOFF=1
+       // keeps the rest of the heartbeat (session pruning, state file
+       // persistence) intact.
+-      if (process.env.HAPI_DISABLE_VERSION_HANDOFF === '1') {
++      if (startedWithVersionHandoffDisabled) {
+         if (process.env.DEBUG) {
+-          logger.debug('[RUNNER RUN] HAPI_DISABLE_VERSION_HANDOFF=1 set, skipping mtime/version drift self-restart');
++          logger.debug('[RUNNER RUN] Version handoff disabled, skipping mtime/version drift self-restart');
+         }
+       } else {
+         const installedCliMtimeMs = getInstalledCliMtimeMs();
+-        if (typeof installedCliMtimeMs === 'number' &&
+-            typeof startedWithCliMtimeMs === 'number' &&
+-            installedCliMtimeMs !== startedWithCliMtimeMs &&
+-            Date.now() >= nextHandoffAttemptAt) {
++        if (shouldAttemptInstalledCliMtimeHandoff({
++            disableVersionHandoff: false,
++            selfUpgradeInFlight: isRunnerSelfUpgradeInFlight(),
++            installedCliMtimeMs,
++            startedWithCliMtimeMs,
++            now: Date.now(),
++            nextHandoffAttemptAt,
++        })) {
+           logger.debug('[RUNNER RUN] Runner is outdated, triggering self-restart with latest version');
+ 
+           // Hand off to a fresh runner that inherits our original argv (workspace
+@@ -1353,19 +1503,33 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}):
+           // the child knows it is an authorized handoff and must NOT call
+           // stopRunner() against us before writing its own state.
+           // Codex review #814 [Major] on run.ts:892.
++          // runnerProof travels on a PID-checked unix socket (path in env only).
++          // Never put the proof in child environ — same-UID siblings can read it (#1473).
++          let proofHandoff: PeerCapabilityInjectServer | null = null
+           try {
+-            spawnHappyCLI(handoffArgv, {
++            proofHandoff = await startPeerCapabilityInjectServer()
++            if (!proofHandoff) {
++              throw new Error('runner proof handoff socket unavailable')
++            }
++            const child = spawnHappyCLI(handoffArgv, {
+               detached: true,
+               stdio: 'ignore',
+               env: {
+                 ...process.env,
+-                HAPI_RUNNER_HANDOFF_FROM_PID: String(process.pid)
++                HAPI_RUNNER_HANDOFF_FROM_PID: String(process.pid),
++                [HAPI_RUNNER_HANDOFF_SOCKET_ENV]: proofHandoff.path,
+               }
+             });
++            if (!child.pid) {
++              throw new Error('replacement runner spawn returned no pid')
++            }
++            await proofHandoff.deliverTo(child.pid, { runnerProof })
+           } catch (error) {
+             logger.debug(`[RUNNER RUN] Failed to spawn replacement runner; staying alive to avoid an offline machine. Next handoff attempt in ${Math.round(HANDOFF_RETRY_BACKOFF_MS / 1000)}s.`, error);
+             deferHandoffRetry();
+             return;
++          } finally {
++            proofHandoff?.close()
+           }
+ 
+           // Release the lock so the child can acquire it. The child is
+@@ -1377,7 +1541,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}):
+           // success) until it holds the lock, and the lock is ours until
+           // we release.
+           try {
+-            await releaseRunnerLock(runnerLockHandle);
++            if (runnerLockHandle) {
++              await releaseRunnerLock(runnerLockHandle);
++              runnerLockHandle = null;
++            }
+           } catch (error) {
+             logger.debug('[RUNNER RUN] Failed to release lock for child handoff; continuing wait anyway', error);
+           }
+@@ -1387,10 +1554,13 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}):
+           const handoffOk = await waitForRunnerHandoff(process.pid, { timeoutMs: 30_000 });
+           if (!handoffOk) {
+             logger.debug(`[RUNNER RUN] Replacement runner did not register within 30s; attempting to re-acquire lock and stay alive to avoid leaving the machine offline.`);
+-            // Re-acquire the lock with a long window (the child has likely
+-            // either succeeded and we're seeing a stale state, or it gave
+-            // up - in either case the lock should be available shortly).
+-            const reacquired = await acquireRunnerLock(60, 500);
++            // Bound reclaim to FAILED_HANDOFF_LOCK_* (~27.5s backoff). The old
++            // (60, 500) window (~885s) left the parent unlocked long enough for a
++            // late-connecting child to create dual machine sockets.
++            const reacquired = await acquireRunnerLock(
++              FAILED_HANDOFF_LOCK_MAX_ATTEMPTS,
++              FAILED_HANDOFF_LOCK_DELAY_INCREMENT_MS,
++            );
+             if (!reacquired) {
+               // Lock is held by someone else (third-party runner, or a
+               // child that succeeded but state file hasn't reflected the
+@@ -1405,6 +1575,22 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}):
+               return;
+             }
+             runnerLockHandle = reacquired;
++            // Child may have written state then died; reclaim ownership so the
++            // next heartbeat does not see a foreign dead PID as confusing noise.
++            try {
++              writeRunnerState({
++                ...fileState,
++                pid: process.pid,
++                httpPort: controlPort,
++                startedWithCliVersion: packageJson.version,
++                startedWithCliMtimeMs,
++                startedWithArgv,
++                startedWithVersionHandoffDisabled,
++                lastHeartbeat: new Date().toLocaleString(),
++              });
++            } catch (error) {
++              logger.debug('[RUNNER RUN] Failed to reclaim runner.state.json after failed handoff', error);
++            }
+             deferHandoffRetry();
+             return;
+           }
+@@ -1419,8 +1605,16 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}):
+       // Race condition is possible, but thats okay for the time being :D
+       const runnerState = await readRunnerState();
+       if (runnerState && runnerState.pid !== process.pid) {
+-        logger.debug('[RUNNER RUN] Somehow a different runner was started without killing us. We should kill ourselves.')
+-        requestShutdown('exception', 'A different runner was started without killing us. We should kill ourselves.')
++        // Only yield if the other PID is actually alive. During RPC/mtime handoff
++        // a child can write state then die; treating that as ownership transfer
++        // would suicide the parent and leave the machine offline.
++        if (isProcessAlive(runnerState.pid)) {
++          logger.debug('[RUNNER RUN] Somehow a different runner was started without killing us. We should kill ourselves.')
++          requestShutdown('exception', 'A different runner was started without killing us. We should kill ourselves.')
++          heartbeatRunning = false;
++          return;
++        }
++        logger.debug(`[RUNNER RUN] runner.state.json points at dead PID ${runnerState.pid}; reclaiming with heartbeat`)
+       }
+ 
+       // Heartbeat
+@@ -1437,6 +1631,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}):
+           startedWithExtraHeadersHash: fileState.startedWithExtraHeadersHash,
+           startedWithArgv,
+           startedWithVersionHandoffDisabled,
++          hubReadyAt: fileState.hubReadyAt,
++          localResumeSocket: fileState.localResumeSocket,
+           lastHeartbeat: new Date().toLocaleString(),
+           runnerLogPath: fileState.runnerLogPath
+         };
+@@ -1473,9 +1669,27 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}):
+       await new Promise(resolve => setTimeout(resolve, 100));
+ 
+       apiMachine.shutdown();
++      stopLocalResumeGrantServer?.()
+       await stopControlServer();
+-      await cleanupRunnerState();
+-      await releaseRunnerLock(runnerLockHandle);
++      // After a successful handoff the replacement owns runner.state.json / lock.
++      // Deleting them here would strand the child — same Major Codex flagged on
++      // self-upgrade requestShutdown. Only clean up when we still own the state.
++      const localState = await readRunnerState();
++      const replacementOwnsState = Boolean(
++        localState
++        && localState.pid !== process.pid
++        && isProcessAlive(localState.pid),
++      );
++      registerRunnerHandoffLockHooks(null);
++      if (replacementOwnsState) {
++        logger.debug('[RUNNER RUN] Replacement owns runner.state.json; skipping state/lock cleanup');
++      } else {
++        await cleanupRunnerState();
++        if (runnerLockHandle) {
++          await releaseRunnerLock(runnerLockHandle);
++          runnerLockHandle = null;
++        }
++      }
+ 
+       logger.debug('[RUNNER RUN] Cleanup completed, exiting process');
+       process.exit(0);
+@@ -1512,13 +1726,11 @@ export function buildCliArgs(
+             ? 'copilot'
+             : agent === 'opencode'
+             ? 'opencode'
+-            : agent === 'dsh'
+-              ? 'dsh'
+-              : agent === 'pi'
+-                ? 'pi'
+-                : agent === 'agy'
+-                  ? 'agy'
+-                  : 'claude';
++            : agent === 'pi'
++              ? 'pi'
++              : agent === 'agy'
++                ? 'agy'
++                : 'claude';
+   const args = [agentCommand];
+   if (options.resumeSessionId) {
+     if (agent === 'codex') {
+@@ -1532,8 +1744,10 @@ export function buildCliArgs(
+       args.push('--resume', options.resumeSessionId);
+     }
+   }
+-  // agy headless reuses the existing hub row on reopen/resume via the generic
+-  // --existing-session-id flow (no PTY special case anymore).
++  // agy PTY reuses the existing hub row directly on reopen/resume.
++  if (options.existingSessionId && agent === 'agy') {
++    args.push('--hapi-session-id', options.existingSessionId);
++  }
+   // Message-level Fork current for Claude: must follow --resume.
+   if (options.forkSession && agentCommand === 'claude') {
+     args.push('--fork-session');
+@@ -1544,8 +1758,6 @@ export function buildCliArgs(
+   // forks reuse the original HAPI row via --existing-session-id.
+   if (agent === 'codex' || agent === 'cursor' || agent === 'pi'
+       || agent === 'opencode'
+-      || agent === 'agy'
+-      || agent === 'dsh'
+       || (agentCommand === 'claude' && options.forkSession)) {
+     const existingSessionId = options.existingSessionId ?? options.sessionId;
+     if (existingSessionId) {
+@@ -1562,7 +1774,7 @@ export function buildCliArgs(
+   if (options.model) {
+     args.push('--model', options.model);
+   }
+-  if (options.effort && (agent === 'claude' || agent === 'grok' || agent === 'pi' || agent === 'agy')) {
++  if (options.effort && (agent === 'claude' || agent === 'grok' || agent === 'pi')) {
+     args.push('--effort', options.effort);
+   }
+   if (options.modelReasoningEffort && (agent === 'codex' || agent === 'opencode')) {
+@@ -1579,7 +1791,7 @@ export function buildCliArgs(
+   }
+   // Pi RPC mode has no permission switching; never pass these flags to it
+   // (the Pi parser rejects --permission-mode and ignores --yolo).
+-  if (agent !== 'pi' && agent !== 'dsh') {
++  if (agent !== 'pi') {
+     if (options.permissionMode && (PERMISSION_MODES as readonly string[]).includes(options.permissionMode)) {
+       args.push('--permission-mode', options.permissionMode);
+     } else if (yolo) {
+@@ -1599,3 +1811,80 @@ export function buildCliArgs(
+   }
+   return args;
+ }
++
++async function redeemResumePeerCapabilityFromHub(
++  sessionId: string,
++  nonce: string
++): Promise<string | undefined> {
++  const apiUrl = configuration.apiUrl
++  // Prefer in-memory token (env / tokenInit). Fall back to settings like
++  // controlClient — empty configuration.cliApiToken after a partial init
++  // silently breaks resume peer inject (#1473 upload blindness).
++  let accessToken = configuration.cliApiToken.trim()
++  if (!accessToken) {
++    try {
++      const settings = await readSettings()
++      accessToken = typeof settings.cliApiToken === 'string' ? settings.cliApiToken.trim() : ''
++      if (accessToken) {
++        configuration._setCliApiToken(accessToken)
++      }
++    } catch (error) {
++      logger.debug('[RUNNER RUN] resume peer redeem: settings token read failed', error)
++    }
++  }
++  if (!apiUrl || !accessToken) {
++    logger.debug('[RUNNER RUN] resume peer redeem skipped: missing apiUrl or cliApiToken')
++    return undefined
++  }
++  // Bun fetch has historically returned empty bodies / null json() on some
++  // keep-alive responses (#1473 estate: hub logs HTTP 200, runner closes the
++  // inject socket in finally → child ECONNREFUSED/ENOENT). Read text + parse,
++  // retry once on empty.
++  const redeemUrl =
++    `${apiUrl}/cli/sessions/${encodeURIComponent(sessionId)}/resume-peer-capability`
++  for (let attempt = 0; attempt < 2; attempt++) {
++    const redeemResponse = await fetch(redeemUrl, {
++      method: 'POST',
++      headers: buildHubRequestHeaders({
++        Authorization: `Bearer ${accessToken}`,
++        'Content-Type': 'application/json',
++      }),
++      body: JSON.stringify({ nonce }),
++    })
++    const rawBody = await redeemResponse.text()
++    if (!redeemResponse.ok) {
++      logger.debug(
++        `[RUNNER RUN] resume peer redeem HTTP ${redeemResponse.status} for ${sessionId} body=${rawBody.slice(0, 120)}`
++      )
++      return undefined
++    }
++    if (!rawBody.trim()) {
++      logger.debug(
++        `[RUNNER RUN] resume peer redeem empty body for ${sessionId} attempt=${attempt}`
++      )
++      continue
++    }
++    let redeemBody: { sessionCapability?: unknown }
++    try {
++      redeemBody = JSON.parse(rawBody) as { sessionCapability?: unknown }
++    } catch (error) {
++      logger.debug(
++        `[RUNNER RUN] resume peer redeem JSON parse failed for ${sessionId}`,
++        error
++      )
++      return undefined
++    }
++    const capability = typeof redeemBody.sessionCapability === 'string'
++      ? redeemBody.sessionCapability.trim()
++      : ''
++    if (capability) {
++      return capability
++    }
++    logger.debug(
++      `[RUNNER RUN] resume peer redeem missing sessionCapability for ${sessionId} body=${rawBody.slice(0, 120)}`
++    )
++    return undefined
++  }
++  return undefined
++}
++
+diff --git a/hub/src/sync/fleetUpgrade.test.ts b/hub/src/sync/fleetUpgrade.test.ts
+index 769af6150..d03986c83 100644
+--- a/hub/src/sync/fleetUpgrade.test.ts
++++ b/hub/src/sync/fleetUpgrade.test.ts
+@@ -230,14 +230,23 @@ describe('SyncEngine fleet upgrade', () => {
+         }
+     })
+ 
+-    it('refuses hub-artifact upgrade when machine arch is missing', async () => {
++    it('infers x64 for legacy runners missing metadata.arch on win32', async () => {
+         const offer: HubUpgradeOffer = {
+             channel: 'hub-artifact',
+             targetVersion: '0.24.0',
+             targetCapabilities: ['cursor-chat-store-status'],
+         }
+         const store = new Store(':memory:')
+-        const prepareArtifactOffer = mock(async () => offer)
++        const prepareArtifactOffer = mock(async (base: HubUpgradeOffer, platform: string, arch: string) => ({
++            ...base,
++            artifact: {
++                url: '/cli/upgrade/cli-artifact',
++                sha256: 'abc',
++                platform,
++                arch,
++                sizeBytes: 10,
++            },
++        }))
+         const registry = new RpcRegistry()
+         const engine = new SyncEngine(
+             store,
+@@ -248,6 +257,13 @@ describe('SyncEngine fleet upgrade', () => {
+         )
+ 
+         try {
++            const runnerSelfUpgrade = mock(async () => ({
++                status: 'started',
++                message: 'ok',
++                channel: 'hub-artifact',
++            }))
++            ;(engine as any).rpcGateway.runnerSelfUpgrade = runnerSelfUpgrade
++
+             engine.getOrCreateMachine(
+                 'no-arch',
+                 {
+@@ -262,6 +278,45 @@ describe('SyncEngine fleet upgrade', () => {
+             registerLiveSelfUpgrade(registry, 'no-arch')
+             engine.handleMachineAlive({ machineId: 'no-arch', time: Date.now() })
+             const result = await engine.upgradeMachineRunner('no-arch', 'default')
++            expect(result.type).toBe('success')
++            expect(prepareArtifactOffer).toHaveBeenCalledWith(offer, 'win32', 'x64')
++        } finally {
++            engine.stop()
++        }
++    })
++
++    it('refuses hub-artifact upgrade when platform/arch cannot be resolved', async () => {
++        const offer: HubUpgradeOffer = {
++            channel: 'hub-artifact',
++            targetVersion: '0.24.0',
++            targetCapabilities: ['cursor-chat-store-status'],
++        }
++        const store = new Store(':memory:')
++        const prepareArtifactOffer = mock(async () => offer)
++        const registry = new RpcRegistry()
++        const engine = new SyncEngine(
++            store,
++            {} as never,
++            registry,
++            { broadcast() {} } as never,
++            { getUpgradeOffer: () => offer, prepareArtifactOffer },
++        )
++
++        try {
++            engine.getOrCreateMachine(
++                'no-arch',
++                {
++                    host: 'exotic',
++                    platform: 'freebsd',
++                    happyCliVersion: '0.20.0',
++                    capabilities: ['runner-self-upgrade'],
++                },
++                null,
++                'default',
++            )
++            registerLiveSelfUpgrade(registry, 'no-arch')
++            engine.handleMachineAlive({ machineId: 'no-arch', time: Date.now() })
++            const result = await engine.upgradeMachineRunner('no-arch', 'default')
+             expect(result).toEqual({
+                 type: 'error',
+                 message: 'Machine platform/arch unavailable for hub-artifact upgrade',
+diff --git a/hub/src/sync/syncEngine.ts b/hub/src/sync/syncEngine.ts
+index abe06c06e..0032e8c09 100644
+--- a/hub/src/sync/syncEngine.ts
++++ b/hub/src/sync/syncEngine.ts
+@@ -7,7 +7,7 @@
+  * - No E2E encryption; data is stored as JSON in SQLite
+  */
+ 
+-import { isKnownFlavor, isSteeringSupportedForSession, type LocalResumeTarget, type ResumableSession, type SessionEndReason } from '@hapi/protocol'
++import { isKnownFlavor, type LocalResumeTarget, type ResumableSession, type SessionEndReason } from '@hapi/protocol'
+ import {
+     cliBinaryUpdatedOnDisk,
+     isMachineCapabilitySkewed,
+@@ -15,6 +15,7 @@ import {
+ } from '@hapi/protocol/runnerCapabilities'
+ import {
+     DEFAULT_FLEET_UPGRADE_POLICY,
++    inferMachineArch,
+     machineTrailsUpgradeOffer,
+     type FleetUpgradePolicy,
+     type HubUpgradeOffer,
+@@ -26,7 +27,7 @@ import type { ExternalRef, AgentFlavor, CodexCollaborationMode, CopilotAgentMode
+ import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
+ import type { Server } from 'socket.io'
+ import { randomUUID } from 'node:crypto'
+-import type { Store, SettingsStore, CancelQueuedMessageResult } from '../store'
++import type { Store, CancelQueuedMessageResult } from '../store'
+ import type { HapiSessionExportResult } from '@hapi/protocol/sessionExport'
+ import type { RpcRegistry } from '../socket/rpcRegistry'
+ import { clearAgentTerminalBuffer } from '../socket/agentTerminalBuffer'
+@@ -43,13 +44,11 @@ import { isTransientArtifactBuildFailure } from '../upgrade/cliArtifact'
+ import { executeSessionRelay } from './sessionRelay'
+ import { EventPublisher, type SyncEventListener } from './eventPublisher'
+ import { MachineCache, type Machine } from './machineCache'
+-import { MessageService, type RetryIndeterminateMessageResult } from './messageService'
+-import { createTitleSuggestionService, type TitleSuggestionService } from './titleSuggestion'
++import { MessageService } from './messageService'
+ import { selectForkTranscriptPrefix } from './forkTranscript'
+ import {
+     RpcGateway,
+     RpcTargetMissingError,
+-    type FileSearchOptions,
+     type RpcCodexModel,
+     type RpcCommandResponse,
+     type RpcDeleteUploadResponse,
+@@ -57,7 +56,6 @@ import {
+     type RpcListDirectoryResponse,
+     type RpcStatFilesResponse,
+     type RpcListAgyModelsResponse,
+-    type RpcListPiModelsResponse,
+     type RpcListCodexModelsResponse,
+     type RpcArchiveCodexSessionResponse,
+     type RpcListCursorModelsResponse,
+@@ -86,10 +84,6 @@ import { ingestNotifySummaryFromMessage } from './workGraphNotifyIngest'
+ import { armResumePeerMint, clearResumePeerMint } from '../web/pendingResumePeerMint'
+ import { buildProvenanceDiagnostics } from './provenanceDiagnostics'
+ import type { ProvenanceDiagnostics } from '@hapi/protocol/provenanceDiagnostics'
+-import {
+-    defaultProvenanceMessageScanOptions,
+-    type ProvenanceMessageScanOptions,
+-} from '@hapi/protocol/provenanceMessageAudit'
+ 
+ type PiResumeAttempt = NonNullable<NonNullable<Session['metadata']>['piResumeAttempt']>
+ type PtyResumeAttempt = NonNullable<NonNullable<Session['metadata']>['ptyResumeAttempt']>
+@@ -105,7 +99,6 @@ export type {
+     RpcListDirectoryResponse,
+     RpcStatFilesResponse,
+     RpcListAgyModelsResponse,
+-    RpcListPiModelsResponse,
+     RpcListCodexModelsResponse,
+     RpcListCursorModelsResponse,
+     RpcListOpencodeModelsResponse,
+@@ -138,17 +131,6 @@ export type LocalHandoffResult =
+     | { type: 'success' }
+     | { type: 'error'; message: string; code: 'session_not_found' | 'access_denied' | 'already_local' | 'handoff_failed' }
+ 
+-/** Archive refused: CLI is still connected (or runner says still alive) but session RPC is missing. */
+-export class SessionArchiveUncontrollableError extends Error {
+-    readonly sessionId: string
+-
+-    constructor(sessionId: string) {
+-        super('Session is connected but not controllable. Reopen or restart the CLI on that machine.')
+-        this.name = 'SessionArchiveUncontrollableError'
+-        this.sessionId = sessionId
+-    }
+-}
+-
+ export type ClearOpencodeSessionResult =
+     | { type: 'success'; sessionId: string }
+     | {
+@@ -225,7 +207,6 @@ export class SyncEngine {
+     private readonly sessionCache: SessionCache
+     private readonly machineCache: MachineCache
+     private readonly messageService: MessageService
+-    private readonly titleSuggestionService: TitleSuggestionService
+     private readonly rpcGateway: RpcGateway
+     private readonly overseerEvents: OverseerEventRecorder
+     private readonly overseerByNamespace: Map<string, OverseerEntity>
+@@ -293,7 +274,6 @@ export class SyncEngine {
+             this.eventPublisher,
+             (sessionId, updatedAt) => this.recordSessionActivity(sessionId, updatedAt)
+         )
+-        this.titleSuggestionService = createTitleSuggestionService(store)
+         this.rpcGateway = new RpcGateway(io, rpcRegistry)
+         const llmFallbackConfig = loadOverseerLlmFallbackConfig()
+         const llmFallback = llmFallbackConfig.enabled
+@@ -491,24 +471,12 @@ export class SyncEngine {
+         return this.machineCache.getOnlineMachinesByNamespace(namespace)
+     }
+ 
+-    getProvenanceDiagnostics(
+-        namespace: string,
+-        options?: { messageScan?: ProvenanceMessageScanOptions | false }
+-    ): ProvenanceDiagnostics {
+-        const scanOptions = options?.messageScan === false
+-            ? null
+-            : (options?.messageScan ?? defaultProvenanceMessageScanOptions())
+-        const messageAudit = scanOptions
+-            ? this.store.scanUnverifiedPeerMessages(namespace, scanOptions)
+-            : null
+-
++    getProvenanceDiagnostics(namespace: string): ProvenanceDiagnostics {
+         return buildProvenanceDiagnostics({
+             sessions: this.getSessionsByNamespace(namespace),
+             machines: this.getOnlineMachinesByNamespace(namespace),
+             getStoredMachine: (machineId) => this.store.machines.getMachineByNamespace(machineId, namespace),
+             hasLiveRpcHandler: (method) => this.rpcGateway.hasLiveHandler(method),
+-            unverifiedPeerMessages: messageAudit?.rows,
+-            messageScan: messageAudit?.meta ?? null,
+         })
+     }
+ 
+@@ -533,8 +501,8 @@ export class SyncEngine {
+         return this.messageService.getQueuedState(sessionId, localIds)
+     }
+ 
+-    getSessionExport(sessionId: string, session: Session, options?: { force?: boolean }): HapiSessionExportResult {
+-        return this.messageService.getSessionExport(sessionId, session, options)
++    getSessionExport(sessionId: string, session: Session): HapiSessionExportResult {
++        return this.messageService.getSessionExport(sessionId, session)
+     }
+ 
+     getDeliverableMessagesAfter(sessionId: string, options: { afterSeq: number; limit: number; now: number }): DecryptedMessage[] {
+@@ -670,11 +638,6 @@ export class SyncEngine {
+         return entity
+     }
+ 
+-    /** Hub settings KV (persisted active brain, etc.) — see SettingsStore. */
+-    getSettings(): SettingsStore {
+-        return this.store.settings
+-    }
+-
+     private createOverseerForNamespace(namespace: string): OverseerEntity {
+         return new OverseerEntity({
+             events: this.store.events,
+@@ -1626,7 +1589,7 @@ export class SyncEngine {
+                 return { type: 'error', message: 'Artifact builder not configured', code: 'upgrade_unavailable' }
+             }
+             const platform = machine.metadata?.platform
+-            const arch = machine.metadata?.arch
++            const arch = machine.metadata?.arch ?? inferMachineArch(platform)
+             if (!platform || !arch) {
+                 return {
+                     type: 'error',
+@@ -1962,19 +1925,10 @@ export class SyncEngine {
+         return this.messageService.cancelQueuedMessage(sessionId, messageId)
+     }
+ 
+-    async retryIndeterminateMessage(
+-        sessionId: string,
+-        messageId: string
+-    ): Promise<RetryIndeterminateMessageResult> {
+-        return this.messageService.retryIndeterminateMessage(sessionId, messageId)
+-    }
+-
+     /**
+-     * Ask the CLI to deliver one waiting-queue message into the active turn
+-     * (native steer). Supported for Pi, Codex, and Cursor ACP sessions; the
+-     * CLI's `steer-queued-message` handler is registered per flavor. Legacy
+-     * stream-json Cursor sessions and other flavors are rejected by the
+-     * capability gate.
++     * Ask the CLI to deliver one waiting-queue message into the active Pi turn
++     * (Pi native steer). Only pi sessions support this today; the CLI's
++     * `steer-queued-message` handler is registered by the pi runner alone.
+      */
+     async steerQueuedMessage(
+         sessionId: string,
+@@ -1984,8 +1938,8 @@ export class SyncEngine {
+         if (!session) {
+             return { status: 'failed', error: 'Session not found', localId: null }
+         }
+-        if (!isSteeringSupportedForSession(session.metadata)) {
+-            return { status: 'failed', error: 'Steering is only supported for Pi, Codex, and Cursor ACP sessions', localId: null }
++        if (session.metadata?.flavor !== 'pi') {
++            return { status: 'failed', error: 'Steering is only supported for Pi sessions', localId: null }
+         }
+         if (session.agentState?.controlledByUser === true) {
+             return { status: 'failed', error: 'Steering is only available for remote sessions', localId: null }
+@@ -2592,64 +2546,24 @@ export class SyncEngine {
+     }
+ 
+     async archiveSession(sessionId: string): Promise<void> {
+-        // tiann/hapi#916: missing KillSession used to mean "CLI already gone".
+-        // After #1203, an in-flight pre-proof CLI can stay connected without
+-        // registering `${sessionId}:killSession`. Do not stamp archived while
+-        // that process is still alive: try runner StopSession, then refuse if
+-        // the session is still heartbeating.
++        // tiann/hapi#916: when the CLI is already gone (e.g. after a
++        // hub-restart cascade SIGTERMed the runner but the in-memory
++        // `active` flag has not been reconciled yet) the kill-RPC throws
++        // and the route used to surface that as HTTP 500. Treat the
++        // missing target as a benign condition: still flip the session's
++        // lifecycleState to `archived` in the hub-side metadata so the
++        // UI does not see a half-cleaned zombie, and continue to mark
++        // it inactive in the cache. Real RPC errors (timeout, protocol
++        // failure) still propagate as 5xx.
+         try {
+             await this.rpcGateway.killSession(sessionId)
+-            this.handleSessionEnd({ sid: sessionId, time: Date.now() })
+-            return
+         } catch (error) {
+-            if (!(error instanceof RpcTargetMissingError)) {
++            if (error instanceof RpcTargetMissingError) {
++                this.sessionCache.markSessionArchivedFromHub(sessionId, 'Archived from hub (CLI unreachable)')
++            } else {
+                 throw error
+             }
+         }
+-
+-        const session = this.sessionCache.getSession(sessionId)
+-        const machineId = typeof session?.metadata?.machineId === 'string'
+-            ? session.metadata.machineId.trim()
+-            : ''
+-
+-        if (machineId) {
+-            try {
+-                const status = await this.rpcGateway.stopRunnerSession(machineId, sessionId)
+-                if (status === 'still_alive') {
+-                    throw new SessionArchiveUncontrollableError(sessionId)
+-                }
+-                if (status === 'stopped') {
+-                    this.sessionCache.markSessionArchivedFromHub(
+-                        sessionId,
+-                        'Archived from hub (CLI unreachable)'
+-                    )
+-                    this.handleSessionEnd({ sid: sessionId, time: Date.now() })
+-                    return
+-                }
+-                // already_gone: runner does not have the pid. Fall through to
+-                // the heartbeat check — do not trust `/cli` room membership
+-                // (namespace token joins that room before tag/capability).
+-            } catch (error) {
+-                if (error instanceof SessionArchiveUncontrollableError) {
+-                    throw error
+-                }
+-                if (!(error instanceof RpcTargetMissingError)) {
+-                    throw error
+-                }
+-            }
+-        }
+-
+-        // Unproven in-flight CLIs keep session-alive without KillSession.
+-        // Counting raw room sockets is attacker-controlled (#1473 review).
+-        // Counting only sessionRpcAuthorizedId sockets misses this CLI.
+-        // Heartbeat is the hub-side liveness signal; expireInactive (~30s)
+-        // clears it when the process is actually gone (#916).
+-        const latest = this.sessionCache.getSession(sessionId)
+-        if (latest?.active) {
+-            throw new SessionArchiveUncontrollableError(sessionId)
+-        }
+-
+-        this.sessionCache.markSessionArchivedFromHub(sessionId, 'Archived from hub (CLI unreachable)')
+         this.handleSessionEnd({ sid: sessionId, time: Date.now() })
+     }
+ 
+@@ -2833,14 +2747,6 @@ export class SyncEngine {
+         await this.sessionCache.renameSession(sessionId, name)
+     }
+ 
+-    async suggestSessionTitle(sessionId: string): Promise<string> {
+-        return await this.titleSuggestionService.suggestTitle(sessionId)
+-    }
+-
+-    async updateSessionSummary(sessionId: string, text: string): Promise<void> {
+-        await this.sessionCache.updateSessionSummary(sessionId, text)
+-    }
+-
+     async deleteSession(sessionId: string): Promise<void> {
+         await this.sessionCache.deleteSession(sessionId)
+         this.overseerEvents.forgetSession(sessionId)
+@@ -2919,7 +2825,7 @@ export class SyncEngine {
+         collaborationMode?: CodexCollaborationMode,
+         copilotAgentMode?: CopilotAgentMode,
+         startingMode?: 'remote' | 'pty'
+-    ): ReturnType<RpcGateway['spawnSession']> {
++    ): Promise<{ type: 'success'; sessionId: string } | { type: 'error'; message: string }> {
+         return await this.rpcGateway.spawnSession(
+             machineId,
+             directory,
+@@ -3378,9 +3284,6 @@ export class SyncEngine {
+         if (flavor === 'kimi') return metadata.kimiSessionId ?? null
+         if (flavor === 'copilot') return metadata.copilotSessionId ?? null
+         if (flavor === 'pi') return metadata.piSessionId ?? null
+-        // The official DSH ACP server creates fresh sessions only; never fall
+-        // through to a stale Claude id and advertise a false resume path.
+-        if (flavor === 'dsh') return null
+ 
+         return metadata.claudeSessionId ?? this.recoverClaudeSessionIdFromMessages(session.id, namespace)
+     }
+@@ -3950,12 +3853,8 @@ export class SyncEngine {
+             // self-reported, so a same-namespace tagged machine can spoof the
+             // victim host and steal the mint (#1473 Blocker). Exact machineId
+             // match only; host-fallback resume stays unattributed.
+-            // Re-read machineId after awaited probes — a concurrent
+-            // migrateSessionsMachineId must not arm against a stale snapshot
+-            // (#1473 cold Major).
+-            const latestMetadata = this.sessionCache.getSession(access.sessionId)?.metadata
+-            const recordedMachineId = typeof latestMetadata?.machineId === 'string'
+-                ? latestMetadata.machineId.trim()
++            const recordedMachineId = typeof metadata.machineId === 'string'
++                ? metadata.machineId.trim()
+                 : ''
+             const resumePeerMintNonce = (
+                 recordedMachineId
+@@ -4063,7 +3962,7 @@ export class SyncEngine {
+                 const readyResult = await this.waitForSessionReady(spawnResult.sessionId)
+                 if (readyResult !== 'ready') {
+                     if (resumedStartingMode === 'pty' && readyResult === 'timeout') {
+-                        let status: 'stopped' | 'already_gone' | 'still_alive' | 'unknown'
++                        let status: 'stopped' | 'already_gone' | 'still_alive'
+                         try {
+                             status = await this.rpcGateway.stopRunnerSession(
+                                 targetMachine.id,
+@@ -4581,7 +4480,7 @@ export class SyncEngine {
+             machineId,
+             startedAt: Date.now(),
+         })
+-        let status: 'stopped' | 'already_gone' | 'still_alive' | 'unknown'
++        let status: 'stopped' | 'already_gone' | 'still_alive'
+         try {
+             status = await this.rpcGateway.stopRunnerSession(machineId, sessionId)
+         } catch {
+@@ -4615,7 +4514,7 @@ export class SyncEngine {
+             startedAt: Date.now(),
+             childSessionId: sessionId,
+         })
+-        let status: 'stopped' | 'already_gone' | 'still_alive' | 'unknown'
++        let status: 'stopped' | 'already_gone' | 'still_alive'
+         try {
+             status = await this.rpcGateway.stopRunnerSession(machineId, sessionId)
+         } catch {
+@@ -4793,7 +4692,7 @@ export class SyncEngine {
+     private async reconcilePersistedPtyResumeAttempt(session: Session): Promise<boolean> {
+         const attempt = session.metadata?.ptyResumeAttempt
+         if (!attempt) return true
+-        let status: 'stopped' | 'already_gone' | 'still_alive' | 'unknown'
++        let status: 'stopped' | 'already_gone' | 'still_alive'
+         try {
+             status = await this.rpcGateway.stopRunnerSession(attempt.machineId, session.id)
+         } catch {
+@@ -4819,7 +4718,7 @@ export class SyncEngine {
+         const attempt = session.metadata?.piResumeAttempt
+         if (!attempt) return true
+         const childSessionId = attempt.childSessionId ?? session.id
+-        let status: 'stopped' | 'already_gone' | 'still_alive' | 'unknown'
++        let status: 'stopped' | 'already_gone' | 'still_alive'
+         try {
+             status = await this.rpcGateway.stopRunnerSession(attempt.machineId, childSessionId)
+         } catch {
+@@ -4890,14 +4789,10 @@ export class SyncEngine {
+         return false
+     }
+ 
+-    async checkPathsExist(machineId: string, paths: string[]): ReturnType<RpcGateway['checkPathsExist']> {
++    async checkPathsExist(machineId: string, paths: string[]): Promise<Record<string, boolean>> {
+         return await this.rpcGateway.checkPathsExist(machineId, paths)
+     }
+ 
+-    async getAgentAvailability(machineId: string): ReturnType<RpcGateway['getAgentAvailability']> {
+-        return await this.rpcGateway.getAgentAvailability(machineId)
+-    }
+-
+     async listMachineDirectory(machineId: string, path: string, includeHidden?: boolean): Promise<RpcListDirectoryResponse> {
+         return await this.rpcGateway.listMachineDirectory(machineId, path, includeHidden)
+     }
+@@ -4938,8 +4833,8 @@ export class SyncEngine {
+         return await this.rpcGateway.deleteUploadFile(sessionId, path)
+     }
+ 
+-    async runRipgrep(sessionId: string, args: string[], cwd?: string, fileSearch?: FileSearchOptions): Promise<RpcCommandResponse> {
+-        return await this.rpcGateway.runRipgrep(sessionId, args, cwd, fileSearch)
++    async runRipgrep(sessionId: string, args: string[], cwd?: string): Promise<RpcCommandResponse> {
++        return await this.rpcGateway.runRipgrep(sessionId, args, cwd)
+     }
+ 
+     async listSlashCommands(sessionId: string, agent: string): Promise<SlashCommandsResponse> {
+@@ -4958,10 +4853,6 @@ export class SyncEngine {
+         return await this.rpcGateway.listAgyModelsForMachine(machineId)
+     }
+ 
+-    async listPiModelsForMachine(machineId: string): Promise<RpcListPiModelsResponse> {
+-        return await this.rpcGateway.listPiModelsForMachine(machineId)
+-    }
+-
+     async listCodexModelsForMachine(machineId: string): Promise<RpcListCodexModelsResponse> {
+         return await this.rpcGateway.listCodexModelsForMachine(machineId)
+     }
+diff --git a/shared/src/upgradeChannel.ts b/shared/src/upgradeChannel.ts
+index 685d9871b..d16bee5ae 100644
+--- a/shared/src/upgradeChannel.ts
++++ b/shared/src/upgradeChannel.ts
+@@ -130,6 +130,24 @@ export type MachineTrailsOptions = {
+     ignoreGenerationDrift?: boolean
+ }
+ 
++/**
++ * Legacy runners omitted `metadata.arch`. Estate fleet is x64-only today; infer
++ * so hub-artifact upgrades can proceed before remotes reconnect with fixed CLI.
++ */
++export function inferMachineArch(platform: string | null | undefined): string | undefined {
++    if (!platform) {
++        return undefined
++    }
++    switch (platform) {
++        case 'linux':
++        case 'win32':
++        case 'darwin':
++            return 'x64'
++        default:
++            return undefined
++    }
++}
++
+ /**
+  * True when a runner advertising `version`/`capabilities`/`generation` is behind
+  * `offer` and the hub should auto-nudge it to the hub's generation.

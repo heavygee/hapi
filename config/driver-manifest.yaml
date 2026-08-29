@@ -840,7 +840,7 @@ layers:
   # Soup union: driver/fleet-runner-upgrade (merged onto live soup tip).
   # Upstream PR branch: estate/fleet-runner-upgrade @ upstream/main (cooling off).
   # Worktree: ~/coding/hapi/worktrees/estate-fleet-runner-upgrade
-  # Tip: b3c21c9cc (origin/driver/fleet-runner-upgrade); soup still @ older remat until next rebuild
+  # Tip: aceb52393 (origin/driver/fleet-runner-upgrade); restores asRunner metadata after re-cut
   - branch: driver/fleet-runner-upgrade
 
   # tiann/hapi#1516 — display_links MCP + CLI fallback + tappable SessionChat card.
