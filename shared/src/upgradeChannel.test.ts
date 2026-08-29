@@ -29,6 +29,16 @@ describe('detectUpgradeChannel', () => {
         })).toBe('off')
     })
 
+    it('rejects invalid non-empty HAPI_UPGRADE_CHANNEL instead of enabling a default', () => {
+        expect(() => detectUpgradeChannel({
+            envChannel: 'of',
+            isCompiled: true,
+            execPath: '/usr/local/bin/hapi',
+            projectPath: '/tmp',
+            monorepoRootExists: false,
+        })).toThrow(/Invalid HAPI_UPGRADE_CHANNEL/)
+    })
+
     it('classifies npm global / node_modules installs as npm', () => {
         expect(detectUpgradeChannel({
             isCompiled: false,
@@ -150,5 +160,27 @@ describe('machineTrailsUpgradeOffer', () => {
             '0.24.0',
             ['cursor-chat-store-status', 'runner-self-upgrade'],
         )).toBe(true)
+    })
+
+    it('does not trail when the runner is newer even if generation differs', () => {
+        const artifactOffer: HubUpgradeOffer = {
+            channel: 'hub-artifact',
+            targetVersion: '0.25.0',
+            targetCapabilities: ['cursor-chat-store-status', 'runner-self-upgrade'],
+            targetGeneration: 'gen-hub',
+            artifact: {
+                url: '/cli/upgrade/cli-artifact',
+                sha256: 'abc',
+                platform: 'linux',
+                arch: 'x64',
+                sizeBytes: 1,
+            },
+        }
+        expect(machineTrailsUpgradeOffer(
+            artifactOffer,
+            '0.26.0',
+            ['cursor-chat-store-status', 'runner-self-upgrade'],
+            'gen-runner',
+        )).toBe(false)
     })
 })

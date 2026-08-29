@@ -22,14 +22,21 @@ export type DetectUpgradeChannelInput = {
 }
 
 function normalizeOverride(raw: string | null | undefined): UpgradeChannel | null {
-    if (!raw) {
+    if (raw == null) {
         return null
     }
     const value = raw.trim().toLowerCase()
+    if (!value) {
+        return null
+    }
     if (value === 'npm' || value === 'hub-artifact' || value === 'off') {
         return value
     }
-    return null
+    // Fail closed: a typo must not fall through to npm/hub-artifact and defeat
+    // an intended kill switch when fleet policy is `auto`.
+    throw new Error(
+        `Invalid HAPI_UPGRADE_CHANNEL="${raw.trim()}"; expected npm, hub-artifact, or off`,
+    )
 }
 
 function pathLooksLikeNpmPackage(path: string): boolean {
@@ -124,6 +131,24 @@ export type MachineTrailsOptions = {
 }
 
 /**
+ * Legacy runners omitted `metadata.arch`. Estate fleet is x64-only today; infer
+ * so hub-artifact upgrades can proceed before remotes reconnect with fixed CLI.
+ */
+export function inferMachineArch(platform: string | null | undefined): string | undefined {
+    if (!platform) {
+        return undefined
+    }
+    switch (platform) {
+        case 'linux':
+        case 'win32':
+        case 'darwin':
+            return 'x64'
+        default:
+            return undefined
+    }
+}
+
+/**
  * True when a runner advertising `version`/`capabilities`/`generation` is behind
  * `offer` and the hub should auto-nudge it to the hub's generation.
  *
@@ -149,15 +174,17 @@ export function machineTrailsUpgradeOffer(
     if (!offer.targetVersion || offer.targetVersion === '0.0.0') {
         return false
     }
+    // Only "behind" counts — a newer runner must not be force-downgraded,
+    // including via generationDrift or capability gaps against an older hub offer.
+    const versionRelation = typeof version === 'string' && version.length > 0
+        ? compareHapiVersions(version, offer.targetVersion)
+        : null
+    if (versionRelation !== null && versionRelation > 0) {
+        return false
+    }
     const advertised = new Set(capabilities ?? [])
     const missingCapability = offer.targetCapabilities.some((cap) => !advertised.has(cap))
-    // Only "behind" counts — a newer runner must not be force-downgraded.
-    const versionBehind = typeof version === 'string'
-        && version.length > 0
-        && (() => {
-            const relation = compareHapiVersions(version, offer.targetVersion)
-            return relation !== null && relation < 0
-        })()
+    const versionBehind = versionRelation !== null && versionRelation < 0
     const generationDrift = !options?.ignoreGenerationDrift
         && offer.channel === 'hub-artifact'
         && typeof offer.targetGeneration === 'string'
@@ -170,11 +197,16 @@ export function machineTrailsUpgradeOffer(
  * Operator-facing fleet-management policy (3-pole switch in Settings):
  * - silent: hub neither alerts nor auto-upgrades drifted runners
  * - alert: hub surfaces the skew banner; operator upgrades manually
- * - auto: hub auto-upgrades drifted runners AND surfaces the banner
+ * - auto: hub auto-upgrades drifted runners; banner only for hosts that
+ *   cannot auto-upgrade (legacy / handoff-disabled). Success is a toast.
  *
  * Orthogonal to {@link UpgradeChannel}: `HAPI_UPGRADE_CHANNEL=off` is a hard
  * kill (no upgrades at all); this policy governs whether the hub acts/alerts
  * when a channel IS available.
+ *
+ * Vocabulary: a *machine* is a host record in the hub registry; its *runner*
+ * is the daemon (`hapi runner start`) that handles spawn + self-upgrade RPCs.
+ * Skew banners list machines whose runners trail the hub offer.
  *
  * Default is `alert`, not `auto`: mutating someone's remote machines without
  * an explicit opt-in is too aggressive for the 99% single-machine case. A
