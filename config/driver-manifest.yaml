@@ -837,11 +837,10 @@ layers:
 
   # heavygee/hapi#122 — fleet runner self-upgrade (fat follow-on to thin upstream merge; fork soup).
   # NOT tiann PR 1108 scope — do not attribute this layer to chip 1108 (Meta mw_manifest_pr_layer_active).
-  # Soup union: driver/fleet-runner-upgrade (merged onto live soup tip).
-  # Upstream PR branch: estate/fleet-runner-upgrade @ upstream/main (cooling off).
-  # Worktree: ~/coding/hapi/worktrees/estate-fleet-runner-upgrade
-  # Tip: aceb52393 (origin/driver/fleet-runner-upgrade); restores asRunner metadata after re-cut
-  - branch: driver/fleet-runner-upgrade
+  # 2026-08-29: layer DISABLED — re-cut aceb52393 regressed hub/syncEngine (typecheck rollback).
+  # Runner metadata fix lives in soup-heals/105-runner-fleet-metadata.patch until branch is re-thinned.
+  # Worktree: ~/coding/hapi/worktrees/estate-fleet-runner-upgrade @ driver/fleet-runner-upgrade
+  # - branch: driver/fleet-runner-upgrade
 
   # tiann/hapi#1516 — display_links MCP + CLI fallback + tappable SessionChat card.
   # Href bytes constructed outside the model (concat landmines; no prose rewrite).
