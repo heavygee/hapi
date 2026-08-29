@@ -852,9 +852,10 @@ layers:
   # into the query (whichever transcription provider is configured), replacing
   # the old long-press-to-dismiss gesture. Web-only.
   # Worktree: ~/coding/hapi/worktrees/session-search-longpress-dismiss @ fix/session-search-longpress-dismiss
-  # Tip: 7c920d3f2 — push-to-talk rework per operator dogfood (hold-to-record,
-  # release-to-apply, no separate stop step); rebased onto upstream/main again
-  # after 170 commits of drift (auto-merged clean this time).
+  # Tip: 3907d7d9a — strip dictation trailing punctuation (Android STT adds a
+  # period, breaks substring match) + desktop mouse press-and-hold support.
+  # Plain commit on top of the already-merged 7c920d3f2 (not a rebase) so this
+  # is a clean fast-forward into driver/integration-wip — no more self-conflicts.
   - branch: fix/session-search-longpress-dismiss
 
 
