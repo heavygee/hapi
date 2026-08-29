@@ -62,7 +62,7 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 28
+const SCHEMA_VERSION: number = 29
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -402,6 +402,7 @@ export class Store {
             25: () => this.migrateFromV25ToV26(),
             26: () => this.migrateFromV26ToV27(),
             27: () => this.migrateFromV27ToV28(),
+            28: () => this.migrateFromV28ToV29(),
         })
 
         if (currentVersion === 0) {
@@ -505,6 +506,9 @@ export class Store {
                 team_state_updated_at INTEGER,
                 pinned INTEGER NOT NULL DEFAULT 0,
                 global_pinned INTEGER NOT NULL DEFAULT 0,
+                last_notify_status TEXT,
+                last_notify_at INTEGER,
+                last_notify_note TEXT,
                 active INTEGER DEFAULT 0,
                 active_at INTEGER,
                 seq INTEGER DEFAULT 0
@@ -1090,6 +1094,24 @@ export class Store {
         }
         if (!columns.has('global_pinned')) {
             this.db.exec('ALTER TABLE sessions ADD COLUMN global_pinned INTEGER NOT NULL DEFAULT 0')
+        }
+    }
+
+    /** Blocked-agent session-list chrome (#1717): persist the last
+     *  AGENT_NOTIFY_SUMMARY footer so the list can flag stuck agents without
+     *  re-reading messages. Numbered v28->v29 on the soup tip; the
+     *  upstream-aimed branch carries the same migration as v25->v26. */
+    private migrateFromV28ToV29(): void {
+        const columns = this.getSessionColumnNames()
+        if (columns.size === 0) return
+        if (!columns.has('last_notify_status')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN last_notify_status TEXT')
+        }
+        if (!columns.has('last_notify_at')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN last_notify_at INTEGER')
+        }
+        if (!columns.has('last_notify_note')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN last_notify_note TEXT')
         }
     }
 
