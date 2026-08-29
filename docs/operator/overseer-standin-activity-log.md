@@ -737,3 +737,45 @@ hygiene. Upstream #1698 is probably a close-in-favour-of-#1618, not a fix.
 "no PR was ever opened", #1698's worktree framing, the "verified provenance" framing, and the
 capability re-mint fix. Each was plausible, checkable, and wrong. The corrective that actually
 works is the one this log keeps re-deriving: enumerate the artefact before asserting it.
+
+**2026-08-28 — #1473 thread parked, cleanly.** Meta confirmed: #1618 queued behind current remat;
+pre-restart ping agreed so this stand-in can go idle for the drain (it was the WORKING=1 blocker);
+`allow:` entry for `feat/a2a-nametag-attribution` will be added when that layer lands, so the new
+excision gate does not block the very fix it exists to protect. Durable-vs-ephemeral id distinction
+accepted — `agentSessionId` as find-key, resolved hub id as ping target, resolve-and-send in one
+step. Excision gate shipped in `ec3345778` and green against the live manifest. Fortress confirmed
+still absent across a full rebuild/restart cycle (hub pid 1445444, 07:51:47) — first evidence the
+excision persists rather than being silently reinstated.
+
+**Estate state at parking — items awaiting the OPERATOR, not an agent:**
+1. Peer #1594 long-press-to-talk — live on `:3006`, awaiting the real click-and-speak test. Oldest.
+2. Peer #1686 local follow-up abort — 5-step dogfood ready on `:3006`; PR opens only on green.
+3. PR #30 (server-setup) — MERGEABLE/CLEAN, checks green, closes #18. Ready to land.
+4. PAT auto-approval — the peer correctly wants the org-policy change confirmed by the operator
+   directly, not relayed. `dl` has a `request_created` with no `access_granted`: blocked today.
+5. gitleaks OSS swap — qar owns its own repo; the other 5 repos have no owner assigned.
+6. PR #29 (SideQuest ADB serial fix) — CONFLICTING, needs a rebase before its test plan can run;
+   and the Quest is offline anyway (heartbeat stale, `worn: false`). Headset-on is the precondition
+   for four workstreams.
+7. Two docs still teaching the rejected #1473 model: `machine-reenroll-resume-runbook.md`,
+   `2026-08-13-session-mailbox-fleet-comms.md`.
+8. Unverified: whether peer #1593 pushed its three local-only commits (incl. the whole #1639
+   feature) as instructed. Worth confirming — that work existed in one worktree with no remote.
+
+**2026-08-29 — recurring pattern: branches cut from the wrong base.** Second instance today.
+- qar PR #30 carried **12 unrelated commits** (VPN provider switch, backup behaviour, NetBird,
+  Home Assistant) under a "Pixel ntfy subscribe" banner — cut from a dirty/older base.
+- #1203 PR #137 failed `drift-gate` + `integration` because it was cut from **upstream/main rather
+  than fork main**, producing lockfile drift and replaying upstream-only failures. Not a logic bug.
+Both were invisible to their authors, who reported local green in good faith. Fix in both cases was
+the same: reset to the correct base, cherry-pick only the feature commit, force-push. After the
+reset, #137's `drift-gate` went FAILURE -> SUCCESS with the branch down to one commit.
+Worth considering whether `hapi-worktree-create` should assert the intended base, or whether a
+pre-PR check should flag "branch contains commits not authored for this change".
+
+**Stand-in error tally, 2026-08-29:** grepped the wrong branch name (`feat/` vs soup `driver/`) AND
+the wrong manifest (legacy `~/.config/hapi` vs canonical `config/`), and concluded #1618 was not
+landed when it had been since Aug 28. That second mistake was also latent **inside the excision gate
+shipped yesterday**, which defaulted to the legacy manifest — a guard that could report green while
+the manifest actually used for rebuilds was contaminated. Fixed in `7ac66a563`. First error today
+that shipped into tooling rather than just into a message.
