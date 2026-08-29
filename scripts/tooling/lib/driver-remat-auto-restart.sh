@@ -124,5 +124,9 @@ driver_remat_auto_restart_hub() {
     echo "  (drains WORKING sessions, then restarts hub + runner)"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     driver_remat_release_rebuild_lock "$driver"
+    # exec replaces this shell — release lease before handoff (EXIT trap cleared above).
+    if declare -F driver_remat_lease_teardown >/dev/null 2>&1; then
+        driver_remat_lease_teardown
+    fi
     exec "$restart_bin"
 }

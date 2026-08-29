@@ -420,6 +420,38 @@ driver_remat_lease_release() {
     fi
 }
 
+# Background heartbeat during long soup mutations (rebuild, build-web).
+# Without this, claimed_at==heartbeat_at forever and peers stale-steal after 30m.
+HAPI_REMAT_LEASE_HB_PID=""
+
+driver_remat_lease_heartbeat_bg_start() {
+    local interval="${HAPI_REMAT_LEASE_HEARTBEAT_SEC:-120}"
+    [[ -n "$(_driver_remat_lease_session)" ]] || return 0
+    driver_remat_lease_heartbeat_bg_stop
+    driver_remat_lease_heartbeat
+    (
+        while true; do
+            sleep "$interval"
+            driver_remat_lease_heartbeat || exit 0
+        done
+    ) &
+    HAPI_REMAT_LEASE_HB_PID=$!
+}
+
+driver_remat_lease_heartbeat_bg_stop() {
+    if [[ -n "${HAPI_REMAT_LEASE_HB_PID:-}" ]]; then
+        kill "$HAPI_REMAT_LEASE_HB_PID" 2>/dev/null || true
+        wait "$HAPI_REMAT_LEASE_HB_PID" 2>/dev/null || true
+        HAPI_REMAT_LEASE_HB_PID=""
+    fi
+}
+
+# Stop heartbeat loop and release lease if we are the holder.
+driver_remat_lease_teardown() {
+    driver_remat_lease_heartbeat_bg_stop
+    driver_remat_lease_release
+}
+
 # Gate: refuse (exit 76) if a DIFFERENT live+fresh session holds the lease;
 # otherwise claim/refresh it for the current session. Operator TTY steal:
 # HAPI_OPERATOR_REMAT_LEASE_STEAL=1 (needs controlling tty).

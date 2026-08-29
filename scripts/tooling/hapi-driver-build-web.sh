@@ -38,13 +38,24 @@ source "$LIB_DIR/build-web-atomic.sh"
 driver_remat_hold_require_clear_or_owner "hapi-driver-build-web"
 # Single-writer lease: even owner-labelled sessions defer to the one live holder.
 driver_remat_lease_require "hapi-driver-build-web"
+driver_remat_lease_heartbeat_bg_start
 
 if [[ "${HAPI_SKIP_DRIVER_LOCK:-}" != "1" ]]; then
     driver_status_init
     driver_stack_wait_idle || exit $?
     driver_status_acquire rebuild
     driver_status_begin rebuild "build-web-only"
-    trap 'driver_status_end rebuild "$?" head_sha="$(git -C "$DRIVER" rev-parse --short HEAD 2>/dev/null || echo unknown)" head_subject="web-only build"' EXIT
+    _hapi_driver_build_web_on_exit() {
+        local rc=$?
+        driver_remat_lease_teardown
+        driver_status_end rebuild "$rc" \
+            head_sha="$(git -C "$DRIVER" rev-parse --short HEAD 2>/dev/null || echo unknown)" \
+            head_subject="web-only build"
+        exit "$rc"
+    }
+    trap '_hapi_driver_build_web_on_exit' EXIT
+else
+    trap 'driver_remat_lease_teardown' EXIT
 fi
 
 if [[ ! -d "$DRIVER/web" ]]; then

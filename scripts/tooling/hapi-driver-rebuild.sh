@@ -69,11 +69,22 @@ source "$LIB_DIR/driver-remat-hold.sh"
 driver_remat_hold_require_clear_or_owner "hapi-driver-rebuild"
 # Single-writer lease: even owner-labelled sessions defer to the one live holder.
 driver_remat_lease_require "hapi-driver-rebuild"
+driver_remat_lease_heartbeat_bg_start
 if [[ "${HAPI_SKIP_DRIVER_LOCK:-}" != "1" ]]; then
     driver_status_init
     driver_status_acquire rebuild
     driver_status_begin rebuild "${ORIG_ARGS[@]}"
-    trap 'driver_status_end rebuild "$?" head_sha="$(git -C "$DRIVER" rev-parse --short HEAD 2>/dev/null || echo unknown)" head_subject="$(git -C "$DRIVER" log -1 --format=%s 2>/dev/null || echo unknown)"' EXIT
+    _hapi_driver_rebuild_on_exit() {
+        local rc=$?
+        driver_remat_lease_teardown
+        driver_status_end rebuild "$rc" \
+            head_sha="$(git -C "$DRIVER" rev-parse --short HEAD 2>/dev/null || echo unknown)" \
+            head_subject="$(git -C "$DRIVER" log -1 --format=%s 2>/dev/null || echo unknown)"
+        exit "$rc"
+    }
+    trap '_hapi_driver_rebuild_on_exit' EXIT
+else
+    trap 'driver_remat_lease_teardown' EXIT
 fi
 
 # shellcheck source=lib/driver-rebuild-agent-guard.sh
@@ -557,6 +568,7 @@ if [[ "$ACTIVATE" -eq 1 ]]; then
     # close the rebuild as successful here (head_sha is known good) and let
     # use-worktree own the switch lock + status from here on.
     if [[ "${HAPI_SKIP_DRIVER_LOCK:-}" != "1" ]]; then
+        driver_remat_lease_teardown
         driver_status_end rebuild 0 \
             head_sha="$(git -C "$DRIVER" rev-parse --short HEAD 2>/dev/null || echo unknown)" \
             head_subject="$(git -C "$DRIVER" log -1 --format=%s 2>/dev/null || echo unknown)"
