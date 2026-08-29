@@ -33,7 +33,8 @@ ${chalk.bold('Usage:')}
 
 ${chalk.bold('Notes:')}
   Do not reinvent JWT + curl for peer handoffs. Prefer this command or MCP ping_peer / list_peers.
-  Resolves by id prefix (8 chars OK). Same hub token/namespace as this CLI.
+  Resolves by hub session id prefix (8 chars OK) or durable metadata.agentSessionId.
+  POST always targets the current hub row after resolve (hub ids rotate).
   Inactive sessions are resumed via POST /api/sessions/:id/resume, then messaged.
   When a user cites [title](/sessions/<id>) or Copy-reference
   See session "…" (/sessions/<id>) for context, pass that <id> here.
