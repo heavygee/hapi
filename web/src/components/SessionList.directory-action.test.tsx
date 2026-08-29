@@ -1312,6 +1312,144 @@ describe('SessionList search toggle', () => {
         await waitFor(() => expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDER)).toHaveValue('dictated words'))
     })
 
+    it('strips trailing sentence punctuation dictation adds — "Jessica." must still match "Jessica"', async () => {
+        // On-device speech recognition (notably Android's) appends a trailing
+        // period to a single dictated word. A stray "." breaks substring
+        // matching against session names, so it must not reach the query.
+        Object.defineProperty(navigator, 'mediaDevices', {
+            configurable: true,
+            value: { getUserMedia: vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })) }
+        })
+
+        class MockMediaRecorder {
+            static isTypeSupported() { return true }
+            state: RecordingState = 'inactive'
+            mimeType = 'audio/webm'
+            ondataavailable: ((event: BlobEvent) => void) | null = null
+            onerror: (() => void) | null = null
+            onstop: (() => void) | null = null
+            start() { this.state = 'recording' }
+            stop() {
+                this.state = 'inactive'
+                this.ondataavailable?.({ data: new Blob(['audio'], { type: this.mimeType }) } as BlobEvent)
+                this.onstop?.()
+            }
+        }
+        vi.stubGlobal('MediaRecorder', MockMediaRecorder)
+
+        const fetchTranscriptionProviders = vi.fn(async () => ({
+            providers: [{ id: 'openai', label: 'OpenAI', modes: ['standard'] }]
+        }))
+        const transcribeVoice = vi.fn(async () => ({ text: 'Jessica.' }))
+        const api = { fetchTranscriptionProviders, transcribeVoice }
+
+        const sessions = [
+            makeSession({
+                id: 'session-jessica',
+                updatedAt: 100,
+                metadata: { path: '/work/hapi', name: 'Jessica task', flavor: 'codex' },
+            }),
+        ]
+
+        renderWithProviders(
+            <SessionList
+                sessions={sessions}
+                selectedSessionId={null}
+                onSelect={vi.fn()}
+                onNewSession={vi.fn()}
+                onRefresh={vi.fn()}
+                isLoading={false}
+                renderHeader={false}
+                api={api as unknown as ApiClient}
+            />
+        )
+
+        await waitFor(() => expect(fetchTranscriptionProviders).toHaveBeenCalled())
+
+        const collapsed = screen.getByRole('button', { name: SEARCH_LABEL })
+        vi.useFakeTimers()
+        fireEvent.touchStart(collapsed, { touches: [{ clientX: 10, clientY: 10 }] })
+        act(() => {
+            vi.advanceTimersByTime(500)
+        })
+        vi.useRealTimers()
+        await waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalled())
+        fireEvent.touchEnd(collapsed, { changedTouches: [{ clientX: 10, clientY: 10 }] })
+
+        await waitFor(() => expect(transcribeVoice).toHaveBeenCalled())
+        await waitFor(() => expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDER)).toHaveValue('Jessica'))
+        expect(screen.getByRole('button', { name: /Jessica task/ })).toBeInTheDocument()
+    })
+
+    it('starts and stops dictation on a desktop mouse press-and-hold', async () => {
+        Object.defineProperty(navigator, 'mediaDevices', {
+            configurable: true,
+            value: { getUserMedia: vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })) }
+        })
+
+        class MockMediaRecorder {
+            static isTypeSupported() { return true }
+            state: RecordingState = 'inactive'
+            mimeType = 'audio/webm'
+            ondataavailable: ((event: BlobEvent) => void) | null = null
+            onerror: (() => void) | null = null
+            onstop: (() => void) | null = null
+            start() { this.state = 'recording' }
+            stop() {
+                this.state = 'inactive'
+                this.ondataavailable?.({ data: new Blob(['audio'], { type: this.mimeType }) } as BlobEvent)
+                this.onstop?.()
+            }
+        }
+        vi.stubGlobal('MediaRecorder', MockMediaRecorder)
+
+        const fetchTranscriptionProviders = vi.fn(async () => ({
+            providers: [{ id: 'openai', label: 'OpenAI', modes: ['standard'] }]
+        }))
+        const transcribeVoice = vi.fn(async () => ({ text: 'desktop dictated' }))
+        const api = { fetchTranscriptionProviders, transcribeVoice }
+
+        const sessions = [
+            makeSession({
+                id: 'session-jelly',
+                updatedAt: 100,
+                metadata: { path: '/work/hapi', name: 'jellybot task', flavor: 'codex' },
+            }),
+        ]
+
+        renderWithProviders(
+            <SessionList
+                sessions={sessions}
+                selectedSessionId={null}
+                onSelect={vi.fn()}
+                onNewSession={vi.fn()}
+                onRefresh={vi.fn()}
+                isLoading={false}
+                renderHeader={false}
+                api={api as unknown as ApiClient}
+            />
+        )
+
+        await waitFor(() => expect(fetchTranscriptionProviders).toHaveBeenCalled())
+
+        const collapsed = screen.getByRole('button', { name: SEARCH_LABEL })
+        vi.useFakeTimers()
+        fireEvent.mouseDown(collapsed, { button: 0, clientX: 10, clientY: 10 })
+        act(() => {
+            vi.advanceTimersByTime(500)
+        })
+        vi.useRealTimers()
+
+        await waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalled())
+        expect(screen.queryByPlaceholderText(SEARCH_PLACEHOLDER)).toBeNull()
+
+        fireEvent.mouseUp(collapsed, { button: 0, clientX: 10, clientY: 10 })
+
+        expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDER)).toBeInTheDocument()
+        await waitFor(() => expect(transcribeVoice).toHaveBeenCalled())
+        await waitFor(() => expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDER)).toHaveValue('desktop dictated'))
+    })
+
     it('a very short hold that never reaches the threshold is treated as a tap, not a stray recording', async () => {
         const fetchTranscriptionProviders = vi.fn(async () => ({
             providers: [{ id: 'openai', label: 'OpenAI', modes: ['standard'] }]

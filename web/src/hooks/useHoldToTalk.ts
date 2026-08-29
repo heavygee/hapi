@@ -6,7 +6,7 @@ type UseHoldToTalkOptions = {
     onHoldStart: () => void
     /** Fires when a hold that reached the threshold ends — release, cancel, or drag-off. Release IS the stop-and-apply action; there is no separate confirm step. */
     onHoldEnd: () => void
-    /** Fires for a touch that released before the threshold — a plain tap. */
+    /** Fires for a press that released before the threshold — a plain tap/click. */
     onTap: () => void
     threshold?: number
     disabled?: boolean
@@ -17,17 +17,25 @@ type UseHoldToTalkHandlers = {
     onTouchEnd: React.TouchEventHandler
     onTouchMove: React.TouchEventHandler
     onTouchCancel: React.TouchEventHandler
+    onMouseDown: React.MouseEventHandler
+    onMouseUp: React.MouseEventHandler
+    onMouseLeave: React.MouseEventHandler
     onClick: React.MouseEventHandler
 }
 
-// Distance a touch may drift before a still-pending hold is treated as a drag
+// Distance a press may drift before a still-pending hold is treated as a drag
 // (e.g. the start of a scroll) rather than an intentional press-and-hold.
 const MOVE_CANCEL_PX = 12
 
-// Touch-only push-to-talk: hold past the threshold to start, release to stop
-// — release is both the stop and the commit, there is no separate button.
-// Mouse/keyboard activation stays a plain tap (onClick) so desktop and a11y
-// behavior is unaffected; only real touches can trigger the hold gesture.
+// Touch browsers emit a compatibility mousedown/mouseup/click a beat after a
+// real touch ends; without this window a single tap could re-trigger the
+// whole gesture a second time via the synthesized mouse events.
+const GHOST_MOUSE_WINDOW_MS = 700
+
+// Push-to-talk on both touch and mouse: hold past the threshold to start,
+// release to stop — release is both the stop and the commit, there is no
+// separate button. Keyboard/assistive activation (detail === 0) stays a
+// plain tap, matching native button semantics.
 export function useHoldToTalk(options: UseHoldToTalkOptions): UseHoldToTalkHandlers {
     const { onHoldStart, onHoldEnd, onTap, threshold = 500, disabled = false } = options
 
@@ -35,6 +43,7 @@ export function useHoldToTalk(options: UseHoldToTalkOptions): UseHoldToTalkHandl
     const holdingRef = useRef(false)
     const draggedRef = useRef(false)
     const startPointRef = useRef({ x: 0, y: 0 })
+    const lastTouchAtRef = useRef(0)
 
     const clearTimer = useCallback(() => {
         if (timerRef.current) {
@@ -44,7 +53,7 @@ export function useHoldToTalk(options: UseHoldToTalkOptions): UseHoldToTalkHandl
     }, [])
 
     // Ends an in-progress hold. Safe to call even when nothing is holding —
-    // touchend after a plain tap, or touchcancel with no prior hold-start.
+    // release after a plain tap, or a cancel/leave with no prior hold-start.
     const endHold = useCallback(() => {
         clearTimer()
         if (holdingRef.current) {
@@ -55,52 +64,96 @@ export function useHoldToTalk(options: UseHoldToTalkOptions): UseHoldToTalkHandl
 
     useEffect(() => () => clearTimer(), [clearTimer])
 
-    const onTouchStart = useCallback<React.TouchEventHandler>((e) => {
-        if (disabled) return
+    const startPending = useCallback((x: number, y: number) => {
         clearTimer()
         draggedRef.current = false
-        const touch = e.touches[0]
-        if (touch) startPointRef.current = { x: touch.clientX, y: touch.clientY }
+        startPointRef.current = { x, y }
         timerRef.current = setTimeout(() => {
             timerRef.current = null
             holdingRef.current = true
             onHoldStart()
         }, threshold)
-    }, [disabled, clearTimer, threshold, onHoldStart])
+    }, [clearTimer, threshold, onHoldStart])
 
-    const onTouchMove = useCallback<React.TouchEventHandler>((e) => {
-        // A real touch keeps the same target for its whole lifetime regardless
-        // of where the finger currently is, so once recording has actually
-        // started there is nothing to cancel here — ignore drift entirely so a
-        // natural hand tremor doesn't cut a genuine hold short.
+    const checkDrift = useCallback((x: number, y: number) => {
+        // Once recording has actually started there is nothing to cancel —
+        // ignore drift entirely so a natural hand tremor (or, for a real
+        // touch, the fact that it keeps the same target regardless of where
+        // the finger currently is) doesn't cut a genuine hold short.
         if (holdingRef.current) return
-        const touch = e.touches[0]
-        if (!touch) return
-        const dx = touch.clientX - startPointRef.current.x
-        const dy = touch.clientY - startPointRef.current.y
+        const dx = x - startPointRef.current.x
+        const dy = y - startPointRef.current.y
         if (Math.hypot(dx, dy) > MOVE_CANCEL_PX) {
             draggedRef.current = true
             clearTimer()
         }
     }, [clearTimer])
 
-    const onTouchEnd = useCallback<React.TouchEventHandler>((e) => {
-        // Suppress the browser's compatibility click so a plain tap does not
-        // fire onTap twice (once here, once via the native onClick below).
-        e.preventDefault()
+    const release = useCallback(() => {
         const wasHolding = holdingRef.current
         endHold()
         if (!wasHolding && !draggedRef.current) onTap()
     }, [endHold, onTap])
 
+    // True when a mouse event is actually a touch-synthesized compatibility
+    // event firing right after a tap; such events must not re-trigger the gesture.
+    const isGhostMouseEvent = useCallback(
+        () => Date.now() - lastTouchAtRef.current < GHOST_MOUSE_WINDOW_MS,
+        []
+    )
+
+    const onTouchStart = useCallback<React.TouchEventHandler>((e) => {
+        lastTouchAtRef.current = Date.now()
+        if (disabled) return
+        const touch = e.touches[0]
+        if (touch) startPending(touch.clientX, touch.clientY)
+    }, [disabled, startPending])
+
+    const onTouchMove = useCallback<React.TouchEventHandler>((e) => {
+        const touch = e.touches[0]
+        if (touch) checkDrift(touch.clientX, touch.clientY)
+    }, [checkDrift])
+
+    const onTouchEnd = useCallback<React.TouchEventHandler>((e) => {
+        lastTouchAtRef.current = Date.now()
+        // Suppress the browser's compatibility click so a plain tap does not
+        // fire onTap twice (once here, once via the native onClick below).
+        e.preventDefault()
+        release()
+    }, [release])
+
     const onTouchCancel = useCallback<React.TouchEventHandler>(() => {
         endHold()
     }, [endHold])
 
-    const onClick = useCallback<React.MouseEventHandler>(() => {
+    const onMouseDown = useCallback<React.MouseEventHandler>((e) => {
+        if (e.button !== 0) return
+        if (disabled || isGhostMouseEvent()) return
+        startPending(e.clientX, e.clientY)
+    }, [disabled, isGhostMouseEvent, startPending])
+
+    const onMouseUp = useCallback<React.MouseEventHandler>(() => {
+        if (isGhostMouseEvent()) return
+        release()
+    }, [isGhostMouseEvent, release])
+
+    const onMouseLeave = useCallback<React.MouseEventHandler>(() => {
+        // Mouse events don't keep their original target once the pointer
+        // moves off the element (unlike touch), so a mouseup outside the
+        // button would never reach onMouseUp — end here instead. This is
+        // never a tap: endHold() only fires onHoldEnd if a hold had actually
+        // started, and silently cancels an unstarted pending press otherwise.
+        if (isGhostMouseEvent()) return
+        endHold()
+    }, [isGhostMouseEvent, endHold])
+
+    const onClick = useCallback<React.MouseEventHandler>((e) => {
         if (disabled) return
-        onTap()
+        // Real mouse/touch clicks are already handled by the mousedown+mouseup
+        // / touchstart+touchend pairs above; only keyboard and assistive
+        // activation (detail 0) reaches the browser's click without one.
+        if (e.detail === 0) onTap()
     }, [disabled, onTap])
 
-    return { onTouchStart, onTouchEnd, onTouchMove, onTouchCancel, onClick }
+    return { onTouchStart, onTouchEnd, onTouchMove, onTouchCancel, onMouseDown, onMouseUp, onMouseLeave, onClick }
 }
