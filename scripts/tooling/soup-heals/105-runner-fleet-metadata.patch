@@ -59,6 +59,96 @@ index 245dc398f..dab72e582 100644
          }),
          runnerState: initialRunnerState
        }),
+diff --git a/hub/src/sync/fleetUpgrade.test.ts b/hub/src/sync/fleetUpgrade.test.ts
+index 769af6150..d03986c83 100644
+--- a/hub/src/sync/fleetUpgrade.test.ts
++++ b/hub/src/sync/fleetUpgrade.test.ts
+@@ -230,14 +230,23 @@ describe('SyncEngine fleet upgrade', () => {
+         }
+     })
+ 
+-    it('refuses hub-artifact upgrade when machine arch is missing', async () => {
++    it('infers x64 for legacy runners missing metadata.arch on win32', async () => {
+         const offer: HubUpgradeOffer = {
+             channel: 'hub-artifact',
+             targetVersion: '0.24.0',
+             targetCapabilities: ['cursor-chat-store-status'],
+         }
+         const store = new Store(':memory:')
+-        const prepareArtifactOffer = mock(async () => offer)
++        const prepareArtifactOffer = mock(async (base: HubUpgradeOffer, platform: string, arch: string) => ({
++            ...base,
++            artifact: {
++                url: '/cli/upgrade/cli-artifact',
++                sha256: 'abc',
++                platform,
++                arch,
++                sizeBytes: 10,
++            },
++        }))
+         const registry = new RpcRegistry()
+         const engine = new SyncEngine(
+             store,
+@@ -248,6 +257,13 @@ describe('SyncEngine fleet upgrade', () => {
+         )
+ 
+         try {
++            const runnerSelfUpgrade = mock(async () => ({
++                status: 'started',
++                message: 'ok',
++                channel: 'hub-artifact',
++            }))
++            ;(engine as any).rpcGateway.runnerSelfUpgrade = runnerSelfUpgrade
++
+             engine.getOrCreateMachine(
+                 'no-arch',
+                 {
+@@ -262,6 +278,45 @@ describe('SyncEngine fleet upgrade', () => {
+             registerLiveSelfUpgrade(registry, 'no-arch')
+             engine.handleMachineAlive({ machineId: 'no-arch', time: Date.now() })
+             const result = await engine.upgradeMachineRunner('no-arch', 'default')
++            expect(result.type).toBe('success')
++            expect(prepareArtifactOffer).toHaveBeenCalledWith(offer, 'win32', 'x64')
++        } finally {
++            engine.stop()
++        }
++    })
++
++    it('refuses hub-artifact upgrade when platform/arch cannot be resolved', async () => {
++        const offer: HubUpgradeOffer = {
++            channel: 'hub-artifact',
++            targetVersion: '0.24.0',
++            targetCapabilities: ['cursor-chat-store-status'],
++        }
++        const store = new Store(':memory:')
++        const prepareArtifactOffer = mock(async () => offer)
++        const registry = new RpcRegistry()
++        const engine = new SyncEngine(
++            store,
++            {} as never,
++            registry,
++            { broadcast() {} } as never,
++            { getUpgradeOffer: () => offer, prepareArtifactOffer },
++        )
++
++        try {
++            engine.getOrCreateMachine(
++                'no-arch',
++                {
++                    host: 'exotic',
++                    platform: 'freebsd',
++                    happyCliVersion: '0.20.0',
++                    capabilities: ['runner-self-upgrade'],
++                },
++                null,
++                'default',
++            )
++            registerLiveSelfUpgrade(registry, 'no-arch')
++            engine.handleMachineAlive({ machineId: 'no-arch', time: Date.now() })
++            const result = await engine.upgradeMachineRunner('no-arch', 'default')
+             expect(result).toEqual({
+                 type: 'error',
+                 message: 'Machine platform/arch unavailable for hub-artifact upgrade',
 diff --git a/hub/src/sync/syncEngine.ts b/hub/src/sync/syncEngine.ts
 index abe06c06e..8cb5bafd8 100644
 --- a/hub/src/sync/syncEngine.ts
