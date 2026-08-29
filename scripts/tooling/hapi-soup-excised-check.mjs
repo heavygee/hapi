@@ -34,10 +34,24 @@ const has = (name) => argv.includes(`--${name}`)
 
 const HOME = process.env.HOME ?? ''
 const primary = flag('primary', process.env.HAPI_PRIMARY ?? join(HOME, 'coding/hapi'))
-const manifestPath = flag(
-    'manifest',
-    process.env.HAPI_DRIVER_MANIFEST ?? join(HOME, '.config/hapi/driver-manifest.yaml')
-)
+/**
+ * Manifest precedence MUST mirror scripts/tooling/lib/hapi-manifest-path.sh:
+ *   $HAPI_DRIVER_MANIFEST -> $PRIMARY/config/driver-manifest.yaml -> legacy ~/.config/hapi.
+ * The tracked config/ copy is CANONICAL; ~/.config/hapi is a legacy override that
+ * can be stale. Reading the wrong one makes this gate report a false GREEN while
+ * the manifest the rebuild actually uses is contaminated — worse than no gate.
+ * (Caught 2026-08-29: the two files differed by 17 lines and one carried a layer
+ * the other did not.)
+ */
+function resolveManifest() {
+    const explicit = flag('manifest', null)
+    if (explicit) return explicit
+    if (process.env.HAPI_DRIVER_MANIFEST) return process.env.HAPI_DRIVER_MANIFEST
+    const canonical = join(primary, 'config/driver-manifest.yaml')
+    if (existsSync(canonical)) return canonical
+    return join(HOME, '.config/hapi/driver-manifest.yaml')
+}
+const manifestPath = resolveManifest()
 const registryPath = flag('registry', join(primary, 'config/soup-excised.yaml'))
 const asJson = has('json')
 
