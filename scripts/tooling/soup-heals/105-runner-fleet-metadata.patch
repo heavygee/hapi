@@ -81,17 +81,13 @@ index abe06c06e..8cb5bafd8 100644
                  return {
                      type: 'error',
 diff --git a/shared/src/upgradeChannel.ts b/shared/src/upgradeChannel.ts
-index 685d9871b..d16bee5ae 100644
+index 685d9871b..f3af0316c 100644
 --- a/shared/src/upgradeChannel.ts
 +++ b/shared/src/upgradeChannel.ts
-@@ -130,6 +130,24 @@ export type MachineTrailsOptions = {
+@@ -130,6 +130,20 @@ export type MachineTrailsOptions = {
      ignoreGenerationDrift?: boolean
  }
  
-+/**
-+ * Legacy runners omitted `metadata.arch`. Estate fleet is x64-only today; infer
-+ * so hub-artifact upgrades can proceed before remotes reconnect with fixed CLI.
-+ */
 +export function inferMachineArch(platform: string | null | undefined): string | undefined {
 +    if (!platform) {
 +        return undefined
