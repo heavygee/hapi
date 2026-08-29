@@ -76,7 +76,7 @@ export default {
   'sessions.blockedSection': 'Blocked',
   'sessions.blocked.jump': '{count} blocked — go to next',
   'sessions.blockedFilter.showingOnly': 'Showing {count} blocked only',
-  'sessions.blockedFilter.hint': 'Hold to show blocked only',
+  'sessions.blockedFilter.hint': 'Show blocked only',
   'sessions.timeFilter.label': 'Filter sessions by last activity',
   'sessions.timeFilter.pickStart': 'Select start date',
   'sessions.timeFilter.pickEnd': 'Select end date',

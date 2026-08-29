@@ -76,7 +76,7 @@ export default {
   'sessions.blockedSection': '已阻塞',
   'sessions.blocked.jump': '{count} 个已阻塞 — 跳到下一个',
   'sessions.blockedFilter.showingOnly': '仅显示 {count} 个已阻塞',
-  'sessions.blockedFilter.hint': '长按仅显示已阻塞',
+  'sessions.blockedFilter.hint': '仅显示已阻塞',
   'sessions.timeFilter.label': '按最后活动时间筛选会话',
   'sessions.timeFilter.pickStart': '选择开始日期',
   'sessions.timeFilter.pickEnd': '选择结束日期',
