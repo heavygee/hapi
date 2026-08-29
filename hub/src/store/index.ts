@@ -42,7 +42,7 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 25
+const SCHEMA_VERSION: number = 26
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -347,6 +347,7 @@ export class Store {
             22: () => this.migrateFromV22ToV23(),
             23: () => this.migrateFromV23ToV24(),
             24: () => this.migrateFromV24ToV25(),
+            25: () => this.migrateFromV25ToV26(),
         })
 
         if (currentVersion === 0) {
@@ -415,6 +416,9 @@ export class Store {
                 team_state_updated_at INTEGER,
                 pinned INTEGER NOT NULL DEFAULT 0,
                 global_pinned INTEGER NOT NULL DEFAULT 0,
+                last_notify_status TEXT,
+                last_notify_at INTEGER,
+                last_notify_note TEXT,
                 active INTEGER DEFAULT 0,
                 active_at INTEGER,
                 seq INTEGER DEFAULT 0
@@ -970,6 +974,23 @@ export class Store {
     }
 
     /** v24→v25: add durable unknown-delivery state for steers. */
+    /** Blocked-agent session-list chrome (#1717): persist the last
+     *  AGENT_NOTIFY_SUMMARY footer so the list can flag stuck agents without
+     *  re-reading messages. */
+    private migrateFromV25ToV26(): void {
+        const columns = this.getSessionColumnNames()
+        if (columns.size === 0) return
+        if (!columns.has('last_notify_status')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN last_notify_status TEXT')
+        }
+        if (!columns.has('last_notify_at')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN last_notify_at INTEGER')
+        }
+        if (!columns.has('last_notify_note')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN last_notify_note TEXT')
+        }
+    }
+
     private migrateFromV24ToV25(): void {
         const messageColumns = this.getMessageColumnNames()
         if (messageColumns.size > 0 && !messageColumns.has('delivery_state')) {
