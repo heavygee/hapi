@@ -10,6 +10,8 @@ import {
     getFirstMessages,
     getDeliverableMessagesAfter,
     getMessagesByPosition,
+    getMessageByIdForSession,
+    getMessagesAfterPosition,
     getUninvokedLocalMessages,
     getMatureScheduledMessages,
     getImmediateQueuedLocalMessages,
@@ -62,6 +64,18 @@ export class MessageStore {
 
     getMessagesByPosition(sessionId: string, limit: number, before?: { at: number; seq: number }): StoredMessage[] {
         return getMessagesByPosition(this.db, sessionId, limit, before)
+    }
+
+    getMessageByIdForSession(sessionId: string, messageId: string): StoredMessage | null {
+        return getMessageByIdForSession(this.db, sessionId, messageId)
+    }
+
+    getMessagesAfterPosition(
+        sessionId: string,
+        after: { at: number; seq: number },
+        limit: number
+    ): StoredMessage[] {
+        return getMessagesAfterPosition(this.db, sessionId, after, limit)
     }
 
     getUninvokedLocalMessages(sessionId: string): StoredMessage[] {

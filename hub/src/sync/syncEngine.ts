@@ -273,7 +273,7 @@ export class SyncEngine {
 
     getMessagesPage(
         sessionId: string,
-        options: { limit: number; before?: { at: number; seq: number } | null }
+        options: { limit: number; before?: { at: number; seq: number } | null; aroundId?: string | null }
     ): {
         messages: DecryptedMessage[]
         page: {
@@ -281,9 +281,17 @@ export class SyncEngine {
             nextBeforeSeq: number | null
             nextBeforeAt: number | null
             hasMore: boolean
+            hasMoreNewer?: boolean
+            aroundId?: string
         }
-    } {
-        return this.messageService.getMessagesPage(sessionId, options)
+    } | null {
+        if (options.aroundId) {
+            return this.messageService.getMessagesAround(sessionId, options.aroundId, { limit: options.limit })
+        }
+        return this.messageService.getMessagesPage(sessionId, {
+            limit: options.limit,
+            before: options.before
+        })
     }
 
     getSessionExport(sessionId: string, session: Session): HapiSessionExportResult {

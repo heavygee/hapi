@@ -6,6 +6,8 @@ import {
     fetchOlderMessages,
     flushPendingMessages,
     getMessageWindowState,
+    returnToLatestMessages,
+    seekToMessage,
     setAtBottom as setMessageWindowAtBottom,
     subscribeMessageWindow,
     type MessageWindowState,
@@ -24,6 +26,7 @@ export const EMPTY_STATE: MessageWindowState = {
     warning: null,
     atBottom: true,
     messagesVersion: 0,
+    historySeekActive: false,
 }
 
 export function useMessages(api: ApiClient | null, sessionId: string | null): {
@@ -35,10 +38,13 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
     hasMore: boolean
     pendingCount: number
     messagesVersion: number
+    historySeekActive: boolean
     loadMore: () => Promise<unknown>
     refetch: () => Promise<unknown>
     flushPending: () => Promise<void>
     setAtBottom: (atBottom: boolean) => void
+    seekToMessage: (hubMessageId: string) => Promise<boolean>
+    returnToLatest: () => Promise<void>
 } {
     const state = useSyncExternalStore(
         useCallback((listener) => {
@@ -87,6 +93,16 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
         setMessageWindowAtBottom(sessionId, atBottom)
     }, [sessionId])
 
+    const seek = useCallback(async (hubMessageId: string) => {
+        if (!api || !sessionId) return false
+        return await seekToMessage(api, sessionId, hubMessageId)
+    }, [api, sessionId])
+
+    const returnToLatest = useCallback(async () => {
+        if (!api || !sessionId) return
+        await returnToLatestMessages(api, sessionId)
+    }, [api, sessionId])
+
     return {
         messages: state.messages,
         pendingMessages: state.pending,
@@ -96,9 +112,12 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
         hasMore: state.hasMore,
         pendingCount: state.pendingCount,
         messagesVersion: state.messagesVersion,
+        historySeekActive: state.historySeekActive,
         loadMore,
         refetch,
         flushPending,
         setAtBottom,
+        seekToMessage: seek,
+        returnToLatest,
     }
 }

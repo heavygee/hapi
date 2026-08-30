@@ -11,6 +11,8 @@ import {
     markMessagesConsumed,
     reconcileQueuedAgainstLatest,
     removeOptimisticMessage,
+    returnToLatestMessages,
+    seekToMessage,
     setAtBottom,
     VISIBLE_WINDOW_SIZE,
     updateMessageStatus,
@@ -679,5 +681,94 @@ describe('message-window-store visible trimming', () => {
         const ids = [...state.messages, ...state.pending].map((m) => m.id)
         expect(ids).not.toContain('ghost-server-id') // queued at fetch start + absent -> dropped
         expect(ids).toContain('fresh-server-id')      // arrived mid-fetch -> kept
+    })
+})
+
+describe('seekToMessage', () => {
+    const SESSION_ID = 'session-seek-to-message-test'
+
+    afterEach(() => {
+        clearMessageWindow(SESSION_ID)
+        sessionStorage.clear()
+    })
+
+    it('replaces the window with the around-page and marks historySeekActive', async () => {
+        ingestIncomingMessages(SESSION_ID, [
+            makeAgentMessage({ id: 'tip-a', seq: 100, createdAt: 1_700_000_100_000 }),
+            makeAgentMessage({ id: 'tip-b', seq: 101, createdAt: 1_700_000_101_000 }),
+        ])
+
+        const aroundMessages = [
+            makeAgentMessage({ id: 'old-1', seq: 10, createdAt: 1_700_000_010_000 }),
+            makeAgentMessage({ id: 'pin-target', seq: 11, createdAt: 1_700_000_011_000 }),
+            makeAgentMessage({ id: 'old-2', seq: 12, createdAt: 1_700_000_012_000 }),
+        ]
+        const api = {
+            getMessages: vi.fn(async (_sessionId: string, options: { aroundId?: string } = {}) => {
+                expect(options.aroundId).toBe('pin-target')
+                return {
+                    messages: aroundMessages,
+                    page: {
+                        limit: 50,
+                        nextBeforeSeq: 10,
+                        nextBeforeAt: 1_700_000_010_000,
+                        hasMore: true,
+                        hasMoreNewer: true,
+                        aroundId: 'pin-target',
+                    },
+                }
+            }),
+        } as Pick<ApiClient, 'getMessages'> & { getMessages: ReturnType<typeof vi.fn> }
+
+        const ok = await seekToMessage(api as unknown as ApiClient, SESSION_ID, 'pin-target')
+        expect(ok).toBe(true)
+
+        const state = getMessageWindowState(SESSION_ID)
+        expect(state.historySeekActive).toBe(true)
+        expect(state.atBottom).toBe(false)
+        expect(state.messages.map((m) => m.id)).toEqual(['old-1', 'pin-target', 'old-2'])
+        expect(state.hasMore).toBe(true)
+        expect(api.getMessages).toHaveBeenCalledTimes(1)
+    })
+
+    it('returnToLatestMessages clears seek and reloads the tip', async () => {
+        const api = {
+            getMessages: vi.fn(async (_sessionId: string, options: { aroundId?: string } = {}) => {
+                if (options.aroundId) {
+                    return {
+                        messages: [
+                            makeAgentMessage({ id: 'pin-target', seq: 11, createdAt: 1_700_000_011_000 }),
+                        ],
+                        page: {
+                            limit: 50,
+                            nextBeforeSeq: null,
+                            nextBeforeAt: null,
+                            hasMore: false,
+                            aroundId: options.aroundId,
+                        },
+                    }
+                }
+                return {
+                    messages: [
+                        makeAgentMessage({ id: 'tip-latest', seq: 200, createdAt: 1_700_000_200_000 }),
+                    ],
+                    page: {
+                        limit: 50,
+                        nextBeforeSeq: null,
+                        nextBeforeAt: null,
+                        hasMore: false,
+                    },
+                }
+            }),
+        } as Pick<ApiClient, 'getMessages'> & { getMessages: ReturnType<typeof vi.fn> }
+
+        await seekToMessage(api as unknown as ApiClient, SESSION_ID, 'pin-target')
+        expect(getMessageWindowState(SESSION_ID).historySeekActive).toBe(true)
+
+        await returnToLatestMessages(api as unknown as ApiClient, SESSION_ID)
+        const state = getMessageWindowState(SESSION_ID)
+        expect(state.historySeekActive).toBe(false)
+        expect(state.atBottom).toBe(true)
+        expect(state.messages.map((m) => m.id)).toEqual(['tip-latest'])
     })
 })

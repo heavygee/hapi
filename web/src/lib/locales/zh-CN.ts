@@ -170,6 +170,7 @@ export default {
   'session.log.empty': '此会话尚无持久事件',
   'session.log.emptyLinks': '此会话尚未 scoop 到链接',
   'session.log.loadOlder': '加载更早',
+  'session.log.returnToLatest': '返回最新',
   'session.log.provenance': '来源',
 
   // Session actions

@@ -269,6 +269,7 @@ export class ApiClient {
         options: {
             beforeSeq?: number | null
             beforeAt?: number | null
+            aroundId?: string | null
             limit?: number
         }
     ): Promise<MessagesResponse> {
@@ -278,6 +279,9 @@ export class ApiClient {
         }
         if (options.beforeSeq !== undefined && options.beforeSeq !== null) {
             params.set('beforeSeq', `${options.beforeSeq}`)
+        }
+        if (options.aroundId) {
+            params.set('aroundId', options.aroundId)
         }
         if (options.limit !== undefined && options.limit !== null) {
             params.set('limit', `${options.limit}`)

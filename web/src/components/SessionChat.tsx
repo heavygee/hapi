@@ -389,6 +389,7 @@ type SessionChatProps = {
     isSending: boolean
     pendingCount: number
     messagesVersion: number
+    historySeekActive?: boolean
     onBack: () => void
     onRefresh: () => void
     onLoadMore: () => Promise<unknown>
@@ -399,6 +400,8 @@ type SessionChatProps = {
     onSend: (text: string, attachments?: AttachmentMetadata[], scheduledAt?: number | null) => Promise<boolean>
     onFlushPending: () => void
     onAtBottomChange: (atBottom: boolean) => void
+    onSeekToMessage?: (hubMessageId: string) => Promise<boolean>
+    onReturnToLatest?: () => Promise<void>
     onRetryMessage?: (localId: string) => void
     autocompleteSuggestions?: (query: string) => Promise<Suggestion[]>
     availableSlashCommands?: readonly SlashCommand[]
@@ -1288,6 +1291,9 @@ function SessionChatInner(props: SessionChatProps) {
                         rawMessagesCount={visibleMessages.length}
                         normalizedMessagesCount={normalizedMessages.length}
                         messagesVersion={props.messagesVersion}
+                        historySeekActive={props.historySeekActive === true}
+                        onSeekToMessage={props.onSeekToMessage}
+                        onReturnToLatest={props.onReturnToLatest}
                         forceScrollToken={forceScrollToken}
                         outlineOpen={outlineOpen}
                         outlineTitle={outlineTitle}

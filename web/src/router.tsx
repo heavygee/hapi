@@ -643,8 +643,11 @@ function SessionPage() {
         refetch: refetchMessages,
         pendingCount,
         messagesVersion,
+        historySeekActive,
         flushPending,
         setAtBottom,
+        seekToMessage,
+        returnToLatest,
     } = useMessages(api, sessionId)
 
     // Tracks the most recent send the hub rejected (4xx/5xx/network), keyed
@@ -935,12 +938,15 @@ function SessionPage() {
             isSending={isSending}
             pendingCount={pendingCount}
             messagesVersion={messagesVersion}
+            historySeekActive={historySeekActive}
             onBack={goBack}
             onRefresh={refreshSelectedSession}
             onLoadMore={loadMoreMessages}
             onSend={sendMessage}
             onFlushPending={flushPending}
             onAtBottomChange={setAtBottom}
+            onSeekToMessage={seekToMessage}
+            onReturnToLatest={returnToLatest}
             onRetryMessage={retryMessage}
             autocompleteSuggestions={getAutocompleteSuggestions}
             availableSlashCommands={slashCommands}

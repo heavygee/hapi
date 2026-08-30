@@ -305,6 +305,26 @@ describe('MessageService message pagination', () => {
         expect(page.page.nextBeforeSeq).toBe(invoked.seq)
         expect(page.page.hasMore).toBe(true)
     })
+
+    it('seeks a bounded window around a message id without walking the full history', () => {
+        const store = makeStore()
+        const session = makeSession(store, 'page-around')
+        const ids: string[] = []
+        for (let i = 0; i < 20; i++) {
+            const row = store.messages.addMessage(session.id, `m-${i}`, `local-${i}`)
+            store.messages.markMessagesInvoked(session.id, [`local-${i}`], 1_000 + i)
+            ids.push(row.id)
+        }
+        const targetId = ids[10]!
+        const around = makeService(store).getMessagesAround(session.id, targetId, { limit: 7 })
+        expect(around).not.toBeNull()
+        expect(around!.page.aroundId).toBe(targetId)
+        expect(around!.messages.some((message) => message.id === targetId)).toBe(true)
+        expect(around!.messages.length).toBeLessThanOrEqual(7)
+        expect(around!.page.hasMore).toBe(true)
+        expect(around!.page.hasMoreNewer).toBe(true)
+        expect(makeService(store).getMessagesAround(session.id, 'missing', { limit: 7 })).toBeNull()
+    })
 })
 
 describe('MessageService.cancelQueuedMessage race scenarios', () => {

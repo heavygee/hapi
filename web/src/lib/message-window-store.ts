@@ -16,6 +16,8 @@ export type MessageWindowState = {
     warning: string | null
     atBottom: boolean
     messagesVersion: number
+    /** True after Session Log / seek replaced the window with a historical slice. */
+    historySeekActive: boolean
 }
 
 export const VISIBLE_WINDOW_SIZE = 400
@@ -263,6 +265,7 @@ function createState(sessionId: string): InternalState {
         warning: null,
         atBottom: true,
         messagesVersion: 0,
+        historySeekActive: false,
         pendingOverflowCount: 0,
         latestGeneration: 0,
         olderGeneration: 0,
@@ -543,6 +546,7 @@ function buildState(
         isLoadingMore?: boolean
         warning?: string | null
         atBottom?: boolean
+        historySeekActive?: boolean
     }
 ): InternalState {
     const messages = updates.messages ?? prev.messages
@@ -578,6 +582,9 @@ function buildState(
         isLoadingMore: updates.isLoadingMore !== undefined ? updates.isLoadingMore : prev.isLoadingMore,
         warning: updates.warning !== undefined ? updates.warning : prev.warning,
         atBottom: updates.atBottom !== undefined ? updates.atBottom : prev.atBottom,
+        historySeekActive: updates.historySeekActive !== undefined
+            ? updates.historySeekActive
+            : prev.historySeekActive,
         messagesVersion,
     }
 }
@@ -865,6 +872,7 @@ export async function fetchLatestMessages(api: ApiClient, sessionId: string): Pr
                     oldestPositionSeq: nextBeforeSeq,
                     isLoading: false,
                     warning: null,
+                    historySeekActive: false,
                 })
             }
             const pendingResult = mergeIntoPending(prev, response.messages)
@@ -889,6 +897,96 @@ export async function fetchLatestMessages(api: ApiClient, sessionId: string): Pr
         const message = error instanceof Error ? error.message : 'Failed to load messages'
         updateStateForGeneration(sessionId, 'latest', generation, (prev) => buildState(prev, { isLoading: false, warning: message }))
     }
+}
+
+/**
+ * Replace the visible window with a bounded slice centered on `aroundId`
+ * (hub message id). Used by Session Log jump so long sessions never walk
+ * the entire scrollback via repeated load-older.
+ */
+export async function seekToMessage(
+    api: ApiClient,
+    sessionId: string,
+    aroundId: string
+): Promise<boolean> {
+    const generation = beginAsyncGeneration(sessionId, 'latest', {
+        isLoading: true,
+        warning: null,
+    })
+    // Cancel any in-flight older page so it cannot prepend into the seek window.
+    updateState(sessionId, (prev) => setGeneration(prev, 'older', getGeneration(prev, 'older') + 1))
+
+    try {
+        const response = await api.getMessages(sessionId, {
+            aroundId,
+            limit: PAGE_SIZE,
+        })
+        if (!isCurrentGeneration(sessionId, 'latest', generation)) {
+            return false
+        }
+        if (response.messages.length === 0) {
+            updateStateForGeneration(sessionId, 'latest', generation, (prev) =>
+                buildState(prev, {
+                    isLoading: false,
+                    warning: 'Message not found in history',
+                })
+            )
+            return false
+        }
+
+        const nextBeforeAt = response.page.nextBeforeAt
+        const nextBeforeSeq = response.page.nextBeforeSeq
+        updateStateForGeneration(
+            sessionId,
+            'latest',
+            generation,
+            (prev) =>
+                buildState(prev, {
+                    messages: response.messages,
+                    hasMore: response.page.hasMore,
+                    oldestPositionAt: nextBeforeAt,
+                    oldestPositionSeq: nextBeforeSeq,
+                    isLoading: false,
+                    isLoadingMore: false,
+                    atBottom: false,
+                    historySeekActive: true,
+                    warning: null,
+                }),
+            true
+        )
+        return true
+    } catch (error) {
+        if (!isCurrentGeneration(sessionId, 'latest', generation)) {
+            return false
+        }
+        const message = error instanceof Error ? error.message : 'Failed to seek message'
+        updateStateForGeneration(sessionId, 'latest', generation, (prev) =>
+            buildState(prev, { isLoading: false, warning: message })
+        )
+        return false
+    }
+}
+
+/** Leave a history seek and reload the live tip window. */
+export async function returnToLatestMessages(api: ApiClient, sessionId: string): Promise<void> {
+    updateState(
+        sessionId,
+        (prev) =>
+            buildState(prev, {
+                messages: [],
+                pending: [],
+                pendingOverflowCount: 0,
+                pendingVisibleCount: 0,
+                pendingOverflowVisibleCount: 0,
+                atBottom: true,
+                historySeekActive: false,
+                isLoading: false,
+                isLoadingMore: false,
+                warning: null,
+            }),
+        true
+    )
+    await fetchLatestMessages(api, sessionId)
 }
 
 export async function fetchOlderMessages(api: ApiClient, sessionId: string): Promise<void> {
@@ -1016,6 +1114,7 @@ export function appendOptimisticMessage(sessionId: string, message: DecryptedMes
             messages: kept,
             pending,
             atBottom: true,
+            historySeekActive: false,
             ...cursorUpdatesAfterAppendTrim(kept, dropped)
         })
     }, true)
