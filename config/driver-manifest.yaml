@@ -907,3 +907,9 @@ layers:
   # Worktree: /work/coding/hapi/worktrees/blocked-list-ux-soup
   # Tip: 06f23fc0f
   - branch: driver/blocked-list-ux
+
+  # tiann/hapi#1724 — Cursor unexpected-stop → AGENT_NOTIFY_SUMMARY blocked footer
+  # so estate Blocked chrome (#1717) lights without stacking on model-error #987.
+  # Independent CLI-only tip; place after blocked-list-ux. Worktree: unexpected-stop-blocked-footer.
+  # Tip: ac6789eb4
+  - branch: fix/cursor-unexpected-stop-blocked-footer
