@@ -804,3 +804,43 @@ Recorded because the failure modes in this log are easy to enumerate and the goo
 yet the good behaviour is what the process is for. Also worth the contrast: on the same day, this
 stand-in made seven unverified assertions, one of which shipped into a guard that read the wrong
 manifest and could have reported false green.
+
+---
+
+## 2026-08-30 — Runner workspace EACCES: routed wrong, then right; class fixed; my bad data caused a near-miss
+
+**The defect (qar peer):** `secret-scan` EACCES on `org-shared-4` — `.git` owned `root:root` while the
+runner runs as `heavygee`, left by a `container: semgrep/semgrep` job writing into a reused host
+workspace. Emergency unblock was `sudo chown -R` across **all** org-shared pools (broad, unilateral,
+but effective — verified 0 root-owned after).
+
+**Mis-routing, mine.** Sent it to `Peer: runner lifecycle hygiene` because its handoff *filename*
+contained "runner". That peer's scope is HAPI's own session/runner lifecycle inside tiann/hapi
+(`syncEngine.archiveSession`, #1705/#1706) — a different system sharing a noun. It pushed back
+correctly. Re-routed to `GitHub Actions runner audit (heavygee)`, verified first this time as the
+genuine owner (it registered `oos-linux-org-shared-1..5` + `oos-linux-qar` and migrated CI on 8 repos).
+
+**Outcome — good.** That owner proved the defect was *recurring* (234 fresh root-owned files on
+`org-shared-1` after the emergency chown), then fixed the class rather than the instance: an
+`ACTIONS_RUNNER_HOOK_JOB_COMPLETED` hook wired across the pool. Verified by me: hook present,
+0 root-owned files, 12 runner services up. It also made a correct scope call — `kinrupt` and
+`local-llm-server` were repos it had migrated (in scope); `lockhouse` is a separate GHE identity
+(left untouched, per its brief).
+
+**Cross-checks paid off.** Blast radius matched at 4 repos. And `tvtropes-dev` *was* a sixth
+gitleaks-affected repo — `zricethezav/gitleaks-action@v2` now resolves to licence-gated code, which
+a version pin makes invisible. Five repos swapped to the OSS CLI as a result.
+
+**My error, and it caused someone else's near-miss.** I reported jessica-build/ci-1/ci-2 as having
+"NO HOOK". They are `root:jessica-builder 0640` — I could not read them. `grep -q … 2>/dev/null`
+exits non-zero identically for "no match" and "permission denied". Acting on that false premise, the
+owner edited `jessica-ci-1/2` believing them empty and nearly clobbered an existing Podman cleanup
+hook; it caught itself pre-restart, verified zero live impact, reverted. I verified the revert clean
+via sudo (one JOB_COMPLETED key each, original script intact).
+
+**Third instance today of the same class:** empty `gh pr list --search` → "no PR was ever opened"
+(#19 existed); `gh search code` → 0 (six repos matched); permission-denied grep → "no hook".
+**An empty or failed query is not evidence of absence.** Recorded to memory as
+`feedback-empty-result-is-not-absence`. The aggravating factor here is that a false negative of mine
+became another agent's instruction — the cost of my unverified claim landed on someone else's
+infrastructure.
