@@ -240,7 +240,7 @@ function MessagePinButton(props: { messageId: string; copyText?: string }) {
                 void handleTogglePin()
             }}
         >
-            <PinIcon className={cn('h-3.5 w-3.5', pinned && 'text-[var(--app-link)]')} />
+            <PinIcon className="h-3.5 w-3.5" filled={pinned} />
         </MessageActionButton>
     )
 }
