@@ -21,7 +21,10 @@ import { useTerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 import { useTranslation } from '@/lib/use-translation'
 import { CloseIcon } from '@/components/icons'
 import { ShareTurnDialog } from '@/components/AssistantChat/ShareTurnDialog'
-import { SessionLogPanel } from '@/components/AssistantChat/SessionLogPanel'
+import {
+    SessionLogPanel,
+    sessionLogTargetMessageIds
+} from '@/components/AssistantChat/SessionLogPanel'
 import { formatCodexReasoningLabel, shouldShowCodexReasoningLabel } from '@/lib/codexStatusLabels'
 import { getSessionModelLabel } from '@/lib/sessionModelLabel'
 import { getSessionTitle } from '@/lib/sessionTitle'
@@ -1418,6 +1421,27 @@ export function HappyThread(props: {
         props.onOutlineOpenChange(false)
     }, [loadOlderForOutline, props.onOutlineItemClick, props.onOutlineOpenChange])
 
+    const handleSessionLogSelect = useCallback(async (hubMessageId: string) => {
+        const candidates = sessionLogTargetMessageIds(hubMessageId)
+        const target = await locateOutlineTargetMessage({
+            targetMessageId: candidates[0],
+            findTarget: () => {
+                for (const targetMessageId of candidates) {
+                    const el = document.getElementById(getConversationMessageAnchorId(targetMessageId))
+                    if (el) return el
+                }
+                return null
+            },
+            hasMoreMessages: () => hasMoreMessagesRef.current,
+            loadOlderPreservingScroll
+        })
+        if (target) {
+            target.scrollIntoView({ block: 'start', behavior: 'smooth' })
+            autoScrollEnabledRef.current = false
+        }
+        // Keep Session Log open after jump (unlike Outline).
+    }, [loadOlderPreservingScroll])
+
     useEffect(() => {
         if (
             !props.hasMoreMessages
@@ -1728,6 +1752,9 @@ export function HappyThread(props: {
                             sessionId={props.sessionId}
                             title={props.metadata?.name ?? props.metadata?.summary?.text ?? props.metadata?.path ?? props.sessionId.slice(0, 8)}
                             onClose={() => props.onSessionLogOpenChange?.(false)}
+                            onSelectMessage={(messageId) => {
+                                void handleSessionLogSelect(messageId)
+                            }}
                         />
                     </>
                 ) : null}

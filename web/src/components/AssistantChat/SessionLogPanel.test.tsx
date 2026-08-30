@@ -3,11 +3,17 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ComponentProps } from 'react'
 import { I18nProvider } from '@/lib/i18n-context'
-import { compactUrlLabel, SessionLogPanel } from '@/components/AssistantChat/SessionLogPanel'
+import {
+    compactUrlLabel,
+    parseSessionLogMessageId,
+    sessionLogTargetMessageIds,
+    SessionLogPanel
+} from '@/components/AssistantChat/SessionLogPanel'
 import type { ApiClient } from '@/api/client'
 import type { SystemEventRow } from '@/types/systemEvents'
 
 const NOW = Date.now()
+const HUB_MESSAGE_ID = 'msg-hub-uuid-1'
 
 const sampleEvents: SystemEventRow[] = [
     {
@@ -21,7 +27,7 @@ const sampleEvents: SystemEventRow[] = [
         artifactRefs: JSON.stringify([{ kind: 'url', url: 'https://example.com/pr/1' }]),
         provenance: 'hub-inferred from message URL scoop',
         relatedSessionId: 'sess-1',
-        payloadJson: null,
+        payloadJson: JSON.stringify({ messageId: HUB_MESSAGE_ID, url: 'https://example.com/pr/1' }),
         severity: 1
     },
     {
@@ -35,8 +41,22 @@ const sampleEvents: SystemEventRow[] = [
         artifactRefs: null,
         provenance: 'AGENT_NOTIFY_SUMMARY',
         relatedSessionId: 'sess-1',
-        payloadJson: null,
+        payloadJson: JSON.stringify({ messageId: HUB_MESSAGE_ID }),
         severity: 1
+    },
+    {
+        id: 4,
+        ts: NOW - 90_000,
+        sourceKind: 'system',
+        sourceRef: 'sess-1',
+        eventType: 'approval_requested',
+        attentionCandidate: 1,
+        summary: 'Permission requested: Bash',
+        artifactRefs: null,
+        provenance: 'hub-inferred from permission prompt',
+        relatedSessionId: 'sess-1',
+        payloadJson: JSON.stringify({ requestId: 'req-1' }),
+        severity: 2
     }
 ]
 
@@ -52,6 +72,7 @@ function renderPanel(
     const queryClient = new QueryClient({
         defaultOptions: { queries: { retry: false } }
     })
+    const onSelectMessage = props.onSelectMessage ?? vi.fn()
 
     const view = render(
         <QueryClientProvider client={queryClient}>
@@ -62,18 +83,45 @@ function renderPanel(
                     title="demo project"
                     onClose={vi.fn()}
                     {...props}
+                    onSelectMessage={onSelectMessage}
                 />
             </I18nProvider>
         </QueryClientProvider>
     )
 
-    return { ...view, fetchSystemEvents, api }
+    return {
+        ...view,
+        fetchSystemEvents,
+        api,
+        onSelectMessage: onSelectMessage as ReturnType<typeof vi.fn>
+    }
 }
 
 describe('compactUrlLabel', () => {
     it('drops scheme and truncates long paths', () => {
         expect(compactUrlLabel('https://example.com/pr/1')).toBe('example.com/pr/1')
         expect(compactUrlLabel(`https://github.com/tiann/hapi/pull/${'9'.repeat(80)}`, 40)).toMatch(/…$/)
+    })
+})
+
+describe('parseSessionLogMessageId', () => {
+    it('reads messageId from payloadJson', () => {
+        expect(parseSessionLogMessageId(JSON.stringify({ messageId: HUB_MESSAGE_ID }))).toBe(HUB_MESSAGE_ID)
+    })
+
+    it('returns null when messageId is missing or payload is invalid', () => {
+        expect(parseSessionLogMessageId(null)).toBeNull()
+        expect(parseSessionLogMessageId('{')).toBeNull()
+        expect(parseSessionLogMessageId(JSON.stringify({ requestId: 'x' }))).toBeNull()
+        expect(parseSessionLogMessageId(JSON.stringify({ messageId: 12 }))).toBeNull()
+        expect(parseSessionLogMessageId(JSON.stringify({ messageId: '  ' }))).toBeNull()
+    })
+})
+
+describe('sessionLogTargetMessageIds', () => {
+    it('prefers agent-text block ids Outline/DOM use (kind:hubId:idx)', () => {
+        expect(sessionLogTargetMessageIds(HUB_MESSAGE_ID)[0]).toBe(`agent-text:${HUB_MESSAGE_ID}:0`)
+        expect(sessionLogTargetMessageIds(HUB_MESSAGE_ID)).toContain(`agent-text:${HUB_MESSAGE_ID}`)
     })
 })
 
@@ -156,5 +204,59 @@ describe('SessionLogPanel', () => {
         await waitFor(() => {
             expect(screen.getByText('No durable events for this session yet')).toBeInTheDocument()
         })
+    })
+
+    it('clicks a notify row with messageId and invokes onSelectMessage', async () => {
+        const { onSelectMessage } = renderPanel()
+
+        await waitFor(() => {
+            expect(screen.getByText('Working on Session Log')).toBeInTheDocument()
+        })
+
+        fireEvent.click(screen.getByRole('button', { name: /Working on Session Log/i }))
+        expect(onSelectMessage).toHaveBeenCalledWith(HUB_MESSAGE_ID)
+    })
+
+    it('does not make rows without messageId clickable', async () => {
+        const { onSelectMessage } = renderPanel()
+
+        await waitFor(() => {
+            expect(screen.getByText('Permission requested: Bash')).toBeInTheDocument()
+        })
+
+        expect(screen.queryByRole('button', { name: /Permission requested: Bash/i })).not.toBeInTheDocument()
+        fireEvent.click(screen.getByText('Permission requested: Bash'))
+        expect(onSelectMessage).not.toHaveBeenCalled()
+    })
+
+    it('Links tab keeps external URL and row click still jumps when messageId present', async () => {
+        const fetchSystemEvents = vi.fn(async (params: { eventType?: string }) => {
+            if (params.eventType === 'link_seen') {
+                return { total: 1, events: [sampleEvents[0]] }
+            }
+            return { total: sampleEvents.length, events: sampleEvents }
+        })
+        const { onSelectMessage } = renderPanel({}, fetchSystemEvents as ApiClient['fetchSystemEvents'])
+
+        await waitFor(() => {
+            expect(screen.getByText('Working on Session Log')).toBeInTheDocument()
+        })
+
+        const filters = screen.getByLabelText('Log filters')
+        fireEvent.click(within(filters).getByText('Links'))
+
+        await waitFor(() => {
+            expect(screen.getByRole('link', { name: 'example.com/pr/1' })).toHaveAttribute(
+                'href',
+                'https://example.com/pr/1'
+            )
+        })
+
+        fireEvent.click(screen.getByRole('button', { name: /example.com\/pr\/1/i }))
+        expect(onSelectMessage).toHaveBeenCalledWith(HUB_MESSAGE_ID)
+
+        onSelectMessage.mockClear()
+        fireEvent.click(screen.getByRole('link', { name: 'example.com/pr/1' }))
+        expect(onSelectMessage).not.toHaveBeenCalled()
     })
 })
