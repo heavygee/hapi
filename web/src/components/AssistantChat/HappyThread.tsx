@@ -1464,8 +1464,10 @@ export function HappyThread(props: {
         if (!target && props.onSeekToMessage) {
             const sought = await props.onSeekToMessage(hubMessageId)
             if (sought) {
-                await waitForPaint()
-                target = findTarget()
+                for (let attempt = 0; attempt < 12 && !target; attempt += 1) {
+                    await waitForPaint()
+                    target = findTarget()
+                }
             }
         }
         if (target) {
