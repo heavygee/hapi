@@ -1,6 +1,8 @@
 import type { Database } from 'bun:sqlite'
 import {
     countSystemEvents,
+    deleteSystemEventByIdempotencyKey,
+    findSystemEventByIdempotencyKey,
     getSystemEventById,
     getSystemEventByIdempotencyKey,
     insertEventLink,
@@ -66,5 +68,13 @@ export class EventStore {
         metadataJson?: string | null
     }): string {
         return insertEventLink(this.db, input)
+    }
+
+    findByIdempotencyKey(idempotencyKey: string): StoredSystemEvent | null {
+        return findSystemEventByIdempotencyKey(this.db, idempotencyKey)
+    }
+
+    deleteByIdempotencyKey(idempotencyKey: string): boolean {
+        return deleteSystemEventByIdempotencyKey(this.db, idempotencyKey)
     }
 }

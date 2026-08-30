@@ -1,8 +1,10 @@
 import * as Popover from '@radix-ui/react-popover'
 import { useState } from 'react'
 import { useAuiState } from '@assistant-ui/react'
-import { CheckIcon, CopyIcon, ForkIcon, InfoIcon, RewindIcon } from '@/components/icons'
+import { CheckIcon, CopyIcon, ForkIcon, InfoIcon, PinIcon, RewindIcon } from '@/components/icons'
+import { useOptionalHappyChatContext, useHappyChatContext } from '@/components/AssistantChat/context'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
+import { hubMessageIdFromThreadMessageId, useSessionPins } from '@/hooks/useSessionPins'
 import { useTranslation } from '@/lib/use-translation'
 import { MessageMetadata, buildMessageMetadataLabels, type MessageMetadataProps } from './MessageMetadata'
 import { MessageTimestamp } from './MessageTimestamp'
@@ -20,6 +22,8 @@ export type MessageHistoryAction = {
 type MessageActionsProps = {
     align: 'start' | 'end'
     copyText?: string
+    /** assistant-ui thread message id (`agent-text:<hubId>:0`, …). */
+    messageId?: string
     metadata?: Omit<MessageMetadataProps, 'className'>
     messageElementId?: string
     showFork?: boolean
@@ -45,7 +49,6 @@ type MessageActionsAuiState = {
  * @internal Exported for unit testing.
  */
 export function selectHideShareButton(state: MessageActionsAuiState): boolean {
-    // Prefer shareHiddenByMessageId when present; fall back to isRunning.
     const extras = state.thread?.extras as (HappyRuntimeExtras & { shareHiddenByMessageId?: Set<string> }) | undefined
     const isRunning = state.thread?.isRunning ?? false
     if (extras?.shareHiddenByMessageId) {
@@ -62,6 +65,7 @@ export function selectThreadIsRunning(state: MessageActionsAuiState): boolean {
 export function MessageActions({
     align,
     copyText,
+    messageId,
     metadata,
     messageElementId,
     showFork = false,
@@ -72,13 +76,12 @@ export function MessageActions({
 }: MessageActionsProps) {
     const { copied, copy } = useCopyToClipboard()
     const { t } = useTranslation()
-    // Split into two primitive selectors. A single object-returning selector
-    // allocates a new snapshot every call and trips React #185 via
-    // useSyncExternalStore (issue #1380, regression from #1306).
+    const chat = useOptionalHappyChatContext()
     const hideShareButton = useAuiState((state) => selectHideShareButton(state))
     const threadIsRunning = useAuiState((state) => selectThreadIsRunning(state))
     const canCopy = Boolean(copyText)
     const hasMetadata = metadata ? buildMessageMetadataLabels(metadata).length > 0 : false
+    const showPin = Boolean(chat && messageId)
     const [forkOpen, setForkOpen] = useState(false)
     const [rewindOpen, setRewindOpen] = useState(false)
     const [forkPending, setForkPending] = useState(false)
@@ -122,6 +125,10 @@ export function MessageActions({
         </MessageActionButton>
     ) : null
 
+    const pinButton = showPin && messageId ? (
+        <MessagePinButton messageId={messageId} copyText={copyText} />
+    ) : null
+
     return (
         <>
             <div
@@ -134,8 +141,10 @@ export function MessageActions({
                 {align === 'end' && hasMetadata && metadata ? <MessageInfoPopover metadata={metadata} /> : null}
                 {align === 'end' ? shareButton : null}
                 {align === 'end' ? historyButtons : null}
+                {align === 'end' ? pinButton : null}
                 {align === 'end' ? copyButton : null}
                 {align === 'start' ? copyButton : null}
+                {align === 'start' ? pinButton : null}
                 {align === 'start' ? historyButtons : null}
                 {align === 'start' ? shareButton : null}
                 {align === 'start' && hasMetadata && metadata ? <MessageInfoPopover metadata={metadata} /> : null}
@@ -187,6 +196,52 @@ export function MessageActions({
                 }}
             />
         </>
+    )
+}
+
+function MessagePinButton(props: { messageId: string; copyText?: string }) {
+    const { t } = useTranslation()
+    const chat = useHappyChatContext()
+    const pins = useSessionPins(chat.api, chat.sessionId)
+    const [pinBusy, setPinBusy] = useState(false)
+    const [pinError, setPinError] = useState<string | null>(null)
+    const hubMessageId = hubMessageIdFromThreadMessageId(props.messageId)
+    if (!hubMessageId) return null
+
+    const pinned = pins.isPinned(hubMessageId)
+
+    const handleTogglePin = async () => {
+        if (pinBusy) return
+        setPinBusy(true)
+        setPinError(null)
+        try {
+            if (pinned) {
+                await pins.unpin(hubMessageId)
+            } else {
+                await pins.pin({
+                    messageId: hubMessageId,
+                    summary: (props.copyText?.trim() || 'Pinned message').slice(0, 500),
+                    targetMessageId: props.messageId
+                })
+            }
+        } catch (err) {
+            setPinError(err instanceof Error ? err.message : String(err))
+        } finally {
+            setPinBusy(false)
+        }
+    }
+
+    return (
+        <MessageActionButton
+            label={pinError ?? (pinned ? t('message.unpin') : t('message.pin'))}
+            aria-pressed={pinned}
+            disabled={pinBusy}
+            onClick={() => {
+                void handleTogglePin()
+            }}
+        >
+            <PinIcon className={cn('h-3.5 w-3.5', pinned && 'text-[var(--app-link)]')} />
+        </MessageActionButton>
     )
 }
 

@@ -140,9 +140,11 @@ describe('overseerEvents mapping', () => {
         }])
     })
 
-    test('OVERSEER_EVENT_TYPES includes link_seen', () => {
+    test('OVERSEER_EVENT_TYPES includes link_seen and operator_pin', () => {
         expect(OVERSEER_EVENT_TYPES).toContain('link_seen')
+        expect(OVERSEER_EVENT_TYPES).toContain('operator_pin')
         expect(defaultAttentionCandidate('link_seen')).toBe(0)
+        expect(defaultAttentionCandidate('operator_pin')).toBe(0)
     })
 
     test('normalizeUrlIdempotencyKey drops hash and lowercases host', () => {

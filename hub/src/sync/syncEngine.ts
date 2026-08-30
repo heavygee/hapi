@@ -80,7 +80,13 @@ import { createOverseerLlmFallbackClient } from './overseerLlmFallback'
 import { loadOverseerLlmFallbackConfig, redactOverseerLlmBaseUrlForLog } from './overseerLlmFallbackConfig'
 import { OverseerEntity } from './overseerEntity'
 import { extractAssistantPlainText } from '@hapi/protocol/messages'
-import type { InboxOperatorAction } from '@hapi/protocol'
+import {
+    buildOverseerSessionIdentity,
+    deriveSeverity,
+    mergeEventPayloadWithSession,
+    operatorPinIdempotencyKey,
+    type InboxOperatorAction
+} from '@hapi/protocol'
 import type { ListSystemEventsOptions, StoredSystemEvent, InsertSystemEventInput } from '../store'
 import type { ListInboxItemsOptions, StoredInboxItem } from '../store/inboxItems'
 import { armResumePeerMint, clearResumePeerMint } from '../web/pendingResumePeerMint'
@@ -714,6 +720,55 @@ export class SyncEngine {
                 }
             }
         }
+    }
+
+    pinSessionMessage(
+        sessionId: string,
+        input: { messageId: string; summary: string; targetMessageId?: string | null }
+    ): StoredSystemEvent | null {
+        const session = this.getSession(sessionId)
+        if (!session) return null
+        const stored = this.store.sessions.getSession(sessionId)
+        const identity = buildOverseerSessionIdentity({
+            id: session.id,
+            flavor: session.metadata?.flavor ?? 'claude',
+            tag: stored?.tag ?? null,
+            metadata: session.metadata
+        })
+        const summary = input.summary.trim().slice(0, 500) || 'Pinned message'
+        const payloadJson = mergeEventPayloadWithSession(
+            {
+                messageId: input.messageId,
+                targetMessageId: input.targetMessageId ?? null
+            },
+            identity
+        )
+        return this.store.events.insert({
+            ts: Date.now(),
+            sourceKind: 'operator',
+            sourceRef: sessionId,
+            eventType: 'operator_pin',
+            attentionCandidate: 0,
+            operatorActionRequired: 0,
+            summary,
+            relatedSessionId: sessionId,
+            provenance: 'operator pin from Session Log / message actions',
+            idempotencyKey: operatorPinIdempotencyKey(sessionId, input.messageId),
+            payloadJson,
+            severity: deriveSeverity('operator_pin')
+        })
+    }
+
+    unpinSessionMessage(sessionId: string, messageId: string): boolean {
+        return this.store.events.deleteByIdempotencyKey(
+            operatorPinIdempotencyKey(sessionId, messageId)
+        )
+    }
+
+    isSessionMessagePinned(sessionId: string, messageId: string): boolean {
+        return this.store.events.findByIdempotencyKey(
+            operatorPinIdempotencyKey(sessionId, messageId)
+        ) != null
     }
 
     getOverseer(namespace = 'default'): OverseerEntity {

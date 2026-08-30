@@ -1433,14 +1433,14 @@ export function HappyThread(props: {
                 return null
             },
             hasMoreMessages: () => hasMoreMessagesRef.current,
-            loadOlderPreservingScroll
+            loadOlderPreservingScroll: loadOlderForOutline
         })
         if (target) {
             target.scrollIntoView({ block: 'start', behavior: 'smooth' })
             autoScrollEnabledRef.current = false
         }
         // Keep Session Log open after jump (unlike Outline).
-    }, [loadOlderPreservingScroll])
+    }, [loadOlderForOutline])
 
     useEffect(() => {
         if (

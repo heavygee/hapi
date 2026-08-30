@@ -119,7 +119,7 @@ export function HappyUserMessage() {
             >
                 <div className="ml-auto w-full max-w-[92%]">
                     <CliOutputBlock text={cliText} />
-                    <MessageActions align="end" copyText={cliText} messageElementId={elementId} />
+                    <MessageActions align="end" copyText={cliText} messageId={messageId} messageElementId={elementId} />
                 </div>
             </MessagePrimitive.Root>
         )
@@ -166,6 +166,7 @@ export function HappyUserMessage() {
             <MessageActions
                 align="end"
                 copyText={hasText ? text : undefined}
+                messageId={messageId}
                 messageElementId={elementId}
                 showFork={showFork}
                 showRewind={showRewind}

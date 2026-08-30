@@ -205,6 +205,18 @@ export function insertSystemEvent(db: Database, input: InsertSystemEventInput): 
     return getSystemEventById(db, id)
 }
 
+export function deleteSystemEventByIdempotencyKey(db: Database, idempotencyKey: string): boolean {
+    const result = db.prepare('DELETE FROM events WHERE idempotency_key = ?').run(idempotencyKey)
+    return result.changes > 0
+}
+
+export function findSystemEventByIdempotencyKey(db: Database, idempotencyKey: string): StoredSystemEvent | null {
+    const row = db.prepare(
+        'SELECT * FROM events WHERE idempotency_key = ? LIMIT 1'
+    ).get(idempotencyKey) as SystemEventRow | undefined
+    return row ? mapRow(row) : null
+}
+
 export function getSystemEventById(db: Database, id: number): StoredSystemEvent | null {
     const row = db.prepare('SELECT * FROM overseer_events WHERE id = ?').get(id) as SystemEventRow | undefined
     return row ? mapRow(row) : null
