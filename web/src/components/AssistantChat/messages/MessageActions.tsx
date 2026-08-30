@@ -105,7 +105,7 @@ function MessagePinButton(props: { messageId: string; copyText?: string }) {
                 void handleTogglePin()
             }}
         >
-            <PinIcon className="h-3.5 w-3.5" />
+            <PinIcon className="h-3.5 w-3.5" filled={pinned} />
         </button>
     )
 }

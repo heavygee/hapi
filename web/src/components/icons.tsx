@@ -42,7 +42,21 @@ export function PlusCircleIcon(props: IconProps) {
     )
 }
 
-export function PinIcon(props: IconProps) {
+export function PinIcon(props: IconProps & { filled?: boolean }) {
+    const { filled = false, className } = props
+    if (filled) {
+        return (
+            <svg
+                className={className ?? 'h-4 w-4'}
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                stroke="none"
+                aria-hidden="true"
+            >
+                <path d="M16 4a2 2 0 0 0-2-2H10a2 2 0 0 0-2 2v.5a1 1 0 0 1-1 1 2 2 0 0 0 0 4 1 1 0 0 1 1 1v2.26a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 4 15.24V16a1 1 0 0 0 1 1h6v5a1 1 0 1 0 2 0v-5h6a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 12.76V10.5a1 1 0 0 1 1-1 2 2 0 0 0 0-4 1 1 0 0 1-1-1Z" />
+            </svg>
+        )
+    }
     return createIcon(
         <>
             <path d="M12 17v5" />
