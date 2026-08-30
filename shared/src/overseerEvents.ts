@@ -52,7 +52,9 @@ export const OVERSEER_EVENT_TYPES = [
     'convo_turn',
     'decided',
     'dispatched',
-    'link_seen'
+    'link_seen',
+    /** Operator-pinned transcript message (hub-durable Session Log Pinned tab). */
+    'operator_pin'
 ] as const
 
 export type OverseerEventType = typeof OVERSEER_EVENT_TYPES[number]
@@ -123,6 +125,10 @@ export function buildUrlArtifactRefs(
         source,
         created_at: createdAt
     }))
+}
+
+export function operatorPinIdempotencyKey(sessionId: string, messageId: string): string {
+    return `session:${sessionId}:message:${messageId}:operator_pin`
 }
 
 export function buildLinkSeenSummary(url: string): string {
@@ -247,6 +253,7 @@ export function deriveSeverity(eventType: string): number {
         case 'completed':
             return 2
         case 'link_seen':
+        case 'operator_pin':
             return 1
         default:
             return 1
@@ -266,6 +273,7 @@ export function defaultAttentionCandidate(eventType: string): 0 | 1 {
         case 'failed':
             return 1
         case 'link_seen':
+        case 'operator_pin':
         case 'progress':
         case 'tool_call':
         case 'tool_result':

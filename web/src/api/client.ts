@@ -819,4 +819,21 @@ export class ApiClient {
         })
     }
 
+
+    async pinSessionMessage(
+        sessionId: string,
+        input: { messageId: string; summary: string; targetMessageId?: string }
+    ): Promise<{ event: unknown }> {
+        return await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/pins`, {
+            method: 'POST',
+            body: JSON.stringify(input)
+        })
+    }
+
+    async unpinSessionMessage(sessionId: string, messageId: string): Promise<{ ok: boolean }> {
+        return await this.request(
+            `/api/sessions/${encodeURIComponent(sessionId)}/pins/${encodeURIComponent(messageId)}`,
+            { method: 'DELETE' }
+        )
+    }
 }

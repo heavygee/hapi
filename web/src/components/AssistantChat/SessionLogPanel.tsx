@@ -9,10 +9,10 @@ import { formatAbsoluteDateTime, formatRelativeTime } from '@/lib/relative-time'
 import { useTranslation } from '@/lib/use-translation'
 import type { SystemEventRow } from '@/types/systemEvents'
 
-export type SessionLogFilter = 'all' | 'links'
+export type SessionLogFilter = 'all' | 'links' | 'pinned'
 
-/** All tab is progress/memory — not the Links carveout, and not ambient silence rows. */
-const ALL_TAB_EXCLUDED_EVENT_TYPES = new Set(['link_seen', 'stale'])
+/** All tab is progress/memory — not Links/Pinned carveouts, and not ambient silence. */
+const ALL_TAB_EXCLUDED_EVENT_TYPES = new Set(['link_seen', 'stale', 'operator_pin'])
 
 function primaryUrl(event: SystemEventRow): string | null {
     const refs = parseArtifactRefs(event.artifactRefs)
@@ -63,6 +63,18 @@ export function sessionLogTargetMessageIds(hubMessageId: string): string[] {
         `user-text:${hubMessageId}`,
         `cli-output:${hubMessageId}:0`,
     ]
+}
+
+/** Case-insensitive filter over event summaries (and link labels) — stopgap before transcript search. */
+export function eventMatchesSessionLogQuery(event: SystemEventRow, query: string): boolean {
+    const needle = query.trim().toLowerCase()
+    if (!needle) return true
+    if (event.summary.toLowerCase().includes(needle)) return true
+    const url = primaryUrl(event)
+    if (url && (url.toLowerCase().includes(needle) || compactUrlLabel(url).toLowerCase().includes(needle))) {
+        return true
+    }
+    return false
 }
 
 function SessionLogEventRow(props: {
@@ -154,12 +166,17 @@ export function SessionLogPanel(props: {
 }) {
     const { t } = useTranslation()
     const [filter, setFilter] = useState<SessionLogFilter>(props.initialFilter ?? 'all')
+    const [query, setQuery] = useState('')
     const [older, setOlder] = useState<SystemEventRow[]>([])
     const [loadingOlder, setLoadingOlder] = useState(false)
     const [olderError, setOlderError] = useState<string | null>(null)
     const [reachedEnd, setReachedEnd] = useState(false)
 
-    const eventType = filter === 'links' ? 'link_seen' : null
+    const eventType = filter === 'links'
+        ? 'link_seen'
+        : filter === 'pinned'
+            ? 'operator_pin'
+            : null
     const { events: page, isLoading, error, refetch } = useSessionSystemEvents(
         props.api,
         props.sessionId,
@@ -174,9 +191,11 @@ export function SessionLogPanel(props: {
                 const seen = new Set(page.map((event) => event.id))
                 return [...page, ...older.filter((event) => !seen.has(event.id))]
             })()
-        if (filter === 'links') return merged
-        return merged.filter((event) => !ALL_TAB_EXCLUDED_EVENT_TYPES.has(event.eventType))
-    }, [page, older, filter])
+        const tabFiltered = filter === 'links' || filter === 'pinned'
+            ? merged
+            : merged.filter((event) => !ALL_TAB_EXCLUDED_EVENT_TYPES.has(event.eventType))
+        return tabFiltered.filter((event) => eventMatchesSessionLogQuery(event, query))
+    }, [page, older, filter, query])
 
     const handleFilterChange = useCallback((next: SessionLogFilter) => {
         setFilter(next)
@@ -276,6 +295,33 @@ export function SessionLogPanel(props: {
                 >
                     {t('session.log.filter.links')}
                 </button>
+                <button
+                    type="button"
+                    role="tab"
+                    aria-selected={filter === 'pinned'}
+                    onClick={() => handleFilterChange('pinned')}
+                    className={`flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
+                        filter === 'pinned'
+                            ? 'bg-[var(--app-button)] text-[var(--app-button-text)]'
+                            : 'text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
+                    }`}
+                >
+                    {t('session.log.filter.pinned')}
+                </button>
+            </div>
+
+            <div className="border-b border-[var(--app-border)] px-2 py-2">
+                <label className="sr-only" htmlFor="session-log-summary-filter">
+                    {t('session.log.filterQuery')}
+                </label>
+                <input
+                    id="session-log-summary-filter"
+                    type="search"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder={t('session.log.filterQueryPlaceholder')}
+                    className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1.5 text-xs text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                />
             </div>
 
             <div className="app-scroll-y min-h-0 flex-1 p-2">
@@ -291,7 +337,13 @@ export function SessionLogPanel(props: {
                     </div>
                 ) : events.length === 0 ? (
                     <div className="px-2 py-8 text-center text-sm text-[var(--app-hint)]">
-                        {filter === 'links' ? t('session.log.emptyLinks') : t('session.log.empty')}
+                        {query.trim()
+                            ? t('session.log.emptyFilter')
+                            : filter === 'links'
+                                ? t('session.log.emptyLinks')
+                                : filter === 'pinned'
+                                    ? t('session.log.emptyPinned')
+                                    : t('session.log.empty')}
                     </div>
                 ) : (
                     <ul className="space-y-0.5">

@@ -26,6 +26,7 @@ import { createVoiceRoutes } from './routes/voice'
 import { createSystemEventsRoutes } from './routes/systemEvents'
 import { createInboxItemsRoutes } from './routes/inboxItems'
 import { createOverseerRoutes } from './routes/overseer'
+import { createSessionPinsRoutes } from './routes/sessionPins'
 import type { SSEManager } from '../sse/sseManager'
 import type { VisibilityTracker } from '../visibility/visibilityTracker'
 import type { Server as BunServer, ServerWebSocket } from 'bun'
@@ -261,6 +262,7 @@ function createWebApp(options: {
     app.route('/api', createSystemEventsRoutes(options.getSyncEngine))
     app.route('/api', createInboxItemsRoutes(options.getSyncEngine))
     app.route('/api', createOverseerRoutes(options.getSyncEngine))
+    app.route('/api', createSessionPinsRoutes(options.getSyncEngine))
 
     // Skip static serving in relay mode, show helpful message on root
     if (options.relayMode) {

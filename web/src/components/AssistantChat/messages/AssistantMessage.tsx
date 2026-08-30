@@ -66,7 +66,7 @@ export function HappyAssistantMessage() {
                 : codexReview
                     ? <CodexReviewCard review={codexReview} />
                     : <MessagePrimitive.Content components={MESSAGE_PART_COMPONENTS} />}
-            <MessageActions align="start" copyText={copyText || undefined} metadata={metadata} />
+            <MessageActions align="start" copyText={copyText || undefined} messageId={messageId} metadata={metadata} />
         </MessagePrimitive.Root>
     )
 }

@@ -5,6 +5,7 @@ import type { ComponentProps } from 'react'
 import { I18nProvider } from '@/lib/i18n-context'
 import {
     compactUrlLabel,
+    eventMatchesSessionLogQuery,
     parseSessionLogMessageId,
     sessionLogTargetMessageIds,
     SessionLogPanel
@@ -122,6 +123,16 @@ describe('sessionLogTargetMessageIds', () => {
     it('prefers agent-text block ids Outline/DOM use (kind:hubId:idx)', () => {
         expect(sessionLogTargetMessageIds(HUB_MESSAGE_ID)[0]).toBe(`agent-text:${HUB_MESSAGE_ID}:0`)
         expect(sessionLogTargetMessageIds(HUB_MESSAGE_ID)).toContain(`agent-text:${HUB_MESSAGE_ID}`)
+    })
+})
+
+describe('eventMatchesSessionLogQuery', () => {
+    it('matches summary and URL labels case-insensitively', () => {
+        const event = sampleEvents[0]
+        expect(eventMatchesSessionLogQuery(event, 'EXAMPLE')).toBe(true)
+        expect(eventMatchesSessionLogQuery(event, 'pr/1')).toBe(true)
+        expect(eventMatchesSessionLogQuery(event, 'nope')).toBe(false)
+        expect(eventMatchesSessionLogQuery(event, '  ')).toBe(true)
     })
 })
 
@@ -258,5 +269,52 @@ describe('SessionLogPanel', () => {
         onSelectMessage.mockClear()
         fireEvent.click(screen.getByRole('link', { name: 'example.com/pr/1' }))
         expect(onSelectMessage).not.toHaveBeenCalled()
+    })
+
+    it('Pinned tab lists operator_pin events and filter box narrows summaries', async () => {
+        const pinEvent: SystemEventRow = {
+            id: 9,
+            ts: NOW - 10_000,
+            sourceKind: 'operator',
+            sourceRef: 'sess-1',
+            eventType: 'operator_pin',
+            attentionCandidate: 0,
+            summary: 'Pinned summary about rematerialize hold',
+            artifactRefs: null,
+            provenance: 'operator pin',
+            relatedSessionId: 'sess-1',
+            payloadJson: JSON.stringify({ messageId: HUB_MESSAGE_ID }),
+            severity: 1
+        }
+        const fetchSystemEvents = vi.fn(async (params: { eventType?: string }) => {
+            if (params.eventType === 'operator_pin') {
+                return { total: 1, events: [pinEvent] }
+            }
+            return { total: sampleEvents.length, events: sampleEvents }
+        })
+        renderPanel({}, fetchSystemEvents as ApiClient['fetchSystemEvents'])
+
+        await waitFor(() => {
+            expect(screen.getByText('Working on Session Log')).toBeInTheDocument()
+        })
+
+        const filters = screen.getByLabelText('Log filters')
+        fireEvent.click(within(filters).getByText('Pinned'))
+
+        await waitFor(() => {
+            expect(screen.getByText('Pinned summary about rematerialize hold')).toBeInTheDocument()
+        })
+
+        fireEvent.change(screen.getByPlaceholderText('Filter summaries…'), {
+            target: { value: 'rematerialize' }
+        })
+        expect(screen.getByText('Pinned summary about rematerialize hold')).toBeInTheDocument()
+
+        fireEvent.change(screen.getByPlaceholderText('Filter summaries…'), {
+            target: { value: 'zzzz-missing' }
+        })
+        await waitFor(() => {
+            expect(screen.getByText('No summaries match this filter')).toBeInTheDocument()
+        })
     })
 })
