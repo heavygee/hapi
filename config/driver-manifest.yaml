@@ -908,8 +908,8 @@ layers:
   # Tip: 06f23fc0f
   - branch: driver/blocked-list-ux
 
-  # tiann/hapi#1724 — Cursor unexpected-stop → AGENT_NOTIFY_SUMMARY blocked footer
-  # so estate Blocked chrome (#1717) lights without stacking on model-error #987.
+  # tiann/hapi#1724 — Cursor unexpected-stop: auto-Continue once after post-tool
+  # interrupt; AGENT_NOTIFY_SUMMARY blocked footer only if that also fails.
   # Independent CLI-only tip; place after blocked-list-ux. Worktree: unexpected-stop-blocked-footer.
-  # Tip: ac6789eb4
+  # Tip: fa9a3dbaa
   - branch: fix/cursor-unexpected-stop-blocked-footer
