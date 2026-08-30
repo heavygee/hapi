@@ -62,6 +62,16 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         const limit = parsed.data.limit ?? 50
+        if (parsed.data.aroundId) {
+            const around = engine.getMessagesPage(sessionId, {
+                limit,
+                aroundId: parsed.data.aroundId
+            })
+            if (!around) {
+                return c.json({ error: 'Message not found', code: 'message_not_found' }, 404)
+            }
+            return c.json(around)
+        }
         const before = parsed.data.beforeAt !== undefined && parsed.data.beforeSeq !== undefined
             ? { at: parsed.data.beforeAt, seq: parsed.data.beforeSeq }
             : null

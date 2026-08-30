@@ -457,6 +457,17 @@ export function getMessagesByPosition(
     return rows.reverse().map(toStoredMessage)
 }
 
+export function getMessageByIdForSession(
+    db: Database,
+    sessionId: string,
+    messageId: string
+): StoredMessage | null {
+    const row = db.prepare(
+        'SELECT * FROM messages WHERE id = ? AND session_id = ? LIMIT 1'
+    ).get(messageId, sessionId) as DbMessageRow | undefined
+    return row ? toStoredMessage(row) : null
+}
+
 /** Return messages strictly after a display-position cursor in ascending order.
  *  `until`, when supplied, is an inclusive fixed snapshot head so a catch-up
  *  loop does not chase messages appended while it is running. */

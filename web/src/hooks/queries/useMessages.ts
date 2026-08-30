@@ -6,6 +6,8 @@ import {
     cancelOlderMessageLoad,
     fetchOlderMessages,
     getMessageWindowState,
+    returnToLatestMessages,
+    seekToMessage,
     setMessageViewMode,
     subscribeMessageWindow,
     syncTailMessages,
@@ -28,6 +30,7 @@ export const EMPTY_STATE: MessageWindowState = {
     messagesVersion: 0,
     historyVersion: 0,
     tailRevision: 0,
+    historySeekActive: false,
 }
 
 export function useMessages(api: ApiClient | null, sessionId: string | null): {
@@ -40,10 +43,13 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
     messagesVersion: number
     historyVersion: number
     tailRevision: number
+    historySeekActive: boolean
     loadMore: (onBeforeApply?: (historyVersion: number) => boolean) => Promise<OlderLoadOutcome>
     cancelLoadMore: () => void
     refetch: () => Promise<void>
     setViewMode: (mode: MessageViewMode) => void
+    seekToMessage: (hubMessageId: string) => Promise<boolean>
+    returnToLatest: () => Promise<void>
 } {
     const state = useSyncExternalStore(
         useCallback((listener) => {
@@ -93,6 +99,16 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
         }
     }, [api, sessionId])
 
+    const seek = useCallback(async (hubMessageId: string) => {
+        if (!api || !sessionId) return false
+        return await seekToMessage(api, sessionId, hubMessageId)
+    }, [api, sessionId])
+
+    const returnToLatest = useCallback(async () => {
+        if (!api || !sessionId) return
+        await returnToLatestMessages(api, sessionId)
+    }, [api, sessionId])
+
     return {
         messages: state.messages,
         warning: state.warning,
@@ -103,9 +119,12 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
         messagesVersion: state.messagesVersion,
         historyVersion: state.historyVersion,
         tailRevision: state.tailRevision,
+        historySeekActive: state.historySeekActive,
         loadMore,
         cancelLoadMore,
         refetch,
         setViewMode,
+        seekToMessage: seek,
+        returnToLatest,
     }
 }

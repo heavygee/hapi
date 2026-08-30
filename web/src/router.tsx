@@ -994,7 +994,10 @@ function SessionPage() {
         messagesVersion,
         historyVersion,
         tailRevision,
+        historySeekActive,
         setViewMode,
+        seekToMessage,
+        returnToLatest,
     } = useMessages(api, sessionId)
 
     // Tracks the most recent send the hub rejected (4xx/5xx/network), keyed
@@ -1437,6 +1440,7 @@ function SessionPage() {
             messagesVersion={messagesVersion}
             historyVersion={historyVersion}
             tailRevision={tailRevision}
+            historySeekActive={historySeekActive}
             onBack={goBack}
             onRefresh={refreshSelectedSession}
             onLoadMore={loadMoreMessages}
@@ -1445,6 +1449,8 @@ function SessionPage() {
             resolveSessionIdForUpload={async (id) => (await resolveSessionId(id)).sessionId}
             onUploadSessionResolved={handleSessionResolved}
             onViewModeChange={setViewMode}
+            onSeekToMessage={seekToMessage}
+            onReturnToLatest={returnToLatest}
             onRetryMessage={retryMessage}
             autocompleteSuggestions={getAutocompleteSuggestions}
             availableSlashCommands={slashCommands}

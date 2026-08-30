@@ -423,6 +423,7 @@ export class ApiClient {
             untilSeq?: number | null
             untilAt?: number | null
             epoch?: number | null
+            aroundId?: string | null
             limit?: number
         }
     ): Promise<MessagesResponse> {
@@ -447,6 +448,9 @@ export class ApiClient {
         }
         if (options.epoch !== undefined && options.epoch !== null) {
             params.set('epoch', `${options.epoch}`)
+        }
+        if (options.aroundId) {
+            params.set('aroundId', options.aroundId)
         }
         if (options.limit !== undefined && options.limit !== null) {
             params.set('limit', `${options.limit}`)

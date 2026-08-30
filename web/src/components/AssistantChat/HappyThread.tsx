@@ -279,6 +279,31 @@ function NewMessagesIndicator(props: { count: number; onClick: () => void }) {
     )
 }
 
+function ReturnToLatestIndicator(props: { visible: boolean; onClick: () => void }) {
+    const { t } = useTranslation()
+    if (!props.visible) {
+        return null
+    }
+
+    return (
+        <button
+            type="button"
+            onClick={props.onClick}
+            className="absolute bottom-20 left-1/2 -translate-x-1/2 bg-[var(--app-button)] text-[var(--app-button-text)] px-3 py-1.5 rounded-full text-sm font-medium shadow-lg z-10"
+        >
+            {t('session.log.returnToLatest')} &#8595;
+        </button>
+    )
+}
+
+async function waitForPaint(): Promise<void> {
+    await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => resolve())
+        })
+    })
+}
+
 function MessageSkeleton() {
     const { t } = useTranslation()
     const rows = [
@@ -494,6 +519,10 @@ export function HappyThread(props: {
     normalizedMessagesCount: number
     messagesVersion: number
     historyVersion: number
+    tailRevision: number
+    historySeekActive?: boolean
+    onSeekToMessage?: (hubMessageId: string) => Promise<boolean>
+    onReturnToLatest?: () => Promise<void>
     forceScrollToken: number
     outlineOpen: boolean
     outlineItems: readonly ConversationOutlineItem[]
@@ -1423,24 +1452,28 @@ export function HappyThread(props: {
 
     const handleSessionLogSelect = useCallback(async (hubMessageId: string) => {
         const candidates = sessionLogTargetMessageIds(hubMessageId)
-        const target = await locateOutlineTargetMessage({
-            targetMessageId: candidates[0],
-            findTarget: () => {
-                for (const targetMessageId of candidates) {
-                    const el = document.getElementById(getConversationMessageAnchorId(targetMessageId))
-                    if (el) return el
-                }
-                return null
-            },
-            hasMoreMessages: () => hasMoreMessagesRef.current,
-            loadOlderPreservingScroll: loadOlderForOutline
-        })
+        const findTarget = (): HTMLElement | null => {
+            for (const targetMessageId of candidates) {
+                const el = document.getElementById(getConversationMessageAnchorId(targetMessageId))
+                if (el) return el
+            }
+            return null
+        }
+
+        let target = findTarget()
+        if (!target && props.onSeekToMessage) {
+            const sought = await props.onSeekToMessage(hubMessageId)
+            if (sought) {
+                await waitForPaint()
+                target = findTarget()
+            }
+        }
         if (target) {
             target.scrollIntoView({ block: 'start', behavior: 'smooth' })
             autoScrollEnabledRef.current = false
         }
         // Keep Session Log open after jump (unlike Outline).
-    }, [loadOlderForOutline])
+    }, [props.onSeekToMessage])
 
     useEffect(() => {
         if (
@@ -1709,7 +1742,17 @@ export function HappyThread(props: {
                         </div>
                     </div>
                 </ThreadPrimitive.Viewport>
-                <NewMessagesIndicator count={props.unseenCount} onClick={scrollToBottom} />
+                <ReturnToLatestIndicator
+                    visible={props.historySeekActive === true}
+                    onClick={() => {
+                        void props.onReturnToLatest?.().then(() => {
+                            scrollToBottom()
+                        })
+                    }}
+                />
+                {props.historySeekActive !== true ? (
+                    <NewMessagesIndicator count={props.unseenCount} onClick={scrollToBottom} />
+                ) : null}
                 {props.outlineOpen ? (
                     <>
                         <button

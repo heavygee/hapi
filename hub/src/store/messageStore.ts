@@ -13,6 +13,7 @@ import {
     getFirstMessages,
     getDeliverableMessagesAfter,
     getMessagesByPosition,
+    getMessageByIdForSession,
     getMessagesAfterPosition,
     getNewestMessagePosition,
     getMessageEpoch,
@@ -104,6 +105,10 @@ export class MessageStore {
 
     getMessagesByPosition(sessionId: string, limit: number, before?: { at: number; seq: number }): StoredMessage[] {
         return getMessagesByPosition(this.db, sessionId, limit, before)
+    }
+
+    getMessageByIdForSession(sessionId: string, messageId: string): StoredMessage | null {
+        return getMessageByIdForSession(this.db, sessionId, messageId)
     }
 
     getMessagesAfterPosition(

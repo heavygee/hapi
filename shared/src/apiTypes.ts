@@ -151,6 +151,10 @@ export type MessagesResponse = {
         snapshotHeadSeq: number | null
         snapshotHeadAt: number | null
         hasMore: boolean
+        /** Present on aroundId seeks: more messages exist toward live tip. */
+        hasMoreNewer?: boolean
+        /** Present on aroundId seeks: the hub message id that was centered. */
+        aroundId?: string
     }
 }
 
@@ -635,10 +639,19 @@ export const MessagesQuerySchema = z.object({
     untilSeq: z.coerce.number().int().min(1).optional(),
     untilAt: z.coerce.number().int().min(0).optional(),
     epoch: z.coerce.number().int().min(0).optional(),
+    /** Hub message id — return a bounded window centered on that row (seek/snap). */
+    aroundId: z.string().min(1).max(200).optional(),
 })
     .refine((data) => (data.beforeAt === undefined) === (data.beforeSeq === undefined), {
         message: 'beforeAt and beforeSeq must be provided together',
         path: ['beforeAt'],
+    })
+    .refine((data) => {
+        if (data.aroundId === undefined) return true
+        return data.beforeAt === undefined && data.beforeSeq === undefined
+    }, {
+        message: 'aroundId cannot be combined with beforeAt/beforeSeq',
+        path: ['aroundId'],
     })
     .refine((data) => (data.afterAt === undefined) === (data.afterSeq === undefined), {
         message: 'afterAt and afterSeq must be provided together',

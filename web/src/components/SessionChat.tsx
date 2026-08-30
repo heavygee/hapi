@@ -515,6 +515,7 @@ type SessionChatProps = {
     messagesVersion: number
     historyVersion: number
     tailRevision: number
+    historySeekActive?: boolean
     onBack: () => void
     onRefresh: () => void
     onLoadMore: (onBeforeApply?: (historyVersion: number) => boolean) => Promise<OlderLoadOutcome>
@@ -532,6 +533,8 @@ type SessionChatProps = {
     resolveSessionIdForUpload?: (sessionId: string) => Promise<string>
     onUploadSessionResolved?: (sessionId: string) => void
     onViewModeChange: (mode: 'tail' | 'history') => void
+    onSeekToMessage?: (hubMessageId: string) => Promise<boolean>
+    onReturnToLatest?: () => Promise<void>
     onRetryMessage?: (localId: string) => void
     autocompleteSuggestions?: (query: string) => Promise<Suggestion[]>
     availableSlashCommands?: readonly SlashCommand[]
@@ -1964,6 +1967,10 @@ function SessionChatInner(props: SessionChatProps) {
                         normalizedMessagesCount={normalizedMessages.length}
                         messagesVersion={props.messagesVersion}
                         historyVersion={props.historyVersion}
+                        tailRevision={props.tailRevision}
+                        historySeekActive={props.historySeekActive === true}
+                        onSeekToMessage={props.onSeekToMessage}
+                        onReturnToLatest={props.onReturnToLatest}
                         forceScrollToken={forceScrollToken}
                         outlineOpen={outlineOpen}
                         outlineItems={outlineItems}

@@ -350,6 +350,7 @@ export default {
   'session.log.empty': 'No durable events for this session yet',
   'session.log.emptyLinks': 'No links scooped for this session yet',
   'session.log.loadOlder': 'Load earlier',
+  'session.log.returnToLatest': 'Return to latest',
   'session.log.provenance': 'Source',
   'session.flow.open': 'Session flow',
   'session.flow.close': 'Close flow',

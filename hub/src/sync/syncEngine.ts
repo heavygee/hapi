@@ -575,8 +575,12 @@ export class SyncEngine {
             after?: { at: number; seq: number } | null
             until?: { at: number; seq: number } | null
             epoch?: number | null
+            aroundId?: string | null
         }
-    ): MessagesResponse {
+    ): MessagesResponse | null {
+        if (options.aroundId) {
+            return this.messageService.getMessagesAround(sessionId, options.aroundId, { limit: options.limit })
+        }
         return this.messageService.getMessagesPage(sessionId, options)
     }
 

@@ -59,6 +59,7 @@ function renderThread(onViewModeChange = vi.fn()) {
                     normalizedMessagesCount={1}
                     messagesVersion={1}
                     historyVersion={0}
+                    tailRevision={0}
                     forceScrollToken={forceScrollToken}
                     outlineOpen={false}
                     outlineItems={[]}

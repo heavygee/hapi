@@ -36,6 +36,8 @@ export type MessageWindowState = {
     messagesVersion: number
     historyVersion: number
     tailRevision: number
+    /** True after Session Log / seek replaced the window with a historical slice. */
+    historySeekActive: boolean
 }
 
 export const VISIBLE_WINDOW_SIZE = 400
@@ -237,6 +239,7 @@ function createState(sessionId: string): InternalState {
         messagesVersion: 0,
         historyVersion: 0,
         tailRevision: 0,
+        historySeekActive: false,
         oldestPositionAt: null,
         oldestPositionSeq: null,
         newestPositionAt: null,
@@ -397,6 +400,7 @@ function buildState(
         | 'olderGeneration'
         | 'historyVersion'
         | 'tailRevision'
+        | 'historySeekActive'
     >>
 ): InternalState {
     const messages = updates.messages ?? previous.messages
@@ -1027,6 +1031,24 @@ export function cancelOlderMessageLoad(sessionId: string): void {
     }, true)
 }
 
+export function getMessageWindowState(sessionId: string): MessageWindowState {
+    return getState(sessionId)
+}
+
+export function subscribeMessageWindow(sessionId: string, listener: () => void): () => void {
+    const subscribers = listeners.get(sessionId) ?? new Set()
+    subscribers.add(listener)
+    listeners.set(sessionId, subscribers)
+    return () => {
+        const current = listeners.get(sessionId)
+        if (!current) return
+        current.delete(listener)
+        if (current.size === 0) {
+            listeners.delete(sessionId)
+        }
+    }
+}
+
 export function setMessageViewMode(sessionId: string, mode: MessageViewMode): void {
     updateState(sessionId, (previous) => {
         if (previous.viewMode === mode) {
@@ -1037,6 +1059,76 @@ export function setMessageViewMode(sessionId: string, mode: MessageViewMode): vo
         }
         return enterTailMode(previous)
     }, true)
+}
+
+/**
+ * Replace the visible window with a bounded slice centered on `aroundId`.
+ * Session Log / pin jump — avoids unbounded load-older walks on long sessions.
+ */
+export async function seekToMessage(
+    api: ApiClient,
+    sessionId: string,
+    aroundId: string
+): Promise<boolean> {
+    const generation = beginTailSync(sessionId)
+    try {
+        const response = await api.getMessages(sessionId, { aroundId, limit: PAGE_SIZE })
+        if (!isCurrentTailSync(sessionId, generation)) {
+            return false
+        }
+        if (response.messages.length === 0) {
+            finishTailSync(sessionId, generation, 'Message not found in history')
+            return false
+        }
+
+        const retained = response.messages.filter(shouldRetainWindowMessage)
+        const { kept } = trimPreservingQueued(retained, VISIBLE_WINDOW_SIZE, 'append')
+        const oldest = pagePosition(response.page.nextBeforeAt, response.page.nextBeforeSeq)
+        const newest = derivePosition(kept, 'newest')
+
+        updateState(sessionId, (previous) => {
+            if (previous.syncGeneration !== generation) {
+                return previous
+            }
+            return buildState(previous, {
+                messages: kept,
+                hasMore: response.page.hasMore,
+                oldestPositionAt: oldest?.at ?? null,
+                oldestPositionSeq: oldest?.seq ?? null,
+                newestPositionAt: newest?.at ?? null,
+                newestPositionSeq: newest?.seq ?? null,
+                viewMode: 'history',
+                historySeekActive: true,
+                requiresLatestReset: true,
+                epoch: response.page.epoch ?? previous.epoch,
+                tailRevision: previous.tailRevision + 1,
+                isSyncingTail: false,
+                warning: null
+            })
+        }, true)
+        return kept.length > 0
+    } catch (error) {
+        if (!isCurrentTailSync(sessionId, generation)) {
+            return false
+        }
+        finishTailSync(
+            sessionId,
+            generation,
+            error instanceof Error ? error.message : 'Failed to seek message'
+        )
+        return false
+    }
+}
+
+/** Leave a history seek and reload the live tip window. */
+export async function returnToLatestMessages(api: ApiClient, sessionId: string): Promise<void> {
+    updateState(sessionId, (previous) => buildState(previous, {
+        historySeekActive: false,
+        viewMode: 'tail',
+        requiresLatestReset: true,
+        preferLatestOnActivation: true
+    }), true)
+    await syncTailMessages(api, sessionId, { ensureAfterCurrent: true })
 }
 
 export function ingestIncomingMessages(sessionId: string, incoming: DecryptedMessage[]): void {
@@ -1059,24 +1151,6 @@ export function ingestIncomingMessages(sessionId: string, incoming: DecryptedMes
         })
         return merged
     })
-}
-
-export function getMessageWindowState(sessionId: string): MessageWindowState {
-    return getState(sessionId)
-}
-
-export function subscribeMessageWindow(sessionId: string, listener: () => void): () => void {
-    const subscribers = listeners.get(sessionId) ?? new Set()
-    subscribers.add(listener)
-    listeners.set(sessionId, subscribers)
-    return () => {
-        const current = listeners.get(sessionId)
-        if (!current) return
-        current.delete(listener)
-        if (current.size === 0) {
-            listeners.delete(sessionId)
-        }
-    }
 }
 
 export function clearMessageWindow(sessionId: string): void {

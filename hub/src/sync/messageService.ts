@@ -452,6 +452,81 @@ export class MessageService {
         }
     }
 
+    /**
+     * Bounded window centered on a hub message id — used by Session Log jump
+     * so long sessions snap to context instead of walking every older page.
+     */
+    getMessagesAround(
+        sessionId: string,
+        aroundId: string,
+        options: { limit: number } = { limit: 50 }
+    ): MessagesResponse | null {
+        const target = this.store.messages.getMessageByIdForSession(sessionId, aroundId)
+        if (!target) {
+            return null
+        }
+
+        const safeLimit = Math.max(5, Math.min(200, options.limit))
+        const beforeHalf = Math.max(1, Math.floor((safeLimit - 1) * 0.6))
+        const afterHalf = Math.max(1, safeLimit - 1 - beforeHalf)
+        const position = {
+            at: target.invokedAt ?? target.createdAt,
+            seq: target.seq
+        }
+        const epoch = this.store.messages.getMessageEpoch(sessionId)
+        const snapshotHead = this.store.messages.getNewestMessagePosition(sessionId)
+
+        const older = this.store.messages.getMessagesByPosition(sessionId, beforeHalf, position)
+        const newer = this.store.messages.getMessagesAfterPosition(sessionId, afterHalf, position)
+        const byId = new Map<string, typeof target>()
+        for (const row of older) byId.set(row.id, row)
+        byId.set(target.id, target)
+        for (const row of newer) byId.set(row.id, row)
+
+        const stored = [...byId.values()].sort((a, b) => {
+            const at = (a.invokedAt ?? a.createdAt) - (b.invokedAt ?? b.createdAt)
+            return at !== 0 ? at : a.seq - b.seq
+        })
+        const messages = toVisibleDecryptedMessages(stored)
+
+        const oldest = stored[0] ?? null
+        const oldestSeq = oldest?.seq ?? null
+        const oldestPositionAt = oldest ? oldest.invokedAt ?? oldest.createdAt : null
+        const hasMore = oldestSeq !== null && oldestPositionAt !== null
+            && this.store.messages.getMessagesByPosition(
+                sessionId,
+                1,
+                { at: oldestPositionAt, seq: oldestSeq }
+            ).length > 0
+
+        const newest = stored[stored.length - 1] ?? null
+        const hasMoreNewer = newest != null
+            && this.store.messages.getMessagesAfterPosition(
+                sessionId,
+                1,
+                { at: newest.invokedAt ?? newest.createdAt, seq: newest.seq }
+            ).length > 0
+
+        return {
+            messages,
+            page: {
+                direction: 'before',
+                limit: safeLimit,
+                epoch,
+                reset: true,
+                nextBeforeSeq: oldestSeq,
+                nextBeforeAt: oldestPositionAt,
+                nextAfterSeq: null,
+                nextAfterAt: null,
+                snapshotHeadSeq: snapshotHead?.seq ?? null,
+                snapshotHeadAt: snapshotHead?.at ?? null,
+                hasMore,
+                hasMoreNewer,
+                aroundId
+            }
+        }
+    }
+
     /** CLI reconnect backfill — excludes future-scheduled rows so the runner does
      *  not consume them ahead of their scheduled_at.  See messages.ts:getDeliverableMessagesAfter. */
     getDeliverableMessagesAfter(sessionId: string, options: { afterSeq: number; limit: number; now: number }): DecryptedMessage[] {
