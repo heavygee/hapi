@@ -155,7 +155,16 @@ async function transcribeStandard(
             signal: AbortSignal.timeout(TRANSCRIPTION_TIMEOUT_MS)
         })
         if (!response.ok) {
-            console.warn('[Voice][Transcription] Upstream request failed', { provider, status: response.status })
+            // The provider's actual error text (e.g. OpenAI's invalid_request_error
+            // detail) was previously discarded entirely — only the status code
+            // reached the logs, which is not enough to tell "audio too short/
+            // malformed" apart from any other rejection reason.
+            const errorBody = await response.text().catch(() => '')
+            console.warn('[Voice][Transcription] Upstream request failed', {
+                provider,
+                status: response.status,
+                body: errorBody.slice(0, 2000)
+            })
             return Response.json({ error: `${provider} transcription failed (HTTP ${response.status})` }, { status: 502 })
         }
         const data = await response.json() as {
