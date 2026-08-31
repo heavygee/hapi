@@ -910,7 +910,7 @@ layers:
   # Union needed: soup already claimed v26/27/28, so this tip renumbers the
   # migration to v28->v29 and resolves SessionList against pinInProgressMode.
   # Worktree: /work/coding/hapi/worktrees/blocked-list-ux-soup
-  # Tip: 06f23fc0f
+  # Tip: 2bcfa93e3
   - branch: driver/blocked-list-ux
 
   # tiann/hapi#1724 — Cursor unexpected-stop: auto-Continue once after post-tool
