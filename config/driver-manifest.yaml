@@ -852,13 +852,14 @@ layers:
   # into the query (whichever transcription provider is configured), replacing
   # the old long-press-to-dismiss gesture. Web-only.
   # Worktree: ~/coding/hapi/worktrees/session-search-longpress-dismiss @ fix/session-search-longpress-dismiss
-  # Tip: c42172d57 — audio capture now starts on press-down (useHoldToTalk
-  # onPressStart), not on the tap/hold threshold: getUserMedia/recorder setup
-  # latency was eating single-word utterances entirely before recording even
-  # began. A tap still briefly touches the mic but discards via the new
-  # dictation.cancel() (never reaches transcription); "Listening…" UI is
-  # gated on a separate holdConfirmed flag so a tap never flashes it. All
-  # commits on top of the already-merged 7c920d3f2 (not rebased) — clean
+  # Tip: c5b50a75e — NOTE: no longer web-only. Adds hub/src/web/routes/voice.ts
+  # logging of the upstream provider's actual error body on a failed
+  # transcription request (was silently discarded, only status code logged) —
+  # needed to diagnose single-word dictation failures. Client response
+  # unchanged. Web side: capture now starts on press-down (useHoldToTalk
+  # onPressStart), not the tap/hold threshold — getUserMedia/recorder setup
+  # latency was eating single-word utterances before recording even began.
+  # All commits on top of the already-merged 7c920d3f2 (not rebased) — clean
   # fast-forward into driver/integration-wip.
   - branch: fix/session-search-longpress-dismiss
 
