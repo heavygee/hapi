@@ -97,6 +97,12 @@ import {
     hasRunningAttachedJob,
 } from '@/lib/sessionInProgress'
 import {
+    BLOCKED_ALERT_PULSE_MS,
+    useBlockedAlertMode,
+    type BlockedAlertMode
+} from '@/hooks/useBlockedAlertMode'
+import { playBlockedAlertSound } from '@/lib/blockedAlertSound'
+import {
     compareDescWithKeyTiebreak,
     compareSessionsByOrderKeyDesc
 } from '@hapi/protocol'
@@ -104,6 +110,7 @@ import { createSessionComparator, getSessionSortKey } from '@/lib/sessionListOrd
 import {
     classifySessionAttention,
     getSessionBlockedState,
+    sessionBlockedIsError,
     sessionIsBlocked,
     sessionIsUnread
 } from '@/lib/sessionAttention'
@@ -260,6 +267,65 @@ export function isPinnedInProgressSession(
     return hasRunningAttachedJob(session) || hasAgentInProgressActivity(session)
 }
 
+/**
+ * Fires the arrival alert when a session *becomes* blocked (#1717).
+ *
+ * Keyed on session ids rather than the count, because a count alone cannot
+ * tell "one resolved, another arrived" from "nothing happened" — that swap
+ * nets to zero and would silently skip the alert on the new blocker.
+ *
+ * The alert deadline is state, not a timer owned by this effect: the blocked
+ * id list churns constantly at fleet scale, and an effect that re-runs would
+ * otherwise cancel its own pending clear and leave the counter pulsing
+ * forever.
+ *
+ * `ready` gates the baseline. The router mounts this list with `sessions={[]}`
+ * while `/sessions` is in flight, so seeding on the literal first render would
+ * make every cold page load read its entire pre-existing backlog as brand new
+ * and — in sound mode — buzz at you on every refresh.
+ */
+function useBlockedArrivalAlert(
+    blockedIds: string[],
+    mode: BlockedAlertMode,
+    ready: boolean
+): boolean {
+    const [alertUntil, setAlertUntil] = useState(0)
+    const [now, setNow] = useState(0)
+    const seenRef = useRef<Set<string> | null>(null)
+
+    const key = blockedIds.join(',')
+    useEffect(() => {
+        if (!ready) return
+        const current = new Set(blockedIds)
+        const seen = seenRef.current
+        seenRef.current = current
+
+        if (seen === null) return
+        const arrived = blockedIds.some(id => !seen.has(id))
+        if (!arrived || mode === 'count') return
+
+        setAlertUntil(Date.now() + BLOCKED_ALERT_PULSE_MS)
+        if (mode === 'sound') playBlockedAlertSound()
+    }, [key, mode, ready]) // eslint-disable-line react-hooks/exhaustive-deps
+
+    useEffect(() => {
+        if (alertUntil === 0) return
+        const remaining = alertUntil - Date.now()
+        if (remaining <= 0) {
+            setAlertUntil(0)
+            return
+        }
+        const timer = setTimeout(() => {
+            setAlertUntil(0)
+            setNow(value => value + 1)
+        }, remaining)
+        return () => clearTimeout(timer)
+    }, [alertUntil])
+
+    void now
+    return alertUntil > 0
+}
+
 export type BlockedJumpDirection = 'none' | 'up' | 'down' | 'both'
 
 const BLOCKED_DIRECTION_GLYPH: Record<BlockedJumpDirection, string | null> = {
@@ -302,6 +368,8 @@ function BlockedFlagIcon(props: { className?: string }) {
 function BlockedJumpPill(props: {
     count: number
     direction: BlockedJumpDirection
+    /** Briefly true after a NEW blocker arrives — see `useBlockedArrivalAlert`. */
+    alerting: boolean
     onJump: () => void
 }) {
     const { t } = useTranslation()
@@ -317,7 +385,11 @@ function BlockedJumpPill(props: {
             aria-label={label}
             className={cn(
                 'flex h-9 shrink-0 items-center gap-1 rounded-full border px-2.5 text-xs font-semibold tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
-                'border-[var(--app-badge-warning-border)] text-[var(--app-badge-warning-text)] hover:bg-[var(--app-badge-warning-bg)]'
+                'border-[var(--app-badge-warning-border)] text-[var(--app-badge-warning-text)] hover:bg-[var(--app-badge-warning-bg)]',
+                // Pulse only on arrival, never continuously: a permanent pulse
+                // at fleet scale is wallpaper within a day, and this needs to
+                // still mean something on day 200.
+                props.alerting ? 'bg-[var(--app-badge-warning-bg)] animate-blocked-alert' : ''
             )}
         >
             <BlockedFlagIcon className="h-3.5 w-3.5" />
@@ -1376,11 +1448,13 @@ const SessionItem = memo(function SessionItem(props: {
                         // Reserve the rail width on every row so blocked rows do
                         // not shift their neighbours when the flag appears.
                         'border-l-2',
-                        blocked && !blocked.stale
-                            ? 'border-[var(--app-badge-warning-text)]'
-                            : blocked
-                                ? 'border-[var(--app-hint)]'
-                                : 'border-transparent',
+                        blocked && blocked.stale
+                            ? 'border-[var(--app-hint)]'
+                            : blocked && sessionBlockedIsError(blocked)
+                                ? 'border-[var(--app-badge-error-text)]'
+                                : blocked
+                                    ? 'border-[var(--app-badge-warning-text)]'
+                                    : 'border-transparent',
                         flashHighlight ? 'ring-2 ring-[var(--app-badge-warning-text)]' : '',
                         selected ? 'bg-[var(--app-secondary-bg)]' : ''
                     )}
@@ -1623,6 +1697,7 @@ export function SessionList(props: {
     const { pinInProgressMode } = usePinInProgressSessions()
     // List sort/filter lives in SessionListView (#2263); jobs mode is #1404.
     const effectivePinInProgressMode: PinInProgressMode = pinInProgressMode
+    const { blockedAlertMode } = useBlockedAlertMode()
     const { machineFilter, setMachineFilter } = useSessionListMachineFilter()
     const showDetailedStatus = sessionListStatusMode === 'detailed'
     const [searchQuery, setSearchQuery] = useState('')
@@ -1935,6 +2010,11 @@ export function SessionList(props: {
             .sort((a, b) => b.updatedAt - a.updatedAt)
     }, [allSessions])
     const blockedCount = blockedSessions.length
+    const blockedAlerting = useBlockedArrivalAlert(
+        useMemo(() => blockedSessions.map(session => session.id), [blockedSessions]),
+        blockedAlertMode,
+        props.sessions.length > 0
+    )
 
     // Rows for the pinned Blocked section. Globally pinned rows keep their own
     // section (the operator put them there on purpose) and still carry the
@@ -2622,7 +2702,11 @@ export function SessionList(props: {
             setMachineFilter(null)
             setListView({ status: 'all', unreadOnly: false })
         }
+        // A globally pinned blocked row lives in the Pinned section, not the
+        // Blocked one — expand both or the jump lands on a zero-height row
+        // inside a collapsed panel and appears to do nothing.
         setBlockedSectionCollapsed(false)
+        setPinnedSectionCollapsed(false)
         const cursor = blockedJumpCursorRef.current % blockedSessions.length
         blockedJumpCursorRef.current = cursor + 1
         setPendingBlockedScrollId(blockedSessions[cursor]!.id)
@@ -2896,6 +2980,7 @@ export function SessionList(props: {
                                                 <BlockedJumpPill
                                                     count={blockedCount}
                                                     direction={blockedDirection}
+                                                    alerting={blockedAlerting}
                                                     onJump={jumpToNextBlocked}
                                                 />
                                                 <BlockedLensToggle
@@ -3056,6 +3141,7 @@ export function SessionList(props: {
                                             targetMessageId={contentTargetMessageIdBySessionId.get(s.id)}
                                             targetMessageQuery={contentSearchActive ? normalizedQuery : undefined}
                                             lastSeenVersion={lastSeenVersion}
+                                            flashHighlight={s.id === flashBlockedSessionId}
                                         />
                                     ))}
                                 </div>

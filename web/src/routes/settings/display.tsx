@@ -5,6 +5,7 @@ import { getColorThemeOptions, getColorThemePreview, useColorTheme, type ColorTh
 import { getFontScaleOptions, useFontScale } from '@/hooks/useFontScale'
 import { getTerminalFontSizeOptions, useTerminalFontSize } from '@/hooks/useTerminalFontSize'
 import { getSessionListStatusModeOptions, useSessionListStatusMode } from '@/hooks/useSessionListStatusMode'
+import { getBlockedAlertModeOptions, useBlockedAlertMode } from '@/hooks/useBlockedAlertMode'
 import { useShowActiveSessionsOnly } from '@/hooks/useShowActiveSessionsOnly'
 import { useKeepUnreadSessionsVisible } from '@/hooks/useKeepUnreadSessionsVisible'
 import { usePinInProgressSessions } from '@/hooks/usePinInProgressSessions'
@@ -139,6 +140,7 @@ export default function SettingsDisplayPage() {
     const { fontScale, setFontScale } = useFontScale()
     const { terminalFontSize, setTerminalFontSize } = useTerminalFontSize()
     const { sessionListStatusMode, setSessionListStatusMode } = useSessionListStatusMode()
+    const { blockedAlertMode, setBlockedAlertMode } = useBlockedAlertMode()
     const { showActiveSessionsOnly, setShowActiveSessionsOnly } = useShowActiveSessionsOnly()
     const { pinInProgressMode, setPinInProgressMode } = usePinInProgressSessions()
     const { keepUnreadSessionsVisible, setKeepUnreadSessionsVisible } = useKeepUnreadSessionsVisible()
@@ -201,6 +203,13 @@ export default function SettingsDisplayPage() {
                     value={sessionListStatusMode}
                     options={getSessionListStatusModeOptions().map((option) => ({ value: option.value, label: t(option.labelKey) }))}
                     onChange={setSessionListStatusMode}
+                />
+                <SettingsChoiceGroup
+                    label={t('settings.display.blockedAlert')}
+                    description={t('settings.display.blockedAlert.desc')}
+                    value={blockedAlertMode}
+                    options={getBlockedAlertModeOptions().map((option) => ({ value: option.value, label: t(option.labelKey) }))}
+                    onChange={setBlockedAlertMode}
                 />
             </SettingsSection>
 
