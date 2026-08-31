@@ -996,17 +996,16 @@ describe('SessionList collapse behavior', () => {
         expect(screen.getByRole('button', { name: 'Expand 2' })).toBeInTheDocument()
     })
 
-    // #1717: these two built "required" rows with pendingRequestsCount, but a
-    // pending session now always floats into the Blocked section, so it can
-    // never sit in a directory group and the scenario cannot be constructed.
-    // The required-ness branch in getVisibleSessionPreview is correspondingly
-    // unreachable while blocked chrome is on — flagged to the owning peer
-    // rather than silently rewritten into a different test.
-    it.skip('does not offer a no-op collapse when required sessions exceed the preview limit', () => {
+    it('does not offer a no-op collapse when required sessions exceed the preview limit', () => {
         localStorage.setItem('hapi-session-preview-limit', '2')
         const sessions = Array.from({ length: 4 }, (_, index) => makeSession({
             id: `session-${index + 1}`,
             updatedAt: 100 - index,
+            // #1717: `thinking` keeps these out of the Blocked section (a working
+            // agent is not blocked) so they stay group-resident while remaining
+            // required by the preview cap.
+            active: index > 0,
+            thinking: index > 0,
             pendingRequestsCount: index > 0 ? 1 : 0,
             metadata: {
                 path: '/work/hapi',
@@ -1032,11 +1031,14 @@ describe('SessionList collapse behavior', () => {
         expect(screen.queryByRole('button', { name: /Collapse/ })).toBeNull()
     })
 
-    it.skip('expands from the rendered count when required sessions exceed the preview limit', () => {
+    it('expands from the rendered count when required sessions exceed the preview limit', () => {
         localStorage.setItem('hapi-session-preview-limit', '2')
         const sessions = Array.from({ length: 8 }, (_, index) => makeSession({
             id: `session-${index + 1}`,
             updatedAt: 100 - index,
+            // See above: thinking keeps a queued-request row in its group.
+            active: index < 5,
+            thinking: index < 5,
             pendingRequestsCount: index < 5 ? 1 : 0,
             metadata: {
                 path: '/work/hapi',
