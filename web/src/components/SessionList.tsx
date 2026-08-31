@@ -1860,7 +1860,7 @@ export function SessionList(props: {
             cancelAnimationFrame(frame)
             frame = requestAnimationFrame(() => {
                 const row = container.querySelector<HTMLElement>(
-                    `.session-list-item[data-session-id="${CSS.escape(selectedSessionId)}"]`
+                    '.session-list-item[aria-current="page"]'
                 )
                 if (!row || isSessionRowInsideCollapsedPanel(row)) {
                     setOpenSessionTickRatio(null)
@@ -1887,19 +1887,25 @@ export function SessionList(props: {
         }
 
         updateTick()
-        const resizeObserver = new ResizeObserver(updateTick)
-        resizeObserver.observe(container)
-        const mutationObserver = new MutationObserver(updateTick)
-        mutationObserver.observe(container, {
+        const resizeObserver = typeof ResizeObserver !== 'undefined'
+            ? new ResizeObserver(updateTick)
+            : null
+        resizeObserver?.observe(container)
+        const mutationObserver = typeof MutationObserver !== 'undefined'
+            ? new MutationObserver(updateTick)
+            : null
+        mutationObserver?.observe(container, {
             childList: true,
             subtree: true,
             attributes: true,
             attributeFilter: ['data-open'],
         })
+        window.addEventListener('resize', updateTick)
         return () => {
             cancelAnimationFrame(frame)
-            resizeObserver.disconnect()
-            mutationObserver.disconnect()
+            resizeObserver?.disconnect()
+            mutationObserver?.disconnect()
+            window.removeEventListener('resize', updateTick)
         }
     }, [
         selectedSessionId,
