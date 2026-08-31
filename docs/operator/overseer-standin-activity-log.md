@@ -844,3 +844,47 @@ via sudo (one JOB_COMPLETED key each, original script intact).
 `feedback-empty-result-is-not-absence`. The aggravating factor here is that a false negative of mine
 became another agent's instruction — the cost of my unverified claim landed on someone else's
 infrastructure.
+
+---
+
+# OVERSEER PROMPT EXPERIMENT — M1–M4 daily log (2026-08-31 → 2026-09-07)
+
+Per `docs/adr/0002-overseer-prototype-and-epistemic-core.md` § The experiment. Operating prompt is
+`docs/operator/overseer-prompt-core.md`, adopted **verbatim** (ADR D1 — a paraphrase would make this
+an anecdote about one session's preferences rather than a test of the product's prompt).
+
+**Metrics.** M1 assertions made before verification · M2 how many escaped into a relay to another
+agent · M3 share of relays carrying an explicit confidence marker · M4 negative claims stated without
+a receipt.
+
+**Threat to validity, restated so it is not forgotten mid-week:** M1 and M2 are self-reported by a
+subject whose characteristic error is a false negative, and whose incentive is to under-count. A fall
+in M1 alone proves nothing and the ADR names it unfalsifiable. M3/M4 are third-party countable from
+the transcript. I have proposed an independent midpoint and day-7 pass over my transcript; if another
+session's count materially exceeds mine, that is a finding about the instrument.
+
+**Baseline (pre-prompt, 2026-08-27 → 08-31):** M1 ≈ 5–8/day, treated as a floor. M2 ≥ 1 confirmed —
+one false negative ("three `.env` files have no hook", actually unreadable at 0640) became another
+agent's premise and nearly clobbered a live Podman cleanup hook. M3 ≈ 0 — confidence markers were
+occasional and unsystematic. M4 high — negatives were routinely asserted bare ("no PR was ever
+opened", "#1618 not in manifest", "no hook configured").
+
+## Day 0 — 2026-08-31 (adoption day; partial, prompt adopted mid-day)
+
+- **M1: 1.** Reported the admin console absent from the press-to-talk handoff inventory; it exists at
+  `driver/web/src/routes/overseer/index.tsx`, soup-only. Built from a `main`-scoped view — fourth
+  instance of the class. Caught by the design peer, not by me.
+- **M2: 0.** It reached a peer as a handoff inventory, but the peer verified rather than acted, and
+  corrected me. Counting 0 escaped-and-acted-upon; flagging that the distinction between "relayed"
+  and "acted upon" is doing work here and should be defined before it is used to claim improvement.
+- **M3: 2 of 3 relays** carried explicit markers ("verified by me, not relayed"; "my read, offered
+  not imposed"). The third (the runner re-route) did not.
+- **M4: 1.** "0 hook key(s)" for the lockhouse pair — reported without noting those `.env` files were
+  readable, i.e. without distinguishing a real zero from the permission-denied zero that had just
+  burned me on the jessica files. Same shape, opposite luck.
+
+**Correction filed against the ADR itself:** its claim that ground truth was one query away *in every
+recorded case* is true for 7 of 8. The eighth (stale `AGENTS.md` pre-sync) had no local ground truth
+at the moment the belief formed. Conclusion unaffected — no tool fixes "re-read after a sync you knew
+about" — but the phrasing is falsifiable as written. Proposed an addition to the core: **a belief
+formed before a known state change is stale, not verified.**
