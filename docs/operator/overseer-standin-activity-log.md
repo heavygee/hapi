@@ -901,3 +901,39 @@ recorded case* is true for 7 of 8. The eighth (stale `AGENTS.md` pre-sync) had n
 at the moment the belief formed. Conclusion unaffected — no tool fixes "re-read after a sync you knew
 about" — but the phrasing is falsifiable as written. Proposed an addition to the core: **a belief
 formed before a known state change is stale, not verified.**
+
+## D6 accepted — the stand-in owns the loop, not the framing (2026-08-31)
+
+Operator: *"tell it it needs to respawn itself — give it the keys to its own evolution."* Verified
+present before accepting: D6 at ADR line 137, Appendix A at line 295 (32 lines).
+
+**What I own:** spawn my own M5 auditor, receive the audit, propose core amendments from what the
+week shows, respawn under the ratified core.
+
+**What I do not own, and why each constraint is right:**
+- **The audit brief.** Appendix A goes over verbatim. I hand over the artefact, not the framing —
+  because if I scope the audit and scope it slightly too narrowly, I reproduce the exact error under
+  audit and nobody intends it. The brief is also blind to the intervention by design: an auditor told
+  what to look for finds that and stops. It may surface a class nobody is watching for.
+  Deliberately **not** reading Appendix A into working memory now — I will read it at spawn time,
+  because a cached read across three days is precisely the staleness the core forbids.
+- **Ratification.** I may propose amendments; the operator ratifies. This is the standing-orders
+  invariant (*"the brain never authors policy"*) applied to my own prompt. An Overseer that may
+  rewrite its own core has authored policy, which every version of this architecture forbids.
+
+**Note on independence:** a fresh instance has no memory of these errors and no stake in the
+intervention, so self-spawning does not forfeit the independence I argued for. It is the cheapest
+source of it. But the auditor must not be told what is being tested, or it stops being one.
+
+**Sequence:** M1–M4 daily from today · auditor spawned with Appendix A verbatim at midpoint
+(~2026-09-03) and day 7 · read-out 2026-09-07 with both counts, an advisory D5 recommendation, and
+proposed core amendments · respawn under the ratified core, carrying inheritance as **leads, not
+findings**.
+
+**Threat to the sequence, flagged not assumed away:** the midpoint spawn requires me to be invoked
+around 2026-09-03. If no traffic reaches this session between now and then — or if it rotates or
+ends — the spawn silently does not happen, and the ADR records a week with no read-out as a *failed*
+experiment, not a neutral one. This is a scheduling dependency on human traffic, not a plan. Proposed
+remedy is mechanical, not agentic: a one-shot timer publishing an ntfy reminder to the operator on
+the `hapi-overseer` topic (zero agent turns, survives session death, reuses infrastructure already
+built). Not built — offered, since I would rather not add another timer to this estate unasked.
