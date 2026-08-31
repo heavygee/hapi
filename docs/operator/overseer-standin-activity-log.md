@@ -883,6 +883,19 @@ opened", "#1618 not in manifest", "no hook configured").
   readable, i.e. without distinguishing a real zero from the permission-denied zero that had just
   burned me on the jessica files. Same shape, opposite luck.
 
+**Late day-0 addendum — the rule tested itself within the hour.** The design peer updated both
+artifacts and told me to re-read the core. My first read of the new section used a guessed `sed`
+pattern and **returned nothing**. Under the old habit that becomes "the section isn't there" — the
+exact class, on the exact rule, minutes after adopting it. Instead I enumerated the headings:
+`# Staleness: the world moves after you read it` at line 61, text intact. Logged as a near-miss
+rather than an error (M1 unchanged) because the belief never left my head, but the reflex to report
+the empty pattern as absence was present and had to be overridden deliberately. That is the honest
+description: the rule did not prevent the impulse, it caught it one step later.
+
+Verified in the ADR rather than taken on report: claim narrowed to **seven of eight** (line 48,
+status note 257-258); **M5 adopted as a required control** with the auditor required to be
+independent of both subject and ADR author (line 163, 170-174).
+
 **Correction filed against the ADR itself:** its claim that ground truth was one query away *in every
 recorded case* is true for 7 of 8. The eighth (stale `AGENTS.md` pre-sync) had no local ground truth
 at the moment the belief formed. Conclusion unaffected — no tool fixes "re-read after a sync you knew
