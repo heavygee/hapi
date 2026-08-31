@@ -1,4 +1,4 @@
-import { describe, expect, it, mock, test, afterEach } from 'bun:test'
+import { describe, expect, it, mock, spyOn, test, afterEach } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -158,6 +158,44 @@ describe('voice transcription routes', () => {
         expect(englishRes.status).toBe(200)
         expect((upstreamInit?.body as FormData).get('languages[]')).toBe('en')
 
+        global.fetch = originalFetch
+        if (previousKey === undefined) delete process.env.OPENAI_API_KEY
+        else process.env.OPENAI_API_KEY = previousKey
+    })
+
+    test('logs the upstream provider error body on a failed transcription request', async () => {
+        // The response body previously only reached the client as a generic
+        // "HTTP 400" message with the provider's actual reason (e.g. OpenAI's
+        // invalid_request_error detail) discarded entirely, uncaptured
+        // anywhere — making it impossible to tell "audio too short" apart
+        // from any other rejection after the fact.
+        const app = createApp()
+        const headers = await authHeaders()
+        const previousKey = process.env.OPENAI_API_KEY
+        process.env.OPENAI_API_KEY = 'server-only-key'
+        const originalFetch = global.fetch
+        // @ts-expect-error test override
+        global.fetch = (async () => new Response(
+            JSON.stringify({ error: { message: 'Audio file is too short', type: 'invalid_request_error' } }),
+            { status: 400 }
+        )) as typeof fetch
+        const warnSpy = spyOn(console, 'warn').mockImplementation(() => {})
+
+        const form = new FormData()
+        form.set('provider', 'openai')
+        form.set('mode', 'standard')
+        form.set('file', new File(['audio bytes'], 'speech.webm', { type: 'audio/webm' }))
+        const res = await app.request('/api/voice/transcription', { method: 'POST', headers, body: form })
+
+        expect(res.status).toBe(502)
+        expect(await res.json()).toEqual({ error: 'openai transcription failed (HTTP 400)' })
+        expect(warnSpy).toHaveBeenCalledWith('[Voice][Transcription] Upstream request failed', {
+            provider: 'openai',
+            status: 400,
+            body: expect.stringContaining('Audio file is too short')
+        })
+
+        warnSpy.mockRestore()
         global.fetch = originalFetch
         if (previousKey === undefined) delete process.env.OPENAI_API_KEY
         else process.env.OPENAI_API_KEY = previousKey
