@@ -7,7 +7,8 @@ import { getAttentionLabel, SessionAttentionIndicator } from '@/components/Sessi
 import {
     classifySessionAttention,
     getSessionBlockedLabelKey,
-    getSessionBlockedState
+    getSessionBlockedState,
+    sessionBlockedIsError
 } from '@/lib/sessionAttention'
 import { getSessionLastSeenAt, getSessionManualUnreadAt } from '@/lib/sessionLastSeen'
 import { formatRelativeTime } from '@/lib/relativeTime'
@@ -189,7 +190,9 @@ export function SessionRowSummary(props: {
                             className={`inline-flex shrink-0 items-center rounded border px-1 py-px text-[10px] font-semibold uppercase leading-none tracking-wide ${
                                 blocked.stale
                                     ? 'border-[var(--app-border)] text-[var(--app-hint)]'
-                                    : 'border-[var(--app-badge-warning-border)] bg-[var(--app-badge-warning-bg)] text-[var(--app-badge-warning-text)]'
+                                    : sessionBlockedIsError(blocked)
+                                        ? 'border-[var(--app-badge-error-border)] bg-[var(--app-badge-error-bg)] text-[var(--app-badge-error-text)]'
+                                        : 'border-[var(--app-badge-warning-border)] bg-[var(--app-badge-warning-bg)] text-[var(--app-badge-warning-text)]'
                             }`}
                             title={blocked.note ?? blockedLabel}
                             aria-label={blocked.note ? `${blockedLabel} — ${blocked.note}` : blockedLabel}

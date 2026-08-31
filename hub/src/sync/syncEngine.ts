@@ -59,7 +59,7 @@ import {
     type RpcUploadFileResponse
 } from './rpcGateway'
 import { SessionCache } from './sessionCache'
-import { extractSessionNotifySignal, ingestNotifySummaryFromMessage } from './workGraphNotifyIngest'
+import { extractSessionNotifySignal, ingestNotifySummaryFromMessage, isOperatorReplyMessage } from './workGraphNotifyIngest'
 
 /** Startup notify backfill bounds (#1717) — see `backfillRecentNotifySignals`. */
 const NOTIFY_BACKFILL_MAX_SESSIONS = 200
@@ -289,6 +289,10 @@ export class SyncEngine {
             // self-report, and older ones have already been superseded.
             for (let index = messages.length - 1; index >= 0; index -= 1) {
                 const message = messages[index]!
+                // Stop at the newest operator prompt. Anything older was already
+                // answered, and clear-on-new-turn deliberately erased it — a
+                // restart must not resurrect a blocker the operator dealt with.
+                if (isOperatorReplyMessage(message.content)) break
                 const signal = extractSessionNotifySignal(message.content, message.createdAt)
                 if (!signal) continue
                 this.sessionCache.setSessionLastNotify(session.id, signal)
