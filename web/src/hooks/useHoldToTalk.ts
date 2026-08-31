@@ -2,11 +2,15 @@ import type React from 'react'
 import { useCallback, useEffect, useRef } from 'react'
 
 type UseHoldToTalkOptions = {
+    /** Fires immediately on press-down, before the threshold timer — start any async prep (e.g. acquiring a mic stream) that a confirmed hold will need, without waiting to find out whether this becomes one. */
+    onPressStart?: () => void
     /** Fires once the press threshold is reached while still held — begin recording. */
     onHoldStart: () => void
     /** Fires when a hold that reached the threshold ends — release, cancel, or drag-off. Release IS the stop-and-apply action; there is no separate confirm step. */
     onHoldEnd: () => void
-    /** Fires for a press that released before the threshold — a plain tap/click. */
+    /** Fires whenever a press ends WITHOUT ever reaching the threshold — tap, drag-off, cancel, or leave. Use this to discard/abort whatever onPressStart began; onTap (below) additionally fires only for a clean quick release, not a drag. */
+    onPressEnd?: () => void
+    /** Fires for a press that released before the threshold with no drag — a plain tap/click. */
     onTap: () => void
     threshold?: number
     disabled?: boolean
@@ -37,7 +41,7 @@ const GHOST_MOUSE_WINDOW_MS = 700
 // separate button. Keyboard/assistive activation (detail === 0) stays a
 // plain tap, matching native button semantics.
 export function useHoldToTalk(options: UseHoldToTalkOptions): UseHoldToTalkHandlers {
-    const { onHoldStart, onHoldEnd, onTap, threshold = 500, disabled = false } = options
+    const { onPressStart, onHoldStart, onHoldEnd, onPressEnd, onTap, threshold = 500, disabled = false } = options
 
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const holdingRef = useRef(false)
@@ -52,15 +56,19 @@ export function useHoldToTalk(options: UseHoldToTalkOptions): UseHoldToTalkHandl
         }
     }, [])
 
-    // Ends an in-progress hold. Safe to call even when nothing is holding —
-    // release after a plain tap, or a cancel/leave with no prior hold-start.
+    // Ends an in-progress press. If it had reached confirmed-hold, finalize
+    // via onHoldEnd; otherwise it never became one (tap, drag-off, cancel, or
+    // leave before the threshold) — onPressEnd lets the caller discard
+    // whatever onPressStart began. Safe to call unconditionally.
     const endHold = useCallback(() => {
         clearTimer()
         if (holdingRef.current) {
             holdingRef.current = false
             onHoldEnd()
+        } else {
+            onPressEnd?.()
         }
-    }, [clearTimer, onHoldEnd])
+    }, [clearTimer, onHoldEnd, onPressEnd])
 
     useEffect(() => () => clearTimer(), [clearTimer])
 
@@ -68,12 +76,13 @@ export function useHoldToTalk(options: UseHoldToTalkOptions): UseHoldToTalkHandl
         clearTimer()
         draggedRef.current = false
         startPointRef.current = { x, y }
+        onPressStart?.()
         timerRef.current = setTimeout(() => {
             timerRef.current = null
             holdingRef.current = true
             onHoldStart()
         }, threshold)
-    }, [clearTimer, threshold, onHoldStart])
+    }, [clearTimer, threshold, onHoldStart, onPressStart])
 
     const checkDrift = useCallback((x: number, y: number) => {
         // Once recording has actually started there is nothing to cancel —

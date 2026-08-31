@@ -1083,35 +1083,60 @@ export function SessionListSearch(props: {
     })
     const dictationListening = dictation.status === 'connecting' || dictation.status === 'connected'
     // Only true while a hold we actually started with dictation is still live —
-    // guards the hold-end handler so releasing a hold that never started
-    // dictation (unconfigured provider) does not call toggle() at all.
+    // guards the hold-end/press-end handlers so a press that never started
+    // dictation (unconfigured provider) does not call toggle()/cancel().
     const dictationHoldActiveRef = useRef(false)
+    // True only once the press has been confirmed as a deliberate hold (past
+    // the threshold) — gates the "Listening…" UI so the pulsing dot never
+    // flashes during the speculative pre-threshold window below, even though
+    // dictation itself may already be connecting by then (see onPressStart).
+    const [holdConfirmed, setHoldConfirmed] = useState(false)
 
     const holdToTalkHandlers = useHoldToTalk({
-        onHoldStart: () => {
+        // Start capturing audio the instant the press begins, not once the
+        // threshold confirms a hold. getUserMedia + MediaRecorder setup is
+        // real, unavoidable latency (tens to hundreds of ms) — deferring it
+        // until onHoldStart meant a short word could be entirely spoken
+        // before recording had even begun. Starting speculatively here and
+        // discarding via onPressEnd/cancel() if it turns out to be a tap
+        // keeps the same tap behavior while erasing that dead time for a
+        // genuine hold.
+        onPressStart: () => {
             if (!dictation.supported) return
             dictationHoldActiveRef.current = true
             void dictation.toggle()
         },
+        onHoldStart: () => {
+            if (dictationHoldActiveRef.current) setHoldConfirmed(true)
+        },
         onHoldEnd: () => {
             // Release is both the stop and the apply — reveal the field with
             // whatever the transcript resolves to, no separate confirm step.
+            setHoldConfirmed(false)
             props.onExpandedChange(true)
             if (dictationHoldActiveRef.current) {
                 dictationHoldActiveRef.current = false
                 void dictation.toggle()
             }
         },
+        onPressEnd: () => {
+            // Never became a deliberate hold (tap, drag-off, or cancel before
+            // the threshold) — discard the speculative capture without ever
+            // sending it for transcription.
+            if (dictationHoldActiveRef.current) {
+                dictationHoldActiveRef.current = false
+                dictation.cancel()
+            }
+        },
         onTap: () => props.onExpandedChange(true),
-        // Shorter than useHoldToTalk's 500ms default: getUserMedia + recorder
-        // setup already adds real latency after this fires, so a long
-        // disambiguation threshold on top of that was eating most of a short
-        // hold's actual speaking time before any audio was captured at all.
+        // Shorter than useHoldToTalk's 500ms default: this only needs to
+        // disambiguate tap vs. hold now, since the actual recording already
+        // started at press-down above — it no longer gates when capture begins.
         threshold: 200,
     })
 
     if (!props.expanded) {
-        const collapsedLabel = dictationListening
+        const collapsedLabel = holdConfirmed
             ? t('sessions.search.dictationActive')
             : hasTextQuery ? `${searchLabel}: ${props.value}` : searchLabel
         // Deliberately excludes dictationListening: resizing the button mid-hold
@@ -1142,7 +1167,7 @@ export function SessionListSearch(props: {
                         title={collapsedLabel}
                         aria-label={collapsedLabel}
                     >
-                        {dictationListening ? (
+                        {holdConfirmed ? (
                             <span className="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-[#007AFF]" aria-hidden="true" />
                         ) : (
                             <SearchIcon className="h-5 w-5 shrink-0" />
