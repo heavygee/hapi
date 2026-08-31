@@ -362,9 +362,31 @@ driver_remat_hold_status_text() {
 # Keyed on HAPI_SESSION_ID (the HAPI session id, present in the agent's process
 # cmdline so liveness is a pgrep). Stale-steal after HAPI_REMAT_LEASE_STALE_SEC
 # of no heartbeat OR when the holder process is gone.
+#
+# Heartbeat bg uses HAPI_REMAT_LEASE_HEARTBEAT_SEC (default 120) — that is the
+# `sleep 120` child you may see under a long rebuild; it is not a wait loop.
 # ─────────────────────────────────────────────────────────────────────────────
 HAPI_REMAT_LEASE_FILE="${HAPI_REMAT_LEASE_FILE:-$HAPI_STATE_DIR/remat-owner.lease}"
 HAPI_REMAT_LEASE_STALE_SEC="${HAPI_REMAT_LEASE_STALE_SEC:-1800}"
+
+# True when driver-status.json shows rebuild or switch running with a live pid.
+# Operator TTY runs often lack HAPI_SESSION_ID in cmdline, so lease liveness is
+# a weak proxy; this is the hard signal that soup mutation is in flight.
+_driver_remat_driver_stack_busy() {
+    local status_file="${HAPI_STATUS_FILE:-$HAPI_STATE_DIR/driver-status.json}"
+    local op state pid
+    [[ -f "$status_file" ]] || return 1
+    command -v jq >/dev/null 2>&1 || return 1
+    for op in rebuild switch; do
+        state="$(jq -r ".${op}.state // \"idle\"" "$status_file" 2>/dev/null || echo idle)"
+        pid="$(jq -r ".${op}.pid // \"null\"" "$status_file" 2>/dev/null || echo null)"
+        if [[ "$state" == "running" && "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+            echo "$op pid=$pid"
+            return 0
+        fi
+    done
+    return 1
+}
 
 _driver_remat_lease_session() { echo "${HAPI_SESSION_ID:-${HAPI_SESSION:-}}"; }
 
@@ -486,6 +508,17 @@ driver_remat_lease_require() {
         echo "       you are:   ${mine:-<no HAPI_SESSION_ID>}" >&2
         echo "       Only ONE session may build soup at a time. Ping the holder; do not build concurrently." >&2
         echo "       Operator TTY steal (holder wedged): HAPI_OPERATOR_REMAT_LEASE_STEAL=1" >&2
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+        exit 76
+    fi
+
+    local stack_busy
+    if stack_busy="$(_driver_remat_driver_stack_busy)"; then
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+        echo "ERROR: refusing stale-steal — driver stack busy ($stack_busy)" >&2
+        echo "       lease holder: $holder (live=$live heartbeat ${age}s ago)" >&2
+        echo "       Wait for hapi-driver-status to show idle, then retry." >&2
+        echo "       Inspect: hapi-driver-status" >&2
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
         exit 76
     fi
