@@ -153,6 +153,30 @@ export function useDictation(config: {
         else await start()
     }, [start, status, stop])
 
+    // Discards an in-flight or recorded take without transcribing — distinct
+    // from stop(), which always sends whatever audio it has for transcription.
+    const cancel = useCallback(() => {
+        operationRef.current += 1
+        transcribingRef.current = false
+        // A cancelled attempt must never leave a stale error banner behind —
+        // e.g. a denied mic permission rejecting just before a plain tap
+        // (which also cancels the speculative capture) must not surface as
+        // an error under the search box for what the user experienced as a
+        // normal tap-to-expand.
+        setError(null)
+        const recorder = recorderRef.current
+        if (recorder) {
+            recorder.ondataavailable = null
+            recorder.onstop = null
+            recorder.onerror = null
+            if (recorder.state !== 'inactive') recorder.stop()
+        }
+        recorderRef.current = null
+        chunksRef.current = []
+        stopTracks()
+        setStatus('disconnected')
+    }, [stopTracks])
+
     useEffect(() => {
         mountedRef.current = true
         return () => {
@@ -167,5 +191,5 @@ export function useDictation(config: {
 
     return config.mode === 'realtime'
         ? realtime
-        : { supported: standardSupported, status, error, partialTranscript: '', toggle }
+        : { supported: standardSupported, status, error, partialTranscript: '', toggle, cancel }
 }

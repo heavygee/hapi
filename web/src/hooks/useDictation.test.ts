@@ -61,6 +61,117 @@ describe('useDictation', () => {
         expect(stopTrack).toHaveBeenCalled()
     })
 
+    it('cancel() discards a recording without transcribing it', async () => {
+        const stopTrack = vi.fn()
+        Object.defineProperty(navigator, 'mediaDevices', {
+            configurable: true,
+            value: { getUserMedia: vi.fn(async () => ({ getTracks: () => [{ stop: stopTrack }] })) }
+        })
+
+        class MockMediaRecorder {
+            static isTypeSupported() { return true }
+            state: RecordingState = 'inactive'
+            mimeType = 'audio/webm'
+            ondataavailable: ((event: BlobEvent) => void) | null = null
+            onerror: (() => void) | null = null
+            onstop: (() => void) | null = null
+            start() { this.state = 'recording' }
+            stop() {
+                this.state = 'inactive'
+                this.ondataavailable?.({ data: new Blob(['audio'], { type: this.mimeType }) } as BlobEvent)
+                this.onstop?.()
+            }
+        }
+        vi.stubGlobal('MediaRecorder', MockMediaRecorder)
+
+        const onTextChange = vi.fn()
+        const api = {
+            transcribeVoice: vi.fn(async () => ({ text: 'should never apply' }))
+        }
+        const { result } = renderHook(() => useDictation({
+            api: api as unknown as ApiClient,
+            provider: 'openai',
+            mode: 'standard',
+            getCurrentText: () => 'existing draft',
+            onTextChange
+        }))
+
+        await act(() => result.current.toggle())
+        expect(result.current.status).toBe('connected')
+
+        act(() => result.current.cancel())
+
+        expect(result.current.status).toBe('disconnected')
+        expect(stopTrack).toHaveBeenCalled()
+        expect(api.transcribeVoice).not.toHaveBeenCalled()
+        expect(onTextChange).not.toHaveBeenCalled()
+    })
+
+    it('cancel() invalidates a start() still awaiting getUserMedia — the stream is stopped once it resolves', async () => {
+        const stopTrack = vi.fn()
+        let resolveGetUserMedia: (stream: { getTracks: () => { stop: () => void }[] }) => void = () => {}
+        Object.defineProperty(navigator, 'mediaDevices', {
+            configurable: true,
+            value: {
+                getUserMedia: vi.fn(() => new Promise((resolve) => { resolveGetUserMedia = resolve }))
+            }
+        })
+        vi.stubGlobal('MediaRecorder', class { static isTypeSupported() { return true } })
+
+        const onTextChange = vi.fn()
+        const api = { transcribeVoice: vi.fn(async () => ({ text: 'should never apply' })) }
+        const { result } = renderHook(() => useDictation({
+            api: api as unknown as ApiClient,
+            provider: 'openai',
+            mode: 'standard',
+            getCurrentText: () => 'existing draft',
+            onTextChange
+        }))
+
+        act(() => { void result.current.toggle() })
+        expect(result.current.status).toBe('connecting')
+
+        act(() => result.current.cancel())
+        expect(result.current.status).toBe('disconnected')
+
+        await act(async () => { resolveGetUserMedia({ getTracks: () => [{ stop: stopTrack }] }) })
+
+        expect(stopTrack).toHaveBeenCalled()
+        expect(api.transcribeVoice).not.toHaveBeenCalled()
+        expect(onTextChange).not.toHaveBeenCalled()
+    })
+
+    it('cancel() clears a stale error from a denied mic permission — a tap must not surface it', async () => {
+        // A speculative capture that starts on every press (not just a
+        // confirmed hold) means a denied/unavailable microphone can reject
+        // during what the user experienced as a plain tap. cancel() must wipe
+        // that error so it never renders under the search box for a tap.
+        Object.defineProperty(navigator, 'mediaDevices', {
+            configurable: true,
+            value: { getUserMedia: vi.fn(async () => { throw new DOMException('Permission denied', 'NotAllowedError') }) }
+        })
+        vi.stubGlobal('MediaRecorder', class { static isTypeSupported() { return true } })
+
+        const onTextChange = vi.fn()
+        const api = { transcribeVoice: vi.fn(async () => ({ text: 'should never apply' })) }
+        const { result } = renderHook(() => useDictation({
+            api: api as unknown as ApiClient,
+            provider: 'openai',
+            mode: 'standard',
+            getCurrentText: () => 'existing draft',
+            onTextChange
+        }))
+
+        await act(() => result.current.toggle())
+        expect(result.current.status).toBe('error')
+        expect(result.current.error).toBeTruthy()
+
+        act(() => result.current.cancel())
+
+        expect(result.current.status).toBe('disconnected')
+        expect(result.current.error).toBeNull()
+    })
+
     it('shows on-device partial text and inserts only the final transcript', async () => {
         vi.stubGlobal('navigator', {
             userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/140.0 Safari/537.36',

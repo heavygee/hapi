@@ -1454,17 +1454,38 @@ describe('SessionList search toggle', () => {
         await waitFor(() => expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDER)).toHaveValue('desktop dictated'))
     })
 
-    it('a very short hold that never reaches the threshold is treated as a tap, not a stray recording', async () => {
+    it('a very short hold that never reaches the threshold cancels the speculative capture instead of transcribing it', async () => {
+        // Capture now starts speculatively on press-down (not gated behind the
+        // threshold) so a genuine hold never loses its first fraction of a
+        // second to getUserMedia/MediaRecorder setup latency. A quick tap
+        // still legitimately touches the mic for that instant, but must
+        // discard the result via cancel() rather than ever transcribing it —
+        // this is the "just a tap" contract, not a stray recording.
+        const stopTrack = vi.fn()
+        const getUserMedia = vi.fn(async () => ({ getTracks: () => [{ stop: stopTrack }] }))
+        Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia } })
+
+        class MockMediaRecorder {
+            static isTypeSupported() { return true }
+            state: RecordingState = 'inactive'
+            mimeType = 'audio/webm'
+            ondataavailable: ((event: BlobEvent) => void) | null = null
+            onerror: (() => void) | null = null
+            onstop: (() => void) | null = null
+            start() { this.state = 'recording' }
+            stop() {
+                this.state = 'inactive'
+                this.ondataavailable?.({ data: new Blob(['audio'], { type: this.mimeType }) } as BlobEvent)
+                this.onstop?.()
+            }
+        }
+        vi.stubGlobal('MediaRecorder', MockMediaRecorder)
+
         const fetchTranscriptionProviders = vi.fn(async () => ({
             providers: [{ id: 'openai', label: 'OpenAI', modes: ['standard'] }]
         }))
-        const getUserMedia = vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] }))
-        Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia } })
-        // Dictation must be fully supported here — proves the short hold never
-        // starts recording because of the threshold timing, not because
-        // dictation happened to be unavailable for some other reason.
-        vi.stubGlobal('MediaRecorder', class { static isTypeSupported() { return true } })
-        const api = { fetchTranscriptionProviders }
+        const transcribeVoice = vi.fn(async () => ({ text: 'should never be sent' }))
+        const api = { fetchTranscriptionProviders, transcribeVoice }
 
         const sessions = [
             makeSession({
@@ -1498,8 +1519,12 @@ describe('SessionList search toggle', () => {
         fireEvent.touchEnd(collapsed, { changedTouches: [{ clientX: 10, clientY: 10 }] })
         vi.useRealTimers()
 
-        expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDER)).toBeInTheDocument()
-        expect(getUserMedia).not.toHaveBeenCalled()
+        // Expands as a normal tap immediately — cancel() is synchronous even
+        // though the speculative getUserMedia() call was already in flight.
+        expect(screen.getByRole('searchbox', { name: SEARCH_LABEL })).toBeEnabled()
+        await waitFor(() => expect(getUserMedia).toHaveBeenCalled())
+        await waitFor(() => expect(stopTrack).toHaveBeenCalled())
+        expect(transcribeVoice).not.toHaveBeenCalled()
     })
 
     it('short tap still expands to normal text search', () => {

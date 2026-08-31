@@ -229,6 +229,29 @@ export function useRealtimeDictation(config: {
         else await start()
     }, [start, status, stop])
 
+    // Discards an in-flight or connected session without transcribing —
+    // distinct from stop(), which always finalizes and applies a transcript.
+    const cancel = useCallback(() => {
+        if (!mountedRef.current) return
+        operationRef.current += 1
+        startAbortRef.current?.abort()
+        startAbortRef.current = null
+        elevenLabsActiveRef.current = false
+        elevenLabsRef.current.disconnect()
+        resolveElevenLabsCommitRef.current?.()
+        resolveElevenLabsCommitRef.current = null
+        sessionRef.current?.cancel()
+        sessionRef.current = null
+        updatePartial('')
+        // A cancelled attempt must never leave a stale error banner behind —
+        // e.g. a denied mic permission rejecting just before a plain tap
+        // (which also cancels the speculative capture) must not surface as
+        // an error under the search box for what the user experienced as a
+        // normal tap-to-expand.
+        setError(null)
+        setStatus('disconnected')
+    }, [updatePartial])
+
     useEffect(() => {
         mountedRef.current = true
         return () => {
@@ -244,5 +267,5 @@ export function useRealtimeDictation(config: {
         }
     }, [])
 
-    return { supported, status, error, partialTranscript, toggle }
+    return { supported, status, error, partialTranscript, toggle, cancel }
 }

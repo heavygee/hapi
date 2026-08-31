@@ -2,7 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import { useHoldToTalk } from './useHoldToTalk'
 
-function Probe(props: { onHoldStart: () => void; onHoldEnd: () => void; onTap: () => void }) {
+function Probe(props: {
+    onPressStart?: () => void
+    onHoldStart: () => void
+    onHoldEnd: () => void
+    onPressEnd?: () => void
+    onTap: () => void
+}) {
     const handlers = useHoldToTalk(props)
     return (
         <button type="button" data-testid="talk" {...handlers}>
@@ -282,5 +288,101 @@ describe('useHoldToTalk', () => {
             vi.advanceTimersByTime(500)
         })
         expect(onHoldStart).not.toHaveBeenCalled()
+    })
+
+    it('fires onPressStart immediately on press-down, before the threshold', () => {
+        const onPressStart = vi.fn()
+        const onHoldStart = vi.fn()
+        const { getByTestId } = render(
+            <Probe onPressStart={onPressStart} onHoldStart={onHoldStart} onHoldEnd={vi.fn()} onTap={vi.fn()} />
+        )
+        const button = getByTestId('talk')
+
+        fireEvent.touchStart(button, { touches: [{ clientX: 10, clientY: 10 }] })
+
+        expect(onPressStart).toHaveBeenCalledOnce()
+        expect(onHoldStart).not.toHaveBeenCalled()
+    })
+
+    it('fires onPressEnd alongside onTap for a clean quick release before the threshold', () => {
+        const onPressStart = vi.fn()
+        const onPressEnd = vi.fn()
+        const onTap = vi.fn()
+        const { getByTestId } = render(
+            <Probe onPressStart={onPressStart} onHoldStart={vi.fn()} onHoldEnd={vi.fn()} onPressEnd={onPressEnd} onTap={onTap} />
+        )
+        const button = getByTestId('talk')
+
+        fireEvent.touchStart(button, { touches: [{ clientX: 10, clientY: 10 }] })
+        act(() => {
+            vi.advanceTimersByTime(100)
+        })
+        fireEvent.touchEnd(button, { changedTouches: [{ clientX: 10, clientY: 10 }] })
+
+        expect(onPressEnd).toHaveBeenCalledOnce()
+        expect(onTap).toHaveBeenCalledOnce()
+    })
+
+    it('fires onPressEnd (but not onTap) for a drag-off before the threshold — still discards the speculative capture', () => {
+        const onPressEnd = vi.fn()
+        const onTap = vi.fn()
+        const { getByTestId } = render(
+            <Probe onHoldStart={vi.fn()} onHoldEnd={vi.fn()} onPressEnd={onPressEnd} onTap={onTap} />
+        )
+        const button = getByTestId('talk')
+
+        fireEvent.touchStart(button, { touches: [{ clientX: 10, clientY: 10 }] })
+        fireEvent.touchMove(button, { touches: [{ clientX: 10, clientY: 40 }] })
+        act(() => {
+            vi.advanceTimersByTime(500)
+        })
+        fireEvent.touchEnd(button, { changedTouches: [{ clientX: 10, clientY: 40 }] })
+
+        expect(onPressEnd).toHaveBeenCalledOnce()
+        expect(onTap).not.toHaveBeenCalled()
+    })
+
+    it('fires onPressEnd for touchcancel before the threshold', () => {
+        const onPressEnd = vi.fn()
+        const { getByTestId } = render(
+            <Probe onHoldStart={vi.fn()} onHoldEnd={vi.fn()} onPressEnd={onPressEnd} onTap={vi.fn()} />
+        )
+        const button = getByTestId('talk')
+
+        fireEvent.touchStart(button, { touches: [{ clientX: 10, clientY: 10 }] })
+        fireEvent.touchCancel(button)
+
+        expect(onPressEnd).toHaveBeenCalledOnce()
+    })
+
+    it('fires onPressEnd for mouseleave before the threshold', () => {
+        const onPressEnd = vi.fn()
+        const { getByTestId } = render(
+            <Probe onHoldStart={vi.fn()} onHoldEnd={vi.fn()} onPressEnd={onPressEnd} onTap={vi.fn()} />
+        )
+        const button = getByTestId('talk')
+
+        fireEvent.mouseDown(button, { button: 0, clientX: 10, clientY: 10 })
+        fireEvent.mouseLeave(button)
+
+        expect(onPressEnd).toHaveBeenCalledOnce()
+    })
+
+    it('does not fire onPressEnd once the hold is confirmed — only onHoldEnd fires at release', () => {
+        const onPressEnd = vi.fn()
+        const onHoldEnd = vi.fn()
+        const { getByTestId } = render(
+            <Probe onHoldStart={vi.fn()} onHoldEnd={onHoldEnd} onPressEnd={onPressEnd} onTap={vi.fn()} />
+        )
+        const button = getByTestId('talk')
+
+        fireEvent.touchStart(button, { touches: [{ clientX: 10, clientY: 10 }] })
+        act(() => {
+            vi.advanceTimersByTime(500)
+        })
+        fireEvent.touchEnd(button, { changedTouches: [{ clientX: 10, clientY: 10 }] })
+
+        expect(onHoldEnd).toHaveBeenCalledOnce()
+        expect(onPressEnd).not.toHaveBeenCalled()
     })
 })
