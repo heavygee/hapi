@@ -852,10 +852,13 @@ layers:
   # into the query (whichever transcription provider is configured), replacing
   # the old long-press-to-dismiss gesture. Web-only.
   # Worktree: ~/coding/hapi/worktrees/session-search-longpress-dismiss @ fix/session-search-longpress-dismiss
-  # Tip: 3907d7d9a — strip dictation trailing punctuation (Android STT adds a
-  # period, breaks substring match) + desktop mouse press-and-hold support.
-  # Plain commit on top of the already-merged 7c920d3f2 (not a rebase) so this
-  # is a clean fast-forward into driver/integration-wip — no more self-conflicts.
+  # Tip: 4f130c686 — visible "Transcribing..." disabled-input wait state on
+  # release + lowered hold threshold 500ms->200ms (getUserMedia/recorder setup
+  # latency was eating most of a short hold's speaking time). Also fixes a
+  # desktop-only bug (22ec5d6ae): the collapsed chip no longer resizes while
+  # listening, since that reflow fired a spurious mouseleave under a still-
+  # held mouse button and stopped recording almost instantly. All commits on
+  # top of the already-merged 7c920d3f2 (not rebased) — clean fast-forward.
   - branch: fix/session-search-longpress-dismiss
 
 
