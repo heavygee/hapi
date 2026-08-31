@@ -1217,9 +1217,15 @@ describe('SessionList search toggle', () => {
 
         fireEvent.touchEnd(collapsed, { changedTouches: [{ clientX: 10, clientY: 10 }] })
 
-        expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDER)).toBeInTheDocument()
+        // Expanded immediately, but disabled and showing the "waiting" state
+        // until the transcript resolves — the operator's requested behavior:
+        // no stray "nothing happened" gap between release and the result.
+        const searchInput = screen.getByRole('searchbox', { name: SEARCH_LABEL })
+        expect(searchInput).toBeDisabled()
+        expect(searchInput).toHaveAttribute('placeholder', 'Transcribing…')
         await waitFor(() => expect(transcribeVoice).toHaveBeenCalled())
         await waitFor(() => expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDER)).toHaveValue('dictated words'))
+        expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDER)).toBeEnabled()
     })
 
     it('does not resize or hide sibling content on the collapsed chip while a hold is recording', async () => {
@@ -1306,7 +1312,7 @@ describe('SessionList search toggle', () => {
         expect(collapsed).toHaveTextContent('jellybot')
 
         fireEvent.mouseUp(collapsed, { button: 0, clientX: 10, clientY: 10 })
-        expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDER)).toBeInTheDocument()
+        expect(screen.getByRole('searchbox', { name: SEARCH_LABEL })).toBeInTheDocument()
         await waitFor(() => expect(transcribeVoice).toHaveBeenCalled())
     })
 
@@ -1443,7 +1449,7 @@ describe('SessionList search toggle', () => {
 
         fireEvent.mouseUp(collapsed, { button: 0, clientX: 10, clientY: 10 })
 
-        expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDER)).toBeInTheDocument()
+        expect(screen.getByRole('searchbox', { name: SEARCH_LABEL })).toBeInTheDocument()
         await waitFor(() => expect(transcribeVoice).toHaveBeenCalled())
         await waitFor(() => expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDER)).toHaveValue('desktop dictated'))
     })
@@ -1487,7 +1493,7 @@ describe('SessionList search toggle', () => {
         vi.useFakeTimers()
         fireEvent.touchStart(collapsed, { touches: [{ clientX: 10, clientY: 10 }] })
         act(() => {
-            vi.advanceTimersByTime(200)
+            vi.advanceTimersByTime(100)
         })
         fireEvent.touchEnd(collapsed, { changedTouches: [{ clientX: 10, clientY: 10 }] })
         vi.useRealTimers()

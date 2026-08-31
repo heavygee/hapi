@@ -854,6 +854,11 @@ export function SessionListSearch(props: {
             }
         },
         onTap: () => props.onExpandedChange(true),
+        // Shorter than useHoldToTalk's 500ms default: getUserMedia + recorder
+        // setup already adds real latency after this fires, so a long
+        // disambiguation threshold on top of that was eating most of a short
+        // hold's actual speaking time before any audio was captured at all.
+        threshold: 200,
     })
 
     if (!props.expanded) {
@@ -950,12 +955,18 @@ export function SessionListSearch(props: {
                 type="search"
                 value={props.value}
                 onChange={(event) => props.onChange(event.target.value)}
-                placeholder={t('sessions.search.placeholder')}
+                // Disabled while a released hold is still being transcribed —
+                // this is the "wait" state the operator asked for: visually
+                // inert until the transcript resolves and search applies.
+                disabled={dictationListening}
+                aria-busy={dictationListening}
+                placeholder={dictationListening ? t('sessions.search.dictationProcessing') : t('sessions.search.placeholder')}
                 aria-label={searchLabel}
                 title={searchLabel}
                 className={cn(
                     'w-full appearance-none rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] py-1.5 pl-8 text-sm text-[var(--app-fg)] outline-none transition-colors placeholder:text-[var(--app-hint)] [text-overflow:ellipsis] focus:border-[var(--app-link)] [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden',
-                    props.value ? 'pr-16' : 'pr-7'
+                    props.value ? 'pr-16' : 'pr-7',
+                    dictationListening ? 'cursor-wait opacity-70' : null
                 )}
             />
             {props.value ? (
