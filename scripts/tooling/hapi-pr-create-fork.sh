@@ -73,4 +73,5 @@ if [[ $HAS_HEAD -eq 0 ]]; then
 fi
 
 echo "hapi-pr-create-fork: target ${FORK_REPO}:${BASE} ← ${BRANCH}" >&2
+export HAPI_PR_CREATE_ACK=1
 exec gh pr create "${ARGS[@]}"

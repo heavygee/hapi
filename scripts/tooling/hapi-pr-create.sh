@@ -252,4 +252,5 @@ fi
 echo "hapi-pr-create: all checks passed; calling gh pr create" >&2
 echo "  branch: $BRANCH" >&2
 echo "  target: ${REPO:-$UPSTREAM_REPO_DEFAULT}:${BASE:-$BASE_DEFAULT}" >&2
+export HAPI_PR_CREATE_ACK=1
 exec gh pr create "${ARGS[@]}"

@@ -49,7 +49,7 @@ Feature agents should **read the relevant doc below at session start**; meta bot
 | `scripts/tooling/install-hapi-operator-lock.sh` | **One-shot operator lock** — all guards + local bin (see [operator-lock.md](./operator-lock.md)) |
 | `scripts/tooling/verify-hapi-operator-lock.sh` | Verify lock install (`--with-sudo` on hub hosts) |
 | `scripts/tooling/hapi-soup-route-mounts-check.mjs` | **Soup remat gate** — fail closed if soup-critical hub `create*Routes(` mounts missing from `server.ts` while the route module exists (upgrade/features/inbox/overseer class) |
-| `scripts/tooling/install-gh-wrapper.sh` | Install `~/.local/bin/gh` wrapper — blocks fork-only diffs targeting `tiann/hapi` (#971 class) |
+| `scripts/tooling/install-gh-wrapper.sh` | Install `~/.local/bin/gh` wrapper — **hapi trees only**: checklist + Enter (human TTY) / `HAPI_PR_CREATE_ACK=1` (agents); blocks fork-only diffs targeting `tiann/hapi` (#971). Non-hapi repos passthrough. |
 | `scripts/tooling/hapi-meta-daily.sh` | **Daily Meta PR watcher entrypoint** — discover → classify → chip status cache → strip title emoji (chipped) → policy-ping → wave-clear unlock → action queue; optional chatty contribution-state events (`--emit-events`, default off; also `--dry-run`, `--no-ping`, `--json`) |
 | `scripts/tooling/lib/meta-wave.sh` | **Wave-clear helpers (gate A)** — owned 🔧 only; layer+worktree clean; 30m collect; defer on `hapi-driver-status` busy |
 | `scripts/tooling/install-hapi-meta-daily-timer.sh` | **Machine-local timers** (fork-only) — **hourly** ping windows **Europe/London** + quiet `--no-ping --emit-events` every 45m **24/7**; units in `scripts/tooling/systemd/hapi-meta-daily*` |
