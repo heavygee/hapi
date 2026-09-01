@@ -102,6 +102,7 @@ import {
     type BlockedAlertMode
 } from '@/hooks/useBlockedAlertMode'
 import { playBlockedAlertSound } from '@/lib/blockedAlertSound'
+import { useShowActiveSessionsOnly } from '@/hooks/useShowActiveSessionsOnly'
 import {
     compareDescWithKeyTiebreak,
     compareSessionsByOrderKeyDesc
@@ -109,6 +110,7 @@ import {
 import { createSessionComparator, getSessionSortKey } from '@/lib/sessionListOrder'
 import {
     classifySessionAttention,
+    getSessionBlockedLabelKey,
     getSessionBlockedState,
     sessionBlockedIsError,
     sessionIsBlocked,
@@ -136,6 +138,7 @@ import { useSessionListMachineFilter } from '@/hooks/useSessionListMachineFilter
 import { useTransientScrollbar } from '@/hooks/useTransientScrollbar'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
 import { SessionRowSummary } from '@/components/SessionRowSummary'
+import { UnblockReasonDialog } from '@/components/UnblockReasonDialog'
 import { Spinner } from '@/components/Spinner'
 import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 import { useToast } from '@/lib/toast-context'
@@ -1276,6 +1279,7 @@ const SessionItem = memo(function SessionItem(props: {
     const [deleteOpen, setDeleteOpen] = useState(false)
     const [forkOpen, setForkOpen] = useState(false)
     const [forkPending, setForkPending] = useState(false)
+    const [unblockOpen, setUnblockOpen] = useState(false)
     const {
         status: cursorChatStoreStatus,
         isApplicable: cursorChatStoreApplicable,
@@ -1301,7 +1305,7 @@ const SessionItem = memo(function SessionItem(props: {
         ? t('session.action.reopenCursorUnverified')
         : undefined
 
-    const { archiveSession, reopenSession, renameSession, suggestSessionTitle, updateSessionSummary, deleteSession, setPinMode, isPending } = useSessionActions(
+    const { archiveSession, reopenSession, renameSession, suggestSessionTitle, updateSessionSummary, deleteSession, setPinMode, acknowledgeBlocked, isPending } = useSessionActions(
         api,
         s.id,
         s.metadata?.flavor ?? null
@@ -1511,6 +1515,7 @@ const SessionItem = memo(function SessionItem(props: {
                     ? () => setForkOpen(true)
                     : undefined}
                 forkDisabledReason={forkDisabledReason}
+                onMarkUnblocked={blocked ? () => setUnblockOpen(true) : undefined}
                 onArchive={() => setArchiveOpen(true)}
                 onReopen={cursorReopenDisabledReason ? undefined : () => void handleReopen()}
                 reopenDisabledReason={cursorReopenDisabledReason}
@@ -1540,6 +1545,18 @@ const SessionItem = memo(function SessionItem(props: {
                             setForkPending(false)
                         }
                     }}
+                />
+            ) : null}
+
+            {unblockOpen ? (
+                <UnblockReasonDialog
+                    isOpen
+                    sessionTitle={sessionName}
+                    blockedLabel={blocked ? t(getSessionBlockedLabelKey(blocked)) : null}
+                    blockedNote={blocked?.note ?? null}
+                    isPending={isPending}
+                    onClose={() => setUnblockOpen(false)}
+                    onConfirm={acknowledgeBlocked}
                 />
             ) : null}
 
@@ -1671,6 +1688,7 @@ export function SessionList(props: {
     const { sessionListStatusMode } = useSessionListStatusMode()
     const { view: listView, setView: setListView } = useSessionListView()
     const listComparator = useMemo(() => createSessionComparator(listView), [listView])
+    const { showActiveSessionsOnly, setShowActiveSessionsOnly } = useShowActiveSessionsOnly()
     const lastSeenVersion = useSessionLastSeenVersion()
     // Unread rows stay visible without a filter: collapsed project groups still
     // show them, and the preview limit never hides them.
@@ -1782,6 +1800,10 @@ export function SessionList(props: {
         return t('machine.unknown')
     }
 
+    // Split so the blocked count can be taken BEFORE status/unread narrowing:
+    // a blocked agent whose CLI disconnected is exactly the one worth
+    // surfacing, and it is not "active" — `sidebarSessions` stays the
+    // pre-narrowed base those fleet-wide counts read from.
     const sidebarSessions = useMemo(
         () => prepareSidebarSessions(props.sessions, selectedSessionId),
         [props.sessions, selectedSessionId]
@@ -2005,10 +2027,10 @@ export function SessionList(props: {
     // it has to reach one of these rows.
     const blockedSessions = useMemo(() => {
         const now = Date.now()
-        return allSessions
+        return sidebarSessions
             .filter(session => sessionIsBlocked(session, { now }))
             .sort((a, b) => b.updatedAt - a.updatedAt)
-    }, [allSessions])
+    }, [sidebarSessions])
     const blockedCount = blockedSessions.length
     const blockedAlerting = useBlockedArrivalAlert(
         useMemo(() => blockedSessions.map(session => session.id), [blockedSessions]),
@@ -2806,7 +2828,7 @@ export function SessionList(props: {
             container.removeEventListener('scroll', schedule)
             window.removeEventListener('resize', schedule)
         }
-    }, [blockedCount, blockedSectionSessions, blockedSectionCollapsed, machineFilteredSessions])
+    }, [blockedCount, blockedSectionSessions, blockedSectionCollapsed, pinnedSectionCollapsed, machineFilteredSessions])
 
     const blockedDirection: BlockedJumpDirection = blockedOffscreen.above > 0 && blockedOffscreen.below > 0
         ? 'both'
