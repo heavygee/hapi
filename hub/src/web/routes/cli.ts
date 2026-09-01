@@ -325,7 +325,7 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
 
         await engine.sendMessage(target.sessionId, {
             text: parsed.data.text,
-            sentFrom: 'webapp',
+            sentFrom: 'peer',
             notifySource: 'peer',
             peerSourceSessionId: source.sessionId
         })

@@ -991,7 +991,7 @@ export class SyncEngine {
                 path: string
                 previewUrl?: string
             }>
-            sentFrom?: 'telegram-bot' | 'webapp'
+            sentFrom?: 'telegram-bot' | 'webapp' | 'peer'
             scheduledAt?: number | null
             deliveryMode?: MessageDeliveryMode
             notifySource?: 'peer'

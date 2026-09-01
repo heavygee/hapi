@@ -849,7 +849,7 @@ export class MessageService {
             text: string
             localId?: string | null
             attachments?: AttachmentMetadata[]
-            sentFrom?: 'telegram-bot' | 'webapp'
+            sentFrom?: 'telegram-bot' | 'webapp' | 'peer'
             scheduledAt?: number | null
             deliveryMode?: MessageDeliveryMode
             notifySource?: 'peer'

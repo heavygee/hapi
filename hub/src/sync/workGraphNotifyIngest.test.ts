@@ -650,7 +650,7 @@ describe('ingestNotifySummaryFromMessage cause stamping', () => {
         ].join('\n')
         const peer = store.messages.addMessage(
             session.id,
-            userInbound(peerText, 'webapp', {
+            userInbound(peerText, 'peer', {
                 notifySource: 'peer',
                 sourceSessionId: 'sess-sender'
             })
@@ -686,7 +686,7 @@ describe('ingestNotifySummaryFromMessage cause stamping', () => {
         expect(recipientAd?.event.payloadJson).toMatchObject({
             messageId: assistant.id,
             causeMessageId: peer.id,
-            causeKind: 'webapp'
+            causeKind: 'peer'
         })
         expect((recipientAd?.event.payloadJson as { causeText?: string })?.causeText)
             ?.toContain('Please resume this lease.')

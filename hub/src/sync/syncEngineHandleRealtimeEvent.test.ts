@@ -351,7 +351,7 @@ describe('SyncEngine.handleRealtimeEvent notify → work-graph ingest', () => {
                 '',
                 'AGENT_NOTIFY_SUMMARY {"status":"done","summary":"peer rest wired","action":"idle"}'
             ].join('\n'),
-            sentFrom: 'webapp',
+            sentFrom: 'peer',
             notifySource: 'peer',
             peerSourceSessionId: source.id
         })
