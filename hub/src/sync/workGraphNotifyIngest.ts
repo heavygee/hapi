@@ -444,22 +444,27 @@ export function buildWorkAdFromNotify(params: {
  * On message ingest: well-formed trailing AGENT_NOTIFY_SUMMARY →
  * idempotent work_ad row. Invalid/missing footer → no-op (null).
  *
- * Accepts agent assistant text and user-role deliveries (hapi-ping-peer /
- * attributed peer posts land as role=user). Capture must not depend on chat
- * display settings.
+ * Accepts agent assistant text, plus user-role deliveries stamped
+ * `meta.notifySource: "peer"` (hapi-ping-peer / MCP ping_peer). Ordinary
+ * web/CLI/Telegram prompts are never elevated even if they paste a footer.
  *
  * Ledger rows are append-only audit: deleting the related session does not
  * delete work_ad rows (cold review M1).
  */
+function isPeerNotifyDelivery(content: unknown): boolean {
+    const record = asRecord(content)
+    if (record?.role !== 'user') return false
+    const meta = asRecord(record.meta)
+    return meta?.notifySource === 'peer'
+}
+
 function extractPlainTextForNotify(content: unknown): string | null {
     if (isAgentMessageContent(content)) {
         const agentBody = unwrapRoleWrappedRecordEnvelope(content)
         const agentContent = agentBody?.role === 'agent' ? agentBody.content : content
         return extractAssistantPlainText(agentContent)
     }
-    if (isInboundUserMessage(content)) {
-        // Peer pings / attributed deliveries are role=user text with a trailing
-        // AGENT_NOTIFY_SUMMARY — same contract as agent footers.
+    if (isPeerNotifyDelivery(content)) {
         return extractInboundCauseText(content)
     }
     return null

@@ -1010,6 +1010,7 @@ export class SyncEngine {
             sentFrom?: 'telegram-bot' | 'webapp'
             scheduledAt?: number | null
             deliveryMode?: MessageDeliveryMode
+            notifySource?: 'peer'
         }
     ): Promise<void> {
         if (this.historyActionsInFlight.has(sessionId)) {

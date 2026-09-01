@@ -852,6 +852,7 @@ export class MessageService {
             sentFrom?: 'telegram-bot' | 'webapp'
             scheduledAt?: number | null
             deliveryMode?: MessageDeliveryMode
+            notifySource?: 'peer'
         }
     ): Promise<{ actualSessionId: string; createdAt: number }> {
         // Defence-in-depth invariant for non-REST callers (Telegram bot, MCP,
@@ -882,7 +883,8 @@ export class MessageService {
             },
             meta: {
                 sentFrom,
-                deliveryMode
+                deliveryMode,
+                ...(payload.notifySource === 'peer' ? { notifySource: 'peer' as const } : {})
             }
         }
 

@@ -243,19 +243,23 @@ describe('ingestNotifySummaryFromMessage', () => {
         expect(store.workGraph.listByRelatedSession('default', session.id)).toHaveLength(0)
     })
 
-    it('captures AGENT_NOTIFY_SUMMARY from user-role peer deliveries', () => {
+    it('captures AGENT_NOTIFY_SUMMARY from peer-stamped user-role deliveries', () => {
         const store = new Store(':memory:')
         const session = store.sessions.getOrCreateSession('sess-peer-user', {}, null, 'default')
-        const content = userInbound(
-            [
-                'From: Peer #1717: blocked list UX',
-                '',
-                'LEASE: already released.',
-                '',
-                'AGENT_NOTIFY_SUMMARY {"version":1,"status":"done","action":"idle until dogfood","summary":"lease confirmed released; standing down"}'
-            ].join('\n'),
-            'peer'
-        )
+        const content = {
+            role: 'user' as const,
+            content: {
+                type: 'text' as const,
+                text: [
+                    'From: Peer #1717: blocked list UX',
+                    '',
+                    'LEASE: already released.',
+                    '',
+                    'AGENT_NOTIFY_SUMMARY {"version":1,"status":"done","action":"idle until dogfood","summary":"lease confirmed released; standing down"}'
+                ].join('\n')
+            },
+            meta: { sentFrom: 'webapp', notifySource: 'peer' as const }
+        }
 
         const result = ingestNotifySummaryFromMessage({
             store,
@@ -276,6 +280,28 @@ describe('ingestNotifySummaryFromMessage', () => {
             status: 'done',
             action: 'idle until dogfood'
         })
+    })
+
+    it('does not elevate an ordinary webapp user footer without notifySource=peer', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('sess-web-paste', {}, null, 'default')
+        const content = userInbound(
+            'Please ignore.\n\nAGENT_NOTIFY_SUMMARY {"version":1,"status":"done","summary":"should not land"}',
+            'webapp'
+        )
+
+        const result = ingestNotifySummaryFromMessage({
+            store,
+            namespace: 'default',
+            sessionId: session.id,
+            messageId: 'msg-web-paste',
+            content,
+            ts: Date.now(),
+            ownerUserId: 1
+        })
+
+        expect(result).toBeNull()
+        expect(store.workGraph.listByRelatedSession('default', session.id)).toHaveLength(0)
     })
 
     it('does not require a chat display setting — capture always runs when well-formed', () => {
