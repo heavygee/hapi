@@ -17,6 +17,7 @@ import {
     setSessionPinned,
     setSessionPinMode,
     type SessionPinMode,
+    setSessionBlockedAck,
     setSessionLastNotify,
     setSessionTeamState,
     setSessionTodos,
@@ -83,6 +84,14 @@ export class SessionStore {
         namespace: string
     ): boolean {
         return setSessionLastNotify(this.db, id, signal, namespace)
+    }
+
+    setSessionBlockedAck(
+        id: string,
+        ack: { at: number; reason: string },
+        namespace: string
+    ): boolean {
+        return setSessionBlockedAck(this.db, id, ack, namespace)
     }
 
     clearSessionLastNotify(id: string, namespace: string): boolean {
