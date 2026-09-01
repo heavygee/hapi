@@ -305,15 +305,13 @@ export class OverseerEventRecorder {
             return primary
         }
 
-        // Peer pings / attributed deliveries land as role=user. Still scrape a
-        // trailing AGENT_NOTIFY_SUMMARY so Session Log / inbox capture A2A status.
+        // Peer pings land as role=user. Scrape synchronously — do not queue behind
+        // in-flight LLM fallback work on the same session.
         const userPlainText = extractTextForLinkScoop(content)
         if (userPlainText) {
-            primary = await this.enqueueSessionWork(session.id, () =>
-                Promise.resolve(this.recordNotifyFromPlainText(session, messageId, userPlainText, ts, {
-                    deliveryRole: 'user'
-                }))
-            )
+            primary = this.recordNotifyFromPlainText(session, messageId, userPlainText, ts, {
+                deliveryRole: 'user'
+            })
         }
 
         const seen = this.seenUserMessageIds.get(session.id) ?? new Set<string>()
