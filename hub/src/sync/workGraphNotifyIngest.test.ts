@@ -635,6 +635,50 @@ describe('ingestNotifySummaryFromMessage cause stamping', () => {
         })
     })
 
+    it('recipient assistant notify keeps peer-stamped handoff as cause after peer work_ad', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('sess-cause-peer-elevate', {}, null, 'default')
+        const peerText = [
+            'From: /sessions/sess-sender',
+            '',
+            'Please resume this lease.',
+            '',
+            'AGENT_NOTIFY_SUMMARY {"version":1,"status":"done","summary":"peer standing down","action":"idle"}'
+        ].join('\n')
+        const peer = store.messages.addMessage(
+            session.id,
+            userInbound(peerText, 'webapp', {
+                notifySource: 'peer',
+                sourceSessionId: 'sess-sender'
+            })
+        )
+        const peerAd = ingestNotify(store, session.id, 'default', peer.content, peer.id)
+        expect(peerAd?.inserted).toBe(true)
+        expect(peerAd?.event.sourceRef).toBe('sess-sender')
+
+        const assistant = store.messages.addMessage(
+            session.id,
+            assistantOutput(notifyFooter('Ack peer handoff'))
+        )
+        const recipientAd = ingestNotify(
+            store,
+            session.id,
+            'default',
+            assistant.content,
+            assistant.id
+        )
+
+        expect(recipientAd?.inserted).toBe(true)
+        expect(recipientAd?.event.sourceRef).toBe(session.id)
+        expect(recipientAd?.event.payloadJson).toMatchObject({
+            messageId: assistant.id,
+            causeMessageId: peer.id,
+            causeKind: 'webapp'
+        })
+        expect((recipientAd?.event.payloadJson as { causeText?: string })?.causeText)
+            ?.toContain('Please resume this lease.')
+    })
+
     it('skips agent-role tool/prose rows when choosing cause', () => {
         const store = new Store(':memory:')
         const session = store.sessions.getOrCreateSession('sess-cause-skip-agent', {}, null, 'default')

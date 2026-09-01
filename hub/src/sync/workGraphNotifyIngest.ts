@@ -251,13 +251,20 @@ function loadMessagesForCause(
 function listPreviousWorkAds(
     store: Store,
     namespace: string,
-    sessionId: string
+    sessionId: string,
+    principalSessionId: string
 ): WorkGraphEvent[] {
-    // Only hub notify elevation. Client POST /work-graph/events can mint
-    // work_ad rows; those must not steal related_event_id, follows, or sticky cause.
+    // Only hub notify elevation for this principal. Peer-authored rows share
+    // related_session_id with the recipient but must not steal related_event_id,
+    // follows, or sticky/legacy cause consume for the recipient's next summary.
+    // Client POST /work-graph/events can mint work_ad rows; those stay out via
+    // provenance !== AGENT_NOTIFY_SUMMARY.
     return store.workGraph
         .listWorkAdsByRelatedSession(namespace, sessionId)
-        .filter((event) => event.provenance === 'AGENT_NOTIFY_SUMMARY')
+        .filter((event) => (
+            event.provenance === 'AGENT_NOTIFY_SUMMARY'
+            && event.sourceRef === principalSessionId
+        ))
 }
 
 function consumedInboundIds(
@@ -493,9 +500,15 @@ export function ingestNotifySummaryFromMessage(input: NotifyIngestInput): Notify
     }
 
     const peerSourceSessionId = extractPeerSourceSessionId(input.content)
+    const principalSessionId = peerSourceSessionId ?? input.sessionId
 
     // Cause is hub-derived from session messages SQL (no REST 200 cap).
-    const previousWorkAds = listPreviousWorkAds(input.store, input.namespace, input.sessionId)
+    const previousWorkAds = listPreviousWorkAds(
+        input.store,
+        input.namespace,
+        input.sessionId,
+        principalSessionId
+    )
     const messages = loadMessagesForCause(input.store, input.sessionId, previousWorkAds)
     const assistantSeq = messages.find((message) => message.id === input.messageId)?.seq ?? null
     const { cause, previousEventId } = resolveWorkAdCause({
@@ -513,7 +526,7 @@ export function ingestNotifySummaryFromMessage(input: NotifyIngestInput): Notify
         ts: input.ts,
         cause,
         relatedEventId: previousEventId,
-        principalSessionId: peerSourceSessionId ?? undefined
+        principalSessionId
     })
 
     try {
