@@ -328,30 +328,42 @@ describe('SyncEngine.handleRealtimeEvent notify → work-graph ingest', () => {
         expect(rows[0]!.summary?.length).toBeLessThan(oversized.length)
     })
 
-    it('captures peer notify footers from SyncEngine.sendMessage (REST peer-messages path)', async () => {
+    it('captures peer notify footers from SyncEngine.sendMessage (CLI peer-messages path)', async () => {
         const { engine, store } = makeEngine()
-        const session = store.sessions.getOrCreateSession(
+        const target = store.sessions.getOrCreateSession(
             'notify-peer-rest',
             { path: '/tmp', host: 'h', flavor: 'cursor' },
             null,
             'default'
         )
-        engine.handleRealtimeEvent({ type: 'session-updated', sessionId: session.id })
+        const source = store.sessions.getOrCreateSession(
+            'notify-peer-source',
+            { path: '/tmp', host: 'h', flavor: 'cursor' },
+            null,
+            'default'
+        )
+        engine.handleRealtimeEvent({ type: 'session-updated', sessionId: target.id })
 
-        await engine.sendMessage(session.id, {
+        await engine.sendMessage(target.id, {
             text: [
                 'From: Peer #1: helper',
                 '',
                 'AGENT_NOTIFY_SUMMARY {"status":"done","summary":"peer rest wired","action":"idle"}'
             ].join('\n'),
             sentFrom: 'webapp',
-            notifySource: 'peer'
+            notifySource: 'peer',
+            peerSourceSessionId: source.id
         })
 
-        const rows = store.workGraph.listByRelatedSession('default', session.id)
+        const rows = store.workGraph.listByRelatedSession('default', target.id)
         expect(rows).toHaveLength(1)
         expect(rows[0]!.summary).toBe('peer rest wired')
         expect(rows[0]!.provenance).toBe('AGENT_NOTIFY_SUMMARY')
+        expect(rows[0]!.sourceRef).toBe(source.id)
+        expect(rows[0]!.principal).toMatchObject({
+            kind: 'agent',
+            id: `session:${source.id}`
+        })
     })
 
     it('does not elevate ordinary sendMessage without notifySource=peer', async () => {

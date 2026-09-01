@@ -14,6 +14,7 @@ import { normalizeSessionIdPrefix } from '@hapi/protocol/sessionCitation'
 import { configuration } from '@/configuration'
 import { getAuthToken } from '@/api/auth'
 import { buildHubRequestHeaders } from '@/api/hubExtraHeaders'
+import { HAPI_SESSION_ID_ENV } from '@/agent/hapiSessionEnv'
 
 export type PingPeerErrorCode =
     | 'bad_args'
@@ -52,6 +53,11 @@ export type PingPeerSessionSummary = {
 export type PingPeerOptions = {
     sessionIdPrefix: string
     message: string
+    /**
+     * Sending session id for CLI peer attribution (`POST /cli/sessions/:source/peer-messages`).
+     * Defaults to `HAPI_SESSION_ID` when unset.
+     */
+    sourceSessionId?: string
     waitActiveSecs?: number
     apiUrl?: string
     accessToken?: string
@@ -340,18 +346,22 @@ async function waitForPiReady(
     )
 }
 
-async function sendMessage(
+async function sendPeerMessage(
     apiUrl: string,
-    jwt: string,
-    sessionId: string,
+    accessToken: string,
+    sourceSessionId: string,
+    targetSessionId: string,
     message: string,
     http: AxiosInstance
 ): Promise<void> {
     const response = await http.post(
-        `${apiUrl}/api/sessions/${encodeURIComponent(sessionId)}/peer-messages`,
-        { text: message },
+        `${apiUrl}/cli/sessions/${encodeURIComponent(sourceSessionId)}/peer-messages`,
+        { text: message, targetSessionId },
         {
-            headers: authHeaders(jwt),
+            headers: buildHubRequestHeaders({
+                Authorization: `Bearer ${accessToken}`,
+                'Content-Type': 'application/json'
+            }),
             timeout: 30_000,
             validateStatus: () => true
         }
@@ -365,6 +375,18 @@ async function sendMessage(
             ? response.data.code
             : `HTTP ${response.status}`
     throw new PingPeerError('send_failed', `send failed: ${detail}`)
+}
+
+function resolveSourceSessionId(explicit?: string): string {
+    const fromOption = explicit?.trim() ?? ''
+    if (fromOption) return fromOption
+    const fromEnv = (process.env[HAPI_SESSION_ID_ENV] ?? '').trim()
+    if (fromEnv) return fromEnv
+    throw new PingPeerError(
+        'bad_args',
+        'source session id required for peer delivery ' +
+            `(set ${HAPI_SESSION_ID_ENV} inside a HAPI session, or pass sourceSessionId)`
+    )
 }
 
 export async function listPeerSessions(
@@ -465,6 +487,8 @@ export async function pingPeer(options: PingPeerOptions): Promise<PingPeerResult
         throw new PingPeerError('bad_args', 'message is required')
     }
 
+    const sourceSessionId = resolveSourceSessionId(options.sourceSessionId)
+
     const waitActiveSecs = options.waitActiveSecs ?? DEFAULT_WAIT_ACTIVE_SECS
     if (!Number.isFinite(waitActiveSecs) || waitActiveSecs <= 0) {
         throw new PingPeerError('bad_args', 'waitActiveSecs must be a positive number')
@@ -482,6 +506,10 @@ export async function pingPeer(options: PingPeerOptions): Promise<PingPeerResult
     const matched = resolveSessionByPrefix(sessions, prefix)
     const name = resolvePeerSessionLabel(matched)
     onProgress?.(`resolved ${matched.id}  active=${matched.active}  name="${name}"`)
+
+    if (matched.id === sourceSessionId) {
+        throw new PingPeerError('bad_args', 'cannot ping the source session itself')
+    }
 
     let resumed = false
     const ensureActive = async (progressMessage: string): Promise<PingPeerSessionSummary> => {
@@ -515,8 +543,8 @@ export async function pingPeer(options: PingPeerOptions): Promise<PingPeerResult
         }
     }
 
-    onProgress?.(`sending message (${message.length} chars)...`)
-    await sendMessage(apiUrl, jwt, matched.id, message, http)
+    onProgress?.(`sending message (${message.length} chars) from ${sourceSessionId.slice(0, 8)}...`)
+    await sendPeerMessage(apiUrl, accessToken, sourceSessionId, matched.id, message, http)
 
     return {
         sessionId: matched.id,

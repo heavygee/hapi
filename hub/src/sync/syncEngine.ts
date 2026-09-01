@@ -995,6 +995,7 @@ export class SyncEngine {
             scheduledAt?: number | null
             deliveryMode?: MessageDeliveryMode
             notifySource?: 'peer'
+            peerSourceSessionId?: string
         }
     ): Promise<void> {
         if (this.historyActionsInFlight.has(sessionId)) {

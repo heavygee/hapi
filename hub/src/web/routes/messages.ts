@@ -1,7 +1,6 @@
 import { Hono } from 'hono'
 import {
     MessagesQuerySchema,
-    PeerMessageRequestSchema,
     QueuedStateRequestSchema,
     SendMessageRequestSchema
 } from '@hapi/protocol'
@@ -153,33 +152,6 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             sentFrom: 'webapp',
             scheduledAt: parsed.data.scheduledAt,
             deliveryMode: parsed.data.deliveryMode
-        })
-        return c.json({ ok: true })
-    })
-
-    app.post('/sessions/:id/peer-messages', async (c) => {
-        const engine = requireSyncEngine(c, getSyncEngine)
-        if (engine instanceof Response) {
-            return engine
-        }
-
-        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
-        if (sessionResult instanceof Response) {
-            return sessionResult
-        }
-        const sessionId = sessionResult.sessionId
-
-        const body = await c.req.json().catch(() => null)
-        const parsed = PeerMessageRequestSchema.safeParse(body)
-        if (!parsed.success) {
-            return c.json({ error: 'Invalid body', issues: parsed.error.flatten() }, 400)
-        }
-
-        // Server-side stamp only — clients cannot set notifySource on ordinary /messages.
-        await engine.sendMessage(sessionId, {
-            text: parsed.data.text,
-            sentFrom: 'webapp',
-            notifySource: 'peer'
         })
         return c.json({ ok: true })
     })

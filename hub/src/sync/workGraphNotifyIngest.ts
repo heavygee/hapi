@@ -257,10 +257,7 @@ function listPreviousWorkAds(
     // work_ad rows; those must not steal related_event_id, follows, or sticky cause.
     return store.workGraph
         .listWorkAdsByRelatedSession(namespace, sessionId)
-        .filter((event) => (
-            event.provenance === 'AGENT_NOTIFY_SUMMARY'
-            && event.sourceRef === sessionId
-        ))
+        .filter((event) => event.provenance === 'AGENT_NOTIFY_SUMMARY')
 }
 
 function consumedInboundIds(
@@ -381,6 +378,11 @@ export function buildWorkAdFromNotify(params: {
     expiresAt?: number
     cause?: WorkAdCause | null
     relatedEventId?: string | null
+    /**
+     * Session that authored the notify (peer source). Defaults to sessionId
+     * (message home / assistant turn). Peer deliveries set this to the sender.
+     */
+    principalSessionId?: string
 }): WorkGraphEventCreate {
     const status = mapNotifyStatusToWorkAdStatus(params.notify.status)
     // Footer fields are untrusted. Clamp to ledger schema bounds so elevation
@@ -399,13 +401,14 @@ export function buildWorkAdFromNotify(params: {
     const causeKind = cause?.causeKind == null
         ? null
         : clampJsonUtf8(cause.causeKind, WORK_GRAPH_MAX_TAG)
+    const principalSessionId = params.principalSessionId ?? params.sessionId
     // Audit principal is always session-bound. notify.agent is untrusted
     // self-label text and stays advisory in payload/tags only.
     // Do not nest a full notify_summary copy — duplicating clamped strings
     // can blow the 32 KiB payload_json cap and silently drop the ledger row.
     return {
         source_kind: 'session',
-        source_ref: params.sessionId,
+        source_ref: principalSessionId,
         event_type: 'work_ad',
         summary,
         payload_json: {
@@ -434,7 +437,7 @@ export function buildWorkAdFromNotify(params: {
         expires_at: params.expiresAt ?? (params.ts + WORK_AD_DEFAULT_TTL_MS),
         principal: {
             kind: 'agent',
-            id: `session:${params.sessionId}`,
+            id: `session:${principalSessionId}`,
             on_behalf_of: String(params.ownerUserId)
         }
     }
@@ -444,18 +447,26 @@ export function buildWorkAdFromNotify(params: {
  * On message ingest: well-formed trailing AGENT_NOTIFY_SUMMARY →
  * idempotent work_ad row. Invalid/missing footer → no-op (null).
  *
- * Accepts agent assistant text, plus user-role deliveries stamped
- * `meta.notifySource: "peer"` (hapi-ping-peer / MCP ping_peer). Ordinary
- * web/CLI/Telegram prompts are never elevated even if they paste a footer.
+ * Accepts agent assistant text, plus user-role deliveries stamped by the
+ * CLI peer path (`meta.notifySource: "peer"` + `meta.sourceSessionId` from
+ * `POST /cli/sessions/:source/peer-messages`). Ordinary web/CLI/Telegram
+ * prompts are never elevated even if they paste a footer.
  *
  * Ledger rows are append-only audit: deleting the related session does not
  * delete work_ad rows (cold review M1).
  */
-function isPeerNotifyDelivery(content: unknown): boolean {
+function extractPeerSourceSessionId(content: unknown): string | null {
     const record = asRecord(content)
-    if (record?.role !== 'user') return false
+    if (record?.role !== 'user') return null
     const meta = asRecord(record.meta)
-    return meta?.notifySource === 'peer'
+    if (meta?.notifySource !== 'peer') return null
+    return typeof meta.sourceSessionId === 'string' && meta.sourceSessionId.trim().length > 0
+        ? meta.sourceSessionId.trim()
+        : null
+}
+
+function isPeerNotifyDelivery(content: unknown): boolean {
+    return extractPeerSourceSessionId(content) !== null
 }
 
 function extractPlainTextForNotify(content: unknown): string | null {
@@ -481,6 +492,8 @@ export function ingestNotifySummaryFromMessage(input: NotifyIngestInput): Notify
         return null
     }
 
+    const peerSourceSessionId = extractPeerSourceSessionId(input.content)
+
     // Cause is hub-derived from session messages SQL (no REST 200 cap).
     const previousWorkAds = listPreviousWorkAds(input.store, input.namespace, input.sessionId)
     const messages = loadMessagesForCause(input.store, input.sessionId, previousWorkAds)
@@ -499,7 +512,8 @@ export function ingestNotifySummaryFromMessage(input: NotifyIngestInput): Notify
         flavor: input.flavor,
         ts: input.ts,
         cause,
-        relatedEventId: previousEventId
+        relatedEventId: previousEventId,
+        principalSessionId: peerSourceSessionId ?? undefined
     })
 
     try {

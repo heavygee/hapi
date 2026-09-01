@@ -853,6 +853,8 @@ export class MessageService {
             scheduledAt?: number | null
             deliveryMode?: MessageDeliveryMode
             notifySource?: 'peer'
+            /** Required when notifySource=peer — sending session for work_ad attribution. */
+            peerSourceSessionId?: string
         }
     ): Promise<{ actualSessionId: string; createdAt: number; message: DecryptedMessage }> {
         // Defence-in-depth invariant for non-REST callers (Telegram bot, MCP,
@@ -865,6 +867,12 @@ export class MessageService {
         // !localId throw.
         if (payload.scheduledAt != null && (payload.attachments?.length ?? 0) > 0) {
             throw new Error('sendMessage: scheduled messages with attachments are not supported')
+        }
+        if (payload.notifySource === 'peer') {
+            const sourceId = payload.peerSourceSessionId?.trim()
+            if (!sourceId) {
+                throw new Error('sendMessage: notifySource=peer requires peerSourceSessionId')
+            }
         }
 
         const sentFrom = payload.sentFrom ?? 'webapp'
@@ -884,7 +892,12 @@ export class MessageService {
             meta: {
                 sentFrom,
                 deliveryMode,
-                ...(payload.notifySource === 'peer' ? { notifySource: 'peer' as const } : {})
+                ...(payload.notifySource === 'peer' && payload.peerSourceSessionId
+                    ? {
+                        notifySource: 'peer' as const,
+                        sourceSessionId: payload.peerSourceSessionId
+                    }
+                    : {})
             }
         }
 
