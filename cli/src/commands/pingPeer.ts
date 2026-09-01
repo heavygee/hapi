@@ -41,7 +41,7 @@ ${chalk.bold('Notes:')}
 
 ${chalk.bold('Env:')}
   HAPI_API_URL / CLI_API_TOKEN (or ~/.hapi/settings.json via \`hapi auth login\`)
-  HAPI_SESSION_ID (required for attributed peer delivery; set automatically inside a HAPI session)
+  HAPI_SESSION_ID (optional; when set, delivery is attributed via /cli peer-messages + notify stamp)
   HAPI_WAIT_ACTIVE_SECS (default 60; overridable with --wait)
 `)
 }

@@ -70,6 +70,7 @@ describe('pingPeer', () => {
     beforeEach(() => {
         nowMs = 1_000_000
         sleepCalls = []
+        delete process.env.HAPI_SESSION_ID
     })
 
     it('sends to an already-active session without resume', async () => {
@@ -129,6 +130,62 @@ describe('pingPeer', () => {
             name: 'Orchestrator',
             resumed: false
         })
+        expect(http.post).toHaveBeenCalledTimes(2)
+    })
+
+    it('sends unattributed via /messages when no source session is set', async () => {
+        const sessionId = '05d9f0f2-9273-4137-933c-07459a1146a2'
+        const http = createHttpMock({
+            post: (url, body) => {
+                if (url.endsWith('/api/auth')) {
+                    return { status: 200, data: { token: 'jwt' } }
+                }
+                if (url.endsWith(`/api/sessions/${sessionId}/messages`)) {
+                    expect(body).toEqual({ text: 'hello peer' })
+                    return { status: 200, data: { ok: true } }
+                }
+                throw new Error(`unexpected POST ${url}`)
+            },
+            get: (url) => {
+                if (url.endsWith('/api/sessions')) {
+                    return {
+                        status: 200,
+                        data: {
+                            sessions: [{
+                                id: sessionId,
+                                active: true,
+                                metadata: { name: 'Orchestrator', flavor: 'cursor' }
+                            }]
+                        }
+                    }
+                }
+                if (url.endsWith(`/api/sessions/${sessionId}`)) {
+                    return {
+                        status: 200,
+                        data: {
+                            session: {
+                                id: sessionId,
+                                active: true,
+                                metadata: { name: 'Orchestrator', flavor: 'cursor' }
+                            }
+                        }
+                    }
+                }
+                throw new Error(`unexpected GET ${url}`)
+            }
+        })
+
+        const result = await pingPeer({
+            sessionIdPrefix: '05d9f0f2',
+            message: 'hello peer',
+            accessToken: 'tok',
+            apiUrl: 'http://127.0.0.1:3006',
+            http: http as never,
+            now: () => nowMs,
+            sleep: async (ms) => { sleepCalls.push(ms) }
+        })
+
+        expect(result.sessionId).toBe(sessionId)
         expect(http.post).toHaveBeenCalledTimes(2)
     })
 

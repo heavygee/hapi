@@ -377,16 +377,40 @@ async function sendPeerMessage(
     throw new PingPeerError('send_failed', `send failed: ${detail}`)
 }
 
-function resolveSourceSessionId(explicit?: string): string {
+/** Unattributed delivery (standalone CLI shell without HAPI_SESSION_ID) — no peer notify stamp. */
+async function sendMessage(
+    apiUrl: string,
+    jwt: string,
+    sessionId: string,
+    message: string,
+    http: AxiosInstance
+): Promise<void> {
+    const response = await http.post(
+        `${apiUrl}/api/sessions/${encodeURIComponent(sessionId)}/messages`,
+        { text: message },
+        {
+            headers: authHeaders(jwt),
+            timeout: 30_000,
+            validateStatus: () => true
+        }
+    )
+    if (response.status >= 200 && response.status < 300 && response.data?.ok === true) {
+        return
+    }
+    const detail = typeof response.data?.error === 'string'
+        ? response.data.error
+        : typeof response.data?.code === 'string'
+            ? response.data.code
+            : `HTTP ${response.status}`
+    throw new PingPeerError('send_failed', `send failed: ${detail}`)
+}
+
+function resolveSourceSessionId(explicit?: string): string | null {
     const fromOption = explicit?.trim() ?? ''
     if (fromOption) return fromOption
     const fromEnv = (process.env[HAPI_SESSION_ID_ENV] ?? '').trim()
     if (fromEnv) return fromEnv
-    throw new PingPeerError(
-        'bad_args',
-        'source session id required for peer delivery ' +
-            `(set ${HAPI_SESSION_ID_ENV} inside a HAPI session, or pass sourceSessionId)`
-    )
+    return null
 }
 
 export async function listPeerSessions(
@@ -507,7 +531,7 @@ export async function pingPeer(options: PingPeerOptions): Promise<PingPeerResult
     const name = resolvePeerSessionLabel(matched)
     onProgress?.(`resolved ${matched.id}  active=${matched.active}  name="${name}"`)
 
-    if (matched.id === sourceSessionId) {
+    if (sourceSessionId && matched.id === sourceSessionId) {
         throw new PingPeerError('bad_args', 'cannot ping the source session itself')
     }
 
@@ -543,8 +567,13 @@ export async function pingPeer(options: PingPeerOptions): Promise<PingPeerResult
         }
     }
 
-    onProgress?.(`sending message (${message.length} chars) from ${sourceSessionId.slice(0, 8)}...`)
-    await sendPeerMessage(apiUrl, accessToken, sourceSessionId, matched.id, message, http)
+    if (sourceSessionId) {
+        onProgress?.(`sending attributed peer message (${message.length} chars) from ${sourceSessionId.slice(0, 8)}...`)
+        await sendPeerMessage(apiUrl, accessToken, sourceSessionId, matched.id, message, http)
+    } else {
+        onProgress?.(`sending message (${message.length} chars)...`)
+        await sendMessage(apiUrl, jwt, matched.id, message, http)
+    }
 
     return {
         sessionId: matched.id,
