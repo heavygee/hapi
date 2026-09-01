@@ -531,9 +531,7 @@ export const SendMessageRequestSchema = z.object({
     localId: z.string().min(1).optional(),
     attachments: z.array(AttachmentMetadataSchema).optional(),
     scheduledAt: z.number().int().positive().nullable().optional(),
-    deliveryMode: MessageDeliveryModeSchema.optional(),
-    /** When set by peer-delivery clients (hapi-ping-peer / MCP ping_peer), hub stamps message meta for notify ingest. */
-    notifySource: z.literal('peer').optional()
+    deliveryMode: MessageDeliveryModeSchema.optional()
 }).refine(
     (data) => data.scheduledAt == null || typeof data.localId === 'string',
     { message: 'scheduledAt requires localId', path: ['localId'] }
@@ -549,6 +547,13 @@ export const SendMessageRequestSchema = z.object({
 )
 
 export type SendMessageRequest = z.infer<typeof SendMessageRequestSchema>
+
+/** Peer-delivery only (hapi-ping-peer). Hub stamps meta.notifySource=peer; clients cannot set it on ordinary /messages. */
+export const PeerMessageRequestSchema = z.object({
+    text: z.string().min(1)
+})
+
+export type PeerMessageRequest = z.infer<typeof PeerMessageRequestSchema>
 
 export const ForkConversationRequestSchema = z.object({
     messageLocalId: z.string().min(1).optional()

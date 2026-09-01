@@ -348,8 +348,8 @@ async function sendMessage(
     http: AxiosInstance
 ): Promise<void> {
     const response = await http.post(
-        `${apiUrl}/api/sessions/${encodeURIComponent(sessionId)}/messages`,
-        { text: message, notifySource: 'peer' },
+        `${apiUrl}/api/sessions/${encodeURIComponent(sessionId)}/peer-messages`,
+        { text: message },
         {
             headers: authHeaders(jwt),
             timeout: 30_000,

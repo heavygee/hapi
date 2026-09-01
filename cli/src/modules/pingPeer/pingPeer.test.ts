@@ -79,8 +79,8 @@ describe('pingPeer', () => {
                     expect(body).toEqual({ accessToken: 'tok' })
                     return { status: 200, data: { token: 'jwt' } }
                 }
-                if (url.endsWith(`/api/sessions/${sessionId}/messages`)) {
-                    expect(body).toEqual({ text: 'hello peer', notifySource: 'peer' })
+                if (url.endsWith(`/api/sessions/${sessionId}/peer-messages`)) {
+                    expect(body).toEqual({ text: 'hello peer' })
                     return { status: 200, data: { ok: true } }
                 }
                 throw new Error(`unexpected POST ${url}`)
@@ -143,7 +143,7 @@ describe('pingPeer', () => {
                 if (url.endsWith(`/api/sessions/${sessionId}/resume`)) {
                     return { status: 200, data: { type: 'success', sessionId, resumed: true } }
                 }
-                if (url.endsWith(`/api/sessions/${sessionId}/messages`)) {
+                if (url.endsWith(`/api/sessions/${sessionId}/peer-messages`)) {
                     expect(active).toBe(true)
                     return { status: 200, data: { ok: true } }
                 }
@@ -215,7 +215,7 @@ describe('pingPeer', () => {
                     resumeCalls += 1
                     return { status: 200, data: { type: 'success', sessionId, resumed: true } }
                 }
-                if (url.endsWith(`/api/sessions/${sessionId}/messages`)) {
+                if (url.endsWith(`/api/sessions/${sessionId}/peer-messages`)) {
                     expect(active).toBe(true)
                     expect(resumeCalls).toBe(1)
                     return { status: 200, data: { ok: true } }
@@ -284,7 +284,7 @@ describe('pingPeer', () => {
                 if (url.endsWith('/api/auth')) {
                     return { status: 200, data: { token: 'jwt' } }
                 }
-                if (url.endsWith(`/api/sessions/${sessionId}/messages`)) {
+                if (url.endsWith(`/api/sessions/${sessionId}/peer-messages`)) {
                     expect(piSessionId).toBe('pi-ready-1')
                     return { status: 200, data: { ok: true } }
                 }
@@ -631,7 +631,7 @@ describe('listSessions query params', () => {
                 if (url.endsWith('/api/auth')) {
                     return { status: 200, data: { token: 'jwt' } }
                 }
-                if (url.endsWith(`/api/sessions/${sessionId}/messages`)) {
+                if (url.endsWith(`/api/sessions/${sessionId}/peer-messages`)) {
                     expect(body).toMatchObject({ text: 'hi' })
                     return { status: 200, data: { ok: true } }
                 }

@@ -144,9 +144,18 @@ describe('SyncEngine.handleRealtimeEvent dedup-on-metadata-change', () => {
 describe('SyncEngine.handleRealtimeEvent notify → work-graph ingest', () => {
     function makeEngine(): { engine: SyncEngine; store: Store } {
         const store = new Store(':memory:')
+        const io = {
+            of() {
+                return {
+                    to() {
+                        return { emit() {} }
+                    }
+                }
+            }
+        }
         const engine = new SyncEngine(
             store,
-            {} as never,
+            io as never,
             new RpcRegistry(),
             { broadcast() {} } as never
         )
@@ -317,5 +326,49 @@ describe('SyncEngine.handleRealtimeEvent notify → work-graph ingest', () => {
         expect(rows).toHaveLength(1)
         expect(rows[0]!.summary?.length).toBe(WORK_GRAPH_MAX_SUMMARY)
         expect(rows[0]!.summary?.length).toBeLessThan(oversized.length)
+    })
+
+    it('captures peer notify footers from SyncEngine.sendMessage (REST peer-messages path)', async () => {
+        const { engine, store } = makeEngine()
+        const session = store.sessions.getOrCreateSession(
+            'notify-peer-rest',
+            { path: '/tmp', host: 'h', flavor: 'cursor' },
+            null,
+            'default'
+        )
+        engine.handleRealtimeEvent({ type: 'session-updated', sessionId: session.id })
+
+        await engine.sendMessage(session.id, {
+            text: [
+                'From: Peer #1: helper',
+                '',
+                'AGENT_NOTIFY_SUMMARY {"status":"done","summary":"peer rest wired","action":"idle"}'
+            ].join('\n'),
+            sentFrom: 'webapp',
+            notifySource: 'peer'
+        })
+
+        const rows = store.workGraph.listByRelatedSession('default', session.id)
+        expect(rows).toHaveLength(1)
+        expect(rows[0]!.summary).toBe('peer rest wired')
+        expect(rows[0]!.provenance).toBe('AGENT_NOTIFY_SUMMARY')
+    })
+
+    it('does not elevate ordinary sendMessage without notifySource=peer', async () => {
+        const { engine, store } = makeEngine()
+        const session = store.sessions.getOrCreateSession(
+            'notify-web-rest',
+            { path: '/tmp', host: 'h', flavor: 'cursor' },
+            null,
+            'default'
+        )
+        engine.handleRealtimeEvent({ type: 'session-updated', sessionId: session.id })
+
+        await engine.sendMessage(session.id, {
+            text: 'Paste.\n\nAGENT_NOTIFY_SUMMARY {"status":"done","summary":"should not land"}',
+            sentFrom: 'webapp'
+        })
+
+        expect(store.workGraph.listByRelatedSession('default', session.id)).toHaveLength(0)
     })
 })
