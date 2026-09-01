@@ -166,38 +166,7 @@ export class OverseerEventRecorder {
 
             const plainText = extractAssistantPlainText(agentContent)
             if (plainText) {
-                if (detectEmptyHapiEventsSentinel(plainText)) {
-                    primary = this.insertSystemEvent(session, {
-                        ts,
-                        sourceKind: 'system',
-                        eventType: 'validation_error',
-                        attentionCandidate: 0,
-                        summary: 'Malformed HAPI_EVENTS sentinel block (empty body)',
-                        relatedSessionId: session.id,
-                        provenance: 'hub-inferred from empty HAPI_EVENTS sentinel pair',
-                        idempotencyKey: `session:${session.id}:message:${messageId}:validation_error:empty_hapi_events`,
-                        payloadFields: { messageId, plainTextPreview: plainText.slice(0, 500) },
-                        severity: 1
-                    })
-                } else if (detectMalformedNotifySummaryLine(plainText)) {
-                    primary = this.insertSystemEvent(session, {
-                        ts,
-                        sourceKind: 'system',
-                        eventType: 'validation_error',
-                        attentionCandidate: 0,
-                        summary: 'Malformed AGENT_NOTIFY_SUMMARY line on last turn',
-                        relatedSessionId: session.id,
-                        provenance: 'hub-inferred from malformed AGENT_NOTIFY_SUMMARY JSON',
-                        idempotencyKey: `session:${session.id}:message:${messageId}:validation_error:malformed_notify`,
-                        payloadFields: { messageId },
-                        severity: 1
-                    })
-                } else {
-                    const notify = extractNotifySummary(plainText)
-                    if (notify) {
-                        primary = this.recordNotifySummary(session, messageId, notify, ts)
-                    }
-                }
+                primary = this.recordNotifyFromPlainText(session, messageId, plainText, ts)
             }
 
             if (!primary) {
@@ -219,6 +188,15 @@ export class OverseerEventRecorder {
                         tags: buildTags(null, session.flavor)
                     })
                 }
+            }
+        } else {
+            // Peer pings / attributed deliveries land as role=user. Still scrape a
+            // trailing AGENT_NOTIFY_SUMMARY so Session Log / inbox capture A2A status.
+            const plainText = extractTextForLinkScoop(content)
+            if (plainText) {
+                primary = this.recordNotifyFromPlainText(session, messageId, plainText, ts, {
+                    deliveryRole: 'user'
+                })
             }
         }
 
@@ -321,11 +299,54 @@ export class OverseerEventRecorder {
         return emitted
     }
 
+    private recordNotifyFromPlainText(
+        session: SessionSnapshot,
+        messageId: string,
+        plainText: string,
+        ts: number,
+        extras: { deliveryRole?: 'agent' | 'user' } = {}
+    ): StoredSystemEvent | null {
+        if (detectEmptyHapiEventsSentinel(plainText)) {
+            return this.insertSystemEvent(session, {
+                ts,
+                sourceKind: 'system',
+                eventType: 'validation_error',
+                attentionCandidate: 0,
+                summary: 'Malformed HAPI_EVENTS sentinel block (empty body)',
+                relatedSessionId: session.id,
+                provenance: 'hub-inferred from empty HAPI_EVENTS sentinel pair',
+                idempotencyKey: `session:${session.id}:message:${messageId}:validation_error:empty_hapi_events`,
+                payloadFields: { messageId, plainTextPreview: plainText.slice(0, 500), ...extras },
+                severity: 1
+            })
+        }
+        if (detectMalformedNotifySummaryLine(plainText)) {
+            return this.insertSystemEvent(session, {
+                ts,
+                sourceKind: 'system',
+                eventType: 'validation_error',
+                attentionCandidate: 0,
+                summary: 'Malformed AGENT_NOTIFY_SUMMARY line on last turn',
+                relatedSessionId: session.id,
+                provenance: 'hub-inferred from malformed AGENT_NOTIFY_SUMMARY JSON',
+                idempotencyKey: `session:${session.id}:message:${messageId}:validation_error:malformed_notify`,
+                payloadFields: { messageId, ...extras },
+                severity: 1
+            })
+        }
+        const notify = extractNotifySummary(plainText)
+        if (!notify) {
+            return null
+        }
+        return this.recordNotifySummary(session, messageId, notify, ts, extras)
+    }
+
     private recordNotifySummary(
         session: SessionSnapshot,
         messageId: string,
         notify: NotifySummary,
-        ts: number
+        ts: number,
+        extras: { deliveryRole?: 'agent' | 'user' } = {}
     ): StoredSystemEvent | null {
         const eventType = mapNotifyStatusToEventType(notify.status)
         const attentionCandidate = deriveAttentionCandidate(notify.status, notify.action)
@@ -341,12 +362,15 @@ export class OverseerEventRecorder {
             operatorActionRequired,
             summary: buildEventSummaryFromNotify(notify),
             relatedSessionId: session.id,
-            provenance: 'AGENT_NOTIFY_SUMMARY',
+            provenance: extras.deliveryRole === 'user'
+                ? 'AGENT_NOTIFY_SUMMARY (user-role delivery)'
+                : 'AGENT_NOTIFY_SUMMARY',
             idempotencyKey: `session:${session.id}:message:${messageId}:notify`,
             payloadFields: {
                 messageId,
                 notify_summary: notify,
-                suggested_action: notify.action ?? null
+                suggested_action: notify.action ?? null,
+                ...extras
             },
             notifyProject: notify.project ?? null,
             severity: deriveSeverity(eventType),
