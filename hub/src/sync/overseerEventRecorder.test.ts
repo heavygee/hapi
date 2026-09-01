@@ -356,4 +356,43 @@ describe('OverseerEventRecorder', () => {
         await recorder.onAgentMessage(snapshot, 'msg-dup', content, Date.now())
         expect(store.events.list({ eventType: 'link_seen' })).toHaveLength(1)
     })
+
+    it('records AGENT_NOTIFY_SUMMARY from user-role peer deliveries (hapi-ping-peer)', async () => {
+        const store = new Store(':memory:')
+        const recorder = new OverseerEventRecorder(store.events, store.inbox)
+        const session = store.sessions.getOrCreateSession('peer-recv', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
+
+        const content = {
+            role: 'user',
+            content: {
+                type: 'text',
+                text: [
+                    'From: Peer #1717: blocked list UX',
+                    '',
+                    'LEASE: already released.',
+                    '',
+                    'AGENT_NOTIFY_SUMMARY {"version":1,"status":"done","action":"idle until dogfood","summary":"lease confirmed released; standing down"}'
+                ].join('\n')
+            }
+        }
+
+        const event = await recorder.onAgentMessage(
+            toSessionSnapshot(makeSession(session.id, 'cursor'), session.tag),
+            'msg-peer-ping',
+            content,
+            Date.now()
+        )
+
+        expect(event?.eventType).toBe('completed')
+        expect(event?.summary).toBe('lease confirmed released; standing down')
+        expect(event?.provenance).toBe('AGENT_NOTIFY_SUMMARY (user-role delivery)')
+        const payload = JSON.parse(event!.payloadJson!) as {
+            messageId: string
+            deliveryRole?: string
+            notify_summary: { status?: string }
+        }
+        expect(payload.messageId).toBe('msg-peer-ping')
+        expect(payload.deliveryRole).toBe('user')
+        expect(payload.notify_summary.status).toBe('done')
+    })
 })

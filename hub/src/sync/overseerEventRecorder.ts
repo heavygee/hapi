@@ -305,6 +305,17 @@ export class OverseerEventRecorder {
             return primary
         }
 
+        // Peer pings / attributed deliveries land as role=user. Still scrape a
+        // trailing AGENT_NOTIFY_SUMMARY so Session Log / inbox capture A2A status.
+        const userPlainText = extractTextForLinkScoop(content)
+        if (userPlainText) {
+            primary = await this.enqueueSessionWork(session.id, () =>
+                Promise.resolve(this.recordNotifyFromPlainText(session, messageId, userPlainText, ts, {
+                    deliveryRole: 'user'
+                }))
+            )
+        }
+
         const seen = this.seenUserMessageIds.get(session.id) ?? new Set<string>()
         if (!seen.has(messageId)) {
             seen.add(messageId)
@@ -568,17 +579,54 @@ export class OverseerEventRecorder {
         return emitted
     }
 
-    /**
-     * (Removed) Hub first-line text synth — do not reintroduce. Session Log is
-     * agent AGENT_NOTIFY_SUMMARY (+ rare session-end completed) only.
-     * Opt-in LLM fallback lives on feat/overseer-llm-fallback.
-     */
+    private recordNotifyFromPlainText(
+        session: SessionSnapshot,
+        messageId: string,
+        plainText: string,
+        ts: number,
+        extras: { deliveryRole?: 'agent' | 'user' } = {}
+    ): StoredSystemEvent | null {
+        if (detectEmptyHapiEventsSentinel(plainText)) {
+            return this.insertSystemEvent(session, {
+                ts,
+                sourceKind: 'system',
+                eventType: 'validation_error',
+                attentionCandidate: 0,
+                summary: 'Malformed HAPI_EVENTS sentinel block (empty body)',
+                relatedSessionId: session.id,
+                provenance: 'hub-inferred from empty HAPI_EVENTS sentinel pair',
+                idempotencyKey: `session:${session.id}:message:${messageId}:validation_error:empty_hapi_events`,
+                payloadFields: { messageId, plainTextPreview: plainText.slice(0, 500), ...extras },
+                severity: 1
+            })
+        }
+        if (detectMalformedNotifySummaryLine(plainText)) {
+            return this.insertSystemEvent(session, {
+                ts,
+                sourceKind: 'system',
+                eventType: 'validation_error',
+                attentionCandidate: 0,
+                summary: 'Malformed AGENT_NOTIFY_SUMMARY line on last turn',
+                relatedSessionId: session.id,
+                provenance: 'hub-inferred from malformed AGENT_NOTIFY_SUMMARY JSON',
+                idempotencyKey: `session:${session.id}:message:${messageId}:validation_error:malformed_notify`,
+                payloadFields: { messageId, ...extras },
+                severity: 1
+            })
+        }
+        const notify = extractNotifySummary(plainText)
+        if (!notify) {
+            return null
+        }
+        return this.recordNotifySummary(session, messageId, notify, ts, extras)
+    }
 
     private recordNotifySummary(
         session: SessionSnapshot,
         messageId: string,
         notify: NotifySummary,
-        ts: number
+        ts: number,
+        extras: { deliveryRole?: 'agent' | 'user' } = {}
     ): StoredSystemEvent | null {
         const eventType = mapNotifyStatusToEventType(notify.status)
         const attentionCandidate = deriveAttentionCandidate(notify.status, notify.action)
@@ -597,12 +645,15 @@ export class OverseerEventRecorder {
             operatorActionRequired,
             summary: buildEventSummaryFromNotify(notify),
             relatedSessionId: session.id,
-            provenance: 'AGENT_NOTIFY_SUMMARY',
+            provenance: extras.deliveryRole === 'user'
+                ? 'AGENT_NOTIFY_SUMMARY (user-role delivery)'
+                : 'AGENT_NOTIFY_SUMMARY',
             idempotencyKey: `session:${session.id}:message:${messageId}:notify`,
             payloadFields: {
                 messageId,
                 notify_summary: notify,
-                suggested_action: usableNotifyAction(notify.action)
+                suggested_action: usableNotifyAction(notify.action),
+                ...extras
             },
             notifyProject: usableNotifyToken(notify.project),
             severity: deriveSeverity(eventType),
