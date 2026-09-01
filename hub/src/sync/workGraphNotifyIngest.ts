@@ -122,6 +122,11 @@ export type NotifyIngestInput = {
     /** Authenticated hub owner id; required for accountable agent principal. */
     ownerUserId: string | number
     flavor?: string | null
+    /**
+     * Hub-validated peer sender id from POST /cli/sessions/:source/peer-messages.
+     * Never derived from persisted message meta (socket clients can forge that).
+     */
+    trustedPeerSourceSessionId?: string
 }
 
 export type NotifyIngestResult = InsertWorkGraphEventResult | null
@@ -454,42 +459,26 @@ export function buildWorkAdFromNotify(params: {
  * On message ingest: well-formed trailing AGENT_NOTIFY_SUMMARY →
  * idempotent work_ad row. Invalid/missing footer → no-op (null).
  *
- * Accepts agent assistant text, plus user-role deliveries stamped by the
- * CLI peer path (`meta.notifySource: "peer"` + `meta.sourceSessionId` from
- * `POST /cli/sessions/:source/peer-messages`). Ordinary web/CLI/Telegram
- * prompts are never elevated even if they paste a footer.
+ * Accepts agent assistant text, plus user-role deliveries from the
+ * validated CLI peer route (caller passes trustedPeerSourceSessionId).
+ * Persisted meta.notifySource is never trusted — socket clients can forge it.
+ * Ordinary web/CLI/Telegram prompts are never elevated even if they paste a footer.
  *
  * Ledger rows are append-only audit: deleting the related session does not
  * delete work_ad rows (cold review M1).
  */
-function extractPeerSourceSessionId(content: unknown): string | null {
-    const record = asRecord(content)
-    if (record?.role !== 'user') return null
-    const meta = asRecord(record.meta)
-    if (meta?.notifySource !== 'peer') return null
-    return typeof meta.sourceSessionId === 'string' && meta.sourceSessionId.trim().length > 0
-        ? meta.sourceSessionId.trim()
-        : null
-}
-
-function isPeerNotifyDelivery(content: unknown): boolean {
-    return extractPeerSourceSessionId(content) !== null
-}
-
-function extractPlainTextForNotify(content: unknown): string | null {
-    if (isAgentMessageContent(content)) {
-        const agentBody = unwrapRoleWrappedRecordEnvelope(content)
-        const agentContent = agentBody?.role === 'agent' ? agentBody.content : content
-        return extractAssistantPlainText(agentContent)
-    }
-    if (isPeerNotifyDelivery(content)) {
-        return extractInboundCauseText(content)
-    }
-    return null
+function extractAgentNotifyText(content: unknown): string | null {
+    if (!isAgentMessageContent(content)) return null
+    const agentBody = unwrapRoleWrappedRecordEnvelope(content)
+    const agentContent = agentBody?.role === 'agent' ? agentBody.content : content
+    return extractAssistantPlainText(agentContent)
 }
 
 export function ingestNotifySummaryFromMessage(input: NotifyIngestInput): NotifyIngestResult {
-    const plainText = extractPlainTextForNotify(input.content)
+    const peerSourceSessionId = input.trustedPeerSourceSessionId?.trim() || null
+    const plainText = peerSourceSessionId
+        ? extractInboundCauseText(input.content)
+        : extractAgentNotifyText(input.content)
     if (!plainText) {
         return null
     }
@@ -499,7 +488,6 @@ export function ingestNotifySummaryFromMessage(input: NotifyIngestInput): Notify
         return null
     }
 
-    const peerSourceSessionId = extractPeerSourceSessionId(input.content)
     const principalSessionId = peerSourceSessionId ?? input.sessionId
 
     // Cause is hub-derived from session messages SQL (no REST 200 cap).
@@ -509,13 +497,22 @@ export function ingestNotifySummaryFromMessage(input: NotifyIngestInput): Notify
         input.sessionId,
         principalSessionId
     )
-    const messages = loadMessagesForCause(input.store, input.sessionId, previousWorkAds)
-    const assistantSeq = messages.find((message) => message.id === input.messageId)?.seq ?? null
-    const { cause, previousEventId } = resolveWorkAdCause({
-        messages,
-        previousWorkAds,
-        assistantSeq
-    })
+    // Peer deliveries are not a recipient turn response — do not attribute
+    // unrelated target prompts as cause of the peer-authored work_ad.
+    const { cause, previousEventId } = peerSourceSessionId
+        ? {
+            cause: null,
+            previousEventId: previousWorkAds.at(-1)?.id ?? null
+        }
+        : (() => {
+            const messages = loadMessagesForCause(input.store, input.sessionId, previousWorkAds)
+            const assistantSeq = messages.find((message) => message.id === input.messageId)?.seq ?? null
+            return resolveWorkAdCause({
+                messages,
+                previousWorkAds,
+                assistantSeq
+            })
+        })()
 
     const create = buildWorkAdFromNotify({
         sessionId: input.sessionId,

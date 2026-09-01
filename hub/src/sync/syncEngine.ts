@@ -1005,17 +1005,26 @@ export class SyncEngine {
             await this.messageService.sendMessage(sessionId, payload)
         this.sessionCache.markMessageQueued(actualSessionId, Date.now(), activeTurnStartedAt)
         this.sessionCache.recordSessionActivity(actualSessionId, Date.now())
-        this.captureNotifyFromMessage(actualSessionId, message)
+        this.captureNotifyFromMessage(actualSessionId, message, {
+            trustedPeerSourceSessionId: payload.notifySource === 'peer'
+                ? payload.peerSourceSessionId
+                : undefined
+        })
     }
 
     private captureNotifyFromMessage(
         sessionId: string,
-        message: { id: string; content: unknown; createdAt: number }
+        message: { id: string; content: unknown; createdAt: number },
+        options?: { trustedPeerSourceSessionId?: string }
     ): void {
         const session = this.getSession(sessionId)
         if (!session) {
             return
         }
+        const peerSourceSessionId = options?.trustedPeerSourceSessionId?.trim() || null
+        const principalSession = peerSourceSessionId
+            ? this.getSession(peerSourceSessionId)
+            : session
         try {
             ingestNotifySummaryFromMessage({
                 store: this.store,
@@ -1025,7 +1034,8 @@ export class SyncEngine {
                 content: message.content,
                 ts: message.createdAt,
                 ownerUserId: this.hubOwnerUserId,
-                flavor: session.metadata?.flavor ?? null
+                flavor: principalSession?.metadata?.flavor ?? null,
+                trustedPeerSourceSessionId: peerSourceSessionId ?? undefined
             })
         } catch (error) {
             console.error('[work-graph] notify ingest failed', error)
