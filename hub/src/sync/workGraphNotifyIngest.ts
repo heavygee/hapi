@@ -441,20 +441,32 @@ export function buildWorkAdFromNotify(params: {
 }
 
 /**
- * On assistant message ingest: well-formed trailing AGENT_NOTIFY_SUMMARY →
+ * On message ingest: well-formed trailing AGENT_NOTIFY_SUMMARY →
  * idempotent work_ad row. Invalid/missing footer → no-op (null).
+ *
+ * Accepts agent assistant text and user-role deliveries (hapi-ping-peer /
+ * attributed peer posts land as role=user). Capture must not depend on chat
+ * display settings.
  *
  * Ledger rows are append-only audit: deleting the related session does not
  * delete work_ad rows (cold review M1).
  */
-export function ingestNotifySummaryFromMessage(input: NotifyIngestInput): NotifyIngestResult {
-    if (!isAgentMessageContent(input.content)) {
-        return null
+function extractPlainTextForNotify(content: unknown): string | null {
+    if (isAgentMessageContent(content)) {
+        const agentBody = unwrapRoleWrappedRecordEnvelope(content)
+        const agentContent = agentBody?.role === 'agent' ? agentBody.content : content
+        return extractAssistantPlainText(agentContent)
     }
+    if (isInboundUserMessage(content)) {
+        // Peer pings / attributed deliveries are role=user text with a trailing
+        // AGENT_NOTIFY_SUMMARY — same contract as agent footers.
+        return extractInboundCauseText(content)
+    }
+    return null
+}
 
-    const agentBody = unwrapRoleWrappedRecordEnvelope(input.content)
-    const agentContent = agentBody?.role === 'agent' ? agentBody.content : input.content
-    const plainText = extractAssistantPlainText(agentContent)
+export function ingestNotifySummaryFromMessage(input: NotifyIngestInput): NotifyIngestResult {
+    const plainText = extractPlainTextForNotify(input.content)
     if (!plainText) {
         return null
     }

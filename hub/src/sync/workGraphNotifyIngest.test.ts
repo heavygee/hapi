@@ -243,6 +243,41 @@ describe('ingestNotifySummaryFromMessage', () => {
         expect(store.workGraph.listByRelatedSession('default', session.id)).toHaveLength(0)
     })
 
+    it('captures AGENT_NOTIFY_SUMMARY from user-role peer deliveries', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('sess-peer-user', {}, null, 'default')
+        const content = userInbound(
+            [
+                'From: Peer #1717: blocked list UX',
+                '',
+                'LEASE: already released.',
+                '',
+                'AGENT_NOTIFY_SUMMARY {"version":1,"status":"done","action":"idle until dogfood","summary":"lease confirmed released; standing down"}'
+            ].join('\n'),
+            'peer'
+        )
+
+        const result = ingestNotifySummaryFromMessage({
+            store,
+            namespace: 'default',
+            sessionId: session.id,
+            messageId: 'msg-peer-ping',
+            content,
+            ts: Date.now(),
+            ownerUserId: 1,
+            flavor: 'cursor'
+        })
+
+        expect(result?.inserted).toBe(true)
+        expect(result?.event.eventType).toBe('work_ad')
+        expect(result?.event.summary).toBe('lease confirmed released; standing down')
+        expect(result?.event.provenance).toBe('AGENT_NOTIFY_SUMMARY')
+        expect(result?.event.payloadJson).toMatchObject({
+            status: 'done',
+            action: 'idle until dogfood'
+        })
+    })
+
     it('does not require a chat display setting — capture always runs when well-formed', () => {
         // Kill criterion: display-off does not block capture. This path has no
         // display gate at all; presence of a footer is sufficient.
