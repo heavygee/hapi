@@ -29,6 +29,7 @@ export const TITLE_INSTRUCTION = trimIdent(`
         pingTool: 'functions.hapi__ping_peer',
         listPeersTool: 'functions.hapi__list_peers',
         spawnTool: 'functions.hapi__spawn_peer',
+        searchPeersTool: 'functions.hapi__search_peers',
     })}
 `);
 

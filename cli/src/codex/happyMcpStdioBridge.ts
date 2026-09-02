@@ -1,7 +1,7 @@
 /**
  * HAPI MCP STDIO Bridge
  *
- * Minimal STDIO MCP server exposing HAPI tools such as `change_title`, `display_image`, `display_video`, `display_media`, `list_peers`, `ping_peer`, `inspect_peer`, and `spawn_peer`.
+ * Minimal STDIO MCP server exposing HAPI tools such as `change_title`, `display_image`, `display_video`, `display_media`, `list_peers`, `search_peers`, `ping_peer`, `inspect_peer`, and `spawn_peer`.
  * `display_links` is Cursor-only and is registered only when `--tools` includes it.
  * On invocation it forwards the tool call to an existing HAPI HTTP MCP server
  * using the StreamableHTTPClientTransport.
@@ -39,6 +39,7 @@ const DEFAULT_TOOL_NAMES = [
   'display_video',
   'display_media',
   'list_peers',
+  'search_peers',
   'ping_peer',
   'inspect_peer',
   'spawn_peer',
@@ -361,7 +362,7 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
       server.registerTool<any, any>(
         'list_peers',
         {
-          description: 'List peer HAPI sessions on the same hub/namespace (id prefix, active, flavor, name). Uses this session\'s hub credentials - works from runner-spawned agents without being on the hub host. Prefer this over shelling `hapi ping-peer --list`. Then call inspect_peer / ping_peer with a listed id, or spawn_peer to create a new peer with a remit.',
+          description: 'List peer HAPI sessions on the same hub/namespace (id prefix, active, flavor, name). Uses this session\'s hub credentials - works from runner-spawned agents without being on the hub host. Prefer this over shelling `hapi ping-peer --list`. Then call inspect_peer / ping_peer with a listed id, search_peers for keyword inventory beyond the recency window, or spawn_peer to create a new peer with a remit.',
           title: 'List Peer Sessions',
           inputSchema: listPeersInputSchema,
         },
@@ -374,6 +375,40 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
             return {
               content: [
                 { type: 'text' as const, text: `Failed to list peers: ${error instanceof Error ? error.message : String(error)}` },
+              ],
+              isError: true,
+            };
+          }
+        }
+      );
+    }
+
+    const searchPeersInputSchema: z.ZodTypeAny = z.object({
+      query: z.string().trim().min(1).max(256).describe(
+        'Keyword to match against session name, path, agentSessionId, or id.'
+      ),
+      limit: z.number().int().min(1).max(100).optional().describe(
+        'Max matches to return (default 30, max 100). Ranked by match field then updatedAt.'
+      ),
+    });
+
+    if (toolNames.has('search_peers')) {
+      server.registerTool<any, any>(
+        'search_peers',
+        {
+          description: 'Search peer HAPI sessions on the same hub/namespace by keyword (name, path, agentSessionId, id). Not bounded by list_peers recency — finds quiet/aged sessions. Prefer this over /proc→SQLite archaeology. Then call inspect_peer / ping_peer with a returned id.',
+          title: 'Search Peer Sessions',
+          inputSchema: searchPeersInputSchema,
+        },
+        async (args: Record<string, unknown>) => {
+          try {
+            const client = await ensureHttpClient();
+            const response = await client.callTool({ name: 'search_peers', arguments: args });
+            return response as any;
+          } catch (error) {
+            return {
+              content: [
+                { type: 'text' as const, text: `Failed to search peers: ${error instanceof Error ? error.message : String(error)}` },
               ],
               isError: true,
             };

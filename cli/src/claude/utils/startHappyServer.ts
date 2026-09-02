@@ -31,7 +31,7 @@ import {
 } from '@hapi/protocol/sessionCitation'
 import { CREATABLE_AGENT_FLAVORS } from '@hapi/protocol/modes'
 import { PermissionModeSchema } from '@hapi/protocol/schemas'
-import { PingPeerError, formatInspectPeerReport, formatPeerSessionsList, inspectPeer, listPeerSessions, peerListFetchLimit, pingPeer } from "@/modules/pingPeer/pingPeer";
+import { PingPeerError, formatInspectPeerReport, formatPeerSessionsList, inspectPeer, listPeerSessions, peerListFetchLimit, pingPeer, searchPeerSessions } from "@/modules/pingPeer/pingPeer";
 import {
     SESSION_JOB_TOOL_DESCRIPTION,
     SESSION_JOB_TOOL_NAME,
@@ -76,6 +76,7 @@ const CLAUDE_MANUAL_APPROVAL_HAPI_TOOLS = new Set([
  * Keeps `display_media` / `display_video` (arbitrary local-path readers), `ping_peer`,
  * `inspect_peer`, and `spawn_peer` off the auto-allow list so they still prompt.
  * `list_peers` stays allowed (discovery shortlist only).
+ * `search_peers` stays allowed (keyword inventory; no resume/inject).
  */
 export function toClaudeAllowedHapiMcpTools(toolNames: string[]): string[] {
     return toolNames
@@ -178,6 +179,15 @@ function createHapiMcpServer(
     const listPeersInputSchema: z.ZodTypeAny = z.object({
         limit: z.number().int().min(1).max(100).optional().describe(
             'Max sessions to return (default 30, max 100). Newest updatedAt first.'
+        ),
+    });
+
+    const searchPeersInputSchema: z.ZodTypeAny = z.object({
+        query: z.string().trim().min(1).max(256).describe(
+            'Keyword to match against session name, path, agentSessionId, or id.'
+        ),
+        limit: z.number().int().min(1).max(100).optional().describe(
+            'Max matches to return (default 30, max 100). Ranked by match field then updatedAt.'
         ),
     });
 
@@ -532,7 +542,7 @@ function createHapiMcpServer(
     });
 
     mcp.registerTool<any, any>('list_peers', {
-        description: 'List peer HAPI sessions on the same hub/namespace (id prefix, active, flavor, name). Uses this session\'s hub credentials - works from runner-spawned agents without being on the hub host. Prefer this over shelling `hapi ping-peer --list`. Then call inspect_peer / ping_peer with a listed id, or spawn_peer to create a new peer with a remit.',
+        description: 'List peer HAPI sessions on the same hub/namespace (id prefix, active, flavor, name). Uses this session\'s hub credentials - works from runner-spawned agents without being on the hub host. Prefer this over shelling `hapi ping-peer --list`. Then call inspect_peer / ping_peer with a listed id, search_peers for keyword inventory beyond the recency window, or spawn_peer to create a new peer with a remit.',
         title: 'List Peer Sessions',
         inputSchema: listPeersInputSchema,
     }, async (args: { limit?: number }) => {
@@ -568,6 +578,53 @@ function createHapiMcpServer(
                     {
                         type: 'text' as const,
                         text: `Failed to list peers: ${message}`,
+                    },
+                ],
+                isError: true,
+            };
+        }
+    });
+
+    mcp.registerTool<any, any>('search_peers', {
+        description: 'Search peer HAPI sessions on the same hub/namespace by keyword (name, path, agentSessionId, id). Not bounded by list_peers recency — finds quiet/aged sessions. Prefer this over /proc→SQLite archaeology. Then call inspect_peer / ping_peer with a returned id.',
+        title: 'Search Peer Sessions',
+        inputSchema: searchPeersInputSchema,
+    }, async (args: { query: string; limit?: number }) => {
+        logger.debug('[hapiMCP] search_peers:', args.query);
+        try {
+            const limit = args.limit ?? 30;
+            const sessions = await searchPeerSessions({
+                query: args.query,
+                limit: peerListFetchLimit(limit, { excludeCaller: true }),
+            });
+            const peers = sessions.filter((session) => session.id !== client.sessionId);
+            const hasMore = peers.length > limit;
+            return {
+                content: [
+                    {
+                        type: 'text' as const,
+                        text: formatPeerSessionsList(peers, {
+                            maxRows: limit,
+                            hasMore,
+                            preserveOrder: true,
+                            emptyMessage: `No peer sessions matched query '${args.query.trim()}'.`,
+                        }),
+                    },
+                ],
+                isError: false,
+            };
+        } catch (error) {
+            const message = error instanceof PingPeerError
+                ? error.message
+                : error instanceof Error
+                    ? error.message
+                    : String(error);
+            logger.debug('[hapiMCP] search_peers failed:', message);
+            return {
+                content: [
+                    {
+                        type: 'text' as const,
+                        text: `Failed to search peers: ${message}`,
                     },
                 ],
                 isError: true,
@@ -702,7 +759,7 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
     if (enableDisplayLinks) {
         toolNames.push('display_links');
     }
-    toolNames.push('list_peers', 'ping_peer', 'inspect_peer', 'spawn_peer', SESSION_JOB_TOOL_NAME);
+    toolNames.push('list_peers', 'search_peers', 'ping_peer', 'inspect_peer', 'spawn_peer', SESSION_JOB_TOOL_NAME);
     if (options.skillLookup) {
         toolNames.push('skill_lookup');
     }

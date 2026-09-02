@@ -27,6 +27,7 @@ export const TITLE_INSTRUCTION = trimIdent(`
         pingTool: 'hapi_ping_peer',
         listPeersTool: 'hapi_list_peers',
         spawnTool: 'hapi_spawn_peer',
+        searchPeersTool: 'hapi_search_peers',
     })}
     ${SKILL_LOOKUP_INSTRUCTION}
 `);
@@ -48,6 +49,7 @@ export const OPENCODE_NATIVE_TOOL_INSTRUCTION = trimIdent(`
         pingTool: 'hapi_ping_peer',
         listPeersTool: 'hapi_list_peers',
         spawnTool: 'hapi_spawn_peer',
+        searchPeersTool: 'hapi_search_peers',
     })}
     ${SKILL_LOOKUP_INSTRUCTION}
 `);

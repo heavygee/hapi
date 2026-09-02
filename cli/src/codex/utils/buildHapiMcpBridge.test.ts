@@ -18,7 +18,7 @@ vi.mock('@/claude/utils/startHappyServer', () => ({
             || (options.enableDisplayLinks !== false && options.skillLookup?.flavor === 'cursor')
         const names = ['change_title', 'display_image', 'display_video', 'display_media']
         if (cursorLinks) names.push('display_links')
-        names.push('list_peers', 'ping_peer', 'inspect_peer', 'spawn_peer', 'session_job')
+        names.push('list_peers', 'search_peers', 'ping_peer', 'inspect_peer', 'spawn_peer', 'session_job')
         if (options.skillLookup) names.push('skill_lookup')
         return {
             url: 'http://127.0.0.1:43006/',
@@ -79,7 +79,7 @@ describe('buildHapiMcpBridge skill lookup config', () => {
             '--url',
             'http://127.0.0.1:43006/',
             '--tools',
-            'change_title,display_image,display_video,display_media,list_peers,ping_peer,inspect_peer,spawn_peer,session_job,skill_lookup'
+            'change_title,display_image,display_video,display_media,list_peers,search_peers,ping_peer,inspect_peer,spawn_peer,session_job,skill_lookup'
         ])
         expect(bridge.mcpServers.hapi.tools).toEqual({
             display_image: { approval_mode: 'prompt' },
@@ -87,6 +87,8 @@ describe('buildHapiMcpBridge skill lookup config', () => {
             display_media: { approval_mode: 'prompt' },
             change_title: { approval_mode: 'approve' },
             list_peers: { approval_mode: 'approve' },
+            list_peers: { approval_mode: 'approve' },
+            search_peers: { approval_mode: 'approve' },
             session_job: { approval_mode: 'approve' },
             skill_lookup: { approval_mode: 'approve' }
         })
@@ -96,15 +98,14 @@ describe('buildHapiMcpBridge skill lookup config', () => {
     it('does not expose skill_lookup for native-skill bridge callers', async () => {
         const bridge = await buildHapiMcpBridge(createClient())
 
-        expect(harness.cliArgs.at(-1)).toBe(
-            'change_title,display_image,display_video,display_media,list_peers,ping_peer,inspect_peer,spawn_peer,session_job'
-        )
+            'change_title,display_image,display_video,display_media,list_peers,search_peers,ping_peer,inspect_peer,spawn_peer,session_job'
         expect(bridge.mcpServers.hapi.tools).toEqual({
             display_image: { approval_mode: 'prompt' },
             display_video: { approval_mode: 'prompt' },
             display_media: { approval_mode: 'prompt' },
             change_title: { approval_mode: 'approve' },
             list_peers: { approval_mode: 'approve' },
+            search_peers: { approval_mode: 'approve' },
             session_job: { approval_mode: 'approve' }
         })
         expect(bridge.mcpServers.hapi.tools).not.toHaveProperty('display_links')

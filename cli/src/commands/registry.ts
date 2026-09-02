@@ -26,6 +26,7 @@ import { jobCommand } from './job'
 import { spawnPeerCommand } from './spawnPeer'
 import { displayLinksCommand } from './displayLinks'
 import { versionCommand } from './version'
+import { searchPeersCommand } from './searchPeers'
 import type { CommandContext, CommandDefinition } from './types'
 
 // Gemini CLI was sunset (Google stopped serving the consumer Gemini CLI on
@@ -71,6 +72,7 @@ const COMMANDS: CommandDefinition[] = [
     jobCommand,
     spawnPeerCommand,
     displayLinksCommand,
+    searchPeersCommand,
     helpCommand,
     versionCommand,
 ]

@@ -143,6 +143,17 @@ describe('buildSessionCitationSteerInstruction', () => {
         expect(text.toLowerCase()).toMatch(/400|reject/)
         expect(text.toLowerCase()).not.toMatch(/strip/)
     })
+
+    it('mentions search_peers when provided', () => {
+        const text = buildSessionCitationSteerInstruction({
+            inspectTool: 'mcp__hapi__inspect_peer',
+            pingTool: 'mcp__hapi__ping_peer',
+            listPeersTool: 'mcp__hapi__list_peers',
+            searchPeersTool: 'mcp__hapi__search_peers',
+        })
+        expect(text).toContain('mcp__hapi__search_peers')
+        expect(text).toContain('hapi search-peers')
+    })
 })
 
 describe('SPAWN_PEER_TOOL_DESCRIPTION', () => {

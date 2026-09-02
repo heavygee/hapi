@@ -43,6 +43,7 @@ import {
     serializeContentSearchSessionIds
 } from '../../store/messageContentSearch'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
+import { normalizeSessionSearchQuery, scoreSessionSearchMatch } from './sessionSearchMatch'
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 // Leave room for the query, limit, and JSON envelope; the serialized session
@@ -159,6 +160,7 @@ export function createSessionsRoutes(
 
         return c.json({ sessions })
     })
+
 
     const respondToSessionContentSearch = (
         c: Context<WebAppEnv>,
@@ -316,6 +318,56 @@ export function createSessionsRoutes(
             matches: result.matches.map(({ sessionId: _sessionId, ...match }) => match),
             total: result.total
         })
+    })
+
+    // Keyword inventory search — not recency-bounded like list_peers / GET ?limit=.
+    // Must be registered before /sessions/:id so "search" is not treated as an id.
+    app.get('/sessions/search', (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const qRaw = c.req.query('q') ?? ''
+        const normalizedQuery = normalizeSessionSearchQuery(qRaw)
+        if (!normalizedQuery) {
+            return c.json({ error: 'query parameter q is required', code: 'bad_args' }, 400)
+        }
+
+        const limitRaw = c.req.query('limit')
+        const parsedLimit = limitRaw === undefined ? 30 : Number(limitRaw)
+        const limit = Number.isFinite(parsedLimit)
+            ? Math.min(100, Math.max(1, Math.floor(parsedLimit)))
+            : 30
+
+        const namespace = c.get('namespace')
+        const ranked = engine.getSessionsByNamespace(namespace)
+            .map((session) => ({
+                session,
+                score: scoreSessionSearchMatch(session, normalizedQuery)
+            }))
+            .filter((row) => row.score > 0)
+            .sort((a, b) => {
+                if (b.score !== a.score) {
+                    return b.score - a.score
+                }
+                return b.session.updatedAt - a.session.updatedAt
+            })
+            .slice(0, limit)
+            .map((row) => row.session)
+
+        const scheduledCounts = engine.getFutureScheduledMessageCounts(ranked.map((session) => session.id))
+        const nextScheduledAt = engine.getNextScheduledAtBySessionIds(ranked.map((session) => session.id))
+        const sessions = ranked.map((session) => {
+            const summary = toSessionSummary(session)
+            return {
+                ...summary,
+                futureScheduledMessageCount: scheduledCounts.get(session.id) ?? 0,
+                nextScheduledAt: nextScheduledAt.get(session.id) ?? null
+            }
+        })
+
+        return c.json({ sessions, q: normalizedQuery })
     })
 
     app.get('/sessions/:id/export', (c) => {

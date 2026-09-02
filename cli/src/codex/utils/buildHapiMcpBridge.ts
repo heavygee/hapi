@@ -115,8 +115,11 @@ export async function buildHapiMcpBridge(
             approval_mode: 'approve'
         };
     }
-    // Discovery shortlist only - same trust as skill_lookup / change_title.
+    // Discovery shortlist / keyword inventory - same trust as skill_lookup / change_title.
     tools.list_peers = {
+        approval_mode: 'approve'
+    };
+    tools.search_peers = {
         approval_mode: 'approve'
     };
     // Own-session progress meter (tiann/hapi#1404) — hub REST, not peer inject.
