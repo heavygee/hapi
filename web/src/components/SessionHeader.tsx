@@ -36,6 +36,7 @@ import { resolveSessionProjectLabel } from '@/lib/sessionProjectLabel'
 import { useMinuteTick } from '@/hooks/useMinuteTick'
 import { disableAllFue, useFue } from '@/lib/use-fue'
 import { FueCallout, FueDot } from '@/components/Fue'
+import { SessionInChatSearch } from '@/components/SessionInChatSearch'
 import { markSessionUnread } from '@/lib/sessionLastSeen'
 
 /** Same preference order as session-list chips: display label → host → short id. */
@@ -210,6 +211,7 @@ export function SessionHeader(props: {
     sessionLogActive?: boolean
     onToggleFlow?: () => void
     flowActive?: boolean
+    onSearchMessage?: (messageId: string, query: string) => void
     api: ApiClient | null
     titleSuggestionAvailable?: boolean
     canReopen?: boolean
@@ -565,6 +567,14 @@ export function SessionHeader(props: {
                         >
                             <FilesIcon />
                         </button>
+                    ) : null}
+
+                    {api && props.onSearchMessage ? (
+                        <SessionInChatSearch
+                            api={api}
+                            sessionId={session.id}
+                            onSelectMatch={props.onSearchMessage}
+                        />
                     ) : null}
 
                     {props.onToggleOutline ? (
