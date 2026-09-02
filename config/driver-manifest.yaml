@@ -932,3 +932,9 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/search-peers @ feat/search-peers
   # Tip: 71a06d877
   - branch: feat/search-peers
+
+  # tiann/hapi#1756 — in-session (open chat) FTS search + jump. Reuses #1554 indexer;
+  # web-only tip (header SessionInChatSearch → ?messageId=&messageQuery=).
+  # Worktree: ~/coding/hapi/worktrees/in-session-content-search @ driver/in-session-content-search
+  # Tip: e3c4494aa — no schema bump. Top layer for dogfood.
+  - branch: driver/in-session-content-search
