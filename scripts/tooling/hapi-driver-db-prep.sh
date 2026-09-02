@@ -173,6 +173,19 @@ PRAGMA user_version = 23;
 COMMIT;
 SQL
             ;;
+        30_to_29)
+            # tiann/hapi#1554 / PR #1598 — drop FTS5 session message content search
+            # (soup SCHEMA union: upstream claimed v25–v28; dogfood tip uses v30).
+            echo "  applying v30 -> v29 downgrade: DROP message_content_search* tables"
+            sqlite3 "$DB_PATH" <<'SQL'
+BEGIN IMMEDIATE;
+DROP TABLE IF EXISTS message_content_search_short;
+DROP TABLE IF EXISTS message_content_search_lookup;
+DROP TABLE IF EXISTS message_content_search;
+PRAGMA user_version = 29;
+COMMIT;
+SQL
+            ;;
         *)
             echo "ERROR: no known downgrade for v${from} -> v${to}" >&2
             echo "       Add a case to apply_downgrade_step() in $0" >&2

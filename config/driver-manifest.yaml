@@ -918,3 +918,9 @@ layers:
   # Independent CLI-only tip; place after blocked-list-ux. Worktree: unexpected-stop-blocked-footer.
   # Tip: fa9a3dbaa
   - branch: fix/cursor-unexpected-stop-blocked-footer
+
+  # tiann/hapi#1554 / PR #1598 — FTS5 session message content search (dogfood)
+  # Worktree: ~/coding/hapi/worktrees/session-content-search-soup @ driver/session-content-search
+  # Tip: a4c29c626 — SCHEMA v29→v30 union (PR claimed v25–v28); re-thin after dogfood bump
+  # Fat file delta (~69) needs HAPI_REMAT_ABSORB_FAT=1 for tip-forward absorb (1 commit).
+  - branch: driver/session-content-search
