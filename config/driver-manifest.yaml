@@ -923,6 +923,6 @@ layers:
 
   # tiann/hapi#1554 / PR #1598 — FTS5 session message content search (dogfood)
   # Worktree: ~/coding/hapi/worktrees/session-content-search-soup @ driver/session-content-search
-  # Tip: f75d4f3f1 — SCHEMA v29→v30 union (PR claimed v25–v28); re-thin after dogfood bump
+  # Tip: 8b00a347b — SCHEMA v29→v30 union (PR claimed v25–v28); re-thin after dogfood bump
   # Thin tip (1 commit, ≤40 files) for tip-forward; re-thin after dogfood bump.
   - branch: driver/session-content-search
