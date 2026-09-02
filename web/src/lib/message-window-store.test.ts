@@ -328,7 +328,8 @@ describe('message tail synchronization', () => {
             oldestPositionSeq: 40,
             newestPositionAt: 40_000,
             newestPositionSeq: 40,
-            epoch: 3
+            epoch: 3,
+            requiresLatestReset: false
         }))
 
         const latest = makeAgentMessage({ id: 'latest', seq: 41, at: 41_000 })
@@ -557,7 +558,8 @@ describe('message tail synchronization', () => {
             oldestPositionSeq: 40,
             newestPositionAt: 40_000,
             newestPositionSeq: 40,
-            epoch: 3
+            epoch: 3,
+            requiresLatestReset: false
         }))
 
         const staleResponse = deferred<MessagesResponse>()
