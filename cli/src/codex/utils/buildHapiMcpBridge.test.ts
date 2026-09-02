@@ -87,7 +87,6 @@ describe('buildHapiMcpBridge skill lookup config', () => {
             display_media: { approval_mode: 'prompt' },
             change_title: { approval_mode: 'approve' },
             list_peers: { approval_mode: 'approve' },
-            list_peers: { approval_mode: 'approve' },
             search_peers: { approval_mode: 'approve' },
             session_job: { approval_mode: 'approve' },
             skill_lookup: { approval_mode: 'approve' }
@@ -98,7 +97,9 @@ describe('buildHapiMcpBridge skill lookup config', () => {
     it('does not expose skill_lookup for native-skill bridge callers', async () => {
         const bridge = await buildHapiMcpBridge(createClient())
 
+        expect(harness.cliArgs.at(-1)).toBe(
             'change_title,display_image,display_video,display_media,list_peers,search_peers,ping_peer,inspect_peer,spawn_peer,session_job'
+        )
         expect(bridge.mcpServers.hapi.tools).toEqual({
             display_image: { approval_mode: 'prompt' },
             display_video: { approval_mode: 'prompt' },
