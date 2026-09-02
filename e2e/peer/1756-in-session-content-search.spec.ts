@@ -10,17 +10,16 @@
 import { createRequire } from 'node:module'
 import { mkdirSync } from 'node:fs'
 import { hostname } from 'node:os'
-import { dirname, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { resolve } from 'node:path'
 import { test, expect, type Page } from '@playwright/test'
 
 const hubUrl = (process.env.HAPI_PEER_WEB_URL ?? process.env.HAPI_PEER_HUB_URL ?? '').replace(/\/$/, '')
 const accessToken = process.env.HAPI_PEER_CLI_TOKEN ?? process.env.HAPI_PEER_ACCESS_TOKEN ?? ''
 const artifactRoot = process.env.HAPI_PEER_WORKTREE ?? process.cwd()
-const mirrorRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
+const mirrorRoot = process.env.HAPI_MIRROR ?? process.cwd()
 
-const PNG_PATH = resolve(artifactRoot, 'localdocs/playwright-runs/1756-in-session-content-search.png')
-const MP4_DIR = resolve(artifactRoot, 'localdocs/playwright-runs')
+const OUT = resolve(artifactRoot, 'localdocs/playwright-runs')
+const PNG_PATH = resolve(OUT, '1756-in-session-content-search.png')
 
 const runId = `${Date.now()}`
 const TITLE = `Peer1756 InChatSearch ${runId}`
@@ -88,11 +87,10 @@ async function seedUserMessage(sessionId: string, text: string): Promise<() => v
             socket.emit('session-ready', { sid: sessionId, time: Date.now() })
             socket.emit('message', {
                 sid: sessionId,
-                localId: `peer1756-${runId}`,
                 message: {
                     role: 'user',
                     content: { type: 'text', text },
-                    meta: { sentFrom: 'web' },
+                    meta: { sentFrom: 'cli' },
                 },
             })
             resolveReady()
@@ -133,8 +131,7 @@ test.describe('in-session content search — peer stack (#1756)', () => {
     })
 
     test('header search finds seeded text and jumps to the match', async ({ page }) => {
-        mkdirSync(dirname(PNG_PATH), { recursive: true })
-        mkdirSync(MP4_DIR, { recursive: true })
+        mkdirSync(OUT, { recursive: true })
         await page.setViewportSize({ width: 1280, height: 900 })
 
         const sessionId = await createSession()
