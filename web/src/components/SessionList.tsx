@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { SessionSummary } from '@/types/api'
+import type { SessionContentSearchResponse, SessionSummary } from '@/types/api'
 import { isWildcardSearch, matchesSearchQuery } from '@hapi/protocol'
 import type { ApiClient } from '@/api/client'
 import { useLongPress } from '@/hooks/useLongPress'
@@ -91,6 +91,8 @@ type SessionGroup = {
     hasActiveSession: boolean
     hasPinnedSession: boolean
 }
+
+const MIN_CONTENT_SEARCH_QUERY_LENGTH = 2
 
 const RUNNING_BUCKETS = [
     { key: 'jobs', labelKey: 'session.item.attachedJob', colorClass: 'text-[var(--app-badge-success-text)]', pulse: true },
@@ -780,6 +782,26 @@ function XIcon(props: { className?: string }) {
     )
 }
 
+function ChevronDownIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+            aria-hidden="true"
+        >
+            <path d="m6 9 6 6 6-6" />
+        </svg>
+    )
+}
+
 function PlusIcon(props: { className?: string }) {
     return (
         <svg
@@ -1050,9 +1072,12 @@ export function SessionListSearch(props: {
     expanded: boolean
     onExpandedChange: (expanded: boolean) => void
     api: ApiClient | null
+    searchMode?: 'metadata' | 'content'
+    onSearchModeChange?: (mode: 'metadata' | 'content') => void
 }) {
     const { t } = useTranslation()
     const [datePickerOpen, setDatePickerOpen] = useState(false)
+    const [searchModeOpen, setSearchModeOpen] = useState(false)
     const inputRef = useRef<HTMLInputElement>(null)
     const collapsedButtonRef = useRef<HTMLButtonElement>(null)
     const dateButtonRef = useRef<HTMLButtonElement>(null)
@@ -1063,6 +1088,7 @@ export function SessionListSearch(props: {
             inputRef.current?.focus()
         } else {
             setDatePickerOpen(false)
+            setSearchModeOpen(false)
         }
     }, [props.expanded])
 
@@ -1132,8 +1158,53 @@ export function SessionListSearch(props: {
         )
     }
 
-    const searchLabel = t('sessions.search.open')
+    const searchMode = props.searchMode ?? 'metadata'
+    const canSearchContent = Boolean(props.onSearchModeChange)
+    const searchLabel = searchMode === 'content'
+        ? t('sessions.search.content.placeholder')
+        : t('sessions.search.open')
     const hasTextQuery = props.value.length > 0
+
+    const renderSearchMode = () => canSearchContent ? (
+        <div className="relative shrink-0">
+            <button
+                type="button"
+                aria-label={t('sessions.search.scope.toggle')}
+                aria-expanded={searchModeOpen}
+                onClick={() => setSearchModeOpen(open => !open)}
+                className="flex h-full w-auto items-center gap-0.5 border-r border-[var(--app-border)] px-1.5 text-xs leading-none text-[var(--app-hint)] transition-colors hover:text-[var(--app-fg)]"
+            >
+                <span className="shrink-0 whitespace-nowrap leading-none">{t(`sessions.search.scope.${searchMode}`)}</span>
+                <ChevronDownIcon className={cn(
+                    'h-3.5 w-3.5 shrink-0 transition-transform duration-200',
+                    searchModeOpen && 'rotate-180'
+                )} />
+            </button>
+            {searchModeOpen ? (
+                <div className="absolute left-0 top-full z-30 mt-1 flex w-max min-w-full flex-col gap-0.5 overflow-hidden rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-0.5 shadow-lg">
+                    {(['metadata', 'content'] as const).map((mode) => (
+                        <button
+                            key={mode}
+                            type="button"
+                            aria-pressed={searchMode === mode}
+                            onClick={() => {
+                                props.onSearchModeChange?.(mode)
+                                setSearchModeOpen(false)
+                            }}
+                            className={cn(
+                                'flex min-h-8 w-full items-center justify-center whitespace-nowrap rounded-md px-2 py-0.5 text-center text-sm leading-none transition-colors',
+                                searchMode === mode
+                                    ? 'bg-[var(--app-subtle-bg)] text-[var(--app-fg)]'
+                                    : 'text-[var(--app-hint)] hover:text-[var(--app-fg)]'
+                            )}
+                        >
+                            {t(`sessions.search.scope.${mode}`)}
+                        </button>
+                    ))}
+                </div>
+            ) : null}
+        </div>
+    ) : null
 
     // getCurrentText reads from a ref, not props.value directly, so dictation's
     // onFinalTranscript always appends onto the latest query even if this
@@ -1282,55 +1353,52 @@ export function SessionListSearch(props: {
                 }
             }}
         >
-            {dictationListening ? (
-                <div
-                    role="status"
-                    aria-live="polite"
-                    className="absolute inset-y-0 left-2.5 flex items-center text-[#007AFF]"
-                >
-                    <span className="h-2 w-2 animate-pulse rounded-full bg-[#007AFF]" />
-                    <span className="sr-only">{t('sessions.search.dictationActive')}</span>
+            <div className="relative flex min-w-0 items-stretch rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] transition-colors focus-within:border-[var(--app-link)]">
+                <div className="flex shrink-0 items-center pl-2 text-[var(--app-hint)]">
+                    {dictationListening ? (
+                        <span className="h-2 w-2 animate-pulse rounded-full bg-[#007AFF]" aria-hidden="true" />
+                    ) : (
+                        <SearchIcon className="h-5 w-5" />
+                    )}
+                    {dictationListening ? (
+                        <span className="sr-only">{t('sessions.search.dictationActive')}</span>
+                    ) : null}
                 </div>
-            ) : (
-                <div className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center text-[var(--app-hint)]">
-                    <SearchIcon className="h-3.5 w-3.5" />
-                </div>
-            )}
-            <input
-                ref={inputRef}
-                type="search"
-                value={props.value}
-                onChange={(event) => props.onChange(event.target.value)}
-                // Disabled while a released hold is still being transcribed —
-                // this is the "wait" state the operator asked for: visually
-                // inert until the transcript resolves and search applies.
-                disabled={dictationListening}
-                aria-busy={dictationListening}
-                placeholder={dictationListening ? t('sessions.search.dictationProcessing') : t('sessions.search.placeholder')}
-                aria-label={searchLabel}
-                title={searchLabel}
-                className={cn(
-                    'w-full appearance-none rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] py-1.5 pl-8 text-sm text-[var(--app-fg)] outline-none transition-colors placeholder:text-[var(--app-hint)] [text-overflow:ellipsis] focus:border-[var(--app-link)] [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden',
-                    props.value ? 'pr-16' : 'pr-7',
-                    dictationListening ? 'cursor-wait opacity-70' : null
-                )}
-            />
-            {props.value ? (
-                <button
-                    type="button"
-                    onClick={() => {
-                        props.onChange('')
-                        // The clear button unmounts with the query; keep focus off <body>
-                        // so a later outside click still routes blur through the wrapper.
-                        inputRef.current?.focus()
-                    }}
-                    className="absolute inset-y-0 right-9 flex items-center rounded p-0.5 text-[var(--app-hint)] hover:text-[var(--app-fg)]"
-                    title={t('sessions.search.clear')}
-                >
-                    <XIcon className="h-3.5 w-3.5" />
-                </button>
-            ) : null}
-            <div className="absolute inset-y-0 right-0 flex items-stretch">
+                {renderSearchMode()}
+                <input
+                    ref={inputRef}
+                    type="search"
+                    value={props.value}
+                    onChange={(event) => props.onChange(event.target.value)}
+                    disabled={dictationListening}
+                    aria-busy={dictationListening}
+                    placeholder={dictationListening
+                        ? t('sessions.search.dictationProcessing')
+                        : searchMode === 'content'
+                            ? t('sessions.search.content.placeholder')
+                            : t('sessions.search.placeholder')}
+                    aria-label={searchLabel}
+                    title={searchLabel}
+                    className={cn(
+                        'min-w-0 flex-1 appearance-none bg-transparent px-2 py-1.5 text-sm text-[var(--app-fg)] outline-none placeholder:text-[var(--app-hint)] [text-overflow:ellipsis] [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden',
+                        dictationListening ? 'cursor-wait opacity-70' : null
+                    )}
+                />
+                {props.value ? (
+                    <button
+                        type="button"
+                        onClick={() => {
+                            props.onChange('')
+                            // The clear button unmounts with the query; keep focus off <body>
+                            // so a later outside click still routes blur through the wrapper.
+                            inputRef.current?.focus()
+                        }}
+                        className="flex shrink-0 items-center rounded p-0.5 text-[var(--app-hint)] hover:text-[var(--app-fg)]"
+                        title={t('sessions.search.clear')}
+                    >
+                        <XIcon className="h-3.5 w-3.5" />
+                    </button>
+                ) : null}
                 {renderDateFilter('embedded')}
             </div>
             {dictationListening && dictation.partialTranscript ? (
@@ -1356,7 +1424,7 @@ export function SessionListSearch(props: {
 
 function SessionItem(props: {
     session: SessionSummary
-    onSelect: (sessionId: string) => void
+    onSelect: (sessionId: string, targetMessageId?: string, targetMessageQuery?: string) => void
     showPath?: boolean
     api: ApiClient | null
     titleSuggestionAvailable?: boolean
@@ -1365,6 +1433,9 @@ function SessionItem(props: {
     inRunningSection?: boolean
     projectLabel?: string
     machineLabel?: string
+    contentSnippet?: string
+    targetMessageId?: string
+    targetMessageQuery?: string
     lastSeenVersion: number
     /** Brief ring after jump-to-next-blocked, so the row the list travelled to
      *  is obvious once the scroll settles. */
@@ -1384,7 +1455,10 @@ function SessionItem(props: {
         projectLabel,
         machineLabel,
         lastSeenVersion,
-        flashHighlight = false
+        flashHighlight = false,
+        contentSnippet,
+        targetMessageId,
+        targetMessageQuery,
     } = props
     const { haptic } = usePlatform()
     const [menuOpen, setMenuOpen] = useState(false)
@@ -1469,7 +1543,7 @@ function SessionItem(props: {
         },
         onClick: () => {
             if (!menuOpen) {
-                onSelect(s.id)
+                onSelect(s.id, targetMessageId, targetMessageQuery)
             }
         },
         threshold: 500
@@ -1547,6 +1621,7 @@ function SessionItem(props: {
                     trailing={githubPrAwarenessEnabled && primaryPrRef ? (
                         <SessionPrChip refs={s.metadata?.externalRefs} />
                     ) : null}
+                    contentSnippet={contentSnippet}
                 />
             </button>
 
@@ -1684,7 +1759,7 @@ function PullRefreshIcon(props: { rotation: number }) {
 
 export function SessionList(props: {
     sessions: SessionSummary[]
-    onSelect: (sessionId: string) => void
+    onSelect: (sessionId: string, targetMessageId?: string, targetMessageQuery?: string) => void
     onNewSession: () => void
     onNewSessionInDirectory?: (args: { machineId: string | null; directory: string }) => void
     onBrowse?: () => void
@@ -1728,6 +1803,10 @@ export function SessionList(props: {
     const { machineFilter, setMachineFilter } = useSessionListMachineFilter()
     const showDetailedStatus = sessionListStatusMode === 'detailed'
     const [searchQuery, setSearchQuery] = useState('')
+    const [searchMode, setSearchMode] = useState<'metadata' | 'content'>('metadata')
+    const [contentSearchResponse, setContentSearchResponse] = useState<SessionContentSearchResponse | null>(null)
+    const [contentSearchLoading, setContentSearchLoading] = useState(false)
+    const [contentSearchError, setContentSearchError] = useState(false)
     const [searchExpanded, setSearchExpanded] = useState(false)
     const [customStart, setCustomStart] = useState('')
     const [customEnd, setCustomEnd] = useState('')
@@ -1735,6 +1814,9 @@ export function SessionList(props: {
     const normalizedQuery = normalizeSearch(searchQuery)
     const timeRange = getSessionTimeRange(customStart, customEnd)
     const isFiltering = normalizedQuery.length > 0 || timeRange !== null
+    const contentSearchActive = searchMode === 'content' && normalizedQuery.length > 0
+    const contentSearchReady = contentSearchActive
+        && Array.from(normalizedQuery).length >= MIN_CONTENT_SEARCH_QUERY_LENGTH
 
     useEffect(() => {
         // 中文注释：监听导入标记变化，让列表在“导入完成”或“用户已在 Hapi 中继续会话”后立即刷新时间文案。
@@ -1767,18 +1849,42 @@ export function SessionList(props: {
         [allSessions]
     )
     const visibleSessions = useMemo(
-        () => isFiltering
-            ? allSessions.filter(session => (
-                sessionMatchesTimeRange(session, timeRange)
-                && sessionMatchesQuery(
-                    session,
-                    normalizedQuery,
-                    resolveMachineLabel(session.metadata?.machineId ?? null)
-                )
-            ))
-            : allSessions,
-        [allSessions, isFiltering, normalizedQuery, timeRange?.start, timeRange?.end, machineLabelsById] // eslint-disable-line react-hooks/exhaustive-deps
+        () => {
+            if (contentSearchActive) {
+                const results = contentSearchResponse?.results.map((result) => result.session) ?? []
+                const prepared = prepareSidebarSessions(results, selectedSessionId)
+                const sidebarSessions = showActiveSessionsOnly
+                    ? filterActiveSessionsOnly(prepared, selectedSessionId)
+                    : prepared
+                return sidebarSessions.filter(session => sessionMatchesTimeRange(session, timeRange))
+            }
+            return isFiltering
+                ? allSessions.filter(session => (
+                    sessionMatchesTimeRange(session, timeRange)
+                    && sessionMatchesQuery(
+                        session,
+                        normalizedQuery,
+                        resolveMachineLabel(session.metadata?.machineId ?? null)
+                    )
+                ))
+                : allSessions
+        },
+        [allSessions, contentSearchActive, contentSearchResponse, isFiltering, normalizedQuery, selectedSessionId, showActiveSessionsOnly, timeRange?.start, timeRange?.end, machineLabelsById] // eslint-disable-line react-hooks/exhaustive-deps
     )
+    const contentSnippetBySessionId = useMemo(() => {
+        const snippets = new Map<string, string>()
+        for (const result of contentSearchResponse?.results ?? []) {
+            snippets.set(result.session.id, result.match.snippet)
+        }
+        return snippets
+    }, [contentSearchResponse])
+    const contentTargetMessageIdBySessionId = useMemo(() => {
+        const messageIds = new Map<string, string>()
+        for (const result of contentSearchResponse?.results ?? []) {
+            messageIds.set(result.session.id, result.match.messageId)
+        }
+        return messageIds
+    }, [contentSearchResponse])
     const allGroups = useMemo(
         () => groupSessionsByDirectory(allSessions),
         [allSessions]
@@ -1809,6 +1915,75 @@ export function SessionList(props: {
         && machineFilters.some(mg => (mg.machineId ?? UNKNOWN_MACHINE_ID) === machineFilter)
         ? machineFilter
         : null
+    const contentSearchCandidateSessions = useMemo(() => {
+        const timeFiltered = allSessions.filter(session => sessionMatchesTimeRange(session, timeRange))
+        const lastSeenById = showUnreadOnly ? getSessionLastSeenSnapshot() : null
+        const unreadFiltered = showUnreadOnly
+            ? filterUnreadSessionsOnly(
+                timeFiltered,
+                selectedSessionId,
+                id => lastSeenById?.[id] ?? 0
+            )
+            : timeFiltered
+        return activeMachineFilter === null
+            ? unreadFiltered
+            : unreadFiltered.filter(session =>
+                (session.metadata?.machineId ?? UNKNOWN_MACHINE_ID) === activeMachineFilter
+            )
+    }, [allSessions, activeMachineFilter, selectedSessionId, showUnreadOnly, timeRange?.start, timeRange?.end])
+    const contentSearchSessionIds = useMemo(
+        () => contentSearchCandidateSessions.map(session => session.id),
+        [contentSearchCandidateSessions]
+    )
+
+    useEffect(() => {
+        if (!contentSearchReady || !api) {
+            setContentSearchResponse(null)
+            setContentSearchLoading(false)
+            setContentSearchError(false)
+            return
+        }
+
+        // Do not leave the previous query's targets clickable while the new
+        // request is waiting for its debounce window.
+        setContentSearchResponse(null)
+        setContentSearchError(false)
+        if (contentSearchSessionIds.length === 0) {
+            setContentSearchResponse({ results: [] })
+            setContentSearchLoading(false)
+            return
+        }
+
+        const controller = new AbortController()
+        const timer = window.setTimeout(() => {
+            setContentSearchLoading(true)
+            const limit = Math.min(100, Math.max(50, contentSearchSessionIds.length))
+            void api.searchSessionContent(
+                normalizedQuery,
+                limit,
+                controller.signal,
+                contentSearchSessionIds
+            )
+                .then((response) => {
+                    if (controller.signal.aborted) return
+                    setContentSearchResponse(response)
+                })
+                .catch(() => {
+                    if (controller.signal.aborted) return
+                    setContentSearchResponse({ results: [] })
+                    setContentSearchError(true)
+                })
+                .finally(() => {
+                    if (!controller.signal.aborted) setContentSearchLoading(false)
+                })
+        }, 180)
+
+        return () => {
+            window.clearTimeout(timer)
+            controller.abort()
+        }
+    }, [api, contentSearchReady, contentSearchSessionIds, normalizedQuery])
+
     // Unread after search/time, before machine scope — so machineFilters (from allSessions)
     // stay stable. Filtering unread into allSessions would drop machines with zero unread
     // and clear a persisted machine selection (showing other machines' unread instead).
@@ -2118,6 +2293,9 @@ export function SessionList(props: {
                                             inRunningSection
                                             projectLabel={getGroupDisplayName(resolveSessionGroupDirectory(s.metadata ?? {}))}
                                             machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
+                                            contentSnippet={contentSnippetBySessionId.get(s.id)}
+                                            targetMessageId={contentTargetMessageIdBySessionId.get(s.id)}
+                                            targetMessageQuery={contentSearchActive ? normalizedQuery : undefined}
                                             lastSeenVersion={lastSeenVersion}
                                         />
                                     ))}
@@ -2245,6 +2423,9 @@ export function SessionList(props: {
                                     titleSuggestionAvailable={titleSuggestionAvailable}
                                     selected={s.id === selectedSessionId}
                                     showDetailedStatus={showDetailedStatus}
+                                    contentSnippet={contentSnippetBySessionId.get(s.id)}
+                                    targetMessageId={contentTargetMessageIdBySessionId.get(s.id)}
+                                    targetMessageQuery={contentSearchActive ? normalizedQuery : undefined}
                                     lastSeenVersion={lastSeenVersion}
                                 />
                             </div>
@@ -2599,6 +2780,8 @@ export function SessionList(props: {
                             expanded={searchExpanded}
                             onExpandedChange={setSearchExpanded}
                             api={api}
+                            searchMode={searchMode}
+                            onSearchModeChange={setSearchMode}
                         />
                     ) : null}
                     {!(showSearch && searchExpanded) ? (
@@ -2708,9 +2891,25 @@ export function SessionList(props: {
                     />
                 ) : null}
 
-                {props.sessions.length > 0 && (isFiltering || activeMachineFilter !== null || showUnreadOnly || showBlockedOnly) && groups.length === 0 && runningSessionTotal === 0 && activeSessionTotal === 0 && pinnedSessions.length === 0 && blockedSectionSessions.length === 0 ? (
+                {props.sessions.length > 0 && contentSearchLoading ? (
                     <div className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
-                        {t('sessions.search.noResults')}
+                        {t('sessions.search.content.loading')}
+                    </div>
+                ) : null}
+
+                {props.sessions.length > 0 && contentSearchError ? (
+                    <div className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
+                        {t('sessions.search.content.error')}
+                    </div>
+                ) : null}
+
+                {props.sessions.length > 0 && !contentSearchLoading && !contentSearchError && (isFiltering || activeMachineFilter !== null || showUnreadOnly || showBlockedOnly) && groups.length === 0 && runningSessionTotal === 0 && activeSessionTotal === 0 && pinnedSessions.length === 0 && blockedSectionSessions.length === 0 ? (
+                    <div className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
+                        {contentSearchActive
+                            ? contentSearchReady
+                                ? t('sessions.search.content.noResults')
+                                : t('sessions.search.content.minQuery')
+                            : t('sessions.search.noResults')}
                     </div>
                 ) : null}
 
@@ -2808,6 +3007,9 @@ export function SessionList(props: {
                                             inRunningSection
                                             projectLabel={getGroupDisplayName(resolveSessionGroupDirectory(s.metadata ?? {}))}
                                             machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
+                                            contentSnippet={contentSnippetBySessionId.get(s.id)}
+                                            targetMessageId={contentTargetMessageIdBySessionId.get(s.id)}
+                                            targetMessageQuery={contentSearchActive ? normalizedQuery : undefined}
                                             lastSeenVersion={lastSeenVersion}
                                             flashHighlight={s.id === flashBlockedSessionId}
                                         />
@@ -2835,8 +3037,7 @@ export function SessionList(props: {
                     pulse: false,
                     count: activeSessionTotal,
                     bucketKeys: ['active'],
-                })}
-                {groups.map(renderDirectoryGroup)}
+                })}                {groups.map(renderDirectoryGroup)}
                 {actionOnlyGroups.map(renderActionOnlyGroupHeader)}
             </div>
             </div>

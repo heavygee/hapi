@@ -26,6 +26,12 @@ import { UsageStore } from './usageStore'
 import { WorkGraphStore } from './workGraphStore'
 import { scanUnverifiedPeerMessages as scanUnverifiedPeerMessagesInDb } from './provenanceMessageScan'
 import type { ProvenanceMessageScanOptions } from '@hapi/protocol/provenanceMessageAudit'
+import {
+    backfillMessageContentSearchLookup,
+    backfillMessageContentSearchShortIndex,
+    createMessageContentSearchTable,
+    rebuildMessageContentSearch
+} from './messageContentSearch'
 
 export type {
     NativeDevicePlatform,
@@ -62,13 +68,16 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 29
+const SCHEMA_VERSION: number = 30
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
     'machine_reenroll_grants',
     'machine_reenroll_replays',
     'messages',
+    'message_content_search',
+    'message_content_search_lookup',
+    'message_content_search_short',
     'message_epochs',
     'users',
     'push_subscriptions',
@@ -403,6 +412,7 @@ export class Store {
             26: () => this.migrateFromV26ToV27(),
             27: () => this.migrateFromV27ToV28(),
             28: () => this.migrateFromV28ToV29(),
+            29: () => this.migrateFromV29ToV30(),
         })
 
         if (currentVersion === 0) {
@@ -727,6 +737,7 @@ export class Store {
             CREATE INDEX IF NOT EXISTS idx_event_links_namespace_to
                 ON event_links(namespace, to_event_id);
         `)
+        createMessageContentSearchTable(this.db)
     }
 
     private migrateLegacySchemaIfNeeded(): void {
@@ -1252,6 +1263,20 @@ export class Store {
                 namespace TEXT NOT NULL
             );
         `)
+    }
+
+
+    /**
+     * tiann/hapi#1554 / PR #1598 — FTS5 session message content search.
+     * Upstream claimed v25→v28 for create/rebuild + lookup + short index;
+     * soup already used those slots, so union into a single v29→v30 step.
+     */
+    private migrateFromV29ToV30(): void {
+        createMessageContentSearchTable(this.db)
+        if (this.getMessageColumnNames().size === 0) return
+        rebuildMessageContentSearch(this.db)
+        backfillMessageContentSearchLookup(this.db)
+        backfillMessageContentSearchShortIndex(this.db)
     }
 
     private getSessionColumnNames(): Set<string> {
