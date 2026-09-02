@@ -712,10 +712,12 @@ layers:
   # e2cb2bd09 (57 commits from Aug merge-base). Drop when upstream #1424 merges.
   - branch: driver/session-attached-jobs
 
-  # Thin delta on live soup tip — session-jobs steer + MCP instanceof + cursor notify overlay.
-  # Worktree: ~/coding/hapi/worktrees/cursor-notify-soup @ driver/cursor-notify-rule-delta
-  # Tip: c5840c9b7 — skip clobber tracked hapi-session.mdc; omit action key (never "")
-  - branch: driver/cursor-notify-rule-delta
+  # DROPPED 2026-09-02: driver/cursor-notify-rule-delta — stale fat tip (60 commits from
+  # Aug merge-base). Notify overlay + session_job instanceof + omit-action-key fixes
+  # (c5840c9b7, a42540a99, 882082b7d) are already ancestors of live soup @ 480a95516 via
+  # driver/session-attached-jobs rethin. Merging the branch regresses cursorMcpOverlay.
+  # Worktree: ~/coding/hapi/worktrees/cursor-notify-soup (archive when convenient).
+  # - branch: driver/cursor-notify-rule-delta
 
   # Fork-only — kitchen hygiene chip in session list header (GET /api/kitchen-status).
   # Worktree: ~/coding/hapi/worktrees/kitchen-status-soup @ driver/kitchen-status-session-list
