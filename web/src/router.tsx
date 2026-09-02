@@ -62,6 +62,7 @@ import { clearClaudeImportedSession, markClaudeSessionsImported } from '@/lib/cl
 import type { CodexDuplicateSessionGroup, CodexLocalSessionSummary, ClaudeLocalSessionSummary, AgentImportFlavor, CursorImportableSessionSummary, CursorImportRowOutcome } from '@/types/api'
 import { getSupersedingSessionId, prepareFollowSupersedingSession, shouldFollowSupersedingSession } from '@/routes/sessions/followSupersedingSession'
 import { migrateSuppressedSendError } from '@/lib/suppressed-send-error'
+import { useConsumedMessageTarget } from '@/lib/useConsumedMessageTarget'
 import FilesPage from '@/routes/sessions/files'
 import FilePage from '@/routes/sessions/file'
 import TerminalPage from '@/routes/sessions/terminal'
@@ -784,11 +785,24 @@ function SessionsPage() {
                         key={initializedHub === baseUrl ? 'last-seen-ready' : 'last-seen-pending'}
                         sessions={sessions}
                         selectedSessionId={selectedSessionId}
-                        onSelect={(sessionId) => navigate({
-                            to: '/sessions/$sessionId',
-                            params: { sessionId },
+                        onSelect={(sessionId, targetMessageId, targetMessageQuery) => {
+                            if (targetMessageId) {
+                                return navigate({
+                                    to: '/sessions/$sessionId',
+                                    params: { sessionId },
+                                    search: {
+                                        messageId: targetMessageId,
+                                        ...(targetMessageQuery ? { messageQuery: targetMessageQuery } : {})
+                                    },
+                                    ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+                                })
+                            }
+                            return navigate(getSessionListSelectionNavigation(sessionId))
+                        }}
+                        onNewSession={() => navigate({
+                            to: '/sessions/new',
+                            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
                         })}
-                        onNewSession={() => navigate({ to: '/sessions/new' })}
                         onNewSessionInDirectory={handleNewSessionInDirectory}
                         onBrowse={canBrowse ? () => navigate({ to: '/browse' }) : undefined}
                         onRefresh={handleRefresh}
@@ -969,7 +983,13 @@ function SessionPage() {
     const queryClient = useQueryClient()
     const { addToast } = useToast()
     const { sessionId } = useParams({ from: '/sessions/$sessionId' })
-    const { outline, log } = useSearch({ from: '/sessions/$sessionId' })
+    const { outline, log, messageId, messageQuery } = useSearch({ from: '/sessions/$sessionId' })
+    const {
+        effectiveMessageId: effectiveInitialMessageId,
+        effectiveMessageQuery: effectiveInitialMessageQuery,
+        consume: consumeMessageTarget,
+        clear: clearConsumedMessageTarget,
+    } = useConsumedMessageTarget(sessionId, messageId, messageQuery)
     const {
         session,
         error: sessionError,
@@ -990,6 +1010,7 @@ function SessionPage() {
         loadMore: loadMoreMessages,
         cancelLoadMore: cancelLoadMoreMessages,
         refetch: refetchMessages,
+        loadMessageContext: loadMessageContextForSession,
         viewMode: messagesViewMode,
         messagesVersion,
         historyVersion,
@@ -998,7 +1019,10 @@ function SessionPage() {
         setViewMode,
         seekToMessage,
         returnToLatest,
-    } = useMessages(api, sessionId)
+        jumpToTail,
+    } = useMessages(api, sessionId, {
+        skipInitialTailSync: Boolean(effectiveInitialMessageId?.trim())
+    })
 
     // Tracks the most recent send the hub rejected (4xx/5xx/network), keyed
     // by the session the failed POST actually targeted (post-resolveSessionId).
@@ -1390,6 +1414,28 @@ function SessionPage() {
         })
     }, [navigate, sessionId])
 
+    const handleInitialMessageConsumed = useCallback(() => {
+        if (messageId) {
+            consumeMessageTarget()
+        }
+        navigate({
+            to: '/sessions/$sessionId',
+            params: { sessionId },
+            replace: true,
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+        })
+    }, [consumeMessageTarget, messageId, navigate, sessionId])
+
+    const handleSearchTargetDismissed = useCallback(() => {
+        clearConsumedMessageTarget()
+        navigate({
+            to: '/sessions/$sessionId',
+            params: { sessionId },
+            replace: true,
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+        })
+    }, [clearConsumedMessageTarget, navigate, sessionId])
+
     if (!session) {
         if (sessionError) {
             return (
@@ -1451,6 +1497,7 @@ function SessionPage() {
             onViewModeChange={setViewMode}
             onSeekToMessage={seekToMessage}
             onReturnToLatest={returnToLatest}
+            onJumpToTail={jumpToTail}
             onRetryMessage={retryMessage}
             autocompleteSuggestions={getAutocompleteSuggestions}
             availableSlashCommands={slashCommands}
@@ -1461,6 +1508,11 @@ function SessionPage() {
             onInitialOutlineConsumed={handleInitialOutlineConsumed}
             initialSessionLogOpen={log}
             onInitialSessionLogConsumed={handleInitialSessionLogConsumed}
+            initialTargetMessageId={effectiveInitialMessageId}
+            initialTargetMessageQuery={effectiveInitialMessageQuery}
+            onLoadMessageContext={loadMessageContextForSession}
+            onInitialTargetConsumed={handleInitialMessageConsumed}
+            onSearchTargetDismissed={handleSearchTargetDismissed}
             onAbortRestore={(text) => {
                 sendErrorIdRef.current += 1
                 setSendErrors((prev) => ({
@@ -1687,13 +1739,21 @@ const sessionsIndexRoute = createRoute({
 const sessionDetailRoute = createRoute({
     getParentRoute: () => sessionsRoute,
     path: '$sessionId',
-    validateSearch: (search: Record<string, unknown>): { outline?: boolean; log?: boolean } => {
+    validateSearch: (search: Record<string, unknown>): { outline?: boolean; log?: boolean; messageId?: string; messageQuery?: string } => {
         const outline = search.outline === true || search.outline === 'true'
         const log = search.log === true || search.log === 'true'
-        const result: { outline?: boolean; log?: boolean } = {}
-        if (outline) result.outline = true
-        if (log) result.log = true
-        return result
+        const messageId = typeof search.messageId === 'string' && search.messageId.length > 0
+            ? search.messageId
+            : undefined
+        const messageQuery = typeof search.messageQuery === 'string' && search.messageQuery.length > 0
+            ? search.messageQuery
+            : undefined
+        return {
+            ...(outline ? { outline: true } : {}),
+            ...(log ? { log: true } : {}),
+            ...(messageId ? { messageId } : {}),
+            ...(messageQuery ? { messageQuery } : {})
+        }
     },
     component: SessionDetailRoute,
 })
