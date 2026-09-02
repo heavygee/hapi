@@ -1436,6 +1436,20 @@ function SessionPage() {
         })
     }, [clearConsumedMessageTarget, navigate, sessionId])
 
+    const handleSearchMessage = useCallback((messageId: string, messageQuery: string) => {
+        clearConsumedMessageTarget()
+        navigate({
+            to: '/sessions/$sessionId',
+            params: { sessionId },
+            search: {
+                messageId,
+                messageQuery,
+            },
+            replace: true,
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+        })
+    }, [clearConsumedMessageTarget, navigate, sessionId])
+
     if (!session) {
         if (sessionError) {
             return (
@@ -1513,6 +1527,7 @@ function SessionPage() {
             onLoadMessageContext={loadMessageContextForSession}
             onInitialTargetConsumed={handleInitialMessageConsumed}
             onSearchTargetDismissed={handleSearchTargetDismissed}
+            onSearchMessage={handleSearchMessage}
             onAbortRestore={(text) => {
                 sendErrorIdRef.current += 1
                 setSendErrors((prev) => ({
