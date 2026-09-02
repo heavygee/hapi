@@ -926,3 +926,9 @@ layers:
   # Tip: ba7b3f96d — SCHEMA v29→v30 union (PR claimed v25–v28); re-thin after dogfood bump
   # Absorbed: soup HEAD 418179d4b (merge + Meta fix 1de2e14dc). Live DB user_version=30.
   - branch: driver/session-content-search
+
+  # tiann/hapi#1710 — search_peers MCP/CLI: keyword find beyond list_peers recency.
+  # Hub GET /api/sessions/search + MCP search_peers + hapi search-peers.
+  # Worktree: ~/coding/hapi/worktrees/search-peers @ feat/search-peers
+  # Tip: 71a06d877
+  - branch: feat/search-peers
