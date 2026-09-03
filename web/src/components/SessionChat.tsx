@@ -536,6 +536,7 @@ type SessionChatProps = {
     onLoadMessageContext?: (messageId: string) => Promise<boolean>
     onInitialTargetConsumed?: () => void
     onSearchTargetDismissed?: () => void
+    onSearchMessage?: (messageId: string, query: string) => void
     // Called when an `abort-restore` event arrives and the composer is not empty,
     // so the caller can surface the aborted text via the existing sendError path.
     onAbortRestore?: (text: string) => void
@@ -1731,6 +1732,7 @@ function SessionChatInner(props: SessionChatProps) {
                 outlineActive={outlineOpen}
                 onToggleTerminal={canViewAgentTerminal ? () => setTerminalVisible(v => !v) : undefined}
                 terminalActive={terminalVisible}
+                onSearchMessage={props.onSearchMessage}
                 api={props.api}
                 titleSuggestionAvailable={props.titleSuggestionAvailable}
                 canReopen={inactiveCanResume}

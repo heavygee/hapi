@@ -513,17 +513,21 @@ function escapeFtsPhrase(query: string): string {
     return `"${query.replaceAll('"', '""')}"`
 }
 
-function makeLikeSnippet(text: string, query: string): string {
+function makeLikeSnippet(text: string, query: string, radius: number = 90): string {
     const lowerText = text.toLocaleLowerCase()
     const lowerQuery = query.toLocaleLowerCase()
     const matchAt = lowerText.indexOf(lowerQuery)
-    const radius = 90
     const start = matchAt < 0 ? 0 : Math.max(0, matchAt - radius)
     const end = Math.min(text.length, (matchAt < 0 ? 0 : matchAt) + query.length + radius)
     const prefix = start > 0 ? '…' : ''
     const suffix = end < text.length ? '…' : ''
     return `${prefix}${text.slice(start, end)}${suffix}`.replace(/\s+/g, ' ').trim()
 }
+
+/** Sidebar stays terse; in-session pickers need enough prose to choose a turn. */
+const SIDEBAR_SNIPPET_TOKENS = 24
+/** ~2 UI lines at hit-card width (~55 chars/line); FTS token snippets were still one line. */
+const IN_SESSION_LIKE_SNIPPET_RADIUS = 100
 
 export function searchMessageContent(
     db: Database,
@@ -605,7 +609,7 @@ export function searchMessageContent(
                 WHERE ${MESSAGE_CONTENT_SEARCH_TABLE} MATCH ?${sessionScope}
             )
             SELECT ranked.message_id, ranked.session_id, ranked.role, ranked.seq, ranked.created_at,
-                   snippet(${MESSAGE_CONTENT_SEARCH_TABLE}, 0, '', '', '…', 24) AS snippet
+                   snippet(${MESSAGE_CONTENT_SEARCH_TABLE}, 0, '', '', '…', ${SIDEBAR_SNIPPET_TOKENS}) AS snippet
             FROM ranked_matches AS ranked
             INNER JOIN ${MESSAGE_CONTENT_SEARCH_TABLE} AS f
                 ON f.rowid = ranked.search_rowid
@@ -680,8 +684,7 @@ export function searchMessageContentInSession(
             LIMIT ?
         `).all(normalizedQuery.toLocaleLowerCase(), namespace, sessionId, safeLimit) as DbSearchRow[]
         : db.prepare(`
-            SELECT f.message_id, f.session_id, f.role, f.seq, f.created_at,
-                   snippet(${MESSAGE_CONTENT_SEARCH_TABLE}, 0, '', '', '…', 24) AS snippet
+            SELECT f.message_id, f.session_id, f.role, f.seq, f.created_at, f.searchable_text
             FROM ${MESSAGE_CONTENT_SEARCH_TABLE} AS f
             INNER JOIN sessions AS s
                 ON s.id = f.session_id AND s.namespace = ?
@@ -698,9 +701,13 @@ export function searchMessageContentInSession(
             role: row.role,
             seq: Number(row.seq),
             createdAt: Number(row.created_at),
-            snippet: useShortIndex
-                ? makeLikeSnippet(row.searchable_text ?? '', normalizedQuery)
-                : String(row.snippet ?? '').replace(/\s+/g, ' ').trim()
+            // Character window (not FTS token snippet) so the web hit card can
+            // reliably fill two lines of context around the query.
+            snippet: makeLikeSnippet(
+                row.searchable_text ?? '',
+                normalizedQuery,
+                IN_SESSION_LIKE_SNIPPET_RADIUS
+            )
         })),
         total: Number(countRow?.count ?? 0)
     }
