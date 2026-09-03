@@ -151,6 +151,7 @@ test.describe('in-session content search — peer stack (#1756)', () => {
 
             const hit = page.locator('[data-testid^="session-in-chat-search-hit-"]').first()
             await expect(hit).toBeVisible({ timeout: 30_000 })
+            await expect(page.locator('[data-testid^="session-in-chat-search-hit-age-"]').first()).toBeVisible()
             await hit.click()
 
             await expect(page.getByTestId('search-match-navigation')).toBeVisible({ timeout: 30_000 })
