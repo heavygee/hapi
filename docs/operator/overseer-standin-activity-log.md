@@ -937,3 +937,40 @@ experiment, not a neutral one. This is a scheduling dependency on human traffic,
 remedy is mechanical, not agentic: a one-shot timer publishing an ntfy reminder to the operator on
 the `hapi-overseer` topic (zero agent turns, survives session death, reuses infrastructure already
 built). Not built — offered, since I would rather not add another timer to this estate unasked.
+
+## Day 3 — 2026-09-03 · find-and-resume: soup packaging for workmates
+
+**Task:** find the session that discussed packaging the operator's soup so teammates can run it, and
+resume it — Doug now has Antevorta and needs a working HAPI with the soup features.
+
+**Found:** `Peer: fork main vs soup parity` (`a1d069ae…`, durable `9cd5f02f…`), author of
+`docs/plans/2026-08-20-workmate-version-parity-recommendation.md`. Briefed and resumed.
+
+**The search took far longer than it should have, and the reason is instructive.** I guessed ~15
+phrasings against fleet content-search — "package soup", "distribute the soup", "soup for
+teammates", "install hapi teammate" — and every one returned zero. The operator's own vocabulary in
+that conversation was **"workmate"**, a word I never tried. I found it only by abandoning search
+entirely and *enumerating* `docs/plans/` filenames, where it was sitting in plain sight.
+
+**Tooling gaps this exposed, for the ADR record:**
+1. **Content search is exact-term, not semantic.** Verified: `soup` → 50 hits, `driver soup` → 50,
+   but no paraphrase of the concept matched. It answers "who said this word", never "who discussed
+   this idea". For an Overseer whose core job is *find the thing the operator half-remembers*, that
+   is the wrong shape of index — the operator recalls concepts, not tokens.
+2. **My own failure pattern is the mirror of it.** Fifteen empty results in a row and I kept
+   re-phrasing rather than switching stores. The rule I now carry says an empty result means the
+   query did not answer the question — I applied it enough not to *assert* absence, but not enough
+   to *change method* until late. Not asserting a false negative is the floor, not the goal.
+3. **Artefacts outranked sessions.** The doc was the shortest path to the session, not the other way
+   round. Worth building in as a habit: search what the work *produced* before searching where it
+   was *discussed*.
+
+**Also worth logging (M4-adjacent, a near-miss avoided):** I nearly reported `Antevorta setup` as
+the packaging owner on three converging signals (it matched "Antevorta", "colleague" and "Doug").
+A per-session search inside it found the agent saying *"I don't know what 'soup' refers to"* —
+which is disconfirming evidence I would have missed had I trusted the convergence. Three weak
+signals agreeing is not one strong signal.
+
+**M1: 0 asserted · M2: 0 escaped · M3: 1/1 relays carried explicit confidence markers ("verified
+context, so you do not rediscover it"; stale-numbers warning) · M4: 0 bare negatives — the "not
+found yet" states were reported with their scope attached.**
