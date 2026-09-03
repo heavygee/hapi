@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboard
 import type { ApiClient } from '@/api/client'
 import type { SessionContentMatch } from '@/types/api'
 import { useTranslation } from '@/lib/use-translation'
-import { disableAllFue, useFue } from '@/lib/use-fue'
+import { useFue } from '@/lib/use-fue'
 import { FueCallout, FueDot } from '@/components/Fue'
 import { formatAbsoluteDateTime, formatRelativeTime } from '@/lib/relativeTime'
 import { useMinuteTick } from '@/hooks/useMinuteTick'
@@ -228,8 +228,6 @@ export function SessionInChatSearch(props: {
                     dismissLabel={t('fue.gotIt')}
                     closeAriaLabel={t('fue.closeAriaLabel')}
                     anchorRef={toggleRef}
-                    onSecondaryAction={disableAllFue}
-                    secondaryActionLabel={t('fue.dontShowAgain')}
                 />
             ) : null}
 
