@@ -1098,3 +1098,35 @@ propagate.
 **M1: 0 · M2: 0 · M3: 3/3 relays marked, including one hypothesis explicitly fenced off in a message
 whose other half was verified · M4: 0 bare negatives — the "(no symlink)" claim shipped with both
 the filesystem check and the status-file contents that contradict it.**
+
+**2026-09-03 — the false-negative status bug is fixed; verified, not taken on report.**
+
+Meta read the writer and found the concrete cause: `_driver_status_active_block()` in
+`scripts/tooling/lib/driver-status.sh` still probed the **retired sibling-dir paths**
+`~/coding/hapi-active` / `~/coding/hapi-driver`. Since the 2026-06 move to the nested
+`~/coding/hapi/active -> ~/coding/hapi/driver` layout those paths have not existed, so the writer
+recorded `active.target=null` against a live symlink and the tool faithfully rendered
+`(no symlink)`.
+
+My hypothesis (a path check not resolving the real layout) was directionally right and materially
+incomplete — I guessed at symlink *resolution*, the truth was a *stale hardcoded path from a
+three-month-old reorganisation*. Fenced as speculation when I sent it, which is why nobody built on
+it. Right shape, wrong specifics, correctly labelled: that is the outcome the marking discipline is
+supposed to produce, and it is worth logging as such rather than claiming the call.
+
+Verified independently rather than accepting the report — with some obligation, given the defect
+was a tool reporting things it had not checked:
+    hapi-driver-status  ->  active -> /work/coding/hapi/driver
+    ~/.hapi/driver-status.json  ->  {target: "/work/coding/hapi/driver", is_driver: true,
+                                     symlink_mtime: "2026-08-12T12:29:06Z"}
+    fix commit 37dbb3c59, 2026-09-03 12:45:07Z, +63/-2 across 3 files **including a regression test**
+    (`hapi-driver-status-active.test.sh`).
+
+**Estate note worth keeping:** a second fleet agent had independently written and landed the
+identical fix minutes before Meta's attempt. Meta verified rather than duplicated. Two agents
+converging on one small bug within minutes is cheap here — but it is duplicated effort that nobody
+saw coming, and the only reason it stayed harmless is that the second one checked before committing.
+That is the same lesson as the duplicate-peer spawn I prevented on 2026-08-26: **the fleet has no
+"someone is already on this" signal**, and the absence keeps costing small amounts of work.
+
+**M1: 0 · M2: 0 · M3: 1/1 · M4: 0.**
