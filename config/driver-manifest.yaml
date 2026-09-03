@@ -937,4 +937,5 @@ layers:
   # web-only tip (header SessionInChatSearch → ?messageId=&messageQuery=).
   # Worktree: ~/coding/hapi/worktrees/in-session-content-search @ driver/in-session-content-search
   # Tip: e3c4494aa — no schema bump. Top layer for dogfood.
+  # Tip bump: <PENDING> richer hit cards (age + longer in-session snippets)
   - branch: driver/in-session-content-search
