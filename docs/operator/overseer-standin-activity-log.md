@@ -1039,3 +1039,28 @@ zero is indistinguishable from absence — the exact failure this log is named a
 **M1: 0 asserted · M2: 0 escaped · M3: 3/3 relays carried explicit confidence markers, and one was
 explicitly labelled unverified and subsequently confirmed by the recipient · M4: 0 bare negatives —
 every zero-result claim shipped with the query that produced it.**
+
+**2026-09-03 — M1 event: a hedge in one clause, an unhedged assertion in the next.**
+
+#1554 confirmed the `escapeFtsPhrase` cause from source, and added a constraint I had asserted
+wrongly. I had written: *"since `messageContentSearch.ts` builds an fts5 virtual table and issues
+`MATCH`, the capability is presumably there and something upstream is quoting the string."* The
+tokenizer is **`trigram`** — classic `*`/`NEAR` semantics are not latent behind the quoting at all,
+so unwrapping the escape would not deliver operators. That is why their option (c) is a tokenizer
+project rather than a flag flip.
+
+**Counting this as M1.** The message that carried it also carried a correctly-flagged hypothesis
+("I did not read the query-construction path… the cause is my inference"), which the recipient
+checked and confirmed. So in one message I hedged the claim I knew was speculative and let a second,
+equally unchecked claim through flat — "the capability is presumably there". `presumably` is a
+weasel-hedge, not a confidence marker: it signals mild uncertainty while still handing the reader a
+conclusion to inherit. The peer would have inherited a false model of the fix's cost from it.
+
+The lesson is narrower than "mark confidence": **marking one claim does not inoculate the message.**
+Each assertion needs its own status, and the ones that slip through are the ones adjacent to a claim
+I *did* hedge — the hedge nearby creates a false impression of care across the whole passage.
+Corrected to the peer directly.
+
+**M1: 1 · M2: 1 escaped into a relay (it reached the peer; caught by them supplying the tokenizer
+fact, not by me) · M3: 4/4 relays carried confidence markers, though this entry shows per-message
+marking is not per-claim marking · M4: 0 bare negatives.**
