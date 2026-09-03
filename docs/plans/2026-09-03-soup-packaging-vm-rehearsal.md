@@ -49,10 +49,25 @@ These blocked a clean “clone + remat” on a virgin host. Workarounds used onl
 | 1 | `HAPI_SESSION_ID` for remat lease | Rebuild exits unless a session id can claim `~/.hapi/remat-owner.lease` | Operator/TTY packaging needs a synthetic id or a documented lease-free operator path |
 | 2 | Non-TTY merge-only rebuild refused | Agent guard: must `--build-web --verify` or set `HAPI_OPERATOR_DRIVER_REBUILD_MERGE_ONLY=1` | Fresh-host checklist in `operator-lock.md` under-states this; merge-only is a special case |
 | 3 | Layer refs are **local branch names**, not `origin/<name>` | `resolve_merge_ref` does `rev-parse $ref` only — fresh clone has remotes, not locals | Must localize `origin/*` → local branches (or teach rebuild to fall back to `origin/$ref`) |
-| 4 | **5 manifest layers not on `origin`** | `feat/garden-route`, `feat/relative-time-upto-year`, `fix/garden-voice-orb-routing`, `fix/claude-mcp-spawn-model-effort`, `driver/a2a-nametag-attribution` exist only as oos worktree/local branches | **Published recipe is incomplete.** Required a 107 MiB `git bundle` from the soup host |
+| 4 | **6 manifest layers not on `origin`** | See [§3.1](#31-unpublished-layer-branches-6-of-50) — all exist locally on oos, none fetchable from `origin` | **Published recipe is incomplete.** Required a 107 MiB `git bundle` from the soup host |
 | 5 | oos manifest dirt | Local `config/driver-manifest.yaml` has **50** layers; `origin/main` has **48** (extra: in-session content search + peers search + related) | Even “the kitchen’s recipe file” is not what a GitHub clone sees |
 | 6 | Balloon / RAM | With `--balloon 2048` guest saw ~1.8 GiB until balloon cleared + hard restart | Concept-proof VMs: balloon 0 or omit |
 | 7 | Cloud image has no `qemu-guest-agent` | `qm guest cmd` / DHCP discovery via agent failed | Install agent in guest or use static IP / serial |
+
+### 3.1 Unpublished layer branches (6 of 50)
+
+Enumerated with `git ls-remote --exit-code --heads origin` per manifest branch, then local existence for each miss:
+
+| Branch | Tip (short) | Last local activity |
+|---|---|---|
+| `feat/garden-route` | `907b13514` | 2026-08-05 |
+| `feat/relative-time-upto-year` | `2518ff6a5` | 2026-07-14 |
+| `fix/garden-voice-orb-routing` | `7b8effaed` | 2026-08-05 |
+| `fix/claude-mcp-spawn-model-effort` | `f0803e996` | 2026-08-28 |
+| `driver/a2a-nametag-attribution` | `c99b8393f` | 2026-08-28 |
+| `feat/search-peers` | `f7a290740` | 2026-08-29 |
+
+All six exist **locally only** on oos. Two are especially consequential if lost: `driver/a2a-nametag-attribution` (attributed peer messaging fleet-wide) and `feat/search-peers` (live search). Publication is an operator decision (`git push -u origin` × 6 on the fork); this rehearsal imported them via bundle only.
 
 ---
 
@@ -60,11 +75,13 @@ These blocked a clean “clone + remat” on a virgin host. Workarounds used onl
 
 ### A. Fresh clone + tip-forward from `upstream/main` (documented default)
 
-After localizing published branches + importing the 5 unpublished ones via bundle:
+After localizing published branches + importing the six unpublished ones via bundle:
 
 - Started at `upstream/main` @ `980a921b…`
 - **Failed on layer 1/48** — merge conflict in `web/src/components/assistant-ui/mermaid-diagram.tsx` merging `feat/mermaid-parse-failure-feedback`
 - Live tip correctly left unchanged; remat hold set on the throwaway guest only
+
+**Why cold clone fails (causal account):** oos always starts from an **already-healed green tip**, not bare upstream. The soup is not a function of the manifest — it is a function of the manifest **plus the accumulated heal history of this specific machine**. That is why a snapshot works and a recipe cannot: the recipe is missing an input that was never written down and exists only as the state of one disk.
 
 **Interpretation:** tip-forward on oos starts from a **green soup tip** that already absorbed history + kitchen `rerere` / heal state. A second kitchen replaying “the recipe” from bare upstream is a different algorithm than daily tip-forward, and it **does not** recreate the dogfood tip.
 
@@ -99,7 +116,7 @@ After localizing published branches + importing the 5 unpublished ones via bundl
 
 Optional follow-ups (not done here):
 
-1. Push or bundle the five unpublished layer branches so `origin` matches the kitchen (recipe hygiene — still won’t make remat deterministic).
+1. Push or bundle the **six** unpublished layer branches so `origin` matches the kitchen (recipe hygiene — still won’t make remat deterministic).
 2. Teach `resolve_merge_ref` to fall back to `origin/$ref`.
 3. Document a `HAPI_REMAT_MODE=full-recipe` + pinned layer SHAs format if recipe distribution is ever required (different product from today’s tip-forward kitchen).
 4. Concept-proof VM template: 2 vCPU / 4 GiB / 20 GiB, balloon 0, static IP or guest-agent in image.
@@ -124,4 +141,5 @@ vm tree:  d2a693b47b409d84ffb2b00173dbf6da8b09bdd4
 origin/main layers: 48
 oos dirty manifest: 50
 cold remat: conflict layer 1 feat/mermaid-parse-failure-feedback
+unpublished layers: 6 of 50 (see §3.1)
 ```
