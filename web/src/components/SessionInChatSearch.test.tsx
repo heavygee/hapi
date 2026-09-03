@@ -43,6 +43,7 @@ describe('SessionInChatSearch', () => {
 
     it('searches the open session and jumps when a ranked hit is chosen', async () => {
         const onSelectMatch = vi.fn()
+        const createdAt = Date.now() - 3 * 60 * 60 * 1000
         const api = {
             searchSessionContentMatches: vi.fn().mockResolvedValue({
                 matches: [
@@ -50,8 +51,8 @@ describe('SessionInChatSearch', () => {
                         messageId: 'msg-hit',
                         role: 'user',
                         seq: 12,
-                        createdAt: 1,
-                        snippet: 'needle in the transcript',
+                        createdAt,
+                        snippet: '…enough surrounding context that the needle stands out in the transcript…',
                     },
                 ],
                 total: 1,
@@ -78,6 +79,8 @@ describe('SessionInChatSearch', () => {
         })
 
         const hit = await screen.findByTestId('session-in-chat-search-hit-msg-hit')
+        expect(screen.getByTestId('session-in-chat-search-hit-age-msg-hit')).toBeInTheDocument()
+        expect(hit).toHaveTextContent(/enough surrounding context/i)
         fireEvent.click(hit)
 
         expect(onSelectMatch).toHaveBeenCalledWith('msg-hit', 'needle')

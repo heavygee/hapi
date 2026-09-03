@@ -4,6 +4,8 @@ import type { SessionContentMatch } from '@/types/api'
 import { useTranslation } from '@/lib/use-translation'
 import { disableAllFue, useFue } from '@/lib/use-fue'
 import { FueCallout, FueDot } from '@/components/Fue'
+import { formatAbsoluteDateTime, formatRelativeTime } from '@/lib/relativeTime'
+import { useMinuteTick } from '@/hooks/useMinuteTick'
 
 const DEBOUNCE_MS = 180
 const MIN_QUERY_LENGTH = 2
@@ -55,6 +57,8 @@ export function SessionInChatSearch(props: {
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState(false)
     const [activeIndex, setActiveIndex] = useState(0)
+    // Relative ages on hit cards should advance while the panel stays open.
+    const relativeTimeTick = useMinuteTick(open)
 
     const normalizedQuery = query.trim()
     const queryReady = normalizedQuery.length >= MIN_QUERY_LENGTH
@@ -216,7 +220,7 @@ export function SessionInChatSearch(props: {
                 <div
                     id={panelId}
                     data-testid="session-in-chat-search-panel"
-                    className="absolute right-0 top-full z-30 mt-1 w-[min(22rem,calc(100vw-2rem))] rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-2 shadow-lg"
+                    className="absolute right-0 top-full z-30 mt-1 w-[min(28rem,calc(100vw-2rem))] rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-2 shadow-lg"
                 >
                     <label className="sr-only" htmlFor={`${panelId}-input`}>
                         {t('session.inChatSearch.inputLabel')}
@@ -238,7 +242,7 @@ export function SessionInChatSearch(props: {
                         className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2.5 py-1.5 text-sm text-[var(--app-fg)] outline-none placeholder:text-[var(--app-hint)] focus:border-[var(--app-button)]"
                     />
 
-                    <div className="mt-2 max-h-64 overflow-y-auto" role="listbox" id={listboxId}>
+                    <div className="mt-2 max-h-80 overflow-y-auto" role="listbox" id={listboxId}>
                         {!queryReady ? (
                             <div className="px-2 py-2 text-xs text-[var(--app-hint)]">
                                 {t('session.inChatSearch.minQuery')}
@@ -257,7 +261,7 @@ export function SessionInChatSearch(props: {
                             </div>
                         ) : (
                             <>
-                                <div className="px-2 pb-1 text-[10px] uppercase tracking-wide text-[var(--app-hint)]">
+                                <div className="px-2 pb-1.5 text-[10px] uppercase tracking-wide text-[var(--app-hint)]">
                                     {t('session.inChatSearch.results', {
                                         shown: String(matches.length),
                                         total: total > matches.length
@@ -265,32 +269,51 @@ export function SessionInChatSearch(props: {
                                             : String(total),
                                     })}
                                 </div>
-                                {matches.map((match, index) => {
-                                    const selected = index === activeIndex
-                                    return (
-                                        <button
-                                            key={match.messageId}
-                                            type="button"
-                                            role="option"
-                                            aria-selected={selected}
-                                            data-testid={`session-in-chat-search-hit-${match.messageId}`}
-                                            onMouseEnter={() => setActiveIndex(index)}
-                                            onClick={() => selectMatch(match)}
-                                            className={`flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left text-sm ${
-                                                selected
-                                                    ? 'bg-[var(--app-secondary-bg)] text-[var(--app-fg)]'
-                                                    : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'
-                                            }`}
-                                        >
-                                            <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--app-hint)]">
-                                                {roleLabel(match.role, t)}
-                                            </span>
-                                            <span className="line-clamp-2 text-xs leading-snug">
-                                                {match.snippet}
-                                            </span>
-                                        </button>
-                                    )
-                                })}
+                                <div className="flex flex-col gap-1.5">
+                                    {matches.map((match, index) => {
+                                        const selected = index === activeIndex
+                                        const ageLabel = match.createdAt > 0
+                                            ? formatRelativeTime(match.createdAt, t)
+                                            : null
+                                        // relativeTimeTick keeps labels fresh while open
+                                        void relativeTimeTick
+                                        const absolute = match.createdAt > 0
+                                            ? formatAbsoluteDateTime(match.createdAt)
+                                            : null
+                                        return (
+                                            <button
+                                                key={match.messageId}
+                                                type="button"
+                                                role="option"
+                                                aria-selected={selected}
+                                                data-testid={`session-in-chat-search-hit-${match.messageId}`}
+                                                onMouseEnter={() => setActiveIndex(index)}
+                                                onClick={() => selectMatch(match)}
+                                                className={`flex w-full flex-col gap-1 rounded-md border px-2.5 py-2 text-left transition-colors ${
+                                                    selected
+                                                        ? 'border-[var(--app-border)] bg-[var(--app-secondary-bg)] text-[var(--app-fg)]'
+                                                        : 'border-transparent text-[var(--app-fg)] hover:border-[var(--app-border)] hover:bg-[var(--app-subtle-bg)]'
+                                                }`}
+                                            >
+                                                <span className="flex min-w-0 items-center justify-between gap-2 text-[10px] font-medium uppercase tracking-wide text-[var(--app-hint)]">
+                                                    <span className="truncate">{roleLabel(match.role, t)}</span>
+                                                    {ageLabel ? (
+                                                        <span
+                                                            data-testid={`session-in-chat-search-hit-age-${match.messageId}`}
+                                                            className="shrink-0 normal-case tracking-normal tabular-nums"
+                                                            title={absolute ?? undefined}
+                                                        >
+                                                            {ageLabel}
+                                                        </span>
+                                                    ) : null}
+                                                </span>
+                                                <span className="line-clamp-4 text-[13px] leading-snug text-[var(--app-fg)]">
+                                                    {match.snippet}
+                                                </span>
+                                            </button>
+                                        )
+                                    })}
+                                </div>
                             </>
                         )}
                     </div>
