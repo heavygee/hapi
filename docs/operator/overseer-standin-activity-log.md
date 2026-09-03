@@ -974,3 +974,36 @@ signals agreeing is not one strong signal.
 **M1: 0 asserted · M2: 0 escaped · M3: 1/1 relays carried explicit confidence markers ("verified
 context, so you do not rediscover it"; stale-numbers warning) · M4: 0 bare negatives — the "not
 found yet" states were reported with their scope attached.**
+
+**2026-09-03 later — dispatched, plus a correction to yesterday's tooling complaint.**
+
+Dispatched `Peer: fork main vs soup parity` with both operator decisions: **VM creation approved**
+(smallest practical PoC, minimal RAM/disk), and the **shared-hub recommendation overruled**. Relayed
+the overrule with its reasoning rather than as a bare instruction, because the reasoning is not
+technical: the operator's install is out-of-scope, and he refuses to be "a single point of failure
+for my stuff being up for them doing work." That is an availability/blast-radius argument, so the
+peer's analysis was not wrong — the question changed. Told it so explicitly; an agent that thinks
+its work was rejected on the merits reasons differently from one that knows the premise moved.
+
+**Correction to yesterday's entry.** I logged that content search "answers *who said this word*,
+never *who discussed this idea*", and framed it as the wrong shape of index. Having tested the
+FTS-backed version:
+
+- `parity` — a single distinctive term — returns `Peer: fork main vs soup parity` **immediately**.
+  That is the session I burned ~15 queries failing to find.
+- `workmate OR teammate`, `soup NEAR package`, `workmate*` all return **empty**, so FTS operators
+  are not reaching `MATCH` — they appear to be escaped and matched literally.
+
+So the honest finding is narrower and less flattering to me: **the index was adequate; my query
+strategy was wrong.** I reached for conceptual multi-word phrases ("package the soup", "soup for
+teammates") when the tool rewards single distinctive nouns. The genuine tooling limitation is only
+that boolean/prefix syntax does not pass through — worth reporting, but it is not what cost me
+yesterday. My own habit was.
+
+Amending the day-2 lesson accordingly: **before concluding a search tool is the wrong shape, test
+whether a single well-chosen term works.** Blaming the instrument is itself a claim requiring
+evidence, and I made it without any.
+
+**M1: 0 asserted · M2: 0 escaped · M3: 1/1 relays carried explicit confidence and provenance
+markers · M4: 0 bare negatives — the FTS-operator negatives were stated with the exact queries that
+produced them.**
