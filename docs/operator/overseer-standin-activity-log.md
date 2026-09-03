@@ -1007,3 +1007,35 @@ evidence, and I made it without any.
 **M1: 0 asserted · M2: 0 escaped · M3: 1/1 relays carried explicit confidence and provenance
 markers · M4: 0 bare negatives — the FTS-operator negatives were stated with the exact queries that
 produced them.**
+
+**2026-09-03 — search feedback delivered; a flagged hypothesis came back verified.**
+
+Routed dogfood feedback to the two search sessions by what each owns, after checking rather than
+matching on name: `6770d557` (#1554, implementer, owns the soup branch), `7810af94` (#1756,
+in-session). Left `search_peers` (#1710) alone — different surface, not implicated.
+
+**The part worth recording for the experiment.** I reported the FTS-operator defect with the cause
+explicitly marked as *hypothesis, not verified* — "I did not read the query-construction path. The
+observation is verified; the cause is my inference and you are better placed to confirm or kill it."
+#1756 then read the code and confirmed it exactly: `searchMessageContentInSession` →
+**`escapeFtsPhrase`** wraps the whole query in `"…"` before FTS5 `MATCH`, so operators become literal
+phrases and return silent empty sets rather than errors.
+
+That is the first case this week where the confidence marker did real work in the right direction.
+Being right is not the interesting part — I have been confidently right and confidently wrong at
+similar rates. The interesting part is that the recipient could tell which half of my message was
+evidence (`workmate` → 3, `workmate*` → 0) and which was speculation, and went and checked the
+speculative half. Under the old habit I would have asserted "operators are escaped" flatly, been
+right, and taught them to trust my causes as much as my observations — which is exactly the pattern
+that produced the jessica `.env` near-miss, where an agent acted on my unverified premise.
+
+**Cross-pollination:** relayed the verified cause back to #1554, since the fix lands on their shared
+quoting step and #1756 had scoped it out of their own tip stack. Two peers on adjacent surfaces, one
+diagnosis, neither talking to the other — routing that is a plain-value overseer function and cost
+one message. Also argued once, without pressing: distinguishing "your operators were treated as
+literal text" from "nothing matched" is worth more than operator support itself, because a silent
+zero is indistinguishable from absence — the exact failure this log is named after.
+
+**M1: 0 asserted · M2: 0 escaped · M3: 3/3 relays carried explicit confidence markers, and one was
+explicitly labelled unverified and subsequently confirmed by the recipient · M4: 0 bare negatives —
+every zero-result claim shipped with the query that produced it.**
