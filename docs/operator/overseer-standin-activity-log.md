@@ -1130,3 +1130,46 @@ That is the same lesson as the duplicate-peer spawn I prevented on 2026-08-26: *
 "someone is already on this" signal**, and the absence keeps costing small amounts of work.
 
 **M1: 0 · M2: 0 · M3: 1/1 · M4: 0.**
+
+## 2026-09-03 — soup packaging rehearsal: negative result, plus a finding bigger than the question
+
+The rehearsal peer (`b5459065`) reported: **the soup does not reproduce** from clone +
+`hapi-driver-rebuild`. Cold remat failed on layer 1/48 (mermaid conflict); planting the oos tip
+`46f333001` onto the throwaway VM matched tree OID bit-identically, but remat *from that tip* still
+fat-skipped / heal-warn-skipped and rolled back. Verdict: a **frozen `driver/integration` tip
+snapshot** is the honest distribution unit, not the tip-forward recipe. VM 2097 destroyed. Doc at
+`docs/plans/2026-09-03-soup-packaging-vm-rehearsal.md`.
+
+That is a clean negative result and the right call. It was told in the brief that "ship an image,
+not a rebuild" would be a legitimate outcome rather than a failure to force reproducibility, and it
+took that seriously instead of grinding.
+
+**The finding underneath it is worse than the headline, and I verified it independently.** The peer
+reported 5 manifest layers missing from `origin`. It is **6 of 50**:
+
+    feat/garden-route              907b13514  2026-08-05
+    feat/relative-time-upto-year   2518ff6a5  2026-07-14
+    fix/garden-voice-orb-routing   7b8effaed  2026-08-05
+    fix/claude-mcp-spawn-model-effort f0803e996 2026-08-28
+    driver/a2a-nametag-attribution c99b8393f  2026-08-28
+    feat/search-peers              f7a290740  2026-08-29
+
+All six exist **locally only** — present on this machine, absent from `origin`. Two consequences:
+
+1. **The recipe is not merely non-deterministic, it is unbuildable by anyone else in principle.**
+   Six referenced branches cannot be fetched. Reproducibility was never the first obstacle;
+   publication was. The rehearsal would have failed for a workmate even if remat were perfectly
+   deterministic.
+2. **Single-copy risk on the estate's own product.** These are not scratch branches:
+   `driver/a2a-nametag-attribution` is the layer that restored attributed peer messaging fleet-wide,
+   and `feat/search-peers` is live search capability. If this disk dies they are gone. This is the
+   same class as peer #1593's three local-only commits — but structural rather than an oversight,
+   and it has been true for weeks (oldest: 2026-07-14).
+
+The fix for (2) is trivial and independent of the packaging question: `git push -u origin <branch>`
+six times. I have not done it — pushing six branches on the operator's fork is his call, not mine,
+and one of them is a soup tip whose publication may have implications I cannot see.
+
+**M1: 0 · M2: 0 · M3: n/a (no relay yet) · M4: 0 — the "missing from origin" claim shipped with the
+per-branch `git ls-remote` result and a local-existence check distinguishing "unpublished" from
+"lost".**
