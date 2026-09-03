@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import type { ApiClient } from '@/api/client'
 import type { SessionContentMatch } from '@/types/api'
 import { useTranslation } from '@/lib/use-translation'
@@ -6,6 +6,7 @@ import { disableAllFue, useFue } from '@/lib/use-fue'
 import { FueCallout, FueDot } from '@/components/Fue'
 import { formatAbsoluteDateTime, formatRelativeTime } from '@/lib/relativeTime'
 import { useMinuteTick } from '@/hooks/useMinuteTick'
+import { highlightSearchSnippet } from '@/components/highlightSearchSnippet'
 
 const DEBOUNCE_MS = 180
 const MIN_QUERY_LENGTH = 2
@@ -36,6 +37,22 @@ function roleLabel(
     t: (key: string) => string
 ): string {
     return role === 'user' ? t('session.outline.kind.user') : t('session.inChatSearch.roleAssistant')
+}
+
+function renderHighlightedSnippet(snippet: string, query: string): ReactNode {
+    return highlightSearchSnippet(snippet, query).map((part, index) => {
+        if (part.type === 'mark') {
+            return (
+                <mark
+                    key={`m-${index}`}
+                    className="hapi-message-search-target px-0.5"
+                >
+                    {part.value}
+                </mark>
+            )
+        }
+        return <span key={`t-${index}`}>{part.value}</span>
+    })
 }
 
 export function SessionInChatSearch(props: {
@@ -220,7 +237,7 @@ export function SessionInChatSearch(props: {
                 <div
                     id={panelId}
                     data-testid="session-in-chat-search-panel"
-                    className="absolute right-0 top-full z-30 mt-1 w-[min(28rem,calc(100vw-2rem))] rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-2 shadow-lg"
+                    className="absolute right-0 top-full z-30 mt-1 w-[min(30rem,calc(100vw-2rem))] rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-2 shadow-lg"
                 >
                     <label className="sr-only" htmlFor={`${panelId}-input`}>
                         {t('session.inChatSearch.inputLabel')}
@@ -242,7 +259,7 @@ export function SessionInChatSearch(props: {
                         className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2.5 py-1.5 text-sm text-[var(--app-fg)] outline-none placeholder:text-[var(--app-hint)] focus:border-[var(--app-button)]"
                     />
 
-                    <div className="mt-2 max-h-80 overflow-y-auto" role="listbox" id={listboxId}>
+                    <div className="mt-2 max-h-[28rem] overflow-y-auto" role="listbox" id={listboxId}>
                         {!queryReady ? (
                             <div className="px-2 py-2 text-xs text-[var(--app-hint)]">
                                 {t('session.inChatSearch.minQuery')}
@@ -269,7 +286,7 @@ export function SessionInChatSearch(props: {
                                             : String(total),
                                     })}
                                 </div>
-                                <div className="flex flex-col gap-1.5">
+                                <div className="divide-y divide-[var(--app-divider)] rounded-md border border-[var(--app-border)]/60">
                                     {matches.map((match, index) => {
                                         const selected = index === activeIndex
                                         const ageLabel = match.createdAt > 0
@@ -289,10 +306,10 @@ export function SessionInChatSearch(props: {
                                                 data-testid={`session-in-chat-search-hit-${match.messageId}`}
                                                 onMouseEnter={() => setActiveIndex(index)}
                                                 onClick={() => selectMatch(match)}
-                                                className={`flex w-full flex-col gap-1 rounded-md border px-2.5 py-2 text-left transition-colors ${
+                                                className={`flex w-full flex-col gap-1 px-2.5 py-2.5 text-left transition-colors first:rounded-t-[5px] last:rounded-b-[5px] ${
                                                     selected
-                                                        ? 'border-[var(--app-border)] bg-[var(--app-secondary-bg)] text-[var(--app-fg)]'
-                                                        : 'border-transparent text-[var(--app-fg)] hover:border-[var(--app-border)] hover:bg-[var(--app-subtle-bg)]'
+                                                        ? 'bg-[var(--app-secondary-bg)] text-[var(--app-fg)]'
+                                                        : 'bg-transparent text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'
                                                 }`}
                                             >
                                                 <span className="flex min-w-0 items-center justify-between gap-2 text-[10px] font-medium uppercase tracking-wide text-[var(--app-hint)]">
@@ -307,8 +324,8 @@ export function SessionInChatSearch(props: {
                                                         </span>
                                                     ) : null}
                                                 </span>
-                                                <span className="line-clamp-4 text-[13px] leading-snug text-[var(--app-fg)]">
-                                                    {match.snippet}
+                                                <span className="line-clamp-3 min-h-[2.6em] text-[13px] leading-snug text-[var(--app-fg)]">
+                                                    {renderHighlightedSnippet(match.snippet, normalizedQuery)}
                                                 </span>
                                             </button>
                                         )
