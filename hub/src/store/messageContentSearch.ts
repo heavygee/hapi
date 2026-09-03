@@ -526,8 +526,8 @@ function makeLikeSnippet(text: string, query: string, radius: number = 90): stri
 
 /** Sidebar stays terse; in-session pickers need enough prose to choose a turn. */
 const SIDEBAR_SNIPPET_TOKENS = 24
-const IN_SESSION_SNIPPET_TOKENS = 96
-const IN_SESSION_LIKE_SNIPPET_RADIUS = 240
+/** ~2 UI lines at hit-card width (~55 chars/line); FTS token snippets were still one line. */
+const IN_SESSION_LIKE_SNIPPET_RADIUS = 100
 
 export function searchMessageContent(
     db: Database,
@@ -684,8 +684,7 @@ export function searchMessageContentInSession(
             LIMIT ?
         `).all(normalizedQuery.toLocaleLowerCase(), namespace, sessionId, safeLimit) as DbSearchRow[]
         : db.prepare(`
-            SELECT f.message_id, f.session_id, f.role, f.seq, f.created_at,
-                   snippet(${MESSAGE_CONTENT_SEARCH_TABLE}, 0, '', '', '…', ${IN_SESSION_SNIPPET_TOKENS}) AS snippet
+            SELECT f.message_id, f.session_id, f.role, f.seq, f.created_at, f.searchable_text
             FROM ${MESSAGE_CONTENT_SEARCH_TABLE} AS f
             INNER JOIN sessions AS s
                 ON s.id = f.session_id AND s.namespace = ?
@@ -702,9 +701,13 @@ export function searchMessageContentInSession(
             role: row.role,
             seq: Number(row.seq),
             createdAt: Number(row.created_at),
-            snippet: useShortIndex
-                ? makeLikeSnippet(row.searchable_text ?? '', normalizedQuery, IN_SESSION_LIKE_SNIPPET_RADIUS)
-                : String(row.snippet ?? '').replace(/\s+/g, ' ').trim()
+            // Character window (not FTS token snippet) so the web hit card can
+            // reliably fill two lines of context around the query.
+            snippet: makeLikeSnippet(
+                row.searchable_text ?? '',
+                normalizedQuery,
+                IN_SESSION_LIKE_SNIPPET_RADIUS
+            )
         })),
         total: Number(countRow?.count ?? 0)
     }

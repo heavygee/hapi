@@ -324,7 +324,7 @@ export function SessionInChatSearch(props: {
                                                         </span>
                                                     ) : null}
                                                 </span>
-                                                <span className="line-clamp-3 min-h-[2.6em] text-[13px] leading-snug text-[var(--app-fg)]">
+                                                <span className="line-clamp-2 min-h-[2.7em] break-words text-[13px] leading-[1.35] text-[var(--app-fg)]">
                                                     {renderHighlightedSnippet(match.snippet, normalizedQuery)}
                                                 </span>
                                             </button>
