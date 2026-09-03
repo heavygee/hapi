@@ -83,11 +83,15 @@ driver_status_init() {
 _driver_status_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 _driver_status_active_block() {
-    local active_link="$HOME/coding/hapi-active"
+    # Canonical layout (2026-06): ~/coding/hapi/active → active tree.
+    # Legacy ~/coding/hapi-active is not checked — it was never the writer path
+    # on this estate and produced false "(no symlink)" when only hapi/active exists.
+    local active_link="${HAPI_ACTIVE_LINK:-$HOME/coding/hapi/active}"
+    local driver_path="${HAPI_DRIVER_PATH:-$HOME/coding/hapi/driver}"
     local target="null" is_driver=false mtime="null" mtime_epoch
     if [[ -L "$active_link" ]]; then
         target="\"$(readlink -f "$active_link")\""
-        if [[ "$(readlink -f "$active_link")" == "$(readlink -f "$HOME/coding/hapi-driver" 2>/dev/null || echo /nope)" ]]; then
+        if [[ "$(readlink -f "$active_link")" == "$(readlink -f "$driver_path" 2>/dev/null || echo /nope)" ]]; then
             is_driver=true
         fi
         # stat the symlink itself (not the target) -- this is the swing time.
@@ -272,6 +276,12 @@ driver_status_set() {
       ${extra} |
       .active = $(_driver_status_active_block)
     " || true
+}
+
+# Refresh .active from the live hapi/active symlink (cheap; safe on every status read).
+driver_status_refresh_active() {
+    driver_status_init
+    _driver_status_jq_update ".active = $(_driver_status_active_block)" || true
 }
 
 _driver_status_jq_update() {

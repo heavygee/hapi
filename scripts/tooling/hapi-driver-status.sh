@@ -151,6 +151,13 @@ render_working() {
 }
 
 render_human() {
+    # Active block is refreshed on every read so a stale writer path cannot lie
+    # for hours between rebuild/switch (see driver-status.sh _driver_status_active_block).
+    # shellcheck source=lib/driver-status.sh
+    source "$(dirname "$(readlink -f "$0")")/lib/driver-status.sh"
+    driver_status_init
+    driver_status_refresh_active
+
     echo "=== hapi-driver-status ($STATUS_FILE) ==="
     echo ""
 
@@ -184,6 +191,10 @@ render_human() {
 
 case "$MODE" in
     json)
+        # shellcheck source=lib/driver-status.sh
+        source "$(dirname "$(readlink -f "$0")")/lib/driver-status.sh"
+        driver_status_init
+        driver_status_refresh_active
         cat "$STATUS_FILE"
         ;;
     quiet)
