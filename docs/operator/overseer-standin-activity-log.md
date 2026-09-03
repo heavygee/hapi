@@ -1064,3 +1064,37 @@ Corrected to the peer directly.
 **M1: 1 · M2: 1 escaped into a relay (it reached the peer; caught by them supplying the tokenizer
 fact, not by me) · M3: 4/4 relays carried confidence markers, though this entry shows per-message
 marking is not per-claim marking · M4: 0 bare negatives.**
+
+**2026-09-03 — found the estate's own version of the false-negative bug.**
+
+Chasing an item the parity peer had flagged twice (`active -> (no symlink)`), which it read as an
+infrastructure mismatch:
+
+- Filesystem: `/home/heavygee/coding/hapi/active -> …/driver` **exists**, created 2026-08-12,
+  resolves to `/work/coding/hapi/driver`.
+- `hapi-driver-status.sh:164` reads `~/.hapi/driver-status.json`: `jq '.active.target // "(no symlink)"'`.
+- That file records `"active": {target: null, is_driver: false, symlink_mtime: null}` — and its
+  mtime is **today**, so it is fresh, not stale. The writer ran and recorded null for a symlink that
+  is present.
+
+**So the estate's own status tool reports absence when the thing exists** — the exact failure class
+this week's prompt work is about, embedded in tooling every agent trusts. Any agent asking "is the
+driver active?" gets a false negative and cannot distinguish it from a real problem. Routed to the
+tooling meta-bot as owner, with the cause explicitly marked as unread hypothesis (I did not open the
+writer; my guess is the `/home/heavygee/coding` → `/work/coding` symlink defeating a literal-path
+check — flagged as speculation, not finding).
+
+Worth noting what the parity peer got right and wrong: it **noticed** the discrepancy and refused to
+silently work around it, twice. Its only error was pointing at the layer that *holds* state rather
+than the layer that *reports* it. That is a good failure — an agent that reports an anomaly it
+cannot explain is more useful than one that rationalises it away.
+
+**And it caught me.** I had passed it "46 active layers"; it re-verified and found **50**. My figure
+was accurate when measured and wrong by the time it was read — the staleness rule I contributed to
+the prompt core, applied to me by someone else. It correctly passed current figures to its spawned
+peer with a "re-verify, this moves daily" caveat rather than letting either of our snapshots
+propagate.
+
+**M1: 0 · M2: 0 · M3: 3/3 relays marked, including one hypothesis explicitly fenced off in a message
+whose other half was verified · M4: 0 bare negatives — the "(no symlink)" claim shipped with both
+the filesystem check and the status-file contents that contradict it.**
