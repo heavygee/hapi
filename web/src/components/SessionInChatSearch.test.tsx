@@ -81,6 +81,7 @@ describe('SessionInChatSearch', () => {
         const hit = await screen.findByTestId('session-in-chat-search-hit-msg-hit')
         expect(screen.getByTestId('session-in-chat-search-hit-age-msg-hit')).toBeInTheDocument()
         expect(hit).toHaveTextContent(/enough surrounding context/i)
+        expect(hit.querySelector('mark.hapi-message-search-target')).toHaveTextContent('needle')
         fireEvent.click(hit)
 
         expect(onSelectMatch).toHaveBeenCalledWith('msg-hit', 'needle')

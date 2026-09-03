@@ -526,8 +526,8 @@ function makeLikeSnippet(text: string, query: string, radius: number = 90): stri
 
 /** Sidebar stays terse; in-session pickers need enough prose to choose a turn. */
 const SIDEBAR_SNIPPET_TOKENS = 24
-const IN_SESSION_SNIPPET_TOKENS = 64
-const IN_SESSION_LIKE_SNIPPET_RADIUS = 160
+const IN_SESSION_SNIPPET_TOKENS = 96
+const IN_SESSION_LIKE_SNIPPET_RADIUS = 240
 
 export function searchMessageContent(
     db: Database,
