@@ -930,7 +930,7 @@ layers:
   # tiann/hapi#1710 — search_peers MCP/CLI: keyword find beyond list_peers recency.
   # Hub GET /api/sessions/search + MCP search_peers + hapi search-peers.
   # Worktree: ~/coding/hapi/worktrees/search-peers @ feat/search-peers
-  # Tip: 71a06d877
+  # Tip: f7a290740 (rebased onto upstream/main)
   - branch: feat/search-peers
 
   # tiann/hapi#1756 — in-session (open chat) FTS search + jump. Reuses #1554 indexer;
