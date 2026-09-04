@@ -909,10 +909,14 @@ layers:
   # Blocked section / rail+chip / header jump pill + blocked-only lens, fed by a
   # hub-persisted last AGENT_NOTIFY_SUMMARY footer (sessions.last_notify_*).
   # Upstream-aimed thin tip: feat/blocked-list-ux-1717 (schema v25->v26).
-  # Union needed: soup already claimed v26/27/28, so this tip renumbers the
-  # migration to v28->v29 and resolves SessionList against pinInProgressMode.
+  # Also: pending/permission/question + needs_decision/review/failed as
+  # blockers, arrival pulse + optional sound, and right-click "Mark unblocked"
+  # with a required reason recorded as a work-graph operator_unblock event.
+  # Union needed: soup claimed v26-v29, so this tip renumbers the two
+  # migrations to v28->v29 (last_notify_*) and v29->v30 (blocked_ack_*), and
+  # resolves SessionList against pinInProgressMode / setExternalRefs.
   # Worktree: /work/coding/hapi/worktrees/blocked-list-ux-soup
-  # Tip: 2bcfa93e3
+  # Tip: bcfe1cadf
   - branch: driver/blocked-list-ux
 
   # tiann/hapi#1724 — Cursor unexpected-stop: auto-Continue once after post-tool
@@ -936,5 +940,5 @@ layers:
   # tiann/hapi#1756 — in-session (open chat) FTS search + jump. Reuses #1554 indexer;
   # web-only tip (header SessionInChatSearch → ?messageId=&messageQuery=).
   # Worktree: ~/coding/hapi/worktrees/in-session-content-search @ driver/in-session-content-search
-  # Tip: 307968c1d — separators + query marks + 96-token excerpts; no schema bump.
+  # Tip: 41449e8c0 — 2-line character-window excerpts (+ marks/separators); no schema bump.
   - branch: driver/in-session-content-search
