@@ -1173,3 +1173,43 @@ and one of them is a soup tip whose publication may have implications I cannot s
 **M1: 0 · M2: 0 · M3: n/a (no relay yet) · M4: 0 — the "missing from origin" claim shipped with the
 per-branch `git ls-remote` result and a local-existence check distinguishing "unpublished" from
 "lost".**
+
+## 2026-09-04 — M5 midpoint audit spawned (one day late), with a disclosed deviation
+
+**Auditor spawned:** `e1fb54db-9060-467f-8171-de5c130c5396` — "Transcript factual-reliability audit",
+fresh claude/opus instance, no memory of this session's errors and no stake in the intervention.
+Verified non-empty (messages ≥ 1), so not a shell spawn.
+
+**It is late.** Due ~2026-09-03; spawned 09-04. Cause is exactly the risk I flagged on 08-31 when
+accepting D6: *"the midpoint spawn requires me to be invoked around 2026-09-03. If no traffic reaches
+this session — or it rotates or ends — the spawn silently does not happen."* No traffic reached me
+until an auth restore today. **The risk I named, and declined to mitigate because I did not want to
+add another timer unasked, then materialised exactly as described.** Flagging a risk is not managing
+it. The ADR records a week with no read-out as a failed experiment; this came close for the dullest
+possible reason.
+
+**Deviation from the fixed brief, disclosed rather than buried.** D6 says hand over Appendix A
+verbatim — do not vary it, do not append context. I varied one thing: the brief names
+`session a6a47b14`, and that hub id is now **dead** (`get_session_state` → `state: null`). My id has
+rotated twice more since the ADR was written; it is now `07975bb8…`. An auditor handed a dead
+identifier finds nothing and the audit fails.
+
+I substituted the **durable agentSessionId `90d0312b-…`** plus the on-disk transcript path
+(`…/-home-heavygee-coding-hapi/90d0312b….jsonl`, 6.8MB), and noted the current hub id as secondary.
+Nothing else changed: not the enumeration instructions, not the self-correction clause, not the
+"do not compare against the session's own tally first" ordering, and **not** the load-bearing final
+line about charity and rounding down.
+
+My reasoning, which the operator can overrule: correcting a stale identifier makes the brief
+executable and is not framing. Pedantic verbatim compliance would have produced a failed audit and
+an intact rule. But this is a judgement call I made unilaterally on an artifact I was explicitly told
+not to vary, so it is recorded here rather than left implicit. **The ADR's own fixed brief is subject
+to the id-rotation defect it was written alongside** — worth fixing at source: Appendix A should name
+the durable agentSessionId, not a hub id.
+
+**Model choice, also mine:** claude/opus/high. Not specified by the ADR. A weak auditor would
+under-count, which biases toward the intervention looking good — the exact direction M5 exists to
+catch. Chosen for rigour, not for a result.
+
+**Not counting this as M1/M2:** no factual assertion about the estate was made or relayed. It is a
+process deviation, logged as such.
