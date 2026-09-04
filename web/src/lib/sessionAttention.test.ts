@@ -5,6 +5,7 @@ import {
     classifySessionAttention,
     getSessionBlockedState,
     sessionBlockedIsError,
+    sessionBlockedIsHubInferred,
     sessionIsUnread,
 } from './sessionAttention'
 
@@ -430,6 +431,36 @@ describe('getSessionBlockedState', () => {
 
         expect(state?.reason).toBe('permission')
         expect(state?.note).toBe('Edit')
+    })
+
+    it('keeps hub-inferred blockers distinguishable from the agent saying so', () => {
+        // "HAPI noticed this went quiet" and "the agent told us it failed" are
+        // different claims; folding both onto `failed` would hide whose
+        // judgement the operator is acting on.
+        const abandoned = getSessionBlockedState(makeSummary({
+            id: 'a',
+            lastNotify: { status: 'hub_turn_abandoned', at: now, note: 'Agent stopped responding mid-turn' }
+        }), { now })!
+        const agentError = getSessionBlockedState(makeSummary({
+            id: 'b',
+            lastNotify: { status: 'hub_agent_error', at: now, note: 'failed after 3 retries' }
+        }), { now })!
+        const selfReported = getSessionBlockedState(makeSummary({
+            id: 'c',
+            lastNotify: { status: 'failed', at: now, note: 'I broke it' }
+        }), { now })!
+
+        expect(abandoned.reason).toBe('no_response')
+        expect(agentError.reason).toBe('agent_error')
+        expect(selfReported.reason).toBe('failed')
+
+        // All three read as errors (red), but only two are inferences.
+        for (const state of [abandoned, agentError, selfReported]) {
+            expect(sessionBlockedIsError(state)).toBe(true)
+        }
+        expect(sessionBlockedIsHubInferred(abandoned)).toBe(true)
+        expect(sessionBlockedIsHubInferred(agentError)).toBe(true)
+        expect(sessionBlockedIsHubInferred(selfReported)).toBe(false)
     })
 
     it('returns null when nothing is blocking', () => {

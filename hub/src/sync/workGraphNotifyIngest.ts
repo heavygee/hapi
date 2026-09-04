@@ -4,6 +4,9 @@ import {
     WORK_GRAPH_MAX_TAGS,
     extractAssistantPlainText,
     extractNotifySummary,
+    BLOCKED_NOTIFY_STALE_MS,
+    clampNotifyNote,
+    HUB_AGENT_ERROR_STATUS,
     isBlockedNotifyStatus,
     normalizeNotifyStatus,
     pickNotifyNote,
@@ -502,6 +505,69 @@ export function extractSessionNotifySignal(
         status,
         at: ts,
         note: isBlockedNotifyStatus(status) ? pickNotifyNote(notify) : null
+    }
+}
+
+/**
+ * True for ordinary agent progress — output that is neither an error nor a
+ * notify footer. Used to retire a hub-authored error once the agent carries
+ * on regardless: the hub guessed the turn was dead and was wrong.
+ */
+export function isAgentProgressMessage(content: unknown): boolean {
+    if (!isAgentMessageContent(content)) return false
+    const agentBody = unwrapRoleWrappedRecordEnvelope(content)
+    const agentContent = asRecord(agentBody?.role === 'agent' ? agentBody.content : content)
+    const data = asRecord(agentContent?.data)
+    if (data === null) return false
+    // Events (modelError, bridged, etc.) are not the agent making progress.
+    return data.type !== 'error' && agentContent?.type !== 'event'
+}
+
+/**
+ * Terminal agent error → hub-authored blocking signal (#1717).
+ *
+ * An agent that surfaces `type: 'error'` has told the operator something broke.
+ * The model call may have died before any turn end, so there is no
+ * `AGENT_NOTIFY_SUMMARY` footer and never will be — the agent structurally
+ * cannot self-report this class. The hub speaks for it instead.
+ *
+ * Returns null for anything that is not an agent error message, so ordinary
+ * output is untouched.
+ */
+export function extractHubAgentErrorSignal(
+    content: unknown,
+    ts: number,
+    now: number = Date.now()
+): SessionNotifySignal | null {
+    if (!isAgentMessageContent(content)) {
+        return null
+    }
+
+    // A hub *inference* is only a claim about the present. Imported/merged
+    // transcripts replay stored rows through `message-received` with their
+    // original createdAt (see `emitImportedMessageEvents`), and a month-old
+    // error entry must not mark a quiet session blocked today. Past the loud
+    // window it would render muted anyway, so nothing is lost by refusing.
+    if (now - ts > BLOCKED_NOTIFY_STALE_MS) {
+        return null
+    }
+
+    const agentBody = unwrapRoleWrappedRecordEnvelope(content)
+    const agentContent = asRecord(agentBody?.role === 'agent' ? agentBody.content : content)
+    const data = asRecord(agentContent?.data)
+    if (data?.type !== 'error') {
+        return null
+    }
+
+    const message = typeof data.message === 'string' ? data.message.trim() : ''
+    if (message.length === 0) {
+        return null
+    }
+
+    return {
+        status: HUB_AGENT_ERROR_STATUS,
+        at: ts,
+        note: clampNotifyNote(message)
     }
 }
 

@@ -8,7 +8,9 @@ import {
     WORK_AD_DEFAULT_TTL_MS,
     buildOperatorUnblockEvent,
     buildWorkAdFromNotify,
+    extractHubAgentErrorSignal,
     extractSessionNotifySignal,
+    isAgentProgressMessage,
     ingestNotifySummaryFromMessage,
     isOperatorReplyMessage,
     mapNotifyStatusToWorkAdStatus
@@ -1080,5 +1082,68 @@ describe('buildOperatorUnblockEvent (#1717 posterity record)', () => {
             priorNotify: null
         })
         expect(event.payload_json).toMatchObject({ prior_status: null, prior_note: null, prior_at: null })
+    })
+})
+
+function assistantError(message: string) {
+    return { role: 'agent', content: { type: 'codex', data: { type: 'error', message } } }
+}
+
+describe('extractHubAgentErrorSignal (#1717 hub speaks for a dead turn)', () => {
+    const ts = 1_700_000_000_000
+
+    it('stamps a hub-authored blocker for a terminal agent error', () => {
+        // Explicit clock: the freshness bound compares against `now`, and a
+        // fixed epoch would read as ancient against the real one.
+        const signal = extractHubAgentErrorSignal(
+            assistantError('Cursor Agent failed after 3 retries.'),
+            ts,
+            ts + 1000
+        )
+        // Provenance is in the status, so the ledger records that the HUB
+        // inferred this rather than the agent claiming it.
+        expect(signal).toEqual({
+            status: 'hub_agent_error',
+            at: ts,
+            note: 'Cursor Agent failed after 3 retries.'
+        })
+    })
+
+    it('ignores ordinary agent output and user messages', () => {
+        expect(extractHubAgentErrorSignal(assistantOutput('all good'), ts, ts + 1000)).toBeNull()
+        expect(extractHubAgentErrorSignal(userInbound('do the thing'), ts, ts + 1000)).toBeNull()
+    })
+
+    it('ignores an error with no message text', () => {
+        expect(extractHubAgentErrorSignal(assistantError('   '), ts, ts + 1000)).toBeNull()
+    })
+
+    it('refuses a replayed historical error so imports cannot resurrect a blocker', () => {
+        // Transcript merges replay stored rows through message-received with
+        // their ORIGINAL createdAt. A month-old error is not a blocker today.
+        const now = ts + 40 * 24 * 60 * 60 * 1000
+        expect(extractHubAgentErrorSignal(
+            assistantError('Cursor Agent failed after 3 retries.'), ts, now
+        )).toBeNull()
+        // Still stamped while it is genuinely recent.
+        expect(extractHubAgentErrorSignal(
+            assistantError('Cursor Agent failed after 3 retries.'), ts, ts + 60_000
+        )?.status).toBe('hub_agent_error')
+    })
+
+    it('clamps a giant error so the summary payload stays bounded', () => {
+        const signal = extractHubAgentErrorSignal(assistantError('x'.repeat(5000)), ts, ts + 1000)
+        expect((signal?.note ?? '').length).toBeLessThanOrEqual(160)
+    })
+})
+
+describe('isAgentProgressMessage (#1717 retires a falsified hub guess)', () => {
+    it('counts ordinary agent output as progress', () => {
+        expect(isAgentProgressMessage(assistantOutput('carrying on'))).toBe(true)
+    })
+
+    it('does not count an error or a user message as progress', () => {
+        expect(isAgentProgressMessage(assistantError('boom'))).toBe(false)
+        expect(isAgentProgressMessage(userInbound('hello'))).toBe(false)
     })
 })

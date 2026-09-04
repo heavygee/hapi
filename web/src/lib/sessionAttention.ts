@@ -91,6 +91,8 @@ export type SessionBlockedReason =
     | 'needs_decision'
     | 'needs_review'
     | 'failed'
+    | 'no_response'
+    | 'agent_error'
     | 'permission'
     | 'question'
 
@@ -190,6 +192,8 @@ const BLOCKED_LABEL_KEY: Record<SessionBlockedReason, string> = {
     needs_decision: 'sessions.blockedChip.decision',
     needs_review: 'sessions.blockedChip.review',
     failed: 'sessions.blockedChip.failed',
+    no_response: 'sessions.blockedChip.noResponse',
+    agent_error: 'sessions.blockedChip.agentError',
     permission: 'sessions.blockedChip.permission',
     question: 'sessions.blockedChip.question'
 }
@@ -204,4 +208,15 @@ export function getSessionBlockedLabelKey(state: SessionBlockedState): string {
  */
 export function sessionBlockedIsError(state: SessionBlockedState): boolean {
     return state.reason === 'failed'
+        || state.reason === 'no_response'
+        || state.reason === 'agent_error'
+}
+
+/**
+ * True when HAPI inferred the block rather than the agent reporting it.
+ * The row tooltip says so, because an inference deserves less trust than a
+ * self-report and the operator should know which they are acting on.
+ */
+export function sessionBlockedIsHubInferred(state: SessionBlockedState): boolean {
+    return state.reason === 'no_response' || state.reason === 'agent_error'
 }

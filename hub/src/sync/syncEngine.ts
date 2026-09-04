@@ -7,7 +7,7 @@
  * - No E2E encryption; data is stored as JSON in SQLite
  */
 
-import { BLOCKED_NOTIFY_STALE_MS, isKnownFlavor, isSteeringSupportedForSession, type LocalResumeTarget, type ResumableSession, type SessionEndReason } from '@hapi/protocol'
+import { BLOCKED_NOTIFY_STALE_MS, isHubAuthoredNotifyStatus, isKnownFlavor, isSteeringSupportedForSession, type LocalResumeTarget, type ResumableSession, type SessionEndReason } from '@hapi/protocol'
 import {
     cliBinaryUpdatedOnDisk,
     isMachineCapabilitySkewed,
@@ -59,7 +59,7 @@ import {
     type RpcUploadFileResponse
 } from './rpcGateway'
 import { SessionCache } from './sessionCache'
-import { buildOperatorUnblockEvent, extractSessionNotifySignal, ingestNotifySummaryFromMessage, isOperatorReplyMessage } from './workGraphNotifyIngest'
+import { buildOperatorUnblockEvent, extractHubAgentErrorSignal, extractSessionNotifySignal, ingestNotifySummaryFromMessage, isAgentProgressMessage, isOperatorReplyMessage } from './workGraphNotifyIngest'
 
 /** Startup notify backfill bounds (#1717) — see `backfillRecentNotifySignals`. */
 const NOTIFY_BACKFILL_MAX_SESSIONS = 200
@@ -583,6 +583,27 @@ export class SyncEngine {
                 )
                 if (notifySignal) {
                     this.sessionCache.setSessionLastNotify(session.id, notifySignal)
+                } else {
+                    // No footer. An agent error still means the operator is
+                    // needed, and this class can never produce a footer of its
+                    // own, so the hub stamps one on the agent's behalf.
+                    const errorSignal = extractHubAgentErrorSignal(
+                        event.message.content,
+                        event.message.createdAt
+                    )
+                    if (errorSignal) {
+                        this.sessionCache.setSessionLastNotify(session.id, errorSignal)
+                    } else if (
+                        isHubAuthoredNotifyStatus(session.lastNotify?.status)
+                        && isAgentProgressMessage(event.message.content)
+                    ) {
+                        // The agent carried on after the error, so the hub's
+                        // guess that the turn was dead is now falsified. Only
+                        // hub-authored signals are retired this way — an
+                        // agent's own `blocked` footer stands until it says
+                        // otherwise or the operator acts.
+                        this.sessionCache.clearSessionLastNotify(session.id)
+                    }
                 }
 
                 try {

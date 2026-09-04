@@ -13,6 +13,19 @@
 export const NOTIFY_NOTE_MAX_CHARS = 160
 
 /**
+ * Hub-authored blocking statuses. Prefixed so any reader can see at a glance
+ * that these did not come from the agent.
+ */
+export const HUB_TURN_ABANDONED_STATUS = 'hub_turn_abandoned'
+export const HUB_AGENT_ERROR_STATUS = 'hub_agent_error'
+
+/** True when the hub inferred the block rather than the agent reporting it. */
+export function isHubAuthoredNotifyStatus(status: string | null | undefined): boolean {
+    const normalized = normalizeNotifyStatus(status)
+    return normalized === HUB_TURN_ABANDONED_STATUS || normalized === HUB_AGENT_ERROR_STATUS
+}
+
+/**
  * Notify statuses that mean "a human is needed before this can continue".
  *
  * Deliberately wider than the documented contract vocabulary, because agents
@@ -36,7 +49,15 @@ export const BLOCKING_NOTIFY_STATUSES: readonly string[] = [
     'pending',
     'waiting',
     'needs_input',
-    'blocked_on_operator'
+    'blocked_on_operator',
+    // Hub-authored, not agent self-reports. An agent whose model call died
+    // cannot emit a footer — there is no turn end to summarise — so the hub
+    // has to speak for it. Kept as distinct status values rather than reusing
+    // `failed` so provenance survives into the ledger: a reader can tell
+    // "the agent said it failed" from "the agent went silent and we inferred
+    // it", which are very different claims.
+    HUB_TURN_ABANDONED_STATUS,
+    HUB_AGENT_ERROR_STATUS
 ]
 
 /**
@@ -63,7 +84,16 @@ export const BLOCKED_NOTIFY_STATUSES: readonly string[] = ['blocked', 'stalled']
  * How a blocking status should be presented. Collapses synonyms onto the small
  * set of chips the session list actually draws.
  */
-export type NotifyBlockReason = 'blocked' | 'stalled' | 'needs_decision' | 'needs_review' | 'failed'
+export type NotifyBlockReason =
+    | 'blocked'
+    | 'stalled'
+    | 'needs_decision'
+    | 'needs_review'
+    | 'failed'
+    /** Hub inferred it: keep-alive stopped mid-turn. */
+    | 'no_response'
+    /** Hub inferred it: the agent surfaced a terminal error. */
+    | 'agent_error'
 
 const NOTIFY_BLOCK_REASON: Record<string, NotifyBlockReason> = {
     blocked: 'blocked',
@@ -76,7 +106,13 @@ const NOTIFY_BLOCK_REASON: Record<string, NotifyBlockReason> = {
     needs_review: 'needs_review',
     awaiting_review: 'needs_review',
     failed: 'failed',
-    error: 'failed'
+    error: 'failed',
+    // Distinct reasons, not folded into `failed`. "HAPI noticed this went
+    // quiet" and "the agent told us it failed" are different claims, and the
+    // operator has to be able to tell them apart at a glance to know whose
+    // judgement they are looking at.
+    [HUB_TURN_ABANDONED_STATUS]: 'no_response',
+    [HUB_AGENT_ERROR_STATUS]: 'agent_error'
 }
 
 export function getNotifyBlockReason(status: string | null | undefined): NotifyBlockReason | null {

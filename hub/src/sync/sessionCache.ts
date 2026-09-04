@@ -1,3 +1,4 @@
+import { HUB_TURN_ABANDONED_STATUS } from '@hapi/protocol'
 import { AgentStateSchema, MetadataSchema, SessionPatchSchema, TeamStateSchema } from '@hapi/protocol/schemas'
 import type { CodexCollaborationMode, CopilotAgentMode, PermissionMode, Session, SessionPatch } from '@hapi/protocol/types'
 import type { Store } from '../store'
@@ -740,18 +741,43 @@ export class SessionCache {
         const sessionTimeoutMs = 30_000
         const expired: string[] = []
 
+        const abandoned: Session[] = []
         for (const session of this.sessions.values()) {
             if (!session.active) continue
             if (now - session.activeAt <= sessionTimeoutMs) continue
+            // Capture before clearing: this flag IS the evidence that the turn
+            // was in flight when the agent's keep-alive stopped.
+            const wasThinking = session.thinking
             session.active = false
             this.store.sessions.setSessionActive(session.id, false, now, session.namespace)
             session.thinking = false
+            session.activeTurnStartedAt = null
             this.pendingThinkingUntilBySessionId.delete(session.id)
             expired.push(session.id)
+            if (wasThinking) abandoned.push(session)
             this.publisher.emit({
                 type: 'session-updated',
                 sessionId: session.id,
-                data: { active: false } satisfies SessionPatch
+                // `thinking` and `activeTurnStartedAt` MUST be in the patch.
+                // The web applies `thinking: patch.thinking ?? current.thinking`,
+                // so omitting it left every expired session displaying
+                // "thinking" forever — which also silently suppressed its
+                // blocked chrome, since a working agent is never blocked.
+                data: {
+                    active: false,
+                    thinking: false,
+                    activeTurnStartedAt: null
+                } satisfies SessionPatch
+            })
+        }
+
+        // After the loop: stamping re-emits per session, and doing it inline
+        // would interleave with the expiry patches above.
+        for (const session of abandoned) {
+            this.setSessionLastNotify(session.id, {
+                status: HUB_TURN_ABANDONED_STATUS,
+                at: now,
+                note: 'Agent stopped responding mid-turn'
             })
         }
 
