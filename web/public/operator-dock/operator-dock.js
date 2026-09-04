@@ -23,7 +23,8 @@
  * HapiInline.init({
  *   appId, configUrl='/api/config',   // config.hapiInline (or legacy config.operatorMic)
  *   navProvider: () => ({...}),        // returns the nav context object (see ADR §4)
- *   captureRoot: document.body,        // element html2canvas rasterizes
+ *   captureRoot: document.documentElement, // default; override if needed (body max-width → white margins)
+ *   sessionName: 'My app router',          // optional operator-facing pin label when hub name missing
  * });
  */
 (function () {
@@ -47,21 +48,71 @@
   var longPressTimer = null, longPressFired = false;
   var mediaRecorder = null, mediaStream = null, mediaChunks = [], mediaMime = '', mediaStopWait = null;
   var toolSheet = null;
-  // #154: keep draw surface clear of Cancel/Send (match .opdock-draw bottom in CSS).
-  var FOOT_CLEAR_PX = 140;
+  // #154 / #209 / #212: keep draw clear of Cancel/Send only — not the FAB pad.
+  // Fallback before measure; sizeCanvas sets --opdock-foot-clear from .opdock-actions.
+  var FOOT_CLEAR_PX = 64;
   var markupOpening = false;
 
   function $(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  /** Strip Quest/clipboard footguns before ByteString checks (#206). */
+  function normalizeGateSecret(raw) {
+    var s = String(raw == null ? '' : raw)
+      .replace(/^\uFEFF/, '')
+      .replace(/[\u200B-\u200D\uFEFF]/g, '')
+      .replace(/\u00A0/g, ' ')
+      .trim();
+    if (
+      (s.charAt(0) === '\u201C' && s.charAt(s.length - 1) === '\u201D') ||
+      (s.charAt(0) === '\u2018' && s.charAt(s.length - 1) === '\u2019') ||
+      (s.charAt(0) === '"' && s.charAt(s.length - 1) === '"') ||
+      (s.charAt(0) === "'" && s.charAt(s.length - 1) === "'")
+    ) {
+      s = s.slice(1, -1).trim();
+    }
+    return s;
+  }
+  function firstNonByteStringCodePoint(value) {
+    var s = String(value == null ? '' : value);
+    for (var i = 0; i < s.length; i++) {
+      var c = s.charCodeAt(i);
+      if (c > 255) return c;
+    }
+    return -1;
+  }
+  function gateSecretByteStringError(raw) {
+    var s = normalizeGateSecret(raw);
+    if (!s) return null;
+    var cp = firstNonByteStringCodePoint(s);
+    if (cp < 0) return null;
+    var hex = cp.toString(16).toUpperCase();
+    while (hex.length < 4) hex = '0' + hex;
+    return 'Gate secret has invalid characters (U+' + hex + ') — re-paste as plain ASCII';
+  }
   function getSecret() {
     try {
-      var next = (localStorage.getItem(SECRET_KEY) || '').trim();
-      if (next) return next;
-      return (localStorage.getItem(LEGACY_SECRET_KEY) || '').trim();
+      var next = normalizeGateSecret(localStorage.getItem(SECRET_KEY) || '');
+      if (next) {
+        if (gateSecretByteStringError(next)) {
+          setSecret('');
+          return '';
+        }
+        return next;
+      }
+      var legacy = normalizeGateSecret(localStorage.getItem(LEGACY_SECRET_KEY) || '');
+      if (legacy) {
+        if (gateSecretByteStringError(legacy)) {
+          setSecret('');
+          return '';
+        }
+        return legacy;
+      }
+      return '';
     } catch (e) { return ''; }
   }
   function setSecret(v) {
     try {
-      if (v) localStorage.setItem(SECRET_KEY, v);
+      var n = normalizeGateSecret(v == null ? '' : v);
+      if (n && !gateSecretByteStringError(n)) localStorage.setItem(SECRET_KEY, n);
       else localStorage.removeItem(SECRET_KEY);
       // TODO(2027-02-01): remove legacy storage key compatibility.
       localStorage.removeItem(LEGACY_SECRET_KEY);
@@ -115,26 +166,45 @@
       }
     } catch (e) {}
   }
-  function shortSessionId(id) {
-    return id && id.length > 8 ? id.slice(0, 8) : (id || '');
+  /** Operator-facing labels never use session ids / UUID prefixes (#201). */
+  function hostSessionName() {
+    var n = cfg && cfg.sessionName != null ? String(cfg.sessionName).trim() : '';
+    return n || '';
+  }
+  function operatorSessionLabel(name, kind) {
+    var n = name != null ? String(name).trim() : '';
+    if (n) return n;
+    var host = hostSessionName();
+    if (host) return host;
+    return kind === 'picker' ? 'Unknown session' : 'Pinned session';
   }
   function resolvePinnedLabel(secret) {
     var id = getPinnedSession();
     if (!id) return Promise.resolve(null);
     var cached = getPinnedSessionLabel();
-    if (!secret) return Promise.resolve(cached || shortSessionId(id));
+    if (!secret) return Promise.resolve(cached || operatorSessionLabel(null, 'pinned'));
     return listProjectSessions(secret).then(function (sessions) {
       for (var i = 0; i < sessions.length; i++) {
         if (sessions[i].id === id) {
-          var name = sessions[i].name || shortSessionId(id);
+          var name = operatorSessionLabel(sessions[i].name, 'pinned');
           setPinnedSession(id, name);
           return name;
         }
       }
-      return cached || shortSessionId(id);
+      return cached || operatorSessionLabel(null, 'pinned');
     }).catch(function () {
-      return cached || shortSessionId(id);
+      return cached || operatorSessionLabel(null, 'pinned');
     });
+  }
+
+  function formatSendError(err, st) {
+    var msg = err && err.message ? String(err.message) : String(err || '');
+    if (/ISO-8859-1|ByteString|code point/i.test(msg) || /invalid characters/i.test(msg)) {
+      return 'Gate secret has invalid characters — re-paste as plain ASCII';
+    }
+    if (st) return 'Send failed: upload ' + st;
+    if (msg) return 'Send failed: ' + msg;
+    return 'Send failed';
   }
 
   function toast(msg, kind) {
@@ -155,6 +225,7 @@
   function shouldClearStoredSecretOnStatus(_status) { return false; }
   function probeStatusMeansSecretRejected(status) { return status === 401 || status === 403; }
   function shouldWriteSecretAfterProbe(probe) {
+    if (probe && probe.invalidSecret) return false;
     if (probeStatusMeansSecretRejected(probe && probe.status)) return false;
     return true;
   }
@@ -224,17 +295,27 @@
       return res.json().catch(function () { return {}; }).then(function (body) {
         return { ok: !!res.ok, status: res.status, error: parseProxyRejectError(body), path: path };
       });
-    }).catch(function () {
+    }).catch(function (err) {
+      var msg = err && err.message ? String(err.message) : String(err || '');
+      if (/ISO-8859-1|ByteString|code point|invalid characters/i.test(msg)) {
+        return { ok: false, status: 0, invalidSecret: true, error: msg, path: path };
+      }
       return { ok: false, status: 0, error: '', path: path };
     });
   }
   function saveProbedSecret(value, inp) {
-    var v = (value || '').trim();
+    var v = normalizeGateSecret(value || '');
     if (!v) { toast('Paste the operator gate secret', 'err'); return Promise.resolve(false); }
+    var bad = gateSecretByteStringError(v);
+    if (bad) { toast(bad, 'err'); return Promise.resolve(false); }
     if (inp) inp.disabled = true;
     return probeSecret(v).then(function (probe) {
       if (inp) inp.disabled = false;
       if (!shouldWriteSecretAfterProbe(probe)) {
+        if (probe && probe.invalidSecret) {
+          toast(probe.error || gateSecretByteStringError(v) || 'Gate secret has invalid characters — re-paste as plain ASCII', 'err');
+          return false;
+        }
         var rejectKind = classifyAuthReject(probe.error, probe.path);
         if (shouldFailClosedGate(rejectKind)) setGateLocked(true);
         toast(authRejectOperatorCopy(probe.status, probe), 'err');
@@ -424,13 +505,29 @@
     }));
   }
 
+  /** Avoid html2canvas default white fill when body is max-width centered (#200). */
+  function captureBackgroundColor() {
+    try {
+      var htmlBg = getComputedStyle(document.documentElement).backgroundColor;
+      var bodyBg = getComputedStyle(document.body).backgroundColor;
+      function usable(c) {
+        return c && c !== 'transparent' && c !== 'rgba(0, 0, 0, 0)';
+      }
+      if (usable(htmlBg)) return htmlBg;
+      if (usable(bodyBg)) return bodyBg;
+    } catch (e) {}
+    return null;
+  }
+
   function captureScreenshot() {
     if (typeof html2canvas !== 'function') return Promise.resolve(null);
-    var root = (cfg.captureRoot && cfg.captureRoot.nodeType) ? cfg.captureRoot : document.body;
+    // Prefer documentElement so html background fills viewport; body max-width leaves white (#200).
+    var root = (cfg.captureRoot && cfg.captureRoot.nodeType) ? cfg.captureRoot : document.documentElement;
     return fetchSameOriginStylesheets().then(function (cssTexts) {
       return html2canvas(root, {
         logging: false,
         useCORS: true,
+        backgroundColor: captureBackgroundColor(),
         scale: Math.min(window.devicePixelRatio || 1, 2),
         ignoreElements: isOpdockChrome,
         onclone: function (doc) {
@@ -706,11 +803,19 @@
     return Promise.resolve(null);
   }
 
+  /** Fetch RequestInit headers must be ByteString (ISO-8859-1) (#202 / #206). */
+  function isHeaderByteString(value) {
+    return firstNonByteStringCodePoint(value) < 0;
+  }
+
   /** Proxy auth: send both secret headers for one release train (#73). Same value only. */
   function proxySecretHeaders(secret) {
+    var s = normalizeGateSecret(secret == null ? '' : secret);
+    var bad = gateSecretByteStringError(s);
+    if (bad) throw new Error(bad);
     var h = {};
-    h[SECRET_HEADER] = secret;
-    h[LEGACY_SECRET_HEADER] = secret;
+    h[SECRET_HEADER] = s;
+    h[LEGACY_SECRET_HEADER] = s;
     return h;
   }
 
@@ -720,7 +825,11 @@
         return { Authorization: 'Bearer ' + jwt };
       });
     }
-    return Promise.resolve(proxySecretHeaders(credential));
+    try {
+      return Promise.resolve(proxySecretHeaders(credential));
+    } catch (e) {
+      return Promise.reject(e);
+    }
   }
 
   function requestTarget(path) {
@@ -983,11 +1092,28 @@
     if (overlay && overlay._interim) overlay._interim.textContent = text || '';
   }
 
+  function measureFootClearPx() {
+    // #212: clear only Cancel/Send row — large fixed FOOT_CLEAR ate host Send/status.
+    if (!overlay) return FOOT_CLEAR_PX;
+    var actions = overlay.querySelector('.opdock-actions');
+    if (!actions) return FOOT_CLEAR_PX;
+    var oRect = overlay.getBoundingClientRect();
+    var aRect = actions.getBoundingClientRect();
+    var clear = Math.ceil(oRect.bottom - aRect.top) + 4;
+    var maxClear = Math.floor(window.innerHeight * 0.35);
+    if (clear < 52) return FOOT_CLEAR_PX;
+    if (clear > maxClear) return Math.max(FOOT_CLEAR_PX, maxClear);
+    return clear;
+  }
+
   function sizeCanvas() {
     if (!drawCanvas) return;
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
-    // #154: height must match CSS bottom inset — inline 100vh would re-cover Cancel.
-    var footClear = FOOT_CLEAR_PX;
+    // #154 / #212: height must match CSS bottom inset — inline 100vh would re-cover Cancel.
+    var footClear = measureFootClearPx();
+    if (overlay && overlay.style) {
+      overlay.style.setProperty('--opdock-foot-clear', footClear + 'px');
+    }
     var w = window.innerWidth, h = Math.max(0, window.innerHeight - footClear);
     drawCanvas.style.width = w + 'px'; drawCanvas.style.height = h + 'px';
     drawCanvas.width = Math.round(w * dpr); drawCanvas.height = Math.round(h * dpr);
@@ -1085,7 +1211,7 @@
         .catch(function (e) {
           var st = e && e.status;
           if (st === 401 || st === 403) onAuthRejected(st, e);
-          else toast('Send failed: ' + (st ? ('upload ' + st) : (e && e.message || e)), 'err');
+          else toast(formatSendError(e, st), 'err');
           setBtnState('overlay');
         });
       });
@@ -1125,7 +1251,7 @@
     }).catch(function (e) {
       var st = e && e.status;
       if (st === 401 || st === 403) onAuthRejected(st, e);
-      else toast('Send failed: ' + (st ? ('upload ' + st) : (e && e.message || e)), 'err');
+      else toast(formatSendError(e, st), 'err');
       setBtnState('idle');
     });
     });
@@ -1852,15 +1978,13 @@
       'pin / spawn apply on send · pick opens the session list now (and on send if unset)'));
     var pinnedId = getPinnedSession() || cfg.session || null;
     var pinnedLine = $('div', 'opdock-session-meta',
-      'Pinned: ' + (getPinnedSessionLabel() || (pinnedId ? shortSessionId(pinnedId) : '(none)')));
-    if (pinnedId) pinnedLine.title = pinnedId;
+      'Pinned: ' + (getPinnedSessionLabel() || (pinnedId ? operatorSessionLabel(null, 'pinned') : '(none)')));
     toolSheet.appendChild(pinnedLine);
     var secretForLabel = getSecret();
     if (secretForLabel && pinnedId) {
       resolvePinnedLabel(secretForLabel).then(function (label) {
         if (!toolSheet || !pinnedLine.isConnected) return;
-        pinnedLine.textContent = 'Pinned: ' + (label || shortSessionId(pinnedId));
-        pinnedLine.title = pinnedId;
+        pinnedLine.textContent = 'Pinned: ' + (label || operatorSessionLabel(null, 'pinned'));
       });
     }
     toolSheet.appendChild($('h3', null, 'Credential'));
@@ -1911,16 +2035,15 @@
         if (!s.unread) unread.hidden = true;
         row.appendChild(unread);
         var body = $('div');
-        var title = s.name || shortSessionId(s.id);
+        var title = operatorSessionLabel(s.name, 'picker');
         var titleEl = $('div', null, title);
-        if (s.id) titleEl.title = s.id;
         body.appendChild(titleEl);
         var meta = (s.active ? 'active' : 'idle') + (s.flavor ? ' · ' + s.flavor : '');
         if (s.updatedAt) meta += ' · ' + new Date(s.updatedAt).toLocaleString();
         body.appendChild($('div', 'opdock-session-meta', meta));
         row.appendChild(body);
         row.addEventListener('click', function () {
-          setPinnedSession(s.id, s.name || shortSessionId(s.id));
+          setPinnedSession(s.id, operatorSessionLabel(s.name, 'picker'));
           cfg.session = s.id;
           closeToolSheet();
           closeCluster();
@@ -2056,7 +2179,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.12.3', // x-release-please-version
+    _version: '0.12.8', // x-release-please-version
     openCluster: function () { return openCluster(); },
     _stripRawJsonForDisplay: stripRawJsonForDisplay,
     _summarizeContextJson: summarizeContextJson,

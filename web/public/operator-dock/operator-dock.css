@@ -3,9 +3,10 @@
 
 .opdock {
   position: fixed;
-  /* #107: flush bottom-right so HAPI composer Send stays clear. Safe-area alone (0 when absent). */
+  /* #107: flush right (safe-area alone). #221: lift 2× hub diameter so host composer
+     Send/audio stay clear — flush bottom sat on top of HAPI web composer controls. */
   right: env(safe-area-inset-right, 0px);
-  bottom: env(safe-area-inset-bottom, 0px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 112px); /* 2 × 56px hub */
   z-index: 2147483300; /* above markup overlay so hub + fan stay clickable (#115) */
   display: flex;
   flex-direction: column;
@@ -125,12 +126,13 @@
   position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
   pointer-events: none;
 }
-/* #154: do not cover Cancel/Send — Quest WebView canvases steal laser hits
- * even when a higher z-index foot paints on top. Keep draw clear of .opdock-foot. */
+/* #154 / #209 / #212: do not cover Cancel/Send — Quest WebView canvases steal laser hits
+ * even when a higher z-index foot paints on top. Keep draw clear of the actions row only
+ * (measured via --opdock-foot-clear). Do not reserve FAB bottom pad — that ate host Send. */
 .opdock-draw {
   position: absolute;
   top: 0; left: 0; right: 0;
-  bottom: 140px;
+  bottom: var(--opdock-foot-clear, 64px);
   width: 100%;
   height: auto;
   cursor: crosshair;
@@ -169,9 +171,11 @@
 .opdock-foot {
   position: absolute;
   left: 0; right: 0; bottom: 0;
-  /* Clear the floating mic FAB (web dock + native host) at bottom-end. */
+  /* FAB (web dock + native host) is bottom-end — clear it with RIGHT padding.
+   * Bottom pad stays tight (#212) so Cancel/Send sit low and FOOT_CLEAR stays small;
+   * a large bottom pad lifted actions and ate host Send/status on the draw canvas. */
   padding: 12px max(84px, calc(16px + env(safe-area-inset-right) + 64px))
-           max(84px, calc(16px + env(safe-area-inset-bottom) + 64px))
+           max(12px, calc(8px + env(safe-area-inset-bottom)))
            max(12px, env(safe-area-inset-left));
   background: linear-gradient(to top, rgba(6, 8, 14, 0.95), rgba(6, 8, 14, 0.0));
   display: flex; flex-direction: column; gap: 8px;
@@ -286,8 +290,10 @@
   padding: 8px 12px;
 }
 .opdock-replies--min {
-  right: max(80px, calc(env(safe-area-inset-right) + 72px));
-  bottom: max(16px, env(safe-area-inset-bottom));
+  /* #192: same column as H (centered like .opdock-sat), above vertical fan
+     (sessions sat ty=-108). Prior left-of-H offset covered host composer Send. */
+  right: calc(env(safe-area-inset-right, 0px) + 6px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 6px + 44px + 108px + 8px);
   width: 44px;
   height: 44px;
   max-height: none;
