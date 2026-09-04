@@ -1,0 +1,21 @@
+# Issue Labelling — daily wake at 09:00 UTC.
+#
+# Fork-local. Install: sudo bash scripts/tooling/install-hapi-issue-labelling-timer.sh
+#
+# Host (oos-linux) is Etc/UTC; 09:00 here matches the original operator ask
+# ("every day, 9am") on this machine. Persistent=true catches missed fires
+# after reboot / downtime (the fragile sleep-loop failure mode).
+
+[Unit]
+Description=HAPI Issue Labelling daily timer (09:00 UTC)
+Documentation=file:///home/heavygee/coding/hapi/docs/operator/AGENTS.md
+
+[Timer]
+OnCalendar=*-*-* 09:00:00 UTC
+RandomizedDelaySec=2min
+AccuracySec=1min
+Persistent=true
+Unit=hapi-issue-labelling-daily.service
+
+[Install]
+WantedBy=timers.target
