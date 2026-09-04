@@ -32,6 +32,7 @@ import {
 } from '@/hooks/usePinInProgressSessions'
 import {
     classifySessionAttention,
+    getSessionBlockedLabelKey,
     getSessionBlockedState,
     sessionBlockedIsError,
     sessionIsBlocked,
@@ -65,6 +66,7 @@ import { useFeatures } from '@/hooks/queries/useFeatures'
 import { getPrimaryGithubPrRef } from '@hapi/protocol'
 import { SessionRowSummary } from '@/components/SessionRowSummary'
 import { KitchenStatusChip } from '@/components/KitchenStatusChip'
+import { UnblockReasonDialog } from '@/components/UnblockReasonDialog'
 import { Spinner } from '@/components/Spinner'
 import { useToast } from '@/lib/toast-context'
 import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
@@ -1345,6 +1347,7 @@ function SessionItem(props: {
     const { features } = useFeatures(api)
     const githubPrAwarenessEnabled = Boolean(features?.githubPrAwareness.enabled)
     const primaryPrRef = getPrimaryGithubPrRef(s.metadata?.externalRefs)
+    const [unblockOpen, setUnblockOpen] = useState(false)
     const {
         status: cursorChatStoreStatus,
         isApplicable: cursorChatStoreApplicable,
@@ -1370,7 +1373,7 @@ function SessionItem(props: {
         ? t('session.action.reopenCursorUnverified')
         : undefined
 
-    const { archiveSession, reopenSession, renameSession, setExternalRefs, suggestSessionTitle, updateSessionSummary, deleteSession, setPinMode, isPending } = useSessionActions(
+    const { archiveSession, reopenSession, renameSession, setExternalRefs, suggestSessionTitle, updateSessionSummary, deleteSession, setPinMode, acknowledgeBlocked, isPending } = useSessionActions(
         api,
         s.id,
         s.metadata?.flavor ?? null
@@ -1512,6 +1515,7 @@ function SessionItem(props: {
                 linkedPr={linkedPr}
                 onExport={() => setExportOpen(true)}
                 onMarkUnread={() => markSessionUnread(s.id, s.updatedAt)}
+                onMarkUnblocked={blocked ? () => setUnblockOpen(true) : undefined}
                 onArchive={() => setArchiveOpen(true)}
                 onReopen={cursorReopenDisabledReason ? undefined : handleReopen}
                 reopenDisabledReason={cursorReopenDisabledReason}
@@ -1519,6 +1523,18 @@ function SessionItem(props: {
                 onDelete={() => setDeleteOpen(true)}
                 anchorPoint={menuAnchorPoint}
             />
+
+            {unblockOpen ? (
+                <UnblockReasonDialog
+                    isOpen
+                    sessionTitle={sessionName}
+                    blockedLabel={blocked ? t(getSessionBlockedLabelKey(blocked)) : null}
+                    blockedNote={blocked?.note ?? null}
+                    isPending={isPending}
+                    onClose={() => setUnblockOpen(false)}
+                    onConfirm={acknowledgeBlocked}
+                />
+            ) : null}
 
             {reopenError ? (
                 <ConfirmDialog
@@ -1658,7 +1674,7 @@ export function SessionList(props: {
     } = props
     const { sessionPreviewLimit } = useSessionPreviewLimit()
     const { sessionListStatusMode } = useSessionListStatusMode()
-    const { showActiveSessionsOnly } = useShowActiveSessionsOnly()
+    const { showActiveSessionsOnly, setShowActiveSessionsOnly } = useShowActiveSessionsOnly()
     const lastSeenVersion = useSessionLastSeenVersion()
     // Transient unread lens — not a Settings preference. Cleared on reload; rows drop as they're seen.
     const [showUnreadOnly, setShowUnreadOnly] = useState(false)
@@ -1701,14 +1717,18 @@ export function SessionList(props: {
         return t('machine.unknown')
     }
 
+    // Split so the blocked count can be taken BEFORE the active-only
+    // preference narrows the list. A blocked agent whose CLI disconnected is
+    // exactly the one worth surfacing, and it is not "active".
+    const preparedSessions = useMemo(
+        () => prepareSidebarSessions(props.sessions, selectedSessionId),
+        [props.sessions, selectedSessionId]
+    )
     const allSessions = useMemo(
-        () => {
-            const prepared = prepareSidebarSessions(props.sessions, selectedSessionId)
-            return showActiveSessionsOnly
-                ? filterActiveSessionsOnly(prepared, selectedSessionId)
-                : prepared
-        },
-        [props.sessions, selectedSessionId, showActiveSessionsOnly]
+        () => showActiveSessionsOnly
+            ? filterActiveSessionsOnly(preparedSessions, selectedSessionId)
+            : preparedSessions,
+        [preparedSessions, selectedSessionId, showActiveSessionsOnly]
     )
     const sessionActivityDates = useMemo(
         () => new Set(allSessions.map(session => formatDateValue(new Date(session.updatedAt)))),
@@ -1799,10 +1819,10 @@ export function SessionList(props: {
     // it has to reach one of these rows.
     const blockedSessions = useMemo(() => {
         const now = Date.now()
-        return allSessions
+        return preparedSessions
             .filter(session => sessionIsBlocked(session, { now }))
             .sort((a, b) => b.updatedAt - a.updatedAt)
-    }, [allSessions])
+    }, [preparedSessions])
     const blockedCount = blockedSessions.length
     const blockedAlerting = useBlockedArrivalAlert(
         useMemo(() => blockedSessions.map(session => session.id), [blockedSessions]),
@@ -2413,6 +2433,10 @@ export function SessionList(props: {
             setCustomEnd('')
             setMachineFilter(null)
             setShowUnreadOnly(false)
+            // Active-only is a persisted preference rather than a transient
+            // lens, but it narrows just the same, and the pill's contract is
+            // "this row exists and I will take you to it".
+            if (showActiveSessionsOnly) setShowActiveSessionsOnly(false)
         }
         // A globally pinned blocked row lives in the Pinned section, not the
         // Blocked one — expand both or the jump lands on a zero-height row
@@ -2518,7 +2542,7 @@ export function SessionList(props: {
             container.removeEventListener('scroll', schedule)
             window.removeEventListener('resize', schedule)
         }
-    }, [blockedCount, blockedSectionSessions, blockedSectionCollapsed, machineFilteredSessions])
+    }, [blockedCount, blockedSectionSessions, blockedSectionCollapsed, pinnedSectionCollapsed, machineFilteredSessions])
 
     const blockedDirection: BlockedJumpDirection = blockedOffscreen.above > 0 && blockedOffscreen.below > 0
         ? 'both'

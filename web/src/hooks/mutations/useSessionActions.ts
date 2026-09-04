@@ -31,6 +31,8 @@ export function useSessionActions(
     suggestSessionTitle: () => Promise<string>
     updateSessionSummary: (text: string) => Promise<void>
     setPinMode: (mode: 'none' | 'project' | 'global') => Promise<void>
+    /** #1717: dismiss blocked chrome with a required rationale. */
+    acknowledgeBlocked: (reason: string) => Promise<void>
     deleteSession: () => Promise<void>
     isPending: boolean
 } {
@@ -276,6 +278,14 @@ export function useSessionActions(
         onSuccess: () => void invalidateSession(),
     })
 
+    const blockedAckMutation = useMutation({
+        mutationFn: async (reason: string) => {
+            if (!api || !sessionId) throw new Error('Session unavailable')
+            await api.acknowledgeSessionBlocked(sessionId, reason)
+        },
+        onSuccess: () => void invalidateSession(),
+    })
+
     const deleteMutation = useMutation({
         mutationFn: async () => {
             if (!api || !sessionId) {
@@ -308,6 +318,7 @@ export function useSessionActions(
         suggestSessionTitle: titleSuggestionMutation.mutateAsync,
         updateSessionSummary: summaryMutation.mutateAsync,
         setPinMode: pinMutation.mutateAsync,
+        acknowledgeBlocked: blockedAckMutation.mutateAsync,
         deleteSession: deleteMutation.mutateAsync,
         isPending: abortMutation.isPending
             || archiveMutation.isPending
@@ -316,6 +327,9 @@ export function useSessionActions(
             || permissionMutation.isPending
             || collaborationMutation.isPending
             || copilotAgentModeMutation.isPending
+            // Without this the unblock dialog's confirm never disables, and a
+            // double click writes two operator_unblock rows to the ledger.
+            || blockedAckMutation.isPending
             || modelMutation.isPending
             || modelReasoningEffortMutation.isPending
             || effortMutation.isPending

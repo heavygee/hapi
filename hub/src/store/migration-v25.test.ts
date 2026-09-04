@@ -28,7 +28,7 @@ describe('schema migration v24 to v27 (via grants/replays)', () => {
         const migrated = new Store(dbPath)
         const internalDb = (migrated as unknown as { db: Database }).db
         const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
-        expect(version.user_version).toBe(29)
+        expect(version.user_version).toBe(30)
         const table = internalDb.prepare(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'machine_reenroll_grants'"
         ).get() as { name: string } | undefined

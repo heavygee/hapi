@@ -89,7 +89,7 @@ import {
     defaultProvenanceMessageScanOptions,
     type ProvenanceMessageScanOptions,
 } from '@hapi/protocol/provenanceMessageAudit'
-import { extractSessionNotifySignal, ingestNotifySummaryFromMessage, isOperatorReplyMessage } from './workGraphNotifyIngest'
+import { buildOperatorUnblockEvent, extractSessionNotifySignal, ingestNotifySummaryFromMessage, isOperatorReplyMessage } from './workGraphNotifyIngest'
 
 /** Startup notify backfill bounds (#1717) — see `backfillRecentNotifySignals`. */
 const NOTIFY_BACKFILL_MAX_SESSIONS = 200
@@ -357,6 +357,40 @@ export class SyncEngine {
 
     getSessions(): Session[] {
         return this.sessionCache.getSessions()
+    }
+
+    /**
+     * Operator manually marks a session unblocked (#1717).
+     *
+     * Two effects, deliberately: it dismisses the chrome, AND it writes a
+     * work-graph event. Replying to an agent leaves the rationale in the
+     * transcript for anyone (or the overseer) to read later; dismissing
+     * silently would leave a state change with no "why", which is exactly the
+     * gap the reason prompt exists to close.
+     */
+    acknowledgeSessionBlocked(sessionId: string, reason: string): { at: number; reason: string } | null {
+        const session = this.getSession(sessionId)
+        if (!session) return null
+
+        const priorNotify = session.lastNotify ?? null
+        const ack = this.sessionCache.setSessionBlockedAck(sessionId, reason)
+        if (!ack) return null
+
+        try {
+            this.store.workGraph.insertEvent(session.namespace, buildOperatorUnblockEvent({
+                sessionId,
+                ownerUserId: this.hubOwnerUserId,
+                reason,
+                acknowledgedAt: ack.at,
+                priorNotify: priorNotify
+            }), { ts: ack.at })
+        } catch (error) {
+            // Best-effort ledger capture — never fail the operator's dismissal
+            // because the event log rejected the row.
+            console.error('[work-graph] operator_unblock capture failed', error)
+        }
+
+        return ack
     }
 
     /**

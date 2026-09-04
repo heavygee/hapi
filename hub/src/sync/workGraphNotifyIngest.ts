@@ -565,3 +565,41 @@ export function ingestNotifySummaryFromMessage(input: NotifyIngestInput): Notify
         throw error
     }
 }
+
+/**
+ * Ledger event for an operator's manual unblock (#1717).
+ *
+ * Pure so the payload the overseer reasons about is testable without standing
+ * up a SyncEngine. Carries the agent's prior claim alongside the operator's
+ * rationale, so a reader can distinguish "operator disagreed with the agent"
+ * from "operator resolved it elsewhere" — the two have very different
+ * implications for whether the agent's judgement should be trusted next time.
+ */
+export function buildOperatorUnblockEvent(input: {
+    sessionId: string
+    ownerUserId: string | number
+    reason: string
+    acknowledgedAt: number
+    priorNotify: NotifySummary | SessionNotifySignal | null
+}): WorkGraphEventCreate {
+    const principalId = String(input.ownerUserId)
+    const prior = input.priorNotify
+    return {
+        source_kind: 'operator',
+        source_ref: principalId,
+        sink_kind: 'session',
+        sink_ref: input.sessionId,
+        event_type: 'operator_unblock',
+        summary: clampUtf8(input.reason, WORK_GRAPH_MAX_SUMMARY),
+        related_session_id: input.sessionId,
+        provenance: 'hapi-web/session-action-menu',
+        payload_json: {
+            reason: clampJsonUtf8(input.reason, WORK_GRAPH_MAX_STRING),
+            acknowledged_at: input.acknowledgedAt,
+            prior_status: prior?.status ?? null,
+            prior_note: (prior && 'note' in prior ? prior.note : null) ?? null,
+            prior_at: (prior && 'at' in prior ? prior.at : null) ?? null
+        },
+        principal: { kind: 'human', id: principalId }
+    }
+}
