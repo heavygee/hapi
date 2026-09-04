@@ -1,4 +1,9 @@
-import { cursorCliSkuBaseId, cursorModelBaseId, resolveCursorLegacyModelBase } from './cursorCliSku'
+import {
+    cursorCliSkuBaseId,
+    cursorModelBaseId,
+    isCursorCliSkuVariantId,
+    resolveCursorLegacyModelBase
+} from './cursorCliSku'
 import type { AgentFlavor } from './modes'
 
 /**
@@ -53,16 +58,47 @@ export function buildSpawnModelCatalogIndex(agent: AgentFlavor, catalog: readonl
  * otherwise spend the whole list on `gpt-5-mini[fast=false]`-style variants of
  * two or three models, and the base slug is itself accepted.
  */
+function formatIdList(ids: readonly string[]): string {
+    const listed = ids.slice(0, MAX_LISTED_MODELS).join(', ')
+    return ids.length > MAX_LISTED_MODELS ? `${listed}, … (${ids.length} total)` : listed
+}
+
 function formatAcceptedModels(agent: AgentFlavor, requested: string, catalog: readonly string[]): string {
     const prefix = requested.toLowerCase()
     const display = (id: string): string => (agent === 'cursor' ? cursorCliSkuBaseId(id) : id)
     const ids = [...new Set(catalog.map((id) => display(id.trim())).filter(Boolean))].sort()
-    const ranked = [
+    return formatIdList([
         ...ids.filter((id) => id.toLowerCase().startsWith(prefix)),
         ...ids.filter((id) => !id.toLowerCase().startsWith(prefix))
-    ]
-    const listed = ranked.slice(0, MAX_LISTED_MODELS).join(', ')
-    return ranked.length > MAX_LISTED_MODELS ? `${listed}, … (${ranked.length} total)` : listed
+    ])
+}
+
+/**
+ * A catalog that enumerates CLI sku variants of a base (`gpt-5.5-medium`) is
+ * authoritative about which variants exist, so an explicit variant of that base
+ * has to match one exactly. Collapsing to the base would wave `gpt-5.5-high-fast`
+ * through when only `gpt-5.5-medium` is offered — and resolveCursorSpawnModel
+ * deliberately forwards an unavailable sku rather than downgrade it
+ * (cursorStaleModelRemap), so the handshake failure lands anyway.
+ *
+ * Scoped to CLI skus on purpose. ACP wire ids are a different naming of the same
+ * models, with parameter sets the remap resolves for us, and a wire-only catalog
+ * says nothing at all about which skus exist — requiring an exact variant there
+ * would reject every valid suffixed sku on a machine whose cache holds wires.
+ */
+function unavailableCursorSkuVariants(requested: string, catalog: readonly string[]): string[] | null {
+    if (!isCursorCliSkuVariantId(requested)) return null
+
+    const wanted = requested.trim().toLowerCase()
+    const base = cursorCliSkuBaseId(wanted)
+    const siblings = [...new Set(
+        catalog
+            .map((id) => id.trim().toLowerCase())
+            .filter((id) => isCursorCliSkuVariantId(id) && cursorCliSkuBaseId(id) === base)
+    )].sort()
+
+    if (siblings.length === 0 || siblings.includes(wanted)) return null
+    return siblings
 }
 
 /**
@@ -82,6 +118,16 @@ export function validateSpawnModelAgainstCatalog(
     const requested = model?.trim() ?? ''
     if (!requested || isWildcardModelId(agent, requested)) return { ok: true }
     if (catalog.length === 0) return { ok: true }
+
+    if (agent === 'cursor') {
+        const siblings = unavailableCursorSkuVariants(requested, catalog)
+        if (siblings) {
+            return {
+                ok: false,
+                message: `Model '${requested}' is not an available cursor variant of '${cursorCliSkuBaseId(requested.toLowerCase())}' on this machine. Accepted: ${formatIdList(siblings)}`
+            }
+        }
+    }
 
     const index = buildSpawnModelCatalogIndex(agent, catalog)
     if (catalogCandidates(agent, requested).some((candidate) => index.has(candidate))) return { ok: true }

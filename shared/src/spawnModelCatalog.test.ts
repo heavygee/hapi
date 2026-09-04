@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { validateSpawnModelAgainstCatalog } from './spawnModelCatalog';
 
+// Wire-id shaped, as a real cached catalog is: `agent --list-models` slugs and
+// ACP wires are separate namings, and machines commonly cache only the wires.
 const CURSOR_CATALOG = [
     'auto',
     'composer-2.5[thinking]',
     'gpt-5.1[reasoning=high]',
-    'cursor-grok-4.5-fast'
+    'cursor-grok-4.5[fast=true]'
 ];
 
 describe('validateSpawnModelAgainstCatalog', () => {
@@ -26,8 +28,30 @@ describe('validateSpawnModelAgainstCatalog', () => {
         expect(validateSpawnModelAgainstCatalog('cursor', 'composer-2.5', CURSOR_CATALOG)).toEqual({ ok: true });
     });
 
-    it('accepts a Cursor CLI sku whose base is in the catalog', () => {
+    it('accepts a Cursor CLI sku whose base is in a wire-id catalog', () => {
+        // A wire-only catalog is a different naming of the same models — it says
+        // nothing about which effort/speed skus exist, so the sku must not be
+        // rejected for being absent from it.
         expect(validateSpawnModelAgainstCatalog('cursor', 'cursor-grok-4.5-high', CURSOR_CATALOG)).toEqual({ ok: true });
+        expect(validateSpawnModelAgainstCatalog('cursor', 'gpt-5.1-high-fast', CURSOR_CATALOG)).toEqual({ ok: true });
+    });
+
+    it('rejects an explicit Cursor sku when the catalog enumerates other variants of its base', () => {
+        const result = validateSpawnModelAgainstCatalog('cursor', 'gpt-5.5-high-fast', ['gpt-5.5-medium']);
+
+        expect(result).toEqual({
+            ok: false,
+            message: "Model 'gpt-5.5-high-fast' is not an available cursor variant of 'gpt-5.5' on this machine. Accepted: gpt-5.5-medium"
+        });
+    });
+
+    it('accepts an enumerated Cursor sku variant and the bare base beside it', () => {
+        const catalog = ['gpt-5.5-medium', 'gpt-5.5-high'];
+
+        expect(validateSpawnModelAgainstCatalog('cursor', 'gpt-5.5-high', catalog)).toEqual({ ok: true });
+        expect(validateSpawnModelAgainstCatalog('cursor', 'gpt-5.5', catalog)).toEqual({ ok: true });
+        // Variants of a base the catalog does not enumerate keep matching on base.
+        expect(validateSpawnModelAgainstCatalog('cursor', 'composer-2.5-high', [...catalog, 'composer-2.5'])).toEqual({ ok: true });
     });
 
     it('accepts a renamed Cursor base that the stale-model remap would resolve', () => {
