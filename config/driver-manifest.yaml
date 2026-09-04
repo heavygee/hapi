@@ -810,7 +810,7 @@ layers:
   # Pin v0.11.6 (#155 fail-closed + v0.11.5 capture). #123 Settings unlock + gate probe.
   # Thin soup tip on live driver/integration. Worktree: hapi-inline-web (feat) + hapi-inline-soup (tip).
   # Knock /opmic. Composed /hapi/operator/sessions. Do not allow-list raw GET /api/sessions.
-  # Tip: 956fffba6 (driver/hapi-inline-operator-dock) — pin v0.12.8 (#221 H hub lift)
+  # Tip: 2d2055ca7 (driver/hapi-inline-operator-dock) — pin v0.12.8 (#221); re-thin after dogfood bump
   - branch: driver/hapi-inline-operator-dock
 
   # heavygee/hapi#121 — operator-hold chip pulse (🛑 needs_operator / babysit.hold).
