@@ -519,6 +519,8 @@ export class Store {
                 last_notify_status TEXT,
                 last_notify_at INTEGER,
                 last_notify_note TEXT,
+                blocked_ack_at INTEGER,
+                blocked_ack_reason TEXT,
                 active INTEGER DEFAULT 0,
                 active_at INTEGER,
                 seq INTEGER DEFAULT 0
@@ -1105,6 +1107,19 @@ export class Store {
         }
         if (!columns.has('global_pinned')) {
             this.db.exec('ALTER TABLE sessions ADD COLUMN global_pinned INTEGER NOT NULL DEFAULT 0')
+        }
+    }
+
+    /** Operator manual-unblock watermark + rationale (#1717). Numbered
+     *  v29->v30 on the soup ladder; the upstream tip carries it as v26->v27. */
+    private migrateFromV29ToV30(): void {
+        const columns = this.getSessionColumnNames()
+        if (columns.size === 0) return
+        if (!columns.has('blocked_ack_at')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN blocked_ack_at INTEGER')
+        }
+        if (!columns.has('blocked_ack_reason')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN blocked_ack_reason TEXT')
         }
     }
 

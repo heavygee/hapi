@@ -1,6 +1,6 @@
 import type { AgentState, AttachedJob, ExternalRef, Metadata, Session, TodoItem, WorktreeMetadata } from './schemas'
 import { isKnownFlavor } from './flavors'
-import type { SessionNotifySignal } from './notifyAttention'
+import type { SessionBlockedAck, SessionNotifySignal } from './notifyAttention'
 import type { AgentFlavor } from './modes'
 
 export type PendingRequestKind = 'permission' | 'input'
@@ -86,6 +86,8 @@ export type SessionSummary = {
      *  pending requests mean "live, waiting on a click", this means "the turn
      *  ended and the agent said it is stuck". See `./notifyAttention`. */
     lastNotify?: SessionNotifySignal | null
+    /** Operator's manual "not blocked" watermark + rationale. */
+    blockedAck?: SessionBlockedAck | null
     futureScheduledMessageCount: number
     /** Epoch ms of the soonest uninvoked future scheduled message, or null. */
     nextScheduledAt: number | null
@@ -259,6 +261,7 @@ export function toSessionSummary(
         pendingRequests: computePendingRequests(session.agentState, session.updatedAt),
         backgroundTaskCount: session.backgroundTaskCount ?? 0,
         lastNotify: session.lastNotify ?? null,
+        blockedAck: session.blockedAck ?? null,
         futureScheduledMessageCount: 0,
         nextScheduledAt: null,
         attachedJob,
