@@ -68,7 +68,7 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 30
+const SCHEMA_VERSION: number = 31
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -413,6 +413,7 @@ export class Store {
             27: () => this.migrateFromV27ToV28(),
             28: () => this.migrateFromV28ToV29(),
             29: () => this.migrateFromV29ToV30(),
+            30: () => this.migrateFromV30ToV31(),
         })
 
         if (currentVersion === 0) {
@@ -1110,9 +1111,9 @@ export class Store {
         }
     }
 
-    /** Operator manual-unblock watermark + rationale (#1717). Numbered
-     *  v29->v30 on the soup ladder; the upstream tip carries it as v26->v27. */
-    private migrateFromV29ToV30(): void {
+    /** Operator manual-unblock watermark + rationale (#1717). Soup ladder
+     *  v30->v31 (content search already occupies v29->v30). */
+    private migrateFromV30ToV31(): void {
         const columns = this.getSessionColumnNames()
         if (columns.size === 0) return
         if (!columns.has('blocked_ack_at')) {

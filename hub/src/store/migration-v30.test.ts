@@ -20,7 +20,7 @@ describe('schema migration v29 to v30 (message content search)', () => {
         const store = new Store(':memory:')
         const db = (store as unknown as { db: Database }).db
         const version = db.prepare('PRAGMA user_version').get() as { user_version: number }
-        expect(version.user_version).toBe(30)
+        expect(version.user_version).toBe(31)
         for (const name of [
             'message_content_search',
             'message_content_search_lookup',
@@ -67,7 +67,7 @@ describe('schema migration v29 to v30 (message content search)', () => {
                 .toBe(session.id)
             const internalDb = (migrated as unknown as { db: Database }).db
             const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
-            expect(version.user_version).toBe(30)
+            expect(version.user_version).toBe(31)
             const short = internalDb.prepare(
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'message_content_search_short'"
             ).get() as { name: string } | null
