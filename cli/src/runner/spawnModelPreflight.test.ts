@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setCursorAcpModelsSnapshot } from '@/cursor/utils/cursorAcpModelsBridge';
-import { _resetCursorModelsCacheForTests, seedCursorModelsCache } from '@/modules/common/cursorModels';
+import { _resetCursorModelsCacheForTests, listCursorModels, seedCursorModelsCache } from '@/modules/common/cursorModels';
+import { writeSharedCursorModelsCache } from '@/modules/common/cursorModelsSharedCache';
 import { checkSpawnModel } from './spawnModelPreflight';
 
 // Isolate the on-disk cursor-models cache to this file's own HAPI_HOME so
@@ -11,6 +12,11 @@ import { checkSpawnModel } from './spawnModelPreflight';
 const previousHapiHome = process.env.HAPI_HOME;
 const testHapiHome = mkdtempSync(join(tmpdir(), 'hapi-spawn-model-preflight-'));
 process.env.HAPI_HOME = testHapiHome;
+
+function ageSharedCache(ageMs: number): void {
+    const when = new Date(Date.now() - ageMs);
+    utimesSync(join(testHapiHome, 'cache', 'cursor-models.json'), when, when);
+}
 
 afterEach(() => {
     setCursorAcpModelsSnapshot(null);
@@ -65,8 +71,23 @@ describe('checkSpawnModel', () => {
         });
         // A catalog that predates a Cursor upgrade must not reject an id that is
         // now valid; the preflight goes dormant instead.
-        const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
-        utimesSync(join(testHapiHome, 'cache', 'cursor-models.json'), twoDaysAgo, twoDaysAgo);
+        ageSharedCache(2 * 24 * 60 * 60 * 1000);
+
+        expect(checkSpawnModel('cursor', 'gpt-5')).toEqual({ ok: true });
+    });
+
+    it('does not let a cache read renew the freshness of a stale catalog', async () => {
+        // Fresh runner: cold in-process cache, shared file left over from before a
+        // Cursor upgrade. Startup prewarm reads that file; it must not stamp it as
+        // current, or the preflight would keep rejecting models added since.
+        writeSharedCursorModelsCache({
+            success: true,
+            availableModels: [{ modelId: 'composer-2.5' }],
+            currentModelId: 'composer-2.5'
+        });
+        ageSharedCache(2 * 24 * 60 * 60 * 1000);
+
+        await listCursorModels();
 
         expect(checkSpawnModel('cursor', 'gpt-5')).toEqual({ ok: true });
     });
