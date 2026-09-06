@@ -632,17 +632,21 @@ describe('runSessionJob', () => {
                     }
                 }
             })),
-            patch: vi.fn(async () => ({
+            patch: vi.fn(async (
+                _url: string,
+                body: { status?: string; detail?: string }
+            ) => ({
                 status: 200,
                 data: {
                     job: {
                         key: 'drain',
                         label: 'drain',
-                        status: 'failed',
+                        status: body.status ?? 'failed',
                         runId: 'run-1',
                         heartbeatAt: 2,
                         startedAt: 1,
-                        updatedAt: 2
+                        updatedAt: 2,
+                        ...(body.detail !== undefined ? { detail: body.detail } : {}),
                     }
                 }
             }))
@@ -681,12 +685,9 @@ describe('runSessionJob', () => {
         resolveKill?.(false)
         const exitCode = await running
         expect(exitCode).toBe(1)
-        const lastPatch = http.patch.mock.calls.at(-1)?.[1] as {
-            status?: string
-            detail?: string
-        }
-        expect(lastPatch.status).toBe('failed')
-        expect(lastPatch.detail).toMatch(/complete child process tree/i)
+        const lastPatch = http.patch.mock.calls.at(-1)?.[1]
+        expect(lastPatch?.status).toBe('failed')
+        expect(lastPatch?.detail).toMatch(/complete child process tree/i)
         expect(err).toHaveBeenCalledWith(expect.stringMatching(/complete child process tree/i))
         err.mockRestore()
     })
