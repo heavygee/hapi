@@ -549,4 +549,65 @@ describe('runSessionJob', () => {
         expect(http.post).toHaveBeenCalledTimes(2)
         expect(http.get).toHaveBeenCalledTimes(1)
     })
+
+    it('forwards SIGINT/SIGTERM via tree-kill so grandchildren cannot outlive the job', async () => {
+        const http = {
+            post: vi.fn(async () => ({ status: 200, data: { token: 'jwt' } })),
+            get: vi.fn(async () => ({
+                status: 200,
+                data: { sessions: [{ id: 'aaaaaaaa-1111-1111-1111-111111111111' }] }
+            })),
+            put: vi.fn(async () => ({
+                status: 200,
+                data: {
+                    job: {
+                        key: 'drain',
+                        label: 'drain',
+                        status: 'running',
+                        runId: 'run-1',
+                        heartbeatAt: 1,
+                        startedAt: 1,
+                        updatedAt: 1
+                    }
+                }
+            })),
+            patch: vi.fn(async () => ({
+                status: 200,
+                data: {
+                    job: {
+                        key: 'drain',
+                        label: 'drain',
+                        status: 'completed',
+                        runId: 'run-1',
+                        heartbeatAt: 2,
+                        startedAt: 1,
+                        updatedAt: 2
+                    }
+                }
+            }))
+        }
+
+        const child = fakeChild(0, true)
+        const killChild = vi.fn(async () => true)
+        const running = runSessionJob({
+            sessionIdPrefix: 'aaaa',
+            jobKey: 'drain',
+            label: 'drain',
+            command: ['sleep', '30'],
+            heartbeatMs: 60_000,
+            accessToken: 'token',
+            apiUrl: 'http://127.0.0.1:3006',
+            http: http as never,
+            spawnImpl: (() => child) as never,
+            setIntervalImpl: (() => 1 as unknown as NodeJS.Timeout) as never,
+            clearIntervalImpl: (() => undefined) as never,
+            killChildImpl: killChild
+        })
+
+        await vi.waitFor(() => expect(http.put).toHaveBeenCalled())
+        process.emit('SIGINT')
+        expect(killChild).toHaveBeenCalledWith(child)
+        child.exit()
+        await running
+    })
 })
