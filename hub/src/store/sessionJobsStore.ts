@@ -12,6 +12,7 @@ import {
     toAttachedJob,
     transferSessionJobs,
     upsertSessionJob,
+    allocateRemappedJobKey,
     type PatchSessionJobResult,
     type TransferSessionJobsResult,
     type UpsertSessionJobResult
@@ -69,5 +70,13 @@ export class SessionJobsStore {
 
     transfer(fromSessionId: string, toSessionId: string): TransferSessionJobsResult {
         return transferSessionJobs(this.db, fromSessionId, toSessionId)
+    }
+
+    allocateRemappedKey(
+        toSessionId: string,
+        fromSessionId: string,
+        fromKey: string
+    ): string {
+        return allocateRemappedJobKey(this.db, toSessionId, fromSessionId, fromKey)
     }
 }
