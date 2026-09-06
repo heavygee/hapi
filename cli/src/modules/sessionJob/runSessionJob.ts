@@ -34,7 +34,7 @@ export type RunSessionJobOptions = SessionJobClientOptions & {
     /** Injected for tests (terminal-status retry backoff). */
     sleepImpl?: (ms: number) => Promise<void>
     /** Injected for tests — defaults to tree-kill via killProcessByChildProcess. */
-    killChildImpl?: (child: ChildProcess) => void | Promise<boolean>
+    killChildImpl?: (child: ChildProcess, signal: NodeJS.Signals) => void | Promise<boolean>
 }
 
 const DEFAULT_HEARTBEAT_MS = 5 * 60 * 1000
@@ -158,18 +158,24 @@ export async function runSessionJob(options: RunSessionJobOptions): Promise<numb
     // Don't keep the event loop alive solely for heartbeats if child already exited.
     heartbeat.unref?.()
 
-    const forward = () => {
+    // Forward the received signal through tree-kill (not always SIGTERM) and
+    // await verified teardown before writing terminal job state.
+    let terminationPromise: Promise<boolean> | null = null
+    const forward = (signal: NodeJS.Signals) => {
         if (child.pid && !child.killed) {
             // Tree-kill: a supervised shell can exit while a grandchild keeps
             // running; bare process.kill(child.pid) would leave orphans and let
             // the wrapper mark the job terminal while work continues.
             const killChild = options.killChildImpl
-                ?? ((target: ChildProcess) => killProcessByChildProcess(target, false))
-            void killChild(child)
+                ?? ((target: ChildProcess, sig: NodeJS.Signals) =>
+                    killProcessByChildProcess(target, false, sig))
+            terminationPromise ??= Promise.resolve(killChild(child, signal)).then(
+                (result) => result !== false
+            )
         }
     }
-    const onSigInt = () => forward()
-    const onSigTerm = () => forward()
+    const onSigInt = () => forward('SIGINT')
+    const onSigTerm = () => forward('SIGTERM')
     process.on('SIGINT', onSigInt)
     process.on('SIGTERM', onSigTerm)
 
@@ -198,7 +204,16 @@ export async function runSessionJob(options: RunSessionJobOptions): Promise<numb
     // the terminal completed/failed write.
     await inflightHeartbeat.catch(() => undefined)
 
-    const terminalStatus = exitCode === 0 ? 'completed' : 'failed'
+    let treeKillFailed = false
+    if (terminationPromise) {
+        const stopped = await terminationPromise
+        if (!stopped) {
+            treeKillFailed = true
+            console.error('[hapi job run] failed to terminate the complete child process tree')
+        }
+    }
+
+    const terminalStatus = exitCode === 0 && !treeKillFailed ? 'completed' : 'failed'
     let terminalWriteFailed = false
     try {
         await markTerminalWithRetry({
@@ -206,7 +221,11 @@ export async function runSessionJob(options: RunSessionJobOptions): Promise<numb
             jobKey: options.jobKey,
             status: terminalStatus,
             expectedRunId: runId,
-            ...(spawnErrorDetail !== undefined ? { detail: spawnErrorDetail } : {}),
+            ...(spawnErrorDetail !== undefined
+                ? { detail: spawnErrorDetail }
+                : treeKillFailed
+                    ? { detail: 'failed to terminate the complete child process tree' }
+                    : {}),
             sleep,
         })
     } catch (error) {
@@ -220,7 +239,11 @@ export async function runSessionJob(options: RunSessionJobOptions): Promise<numb
         console.error(`[hapi job run] failed to mark job ${terminalStatus}: ${message}`)
     }
 
-    // Child success with a frozen "running" meter is worse than a nonzero exit —
-    // surface the supervision failure so wrappers/CI cannot claim green.
+    // Child success with a frozen "running" meter (or uncleared descendants) is
+    // worse than a nonzero exit — surface the supervision failure so wrappers/CI
+    // cannot claim green.
+    if (treeKillFailed) {
+        return exitCode === 0 ? 1 : exitCode
+    }
     return exitCode === 0 && terminalWriteFailed ? 1 : exitCode
 }
