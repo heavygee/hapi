@@ -631,5 +631,32 @@ describe('mergeSessions job redirect through SessionCache (#1404)', () => {
         expect(store.sessionJobs.get(newId, 'beets')?.runId).toBe('run-target')
         expect(store.sessionJobs.get(newId, 'beets')?.label).toBe('target-live')
         expect(store.sessionJobs.get(newId, 'beets.eeeeeeee')?.runId).toBe('run-late-source')
+
+        // Manual job set (no runId) from the merged-away id must also remap —
+        // otherwise it would clobber the target's label/progress in place.
+        const remappedSet = cache.resolveAttachedJobKeyForUpsert(
+            oldId,
+            newId,
+            'drain',
+            'default',
+            undefined
+        )
+        // No collision on free key 'drain'.
+        expect(remappedSet).toBe('drain')
+        store.sessionJobs.upsert(newId, 'drain', {
+            label: 'target-drain',
+            status: 'running',
+            remaining: 1,
+            runId: 'run-drain-target'
+        }, 3_000)
+        const remappedSetCollide = cache.resolveAttachedJobKeyForUpsert(
+            oldId,
+            newId,
+            'drain',
+            'default',
+            undefined
+        )
+        expect(remappedSetCollide).toBe('drain.eeeeeeee')
+        expect(store.sessionJobs.get(newId, 'drain')?.label).toBe('target-drain')
     })
 })
