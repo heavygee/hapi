@@ -606,8 +606,88 @@ describe('runSessionJob', () => {
 
         await vi.waitFor(() => expect(http.put).toHaveBeenCalled())
         process.emit('SIGINT')
-        expect(killChild).toHaveBeenCalledWith(child)
+        expect(killChild).toHaveBeenCalledWith(child, 'SIGINT')
         child.exit()
         await running
+    })
+
+    it('awaits verified tree-kill before writing terminal job state', async () => {
+        const http = {
+            post: vi.fn(async () => ({ status: 200, data: { token: 'jwt' } })),
+            get: vi.fn(async () => ({
+                status: 200,
+                data: { sessions: [{ id: 'aaaaaaaa-1111-1111-1111-111111111111' }] }
+            })),
+            put: vi.fn(async () => ({
+                status: 200,
+                data: {
+                    job: {
+                        key: 'drain',
+                        label: 'drain',
+                        status: 'running',
+                        runId: 'run-1',
+                        heartbeatAt: 1,
+                        startedAt: 1,
+                        updatedAt: 1
+                    }
+                }
+            })),
+            patch: vi.fn(async () => ({
+                status: 200,
+                data: {
+                    job: {
+                        key: 'drain',
+                        label: 'drain',
+                        status: 'failed',
+                        runId: 'run-1',
+                        heartbeatAt: 2,
+                        startedAt: 1,
+                        updatedAt: 2
+                    }
+                }
+            }))
+        }
+
+        let resolveKill: ((ok: boolean) => void) | undefined
+        const killChild = vi.fn(() => new Promise<boolean>((resolve) => {
+            resolveKill = resolve
+        }))
+        const child = fakeChild(0, true)
+        const err = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+        const running = runSessionJob({
+            sessionIdPrefix: 'aaaa',
+            jobKey: 'drain',
+            label: 'drain',
+            command: ['sleep', '30'],
+            heartbeatMs: 60_000,
+            accessToken: 'token',
+            apiUrl: 'http://127.0.0.1:3006',
+            http: http as never,
+            spawnImpl: (() => child) as never,
+            setIntervalImpl: (() => 1 as unknown as NodeJS.Timeout) as never,
+            clearIntervalImpl: (() => undefined) as never,
+            killChildImpl: killChild
+        })
+
+        await vi.waitFor(() => expect(http.put).toHaveBeenCalled())
+        process.emit('SIGTERM')
+        expect(killChild).toHaveBeenCalledWith(child, 'SIGTERM')
+        child.exit()
+
+        // Child exited, but tree-kill still pending → no terminal write yet.
+        await Promise.resolve()
+        expect(http.patch).not.toHaveBeenCalled()
+
+        resolveKill?.(false)
+        const exitCode = await running
+        expect(exitCode).toBe(1)
+        const lastPatch = http.patch.mock.calls.at(-1)?.[1] as {
+            status?: string
+            detail?: string
+        }
+        expect(lastPatch.status).toBe('failed')
+        expect(lastPatch.detail).toMatch(/complete child process tree/i)
+        expect(err).toHaveBeenCalledWith(expect.stringMatching(/complete child process tree/i))
+        err.mockRestore()
     })
 })
