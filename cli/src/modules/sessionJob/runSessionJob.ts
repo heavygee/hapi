@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { constants as osConstants } from 'node:os'
 import type { AttachedJobUpsert } from '@hapi/protocol'
+import { killProcessByChildProcess } from '@/utils/process'
 import {
     SessionJobError,
     resolveSessionJobClient,
@@ -32,6 +33,8 @@ export type RunSessionJobOptions = SessionJobClientOptions & {
     clearIntervalImpl?: typeof clearInterval
     /** Injected for tests (terminal-status retry backoff). */
     sleepImpl?: (ms: number) => Promise<void>
+    /** Injected for tests — defaults to tree-kill via killProcessByChildProcess. */
+    killChildImpl?: (child: ChildProcess) => void | Promise<boolean>
 }
 
 const DEFAULT_HEARTBEAT_MS = 5 * 60 * 1000
@@ -155,17 +158,18 @@ export async function runSessionJob(options: RunSessionJobOptions): Promise<numb
     // Don't keep the event loop alive solely for heartbeats if child already exited.
     heartbeat.unref?.()
 
-    const forward = (signal: NodeJS.Signals) => {
+    const forward = () => {
         if (child.pid && !child.killed) {
-            try {
-                process.kill(child.pid, signal)
-            } catch {
-                // Child may have already exited.
-            }
+            // Tree-kill: a supervised shell can exit while a grandchild keeps
+            // running; bare process.kill(child.pid) would leave orphans and let
+            // the wrapper mark the job terminal while work continues.
+            const killChild = options.killChildImpl
+                ?? ((target: ChildProcess) => killProcessByChildProcess(target, false))
+            void killChild(child)
         }
     }
-    const onSigInt = () => forward('SIGINT')
-    const onSigTerm = () => forward('SIGTERM')
+    const onSigInt = () => forward()
+    const onSigTerm = () => forward()
     process.on('SIGINT', onSigInt)
     process.on('SIGTERM', onSigTerm)
 
