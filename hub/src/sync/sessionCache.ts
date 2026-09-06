@@ -1723,6 +1723,70 @@ export class SessionCache {
         return typeof mapped === 'string' && mapped.trim() ? mapped : jobKey
     }
 
+    /**
+     * Resolve the owner key for a PUT that may arrive via a merged-away session
+     * id. When merge recorded no key redirect (source had no row yet) but the
+     * owner already has a different running generation at that key, allocate a
+     * remap + persist jobKeyRedirects so the late registration cannot overwrite
+     * the target's live meter (HAPI Bot Major on #1424).
+     */
+    resolveAttachedJobKeyForUpsert(
+        requestedSessionId: string,
+        ownerSessionId: string,
+        jobKey: string,
+        namespace: string,
+        incomingRunId: string | undefined
+    ): string {
+        const mapped = this.resolveAttachedJobKey(
+            requestedSessionId,
+            ownerSessionId,
+            jobKey,
+            namespace
+        )
+        if (mapped !== jobKey) return mapped
+        if (requestedSessionId === ownerSessionId) return jobKey
+        if (incomingRunId === undefined) return jobKey
+
+        const allocated = this.store.runInTransaction(() => {
+            // Re-read redirect inside the txn in case a concurrent merge wrote one.
+            const again = this.resolveAttachedJobKey(
+                requestedSessionId,
+                ownerSessionId,
+                jobKey,
+                namespace
+            )
+            if (again !== jobKey) return again
+
+            const existing = this.store.sessionJobs.get(ownerSessionId, jobKey)
+            if (
+                !existing
+                || existing.status !== 'running'
+                || existing.runId === incomingRunId
+            ) {
+                return jobKey
+            }
+
+            const toKey = this.store.sessionJobs.allocateRemappedKey(
+                ownerSessionId,
+                requestedSessionId,
+                jobKey
+            )
+            if (
+                !this.recordJobKeyRedirects(
+                    ownerSessionId,
+                    requestedSessionId,
+                    [{ fromKey: jobKey, toKey }],
+                    namespace
+                )
+            ) {
+                throw new Error('Failed to persist late job-key redirect')
+            }
+            return toKey
+        })
+        this.refreshSession(ownerSessionId)
+        return allocated
+    }
+
     private mergeSessionMetadata(oldMetadata: unknown | null, newMetadata: unknown | null): unknown | null {
         if (!oldMetadata || typeof oldMetadata !== 'object') {
             return newMetadata

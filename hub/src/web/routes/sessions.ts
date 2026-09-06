@@ -1361,12 +1361,18 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         if (!rawJobKey || !JOB_KEY_RE.test(rawJobKey)) {
             return c.json({ error: 'Invalid jobKey (1-128 chars: alnum, . _ -)' }, 400)
         }
-        const jobKey = resolveJobKey(c, engine, sessionResult, rawJobKey)
         const body = await c.req.json().catch(() => null)
         const parsed = AttachedJobUpsertSchema.safeParse(body)
         if (!parsed.success) {
             return c.json({ error: 'Invalid body', issues: parsed.error.issues }, 400)
         }
+        const jobKey = engine.resolveAttachedJobKeyForUpsert(
+            sessionResult.requestedSessionId,
+            sessionResult.sessionId,
+            rawJobKey,
+            c.get('namespace'),
+            parsed.data.runId
+        )
         const result = engine.upsertSessionJob(sessionResult.sessionId, jobKey, parsed.data)
         if (result.outcome === 'session-not-found') {
             return c.json({ error: 'Session not found' }, 404)

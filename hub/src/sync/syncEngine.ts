@@ -378,6 +378,26 @@ export class SyncEngine {
         )
     }
 
+    /**
+     * PUT path: follow existing remaps, or allocate one when a redirected late
+     * registration would overwrite a different running generation.
+     */
+    resolveAttachedJobKeyForUpsert(
+        requestedSessionId: string,
+        ownerSessionId: string,
+        jobKey: string,
+        namespace: string,
+        incomingRunId: string | undefined
+    ): string {
+        return this.sessionCache.resolveAttachedJobKeyForUpsert(
+            requestedSessionId,
+            ownerSessionId,
+            jobKey,
+            namespace,
+            incomingRunId
+        )
+    }
+
     getActiveSessions(): Session[] {
         return this.sessionCache.getActiveSessions()
     }
