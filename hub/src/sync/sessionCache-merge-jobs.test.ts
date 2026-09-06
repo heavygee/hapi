@@ -567,4 +567,69 @@ describe('mergeSessions job redirect through SessionCache (#1404)', () => {
         await mergePromise
         moveSpy.mockRestore()
     })
+
+    it('remaps late PUT from merged-away session when target already has a different running generation', async () => {
+        const { store, cache } = setup()
+        const oldId = 'eeeeeeee-5555-5555-5555-555555555555'
+        const newId = 'ffffffff-6666-6666-6666-666666666666'
+        const oldSession = cache.getOrCreateSession(
+            'tag-late-old',
+            { path: '/a', host: 'local', flavor: 'codex' },
+            null,
+            'default',
+            undefined,
+            undefined,
+            undefined,
+            oldId
+        )
+        const newSession = cache.getOrCreateSession(
+            'tag-late-new',
+            { path: '/b', host: 'local', flavor: 'codex' },
+            null,
+            'default',
+            undefined,
+            undefined,
+            undefined,
+            newId
+        )
+
+        // Target already owns a live meter; source has none at merge time.
+        store.sessionJobs.upsert(newSession.id, 'beets', {
+            label: 'target-live',
+            status: 'running',
+            remaining: 9,
+            runId: 'run-target'
+        }, 1_000)
+
+        await cache.mergeSessions(oldSession.id, newSession.id, 'default')
+        expect(cache.resolveAttachedJobSessionId(oldId, 'default')).toBe(newId)
+        expect(
+            cache.resolveAttachedJobKey(oldId, newId, 'beets', 'default')
+        ).toBe('beets')
+
+        const remapped = cache.resolveAttachedJobKeyForUpsert(
+            oldId,
+            newId,
+            'beets',
+            'default',
+            'run-late-source'
+        )
+        expect(remapped).toBe('beets.eeeeeeee')
+        expect(
+            cache.refreshSession(newId)?.metadata?.jobKeyRedirects
+        ).toEqual({
+            [`${oldId}/beets`]: 'beets.eeeeeeee'
+        })
+
+        const upserted = store.sessionJobs.upsert(newId, remapped, {
+            label: 'source-late',
+            status: 'running',
+            remaining: 3,
+            runId: 'run-late-source'
+        }, 2_000)
+        expect(upserted.outcome).toBe('upserted')
+        expect(store.sessionJobs.get(newId, 'beets')?.runId).toBe('run-target')
+        expect(store.sessionJobs.get(newId, 'beets')?.label).toBe('target-live')
+        expect(store.sessionJobs.get(newId, 'beets.eeeeeeee')?.runId).toBe('run-late-source')
+    })
 })
