@@ -1745,7 +1745,6 @@ export class SessionCache {
         )
         if (mapped !== jobKey) return mapped
         if (requestedSessionId === ownerSessionId) return jobKey
-        if (incomingRunId === undefined) return jobKey
 
         const allocated = this.store.runInTransaction(() => {
             // Re-read redirect inside the txn in case a concurrent merge wrote one.
@@ -1758,10 +1757,13 @@ export class SessionCache {
             if (again !== jobKey) return again
 
             const existing = this.store.sessionJobs.get(ownerSessionId, jobKey)
+            if (!existing || existing.status !== 'running') {
+                return jobKey
+            }
+            // Same supervised generation may correct via redirected session id.
             if (
-                !existing
-                || existing.status !== 'running'
-                || existing.runId === incomingRunId
+                incomingRunId !== undefined
+                && existing.runId === incomingRunId
             ) {
                 return jobKey
             }
