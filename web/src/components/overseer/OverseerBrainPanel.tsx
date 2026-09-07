@@ -49,6 +49,7 @@ export function OverseerBrainPanel() {
             .then((res) => {
                 if (cancelled) return
                 setModels(res.models)
+                setSelectedModel((current) => (current && !res.models.includes(current) ? '' : current))
                 if (res.error) {
                     setModelsError(res.error)
                     setModelsReachable(res.reachable ?? false)
@@ -94,6 +95,7 @@ export function OverseerBrainPanel() {
             <p className="text-xs text-[var(--app-hint)]">
                 The active brain is what voice and every converse default to. Switch it at whim — persisted, no hub restart.
                 A per-request override in the talk-to panel below still wins for that one call.
+                Only models that support function tools on chat completions are listed (reasoning-only ids like luna / o-series are hidden — they 400 on Overseer talk).
             </p>
 
             <div className="flex flex-wrap items-end gap-3">
@@ -150,7 +152,9 @@ export function OverseerBrainPanel() {
                 ) : modelsLoading ? (
                     <span className="text-[var(--app-hint)]">probing endpoint…</span>
                 ) : (
-                    <span className="text-emerald-500">endpoint reachable · {models.length} chat model{models.length === 1 ? '' : 's'}</span>
+                    <span className="text-emerald-500">
+                        endpoint reachable · {models.length} tool-capable chat model{models.length === 1 ? '' : 's'}
+                    </span>
                 )}
                 {saveError ? <span className="text-red-500">{saveError}</span> : null}
             </div>

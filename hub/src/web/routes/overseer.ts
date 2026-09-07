@@ -12,7 +12,7 @@ import type { WebAppEnv } from '../middleware/auth'
 import { requireSyncEngine } from './guards'
 import { isOverseerToolName, OverseerWriteNotAllowedError, runOverseerTool } from '../../overseer/runOverseerTool'
 import { runOverseerConverse } from '../../overseer/converse'
-import { BrainUnavailableError, filterChatModels, isKnownBrainProfile, listBrainModels, listBrainProfiles, resolveBrainConfig, resolveBrainSelection } from '../../overseer/brainClient'
+import { BrainUnavailableError, filterOverseerToolModels, isKnownBrainProfile, isOverseerToolCompatibleModel, listBrainModels, listBrainProfiles, resolveBrainConfig, resolveBrainSelection } from '../../overseer/brainClient'
 import type { ActiveBrainSetting } from '../../store/settingsStore'
 
 const convoTurnBodySchema = z.object({
@@ -42,14 +42,22 @@ const activeBrainBodySchema = z.object({
     model: z.string().max(100).nullish()
 })
 
-/** Drop a persisted active brain when its profile was removed from env after restart. */
+/** Drop a persisted active brain when its profile was removed from env after restart.
+ *  Also clear a model override that Overseer converse cannot drive (tool-incompatible). */
 function getSanitizedActiveBrain(engine: SyncEngine): ActiveBrainSetting | null {
     const settings = engine.getSettings()
     const active = settings.getActiveBrain()
     if (!active) return null
-    if (isKnownBrainProfile(active.profile)) return active
-    settings.clearActiveBrain()
-    return null
+    if (!isKnownBrainProfile(active.profile)) {
+        settings.clearActiveBrain()
+        return null
+    }
+    if (active.model && !isOverseerToolCompatibleModel(active.model)) {
+        const fixed = { profile: active.profile, model: null }
+        settings.setActiveBrain(fixed)
+        return fixed
+    }
+    return active
 }
 
 export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
@@ -124,6 +132,12 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
         if (!isKnownBrainProfile(parsed.data.profile)) {
             return c.json({ error: `Unknown brain profile: ${parsed.data.profile}` }, 400)
         }
+        if (parsed.data.model && !isOverseerToolCompatibleModel(parsed.data.model)) {
+            return c.json({
+                error: `Model ${parsed.data.model} cannot run Overseer tool converse (chat/completions + tools). Pick a tool-capable chat model.`,
+                code: 'overseer_tool_incompatible_model'
+            }, 400)
+        }
 
         const active = { profile: parsed.data.profile, model: parsed.data.model ?? null }
         engine.getSettings().setActiveBrain(active)
@@ -132,6 +146,8 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
 
     // Live model list for a brain profile (proxies the endpoint's GET /models so
     // the api key stays server-side). Powers the model dropdown in the debug UI.
+    // Tool-incompatible reasoning models (e.g. gpt-5.6-luna) are omitted so the
+    // operator cannot pick a brain that will 400 on the first tool round-trip.
     app.get('/overseer/brains/:id/models', async (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)
         if (engine instanceof Response) return engine
@@ -141,7 +157,7 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ profile: id, defaultModel: null, models: [], error: 'profile not configured' }, 404)
         }
         try {
-            const models = filterChatModels(await listBrainModels(config))
+            const models = filterOverseerToolModels(await listBrainModels(config))
             return c.json({ profile: id, defaultModel: config.model, models })
         } catch (error) {
             const message = error instanceof Error ? error.message : 'failed to list models'
@@ -221,6 +237,14 @@ export function createOverseerRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 toolTrace: [],
                 model: null,
                 brainOnline: false
+            })
+        }
+        if (!isOverseerToolCompatibleModel(config.model)) {
+            return c.json({
+                reply: `Model ${config.model} cannot run Overseer tool converse. Switch the active brain to a tool-capable chat model (for example gpt-4o), then retry.`,
+                toolTrace: [],
+                model: config.model,
+                brainOnline: true
             })
         }
 

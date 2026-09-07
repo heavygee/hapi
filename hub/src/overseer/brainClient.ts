@@ -137,10 +137,37 @@ export function resolveBrainSelection(
 
 const NON_CHAT_MODEL = /embedding|whisper|tts|dall-?e|moderation|audio|realtime|image|transcribe|-search|babbage|davinci-002|instruct/i
 
+/**
+ * Models that refuse function tools on `/v1/chat/completions` (Overseer's only
+ * converse transport). OpenAI returns 400 for these when tools are present
+ * unless the caller uses `/v1/responses` or forces `reasoning_effort: "none"` —
+ * we do neither, so the console must not offer them.
+ *
+ * Receipt (2026-09-07): `gpt-5.6-luna` →
+ * "Function tools with reasoning_effort are not supported … in /v1/chat/completions".
+ */
+const OVERSEER_TOOL_INCOMPATIBLE_MODEL =
+    /luna|(^|\/)o[1-4]([.-]|$)|computer-use|codex-mini/i
+
 /** Keep the chat-usable model ids (drop embeddings/audio/image/etc.), sorted. */
 export function filterChatModels(ids: string[]): string[] {
     const chat = ids.filter((id) => !NON_CHAT_MODEL.test(id))
     return (chat.length > 0 ? chat : ids).slice().sort()
+}
+
+/** True when Overseer converse (chat/completions + tools) can use this model id. */
+export function isOverseerToolCompatibleModel(modelId: string): boolean {
+    const id = modelId.trim()
+    if (!id) return false
+    return !OVERSEER_TOOL_INCOMPATIBLE_MODEL.test(id)
+}
+
+/**
+ * Chat models that Overseer talk can actually drive. Prefer an empty list over
+ * offering a broken pick — the UI falls back to the profile default when empty.
+ */
+export function filterOverseerToolModels(ids: string[]): string[] {
+    return filterChatModels(ids).filter(isOverseerToolCompatibleModel)
 }
 
 /** List model ids a brain endpoint serves (OpenAI-compatible GET /models). */
