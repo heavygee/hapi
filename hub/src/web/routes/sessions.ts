@@ -713,6 +713,7 @@ export function createSessionsRoutes(
         if (result.type === 'error') {
             return c.json({
                 error: result.message,
+                code: result.code,
                 hydrateFailed: result.hydrateFailed === true
             }, result.hydrateFailed ? 500 : 409)
         }

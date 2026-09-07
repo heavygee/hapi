@@ -582,6 +582,12 @@ export class Store {
             CREATE INDEX IF NOT EXISTS idx_messages_scheduled_pending
                 ON messages(scheduled_at)
                 WHERE scheduled_at IS NOT NULL AND invoked_at IS NULL;
+            CREATE INDEX IF NOT EXISTS idx_messages_immediate_queued
+                ON messages(session_id, seq)
+                WHERE invoked_at IS NULL
+                  AND local_id IS NOT NULL
+                  AND scheduled_at IS NULL
+                  AND delivery_state = 'queued';
 
             CREATE TABLE IF NOT EXISTS message_epochs (
                 session_id TEXT PRIMARY KEY,
@@ -1255,6 +1261,14 @@ export class Store {
         if (!columns.has('runner_proof_hash')) {
             this.db.exec('ALTER TABLE machines ADD COLUMN runner_proof_hash TEXT')
         }
+        this.db.exec(`
+            CREATE INDEX IF NOT EXISTS idx_messages_immediate_queued
+                ON messages(session_id, seq)
+                WHERE invoked_at IS NULL
+                  AND local_id IS NOT NULL
+                  AND scheduled_at IS NULL
+                  AND delivery_state = 'queued';
+        `)
     }
 
     private migrateFromV26ToV27(): void {
