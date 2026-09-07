@@ -152,7 +152,9 @@ export function OverseerChatDebugControls() {
                         {modelsError ? (
                             <span className="text-[10px] text-amber-500">models: {modelsError}</span>
                         ) : (
-                            <span className="text-[10px] text-[var(--app-hint)]">Per-request — no hub restart.</span>
+                            <span className="text-[10px] text-[var(--app-hint)]">
+                                Per-request — tool-capable models only (luna / o-series hidden).
+                            </span>
                         )}
                     </div>
 

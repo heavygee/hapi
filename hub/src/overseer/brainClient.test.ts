@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { filterChatModels, isKnownBrainProfile, listBrainProfiles, resolveBrainConfig, resolveBrainSelection } from './brainClient'
+import {
+    filterChatModels,
+    filterOverseerToolModels,
+    isKnownBrainProfile,
+    isOverseerToolCompatibleModel,
+    listBrainProfiles,
+    resolveBrainConfig,
+    resolveBrainSelection
+} from './brainClient'
 
 const baseEnv = {
     OVERSEER_BRAIN_URL: 'http://local.test/v1/',
@@ -117,5 +125,26 @@ describe('filterChatModels', () => {
 
     it('falls back to the raw list when filtering removes everything', () => {
         expect(filterChatModels(['text-embedding-3-large'])).toEqual(['text-embedding-3-large'])
+    })
+})
+
+describe('isOverseerToolCompatibleModel / filterOverseerToolModels', () => {
+    it('rejects luna and o-series reasoning ids that break tool converse', () => {
+        expect(isOverseerToolCompatibleModel('gpt-5.6-luna')).toBe(false)
+        expect(isOverseerToolCompatibleModel('o3')).toBe(false)
+        expect(isOverseerToolCompatibleModel('o1-pro')).toBe(false)
+        expect(isOverseerToolCompatibleModel('gpt-4o')).toBe(true)
+        expect(isOverseerToolCompatibleModel('main')).toBe(true)
+        expect(isOverseerToolCompatibleModel('gpt-5.6')).toBe(true)
+    })
+
+    it('drops tool-incompatible ids after the chat filter', () => {
+        expect(filterOverseerToolModels([
+            'gpt-4o',
+            'gpt-5.6-luna',
+            'o3',
+            'text-embedding-3-small',
+            'main'
+        ])).toEqual(['gpt-4o', 'main'])
     })
 })
