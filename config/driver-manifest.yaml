@@ -942,3 +942,9 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/in-session-content-search @ driver/in-session-content-search
   # Tip: 41449e8c0 — 2-line character-window excerpts (+ marks/separators); no schema bump.
   - branch: driver/in-session-content-search
+
+  # heavygee/hapi#142 — Overseer talk: hide tool-incompatible brain models (luna / o-series).
+  # chat/completions + function tools 400 on those ids; filter picker + clear stuck active.
+  # Worktree: ~/coding/hapi/worktrees/overseer-tool-models @ driver/overseer-tool-models
+  # Tip: efca0eb71
+  - branch: driver/overseer-tool-models
