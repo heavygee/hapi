@@ -959,3 +959,10 @@ layers:
   # Union worktree: ~/coding/hapi/worktrees/dir-auth-soup @ driver/dir-auth-profiles
   # Tip: 7eb7d60fc — re-thin after dogfood bump
   - branch: driver/dir-auth-profiles
+
+  # tiann/hapi#1792 — absolute datetime tooltips on relative "Nm ago" ages (sidebar + share).
+  # Thin tip: feat/relative-time-absolute-tooltips (upstreamable). Soup diverged SessionRowSummary /
+  # shareTurnMetadata — union tip ports the same title= wiring cleanly.
+  # Worktree: ~/coding/hapi/worktrees/relative-time-tooltips-soup @ driver/relative-time-absolute-tooltips
+  # Tip: 8fb87aada
+  - branch: driver/relative-time-absolute-tooltips
