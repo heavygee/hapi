@@ -956,5 +956,6 @@ layers:
   # Thin tip: ~/coding/hapi/worktrees/dir-auth-profiles @ feat/dir-auth-profiles (e2bce00ce, on upstream/main)
   # Union: driver/dir-auth-profiles = soup tip c1b1e7982 + thin tip; only conflict was the
   # Settings interface tail (runnerDisableVersionHandoff vs directoryAuthProfiles — kept both).
+  # Union worktree: ~/coding/hapi/worktrees/dir-auth-soup @ driver/dir-auth-profiles
   # Tip: 7eb7d60fc — re-thin after dogfood bump
   - branch: driver/dir-auth-profiles
