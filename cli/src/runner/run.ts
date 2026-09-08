@@ -1,6 +1,5 @@
 import fs from 'fs/promises';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import os from 'os';
 
 import { ApiClient } from '@/api/api';
 import { TrackedSession } from './types';
@@ -24,7 +23,7 @@ import { cleanupRunnerState, getInstalledCliMtimeMs, isRunnerRunningCurrentlyIns
 import { startRunnerControlServer } from './controlServer';
 import { createWorktree, removeWorktree, type WorktreeInfo } from './worktree';
 import { validateWorkspaceDirectory } from './validateWorkspaceDirectory';
-import { join } from 'path';
+import { buildSpawnAuthEnv } from './spawnAuth';
 import { buildMachineMetadata } from '@/agent/sessionFactory';
 import { resolveWorkspaceRoots } from '@/utils/workspaceRoot';
 import { hashRunnerCliApiToken, hashRunnerExtraHeaders } from './runnerIdentity';
@@ -496,7 +495,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     // Spawn a new session (sessionId reserved for future --resume functionality)
     let spawnSession!: SpawnDeduplicator;
     const spawnSessionOnce = async (options: SpawnSessionOptions): Promise<SpawnSessionResult> => {
-      logger.debugLargeJson('[RUNNER RUN] Spawning session', options);
+      // `options.token` is a live credential; never let it reach the log file.
+      logger.debugLargeJson('[RUNNER RUN] Spawning session', {
+        ...options,
+        token: options.token ? '<redacted>' : undefined
+      });
 
       const { directory, sessionId, machineId, approvedNewDirectoryCreation = true } = options;
       const agent = options.agent ?? 'claude';
@@ -639,27 +642,16 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
 
       try {
 
-        // Resolve authentication token if provided
-        let extraEnv: Record<string, string> = {};
-        if (options.token) {
-          if (options.agent === 'codex') {
-
-            // Create a temporary directory for Codex
-            const codexHomeDir = await fs.mkdtemp(join(os.tmpdir(), 'hapi-codex-'));
-
-            // Write the token to the temporary directory
-            await fs.writeFile(join(codexHomeDir, 'auth.json'), options.token);
-
-            // Set the environment variable for Codex
-            extraEnv = {
-              CODEX_HOME: codexHomeDir
-            };
-          } else if (options.agent === 'claude' || !options.agent) {
-            extraEnv = {
-              CLAUDE_CODE_OAUTH_TOKEN: options.token
-            };
-          }
-        }
+        // Resolve the session's credentials: an explicit per-spawn token from
+        // the hub/mobile app, else a directory-scoped profile from
+        // ~/.hapi/settings.json, else nothing - the child inherits the
+        // runner's ambient login exactly as it always has.
+        let extraEnv: Record<string, string> = await buildSpawnAuthEnv({
+          agent: options.agent,
+          token: options.token,
+          spawnDirectory,
+          directory
+        });
 
         if (worktreeInfo) {
           extraEnv = {

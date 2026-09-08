@@ -10,8 +10,9 @@ import { existsSync, writeFileSync, readFileSync, unlinkSync } from 'node:fs'
 import { withSettingsFileLock } from '@hapi/protocol/settingsFileLock'
 import { configuration } from '@/configuration'
 import { isProcessAlive } from '@/utils/process';
+import type { DirectoryAuthProfile } from '@/runner/spawnAuth'
 
-interface Settings {
+export interface Settings {
   // This ID is used as the actual database ID on the server
   // All machine operations use this ID
   machineId?: string
@@ -33,6 +34,9 @@ interface Settings {
   serverUrl?: string
   /** Operator opt-out: runner must not self-restart on mtime/version drift (systemd-owned). */
   runnerDisableVersionHandoff?: boolean
+  // Directory-scoped Claude credentials for sessions spawned by this runner.
+  // Absent by default; see DirectoryAuthProfile.
+  directoryAuthProfiles?: DirectoryAuthProfile[]
 }
 
 const defaultSettings: Settings = {}
