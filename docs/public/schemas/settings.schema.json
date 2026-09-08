@@ -98,6 +98,25 @@
       "type": "boolean",
       "description": "Auto-start runner when running hapi command."
     },
+    "directoryAuthProfiles": {
+      "type": "array",
+      "description": "Runner-local Claude credentials bound to a directory tree. Sessions this runner spawns at or below pathPrefix authenticate with that token instead of the host's ambient login. Longest matching prefix wins, and matching is segment-aware so /x/proj-old does not match /x/proj. An explicit per-spawn token from the app still takes precedence.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "pathPrefix": {
+            "type": "string",
+            "description": "Absolute path prefix; a leading ~ is expanded to the current user's home."
+          },
+          "claudeCodeOAuthToken": {
+            "type": "string",
+            "description": "Claude Code OAuth token for sessions under pathPrefix. Injected as CLAUDE_CODE_OAUTH_TOKEN."
+          }
+        },
+        "required": ["pathPrefix", "claudeCodeOAuthToken"],
+        "additionalProperties": false
+      }
+    },
     "providerCredentials": {
       "type": "object",
       "additionalProperties": {

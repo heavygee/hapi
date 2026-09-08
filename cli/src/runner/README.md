@@ -95,6 +95,33 @@ When spawning a session with a token:
 - **Grok Build**: No token injection; relies on Grok CLI login or `XAI_API_KEY` in the runner environment
 - **OpenCode**: No token injection; relies on OpenCode's own configuration
 
+### Directory Auth Profiles (Claude)
+
+A runner host is normally logged into a single Claude account, and every
+terminal-spawned session inherits it. `directoryAuthProfiles` in
+`~/.hapi/settings.json` binds a different account to one directory tree, so a
+machine can host work for two billing accounts without re-authenticating
+between sessions:
+
+```json
+{
+  "directoryAuthProfiles": [
+    { "pathPrefix": "~/coding/client-project", "claudeCodeOAuthToken": "sk-ant-oat01-..." }
+  ]
+}
+```
+
+- Matching is longest-prefix and segment-aware: `~/coding/client-project-old`
+  does **not** match `~/coding/client-project`.
+- Precedence: an explicit per-spawn `token` (hub/mobile) wins, then a matching
+  directory profile, then the runner's ambient login.
+- Claude only. Other agents ignore these profiles.
+- Absent by default; with no profiles configured the spawn environment is
+  exactly what it was before the feature existed.
+- The token is a live credential. It lives in `~/.hapi/settings.json`
+  (`0600`, same trust boundary as `cliApiToken`) and is redacted from
+  `hapi doctor` output. See `runner/spawnAuth.ts`.
+
 ## 3. Session Management
 
 ### Runner-Spawned Sessions (Remote)

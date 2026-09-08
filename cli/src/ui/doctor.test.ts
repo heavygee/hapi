@@ -20,4 +20,26 @@ describe('redactSettingsForDisplay', () => {
         expect(JSON.stringify(displaySettings)).not.toContain('cli-secret')
         expect(JSON.stringify(displaySettings)).not.toContain('client-secret')
     })
+
+    it('redacts directory auth tokens but keeps their path prefixes readable', () => {
+        const displaySettings = redactSettingsForDisplay({
+            directoryAuthProfiles: [
+                { pathPrefix: '/home/op/coding/sparling', claudeCodeOAuthToken: 'oauth-secret' }
+            ]
+        })
+
+        expect(displaySettings.directoryAuthProfiles).toEqual([
+            { pathPrefix: '/home/op/coding/sparling', claudeCodeOAuthToken: '***' }
+        ])
+        expect(JSON.stringify(displaySettings)).not.toContain('oauth-secret')
+    })
+
+    it('leaves directoryAuthProfiles absent when it was never configured', () => {
+        expect(redactSettingsForDisplay({ apiUrl: 'https://hapi.example.com' })).toEqual({
+            apiUrl: 'https://hapi.example.com',
+            cliApiToken: undefined,
+            extraHeaders: undefined,
+            directoryAuthProfiles: undefined
+        })
+    })
 })

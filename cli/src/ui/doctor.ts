@@ -51,7 +51,16 @@ export function redactSettingsForDisplay(settings: Record<string, unknown>): Rec
     return {
         ...settings,
         cliApiToken: settings.cliApiToken ? '***' : undefined,
-        extraHeaders: settings.extraHeaders === undefined ? undefined : '***'
+        extraHeaders: settings.extraHeaders === undefined ? undefined : '***',
+        // Keep the path prefixes visible - they are what the operator needs to
+        // debug a profile that is not matching - but never the credential.
+        directoryAuthProfiles: Array.isArray(settings.directoryAuthProfiles)
+            ? settings.directoryAuthProfiles.map((profile) => (
+                profile && typeof profile === 'object'
+                    ? { ...profile, claudeCodeOAuthToken: '***' }
+                    : profile
+            ))
+            : settings.directoryAuthProfiles
     }
 }
 
