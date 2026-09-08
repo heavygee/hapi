@@ -948,3 +948,13 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/overseer-tool-models @ driver/overseer-tool-models
   # Tip: efca0eb71
   - branch: driver/overseer-tool-models
+
+  # (no upstream issue yet — spike-first, operator's call on filing) Directory-scoped
+  # Claude auth: ~/.hapi/settings.json `directoryAuthProfiles` binds a path prefix to a
+  # CLAUDE_CODE_OAUTH_TOKEN so ~/coding/sparling can run on its own (Teams) account
+  # instead of the host's ambient login. No-op when unconfigured.
+  # Thin tip: ~/coding/hapi/worktrees/dir-auth-profiles @ feat/dir-auth-profiles (e2bce00ce, on upstream/main)
+  # Union: driver/dir-auth-profiles = soup tip c1b1e7982 + thin tip; only conflict was the
+  # Settings interface tail (runnerDisableVersionHandoff vs directoryAuthProfiles — kept both).
+  # Tip: 7eb7d60fc — re-thin after dogfood bump
+  - branch: driver/dir-auth-profiles
