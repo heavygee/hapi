@@ -28,18 +28,28 @@ usage() {
 peer_stack_resolve_worktree() {
     local wt="${1:-$PWD}"
     wt="$(cd "$wt" && pwd)"
+    # `pwd` may resolve through a symlink (e.g. ~/coding -> /work/coding on oos).
+    # Compare against the realpath of the canonical worktrees root as well.
+    local canon_root=""
+    if [[ -d "$HOME/coding/hapi/worktrees" ]]; then
+        canon_root="$(cd "$HOME/coding/hapi/worktrees" && pwd)"
+    fi
     case "$wt" in
         "$HOME"/coding/hapi/worktrees/*|"$HOME"/coding/hapi/worktrees/*/*)
             echo "$wt"
+            return
             ;;
         "$HOME"/coding/hapi-*|"$HOME"/coding/hapi/worktrees/*)
             echo "$wt"
-            ;;
-        *)
-            echo "ERROR: worktree must be under ~/coding/hapi/worktrees/ (got $wt)" >&2
-            exit 2
+            return
             ;;
     esac
+    if [[ -n "$canon_root" && ( "$wt" == "$canon_root" || "$wt" == "$canon_root"/* ) ]]; then
+        echo "$wt"
+        return
+    fi
+    echo "ERROR: worktree must be under ~/coding/hapi/worktrees/ (got $wt)" >&2
+    exit 2
 }
 
 peer_stack_default_name() {
