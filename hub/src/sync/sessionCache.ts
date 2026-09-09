@@ -952,7 +952,20 @@ export class SessionCache {
                 throw new Error('Session not found')
             }
 
-            const currentMetadata = session.metadata ?? { path: '', host: '' }
+            // Prefer the on-disk blob over the cache. refreshSession nulls
+            // metadata when MetadataSchema fails; spreading `{ path: '', host: '' }`
+            // would then wipe name/summary/worktree/etc. on link/unlink.
+            const stored = this.store.sessions.getSessionByNamespace(sessionId, session.namespace)
+            const storedMetadata = stored?.metadata
+            if (
+                !stored
+                || typeof storedMetadata !== 'object'
+                || storedMetadata === null
+                || Array.isArray(storedMetadata)
+            ) {
+                throw new Error('Cannot update external refs while session metadata is invalid')
+            }
+            const currentMetadata = storedMetadata as Record<string, unknown>
             const currentRefs = Array.isArray(currentMetadata.externalRefs)
                 ? currentMetadata.externalRefs as ExternalRef[]
                 : []
@@ -968,7 +981,7 @@ export class SessionCache {
             const result = this.store.sessions.updateSessionMetadata(
                 sessionId,
                 newMetadata,
-                session.metadataVersion,
+                stored.metadataVersion,
                 session.namespace,
                 { touchUpdatedAt: false }
             )

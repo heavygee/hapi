@@ -477,6 +477,58 @@ describe('session model', () => {
         expect(store.messages.getMessages(newSession.id).length).toBe(0)
     })
 
+    it('preserves unparsed stored metadata fields when linking a PR', async () => {
+        const store = new Store(':memory:')
+        const cache = new SessionCache(store, createPublisher([]))
+
+        const session = cache.getOrCreateSession(
+            'session-unparsed-meta',
+            {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'codex',
+                name: 'Keep Me'
+            },
+            null,
+            'default'
+        )
+        const row = store.sessions.getSessionByNamespace(session.id, 'default')
+        if (!row) throw new Error('expected session row')
+
+        // Poison path's runtime type so MetadataSchema fails while other fields remain.
+        const poisoned = store.sessions.updateSessionMetadata(
+            session.id,
+            {
+                path: 123 as unknown as string,
+                host: 'localhost',
+                name: 'Keep Me',
+                summary: { text: 'saved', updatedAt: 1 }
+            },
+            row.metadataVersion,
+            'default',
+            { touchUpdatedAt: false }
+        )
+        expect(poisoned.result).toBe('success')
+        expect(cache.refreshSession(session.id)?.metadata).toBeNull()
+
+        const refs = await cache.mutateSessionExternalRefs(session.id, () => [{
+            kind: 'github_pr' as const,
+            repo: 'tiann/hapi',
+            number: 1163,
+            url: 'https://github.com/tiann/hapi/pull/1163',
+            role: 'primary' as const,
+            source: 'user' as const,
+            linkedAt: 1
+        }])
+        expect(refs).toHaveLength(1)
+
+        const after = store.sessions.getSessionByNamespace(session.id, 'default')
+        const meta = after?.metadata as Record<string, unknown>
+        expect(meta.name).toBe('Keep Me')
+        expect(meta.summary).toEqual({ text: 'saved', updatedAt: 1 })
+        expect(meta.externalRefs).toEqual(refs)
+    })
+
     it('preserves global pin from old session when merging into resumed session', async () => {
         const store = new Store(':memory:')
         const events: SyncEvent[] = []
