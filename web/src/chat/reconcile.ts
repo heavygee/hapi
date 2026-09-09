@@ -195,6 +195,7 @@ function areDisplayLinksBlocksEqual(left: DisplayLinksBlock, right: DisplayLinks
     if (left.localId !== right.localId || left.createdAt !== right.createdAt || left.meta !== right.meta) {
         return false
     }
+    if (!areRoundSummariesEqual(left.roundSummary, right.roundSummary)) return false
     if (left.urls.length !== right.urls.length) return false
     for (let i = 0; i < left.urls.length; i += 1) {
         if (left.urls[i]?.href !== right.urls[i]?.href || left.urls[i]?.title !== right.urls[i]?.title) {
