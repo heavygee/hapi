@@ -4,6 +4,7 @@ import { useState, type ComponentProps } from 'react'
 import { I18nProvider } from '@/lib/i18n-context'
 import {
     ConversationOutlinePanel,
+    SEARCH_TARGET_SCROLL_SETTLE_MS,
     captureScrollAnchor,
     getHistoryCoverageRetryDelay,
     getPullToLoadState,
@@ -407,6 +408,11 @@ describe('scroll anchor helpers', () => {
             isScrollingUp: true
         })
         expect(shouldCancelInitialScrollSettling(intent, true)).toBe(true)
+    })
+
+    it('caps search-target settle scrolls so hits stay free-scrollable (#143)', () => {
+        // Formerly re-centered for up to 45s; keep a short layout settle only.
+        expect(SEARCH_TARGET_SCROLL_SETTLE_MS).toBeLessThanOrEqual(2000)
     })
 
     it('keeps initial scroll settling for programmatic upward movement', () => {
