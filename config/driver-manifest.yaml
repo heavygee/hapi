@@ -949,6 +949,11 @@ layers:
   # Tip: efca0eb71
   - branch: driver/overseer-tool-models
 
+  # heavygee/hapi#143 — search jump: stop 45s re-center snap-back; free scroll after hit.
+  # Worktree: ~/coding/hapi/worktrees/search-target-free-scroll @ driver/search-target-free-scroll
+  # Tip: d1b9408c5
+  - branch: driver/search-target-free-scroll
+
   # (no upstream issue yet — spike-first, operator's call on filing) Directory-scoped
   # Claude auth: ~/.hapi/settings.json `directoryAuthProfiles` binds a path prefix to a
   # CLAUDE_CODE_OAUTH_TOKEN so ~/coding/sparling can run on its own (Teams) account
