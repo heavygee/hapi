@@ -17,8 +17,12 @@ const baseRef = (over: Partial<GithubPrExternalRef> = {}): GithubPrExternalRef =
     ...over
 })
 
-const keyedT = (key: string, params?: Record<string, string | number>) =>
-    params && 'n' in params ? `${key}:${params.n}` : key
+const keyedT = (key: string, params?: Record<string, string | number>) => {
+    if (!params) return key
+    if ('n' in params) return `${key}:${params.n}`
+    if ('time' in params) return `${key}:${params.time}`
+    return key
+}
 
 afterEach(() => {
     vi.useRealTimers()
@@ -82,8 +86,22 @@ describe('SessionPrChip helpers', () => {
         const title = formatGithubPrChipTitle(ref, display, keyedT)
         expect(formatGithubPrChipLabel(ref, display)).toBe('⚠️')
         expect(title).toBe(
-            '⚠️ tiann/hapi#1163 · needs work · checked session.time.hoursAgo:1 — rebase (merge state dirty)'
+            '⚠️ tiann/hapi#1163 · needs work · session.item.prChecked:session.time.hoursAgo:1 — rebase (merge state dirty)'
         )
         expect(title).not.toMatch(/T\d{2}:\d{2}:\d{2}/)
+    })
+
+    it('maps default forge labels through i18n keys', () => {
+        const ref = baseRef({
+            checks: 'pass',
+            merge: 'clean',
+            statusCheckedAt: 1_700_000_000_000
+        })
+        const display = resolveGithubPrChipDisplay(ref, DEFAULT_PR_CHIP_DISPLAY, 1_700_000_000_000)
+        const title = formatGithubPrChipTitle(ref, display, keyedT)
+        expect(title).toContain('session.item.prStatus.readyToMerge')
+        expect(title).toContain('session.item.prChecked:')
+        expect(title).not.toContain('ready to merge')
+        expect(title).not.toMatch(/\bchecked\b/)
     })
 })

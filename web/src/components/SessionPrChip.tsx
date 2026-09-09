@@ -17,6 +17,22 @@ import { useMinuteTick } from '@/hooks/useMinuteTick'
 
 type TFunc = (key: string, params?: Record<string, string | number>) => string
 
+/** Built-in forge labels from DEFAULT_PR_CHIP_DISPLAY → i18n keys. Estate labels pass through. */
+const DEFAULT_PR_STATUS_LABEL_KEYS: Readonly<Record<string, string>> = {
+    'merged': 'session.item.prStatus.merged',
+    'closed': 'session.item.prStatus.closed',
+    'draft': 'session.item.prStatus.draft',
+    'checks failed': 'session.item.prStatus.checksFailed',
+    'conflicts': 'session.item.prStatus.conflicts',
+    'merge blocked': 'session.item.prStatus.mergeBlocked',
+    'checks running': 'session.item.prStatus.checksRunning',
+    'unstable': 'session.item.prStatus.unstable',
+    'behind base': 'session.item.prStatus.behindBase',
+    'ready to merge': 'session.item.prStatus.readyToMerge',
+    'mergeable': 'session.item.prStatus.mergeable',
+    'checks passed': 'session.item.prStatus.checksPassed',
+}
+
 export type SessionPrChipProps = {
     refs: readonly ExternalRef[] | null | undefined
     className?: string
@@ -67,9 +83,14 @@ export function formatGithubPrChipDetailParts(
     const relative = typeof ref.statusCheckedAt === 'number'
         ? formatRelativeTime(ref.statusCheckedAt, t)
         : null
-    const checked = relative ? ` · checked ${relative}` : ''
-    const staleNote = display.stale ? ' · stale' : ''
-    const shown = display.label ?? ref.estateCode ?? 'linked'
+    const checked = relative
+        ? ` · ${t('session.item.prChecked', { time: relative })}`
+        : ''
+    const staleNote = display.stale ? ` · ${t('session.item.prStale')}` : ''
+    const labelKey = display.label ? DEFAULT_PR_STATUS_LABEL_KEYS[display.label] : undefined
+    const shown = labelKey
+        ? t(labelKey)
+        : display.label ?? ref.estateCode ?? t('session.item.prLinked')
     const action = !display.stale && display.action ? ` — ${display.action}` : ''
     return { glyph, detail: `${identity} · ${shown}${checked}${staleNote}${action}` }
 }
