@@ -74,6 +74,24 @@ describe('toCodexBudgetState', () => {
         expect(creditsAxis?.valueText).toBe('246')
     })
 
+    it('does not treat sparse credits { unlimited: false } as covering a capped window', () => {
+        // Bot Major 2026-09-09: exhausted was false for partial payloads with
+        // neither hasCredits nor balance, so covering amber hid the weekly cap.
+        const usage: CodexUsage = {
+            contextWindow: { usedTokens: 20_000, limitTokens: 100_000, percent: 20, updatedAt: 1 },
+            rateLimits: {
+                fiveHour: { usedPercent: 5, windowMinutes: 300 },
+                weekly: { usedPercent: 100, windowMinutes: 10080 }
+            },
+            credits: { unlimited: false }
+        }
+        const state = toCodexBudgetState(usage)
+        expect(state?.effective).toBe('red')
+        expect(state?.dominantAxisId).toBe('weekly')
+        const creditsAxis = state?.axes.find((axis) => axis.id === 'credits')
+        expect(creditsAxis?.covering).toBeUndefined()
+    })
+
     it('stays amber when one window is capped and the other is near-cap while credits cover', () => {
         // Bot Major 2026-07-30: excluding only 100% windows left a 99% sibling
         // in pressure candidates and painted red before covering-amber.

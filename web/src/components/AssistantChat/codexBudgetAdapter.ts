@@ -235,6 +235,12 @@ export function toCodexBudgetState(usage: CodexUsage | null | undefined): AgentB
     if (usage.credits) {
         const parsedBalance = parseCreditsBalance(usage.credits.balance)
         const balanceZero = parsedBalance !== null && parsedBalance === 0
+        const balancePositive = parsedBalance !== null && parsedBalance > 0
+        // Covering requires positive evidence that credits can pay overage.
+        // A sparse `{ unlimited: false }` must not hide capped windows as amber.
+        const creditsAvailable = usage.credits.unlimited === true
+            || usage.credits.hasCredits === true
+            || balancePositive
         const exhausted = !usage.credits.unlimited && (usage.credits.hasCredits === false || balanceZero)
         const subscriptionExists = axes.some((axis) => axis.id === 'fiveHour' || axis.id === 'weekly')
         const subscriptionCapped = axes.some(
@@ -246,7 +252,7 @@ export function toCodexBudgetState(usage: CodexUsage | null | undefined): AgentB
         // When credits remain and a window is capped, mark covering.
         const creditsConstrainNow = exhausted && (!subscriptionExists || subscriptionCapped)
         const pressure = creditsConstrainNow ? 100 : 0
-        const covering = !exhausted && subscriptionExists && subscriptionCapped
+        const covering = creditsAvailable && subscriptionExists && subscriptionCapped
         axes.push({
             id: 'credits',
             label: 'Credits',
