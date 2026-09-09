@@ -43,4 +43,43 @@ describe('resolvePrChipDisplay', () => {
         expect(resolved.hasSnapshot).toBe(true)
         expect(resolved.stale).toBe(false)
     })
+
+    it('prefers conflicts/blocked merge over passing or pending checks', () => {
+        const now = 1_700_000_000_000
+        const base = {
+            ...buildGithubPrExternalRef({
+                repo: 'tiann/hapi',
+                number: 1163,
+                role: 'primary' as const,
+                source: 'user' as const,
+                linkedAt: 1
+            }),
+            openState: 'open' as const,
+            statusCheckedAt: now - 60_000
+        }
+
+        const conflictingPass = resolvePrChipDisplay({
+            ...base,
+            checks: 'pass',
+            merge: 'conflicting'
+        }, DEFAULT_PR_CHIP_DISPLAY, now)
+        expect(conflictingPass.tone).toBe('needs_work')
+        expect(conflictingPass.label).toBe('conflicts')
+
+        const blockedPending = resolvePrChipDisplay({
+            ...base,
+            checks: 'pending',
+            merge: 'blocked'
+        }, DEFAULT_PR_CHIP_DISPLAY, now)
+        expect(blockedPending.tone).toBe('needs_work')
+        expect(blockedPending.label).toBe('merge blocked')
+
+        const conflictingPending = resolvePrChipDisplay({
+            ...base,
+            checks: 'pending',
+            merge: 'conflicting'
+        }, DEFAULT_PR_CHIP_DISPLAY, now)
+        expect(conflictingPending.tone).toBe('needs_work')
+        expect(conflictingPending.label).toBe('conflicts')
+    })
 })

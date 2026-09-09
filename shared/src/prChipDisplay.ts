@@ -79,8 +79,18 @@ function forgeCandidateKeys(ref: GithubPrExternalRef): string[] {
         keys.push(`merge.${ref.merge}+checks.${ref.checks}`)
     }
     if (ref.openState) keys.push(`openState.${ref.openState}`)
-    if (ref.checks) keys.push(`checks.${ref.checks}`)
+    // Blocking forge states before "green" check/merge labels so a passing
+    // CI run cannot hide conflicts/blocked merge (or pending CI hide blocked).
+    if (ref.checks === 'fail') keys.push('checks.fail')
+    if (ref.merge === 'conflicting' || ref.merge === 'blocked') {
+        keys.push(`merge.${ref.merge}`)
+    }
+    if (ref.checks === 'pending') keys.push('checks.pending')
+    if (ref.merge === 'unstable' || ref.merge === 'behind') {
+        keys.push(`merge.${ref.merge}`)
+    }
     if (ref.merge) keys.push(`merge.${ref.merge}`)
+    if (ref.checks) keys.push(`checks.${ref.checks}`)
     return keys
 }
 
