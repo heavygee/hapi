@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { AgentBudgetAxis, AgentBudgetEffectiveState, AgentBudgetState } from '@hapi/protocol/types'
 
 // Flavor-agnostic budget indicator. Consumes a normalized AgentBudgetState
@@ -84,6 +84,15 @@ export function AgentBudgetIndicator(props: { state: AgentBudgetState | null | u
             document.removeEventListener('keydown', handleKeyDown)
         }
     }, [open])
+
+    // CodexUsageIndicator stays mounted while state flickers null (e.g. Luna
+    // Reserve hides ordinary usage). Clear popover so it does not reopen with
+    // a stale fixed position when usage returns.
+    useEffect(() => {
+        if (props.state) return
+        setOpen(false)
+        setPosition(null)
+    }, [props.state])
 
     if (!props.state) return null
 
