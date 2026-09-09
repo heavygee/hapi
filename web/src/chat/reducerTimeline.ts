@@ -79,10 +79,11 @@ function mapAgentRunStatusToToolState(status: string | null): ToolCallBlock['too
 }
 
 function attachCodexRoundSummaryToLatestGroup(blocks: ChatBlock[], summary: RoundSummary): void {
-    type SummaryTargetBlock = Exclude<ChatBlock, UserTextBlock | AgentEventBlock>
+    type SummaryTargetBlock = Exclude<ChatBlock, UserTextBlock | AgentEventBlock | DisplayLinksBlock>
     const isSummaryTarget = (block: ChatBlock): block is SummaryTargetBlock =>
         block.kind !== 'user-text'
         && block.kind !== 'agent-event'
+        && block.kind !== 'display-links'
         && !(block.kind === 'cli-output' && block.source === 'user')
 
     let firstIndex = -1
