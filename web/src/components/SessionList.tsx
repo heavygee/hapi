@@ -386,12 +386,15 @@ export function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGro
     const groups = new Map<string, { directory: string; machineId: string | null; sessions: SessionSummary[] }>()
 
     sessions.forEach(session => {
-        const path = resolveSessionGroupDirectory(session.metadata ?? {})
+        const directory = resolveSessionGroupDirectory(session.metadata ?? {})
         const machineId = session.metadata?.machineId ?? null
-        const key = `${machineId ?? UNKNOWN_MACHINE_ID}::${path}`
+        const directoryKey = usesWindowsSeparators(directory)
+            ? pathComparisonKey(directory)
+            : directory
+        const key = `${machineId ?? UNKNOWN_MACHINE_ID}::${directoryKey}`
         if (!groups.has(key)) {
             groups.set(key, {
-                directory: path,
+                directory,
                 machineId,
                 sessions: []
             })

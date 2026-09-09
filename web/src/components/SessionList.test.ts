@@ -928,4 +928,39 @@ describe('groupSessionsByDirectory symlink coalesce', () => {
             },
         })).toBe('C:/Users/Me/coding/hapi')
     })
+
+    it('groups mixed-case Windows spellings under one map key', () => {
+        const upper = makeSession({
+            id: 'upper',
+            updatedAt: 2,
+            metadata: {
+                machineId: 'machine-win',
+                path: 'C:\\Users\\Me\\coding\\hapi',
+                worktree: {
+                    basePath: 'C:\\Users\\Me\\coding\\hapi',
+                    branch: 'main',
+                    name: 'main',
+                    worktreePath: 'C:\\Users\\Me\\coding\\hapi',
+                },
+            },
+        })
+        const lower = makeSession({
+            id: 'lower',
+            updatedAt: 1,
+            metadata: {
+                machineId: 'machine-win',
+                path: 'c:/users/me/coding/hapi/worktrees/feat',
+                worktree: {
+                    basePath: 'c:/users/me/coding/hapi',
+                    branch: 'feat',
+                    name: 'feat',
+                    worktreePath: 'c:/users/me/coding/hapi/worktrees/feat',
+                },
+            },
+        })
+
+        const groups = groupSessionsByDirectory([upper, lower])
+        expect(groups).toHaveLength(1)
+        expect(groups[0]?.sessions.map((s) => s.id).sort()).toEqual(['lower', 'upper'])
+    })
 })
