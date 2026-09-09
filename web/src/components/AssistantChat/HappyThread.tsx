@@ -138,10 +138,13 @@ const SEARCH_TARGET_QUERY_RETRY_DELAY_MS = 75
 const MAX_SEARCH_TARGET_QUERY_RETRIES = 80
 const MAX_SEARCH_TARGET_CONTEXT_RETRIES = 3
 const MAX_SEARCH_TARGET_RENDER_RETRIES = 120
-const SEARCH_TARGET_SCROLL_DELAYS_MS = [
-    0, 16, 50, 120, 250, 500, 900, 1400, 2200, 3500, 5000, 7000,
-    10_000, 15_000, 22_000, 30_000, 45_000
-] as const
+// Brief layout settle only. Long delayed re-centers (formerly up to 45s) fought
+// operators who scrolled away from a hit to read nearby context — treat the jump
+// as a one-shot scroll point, then free scrolling (heavygee/hapi#143).
+const SEARCH_TARGET_SCROLL_DELAYS_MS = [0, 16, 50, 120, 250, 500, 900, 1400, 1800] as const
+export const SEARCH_TARGET_SCROLL_SETTLE_MS = SEARCH_TARGET_SCROLL_DELAYS_MS[
+    SEARCH_TARGET_SCROLL_DELAYS_MS.length - 1
+]!
 // Resume tail-following only once the user has actually reached the bottom.
 // A wider proximity threshold makes a downward-reading user enter tail mode
 // early; the next content/layout update then snaps the viewport to the end.
@@ -339,10 +342,21 @@ function findScrollableAncestor(element: HTMLElement): HTMLElement | null {
     return null
 }
 
-function scrollSearchTargetIntoView(target: HTMLElement, preferredViewport?: HTMLElement | null): void {
+function scrollSearchTargetIntoView(
+    target: HTMLElement,
+    preferredViewport?: HTMLElement | null,
+    options?: { markProgrammatic?: () => void; clearProgrammatic?: () => void }
+): void {
     const viewport = preferredViewport ?? findScrollableAncestor(target)
+    const mark = options?.markProgrammatic
+    const clear = options?.clearProgrammatic
     if (!viewport) {
-        target.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        mark?.()
+        try {
+            target.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        } finally {
+            clear?.()
+        }
         return
     }
 
@@ -355,7 +369,12 @@ function scrollSearchTargetIntoView(target: HTMLElement, preferredViewport?: HTM
         maxScrollTop,
         Math.max(0, viewport.scrollTop + targetCenter - viewportCenter)
     )
-    viewport.scrollTo({ top: nextScrollTop, behavior: 'auto' })
+    mark?.()
+    try {
+        viewport.scrollTo({ top: nextScrollTop, behavior: 'auto' })
+    } finally {
+        clear?.()
+    }
 }
 
 function removeSearchMatchMarker(marker: HTMLElement, target: HTMLElement): void {
@@ -836,6 +855,9 @@ export function HappyThread(props: {
     const searchTargetContextRetryCountRef = useRef(0)
     const searchTargetRenderRetryCountRef = useRef(0)
     const searchTargetScrollTimersRef = useRef<number[]>([])
+    // True while a search-target scrollTo runs so handleScroll does not treat
+    // that programmatic move as the operator releasing the settle chain.
+    const searchTargetProgrammaticScrollRef = useRef(false)
 
     // Smart scroll state: enabled only while the user is intentionally at the bottom.
     const autoScrollEnabledRef = useRef(true)
@@ -938,6 +960,12 @@ export function HappyThread(props: {
         setIsLocatingSearchTarget(false)
         props.onSearchTargetDismissed?.()
     }, [props.onSearchTargetDismissed, releaseSearchTargetHistoryLock])
+    const markSearchTargetProgrammaticScroll = useCallback(() => {
+        searchTargetProgrammaticScrollRef.current = true
+    }, [])
+    const clearSearchTargetProgrammaticScroll = useCallback(() => {
+        searchTargetProgrammaticScrollRef.current = false
+    }, [])
     const scheduleSearchTargetScroll = useCallback((
         targetMessageId: string,
         query: string | undefined,
@@ -966,10 +994,17 @@ export function HappyThread(props: {
                 }
             }
             if (target.isConnected) {
-                scrollSearchTargetIntoView(target, viewportRef.current)
+                scrollSearchTargetIntoView(target, viewportRef.current, {
+                    markProgrammatic: markSearchTargetProgrammaticScroll,
+                    clearProgrammatic: clearSearchTargetProgrammaticScroll
+                })
             }
         }, delay))
-    }, [clearSearchTargetScrollTimers])
+    }, [
+        clearSearchTargetProgrammaticScroll,
+        clearSearchTargetScrollTimers,
+        markSearchTargetProgrammaticScroll
+    ])
 
     const clearCoverageCheckTimer = useCallback(() => {
         if (coverageCheckTimerRef.current !== null) {
@@ -1091,7 +1126,20 @@ export function HappyThread(props: {
                 clientHeight: viewport.clientHeight,
                 previousScrollTop: lastScrollTopRef.current
             })
+            const scrollDeltaPx = Math.abs(viewport.scrollTop - lastScrollTopRef.current)
             lastScrollTopRef.current = viewport.scrollTop
+
+            // After a search jump, delayed settle scrolls must not fight the
+            // operator. Any non-programmatic scroll cancels remaining re-centers
+            // while keeping the highlight / history lock (#143).
+            if (
+                searchTargetHistoryLockRef.current
+                && searchTargetScrollTimersRef.current.length > 0
+                && !searchTargetProgrammaticScrollRef.current
+                && scrollDeltaPx > MANUAL_SCROLL_EPSILON_PX
+            ) {
+                clearSearchTargetScrollTimers()
+            }
 
             // A slow older-page request must not restore the position from
             // when it started after the user has already scrolled elsewhere.
@@ -1627,7 +1675,10 @@ export function HappyThread(props: {
                     targetMessageId
                 )
                 : null
-            scrollSearchTargetIntoView(matchMarker ?? target, viewportRef.current)
+            scrollSearchTargetIntoView(matchMarker ?? target, viewportRef.current, {
+                markProgrammatic: markSearchTargetProgrammaticScroll,
+                clearProgrammatic: clearSearchTargetProgrammaticScroll
+            })
             scheduleSearchTargetScroll(targetMessageId, targetSearchQuery, target)
             if (!matchMarker) {
                 target.classList.add(SEARCH_TARGET_HIGHLIGHT_CLASS)
@@ -1701,6 +1752,8 @@ export function HappyThread(props: {
         releaseSearchTargetHistoryLock,
         scheduleSearchTargetRetry,
         scheduleSearchTargetScroll,
+        markSearchTargetProgrammaticScroll,
+        clearSearchTargetProgrammaticScroll,
         appliedHistoryVersion,
         appliedMessagesVersion,
         props.historyVersion,
