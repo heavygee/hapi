@@ -12,7 +12,7 @@ import {
 import { cn } from '@/lib/utils'
 import { formatRelativeTime } from '@/lib/relativeTime'
 import { useTranslation } from '@/lib/use-translation'
-import { HoverTooltip } from '@/components/HoverTooltip'
+import { HoverTooltip, SESSION_ROW_TOOLTIP_FOCUS_CLASS } from '@/components/HoverTooltip'
 import { useMinuteTick } from '@/hooks/useMinuteTick'
 
 type TFunc = (key: string, params?: Record<string, string | number>) => string
@@ -156,6 +156,9 @@ export function SessionPrChip(props: SessionPrChipProps) {
             align="end"
             // Isolate hover to the chip — not the whole session row.
             hoverGroup="help"
+            revealOnParentFocusClass={
+                interactive ? undefined : SESSION_ROW_TOOLTIP_FOCUS_CLASS
+            }
             className={cn('relative z-20 shrink-0 overflow-visible', props.className)}
             tooltipClassName="max-w-[18rem] whitespace-normal"
             target={chip}
