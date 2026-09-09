@@ -266,11 +266,15 @@ class CodexSessionScannerImpl extends BaseSessionScanner<CodexSessionEvent> {
             return;
         }
         const cursor = Math.min(offset, fileStats.size);
+        // If the remote launcher snapped mid-write, keep bytes after the prior
+        // newline so the completed JSONL record can be reconstructed on the
+        // next scan instead of discarding the prefix before the cursor.
+        const partialLine = await readBytesAfterPreviousNewline(filePath, cursor);
         this.setCursor(filePath, cursor);
         this.fileStateByPath.set(filePath, {
             device: fileStats.dev,
             inode: fileStats.ino,
-            partialLine: Buffer.alloc(0),
+            partialLine,
             nextLineIndex: 0
         });
     }
@@ -396,6 +400,28 @@ export async function readTranscriptRange(filePath: string, startOffset: number,
         await handle.close();
     }
     return bytesRead === content.length ? content : content.subarray(0, bytesRead);
+}
+
+const PARTIAL_LINE_LOOKBACK_MAX_BYTES = 256 * 1024;
+
+/** Bytes between the previous newline and `cursor`, for mid-record attach. */
+export async function readBytesAfterPreviousNewline(
+    filePath: string,
+    cursor: number,
+    maxLookbackBytes = PARTIAL_LINE_LOOKBACK_MAX_BYTES
+): Promise<Buffer> {
+    if (cursor <= 0) return Buffer.alloc(0);
+    const lookback = Math.min(cursor, Math.max(1, maxLookbackBytes));
+    const start = cursor - lookback;
+    const window = await readTranscriptRange(filePath, start, lookback);
+    for (let index = window.length - 1; index >= 0; index -= 1) {
+        if (window[index] === 0x0a) {
+            return Buffer.from(window.subarray(index + 1));
+        }
+    }
+    // No newline in the lookback window: whole prefix from BOF, else empty
+    // rather than inventing a mid-line fragment that can never parse.
+    return start === 0 ? Buffer.from(window) : Buffer.alloc(0);
 }
 
 function parseCodexSessionEvent(value: unknown): CodexSessionEvent | null {
