@@ -63,27 +63,30 @@ export default function SettingsGeneralPage() {
                 <SettingsChoiceGroup hideLabel label={t('settings.language.label')} value={locale} options={locales} onChange={setLocale} />
             </SettingsSection>
             {isOwner ? (
-            <SettingsSection title={t('settings.general.githubPrAwareness')}>
-                <SettingsSwitch
-                    label={t('settings.general.githubPrAwareness')}
-                    description={featureError
-                        ?? (envPinned
-                            ? t('settings.general.githubPrAwareness.envPinned')
-                            : t('settings.general.githubPrAwareness.desc'))}
-                    checked={Boolean(awareness?.enabled)}
-                    disabled={envPinned || isPending}
-                    onChange={(checked) => {
-                        void setGithubPrAwareness(checked)
-                            .then(() => setFeatureError(null))
-                            .catch((error) => {
-                                setFeatureError(error instanceof Error ? error.message : t('dialog.error.default'))
-                            })
-                    }}
-                />
-            </SettingsSection>
+                <SettingsSection title={t('settings.general.githubPrAwareness')}>
+                    <SettingsSwitch
+                        label={t('settings.general.githubPrAwareness')}
+                        description={featureError
+                            ?? (envPinned
+                                ? t('settings.general.githubPrAwareness.envPinned')
+                                : t('settings.general.githubPrAwareness.desc'))}
+                        checked={Boolean(awareness?.enabled)}
+                        disabled={envPinned || isPending}
+                        onChange={(checked) => {
+                            void setGithubPrAwareness(checked)
+                                .then(() => setFeatureError(null))
+                                .catch((error) => {
+                                    setFeatureError(error instanceof Error ? error.message : t('dialog.error.default'))
+                                })
+                        }}
+                    />
+                </SettingsSection>
             ) : null}
             {isOwner ? (
-                <SettingsSection title={t('settings.general.agents.title')} description={t('settings.general.agents.description')}>
+                <SettingsSection
+                    title={t('settings.general.sessionSummary.title')}
+                    description={t('settings.general.sessionSummary.description')}
+                >
                     {hubSettingsQuery.data ? (
                         <>
                             <SettingsSwitch

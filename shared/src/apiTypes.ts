@@ -132,7 +132,12 @@ export type MachinesResponse = { machines: Machine[] }
 
 export type SpawnResponse =
     | { type: 'success'; sessionId: string }
-    | { type: 'error'; message: string }
+    | {
+        type: 'error'
+        message: string
+        code?: 'agent_unavailable' | 'runner_upgrade_required' | 'outside_workspace_roots'
+        agent?: z.infer<typeof AgentFlavorSchema>
+    }
 
 export const SessionPermissionModeRequestSchema = z.object({
     mode: PermissionModeSchema
@@ -593,6 +598,10 @@ export type ForkConversationRpcResult = {
     forkSession?: boolean
 }
 
+export type RewindConversationErrorCode =
+    | 'ambiguous_native_boundary'
+    | 'ambiguous_native_boundary_fork_safe'
+
 export type RewindConversationRpcResult = {
     success: true
     /** Truncate HAPI transcript at/after this localId, then accept rehydrated history. */
@@ -606,6 +615,7 @@ export type RewindConversationRpcResult = {
 } | {
     success: false
     error: string
+    code?: RewindConversationErrorCode
     /** Native state is unchanged, cancelled, or was restored exactly. */
     outcome: 'rejected' | 'cancelled' | 'source_restored'
 }
@@ -655,6 +665,21 @@ export const MachinePathsExistsRequestSchema = z.object({
 })
 
 export type MachinePathsExistsRequest = z.infer<typeof MachinePathsExistsRequestSchema>
+
+export const AgentAvailabilityReasonSchema = z.enum(['not_found', 'invalid_configuration'])
+export type AgentAvailabilityReason = z.infer<typeof AgentAvailabilityReasonSchema>
+
+export const AgentAvailabilityEntrySchema = z.object({
+    agent: AgentFlavorSchema,
+    available: z.boolean(),
+    reason: AgentAvailabilityReasonSchema.optional()
+})
+export type AgentAvailabilityEntry = z.infer<typeof AgentAvailabilityEntrySchema>
+
+export const AgentAvailabilityResponseSchema = z.object({
+    agents: z.array(AgentAvailabilityEntrySchema)
+})
+export type AgentAvailabilityResponse = z.infer<typeof AgentAvailabilityResponseSchema>
 
 export const AuthRequestSchema = z.union([
     z.object({ initData: z.string() }),
@@ -739,6 +764,8 @@ export type MachineListDirectoryResponse = {
 
 export type PathExistsResponse = {
     exists: Record<string, boolean>
+    /** Requested paths rejected by the runner's configured workspace roots. */
+    outsideWorkspaceRoots?: string[]
 }
 
 export type MachinePathsExistsResponse = PathExistsResponse
@@ -777,6 +804,13 @@ export type OpencodeModelsResponse = {
 }
 
 export type ListOpencodeModelsResponse = OpencodeModelsResponse
+
+/** Variant values keyed by `providerId/modelId` from the OpenCode server catalog. */
+export type OpencodeModelVariantsResponse = {
+    success: boolean
+    variants?: Record<string, string[]>
+    error?: string
+}
 
 export type GrokModelSummary = {
     modelId: string
@@ -829,6 +863,10 @@ export type OpencodeReasoningEffortResponse = {
     success: boolean
     options?: OpencodeReasoningEffortOption[]
     currentValue?: string | null
+    /** Backend-side model the options belong to — lets clients detect a pending model switch. */
+    currentModelId?: string | null
+    /** Concrete backend model requested by the session, including a resolved Default selection. */
+    targetModelId?: string | null
     error?: string
 }
 
