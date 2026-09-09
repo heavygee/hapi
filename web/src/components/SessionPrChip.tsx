@@ -33,6 +33,12 @@ const DEFAULT_PR_STATUS_LABEL_KEYS: Readonly<Record<string, string>> = {
     'checks passed': 'session.item.prStatus.checksPassed',
 }
 
+function localizePrStatusLabel(label: string | undefined, t: TFunc): string | undefined {
+    if (!label) return undefined
+    const key = DEFAULT_PR_STATUS_LABEL_KEYS[label]
+    return key ? t(key) : label
+}
+
 export type SessionPrChipProps = {
     refs: readonly ExternalRef[] | null | undefined
     className?: string
@@ -87,10 +93,10 @@ export function formatGithubPrChipDetailParts(
         ? ` · ${t('session.item.prChecked', { time: relative })}`
         : ''
     const staleNote = display.stale ? ` · ${t('session.item.prStale')}` : ''
-    const labelKey = display.label ? DEFAULT_PR_STATUS_LABEL_KEYS[display.label] : undefined
-    const shown = labelKey
-        ? t(labelKey)
-        : display.label ?? ref.estateCode ?? t('session.item.prLinked')
+    const shown = localizePrStatusLabel(display.label, t)
+        ?? display.label
+        ?? ref.estateCode
+        ?? t('session.item.prLinked')
     const action = !display.stale && display.action ? ` — ${display.action}` : ''
     return { glyph, detail: `${identity} · ${shown}${checked}${staleNote}${action}` }
 }
@@ -131,10 +137,11 @@ export function SessionPrChip(props: SessionPrChipProps) {
         interactive ? 'hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]' : null,
         toneClass(display.tone)
     )
-    const chipLabel = display.label
+    const localizedStatus = localizePrStatusLabel(display.label, t)
+    const chipLabel = localizedStatus
         ? t('session.item.prChipWithStatus', {
             number: primary.number,
-            status: display.label
+            status: localizedStatus
         })
         : t('session.item.prChip', { number: primary.number })
 

@@ -75,10 +75,17 @@ export type ResolvedPrChipDisplay = {
 
 function forgeCandidateKeys(ref: GithubPrExternalRef): string[] {
     const keys: string[] = []
+    // Terminal openState before green merge/check composites — a merged/closed/
+    // draft PR can still carry merge:clean + checks:pass from the last poll.
+    if (ref.openState && ref.openState !== 'open') {
+        keys.push(`openState.${ref.openState}`)
+    }
     if (ref.merge && ref.checks) {
         keys.push(`merge.${ref.merge}+checks.${ref.checks}`)
     }
-    if (ref.openState) keys.push(`openState.${ref.openState}`)
+    if (ref.openState === 'open') {
+        keys.push('openState.open')
+    }
     // Blocking forge states before "green" check/merge labels so a passing
     // CI run cannot hide conflicts/blocked merge (or pending CI hide blocked).
     if (ref.checks === 'fail') keys.push('checks.fail')

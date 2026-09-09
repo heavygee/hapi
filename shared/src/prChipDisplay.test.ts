@@ -82,4 +82,31 @@ describe('resolvePrChipDisplay', () => {
         expect(conflictingPending.tone).toBe('needs_work')
         expect(conflictingPending.label).toBe('conflicts')
     })
+
+    it.each([
+        ['merged', 'merged', 'merged'],
+        ['closed', 'muted', 'closed'],
+        ['draft', 'muted', 'draft']
+    ] as const)(
+        'prefers terminal openState=%s over clean+pass ready-to-merge',
+        (openState, tone, label) => {
+            const now = 1_700_000_000_000
+            const resolved = resolvePrChipDisplay({
+                ...buildGithubPrExternalRef({
+                    repo: 'tiann/hapi',
+                    number: 1163,
+                    role: 'primary',
+                    source: 'user',
+                    linkedAt: 1
+                }),
+                openState,
+                checks: 'pass',
+                merge: 'clean',
+                statusCheckedAt: now - 60_000
+            }, DEFAULT_PR_CHIP_DISPLAY, now)
+            expect(resolved.stale).toBe(false)
+            expect(resolved.tone).toBe(tone)
+            expect(resolved.label).toBe(label)
+        }
+    )
 })
