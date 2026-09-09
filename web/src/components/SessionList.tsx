@@ -83,6 +83,7 @@ import { UnblockReasonDialog } from '@/components/UnblockReasonDialog'
 import { Spinner } from '@/components/Spinner'
 import { useToast } from '@/lib/toast-context'
 import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
+import { getPathDisplayName } from '@/utils/path'
 
 export { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
 
@@ -428,10 +429,21 @@ function normalizePathForCompare(path: string): string {
     return usesWindowsSeparators(path) ? stripped.replace(/\\/g, '/') : stripped
 }
 
+function pathComparisonKey(path: string): string {
+    const normalized = normalizePathForCompare(path)
+    return usesWindowsSeparators(path) ? normalized.toLowerCase() : normalized
+}
+
 function pathIsUnder(parent: string, child: string): boolean {
-    const parentNorm = normalizePathForCompare(parent)
-    const childNorm = normalizePathForCompare(child)
+    const parentNorm = pathComparisonKey(parent)
+    const childNorm = pathComparisonKey(child)
     return childNorm === parentNorm || childNorm.startsWith(`${parentNorm}/`)
+}
+
+function isHapiSiblingWorktree(basePath: string, worktreePath: string): boolean {
+    const baseNorm = pathComparisonKey(basePath)
+    const worktreeNorm = pathComparisonKey(worktreePath)
+    return worktreeNorm.startsWith(`${baseNorm}-worktrees/`)
 }
 
 export type SessionGroupDirectorySource = {
@@ -460,12 +472,21 @@ export function resolveSessionGroupDirectory(source: SessionGroupDirectorySource
 
     const normBase = stripTrailingSeparators(basePath)
     if (pathIsUnder(normBase, path)) {
+        // On Windows, prefer path's casing for the shared root so a mixed-case
+        // logical spelling and a lowercased realpath base still share one key.
+        if (usesWindowsSeparators(path) || usesWindowsSeparators(basePath)) {
+            const rootLen = normalizePathForCompare(normBase).length
+            return stripTrailingSeparators(path.slice(0, rootLen))
+        }
         return normBase
     }
 
-    // Alias evidence: realpathed worktreePath under realpathed basePath, while
-    // path still uses a logical spelling of the same checkout.
-    if (!worktreePath || !pathIsUnder(normBase, worktreePath)) {
+    // Alias evidence: realpathed worktreePath under realpathed basePath (or
+    // HAPI's sibling `<repo>-worktrees/<name>` layout), while path still uses a
+    // logical spelling of the same checkout.
+    const nestedUnderBase = pathIsUnder(normBase, worktreePath)
+    const siblingBesideBase = isHapiSiblingWorktree(normBase, worktreePath)
+    if (!worktreePath || (!nestedUnderBase && !siblingBesideBase)) {
         return normBase
     }
 
@@ -475,14 +496,22 @@ export function resolveSessionGroupDirectory(source: SessionGroupDirectorySource
     const suffix = worktreeNorm.slice(baseNorm.length)
     if (!suffix) return normBase
 
-    const suffixIndex = pathNorm.lastIndexOf(`${suffix}/`)
-    if (suffixIndex !== -1) {
-        const logicalRoot = pathNorm.slice(0, suffixIndex)
-        return usesWindowsSeparators(path) ? logicalRoot.replace(/\//g, '\\') : logicalRoot
-    }
-    if (pathNorm.endsWith(suffix)) {
-        const logicalRoot = pathNorm.slice(0, -suffix.length) || normBase
-        return usesWindowsSeparators(path) ? logicalRoot.replace(/\//g, '\\') : logicalRoot
+    // Prefer the occurrence whose parent matches basePath's display name so a
+    // nested cwd that repeats the worktree suffix does not win via lastIndexOf.
+    // Slice the original path so Windows forward-slash spelling is preserved.
+    const windowsPath = usesWindowsSeparators(path) || usesWindowsSeparators(basePath)
+    const baseDisplay = getPathDisplayName(baseNorm)
+    const suffixFlags = windowsPath ? 'gi' : 'g'
+    const suffixPattern = new RegExp(`${suffix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=/|$)`, suffixFlags)
+    for (const match of pathNorm.matchAll(suffixPattern)) {
+        const index = match.index
+        if (index === undefined) continue
+        const candidateDisplay = getPathDisplayName(pathNorm.slice(0, index))
+        const displayMatches = windowsPath
+            ? candidateDisplay.toLowerCase() === baseDisplay.toLowerCase()
+            : candidateDisplay === baseDisplay
+        if (!displayMatches) continue
+        return stripTrailingSeparators(path.slice(0, index))
     }
     return normBase
 }
@@ -628,12 +657,15 @@ export function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGro
     const groups = new Map<string, { directory: string; machineId: string | null; sessions: SessionSummary[] }>()
 
     sessions.forEach(session => {
-        const path = resolveSessionGroupDirectory(session.metadata ?? {})
+        const directory = resolveSessionGroupDirectory(session.metadata ?? {})
         const machineId = session.metadata?.machineId ?? null
-        const key = `${machineId ?? UNKNOWN_MACHINE_ID}::${path}`
+        const directoryKey = usesWindowsSeparators(directory)
+            ? pathComparisonKey(directory)
+            : directory
+        const key = `${machineId ?? UNKNOWN_MACHINE_ID}::${directoryKey}`
         if (!groups.has(key)) {
             groups.set(key, {
-                directory: path,
+                directory,
                 machineId,
                 sessions: []
             })
@@ -2334,7 +2366,7 @@ export function SessionList(props: {
                                             selected={s.id === selectedSessionId}
                                             showDetailedStatus={showDetailedStatus}
                                             inRunningSection
-                                            projectLabel={getGroupDisplayName(resolveSessionGroupDirectory(s.metadata ?? {}))}
+                                            projectLabel={getPathDisplayName(resolveSessionGroupDirectory(s.metadata ?? {}))}
                                             machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
                                             contentSnippet={contentSnippetBySessionId.get(s.id)}
                                             targetMessageId={contentTargetMessageIdBySessionId.get(s.id)}
@@ -3009,7 +3041,7 @@ export function SessionList(props: {
                                             selected={s.id === selectedSessionId}
                                             showDetailedStatus={showDetailedStatus}
                                             inRunningSection
-                                            projectLabel={getGroupDisplayName(resolveSessionGroupDirectory(s.metadata ?? {}))}
+                                            projectLabel={getPathDisplayName(resolveSessionGroupDirectory(s.metadata ?? {}))}
                                             machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
                                             lastSeenVersion={lastSeenVersion}
                                             flashHighlight={s.id === flashBlockedSessionId}
