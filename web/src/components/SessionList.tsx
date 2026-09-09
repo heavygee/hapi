@@ -197,10 +197,21 @@ function normalizePathForCompare(path: string): string {
     return usesWindowsSeparators(path) ? stripped.replace(/\\/g, '/') : stripped
 }
 
+function pathComparisonKey(path: string): string {
+    const normalized = normalizePathForCompare(path)
+    return usesWindowsSeparators(path) ? normalized.toLowerCase() : normalized
+}
+
 function pathIsUnder(parent: string, child: string): boolean {
-    const parentNorm = normalizePathForCompare(parent)
-    const childNorm = normalizePathForCompare(child)
+    const parentNorm = pathComparisonKey(parent)
+    const childNorm = pathComparisonKey(child)
     return childNorm === parentNorm || childNorm.startsWith(`${parentNorm}/`)
+}
+
+function isHapiSiblingWorktree(basePath: string, worktreePath: string): boolean {
+    const baseNorm = pathComparisonKey(basePath)
+    const worktreeNorm = pathComparisonKey(worktreePath)
+    return worktreeNorm.startsWith(`${baseNorm}-worktrees/`)
 }
 
 export type SessionGroupDirectorySource = {
@@ -229,12 +240,21 @@ export function resolveSessionGroupDirectory(source: SessionGroupDirectorySource
 
     const normBase = stripTrailingSeparators(basePath)
     if (pathIsUnder(normBase, path)) {
+        // On Windows, prefer path's casing for the shared root so a mixed-case
+        // logical spelling and a lowercased realpath base still share one key.
+        if (usesWindowsSeparators(path) || usesWindowsSeparators(basePath)) {
+            const rootLen = normalizePathForCompare(normBase).length
+            return stripTrailingSeparators(path.slice(0, rootLen))
+        }
         return normBase
     }
 
-    // Alias evidence: realpathed worktreePath under realpathed basePath, while
-    // path still uses a logical spelling of the same checkout.
-    if (!worktreePath || !pathIsUnder(normBase, worktreePath)) {
+    // Alias evidence: realpathed worktreePath under realpathed basePath (or
+    // HAPI's sibling `<repo>-worktrees/<name>` layout), while path still uses a
+    // logical spelling of the same checkout.
+    const nestedUnderBase = pathIsUnder(normBase, worktreePath)
+    const siblingBesideBase = isHapiSiblingWorktree(normBase, worktreePath)
+    if (!worktreePath || (!nestedUnderBase && !siblingBesideBase)) {
         return normBase
     }
 
@@ -247,12 +267,18 @@ export function resolveSessionGroupDirectory(source: SessionGroupDirectorySource
     // Prefer the occurrence whose parent matches basePath's display name so a
     // nested cwd that repeats the worktree suffix does not win via lastIndexOf.
     // Slice the original path so Windows forward-slash spelling is preserved.
+    const windowsPath = usesWindowsSeparators(path) || usesWindowsSeparators(basePath)
     const baseDisplay = getPathDisplayName(baseNorm)
-    const suffixPattern = new RegExp(`${suffix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=/|$)`, 'g')
+    const suffixFlags = windowsPath ? 'gi' : 'g'
+    const suffixPattern = new RegExp(`${suffix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=/|$)`, suffixFlags)
     for (const match of pathNorm.matchAll(suffixPattern)) {
         const index = match.index
         if (index === undefined) continue
-        if (getPathDisplayName(pathNorm.slice(0, index)) !== baseDisplay) continue
+        const candidateDisplay = getPathDisplayName(pathNorm.slice(0, index))
+        const displayMatches = windowsPath
+            ? candidateDisplay.toLowerCase() === baseDisplay.toLowerCase()
+            : candidateDisplay === baseDisplay
+        if (!displayMatches) continue
         return stripTrailingSeparators(path.slice(0, index))
     }
     return normBase
