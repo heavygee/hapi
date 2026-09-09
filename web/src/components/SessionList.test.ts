@@ -680,6 +680,16 @@ describe('resolveSessionGroupDirectory', () => {
         })).toBe('/home/heavygee/coding/hapi')
     })
 
+    it('matches the worktree suffix at the project boundary, not a nested repeat', () => {
+        expect(resolveSessionGroupDirectory({
+            path: '/home/me/coding/hapi/worktrees/feat/src/worktrees/feat/file',
+            worktree: {
+                basePath: '/work/coding/hapi',
+                worktreePath: '/work/coding/hapi/worktrees/feat',
+            },
+        })).toBe('/home/me/coding/hapi')
+    })
+
     it('keeps an external same-suffix worktree under basePath', () => {
         // worktreePath is NOT under basePath — no alias evidence.
         expect(resolveSessionGroupDirectory({

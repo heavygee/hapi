@@ -244,13 +244,15 @@ export function resolveSessionGroupDirectory(source: SessionGroupDirectorySource
     const suffix = worktreeNorm.slice(baseNorm.length)
     if (!suffix) return normBase
 
-    const suffixIndex = pathNorm.lastIndexOf(`${suffix}/`)
-    if (suffixIndex !== -1) {
-        const logicalRoot = pathNorm.slice(0, suffixIndex)
-        return usesWindowsSeparators(path) ? logicalRoot.replace(/\//g, '\\') : logicalRoot
-    }
-    if (pathNorm.endsWith(suffix)) {
-        const logicalRoot = pathNorm.slice(0, -suffix.length) || normBase
+    // Prefer the occurrence whose parent matches basePath's display name so a
+    // nested cwd that repeats the worktree suffix does not win via lastIndexOf.
+    const baseDisplay = getPathDisplayName(baseNorm)
+    const suffixPattern = new RegExp(`${suffix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=/|$)`, 'g')
+    for (const match of pathNorm.matchAll(suffixPattern)) {
+        const index = match.index
+        if (index === undefined) continue
+        const logicalRoot = pathNorm.slice(0, index)
+        if (getPathDisplayName(logicalRoot) !== baseDisplay) continue
         return usesWindowsSeparators(path) ? logicalRoot.replace(/\//g, '\\') : logicalRoot
     }
     return normBase
