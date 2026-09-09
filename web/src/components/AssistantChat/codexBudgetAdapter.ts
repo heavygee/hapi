@@ -313,3 +313,23 @@ export function toCodexBudgetState(usage: CodexUsage | null | undefined): AgentB
         ...(dominant ? { dominantAxisId: dominant.id } : {})
     }
 }
+
+/**
+ * Composer gauge input. When Luna Reserve is active (`agentState.codexUsage.reserve`),
+ * ordinary metadata can still look blocked while the task is running on Reserve —
+ * hide the ordinary gauge until Reserve is modeled as its own covering axis.
+ */
+export function composerCodexUsageForGauge(
+    agentFlavor: string | null | undefined,
+    metadataUsage: CodexUsage | null | undefined,
+    agentState: {
+        codexUsage?: {
+            ordinary?: unknown
+            reserve?: unknown
+        } | null
+    } | null | undefined
+): CodexUsage | undefined {
+    if (agentFlavor !== 'codex') return undefined
+    if (agentState?.codexUsage?.reserve != null) return undefined
+    return metadataUsage ?? undefined
+}

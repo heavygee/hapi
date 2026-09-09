@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CodexUsage } from '@hapi/protocol/types'
-import { toCodexBudgetState } from './codexBudgetAdapter'
+import { toCodexBudgetState, composerCodexUsageForGauge } from './codexBudgetAdapter'
 
 describe('toCodexBudgetState', () => {
     it('returns null when usage is empty', () => {
@@ -278,5 +278,32 @@ describe('toCodexBudgetState', () => {
         // No context -> pick the highest-pressure axis as operational so
         // the ring centre still shows the worst non-credits pressure.
         expect(state?.operationalAxisId).toBe('weekly')
+    })
+})
+
+describe('composerCodexUsageForGauge', () => {
+    it('hides ordinary metadata when Luna Reserve is active so the gauge is not blocked', () => {
+        // Bot Major 2026-09-09: exhausted ordinary limits + active Reserve must
+        // not feed the composer gauge (which would report blocked).
+        const exhausted: CodexUsage = {
+            rateLimits: {},
+            credits: { hasCredits: false, unlimited: false, balance: '0' },
+            limitId: 'premium'
+        }
+        expect(toCodexBudgetState(exhausted)?.effective).toBe('blocked')
+
+        expect(composerCodexUsageForGauge('codex', exhausted, {
+            codexUsage: {
+                ordinary: { primary: null, secondary: null },
+                reserve: { primary: null, secondary: null }
+            }
+        })).toBeUndefined()
+
+        expect(composerCodexUsageForGauge('codex', exhausted, {
+            codexUsage: {
+                ordinary: { primary: null, secondary: null },
+                reserve: null
+            }
+        })).toEqual(exhausted)
     })
 })
