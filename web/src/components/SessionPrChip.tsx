@@ -170,10 +170,10 @@ export function SessionPrChip(props: SessionPrChipProps) {
             data-pr-stale={display.stale ? '1' : '0'}
             aria-describedby={tooltipId}
             title={detail}
-            aria-label={chipLabel}
-            className={chipClassName}
+            className="inline-flex shrink-0"
         >
-            {glyph}
+            <span aria-hidden="true" className={chipClassName}>{glyph}</span>
+            <span className="sr-only">{`${chipLabel}. ${detail}`}</span>
         </span>
     )
 

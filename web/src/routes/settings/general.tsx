@@ -30,7 +30,7 @@ export default function SettingsGeneralPage() {
     const { api, baseUrl, token } = useAppContext()
     const queryClient = useQueryClient()
     const isOwner = getNamespace(token) === 'default'
-    const { features } = useFeatures(api)
+    const { features, isLoading: featuresLoading } = useFeatures(api)
     const { setGithubPrAwareness, isPending } = usePatchFeatures(api)
     const awareness = features?.githubPrAwareness
     const envPinned = awareness?.source === 'env'
@@ -71,7 +71,7 @@ export default function SettingsGeneralPage() {
                                 ? t('settings.general.githubPrAwareness.envPinned')
                                 : t('settings.general.githubPrAwareness.desc'))}
                         checked={Boolean(awareness?.enabled)}
-                        disabled={envPinned || isPending}
+                        disabled={featuresLoading || !awareness || envPinned || isPending}
                         onChange={(checked) => {
                             void setGithubPrAwareness(checked)
                                 .then(() => setFeatureError(null))
