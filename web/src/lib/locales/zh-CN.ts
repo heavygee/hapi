@@ -873,13 +873,9 @@ export default {
   'settings.display.pinInProgressSessions.desc': '侧边栏顶部「进行中」分区的置顶程度（位于项目目录分组之上）。默认为长时间任务（带会话 job 进度的后台批处理）。全局置顶仍在该分区之上。仅保持连接、智能体未在工作且未等待你操作的会话在任何模式下都留在项目目录中——那不是进行中的工作。关闭后全部保留在目录分组中。',
   'settings.display.pinInProgressMode.off': '关闭',
   'settings.display.pinInProgressMode.jobs': '长时间任务',
-<<<<<<< HEAD
-  'settings.display.pinInProgressMode.all': '全部活动',
+  'settings.display.pinInProgressMode.all': '工作中与待处理',
   'settings.display.appBadge': '任务栏未读角标',
   'settings.display.appBadge.desc': '在已安装的 Edge 或 Chrome PWA 图标上显示有新活动的会话数。角标样式由宿主浏览器控制；普通浏览器标签页不受影响。',
-=======
-  'settings.display.pinInProgressMode.all': '工作中与待处理',
->>>>>>> 809220a46 (fix(web): rename All activity — quiet connected is not in-progress)
   'settings.display.sessionListStatus': '会话列表状态提示',
   'settings.display.sessionListStatus.standard': '基础',
   'settings.display.sessionListStatus.detailed': '扩展',
