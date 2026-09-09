@@ -61,8 +61,8 @@ final class ChatModel {
     /// navigation entry with this one.
     private(set) var supersededSessionId: String?
 
-    /// Session-pipe connection state (observed through the chat session).
-    var connectionState: SSEConnectionState { chat.connectionState }
+    /// Delayed session-pipe notice; stable until the hub handshake arrives.
+    var isReconnecting: Bool { chat.reconnectNotice.isVisible }
 
     // MARK: Wiring
 

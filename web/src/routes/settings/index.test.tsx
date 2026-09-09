@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from '@/lib/i18n-context'
 import SettingsHubPage from './index'
@@ -12,7 +12,7 @@ import SettingsVoicePage from './voice'
 import SettingsVoiceVoicesPage from './voice-voices'
 import SettingsVoiceAdvancedPage from './voice-advanced'
 
-const { context, navigate, setAppearance, setColorTheme, setFontScale, setTerminalFontSize, setComposerEnterBehavior, setCodexExplorationCollapsed, setVoice, setFleetPolicy } = vi.hoisted(() => ({
+const { context, navigate, setAppearance, setColorTheme, setFontScale, setTerminalFontSize, setComposerEnterBehavior, setCodexExplorationCollapsed, setVoice, setFleetPolicy, setAppBadgeEnabled } = vi.hoisted(() => ({
     context: { token: '' },
     navigate: vi.fn(),
     setAppearance: vi.fn(),
@@ -23,6 +23,7 @@ const { context, navigate, setAppearance, setColorTheme, setFontScale, setTermin
     setCodexExplorationCollapsed: vi.fn(),
     setVoice: vi.fn(),
     setFleetPolicy: vi.fn(),
+    setAppBadgeEnabled: vi.fn(),
 }))
 
 const getHubSettings = vi.fn().mockResolvedValue({ sessionSummaryContract: false })
@@ -125,6 +126,10 @@ vi.mock('@/hooks/usePinInProgressSessions', () => ({
         pinInProgressSessions: false,
         setPinInProgressSessions: vi.fn(),
     }),
+}))
+
+vi.mock('@/hooks/useAppBadgePreference', () => ({
+    useAppBadgePreference: () => ({ appBadgeEnabled: false, setAppBadgeEnabled }),
 }))
 
 vi.mock('@/hooks/useSessionHeaderMetadata', () => ({
@@ -301,7 +306,8 @@ describe('responsive settings pages', () => {
         renderPage(<SettingsGeneralPage />)
         expect(screen.getByText('Companion')).toBeInTheDocument()
         expect(screen.getByText('Companion pairing')).toBeInTheDocument()
-        expect(await screen.findByRole('checkbox', { name: 'Ask agents to emit session status summary' })).toBeInTheDocument()
+        expect(await screen.findByRole('checkbox', { name: 'Emit status summaries' })).toBeInTheDocument()
+        expect(screen.getByRole('checkbox', { name: 'Show status summaries in chat' })).toBeInTheDocument()
         fireEvent.click(screen.getByRole('radio', { name: '简体中文' }))
         expect(localStorage.getItem('hapi-lang')).toBe('zh-CN')
     })
@@ -384,6 +390,32 @@ describe('responsive settings pages', () => {
         expect(screen.queryByRole('radio', { name: /^Auto-upgrade/ })).not.toBeInTheDocument()
     })
 
+    it('explains and keeps summary generation separate from chat display', async () => {
+        updateHubSettings.mockImplementation(async (patch: { sessionSummaryContract?: boolean; sessionSummaryInChat?: boolean }) => ({
+            sessionSummaryContract: patch.sessionSummaryContract ?? false,
+            sessionSummaryInChat: patch.sessionSummaryInChat ?? false,
+        }))
+
+        renderPage(<SettingsGeneralPage />)
+
+        expect(await screen.findByRole('heading', { name: 'Session status summaries' })).toBeInTheDocument()
+        expect(screen.getByText('Choose whether supported agents emit a machine-readable status summary and whether it appears in chat.')).toBeInTheDocument()
+        expect(await screen.findByRole('checkbox', { name: 'Emit status summaries' })).toBeInTheDocument()
+        expect(screen.getByText('Off by default. When enabled, supported agents are asked to add a trailing AGENT_NOTIFY_SUMMARY line after each turn for notifications and background work records. Applies to new/resumed sessions. (Supported: Claude, Codex, OpenCode, remote Grok; not yet supported: local Grok, Cursor)')).toBeInTheDocument()
+        expect(screen.queryByRole('heading', { name: 'Chat display', level: 3 })).not.toBeInTheDocument()
+        expect(screen.getByText('Only affects display in chat and copied content; it does not affect summary generation, notifications, or background work records. When on, a status row is shown; when off, it is hidden. Stored messages remain unchanged.')).toBeInTheDocument()
+
+        fireEvent.click(screen.getByRole('checkbox', { name: 'Emit status summaries' }))
+        await waitFor(() => {
+            expect(updateHubSettings).toHaveBeenCalledWith({ sessionSummaryContract: true })
+        })
+
+        fireEvent.click(screen.getByRole('checkbox', { name: 'Show status summaries in chat' }))
+        await waitFor(() => {
+            expect(updateHubSettings).toHaveBeenCalledWith({ sessionSummaryInChat: true })
+        })
+    })
+
     it('renders compact display controls without dropdown popovers', () => {
         renderPage(<SettingsDisplayPage />)
         expect(screen.getByRole('radio', { name: 'OLED Black' })).toBeInTheDocument()
@@ -391,6 +423,10 @@ describe('responsive settings pages', () => {
         expect(setColorTheme).toHaveBeenCalledWith('nord')
         expect(screen.getByRole('radio', { name: '120%' })).toBeInTheDocument()
         expect(screen.getByRole('spinbutton', { name: 'Sessions Before Folding' })).toHaveValue(8)
+        const appBadgeToggle = screen.getByRole('checkbox', { name: 'Taskbar unread badge' })
+        expect(appBadgeToggle).not.toBeChecked()
+        fireEvent.click(appBadgeToggle)
+        expect(setAppBadgeEnabled).toHaveBeenCalledWith(true)
         expect(screen.getByRole('checkbox', { name: 'Show field labels' })).toBeChecked()
         expect(screen.getByRole('checkbox', { name: 'Reasoning effort' })).toBeChecked()
         expect(screen.getByRole('checkbox', { name: 'Machine' })).toBeChecked()

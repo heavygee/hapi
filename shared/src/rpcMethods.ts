@@ -40,6 +40,7 @@ export const RPC_METHODS = {
     ListAgyModels: 'listAgyModels',
     ListPiSessions: 'listPiSessions',
     ListOpencodeModels: 'listOpencodeModels',
+    ListOpencodeModelVariants: 'listOpencodeModelVariants',
     ListOpencodeModelsForCwd: 'listOpencodeModelsForCwd',
     ListGrokModelsForCwd: 'listGrokModelsForCwd',
     ListGrokModels: 'listGrokModels',

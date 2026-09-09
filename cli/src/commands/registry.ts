@@ -16,6 +16,7 @@ import { opencodeCommand } from './opencode'
 import { piCommand } from './pi'
 import { hookForwarderCommand } from './hookForwarder'
 import { mcpCommand } from './mcp'
+import { mcpProxyCommand } from './mcpProxy'
 import { notifyCommand } from './notify'
 import { linkPrCommand } from './linkPr'
 import { hubCommand } from './hub'
@@ -59,6 +60,7 @@ const COMMANDS: CommandDefinition[] = [
     opencodeCommand,
     piCommand,
     mcpCommand,
+    mcpProxyCommand,
     hubCommand,
     { ...hubCommand, name: 'server' },
     hookForwarderCommand,

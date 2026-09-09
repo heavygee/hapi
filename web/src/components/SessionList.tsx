@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { SessionListScrollAnchor } from './SessionListScrollAnchor'
 import type { SessionContentSearchResponse, SessionSummary } from '@/types/api'
 import { isWildcardSearch, matchesSearchQuery } from '@hapi/protocol'
 import type { ApiClient } from '@/api/client'
@@ -14,7 +15,17 @@ import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { LinkPrDialog } from '@/components/LinkPrDialog'
 import { SessionPrChip, formatGithubPrChipDetailParts, resolveGithubPrChipDisplay } from '@/components/SessionPrChip'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import { CopyIcon, CheckIcon } from '@/components/icons'
+import { CopyIcon, CheckIcon, MarkAllReadIcon } from '@/components/icons'
+
+function PinnedSectionIcon(props: { className?: string }) {
+    return (
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className={props.className} aria-hidden="true">
+            <path d="M12 17v5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
+            <path d="M5 17h14" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
+            <path d="M7 4V2h10v2l-2 5v4l2 2H7l2-2V9Z" />
+        </svg>
+    )
+}
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
 import { DEFAULT_SESSION_PREVIEW_LIMIT, useSessionPreviewLimit } from '@/hooks/useSessionPreviewLimit'
@@ -46,6 +57,8 @@ import {
     getSessionLastSeenAt,
     getSessionLastSeenSnapshot,
     getSessionManualUnreadAt,
+    getUnreadSessionCount,
+    markAllSessionsSeen,
     markSessionUnread,
     useSessionLastSeenVersion
 } from '@/lib/sessionLastSeen'
@@ -1590,6 +1603,7 @@ function SessionItem(props: {
                 {...longPressHandlers}
                 data-session-id={s.id}
                 data-session-blocked={blocked ? (blocked.stale ? 'stale' : 'active') : undefined}
+                data-session-scroll-anchor
                 className={cn(
                     'session-list-item group/session-row flex w-full flex-col gap-1 py-2 pr-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg',
                     // Reserve the rail width on every row so blocked rows do
@@ -1826,6 +1840,7 @@ export function SessionList(props: {
     const [searchExpanded, setSearchExpanded] = useState(false)
     const [customStart, setCustomStart] = useState('')
     const [customEnd, setCustomEnd] = useState('')
+    const [markAllReadOpen, setMarkAllReadOpen] = useState(false)
     const [, setCodexImportedSessionsVersion] = useState(0)
     const normalizedQuery = normalizeSearch(searchQuery)
     const timeRange = getSessionTimeRange(customStart, customEnd)
@@ -1858,11 +1873,19 @@ export function SessionList(props: {
         () => prepareSidebarSessions(props.sessions, selectedSessionId),
         [props.sessions, selectedSessionId]
     )
+    const readableSessions = useMemo(
+        () => props.sessions.filter(session => shouldShowSessionInSidebar(session, selectedSessionId)),
+        [props.sessions, selectedSessionId]
+    )
     const allSessions = useMemo(
         () => showActiveSessionsOnly
             ? filterActiveSessionsOnly(preparedSessions, selectedSessionId)
             : preparedSessions,
         [preparedSessions, selectedSessionId, showActiveSessionsOnly]
+    )
+    const unreadSessionCount = useMemo(
+        () => getUnreadSessionCount(readableSessions),
+        [lastSeenVersion, readableSessions]
     )
     const sessionActivityDates = useMemo(
         () => new Set(allSessions.map(session => formatDateValue(new Date(session.updatedAt)))),
@@ -2336,7 +2359,7 @@ export function SessionList(props: {
             ? `${group.displayName} · ${resolveMachineLabel(group.machineId)}`
             : group.displayName
         return (
-            <div key={group.key}>
+            <div key={group.key} data-session-scroll-anchor>
                 <div
                     className="group/project sticky top-0 z-10 flex items-center gap-2 bg-[var(--app-bg)] py-1.5 pl-2 pr-2 text-left rounded-lg transition-colors hover:bg-[var(--app-secondary-bg)] min-w-0 w-full select-none"
                     title={group.directory}
@@ -2390,7 +2413,7 @@ export function SessionList(props: {
             ? `${group.displayName} · ${resolveMachineLabel(group.machineId)}`
             : group.displayName
         return (
-            <div key={group.key}>
+            <div key={group.key} data-session-scroll-anchor>
                 <div
                     className="group/project sticky top-0 z-10 flex items-center gap-2 bg-[var(--app-bg)] py-1.5 pl-2 pr-2 text-left rounded-lg transition-colors hover:bg-[var(--app-subtle-bg)] cursor-pointer min-w-0 w-full select-none"
                     onClick={() => toggleGroup(group.key, isCollapsed)}
@@ -2834,6 +2857,17 @@ export function SessionList(props: {
                                     />
                                 </>
                             ) : null}
+                            {unreadSessionCount > 0 ? (
+                                <button
+                                    type="button"
+                                    onClick={() => setMarkAllReadOpen(true)}
+                                    title={t('sessions.markAllRead.button', { count: unreadSessionCount })}
+                                    aria-label={t('sessions.markAllRead.button', { count: unreadSessionCount })}
+                                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                >
+                                    <MarkAllReadIcon className="h-5 w-5" />
+                                </button>
+                            ) : null}
                             <button
                                 type="button"
                                 onClick={() => setShowUnreadOnly(!showUnreadOnly)}
@@ -2907,7 +2941,7 @@ export function SessionList(props: {
                 </div>
             ) : null}
             <div ref={scrollContainerRef} className="app-scroll-y session-list-scrollbar-left min-h-0 flex-1">
-            <div className="mx-auto flex w-full max-w-content flex-col gap-1 pl-1.5 pr-2 pb-2">
+            <SessionListScrollAnchor sessions={props.sessions} className="mx-auto flex w-full max-w-content flex-col gap-1 pl-1.5 pr-2 pb-2">
                 {props.sessions.length === 0 && !props.isLoading ? (
                     <SessionsEmptyState
                         onNewSession={props.onNewSession}
@@ -3063,9 +3097,23 @@ export function SessionList(props: {
                     bucketKeys: ['active'],
                 })}                {groups.map(renderDirectoryGroup)}
                 {actionOnlyGroups.map(renderActionOnlyGroupHeader)}
+            </SessionListScrollAnchor>
             </div>
             </div>
-            </div>
+            <ConfirmDialog
+                isOpen={markAllReadOpen}
+                onClose={() => setMarkAllReadOpen(false)}
+                title={t('sessions.markAllRead.title')}
+                description={t('sessions.markAllRead.description', { count: unreadSessionCount })}
+                confirmLabel={t('sessions.markAllRead.confirm')}
+                confirmingLabel={t('sessions.markAllRead.confirming')}
+                onConfirm={async () => {
+                    markAllSessionsSeen(readableSessions)
+                }}
+                isPending={false}
+                centerTitle
+                destructive
+            />
         </div>
     )
 }

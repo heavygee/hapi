@@ -138,7 +138,10 @@ export default function SettingsGeneralPage() {
                 />
             </SettingsSection>
             {isOwner ? (
-                <SettingsSection title={t('settings.general.agents.title')} description={t('settings.general.agents.description')}>
+                <SettingsSection
+                    title={t('settings.general.sessionSummary.title')}
+                    description={t('settings.general.sessionSummary.description')}
+                >
                     {hubSettingsQuery.data ? (
                         <>
                             <SettingsSwitch
