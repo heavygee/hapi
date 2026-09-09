@@ -396,4 +396,25 @@ describe('codexSessionScanner', () => {
         expect(events).toHaveLength(1);
         expect(events[0]?.payload).toEqual({ type: 'agent_message', message: 'live only' });
     });
+
+    it('reconstructs a split JSONL record when initialCursor lands mid-write', async () => {
+        const prefix = JSON.stringify({ type: 'session_meta', payload: { id: 'session-split' } }) + '\n';
+        const partial = '{"type":"event_msg","payload":{"type":"agent_message","message":"spl';
+        const suffix = 'it write"}}\n';
+        await writeFile(transcriptPath, prefix + partial);
+        const initialCursor = Buffer.byteLength(prefix + partial);
+
+        scanner = await createCodexSessionScanner({
+            transcriptPath,
+            initialCursor,
+            replayExistingHistory: false,
+            onEvent: (event) => events.push(event)
+        });
+        expect(events).toEqual([]);
+
+        await appendFile(transcriptPath, suffix);
+        await scanner.flush();
+        expect(events).toHaveLength(1);
+        expect(events[0]?.payload).toEqual({ type: 'agent_message', message: 'split write' });
+    });
 });
