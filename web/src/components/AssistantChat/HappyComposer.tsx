@@ -30,6 +30,7 @@ import { useFue } from '@/lib/use-fue'
 import { FueCallout, FueDot } from '@/components/Fue'
 import type { AgentState, CodexCollaborationMode, PermissionMode, PiModelSummary } from '@/types/api'
 import type { CodexUsage } from '@hapi/protocol/types'
+import { composerCodexUsageForGauge } from '@/components/AssistantChat/codexBudgetAdapter'
 import type { Suggestion } from '@/hooks/useActiveSuggestions'
 import type { ConversationStatus } from '@/realtime/types'
 import { useActiveWord } from '@/hooks/useActiveWord'
@@ -2370,7 +2371,7 @@ export function HappyComposer(props: {
                             scratchlistMode={props.scratchlistMode}
                             scratchlistCount={props.scratchlistCount}
                             onScratchlistToggle={props.onScratchlistToggle}
-                            codexUsage={agentFlavor === 'codex' ? codexUsage : undefined}
+                            codexUsage={composerCodexUsageForGauge(agentFlavor, codexUsage, agentState)}
                         />
                     </div>
                 </ComposerPrimitive.Root>
