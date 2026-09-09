@@ -321,6 +321,7 @@ export default {
   'dialog.linkPr.unlink': 'Unlink',
   'dialog.linkPr.current': 'Currently linked: {label}',
   'dialog.linkPr.error': 'Failed to update PR link. Please try again.',
+  'dialog.linkPr.invalid': 'Enter owner/repo#123 or a github.com pull request URL.',
   'session.menu.linkPr': 'Link pull request…',
   'session.menu.linkedPr': 'Linked pull request',
   'settings.general.githubPrAwareness': 'GitHub PR awareness',

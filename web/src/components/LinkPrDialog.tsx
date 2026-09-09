@@ -38,7 +38,7 @@ export function LinkPrDialog(props: LinkPrDialogProps) {
         event.preventDefault()
         const parsed = parseGithubPrInput(input)
         if (!parsed.ok) {
-            setError(parsed.error)
+            setError(t('dialog.linkPr.invalid'))
             return
         }
         setError(null)
@@ -83,6 +83,7 @@ export function LinkPrDialog(props: LinkPrDialogProps) {
                         ref={inputRef}
                         value={input}
                         onChange={(event) => setInput(event.target.value)}
+                        aria-label={t('dialog.linkPr.title')}
                         placeholder={t('dialog.linkPr.placeholder')}
                         className="w-full px-3 py-2.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-button)] focus:border-transparent"
                         disabled={isPending}

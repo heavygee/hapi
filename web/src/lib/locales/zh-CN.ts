@@ -321,6 +321,7 @@ export default {
   'dialog.linkPr.unlink': '取消关联',
   'dialog.linkPr.current': '当前关联：{label}',
   'dialog.linkPr.error': '更新 PR 关联失败，请重试。',
+  'dialog.linkPr.invalid': '请输入 owner/repo#123 或 github.com 的 PR 链接。',
   'session.menu.linkPr': '关联拉取请求…',
   'session.menu.linkedPr': '已关联拉取请求',
   'settings.general.githubPrAwareness': 'GitHub PR 感知',
