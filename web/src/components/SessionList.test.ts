@@ -836,4 +836,40 @@ describe('groupSessionsByDirectory symlink coalesce', () => {
             '/mnt/clone/org/repo',
         ])
     })
+
+    it('preserves Windows forward-slash spelling when coalescing alias sessions', () => {
+        const homeSpelling = makeSession({
+            id: 'home',
+            updatedAt: 2,
+            metadata: {
+                machineId: 'machine-win',
+                path: 'C:/Users/me/coding/hapi',
+                worktree: {
+                    basePath: 'C:/Users/me/coding/hapi',
+                    branch: 'main',
+                    name: 'main',
+                    worktreePath: 'C:/Users/me/coding/hapi',
+                },
+            },
+        })
+        const aliased = makeSession({
+            id: 'alias',
+            updatedAt: 1,
+            metadata: {
+                machineId: 'machine-win',
+                path: 'C:/Users/me/coding/hapi/worktrees/feat',
+                worktree: {
+                    basePath: 'D:/mirror/coding/hapi',
+                    branch: 'feat',
+                    name: 'feat',
+                    worktreePath: 'D:/mirror/coding/hapi/worktrees/feat',
+                },
+            },
+        })
+
+        expect(resolveSessionGroupDirectory(aliased.metadata ?? {})).toBe('C:/Users/me/coding/hapi')
+        const groups = groupSessionsByDirectory([homeSpelling, aliased])
+        expect(groups).toHaveLength(1)
+        expect(groups[0]?.directory).toBe('C:/Users/me/coding/hapi')
+    })
 })

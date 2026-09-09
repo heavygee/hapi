@@ -246,14 +246,14 @@ export function resolveSessionGroupDirectory(source: SessionGroupDirectorySource
 
     // Prefer the occurrence whose parent matches basePath's display name so a
     // nested cwd that repeats the worktree suffix does not win via lastIndexOf.
+    // Slice the original path so Windows forward-slash spelling is preserved.
     const baseDisplay = getPathDisplayName(baseNorm)
     const suffixPattern = new RegExp(`${suffix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=/|$)`, 'g')
     for (const match of pathNorm.matchAll(suffixPattern)) {
         const index = match.index
         if (index === undefined) continue
-        const logicalRoot = pathNorm.slice(0, index)
-        if (getPathDisplayName(logicalRoot) !== baseDisplay) continue
-        return usesWindowsSeparators(path) ? logicalRoot.replace(/\//g, '\\') : logicalRoot
+        if (getPathDisplayName(pathNorm.slice(0, index)) !== baseDisplay) continue
+        return stripTrailingSeparators(path.slice(0, index))
     }
     return normBase
 }
