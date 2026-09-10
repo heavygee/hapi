@@ -1213,3 +1213,36 @@ catch. Chosen for rigour, not for a result.
 
 **Not counting this as M1/M2:** no factual assertion about the estate was made or relayed. It is a
 process deviation, logged as such.
+
+## 2026-09-10 — Site spider (#311): independent verification of peer delivery claim
+
+Peer `62816c89` ("Site Image Spider") reported merge + deploy + UI proof. **Verified independently
+rather than relayed** (standing rule: agents are unreliable narrators of themselves).
+
+| Claim | Independent check | Result |
+|---|---|---|
+| PR #311 merged | `gh pr view 311 --json state,mergeCommit` | `MERGED` 2026-09-10T09:09Z, `7d1f0733` |
+| Deploy succeeded | `gh run view 34460134865` | `success`, headSha matches merge commit |
+| UI actually shows the input | fetched live bundle from `192.168.86.73:8083` | **confirmed, see below** |
+
+The UI check is the one that mattered — the failure mode being guarded against was "green workflow
+reported as shipped UI". Served bundle `story-studio-assets/index-7YIhQq-F.js` (349,103 bytes)
+contains:
+
+- the scope list `[instagram | imagefap | **sites** | all]` — i.e. a URL scope sitting exactly
+  alongside the existing Instagram/ImageFap handle inputs, which is what the operator asked for
+- a real `<input placeholder="https://conniesfashionvault.com/">` with an Enter handler and an
+  empty-value guard
+- `/api/gallery/sites/fetch` and `/api/gallery/sites/prep/open` (the prep/annotation route)
+
+**Counting caveat worth recording:** a naive `grep -c prep` returned 23, but most hits were React's
+own `Error.prepareStackTrace`. The load-bearing evidence is the `sitesPrepOpenUrl` route constant,
+not the raw count. `has_prompt`/`approved` do not appear as literals — they arrive in API responses
+and are accessed dynamically, so their absence from the bundle is not evidence against the badge.
+Cf. [[feedback-empty-result-is-not-absence]] applied to a minified bundle.
+
+**Root cause of the 5-day gap was not code.** #311 was green and mergeable from 2026-09-05. Deploys
+ran 09-05 and 09-07 and both succeeded *without it*. The session had drifted onto a GitHub runner
+re-registration sweep and never signalled the work was ready. Failure mode: **finished work with no
+close-the-loop step**, invisible to anyone not asking. Argues for an overseer signal on
+"green + mergeable + untouched for N days".
