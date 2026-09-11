@@ -294,6 +294,9 @@ describe('CLI session external-refs', () => {
     const sessionId = 'session-pr-link'
 
     it('GET returns stored external refs for a namespace session', async () => {
+        const config = await createConfiguration()
+        config.githubPrAwareness = true
+
         const prRef = {
             kind: 'github_pr' as const,
             repo: 'tiann/hapi',
@@ -383,6 +386,107 @@ describe('CLI session external-refs', () => {
         })
 
         expect(response.status).toBe(403)
+    })
+
+    it('GET returns 403 when github PR awareness is disabled', async () => {
+        const config = await createConfiguration()
+        config.githubPrAwareness = false
+
+        const app = createApp({
+            resolveSessionAccess: () => ({
+                ok: true as const,
+                sessionId,
+                session: { id: sessionId, metadata: {} }
+            })
+        } as never)
+
+        const response = await app.request(`/cli/sessions/${sessionId}/external-refs`, {
+            headers: authHeaders()
+        })
+
+        expect(response.status).toBe(403)
+    })
+
+    it('POST upsert merges a github PR ref', async () => {
+        const config = await createConfiguration()
+        config.githubPrAwareness = true
+
+        const prRef = {
+            kind: 'github_pr' as const,
+            repo: 'tiann/hapi',
+            number: 99,
+            url: 'https://github.com/tiann/hapi/pull/99',
+            role: 'primary' as const,
+            source: 'agent' as const,
+            linkedAt: 3
+        }
+        let updated: unknown
+        const app = createApp({
+            resolveSessionAccess: () => ({
+                ok: true as const,
+                sessionId,
+                session: { id: sessionId, metadata: { externalRefs: [] } }
+            }),
+            mutateSessionExternalRefs: async (_id: string, mutate: (current: unknown[]) => unknown[]) => {
+                updated = mutate([])
+                return updated
+            }
+        } as never)
+
+        const response = await app.request(`/cli/sessions/${sessionId}/external-refs/upsert`, {
+            method: 'POST',
+            headers: {
+                ...authHeaders(),
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify({ ref: prRef })
+        })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ ok: true, externalRefs: [prRef] })
+        expect(updated).toEqual([prRef])
+    })
+
+    it('POST remove-primary drops primary github PR refs', async () => {
+        const config = await createConfiguration()
+        config.githubPrAwareness = true
+
+        const primary = {
+            kind: 'github_pr' as const,
+            repo: 'tiann/hapi',
+            number: 1,
+            url: 'https://github.com/tiann/hapi/pull/1',
+            role: 'primary' as const,
+            source: 'agent' as const,
+            linkedAt: 1
+        }
+        const secondary = {
+            ...primary,
+            number: 2,
+            url: 'https://github.com/tiann/hapi/pull/2',
+            role: 'secondary' as const
+        }
+        let updated: unknown
+        const app = createApp({
+            resolveSessionAccess: () => ({
+                ok: true as const,
+                sessionId,
+                session: { id: sessionId, metadata: { externalRefs: [primary, secondary] } }
+            }),
+            mutateSessionExternalRefs: async (_id: string, mutate: (current: unknown[]) => unknown[]) => {
+                updated = mutate([primary, secondary])
+                return updated
+            }
+        } as never)
+
+        const response = await app.request(`/cli/sessions/${sessionId}/external-refs/remove-primary`, {
+            method: 'POST',
+            headers: authHeaders()
+        })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ ok: true, externalRefs: [secondary] })
+        expect(updated).toEqual([secondary])
     })
 })
 

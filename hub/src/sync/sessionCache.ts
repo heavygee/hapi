@@ -1,10 +1,13 @@
-import { AgentStateSchema, MetadataSchema, SessionPatchSchema, TeamStateSchema } from '@hapi/protocol/schemas'
+import { AgentStateSchema, ExternalRefsSchema, MetadataSchema, SessionPatchSchema, TeamStateSchema } from '@hapi/protocol/schemas'
 import type { CodexCollaborationMode, CopilotAgentMode, ExternalRef, PermissionMode, Session, SessionPatch } from '@hapi/protocol/types'
 import type { Store } from '../store'
 import { clampAliveTime } from './aliveTime'
 import { EventPublisher } from './eventPublisher'
 import { extractTodoWriteTodosFromMessageContent, TodosSchema } from './todos'
 import { extractBackgroundTaskDelta } from './backgroundTasks'
+import { InvalidExternalRefsError } from './externalRefErrors'
+
+export { InvalidExternalRefsError } from './externalRefErrors'
 
 const QUEUED_MESSAGE_THINKING_GRACE_MS = 15_000
 // tiann/hapi#919: metadata writers (renameSession, clearSessionArchiveMetadata,
@@ -1183,6 +1186,67 @@ export class SessionCache {
                         .catch(() => undefined)
                 }
                 return
+            }
+
+            this.refreshSession(sessionId)
+        }
+
+        throw new Error('Session was modified concurrently. Please try again.')
+    }
+
+    /**
+     * Apply a pure transform to the latest externalRefs inside the metadata-version
+     * retry loop so concurrent health/classifier updates are not clobbered by a
+     * stale client-side snapshot.
+     */
+    async mutateSessionExternalRefs(
+        sessionId: string,
+        mutate: (current: ExternalRef[]) => ExternalRef[]
+    ): Promise<ExternalRef[]> {
+        for (let attempt = 0; attempt < METADATA_RETRY_ATTEMPTS; attempt += 1) {
+            const session = this.sessions.get(sessionId) ?? this.refreshSession(sessionId)
+            if (!session) {
+                throw new Error('Session not found')
+            }
+
+            const stored = this.store.sessions.getSessionByNamespace(sessionId, session.namespace)
+            const storedMetadata = stored?.metadata
+            if (
+                !stored
+                || typeof storedMetadata !== 'object'
+                || storedMetadata === null
+                || Array.isArray(storedMetadata)
+            ) {
+                throw new Error('Cannot update external refs while session metadata is invalid')
+            }
+            const currentMetadata = storedMetadata as Record<string, unknown>
+            const currentRefs = Array.isArray(currentMetadata.externalRefs)
+                ? currentMetadata.externalRefs as ExternalRef[]
+                : []
+            const parsedRefs = ExternalRefsSchema.safeParse(mutate(currentRefs))
+            if (!parsedRefs.success) {
+                throw new InvalidExternalRefsError(
+                    parsedRefs.error.issues[0]?.message ?? 'Invalid external refs'
+                )
+            }
+            const externalRefs = parsedRefs.data
+            const newMetadata = { ...currentMetadata, externalRefs }
+
+            const result = this.store.sessions.updateSessionMetadata(
+                sessionId,
+                newMetadata,
+                stored.metadataVersion,
+                session.namespace,
+                { touchUpdatedAt: false }
+            )
+
+            if (result.result === 'error') {
+                throw new Error('Failed to update session metadata')
+            }
+
+            if (result.result === 'success') {
+                this.refreshSession(sessionId)
+                return externalRefs
             }
 
             this.refreshSession(sessionId)

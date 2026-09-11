@@ -4910,6 +4910,12 @@ export class SyncEngine {
         await this.sessionCache.setSessionExternalRefs(sessionId, externalRefs)
     }
 
+    async mutateSessionExternalRefs(
+        sessionId: string,
+        mutate: (current: ExternalRef[]) => ExternalRef[]
+    ): Promise<ExternalRef[]> {
+        return await this.sessionCache.mutateSessionExternalRefs(sessionId, mutate)
+    }
 
     async acknowledgeModelError(sessionId: string, atTs: number): Promise<void> {
         await this.sessionCache.acknowledgeModelError(sessionId, atTs)

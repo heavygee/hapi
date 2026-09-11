@@ -93,6 +93,8 @@ export const GithubPrExternalRefSchema = z.object({
 export type GithubPrExternalRef = z.infer<typeof GithubPrExternalRefSchema>
 export const ExternalRefSchema = GithubPrExternalRefSchema
 export type ExternalRef = z.infer<typeof ExternalRefSchema>
+export const ExternalRefsSchema = z.array(ExternalRefSchema)
+export type ExternalRefs = z.infer<typeof ExternalRefsSchema>
 
 export const MetadataSchema = z.object({
     path: z.string(),
