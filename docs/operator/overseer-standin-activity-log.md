@@ -1246,3 +1246,67 @@ ran 09-05 and 09-07 and both succeeded *without it*. The session had drifted ont
 re-registration sweep and never signalled the work was ready. Failure mode: **finished work with no
 close-the-loop step**, invisible to anyone not asking. Argues for an overseer signal on
 "green + mergeable + untouched for N days".
+
+## 2026-09-11 — "Email from Ian about an article": three-corpus search, not found
+
+**Question:** find the conversation where the operator submitted an email from Ian proposing
+collaboration on an article for LinkedIn/a blog about agentic development.
+
+**Result: not present in any searchable corpus.** Recording the search so it is not repeated blind.
+
+| Corpus | Extent searched | Outcome |
+|---|---|---|
+| HAPI hub FTS index (all machines) | 83,798 indexed prose rows, 649 sessions | 6 LinkedIn hits, all incidental |
+| Local Claude transcripts (oos) | 1,142 files / 568 MB | exactly 1 file matches `LinkedIn` — this session |
+| SpecStory Cloud | **624/624 sessions, 373 MB** full markdown bodies | 80 candidate files, none an article proposal |
+
+Terms swept: `LinkedIn`, `agentic`, `agentic coding`, `article`, `blog post`, `co-author`,
+`Substack`, `Medium`, `op-ed`, `collaborat*`, `write an article`, `joint piece`, `salientpoint`,
+`Stevenson`, plus a regex for writing-verb-near-noun. SpecStory `co-author` hits were all git
+commit trailers.
+
+**Who Ian is:** `Ian Stevenson <Ian.Stevenson@salientpoint.co.uk>` — 8 occurrences, dominant over
+other Ians in the corpus (Plasch/Kirill/Andrusiak/Astbury are incidental contacts and music
+metadata). Appears in Feb 2026 email readouts (one subject "Re: VR"), a `Design: Ian commitment
+tracker` session, `Ian sandbox-gaps assessment review`, and a diarized `Ian Conversation` in the
+Arthur work. None mentions an article.
+
+**Method note — trigram FTS and short names.** Searching `Ian` is near-useless: the trigram index
+matches *Austral**ian***, *med**ian***, *Ital**ian***. `salientpoint` and `Stevenson` are what
+discriminate. Extends the 2026-09-03 lesson (single distinctive nouns) with a corollary: **a short
+name is not a distinctive noun under trigram tokenization** — reach for the domain, surname, or
+employer instead.
+
+**Gaps that remain (this is not a proof of absence):** web-chat surfaces (ChatGPT / Claude.ai /
+Gemini) hold no local transcript and were not searchable; Claude transcripts on teemo/proxmox were
+not grepped directly (only their hub-synced sessions); the source email itself lives in the mail
+store on another host and was not touched.
+
+Cf. [[feedback-empty-result-is-not-absence]].
+
+## 2026-09-11 — The 16k search cap: provenance and measured impact
+
+I flagged `MAX_INDEXED_MESSAGE_CHARACTERS = 16_384` as a blind spot caveat on the search above,
+**then measured it and it does not support the weight I put on it.** Correction recorded.
+
+- **Provenance:** NOT upstream HAPI — `hub/src/store/messageContentSearch.ts` does not exist in
+  `upstream/main`. It arrives via **upstream PR #1598 / issue #1554 by `techotaku39` ("Ananovo")**,
+  still OPEN and unmerged; soup carries it at tip (`8b00a347b`). We run a pre-merge feature.
+- **Rationale (real, verified):** the cap was added in `572cf084b` answering a HAPI Bot review
+  finding — trigram FTS insertion runs **synchronously inside message writes** (9 `indexMessageContent`
+  call sites in `messages.ts`) and in startup backfill, while user prompts are unbounded by design.
+  Each unique adjacent character pair is its own synchronous SQLite insert, so one huge paste is
+  O(n) blocking writes on the hub event loop for the whole fleet.
+- **The head+tail split is itself a fix:** the original bound was head-only (`slice(0, MAX)`);
+  `0c365fe51 "preserve indexed tails"` added tail retention.
+- **Measured impact** (hub backup `hapi-guest-20260909231503.db`): **17 of 83,798 indexed rows hit
+  the cap = 0.02%.** 110 sessions lack index rows but hold 120 messages total — near-empty sessions,
+  not a coverage gap.
+- **But the 17 are not random.** They are bulk pastes: a session named `Ian Conversation Diarized`
+  and three inline `FULL TRANSCRIPT` parts. The cap bites hardest on meeting transcripts, long
+  emails and handoff dumps — low row count, high searchable value.
+- **The actionable defect is silence:** the search response carries `messageId/role/seq/createdAt/
+  snippet` and no truncation indicator, so a null result cannot distinguish "absent" from "in a
+  dropped middle". Options, ascending: flag truncated rows in the response; raise the cap; move
+  indexing off the write path (the real fix). Any change belongs on #1598, not a silent soup
+  divergence.
