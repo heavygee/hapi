@@ -1129,7 +1129,6 @@ export function shouldShowPinnedDivider(sessions: SessionSummary[], index: numbe
     if (index <= 0 || index >= sessions.length) return false
     return Boolean(sessions[index - 1]?.pinned) && !sessions[index]?.pinned
 }
-}
 
 export function SessionListSearch(props: {
     value: string
