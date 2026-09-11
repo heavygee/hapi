@@ -6,7 +6,8 @@ import {
     CreateOrLoadSessionRequestSchema,
     ClearOpencodeSessionCallbackRequestSchema,
     CursorMigrateToAcpRequestSchema,
-    PROTOCOL_VERSION
+    PROTOCOL_VERSION,
+    SetExternalRefsRequestSchema
 } from '@hapi/protocol'
 import { resolvePeerMetaFromSourceSession } from './messages'
 import { getConfiguration } from '../../configuration'
@@ -255,6 +256,53 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
             getConfiguration().dataDir
         )
         return c.json({ session: resolved.session, sessionSummaryContract })
+    })
+
+    app.get('/sessions/:id/external-refs', (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not ready' }, 503)
+        }
+        const sessionId = c.req.param('id')
+        const namespace = c.get('namespace')
+        const resolved = resolveSessionForNamespace(engine, sessionId, namespace)
+        if (!resolved.ok) {
+            return c.json({ error: resolved.error }, resolved.status)
+        }
+        return c.json({ externalRefs: resolved.session.metadata?.externalRefs ?? [] })
+    })
+
+    app.put('/sessions/:id/external-refs', async (c) => {
+        if (!getConfiguration().githubPrAwareness) {
+            return c.json({
+                error: 'GitHub PR awareness is disabled',
+                code: 'github_pr_awareness_disabled'
+            }, 403)
+        }
+
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not ready' }, 503)
+        }
+        const sessionId = c.req.param('id')
+        const namespace = c.get('namespace')
+        const resolved = resolveSessionForNamespace(engine, sessionId, namespace)
+        if (!resolved.ok) {
+            return c.json({ error: resolved.error }, resolved.status)
+        }
+
+        const parsed = SetExternalRefsRequestSchema.safeParse(await c.req.json().catch(() => null))
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body: externalRefs is required' }, 400)
+        }
+
+        try {
+            await engine.setSessionExternalRefs(resolved.sessionId, parsed.data.externalRefs)
+            return c.json({ ok: true, externalRefs: parsed.data.externalRefs })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to update external refs'
+            return c.json({ error: message }, message.includes('concurrently') || message.includes('version') ? 409 : 500)
+        }
     })
 
     app.get('/sessions/:id/messages', (c) => {

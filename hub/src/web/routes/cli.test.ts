@@ -290,6 +290,102 @@ describe('cli lazy session creation', () => {
     })
 })
 
+describe('CLI session external-refs', () => {
+    const sessionId = 'session-pr-link'
+
+    it('GET returns stored external refs for a namespace session', async () => {
+        const prRef = {
+            kind: 'github_pr' as const,
+            repo: 'tiann/hapi',
+            number: 1160,
+            url: 'https://github.com/tiann/hapi/pull/1160',
+            role: 'primary' as const,
+            source: 'agent' as const,
+            linkedAt: 1
+        }
+        const app = createApp({
+            resolveSessionAccess: () => ({
+                ok: true as const,
+                sessionId,
+                session: { id: sessionId, metadata: { externalRefs: [prRef] } }
+            })
+        } as never)
+
+        const response = await app.request(`/cli/sessions/${sessionId}/external-refs`, {
+            headers: authHeaders()
+        })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ externalRefs: [prRef] })
+    })
+
+    it('PUT updates external refs when github PR awareness is enabled', async () => {
+        const config = await createConfiguration()
+        config.githubPrAwareness = true
+
+        const prRef = {
+            kind: 'github_pr' as const,
+            repo: 'tiann/hapi',
+            number: 42,
+            url: 'https://github.com/tiann/hapi/pull/42',
+            role: 'primary' as const,
+            source: 'agent' as const,
+            linkedAt: 2
+        }
+        let updated: unknown
+        const app = createApp({
+            resolveSessionAccess: () => ({
+                ok: true as const,
+                sessionId,
+                session: { id: sessionId, metadata: { externalRefs: [] } }
+            }),
+            setSessionExternalRefs: async (_id: string, externalRefs: unknown) => {
+                updated = externalRefs
+            }
+        } as never)
+
+        const response = await app.request(`/cli/sessions/${sessionId}/external-refs`, {
+            method: 'PUT',
+            headers: {
+                ...authHeaders(),
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify({ externalRefs: [prRef] })
+        })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ ok: true, externalRefs: [prRef] })
+        expect(updated).toEqual([prRef])
+    })
+
+    it('PUT returns 403 when github PR awareness is disabled', async () => {
+        const config = await createConfiguration()
+        config.githubPrAwareness = false
+
+        const app = createApp({
+            resolveSessionAccess: () => ({
+                ok: true as const,
+                sessionId,
+                session: { id: sessionId, metadata: {} }
+            }),
+            setSessionExternalRefs: async () => {
+                throw new Error('should not update')
+            }
+        } as never)
+
+        const response = await app.request(`/cli/sessions/${sessionId}/external-refs`, {
+            method: 'PUT',
+            headers: {
+                ...authHeaders(),
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify({ externalRefs: [] })
+        })
+
+        expect(response.status).toBe(403)
+    })
+})
+
 describe('POST /cli/sessions/:id/peer-messages', () => {
     const sourceId = '6212dae5-8a60-4284-b7a5-c09aa3571ce4'
     const targetId = '05d9f0f2-9273-4137-933c-07459a1146a2'
