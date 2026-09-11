@@ -80,6 +80,16 @@ with 16pt minimum side margins. Font, Bold Text, locale, and effective width
 changes invalidate height measurements while preserving the reading anchor.
 Ordinary streaming updates retain unchanged hosting roots and measurements.
 
+User messages stay fully expanded through 8,000 characters and 120 source lines,
+even when they span multiple screens. Only larger payloads fold to a preview
+bounded to 2,000 characters / 24 lines. The folding threshold is separate from
+the preview budget; both bound the actual text passed to layout. **View full
+message** opens a screen-owned reader with one 4,000-character / 80-source-line
+part mounted at a time, previous/next navigation, and exact full-content copy.
+Paging preserves Unicode and whitespace without scanning the entire payload on
+open. The reader survives cell recycling and pauses hidden history/tail following;
+closing it preserves the reading position. Stored/sent messages are never truncated.
+
 The UIKit transcript suite covers typography changes, recycling, shrinking
 text, tablet/phone widths, and tail following. Optional deterministic visual
 specimens cover light/dark/OLED, mixed Chinese/English, code, tables, diffs,

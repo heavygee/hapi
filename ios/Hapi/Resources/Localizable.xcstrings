@@ -2212,6 +2212,17 @@
         }
       }
     },
+    "Full message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完整消息"
+          }
+        }
+      }
+    },
     "Git status unavailable" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2751,6 +2762,17 @@
         }
       }
     },
+    "Next part" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下一部分"
+          }
+        }
+      }
+    },
     "Next tool" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3191,6 +3213,17 @@
         }
       }
     },
+    "Part %lld" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %lld 部分"
+          }
+        }
+      }
+    },
     "Path" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3363,6 +3396,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此图片格式不支持预览"
+          }
+        }
+      }
+    },
+    "Previous part" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上一部分"
           }
         }
       }
@@ -5013,6 +5057,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "查看完整输入"
+          }
+        }
+      }
+    },
+    "View full message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查看完整消息"
           }
         }
       }
