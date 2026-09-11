@@ -971,3 +971,10 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/relative-time-tooltips-soup @ driver/relative-time-absolute-tooltips
   # Tip: 8fb87aada
   - branch: driver/relative-time-absolute-tooltips
+
+  # tiann/hapi#1772 — combined session list filters (unread + scratchlist + date) in one menu;
+  # GET /api/sessions/scratchlist-status + SSE resync invalidation for scratchlist membership.
+  # Upstream PR CONFLICTING; soup tip re-thinned onto upstream/main (kept #1773 mark-all-read).
+  # Worktree: ~/coding/hapi/worktrees/soup-1772-list-filters @ soup/1772-combined-list-filters
+  # Tip: 537c260c6 — 2 commits / 34 files; re-thin after dogfood bump
+  - branch: soup/1772-combined-list-filters
