@@ -401,7 +401,7 @@ describe('cursorAcpRemoteLauncher', () => {
 
         const arrivalMode: EnhancedMode = {
             permissionMode: 'default',
-            model: session.getModel()
+            model: session.getModel() ?? undefined
         };
         session.queue.push('peer nudge', arrivalMode, 'peer-1', true);
         await vi.waitFor(() => expect(session.client.emitMessagesConsumed).toHaveBeenCalledWith(
