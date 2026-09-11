@@ -19,10 +19,11 @@ type MenuPosition = {
 /**
  * Position and dismissal lifecycle for a pointer-anchored context menu.
  *
- * Shared by the session action menu and the file action menu: measures the
- * menu, opens above/below the pointer as space allows, clamps it inside the
- * viewport, dismisses on outside pointer-down / Escape, repositions on
- * resize/scroll, and focuses the first `menuitem` when it opens.
+ * Shared by the session action menu, file action menu, and project-group
+ * action menu: measures the menu, opens above/below the pointer as space
+ * allows, clamps it inside the viewport, dismisses on outside pointer-down /
+ * Escape, repositions on resize/scroll, and focuses the first enabled
+ * `menuitem` when it opens.
  */
 export function useAnchoredMenu(options: {
     isOpen: boolean
@@ -114,7 +115,7 @@ export function useAnchoredMenu(options: {
         if (!isOpen) return
 
         const frame = window.requestAnimationFrame(() => {
-            const firstItem = menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')
+            const firstItem = menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]:not([disabled])')
             firstItem?.focus()
         })
 
