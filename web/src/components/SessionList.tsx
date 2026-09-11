@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { SessionListScrollAnchor } from './SessionListScrollAnchor'
 import type { SessionSummary } from '@/types/api'
-import { isWildcardSearch, matchesSearchQuery } from '@hapi/protocol'
+import { isWildcardSearch, matchesSearchQuery, SESSION_LIFECYCLE_IDLE } from '@hapi/protocol'
 import type { ApiClient } from '@/api/client'
 import { useLongPress } from '@/hooks/useLongPress'
 import { usePlatform } from '@/hooks/usePlatform'
@@ -72,6 +72,10 @@ const RUNNING_BUCKETS = [
     { key: 'working', labelKey: 'session.item.running', colorClass: 'text-[var(--app-badge-success-text)]', pulse: true },
     { key: 'pending', labelKey: 'session.item.pending', colorClass: 'text-[var(--app-badge-warning-text)]', pulse: true },
     { key: 'active', labelKey: 'session.item.active', colorClass: 'text-[var(--app-hint)]', pulse: false },
+    // tiann/hapi#1820: connected, but the hub has seen nothing except
+    // keepalives for the configured window. Split out so a fleet of zombies
+    // does not read as a fleet of ready sessions.
+    { key: 'idle', labelKey: 'session.item.idle', colorClass: 'text-[var(--app-hint)]', pulse: false },
 ] as const
 
 type RunningBucketKey = (typeof RUNNING_BUCKETS)[number]['key']
@@ -1329,6 +1333,7 @@ export function SessionList(props: {
             working: [],
             pending: [],
             active: [],
+            idle: [],
         }
         if (!pinInProgressSessions) {
             return buckets
@@ -1344,6 +1349,9 @@ export function SessionList(props: {
                 buckets.working.push(session)
             } else if ((session.pendingRequestsCount ?? 0) > 0) {
                 buckets.pending.push(session)
+            } else if (session.metadata?.lifecycleState === SESSION_LIFECYCLE_IDLE) {
+                // Keepalive-only: socket up, no agent progress for hours.
+                buckets.idle.push(session)
             } else {
                 // Quiet but connected: finished executing, operator will continue.
                 buckets.active.push(session)
@@ -1357,7 +1365,7 @@ export function SessionList(props: {
     }, [machineFilteredSessions, pinInProgressSessions])
     const runningSessionTotal = runningSessions.working.length
         + runningSessions.pending.length
-    const activeSessionTotal = runningSessions.active.length
+    const activeSessionTotal = runningSessions.active.length + runningSessions.idle.length
     const groups = useMemo(
         () => groupSessionsByDirectory(
             machineFilteredSessions.filter((session) => {
@@ -2072,7 +2080,7 @@ export function SessionList(props: {
                     onToggle: () => setActiveSectionCollapsed((value) => !value),
                     pulse: false,
                     count: activeSessionTotal,
-                    bucketKeys: ['active'],
+                    bucketKeys: ['active', 'idle'],
                 })}
                 {groups.map(renderDirectoryGroup)}
                 {actionOnlyGroups.map(renderActionOnlyGroupHeader)}
