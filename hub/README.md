@@ -89,7 +89,7 @@ JWT lifetime is **4 hours**; clients must refresh using the long-lived access cr
 
 ### Sessions (`src/web/routes/sessions.ts`)
 
-- `GET /api/sessions` - List all sessions.
+- `GET /api/sessions` - List all sessions. Each summary includes `hasConversationContent`, derived from stored conversation messages (not titles or lifecycle events); full session SSE updates carry changes to this flag.
 - `GET /api/sessions/:id` - Get session details.
 - `POST /api/sessions/:id/abort` - Abort session.
 - `POST /api/sessions/:id/switch` - Switch session to remote mode.
