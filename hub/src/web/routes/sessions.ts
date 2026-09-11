@@ -163,7 +163,6 @@ export function createSessionsRoutes(
         return c.json({ sessions })
     })
 
-
     const respondToSessionContentSearch = (
         c: Context<WebAppEnv>,
         engine: SyncEngine,
@@ -370,6 +369,17 @@ export function createSessionsRoutes(
         })
 
         return c.json({ sessions, q: normalizedQuery })
+    })
+
+    app.get('/sessions/scratchlist-status', (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        return c.json({
+            sessionIds: engine.getScratchlistSessionIdsByNamespace(c.get('namespace'))
+        })
     })
 
     app.get('/sessions/:id/export', (c) => {

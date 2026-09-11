@@ -154,6 +154,7 @@ export type SessionContentMatchesResponse = {
     matches: SessionContentMatch[]
     total: number
 }
+export type ScratchlistSessionIdsResponse = { sessionIds: string[] }
 export type SessionResponse = { session: Session }
 export type MessagesResponse = {
     messages: DecryptedMessage[]

@@ -186,6 +186,16 @@ describe('ApiClient error mapping', () => {
         expect(fetchMock.mock.calls[1][0]).toContain('/api/machines/machine-1/agy-models?refresh=true')
     })
 
+    it('loads the batch scratchlist session status', async () => {
+        fetchMock.mockResolvedValueOnce(
+            new Response(JSON.stringify({ sessionIds: ['session-a', 'session-c'] }), { status: 200 })
+        )
+
+        const api = new ApiClient('test-token')
+        await expect(api.getScratchlistSessionIds()).resolves.toEqual(['session-a', 'session-c'])
+        expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/sessions/scratchlist-status')
+    })
+
     it('lists and imports Pi sessions through the selected machine', async () => {
         fetchMock
             .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, sessions: [], machineId: 'machine-1' }), { status: 200 }))

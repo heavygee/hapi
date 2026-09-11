@@ -81,9 +81,16 @@ import { useSessionListMachineFilter } from '@/hooks/useSessionListMachineFilter
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
 import { useFeatures } from '@/hooks/queries/useFeatures'
 import { getPrimaryGithubPrRef } from '@hapi/protocol'
+import { useScratchlistSessionIds } from '@/hooks/queries/useScratchlistSessionIds'
 import { SessionRowSummary } from '@/components/SessionRowSummary'
 import { KitchenStatusChip } from '@/components/KitchenStatusChip'
 import { UnblockReasonDialog } from '@/components/UnblockReasonDialog'
+import { SessionListFilterMenu } from '@/components/SessionListFilterMenu'
+import { CalendarIcon, formatDateValue, parseLocalDate, SessionDateRangePicker } from '@/components/SessionDateFilter'
+import {
+    DEFAULT_SESSION_LIST_FILTER_STATE,
+    type SessionListFilterState
+} from '@/lib/sessionListFilter'
 import { Spinner } from '@/components/Spinner'
 import { useToast } from '@/lib/toast-context'
 import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
@@ -326,17 +333,6 @@ function BlockedLensToggle(props: {
 export type SessionTimeRange = {
     start: number | null
     end: number | null
-}
-
-function parseLocalDate(value: string): Date | null {
-    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
-    if (!match) return null
-    const year = Number(match[1])
-    const month = Number(match[2])
-    const day = Number(match[3])
-    const date = new Date(year, month - 1, day)
-    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null
-    return date
 }
 
 export function getSessionTimeRange(start: string, end: string): SessionTimeRange | null {
@@ -643,6 +639,19 @@ export function filterUnreadSessionsOnly(
     return sessions.filter(session =>
         session.id === selectedSessionId
         || sessionIsUnread(session, { lastSeenAt: getLastSeenAt(session.id) })
+    )
+}
+
+// Keep the open session visible while filtering so changing the lens never
+// removes the conversation currently shown in the main pane.
+export function filterScratchlistSessionsOnly(
+    sessions: SessionSummary[],
+    selectedSessionId: string | null | undefined,
+    scratchlistSessionIds: ReadonlySet<string>
+): SessionSummary[] {
+    return sessions.filter(session =>
+        session.id === selectedSessionId
+        || scratchlistSessionIds.has(session.id)
     )
 }
 
@@ -1116,138 +1125,10 @@ export function getVisibleSessionPreview(
     return visible
 }
 
-function CalendarIcon(props: { className?: string }) {
-    return (
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={props.className}>
-            <rect x="3" y="5" width="18" height="16" rx="2" />
-            <path d="M16 3v4M8 3v4M3 10h18" />
-        </svg>
-    )
+export function shouldShowPinnedDivider(sessions: SessionSummary[], index: number): boolean {
+    if (index <= 0 || index >= sessions.length) return false
+    return Boolean(sessions[index - 1]?.pinned) && !sessions[index]?.pinned
 }
-
-function formatDateValue(date: Date): string {
-    const year = date.getFullYear()
-    const month = String(date.getMonth() + 1).padStart(2, '0')
-    const day = String(date.getDate()).padStart(2, '0')
-    return `${year}-${month}-${day}`
-}
-
-function SessionDateRangePicker(props: {
-    start: string
-    end: string
-    sessionActivityDates: ReadonlySet<string>
-    onChange: (start: string, end: string) => void
-    onClear: () => void
-    onClose: () => void
-    align: 'left' | 'right'
-}) {
-    const { t } = useTranslation()
-    const initialDate = parseLocalDate(props.start) ?? new Date()
-    const [visibleMonth, setVisibleMonth] = useState(() => new Date(initialDate.getFullYear(), initialDate.getMonth(), 1))
-    const today = formatDateValue(new Date())
-    const firstWeekday = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth(), 1).getDay()
-    const daysInMonth = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1, 0).getDate()
-    const weekdays = Array.from({ length: 7 }, (_, day) => (
-        new Intl.DateTimeFormat(undefined, { weekday: 'narrow' }).format(new Date(2026, 5, 7 + day))
-    ))
-
-    const selectDate = (value: string) => {
-        if (!props.start || props.end) {
-            props.onChange(value, '')
-            return
-        }
-        props.onChange(value < props.start ? value : props.start, value < props.start ? props.start : value)
-        props.onClose()
-    }
-
-    return (
-        <div className={cn(
-            'absolute top-full z-30 mt-2 w-72 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] p-3 shadow-xl',
-            props.align === 'left' ? 'left-0' : 'right-0'
-        )}>
-            <div className="mb-2 flex items-center justify-between">
-                <button
-                    type="button"
-                    onClick={() => setVisibleMonth(new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() - 1, 1))}
-                    className="rounded-lg p-1.5 text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
-                    aria-label={t('sessions.timeFilter.previousMonth')}
-                >
-                    <span aria-hidden="true">‹</span>
-                </button>
-                <div className="text-sm font-medium">
-                    {visibleMonth.toLocaleDateString(undefined, { year: 'numeric', month: 'long' })}
-                </div>
-                <button
-                    type="button"
-                    onClick={() => setVisibleMonth(new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1, 1))}
-                    className="rounded-lg p-1.5 text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
-                    aria-label={t('sessions.timeFilter.nextMonth')}
-                >
-                    <span aria-hidden="true">›</span>
-                </button>
-            </div>
-            <div className="mb-1 grid grid-cols-7 text-center text-[10px] text-[var(--app-hint)]">
-                {weekdays.map((weekday, index) => <div key={`${weekday}-${index}`} className="py-1">{weekday}</div>)}
-            </div>
-            <div className="grid grid-cols-7 gap-0.5">
-                {Array.from({ length: firstWeekday }, (_, index) => <div key={`blank-${index}`} />)}
-                {Array.from({ length: daysInMonth }, (_, index) => {
-                    const date = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth(), index + 1)
-                    const value = formatDateValue(date)
-                    const isToday = value === today
-                    const isEndpoint = value === props.start || value === props.end
-                    const isInRange = Boolean(props.start && props.end && value > props.start && value < props.end)
-                    const hasSessionActivity = props.sessionActivityDates.has(value)
-                    const dateLabel = date.toLocaleDateString()
-                    const activityLabel = hasSessionActivity
-                        ? t('sessions.timeFilter.dayWithActivity', { date: dateLabel })
-                        : dateLabel
-                    return (
-                        <button
-                            key={value}
-                            type="button"
-                            onClick={() => selectDate(value)}
-                            aria-label={activityLabel}
-                            aria-current={isToday ? 'date' : undefined}
-                            title={hasSessionActivity ? activityLabel : undefined}
-                            className={cn(
-                                'h-8 rounded-lg text-xs transition-colors',
-                                isEndpoint && 'bg-[var(--app-button)] text-[var(--app-button-text)]',
-                                isInRange && 'bg-[var(--app-link)]/15 text-[var(--app-link)]',
-                                !isEndpoint && !isInRange && isToday && 'bg-[var(--app-subtle-bg)]',
-                                !isEndpoint && !isInRange && hasSessionActivity && 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]',
-                                !isEndpoint && !isInRange && !hasSessionActivity && 'text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)]'
-                            )}
-                        >
-                            {index + 1}
-                        </button>
-                    )
-                })}
-            </div>
-            <div className="mt-2 flex items-center justify-between border-t border-[var(--app-divider)] pt-2 text-xs">
-                <span className="text-[var(--app-hint)]">
-                    {!props.start
-                        ? t('sessions.timeFilter.pickStart')
-                        : !props.end
-                            ? t('sessions.timeFilter.pickEnd')
-                            : `${props.start} – ${props.end}`}
-                </span>
-                {props.start ? (
-                    <button type="button" onClick={props.onClear} className="text-[var(--app-link)]">
-                        {t('sessions.timeFilter.clear')}
-                    </button>
-                ) : null}
-            </div>
-        </div>
-    )
-}
-
-// On-device speech recognition (notably Android's) appends sentence-ending
-// punctuation the user never said — "Jessica" comes back as "Jessica." — which
-// then fails to substring-match anything. A search query is never a sentence,
-// so trailing `.`/`!`/`?` from dictation is always noise, not intent.
-function stripDictationTrailingPunctuation(text: string): string {
-    return text.replace(/[.!?]+\s*$/, '')
 }
 
 export function SessionListSearch(props: {
@@ -1262,6 +1143,7 @@ export function SessionListSearch(props: {
     api: ApiClient | null
     searchMode?: 'metadata' | 'content'
     onSearchModeChange?: (mode: 'metadata' | 'content') => void
+    showDateFilter?: boolean
 }) {
     const { t } = useTranslation()
     const [datePickerOpen, setDatePickerOpen] = useState(false)
@@ -1270,6 +1152,7 @@ export function SessionListSearch(props: {
     const collapsedButtonRef = useRef<HTMLButtonElement>(null)
     const dateButtonRef = useRef<HTMLButtonElement>(null)
     const hasDateRange = Boolean(props.customStart && props.customEnd)
+    const showDateFilter = props.showDateFilter !== false
 
     useEffect(() => {
         if (props.expanded) {
@@ -1524,7 +1407,7 @@ export function SessionListSearch(props: {
                         </button>
                     ) : null}
                 </div>
-                {renderDateFilter('standalone')}
+                {showDateFilter ? renderDateFilter('standalone') : null}
             </div>
         )
     }
@@ -1606,6 +1489,9 @@ export function SessionListSearch(props: {
                     {dictation.error}
                 </div>
             ) : null}
+            <div className="absolute inset-y-0 right-0 flex items-stretch">
+                {showDateFilter ? renderDateFilter('embedded') : null}
+            </div>
         </div>
     )
 }
@@ -1990,18 +1876,20 @@ export function SessionList(props: {
     const { sessionListStatusMode } = useSessionListStatusMode()
     const { showActiveSessionsOnly, setShowActiveSessionsOnly } = useShowActiveSessionsOnly()
     const lastSeenVersion = useSessionLastSeenVersion()
-    // Transient unread lens — not a Settings preference. Cleared on reload; rows drop as they're seen.
-    const [showUnreadOnly, setShowUnreadOnly] = useState(false)
-    // Blocked lens + travel state (#1717). Transient for the same reason.
+    const [sessionFilters, setSessionFilters] = useState<SessionListFilterState>(DEFAULT_SESSION_LIST_FILTER_STATE)
+    const showScratchlistOnly = sessionFilters.scratchlist
+    const {
+        sessionIds: scratchlistSessionIds,
+        isLoading: isScratchlistStatusLoading,
+        error: scratchlistStatusError
+    } = useScratchlistSessionIds(api, showScratchlistOnly)
     const [showBlockedOnly, setShowBlockedOnly] = useState(false)
     const [blockedSectionCollapsed, setBlockedSectionCollapsed] = useState(false)
     const [pendingBlockedScrollId, setPendingBlockedScrollId] = useState<string | null>(null)
     const [flashBlockedSessionId, setFlashBlockedSessionId] = useState<string | null>(null)
-    const [blockedOffscreen, setBlockedOffscreen] = useState<{ above: number; below: number }>(
-        { above: 0, below: 0 }
-    )
+    const [blockedOffscreen, setBlockedOffscreen] = useState<{ above: number; below: number }>({ above: 0, below: 0 })
     const blockedJumpCursorRef = useRef(0)
-    const { pinInProgressMode } = usePinInProgressSessions()
+    const { pinInProgressMode, pinInProgressSessions } = usePinInProgressSessions()
     const { blockedAlertMode } = useBlockedAlertMode()
     const { machineFilter, setMachineFilter } = useSessionListMachineFilter()
     const showDetailedStatus = sessionListStatusMode === 'detailed'
@@ -2017,10 +1905,11 @@ export function SessionList(props: {
     const [, setCodexImportedSessionsVersion] = useState(0)
     const normalizedQuery = normalizeSearch(searchQuery)
     const timeRange = getSessionTimeRange(customStart, customEnd)
-    const isFiltering = normalizedQuery.length > 0 || timeRange !== null
+    const isSearchFiltering = normalizedQuery.length > 0 || timeRange !== null
     const contentSearchActive = searchMode === 'content' && normalizedQuery.length > 0
     const contentSearchReady = contentSearchActive
         && Array.from(normalizedQuery).length >= MIN_CONTENT_SEARCH_QUERY_LENGTH
+    const isFiltering = isSearchFiltering || sessionFilters.unread || sessionFilters.scratchlist || showBlockedOnly
 
     useEffect(() => {
         // 中文注释：监听导入标记变化，让列表在“导入完成”或“用户已在 Hapi 中继续会话”后立即刷新时间文案。
@@ -2133,8 +2022,8 @@ export function SessionList(props: {
         : null
     const contentSearchCandidateSessions = useMemo(() => {
         const timeFiltered = allSessions.filter(session => sessionMatchesTimeRange(session, timeRange))
-        const lastSeenById = showUnreadOnly ? getSessionLastSeenSnapshot() : null
-        const unreadFiltered = showUnreadOnly
+        const lastSeenById = sessionFilters.unread ? getSessionLastSeenSnapshot() : null
+        const unreadFiltered = sessionFilters.unread
             ? filterUnreadSessionsOnly(
                 timeFiltered,
                 selectedSessionId,
@@ -2146,7 +2035,7 @@ export function SessionList(props: {
             : unreadFiltered.filter(session =>
                 (session.metadata?.machineId ?? UNKNOWN_MACHINE_ID) === activeMachineFilter
             )
-    }, [allSessions, activeMachineFilter, selectedSessionId, showUnreadOnly, timeRange?.start, timeRange?.end])
+    }, [allSessions, activeMachineFilter, selectedSessionId, sessionFilters.unread, timeRange?.start, timeRange?.end])
     const contentSearchSessionIds = useMemo(
         () => contentSearchCandidateSessions.map(session => session.id),
         [contentSearchCandidateSessions]
@@ -2200,29 +2089,51 @@ export function SessionList(props: {
         }
     }, [api, contentSearchReady, contentSearchSessionIds, normalizedQuery])
 
-    // Unread after search/time, before machine scope — so machineFilters (from allSessions)
-    // stay stable. Filtering unread into allSessions would drop machines with zero unread
-    // and clear a persisted machine selection (showing other machines' unread instead).
-    const unreadFilteredSessions = useMemo(() => {
-        if (!showUnreadOnly) return visibleSessions
-        const lastSeenById = getSessionLastSeenSnapshot()
-        return filterUnreadSessionsOnly(
-            visibleSessions,
-            selectedSessionId,
-            id => lastSeenById[id] ?? 0
-        )
-    }, [lastSeenVersion, visibleSessions, selectedSessionId, showUnreadOnly])
+    // Apply the session lens after search/time and before machine scope — so
+    // machineFilters (from allSessions) stay stable. Filtering into allSessions
+    // would drop machines with zero matching sessions and clear a persisted
+    // machine selection.
+    const sessionFilteredSessions = useMemo(() => {
+        let filtered = visibleSessions
+        if (sessionFilters.unread) {
+            const lastSeenById = getSessionLastSeenSnapshot()
+            filtered = filterUnreadSessionsOnly(
+                filtered,
+                selectedSessionId,
+                id => lastSeenById[id] ?? 0
+            )
+        }
+        if (sessionFilters.scratchlist) {
+            if (isScratchlistStatusLoading || scratchlistStatusError) {
+                return []
+            }
+            filtered = filterScratchlistSessionsOnly(
+                filtered,
+                selectedSessionId,
+                scratchlistSessionIds
+            )
+        }
+        return filtered
+    }, [
+        isScratchlistStatusLoading,
+        lastSeenVersion,
+        scratchlistSessionIds,
+        scratchlistStatusError,
+        selectedSessionId,
+        sessionFilters,
+        visibleSessions
+    ])
     // Blocked lens. Sits alongside the unread lens rather than inside it:
     // "you have not looked at this" and "it stopped and needs you" are
     // different questions, and a blocked session you already read is still
     // blocked.
     const blockedFilteredSessions = useMemo(() => {
-        if (!showBlockedOnly) return unreadFilteredSessions
+        if (!showBlockedOnly) return sessionFilteredSessions
         const now = Date.now()
-        return unreadFilteredSessions.filter(session =>
+        return sessionFilteredSessions.filter(session =>
             session.id === selectedSessionId || sessionIsBlocked(session, { now })
         )
-    }, [unreadFilteredSessions, showBlockedOnly, selectedSessionId])
+    }, [sessionFilteredSessions, showBlockedOnly, selectedSessionId])
     const machineFilteredSessions = useMemo(
         () => activeMachineFilter === null
             ? blockedFilteredSessions
@@ -2338,7 +2249,8 @@ export function SessionList(props: {
     // render an action-only header so copy-path / new-session-in-directory
     // stay available (no rows to group, but the project itself is live).
     // Based on the same machineFilteredSessions set as `groups` so machine /
-    // unread filters stay consistent.
+    // Keep directory action rows in the same filtered machine scope so all
+    // session-list filters stay consistent.
     const allDirectoryGroups = useMemo(
         () => groupSessionsByDirectory(
             machineFilteredSessions.filter((session) => !session.globalPinned)
@@ -2728,6 +2640,7 @@ export function SessionList(props: {
     }, [showSearch])
 
     const showHeaderRow = showSearch || renderHeader || Boolean(props.headerActions)
+    const sessionListRef = useRef<HTMLDivElement>(null)
 
     // Pull-to-refresh on the scrollable list. Touch-only gesture mirroring the
     // pull-to-load-older pattern in HappyThread; desktop has no overscroll
@@ -2953,7 +2866,7 @@ export function SessionList(props: {
                 : 'none'
 
     return (
-        <div className="flex min-h-0 w-full flex-1 flex-col">
+        <div ref={sessionListRef} className="flex min-h-0 w-full flex-1 flex-col">
             <div className="session-list-scrollbar-offset mx-auto w-full max-w-content shrink-0">
             {showHeaderRow ? (
                 <div className="flex items-center gap-1 px-2 py-1">
@@ -2973,6 +2886,7 @@ export function SessionList(props: {
                             api={api}
                             searchMode={searchMode}
                             onSearchModeChange={setSearchMode}
+                            showDateFilter={false}
                         />
                     ) : null}
                     {!(showSearch && searchExpanded) ? (
@@ -2984,6 +2898,16 @@ export function SessionList(props: {
                                     totalCount={allSessions.length}
                                     value={activeMachineFilter}
                                     onChange={setMachineFilter}
+                                    sessionFilter={sessionFilters}
+                                    onSessionFilterChange={setSessionFilters}
+                                    customStart={customStart}
+                                    customEnd={customEnd}
+                                    sessionActivityDates={sessionActivityDates}
+                                    onDateRangeChange={(start, end) => {
+                                        setCustomStart(start)
+                                        setCustomEnd(end)
+                                    }}
+                                    datePickerCenterRef={sessionListRef}
                                 />
                             ) : null}
                             {blockedCount > 0 ? (
@@ -3012,30 +2936,19 @@ export function SessionList(props: {
                                     <MarkAllReadIcon className="h-5 w-5" />
                                 </button>
                             ) : null}
-                            <button
-                                type="button"
-                                onClick={() => setShowUnreadOnly(!showUnreadOnly)}
-                                aria-pressed={showUnreadOnly}
-                                title={t('sessions.unreadFilter.toggle')}
-                                aria-label={t('sessions.unreadFilter.toggle')}
-                                className={cn(
-                                    'flex h-9 w-9 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
-                                    showUnreadOnly
-                                        ? 'bg-[var(--app-subtle-bg)]'
-                                        : 'hover:bg-[var(--app-subtle-bg)]'
-                                )}
-                            >
-                                {/* Same shape/color language as session-row unread dots (SessionAttentionIndicator). */}
-                                <span
-                                    aria-hidden
-                                    className={cn(
-                                        'inline-flex h-2.5 w-2.5 shrink-0 rounded-full',
-                                        showUnreadOnly
-                                            ? 'bg-[var(--app-link)]'
-                                            : 'bg-[var(--app-hint)]'
-                                    )}
-                                />
-                            </button>
+                            <SessionListFilterMenu
+                                value={sessionFilters}
+                                onChange={setSessionFilters}
+                                customStart={customStart}
+                                customEnd={customEnd}
+                                sessionActivityDates={sessionActivityDates}
+                                onDateRangeChange={(start, end) => {
+                                    setCustomStart(start)
+                                    setCustomEnd(end)
+                                }}
+                                datePickerCenterRef={sessionListRef}
+                                className={showMachineFilterBar ? 'max-md:hidden' : undefined}
+                            />
                             <KitchenStatusChip api={api} />
                             {renderHeader ? (
                                 <button
@@ -3093,6 +3006,18 @@ export function SessionList(props: {
                     />
                 ) : null}
 
+                {props.sessions.length > 0 && isScratchlistStatusLoading && sessionFilters.scratchlist ? (
+                    <div role="status" className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
+                        {t('sessions.filter.loading')}
+                    </div>
+                ) : null}
+
+                {props.sessions.length > 0 && scratchlistStatusError && sessionFilters.scratchlist ? (
+                    <div role="alert" className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
+                        {t('sessions.filter.error')}
+                    </div>
+                ) : null}
+
                 {props.sessions.length > 0 && contentSearchLoading ? (
                     <div className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
                         {t('sessions.search.content.loading')}
@@ -3105,7 +3030,7 @@ export function SessionList(props: {
                     </div>
                 ) : null}
 
-                {props.sessions.length > 0 && !contentSearchLoading && !contentSearchError && (isFiltering || activeMachineFilter !== null || showUnreadOnly || showBlockedOnly) && groups.length === 0 && runningSessionTotal === 0 && activeSessionTotal === 0 && pinnedSessions.length === 0 && blockedSectionSessions.length === 0 ? (
+                {props.sessions.length > 0 && !contentSearchLoading && !contentSearchError && !isScratchlistStatusLoading && !scratchlistStatusError && (isFiltering || activeMachineFilter !== null) && groups.length === 0 && runningSessionTotal === 0 && activeSessionTotal === 0 && pinnedSessions.length === 0 && blockedSectionSessions.length === 0 ? (
                     <div className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
                         {contentSearchActive
                             ? contentSearchReady
