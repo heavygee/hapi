@@ -153,7 +153,7 @@ export default {
   'sessions.group.archiveAll': '归档所有会话',
   'sessions.group.delete': '删除分组',
   'sessions.group.deleteHint': '请先归档所有会话，才能删除分组',
-  'sessions.machineFilter.label': '按机器筛选会话',
+  'sessions.machineFilter.label': '按机器筛选',
   'sessions.machineFilter.all': '全部',
   'codexSync.tooltip': '从 Codex 导入会话到 Hapi',
   'codexSync.newSessionAction': '导入 Codex 历史',

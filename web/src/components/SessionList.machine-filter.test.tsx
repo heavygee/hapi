@@ -222,7 +222,10 @@ describe('SessionList session filter menu', () => {
 
     it('filters by scratchlist session ids using one batch request', async () => {
         const getScratchlistSessionIds = vi.fn().mockResolvedValue(['session-with-draft'])
-        const api = { getScratchlistSessionIds } as unknown as ApiClient
+        const api = {
+            getScratchlistSessionIds,
+            fetchTranscriptionProviders: vi.fn().mockResolvedValue({ providers: [] })
+        } as unknown as ApiClient
         renderSessionList([
             makeSession({ id: 'session-with-draft', metadata: { path: '/work/draft', name: 'Draft session' } }),
             makeSession({ id: 'session-without-draft', metadata: { path: '/work/empty', name: 'Empty session' } })
@@ -245,7 +248,10 @@ describe('SessionList session filter menu', () => {
             'plain-unread': 0
         }))
         const getScratchlistSessionIds = vi.fn().mockResolvedValue(['draft-unread', 'draft-seen'])
-        const api = { getScratchlistSessionIds } as unknown as ApiClient
+        const api = {
+            getScratchlistSessionIds,
+            fetchTranscriptionProviders: vi.fn().mockResolvedValue({ providers: [] })
+        } as unknown as ApiClient
         renderSessionList([
             makeSession({ id: 'draft-unread', updatedAt: 500, metadata: { path: '/work/draft-unread', name: 'Draft unread' } }),
             makeSession({ id: 'draft-seen', updatedAt: 500, metadata: { path: '/work/draft-seen', name: 'Draft seen' } }),

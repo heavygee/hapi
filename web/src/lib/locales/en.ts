@@ -153,7 +153,7 @@ export default {
   'sessions.group.archiveAll': 'Archive All Sessions',
   'sessions.group.delete': 'Delete Group',
   'sessions.group.deleteHint': 'Archive every session first to delete the group',
-  'sessions.machineFilter.label': 'Filter sessions by machine',
+  'sessions.machineFilter.label': 'Filter by machine',
   'sessions.machineFilter.all': 'All',
   'codexSync.tooltip': 'Import sessions from Codex into Hapi',
   'codexSync.newSessionAction': 'Import Codex history',
