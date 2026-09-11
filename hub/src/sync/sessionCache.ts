@@ -613,16 +613,25 @@ export class SessionCache {
     }
 
     /**
-     * Seeded from `updatedAt` (last human turn on disk) when the hub has not
-     * observed progress itself yet — after a restart that is the most honest
-     * lower bound we have, and any live session corrects it on its next
-     * message.
+     * A cold cache (hub restart) has observed no progress of its own, so seed
+     * it once from disk.
+     *
+     * `updatedAt` alone is not enough: assistant messages deliberately do not
+     * move it, so a session that was streaming output a minute before the
+     * restart would read as hours idle and get marked on the very next tick.
+     * The newest stored message is the durable record of that output.
+     *
+     * `updatedAt` stays a floor on top of the seed, because todos / teamState
+     * / agentState writes bump it without routing through
+     * `recordAgentProgress`.
      */
     private getAgentProgressAt(session: Session): number {
-        return Math.max(
-            this.agentProgressAtBySessionId.get(session.id) ?? 0,
-            session.updatedAt
-        )
+        let observed = this.agentProgressAtBySessionId.get(session.id)
+        if (observed === undefined) {
+            observed = this.store.messages.getNewestMessagePosition(session.id)?.at ?? 0
+            this.agentProgressAtBySessionId.set(session.id, observed)
+        }
+        return Math.max(observed, session.updatedAt)
     }
 
     /**
