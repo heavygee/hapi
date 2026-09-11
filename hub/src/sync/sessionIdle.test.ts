@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Session, SyncEvent } from '@hapi/protocol/types'
 import { Store } from '../store'
+import { registerSessionHandlers } from '../socket/handlers/cli/sessionHandlers'
 import type { EventPublisher } from './eventPublisher'
 import { SessionCache } from './sessionCache'
 import {
@@ -222,6 +223,48 @@ describe('SessionCache.reconcileKeepaliveIdle', () => {
         expect(restarted.getSession(sessionId)!.metadata?.lifecycleState).toBe('idle')
 
         rmSync(dir, { recursive: true, force: true })
+    })
+
+    it('an assistant message over the socket handler wakes an idle session', () => {
+        const { store, cache, sessionId, later } = setup()
+        cache.handleSessionAlive({ sid: sessionId, time: Date.now() })
+        cache.reconcileKeepaliveIdle(later, window)
+        expect(cache.getSession(sessionId)!.metadata?.lifecycleState).toBe('idle')
+
+        // Mirror startHub's wiring: the socket handler's onAgentProgress hook
+        // feeds the cache clock. A refactor dropping this would silently
+        // false-idle every actively working session.
+        const handlers = new Map<string, (payload: unknown) => void>()
+        const progress: Array<{ sessionId: string; at: number }> = []
+        registerSessionHandlers({
+            on: (event: string, handler: (payload: unknown) => void) => {
+                handlers.set(event, handler)
+            },
+            to: () => ({ emit: () => {} })
+        } as never, {
+            store,
+            resolveSessionAccess: (id: string) => {
+                const stored = store.sessions.getSessionByNamespace(id, 'default')
+                return stored ? { ok: true, value: stored } : { ok: false, reason: 'not-found' }
+            },
+            emitAccessError: () => {},
+            onAgentProgress: (id: string, at: number) => {
+                progress.push({ sessionId: id, at })
+                cache.recordAgentProgress(id, at)
+            }
+        } as never)
+
+        // An *assistant* message: it never bumps `updatedAt`, so the progress
+        // hook is the only thing that can wake the session.
+        handlers.get('message')?.({
+            sid: sessionId,
+            message: JSON.stringify({ role: 'agent', content: { type: 'text', text: 'resumed work' } })
+        })
+        expect(progress).toHaveLength(1)
+        expect(progress[0].sessionId).toBe(sessionId)
+
+        cache.reconcileKeepaliveIdle(progress[0].at + 1 * HOUR, window)
+        expect(cache.getSession(sessionId)!.metadata?.lifecycleState).toBe('running')
     })
 
     it('does nothing when the window is disabled', () => {

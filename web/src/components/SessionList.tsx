@@ -80,6 +80,48 @@ const RUNNING_BUCKETS = [
 
 type RunningBucketKey = (typeof RUNNING_BUCKETS)[number]['key']
 
+export function emptyRunningBuckets(): Record<RunningBucketKey, SessionSummary[]> {
+    return { working: [], pending: [], active: [], idle: [] }
+}
+
+/**
+ * Split the connected sessions into the in-progress / active sub-buckets the
+ * pinned sections render. Pure so the bucketing rules stay testable.
+ */
+export function bucketRunningSessions(
+    sessions: SessionSummary[],
+    pinInProgressSessions: boolean
+): Record<RunningBucketKey, SessionSummary[]> {
+    const buckets = emptyRunningBuckets()
+    if (!pinInProgressSessions) {
+        return buckets
+    }
+    for (const session of sessions) {
+        if (session.globalPinned || session.pinned) {
+            continue
+        }
+        if (!session.active) {
+            continue
+        }
+        if (session.thinking || (session.backgroundTaskCount ?? 0) > 0) {
+            buckets.working.push(session)
+        } else if ((session.pendingRequestsCount ?? 0) > 0) {
+            buckets.pending.push(session)
+        } else if (session.metadata?.lifecycleState === SESSION_LIFECYCLE_IDLE) {
+            // Keepalive-only: socket up, no agent progress for hours.
+            buckets.idle.push(session)
+        } else {
+            // Quiet but connected: finished executing, operator will continue.
+            buckets.active.push(session)
+        }
+    }
+    const byRecent = (a: SessionSummary, b: SessionSummary) => b.updatedAt - a.updatedAt
+    for (const key of Object.keys(buckets) as RunningBucketKey[]) {
+        buckets[key].sort(byRecent)
+    }
+    return buckets
+}
+
 /**
  * Sessions that warrant the optional pinned top sections.
  * Any connected session floats — a session that just finished executing stays
@@ -1328,41 +1370,10 @@ export function SessionList(props: {
             .filter((session) => Boolean(session.globalPinned))
             .sort((a, b) => b.updatedAt - a.updatedAt)
     }, [machineFilteredSessions])
-    const runningSessions = useMemo(() => {
-        const buckets: Record<RunningBucketKey, SessionSummary[]> = {
-            working: [],
-            pending: [],
-            active: [],
-            idle: [],
-        }
-        if (!pinInProgressSessions) {
-            return buckets
-        }
-        for (const session of machineFilteredSessions) {
-            if (session.globalPinned || session.pinned) {
-                continue
-            }
-            if (!session.active) {
-                continue
-            }
-            if (session.thinking || (session.backgroundTaskCount ?? 0) > 0) {
-                buckets.working.push(session)
-            } else if ((session.pendingRequestsCount ?? 0) > 0) {
-                buckets.pending.push(session)
-            } else if (session.metadata?.lifecycleState === SESSION_LIFECYCLE_IDLE) {
-                // Keepalive-only: socket up, no agent progress for hours.
-                buckets.idle.push(session)
-            } else {
-                // Quiet but connected: finished executing, operator will continue.
-                buckets.active.push(session)
-            }
-        }
-        const byRecent = (a: SessionSummary, b: SessionSummary) => b.updatedAt - a.updatedAt
-        for (const key of Object.keys(buckets) as RunningBucketKey[]) {
-            buckets[key].sort(byRecent)
-        }
-        return buckets
-    }, [machineFilteredSessions, pinInProgressSessions])
+    const runningSessions = useMemo(
+        () => bucketRunningSessions(machineFilteredSessions, pinInProgressSessions),
+        [machineFilteredSessions, pinInProgressSessions]
+    )
     const runningSessionTotal = runningSessions.working.length
         + runningSessions.pending.length
     const activeSessionTotal = runningSessions.active.length + runningSessions.idle.length
