@@ -1125,6 +1125,14 @@ export function getVisibleSessionPreview(
     return visible
 }
 
+// On-device speech recognition (notably Android's) appends sentence-ending
+// punctuation the user never said — "Jessica" comes back as "Jessica." — which
+// then fails to substring-match anything. A search query is never a sentence,
+// so trailing `.`/`!`/`?` from dictation is always noise, not intent.
+function stripDictationTrailingPunctuation(text: string): string {
+    return text.replace(/[.!?]+\s*$/, '')
+}
+
 export function SessionListSearch(props: {
     value: string
     onChange: (value: string) => void
@@ -2739,7 +2747,7 @@ export function SessionList(props: {
             setCustomStart('')
             setCustomEnd('')
             setMachineFilter(null)
-            setShowUnreadOnly(false)
+            setSessionFilters(DEFAULT_SESSION_LIST_FILTER_STATE)
             // Active-only is a persisted preference rather than a transient
             // lens, but it narrows just the same, and the pill's contract is
             // "this row exists and I will take you to it".
