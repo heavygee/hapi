@@ -347,6 +347,23 @@ Pre-push hook blocks `web/src/garden/**` on upstream-PR-bound refs — Garden is
 
 **Windows chicken-egg (ops playbook):** old self-upgrade wrote `hapi-VERSION` without `.exe`. Promote once: `copy hapi-VERSION → hapi-VERSION.exe → hapi.exe`, then `schtasks /Run /TN "HAPI Runner"`. Or SCP `/var/lib/hapi/upgrade-artifacts/hapi-*-win32-x64` → `%USERPROFILE%\.hapi\bin\hapi.exe`. Future Upgrades from a fixed binary should self-heal.
 
+### Soup single-exe fleet artifacts (Stage 0)
+
+On **oos-linux only**, a verified soup promote with web build also publishes self-contained `hapi` binaries (CLI + hub + runner, embedded web UI):
+
+| What | Where |
+|---|---|
+| Tagged release tree | `/var/lib/hapi/soup-artifacts/hapi-soup-v<YYYY.MM.DD>-<7-char-tip>/` |
+| `latest` symlink | `/var/lib/hapi/soup-artifacts/latest/` |
+| Manifest (tip SHA, layer count, `web/dist` hash, `protocolVersion`) | `.../manifest.json` |
+| Linux x64 baseline (SCP playbook) | also mirrored to `/var/lib/hapi/upgrade-artifacts/hapi-<tag>-linux-x64-baseline` |
+
+**Automatic:** `hapi-driver-rebuild --build-web --verify` (skip: `HAPI_SKIP_SOUP_SINGLE_EXE=1`).
+
+**Manual** (first install / one-off): `hapi-soup-publish-single-exe` or `hapi-soup-publish-single-exe --dry-run`.
+
+Plan: [`docs/plans/2026-09-04-fleet-vm-swap-strategy.md`](../plans/2026-09-04-fleet-vm-swap-strategy.md) § Stage 0.
+
 Sources: `scripts/tooling/` in repo; installed to `~/.local/bin/`.
 
 ### Coordination (avoid stack-switch contention)

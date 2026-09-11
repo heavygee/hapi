@@ -20,6 +20,10 @@
 #   hapi-driver-rebuild --verify     # run typecheck + test after merge
 #   hapi-driver-rebuild --activate   # swing hapi-active + restart hub (DESTRUCTIVE to live sessions)
 #
+# With --build-web --verify on oos-linux: also builds + publishes soup single-exe
+# fleet artifacts (Stage 0 — docs/plans/2026-09-04-fleet-vm-swap-strategy.md).
+# Skip: HAPI_SKIP_SOUP_SINGLE_EXE=1. Manual: hapi-soup-publish-single-exe.
+#
 # Post-remat restart: after a successful promote, if hub/cli/shared changed vs the
 # pre-remat tip, runs patient hapi-restart-hub (hub + runner). Web-only remats
 # skip restart (hard-reload dogfood). Opt out: HAPI_DRIVER_NO_RESTART=1
@@ -520,6 +524,26 @@ if [[ "$VERIFY" -eq 1 ]]; then
     mkdir -p "$(dirname "$STAMP")"
     git -C "$DRIVER" rev-parse HEAD >"$STAMP"
     echo "Verify stamp: $STAMP ($(cat "$STAMP" | head -c 12)…)"
+fi
+
+# Stage 0 golden artifact: self-contained single-exe per platform (oos foundry only).
+if [[ "$VERIFY" -eq 1 && "$BUILD_WEB" -eq 1 && "${PROMOTED:-0}" -eq 1 && "${HAPI_SKIP_SOUP_SINGLE_EXE:-}" != "1" ]]; then
+    # shellcheck source=lib/driver-soup-single-exe-publish.sh
+    source "$LIB_DIR/driver-soup-single-exe-publish.sh"
+    if driver_soup_single_exe_host_ok; then
+        echo ""
+        echo "Publishing soup single-exe fleet artifact (Stage 0)..."
+        if ! driver_soup_single_exe_publish "$DRIVER" "$PRIMARY" "$MANIFEST" "$PARSE" "$BUN" 0; then
+            echo "" >&2
+            echo "ERROR: soup single-exe publish failed after verified promote." >&2
+            echo "       Live driver tip was NOT rolled back — dogfood soup on disk is still current." >&2
+            echo "       Retry: hapi-soup-publish-single-exe $DRIVER" >&2
+            echo "       Skip next time: HAPI_SKIP_SOUP_SINGLE_EXE=1" >&2
+            exit 1
+        fi
+    else
+        echo "soup-artifact: skip single-exe publish (host is not oos soup foundry)"
+    fi
 fi
 
 # Successful remat by escalate owner clears any prior hold.
