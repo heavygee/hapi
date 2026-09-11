@@ -3050,6 +3050,10 @@ export class SyncEngine {
         this.overseerEvents.forgetSession(sessionId)
     }
 
+    async deleteArchivedSessions(sessionIds: string[], namespace: string): Promise<void> {
+        await this.sessionCache.deleteArchivedSessions(sessionIds, namespace)
+    }
+
     async applySessionConfig(
         sessionId: string,
         config: {
