@@ -972,9 +972,25 @@ layers:
   # Tip: 8fb87aada
   - branch: driver/relative-time-absolute-tooltips
 
+  # tiann/hapi#881 / PR #1607 — sidebar project-group right-click / long-press context menu
+  # (Copy Path, Archive All, Delete Group) + hub requireArchived + atomic delete-archived.
+  # Thin tip on upstream/main (1 commit). Hub+web → remat needs --build-web + hapi-restart-hub.
+  # Worktree: ~/coding/hapi/worktrees/soup-1607-group-menu @ soup/1607-project-group-menu
+  # Tip: 3653ddbe6 — re-thin 2026-09-11 after upstream CONFLICTING; keep main useAnchoredMenu align API
+  - branch: soup/1607-project-group-menu
+
   # tiann/hapi#1772 — combined session list filters (unread + scratchlist + date) in one menu;
   # GET /api/sessions/scratchlist-status + SSE resync invalidation for scratchlist membership.
   # Upstream PR CONFLICTING; soup tip re-thinned onto upstream/main (kept #1773 mark-all-read).
   # Worktree: ~/coding/hapi/worktrees/soup-1772-list-filters @ soup/1772-combined-list-filters
   # Tip: 537c260c6 — 2 commits / 34 files; re-thin after dogfood bump
   - branch: soup/1772-combined-list-filters
+
+  # tiann/hapi#1605 — Claude live model catalog (list_models) + effort/context-window wiring.
+  # Upstream PR MERGEABLE/CLEAN (junmo-kim). Thin tip on upstream/main:
+  #   soup/1605-claude-model-catalog @ 61475f769 (merge of upstream/pr-1605).
+  # Soup union (driver tip; Claude-only SessionChat — no AGY catch-up):
+  #   driver/claude-model-catalog @ c84fc1914 — 1 commit / 55 files; merge-tree clean.
+  # Worktrees: soup-1605-claude-models + soup-1605-claude-union.
+  # Hub+cli+web → remat needs --build-web + hapi-restart-hub. Drop when #1605 merges.
+  - branch: driver/claude-model-catalog
