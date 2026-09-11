@@ -873,6 +873,17 @@
         }
       }
     },
+    "Answers" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "答案"
+          }
+        }
+      }
+    },
     "App language" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1694,6 +1705,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "当前目录"
+          }
+        }
+      }
+    },
+    "Custom answer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自定义答案"
           }
         }
       }
@@ -3128,6 +3150,28 @@
         }
       }
     },
+    "Not selected" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未选择"
+          }
+        }
+      }
+    },
+    "Note" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "备注"
+          }
+        }
+      }
+    },
     "Note, draft, parking-lot idea…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3645,6 +3689,17 @@
         }
       }
     },
+    "Questions & Answers" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "问答"
+          }
+        }
+      }
+    },
     "Range" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4103,6 +4158,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "选择"
+          }
+        }
+      }
+    },
+    "Selected" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已选择"
           }
         }
       }

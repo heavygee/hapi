@@ -112,8 +112,14 @@ individual recycled rows, joined by continuous surfaces and inset separators.
 File/image summaries show the action and basename; commands use a bounded preview.
 Success is quiet, while running/errors remain visible; every row keeps a 44pt target.
 Edits show their recorded input, with a separate **View current file** action.
-Task/Agent sidechains open a process page; approvals and questions remain in
+Task/Agent sidechains open a process page; approvals and question answering remain in
 the conversation/process, not in the read-only inspector.
+
+Question inspectors show recorded selections, custom answers and notes with
+Markdown questions/options. `request_user_input` also restores answers from
+historical results; live permission answers take precedence. Answered cards
+avoid duplicate results, but retain errors and the full input/result/answers
+under **Source**. Answer submission remains in the conversation.
 
 Inspection pauses transcript tail-following and hidden history paging, without
 opening another SSE subscription. Closing returns to the reading anchor;
