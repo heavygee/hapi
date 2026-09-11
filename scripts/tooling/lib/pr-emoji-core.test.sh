@@ -368,6 +368,14 @@ _clean_body_none_dot='**Findings**
 **Summary**
 - No issues found.
 '
+_clean_body_reportable='**Findings**
+
+No reportable issues found in the full latest diff.
+
+**Summary**
+
+Review mode: follow-up after new commits
+'
 _dirty_body_major='**Findings**
 - [Major] Something broke.
 
@@ -383,6 +391,11 @@ if pec_bot_body_findings_clean "$_clean_body_none_dot"; then
     eq "findings clean: - None." "yes" "yes"
 else
     eq "findings clean: - None." "no" "yes"
+fi
+if pec_bot_body_findings_clean "$_clean_body_reportable"; then
+    eq "findings clean: No reportable issues" "yes" "yes"
+else
+    eq "findings clean: No reportable issues" "no" "yes"
 fi
 if pec_bot_body_findings_clean "$_dirty_body_major"; then
     eq "findings dirty: Major" "yes" "no"

@@ -278,11 +278,12 @@ pec_status_from_emoji() {
 # Never match bare "- None." globally — Codex puts that under **Questions**
 # even when **Findings** still has [Major] (#1108 attach-time false ✅).
 # HAPI Bot clean variants include "- None.", "- None at the current head.",
-# and "No Blocker, Major, Minor, or Nit findings…" (#1400 false ⚠️).
+# "No Blocker, Major, Minor, or Nit findings…" (#1400 false ⚠️), and
+# "No reportable issues found…" (align with hapi-pr-status CLEAN_REGEX; #1821 false ⚠️).
 pec_bot_body_findings_clean() {
     local body="$1" findings stripped
     if printf '%s' "$body" | grep -qiE \
-        'No findings|No high-confidence|No issues found|No actionable|Didn.t find any|No new issues found|No Blocker, Major, Minor, or Nit findings|No Blocker[[:space:]].*findings|None at the current head'; then
+        'No findings|No high-confidence|No issues found|No reportable issues|No actionable|Didn.t find any|No new issues found|No Blocker, Major, Minor, or Nit findings|No Blocker[[:space:]].*findings|None at the current head'; then
         return 0
     fi
     findings="$(printf '%s' "$body" | awk '
