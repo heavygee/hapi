@@ -440,7 +440,21 @@ remat_rollback_live_tip() {
         "${REMAT:-}" "${PREV_TIP:-}" "${WIP_BRANCH:-}" ""
 }
 
+WEB_SWAP_DEFERRED=0
 if [[ "$BUILD_WEB" -eq 1 ]] || [[ ! -f "$DRIVER/web/dist/index.html" ]]; then
+    # When hub/cli/shared changed, defer web/dist swap until after patient
+    # hapi-restart-hub — avoids split-deploy cliffs (web gates on new hub API
+    # fields while old hub still serves; 2026-09-11 @-mention outage class).
+    # shellcheck source=lib/driver-remat-auto-restart.sh
+    source "$LIB_DIR/driver-remat-auto-restart.sh"
+    if [[ "${PROMOTED:-0}" -eq 1 && -n "${PREV_TIP:-}" && -n "${WIP_SHA:-}" ]]; then
+        if driver_remat_needs_hub_restart "$DRIVER" "$PREV_TIP" "$WIP_SHA"; then
+            export HAPI_WEB_SWAP_DEFER=1
+            WEB_SWAP_DEFERRED=1
+            echo "post-remat: hub restart pending — deferring web/dist swap until hub is live" >&2
+        fi
+    fi
+
     echo "Building web (atomic swap + stamp)..."
     # shellcheck source=lib/build-web-atomic.sh
     source "$LIB_DIR/build-web-atomic.sh"
@@ -449,7 +463,9 @@ if [[ "$BUILD_WEB" -eq 1 ]] || [[ ! -f "$DRIVER/web/dist/index.html" ]]; then
         exit 1
     fi
 
-    if [[ -f "$VERIFY_SCRIPT" ]]; then
+    if [[ "$WEB_SWAP_DEFERRED" -eq 1 ]]; then
+        echo "post-remat: web/dist verify + session-open-smoke deferred until post-restart swap" >&2
+    elif [[ -f "$VERIFY_SCRIPT" ]]; then
         echo "Verifying web/dist matches driver web/src..."
         if ! "$BUN" run "$VERIFY_SCRIPT" "$DRIVER" "$MANIFEST" "$PRIMARY"; then
             echo "ERROR: web/dist verify failed after build — rolling back to dist.prev" >&2
@@ -464,11 +480,13 @@ if [[ "$BUILD_WEB" -eq 1 ]] || [[ ! -f "$DRIVER/web/dist/index.html" ]]; then
     fi
 
     # verify-soup-web-dist alone missed session-route error boundaries (2026-08-04).
-    # shellcheck source=lib/session-open-smoke-gate.sh
-    source "$LIB_DIR/session-open-smoke-gate.sh"
-    if ! driver_session_open_smoke_gate "$DRIVER"; then
-        remat_rollback_live_tip "session-open-smoke failed"
-        exit 1
+    if [[ "$WEB_SWAP_DEFERRED" -eq 0 ]]; then
+        # shellcheck source=lib/session-open-smoke-gate.sh
+        source "$LIB_DIR/session-open-smoke-gate.sh"
+        if ! driver_session_open_smoke_gate "$DRIVER"; then
+            remat_rollback_live_tip "session-open-smoke failed"
+            exit 1
+        fi
     fi
 elif [[ -f "$VERIFY_SCRIPT" ]] && [[ -f "$DRIVER/web/dist/index.html" ]]; then
     echo "Checking web/dist freshness vs merged driver HEAD..."

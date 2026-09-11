@@ -251,3 +251,11 @@ fi
 echo ""
 echo "  hub:    $(systemctl is-active "$HAPI_HUB_UNIT")"
 [[ "$RUNNER" -eq 1 ]] && echo "  runner: $(systemctl is-active "$HAPI_RUNNER_UNIT")"
+
+# Post-restart: publish web/dist if remat deferred the atomic swap (hub-first sequencing).
+DRIVER="$(readlink -f "${HAPI_DRIVER:-$HOME/coding/hapi/driver}" 2>/dev/null || true)"
+if [[ -n "$DRIVER" && -d "$DRIVER/web" ]]; then
+    # shellcheck source=lib/build-web-atomic.sh
+    source "$TOOLING_LIB/build-web-atomic.sh"
+    build_web_finish_deferred_swap "$DRIVER" || true
+fi

@@ -6,6 +6,12 @@
 # manual step — this lib makes it the default after a successful promote when
 # hub/, cli/, or shared/ changed.
 #
+# Split-deploy cliff (2026-09-11): when --build-web runs in the same remat as
+# a hub change, hapi-driver-rebuild sets HAPI_WEB_SWAP_DEFER=1 so dist.next is
+# built but not published until hapi-restart-hub finishes (see
+# build-web-atomic.sh build_web_finish_deferred_swap). Prevents web gates that
+# depend on new hub API fields from going live while the old hub still serves.
+#
 # Opt out: HAPI_DRIVER_NO_RESTART=1
 
 # driver_remat_touched_hub_cli_shared <repo> <from_sha> <to_sha>
