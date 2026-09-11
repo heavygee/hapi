@@ -4,10 +4,7 @@ import { configuration } from '@/configuration';
 import { logger } from '@/ui/logger';
 import { getHappyCliCommand } from '@/utils/spawnHappyCLI';
 import { shellJoin } from '@/modules/common/shellQuote';
-import {
-    hapiClaudePreToolUseGuardCommand,
-    resolveHapiToolingRoot
-} from '@/modules/common/hooks/resolveHapiToolingRoot';
+import { LOCAL_PERMISSION_TIMEOUT_SECONDS } from '@/claude/utils/localPermissionProtocol';
 
 type HookCommandConfig = {
     matcher?: string;
@@ -19,14 +16,6 @@ type HookCommandConfig = {
     }>;
 };
 
-// PreToolUse bridges a tool approval to the web and blocks the (synchronous)
-// hook until the user answers on their phone — which can take minutes. claude's
-// default command-hook timeout is 60s; on timeout the decision is dropped and
-// claude falls back to its own permission prompt (which renders in the TUI
-// and stalls the chat flow). Give the PreToolUse hook a generous timeout so a
-// human has time to respond.
-const PRE_TOOL_USE_TIMEOUT_SECONDS = 3600;
-
 type HookSettings = {
     hooksConfig?: {
         enabled?: boolean;
@@ -35,6 +24,10 @@ type HookSettings = {
         SessionStart: HookCommandConfig[];
         UserPromptSubmit?: HookCommandConfig[];
         PreToolUse?: HookCommandConfig[];
+        PermissionRequest?: HookCommandConfig[];
+        PostToolUse?: HookCommandConfig[];
+        PostToolUseFailure?: HookCommandConfig[];
+        SessionEnd?: HookCommandConfig[];
     };
 };
 
@@ -50,17 +43,8 @@ export type HookSettingsOptions = {
      * and remote permission state is owned by the hub/RPC path anyway.
      */
     trackPermissionMode?: boolean;
-    /**
-     * Register a PreToolUse hook (PTY mode only). The SDK path routes tool
-     * approvals through the SDK's canUseTool callback, so it must NOT register
-     * PreToolUse or every tool would be double-handled. PTY sessions have no
-     * SDK callback, so they rely on this hook to bridge tool approvals to the
-     * web. The same forwarder command serves both events; it branches on the
-     * stdin `hook_event_name`.
-     */
-    includePreToolUse?: boolean;
-    /** When set and cwd resolves to hapi, inject project-scoped PreToolUse guards. */
-    workingDirectory?: string;
+    /** Mirror main-session permissions without suppressing the native dialog. Local only. */
+    includeLocalPermissions?: boolean;
 };
 
 /**
@@ -72,8 +56,7 @@ export function buildHookSettings(
     command: string,
     hooksEnabled?: boolean,
     trackPermissionMode?: boolean,
-    includePreToolUse?: boolean,
-    workingDirectory?: string
+    includeLocalPermissions?: boolean
 ): HookSettings {
     const commandHook = {
         hooks: [
@@ -86,22 +69,19 @@ export function buildHookSettings(
     const hooks: HookSettings['hooks'] = {
         SessionStart: [{ matcher: '*', ...commandHook }]
     };
-    if (trackPermissionMode) {
+    if (trackPermissionMode || includeLocalPermissions) {
         hooks.UserPromptSubmit = [commandHook];
         hooks.PreToolUse = [{ matcher: '*', ...commandHook }];
     }
 
-    if (includePreToolUse) {
-        // matcher '*' matches every tool name (claude's matcher: !q || q==='*' → all).
-        // The same forwarder command serves both events; it branches on the
-        // stdin hook_event_name. The long timeout keeps the (blocking) hook
-        // alive while the user approves on their phone.
-        hooks.PreToolUse = [
-            {
-                matcher: '*',
-                hooks: [{ type: 'command', command, timeout: PRE_TOOL_USE_TIMEOUT_SECONDS }]
-            }
-        ];
+    if (includeLocalPermissions) {
+        hooks.PermissionRequest = [{
+            matcher: '*',
+            hooks: [{ type: 'command', command, timeout: LOCAL_PERMISSION_TIMEOUT_SECONDS }]
+        }];
+        hooks.PostToolUse = [{ matcher: '*', ...commandHook }];
+        hooks.PostToolUseFailure = [{ matcher: '*', ...commandHook }];
+        hooks.SessionEnd = [{ matcher: '*', ...commandHook }];
     }
 
     const hapiRoot = workingDirectory ? resolveHapiToolingRoot(workingDirectory) : null;
@@ -157,8 +137,7 @@ export function generateHookSettingsFile(
         hookCommand,
         options.hooksEnabled,
         options.trackPermissionMode,
-        options.includePreToolUse,
-        options.workingDirectory
+        options.includeLocalPermissions
     );
 
     writeFileSync(filepath, JSON.stringify(settings, null, 4));

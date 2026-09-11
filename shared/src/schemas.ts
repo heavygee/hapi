@@ -166,6 +166,8 @@ export type Metadata = z.infer<typeof MetadataSchema>
 
 export const AgentStateRequestSchema = z.object({
     tool: z.string(),
+    // Correlation only; replies use the request map key, never this tool id.
+    toolCallId: z.string().optional(),
     arguments: z.unknown(),
     createdAt: z.number().nullish()
 })
@@ -174,6 +176,7 @@ export type AgentStateRequest = z.infer<typeof AgentStateRequestSchema>
 
 export const AgentStateCompletedRequestSchema = z.object({
     tool: z.string(),
+    toolCallId: z.string().optional(),
     arguments: z.unknown(),
     createdAt: z.number().nullish(),
     completedAt: z.number().nullish(),
