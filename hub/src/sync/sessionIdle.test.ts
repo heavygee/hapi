@@ -1,4 +1,8 @@
 import { describe, expect, it } from 'bun:test'
+import { Database } from 'bun:sqlite'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { Session, SyncEvent } from '@hapi/protocol/types'
 import { Store } from '../store'
 import type { EventPublisher } from './eventPublisher'
@@ -175,6 +179,49 @@ describe('SessionCache.reconcileKeepaliveIdle', () => {
         cache.recordAgentProgress(sessionId, later)
         cache.reconcileKeepaliveIdle(later, window)
         expect(cache.getSession(sessionId)!.metadata?.lifecycleState).toBe('running')
+    })
+
+    it('survives a hub restart: recent assistant output is not read as idle', () => {
+        // Needs a file-backed store so the human-turn clock can be backdated
+        // directly; `touchSessionUpdatedAt` is forward-only by design.
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-1820-'))
+        const dbPath = join(dir, 'hapi.db')
+        const store = new Store(dbPath)
+        const cache = new SessionCache(store, createPublisher([]))
+        const sessionId = cache.getOrCreateSession(
+            'tag-restart',
+            { path: '/tmp/project', host: 'localhost', flavor: 'cursor', lifecycleState: 'running' },
+            null,
+            'default'
+        ).id
+
+        // Assistant output just now. This deliberately does NOT move
+        // `updatedAt` (sessionHandlers bumps that for human turns only), so
+        // the message row is the only durable record of it.
+        store.messages.addMessage(
+            sessionId,
+            { role: 'agent', content: { type: 'text', text: 'still working' } }
+        )
+        // Last human turn was 80h ago.
+        const raw = new Database(dbPath)
+        raw.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?')
+            .run(Date.now() - 80 * HOUR, sessionId)
+        raw.close()
+
+        // Hub restart: fresh cache over the same store, empty progress map.
+        const restarted = new SessionCache(store, createPublisher([]))
+        restarted.reloadAll()
+        restarted.handleSessionAlive({ sid: sessionId, time: Date.now() })
+
+        // Seeded from the message, not from the 80h-old `updatedAt`.
+        expect(restarted.reconcileKeepaliveIdle(Date.now(), window)).toEqual([])
+        expect(restarted.getSession(sessionId)!.metadata?.lifecycleState).toBe('running')
+
+        // ...and once that output is itself stale, it does get marked.
+        expect(restarted.reconcileKeepaliveIdle(Date.now() + 13 * HOUR, window)).toEqual([sessionId])
+        expect(restarted.getSession(sessionId)!.metadata?.lifecycleState).toBe('idle')
+
+        rmSync(dir, { recursive: true, force: true })
     })
 
     it('does nothing when the window is disabled', () => {
