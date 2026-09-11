@@ -1125,11 +1125,6 @@ export function getVisibleSessionPreview(
     return visible
 }
 
-export function shouldShowPinnedDivider(sessions: SessionSummary[], index: number): boolean {
-    if (index <= 0 || index >= sessions.length) return false
-    return Boolean(sessions[index - 1]?.pinned) && !sessions[index]?.pinned
-}
-
 export function SessionListSearch(props: {
     value: string
     onChange: (value: string) => void
