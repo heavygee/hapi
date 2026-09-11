@@ -974,10 +974,12 @@ layers:
 
   # tiann/hapi#881 / PR #1607 — sidebar project-group right-click / long-press context menu
   # (Copy Path, Archive All, Delete Group) + hub requireArchived + atomic delete-archived.
-  # Thin tip on upstream/main (1 commit). Hub+web → remat needs --build-web + hapi-restart-hub.
-  # Worktree: ~/coding/hapi/worktrees/soup-1607-group-menu @ soup/1607-project-group-menu
-  # Tip: 3653ddbe6 — re-thin 2026-09-11 after upstream CONFLICTING; keep main useAnchoredMenu align API
-  - branch: soup/1607-project-group-menu
+  # Upstream-thin: soup/1607-project-group-menu @ 3653ddbe6 (1 commit on upstream/main).
+  # Soup union: driver/1607-project-group-menu — cherry-pick onto live driver tip (SessionList /
+  # blocked-ack / client.ts union; adds useAnchoredMenu for ProjectGroupActionMenu).
+  # Worktree: ~/coding/hapi/worktrees/soup-1607-group-menu
+  # Tip: b6f90c596 — remat needs --build-web + hapi-restart-hub (hub+web)
+  - branch: driver/1607-project-group-menu
 
   # tiann/hapi#1772 — combined session list filters (unread + scratchlist + date) in one menu;
   # GET /api/sessions/scratchlist-status + SSE resync invalidation for scratchlist membership.
