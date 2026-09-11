@@ -701,6 +701,12 @@ export default {
   'files.sort.smallest': '最小优先',
   'files.sort.largest': '最大优先',
 
+  // 文件右键菜单
+  'file.menu.title': '文件操作',
+  'file.menu.copyPath': '复制路径',
+  'file.menu.copyAbsolutePath': '复制绝对路径',
+  'file.menu.addToComposer': '添加到对话框',
+
   // File page
   'file.page.fallbackName': '文件',
   'file.page.unknownPath': '未知路径',
@@ -1025,7 +1031,7 @@ export default {
   'settings.general.peerSpawn.model': '对等 spawn 模型',
   'settings.general.peerSpawn.model.desc': '所选对等 spawn 智能体的默认模型 id（按风味；失焦后保存）。',
   'settings.general.sessionSummary.title': '会话状态摘要',
-  'settings.general.sessionSummary.description': '选择是否让受支持的智能体输出机器可读的状态摘要，以及是否在聊天中显示。',
+  'settings.general.sessionSummary.description': '选择是否让受支持的智能体输出状态摘要，以及是否在聊天中显示。',
   'settings.general.sessionSummaryContract': '输出状态摘要',
   'settings.general.sessionSummaryContract.desc': '默认关闭。开启后会要求受支持的智能体在每轮结束时追加 AGENT_NOTIFY_SUMMARY 行，供通知和后台工作记录使用，对新开/恢复的会话生效。(已支持：Claude、Codex、OpenCode、远程 Grok；暂不支持：本地 Grok、Cursor)',
   'settings.general.operatorDock': '显示操作员工具',

@@ -4,6 +4,7 @@ import { configuration } from '@/configuration';
 import { logger } from '@/ui/logger';
 import { getHappyCliCommand } from '@/utils/spawnHappyCLI';
 import { shellJoin } from '@/modules/common/shellQuote';
+import { LOCAL_PERMISSION_TIMEOUT_SECONDS } from '@/claude/utils/localPermissionProtocol';
 import {
     hapiClaudePreToolUseGuardCommand,
     resolveHapiToolingRoot
@@ -35,6 +36,10 @@ type HookSettings = {
         SessionStart: HookCommandConfig[];
         UserPromptSubmit?: HookCommandConfig[];
         PreToolUse?: HookCommandConfig[];
+        PermissionRequest?: HookCommandConfig[];
+        PostToolUse?: HookCommandConfig[];
+        PostToolUseFailure?: HookCommandConfig[];
+        SessionEnd?: HookCommandConfig[];
     };
 };
 
@@ -61,19 +66,22 @@ export type HookSettingsOptions = {
     includePreToolUse?: boolean;
     /** When set and cwd resolves to hapi, inject project-scoped PreToolUse guards. */
     workingDirectory?: string;
+    /** Mirror main-session permissions without suppressing the native dialog. Local only. */
+    includeLocalPermissions?: boolean;
 };
 
 /**
  * Build Claude Code hook settings.
- * Soup union: upstream trackPermissionMode + includePreToolUse, plus fork
- * workingDirectory PreToolUse Bash guard when cwd is under a hapi tree.
+ * Soup union: upstream trackPermissionMode + includeLocalPermissions,
+ * fork includePreToolUse + workingDirectory PreToolUse Bash guard.
  */
 export function buildHookSettings(
     command: string,
     hooksEnabled?: boolean,
     trackPermissionMode?: boolean,
     includePreToolUse?: boolean,
-    workingDirectory?: string
+    workingDirectory?: string,
+    includeLocalPermissions?: boolean
 ): HookSettings {
     const commandHook = {
         hooks: [
@@ -86,22 +94,28 @@ export function buildHookSettings(
     const hooks: HookSettings['hooks'] = {
         SessionStart: [{ matcher: '*', ...commandHook }]
     };
-    if (trackPermissionMode) {
+    if (trackPermissionMode || includeLocalPermissions) {
         hooks.UserPromptSubmit = [commandHook];
         hooks.PreToolUse = [{ matcher: '*', ...commandHook }];
     }
 
     if (includePreToolUse) {
-        // matcher '*' matches every tool name (claude's matcher: !q || q==='*' → all).
-        // The same forwarder command serves both events; it branches on the
-        // stdin hook_event_name. The long timeout keeps the (blocking) hook
-        // alive while the user approves on their phone.
         hooks.PreToolUse = [
             {
                 matcher: '*',
                 hooks: [{ type: 'command', command, timeout: PRE_TOOL_USE_TIMEOUT_SECONDS }]
             }
         ];
+    }
+
+    if (includeLocalPermissions) {
+        hooks.PermissionRequest = [{
+            matcher: '*',
+            hooks: [{ type: 'command', command, timeout: LOCAL_PERMISSION_TIMEOUT_SECONDS }]
+        }];
+        hooks.PostToolUse = [{ matcher: '*', ...commandHook }];
+        hooks.PostToolUseFailure = [{ matcher: '*', ...commandHook }];
+        hooks.SessionEnd = [{ matcher: '*', ...commandHook }];
     }
 
     const hapiRoot = workingDirectory ? resolveHapiToolingRoot(workingDirectory) : null;
@@ -158,7 +172,8 @@ export function generateHookSettingsFile(
         options.hooksEnabled,
         options.trackPermissionMode,
         options.includePreToolUse,
-        options.workingDirectory
+        options.workingDirectory,
+        options.includeLocalPermissions
     );
 
     writeFileSync(filepath, JSON.stringify(settings, null, 4));

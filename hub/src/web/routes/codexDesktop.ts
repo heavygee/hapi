@@ -2099,7 +2099,9 @@ function importSingleCodexSession(options: {
         } else {
             options.store.sessions.touchSessionUpdatedAt(sessionId, latestMessageCreatedAt, options.namespace)
         }
-        if (!created) {
+        if (created) {
+            engine?.handleRealtimeEvent({ type: 'session-updated', sessionId })
+        } else {
             emitImportedMessageEvents(engine, sessionId, appendedMessages)
         }
 

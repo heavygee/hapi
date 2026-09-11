@@ -35,6 +35,7 @@ import { backoff } from '@/utils/time'
 import { getInvokedCwd } from '@/utils/invokedCwd'
 import { RpcHandlerManager } from './rpc/RpcHandlerManager'
 import { registerCommonHandlers } from '../modules/common/registerCommonHandlers'
+import { setAgyCatalogChangeListener } from '../modules/common/agyModels'
 import {
     listOpencodeModelsForCwd,
     type ListOpencodeModelsForCwdRequest,
@@ -137,6 +138,12 @@ export class ApiMachineClient {
         })
 
         registerCommonHandlers(this.rpcHandlerManager, getInvokedCwd())
+
+        // Only the machine daemon answers `<machineId>:listAgyModels`, so it is
+        // the one process that can tell the hub its catalog moved.
+        setAgyCatalogChangeListener(() => {
+            this.socket.emit('machine-agy-models-changed', { machineId: this.machine.id })
+        })
 
         this.rpcHandlerManager.registerHandler<unknown, AgentAvailabilityResponse>(
             RPC_METHODS.AgentAvailability,
@@ -874,6 +881,8 @@ export class ApiMachineClient {
 
     shutdown(): void {
         this.stopKeepAlive()
+        // The listener holds this client, and the socket is about to close.
+        setAgyCatalogChangeListener(null)
         if (this.socket) {
             this.socket.close()
         }

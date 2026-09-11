@@ -48,6 +48,21 @@ describe('buildHookSettings PTY approvals', () => {
     });
 });
 
+describe('buildHookSettings local approvals', () => {
+    it('adds a long-lived PermissionRequest hook and observation-only lifecycle hooks', () => {
+        const settings = buildHookSettings('forward-cmd', undefined, false, false, undefined, true);
+        expect(settings.hooks.PermissionRequest?.[0].matcher).toBe('*');
+        expect(settings.hooks.PostToolUse).toBeDefined();
+        expect(settings.hooks.PostToolUseFailure).toBeDefined();
+        expect(settings.hooks.SessionEnd).toBeDefined();
+        expect(settings.hooks.PermissionRequest?.[0].hooks[0]).toEqual({
+            type: 'command',
+            command: 'forward-cmd',
+            timeout: 3600
+        });
+    });
+});
+
 describe('generateHookSettingsFile', () => {
     const created: string[] = [];
     let fakeHapiRoot: string | null = null;
