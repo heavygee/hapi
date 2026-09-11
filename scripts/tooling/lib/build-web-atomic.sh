@@ -59,6 +59,17 @@ build_web_atomic() {
 {"driverHead":"$head_sha","builtAt":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","builtBy":"build_web_atomic"}
 EOF
 
+    # Regenerate hub embed manifest so hub-artifact / single-exe compiles stay
+    # lockstep with the new dist hashes (2026-09-11 Teemo upgrade toast class).
+    local hub="$driver/hub"
+    if [[ -f "$hub/package.json" ]] && grep -q '"generate:embedded-web-assets"' "$hub/package.json" 2>/dev/null; then
+        echo "Regenerating hub embeddedAssets.generated.ts from $dist..."
+        if ! (cd "$hub" && "$bun" run generate:embedded-web-assets); then
+            echo "ERROR: embedded asset manifest regen failed after web swap" >&2
+            return 1
+        fi
+    fi
+
     echo "Web bundle swapped atomically: $dist"
     echo "Previous bundle: $prev (use hapi-driver-rollback-web to restore)"
 }
