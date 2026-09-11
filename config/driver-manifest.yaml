@@ -988,9 +988,10 @@ layers:
 
   # tiann/hapi#1605 — Claude live model catalog (list_models) + effort/context-window wiring.
   # Upstream PR MERGEABLE/CLEAN (junmo-kim). Thin tip on upstream/main:
-  #   soup/1605-claude-model-catalog @ 61475f769 (merge of upstream/pr-1605).
+  #   soup/1605-claude-model-catalog @ 0964042d5 — 1 commit / 55 files (squashed merge noise).
   # Soup union (driver tip; Claude-only SessionChat — no AGY catch-up):
   #   driver/claude-model-catalog @ c84fc1914 — 1 commit / 55 files; merge-tree clean.
   # Worktrees: soup-1605-claude-models + soup-1605-claude-union.
   # Hub+cli+web → remat needs --build-web + hapi-restart-hub. Drop when #1605 merges.
+  # Wave slot 1 (before #1607 / #1772). Remat owner: tooling/meta — no self-remat.
   - branch: driver/claude-model-catalog
