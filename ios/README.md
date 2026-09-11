@@ -140,6 +140,25 @@ TEST_RUNNER_HAPI_TOOL_CAPTURE=/tmp/hapi-tool-review \
     -only-testing:HapiTests/ToolTranscriptPresentationTests
 ```
 
+### Home filtering
+
+Home keeps a fixed Sessions title: hub switching on the leading edge,
+Filters and New Session on the trailing edge. The native menu currently
+offers machine single-selection; only applied filters add a summary line.
+Filters are transient per home/hub and never select a new session's machine.
+Options/counts come from all session summaries, including historical machines;
+the online roster supplies names only. Missing names use a labeled short ID.
+Session-count updates do not reorder options or reset the list's scroll position.
+
+App-hosted filter tests use observable in-memory stores (no network or pairing).
+Optional layout captures are test specimens, not live or App Store screenshots:
+
+```sh
+TEST_RUNNER_HAPI_HOME_CAPTURE=/tmp/hapi-home-review \
+  ios/scripts/test-transcript.sh -only-testing:HapiTests/SessionListFilterTests \
+    -only-testing:HapiTests/HomeFilterPresentationTests
+```
+
 ### Linux verification (no Mac needed)
 
 `ios/scripts/linux-test.sh` compiles and tests the non-UI targets
@@ -196,12 +215,14 @@ ios/
                            Features/  Pairing/ (welcome, VisionKit QR scan,
                                       manual entry, shared confirm + error
                                       states), Home/ (session list host with
-                                      hub switcher + connection dot in the
-                                      toolbar), Sessions/ (SessionListView:
+                                      leading hub switcher, native filter
+                                      menu + new-session action; one degraded
+                                      connection notice below navigation),
+                                      Sessions/ (SessionListView:
                                       status dot with thinking pulse, title
                                       cascade, flavor·machine·worktree meta,
                                       pending/todo badges, unread dots,
-                                      pinned section, machine filter chips,
+                                      pinned section, applied-filter summary,
                                       pull-to-refresh, long-press
                                       pin/archive; row taps push the chat),
                                       Chat/ (M2f read-only chat: ChatModel —
