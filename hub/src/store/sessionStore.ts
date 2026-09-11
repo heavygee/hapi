@@ -3,6 +3,7 @@ import type { Database } from 'bun:sqlite'
 import type { StoredSession, VersionedUpdateResult } from './types'
 import {
     clearSessionLastNotify,
+    deleteArchivedSessions,
     deleteSession,
     getOrCreateSession,
     getSession,
@@ -162,5 +163,9 @@ export class SessionStore {
 
     deleteSession(id: string, namespace: string): boolean {
         return deleteSession(this.db, id, namespace)
+    }
+
+    deleteArchivedSessions(ids: string[], namespace: string): StoredSession[] | null {
+        return deleteArchivedSessions(this.db, ids, namespace)
     }
 }
