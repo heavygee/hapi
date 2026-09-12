@@ -1789,15 +1789,31 @@ export class SessionCache {
             if (again !== undefined) return again
 
             const existing = this.store.sessionJobs.get(ownerSessionId, jobKey)
-            if (!existing || existing.status !== 'running') {
+            const persistIdentity = (): string => {
+                // Free-key / same-generation returns still need an explicit
+                // A/batch→batch map so a later B→C collision remap can compose
+                // inherited redirects (empty A→B, late register, then B→C).
+                if (
+                    !this.recordJobKeyRedirects(
+                        ownerSessionId,
+                        requestedSessionId,
+                        [{ fromKey: jobKey, toKey: jobKey }],
+                        namespace
+                    )
+                ) {
+                    throw new Error('Failed to persist late job-key redirect')
+                }
                 return jobKey
+            }
+            if (!existing || existing.status !== 'running') {
+                return persistIdentity()
             }
             // Same supervised generation may correct via redirected session id.
             if (
                 incomingRunId !== undefined
                 && existing.runId === incomingRunId
             ) {
-                return jobKey
+                return persistIdentity()
             }
 
             const toKey = this.store.sessionJobs.allocateRemappedKey(
