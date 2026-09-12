@@ -133,7 +133,7 @@ private struct ToolInputSection: View {
             if !items.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                        Text("\(item.glyph) \(item.text)")
+                        Text(verbatim: "\(item.glyph) \(item.text)")
                             .font(.footnote)
                     }
                 }
@@ -246,7 +246,7 @@ private struct QuestionsReadOnlyView: View {
                                 .font(.subheadline)
                         }
                         ForEach(Array(optionLabels(question).enumerated()), id: \.offset) { _, label in
-                            Text("◦ \(label)")
+                            Text(verbatim: "◦ \(label)")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                                 .padding(.leading, 8)

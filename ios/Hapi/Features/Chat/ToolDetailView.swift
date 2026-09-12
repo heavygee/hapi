@@ -150,7 +150,7 @@ struct ToolDetailSheet: View {
             }
             .disabled((inspection.selectedIndex ?? 0) == 0)
             Spacer()
-            Text("\((inspection.selectedIndex ?? 0) + 1) / \(inspection.siblingIDs.count)")
+            Text(verbatim: "\((inspection.selectedIndex ?? 0) + 1) / \(inspection.siblingIDs.count)")
                 .font(.footnote.monospacedDigit())
                 .accessibilityLabel(String(format: String(localized: "Tool %lld of %lld"),
                                            Int64((inspection.selectedIndex ?? 0) + 1), Int64(inspection.siblingIDs.count)))

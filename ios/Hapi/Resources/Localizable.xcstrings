@@ -1775,6 +1775,17 @@
         }
       }
     },
+    "Delivery outcome unknown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "发送结果未知"
+          }
+        }
+      }
+    },
     "Denied" : {
       "extractionState" : "manual",
       "localizations" : {
