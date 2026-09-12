@@ -173,6 +173,11 @@ export async function runCli(): Promise<void> {
         return
     }
 
+    if (args[0] === '-v' || args[0] === '--version') {
+        console.log(`hapi version: ${packageJson.version}`)
+        return
+    }
+
     // Hub-artifact binaries are runner-only (empty embedded web). Only redirect
     // systemd `runner start` / `start-sync` so `hapi hub` / doctor stay on the
     // general-purpose entrypoint.
