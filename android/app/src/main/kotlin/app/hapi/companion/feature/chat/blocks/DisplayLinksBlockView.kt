@@ -56,15 +56,24 @@ fun DisplayLinksBlockView(block: DisplayLinksBlock, modifier: Modifier = Modifie
             for (url in block.urls) {
                 val urlTitle = url.title
                 val navigable = runCatching {
-                    val uri = url.href.toUri()
-                    uri.scheme.equals("http", ignoreCase = true) ||
-                        uri.scheme.equals("https", ignoreCase = true)
+                    // Android Uri.parse is lenient; still mirror http(s) gate used by protocol.
+                    val forScheme = url.href.replace(" ", "%20").toUri()
+                    forScheme.scheme.equals("http", ignoreCase = true) ||
+                        forScheme.scheme.equals("https", ignoreCase = true)
                 }.getOrDefault(false)
                 if (navigable) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { context.openUrl(url.href) }
+                            .clickable {
+                                // Prefer space-escaped href for ACTION_VIEW; keep card text original.
+                                val openHref = if (url.href.contains(' ')) {
+                                    url.href.replace(" ", "%20")
+                                } else {
+                                    url.href
+                                }
+                                context.openUrl(openHref)
+                            }
                             .padding(10.dp),
                     ) {
                         Text(

@@ -25,6 +25,10 @@ describe('isDisplayableHttpHref', () => {
         expect(isDisplayableHttpHref('http://example.com/path')).toBe(true)
     })
 
+    it('accepts paths with unescaped spaces (web URL parity)', () => {
+        expect(isDisplayableHttpHref('https://example.com/report Q3.pdf')).toBe(true)
+    })
+
     it.each([
         'javascript:alert(1)',
         'data:text/html,xss',
@@ -50,6 +54,11 @@ describe('parseDisplayLinksInput', () => {
         const urls = parseDisplayLinksInput([{ href, title: 'Issue 1516' }])
         expect(urls).toEqual([{ href: 'https://github.com/tiann/hapi/issues/1516', title: 'Issue 1516' }])
         expect(urls[0]?.href).toBe(href)
+    })
+
+    it('keeps unescaped spaces in stored href bytes', () => {
+        const href = 'https://example.com/report Q3.pdf'
+        expect(parseDisplayLinksInput([{ href, title: 'Q3' }])).toEqual([{ href, title: 'Q3' }])
     })
 
     it('accepts a bare href string in the urls array', () => {
