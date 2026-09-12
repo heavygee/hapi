@@ -421,6 +421,55 @@ describe('session list search helpers', () => {
         expect(sessionMatchesQuery(session, normalizeSearch('bot*review'), 'desktop')).toBe(false)
         expect(sessionMatchesQuery(session, normalizeSearch('bot review'), 'desktop')).toBe(true)
     })
+
+    // Dogfood: query "Home" looked dead because every Linux session path is
+    // under /home/<user>/… and machine label "homelab" also substring-matches.
+    it('does not treat the OS home prefix or homelab machine label as a Home hit', () => {
+        const meta = makeSession({
+            id: 'meta-triage',
+            metadata: {
+                path: '/home/heavygee/coding/hapi',
+                name: 'meta HAPI triage/problems'
+            }
+        })
+        const homeAssistant = makeSession({
+            id: 'd755080b',
+            metadata: {
+                path: '/home/heavygee/coding/home-assistant',
+                name: 'Home Assistant'
+            }
+        })
+        const homeLabOnly = makeSession({
+            id: 'on-homelab',
+            metadata: {
+                path: '/work/docs',
+                name: 'Peer docs'
+            }
+        })
+
+        const query = normalizeSearch('Home')
+        expect(sessionMatchesQuery(meta, query, 'oos')).toBe(false)
+        expect(sessionMatchesQuery(meta, query, 'homelab')).toBe(false)
+        expect(sessionMatchesQuery(homeLabOnly, query, 'homelab')).toBe(false)
+        expect(sessionMatchesQuery(homeAssistant, query, 'oos')).toBe(true)
+        expect(sessionMatchesQuery(homeAssistant, query, 'homelab')).toBe(true)
+    })
+
+    it('still matches intentional path and machine queries after home-prefix stripping', () => {
+        const session = makeSession({
+            id: 'session-1',
+            metadata: {
+                path: '/home/heavygee/coding/hapi',
+                name: 'upstream issue/pr discovery'
+            }
+        })
+
+        expect(sessionMatchesQuery(session, normalizeSearch('hapi'), 'oos')).toBe(true)
+        expect(sessionMatchesQuery(session, normalizeSearch('coding'), 'oos')).toBe(true)
+        expect(sessionMatchesQuery(session, normalizeSearch('heavygee'), 'oos')).toBe(true)
+        expect(sessionMatchesQuery(session, normalizeSearch('oos'), 'oos')).toBe(true)
+        expect(sessionMatchesQuery(session, normalizeSearch('homelab'), 'homelab')).toBe(true)
+    })
 })
 
 describe('session list time filter helpers', () => {

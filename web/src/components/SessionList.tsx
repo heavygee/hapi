@@ -528,25 +528,47 @@ export function normalizeSearch(value: string | null | undefined): string {
     return (value ?? '').trim().toLowerCase()
 }
 
+/** Drop the OS user-home root segment so "home" does not match every ~/ path. */
+export function stripOsHomeRootForSearch(path: string): string {
+    return path
+        .replace(/\\/g, '/')
+        .replace(/^\/home\//i, '/')
+        .replace(/^\/users\//i, '/')
+        .replace(/^[a-z]:\/users\//i, '/')
+}
+
+/** Plain-query match on an alphanumeric token boundary (avoids home⊂homelab). */
+export function searchFieldMatchesQuery(value: string, query: string): boolean {
+    if (!query) return true
+    const haystack = value.toLowerCase()
+    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`).test(haystack)
+}
+
 export function sessionMatchesQuery(session: SessionSummary, query: string, machineLabel: string): boolean {
     if (!query) return true
-    const searchableParts = [
+    const textParts = [
         getSessionTitle(session),
         getWorktreeSessionLabel(session),
         session.id,
-        session.metadata?.path,
-        session.metadata?.worktree?.basePath,
-        session.metadata?.worktree?.worktreePath,
         session.metadata?.name,
         session.metadata?.summary?.text,
         session.metadata?.flavor,
         machineLabel,
     ]
+    const pathParts = [
+        session.metadata?.path,
+        session.metadata?.worktree?.basePath,
+        session.metadata?.worktree?.worktreePath,
+    ]
+        .filter((part): part is string => typeof part === 'string' && part.length > 0)
+        .map(stripOsHomeRootForSearch)
+    const searchableParts = [...textParts, ...pathParts]
         .filter((part): part is string => typeof part === 'string' && part.length > 0)
     if (isWildcardSearch(query)) {
         return searchableParts.some((part) => matchesSearchQuery(part, query))
     }
-    return searchableParts.join('\n').toLowerCase().includes(query)
+    return searchableParts.some((part) => searchFieldMatchesQuery(part, query))
 }
 
 

@@ -280,4 +280,38 @@ describe('SessionList session filter menu', () => {
         expect(screen.getByTitle('/work/unread')).toBeTruthy()
         expect(screen.queryByTitle('/work/seen')).toBeNull()
     })
+
+    it('ANDs text search with the unread lens instead of replacing it', () => {
+        window.localStorage.setItem('hapi.sessionLastSeen.v1', JSON.stringify({
+            'home-unread': 0,
+            'other-unread': 0,
+            'home-seen': 2_000
+        }))
+        renderSessionList([
+            makeSession({
+                id: 'home-unread',
+                updatedAt: 500,
+                metadata: { path: '/home/heavygee/coding/home-assistant', name: 'Home Assistant' }
+            }),
+            makeSession({
+                id: 'other-unread',
+                updatedAt: 400,
+                metadata: { path: '/home/heavygee/coding/hapi', name: 'meta HAPI triage/problems' }
+            }),
+            makeSession({
+                id: 'home-seen',
+                updatedAt: 1_000,
+                metadata: { path: '/home/heavygee/coding/home-assistant-docs', name: 'Home docs' }
+            })
+        ])
+
+        fireEvent.click(screen.getByRole('button', { name: 'Filter sessions' }))
+        fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Unread' }))
+        fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
+        fireEvent.change(screen.getByPlaceholderText(SEARCH_PLACEHOLDER), { target: { value: 'Home' } })
+
+        expect(screen.getByTitle('/home/heavygee/coding/home-assistant')).toBeTruthy()
+        expect(screen.queryByTitle('/home/heavygee/coding/hapi')).toBeNull()
+        expect(screen.queryByTitle('/home/heavygee/coding/home-assistant-docs')).toBeNull()
+    })
 })
