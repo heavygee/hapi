@@ -257,16 +257,23 @@ private struct ToolDetailHeader: View {
         VStack(alignment: .leading, spacing: 10) {
             Label(presentation.title, systemImage: presentation.icon)
                 .font(.headline).textSelection(.enabled)
-            HStack(spacing: 8) {
-                ToolStatusIndicator(state: block.tool.state)
-                Text(statusLabel).font(.footnote).foregroundStyle(.secondary)
-            }
-            if let permission = block.tool.permission {
-                PermissionStateRow(permission: permission)
-                if permission.status == .pending && !permissionActionsInline {
-                    Text("Close details to approve or answer in the conversation.")
-                        .font(.footnote).foregroundStyle(.secondary)
+            if isQuestionDetailsTool(block.tool.name) {
+                let state = QuestionCardState(tool: block.tool, details: questionToolDetails(block.tool), override: nil)
+                Label(state.title, systemImage: state.icon)
+                    .font(.footnote)
+                    .foregroundStyle(state == .failed ? Color.red : .secondary)
+            } else {
+                HStack(spacing: 8) {
+                    ToolStatusIndicator(state: block.tool.state)
+                    Text(statusLabel).font(.footnote).foregroundStyle(.secondary)
                 }
+                if let permission = block.tool.permission {
+                    PermissionStateRow(permission: permission)
+                }
+            }
+            if block.tool.permission?.status == .pending && !permissionActionsInline {
+                Text("Close details to approve or answer in the conversation.")
+                    .font(.footnote).foregroundStyle(.secondary)
             }
             if let path = toolFilePath(block.tool) {
                 Text(path).font(.footnote.monospaced()).textSelection(.enabled)

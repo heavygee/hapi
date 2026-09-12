@@ -4,7 +4,7 @@ import HapiUI
 import SwiftUI
 
 /// A bounded activity summary. Ordinary tools open the shared inspector;
-/// sidechains open their own transcript. Only approvals keep actions inline.
+/// sidechains open their own transcript. Questions and approvals stay inline.
 struct ToolCallBlockView: View {
     let block: ToolCallBlock
     let basePath: String?
@@ -15,6 +15,15 @@ struct ToolCallBlockView: View {
     @Environment(\.openChatTool) private var openTool
 
     var body: some View {
+        if isQuestionDetailsTool(block.tool.name) {
+            QuestionToolCard(block: block)
+        } else {
+            activityCard
+        }
+    }
+
+    @ViewBuilder
+    private var activityCard: some View {
         let presentation = toolSummaryPresentation(block.tool, basePath: basePath)
         VStack(alignment: .leading, spacing: 0) {
             headerRow(presentation)
@@ -57,15 +66,13 @@ struct ToolCallBlockView: View {
                 .foregroundStyle(.orange)
                 .padding(.horizontal, 10)
                 .padding(.top, 6)
-            if !isAskUserQuestionToolName(block.tool.name) && !isRequestUserInputToolName(block.tool.name) {
-                Button { openTool?(block) } label: {
-                    Label("View full input", systemImage: "arrow.up.right.square")
-                        .font(typography.toolSubtitleFont)
-                        .frame(minHeight: 44)
-                }
-                .padding(.horizontal, 10)
+            Button { openTool?(block) } label: {
+                Label("View full input", systemImage: "arrow.up.right.square")
+                    .font(typography.toolSubtitleFont)
+                    .frame(minHeight: 44)
             }
-            PendingPermissionFooter(
+            .padding(.horizontal, 10)
+            PermissionActionsRow(
                 tool: block.tool,
                 requestId: permission.id,
                 interactions: interactions

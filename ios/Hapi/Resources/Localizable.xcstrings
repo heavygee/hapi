@@ -873,6 +873,17 @@
         }
       }
     },
+    "Answered" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已回答"
+          }
+        }
+      }
+    },
     "Answers" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1012,6 +1023,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "等待审批"
+          }
+        }
+      }
+    },
+    "Awaiting response" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等待回答"
           }
         }
       }
@@ -1815,6 +1837,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "游离 HEAD"
+          }
+        }
+      }
+    },
+    "Details" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "详情"
           }
         }
       }
@@ -2941,6 +2974,17 @@
         }
       }
     },
+    "Next question" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下一题"
+          }
+        }
+      }
+    },
     "Next tool" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3315,6 +3359,17 @@
         }
       }
     },
+    "Optional" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可选"
+          }
+        }
+      }
+    },
     "Options" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3322,6 +3377,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "选项"
+          }
+        }
+      }
+    },
+    "Other answer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其他答案"
           }
         }
       }
@@ -3612,6 +3678,17 @@
         }
       }
     },
+    "Previous question" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上一题"
+          }
+        }
+      }
+    },
     "Previous tool" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3722,6 +3799,50 @@
         }
       }
     },
+    "Question %lld of %lld" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %1$lld 题，共 %2$lld 题"
+          }
+        }
+      }
+    },
+    "Question canceled" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "问题已取消"
+          }
+        }
+      }
+    },
+    "Question failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "问题处理失败"
+          }
+        }
+      }
+    },
+    "Question handled" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已处理"
+          }
+        }
+      }
+    },
     "Questions & Answers" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3806,6 +3927,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "思考中…"
+          }
+        }
+      }
+    },
+    "Recommended" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "推荐"
           }
         }
       }
@@ -4191,6 +4323,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "选择"
+          }
+        }
+      }
+    },
+    "Select all that apply" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可多选"
           }
         }
       }
@@ -4712,6 +4855,28 @@
         }
       }
     },
+    "Submit answer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提交回答"
+          }
+        }
+      }
+    },
+    "Submitting answer…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在提交回答…"
+          }
+        }
+      }
+    },
     "Team: %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4950,6 +5115,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此笔记的附件配额已用完"
+          }
+        }
+      }
+    },
+    "This question could not be displayed. Open details to inspect the request." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法显示这个问题。请打开详情查看原始请求。"
           }
         }
       }
@@ -5306,6 +5482,17 @@
         }
       }
     },
+    "View full questions and answers" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查看完整问题与回答"
+          }
+        }
+      }
+    },
     "View image" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5467,6 +5654,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "预写日志"
+          }
+        }
+      }
+    },
+    "Your answer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的回答"
           }
         }
       }

@@ -126,6 +126,27 @@ historical results; live permission answers take precedence. Answered cards
 avoid duplicate results, but retain errors and the full input/result/answers
 under **Source**. Answer submission remains in the conversation.
 
+Synchronous questions use a dedicated inline card, not the orange approval
+footer. Only one question is shown at a time: single-selection taps advance
+to the next question, while multiple-selection and text questions use **Next
+question**. **Previous question** retains all choices and notes; the last step
+always requires **Submit answer**. Recommended labels are display-only badges,
+never default selections or rewritten wire values. Other-answer/note fields
+expand on demand; text-only questions and prefilled drafts show them immediately.
+All form state survives transcript-cell recycling for the retained request.
+Successful records collapse to answer summaries; missing recorded answers are
+shown as handled, not inferred from local drafts. Ordinary approvals and the
+asynchronous question path are unchanged.
+
+Question tests include pure navigation/answer-building checks and app-hosted
+layout/recycling specimens (fake data; no live agent or saved credentials):
+
+```sh
+TEST_RUNNER_HAPI_QUESTION_CAPTURE=/tmp/hapi-question-review \
+  ios/scripts/test-transcript.sh -only-testing:HapiTests/QuestionAnswerDraftTests \
+    -only-testing:HapiTests/QuestionCardPresentationTests
+```
+
 Inspection pauses transcript tail-following and hidden history paging, without
 opening another SSE subscription. Closing returns to the reading anchor;
 **Back to latest** explicitly resumes following. Trimmed records remain visible
