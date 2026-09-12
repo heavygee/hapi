@@ -1126,7 +1126,6 @@ export function getVisibleSessionPreview(
     return visible
 }
 
-/** Sidebar search dictation: strip STT punctuation + join spelled letters. */
 export function SessionListSearch(props: {
     value: string
     onChange: (value: string) => void
