@@ -546,6 +546,70 @@ describe('mergeSessions job redirect through SessionCache (#1404)', () => {
         expect(store.sessionJobs.get(cId, 'batch.bbbbbbbb')?.label).toBe('a-batch')
     })
 
+    it('honors identity redirect on corrective PUT without runId (no second key)', async () => {
+        const { store, cache } = setup()
+        const aId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+        const bId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+        cache.getOrCreateSession(
+            'tag-corr-a',
+            { path: '/a', host: 'local', flavor: 'codex' },
+            null,
+            'default',
+            undefined,
+            undefined,
+            undefined,
+            aId
+        )
+        cache.getOrCreateSession(
+            'tag-corr-b',
+            { path: '/b', host: 'local', flavor: 'codex' },
+            null,
+            'default',
+            undefined,
+            undefined,
+            undefined,
+            bId
+        )
+
+        store.sessionJobs.upsert(aId, 'batch', {
+            label: 'a-batch',
+            status: 'running',
+            runId: 'run-a',
+            startedAt: 1_000
+        }, 1_000)
+
+        await cache.mergeSessionHistory(aId, bId, 'default', { mergeAgentState: false })
+        expect(cache.refreshSession(bId)?.metadata?.jobKeyRedirects).toEqual({
+            [`${aId}/batch`]: 'batch'
+        })
+
+        // Corrective job set from merged-away A without runId must keep the
+        // original row (and its runId), not allocate batch.<A>.
+        const key = cache.resolveAttachedJobKeyForUpsert(
+            aId,
+            bId,
+            'batch',
+            'default',
+            undefined
+        )
+        expect(key).toBe('batch')
+        const upserted = store.sessionJobs.upsert(bId, key, {
+            label: 'a-batch-corrected',
+            status: 'running',
+            startedAt: 500
+        }, 2_000)
+        expect(upserted.outcome).toBe('upserted')
+        if (upserted.outcome !== 'upserted') throw new Error('unreachable')
+        expect(upserted.job.key).toBe('batch')
+        expect(upserted.job.runId).toBe('run-a')
+        expect(upserted.job.label).toBe('a-batch-corrected')
+        expect(upserted.job.startedAt).toBe(500)
+        expect(store.sessionJobs.get(bId, 'batch.aaaaaaaa')).toBeNull()
+        expect(cache.refreshSession(bId)?.metadata?.jobKeyRedirects).toEqual({
+            [`${aId}/batch`]: 'batch'
+        })
+    })
+
     it('rolls back the job-row move when redirect metadata write fails', () => {
         const { store, cache } = setup()
         const { oldSession, newSession } = makeSessions(cache)
