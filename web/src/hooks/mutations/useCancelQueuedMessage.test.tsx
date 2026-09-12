@@ -102,7 +102,10 @@ describe('useCancelQueuedMessage', () => {
         })
 
         expect(storeMocks.removeOptimisticMessage).toHaveBeenCalledWith('session-1', 'local-1')
-        expect(storeMocks.appendOptimisticMessage).not.toHaveBeenCalled()
+        expect(storeMocks.appendOptimisticMessage).toHaveBeenCalledWith('session-1', expect.objectContaining({
+            deliveryState: 'indeterminate',
+            queueDismissed: true,
+        }))
         expect(storeMocks.markMessagesConsumed).not.toHaveBeenCalled()
     })
 

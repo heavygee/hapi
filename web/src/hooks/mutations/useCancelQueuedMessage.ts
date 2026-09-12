@@ -34,8 +34,9 @@ type CancelQueuedMessageInput = {
  *      appendOptimisticMessage with status='sent' shows the message in the thread correctly.
  *  3c. On success with status='busy': the row is inside an async steer / unknown outcome.
  *      First-time busy restores a held indeterminate copy so the user can retry or cancel.
- *      Cancel/Edit on an *already* indeterminate row force-dismisses locally (#1839) —
- *      re-sticking left Edit/X dead with no in-UI escape.
+ *      Cancel/Edit on an *already* indeterminate row force-dismisses from the floating bar
+ *      (#1839) via queueDismissed — the row stays in the window so a later messages-consumed
+ *      SSE can still promote it into the thread.
  *      If getQueuedState reports the row was already consumed, mutationFn upgrades the
  *      result to `invoked` so Edit toasts instead of prefilling a duplicate.
  *  4. On error: re-insert the snapshot so the bar comes back; haptic error feedback.
@@ -83,7 +84,14 @@ export function useCancelQueuedMessage(api: ApiClient | null) {
             if (result.status === 'busy') {
                 const forceDismiss = input.snapshot.deliveryState === 'indeterminate'
                 if (forceDismiss) {
-                    // Optimistic removal stands — do not re-stick an indeterminate row.
+                    // Keep a hidden copy so a later messages-consumed SSE can
+                    // still promote the row into the thread (markMessagesConsumed
+                    // is a no-op when the row is fully absent).
+                    appendOptimisticMessage(input.sessionId, {
+                        ...input.snapshot,
+                        deliveryState: 'indeterminate',
+                        queueDismissed: true,
+                    })
                     return
                 }
                 // The row is inside an async steer: restore a held copy, not a
