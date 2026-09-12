@@ -767,31 +767,84 @@ describe('mergeSessions job redirect through SessionCache (#1404)', () => {
         expect(store.sessionJobs.get(newId, 'beets')?.label).toBe('target-live')
         expect(store.sessionJobs.get(newId, 'beets.eeeeeeee')?.runId).toBe('run-late-source')
 
-        // Manual job set (no runId) from the merged-away id must also remap —
-        // otherwise it would clobber the target's label/progress in place.
-        const remappedSet = cache.resolveAttachedJobKeyForUpsert(
+        // Free-key late registration records identity so a later dual-running
+        // merge can compose (see next test). Further PUTs keep that key.
+        const freeKey = cache.resolveAttachedJobKeyForUpsert(
             oldId,
             newId,
             'drain',
             'default',
             undefined
         )
-        // No collision on free key 'drain'.
-        expect(remappedSet).toBe('drain')
-        store.sessionJobs.upsert(newId, 'drain', {
-            label: 'target-drain',
+        expect(freeKey).toBe('drain')
+        expect(cache.refreshSession(newId)?.metadata?.jobKeyRedirects).toEqual({
+            [`${oldId}/beets`]: 'beets.eeeeeeee',
+            [`${oldId}/drain`]: 'drain'
+        })
+        expect(
+            cache.resolveAttachedJobKeyForUpsert(oldId, newId, 'drain', 'default', undefined)
+        ).toBe('drain')
+    })
+
+    it('persists late free-key identity so A→B→C collision remaps compose', async () => {
+        const { store, cache } = setup()
+        const aId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+        const bId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+        const cId = 'cccccccc-cccc-cccc-cccc-cccccccccccc'
+        for (const [tag, id] of [
+            ['tag-late-id-a', aId],
+            ['tag-late-id-b', bId],
+            ['tag-late-id-c', cId]
+        ] as const) {
+            cache.getOrCreateSession(
+                tag,
+                { path: `/${tag}`, host: 'local', flavor: 'codex' },
+                null,
+                'default',
+                undefined,
+                undefined,
+                undefined,
+                id
+            )
+        }
+
+        // Empty A→B: no job rows, so merge records no key redirect.
+        await cache.mergeSessionHistory(aId, bId, 'default', { mergeAgentState: false })
+        expect(cache.refreshSession(bId)?.metadata?.jobKeyRedirects).toBeUndefined()
+
+        // Late PUT while B's key is free — must persist A/batch→batch.
+        const key = cache.resolveAttachedJobKeyForUpsert(
+            aId,
+            bId,
+            'batch',
+            'default',
+            'run-late-a'
+        )
+        expect(key).toBe('batch')
+        expect(cache.refreshSession(bId)?.metadata?.jobKeyRedirects).toEqual({
+            [`${aId}/batch`]: 'batch'
+        })
+        store.sessionJobs.upsert(bId, key, {
+            label: 'a-late',
             status: 'running',
-            remaining: 1,
-            runId: 'run-drain-target'
-        }, 3_000)
-        const remappedSetCollide = cache.resolveAttachedJobKeyForUpsert(
-            oldId,
-            newId,
-            'drain',
-            'default',
-            undefined
-        )
-        expect(remappedSetCollide).toBe('drain.eeeeeeee')
-        expect(store.sessionJobs.get(newId, 'drain')?.label).toBe('target-drain')
+            runId: 'run-late-a'
+        }, 1_000)
+
+        // C already runs batch — B→C remaps B's row and must compose A's identity.
+        store.sessionJobs.upsert(cId, 'batch', {
+            label: 'c-batch',
+            status: 'running',
+            runId: 'run-c'
+        }, 2_000)
+        await cache.mergeSessionHistory(bId, cId, 'default', { mergeAgentState: false })
+
+        const redirects = cache.refreshSession(cId)?.metadata?.jobKeyRedirects as
+            | Record<string, string>
+            | undefined
+        expect(redirects?.[`${bId}/batch`]).toBe('batch.bbbbbbbb')
+        expect(redirects?.[`${aId}/batch`]).toBe('batch.bbbbbbbb')
+        expect(cache.resolveAttachedJobKey(aId, cId, 'batch', 'default')).toBe('batch.bbbbbbbb')
+        expect(store.sessionJobs.get(cId, 'batch')?.label).toBe('c-batch')
+        expect(store.sessionJobs.get(cId, 'batch.bbbbbbbb')?.label).toBe('a-late')
     })
 })
