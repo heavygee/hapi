@@ -1722,15 +1722,34 @@ export class SessionCache {
         jobKey: string,
         namespace: string
     ): string {
+        return this.lookupExplicitJobKeyRedirect(
+            requestedSessionId,
+            ownerSessionId,
+            jobKey,
+            namespace
+        ) ?? jobKey
+    }
+
+    /**
+     * Explicit `jobKeyRedirects` entry for this requested session/key, including
+     * identity maps (`A/batch → batch`) from no-collision transfers. Distinguishes
+     * "mapped to itself" from "no mapping recorded".
+     */
+    private lookupExplicitJobKeyRedirect(
+        requestedSessionId: string,
+        ownerSessionId: string,
+        jobKey: string,
+        namespace: string
+    ): string | undefined {
         const access = this.resolveSessionAccess(ownerSessionId, namespace)
-        if (!access.ok) return jobKey
+        if (!access.ok) return undefined
         const meta = access.session.metadata as Record<string, unknown> | null | undefined
         const redirects = meta?.jobKeyRedirects
         if (!redirects || typeof redirects !== 'object' || Array.isArray(redirects)) {
-            return jobKey
+            return undefined
         }
         const mapped = (redirects as Record<string, unknown>)[`${requestedSessionId}/${jobKey}`]
-        return typeof mapped === 'string' && mapped.trim() ? mapped : jobKey
+        return typeof mapped === 'string' && mapped.trim() ? mapped : undefined
     }
 
     /**
@@ -1747,24 +1766,27 @@ export class SessionCache {
         namespace: string,
         incomingRunId: string | undefined
     ): string {
-        const mapped = this.resolveAttachedJobKey(
+        // Honor any explicit redirect — including identity maps from a
+        // collision-free transfer — before the late-registration remap path.
+        // Otherwise a corrective `job set` without runId reallocates a second key.
+        const explicit = this.lookupExplicitJobKeyRedirect(
             requestedSessionId,
             ownerSessionId,
             jobKey,
             namespace
         )
-        if (mapped !== jobKey) return mapped
+        if (explicit !== undefined) return explicit
         if (requestedSessionId === ownerSessionId) return jobKey
 
         const allocated = this.store.runInTransaction(() => {
             // Re-read redirect inside the txn in case a concurrent merge wrote one.
-            const again = this.resolveAttachedJobKey(
+            const again = this.lookupExplicitJobKeyRedirect(
                 requestedSessionId,
                 ownerSessionId,
                 jobKey,
                 namespace
             )
-            if (again !== jobKey) return again
+            if (again !== undefined) return again
 
             const existing = this.store.sessionJobs.get(ownerSessionId, jobKey)
             if (!existing || existing.status !== 'running') {
