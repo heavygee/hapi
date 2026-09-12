@@ -1,6 +1,7 @@
 import { useMutation } from '@tanstack/react-query'
 import type { ApiClient } from '@/api/client'
 import type { DecryptedMessage } from '@/types/api'
+import type { CancelMessageResponse } from '@hapi/protocol/schemas'
 import {
     appendOptimisticMessage,
     markMessagesConsumed,
@@ -31,17 +32,48 @@ type CancelQueuedMessageInput = {
  *      have already arrived while the web row was optimistically removed (markMessagesConsumed
  *      no-op on missing row), so no later event will fix the stuck chip.
  *      appendOptimisticMessage with status='sent' shows the message in the thread correctly.
+ *  3c. On success with status='busy': the row is inside an async steer / unknown outcome.
+ *      First-time busy restores a held indeterminate copy so the user can retry or cancel.
+ *      Cancel/Edit on an *already* indeterminate row force-dismisses locally (#1839) —
+ *      re-sticking left Edit/X dead with no in-UI escape.
+ *      If getQueuedState reports the row was already consumed, mutationFn upgrades the
+ *      result to `invoked` so Edit toasts instead of prefilling a duplicate.
  *  4. On error: re-insert the snapshot so the bar comes back; haptic error feedback.
  */
 export function useCancelQueuedMessage(api: ApiClient | null) {
     const { haptic } = usePlatform()
 
     const mutation = useMutation({
-        mutationFn: async (input: CancelQueuedMessageInput) => {
+        mutationFn: async (input: CancelQueuedMessageInput): Promise<CancelMessageResponse> => {
             if (!api) {
                 throw new Error('API unavailable')
             }
-            return api.cancelMessage(input.sessionId, input.messageId)
+            const result = await api.cancelMessage(input.sessionId, input.messageId)
+            // Force-dismiss (#1839): learn whether the steer already landed before
+            // callers (Edit) decide to prefill. Returning synthetic `invoked` keeps
+            // the existing Edit toast path and avoids a duplicate composer send.
+            if (result.status === 'busy' && input.snapshot.deliveryState === 'indeterminate') {
+                try {
+                    const state = await api.getQueuedState(input.sessionId, [input.localId])
+                    const invoked = state.invokedLocalMessages.find((item) => item.localId === input.localId)
+                    if (invoked) {
+                        return {
+                            status: 'invoked',
+                            message: {
+                                id: input.snapshot.id,
+                                seq: input.snapshot.seq ?? null,
+                                localId: input.localId,
+                                content: input.snapshot.content,
+                                createdAt: input.snapshot.createdAt,
+                                invokedAt: invoked.invokedAt,
+                            },
+                        }
+                    }
+                } catch {
+                    // Fall through to busy force-dismiss; SSE / reconnect may still reconcile.
+                }
+            }
+            return result
         },
         onMutate: (input) => {
             // Optimistic: remove from the floating bar immediately.
@@ -49,6 +81,11 @@ export function useCancelQueuedMessage(api: ApiClient | null) {
         },
         onSuccess: async (result, input) => {
             if (result.status === 'busy') {
+                const forceDismiss = input.snapshot.deliveryState === 'indeterminate'
+                if (forceDismiss) {
+                    // Optimistic removal stands — do not re-stick an indeterminate row.
+                    return
+                }
                 // The row is inside an async steer: restore a held copy, not a
                 // normal FIFO row. A concurrent consumed ACK may have arrived
                 // while the optimistic row was absent, so reconcile once.

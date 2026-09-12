@@ -15,7 +15,7 @@ import {
 import { formatScheduledTime } from '@/lib/scheduledTime'
 import { clearQueuedEditRecovery, getQueuedEditRecovery } from '@/lib/queued-edit-recovery'
 
-type DeferredCancelResult = { status: 'cancelled' | 'invoked' }
+type DeferredCancelResult = { status: 'cancelled' | 'invoked' | 'busy'; localId?: string }
 
 const mocks = vi.hoisted(() => ({
     composerText: '',
@@ -69,7 +69,11 @@ vi.mock('@/lib/toast-context', () => ({
     useToast: () => ({ addToast: mocks.addToast }),
 }))
 
-function makeQueuedMessage(scheduledAt: number | null = null, id = 'server-message-id'): DecryptedMessage {
+function makeQueuedMessage(
+    scheduledAt: number | null = null,
+    id = 'server-message-id',
+    overrides: Partial<DecryptedMessage> = {},
+): DecryptedMessage {
     return {
         id,
         localId: `local-${id}`,
@@ -82,6 +86,7 @@ function makeQueuedMessage(scheduledAt: number | null = null, id = 'server-messa
             role: 'user',
             content: { type: 'text', text: 'Queued request' },
         },
+        ...overrides,
     } as unknown as DecryptedMessage
 }
 
@@ -476,6 +481,48 @@ describe('QueuedMessagesBar edit restore', () => {
             body: '',
             sessionId: 'session-1',
             url: window.location.href,
+        })
+    })
+
+    it('does not prefill when a normal cancel returns busy (steer still may deliver)', async () => {
+        const { onEdit } = renderQueuedMessage()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Edit queued message' }))
+        await resolveCancel({ status: 'busy', localId: 'local-server-message-id' })
+
+        expect(mocks.composerSetText).not.toHaveBeenCalled()
+        expect(onEdit).not.toHaveBeenCalled()
+        expect(mocks.addToast).not.toHaveBeenCalled()
+    })
+
+    it('prefills the composer when editing an indeterminate row whose cancel returns busy (#1839)', async () => {
+        mocks.messageWindowState = {
+            messages: [makeQueuedMessage(null, 'server-message-id', { deliveryState: 'indeterminate' })],
+        }
+        const onEdit = vi.fn()
+        const queryClient = new QueryClient({
+            defaultOptions: { mutations: { retry: false } },
+        })
+        render(
+            <QueryClientProvider client={queryClient}>
+                <QueuedMessagesBar
+                    sessionId="session-1"
+                    api={null}
+                    pendingSchedule={null}
+                    pendingScheduleRevision={0}
+                    onEdit={onEdit}
+                />
+            </QueryClientProvider>
+        )
+
+        expect(screen.getByText('queuedMessages.steerOutcomeUnknown')).toBeTruthy()
+        fireEvent.click(screen.getByRole('button', { name: 'Edit queued message' }))
+        await resolveCancel({ status: 'busy', localId: 'local-server-message-id' })
+
+        expect(mocks.composerSetText).toHaveBeenCalledWith('Queued request')
+        expect(onEdit).toHaveBeenCalledWith({
+            text: 'Queued request',
+            pendingSchedule: null,
         })
     })
 
