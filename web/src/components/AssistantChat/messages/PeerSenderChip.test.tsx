@@ -16,7 +16,12 @@ vi.mock('@/components/AssistantChat/context', () => ({
     useOptionalHappyChatContext: () => null,
 }))
 
-const mockUseSessions = vi.fn(() => ({ sessions: [], isLoading: false, error: null, refetch: vi.fn() }))
+const mockUseSessions = vi.fn(() => ({
+    sessions: [] as Array<{ id: string; metadata?: { name?: string; summary?: { text: string }; path?: string } }>,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+}))
 
 vi.mock('@/hooks/queries/useSessions', () => ({
     useSessions: () => mockUseSessions(),
