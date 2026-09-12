@@ -103,6 +103,19 @@ Modular session creation:
 - Model selector
 - Per-agent permission, effort, and collaboration controls when supported
 
+### First-User-Experience (FUE)
+
+For a new, non-essential feature whose affordance would otherwise be hard to
+discover, consider the existing FUE primitive rather than a permanent UI block.
+Optional, not a requirement for every feature or a reason to expand a bug fix.
+
+- `src/lib/use-fue.ts`: `useFue(featureId)` returns `{ status, engage, dismiss }`; acknowledgement is isolated per feature in `hapi.fue.v1.<featureId>` localStorage keys.
+- `src/components/Fue.tsx`: `FueDot` marks the affordance; `FueCallout` explains it while `status === 'engaging'`.
+- Dismissal requires an affirmative user action ("Got it"), never an auto-timeout.
+- The FUE dot and feature-specific badges/counters are mutually exclusive; onboarding wins until acknowledged.
+- Opt in per feature; skip the wrapper if an upstream component already supplies onboarding.
+- Working example: `ScratchlistToggleButton` in `src/components/AssistantChat/ComposerButtons.tsx`. Use the source rather than maintaining a copied example here.
+
 ## Authentication
 
 See `src/hooks/useAuth.ts` and `src/hooks/useAuthSource.ts`.

@@ -233,6 +233,14 @@ session when MCP is unavailable:
 bun scripts/tooling/hapi-display-image.mjs /absolute/path/to/image.png "optional title"
 ```
 
+## Session lifecycle invariants
+
+When changing agent bootstrap, handoff, or shared-session plumbing:
+
+- Handoff-capable integrations use `local` (terminal) and `remote` (web-controlled) ownership modes. Codex instead supports concurrent clients without ownership switching; see [Codex shared sessions](../docs/guide/codex-shared-sessions.md).
+- Ordinary wrappers export `HAPI_SESSION_ID` after bootstrap. Shared Codex uses a per-root MCP bridge and `shell_environment_policy.set.HAPI_SESSION_ID`; never put one root's ID into the shared app-server environment. Implementation: `src/codex/shared/root.ts`, `src/codex/shared/runtime.ts`.
+- Gemini remains a historical wire flavor, not a launchable integration. Use the [supported-agent guide](../docs/guide/agents.md) for the launchable set.
+
 ## Storage
 
 Data is stored in `~/.hapi/` (or `$HAPI_HOME`):
