@@ -6,13 +6,14 @@ Short guide for AI agents in this repo. Prefer progressive loading: start with t
 
 ## What is HAPI?
 
-Local-first platform for running AI coding agents (Claude Code, Codex, Gemini) with remote control via web/phone. CLI wraps agents and connects to hub; hub serves web app and handles real-time sync.
+Local-first platform for running AI coding agents with remote control via web/phone. CLI wraps agents and connects to hub; hub serves web app and handles real-time sync. See `docs/guide/agents.md` for launchable agents; Gemini remains a historical wire flavor, not a launchable integration.
 
 ## Repo layout
 
 ```
 cli/             - CLI binary, agent wrappers, runner daemon
 hub/             - HTTP API + Socket.IO + SSE + Telegram bot
+relay/           - Standalone encrypted native push relay (APNs + FCM)
 web/             - React PWA for remote control
 ios/             - Native SwiftUI app (in development)
 android/         - Native Kotlin Compose app (in development)
@@ -22,7 +23,7 @@ docs/            - VitePress documentation site
 website/         - Marketing site
 ```
 
-Bun workspaces; `shared` consumed by cli, hub, web. `ios`/`android` outside workspaces (Xcode / Gradle toolchains).
+Bun workspaces: cli, shared, hub, web, website, docs, relay. `shared` consumed by cli, hub, web as `@hapi/protocol`. `ios`/`android` outside workspaces (Xcode / Gradle toolchains).
 
 ## Architecture overview
 
@@ -39,10 +40,12 @@ Bun workspaces; `shared` consumed by cli, hub, web. `ios`/`android` outside work
 ```
 
 **Data flow:**
-1. CLI spawns agent (claude/codex/gemini), connects to hub via Socket.IO
+1. CLI starts the selected agent integration, connects to hub via Socket.IO
 2. Agent events → CLI → hub (socket `message` event) → DB + SSE broadcast
 3. Web subscribes to SSE `/api/events`, receives live updates
 4. User actions → Web → hub REST API → RPC to CLI → agent
+
+Web terminals use a separate JWT-authenticated Socket.IO `/terminal` namespace; `/cli` uses the CLI access token.
 
 ## Reference docs
 
@@ -66,8 +69,8 @@ Bun workspaces; `shared` consumed by cli, hub, web. `ios`/`android` outside work
 ## Common commands (repo root)
 
 ```bash
-bun typecheck           # All packages
-bun run test            # cli + hub + web + shared tests
+bun typecheck           # cli + hub + web + relay (shared checked through consumers)
+bun run test            # cli + hub + web + shared + relay tests
 bun run dev             # hub + web concurrently
 bun run build:single-exe # All-in-one binary
 bun run gen:fixtures    # Regenerate shared/fixtures/ from web pipeline
@@ -82,7 +85,7 @@ iOS tests run in CI (`ios.yml`: macOS `swift test`); no local Xcode/Swift toolch
 - `api/` - Hub connection (Socket.IO client, auth)
 - `claude/` - Claude Code integration (wrapper, hooks)
 - `codex/` - Codex mode integration
-- `agent/` - Multi-agent support (Gemini via ACP)
+- `agent/` - Shared session/bootstrap support and ACP transport
 - `runner/` - Background daemon for remote spawn
 - `commands/` - CLI subcommands (auth, runner, doctor)
 - `modules/` - Tool implementations (ripgrep, difftastic, git)
@@ -93,10 +96,12 @@ iOS tests run in CI (`ios.yml`: macOS `swift test`); no local Xcode/Swift toolch
 - `socket/` - Socket.IO setup
 - `socket/handlers/cli/` - CLI event handlers (session, terminal, machine, RPC)
 - `sync/` - Core logic (sessionCache, messageService, rpcGateway)
-- `store/` - SQLite persistence (better-sqlite3)
+- `store/` - SQLite persistence (bun:sqlite)
 - `sse/` - Server-Sent Events manager
 - `telegram/` - Bot commands, callbacks
-- `notifications/` - Push (VAPID) and Telegram notifications
+- `notifications/` - Notification dispatch and payload composition
+- `push/`, `fcm/`, `push-ios/` - Web Push, Android, and iOS delivery
+- `push-native/` - Shared encrypted envelope and push relay client
 - `config/` - Settings loading, token generation
 - `visibility/` - Client visibility tracking
 
@@ -117,8 +122,8 @@ iOS tests run in CI (`ios.yml`: macOS `swift test`); no local Xcode/Swift toolch
 - `modes.ts` - Permission/model mode definitions
 
 ### iOS (`ios/`)
-- `Packages/HapiKit/` - local SPM package: `HapiProtocol` (wire models + chat pipeline, fixtures-verified), `HapiClient` (API/auth/SSE/stores)
-- `Hapi/` + `Hapi.xcodeproj` - thin SwiftUI app target
+- `Packages/HapiKit/` - local SPM package: `HapiProtocol` (wire models + chat pipeline, fixtures-verified), `HapiClient` (API/auth/SSE/stores), `HapiUI` (rendering)
+- `Hapi/` + `Hapi.xcodeproj` - SwiftUI app, native transcript, feature screens, push extension
 
 ### Android (`android/`)
 - `:core:protocol` - pure JVM wire types + chat pipeline (fixtures-verified)
@@ -134,15 +139,15 @@ iOS tests run in CI (`ios.yml`: macOS `swift test`); no local Xcode/Swift toolch
 
 ## Pre-push self-review (agents)
 
-Before commit/push/PR: use the **`pre-push-review`** skill (`~/.cursor/skills/pre-push-review/`).
+Before commit/push/PR, run the repository checks directly:
 
-1. **Mechanical:** `bun typecheck && bun run test` (matches `.github/workflows/test.yml`)
+1. **Mechanical:** `bun typecheck && bun run test` (typecheck/unit-test portion of `.github/workflows/test.yml`; CI also runs selected Playwright and CLI integration tests)
 2. **Logic:** skim `git diff origin/main...HEAD`; apply `.github/prompts/codex-pr-review.md` as a local Major checklist (no Codex required)
 3. **Style:** optional
 
 ## Testing
 
-- Test framework: Vitest (via `bun run test`)
+- Test frameworks: Vitest for CLI/Web; Bun test for Hub/Shared/Relay (via `bun run test`)
 - Test files: `*.test.ts` next to source
 - Run: `bun run test` (from root) or `bun run test` (from package)
 - Hub tests: `hub/src/**/*.test.ts`
@@ -153,8 +158,8 @@ Before commit/push/PR: use the **`pre-push-review`** skill (`~/.cursor/skills/pr
 
 | Task | Key files |
 |------|-----------|
-| Add CLI command | `cli/src/commands/`, `cli/src/index.ts` |
-| Add API endpoint | `hub/src/web/routes/`, register in `hub/src/web/index.ts` |
+| Add CLI command | `cli/src/commands/`, register in `cli/src/commands/registry.ts`; public help in `help.ts` |
+| Add API endpoint | `hub/src/web/routes/`, register in `hub/src/web/server.ts` |
 | Add Socket.IO event | `hub/src/socket/handlers/cli/`, `shared/src/socket.ts` |
 | Add web route | `web/src/routes/`, `web/src/router.tsx` |
 | Add web component | `web/src/components/` |
@@ -167,8 +172,9 @@ Before commit/push/PR: use the **`pre-push-review`** skill (`~/.cursor/skills/pr
 
 - **RPC**: CLI registers handlers (`rpc-register`), hub routes requests via `rpcGateway.ts`
 - **Versioned updates**: CLI sends `update-metadata`/`update-state` with version; hub rejects stale
-- **Session modes**: `local` (terminal) vs `remote` (web-controlled); switchable mid-session
-- **Permission modes**: `default`, `acceptEdits`, `auto`, `bypassPermissions`, `plan`
+- **Session modes**: `local` (terminal) vs `remote` (web-controlled) for handoff-capable integrations; Codex uses concurrent clients without ownership switching. See `docs/guide/codex-shared-sessions.md`.
+- **Session identity**: Ordinary wrappers export `HAPI_SESSION_ID` after bootstrap. Shared Codex uses a per-root MCP bridge and `shell_environment_policy.set.HAPI_SESSION_ID`; never put one root's ID into the shared app-server environment (`cli/src/codex/shared/root.ts`, `runtime.ts`).
+- **Permission modes**: Per-flavor catalogs in `shared/src/modes.ts`; session capabilities further constrain available controls
 - **Namespaces**: Multi-user isolation via `CLI_API_TOKEN:<namespace>` suffix
 
 ## Adding new web features — consider an FUE

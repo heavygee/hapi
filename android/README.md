@@ -11,9 +11,9 @@ independent from the web app; shares only the protocol contract
 
 | Module | Type | Responsibility |
 |---|---|---|
-| `:core:protocol` | **pure Kotlin/JVM** (no Android) | Hub wire types (kotlinx.serialization), chat pipeline port (normalize → reduce → tool groups), message-window/pagination logic, versioned patch application, modes catalog, git output parsers, `BindLink` pairing-link parsing. **M1a landed**: `wire/` (`HapiJson`, `Session`/`SessionPatch`/`SessionSummary`, `DecryptedMessage`, `AgentState`, `Machine`, 13-type `SyncEvent` union via `SyncEvents.parse`, `MessagesResponse`), `catalog/` (flavors + permission/collaboration modes), `patch/SessionPatching.kt` (exact port of `web/src/lib/sessionPatch.ts`), all fixture-verified. |
-| `:core:data` | Android library | Transport + persistence. **M1b landed** — `auth/` (`JwtPeek`, `CredentialStore` interface + `EncryptedPrefsCredentialStore`/in-memory, `HubUrls` origin normalization, `HubRegistry` roster behind a storage seam, `AuthInterceptor` + single-flight `TokenAuthenticator` with `ensureFreshToken()` and terminal `AuthEvents`), `api/` (`HapiApi` — plain OkHttp + kotlinx.serialization, one suspend fun per v1 endpoint incl. generated-image bytes via a 256 MB OkHttp cache and the multipart transcription helper; `ApiError` with `(status, code)`), `HubSession` per-hub factory; MockWebServer-tested. **M1c landed** — `sse/`: `SseEngine` (per-key `global`/`session:<id>` loops, `connection-changed` handshake gate with `ok`/`gap` resume verdict, per-key `Last-Event-ID` cursors advanced only after downstream hand-off (at-least-once), 10 s connect deadline, 90 s watchdog, 1 s→30 s→300 s backoff + jitter, background retry deferral + 45 s foreground stale check, one silent 401 re-auth per cycle), `OkHttpSseTransport` (dedicated client, `readTimeout=0`, incremental gzip decoding pinned by test, `acceptEncodingIdentity` fallback), `SyncEventRouter` → `SyncTargets` seam; virtual-time tested. Still to come: StateFlow stores + AtomicFile JSON snapshots (M2), FCM registration + WorkManager workers (M4). |
-| `:app` | Android application | Compose UI, navigation, deep links (`hapicompanion://bind`), FCM service (M4), hand-rolled DI (`AppGraph`, no Hilt). **M1d landed** — `di/` (`AppGraph` process singletons: Preferences DataStore-backed `HubRegistryStorage`, `EncryptedPrefsCredentialStore`, `HubRegistry`, auth-terminal fan-out; `HubGraph` per active hub: `HubSession` + `SseEngine` wired to `ensureFreshToken`, recreated on hub switch; `LocalAppGraph` CompositionLocal + `viewModelFactory` helper), `feature/pairing/` (landing / zxing `ScanContract` QR scan / manual entry sharing one `PairingViewModel`: health + protocol check → `POST /api/auth` → persist + activate), `feature/home/` placeholder (hub switcher + sign-out), `Navigation.kt` (pairing ⇄ home, auth-terminal → pairing with banner), bind deep-link handling in `MainActivity`. |
+| `:core:protocol` | **pure Kotlin/JVM** (no Android) | Hub wire types, chat pipeline, message pagination, versioned patches, agent/mode catalogs, git parsers, pairing links, and golden-fixture conformance tests. |
+| `:core:data` | Android library | OkHttp API/SSE transport, per-hub authentication, secure credentials, StateFlow stores and disk snapshots, encrypted push registration/decoding, and background notification actions. |
+| `:app` | Android application | Compose screens for pairing, sessions/chat, approvals, new sessions, files, Scratchlist, dictation, usage/storage, and settings; navigation, localization, FCM service, and WorkManager wiring. |
 
 Dependency direction: `:app` → `:core:data` → `:core:protocol`.
 
@@ -30,9 +30,9 @@ tasks.test {
 }
 ```
 
-Fixture-driven tests (M2) read `System.getProperty("hapi.fixtures.dir")` —
-no further build changes are needed when `shared/fixtures/**` lands. CI
-re-runs this suite whenever `android/**` or `shared/fixtures/**` change.
+Fixture-driven tests read `System.getProperty("hapi.fixtures.dir")` from the
+checked-in golden fixture set. CI re-runs this suite whenever `android/**`
+or `shared/fixtures/**` change.
 
 ## Building
 
@@ -197,9 +197,9 @@ and restored hub state. The manifest also sets
 Sign-out (home → Sign out) deletes the stored credentials for that hub and
 drops it from the roster.
 
-## Milestones (track B of the native-clients plan)
+## Milestone history (track B of the native-clients plan)
 
-- **M0** — this scaffold: modules, version catalog, CI, placeholder screen.
+- **M0** — initial scaffold: modules, version catalog, CI, placeholder screen.
 - **M1** — foundations: wire types + modes catalog; auth + `HapiApi` (MockWebServer-tested); `SseEngine` reconnect state machine + versioned patches (gzip streaming verified); pairing UI + `hapicompanion://bind` deep link.
 - **M2** — read-only chat: chat pipeline port gated on fixtures all-green; session list; `MessageWindowStore` port; Markdown renderer; read-only chat screen (`LazyColumn` with chronological stable keys).
 - **M3** — interaction: composer (optimistic send/queue/steer/drafts), permission approvals UX, session controls (mode/model/abort/resume/rename/archive), new session, dictation.

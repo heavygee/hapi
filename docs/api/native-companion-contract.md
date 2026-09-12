@@ -9,7 +9,7 @@ binding (requires Telegram `initData`).
 
 ## Scope
 
-A companion implementing this contract is a **native client to the same hub the PWA talks to**, surfacing notifications and reply / approve actions on a phone or wearable. Hub topology is unchanged - the hub still runs on the operator's dev machine.
+A companion implementing this contract is a **native client to the same hub the PWA talks to**, surfacing notifications and reply / approve actions on a phone or wearable. The hub may run on the operator's development machine or a separate host; agents execute on their CLI/Runner machines.
 
 ---
 
@@ -40,7 +40,7 @@ registry; no schema or database version change is required.
 
 **Response:** `{ "ok": true }`
 
-Upsert on `(namespace, deviceId, platform)` - same device re-registering replaces the FCM token.
+Upsert on `(namespace, deviceId, platform)` - same device re-registering replaces its push token.
 
 ### Unregister
 
@@ -188,7 +188,7 @@ AAD      = ASCII "hapi-push-v1"
 ```
 
 Golden test vector (key `0x00..0x1f`, nonce `0x00..0x0b`):
-[`shared/fixtures/push/envelope-v1.json`](../../shared/fixtures/push/envelope-v1.json) -
+[`shared/fixtures/push/envelope-v1.json`](https://github.com/tiann/hapi/blob/main/shared/fixtures/push/envelope-v1.json) -
 the iOS implementation must reproduce it byte-for-byte.
 
 ### APNs request (what the device receives)
