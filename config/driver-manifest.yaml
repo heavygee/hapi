@@ -954,6 +954,11 @@ layers:
   # Tip: d1b9408c5
   - branch: driver/search-target-free-scroll
 
+  # heavygee/hapi#144 — sidebar search dictation: join spelled letters (E-N-O → ENO).
+  # Worktree: ~/coding/hapi/worktrees/search-dictation-letters @ driver/search-dictation-letters
+  # Tip: ed558b37e
+  - branch: driver/search-dictation-letters
+
   # (no upstream issue yet — spike-first, operator's call on filing) Directory-scoped
   # Claude auth: ~/.hapi/settings.json `directoryAuthProfiles` binds a path prefix to a
   # CLAUDE_CODE_OAUTH_TOKEN so ~/coding/sparling can run on its own (Teams) account
