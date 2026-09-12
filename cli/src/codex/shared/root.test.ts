@@ -31,7 +31,10 @@ vi.mock('../utils/buildHapiMcpBridge', () => ({ buildHapiMcpBridge: async () => 
 }) }));
 
 const cleanups: Array<() => Promise<void>> = [];
-afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(); });
+afterEach(async () => {
+    try { for (const cleanup of cleanups.splice(0)) await cleanup(); }
+    finally { vi.useRealTimers(); }
+});
 
 async function fixture() {
     const directory = await mkdtemp('/tmp/hapi-shared-root-');
@@ -45,7 +48,7 @@ async function fixture() {
         updateAgentState: updateState, keepAlive() {},
         onUserMessage() {}, onCancelQueuedMessage() {}, onRetryQueuedMessage() {},
         onReconnect: (fn: (() => void) | null) => { reconnect = fn; },
-        rpcHandlerManager: { registerHandler() {} }, sendSessionEvent() {}, sendAgentMessage() {},
+        rpcHandlerManager: { registerHandler() {} }, sendSessionEvent() {}, sendAgentMessage() {}, emitSessionReady() {},
         sendSessionDeath() {}, async flush() {}, close() {}
     } as unknown as ApiSessionClient;
     const root = new SharedCodexRoot({ session, workingDirectory: directory } as SessionBootstrapResult, {
@@ -66,6 +69,21 @@ async function fixture() {
 }
 
 describe('shared steering availability', () => {
+    it('keeps idle sessions online without polling usage or publishing agent-state updates', async () => {
+        const f = await fixture();
+        const requests = vi.spyOn(f.root.client, 'request');
+        const heartbeat = vi.spyOn(f.root.session, 'keepAlive');
+        const updates = f.updateState.mock.calls.length;
+        vi.useFakeTimers();
+
+        await f.root.activate();
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+
+        expect(heartbeat).toHaveBeenCalled();
+        expect(requests).not.toHaveBeenCalled();
+        expect(f.updateState).toHaveBeenCalledTimes(updates);
+    });
+
     it('publishes root turn transitions, ignores child turns, and clears on shutdown', async () => {
         const f = await fixture();
         expect(f.state().steeringActive).toBe(false);

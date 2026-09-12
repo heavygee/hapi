@@ -1,11 +1,4 @@
 export default {
-  'codexUsage.title': 'Codex 用量',
-  'codexUsage.ordinary': '常规用量',
-  'codexUsage.unknown': '未知',
-  'codexUsage.remaining': '剩余 {percent}%',
-  'codexUsage.window': '{minutes} 分钟窗口',
-  'codexUsage.resets': '重置时间 {time}',
-
   // Loading states
   'loading': '加载中…',
   'authorizing': '认证中…',

@@ -12,7 +12,6 @@ import { CodexAppServerClient } from '../codexAppServerClient';
 import { buildHapiMcpBridge, type HapiMcpBridge } from '../utils/buildHapiMcpBridge';
 import { buildUserInputFromMessage } from '../utils/appServerConfig';
 import { resolveCodexPermissionModeConfig } from '../utils/permissionModeConfig';
-import { LunaReserve } from '../utils/lunaReserve';
 import { resolveCodexSlashCommand } from '../utils/slashCommands';
 import { parseReasoningEffortValue } from '../utils/reasoningEffort';
 import { SharedCodexPermissions } from './permissions';
@@ -49,9 +48,7 @@ export class SharedCodexRoot {
     private projection!: SharedCodexProjection;
     private readonly children = new Map<string, SharedCodexProjection>();
     private readonly ancestry = new Map<string, string | null>();
-    private readonly reserve: LunaReserve;
     private heartbeat?: ReturnType<typeof setInterval>;
-    private usageTimer?: ReturnType<typeof setInterval>;
     private work: Promise<unknown> = Promise.resolve();
     private notifications = Promise.resolve();
     private currentTurn: string | undefined;
@@ -75,9 +72,6 @@ export class SharedCodexRoot {
     constructor(readonly bootstrap: SessionBootstrapResult, private readonly host: RootHost) {
         this.session = bootstrap.session;
         this.client = new CodexAppServerClient({ endpoint: host.endpoint, token: host.token, cwd: bootstrap.workingDirectory });
-        this.reserve = new LunaReserve(this.client,
-            (model, effort, serviceTier) => { this.settings = { ...this.settings, model, modelReasoningEffort: effort, serviceTier }; },
-            codexUsage => this.session.updateAgentState(state => ({ ...state, codexUsage })), message => this.notice(message));
         this.client.setNotificationHandler((method, params) => {
             if (method === 'serverRequest/resolved') {
                 this.permissions?.resolved(string(record(params).threadId) ?? '', record(params).requestId); return;
@@ -105,7 +99,6 @@ export class SharedCodexRoot {
                 const text = formatMessageWithAttachments(message.content.text, message.content.attachments);
                 const resolved = text.trim().startsWith('/') ? await this.queue.command(id, () => this.command(text)) : text;
                 if (resolved === null) { this.session.emitMessagesConsumed([id], { clearQueuedThinkingGrace: true }); return; }
-                await this.refreshUsage();
                 await this.queue.enqueue(id, buildUserInputFromMessage(resolved), this.interrupted);
             }).catch(error => this.notice(`Message not confirmed: ${error instanceof Error ? error.message : error}. Inspect the queue before retrying.`));
         });
@@ -186,7 +179,7 @@ export class SharedCodexRoot {
                 [id, { ...request, completedAt: Date.now(), status: 'canceled' as const }])) }
         }));
         if (subscribe) response = record(await this.client.request('thread/resume', { threadId }));
-        this.acceptSettings(response); this.acceptSettings(this.host.settingsFor(threadId) ?? {}); this.reserve.attach(threadId, response);
+        this.acceptSettings(response); this.acceptSettings(this.host.settingsFor(threadId) ?? {});
         await this.projection.history(response.thread); await this.refresh(); await this.refreshChildren(true);
     }
     async activate(options: SharedLaunchOptions = {}): Promise<void> {
@@ -195,8 +188,6 @@ export class SharedCodexRoot {
         if (this.stopping) throw new Error('Codex execution is stopping');
         this.registerControls(); this.ready();
         this.heartbeat = setInterval(() => this.alive(), 2_000); this.alive(); this.session.emitSessionReady();
-        void this.reserve.initialize().catch(error => logger.debug('[Codex shared] usage initialization', error));
-        this.usageTimer = setInterval(() => { void this.refreshUsage(); }, 60_000);
     }
     private publishSteering(): void {
         const active = Boolean(this.currentTurn) && !this.stopping && !this.closed && !this.reconnecting && this.client.isInitialized();
@@ -220,7 +211,6 @@ export class SharedCodexRoot {
             ...('serviceTier' in value ? { serviceTier: value.serviceTier === 'priority' ? 'fast' : 'standard' } : {}),
             ...('collaborationMode' in value ? { collaborationMode: record(value.collaborationMode).mode === 'plan' ? 'plan' as const : 'default' as const } : {})
         };
-        this.reserve.onSettings(this.threadId, value);
         for (const listener of this.settingsListeners) listener();
     }
     private async notification(method: string, params: unknown, modelAtReceipt?: string): Promise<void> {
@@ -302,11 +292,6 @@ export class SharedCodexRoot {
                 projection.reset(); await projection.history(await this.readThread(id));
             } catch (error) { logger.debug('[Codex shared] child history unavailable', { id, error }); }
         }
-    }
-    private refreshUsage(): Promise<void> {
-        return this.reserve.refresh({ permissionMode: this.settings.permissionMode === 'yolo' ? 'yolo' : 'default',
-            collaborationMode: this.settings.collaborationMode ?? 'default', model: this.settings.model ?? undefined },
-        () => !this.closed && !this.currentTurn);
     }
     nativeQueueDeleted(nativeId: string): Promise<void> { return this.queue.deleted(nativeId); }
     replaySettings(): Array<{ method: string; params: unknown }> {
@@ -482,9 +467,9 @@ export class SharedCodexRoot {
         return slash.kind === 'replace' ? slash.text : null;
     }
     stopAccepting(): void {
-        this.stopping = true; this.ready(); clearInterval(this.usageTimer);
+        this.stopping = true; this.ready();
         this.publishSteering();
-        this.session.onReconnect(null); this.client.setTransportAbandonedHandler(null); this.reserve.dispose();
+        this.session.onReconnect(null); this.client.setTransportAbandonedHandler(null);
     }
     async suspend(): Promise<void> {
         this.stopAccepting();
