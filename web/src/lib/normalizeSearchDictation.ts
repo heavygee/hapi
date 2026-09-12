@@ -61,6 +61,6 @@ export function collapseSpelledLetterRuns(text: string): string {
 /** Full pipeline applied when search dictation commits a transcript. */
 export function normalizeSearchDictation(text: string): string {
     return stripDictationTrailingPunctuation(
-        collapseSpelledLetterRuns(text.trim()).replace(/[-]+$/g, '')
-    )
+        collapseSpelledLetterRuns(text.trim())
+    ).replace(/-+$/g, '')
 }
