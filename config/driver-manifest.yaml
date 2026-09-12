@@ -798,7 +798,7 @@ layers:
   # CLI hapi spawn-peer + MCP spawn_peer; hub 400 on spawn body message/prompt/text.
   # Includes peerSpawnDefaults: machine spawn + New Session seed (Gap A/B; stock yolo).
   # Worktree: ~/coding/hapi/worktrees/spawn-peer-remit @ feat/spawn-peer-remit
-  # Tip: 7bf24d831 (origin/feat/spawn-peer-remit) — yolo omit copy + server-side defaults
+  # Tip: 1fb2a7d17 (origin/feat/spawn-peer-remit) — Gap A/B + sticky NewSession seed + tests
   - branch: feat/spawn-peer-remit
 
   # Soup heal: remat 47ce90965 dropped Claude Happy MCP spawn_peer model/effort
