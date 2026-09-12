@@ -1378,18 +1378,20 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         if (engine instanceof Response) {
             return engine
         }
-        const sessionResult = resolveJobOwnerSession(c, engine)
-        if (sessionResult instanceof Response) {
-            return sessionResult
-        }
         const rawJobKey = c.req.param('jobKey')
         if (!rawJobKey || !JOB_KEY_RE.test(rawJobKey)) {
             return c.json({ error: 'Invalid jobKey (1-128 chars: alnum, . _ -)' }, 400)
         }
+        // Parse body before owner/key resolution so a merge/clear that lands
+        // during await cannot leave PUT writing to an emptied source row.
         const body = await c.req.json().catch(() => null)
         const parsed = AttachedJobUpsertSchema.safeParse(body)
         if (!parsed.success) {
             return c.json({ error: 'Invalid body', issues: parsed.error.issues }, 400)
+        }
+        const sessionResult = resolveJobOwnerSession(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
         }
         const jobKey = engine.resolveAttachedJobKeyForUpsert(
             sessionResult.requestedSessionId,
@@ -1410,20 +1412,20 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         if (engine instanceof Response) {
             return engine
         }
-        const sessionResult = resolveJobOwnerSession(c, engine)
-        if (sessionResult instanceof Response) {
-            return sessionResult
-        }
         const rawJobKey = c.req.param('jobKey')
         if (!rawJobKey || !JOB_KEY_RE.test(rawJobKey)) {
             return c.json({ error: 'Invalid jobKey (1-128 chars: alnum, . _ -)' }, 400)
         }
-        const jobKey = resolveJobKey(c, engine, sessionResult, rawJobKey)
         const body = await c.req.json().catch(() => null)
         const parsed = AttachedJobPatchSchema.safeParse(body)
         if (!parsed.success) {
             return c.json({ error: 'Invalid body', issues: parsed.error.issues }, 400)
         }
+        const sessionResult = resolveJobOwnerSession(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+        const jobKey = resolveJobKey(c, engine, sessionResult, rawJobKey)
         const result = engine.patchSessionJob(sessionResult.sessionId, jobKey, parsed.data)
         if (result.outcome === 'not-found') {
             return c.json({ error: 'Job not found' }, 404)
