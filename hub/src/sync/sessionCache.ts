@@ -1599,7 +1599,8 @@ export class SessionCache {
         toSessionId: string,
         fromSessionId: string,
         redirects: Array<{ fromKey: string; toKey: string }>,
-        namespace: string
+        namespace: string,
+        inheritSourceRedirects = true
     ): boolean {
         for (let attempt = 0; attempt < 2; attempt += 1) {
             const latest = this.store.sessions.getSessionByNamespace(toSessionId, namespace)
@@ -1614,20 +1615,25 @@ export class SessionCache {
                     if (typeof v === 'string' && v.trim()) next[k] = v
                 }
             }
-            const fromMeta = this.store.sessions
-                .getSessionByNamespace(fromSessionId, namespace)
-                ?.metadata as Record<string, unknown> | null | undefined
             // Compose inherited A→B redirects through this merge's remaps so an
             // A→B→C chain where the intermediate remapped key collides again on
             // C does not leave A pointing at C's unrelated live job.
-            const currentRemaps = new Map(
-                redirects.map(({ fromKey, toKey }) => [fromKey, toKey])
-            )
-            const inheritedRaw = fromMeta?.jobKeyRedirects
-            if (inheritedRaw && typeof inheritedRaw === 'object' && !Array.isArray(inheritedRaw)) {
-                for (const [k, v] of Object.entries(inheritedRaw as Record<string, unknown>)) {
-                    if (typeof v === 'string' && v.trim()) {
-                        next[k] = currentRemaps.get(v) ?? v
+            // Late PUT registration must NOT inherit: fromSessionId is the
+            // requested id and may still hold stale pre-composition maps that
+            // would overwrite C's composed A/batch→batch.<B> entry.
+            if (inheritSourceRedirects) {
+                const fromMeta = this.store.sessions
+                    .getSessionByNamespace(fromSessionId, namespace)
+                    ?.metadata as Record<string, unknown> | null | undefined
+                const currentRemaps = new Map(
+                    redirects.map(({ fromKey, toKey }) => [fromKey, toKey])
+                )
+                const inheritedRaw = fromMeta?.jobKeyRedirects
+                if (inheritedRaw && typeof inheritedRaw === 'object' && !Array.isArray(inheritedRaw)) {
+                    for (const [k, v] of Object.entries(inheritedRaw as Record<string, unknown>)) {
+                        if (typeof v === 'string' && v.trim()) {
+                            next[k] = currentRemaps.get(v) ?? v
+                        }
                     }
                 }
             }
@@ -1793,12 +1799,15 @@ export class SessionCache {
                 // Free-key / same-generation returns still need an explicit
                 // A/batch→batch map so a later B→C collision remap can compose
                 // inherited redirects (empty A→B, late register, then B→C).
+                // inheritSourceRedirects=false: do not reimport the requested
+                // session's stale maps onto the owner after a chained merge.
                 if (
                     !this.recordJobKeyRedirects(
                         ownerSessionId,
                         requestedSessionId,
                         [{ fromKey: jobKey, toKey: jobKey }],
-                        namespace
+                        namespace,
+                        false
                     )
                 ) {
                     throw new Error('Failed to persist late job-key redirect')
@@ -1826,7 +1835,8 @@ export class SessionCache {
                     ownerSessionId,
                     requestedSessionId,
                     [{ fromKey: jobKey, toKey }],
-                    namespace
+                    namespace,
+                    false
                 )
             ) {
                 throw new Error('Failed to persist late job-key redirect')
