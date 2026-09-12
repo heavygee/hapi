@@ -796,8 +796,9 @@ layers:
 
   # tiann/hapi#1509 / PR #1511 — first-class spawn-peer with required remit.
   # CLI hapi spawn-peer + MCP spawn_peer; hub 400 on spawn body message/prompt/text.
+  # Includes peerSpawnDefaults: machine spawn + New Session seed (Gap A/B; stock yolo).
   # Worktree: ~/coding/hapi/worktrees/spawn-peer-remit @ feat/spawn-peer-remit
-  # Tip: 52c51ba51 (origin/feat/spawn-peer-remit) — includes model/effort surface
+  # Tip: 7bf24d831 (origin/feat/spawn-peer-remit) — yolo omit copy + server-side defaults
   - branch: feat/spawn-peer-remit
 
   # Soup heal: remat 47ce90965 dropped Claude Happy MCP spawn_peer model/effort
