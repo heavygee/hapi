@@ -1918,6 +1918,17 @@
         }
       }
     },
+    "Earlier calls aren't loaded. Close this view and load older messages in the conversation." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更早的工具调用尚未加载。请关闭此视图，在对话中加载更早的消息。"
+          }
+        }
+      }
+    },
     "Edit" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2552,6 +2563,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "语言"
+          }
+        }
+      }
+    },
+    "Latest tool" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最新工具"
           }
         }
       }
@@ -4448,6 +4470,17 @@
         }
       }
     },
+    "Showing the last available group. Live group updates are unavailable." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在显示工具组的最后可用记录，工具组已无法实时更新。"
+          }
+        }
+      }
+    },
     "Showing the last available record. Live updates are unavailable for this tool." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5302,6 +5335,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "查看工具详情"
+          }
+        }
+      }
+    },
+    "View tool group" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查看工具组"
           }
         }
       }

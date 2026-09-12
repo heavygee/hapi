@@ -105,10 +105,15 @@ TEST_RUNNER_HAPI_TYPOGRAPHY_CAPTURE=/tmp/hapi-typography-review \
 ### Tool inspection
 
 Tool summaries open a native large sheet instead of expanding their output
-inside the conversation. Groups expand only summary rows; the inspector can
-move between group members while resolving each stable tool ID from live data.
-Group headers prioritize total calls over category counts. Expanded tools retain
-individual recycled rows, joined by continuous surfaces and inset separators.
+inside the conversation. Tool groups also stay as one summary row: tapping one
+opens a native lazy list in the same inspector. Calls remain chronological, with
+each new presentation initially positioned at the latest tool. Streaming never
+scrolls the list; **Latest tool** explicitly returns to its end. Details push
+inside the same sheet, retaining the list position on Back. Both levels keep a
+toolbar Close action and native swipe dismissal. The inspector resolves stable
+group/tool IDs from live data; output-only changes do not reconfigure unchanged
+group summaries in the transcript. Group headers prioritize total calls over
+category counts.
 File/image summaries show the action and basename; commands use a bounded preview.
 Success is quiet, while running/errors remain visible; every row keeps a 44pt target.
 Edits show their recorded input, with a separate **View current file** action.
@@ -124,8 +129,11 @@ under **Source**. Answer submission remains in the conversation.
 Inspection pauses transcript tail-following and hidden history paging, without
 opening another SSE subscription. Closing returns to the reading anchor;
 **Back to latest** explicitly resumes following. Trimmed records remain visible
-as labeled, read-only snapshots. Large text is loaded in 20,000-character parts
-and can be copied in full; large diffs use paged source instead of eager rows.
+as labeled, read-only snapshots; missing groups retain their last membership,
+without switching to another group. Incomplete history is labeled and can be
+loaded from the conversation after closing the inspector. Large text is loaded
+in 20,000-character parts and can be copied in full; large diffs use paged source
+instead of eager rows.
 
 The inspector recognizes namespaced command/script/patch calls. File reads use
 source-language highlighting; web/agent prose uses Markdown (large documents
@@ -134,8 +142,10 @@ command exit/status metadata kept visible. **Source** reveals the original
 input/result, including fields not shown in the preview; mixed text/media
 results stay JSON instead of losing non-text blocks.
 
-The app-hosted suite covers selection, live updates, native sheet dismissal,
-surface handoffs, Unicode paging, and reading-position preservation. Transcript
+The app-hosted suite covers selection, live updates, native sheet presentation,
+2/42/240-call lists, initial positioning, detail navigation, surface handoffs,
+Unicode paging, and reading-position preservation. Native swipe gestures and
+release-device animation smoothness still need manual acceptance. Transcript
 specimens run the real ChatModel/ChatTranscriptView with fake HTTP and closed
 loopback SSE; sheet specimens are non-networked. Both use deterministic test
 records, not live sessions or App Store screenshots. Capture into a fresh directory:

@@ -1,17 +1,18 @@
 import HapiClient
-import HapiUI
+@testable import HapiUI
 import SwiftUI
 import UIKit
 import XCTest
 @testable import Hapi
 @testable import HapiProtocol
 
-/// Render the real ChatModel → ChatTranscriptView → recycled UIKit rows, not an
-/// inline ToolGroupBlockView specimen. HTTP is faked; SSE targets closed loopback.
+/// Render the real ChatModel → ChatTranscriptView → recycled UIKit rows, not a
+/// standalone ToolGroupBlockView specimen. HTTP is faked; SSE targets closed loopback.
 @MainActor
 final class ToolTranscriptPresentationTests: XCTestCase {
     private struct Harness: View {
         let model: ChatModel
+        let session: HubSession
         let theme: HapiTheme
         let size: DynamicTypeSize
 
@@ -23,6 +24,7 @@ final class ToolTranscriptPresentationTests: XCTestCase {
                     }
                     .navigationTitle("HAPI · UI specimen")
                     .navigationBarTitleDisplayMode(.inline)
+                    .toolPresentations(model: model, session: session, owner: "chat", openFile: { _ in })
             }
             .hapiTypography()
             .hapiTheme(theme)
@@ -32,7 +34,7 @@ final class ToolTranscriptPresentationTests: XCTestCase {
         }
     }
 
-    func testRealTranscriptKeepsExpandedGroupContiguousAndCompact() async throws {
+    func testGroupBrowserNeverExpandsTranscriptAndDismissalPreservesAnchor() async throws {
         let credentials = InMemoryCredentialStore()
         let payload = Data(#"{"uid":1,"exp":4102444800,"ns":"test"}"#.utf8).base64EncodedString()
         try credentials.store(HubCredentials(hubUrl: "http://127.0.0.1:1", accessToken: "test", jwt: "e30.\(payload).test"))
@@ -49,9 +51,9 @@ final class ToolTranscriptPresentationTests: XCTestCase {
         XCTAssertEqual(groups.map(\.tools.count), [42, 5])
         let first = try XCTUnwrap(groups.first)
         let last = try XCTUnwrap(groups.last)
-        XCTAssertEqual(toolGroupTitle(first), "42 tool calls")
-        model.expandedToolGroups[first.id] = false
-        model.expandedToolGroups[last.id] = true
+        XCTAssertEqual(ToolGroupPresentation(first).title, "42 tool calls")
+        XCTAssertEqual(ToolGroupPresentation(last).title, "5 tool calls")
+        let controller = await hub.windows.open(sessionId: "tool-transcript")
 
         let cases: [(String, HapiTheme, DynamicTypeSize, CGFloat)] = [
             ("light-transcript", .light, .large, 390),
@@ -63,35 +65,66 @@ final class ToolTranscriptPresentationTests: XCTestCase {
             let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
             let window = UIWindow(windowScene: scene)
             window.frame = CGRect(x: 0, y: 0, width: width, height: 844)
-            let host = UIHostingController(rootView: Harness(model: model, theme: theme, size: size))
+            let host = UIHostingController(rootView: Harness(model: model, session: hub, theme: theme, size: size))
             window.rootViewController = host
             window.makeKeyAndVisible()
             defer { window.isHidden = true }
             host.view.layoutIfNeeded()
             let collection = try XCTUnwrap(findCollection(host.view))
-            try await eventually { collection.numberOfItems(inSection: 0) == 11 }
+            try await eventually { collection.numberOfItems(inSection: 0) == 6 }
             try await Task.sleep(for: .milliseconds(250))
-            for index in 5...9 {
-                let previous = try XCTUnwrap(collection.layoutAttributesForItem(at: IndexPath(item: index - 1, section: 0)))
-                let current = try XCTUnwrap(collection.layoutAttributesForItem(at: IndexPath(item: index, section: 0)))
-                XCTAssertEqual(current.frame.minY, previous.frame.maxY, accuracy: 0.5, "\(name): group segments must touch")
-                XCTAssertEqual(current.frame.minX, previous.frame.minX, accuracy: 0.5)
-                XCTAssertEqual(current.frame.width, previous.frame.width, accuracy: 0.5)
-                XCTAssertGreaterThanOrEqual(current.frame.height, 44)
-            }
-            if size == .large {
-                let top = try XCTUnwrap(collection.layoutAttributesForItem(at: IndexPath(item: 4, section: 0)))
-                let bottom = try XCTUnwrap(collection.layoutAttributesForItem(at: IndexPath(item: 9, section: 0)))
-                XCTAssertLessThanOrEqual(bottom.frame.maxY - top.frame.minY, 330, "Five tools and header should not fill the screen")
-            } else {
-                let imageRow = try XCTUnwrap(collection.layoutAttributesForItem(at: IndexPath(item: 8, section: 0)))
-                XCTAssertGreaterThan(imageRow.frame.height, 60, "System-font tool rows must also scale, not just markdown")
+            for index in [2, 4] {
+                let summary = try XCTUnwrap(collection.layoutAttributesForItem(at: IndexPath(item: index, section: 0)))
+                XCTAssertGreaterThanOrEqual(summary.frame.height, 44)
+                if size == .large { XCTAssertLessThanOrEqual(summary.frame.height, 100) }
             }
             try capture(window, name: name)
-            model.expandedToolGroups[first.id] = true
-            try await eventually { collection.numberOfItems(inSection: 0) == 53 }
-            model.expandedToolGroups[first.id] = false
-            try await eventually { collection.numberOfItems(inSection: 0) == 11 }
+            let cell = try XCTUnwrap(collection.visibleCells
+                .filter { $0.accessibilityIdentifier != "chat-row-chat-history-control" }
+                .sorted { $0.frame.minY < $1.frame.minY }.first)
+            let anchorID = cell.accessibilityIdentifier
+            let anchorY = cell.frame.minY - collection.contentOffset.y
+            XCTAssertTrue(model.inspectToolGroup(first.id, owner: "chat"))
+            try await eventually { host.presentedViewController != nil && !model.followsTail }
+            try await Task.sleep(for: .milliseconds(600))
+            XCTAssertTrue(model.isInspectingContent)
+            XCTAssertNil(model.toolInspection.selection, "Group root must pause following without a selected tool")
+            XCTAssertEqual(collection.numberOfItems(inSection: 0), 6)
+            let presented = try XCTUnwrap(host.presentedViewController)
+            let transcript = try XCTUnwrap(findTranscriptController(host))
+            #if DEBUG
+            let configurations = transcript.cellConfigurationCount
+            #endif
+            let tool = try XCTUnwrap(first.tools.last)
+            for update in 0..<3 {
+                let seq = (await controller.state.newestSeq ?? 0) + 1
+                let result = "\(name) streamed result \(update)"
+                let message = DecryptedMessage(id: "live-\(seq)", seq: seq,
+                    content: ["role": "agent", "content": ["type": "codex", "data": [
+                        "type": "tool-call-result", "callId": .string(tool.tool.id),
+                        "output": .string(result), "is_error": false,
+                    ]]], createdAt: seq * 1000, invokedAt: seq * 1000)
+                await controller.onMessageEvent(.messageReceived(namespace: nil, sessionId: "tool-transcript", message: message))
+                try await eventually { model.toolInspection.tools[tool.id]?.tool.result == .string(result) }
+                XCTAssertTrue(host.presentedViewController === presented)
+                XCTAssertEqual(collection.numberOfItems(inSection: 0), 6)
+            }
+            #if DEBUG
+            XCTAssertEqual(transcript.cellConfigurationCount, configurations,
+                           "Member output must not reconfigure unchanged transcript summaries")
+            #endif
+            if size.isAccessibilitySize {
+                let browser = try XCTUnwrap(findCollection(presented.view))
+                let lastRow = try XCTUnwrap(browser.layoutAttributesForItem(at: IndexPath(item: 41, section: 0)))
+                XCTAssertGreaterThan(lastRow.frame.height, 60, "The sheet must inherit the conversation's Dynamic Type")
+            }
+            try capture(window, name: "\(name)-browser")
+            model.toolInspection.dismiss(owner: "chat")
+            try await eventually { host.presentedViewController == nil && !model.isInspectingContent }
+            let restored = try XCTUnwrap(collection.visibleCells.first { $0.accessibilityIdentifier == anchorID })
+            XCTAssertEqual(restored.frame.minY - collection.contentOffset.y, anchorY, accuracy: 1)
+            XCTAssertFalse(model.followsTail)
+            XCTAssertEqual(collection.numberOfItems(inSection: 0), 6)
         }
     }
 
@@ -106,6 +139,11 @@ final class ToolTranscriptPresentationTests: XCTestCase {
     private func findCollection(_ view: UIView) -> UICollectionView? {
         if let collection = view as? UICollectionView { return collection }
         return view.subviews.lazy.compactMap(findCollection).first
+    }
+
+    private func findTranscriptController(_ controller: UIViewController) -> TranscriptCollectionController<TranscriptRow>? {
+        if let transcript = controller as? TranscriptCollectionController<TranscriptRow> { return transcript }
+        return controller.children.lazy.compactMap(findTranscriptController).first
     }
 
     private func capture(_ window: UIWindow, name: String) throws {

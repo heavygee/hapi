@@ -8,7 +8,6 @@ import SwiftUI
 struct ToolCallBlockView: View {
     let block: ToolCallBlock
     let basePath: String?
-    var compact = false
 
     @Environment(\.hapiTheme) private var theme
     @Environment(\.hapiTypography) private var typography
@@ -42,7 +41,7 @@ struct ToolCallBlockView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(compact ? Color.clear : theme.surface)
+        .background(theme.surface)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
@@ -77,9 +76,24 @@ struct ToolCallBlockView: View {
     }
 
     private func headerRow(_ presentation: ToolCardPresentation) -> some View {
-        Button {
-            openTool?(block)
-        } label: {
+        ToolSummaryRow(presentation: presentation, state: block.tool.state) { openTool?(block) }
+            .accessibilityHint(opensToolProcess(block)
+                ? String(localized: "View agent process") : String(localized: "View tool details"))
+            .accessibilityIdentifier("tool-summary-\(block.id)")
+    }
+}
+
+/// Lightweight, read-only row shared by the conversation and group browser.
+/// Tool output and approval controls are deliberately not part of this view.
+struct ToolSummaryRow: View {
+    let presentation: ToolCardPresentation
+    let state: ToolCallState
+    let action: () -> Void
+    @Environment(\.hapiTheme) private var theme
+    @Environment(\.hapiTypography) private var typography
+
+    var body: some View {
+        Button(action: action) {
             let layout = typography.usesStackedToolLayout
                 ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
                 : AnyLayout(HStackLayout(spacing: 8))
@@ -109,8 +123,8 @@ struct ToolCallBlockView: View {
                 }
                 if !typography.usesStackedToolLayout { Spacer(minLength: 8) }
                 HStack(spacing: 8) {
-                    if block.tool.state != .completed {
-                        ToolStatusIndicator(state: block.tool.state)
+                    if state != .completed {
+                        ToolStatusIndicator(state: state)
                     }
                     Image(systemName: "chevron.right")
                         .font(typography.captionFont)
@@ -123,12 +137,8 @@ struct ToolCallBlockView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityValue(block.tool.state == .completed ? String(localized: "Completed") : "")
-        .accessibilityHint(opensToolProcess(block)
-            ? String(localized: "View agent process") : String(localized: "View tool details"))
-        .accessibilityIdentifier("tool-summary-\(block.id)")
+        .accessibilityValue(state == .completed ? String(localized: "Completed") : "")
     }
-
 }
 
 // MARK: - Status
