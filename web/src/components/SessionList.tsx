@@ -31,6 +31,7 @@ function PinnedSectionIcon(props: { className?: string }) {
     )
 }
 import { cn } from '@/lib/utils'
+import { normalizeSearchDictation } from '@/lib/normalizeSearchDictation'
 import { useTranslation } from '@/lib/use-translation'
 import { DEFAULT_SESSION_PREVIEW_LIMIT, useSessionPreviewLimit } from '@/hooks/useSessionPreviewLimit'
 import { useSessionListStatusMode } from '@/hooks/useSessionListStatusMode'
@@ -1125,14 +1126,7 @@ export function getVisibleSessionPreview(
     return visible
 }
 
-// On-device speech recognition (notably Android's) appends sentence-ending
-// punctuation the user never said — "Jessica" comes back as "Jessica." — which
-// then fails to substring-match anything. A search query is never a sentence,
-// so trailing `.`/`!`/`?` from dictation is always noise, not intent.
-function stripDictationTrailingPunctuation(text: string): string {
-    return text.replace(/[.!?]+\s*$/, '')
-}
-
+/** Sidebar search dictation: strip STT punctuation + join spelled letters. */
 export function SessionListSearch(props: {
     value: string
     onChange: (value: string) => void
@@ -1288,7 +1282,7 @@ export function SessionListSearch(props: {
 
     const voiceInput = useVoiceInputPreferences(props.api)
     const onDictationTextChange = useCallback((text: string) => {
-        props.onChange(stripDictationTrailingPunctuation(text))
+        props.onChange(normalizeSearchDictation(text))
     }, [props.onChange])
     const dictation = useDictation({
         api: props.api,
