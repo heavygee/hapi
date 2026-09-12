@@ -847,4 +847,63 @@ describe('mergeSessions job redirect through SessionCache (#1404)', () => {
         expect(store.sessionJobs.get(cId, 'batch')?.label).toBe('c-batch')
         expect(store.sessionJobs.get(cId, 'batch.bbbbbbbb')?.label).toBe('a-late')
     })
+
+    it('late free-key PUT via retained B does not clobber composed A redirects on C', async () => {
+        const { store, cache } = setup()
+        const aId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+        const bId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+        const cId = 'cccccccc-cccc-cccc-cccc-cccccccccccc'
+        for (const [tag, id] of [
+            ['tag-retain-a', aId],
+            ['tag-retain-b', bId],
+            ['tag-retain-c', cId]
+        ] as const) {
+            cache.getOrCreateSession(
+                tag,
+                { path: `/${tag}`, host: 'local', flavor: 'codex' },
+                null,
+                'default',
+                undefined,
+                undefined,
+                undefined,
+                id
+            )
+        }
+
+        store.sessionJobs.upsert(aId, 'batch', {
+            label: 'a-batch',
+            status: 'running',
+            runId: 'run-a'
+        }, 1_000)
+        // Keep B alive after merges so a later PUT can still arrive via B.
+        await cache.mergeSessionHistory(aId, bId, 'default', { mergeAgentState: false })
+        expect(cache.refreshSession(bId)?.metadata?.jobKeyRedirects).toEqual({
+            [`${aId}/batch`]: 'batch'
+        })
+
+        store.sessionJobs.upsert(cId, 'batch', {
+            label: 'c-batch',
+            status: 'running',
+            runId: 'run-c'
+        }, 2_000)
+        await cache.mergeSessionHistory(bId, cId, 'default', { mergeAgentState: false })
+        expect(
+            cache.resolveAttachedJobKey(aId, cId, 'batch', 'default')
+        ).toBe('batch.bbbbbbbb')
+
+        // Late PUT through retained B for an unrelated free key must not
+        // reimport B's stale A/batch→batch onto C.
+        expect(
+            cache.resolveAttachedJobKeyForUpsert(bId, cId, 'other', 'default', 'run-other')
+        ).toBe('other')
+        const redirects = cache.refreshSession(cId)?.metadata?.jobKeyRedirects as
+            | Record<string, string>
+            | undefined
+        expect(redirects?.[`${aId}/batch`]).toBe('batch.bbbbbbbb')
+        expect(redirects?.[`${bId}/batch`]).toBe('batch.bbbbbbbb')
+        expect(redirects?.[`${bId}/other`]).toBe('other')
+        expect(cache.resolveAttachedJobKey(aId, cId, 'batch', 'default')).toBe('batch.bbbbbbbb')
+        expect(store.sessionJobs.get(cId, 'batch')?.label).toBe('c-batch')
+        expect(store.sessionJobs.get(cId, 'batch.bbbbbbbb')?.label).toBe('a-batch')
+    })
 })
