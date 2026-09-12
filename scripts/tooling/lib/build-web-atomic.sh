@@ -91,6 +91,11 @@ build_web_atomic() {
         cat >"$next/.hapi-deferred-swap.json" <<EOF
 {"driverHead":"$head_sha","builtAt":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","reason":"hub_restart_pending"}
 EOF
+        # Post-promote typecheck runs before swap; sync embed manifest to dist.next
+        # so hub tsc does not read a stale embeddedAssets.generated.ts (2026-09-12).
+        if ! _build_web_regen_embed "$driver" "$next"; then
+            return 1
+        fi
         echo "Web build ready in $next — swap deferred until hub restart (HAPI_WEB_SWAP_DEFER=1)" >&2
         echo "  Live $dist unchanged; hub-dependent web gates stay safe during patient drain." >&2
         return 0
