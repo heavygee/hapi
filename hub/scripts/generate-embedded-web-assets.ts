@@ -69,7 +69,15 @@ function main(): void {
         throw new Error(`Missing web/dist/index.html. Run bun run build:web first.`);
     }
 
-    const files = listFiles(webDistDir).sort((a, b) => a.localeCompare(b));
+    const files = listFiles(webDistDir)
+        // Operator stamps (build meta, deferred-swap marker) live in dist for
+        // verify-soup-web-dist but are not served assets. JSON imports resolve
+        // to parsed objects under tsc, breaking EmbeddedWebAsset.sourcePath.
+        .filter((filePath) => {
+            const base = filePath.slice(filePath.lastIndexOf('/') + 1);
+            return !base.startsWith('.hapi-');
+        })
+        .sort((a, b) => a.localeCompare(b));
     if (files.length === 0) {
         throw new Error(`No files found in web/dist: ${webDistDir}.`);
     }
