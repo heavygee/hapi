@@ -27,6 +27,7 @@ describe('CLI entrypoint', () => {
 
     beforeEach(() => {
         vi.clearAllMocks()
+        getCliArgsMock.mockReturnValue([])
         process.exitCode = undefined
         Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: true })
         Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: true })

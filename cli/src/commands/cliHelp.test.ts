@@ -14,11 +14,14 @@ describe('formatHapiCliHelp', () => {
     })
 })
 
-describe('resolveCommand help vs default Claude', () => {
-    it('routes bare --help / -h / help to the help command, not Claude', () => {
-        expect(resolveCommand(['--help'])!.command.name).toBe('help')
-        expect(resolveCommand(['-h'])!.command.name).toBe('help')
+describe('resolveCommand help vs agent dispatch', () => {
+    it('routes hapi help subcommand to the help command', () => {
         expect(resolveCommand(['help'])!.command.name).toBe('help')
+    })
+
+    it('does not treat top-level --help as a subcommand (runCli handles it)', () => {
+        expect(resolveCommand(['--help'])).toBeNull()
+        expect(resolveCommand(['-h'])).toBeNull()
     })
 
     it('keeps hapi job --help on the job command', () => {
@@ -26,11 +29,11 @@ describe('resolveCommand help vs default Claude', () => {
         expect(resolveCommand(['ping-peer', '--help'])!.command.name).toBe('ping-peer')
     })
 
-    it('still defaults bare hapi (no args) to Claude', () => {
-        expect(resolveCommand([])!.command.name).toBe('default')
+    it('returns null for bare argv (runCli agent picker fills the agent)', () => {
+        expect(resolveCommand([])).toBeNull()
     })
 
-    it('routes hapi version to the version command, not Claude', () => {
+    it('routes hapi version to the version command', () => {
         expect(resolveCommand(['version'])!.command.name).toBe('version')
     })
 })

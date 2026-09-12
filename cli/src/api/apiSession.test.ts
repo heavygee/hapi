@@ -63,7 +63,7 @@ vi.mock('socket.io-client', () => ({
                 return socket
             },
             emitWithAck: async () => ({}),
-            timeout: () => ({ emitWithAck: async () => ({}) }),
+            timeout: () => socket,
             connect: () => {
                 state.connectCalls += 1
                 if (state.connectImmediately) {
