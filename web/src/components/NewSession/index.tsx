@@ -269,7 +269,9 @@ export function NewSession(props: {
         machineId
     ])
 
-    // Seed agent / yolo / permission from hub peerSpawnDefaults once (Settings → General).
+    // Seed from hub peerSpawnDefaults once (Settings → General).
+    // Sticky New Session localStorage agent wins when present (last-used UI);
+    // peer spawn / machine spawn always resolve hub server-side.
     // Browse-draft restore wins; explicit form edits after seed are not overwritten.
     useEffect(() => {
         if (seededFromHubRef.current || restoredFromBrowseRef.current || !hubPeerSpawnDefaults) {
@@ -277,27 +279,39 @@ export function NewSession(props: {
         }
         seededFromHubRef.current = true
         const seeded = seedNewSessionFromPeerSpawnDefaults(hubPeerSpawnDefaults)
-        setAgent(seeded.agent)
-        setYoloMode(seeded.yoloMode)
-        if (usesCodexFamilyPermissionModes(seeded.agent)) {
-            setCodexFamilyPermissionMode(seeded.permissionMode)
-        } else if (seeded.agent === 'grok') {
-            if (
-                seeded.permissionMode === 'default'
-                || seeded.permissionMode === 'auto'
-                || seeded.permissionMode === 'plan'
-                || seeded.permissionMode === 'bypassPermissions'
-            ) {
-                setGrokPermissionMode(seeded.permissionMode)
-            } else if (isYoloStylePermissionMode(seeded.permissionMode)) {
-                setGrokPermissionMode('bypassPermissions')
+        let hasStickyAgent = false
+        let hasStickyYolo = false
+        try {
+            hasStickyAgent = localStorage.getItem('hapi:newSession:agent') !== null
+            hasStickyYolo = localStorage.getItem('hapi:newSession:yolo') !== null
+        } catch {
+            // Ignore storage errors
+        }
+        if (!hasStickyAgent) {
+            setAgent(seeded.agent)
+            if (usesCodexFamilyPermissionModes(seeded.agent)) {
+                setCodexFamilyPermissionMode(seeded.permissionMode)
+            } else if (seeded.agent === 'grok') {
+                if (
+                    seeded.permissionMode === 'default'
+                    || seeded.permissionMode === 'auto'
+                    || seeded.permissionMode === 'plan'
+                    || seeded.permissionMode === 'bypassPermissions'
+                ) {
+                    setGrokPermissionMode(seeded.permissionMode)
+                } else if (isYoloStylePermissionMode(seeded.permissionMode)) {
+                    setGrokPermissionMode('bypassPermissions')
+                }
+            }
+            if (seeded.model) {
+                setModel(seeded.model)
+                if (seeded.agent === 'cursor') {
+                    setCursorSelectedBase(seeded.model)
+                }
             }
         }
-        if (seeded.model) {
-            setModel(seeded.model)
-            if (seeded.agent === 'cursor') {
-                setCursorSelectedBase(seeded.model)
-            }
+        if (!hasStickyYolo) {
+            setYoloMode(seeded.yoloMode)
         }
     }, [hubPeerSpawnDefaults])
 
@@ -830,8 +844,7 @@ export function NewSession(props: {
         const preferred = resolvePreferredLaunchSettings(
             agent,
             loadPreferredLaunchSettings(machineId, agent),
-            legacyCodexYolo,
-            hubPeerSpawnDefaults?.permissionMode
+            legacyCodexYolo
         )
 
         setModel(agent === 'opencode' ? 'auto' : preferred.model)
@@ -847,7 +860,7 @@ export function NewSession(props: {
         setAgySelectedModel(
             agent === 'agy' && preferred.model !== 'auto' ? preferred.model : null
         )
-    }, [agent, legacyCodexYolo, machineId, hubPeerSpawnDefaults?.permissionMode])
+    }, [agent, legacyCodexYolo, machineId])
 
     useEffect(() => {
         if (
