@@ -32,8 +32,7 @@ import type { CommandContext, CommandDefinition } from './types'
 
 // Gemini CLI was sunset (Google stopped serving the consumer Gemini CLI on
 // 2026-06-18) so the agent is no longer launchable. Keep an explicit tombstone
-// command so `hapi gemini` reports a clear error instead of falling through to
-// the default Claude command with "gemini" as a forwarded argument.
+// command so `hapi gemini` explains why the agent is no longer available.
 const removedGeminiCommand: CommandDefinition = {
     name: 'gemini',
     requiresRuntimeAssets: false,
@@ -49,6 +48,8 @@ const removedGeminiCommand: CommandDefinition = {
 const COMMANDS: CommandDefinition[] = [
     agyCommand,
     authCommand,
+    claudeCommand,
+    { ...claudeCommand, name: 'claude' },
     connectCommand,
     codexCommand,
     dshCommand,
@@ -87,7 +88,7 @@ for (const command of COMMANDS) {
 const HELP_TOKENS = new Set(['help', '-h', '--help'])
 const VERSION_TOKENS = new Set(['version'])
 
-export function resolveCommand(args: string[]): { command: CommandDefinition; context: CommandContext } {
+export function resolveCommand(args: string[]): { command: CommandDefinition; context: CommandContext } | null {
     const subcommand = args[0]
     if (subcommand && HELP_TOKENS.has(subcommand)) {
         return {
@@ -102,6 +103,15 @@ export function resolveCommand(args: string[]): { command: CommandDefinition; co
         }
     }
     const command = subcommand ? commandMap.get(subcommand) : undefined
+    if (subcommand && !command) {
+        if (subcommand.startsWith('-') && subcommand !== '-v' && subcommand !== '--version') {
+            return {
+                command: claudeCommand,
+                context: { args, subcommand, commandArgs: args },
+            }
+        }
+        return null
+    }
     const resolvedCommand = command ?? claudeCommand
     const commandArgs = command ? args.slice(1) : args
 

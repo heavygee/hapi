@@ -33,7 +33,10 @@ export const claudeCommand: CommandDefinition = {
         for (let i = 0; i < args.length; i++) {
             const arg = args[i]
 
-            if (arg === '-h' || arg === '--help') {
+            if (arg === '--') {
+                unknownArgs.push(...args.slice(i))
+                break
+            } else if (arg === '-h' || arg === '--help') {
                 showHelp = true
                 unknownArgs.push(arg)
             } else if (arg === '--hapi-starting-mode') {

@@ -50,6 +50,14 @@ Dictation and voice-assistant provider keys can also be added from **Settings â†
 - `HAPI_RELAY_AUTH` - Explicit relay auth key. By default the hub obtains and persists an individually revocable key from the relay. A persisted key rejected with HTTP 403 is discarded and reissued once; an explicitly configured environment key must be updated manually.
 - `HAPI_RELAY_FORCE_TCP` - Force TCP relay mode (true/1).
 - `VAPID_SUBJECT` - Contact email/URL for Web Push.
+- `HAPI_ANDROID_PUSH` - `auto` (default: direct FCM when credentials are configured, otherwise relay), `relay`, `fcm`, or `off`.
+- `FCM_SERVICE_ACCOUNT_PATH` - Service-account JSON for private Firebase builds; the app must use the same project. Invalid configured credentials disable Android push instead of switching projects.
+- `HAPI_IOS_PUSH` - `relay` (default), `apns`, or `off`.
+- `HAPI_PUSH_RELAY_URL` - Shared Android/iOS push relay (default: `https://push.hapi.run`; persisted as `iosPushRelayUrl`). Independent of the `--relay` network tunnel.
+
+Official native apps register their encryption keys automatically; no push
+provider setup is needed on a fresh hub. See the [native companion push
+contract](../docs/api/native-companion-contract.md).
 
 ### Optional (Overseer LLM fallback â€” fork, default OFF)
 

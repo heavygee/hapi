@@ -9,3 +9,7 @@ export const helpCommand: CommandDefinition = {
         process.exit(0)
     },
 }
+
+export function printCliHelp(): void {
+    console.log(formatHapiCliHelp())
+}

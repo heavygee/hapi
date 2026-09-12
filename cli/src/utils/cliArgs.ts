@@ -12,8 +12,8 @@ function isEntrypointPath(value: string, bunMain: string): boolean {
     if (!value) {
         return false;
     }
-    if (value === bunMain) {
-        return true;
+    if (bunMain) {
+        return value === bunMain;
     }
     return /\.(c|m)?(ts|js)$/.test(value);
 }
@@ -41,22 +41,31 @@ function stripRuntimePrefix(
     execBase: string,
     bunMain: string
 ): string[] {
+    if (args.length === 0) {
+        return [];
+    }
+
     let startIndex = 0;
-    while (startIndex < args.length) {
-        const value = args[startIndex] || '';
-        const nextValue = args[startIndex + 1] || '';
-        if (
-            value === 'bun' &&
-            (nextValue === bunMain || nextValue === execPath || nextValue === execBase || isEntrypointPath(nextValue, bunMain))
-        ) {
-            startIndex += 2;
-            continue;
-        }
-        if (value === execPath || value === execBase || isEntrypointPath(value, bunMain)) {
-            startIndex += 1;
-            continue;
-        }
-        break;
+    const nextValue = args[1] || '';
+    if (args[0] === 'bun' && (
+        nextValue === execPath || nextValue === execBase || isEntrypointPath(nextValue, bunMain)
+    )) {
+        startIndex += 1;
+    }
+    if (args[startIndex] === execPath || args[startIndex] === execBase) {
+        startIndex += 1;
+    }
+    // Consume at most one entrypoint. Later filenames, even *.ts / *.js, are
+    // user arguments, not additional runtime wrappers.
+    if ((startIndex > 0 || (bunMain && args[0] === bunMain))
+        && isEntrypointPath(args[startIndex] || '', bunMain)) {
+        startIndex += 1;
+    }
+
+    // Only a separator immediately after the runtime/entrypoint is a wrapper
+    // separator. A later `--` belongs to the selected command and its arguments.
+    if (startIndex > 0 && args[startIndex] === '--') {
+        startIndex += 1;
     }
     return args.slice(startIndex);
 }

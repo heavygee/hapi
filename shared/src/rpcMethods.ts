@@ -54,6 +54,7 @@ export const RPC_METHODS = {
     RewindConversation: 'rewind-conversation',
     BridgeModelError: 'bridge-model-error',
     RunnerSelfUpgrade: 'runner-self-upgrade',
+    ClearConversation: 'clear-conversation',
 } as const
 
 export const RPC_TARGET_MISSING_ERROR_CODE = 'rpc_target_missing' as const

@@ -197,7 +197,7 @@ export type NormalizedMessage = ({
 
 export type ToolPermission = {
     id: string
-    status: 'pending' | 'approved' | 'denied' | 'canceled'
+    status: 'pending' | 'approved' | 'denied' | 'canceled' | 'resolved'
     reason?: string
     mode?: string
     allowedTools?: string[]
