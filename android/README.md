@@ -127,8 +127,11 @@ events. Default-network/interface/route changes wake reconnect immediately,
 preserving replay cursors; background retries defer until foreground. A local
 hub route does not need Android's internet-validation capability.
 
-Home keeps the Sessions title and new-session FAB. **Filters** opens a Material
-3 single-selection sheet. Choices come from all sessions, including historical
+Home centers the Sessions title between a **Hubs and settings** icon and a
+**Filters** icon, keeping the new-session FAB. The hub menu is the only entry
+for switching/adding hubs, app settings and sign-out; the active hub is checked.
+The filter icon marks an applied filter and opens a Material 3 single-selection
+sheet. Choices come from all sessions, including historical
 machines; names/IDs determine ordering, never counts. Duplicate names include
 IDs; unnamed and unknown machines are labeled. The applied filter has a Clear
 action, is transient per home/hub, and is cleared when no longer valid.
@@ -140,16 +143,23 @@ These controls and notices ship in English and Simplified Chinese.
 
 ### Validation status (2026-09-12)
 
-Protocol/data/app JVM suites: 707 tests passed. Debug APK, instrumentation APK
-and lint passed. API 29: 19 chat/reader regressions passed, including large-font
-pagination, source/answer rendering, exact clipboard text, and FileProvider URI
-export. The opt-in frame probe was skipped.
+Protocol/data/app JVM suites: 722 tests passed. Debug APK, instrumentation APK
+and lint passed. Pixel 6 (Android 17/API 37): installed and visually checked the
+home toolbar, hub/settings menu, applying/clearing filters, English/Chinese
+switching and code-copy feedback. Code headers keep an 18dp action icon inside
+a 48dp touch target, at the trailing edge even with short language labels.
 
-The local API 36 software emulator completed boot but Android killed the
-instrumentation process for a startup ANR before any tests ran; system services
-also timed out on this host without KVM. API 36 remains pending the CI job with
-KVM. No 60/120 Hz device frame-time, memory, or predictive-back measurements are
-claimed by these checks.
+API 36 ARM64 emulator (macOS Hypervisor.Framework): 8 targeted instrumentation
+tests passed, including 5 new toolbar/code-layout regressions (320dp width,
+English/Chinese, 2× font scaling), exact clipboard/file export and question
+details. The full 30-test run was **not all green**: 3 transcript group-anchor
+checks and the tool-browser initial-position check also fail with the pre-fix
+APK. One question-details timeout passed on targeted rerun; the opt-in frame
+probe was skipped. API 37 instrumentation is blocked by the current Espresso
+dependency calling the removed `InputManager.getInstance()` method.
+
+Earlier API 29 checks passed 19 chat/reader regressions. No 60/120 Hz device
+frame-time, memory, or predictive-back measurements are claimed by these checks.
 
 ## Pairing
 
