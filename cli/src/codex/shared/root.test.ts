@@ -41,14 +41,19 @@ async function fixture() {
     let state: AgentState = { steeringActive: true };
     let metadata: Metadata = { path: directory, host: 'test', flavor: 'codex' };
     let reconnect: (() => void) | null = null;
+    let userMessage: ((message: { content: { text: string }; meta?: { deliveryMode?: 'queue' | 'steer' } }, localId?: string) => void) | undefined;
     const updateState = vi.fn((fn: (value: AgentState) => AgentState) => { state = fn(state); });
+    const emitMessagesConsumed = vi.fn();
     const session = {
         sessionId: 'sid', getMetadata: () => metadata,
         updateMetadata: (fn: (value: Metadata) => Metadata) => { metadata = fn(metadata); },
         updateAgentState: updateState, keepAlive() {},
-        onUserMessage() {}, onCancelQueuedMessage() {}, onRetryQueuedMessage() {},
+        onUserMessage(fn: typeof userMessage) { userMessage = fn; },
+        onCancelQueuedMessage() {}, onRetryQueuedMessage() {},
         onReconnect: (fn: (() => void) | null) => { reconnect = fn; },
         rpcHandlerManager: { registerHandler() {} }, sendSessionEvent() {}, sendAgentMessage() {}, emitSessionReady() {},
+        emitMessagesConsumed, emitSteerIndeterminate() {}, setSteerDeliveryState: async () => true,
+        syncNativeQueuedMessage() {},
         sendSessionDeath() {}, async flush() {}, close() {}
     } as unknown as ApiSessionClient;
     const root = new SharedCodexRoot({ session, workingDirectory: directory } as SessionBootstrapResult, {
@@ -64,8 +69,9 @@ async function fixture() {
         thread: { id: string; turns: Array<{ id: string; status: string; items: unknown[] }> };
         notify(method: string, params: unknown): void;
         abandoned(): void;
+        request: (method: string, params?: unknown) => Promise<unknown>;
     };
-    return { root, native, state: () => state, updateState, reconnect: () => reconnect?.() };
+    return { root, native, state: () => state, updateState, reconnect: () => reconnect?.(), userMessage: () => userMessage!, emitMessagesConsumed };
 }
 
 describe('shared steering availability', () => {
@@ -114,5 +120,26 @@ describe('shared steering availability', () => {
         f.native.thread.turns = [{ id: 'busy', status: 'completed', items: [] }];
         f.reconnect();
         await vi.waitFor(() => expect(f.state().steeringActive).toBe(false));
+    });
+
+    it('auto-steers a deliveryMode steer peer nudge into the active turn', async () => {
+        const f = await fixture();
+        await f.root.activate();
+        f.native.notify('turn/started', { threadId: 'thread', turn: { id: 'turn-live' } });
+        const requests = vi.spyOn(f.root.client, 'request').mockImplementation(async (method: string) => {
+            if (method === 'turn/steer') return {};
+            if (method === 'thread/read' || method === 'thread/resume') {
+                return { model: 'mock', thread: f.native.thread };
+            }
+            if (method === 'thread/list' || method === 'thread/queue/list' || method === 'thread/loaded/list') {
+                return { data: [] };
+            }
+            throw new Error(`Unexpected request: ${method}`);
+        });
+
+        f.userMessage()({ content: { text: 'peer nudge' }, meta: { deliveryMode: 'steer' } }, 'peer-1');
+        await vi.waitFor(() => expect(f.emitMessagesConsumed).toHaveBeenCalledWith(['peer-1'], { steered: true }));
+        expect(requests.mock.calls.some(([method]) => method === 'turn/steer')).toBe(true);
+        expect(requests.mock.calls.some(([method]) => method === 'thread/queue/add')).toBe(false);
     });
 });
