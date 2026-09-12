@@ -475,6 +475,77 @@ describe('mergeSessions job redirect through SessionCache (#1404)', () => {
         expect(store.sessionJobs.get(cId, 'beets.aaaaaaaa.bbbbbbbb')?.label).toBe('a-live')
     })
 
+    it('composes identity maps from a no-collision A→B through a later B→C remap', async () => {
+        const { store, cache } = setup()
+        const aId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+        const bId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+        const cId = 'cccccccc-cccc-cccc-cccc-cccccccccccc'
+        cache.getOrCreateSession(
+            'tag-id-a',
+            { path: '/a', host: 'local', flavor: 'codex' },
+            null,
+            'default',
+            undefined,
+            undefined,
+            undefined,
+            aId
+        )
+        cache.getOrCreateSession(
+            'tag-id-b',
+            { path: '/b', host: 'local', flavor: 'codex' },
+            null,
+            'default',
+            undefined,
+            undefined,
+            undefined,
+            bId
+        )
+        cache.getOrCreateSession(
+            'tag-id-c',
+            { path: '/c', host: 'local', flavor: 'codex' },
+            null,
+            'default',
+            undefined,
+            undefined,
+            undefined,
+            cId
+        )
+
+        // A owns batch; B has no job — first transfer keeps the key.
+        store.sessionJobs.upsert(aId, 'batch', {
+            label: 'a-batch',
+            status: 'running',
+            runId: 'run-a'
+        }, 1_000)
+
+        await cache.mergeSessionHistory(aId, bId, 'default', { mergeAgentState: false })
+        expect(cache.refreshSession(bId)?.metadata?.jobKeyRedirects).toEqual({
+            [`${aId}/batch`]: 'batch'
+        })
+        expect(store.sessionJobs.get(bId, 'batch')?.label).toBe('a-batch')
+
+        // C already has a live batch — second transfer remaps B's row.
+        store.sessionJobs.upsert(cId, 'batch', {
+            label: 'c-batch',
+            status: 'running',
+            runId: 'run-c'
+        }, 2_000)
+
+        await cache.mergeSessionHistory(bId, cId, 'default', { mergeAgentState: false })
+
+        const redirects = cache.refreshSession(cId)?.metadata?.jobKeyRedirects as
+            | Record<string, string>
+            | undefined
+        expect(redirects?.[`${bId}/batch`]).toBe('batch.bbbbbbbb')
+        // Without the A→B identity map, A would still resolve to C's live `batch`.
+        expect(redirects?.[`${aId}/batch`]).toBe('batch.bbbbbbbb')
+        expect(
+            cache.resolveAttachedJobKey(aId, cId, 'batch', 'default')
+        ).toBe('batch.bbbbbbbb')
+        expect(store.sessionJobs.get(cId, 'batch')?.label).toBe('c-batch')
+        expect(store.sessionJobs.get(cId, 'batch.bbbbbbbb')?.label).toBe('a-batch')
+    })
+
     it('rolls back the job-row move when redirect metadata write fails', () => {
         const { store, cache } = setup()
         const { oldSession, newSession } = makeSessions(cache)

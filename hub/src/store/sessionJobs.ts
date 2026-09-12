@@ -399,6 +399,9 @@ export function transferSessionJobs(
                     `UPDATE session_jobs SET session_id = ?
                      WHERE session_id = ? AND job_key = ?`
                 ).run(toSessionId, fromSessionId, job.key)
+                // Identity map so a later B→C remap can compose A→…→remapped key
+                // instead of leaving A pointed at C's unrelated same-key job.
+                keyRedirects.push({ fromKey: job.key, toKey: job.key })
                 moved += 1
             } else {
                 db.prepare('DELETE FROM session_jobs WHERE session_id = ? AND job_key = ?')
@@ -411,6 +414,9 @@ export function transferSessionJobs(
             `UPDATE session_jobs SET session_id = ?
              WHERE session_id = ? AND job_key = ?`
         ).run(toSessionId, fromSessionId, job.key)
+        // No collision: still record identity so A→B→C chains compose when a
+        // later merge remaps the key (HAPI Bot Major on #1424).
+        keyRedirects.push({ fromKey: job.key, toKey: job.key })
         moved += 1
     }
 
