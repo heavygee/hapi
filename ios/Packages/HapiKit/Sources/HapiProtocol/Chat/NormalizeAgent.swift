@@ -24,7 +24,10 @@ func parseAgentTimestampMs(_ value: JSONValue?) -> Int? {
 func isDisplayableHttpHref(_ href: String) -> Bool {
     let trimmed = href.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty, trimmed.count <= 2048 else { return false }
-    guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased() else { return false }
+    // Validation copy only — keep original href bytes on DisplayLinkItem.
+    // Foundation `URL(string:)` rejects unescaped spaces that `new URL()` (web) accepts.
+    let validation = trimmed.replacingOccurrences(of: " ", with: "%20")
+    guard let url = URL(string: validation), let scheme = url.scheme?.lowercased() else { return false }
     return scheme == "http" || scheme == "https"
 }
 

@@ -13,9 +13,7 @@ struct DisplayLinksBlockView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             ForEach(Array(block.urls.enumerated()), id: \.offset) { _, url in
-                if let link = URL(string: url.href),
-                   let scheme = link.scheme?.lowercased(),
-                   scheme == "http" || scheme == "https" {
+                if let link = displayableHttpURL(from: url.href) {
                     Link(destination: link) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(url.title?.isEmpty == false ? url.title! : url.href)
@@ -88,5 +86,21 @@ struct DisplayLinksBlockView: View {
                 .expirationDate: Date().addingTimeInterval(120),
             ]
         )
+    }
+
+    /// Build a tappable URL; escape spaces for Foundation while the card still shows original href bytes.
+    private func displayableHttpURL(from href: String) -> URL? {
+        let trimmed = href.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let url = URL(string: trimmed),
+           let scheme = url.scheme?.lowercased(),
+           scheme == "http" || scheme == "https" {
+            return url
+        }
+        guard let url = URL(string: trimmed.replacingOccurrences(of: " ", with: "%20")),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            return nil
+        }
+        return url
     }
 }

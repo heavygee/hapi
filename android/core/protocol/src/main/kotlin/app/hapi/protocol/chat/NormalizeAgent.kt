@@ -41,7 +41,9 @@ internal fun isDisplayableHttpHref(href: String): Boolean {
     val trimmed = href.trim()
     if (trimmed.isEmpty() || trimmed.length > 2048) return false
     return try {
-        val uri = java.net.URI(trimmed)
+        // Validation copy only — keep original href bytes on DisplayLinkItem.
+        // java.net.URI rejects unescaped spaces that `new URL()` (web) accepts.
+        val uri = java.net.URI(trimmed.replace(" ", "%20"))
         val scheme = uri.scheme?.lowercase()
         scheme == "http" || scheme == "https"
     } catch (_: Exception) {
