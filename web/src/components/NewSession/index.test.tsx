@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactElement } from 'react'
 import type { ApiClient } from '@/api/client'
 import type { Machine, PiModelSummary } from '@/types/api'
 import { saveNewSessionFormDraft } from './newSessionFormDraft'
@@ -255,7 +257,29 @@ vi.mock('./ActionButtons', () => ({
 import { NewSession } from './index'
 
 const machine = { id: 'machine-1' } as Machine
-const api = {} as ApiClient
+const api = {
+    getHubSettings: vi.fn().mockResolvedValue({
+        sessionSummaryContract: false,
+        sessionSummaryInChat: false,
+        peerSpawnDefaults: {
+            agent: 'claude',
+            permissionMode: 'bypassPermissions',
+            models: { claude: 'sonnet' }
+        }
+    })
+} as unknown as ApiClient
+
+function renderWithQuery(ui: ReactElement) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const wrap = (node: ReactElement) => (
+        <QueryClientProvider client={client}>{node}</QueryClientProvider>
+    )
+    const result = render(wrap(ui))
+    return {
+        ...result,
+        rerender: (node: ReactElement) => result.rerender(wrap(node))
+    }
+}
 
 describe('NewSession launch preferences', () => {
     beforeEach(() => {
@@ -301,7 +325,7 @@ describe('NewSession launch preferences', () => {
             { agent: 'codex', available: true }
         )
 
-        render(
+        renderWithQuery(
             <NewSession
                 api={api}
                 machines={[machine]}
@@ -323,7 +347,7 @@ describe('NewSession launch preferences', () => {
         }))
         mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'unexpected' })
 
-        render(
+        renderWithQuery(
             <NewSession
                 api={api}
                 machines={[machine]}
@@ -350,7 +374,7 @@ describe('NewSession launch preferences', () => {
             permissionMode: 'safe-yolo'
         })
 
-        render(
+        renderWithQuery(
             <NewSession
                 api={api}
                 machines={[machine]}
@@ -372,7 +396,7 @@ describe('NewSession launch preferences', () => {
         savePreferredAgent('claude')
         savePreferredYoloMode(true)
 
-        render(
+        renderWithQuery(
             <NewSession
                 api={api}
                 machines={[machine]}
@@ -394,7 +418,7 @@ describe('NewSession launch preferences', () => {
         savePreferredAgent('codex')
         savePreferredYoloMode(true)
 
-        render(
+        renderWithQuery(
             <NewSession
                 api={api}
                 machines={[machine]}
@@ -416,7 +440,7 @@ describe('NewSession launch preferences', () => {
             { modelId: 'auto', name: 'Auto' }
         ]
 
-        render(
+        renderWithQuery(
             <NewSession
                 api={api}
                 machines={[machine]}
@@ -444,7 +468,7 @@ describe('NewSession launch preferences', () => {
             modelReasoningEffort: 'default'
         })
 
-        render(
+        renderWithQuery(
             <NewSession
                 api={api}
                 machines={[machine]}
@@ -474,7 +498,7 @@ describe('NewSession launch preferences', () => {
             modelReasoningEffort
         })
 
-        render(
+        renderWithQuery(
             <NewSession
                 api={api}
                 machines={[machine]}
@@ -509,7 +533,7 @@ describe('NewSession launch preferences', () => {
         savePreferredAgent(agent)
         savePreferredLaunchSettings('machine-1', agent, settings)
 
-        render(
+        renderWithQuery(
             <NewSession
                 api={api}
                 machines={[machine]}
@@ -526,7 +550,7 @@ describe('NewSession launch preferences', () => {
     it('saves changed launch settings only after creation succeeds', async () => {
         mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'session-1' })
 
-        render(
+        renderWithQuery(
             <NewSession
                 api={api}
                 machines={[machine]}
@@ -563,7 +587,7 @@ describe('NewSession launch preferences', () => {
             copilotAgentMode: 'interactive', yoloMode: false, codexFamilyPermissionMode: 'default',
             grokPermissionMode: 'default', sessionType: 'simple', worktreeName: ''
         })
-        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        renderWithQuery(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
         await waitFor(() => expect(screen.getByTestId('agy-model')).toHaveTextContent('gemini-3.6-flash-low'))
     })
 
@@ -575,14 +599,14 @@ describe('NewSession launch preferences', () => {
             copilotAgentMode: 'interactive', yoloMode: false, codexFamilyPermissionMode: 'default',
             grokPermissionMode: 'default', sessionType: 'simple', worktreeName: ''
         })
-        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        renderWithQuery(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
         await waitFor(() => expect(screen.getByTestId('agy-model')).toHaveTextContent('auto'))
     })
 
     it('falls back to Default when a preferred AGY model is no longer advertised', async () => {
         savePreferredAgent('agy')
         savePreferredLaunchSettings('machine-1', 'agy', { model: 'removed-model', cursorSelectedBase: 'auto', effort: 'auto', modelReasoningEffort: 'default' })
-        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        renderWithQuery(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
         await waitFor(() => expect(screen.getByTestId('agy-model')).toHaveTextContent('auto'))
     })
 
@@ -590,7 +614,7 @@ describe('NewSession launch preferences', () => {
         savePreferredAgent('agy')
         savePreferredLaunchSettings('machine-1', 'agy', { model: 'gemini-3.6-flash-low', cursorSelectedBase: 'auto', effort: 'auto', modelReasoningEffort: 'default' })
         mocks.agyModelsLoading = true
-        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        renderWithQuery(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
         await waitFor(() => expect(screen.getByTestId('create')).toBeDisabled())
     })
 
@@ -598,7 +622,7 @@ describe('NewSession launch preferences', () => {
         savePreferredAgent('dsh')
         savePreferredYoloMode(true)
         mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'dsh-session' })
-        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        renderWithQuery(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
 
         fireEvent.click(screen.getByTestId('create'))
         await waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledWith('dsh-session'))
@@ -612,7 +636,7 @@ describe('NewSession launch preferences', () => {
     it('keeps an explicit OpenCode Default selection instead of restoring a concrete model', async () => {
         savePreferredAgent('opencode')
         mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'opencode-session' })
-        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        renderWithQuery(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
         // The catalog advertises a concrete default; the user picks Default.
         fireEvent.click(screen.getByTestId('opencode-model-default'))
         await waitFor(() => expect(screen.getByTestId('opencode-model')).toHaveTextContent('default'))
@@ -628,14 +652,14 @@ describe('NewSession launch preferences', () => {
         savePreferredAgent('opencode')
         savePreferredLaunchSettings('machine-1', 'opencode', { model: 'provider/model', cursorSelectedBase: 'auto', effort: 'auto', modelReasoningEffort: 'high' })
         mocks.opencodeModels = [{ modelId: 'provider/model', name: 'Model' }]
-        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        renderWithQuery(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
         await waitFor(() => expect(screen.getByTestId('opencode-model')).toHaveTextContent('provider/model'))
     })
 
     it('persists the selected AGY model only after a successful launch', async () => {
         savePreferredAgent('agy')
         mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'agy-session' })
-        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        renderWithQuery(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
         fireEvent.click(screen.getByTestId('agy-model'))
         fireEvent.click(screen.getByTestId('create'))
         await waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledWith('agy-session'))
@@ -651,7 +675,7 @@ describe('NewSession launch preferences', () => {
             { modelId: 'gemini-3.6-flash-low', name: 'Gemini 3.6 Flash (Low)' }
         ]
         mocks.spawnSession.mockResolvedValue({ type: 'error', message: 'spawn failed' })
-        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        renderWithQuery(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
         await waitFor(() => expect(screen.getByTestId('agy-model')).toHaveTextContent('gemini-3.5-flash-low'))
         fireEvent.click(screen.getByTestId('agy-model'))
         fireEvent.click(screen.getByTestId('create'))
@@ -666,7 +690,7 @@ describe('NewSession launch preferences', () => {
         }))
         mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'session-1' })
 
-        render(
+        renderWithQuery(
             <NewSession
                 api={api}
                 machines={[machine]}
@@ -710,7 +734,7 @@ describe('NewSession launch preferences', () => {
             reopenSession: vi.fn().mockResolvedValue({ ok: true, sessionId: 'hapi-imported-1', resumed: true })
         } as unknown as ApiClient
 
-        render(
+        renderWithQuery(
             <NewSession
                 api={piApi}
                 machines={[machine]}
@@ -761,7 +785,7 @@ describe('NewSession launch preferences', () => {
             reopenSession: vi.fn().mockResolvedValue({ ok: true, sessionId: 'hapi-machine-b', resumed: true })
         } as unknown as ApiClient
 
-        render(
+        renderWithQuery(
             <NewSession
                 api={piApi}
                 machines={[machineA, machineB]}
@@ -833,7 +857,7 @@ describe('NewSession launch preferences', () => {
             })
         } as unknown as ApiClient
 
-        render(
+        renderWithQuery(
             <NewSession
                 api={piApi}
                 machines={[machine]}
@@ -860,7 +884,7 @@ describe('NewSession launch preferences', () => {
     it('does not save changed launch settings when creation fails', async () => {
         mocks.spawnSession.mockResolvedValue({ type: 'error', message: 'spawn failed' })
 
-        render(
+        renderWithQuery(
             <NewSession
                 api={api}
                 machines={[machine]}
@@ -905,7 +929,7 @@ describe('NewSession launch preferences', () => {
             worktreeName: ''
         })
 
-        render(
+        renderWithQuery(
             <NewSession
                 api={api}
                 machines={[machine]}
@@ -934,7 +958,7 @@ describe('NewSession launch preferences', () => {
             modelReasoningEffort: 'default',
         })
 
-        render(
+        renderWithQuery(
             <NewSession
                 api={api}
                 machines={[machine]}
@@ -970,7 +994,7 @@ describe('NewSession launch preferences', () => {
             modelReasoningEffort: 'default',
         })
 
-        render(
+        renderWithQuery(
             <NewSession
                 api={api}
                 machines={[machine]}
@@ -1003,7 +1027,7 @@ describe('NewSession launch preferences', () => {
             modelReasoningEffort: 'default',
         })
 
-        render(
+        renderWithQuery(
             <NewSession
                 api={api}
                 machines={[machine]}
@@ -1035,7 +1059,7 @@ describe('NewSession launch preferences', () => {
             modelReasoningEffort: 'default',
         })
 
-        render(
+        renderWithQuery(
             <NewSession
                 api={api}
                 machines={[machine]}
@@ -1069,7 +1093,7 @@ describe('NewSession launch preferences', () => {
             { provider: 'opencode-go', modelId: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
         ]
 
-        render(
+        renderWithQuery(
             <NewSession
                 api={api}
                 machines={[machine]}
