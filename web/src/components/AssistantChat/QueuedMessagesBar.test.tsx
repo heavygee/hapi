@@ -495,7 +495,9 @@ describe('QueuedMessagesBar edit restore', () => {
         expect(mocks.addToast).not.toHaveBeenCalled()
     })
 
-    it('prefills the composer when editing an indeterminate row whose cancel returns busy (#1839)', async () => {
+    it('does not prefill when editing an indeterminate row whose cancel returns busy', async () => {
+        // Hub may still be mid-dispatch (serialized as indeterminate). Prefilling
+        // would invite a duplicate send if the original later lands.
         mocks.messageWindowState = {
             messages: [makeQueuedMessage(null, 'server-message-id', { deliveryState: 'indeterminate' })],
         }
@@ -519,10 +521,13 @@ describe('QueuedMessagesBar edit restore', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Edit queued message' }))
         await resolveCancel({ status: 'busy', localId: 'local-server-message-id' })
 
-        expect(mocks.composerSetText).toHaveBeenCalledWith('Queued request')
-        expect(onEdit).toHaveBeenCalledWith({
-            text: 'Queued request',
-            pendingSchedule: null,
+        expect(mocks.composerSetText).not.toHaveBeenCalled()
+        expect(onEdit).not.toHaveBeenCalled()
+        expect(mocks.addToast).toHaveBeenCalledWith({
+            title: 'queuedMessages.editBusyNotRestored',
+            body: '',
+            sessionId: 'session-1',
+            url: window.location.href,
         })
     })
 

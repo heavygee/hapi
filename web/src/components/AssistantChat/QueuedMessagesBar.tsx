@@ -432,12 +432,21 @@ export function QueuedMessagesBar({
                                 })
                                 // Race guard: if the agent already consumed this message, skip prefill
                                 // and inform the user so they aren't confused by the row disappearing.
-                                // A first-time 'busy' cancel means the row is inside an async steer —
-                                // it was NOT cancelled, so never prefill (the instruction may still be
-                                // delivered; prefilling invites a duplicate send).
-                                // Cancel/Edit on an already-indeterminate row force-dismisses (#1839),
-                                // so fall through and restore the composer like a successful cancel.
-                                if (result.status === 'busy' && msg.deliveryState !== 'indeterminate') {
+                                // A 'busy' cancel means the row is inside an async steer / live
+                                // dispatch — it was NOT cancelled. Never prefill (the instruction
+                                // may still be delivered; prefilling invites a duplicate send).
+                                // Cancel still force-dismisses an already-indeterminate row (#1839);
+                                // Edit clears the stuck chip but waits for a confirmed cancel before
+                                // restoring composer text.
+                                if (result.status === 'busy') {
+                                    if (msg.deliveryState === 'indeterminate' && mountedRef.current) {
+                                        addToast({
+                                            title: t('queuedMessages.editBusyNotRestored'),
+                                            body: '',
+                                            sessionId,
+                                            url: window.location.href,
+                                        })
+                                    }
                                     return
                                 }
                                 if (result.status === 'invoked') {
