@@ -195,7 +195,7 @@ drops it from the roster.
 - **M3** — interaction: composer (optimistic send/queue/steer/drafts), permission approvals UX, session controls (mode/model/abort/resume/rename/archive), new session, dictation.
   - **B-M3ce landed** — voice dictation: mic button in the composer (`RECORD_AUDIO` requested at first use), `MediaRecorder` → m4a/AAC, provider discovery via `GET /api/voice/transcription/providers` on chat entry (first `standard`-capable provider; mic hidden until available, including unconfigured/unreachable hubs), upload through the multipart `POST /api/voice/transcription`, transcript appended at the composer text with a space separator; `DictationController` is a plain seam over recorder + API, JVM-tested with fakes. Slash commands: typing a lone `/token` opens a dropdown merging the session's `metadata.slashCommands` names with the `GET /slash-commands` RPC list (RPC entries win dedupe; exact → prefix → contains filtering), tap inserts `/name ` (the skills `$` trigger is deferred). Session ops: list long-press sheet and chat top-bar overflow gain Rename (`PATCH /sessions/:id`, optimistic name with roll-forward on failure), Delete (confirm; 409-while-active surfaced), and Reopen for inactive sessions (`POST /reopen`; a superseding id reuses the supersede path — window seed + draft move + navigate-replace; 422 missing-metadata formatted); chat shows an inactive-session bar ("send to resume, or Reopen").
 - **M4** — FCM push (register → notification actions via expedited WorkManager) + files/git viewer, Scratchlist, usage/storage stats.
-  - **B-M4a landed** — FCM push + notification actions. `:core:data` `push/`: `PushPayload` (data-only contract v1 decoding: type/severity/`notifySummary` parsing, channel routing, `type-<sessionId>` coalescing tags, unknown type/contractVersion degrade to plain title/body), `DeviceRegistrar` (registers the FCM token with **every** paired hub on start/pairing/`onNewToken`, DataStore-persisted `deviceId` UUID, WorkManager retry seam, best-effort unregister on sign-out before credentials are wiped), `PushHubAccess` + `PushActionRunner` (workers build a `HubSession` on demand from stored credentials — no `HubGraph` needed in background — and resolve the owning hub: active hub first, other paired hubs on 404 session-miss). `:app`: `push/PushBinding` (Firebase availability gate — no `google-services.json` → all push paths no-op), `fcm/` (`HapiFirebaseMessagingService`, `NotificationChannels` — `permission_requests` HIGH / `ready` / `task_notifications`, `PushNotifications` builder with severity accents + suppress-when-open rule, `NotificationActionReceiver` → expedited `PermissionActionWorker` (Allow/Deny → approve/deny `{}`) and `SendMessageWorker` (RemoteInput reply → `{text, localId}`) with pending → done/"Already handled"/failed notification states), WorkManager on-demand init + `HapiWorkerFactory`, notification tap → internal `MainActivity` intent route → chat.
+  - **B-M4a landed** — FCM push + notification actions. `:core:data` `push/`: `PushPayload` (data-only contract v1 decoding: type/severity/`notifySummary` parsing, channel routing, `type-<sessionId>` coalescing tags, unknown type/contractVersion degrade to plain title/body), `DeviceRegistrar` (registers the FCM token with **every** paired hub on start/pairing/`onNewToken`, Keystore-encrypted install identity (`deviceId` UUID + `pushKey`), WorkManager retry seam, best-effort unregister on sign-out before credentials are wiped), `PushHubAccess` + `PushActionRunner` (workers build a `HubSession` on demand from stored credentials — no `HubGraph` needed in background — and resolve the owning hub: active hub first, other paired hubs on 404 session-miss). `:app`: `push/PushBinding` (Firebase availability gate — no `google-services.json` → all push paths no-op), `fcm/` (`HapiFirebaseMessagingService`, `NotificationChannels` — `permission_requests` HIGH / `ready` / `task_notifications`, `PushNotifications` builder with severity accents + suppress-when-open rule, `NotificationActionReceiver` → expedited `PermissionActionWorker` (Allow/Deny → approve/deny `{}`) and `SendMessageWorker` (RemoteInput reply → `{text, localId}`) with pending → done/"Already handled"/failed notification states), WorkManager on-demand init + `HapiWorkerFactory`, notification tap → internal `MainActivity` intent route → chat.
 - **M5** — polish: zh-CN i18n, OLED/Material You theming, predictive back, LeakCanary pass, Play listing + self-build docs.
   - **B-M5a landed** — zh-CN localization + in-app language switching (see "Internationalization" below).
 
@@ -256,38 +256,74 @@ does not translate them either, and terminology parity with the web wins.
 
 ## Firebase / push
 
-FCM needs a Firebase project binding, which is deliberately **optional**:
-the `com.google.gms.google-services` plugin is applied *conditionally*
-(only when `app/google-services.json` exists — see `app/build.gradle.kts`),
-so the repo always builds green without any Firebase config. Without one,
-`FirebaseApp` never initializes, `PushBinding.isAvailable` reports false,
-and every push code path (registration, FCM service, workers, the
-notification-permission prompt) no-ops — the app behaves like pre-M4a.
+**Official app users:** install the app, pair an updated hub, and allow
+notifications. The official Firebase client configuration is bundled in the
+app. Hubs without a private `FCM_SERVICE_ACCOUNT_PATH` use the official push
+relay automatically; users do not create Firebase projects or configure
+service-account keys. Google Play services and FCM connectivity are needed.
+The push relay also works with hubs accessed through Tailscale or other HTTPS
+setups; it is independent of `hapi hub --relay`.
 
-To enable push:
+**Private builds:** create a Firebase project for your application ID,
+download `google-services.json` into `android/app/`, and configure the hub's
+`FCM_SERVICE_ACCOUNT_PATH` for that same project. Existing configured hubs
+keep direct delivery under the default `HAPI_ANDROID_PUSH=auto`. Use
+`relay`, `fcm`, or `off` to select explicitly. `HAPI_PUSH_RELAY_URL` overrides
+the shared Android/iOS relay URL. One hub cannot mix private-project builds
+and official-project builds.
 
-1. **Official builds**: CI injects the default Firebase project's
-   `google-services.json` before assembling (the file is gitignored;
-   `app/google-services.json.example` documents the expected shape).
-2. **Self-builds**: create your own Firebase project, add an Android app
-   with your `applicationId` (default `run.hapi.companion`), download
-   `google-services.json` into `android/app/`, and rebuild.
-3. **Hub side**: point the hub at the *same* Firebase project —
-   `FCM_SERVICE_ACCOUNT_PATH` (or `fcmServiceAccountPath` in
-   `~/.hapi/settings.json`; the project id comes from the JSON itself, see
-   `docs/api/native-companion-contract.md`). The device registers itself
-   with every paired hub (`POST /api/devices/register`) on pairing, app
-   start, and token rotation, and unregisters on sign-out.
+**Builds without Firebase:** the Google services plugin stays conditional.
+Without `app/google-services.json`, Firebase does not initialize and push
+paths no-op; ordinary PR builds require no credentials. Official builds use
+a separate mandatory configuration check (below).
 
-Multi-hub note: the FCM payload does not name the sending hub (contract v1),
-so notification actions resolve it — the workers try the **active** hub
-first, then the other paired hubs when a hub answers 404 for the session.
-Single-hub setups always hit on the first try. Tapping a notification opens
-the session against the active hub.
+**Encrypted relay:** the app registers its FCM token, install ID and random
+32-byte `pushKey` with every paired hub. The ID/key are persisted together in
+Keystore-encrypted preferences excluded from cloud backup and device
+transfer. First upgrade replaces the old DataStore identity through the
+hub's token deduplication; later token rotations reuse the ID/key. On start,
+pairing, token rotation and worker retries, registrations refresh
+automatically. Sign-out unregisters before wiping that hub's credentials.
 
-Planned for v1.x: runtime `FirebaseOptions` handed out by the hub, so
-self-builds get push without baking a config into the APK. That lands
-entirely behind the existing `app/.../push/PushBinding.kt` seam.
+Relay messages carry only `hapi_v`/`hapi_e`. AES-256-GCM decryption uses the
+same golden vector as iOS; notification content is unavailable to the relay
+and Google. Failed decrypts are dropped. Direct private FCM retains its
+existing unwrapped data payload. Rendering, foreground-chat suppression,
+Allow/Deny and Reply workers use the same decoded `PushPayload` in both paths.
+The notification contract still does not name the sending hub: action
+workers try the active hub first, then other paired hubs on session miss;
+tapping opens the session against the active hub.
+
+See [native companion contract](../docs/api/native-companion-contract.md)
+for wire details and [relay deployment](../relay/README.md) for maintainer setup.
+
+### Official APK/AAB builds
+
+The **Android Official Build** workflow is manually dispatched on `main`.
+It tests and uploads signed APK/AAB artifacts; it does not publish to Play.
+Provide a new positive `version_code` and the desired `version_name`.
+
+Repository configuration, set once by the maintainer:
+
+| Setting | Value |
+|---|---|
+| Variable `ANDROID_FIREBASE_PROJECT_ID` | Project used by the deployed relay's FCM service account |
+| Secret `ANDROID_GOOGLE_SERVICES_JSON` | Firebase **client** config for `run.hapi.companion` in that project |
+| Secret `HAPI_UPLOAD_KEYSTORE_BASE64` | Base64-encoded release keystore |
+| Secret `HAPI_UPLOAD_KEYSTORE_PASSWORD` | Keystore password |
+| Secret `HAPI_UPLOAD_KEY_ALIAS` | Optional, defaults to `upload` |
+| Secret `HAPI_UPLOAD_KEY_PASSWORD` | Optional, defaults to store password |
+
+`-PhapiOfficialBuild=true -PhapiFirebaseProjectId=<project>` requires a
+matching Firebase project/package and release signing configuration.
+Missing or mismatched settings fail the build instead of shipping a package
+without working push. `hapiVersionCode` and `hapiVersionName` override the
+normal version defaults. The Firebase service-account private key belongs
+only on the relay and must never enter Android build artifacts.
+
+Roll out relay support/credentials first, then the hub, then the app. Verify
+real background, lock-screen and cold-process notifications using a hub with
+no Firebase settings; test Allow/Deny/Reply and an iOS push before publishing.
 
 ## Release signing
 

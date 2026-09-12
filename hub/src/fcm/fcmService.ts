@@ -38,10 +38,14 @@ export type FcmSendPayload = {
     data: FcmDataPayload
 }
 
-type FcmSendResult = {
+export type FcmSendResult = {
     sent: number
     failed: number
     invalidTokens: string[]
+}
+
+export interface AndroidPushSender {
+    sendToNamespace(namespace: string, payload: FcmSendPayload): Promise<FcmSendResult>
 }
 
 /**
