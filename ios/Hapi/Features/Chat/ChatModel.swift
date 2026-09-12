@@ -60,11 +60,12 @@ final class ChatModel {
     private(set) var jumpToLatestToken = 0
     private(set) var isJumpingToLatest = false
     private(set) var hasTrimmedTail = false
-    var expandedToolGroups: [String: Bool] = [:]
     let toolInspection = ToolInspectionState()
     private(set) var visibleSurfaces = Set<String>()
-    var isInspectingTools: Bool {
-        toolInspection.selection != nil || visibleSurfaces.contains { $0.hasPrefix("process:") }
+    var isInspectingContent: Bool {
+        toolInspection.owner != nil || visibleSurfaces.contains {
+            $0.hasPrefix("process:") || $0.hasPrefix("message:") || $0.hasPrefix("inspector:")
+        }
     }
 
     /// Transient toast text (interaction failures/notices); auto-dismissed.
@@ -160,12 +161,20 @@ final class ChatModel {
         }
     }
 
-    func beginToolInspection() {
+    func beginContentInspection() {
         dictation.cancel()
         jumpTask?.cancel()
         jumpTask = nil
         isJumpingToLatest = false
         readingViewportChanged(followsTail: false, needsOlder: false)
+    }
+
+    @discardableResult
+    func inspectToolGroup(_ id: String, owner: String) -> Bool {
+        guard toolInspection.openGroup(id, owner: owner) else { return false }
+        beginContentInspection()
+        retainSurface("inspector:\(owner)")
+        return true
     }
 
     func start() {
@@ -266,8 +275,8 @@ final class ChatModel {
     // MARK: - Actions
 
     func readingViewportChanged(followsTail: Bool, needsOlder: Bool) {
-        let followsTail = isInspectingTools ? false : followsTail
-        let needsOlder = isInspectingTools ? false : needsOlder
+        let followsTail = isInspectingContent ? false : followsTail
+        let needsOlder = isInspectingContent ? false : needsOlder
         let changedMode = self.followsTail != followsTail
         self.followsTail = followsTail
         viewportNeedsOlder = needsOlder
@@ -322,7 +331,7 @@ final class ChatModel {
     }
 
     private func pumpHistory() {
-        guard isActive, !isInspectingTools, !isJumpingToLatest, viewportNeedsOlder, hasMore,
+        guard isActive, !isInspectingContent, !isJumpingToLatest, viewportNeedsOlder, hasMore,
               !isSyncingTail, !isLoadingOlder, olderTask == nil,
               let controller = chat.windowController,
               let request = historyPaging.begin() else { return }
@@ -455,6 +464,7 @@ final class ChatModel {
                     switch value {
                     case .agentText(let text): return [text.text]
                     case .agentReasoning(let text): return [text.text]
+                    case .toolCall(let block): return planProposalMarkdown(block.tool).map { [$0] } ?? []
                     default: return []
                     }
                 })
@@ -511,9 +521,6 @@ final class ChatModel {
                 }
             }
             presentationState.prune(to: liveIDs)
-            for key in expandedToolGroups.keys where !liveIDs.contains(key) {
-                expandedToolGroups.removeValue(forKey: key)
-            }
         }
         header = Self.buildHeader(
             sessionId: sessionId,
@@ -543,7 +550,7 @@ final class ChatModel {
         // is fresher (summary via the global pipe, detail via this one).
         // markSeen is monotonic, so stale inputs cannot rewind it.
         let updatedAt = max(detail?.updatedAt ?? 0, summary?.updatedAt ?? 0)
-        if updatedAt > 0 && !isInspectingTools {
+        if updatedAt > 0 && !isInspectingContent {
             hub.lastSeenStore.markSeen(sessionId: sessionId, seenAt: updatedAt)
         }
     }

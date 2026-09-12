@@ -22,6 +22,7 @@ type ElicitationSchemaProperty = {
 };
 
 type UserInputAnswer = Record<string, string[]> | Record<string, { answers: string[] }>;
+export const IGNORE_SHARED_REQUEST = Symbol('ignore-shared-request');
 
 function asRecord(value: unknown): Record<string, unknown> | null {
     if (!value || typeof value !== 'object') {
@@ -380,8 +381,9 @@ function isHapiBridgeElicitation(params: unknown): boolean {
 }
 
 export function registerAppServerPermissionHandlers(args: {
-    client: CodexAppServerClient;
-    permissionHandler: CodexPermissionHandler;
+    client: Pick<CodexAppServerClient, 'registerRequestHandler'>;
+    permissionHandler: Pick<CodexPermissionHandler, 'handleToolCall'>;
+    shared?: boolean;
     getPermissionMode?: () => CodexPermissionMode | undefined;
     onUserInputRequest?: (request: { id: string; input: unknown }) => Promise<
         | { decision: 'accept'; answers: UserInputAnswer }
@@ -510,6 +512,7 @@ export function registerAppServerPermissionHandlers(args: {
 
         const input = buildElicitationUserInput(params);
         if (!onUserInputRequest || !input) {
+            if (args.shared) return IGNORE_SHARED_REQUEST;
             logger.debug('[CodexAppServer] Cancelling unsupported MCP elicitation request', {
                 serverName: record.serverName,
                 mode: request.mode,
