@@ -328,7 +328,6 @@ describe('POST /cli/sessions/:id/peer-messages', () => {
             body: JSON.stringify({
                 targetSessionId: targetId,
                 text: 'handoff',
-                // Body source claims must not override the path id.
                 peer: { sourceSessionId: targetId, sourceName: 'forged' }
             })
         })
@@ -344,6 +343,50 @@ describe('POST /cli/sessions/:id/peer-messages', () => {
                 deliveryMode: undefined
             }
         }])
+    })
+
+    it('snapshots summary title when metadata.name is unset', async () => {
+        const sentMessages: Array<{ sessionId: string; payload: unknown }> = []
+        const app = createApp({
+            resolveSessionAccess: (id: string) => {
+                if (id === sourceId) {
+                    return {
+                        ok: true as const,
+                        sessionId: sourceId,
+                        session: {
+                            id: sourceId,
+                            active: true,
+                            metadata: { summary: { text: 'Teemo peer session' } }
+                        }
+                    }
+                }
+                if (id === targetId) {
+                    return {
+                        ok: true as const,
+                        sessionId: targetId,
+                        session: { id: targetId, active: true, metadata: { name: 'Target' } }
+                    }
+                }
+                return { ok: false as const, reason: 'not-found' as const }
+            },
+            sendMessage: async (sessionId: string, payload: unknown) => {
+                sentMessages.push({ sessionId, payload })
+            }
+        } as never)
+
+        const response = await app.request(`/cli/sessions/${sourceId}/peer-messages`, {
+            method: 'POST',
+            headers: {
+                ...authHeaders(),
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify({ targetSessionId: targetId, text: 'handoff' })
+        })
+
+        expect(response.status).toBe(200)
+        expect(sentMessages[0]?.payload).toMatchObject({
+            peer: { sourceSessionId: sourceId, sourceName: 'Teemo peer session' }
+        })
     })
 
     it('rejects delivery when the target is inactive', async () => {

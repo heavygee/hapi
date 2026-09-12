@@ -6,6 +6,7 @@ import {
     formatSessionMentionChipLabel,
 } from '@/lib/sessionMentionChip'
 import { formatSessionMentionTooltip } from '@/lib/sessionReference'
+import { getSessionTitle } from '@/lib/sessionTitle'
 import { useTranslation } from '@/lib/use-translation'
 import { cn } from '@/lib/utils'
 
@@ -28,7 +29,8 @@ export function PeerSenderChip({ sourceSessionId, sourceName }: PeerSenderChipPr
     const chatCtx = useOptionalHappyChatContext()
     const { sessions } = useSessions(chatCtx?.api ?? null)
     const id = sourceSessionId?.trim() || ''
-    const title = sourceName?.trim() || ''
+    const liveSession = id ? sessions.find((session) => session.id === id) : undefined
+    const title = sourceName?.trim() || (liveSession ? getSessionTitle(liveSession) : '')
 
     if (!id) {
         return (

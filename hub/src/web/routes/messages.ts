@@ -7,6 +7,7 @@ import {
     SendMessageRequestSchema,
     type PeerDeliveryMeta
 } from '@hapi/protocol'
+import { getSessionName } from '../../notifications/sessionInfo'
 import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
@@ -34,7 +35,9 @@ export function resolvePeerMetaFromSourceSession(
     if (!access.ok) {
         return undefined
     }
-    const sourceName = access.session.metadata?.name?.trim() ?? ''
+    // Match sidebar / notification title cascade (name → summary → path), not
+    // metadata.name alone — unnamed remote sessions still have summary titles.
+    const sourceName = getSessionName(access.session).trim()
     return {
         sourceSessionId: access.sessionId,
         ...(sourceName ? { sourceName: sourceName.slice(0, 255) } : {})
