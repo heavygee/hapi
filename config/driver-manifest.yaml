@@ -991,8 +991,8 @@ layers:
   # GET /api/sessions/scratchlist-status + SSE resync invalidation for scratchlist membership.
   # Upstream PR CONFLICTING; soup tip re-thinned onto upstream/main (kept #1773 mark-all-read).
   # Worktree: ~/coding/hapi/worktrees/soup-1772-list-filters @ soup/1772-combined-list-filters
-  # Tip: afab28f95 — ranking (field×IDF) + post-bonus field pick; re-thin after dogfood bump
-  # (afab28f95: search relevance; paths stay searchable; boundary = score bonus)
+  # Tip: 640d71025 — ranking (field×IDF) + post-bonus field pick; re-thin after dogfood bump
+  # (640d71025: search relevance; paths stay searchable; boundary = score bonus)
   - branch: soup/1772-combined-list-filters
 
   # tiann/hapi#1605 — Claude live model catalog (list_models) + effort/context-window wiring.
