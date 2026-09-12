@@ -3,7 +3,7 @@ import type { AgentSelection } from '@/ui/selectAgent'
 import type { CommandContext } from './types'
 
 const { getCliArgsMock, resolveCommandMock, selectAgentMock, ensureRuntimeAssetsMock, runMock } = vi.hoisted(() => ({
-    getCliArgsMock: vi.fn<() => string[]>(),
+    getCliArgsMock: vi.fn<() => string[]>(() => []),
     resolveCommandMock: vi.fn(),
     selectAgentMock: vi.fn<() => Promise<AgentSelection>>(),
     ensureRuntimeAssetsMock: vi.fn(async () => {}),

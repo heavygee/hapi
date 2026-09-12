@@ -100,16 +100,6 @@ export function normalizeCliArgs(rawArgv: string[]): string[] {
                 bunMain,
             );
         }
-        // Direct `hapi codex -- --model` passthrough: drop the hapi-level `--`.
-        // Bun-wrapped argv keeps command-level `--` (upstream argv normalization tests).
-        if (preArgs[0] !== 'bun' && normalizedPre.length > 0) {
-            return stripRuntimePrefix(
-                [...preArgs, ...postArgs],
-                execPath,
-                execBase,
-                bunMain,
-            );
-        }
     }
 
     return stripRuntimePrefix(rawArgv, execPath, execBase, bunMain);

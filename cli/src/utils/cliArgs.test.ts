@@ -77,7 +77,7 @@ describe('normalizeCliArgs (tiann/hapi#1404 job run --)', () => {
         ])).toEqual(['auth', 'login'])
     })
 
-    it('does not re-insert -- for hapi codex -- --model o3', () => {
+    it('preserves command-level -- for hapi codex -- --model o3 (upstream argv)', () => {
         const hapiBin = process.execPath
         expect(normalizeCliArgs([
             hapiBin,
@@ -85,7 +85,7 @@ describe('normalizeCliArgs (tiann/hapi#1404 job run --)', () => {
             '--',
             '--model',
             'o3'
-        ])).toEqual(['codex', '--model', 'o3'])
+        ])).toEqual(['codex', '--', '--model', 'o3'])
     })
 })
 
