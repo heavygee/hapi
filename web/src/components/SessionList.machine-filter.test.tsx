@@ -291,17 +291,17 @@ describe('SessionList session filter menu', () => {
             makeSession({
                 id: 'home-unread',
                 updatedAt: 500,
-                metadata: { path: '/home/heavygee/coding/home-assistant', name: 'Home Assistant' }
+                metadata: { path: '/work/home-assistant', name: 'Home Assistant' }
             }),
             makeSession({
                 id: 'other-unread',
                 updatedAt: 400,
-                metadata: { path: '/home/heavygee/coding/hapi', name: 'meta HAPI triage/problems' }
+                metadata: { path: '/work/hapi', name: 'meta HAPI triage/problems' }
             }),
             makeSession({
                 id: 'home-seen',
                 updatedAt: 1_000,
-                metadata: { path: '/home/heavygee/coding/home-assistant-docs', name: 'Home docs' }
+                metadata: { path: '/work/home-assistant-docs', name: 'Home docs' }
             })
         ])
 
@@ -310,8 +310,8 @@ describe('SessionList session filter menu', () => {
         fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
         fireEvent.change(screen.getByPlaceholderText(SEARCH_PLACEHOLDER), { target: { value: 'Home' } })
 
-        expect(screen.getByTitle('/home/heavygee/coding/home-assistant')).toBeTruthy()
-        expect(screen.queryByTitle('/home/heavygee/coding/hapi')).toBeNull()
-        expect(screen.queryByTitle('/home/heavygee/coding/home-assistant-docs')).toBeNull()
+        expect(screen.getByTitle('/work/home-assistant')).toBeTruthy()
+        expect(screen.queryByTitle('/work/hapi')).toBeNull()
+        expect(screen.queryByTitle('/work/home-assistant-docs')).toBeNull()
     })
 })
