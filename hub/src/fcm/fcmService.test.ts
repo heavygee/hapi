@@ -1,29 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
-import { readFileSync } from 'node:fs'
 import { FcmService, type FcmSendPayload } from './fcmService'
-
-mock.module('./fcmAuth', () => ({
-    FCM_REQUEST_TIMEOUT_MS: 10_000,
-    getFcmAccessToken: async () => 'test-access-token',
-    // Read the real file so sibling fcmConfig tests still see project_id.
-    loadServiceAccount: (path: string) => {
-        const parsed = JSON.parse(readFileSync(path, 'utf8')) as {
-            client_email?: string
-            private_key?: string
-            project_id?: string
-        }
-        if (!parsed.client_email || !parsed.private_key) {
-            throw new Error('FCM service account JSON missing client_email or private_key')
-        }
-        return parsed
-    }
-}))
+import type { ServiceAccount } from './fcmAuth'
 
 type FakeStore = {
     fcm: {
         getDevicesByNamespace: ReturnType<typeof mock>
         removeDeviceByToken: ReturnType<typeof mock>
     }
+}
+
+const TEST_ACCOUNT: ServiceAccount = { client_email: 'x', private_key: 'y' }
+
+/** Build a service with an injected token getter — no process-wide module mock. */
+function makeService(store: FakeStore): FcmService {
+    return new FcmService(
+        'proj-id',
+        TEST_ACCOUNT,
+        store as never,
+        async () => 'test-access-token'
+    )
 }
 
 function makeStore(devices: Array<{ token: string; platform: 'phone' | 'wear'; deviceId: string; namespace: string }>): FakeStore {
@@ -81,7 +76,7 @@ describe('FcmService.sendToNamespace', () => {
             new Response('{"error":{"status":"UNREGISTERED"}}', { status: 404 })
         ) as unknown as typeof fetch
 
-        const svc = new FcmService('proj-id', { client_email: 'x', private_key: 'y' }, store as never)
+        const svc = makeService(store)
         const result = await svc.sendToNamespace('default', makePayload())
 
         expect(result.sent).toBe(0)
@@ -98,7 +93,7 @@ describe('FcmService.sendToNamespace', () => {
             new Response('{"error":{"status":"NOT_FOUND","message":"Requested entity was not found."}}', { status: 404 })
         ) as unknown as typeof fetch
 
-        const svc = new FcmService('proj-id', { client_email: 'x', private_key: 'y' }, store as never)
+        const svc = makeService(store)
         const result = await svc.sendToNamespace('default', makePayload())
 
         expect(result.failed).toBe(1)
@@ -122,7 +117,7 @@ describe('FcmService.sendToNamespace', () => {
             }), { status: 404 })
         ) as unknown as typeof fetch
 
-        const svc = new FcmService('proj-id', { client_email: 'x', private_key: 'y' }, store as never)
+        const svc = makeService(store)
         const result = await svc.sendToNamespace('default', makePayload())
 
         expect(result.invalidTokens).toEqual(['dead-token'])
@@ -144,7 +139,7 @@ describe('FcmService.sendToNamespace', () => {
             }), { status: 400 })
         ) as unknown as typeof fetch
 
-        const svc = new FcmService('proj-id', { client_email: 'x', private_key: 'y' }, store as never)
+        const svc = makeService(store)
         const result = await svc.sendToNamespace('default', makePayload())
 
         expect(result.failed).toBe(1)
@@ -159,7 +154,7 @@ describe('FcmService.sendToNamespace', () => {
             new Response('{"error":{"status":"RESOURCE_EXHAUSTED"}}', { status: 429 })
         ) as unknown as typeof fetch
 
-        const svc = new FcmService('proj-id', { client_email: 'x', private_key: 'y' }, store as never)
+        const svc = makeService(store)
         const result = await svc.sendToNamespace('default', makePayload())
 
         expect(result.sent).toBe(0)
@@ -177,7 +172,7 @@ describe('FcmService.sendToNamespace', () => {
             new Response('Service Unavailable', { status: 503 })
         ) as unknown as typeof fetch
 
-        const svc = new FcmService('proj-id', { client_email: 'x', private_key: 'y' }, store as never)
+        const svc = makeService(store)
         const result = await svc.sendToNamespace('default', makePayload())
 
         expect(result.failed).toBe(1)
@@ -193,7 +188,7 @@ describe('FcmService.sendToNamespace', () => {
             new Response('{"error":{"status":"UNAUTHENTICATED"}}', { status: 401 })
         ) as unknown as typeof fetch
 
-        const svc = new FcmService('proj-id', { client_email: 'x', private_key: 'y' }, store as never)
+        const svc = makeService(store)
         const result = await svc.sendToNamespace('default', makePayload())
 
         expect(result.failed).toBe(1)
@@ -208,7 +203,7 @@ describe('FcmService.sendToNamespace', () => {
             throw new Error('ECONNREFUSED')
         }) as unknown as typeof fetch
 
-        const svc = new FcmService('proj-id', { client_email: 'x', private_key: 'y' }, store as never)
+        const svc = makeService(store)
         const result = await svc.sendToNamespace('default', makePayload())
 
         expect(result.failed).toBe(1)
@@ -224,7 +219,7 @@ describe('FcmService.sendToNamespace', () => {
             throw new DOMException('The operation was aborted.', 'AbortError')
         }) as unknown as typeof fetch
 
-        const svc = new FcmService('proj-id', { client_email: 'x', private_key: 'y' }, store as never)
+        const svc = makeService(store)
         const result = await svc.sendToNamespace('default', makePayload())
 
         expect(result.failed).toBe(1)
@@ -239,7 +234,7 @@ describe('FcmService.sendToNamespace', () => {
             new Response('{"name":"projects/proj-id/messages/0:1234567890"}', { status: 200 })
         ) as unknown as typeof fetch
 
-        const svc = new FcmService('proj-id', { client_email: 'x', private_key: 'y' }, store as never)
+        const svc = makeService(store)
         const result = await svc.sendToNamespace('default', makePayload())
 
         expect(result.sent).toBe(1)
@@ -266,7 +261,7 @@ describe('FcmService.sendToNamespace', () => {
             return fn ? fn() : new Response('unknown', { status: 500 })
         }) as unknown as typeof fetch
 
-        const svc = new FcmService('proj-id', { client_email: 'x', private_key: 'y' }, store as never)
+        const svc = makeService(store)
         const result = await svc.sendToNamespace('default', makePayload())
 
         expect(result.sent).toBe(1)
@@ -282,7 +277,7 @@ describe('FcmService.sendToNamespace', () => {
         const store = makeStore([])
         globalThis.fetch = mock(async () => new Response('should-not-be-called', { status: 200 })) as unknown as typeof fetch
 
-        const svc = new FcmService('proj-id', { client_email: 'x', private_key: 'y' }, store as never)
+        const svc = makeService(store)
         const result = await svc.sendToNamespace('empty-ns', makePayload())
 
         expect(result).toEqual({ sent: 0, failed: 0, invalidTokens: [] })
@@ -306,7 +301,7 @@ describe('FcmService.isHealthy (rolling outcome window)', () => {
         // silently drops the first N notifications while waiting for the
         // failure threshold to trip.
         const store = makeStore([])
-        const svc = new FcmService('proj-id', { client_email: 'x', private_key: 'y' }, store as never)
+        const svc = makeService(store)
         expect(svc.isHealthy()).toBe(false)
     })
 
@@ -318,7 +313,7 @@ describe('FcmService.isHealthy (rolling outcome window)', () => {
             new Response('{"name":"ok"}', { status: 200 })
         ) as unknown as typeof fetch
 
-        const svc = new FcmService('proj-id', { client_email: 'x', private_key: 'y' }, store as never)
+        const svc = makeService(store)
         expect(svc.isHealthy()).toBe(false)
         await svc.sendToNamespace('default', makePayload())
         expect(svc.isHealthy()).toBe(true)
@@ -332,7 +327,7 @@ describe('FcmService.isHealthy (rolling outcome window)', () => {
             new Response('Service Unavailable', { status: 503 })
         ) as unknown as typeof fetch
 
-        const svc = new FcmService('proj-id', { client_email: 'x', private_key: 'y' }, store as never)
+        const svc = makeService(store)
 
         // Without any prior success the gate must stay unhealthy regardless
         // of where we are in the failure-threshold count. This is the exact
@@ -355,7 +350,7 @@ describe('FcmService.isHealthy (rolling outcome window)', () => {
             return new Response('Service Unavailable', { status: 503 })
         }) as unknown as typeof fetch
 
-        const svc = new FcmService('proj-id', { client_email: 'x', private_key: 'y' }, store as never)
+        const svc = makeService(store)
 
         // 3 successes establish health
         for (let i = 0; i < 3; i += 1) await svc.sendToNamespace('default', makePayload())
@@ -384,7 +379,7 @@ describe('FcmService.isHealthy (rolling outcome window)', () => {
             return new Response('{"name":"ok"}', { status: 200 })
         }) as unknown as typeof fetch
 
-        const svc = new FcmService('proj-id', { client_email: 'x', private_key: 'y' }, store as never)
+        const svc = makeService(store)
 
         for (let i = 0; i < 5; i += 1) {
             await svc.sendToNamespace('default', makePayload())
@@ -413,7 +408,7 @@ describe('FcmService.isHealthy (rolling outcome window)', () => {
             return new Response('{"error":{"status":"UNREGISTERED"}}', { status: 404 })
         }) as unknown as typeof fetch
 
-        const svc = new FcmService('proj-id', { client_email: 'x', private_key: 'y' }, store as never)
+        const svc = makeService(store)
 
         // First send produces 1 sent + 1 invalid. After this the rotated
         // token is removed from the store, leaving only the good one.
@@ -440,7 +435,7 @@ describe('FcmService.isHealthy (rolling outcome window)', () => {
             throw new Error('ECONNREFUSED')
         }) as unknown as typeof fetch
 
-        const svc = new FcmService('proj-id', { client_email: 'x', private_key: 'y' }, store as never)
+        const svc = makeService(store)
 
         // Establish health with 3 successes
         for (let i = 0; i < 3; i += 1) await svc.sendToNamespace('default', makePayload())
