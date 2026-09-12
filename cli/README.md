@@ -1,6 +1,6 @@
 # hapi CLI
 
-Run Claude Code, Codex, Cursor Agent, Grok Build, OpenCode, or DeepSeek Harness sessions from your terminal and control them remotely through the hapi hub.
+Choose a supported coding agent from your terminal and control its sessions remotely through the hapi hub. See the [supported agents](../docs/guide/agents.md).
 
 ## What it does
 
@@ -18,20 +18,25 @@ Run Claude Code, Codex, Cursor Agent, Grok Build, OpenCode, or DeepSeek Harness 
 
 1. Start the hub and set env vars (see ../hub/README.md).
 2. Set the same CLI_API_TOKEN on this machine or run `hapi auth login`.
-3. Run `hapi` to start a session.
+3. Run `hapi` to choose an agent, or `hapi <agent>` to start one directly.
 4. Use the web app or Telegram Mini App to monitor and control.
 
 ## Commands
 
 ### Session commands
 
-- `hapi` - Start a Claude Code session (passes through Claude CLI flags). See `src/index.ts`.
+- `hapi` - Choose an agent interactively. Unavailable agents are shown with a reason and cannot be selected.
+- `hapi claude` - Start a Claude Code session (passes through Claude CLI flags).
 - `hapi codex` - Start Codex mode. See `src/codex/runCodex.ts`.
 - `hapi codex resume <sessionId>` - Resume existing Codex session.
 - `hapi cursor` - Start Cursor Agent mode. See `src/cursor/runCursor.ts`.
   Supports `hapi cursor resume <chatId>`, `hapi cursor --continue`, `--mode plan|ask`, `--yolo`, `--model`.
   Local and remote modes supported; remote uses `agent -p` with stream-json.
 - `hapi grok` - Start Grok Build mode. See `src/grok/runGrok.ts`.
+- `hapi copilot` - Start GitHub Copilot mode.
+- `hapi kimi` - Start Kimi mode.
+- `hapi agy` - Start Antigravity mode (remote-only).
+- `hapi pi` - Start Pi mode (remote-only).
 - `hapi opencode` - Start OpenCode mode via ACP. See `src/opencode/runOpencode.ts`.
   Note: OpenCode supports local and remote modes; local mode streams via OpenCode plugins.
 - `hapi dsh` - Start DeepSeek Harness through ACP. See `src/dsh/runDsh.ts`.
@@ -39,6 +44,21 @@ Run Claude Code, Codex, Cursor Agent, Grok Build, OpenCode, or DeepSeek Harness 
 - `hapi resume [sessionId]` - List resumable sessions for this machine or resume one locally.
 - `hapi ping-peer <session-id-prefix> <message>` - Resume (if needed) and message another session. Prefer this or MCP `ping_peer` / `list_peers` over reinventing JWT+curl. Also `--message-file` / `--list`.
 - `hapi inspect-peer <session-id-or-prefix>` - Read-only peer metadata + recent message text (no resume). Prefer this or MCP `inspect_peer` when a user cites `[title](/sessions/<id>)` or Copy-reference `See session "…" (/sessions/<id>) for context`. `/sessions/<id>` is a hub path, not a local file. Optional `--limit`.
+
+The picker lists agents alphabetically by command name. Use Up/Down and Enter
+to choose; Esc or Ctrl-C cancels. It appears on every bare invocation, even
+when only one agent is available. No default agent or selection is saved.
+
+Scripts and non-interactive shells must specify an agent. Old implicit-Claude
+commands such as `hapi --yolo`, `hapi --resume`, and `hapi "prompt"` now report
+an error; use `hapi claude --yolo`, `hapi claude --resume`, or
+`hapi claude "prompt"` instead.
+
+`hapi --help`, `hapi -h`, and `hapi help` show only HAPI's help, without starting
+a session or requiring an installed agent. `hapi --version` / `hapi -v` show
+HAPI's version. Flags after an agent name are handled by that agent's existing
+integration; supported flags vary by agent. HAPI does not translate or append
+agent help text.
 
 ### Resume a remote session locally
 
@@ -60,7 +80,7 @@ for queue semantics, environment isolation, recovery, supported flags and tests.
 
 ### Answer local Claude prompts from HAPI
 
-In a local Claude session started by `hapi`, main-session `AskUserQuestion`
+In a local Claude session started by `hapi claude`, main-session `AskUserQuestion`
 questions and tool permission prompts can also be answered from the web app.
 The terminal dialog stays usable; answering does not restart Claude or switch
 the session to remote mode. Claude arbitrates terminal/web races, and HAPI
@@ -216,7 +236,7 @@ Data is stored in `~/.hapi/` (or `$HAPI_HOME`):
 
 ## Requirements
 
-- Claude CLI installed and logged in (`claude` on PATH).
+- Install and authenticate the agent you want to use. Claude CLI (`claude` on PATH) is required only for `hapi claude`.
 - Cursor Agent CLI installed (`agent` on PATH) for `hapi cursor`. Install: `curl https://cursor.com/install -fsS | bash` (macOS/Linux), `irm 'https://cursor.com/install?win32=true' | iex` (Windows).
 - Grok Build CLI installed (`grok` on PATH) for `hapi grok`. Authenticate with `grok login --device-auth` on headless runner machines, or set `XAI_API_KEY`.
 - OpenCode CLI installed (`opencode` on PATH).

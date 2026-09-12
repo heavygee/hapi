@@ -1163,8 +1163,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     // but in compiled binary mode (`bun build --compile`) the raw argv shape is
     // `[hapi, runner, start-sync, ...]` so slice(2) produced `['start-sync', ...]`.
     // The replacement then spawned `hapi start-sync ...`, which `resolveCommand`
-    // treats as an unknown top-level command - falling back to Claude instead
-    // of starting the runner. `getCliArgs()` strips runtime + entrypoint
+    // now rejects as an unknown top-level command (previously it fell back to
+    // Claude). `getCliArgs()` strips runtime + entrypoint
     // correctly in all execution modes.
     //
     // Defensive guard: only replay the captured argv when it actually starts

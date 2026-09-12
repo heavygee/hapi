@@ -23,10 +23,14 @@ https://github.com/user-attachments/assets/38230353-94c6-4dbe-9c29-b2a2cc457546
 
 ```bash
 npx @twsxtd/hapi hub --relay     # start hub with E2E encrypted relay
-npx @twsxtd/hapi                 # run claude code
+npx @twsxtd/hapi                 # choose an agent and start a session
 ```
 
 `hapi server` remains supported as an alias.
+
+Use `hapi <agent> [options]` to start an agent directly, for example `hapi claude`
+or `hapi codex`. Scripts must specify the agent explicitly. `hapi --help` shows
+HAPI's commands and supported agents.
 
 The terminal will display a URL and QR code. Scan the QR code with your phone or open the URL to access.
 
