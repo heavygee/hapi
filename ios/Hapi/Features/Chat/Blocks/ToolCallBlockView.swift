@@ -4,7 +4,7 @@ import HapiUI
 import SwiftUI
 
 /// A bounded activity summary. Ordinary tools open the shared inspector;
-/// sidechains open their own transcript. Questions and approvals stay inline.
+/// sidechains open their own transcript. Questions, plans and approvals stay inline.
 struct ToolCallBlockView: View {
     let block: ToolCallBlock
     let basePath: String?
@@ -27,6 +27,11 @@ struct ToolCallBlockView: View {
         let presentation = toolSummaryPresentation(block.tool, basePath: basePath)
         VStack(alignment: .leading, spacing: 0) {
             headerRow(presentation)
+            if let plan = planProposalMarkdown(block.tool) {
+                PlanProposalContent(markdown: plan)
+                    .padding(12)
+                    .accessibilityIdentifier("plan-proposal-\(block.id)")
+            }
             if let permission = block.tool.permission {
                 if permission.status == .pending, let interactions {
                     pendingApprovalSection(permission: permission, interactions: interactions)

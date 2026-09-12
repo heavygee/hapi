@@ -104,6 +104,13 @@ TEST_RUNNER_HAPI_TYPOGRAPHY_CAPTURE=/tmp/hapi-typography-review \
 
 ### Tool inspection
 
+Plan proposals (`ExitPlanMode` / `exit_plan_mode`) are reading documents, not
+activity summaries: their complete `input.plan` Markdown stays visible in the
+conversation, before any approval controls. The same renderer is used in the
+inspector; null output does not show a misleading "No output" placeholder.
+Plans are prewarmed in the chat Markdown cache and never use the ordinary
+tool-output preview/paging budget. The inspector retains raw fields under Source.
+
 Tool summaries open a native large sheet instead of expanding their output
 inside the conversation. Tool groups also stay as one summary row: tapping one
 opens a native lazy list in the same inspector. Calls remain chronological, with

@@ -464,6 +464,7 @@ final class ChatModel {
                     switch value {
                     case .agentText(let text): return [text.text]
                     case .agentReasoning(let text): return [text.text]
+                    case .toolCall(let block): return planProposalMarkdown(block.tool).map { [$0] } ?? []
                     default: return []
                     }
                 })

@@ -2,6 +2,7 @@ package app.hapi.companion.feature.chat
 
 import androidx.annotation.MainThread
 import app.hapi.companion.feature.chat.attachments.ComposerAttachments
+import app.hapi.companion.feature.chat.blocks.planProposalMarkdown
 import app.hapi.companion.feature.chat.composer.ChatDrafts
 import app.hapi.companion.feature.chat.composer.SlashCommands
 import app.hapi.companion.feature.chat.composer.appendTranscript
@@ -31,6 +32,7 @@ import app.hapi.protocol.catalog.PermissionMode
 import app.hapi.protocol.catalog.PermissionModes
 import app.hapi.protocol.chat.NormalizedMessage
 import app.hapi.protocol.chat.ToolGroupBlock
+import app.hapi.protocol.chat.ToolCallBlock
 import app.hapi.protocol.chat.ToolGroupingOptions
 import app.hapi.protocol.chat.VisibleChatBlock
 import app.hapi.protocol.chat.buildVisibleChatBlocks
@@ -1671,6 +1673,7 @@ class ChatViewModel(
             when (block) {
                 is AgentTextBlock -> block.text
                 is AgentReasoningBlock -> block.text
+                is ToolCallBlock -> planProposalMarkdown(block.tool)
                 else -> null
             }
         }.toSet()

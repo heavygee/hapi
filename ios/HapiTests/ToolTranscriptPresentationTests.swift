@@ -30,6 +30,7 @@ final class ToolTranscriptPresentationTests: XCTestCase {
             .hapiTheme(theme)
             .environment(\.dynamicTypeSize, size)
             .environment(\.colorScheme, theme.isDark ? .dark : .light)
+            .environment(\.hapiMarkdownCache, model.markdownCache)
             .preferredColorScheme(theme.isDark ? .dark : .light)
         }
     }
@@ -128,6 +129,73 @@ final class ToolTranscriptPresentationTests: XCTestCase {
         }
     }
 
+    func testPlanPublicationUpdatesRecyclingAndInspectorPreserveTheDocumentAndAnchor() async throws {
+        let plan = "# Initial proposal\n\nRead the document without opening the inspector."
+        let credentials = InMemoryCredentialStore()
+        let payload = Data(#"{"uid":1,"exp":4102444800,"ns":"test"}"#.utf8).base64EncodedString()
+        try credentials.store(HubCredentials(hubUrl: "http://127.0.0.1:1", accessToken: "test", jwt: "e30.\(payload).test"))
+        let hub = try XCTUnwrap(HubSession(hubUrl: "http://127.0.0.1:1/plan-transcript-\(UUID().uuidString)",
+                                         credentialStore: credentials, performer: ToolTranscriptHTTP(proposedPlan: plan)))
+        let model = ChatModel(session: hub, sessionId: "tool-transcript")
+        defer { model.stop(); hub.shutdown() }
+        model.start()
+        try await eventually { !model.blocks.isEmpty && !model.isSyncingTail }
+        XCTAssertNotNil(model.markdownCache.cached(plan), "Prewarm plan Markdown before publishing rows")
+        let index = try XCTUnwrap(model.blocks.firstIndex { $0.stableId == "proposal" }) + 1
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        let host = UIHostingController(rootView: Harness(model: model, session: hub, theme: .light, size: .large))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        host.view.layoutIfNeeded()
+        try await eventually { findCollection(host.view) != nil }
+        let collection = try XCTUnwrap(findCollection(host.view))
+        try await eventually { collection.numberOfItems(inSection: 0) == model.blocks.count + 1 }
+        collection.delegate?.scrollViewWillBeginDragging?(collection)
+        collection.scrollToItem(at: IndexPath(item: index, section: 0), at: .top, animated: false)
+        try await eventually { collection.cellForItem(at: IndexPath(item: index, section: 0)) != nil }
+        try await Task.sleep(for: .milliseconds(200))
+        let cell = try XCTUnwrap(collection.cellForItem(at: IndexPath(item: index, section: 0)))
+        let initialHeight = cell.frame.height
+        XCTAssertGreaterThan(initialHeight, 100, "A plan must not remain a summary row")
+        let anchorY = cell.frame.minY - collection.contentOffset.y
+        let updated = "# Revised proposal\n\n" + String(repeating: "More plan detail. ", count: 150)
+        let controller = await hub.windows.open(sessionId: "tool-transcript")
+        let seq = (await controller.state.newestSeq ?? 0) + 1
+        let message = DecryptedMessage(id: "plan-update", seq: seq,
+            content: ["role": "agent", "content": ["type": "codex", "data": [
+                "type": "tool-call", "callId": "proposal", "name": "ExitPlanMode",
+                "input": ["plan": .string(updated)],
+            ]]], createdAt: seq * 1000, invokedAt: seq * 1000)
+        await controller.onMessageEvent(.messageReceived(namespace: nil, sessionId: "tool-transcript", message: message))
+        try await eventually { model.toolInspection.tools["proposal"]?.tool.input?[chatKey: "plan"]?.chatString == updated }
+        XCTAssertNotNil(model.markdownCache.cached(updated))
+        try await eventually { (collection.cellForItem(at: IndexPath(item: index, section: 0))?.frame.height ?? 0) > initialHeight + 100 }
+        XCTAssertEqual(cell.frame.minY - collection.contentOffset.y, anchorY, accuracy: 1)
+        let count = collection.numberOfItems(inSection: 0)
+        collection.scrollToItem(at: IndexPath(item: count - 1, section: 0), at: .bottom, animated: false)
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertNil(collection.cellForItem(at: IndexPath(item: index, section: 0)))
+        collection.delegate?.scrollViewWillBeginDragging?(collection)
+        collection.scrollToItem(at: IndexPath(item: index, section: 0), at: .top, animated: false)
+        try await Task.sleep(for: .milliseconds(200))
+        let returned = try XCTUnwrap(collection.cellForItem(at: IndexPath(item: index, section: 0)))
+        XCTAssertGreaterThan(returned.frame.height, initialHeight + 100)
+        let restoredY = returned.frame.minY - collection.contentOffset.y
+        model.beginContentInspection()
+        model.retainSurface("inspector:chat")
+        model.toolInspection.open(try XCTUnwrap(model.toolInspection.tools["proposal"]), owner: "chat")
+        try await eventually { host.presentedViewController != nil }
+        XCTAssertEqual(planProposalMarkdown(try XCTUnwrap(model.toolInspection.selection).block.tool), updated)
+        model.toolInspection.dismiss(owner: "chat")
+        try await eventually { host.presentedViewController == nil && !model.isInspectingContent }
+        XCTAssertEqual(returned.frame.minY - collection.contentOffset.y, restoredY, accuracy: 1)
+        XCTAssertEqual(collection.numberOfItems(inSection: 0), count)
+        XCTAssertFalse(model.followsTail)
+    }
+
     private func eventually(_ condition: () -> Bool) async throws {
         for _ in 0..<150 {
             if condition() { return }
@@ -157,6 +225,8 @@ final class ToolTranscriptPresentationTests: XCTestCase {
 }
 
 private struct ToolTranscriptHTTP: HTTPPerforming {
+    var proposedPlan: String? = nil
+
     func perform(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let url = request.url!
         guard url.lastPathComponent == "messages" else {
@@ -199,6 +269,13 @@ private struct ToolTranscriptHTTP: HTTPPerforming {
         tool("Bash", input: ["command": "rm ios/Packages/HapiKit/Package.resolved && git diff --check && git status --short"])
         tool("exec", input: ["code": "await tools.mcp__hapi__display_image({path: '/tmp/light-summary.png'})"])
         tool("mcp__hapi__display_image", input: ["path": "/tmp/light-summary.png"])
+        if let proposedPlan {
+            append(["type": "tool-call", "name": "ExitPlanMode", "callId": "proposal", "input": ["plan": .string(proposedPlan)]])
+            append(["type": "tool-call-result", "callId": "proposal", "output": .null])
+            for index in 0..<20 {
+                append(["type": "message", "id": .string("after-plan-\(index)"), "message": .string("Later message \(index)\n\nKeeps the plan away from the live tail for recycling tests.")])
+            }
+        }
         append(["type": "message", "message": "检查完成，可以继续对话。"])
         return rows
     }

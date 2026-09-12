@@ -1,7 +1,14 @@
 # Native transcript scrolling
 
-Native-only presentation policy. No Web, Hub, REST/SSE format, or generated
-fixture changes. iOS and Android still reduce the same protocol messages.
+Native-only presentation policy. No Web, Hub or REST/SSE format changes.
+iOS and Android still reduce the same protocol messages; golden fixtures pin
+that contract, not the native view appearance.
+
+Plan proposals are an exception to compact tool summaries: both native clients
+show the complete input document as Markdown by default, before approvals.
+Android retains explicit manual folding; iOS retains its separate inspector.
+Plan text joins off-main Markdown preparation before transcript publication;
+stable tool IDs and normal self-sizing/anchor compensation remain unchanged.
 
 ## Behavior
 

@@ -13,6 +13,7 @@ import SwiftUI
 /// - `CodexDiff` (and any input/result that parses as a unified diff) →
 ///   `DiffTextView`;
 /// - `TodoWrite`/`update_plan` → checklist rows;
+/// - `ExitPlanMode`/`exit_plan_mode` → complete Markdown proposal from input;
 /// - Ask/RequestUserInput → questions + selected answers, read-only;
 /// - anything else → pretty-printed JSON input, then the generic result.
 struct ToolCallBody: View {
@@ -26,6 +27,9 @@ struct ToolCallBody: View {
         VStack(alignment: .leading, spacing: 12) {
             if questionTool {
                 QuestionToolBody(tool: tool)
+            } else if let plan = planProposalMarkdown(tool) {
+                PlanProposalContent(markdown: plan)
+                if planProposalShowsResult(tool) { ToolResultSection(tool: tool) }
             } else {
                 SectionLabel(text: String(localized: "Input"))
                 ToolInputSection(tool: tool, basePath: basePath)
@@ -50,6 +54,17 @@ struct ToolCallBody: View {
                 }
             }
         }
+    }
+}
+
+/// Shared by the transcript and inspector. Unlike ordinary tool output, the
+/// proposal is a reading document: no preview budget or paged-source fallback.
+struct PlanProposalContent: View {
+    let markdown: String
+
+    var body: some View {
+        CachedMarkdownView(markdown: markdown)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
