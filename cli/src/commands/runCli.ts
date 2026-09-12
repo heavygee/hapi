@@ -257,18 +257,6 @@ export async function runCli(): Promise<void> {
         }
     }
 
-    if (args.includes('-v') || args.includes('--version')) {
-        const marker = readUpgradeTarget()
-        console.log(formatVersionIdentity({
-            version: packageJson.version,
-            generation: marker?.targetGeneration ?? null,
-            hubTarget: null,
-            executable: currentCliExecutable(),
-            durableTarget: marker?.path ?? null,
-        }).trimEnd())
-        process.exit(0)
-    }
-
     if (args.length === 0) {
         if (!process.stdin.isTTY || !process.stdout.isTTY) {
             console.error('Agent selection requires an interactive terminal. Run: hapi <agent> [options]')
