@@ -180,11 +180,9 @@ def iter_project_mcp(root: Path):
         "(", "-path", "*/node_modules/*", "-o", "-path", "*/.git/*", ")", "-prune",
         "-o", "-path", "*/.cursor/mcp.json", "-type", "f", "-print",
     ]
-    try:
-        out = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL)
-    except subprocess.CalledProcessError:
-        return
-    for line in out.splitlines():
+    # find exits 1 when it hits unreadable dirs (e.g. compose state); still emit matches
+    proc = subprocess.run(cmd, text=True, capture_output=True, check=False)
+    for line in (proc.stdout or "").splitlines():
         line = line.strip()
         if line:
             yield Path(line)
