@@ -79,28 +79,30 @@ export function normalizeCliArgs(rawArgv: string[]): string[] {
     const execBase = basename(execPath);
     const bunMain = globalThis.Bun?.main ?? '';
     const dashIndex = rawArgv.indexOf('--');
-    let argv = rawArgv.slice();
     if (dashIndex >= 0) {
         const preArgs = rawArgv.slice(0, dashIndex);
         const postArgs = rawArgv.slice(dashIndex + 1);
         const normalizedPre = stripRuntimePrefix(preArgs, execPath, execBase, bunMain);
         // Only `job run … -- <cmd>` needs the child separator preserved.
-        // `hapi -- auth login` / `hapi codex -- --model o3` must keep stripping.
+        // `hapi -- auth login` / `hapi codex -- --model o3` use upstream strip only.
         const keepSeparator = normalizedPre[0] === 'job' && normalizedPre[1] === 'run';
         if (
             hasRuntimeWrapper(preArgs, execPath, execBase, bunMain)
             && normalizedPre.length === 0
         ) {
-            // `bun src/index.ts -- auth login` → only postArgs (runtime handoff).
-            argv = postArgs;
-        } else {
-            argv = keepSeparator
-                ? [...preArgs, '--', ...postArgs]
-                : [...preArgs, ...postArgs];
+            return stripRuntimePrefix(postArgs, execPath, execBase, bunMain);
+        }
+        if (keepSeparator) {
+            return stripRuntimePrefix(
+                [...preArgs, '--', ...postArgs],
+                execPath,
+                execBase,
+                bunMain,
+            );
         }
     }
 
-    return stripRuntimePrefix(argv, execPath, execBase, bunMain);
+    return stripRuntimePrefix(rawArgv, execPath, execBase, bunMain);
 }
 
 export function getCliArgs(): string[] {

@@ -168,6 +168,11 @@ export async function runCli(): Promise<void> {
 
     const args = getCliArgs()
 
+    if (args[0] === '--help' || args[0] === '-h' || args[0] === 'help') {
+        printCliHelp()
+        return
+    }
+
     // Hub-artifact binaries are runner-only (empty embedded web). Only redirect
     // systemd `runner start` / `start-sync` so `hapi hub` / doctor stay on the
     // general-purpose entrypoint.

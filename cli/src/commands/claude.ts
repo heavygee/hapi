@@ -16,17 +16,12 @@ import { extractErrorInfo } from '@/utils/errorUtils'
 import type { CommandDefinition } from './types'
 
 export const claudeCommand: CommandDefinition = {
-    name: 'default',
+    name: 'claude',
     requiresRuntimeAssets: true,
     run: async ({ commandArgs }) => {
         const args = [...commandArgs]
 
-        if (args.length > 0 && args[0] === 'claude') {
-            args.shift()
-        }
-
         const options: StartOptions = {}
-        let showHelp = false
         const unknownArgs: string[] = []
         let hasExplicitPermissionMode = false
 
@@ -37,7 +32,6 @@ export const claudeCommand: CommandDefinition = {
                 unknownArgs.push(...args.slice(i))
                 break
             } else if (arg === '-h' || arg === '--help') {
-                showHelp = true
                 unknownArgs.push(arg)
             } else if (arg === '--hapi-starting-mode') {
                 options.startingMode = z.enum(['local', 'remote']).parse(args[++i])
@@ -91,50 +85,6 @@ export const claudeCommand: CommandDefinition = {
 
         if (unknownArgs.length > 0) {
             options.claudeArgs = [...(options.claudeArgs || []), ...unknownArgs]
-        }
-
-        if (showHelp) {
-            console.log(`
-${chalk.bold('hapi claude')} - start a Claude Code session through HAPI
-
-${chalk.bold('Usage:')}
-  hapi [options]         Start Claude (default command; same as \`hapi claude\`)
-  hapi claude [options]  Explicit Claude session
-
-For HAPI product commands (\`job\`, \`ping-peer\`, \`version\`, \`auth\`, \`runner\`), run:
-  hapi --help
-  hapi version
-
-${chalk.bold('Examples:')}
-  hapi                    Start session (will prompt for token if not set)
-  hapi --yolo             Start with bypassing permissions
-                            hapi sugar for --dangerously-skip-permissions
-  hapi --resume           Resume most recent Claude session
-
-${chalk.bold('hapi supports ALL Claude options!')}
-  Use any claude flag with hapi as you would with claude.
-
-${chalk.gray('─'.repeat(60))}
-${chalk.bold.cyan('Claude Code Options (from `claude --help`):')}
-`)
-
-            try {
-                const claudeHelp = execFileSync(
-                    'claude',
-                    ['--help'],
-                    {
-                        encoding: 'utf8',
-                        env: withBunRuntimeEnv(),
-                        shell: process.platform === 'win32',
-                        windowsHide: process.platform === 'win32'
-                    }
-                )
-                console.log(claudeHelp)
-            } catch {
-                console.log(chalk.yellow('Could not retrieve claude help. Make sure claude is installed.'))
-            }
-
-            process.exit(0)
         }
 
         await initializeToken()

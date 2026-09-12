@@ -49,7 +49,6 @@ const COMMANDS: CommandDefinition[] = [
     agyCommand,
     authCommand,
     claudeCommand,
-    { ...claudeCommand, name: 'claude' },
     connectCommand,
     codexCommand,
     dshCommand,
@@ -85,42 +84,17 @@ for (const command of COMMANDS) {
     commandMap.set(command.name, command)
 }
 
-const HELP_TOKENS = new Set(['help', '-h', '--help'])
-const VERSION_TOKENS = new Set(['version'])
-
 export function resolveCommand(args: string[]): { command: CommandDefinition; context: CommandContext } | null {
     const subcommand = args[0]
-    if (subcommand && HELP_TOKENS.has(subcommand)) {
-        return {
-            command: helpCommand,
-            context: { args, subcommand, commandArgs: args.slice(1) },
-        }
-    }
-    if (subcommand && VERSION_TOKENS.has(subcommand)) {
-        return {
-            command: versionCommand,
-            context: { args, subcommand, commandArgs: args.slice(1) },
-        }
-    }
     const command = subcommand ? commandMap.get(subcommand) : undefined
-    if (subcommand && !command) {
-        if (subcommand.startsWith('-') && subcommand !== '-v' && subcommand !== '--version') {
-            return {
-                command: claudeCommand,
-                context: { args, subcommand, commandArgs: args },
-            }
-        }
-        return null
-    }
-    const resolvedCommand = command ?? claudeCommand
-    const commandArgs = command ? args.slice(1) : args
+    if (!command) return null
 
     return {
-        command: resolvedCommand,
+        command,
         context: {
             args,
             subcommand,
-            commandArgs
-        }
+            commandArgs: args.slice(1),
+        },
     }
 }
