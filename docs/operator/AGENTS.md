@@ -759,3 +759,18 @@ so it cannot authorise a later push, and cannot merge twice. If the branch moves
 the gate blocks and the operator must re-authorise.
 
 Agents wanting an upstream merge must **ask the operator to run it**; they cannot grant it themselves.
+
+### Host coverage (verified 2026-09-13)
+
+| Host | Mechanism | Verified |
+|---|---|---|
+| **oos-linux** | `~/.local/bin/gh` wrapper → `hapi-pr-merge-gate.sh` | `gh pr merge 1842` blocked, naming tiann's unanswered comment |
+| **proxmox** | same, installed to `~/.local/bin` (no hapi checkout there, so the gate is installed standalone) | same block reproduced via login shell |
+| **teemo** (Windows) | `scripts/tooling/windows/hapi-gh-merge-guard.ps1`, dot-sourced from `profile.ps1` | `gh pr merge` refused |
+
+**teemo has no bash**, so it cannot run the gate — it therefore **cannot merge at all** and redirects
+to oos/proxmox. Fail closed rather than an ungated exception.
+
+Note proxmox's `~/.local/bin` is only ahead of `/usr/bin` in a **login** shell; a bare
+non-interactive `ssh proxmox gh ...` resolves to `/usr/bin/gh` and bypasses the wrapper. Agent shells
+are login shells, so they are covered — but do not use non-interactive ssh to run merges.
