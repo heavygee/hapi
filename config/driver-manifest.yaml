@@ -990,10 +990,11 @@ layers:
 
   # tiann/hapi#1772 — combined session list filters (unread + scratchlist + date) in one menu;
   # GET /api/sessions/scratchlist-status + SSE resync invalidation for scratchlist membership.
-  # Upstream #1772 still open/MERGEABLE; soup tip re-thinned onto post-#1842 upstream/main
-  # (b6d0fa563). Ranking comes from upstream #1842 — do NOT re-apply soup ranking commits.
+  # Upstream #1772 still open/MERGEABLE; soup tip re-thinned onto post-#1848 upstream/main
+  # (de6c9dee2). Ranking/pin-divider from upstream #1848 — do NOT re-apply soup ranking commits.
   # Worktree: ~/coding/hapi/worktrees/soup-1772-list-filters @ soup/1772-combined-list-filters
-  # Tip: 6dd50e5f3 — 2 commits / 34 files (#1772 filters + scratchlist SSE only)
+  # Tip: 79c85e024 — 2 commits / 34 files (#1772 filters + scratchlist SSE only)
+  # Remat order: #1605 → #1607 → #1772 last. Remat owner: tooling/meta — no self-remat.
   - branch: soup/1772-combined-list-filters
 
   # tiann/hapi#1605 — Claude live model catalog (list_models) + effort/context-window wiring.
