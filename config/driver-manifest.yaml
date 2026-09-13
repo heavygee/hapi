@@ -990,10 +990,10 @@ layers:
 
   # tiann/hapi#1772 — combined session list filters (unread + scratchlist + date) in one menu;
   # GET /api/sessions/scratchlist-status + SSE resync invalidation for scratchlist membership.
-  # Upstream PR CONFLICTING; soup tip re-thinned onto upstream/main (kept #1773 mark-all-read).
+  # Upstream #1772 still open/MERGEABLE; soup tip re-thinned onto post-#1842 upstream/main
+  # (b6d0fa563). Ranking comes from upstream #1842 — do NOT re-apply soup ranking commits.
   # Worktree: ~/coding/hapi/worktrees/soup-1772-list-filters @ soup/1772-combined-list-filters
-  # Tip: 640d71025 — ranking (field×IDF) + post-bonus field pick; re-thin after dogfood bump
-  # (640d71025: search relevance; paths stay searchable; boundary = score bonus)
+  # Tip: 6dd50e5f3 — 2 commits / 34 files (#1772 filters + scratchlist SSE only)
   - branch: soup/1772-combined-list-filters
 
   # tiann/hapi#1605 — Claude live model catalog (list_models) + effort/context-window wiring.
