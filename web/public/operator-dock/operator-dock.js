@@ -13,7 +13,7 @@
  *
  * UX:
  *   cluster mic (no markup) -> red pulse + live text -> tap again -> send screenshot + transcript.
- *   markup tool (or hidden long-press) -> draw on frozen shot -> Cancel / Send (no typed-note field).
+ *   markup tool (or hidden long-press) -> draw on frozen shot; mic sends, H cancels (#271; no foot).
  *   tap mic WHILE markup open -> keep drawings visible + STT; tap again -> annotated shot + transcript.
  *   #115: overlay is transparent; hub+fan sit above it. Secret recovery is an in-dock sheet (Quest prompt fails).
  * STT chain: native/browser first; if empty, MediaRecorder → config.hapiInline.sttUrl.
@@ -45,12 +45,13 @@
   var shotImg = null; // Image of the frozen screenshot
   var replies = null, replyPoll = null;
   var pendingShot = null, liveTranscript = '', liveInterim = '', recordLabel = null;
+  // #241: keep last outbound after routing miss so picker can complete without re-speaking.
+  var pendingOutbound = null;
   var longPressTimer = null, longPressFired = false;
   var mediaRecorder = null, mediaStream = null, mediaChunks = [], mediaMime = '', mediaStopWait = null;
   var toolSheet = null;
   // #154 / #209 / #212: keep draw clear of Cancel/Send only — not the FAB pad.
-  // Fallback before measure; sizeCanvas sets --opdock-foot-clear from .opdock-actions.
-  var FOOT_CLEAR_PX = 64;
+  // #271: markup has no Cancel/Send foot — draw uses the full viewport.
   var markupOpening = false;
 
   function $(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
@@ -128,15 +129,144 @@
   function pinnedSessionLabelKey() {
     return 'hapiInline.pinnedSessionLabel.' + ((cfg && cfg.appId) || 'unknown-app');
   }
+  // #249: operator-supplied spawn targets (host config still wins when set).
+  function spawnMachineKey() {
+    return 'hapiInline.spawnMachineId.' + ((cfg && cfg.appId) || 'unknown-app');
+  }
+  function spawnDirectoryKey() {
+    return 'hapiInline.spawnDirectory.' + ((cfg && cfg.appId) || 'unknown-app');
+  }
+  function getOperatorMachineId() {
+    try { return (localStorage.getItem(spawnMachineKey()) || '').trim(); } catch (e) { return ''; }
+  }
+  function setOperatorMachineId(id) {
+    try {
+      var v = id != null ? String(id).trim() : '';
+      if (v) localStorage.setItem(spawnMachineKey(), v);
+      else localStorage.removeItem(spawnMachineKey());
+    } catch (e) {}
+  }
+  function getOperatorSpawnDirectory() {
+    try { return (localStorage.getItem(spawnDirectoryKey()) || '').trim(); } catch (e) { return ''; }
+  }
+  function setOperatorSpawnDirectory(dir) {
+    try {
+      var v = dir != null ? String(dir).trim() : '';
+      if (v) localStorage.setItem(spawnDirectoryKey(), v);
+      else localStorage.removeItem(spawnDirectoryKey());
+    } catch (e) {}
+  }
+  // #260: operator-chosen spawn agent / yolo (browser-hub). Empty = defer to host then hub.
+  var SPAWN_AGENT_CHOICES = ['claude', 'codex', 'cursor', 'gemini', 'kimi', 'opencode', 'pi'];
+  function spawnAgentKey() {
+    return 'hapiInline.spawnAgent.' + ((cfg && cfg.appId) || 'unknown-app');
+  }
+  function spawnYoloKey() {
+    return 'hapiInline.spawnYolo.' + ((cfg && cfg.appId) || 'unknown-app');
+  }
+  function getOperatorSpawnAgent() {
+    try { return (localStorage.getItem(spawnAgentKey()) || '').trim(); } catch (e) { return ''; }
+  }
+  function setOperatorSpawnAgent(agent) {
+    try {
+      var v = agent != null ? String(agent).trim() : '';
+      if (v) localStorage.setItem(spawnAgentKey(), v);
+      else localStorage.removeItem(spawnAgentKey());
+    } catch (e) {}
+  }
+  /** '' | '1' | '0' | '__hub__' — empty defers to host; __hub__ forces omit. */
+  function getOperatorSpawnYolo() {
+    try { return (localStorage.getItem(spawnYoloKey()) || '').trim(); } catch (e) { return ''; }
+  }
+  function setOperatorSpawnYolo(flag) {
+    try {
+      var v = flag != null ? String(flag).trim() : '';
+      if (v === '1' || v === '0' || v === '__hub__') localStorage.setItem(spawnYoloKey(), v);
+      else localStorage.removeItem(spawnYoloKey());
+    } catch (e) {}
+  }
+  function hostSpawnAgent() {
+    return cfg && cfg.spawnAgent != null ? String(cfg.spawnAgent).trim() : '';
+  }
+  function hostSpawnModel() {
+    return cfg && cfg.spawnModel != null ? String(cfg.spawnModel).trim() : '';
+  }
+  function resolveEffectiveSpawnAgent() {
+    var op = getOperatorSpawnAgent();
+    if (op === '__hub__') return '';
+    if (op) return op;
+    return hostSpawnAgent();
+  }
+  function resolveEffectiveSpawnModel() {
+    // Operator does not override model yet (#260 focuses agent/yolo); host only, else omit.
+    return hostSpawnModel();
+  }
+  /**
+   * #260: true → send yolo:true; false/null → omit (hub default / off).
+   * Operator LS beats host; empty operator defers to host; unset host omits.
+   */
+  function resolveEffectiveSpawnYolo() {
+    var op = getOperatorSpawnYolo();
+    if (op === '__hub__') return null;
+    if (op === '1') return true;
+    if (op === '0') return false;
+    if (cfg && cfg._hostSpawnYoloSet) return cfg.spawnYolo !== false;
+    return null;
+  }
+  function spawnAgentProvenance() {
+    var op = getOperatorSpawnAgent();
+    if (op === '__hub__') return 'your hub default';
+    if (op) return 'saved on this device';
+    if (hostSpawnAgent()) return 'set by this deployment';
+    return 'your hub default';
+  }
+  function spawnYoloProvenance() {
+    var op = getOperatorSpawnYolo();
+    if (op === '__hub__') return 'your hub default';
+    if (op === '1' || op === '0') return 'saved on this device';
+    if (cfg && cfg._hostSpawnYoloSet) return 'set by this deployment';
+    return 'your hub default';
+  }
+  function hostMachineId() {
+    return cfg && cfg.machineId != null ? String(cfg.machineId).trim() : '';
+  }
+  function hostSpawnDirectory() {
+    if (!cfg) return '';
+    var dedicated = cfg.spawnDirectory != null ? String(cfg.spawnDirectory).trim() : '';
+    if (dedicated) return dedicated;
+    return cfg.projectPath != null ? String(cfg.projectPath).trim() : '';
+  }
+  function resolveEffectiveMachineId() {
+    var host = hostMachineId();
+    if (host) return host;
+    return getOperatorMachineId();
+  }
   function getRoutingMode() {
     try {
       var raw = localStorage.getItem(routingModeKey());
-      if (raw === 'pick' || raw === 'spawn-per-send' || raw === 'pin') return raw;
+      if (raw === 'spawn-per-send') {
+        // #246: sticky spawn with missing host config must not stay selected.
+        if (!canSpawnPerSend()) return hasPinnedOrConfigSession() ? 'pin' : 'pick';
+        return 'spawn-per-send';
+      }
+      if (raw === 'pick' || raw === 'pin') return raw;
     } catch (e) {}
-    return 'pin';
+    // #241: fresh unlock with nothing pinned — pick recovers; bare pin does not.
+    return hasPinnedOrConfigSession() ? 'pin' : 'pick';
+  }
+  function hasPinnedOrConfigSession() {
+    try {
+      var override = (localStorage.getItem(pinnedSessionKey()) || '').trim();
+      if (override) return true;
+    } catch (e) {}
+    return !!(cfg && cfg.session);
   }
   function setRoutingMode(mode) {
     var next = (mode === 'pick' || mode === 'spawn-per-send') ? mode : 'pin';
+    if (next === 'spawn-per-send' && !canSpawnPerSend()) {
+      toast(spawnUnavailableReason() || 'Spawn per send needs a machine and working directory', 'err');
+      next = hasPinnedOrConfigSession() ? 'pin' : 'pick';
+    }
     try { localStorage.setItem(routingModeKey(), next); } catch (e) {}
     return next;
   }
@@ -196,11 +326,51 @@
       return cached || operatorSessionLabel(null, 'pinned');
     });
   }
+  // #259: last outbound target label for replies title / spawn toast (never a UUID).
+  var lastOutboundSessionLabel = null;
+  function repliesExpandedTitle(label) {
+    var n = label != null ? String(label).trim() : '';
+    return n ? ('🤖 ' + n) : '🤖 Agent replies';
+  }
+  function resolveSessionLabel(secret, sessionId) {
+    var id = sessionId != null ? String(sessionId).trim() : '';
+    if (!id) return Promise.resolve(operatorSessionLabel(null, 'pinned'));
+    if (getPinnedSession() === id && getPinnedSessionLabel()) {
+      return Promise.resolve(getPinnedSessionLabel());
+    }
+    if (!secret) return Promise.resolve(lastOutboundSessionLabel || operatorSessionLabel(null, 'pinned'));
+    function labelFromRow(row) {
+      if (!row) return '';
+      var flavor = row.flavor ? String(row.flavor).trim() : '';
+      var raw = row.name != null ? String(row.name).trim() : '';
+      // #201/#259: never surface UUID prefixes as the title.
+      if (raw && !/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(raw) && raw !== id) return raw;
+      if (flavor) return flavor + ' session';
+      return '';
+    }
+    return listProjectSessions(secret).then(function (sessions) {
+      for (var i = 0; i < sessions.length; i++) {
+        if (sessions[i].id === id) {
+          var named = labelFromRow(sessions[i]);
+          if (named) return named;
+          break;
+        }
+      }
+      return lastOutboundSessionLabel || 'New session';
+    }).catch(function () {
+      return lastOutboundSessionLabel || 'New session';
+    });
+  }
 
   function formatSendError(err, st) {
     var msg = err && err.message ? String(err.message) : String(err || '');
+    var code = err && err.code ? String(err.code) : '';
     if (/ISO-8859-1|ByteString|code point/i.test(msg) || /invalid characters/i.test(msg)) {
       return 'Gate secret has invalid characters — re-paste as plain ASCII';
+    }
+    // #236: dormant pin — bare "upload 409" is not actionable.
+    if (st === 409 || code === 'session_inactive' || /session_inactive|inactive/i.test(msg)) {
+      return 'Session is asleep — pick an active one, or resume it in HAPI and retry';
     }
     if (st) return 'Send failed: upload ' + st;
     if (msg) return 'Send failed: ' + msg;
@@ -209,8 +379,271 @@
 
   function toast(msg, kind) {
     var t = $('div', 'opdock-toast opdock-toast--' + (kind || 'info'), msg);
-    document.body.appendChild(t); void t.offsetWidth; t.classList.add('opdock-toast--show');
-    setTimeout(function () { t.classList.remove('opdock-toast--show'); setTimeout(function () { t.remove(); }, 400); }, kind === 'err' ? 6000 : 3000);
+    document.body.appendChild(t);
+    mountAsTopLayer(t);
+    void t.offsetWidth; t.classList.add('opdock-toast--show');
+    setTimeout(function () {
+      t.classList.remove('opdock-toast--show');
+      setTimeout(function () {
+        forgetTopLayer(t);
+        t.remove();
+      }, 400);
+    }, kind === 'err' ? 6000 : 3000);
+  }
+
+  // #254/#268: showModal() inerts the document outside the dialog — including top-layer
+  // popovers that paint above it (Chrome/Firefox today). popover=manual still gets us into
+  // the top layer; to stay *interactive* we adopt chrome into the open :modal dialog and
+  // restore to body when it closes.
+  var topLayerNodes = [];
+  var hostModalObserver = null;
+  var popoverUnavailableNoted = false;
+  var topLayerBusy = false;
+  var modalChromeSyncScheduled = false;
+  var hostModalToggleBound = false;
+
+  function supportsPopoverApi() {
+    return typeof HTMLElement !== 'undefined'
+      && HTMLElement.prototype
+      && typeof HTMLElement.prototype.showPopover === 'function';
+  }
+
+  function notePopoverUnavailableOnce() {
+    // #254 follow-up: Quest/old Chromium may lack Popover — silent no-op looked like "still broken".
+    if (popoverUnavailableNoted) return;
+    popoverUnavailableNoted = true;
+    try {
+      if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+        console.warn(
+          'operator-dock: Popover API unavailable; dock will be inert under host modals '
+          + '(needs Chromium 114+ / equivalent — check Quest Browser version)'
+        );
+      }
+    } catch (e) {}
+  }
+
+  function bumpTopLayer(el) {
+    if (!el || !supportsPopoverApi()) return;
+    // When adopted under a :modal dialog, still showPopover: descendants escape inert,
+    // and popover keeps viewport-fixed placement (plain fixed inside dialog is dialog-relative
+    // in Chromium).
+    topLayerBusy = true;
+    try {
+      if (typeof el.matches === 'function' && el.matches(':popover-open')) {
+        el.hidePopover();
+      }
+      el.showPopover();
+    } catch (e) {}
+    topLayerBusy = false;
+  }
+
+  function mountAsTopLayer(el) {
+    if (!el) return el;
+    if (!supportsPopoverApi()) {
+      notePopoverUnavailableOnce();
+      return el;
+    }
+    try { el.setAttribute('popover', 'manual'); } catch (e) {}
+    if (!el._opdockPopoverToggleBound) {
+      el._opdockPopoverToggleBound = true;
+      el.addEventListener('toggle', function (ev) {
+        // manual should not light-dismiss; if something closes us, reopen while connected.
+        // Skip only while bumping/adopting — hidePopover is intentional then.
+        if (topLayerBusy) return;
+        if (ev && ev.newState === 'closed' && el.isConnected) {
+          try { el.showPopover(); } catch (e2) {}
+        }
+      });
+    }
+    if (topLayerNodes.indexOf(el) === -1) topLayerNodes.push(el);
+    try { el.showPopover(); } catch (e3) {}
+    // If a modal is already open at mount time, adopt immediately (#268).
+    scheduleModalChromeSync();
+    return el;
+  }
+
+  function forgetTopLayer(el) {
+    var i = topLayerNodes.indexOf(el);
+    if (i >= 0) topLayerNodes.splice(i, 1);
+  }
+
+  function reassertTopLayerChrome() {
+    // Prefer dock above overlay (#115 / #276): full-bleed draw must not steal H/mic hits.
+    // Top-layer paint order is last-showPopover wins — dock must bump after overlay.
+    var order = ['opdock-toast', 'opdock-replies', 'opdock-overlay', 'opdock'];
+    var ranked = topLayerNodes.filter(function (n) { return n && n.isConnected; });
+    ranked.sort(function (a, b) {
+      function rank(el) {
+        for (var i = 0; i < order.length; i++) {
+          if (el.classList && el.classList.contains(order[i])) return i;
+        }
+        return -1;
+      }
+      return rank(a) - rank(b);
+    });
+    for (var i = 0; i < ranked.length; i++) bumpTopLayer(ranked[i]);
+  }
+
+  function nodeLooksLikeHostModal(node) {
+    if (!node || node.nodeType !== 1) return false;
+    if ((node.tagName || '').toLowerCase() !== 'dialog') return false;
+    if (!node.hasAttribute('open')) return false;
+    // Our chrome is never a host modal.
+    if (node.classList && (
+      node.classList.contains('opdock')
+      || node.classList.contains('opdock-toast')
+      || node.classList.contains('opdock-overlay')
+      || node.classList.contains('opdock-replies')
+    )) return false;
+    return true;
+  }
+
+  /**
+   * #254/#268: modal dialogs make the rest of the document inert — including top-layer
+   * popovers that paint above them (Chrome/Firefox today; whatwg/html#10811). Descending
+   * from the open dialog escapes inert. Adopt our chrome into the topmost :modal dialog;
+   * restore to body when none remain.
+   */
+  function topmostOpenModalDialog() {
+    var dialogs = document.querySelectorAll('dialog[open]');
+    var top = null;
+    for (var i = 0; i < dialogs.length; i++) {
+      var d = dialogs[i];
+      if (!nodeLooksLikeHostModal(d)) continue;
+      try {
+        if (typeof d.matches === 'function' && d.matches(':modal')) top = d;
+        else if (d.open) top = d;
+      } catch (e) {
+        if (d.open) top = d;
+      }
+    }
+    return top;
+  }
+
+  function rememberChromeHome(el) {
+    if (!el || el._opdockHomeParent) return;
+    el._opdockHomeParent = el.parentNode;
+    el._opdockHomeNext = el.nextSibling;
+  }
+
+  function restoreChromeHome(el) {
+    if (!el) return;
+    var home = el._opdockHomeParent;
+    var next = el._opdockHomeNext;
+    el._opdockHomeParent = null;
+    el._opdockHomeNext = null;
+    el._opdockAdoptedDialog = null;
+    try {
+      if (home && home.isConnected) {
+        if (next && next.parentNode === home) home.insertBefore(el, next);
+        else home.appendChild(el);
+      } else if (!el.isConnected || el.parentNode !== document.body) {
+        document.body.appendChild(el);
+      }
+    } catch (e) {}
+  }
+
+  function adoptChromeIntoDialog(dialog) {
+    if (!dialog) return;
+    for (var i = 0; i < topLayerNodes.length; i++) {
+      var el = topLayerNodes[i];
+      // Do not require isConnected — React may detach our node on re-render; re-append.
+      if (!el) continue;
+      if (!dialog.contains(el)) {
+        rememberChromeHome(el);
+        topLayerBusy = true;
+        try {
+          // Ensure popover attr survives reparent (UA may hide on move).
+          if (!el.hasAttribute('popover')) {
+            try { el.setAttribute('popover', 'manual'); } catch (e0) {}
+          }
+          dialog.appendChild(el);
+        } catch (e2) {
+          topLayerBusy = false;
+          continue;
+        }
+        topLayerBusy = false;
+      }
+      el._opdockAdoptedDialog = dialog;
+      // Descendant of :modal → not inert; showPopover → viewport paint above dialog UI.
+      bumpTopLayer(el);
+    }
+  }
+
+  function restoreAllChromeFromDialogs() {
+    for (var i = 0; i < topLayerNodes.length; i++) {
+      var el = topLayerNodes[i];
+      if (!el || !el._opdockAdoptedDialog) continue;
+      restoreChromeHome(el);
+      bumpTopLayer(el);
+    }
+  }
+
+  function syncChromeWithHostModals() {
+    var modal = topmostOpenModalDialog();
+    if (modal) adoptChromeIntoDialog(modal);
+    else restoreAllChromeFromDialogs();
+    // #276: adopt bumps in topLayerNodes order (dock then overlay) — re-rank so dock wins.
+    reassertTopLayerChrome();
+  }
+
+  function scheduleModalChromeSync() {
+    if (modalChromeSyncScheduled) return;
+    modalChromeSyncScheduled = true;
+    var run = function () {
+      modalChromeSyncScheduled = false;
+      syncChromeWithHostModals();
+    };
+    // After the browser finishes promoting the dialog into the top layer.
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(function () { requestAnimationFrame(run); });
+    } else {
+      setTimeout(run, 0);
+    }
+  }
+
+  function watchHostModals() {
+    if (!hostModalObserver && typeof MutationObserver !== 'undefined') {
+      hostModalObserver = new MutationObserver(function (mutations) {
+        var need = false;
+        for (var i = 0; i < mutations.length && !need; i++) {
+          var m = mutations[i];
+          if (m.type === 'attributes' && m.attributeName === 'open') {
+            need = true;
+          } else if (m.type === 'childList') {
+            for (var j = 0; j < m.addedNodes.length; j++) {
+              var n = m.addedNodes[j];
+              if (n && n.nodeType === 1 && (n.tagName || '').toLowerCase() === 'dialog') {
+                need = true; break;
+              }
+            }
+            // React may re-render dialog children and drop our adopted nodes — re-sync.
+            if (!need && m.target && (m.target.tagName || '').toLowerCase() === 'dialog') {
+              need = true;
+            }
+          }
+        }
+        if (need) scheduleModalChromeSync();
+      });
+      try {
+        hostModalObserver.observe(document.documentElement, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          attributeFilter: ['open'],
+        });
+      } catch (e) {}
+    }
+    if (!hostModalToggleBound && typeof document.addEventListener === 'function') {
+      hostModalToggleBound = true;
+      // showModal() on an existing <dialog> fires toggle; attribute observer alone can race.
+      document.addEventListener('toggle', function (ev) {
+        var t = ev && ev.target;
+        if (!t || (t.tagName || '').toLowerCase() !== 'dialog') return;
+        scheduleModalChromeSync();
+      }, true);
+    }
+    scheduleModalChromeSync();
   }
 
   function promptMessageForMode() {
@@ -263,6 +696,7 @@
     else if (kind === 'conflict') bits.push('Primary and legacy secret headers differ. Paste one secret in the dock sheet.');
     else if (kind === 'forbidden') bits.push('Proxy refused this path or session — not an unloaded hub secret.');
     else bits.push('Paste the gate secret in the dock sheet.');
+    if (cfg && cfg.mode === MODE_BROWSER_HUB) bits.push('Hub called: ' + hubOriginDisplayLabel());
     return bits.join(' — ');
   }
   var gateLocked = false;
@@ -303,11 +737,32 @@
       return { ok: false, status: 0, error: '', path: path };
     });
   }
-  function saveProbedSecret(value, inp) {
+  function saveProbedSecret(value, inp, hubInp) {
     var v = normalizeGateSecret(value || '');
-    if (!v) { toast('Paste the operator gate secret', 'err'); return Promise.resolve(false); }
-    var bad = gateSecretByteStringError(v);
-    if (bad) { toast(bad, 'err'); return Promise.resolve(false); }
+    if (!v) {
+      toast(cfg && cfg.mode === MODE_BROWSER_HUB
+        ? 'Paste your HAPI CLI token or JWT'
+        : 'Paste the operator gate secret', 'err');
+      return Promise.resolve(false);
+    }
+    if (cfg && cfg.mode === MODE_BROWSER_HUB) {
+      if (hubInp) {
+        var hub = normalizeHubOrigin(hubInp.value || '');
+        if (!hub || !isHttpsHubBase(hub)) {
+          toast('Enter a valid HTTPS hub origin (e.g. https://hapi.example.ts.net)', 'err');
+          return Promise.resolve(false);
+        }
+        setHubOriginOverride(hub);
+      }
+      syncEffectiveHubOrigin();
+      if (!hasValidHubOrigin()) {
+        toast('Hub origin required — enter your hub URL above the token', 'err');
+        return Promise.resolve(false);
+      }
+    } else {
+      var bad = gateSecretByteStringError(v);
+      if (bad) { toast(bad, 'err'); return Promise.resolve(false); }
+    }
     if (inp) inp.disabled = true;
     return probeSecret(v).then(function (probe) {
       if (inp) inp.disabled = false;
@@ -360,25 +815,40 @@
     var meta = promptMessageForMode();
     if (detail.error || detail.path) meta = authRejectOperatorCopy(403, detail);
     toolSheet.appendChild($('div', 'opdock-session-meta', meta));
+    var hubInp = null;
+    if (cfg && cfg.mode === MODE_BROWSER_HUB) {
+      toolSheet.appendChild($('h3', null, 'Hub'));
+      toolSheet.appendChild($('div', 'opdock-session-meta', 'Destination: ' + hubOriginDisplayLabel()));
+      hubInp = document.createElement('input');
+      hubInp.type = 'url';
+      hubInp.className = 'opdock-secret-input';
+      hubInp.setAttribute('autocomplete', 'off');
+      hubInp.setAttribute('autocapitalize', 'off');
+      hubInp.placeholder = 'https://your-hub.tailnet.ts.net';
+      hubInp.value = getHubOriginOverride() || normalizeHubOrigin(cfg._configHubOrigin) || '';
+      toolSheet.appendChild(hubInp);
+      toolSheet.appendChild($('div', 'opdock-session-meta',
+        'Your hub must allow this site in CORS (browser calls your hub directly).'));
+    }
     var inp = document.createElement('input');
     inp.type = 'password';
     inp.className = 'opdock-secret-input';
     inp.setAttribute('autocomplete', 'off');
     inp.setAttribute('autocapitalize', 'off');
-    inp.placeholder = 'Gate secret';
+    inp.placeholder = cfg && cfg.mode === MODE_BROWSER_HUB ? 'HAPI CLI token or JWT' : 'Gate secret';
     // #158: never prefill known-bad — Quest paste into dotted field often fails to replace.
     toolSheet.appendChild(inp);
     var actions = $('div', 'opdock-secret-actions');
     var save = $('button', 'opdock-btn2 opdock-send', 'Save');
     save.addEventListener('click', function () {
-      saveProbedSecret(inp.value, save).then(function (ok) {
+      saveProbedSecret(inp.value, save, hubInp).then(function (ok) {
         if (ok && typeof opts.onSaved === 'function') opts.onSaved(getSecret());
       });
     });
     actions.appendChild(save);
     toolSheet.appendChild(actions);
     dock.appendChild(toolSheet);
-    try { inp.focus(); } catch (e) {}
+    try { (hubInp || inp).focus(); } catch (e) {}
   }
   function ensureSecret() {
     var s = getSecret();
@@ -606,8 +1076,10 @@
   }
 
   /**
-   * Host STT URL: omit/undefined → '/api/stt' (Jessica). Explicit null/false/'' → disabled (#176).
-   * Never treat JSON null as the hub /api/stt (HAPI JWT 401).
+   * Host STT URL (proxy / raw): omit/undefined → '/api/stt' (Jessica).
+   * Explicit null/false/'' → disabled for proxy (#176 — never coalesce null → relative /api/stt
+   * with gate-secret headers / HAPI JWT 401).
+   * Browser-hub effective URL is syncEffectiveSttUrl (#232): blank/null derive {hub}/api/stt.
    */
   function resolveSttUrl(raw) {
     if (raw === undefined) return '/api/stt';
@@ -622,6 +1094,43 @@
     var s = String(raw || '').trim().toLowerCase();
     if (s === 'hub-jwt' || s === 'bearer' || s === 'jwt') return 'hub-jwt';
     return 'proxy-secret';
+  }
+
+  /** Host published a concrete sttUrl string (absolute or relative) — not blank/null/false. */
+  function hostSttUrlIsExplicit(raw) {
+    if (raw === undefined || raw === null || raw === false) return false;
+    return !!String(raw).trim();
+  }
+
+  /**
+   * Browser-hub (#232): when host leaves sttUrl blank/null, derive {effectiveHub}/api/stt
+   * after hub origin is known (init default or operator hub URL). Explicit false = hard off.
+   * Explicit host string wins (deployment bake). Proxy mode unchanged (#176).
+   */
+  function syncEffectiveSttUrl() {
+    if (!cfg) return null;
+    if (cfg.mode !== MODE_BROWSER_HUB) return cfg.sttUrl;
+    var raw = cfg._configSttUrl;
+    if (raw === false) {
+      cfg.sttUrl = null;
+      cfg._sttDerivedFromHub = false;
+      return null;
+    }
+    if (hostSttUrlIsExplicit(raw)) {
+      cfg.sttUrl = String(raw).trim();
+      cfg._sttDerivedFromHub = false;
+      return cfg.sttUrl;
+    }
+    var hub = resolveHubOrigin(cfg._configHubOrigin);
+    if (hub && isHttpsHubBase(hub)) {
+      cfg.sttUrl = joinUrl(hub, '/api/stt');
+      cfg._sttDerivedFromHub = true;
+      if (!cfg._configSttAuth) cfg.sttAuth = 'hub-jwt';
+      return cfg.sttUrl;
+    }
+    cfg.sttUrl = null;
+    cfg._sttDerivedFromHub = false;
+    return null;
   }
 
   /** True when we should POST recorded audio to the LAN whisper proxy. */
@@ -724,6 +1233,57 @@
     }
   }
 
+  // Keep in sync with lib/operator-hub-origin.ts (#219).
+  var HUB_ORIGIN_KEY = 'hapiInlineHubOrigin';
+  function normalizeHubOrigin(raw) {
+    return String(raw == null ? '' : raw).trim().replace(/\/+$/, '');
+  }
+  function getHubOriginOverride() {
+    try { return normalizeHubOrigin(localStorage.getItem(HUB_ORIGIN_KEY) || ''); } catch (e) { return ''; }
+  }
+  function setHubOriginOverride(v) {
+    try {
+      var n = normalizeHubOrigin(v);
+      if (n && isHttpsHubBase(n)) localStorage.setItem(HUB_ORIGIN_KEY, n);
+      else localStorage.removeItem(HUB_ORIGIN_KEY);
+    } catch (e) {}
+  }
+  function resolveHubOrigin(configDefault) {
+    var override = getHubOriginOverride();
+    if (override && isHttpsHubBase(override)) return override;
+    var d = normalizeHubOrigin(configDefault != null ? configDefault : (cfg && cfg._configHubOrigin) || '');
+    return d && isHttpsHubBase(d) ? d : '';
+  }
+  function syncEffectiveHubOrigin() {
+    if (!cfg) return '';
+    cfg.hapiProxy = resolveHubOrigin(cfg._configHubOrigin);
+    syncEffectiveSttUrl();
+    return cfg.hapiProxy;
+  }
+  function hasValidHubOrigin() {
+    syncEffectiveHubOrigin();
+    return !!(cfg && cfg.hapiProxy && isHttpsHubBase(cfg.hapiProxy));
+  }
+  function hubOriginDisplayLabel() {
+    var h = syncEffectiveHubOrigin();
+    return h || '(not set)';
+  }
+  function saveHubOrigin(value, btn, labelEl) {
+    var hub = normalizeHubOrigin(value || '');
+    if (!hub || !isHttpsHubBase(hub)) {
+      toast('Enter a valid HTTPS hub origin (e.g. https://hapi.example.ts.net)', 'err');
+      return false;
+    }
+    if (btn) btn.disabled = true;
+    setHubOriginOverride(hub);
+    syncEffectiveHubOrigin();
+    if (btn) btn.disabled = false;
+    if (labelEl) labelEl.textContent = 'Calling: ' + hubOriginDisplayLabel();
+    if (getSecret()) setGateLocked(false);
+    toast(cfg.sttUrl ? 'Hub destination saved (voice → hub STT)' : 'Hub destination saved', 'ok');
+    return true;
+  }
+
   function joinUrl(base, path) {
     var b = String(base || '').replace(/\/+$/, '');
     var p = String(path || '');
@@ -762,6 +1322,7 @@
   }
 
   function mintBrowserHubJwt(credential) {
+    syncEffectiveHubOrigin();
     var accessToken = credential.indexOf(':') === -1 ? (credential + ':default') : credential;
     return fetch(joinUrl(cfg.hapiProxy, '/api/auth'), {
       method: 'POST',
@@ -833,6 +1394,7 @@
   }
 
   function requestTarget(path) {
+    syncEffectiveHubOrigin();
     if (cfg.mode === MODE_BROWSER_HUB) return joinUrl(cfg.hapiProxy, path);
     return joinUrl(cfg.hapiProxy, path);
   }
@@ -964,12 +1526,57 @@
   }
   function uploadAttachment(secret, session, name, b64, mime) {
     var path = '/api/sessions/' + encodeURIComponent(session) + '/upload';
-    return hapiPost(path, secret, { filename: name, content: b64, mimeType: mime })
-      .then(function (res) {
-        if (res.ok) return res.json();
-        return readRejectDetail(res, path, session).then(function (d) { return Promise.reject(d); });
-      })
-      .then(function (out) { if (!out || !out.path) return Promise.reject(new Error('upload rejected')); var size = 0; try { size = atob(b64).length; } catch (e) {} return { id: name, filename: name, mimeType: mime, size: size, path: out.path }; });
+    var body = { filename: name, content: b64, mimeType: mime };
+    function rejectDetail(res) {
+      return readRejectDetail(res, path, session).then(function (d) { return Promise.reject(d); });
+    }
+    function toAttachment(out) {
+      if (!out || !out.path) return Promise.reject(new Error('upload rejected'));
+      var size = 0;
+      try { size = atob(b64).length; } catch (e) {}
+      return { id: name, filename: name, mimeType: mime, size: size, path: out.path };
+    }
+    function postOnce() {
+      return hapiPost(path, secret, body).then(function (res) {
+        if (res.ok) return res.json().then(toAttachment);
+        // #236: browser-hub has no proxy auto-resume — resume once then retry.
+        if (cfg.mode === MODE_BROWSER_HUB && res.status === 409) {
+          return res.json().catch(function () { return {}; }).then(function (payload) {
+            var inactive = !!(payload && (
+              payload.code === 'session_inactive' ||
+              /inactive|asleep/i.test(String(payload.error || ''))
+            ));
+            if (!inactive) {
+              return Promise.reject({
+                status: 409,
+                code: payload && payload.code,
+                error: parseProxyRejectError(payload) || 'upload 409',
+                path: path,
+                sessionId: session,
+              });
+            }
+            return hapiPost('/api/sessions/' + encodeURIComponent(session) + '/resume', secret, {})
+              .then(function (resumeRes) {
+                if (!resumeRes.ok) {
+                  return Promise.reject({
+                    status: 409,
+                    code: 'session_inactive',
+                    error: 'session asleep',
+                    path: path,
+                    sessionId: session,
+                  });
+                }
+                return hapiPost(path, secret, body).then(function (retry) {
+                  if (retry.ok) return retry.json().then(toAttachment);
+                  return rejectDetail(retry);
+                });
+              });
+          });
+        }
+        return rejectDetail(res);
+      });
+    }
+    return postOnce();
   }
 
   // --- annotation overlay -------------------------------------------------------------------
@@ -1028,31 +1635,15 @@
     bar.appendChild(undo); bar.appendChild(clear);
     overlay.appendChild(bar);
 
-    // Markup is DRAW-ONLY: Cancel / Send only. No typed-note field (voice is tap-mic).
-    // Foot is padded clear of the FAB (web + native host) — see .opdock-foot in CSS.
-    var foot = $('div', 'opdock-foot');
-    var actions = $('div', 'opdock-actions');
-    var cancel = $('button', 'opdock-btn2 opdock-cancel', 'Cancel');
-    var send = $('button', 'opdock-btn2 opdock-send', 'Send ▶');
-    cancel.type = 'button';
-    send.type = 'button';
-    // #133: Send unusable until shotImg decode/load — blocks race that flattens #111 + strokes.
-    send.disabled = true;
-    // #154: stopPropagation so Quest laser hits are not stolen by draw/hub siblings.
-    cancel.addEventListener('click', function (e) {
-      e.preventDefault(); e.stopPropagation(); closeOverlay();
-    });
-    send.addEventListener('click', function (e) {
-      e.preventDefault(); e.stopPropagation();
-      // #166: Send while listening must flush STT — empty doSend dropped the recording.
-      if (recording) { finishRecording(); return; }
-      doSend((liveTranscript || '').trim());
-    });
-    actions.appendChild(cancel); actions.appendChild(send);
-    foot.appendChild(actions);
-    overlay.appendChild(foot);
-
+    // #271: Markup is DRAW-ONLY — no Cancel/Send foot (they ate drawable area + hid under
+    // the transcript). Send = mic again while recording; Cancel = H (discard markup + audio).
+    // No typed-note field (voice is the mic satellite). Chromium/Quest get live Web Speech
+    // interim text; Firefox has no SpeechRecognition and only fills text after stop (hub whisper).
     document.body.appendChild(overlay);
+    mountAsTopLayer(overlay);
+    // #276: mountAsTopLayer(overlay) puts the canvas above the dock in the top layer —
+    // full-bleed pointer-events:auto then traps H/mic. Re-assert dock last.
+    reassertTopLayerChrome();
     document.body.classList.add('opdock-noscroll');
     sizeCanvas();
     window.addEventListener('resize', sizeCanvas);
@@ -1064,8 +1655,7 @@
 
     waitForShotReady(shotImg).then(function (ready) {
       if (!overlay) return;
-      if (ready) send.disabled = false;
-      else toast('Screenshot failed to load', 'err');
+      if (!ready) toast('Screenshot failed to load', 'err');
     });
 
     // #115: markup must stay available while mic runs. Do not abort an active recording.
@@ -1080,6 +1670,11 @@
       hideRecordLabel();
       setBtnState('markup');
     }
+    // Keep satellites open so mic/H stay reachable over the overlay (#271).
+    openCluster();
+    refreshChromeAffordances();
+    // openCluster does not change top-layer order; keep dock above after affordance refresh.
+    reassertTopLayerChrome();
   }
 
   // Live feedback that speech is being captured (driven by the web recognizer or a native host).
@@ -1092,29 +1687,11 @@
     if (overlay && overlay._interim) overlay._interim.textContent = text || '';
   }
 
-  function measureFootClearPx() {
-    // #212: clear only Cancel/Send row — large fixed FOOT_CLEAR ate host Send/status.
-    if (!overlay) return FOOT_CLEAR_PX;
-    var actions = overlay.querySelector('.opdock-actions');
-    if (!actions) return FOOT_CLEAR_PX;
-    var oRect = overlay.getBoundingClientRect();
-    var aRect = actions.getBoundingClientRect();
-    var clear = Math.ceil(oRect.bottom - aRect.top) + 4;
-    var maxClear = Math.floor(window.innerHeight * 0.35);
-    if (clear < 52) return FOOT_CLEAR_PX;
-    if (clear > maxClear) return Math.max(FOOT_CLEAR_PX, maxClear);
-    return clear;
-  }
-
   function sizeCanvas() {
     if (!drawCanvas) return;
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
-    // #154 / #212: height must match CSS bottom inset — inline 100vh would re-cover Cancel.
-    var footClear = measureFootClearPx();
-    if (overlay && overlay.style) {
-      overlay.style.setProperty('--opdock-foot-clear', footClear + 'px');
-    }
-    var w = window.innerWidth, h = Math.max(0, window.innerHeight - footClear);
+    // #271: full viewport — no Cancel/Send foot to clear.
+    var w = window.innerWidth, h = Math.max(0, window.innerHeight);
     drawCanvas.style.width = w + 'px'; drawCanvas.style.height = h + 'px';
     drawCanvas.width = Math.round(w * dpr); drawCanvas.height = Math.round(h * dpr);
     drawCtx = drawCanvas.getContext('2d'); drawCtx.scale(dpr, dpr);
@@ -1153,12 +1730,35 @@
     liveInterim = '';
     hideRecordLabel();
     window.removeEventListener('resize', sizeCanvas);
-    if (overlay) { overlay.remove(); overlay = null; }
+    if (overlay) { forgetTopLayer(overlay); overlay.remove(); overlay = null; }
     document.body.classList.remove('opdock-noscroll');
     // Tell a native host (Android) the capture surface closed, so it can stop its SpeechRecognizer.
     try { if (window.AndroidOperator && window.AndroidOperator.onCaptureDone) window.AndroidOperator.onCaptureDone(); } catch (e) {}
     strokes = []; curStroke = null; shotImg = null; drawCanvas = null; drawCtx = null;
     setBtnState('idle');
+    refreshChromeAffordances();
+  }
+
+  /**
+   * #271: H while recording/markup → cancel: stop audio without sending and discard markup.
+   * Same outcome as the old Cancel foot button.
+   */
+  function cancelActiveCapture() {
+    if (overlay) {
+      closeOverlay();
+      return;
+    }
+    if (!recording) return;
+    recording = false;
+    stopWebRecognition();
+    stopMediaCapture(true);
+    liveTranscript = '';
+    liveInterim = '';
+    pendingShot = null;
+    hideRecordLabel();
+    try { if (window.AndroidOperator && window.AndroidOperator.onCaptureDone) window.AndroidOperator.onCaptureDone(); } catch (e) {}
+    setBtnState('idle');
+    refreshChromeAffordances();
   }
 
   // flatten screenshot + strokes -> JPEG base64 (null when no usable shot — #133 fail-closed)
@@ -1188,7 +1788,12 @@
         return;
       }
       resolveTargetSession(secret).then(function (session) {
-      if (!session) { toast('No target session configured', 'err'); return; }
+      if (!session) {
+        stashPendingOutbound(transcript, null, true);
+        toast('No target session — pick one to send what you just said', 'err');
+        return;
+      }
+      pendingOutbound = null;
       var annotated = strokes.length > 0;
       var nav = collectNav();
       var text = renderText(nav, (transcript || '').trim(), annotated);
@@ -1227,7 +1832,13 @@
   function doSendFromShot(transcript, shotDataUrl) {
     var secret = ensureSecret(); if (!secret) { setBtnState('idle'); return; }
     resolveTargetSession(secret).then(function (session) {
-    if (!session) { toast('No target session configured', 'err'); setBtnState('idle'); return; }
+    if (!session) {
+      stashPendingOutbound(transcript, shotDataUrl, false);
+      toast('No target session — pick one to send what you just said', 'err');
+      setBtnState('idle');
+      return;
+    }
+    pendingOutbound = null;
     var nav = collectNav();
     var text = renderText(nav, (transcript || '').trim(), false);
     var b64 = shotToB64(shotDataUrl);
@@ -1342,8 +1953,33 @@
     if (inner && typeof inner === 'object') {
       if (inner.type === 'event') return null;
       if (typeof inner.text === 'string') text = inner.text;
-      else if (inner.data && typeof inner.data === 'object') { if (inner.data.type === 'reasoning') return null; text = inner.data.message || inner.data.text || ''; }
+      else if (inner.data && typeof inner.data === 'object') {
+        if (inner.data.type === 'reasoning') return null;
+        // #242: Claude flavour puts the Anthropic message object in data.message
+        // (role/content[]/usage…), not a string. Cursor often has a string.
+        var dm = inner.data.message;
+        if (dm && typeof dm === 'object') {
+          var body = dm.content;
+          if (typeof body === 'string') text = body;
+          else if (Array.isArray(body)) {
+            text = body
+              .filter(function (b) { return b && b.type === 'text' && typeof b.text === 'string'; })
+              .map(function (b) { return b.text; })
+              .join('\n');
+          } else {
+            text = '';
+          }
+        } else if (typeof dm === 'string') {
+          text = dm;
+        } else if (typeof inner.data.text === 'string') {
+          text = inner.data.text;
+        } else {
+          text = '';
+        }
+      }
     } else if (typeof inner === 'string') text = inner;
+    // Never paint String(object) → "[object Object]" (#242).
+    if (typeof text !== 'string') return null;
     text = stripRawJsonForDisplay(stripAgentNotifySummary(text || ''));
     if (!text) return null;
     return { role: c.role || '?', text: text, seq: m.seq };
@@ -1398,7 +2034,10 @@
     head.setAttribute('tabindex', '0');
     head.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
     head.title = 'Collapse or expand replies';
-    var title = $('span', 'opdock-replies-title', '🤖 Agent replies');
+    var initialLabel = lastOutboundSessionLabel
+      || (getPinnedSession() === session ? getPinnedSessionLabel() : null);
+    var title = $('span', 'opdock-replies-title', collapsed ? '🤖' : repliesExpandedTitle(initialLabel));
+    title._opdockSessionLabel = initialLabel || '';
     var unread = $('span', 'opdock-replies-unread');
     unread.hidden = true;
     unread.setAttribute('aria-label', 'Unread agent replies');
@@ -1418,20 +2057,27 @@
       collapsed = !!next;
       replies.classList.toggle('opdock-replies--min', collapsed);
       head.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-      title.textContent = collapsed ? '🤖' : '🤖 Agent replies';
+      title.textContent = collapsed ? '🤖' : repliesExpandedTitle(title._opdockSessionLabel);
       setRepliesWantCollapsed(collapsed);
       if (!collapsed) {
         unreadCount = 0;
         unread.hidden = true;
       }
     }
-    title.textContent = collapsed ? '🤖' : '🤖 Agent replies';
     head.addEventListener('click', function () { setCollapsed(!collapsed); });
     head.addEventListener('keydown', function (ev) {
       if (ev.key === 'Enter' || ev.key === ' ') {
         ev.preventDefault();
         setCollapsed(!collapsed);
       }
+    });
+    resolveSessionLabel(secret, session).then(function (label) {
+      if (!replies || !title.isConnected) return;
+      if (!label) return;
+      title._opdockSessionLabel = label;
+      lastOutboundSessionLabel = label;
+      if (!collapsed) title.textContent = repliesExpandedTitle(label);
+      head.title = 'Replies from ' + label + ' — click to collapse or expand';
     });
 
     var body = $('div', 'opdock-replies-body', 'Waiting for the agent…');
@@ -1472,6 +2118,7 @@
     replies.appendChild(body);
     replies.appendChild(compose);
     document.body.appendChild(replies);
+    mountAsTopLayer(replies);
 
     var seen = {};
     var primed = false;
@@ -1502,7 +2149,10 @@
     replyPoll = setInterval(tick, 4000);
     setTimeout(function () { if (replyPoll) { clearInterval(replyPoll); replyPoll = null; } }, 300000);
   }
-  function closeReplies() { if (replyPoll) { clearInterval(replyPoll); replyPoll = null; } if (replies) { replies.remove(); replies = null; } }
+  function closeReplies() {
+    if (replyPoll) { clearInterval(replyPoll); replyPoll = null; }
+    if (replies) { forgetTopLayer(replies); replies.remove(); replies = null; }
+  }
 
   // --- mic button / toggle record -----------------------------------------------------------
   function notifyNativeMicUi(state, label) {
@@ -1527,9 +2177,10 @@
     if (state === 'recording' && recordLabel && recordLabel.style.display !== 'none') {
       label = recordLabel.textContent || '';
     } else if (state === 'markup') {
-      label = ''; // no chip — FAB stays tappable; foot has Cancel/Send
+      label = ''; // no chip — FAB stays tappable; #271 send/cancel via mic / H
     }
     notifyNativeMicUi(state, label);
+    refreshChromeAffordances();
   }
 
   function showRecordLabel(text) {
@@ -1540,7 +2191,8 @@
     }
     var st = recording ? 'recording' : (overlay ? 'markup' : 'idle');
     if (dock.classList.contains('opdock--busy')) st = 'sending';
-    var labelText = text || 'Listening… open H and tap mic to send';
+    // #271: mic again = send; H = cancel. Chromium shows live text; Firefox only after stop.
+    var labelText = text || 'Listening… tap mic to send · H to cancel';
     // #104: native host present → one STT label surface (native onMicUi only).
     if (hasNativeHost()) {
       recordLabel.style.display = 'none';
@@ -1565,7 +2217,7 @@
     if (!recording) return;
     var bits = liveTranscript || '';
     if (liveInterim) bits = (bits ? bits + ' ' : '') + liveInterim;
-    showRecordLabel(bits ? ('🎙️ ' + bits) : 'Listening… tap mic again to send');
+    showRecordLabel(bits ? ('🎙️ ' + bits) : 'Listening… tap mic to send · H to cancel');
   }
 
   function stopWebRecognition() {
@@ -1601,6 +2253,7 @@
   }
 
   function startRecording(providedShot) {
+    if (!ensureRoutableBeforeRecord()) return false;
     var status = voiceStatus({
       hasSR: !!(window.SpeechRecognition || window.webkitSpeechRecognition),
       hasNative: hasNativeHost(),
@@ -1618,6 +2271,9 @@
     recording = true;
     setBtnState('recording');
     showRecordLabel(status.text);
+    // #271: satellites stay open — mic becomes Send, H becomes Cancel.
+    openCluster();
+    refreshChromeAffordances();
 
     function armed(shot) {
       if (!recording) return;
@@ -1679,13 +2335,17 @@
     liveInterim = '';
     function done(text) {
       hideRecordLabel();
-      if (!(text || '').trim()) {
+      var trimmed = (text || '').trim();
+      // #271: markup+mic send may have strokes with no speech (draw-only then tap mic twice).
+      // Voice-only still requires speech.
+      if (!trimmed && !fromMarkup) {
         toast('No speech captured — tap mic, talk, tap again (use HTTPS Tailscale if this keeps failing)', 'err');
         setBtnState(fromMarkup ? 'markup' : 'idle');
+        refreshChromeAffordances();
         return;
       }
-      if (fromMarkup) doSend(text.trim());
-      else doSendFromShot(text.trim(), shot);
+      if (fromMarkup) doSend(trimmed);
+      else doSendFromShot(trimmed, shot);
     }
     if (transcript) {
       stopMediaCapture(true);
@@ -1782,6 +2442,10 @@
   function micIconSvg() {
     return '<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V22h2v-3.08A7 7 0 0 0 19 12h-2z"/></svg>';
   }
+  function sendIconSvg() {
+    // #271: mic satellite while recording → Send affordance.
+    return '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>';
+  }
   function hubIconSvg() {
     // Idle hub is the letter H for every pointer — mic lives only as a fan tool (#107).
     return '<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><text x="12" y="17" text-anchor="middle" font-size="15" font-weight="700" fill="currentColor" font-family="ui-sans-serif,system-ui,sans-serif">H</text></svg>';
@@ -1790,12 +2454,50 @@
     if (kind === 'mic') return '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V22h2v-3.08A7 7 0 0 0 19 12h-2z"/></svg>';
     if (kind === 'markup') return '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
     if (kind === 'sessions') return '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h10v2H4v-2z"/></svg>';
-    return '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.61-.22l-2.39.96a7.07 7.07 0 0 0-1.63-.94l-.36-2.54A.5.5 0 0 0 13.9 2h-3.8a.5.5 0 0 0-.49.42l-.36 2.54c-.59.22-1.14.52-1.63.94l-2.39-.96a.5.5 0 0 0-.61.22L2.7 8.84a.5.5 0 0 0 .12.64L4.85 11.06c-.04.31-.06.63-.06.94s.02.63.06.94L2.82 14.52a.5.5 0 0 0-.12.64l1.92 3.32c.13.23.4.32.61.22l2.39-.96c.5.42 1.04.72 1.63.94l.36 2.54c.05.24.25.42.49.42h3.8c.24 0 .44-.18.49-.42l.36-2.54c.59-.22 1.14-.52 1.63-.94l2.39.96c.23.1.48 0 .61-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/></svg>';
+    if (kind === 'settings') return '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M19.14 12.94a7.43 7.43 0 0 0 .05-.94 7.43 7.43 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.2 7.2 0 0 0-1.63-.94l-.36-2.54A.5.5 0 0 0 13.9 1h-3.8a.5.5 0 0 0-.49.42l-.36 2.54c-.58.23-1.12.54-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 7.48a.5.5 0 0 0 .12.64L4.86 9.7A7.43 7.43 0 0 0 4.81 10.64c0 .32.02.63.05.94L2.83 13.16a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.4 1.05.71 1.63.94l.36 2.54a.5.5 0 0 0 .49.42h3.8a.5.5 0 0 0 .49-.42l.36-2.54c.58-.23 1.12-.54 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/></svg>';
+    return '';
+  }
+
+  /**
+   * #271: while recording/markup, mic satellite = Send and H = Cancel (visible titles/icons).
+   * Idle H tooltip describes the fan only — recording copy is applied here.
+   */
+  function refreshChromeAffordances() {
+    if (!dock) return;
+    var btn = dock.querySelector('.opdock-btn');
+    var micSat = dock.querySelector('.opdock-sat[data-tool="mic"]');
+    var captureActive = !!(recording || overlay);
+    if (micSat) {
+      if (recording) {
+        micSat.innerHTML = sendIconSvg();
+        micSat.setAttribute('aria-label', 'Send recording');
+        micSat.setAttribute('title', 'Send — stop recording and deliver');
+        micSat.classList.add('opdock-sat--send');
+      } else {
+        micSat.innerHTML = satIcon('mic');
+        micSat.setAttribute('aria-label', 'mic');
+        micSat.setAttribute('title', 'Record — tap again to send');
+        micSat.classList.remove('opdock-sat--send');
+      }
+    }
+    if (btn && !btn.disabled) {
+      if (captureActive) {
+        btn.innerHTML = hubIconSvg();
+        btn.setAttribute('aria-label', 'Cancel');
+        btn.setAttribute('title', 'Cancel — stop recording and discard markup');
+        btn.classList.add('opdock-btn--cancel');
+      } else {
+        applyIdleIcon(btn);
+        btn.classList.remove('opdock-btn--cancel');
+      }
+    }
   }
   function pathUnderProject(sessionPath, projectPath) {
     var session = String(sessionPath || '').replace(/\\/g, '/').replace(/\/+$/, '');
     var project = String(projectPath || '').replace(/\\/g, '/').replace(/\/+$/, '');
-    if (!session || !project) return false;
+    // #233: empty projectPath is unfiltered (browser-hub public cattle); do not reject all.
+    if (!project) return true;
+    if (!session) return false;
     return session === project || session.indexOf(project + '/') === 0;
   }
   function mapPickerSession(s) {
@@ -1816,10 +2518,14 @@
       return hapiGet('/api/sessions', secret).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
         var raw = (d && Array.isArray(d.sessions)) ? d.sessions : (Array.isArray(d) ? d : []);
         var project = cfg.projectPath || '';
-        return raw.filter(function (s) {
-          var path = s && s.metadata && s.metadata.path;
-          return pathUnderProject(path, project);
-        }).map(mapPickerSession).filter(Boolean);
+        // #233: null/empty projectPath → show all sessions the token can see.
+        var filtered = !project
+          ? raw
+          : raw.filter(function (s) {
+              var path = s && s.metadata && s.metadata.path;
+              return pathUnderProject(path, project);
+            });
+        return filtered.map(mapPickerSession).filter(Boolean);
       });
     }
     return hapiGet('/operator/sessions', secret).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
@@ -1828,17 +2534,64 @@
   }
   function spawnHubBody() {
     var body = {
-      directory: cfg.projectPath,
-      agent: cfg.spawnAgent || 'cursor',
-      model: cfg.spawnModel || 'auto',
+      // #246/#249: spawn directory may differ from session filter (#233 blank projectPath).
+      directory: resolveSpawnDirectory(),
     };
-    if (cfg.spawnYolo !== false) body.yolo = true;
+    // #260: omit agent/model/yolo when unset so hub peerSpawnDefaults apply.
+    var agent = resolveEffectiveSpawnAgent();
+    if (agent) body.agent = agent;
+    var model = resolveEffectiveSpawnModel();
+    if (model) body.model = model;
+    if (resolveEffectiveSpawnYolo() === true) body.yolo = true;
     return body;
+  }
+  /**
+   * #246/#249: spawn cwd — host spawnDirectory/projectPath wins; else operator localStorage.
+   * Blank projectPath stays unfiltered for the picker (#233).
+   */
+  function resolveSpawnDirectory() {
+    var host = hostSpawnDirectory();
+    if (host) return host;
+    return getOperatorSpawnDirectory();
+  }
+  /** #246/#249: offer spawn when host or operator can satisfy machine + directory. */
+  function canSpawnPerSend() {
+    if (!cfg) return false;
+    // Proxy: host /hapi owns machine + directory.
+    if (cfg.mode !== MODE_BROWSER_HUB) return true;
+    return !!(resolveEffectiveMachineId() && resolveSpawnDirectory());
+  }
+  function spawnUnavailableReason() {
+    if (!cfg || cfg.mode !== MODE_BROWSER_HUB) return '';
+    if (canSpawnPerSend()) return '';
+    var missing = [];
+    if (!resolveEffectiveMachineId()) missing.push('machine');
+    if (!resolveSpawnDirectory()) missing.push('working directory');
+    return 'Spawn needs a ' + missing.join(' and ') + ' — set them below (saved on this device)';
+  }
+  function machineLabel(m) {
+    if (!m || typeof m !== 'object') return 'Machine';
+    var meta = m.metadata && typeof m.metadata === 'object' ? m.metadata : {};
+    var name = (meta.displayName || meta.host || meta.name || '').trim();
+    if (name) return name;
+    return 'Online machine';
+  }
+  function listHubMachines(secret) {
+    if (!secret) return Promise.resolve([]);
+    if (cfg.mode === MODE_BROWSER_HUB) {
+      return hapiGet('/api/machines', secret).then(function (r) {
+        return r.ok ? r.json() : null;
+      }).then(function (d) {
+        return (d && Array.isArray(d.machines)) ? d.machines : [];
+      }).catch(function () { return []; });
+    }
+    return Promise.resolve([]);
   }
   function spawnProjectSession(secret, name) {
     if (cfg.mode === MODE_BROWSER_HUB) {
-      if (!cfg.machineId || !cfg.projectPath) return Promise.reject(new Error('spawn not configured'));
-      return hapiPost('/api/machines/' + encodeURIComponent(cfg.machineId) + '/spawn', secret, spawnHubBody())
+      if (!canSpawnPerSend()) return Promise.reject(new Error(spawnUnavailableReason() || 'spawn not configured'));
+      var mid = resolveEffectiveMachineId();
+      return hapiPost('/api/machines/' + encodeURIComponent(mid) + '/spawn', secret, spawnHubBody())
         .then(function (res) { if (!res.ok) return Promise.reject(res); return res.json(); })
         .then(function (out) {
           var id = out && out.type === 'success' ? out.sessionId : (out && out.id);
@@ -1856,17 +2609,70 @@
   }
   function resolveTargetSession(secret) {
     var mode = getRoutingMode();
-    if (mode === 'spawn-per-send') return spawnProjectSession(secret);
-    if (mode === 'pick') {
-      var picked = getPinnedSession();
-      if (!picked) {
-        toast('Pick a project session first', 'err');
+    if (mode === 'spawn-per-send') {
+      if (!canSpawnPerSend()) {
+        toast(spawnUnavailableReason() || 'Spawn per send needs a machine and working directory', 'err');
+        setRoutingMode('pick');
         openSessionPicker();
         return Promise.resolve(null);
       }
-      return Promise.resolve(picked);
+      return spawnProjectSession(secret).then(function (id) {
+        return resolveSessionLabel(secret, id).then(function (label) {
+          var shown = label || 'New session';
+          lastOutboundSessionLabel = shown;
+          toast('Spawned: ' + shown, 'ok');
+          return id;
+        });
+      }).catch(function (err) {
+        var msg = '';
+        if (err && err.message) msg = String(err.message);
+        else if (err && err.status) msg = 'HTTP ' + err.status;
+        else msg = String(err || 'spawn failed');
+        toast('Spawn failed: ' + msg, 'err');
+        return null;
+      });
     }
-    return Promise.resolve(getPinnedSession() || cfg.session || null);
+    var pinned = getPinnedSession();
+    // #241: pin and pick both recover via the picker when nothing is chosen.
+    if (mode === 'pick' || mode === 'pin') {
+      if (!pinned) {
+        toast(mode === 'pin' ? 'Pin a project session first' : 'Pick a project session first', 'err');
+        openSessionPicker();
+        return Promise.resolve(null);
+      }
+      return Promise.resolve(pinned);
+    }
+    return Promise.resolve(pinned || (cfg && cfg.session) || null);
+  }
+  /** #241/#246: block mic-press when routing cannot succeed (before the operator speaks). */
+  function ensureRoutableBeforeRecord() {
+    var mode = getRoutingMode();
+    if (mode === 'spawn-per-send') {
+      if (canSpawnPerSend()) return true;
+      toast(spawnUnavailableReason() || 'Spawn per send needs a machine and working directory', 'err');
+      setRoutingMode('pick');
+      openSessionPicker();
+      return false;
+    }
+    if (getPinnedSession() || (cfg && cfg.session)) return true;
+    toast('Pick a project session before recording', 'err');
+    openSessionPicker();
+    return false;
+  }
+  function stashPendingOutbound(transcript, shotDataUrl, fromMarkup) {
+    pendingOutbound = {
+      transcript: String(transcript || ''),
+      shotDataUrl: shotDataUrl || null,
+      fromMarkup: !!fromMarkup,
+    };
+  }
+  function flushPendingOutbound(secret) {
+    var pending = pendingOutbound;
+    pendingOutbound = null;
+    if (!pending || !(pending.transcript || '').trim()) return false;
+    if (pending.fromMarkup) doSend(pending.transcript);
+    else doSendFromShot(pending.transcript, pending.shotDataUrl);
+    return true;
   }
   function closeToolSheet() {
     if (toolSheet) { toolSheet.remove(); toolSheet = null; }
@@ -1939,6 +2745,11 @@
       openSecretSheet({ reason: 'rejected' });
       return;
     }
+    // #271: while recording or markup open, H cancels (stop + discard) instead of toggling fan.
+    if (recording || overlay) {
+      cancelActiveCapture();
+      return;
+    }
     // #115: hub always toggles the fan (markup + mic). Mic satellite starts/stops record.
     // Click-toggle fan for all pointers — no hover-open / hover-close (#107).
     // #144: hub stays above fan hit plate (CSS z-index) so retract always works.
@@ -1946,9 +2757,10 @@
     else openCluster();
   }
   function onSatellite(tool) {
-    // Selecting any tool closes the fan. Sheets/overlays recreate after closeCluster.
-    if (tool === 'mic') { closeCluster(); toggleMic(null); return; }
-    if (tool === 'markup') { closeCluster(); beginMarkup(null); return; }
+    // #271: mic/markup keep the fan open so Send (mic) and Cancel (H) stay reachable.
+    if (tool === 'mic') { toggleMic(null); return; }
+    if (tool === 'markup') { beginMarkup(null); return; }
+    // Sheets still fold the fan — picker/settings recreate their own chrome.
     if (tool === 'settings') { closeCluster(); openSettingsSheet(); return; }
     if (tool === 'sessions') { closeCluster(); openSessionPicker(); return; }
   }
@@ -1956,8 +2768,18 @@
     closeToolSheet();
     if (!dock) return;
     toolSheet = $('div', 'opdock-sheet');
+    // #249/#251: reopen once when operator prefs newly unlock spawn-per-send.
+    var spawnReadyAtOpen = canSpawnPerSend();
+    function refreshIfSpawnUnlocked() {
+      if (!spawnReadyAtOpen && canSpawnPerSend()) openSettingsSheet();
+    }
+    function setQuietStatus(el, text) {
+      if (el) el.textContent = text;
+    }
     toolSheet.appendChild($('h3', null, 'Routing'));
-    ['pin', 'pick', 'spawn-per-send'].forEach(function (mode) {
+    var modes = ['pin', 'pick'];
+    if (canSpawnPerSend()) modes.push('spawn-per-send');
+    modes.forEach(function (mode) {
       var lab = $('label');
       var inp = document.createElement('input');
       inp.type = 'radio';
@@ -1974,6 +2796,13 @@
       lab.appendChild(document.createTextNode(mode === 'spawn-per-send' ? 'spawn per send' : mode));
       toolSheet.appendChild(lab);
     });
+    if (!canSpawnPerSend() && cfg.mode === MODE_BROWSER_HUB) {
+      toolSheet.appendChild($('div', 'opdock-session-meta',
+        spawnUnavailableReason() || 'Spawn per send needs a machine and working directory below'));
+    } else if (!canSpawnPerSend()) {
+      toolSheet.appendChild($('div', 'opdock-session-meta',
+        spawnUnavailableReason() || 'Spawn per send unavailable on this host'));
+    }
     toolSheet.appendChild($('div', 'opdock-session-meta',
       'pin / spawn apply on send · pick opens the session list now (and on send if unset)'));
     var pinnedId = getPinnedSession() || cfg.session || null;
@@ -1987,22 +2816,236 @@
         pinnedLine.textContent = 'Pinned: ' + (label || operatorSessionLabel(null, 'pinned'));
       });
     }
+    // #249/#251: operator picks machine + directory; persist on change/blur (no Save button).
+    var machineSelect = null;
+    var dirInp = null;
+    var spawnStatus = null;
+    if (cfg.mode === MODE_BROWSER_HUB) {
+      toolSheet.appendChild($('h3', null, 'Spawn'));
+      var hostMid = hostMachineId();
+      var hostDir = hostSpawnDirectory();
+      if (hostMid) {
+        toolSheet.appendChild($('div', 'opdock-session-meta', 'Machine: host ' + hostMid.slice(0, 8) + '…'));
+      } else {
+        toolSheet.appendChild($('div', 'opdock-session-meta', 'Machine (from your hub)'));
+        machineSelect = document.createElement('select');
+        machineSelect.className = 'opdock-secret-input';
+        machineSelect.appendChild(document.createElement('option')).textContent = 'Loading machines…';
+        toolSheet.appendChild(machineSelect);
+      }
+      if (hostDir) {
+        toolSheet.appendChild($('div', 'opdock-session-meta', 'Working directory: host-configured'));
+      } else {
+        toolSheet.appendChild($('div', 'opdock-session-meta', 'Working directory (on that machine)'));
+        dirInp = document.createElement('input');
+        dirInp.type = 'text';
+        dirInp.className = 'opdock-secret-input';
+        dirInp.setAttribute('autocomplete', 'off');
+        dirInp.setAttribute('autocapitalize', 'off');
+        dirInp.placeholder = '/home/you/coding/my-app';
+        dirInp.value = getOperatorSpawnDirectory();
+        toolSheet.appendChild(dirInp);
+      }
+      if (!hostMid || !hostDir) {
+        spawnStatus = $('div', 'opdock-session-meta',
+          'Saved on this device as you change them — same idea as your hub URL');
+        toolSheet.appendChild(spawnStatus);
+      }
+      if (machineSelect) {
+        machineSelect.addEventListener('change', function () {
+          var mid = (machineSelect.value || '').trim();
+          setOperatorMachineId(mid);
+          setQuietStatus(spawnStatus, mid
+            ? 'Machine saved on this device'
+            : 'Pick a machine when the list is ready');
+          refreshIfSpawnUnlocked();
+        });
+        var secretForMachines = getSecret();
+        if (secretForMachines) {
+          listHubMachines(secretForMachines).then(function (machines) {
+            if (!toolSheet || !machineSelect.isConnected) return;
+            machineSelect.textContent = '';
+            if (!machines.length) {
+              var empty = document.createElement('option');
+              empty.value = '';
+              empty.textContent = 'No online machines on this hub';
+              machineSelect.appendChild(empty);
+              return;
+            }
+            // Auto-select when exactly one (#249).
+            var current = getOperatorMachineId();
+            if (machines.length === 1 && !current) {
+              setOperatorMachineId(machines[0].id);
+              current = machines[0].id;
+              setQuietStatus(spawnStatus, 'Machine saved on this device');
+              refreshIfSpawnUnlocked();
+            }
+            if (machines.length > 1) {
+              var placeholder = document.createElement('option');
+              placeholder.value = '';
+              placeholder.textContent = 'Select a machine…';
+              if (!current) placeholder.selected = true;
+              machineSelect.appendChild(placeholder);
+            }
+            machines.forEach(function (m) {
+              var opt = document.createElement('option');
+              opt.value = m.id;
+              opt.textContent = machineLabel(m);
+              if (m.id === current) opt.selected = true;
+              machineSelect.appendChild(opt);
+            });
+          });
+        } else {
+          machineSelect.textContent = '';
+          var needCred = document.createElement('option');
+          needCred.value = '';
+          needCred.textContent = 'Save credential below first to list machines';
+          machineSelect.appendChild(needCred);
+        }
+      }
+      if (dirInp) {
+        function persistSpawnDirectory() {
+          var dir = (dirInp.value || '').trim();
+          setOperatorSpawnDirectory(dir);
+          setQuietStatus(spawnStatus, dir
+            ? 'Working directory saved on this device'
+            : 'Enter a working directory on that machine');
+          refreshIfSpawnUnlocked();
+        }
+        dirInp.addEventListener('change', persistSpawnDirectory);
+        dirInp.addEventListener('blur', persistSpawnDirectory);
+      }
+      // #260: agent + yolo — visible, operator-overridable; hub-default can ignore deployment.
+      var agentProv = $('div', 'opdock-session-meta', '');
+      function refreshAgentProv() {
+        var eff = resolveEffectiveSpawnAgent();
+        agentProv.textContent = 'Agent: ' + (eff || '(hub default)') + ' — ' + spawnAgentProvenance();
+      }
+      toolSheet.appendChild($('div', 'opdock-session-meta', 'Agent (spawn flavor)'));
+      var agentSelect = document.createElement('select');
+      agentSelect.className = 'opdock-secret-input';
+      var agentHubOpt = document.createElement('option');
+      agentHubOpt.value = '__hub__';
+      agentHubOpt.textContent = hostSpawnAgent()
+        ? 'Use hub default (ignore deployment)'
+        : 'Use hub default';
+      agentSelect.appendChild(agentHubOpt);
+      SPAWN_AGENT_CHOICES.forEach(function (a) {
+        var opt = document.createElement('option');
+        opt.value = a;
+        opt.textContent = a;
+        agentSelect.appendChild(opt);
+      });
+      var agentOp = getOperatorSpawnAgent();
+      if (agentOp === '__hub__') agentSelect.value = '__hub__';
+      else if (agentOp) agentSelect.value = agentOp;
+      else if (hostSpawnAgent()) agentSelect.value = hostSpawnAgent();
+      else agentSelect.value = '__hub__';
+      agentSelect.addEventListener('change', function () {
+        setOperatorSpawnAgent(agentSelect.value);
+        refreshAgentProv();
+      });
+      toolSheet.appendChild(agentSelect);
+      refreshAgentProv();
+      toolSheet.appendChild(agentProv);
+
+      var yoloProv = $('div', 'opdock-session-meta', '');
+      function refreshYoloProv() {
+        var eff = resolveEffectiveSpawnYolo();
+        var shown = eff === true ? 'on' : (eff === false ? 'off' : '(hub default)');
+        yoloProv.textContent = 'Yolo: ' + shown + ' — ' + spawnYoloProvenance();
+      }
+      toolSheet.appendChild($('div', 'opdock-session-meta', 'Yolo (unattended tools)'));
+      var yoloSelect = document.createElement('select');
+      yoloSelect.className = 'opdock-secret-input';
+      ;[
+        { v: '__hub__', t: (cfg && cfg._hostSpawnYoloSet) ? 'Use hub default (ignore deployment)' : 'Use hub default' },
+        { v: '1', t: 'On' },
+        { v: '0', t: 'Off' },
+      ].forEach(function (row) {
+        var opt = document.createElement('option');
+        opt.value = row.v;
+        opt.textContent = row.t;
+        yoloSelect.appendChild(opt);
+      });
+      var yoloOp = getOperatorSpawnYolo();
+      if (yoloOp === '__hub__' || yoloOp === '1' || yoloOp === '0') yoloSelect.value = yoloOp;
+      else if (cfg && cfg._hostSpawnYoloSet) yoloSelect.value = cfg.spawnYolo !== false ? '1' : '0';
+      else yoloSelect.value = '__hub__';
+      yoloSelect.addEventListener('change', function () {
+        setOperatorSpawnYolo(yoloSelect.value);
+        refreshYoloProv();
+      });
+      toolSheet.appendChild(yoloSelect);
+      refreshYoloProv();
+      toolSheet.appendChild(yoloProv);
+    }
+    var hubInp = null;
+    var hubMeta = null;
+    var hubStatus = null;
+    if (cfg.mode === MODE_BROWSER_HUB) {
+      toolSheet.appendChild($('h3', null, 'Hub'));
+      hubMeta = $('div', 'opdock-session-meta', 'Calling: ' + hubOriginDisplayLabel());
+      toolSheet.appendChild(hubMeta);
+      hubInp = document.createElement('input');
+      hubInp.type = 'url';
+      hubInp.className = 'opdock-secret-input';
+      hubInp.setAttribute('autocomplete', 'off');
+      hubInp.placeholder = 'https://your-hub.tailnet.ts.net';
+      hubInp.value = getHubOriginOverride() || normalizeHubOrigin(cfg._configHubOrigin) || '';
+      toolSheet.appendChild(hubInp);
+      hubStatus = $('div', 'opdock-session-meta',
+        'Saved on this device when you leave the field · site must be allowed in hub CORS');
+      toolSheet.appendChild(hubStatus);
+      function persistHubQuiet() {
+        var hub = normalizeHubOrigin(hubInp.value || '');
+        if (!hub) {
+          setQuietStatus(hubStatus, 'Enter your hub HTTPS origin');
+          return;
+        }
+        if (!isHttpsHubBase(hub)) {
+          setQuietStatus(hubStatus, 'Hub URL needs https://…');
+          return;
+        }
+        var prev = syncEffectiveHubOrigin();
+        if (hub === prev) {
+          setQuietStatus(hubStatus, 'Calling: ' + hubOriginDisplayLabel());
+          if (hubMeta) hubMeta.textContent = 'Calling: ' + hubOriginDisplayLabel();
+          return;
+        }
+        // Quiet path — no toast (#251). Credential still probes the hub explicitly.
+        setHubOriginOverride(hub);
+        syncEffectiveHubOrigin();
+        if (hubMeta) hubMeta.textContent = 'Calling: ' + hubOriginDisplayLabel();
+        setQuietStatus(hubStatus, cfg.sttUrl
+          ? 'Hub saved on this device (voice → hub STT)'
+          : 'Hub saved on this device');
+        if (getSecret()) setGateLocked(false);
+      }
+      hubInp.addEventListener('change', persistHubQuiet);
+      hubInp.addEventListener('blur', persistHubQuiet);
+    }
     toolSheet.appendChild($('h3', null, 'Credential'));
     var secInp = document.createElement('input');
     secInp.type = 'password';
     secInp.className = 'opdock-secret-input';
     secInp.setAttribute('autocomplete', 'off');
-    secInp.placeholder = getSecret() ? 'Saved — paste to replace' : 'Paste gate secret';
+    secInp.placeholder = cfg.mode === MODE_BROWSER_HUB
+      ? (getSecret() ? 'Saved — paste to replace token/JWT' : 'Paste HAPI CLI token or JWT')
+      : (getSecret() ? 'Saved — paste to replace' : 'Paste gate secret');
     toolSheet.appendChild(secInp);
-    // #139: Done is always primary dismiss; credential is secondary and never owns routing exit.
+    // #251: credential is the only prefs field that round-trips — action lives beside it.
+    var hasSecret = !!getSecret();
+    var secBtn = $('button', 'opdock-btn2 opdock-secondary', hasSecret ? 'Update secret' : 'Save secret');
+    secBtn.addEventListener('click', function () { saveProbedSecret(secInp.value, secBtn, hubInp); });
+    toolSheet.appendChild(secBtn);
+    toolSheet.appendChild($('div', 'opdock-session-meta',
+      'Probes your hub — keep an explicit save for this one'));
+    // #139/#251: Done alone in the footer (primary dismiss).
     var actions = $('div', 'opdock-actions');
     var doneBtn = $('button', 'opdock-btn2 opdock-send', 'Done');
     doneBtn.addEventListener('click', function () { closeToolSheet(); });
-    var hasSecret = !!getSecret();
-    var secBtn = $('button', 'opdock-btn2 opdock-secondary', hasSecret ? 'Update secret' : 'Save secret');
-    secBtn.addEventListener('click', function () { saveProbedSecret(secInp.value, secBtn); });
     actions.appendChild(doneBtn);
-    actions.appendChild(secBtn);
     toolSheet.appendChild(actions);
     dock.appendChild(toolSheet);
   }
@@ -2025,7 +3068,8 @@
     listProjectSessions(secret).then(function (sessions) {
       list.textContent = '';
       if (!sessions.length) {
-        list.appendChild($('div', 'opdock-session-meta', 'No sessions for this project.'));
+        list.appendChild($('div', 'opdock-session-meta',
+          cfg.projectPath ? 'No sessions for this project.' : 'No sessions on this hub.'));
         return;
       }
       var current = getPinnedSession();
@@ -2047,6 +3091,8 @@
           cfg.session = s.id;
           closeToolSheet();
           closeCluster();
+          // #241: complete a deferred send (transcript kept) instead of forcing a re-speak.
+          if (flushPendingOutbound(secret)) return;
           openReplies(secret, s.id);
         });
         list.appendChild(row);
@@ -2060,7 +3106,7 @@
     if (!btn) return;
     btn.innerHTML = hubIconSvg();
     btn.setAttribute('aria-label', 'Operator tools');
-    btn.setAttribute('title', 'Open operator tools (mic, markup, sessions, settings). Click to toggle. Long-press markup shortcut.');
+    btn.setAttribute('title', 'Open operator tools (mic, markup, sessions, settings). Click to toggle. Long-press markup shortcut. While recording: H cancels, mic sends.');
     btn.setAttribute('aria-expanded', dock && dock.classList.contains('opdock--cluster-open') ? 'true' : 'false');
   }
 
@@ -2098,6 +3144,18 @@
     btn.addEventListener('pointercancel', clearLong);
     dock.appendChild(btn);
     document.body.appendChild(dock);
+    mountAsTopLayer(dock);
+    watchHostModals();
+    // #276: Escape cancels markup/recording (was no-op when foot Cancel was removed).
+    if (!document.documentElement._opdockEscapeBound) {
+      document.documentElement._opdockEscapeBound = true;
+      document.addEventListener('keydown', function (ev) {
+        if (!ev || ev.key !== 'Escape') return;
+        if (!recording && !overlay) return;
+        ev.preventDefault();
+        cancelActiveCapture();
+      }, true);
+    }
     ready = true;
     // #124: native host ≠ hide mic sat. AndroidOperator is a bridge (STT / PixelCopy),
     // not chrome ownership. Native FAB may be hub (QAR openCluster) or mic (Jessica).
@@ -2117,23 +3175,39 @@
         if (om.enabled !== true) return;
         cfg.mode = om.mode === MODE_BROWSER_HUB ? MODE_BROWSER_HUB : MODE_PROXY;
         cfg.authMode = om.authMode || (cfg.mode === MODE_BROWSER_HUB ? 'bearer' : 'proxy-secret');
-        cfg.hapiProxy = om.hapiProxy || (cfg.mode === MODE_BROWSER_HUB ? '' : '/hapi');
+        cfg._configHubOrigin = String(om.hapiProxy || '').trim();
+        cfg.hapiProxy = cfg.mode === MODE_BROWSER_HUB ? resolveHubOrigin(cfg._configHubOrigin) : (om.hapiProxy || '/hapi');
         cfg.session = om.session || null;
         cfg.projectPath = om.projectPath || null;
+        cfg.spawnDirectory = om.spawnDirectory || null;
         cfg.machineId = om.machineId || null;
-        cfg.spawnAgent = om.spawnAgent || 'cursor';
-        cfg.spawnModel = om.spawnModel || 'auto';
-        cfg.spawnYolo = om.spawnYolo !== false;
-        cfg.sttUrl = resolveSttUrl(om.sttUrl);
+        // #260: browser-hub — empty means omit from spawn body (hub defaults). Proxy keeps package defaults for composed spawn docs.
+        if (cfg.mode === MODE_BROWSER_HUB) {
+          cfg.spawnAgent = om.spawnAgent != null ? String(om.spawnAgent).trim() : '';
+          cfg.spawnModel = om.spawnModel != null ? String(om.spawnModel).trim() : '';
+          cfg._hostSpawnYoloSet = Object.prototype.hasOwnProperty.call(om, 'spawnYolo');
+          cfg.spawnYolo = om.spawnYolo !== false;
+        } else {
+          cfg.spawnAgent = om.spawnAgent || 'cursor';
+          cfg.spawnModel = om.spawnModel || 'auto';
+          cfg._hostSpawnYoloSet = true;
+          cfg.spawnYolo = om.spawnYolo !== false;
+        }
+        cfg._configSttUrl = om.sttUrl;
+        cfg._configSttAuth = (om.sttAuth != null && String(om.sttAuth).trim()) ? String(om.sttAuth).trim() : '';
         cfg.sttAuth = resolveSttAuth(om.sttAuth);
+        if (cfg.mode === MODE_BROWSER_HUB) {
+          // #232: blank/null derive after hub sync; do not freeze resolveSttUrl(null) at boot.
+          cfg.sttUrl = null;
+          syncEffectiveHubOrigin();
+        } else {
+          cfg.sttUrl = resolveSttUrl(om.sttUrl);
+        }
         if (!cfg.build) cfg.build = om.build || null;
         if (om.appId && cfg.appId === 'unknown-app') cfg.appId = om.appId;
 
         if (cfg.mode === MODE_BROWSER_HUB) {
-          if (!cfg.hapiProxy || !isHttpsHubBase(cfg.hapiProxy)) {
-            toast('HAPI inline disabled: browser-hub requires an explicit HTTPS hub origin', 'err');
-            return;
-          }
+          // hub + stt already synced above
         } else {
           if (!isRelativeSameOriginPath(cfg.hapiProxy)) {
             toast('HAPI inline disabled: proxy target must be same-origin relative', 'err');
@@ -2153,12 +3227,13 @@
         // Visibility vs auth: installed native host IS the visibility knock (?opmic / /opmic optional).
         // Auth: in-dock sheet (Quest prompt fails). Never soft-lock by returning before render.
         var nativePresent = hasNativeHost();
-        if (!getSecret() && !nativePresent && !unlock.shouldPrompt) return;
+        var needsBrowserHubSetup = cfg.mode === MODE_BROWSER_HUB && !hasValidHubOrigin();
+        if (!getSecret() && !nativePresent && !unlock.shouldPrompt && !needsBrowserHubSetup) return;
         render();
-        if (!getSecret()) {
-          // #155: unlock without a matching secret — hide H / block tools until probe-OK save.
+        if (!getSecret() || needsBrowserHubSetup) {
+          // #155 / #219: unlock without credential or hub — hide H / block tools until probe-OK save.
           setGateLocked(true);
-          openSecretSheet({ reason: 'missing' });
+          openSecretSheet({ reason: needsBrowserHubSetup && getSecret() ? 'rejected' : 'missing' });
           return;
         }
         // Existing stored secret: probe once so a known-bad gate fails closed before markup.
@@ -2179,7 +3254,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.12.8', // x-release-please-version
+    _version: '0.12.22', // x-release-please-version
     openCluster: function () { return openCluster(); },
     _stripRawJsonForDisplay: stripRawJsonForDisplay,
     _summarizeContextJson: summarizeContextJson,
@@ -2188,6 +3263,7 @@
     _resolveSttUrl: resolveSttUrl,
     _resolveSttAuth: resolveSttAuth,
     _voiceIsUsable: voiceIsUsable,
+    _extractMessage: extractMessage,
     isReady: function () { return ready; },
     isRecording: function () { return !!recording; },
     toggleMic: function (dataUrl) { return toggleMic(dataUrl || null); },

@@ -7,13 +7,87 @@
      Send/audio stay clear — flush bottom sat on top of HAPI web composer controls. */
   right: env(safe-area-inset-right, 0px);
   bottom: calc(env(safe-area-inset-bottom, 0px) + 112px); /* 2 × 56px hub */
-  z-index: 2147483300; /* above markup overlay so hub + fan stay clickable (#115) */
+  /* #115: above markup overlay among our own surfaces. #254/#268: z-index cannot beat
+     host showModal() (top layer + inert). popover=manual gets us into the top layer;
+     when a :modal dialog is open we adopt chrome into it so hits escape inert. */
+  z-index: 2147483300;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 8px;
   pointer-events: none; /* only the button / open fan plate are interactive */
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* #254/#264: UA [popover] uses inset:0; margin:auto. A bare `inset: auto` on
+   `.opdock[popover]` is MORE specific than `.opdock { right; bottom }` and WIPED
+   the corner offsets → 0×0 FAB on production (Chromium + Firefox). Re-assert
+   placement + min box size on the same selector. */
+.opdock[popover],
+.opdock:popover-open {
+  position: fixed !important;
+  inset: auto !important;
+  top: auto !important;
+  left: auto !important;
+  right: env(safe-area-inset-right, 0px) !important;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 112px) !important;
+  margin: 0 !important;
+  border: none !important;
+  padding: 0 !important;
+  overflow: visible !important;
+  background: transparent !important;
+  color: inherit !important;
+  /* Content-sized from the 56px hub — never UA stretch-to-zero. */
+  width: max-content !important;
+  height: max-content !important;
+  min-width: 56px !important;
+  min-height: 56px !important;
+  max-width: none !important;
+  max-height: none !important;
+}
+.opdock-toast[popover],
+.opdock-toast:popover-open {
+  position: fixed !important;
+  inset: auto !important;
+  top: auto !important;
+  right: auto !important;
+  left: 50% !important;
+  bottom: 88px !important;
+  margin: 0 !important;
+  border: none !important;
+  width: max-content !important;
+  height: max-content !important;
+  max-width: 80vw !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+.opdock-overlay[popover],
+.opdock-overlay:popover-open {
+  position: fixed !important;
+  inset: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+  padding: 0 !important;
+  width: auto !important;
+  height: auto !important;
+  max-width: none !important;
+  max-height: none !important;
+  overflow: visible !important;
+  background: transparent !important;
+}
+.opdock-replies[popover],
+.opdock-replies:popover-open {
+  position: fixed !important;
+  inset: auto !important;
+  top: auto !important;
+  left: auto !important;
+  right: max(16px, env(safe-area-inset-right)) !important;
+  bottom: 84px !important;
+  margin: 0 !important;
+  width: min(380px, 88vw) !important;
+  max-height: 60vh !important;
+  height: auto !important;
+  overflow: hidden !important;
 }
 
 .opdock-btn {
@@ -116,9 +190,7 @@
   touch-action: none;
   pointer-events: none;
 }
-.opdock-toolbar,
-.opdock-draw,
-.opdock-foot {
+.opdock-toolbar {
   pointer-events: auto;
 }
 .opdock-stage { position: absolute; inset: 0; pointer-events: none; }
@@ -126,15 +198,12 @@
   position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
   pointer-events: none;
 }
-/* #154 / #209 / #212: do not cover Cancel/Send — Quest WebView canvases steal laser hits
- * even when a higher z-index foot paints on top. Keep draw clear of the actions row only
- * (measured via --opdock-foot-clear). Do not reserve FAB bottom pad — that ate host Send. */
+/* #271: full-viewport draw — Cancel/Send foot removed (mic=send, H=cancel). */
 .opdock-draw {
   position: absolute;
-  top: 0; left: 0; right: 0;
-  bottom: var(--opdock-foot-clear, 64px);
+  inset: 0;
   width: 100%;
-  height: auto;
+  height: 100%;
   cursor: crosshair;
   touch-action: none;
   pointer-events: auto;
@@ -168,22 +237,7 @@
 }
 .opdock-tool:hover { background: rgba(255, 255, 255, 0.22); }
 
-.opdock-foot {
-  position: absolute;
-  left: 0; right: 0; bottom: 0;
-  /* FAB (web dock + native host) is bottom-end — clear it with RIGHT padding.
-   * Bottom pad stays tight (#212) so Cancel/Send sit low and FOOT_CLEAR stays small;
-   * a large bottom pad lifted actions and ate host Send/status on the draw canvas. */
-  padding: 12px max(84px, calc(16px + env(safe-area-inset-right) + 64px))
-           max(12px, calc(8px + env(safe-area-inset-bottom)))
-           max(12px, env(safe-area-inset-left));
-  background: linear-gradient(to top, rgba(6, 8, 14, 0.95), rgba(6, 8, 14, 0.0));
-  display: flex; flex-direction: column; gap: 8px;
-  /* #154: above .opdock-draw; manipulation so Quest laser/touch lands on Cancel/Send */
-  z-index: 20;
-  pointer-events: auto;
-  touch-action: manipulation;
-}
+/* #271: foot Cancel/Send removed from markup; .opdock-btn2 remains for sheets (Done, etc.). */
 .opdock-interim { min-height: 16px; color: #a5b4fc; font-size: 13px; font-style: italic; }
 .opdock-listening {
   align-self: flex-start;
@@ -198,18 +252,9 @@
   animation: none;
   box-shadow: none;
 }
-.opdock-transcript {
-  width: 100%; box-sizing: border-box;
-  min-height: 60px; max-height: 28vh; resize: vertical;
-  border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.2);
-  background: rgba(17, 17, 20, 0.9); color: #f5f5f5;
-  padding: 10px 12px; font: 14px/1.4 ui-sans-serif, system-ui, sans-serif;
-}
-.opdock-actions { display: flex; justify-content: flex-start; flex-wrap: wrap; gap: 10px; }
 .opdock-btn2 {
   border: none; cursor: pointer; font-size: 15px; font-weight: 600;
   padding: 12px 22px; border-radius: 10px;
-  /* #154: Quest laser / touch plate — not a skinny text chip */
   min-height: 48px;
   min-width: 48px;
   position: relative;
@@ -218,13 +263,18 @@
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
-.opdock-cancel { background: rgba(255, 255, 255, 0.14); color: #e5e7eb; }
-/* #139: secondary credential CTA next to primary Done */
+/* Sheet secondary / primary (not markup foot — #271). */
 .opdock-secondary { background: rgba(255, 255, 255, 0.14); color: #e5e7eb; }
 .opdock-secondary:hover { background: rgba(255, 255, 255, 0.22); }
 .opdock-send { background: #6b21a8; color: #fff; }
 .opdock-send:hover { background: #7c3aed; }
 .opdock-send:disabled { opacity: 0.45; cursor: not-allowed; }
+.opdock-sat--send {
+  background: #6b21a8;
+}
+.opdock-btn--cancel {
+  box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.85), 0 4px 14px rgba(0, 0, 0, 0.35);
+}
 
 /* --- read-back replies panel ---------------------------------------------------------- */
 .opdock-replies {
@@ -299,6 +349,16 @@
   max-height: none;
   border-radius: 50%;
   overflow: visible;
+}
+/* #264: popover !important placement must not freeze expanded replies geometry on --min. */
+.opdock-replies--min[popover],
+.opdock-replies--min:popover-open {
+  right: calc(env(safe-area-inset-right, 0px) + 6px) !important;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 6px + 44px + 108px + 8px) !important;
+  width: 44px !important;
+  height: 44px !important;
+  max-height: none !important;
+  overflow: visible !important;
 }
 .opdock-replies--min .opdock-replies-body { display: none; }
 .opdock-replies--min .opdock-replies-compose { display: none; }
@@ -392,6 +452,11 @@
   z-index: 3;
   font-size: 13px;
 }
+/* #233: hub URL + token need room — 280px clipped https://… to ttps://… */
+.opdock-sheet.opdock-secret-sheet {
+  width: min(420px, 92vw);
+  max-height: min(70vh, 480px);
+}
 .opdock-sheet h3 {
   margin: 0 0 8px;
   font-size: 12px;
@@ -437,5 +502,10 @@
   background: rgba(17, 17, 20, 0.9);
   color: #f5f5f5;
   font: 14px/1.4 ui-sans-serif, system-ui, sans-serif;
+  direction: ltr;
+  text-align: left;
+}
+.opdock-secret-input[type="url"] {
+  font-size: 12px;
 }
 .opdock-secret-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
