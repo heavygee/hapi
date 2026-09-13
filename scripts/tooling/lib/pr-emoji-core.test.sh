@@ -376,6 +376,22 @@ No reportable issues found in the full latest diff.
 
 Review mode: follow-up after new commits
 '
+_clean_body_reportable_code='Review mode: follow-up after new commits
+
+**Requirement — Pass**
+
+Durable links.
+
+**Code — Reviewed**
+
+No additional actionable defects were established through static review.
+
+No reportable code issues found.
+
+**Testing**
+
+Not run.
+'
 _dirty_body_major='**Findings**
 - [Major] Something broke.
 
@@ -396,6 +412,11 @@ if pec_bot_body_findings_clean "$_clean_body_reportable"; then
     eq "findings clean: No reportable issues" "yes" "yes"
 else
     eq "findings clean: No reportable issues" "no" "yes"
+fi
+if pec_bot_body_findings_clean "$_clean_body_reportable_code"; then
+    eq "findings clean: No reportable code issues" "yes" "yes"
+else
+    eq "findings clean: No reportable code issues" "no" "yes"
 fi
 if pec_bot_body_findings_clean "$_dirty_body_major"; then
     eq "findings dirty: Major" "yes" "no"

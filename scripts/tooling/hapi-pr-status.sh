@@ -223,7 +223,9 @@ else
         # ("No Blocker, Major, Minor, or Nit findings…") which lacks "No findings".
         # Allow blank line(s) between **Findings** and "- None." (HAPI Bot often
         # emits that shape; a strict \\n- None false-positived #1274 as dirty).
-        CLEAN_REGEX="No findings|No high-confidence|No issues found|No reportable issues found|No actionable|No Blocker, Major, Minor, or Nit findings|No Blocker[[:space:]].*findings|\*\*Findings\*\*[[:space:]]*- None"
+        # "No reportable code issues found" (#1163 Codex v2 Code section) — not
+        # contiguous with older "No reportable issues found".
+        CLEAN_REGEX="No findings|No high-confidence|No issues found|No reportable (code )?issues found|No additional actionable|No actionable|No Blocker, Major, Minor, or Nit findings|No Blocker[[:space:]].*findings|\*\*Findings\*\*[[:space:]]*- None"
         BOT_DESC="github-actions[bot] review"
         TIMESTAMP_FIELD=".submitted_at"
     fi
@@ -235,15 +237,18 @@ else
         PASS=1
     else
         SUBMITTED=$(echo "$LATEST_BOT" | jq -r "${TIMESTAMP_FIELD}")
+        BODY=$(echo "$LATEST_BOT" | jq -r '.body // empty')
         SNIPPET=$(echo "$LATEST_BOT" | jq -r '.body[0:300]')
         echo "     Source: ${BOT_DESC}"
         echo "     Last run: ${SUBMITTED}"
         echo "$SNIPPET" | sed 's/^/     /'
+        # Match full body — clean verdict often sits after Requirement/Approach
+        # (#1163 false FINDINGS when only body[0:300] was searched).
         # grep is line-oriented; HAPI Bot puts "**Findings**" and "- None." on
         # separate lines, so flatten before matching (otherwise false dirty).
         # Some tip-bot payloads also embed literal backslash-n sequences
         # (not real newlines) — flatten those too (#1108 2026-08-04).
-        if printf '%s' "$SNIPPET" | sed 's/\\n/ /g' | tr '\n' ' ' | grep -qE "$CLEAN_REGEX"; then
+        if printf '%s' "$BODY" | sed 's/\\n/ /g' | tr '\n' ' ' | grep -qE "$CLEAN_REGEX"; then
             echo "     → PASS"
         else
             echo "     → FINDINGS PRESENT (apply 'cold-review-clean' label to override after addressing)"
