@@ -111,39 +111,48 @@ fi
 # so GitHub said CLEAN and reviewDecision="" and nothing stopped the merge.
 # Fails CLOSED: if the gate cannot run, the merge does not happen.
 if [[ "${1:-}" == "pr" && "${2:-}" == "merge" ]]; then
-    # Applies in EVERY repo, not just hapi trees — an unanswered maintainer
-    # comment is blocking wherever it appears (2026-09-13 #1842).
-    if true; then
-        root="$(hapi_tree_root 2>/dev/null || true)"
+    # SCOPE: HAPI work only. Other projects have their own concerns and must not
+    # inherit this gate. Decided by TARGET REPO, not cwd — merging tiann/hapi from
+    # a scratch directory is still hapi work; merging nuzzle from a hapi tree is not.
+    # Override with HAPI_MERGE_GATE_REPOS="owner/name owner/other".
+    gate_repos="${HAPI_MERGE_GATE_REPOS:-tiann/hapi heavygee/hapi}"
+
+    repo_arg=""
+    for ((i=1; i<=$#; i++)); do
+        [[ "${!i}" == "--repo" ]] && { j=$((i+1)); repo_arg="${!j}"; break; }
+    done
+    if [[ -z "$repo_arg" ]]; then
+        repo_arg="$("$REAL_GH" repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || true)"
+    fi
+
+    in_scope=0
+    for r in $gate_repos; do
+        [[ "$repo_arg" == "$r" ]] && { in_scope=1; break; }
+    done
+
+    if [[ "$in_scope" == "1" ]]; then
         pr_num=""
         for a in "$@"; do [[ "$a" =~ ^[0-9]+$ ]] && { pr_num="$a"; break; }; done
-        repo_arg=""
-        for ((i=1; i<=$#; i++)); do
-            [[ "${!i}" == "--repo" ]] && { j=$((i+1)); repo_arg="${!j}"; break; }
-        done
+        if [[ -z "$pr_num" ]]; then
+            pr_num="$("$REAL_GH" pr view --json number -q .number 2>/dev/null || true)"
+        fi
+        if [[ -z "$pr_num" ]]; then
+            echo "REFUSE: gh pr merge on $repo_arg — cannot determine PR number to gate." >&2
+            exit 2
+        fi
+
+        root="$(hapi_tree_root 2>/dev/null || true)"
         gate=""
         for cand in "$root/scripts/tooling/hapi-pr-merge-gate.sh" \
                     "$HOME/.local/bin/hapi-pr-merge-gate.sh"; do
             [[ -n "$cand" && -x "$cand" ]] && { gate="$cand"; break; }
         done
-        [[ -z "$gate" ]] && gate="$HOME/.local/bin/hapi-pr-merge-gate.sh"
-        if [[ ! -x "$gate" ]]; then
-            echo "REFUSE: gh pr merge blocked — missing gate $gate" >&2
-            echo "This gate is mandatory. Do not work around it; repair it." >&2
+        if [[ -z "$gate" ]]; then
+            echo "REFUSE: gh pr merge on $repo_arg blocked — pre-merge gate not installed." >&2
+            echo "Run scripts/tooling/install-gh-wrapper.sh. Do not route around it." >&2
             exit 2
         fi
-        if [[ -z "$pr_num" ]]; then
-            pr_num="$("$REAL_GH" pr view --json number -q .number 2>/dev/null || true)"
-        fi
-        if [[ -z "$pr_num" ]]; then
-            echo "REFUSE: gh pr merge blocked — cannot determine PR number to gate." >&2
-            exit 2
-        fi
-        if [[ -n "$repo_arg" ]]; then
-            "$gate" "$pr_num" --repo "$repo_arg" || exit $?
-        else
-            "$gate" "$pr_num" || exit $?
-        fi
+        "$gate" "$pr_num" --repo "$repo_arg" || exit $?
     fi
 fi
 

@@ -721,6 +721,12 @@ Topology: `docs/ROUTER_AGENT.md` (one router per integrating project).
 
 ## Merging: the pre-merge gate (mandatory, enforced)
 
+**Scope: HAPI work only.** The gate fires on the **target repo** — `tiann/hapi` and `heavygee/hapi`
+by default (`HAPI_MERGE_GATE_REPOS` to change). Every other project passes straight through to real
+`gh`; they have their own concerns and must not inherit this. Scope is decided by repo, **not cwd** —
+merging `tiann/hapi` from a scratch directory is still HAPI work, and merging another project from
+inside a hapi tree is not.
+
 **No agent merges anything without passing `scripts/tooling/hapi-pr-merge-gate.sh`.** `gh pr merge`
 is intercepted by `~/.local/bin/gh` (source: `scripts/tooling/gh-wrapper.sh`) and **fails closed** —
 if the gate is missing or cannot run, the merge does not happen. Repair the gate; never route around
