@@ -42,4 +42,25 @@ else
     echo "OK: non-oos host (publish would skip)"
 fi
 
+name="$(driver_soup_single_exe_github_asset_name linux-x64-baseline hapi)"
+[[ "$name" == hapi-linux-x64-baseline ]] || { echo "FAIL: github asset name linux x64 ($name)"; exit 1; }
+echo "OK: github asset name linux-x64-baseline"
+
+name="$(driver_soup_single_exe_github_asset_name windows-x64 hapi.exe)"
+[[ "$name" == hapi-windows-x64.exe ]] || { echo "FAIL: github asset name windows ($name)"; exit 1; }
+echo "OK: github asset name windows-x64"
+
+fixture="$TMP/fixture-release"
+mkdir -p "$fixture/linux-x64-baseline" "$fixture/darwin-arm64"
+printf '{}' >"$fixture/manifest.json"
+printf 'bin' >"$fixture/linux-x64-baseline/hapi"
+printf 'bin' >"$fixture/darwin-arm64/hapi"
+stage="$TMP/stage-release"
+files=()
+driver_soup_single_exe_stage_github_assets "$fixture" "$stage" files
+[[ "${#files[@]}" == "3" ]] || { echo "FAIL: expected 3 staged files, got ${#files[@]}"; exit 1; }
+[[ -f "$stage/manifest.json" && -f "$stage/hapi-linux-x64-baseline" && -f "$stage/hapi-darwin-arm64" ]] \
+    || { echo "FAIL: staged asset names missing"; exit 1; }
+echo "OK: stage github assets"
+
 echo "All driver-soup-single-exe-publish tests passed."

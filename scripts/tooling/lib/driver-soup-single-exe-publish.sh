@@ -17,6 +17,9 @@
 #   HAPI_SOUP_ARTIFACTS_ROOT  default /var/lib/hapi/soup-artifacts
 #   HAPI_SKIP_SOUP_SINGLE_EXE=1   skip (rebuild hook respects this)
 #   HAPI_SOUP_SINGLE_EXE_REQUIRED=1  fail hard on publish errors (default when hooked from rebuild --verify --build-web)
+#   HAPI_SOUP_GITHUB_REPO       default heavygee/hapi (GitHub Releases mirror)
+#   HAPI_SKIP_SOUP_GITHUB_RELEASE=1  skip gh release create/upload (local publish only)
+#   HAPI_SOUP_GITHUB_RELEASE_REQUIRED=1  fail publish if gh upload fails (default on oos foundry)
 
 driver_soup_single_exe_artifacts_root() {
     printf '%s\n' "${HAPI_SOUP_ARTIFACTS_ROOT:-/var/lib/hapi/soup-artifacts}"
@@ -61,6 +64,120 @@ driver_soup_single_exe_sha256_file() {
     else
         shasum -a 256 "$path" | awk '{print $1}'
     fi
+}
+
+driver_soup_single_exe_github_repo() {
+    printf '%s\n' "${HAPI_SOUP_GITHUB_REPO:-heavygee/hapi}"
+}
+
+# Flat release asset name for https://github.com/.../releases/latest/download/<name>
+driver_soup_single_exe_github_asset_name() {
+    local platform_dir="${1:?}"
+    local binary_name="${2:?}"
+    if [[ "$binary_name" == *.exe ]]; then
+        printf 'hapi-%s.exe\n' "$platform_dir"
+    else
+        printf 'hapi-%s\n' "$platform_dir"
+    fi
+}
+
+# Stage flat release asset filenames under a temp dir for gh upload.
+driver_soup_single_exe_stage_github_assets() {
+    local dest="${1:?}"
+    local staging="${2:?}"
+    local -n out_files="${3:?}"
+
+    rm -rf "$staging"
+    mkdir -p "$staging"
+    out_files=()
+
+    [[ -f "$dest/manifest.json" ]] || return 1
+    cp -f "$dest/manifest.json" "$staging/manifest.json"
+    out_files+=("$staging/manifest.json")
+
+    local platform_dir binary_name asset_name
+    for platform_dir in "$dest"/*/; do
+        [[ -d "$platform_dir" ]] || continue
+        platform_dir="${platform_dir%/}"
+        platform_dir="${platform_dir##*/}"
+        if [[ -f "$dest/$platform_dir/hapi.exe" ]]; then
+            binary_name=hapi.exe
+        elif [[ -f "$dest/$platform_dir/hapi" ]]; then
+            binary_name=hapi
+        else
+            continue
+        fi
+        asset_name="$(driver_soup_single_exe_github_asset_name "$platform_dir" "$binary_name")"
+        cp -f "$dest/$platform_dir/$binary_name" "$staging/$asset_name"
+        chmod +x "$staging/$asset_name" 2>/dev/null || true
+        out_files+=("$staging/$asset_name")
+    done
+
+    ((${#out_files[@]} >= 2)) || return 1
+    return 0
+}
+
+# Mirror a published soup-artifact directory to GitHub Releases on heavygee/hapi.
+driver_soup_single_exe_publish_github_release() {
+    local dest="${1:?}"
+    local tag="${2:?}"
+    local tip_sha="${3:-}"
+
+    if [[ "${HAPI_SKIP_SOUP_GITHUB_RELEASE:-}" == "1" ]]; then
+        echo "soup-artifact: skip GitHub Releases mirror (HAPI_SKIP_SOUP_GITHUB_RELEASE=1)"
+        return 0
+    fi
+
+    if ! command -v gh >/dev/null 2>&1; then
+        echo "ERROR: soup-artifact: gh CLI not found — cannot mirror to GitHub Releases" >&2
+        return 1
+    fi
+
+    local repo staging files=()
+    repo="$(driver_soup_single_exe_github_repo)"
+    staging="$(mktemp -d "${TMPDIR:-/tmp}/hapi-soup-gh-release.XXXXXX")"
+    if ! driver_soup_single_exe_stage_github_assets "$dest" "$staging" files; then
+        rm -rf "$staging"
+        echo "ERROR: soup-artifact: no release assets under $dest" >&2
+        return 1
+    fi
+
+    local notes target_args=()
+    notes="Automated soup single-exe publish."
+    if [[ -n "$tip_sha" ]]; then
+        notes="$notes Composed driver tip: ${tip_sha}."
+    fi
+    notes="$notes Download per-platform binaries as hapi-<platform-dir> (see manifest.json for sha256)."
+
+    if [[ -n "$tip_sha" ]] && gh api "repos/${repo}/commits/${tip_sha}" >/dev/null 2>&1; then
+        target_args=(--target "$tip_sha")
+    fi
+
+    echo "soup-artifact: mirroring ${#files[@]} asset(s) to GitHub Releases ${repo} tag=${tag}"
+
+    local gh_rc=0
+    if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
+        echo "soup-artifact: release $tag already exists — uploading assets (--clobber)"
+        gh release upload "$tag" --repo "$repo" --clobber "${files[@]}" || gh_rc=$?
+    else
+        gh release create "$tag" \
+            --repo "$repo" \
+            --title "Soup release $tag" \
+            --notes "$notes" \
+            "${target_args[@]}" \
+            "${files[@]}" || gh_rc=$?
+    fi
+    rm -rf "$staging"
+
+    if [[ "$gh_rc" -ne 0 ]]; then
+        echo "ERROR: soup-artifact: gh release mirror failed for $tag" >&2
+        return 1
+    fi
+
+    echo "soup-artifact: GitHub Releases mirror OK"
+    echo "soup-artifact: latest linux x64: https://github.com/${repo}/releases/latest/download/hapi-linux-x64-baseline"
+    echo "soup-artifact: manifest: https://github.com/${repo}/releases/latest/download/manifest.json"
+    return 0
 }
 
 driver_soup_single_exe_protocol_version() {
@@ -265,5 +382,19 @@ driver_soup_single_exe_publish() {
     echo "soup-artifact: fetch linux x64: $dest/linux-x64-baseline/hapi"
     echo "soup-artifact: manifest: $dest/manifest.json"
     echo "soup-artifact: latest symlink: $root/latest"
+
+    local github_required=0
+    if [[ "${HAPI_SOUP_GITHUB_RELEASE_REQUIRED:-}" == "1" ]] || driver_soup_single_exe_host_ok; then
+        github_required=1
+    fi
+    if driver_soup_single_exe_publish_github_release "$dest" "$tag" "$tip_sha"; then
+        :
+    elif [[ "$github_required" == "1" ]]; then
+        echo "ERROR: soup-artifact: GitHub Releases mirror failed (required on soup foundry host)" >&2
+        return 1
+    else
+        echo "WARNING: soup-artifact: GitHub Releases mirror failed (non-fatal on this host)" >&2
+    fi
+
     return 0
 }

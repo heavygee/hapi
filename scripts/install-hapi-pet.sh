@@ -43,26 +43,11 @@ esac
 log "Architecture: $ARCH -> $HAPI_PLATFORM"
 
 # --- 2. Resolve artifact source ---
-# NOTE (2026-09-13): the public GitHub Releases mirror for these binaries is not live
-# yet. Until it ships, HAPI_ARTIFACT_URL must be set explicitly to wherever you were
-# handed the binary (a URL reachable from this box, or a local path). Once the mirror
-# lands, this script's default should be updated to point there automatically.
+# Default: GitHub Releases mirror on heavygee/hapi (soup single-exe publish).
+# Override with HAPI_ARTIFACT_URL for a local path or a different mirror.
+HAPI_RELEASES_REPO="${HAPI_RELEASES_REPO:-heavygee/hapi}"
 if [[ -z "$HAPI_ARTIFACT_URL" ]]; then
-    cat >&2 <<EOF
-No HAPI_ARTIFACT_URL set.
-
-The public download mirror for HAPI pet-install binaries is not live yet. Ask whoever
-manages the estate for a URL or file path to the current "$HAPI_PLATFORM" build, then
-re-run as:
-
-  HAPI_ARTIFACT_URL=https://.../hapi bash install-hapi-pet.sh
-    or
-  HAPI_ARTIFACT_URL=/path/to/already-downloaded/hapi bash install-hapi-pet.sh
-
-Once a public GitHub Releases mirror exists, this script will be updated to default
-there automatically — no change needed on your end at that point.
-EOF
-    exit 1
+    HAPI_ARTIFACT_URL="https://github.com/${HAPI_RELEASES_REPO}/releases/latest/download/hapi-${HAPI_PLATFORM}"
 fi
 log "Artifact source: $HAPI_ARTIFACT_URL"
 
