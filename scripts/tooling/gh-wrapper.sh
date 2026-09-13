@@ -111,14 +111,22 @@ fi
 # so GitHub said CLEAN and reviewDecision="" and nothing stopped the merge.
 # Fails CLOSED: if the gate cannot run, the merge does not happen.
 if [[ "${1:-}" == "pr" && "${2:-}" == "merge" ]]; then
-    if root="$(hapi_tree_root)"; then
+    # Applies in EVERY repo, not just hapi trees — an unanswered maintainer
+    # comment is blocking wherever it appears (2026-09-13 #1842).
+    if true; then
+        root="$(hapi_tree_root 2>/dev/null || true)"
         pr_num=""
         for a in "$@"; do [[ "$a" =~ ^[0-9]+$ ]] && { pr_num="$a"; break; }; done
         repo_arg=""
         for ((i=1; i<=$#; i++)); do
             [[ "${!i}" == "--repo" ]] && { j=$((i+1)); repo_arg="${!j}"; break; }
         done
-        gate="$root/scripts/tooling/hapi-pr-merge-gate.sh"
+        gate=""
+        for cand in "$root/scripts/tooling/hapi-pr-merge-gate.sh" \
+                    "$HOME/.local/bin/hapi-pr-merge-gate.sh"; do
+            [[ -n "$cand" && -x "$cand" ]] && { gate="$cand"; break; }
+        done
+        [[ -z "$gate" ]] && gate="$HOME/.local/bin/hapi-pr-merge-gate.sh"
         if [[ ! -x "$gate" ]]; then
             echo "REFUSE: gh pr merge blocked — missing gate $gate" >&2
             echo "This gate is mandatory. Do not work around it; repair it." >&2

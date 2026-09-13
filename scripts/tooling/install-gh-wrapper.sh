@@ -23,6 +23,21 @@ if [[ -f "$DEST" && ! -L "$DEST" ]] && ! grep -q 'gh-wrapper.sh\|PRE-PR MANDATOR
 fi
 
 cp "$SRC" "$DEST"
+
+# The merge gate must exist on hosts with no hapi checkout — the wrapper falls
+# back to this copy. Without it, gh pr merge fails closed everywhere.
+GATE_SRC="$REPO_ROOT/scripts/tooling/hapi-pr-merge-gate.sh"
+if [[ -f "$GATE_SRC" ]]; then
+    cp "$GATE_SRC" "$HOME/.local/bin/hapi-pr-merge-gate.sh"
+    chmod +x "$HOME/.local/bin/hapi-pr-merge-gate.sh"
+    echo "Installed merge gate → $HOME/.local/bin/hapi-pr-merge-gate.sh"
+fi
+LANEB_SRC="$REPO_ROOT/scripts/tooling/hapi-laneb-authorise.sh"
+if [[ -f "$LANEB_SRC" ]]; then
+    cp "$LANEB_SRC" "$HOME/.local/bin/hapi-laneb-authorise"
+    chmod +x "$HOME/.local/bin/hapi-laneb-authorise"
+    echo "Installed lane B authoriser → $HOME/.local/bin/hapi-laneb-authorise"
+fi
 chmod +x "$DEST"
 
 echo "Installed gh wrapper → $DEST"
