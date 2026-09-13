@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { SessionListScrollAnchor } from './SessionListScrollAnchor'
 import type { SessionContentSearchResponse, SessionSummary } from '@/types/api'
-import { isWildcardSearch, matchesSearchQuery } from '@hapi/protocol'
 import type { ApiClient } from '@/api/client'
+import {
+    buildSessionSearchScoreIndex,
+    compareSessionsBySearchRelevance,
+    rankSessionGroupsBySearchRelevance,
+    sessionMatchesQuery,
+    sortSessionsBySearchRelevance,
+} from '@/lib/sessionListSearch'
 import { useLongPress } from '@/hooks/useLongPress'
 import { useHoldToTalk } from '@/hooks/useHoldToTalk'
 import { useDictation } from '@/hooks/useDictation'
@@ -1063,30 +1069,10 @@ function SessionPreviewArrowIcon(props: { direction: 'up' | 'down'; className?: 
 }
 
 export { getSessionTitle } from '@/lib/sessionTitle'
+export { sessionMatchesQuery } from '@/lib/sessionListSearch'
 
 export function normalizeSearch(value: string | null | undefined): string {
     return (value ?? '').trim().toLowerCase()
-}
-
-export function sessionMatchesQuery(session: SessionSummary, query: string, machineLabel: string): boolean {
-    if (!query) return true
-    const searchableParts = [
-        getSessionTitle(session),
-        getWorktreeSessionLabel(session),
-        session.id,
-        session.metadata?.path,
-        session.metadata?.worktree?.basePath,
-        session.metadata?.worktree?.worktreePath,
-        session.metadata?.name,
-        session.metadata?.summary?.text,
-        session.metadata?.flavor,
-        machineLabel,
-    ]
-        .filter((part): part is string => typeof part === 'string' && part.length > 0)
-    if (isWildcardSearch(query)) {
-        return searchableParts.some((part) => matchesSearchQuery(part, query))
-    }
-    return searchableParts.join('\n').toLowerCase().includes(query)
 }
 
 export function shouldShowPinnedDivider(sessions: SessionSummary[], index: number): boolean {
@@ -1948,6 +1934,19 @@ export function SessionList(props: {
         () => new Set(allSessions.map(session => formatDateValue(new Date(session.updatedAt)))),
         [allSessions]
     )
+    const hasTextQuery = normalizedQuery.length > 0
+    const timeScopedSessions = useMemo(
+        () => timeRange === null
+            ? allSessions
+            : allSessions.filter(session => sessionMatchesTimeRange(session, timeRange)),
+        [allSessions, timeRange?.start, timeRange?.end] // eslint-disable-line react-hooks/exhaustive-deps
+    )
+    const searchScoreIndex = useMemo(
+        () => hasTextQuery
+            ? buildSessionSearchScoreIndex(timeScopedSessions, normalizedQuery, resolveMachineLabel)
+            : null,
+        [hasTextQuery, timeScopedSessions, normalizedQuery, machineLabelsById] // eslint-disable-line react-hooks/exhaustive-deps
+    )
     const visibleSessions = useMemo(
         () => {
             if (contentSearchActive) {
@@ -1958,18 +1957,22 @@ export function SessionList(props: {
                     : prepared
                 return sidebarSessions.filter(session => sessionMatchesTimeRange(session, timeRange))
             }
-            return isFiltering
-                ? allSessions.filter(session => (
-                    sessionMatchesTimeRange(session, timeRange)
-                    && sessionMatchesQuery(
+            if (!isSearchFiltering) return allSessions
+            const matched = hasTextQuery && searchScoreIndex
+                ? timeScopedSessions.filter(session => searchScoreIndex.matchedIds.has(session.id))
+                : timeScopedSessions.filter(session => (
+                    sessionMatchesQuery(
                         session,
                         normalizedQuery,
                         resolveMachineLabel(session.metadata?.machineId ?? null)
                     )
                 ))
-                : allSessions
+            if (hasTextQuery && searchScoreIndex) {
+                return sortSessionsBySearchRelevance(matched, searchScoreIndex)
+            }
+            return matched
         },
-        [allSessions, contentSearchActive, contentSearchResponse, isFiltering, normalizedQuery, selectedSessionId, showActiveSessionsOnly, timeRange?.start, timeRange?.end, machineLabelsById] // eslint-disable-line react-hooks/exhaustive-deps
+        [allSessions, contentSearchActive, contentSearchResponse, hasTextQuery, isSearchFiltering, normalizedQuery, searchScoreIndex, selectedSessionId, showActiveSessionsOnly, timeScopedSessions, machineLabelsById, timeRange?.start, timeRange?.end] // eslint-disable-line react-hooks/exhaustive-deps
     )
     const contentSnippetBySessionId = useMemo(() => {
         const snippets = new Map<string, string>()
@@ -2137,10 +2140,13 @@ export function SessionList(props: {
             ),
         [blockedFilteredSessions, activeMachineFilter]
     )
-    const { pinned: pinnedSessions, unpinned: unpinnedMachineSessions } = useMemo(
-        () => partitionGlobalPinnedSessions(machineFilteredSessions),
-        [machineFilteredSessions]
-    )
+    const { pinned: pinnedSessions, unpinned: unpinnedMachineSessions } = useMemo(() => {
+        const { pinned, unpinned } = partitionGlobalPinnedSessions(machineFilteredSessions)
+        if (searchScoreIndex && hasTextQuery) {
+            return { pinned: sortSessionsBySearchRelevance(pinned, searchScoreIndex), unpinned }
+        }
+        return { pinned, unpinned }
+    }, [machineFilteredSessions, searchScoreIndex, hasTextQuery])
     // Fleet-wide count, deliberately computed BEFORE search / time / unread /
     // machine narrowing: the pill exists to tell the operator how much blocked
     // work exists, and a count that silently shrank behind a filter would be
@@ -2210,25 +2216,37 @@ export function SessionList(props: {
             }
         }
         const byRecent = (a: SessionSummary, b: SessionSummary) => b.updatedAt - a.updatedAt
+        const byRelevanceOrRecent = (a: SessionSummary, b: SessionSummary) => {
+            if (searchScoreIndex && hasTextQuery) {
+                return compareSessionsBySearchRelevance(a, b, searchScoreIndex)
+            }
+            return byRecent(a, b)
+        }
         for (const key of Object.keys(buckets) as RunningBucketKey[]) {
-            buckets[key].sort(byRecent)
+            buckets[key].sort(byRelevanceOrRecent)
         }
         return buckets
-    }, [unpinnedMachineSessions, pinInProgressMode, blockedSectionIds])
+    }, [unpinnedMachineSessions, pinInProgressMode, blockedSectionIds, searchScoreIndex, hasTextQuery])
     const runningSessionTotal = runningSessions.jobs.length
         + runningSessions.working.length
         + runningSessions.pending.length
     const activeSessionTotal = runningSessions.active.length
     const groups = useMemo(
-        () => groupSessionsByDirectory(
-            unpinnedMachineSessions.filter((session) => {
-                if (blockedSectionIds.has(session.id)) return false
-                if (pinInProgressMode !== 'off'
-                    && isPinnedInProgressSession(session, pinInProgressMode)) return false
-                return true
-            })
-        ),
-        [unpinnedMachineSessions, pinInProgressMode, blockedSectionIds]
+        () => {
+            const grouped = groupSessionsByDirectory(
+                unpinnedMachineSessions.filter((session) => {
+                    if (blockedSectionIds.has(session.id)) return false
+                    if (pinInProgressMode !== 'off'
+                        && isPinnedInProgressSession(session, pinInProgressMode)) return false
+                    return true
+                })
+            )
+            if (searchScoreIndex && hasTextQuery) {
+                return rankSessionGroupsBySearchRelevance(grouped, searchScoreIndex)
+            }
+            return grouped
+        },
+        [unpinnedMachineSessions, pinInProgressMode, blockedSectionIds, searchScoreIndex, hasTextQuery]
     )
     // Destructive group actions must scope to the FULL project group, not the
     // rendered subset: `groups` above drops global-pinned/in-progress rows and
