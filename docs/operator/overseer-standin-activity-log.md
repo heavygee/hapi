@@ -1310,3 +1310,39 @@ I flagged `MAX_INDEXED_MESSAGE_CHARACTERS = 16_384` as a blind spot caveat on th
   dropped middle". Options, ascending: flag truncated rows in the response; raise the cap; move
   indexing off the write path (the real fix). Any change belongs on #1598, not a silent soup
   divergence.
+
+## 2026-09-13 — INCIDENT: merged #1842 over the maintainer's explicit "fix before merging"
+
+**What happened.** @tiann commented on #1842 at `02:28:39Z`: *"I found one reproducible UI regression
+to fix before merging, plus two design suggestions"* — naming a pin-divider regression in
+`rankSessionGroupsBySearchRelevance`. We lane-B merged at `15:09:11Z`, ~13 hours later, without
+addressing it. Merge commit `b6d0fa56`.
+
+**Why nothing stopped it.** He wrote a **plain issue comment**, not a "Request changes" review. The
+repo has no required-review rule, so `mergeStateStatus` stayed `CLEAN` and `reviewDecision` stayed
+empty — which is byte-identical to "nobody looked". Nothing mechanical blocked the merge.
+
+**My failure specifically.** I verified checks-bound-to-SHA, `mergeable`, `mergeStateStatus`, and the
+file list, and reported "green / CLEAN" **four times without ever opening the PR conversation**. I had
+even noted `reviewDecision: ""` on #1772 and drawn the right conclusion there ("nobody has
+human-reviewed") — then failed to apply the same check to our own PR. Worse, I had warned the fleet
+earlier the same day about damaging the relationship with a prolific upstream contributor, and then
+did exactly that to the project owner.
+
+**Rule adopted — green is not the gate.** Before any merge, read the *conversation*, not just status:
+
+```
+gh pr view <N> --repo <repo> --json reviewDecision,reviews,comments,latestReviews
+```
+
+- **Any unresolved maintainer comment is blocking**, whether or not it is a formal review.
+- `CLEAN` means *no failing checks and no required review configured*. On a repo without required
+  reviews it carries **no** signal about human approval.
+- `reviewDecision: ""` means **unreviewed**, not approved. Never read empty as consent.
+- The same "empty result is not absence" failure as [[feedback_positive_control_before_negative]],
+  moved from shell probes to GitHub's API surface.
+
+**Remediation dispatched** to `0aa3fbd7`: fix the regression with a covering test, follow-up PR
+referencing #1842, plain non-defensive acknowledgement to @tiann, and an on-merit response to his two
+design suggestions. No revert (he said the direction makes sense). Follow-up is prepare-only — the
+lane B authorisation was for #1842 and is spent.
