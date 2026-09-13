@@ -106,4 +106,37 @@ MSG
     fi
 fi
 
+# ── `gh pr merge` — deterministic pre-merge gate (2026-09-13 #1842 incident) ──
+# CI green never meant reviewed. tiann's "fix before merging" was a plain comment,
+# so GitHub said CLEAN and reviewDecision="" and nothing stopped the merge.
+# Fails CLOSED: if the gate cannot run, the merge does not happen.
+if [[ "${1:-}" == "pr" && "${2:-}" == "merge" ]]; then
+    if root="$(hapi_tree_root)"; then
+        pr_num=""
+        for a in "$@"; do [[ "$a" =~ ^[0-9]+$ ]] && { pr_num="$a"; break; }; done
+        repo_arg=""
+        for ((i=1; i<=$#; i++)); do
+            [[ "${!i}" == "--repo" ]] && { j=$((i+1)); repo_arg="${!j}"; break; }
+        done
+        gate="$root/scripts/tooling/hapi-pr-merge-gate.sh"
+        if [[ ! -x "$gate" ]]; then
+            echo "REFUSE: gh pr merge blocked — missing gate $gate" >&2
+            echo "This gate is mandatory. Do not work around it; repair it." >&2
+            exit 2
+        fi
+        if [[ -z "$pr_num" ]]; then
+            pr_num="$("$REAL_GH" pr view --json number -q .number 2>/dev/null || true)"
+        fi
+        if [[ -z "$pr_num" ]]; then
+            echo "REFUSE: gh pr merge blocked — cannot determine PR number to gate." >&2
+            exit 2
+        fi
+        if [[ -n "$repo_arg" ]]; then
+            "$gate" "$pr_num" --repo "$repo_arg" || exit $?
+        else
+            "$gate" "$pr_num" || exit $?
+        fi
+    fi
+fi
+
 exec "$REAL_GH" "$@"

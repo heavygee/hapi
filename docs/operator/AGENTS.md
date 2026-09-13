@@ -718,3 +718,44 @@ This app's operator mic targets **this** session as the **app router** (not a gl
 
 Canon: `hapi-inline` → `docs/APP_ROUTER_AGENT.md` + `docs/CONSUMER_CONTRACT.md`.
 Topology: `docs/ROUTER_AGENT.md` (one router per integrating project).
+
+## Merging: the pre-merge gate (mandatory, enforced)
+
+**No agent merges anything without passing `scripts/tooling/hapi-pr-merge-gate.sh`.** `gh pr merge`
+is intercepted by `~/.local/bin/gh` (source: `scripts/tooling/gh-wrapper.sh`) and **fails closed** —
+if the gate is missing or cannot run, the merge does not happen. Repair the gate; never route around
+it with `/usr/bin/gh`.
+
+Origin: **2026-09-13**, `tiann/hapi#1842`. @tiann commented *"one reproducible UI regression to fix
+before merging"*. It was a **plain comment, not a "Request changes" review**, so GitHub reported
+`mergeStateStatus=CLEAN` and `reviewDecision=""`, and an agent — having verified checks-on-SHA,
+mergeable and diff scope — merged 13 hours later over the maintainer's explicit objection.
+**CI green never meant reviewed.**
+
+The gate blocks unless **all** of these hold:
+
+| # | Condition | Why it is there |
+|---|---|---|
+| 1 | PR is `OPEN` and not a draft | no re-merging or merging drafts |
+| 2 | `mergeable == MERGEABLE` | `UNKNOWN` means GitHub is still computing — re-run, don't assume |
+| 3 | Checks green **on the head SHA** | the PR-level summary lags a fresh push |
+| 4 | `reviewDecision != CHANGES_REQUESTED` | explicit rejection |
+| 5 | **Zero unresolved review threads** | status APIs hide these |
+| 6 | **Zero unanswered comments from anyone but the author since the last push** | **the #1842 case** — a maintainer's plain comment carries no mechanical weight on GitHub, so the gate gives it weight |
+| 7 | No `docs/operator/`, `docs/plans/`, `CLAUDE.md` in the diff | leak scanner parity |
+| 8 | For `tiann/hapi`: a valid **lane B authorisation** | agents are prepare-only upstream |
+
+Checks 5 and 6 **fail closed on API error** — an unreadable thread is treated as blocking, because an
+empty result is not absence.
+
+### Lane B authorisation
+
+`scripts/tooling/hapi-laneb-authorise.sh` — **operator only, on a real TTY.** It refuses to run from
+any agent shell (`CLAUDECODE`, `CURSOR_AGENT*`, `HAPI_AGENT_CONTEXT`, `CI`, or no controlling tty) and
+**has no env-var bypass by design.** This is the one gate an agent cannot self-serve.
+
+A grant is bound to **one PR and one head SHA**, expires (default 30 min), and is **consumed on use** —
+so it cannot authorise a later push, and cannot merge twice. If the branch moves after authorisation,
+the gate blocks and the operator must re-authorise.
+
+Agents wanting an upstream merge must **ask the operator to run it**; they cannot grant it themselves.
