@@ -4,7 +4,7 @@ import type { AppendMessage, AttachmentAdapter, ThreadMessageLike } from '@assis
 import { useExternalMessageConverter, useExternalStoreRuntime } from '@assistant-ui/react'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { resolvePendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
-import { safeStringify } from '@hapi/protocol'
+import { safeStringify, stripAgentContract } from '@hapi/protocol'
 import { renderEventLabel } from '@/chat/presentation'
 import type { ChatBlock, CliOutputBlock, CodexReview, UsageData } from '@/chat/types'
 import type { AgentEvent, ToolCallBlock } from '@/chat/types'
@@ -324,7 +324,11 @@ function toThreadMessageLike(block: VisibleChatBlock, threadMessageId: string): 
             role: 'user',
             id: threadMessageId,
             createdAt: new Date(block.createdAt),
-            content: [{ type: 'text', text: block.text }],
+            // Strip the machine-only notify contract from the human render. On
+            // non-Cursor flavors the hub prepends an inline contract prefix to
+            // the stored operator message (#20); stripAgentContract removes that
+            // leading block. No-op when absent.
+            content: [{ type: 'text', text: stripAgentContract(block.text) }],
             metadata: {
                 custom: {
                     kind: 'user',
@@ -343,7 +347,12 @@ function toThreadMessageLike(block: VisibleChatBlock, threadMessageId: string): 
             role: 'assistant',
             id: threadMessageId,
             createdAt: new Date(block.createdAt),
-            content: [{ type: 'text', text: block.text }],
+            // Strip the trailing AGENT_NOTIFY_SUMMARY line (collapse-normalized,
+            // so Cursor's corrupted SUMARY variant strips too) so the human never
+            // sees the machine contract. The raw text stays in the store for the
+            // overseer event/inbox pipeline. copyText derives from this content,
+            // so the clipboard is clean too.
+            content: [{ type: 'text', text: stripAgentContract(block.text) }],
             metadata: {
                 custom: {
                     kind: 'assistant',
