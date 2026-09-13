@@ -114,6 +114,8 @@ This is a proposal, not a decision — flagging for operator confirmation before
 - [x] Janus `in-svc-01` in-place upgrade test — **PASS 2026-09-13**, same artifact bump as antevorta (9622798 → cd7d515), same result (state/token survived), see §4. Confirmed untangled from the blocked official IN-zone network rebuild (bridges/CIDR) — that's a separate host-network process, not touched. VM stopped again afterward, not running 24/7 yet. Same drain-under-load caveat as antevorta
 - [x] **Two-host proof (2026-09-13):** persistent-volume + in-place-upgrade design confirmed on two independent physical hosts (antevorta, janus), not just one
 - [x] Quiesce resolved 2026-09-11 (Gavin sign-off): reuse `hapi-restart-hub`'s existing patient drain unchanged
+- [x] Stage 0 automation (2026-09-11): `hapi-driver-rebuild --build-web --verify` on oos publishes soup single-exe artifacts
+- [x] Pet-install cheat sheet (§6) — **VERIFIED 2026-09-13** after two rewrite rounds across three independent fresh-box tests (CTID 9001 fail → CTID 9002 partial-fix-with-new-bugs → CTID 9003 clean). See §6 for full detail
 
 ## 6. Self-upgrade path for non-fleet ("pet") installs — new 2026-09-13
 
@@ -146,13 +148,13 @@ Container is still up and available as a dev target for the meta-bot's `hapi upg
 
 **Cheat sheet status: VERIFIED, 2026-09-13** (after two rewrite rounds — see collapsed history below).
 
-Round 1 (fresh LXC `pet-firsttimer-sim`, CTID 9001) found the original did **not** get a real first-timer to a working install — full findings collapsed below. Round 2 fixes (correct per-platform path, `nvm` for Node/npm) were re-tested from scratch on a **third, independent fresh box** (LXC `pet-rewrite-test2`, CTID 9003, janus, `192.168.86.x`, no `sudo`, nothing pre-installed) — every step followed literally:
+Round 1 (fresh LXC `pet-firsttimer-sim`, CTID 9001) found the original did **not** get a real first-timer to a working install — full findings collapsed below. Round 2 fixes (correct per-platform path, `nvm` for Node/npm) were re-tested from scratch on a **third, independent fresh box** (LXC `pet-rewrite-test2`, CTID 9003, janus, `192.168.86.90`, no `sudo`, nothing pre-installed) — every step followed literally:
 
 - Steps 1–6 (arch check → fetch from the corrected `soup-artifacts/latest/<platform>/hapi` path, no rename needed → no-`sudo` install fallback → directories created before launch → hub up without `--relay` → `/health` ok) — clean, no deviations.
 - Step 7 (`nvm` → Node 22 → `npm install -g @anthropic-ai/claude-code`) — clean: no `EACCES`, no `EBADENGINE`, no root needed. (One thing that looked like a gap during testing — sourcing `~/.bashrc` non-interactively didn't load `nvm` — turned out to be a testing-harness artifact: Debian's stock `.bashrc` has `[ interactive ] || return` at the very top, and my test shell wasn't interactive. Confirmed via nvm's own direct `NVM_DIR`/`nvm.sh` export, which is unaffected by that guard. A real person's real terminal is interactive and doesn't hit this — not a cheat-sheet gap, verified rather than assumed.)
 - Step 8 (`hapi --print "hello"`) — reproduced the exact documented `Not logged in · Please run /login` failure mode (deliberately did not spend a real Anthropic OAuth login on a disposable test box — same boundary as round 1, this time by explicit operator/peer sign-off rather than a judgment call made solo). Completing that login is a separately-proven mechanism (done for real on antevorta/Doug's install), not something that needed re-proving here.
 
-Net: three independent fresh-box tests total (round 1 fail, round 2 partial-fix-with-new-bugs, round 2 re-test clean) across three different CTIDs, by two different rewrite iterations. The instructions, followed literally with nothing silently fixed, get a real first-timer to a working install now.
+Net: three independent fresh-box tests total, named for auditability — **CTID 9001** (`pet-firsttimer-sim`, round 1, failed: the 10-item findings list above), **CTID 9002** (`pet-rewrite-test`, first rewrite pass, found two new bugs the rewrite itself introduced: the wrong per-platform artifact path, and `npm install -g` hitting the same no-`sudo` `EACCES` wall the rewrite had just solved one step earlier for installing `hapi` itself — both fixed in the doc immediately after, same day), **CTID 9003** (`pet-rewrite-test2`, second rewrite pass, clean per above) — across two rewrite iterations. The instructions, followed literally with nothing silently fixed, get a real first-timer to a working install now.
 
 <details>
 <summary>First-timer test findings, 2026-09-13 (click to expand) — every gap the original cheat sheet had</summary>
@@ -272,5 +274,3 @@ chmod +x hapi && sudo mv hapi /usr/local/bin/hapi
 # Update, forever after
 hapi upgrade
 ```
-
-- [x] Stage 0 automation (2026-09-11): `hapi-driver-rebuild --build-web --verify` on oos publishes soup single-exe artifacts
