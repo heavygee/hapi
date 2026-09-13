@@ -1857,6 +1857,7 @@ export function SessionList(props: {
     const { sessionListStatusMode } = useSessionListStatusMode()
     const { showActiveSessionsOnly, setShowActiveSessionsOnly } = useShowActiveSessionsOnly()
     const lastSeenVersion = useSessionLastSeenVersion()
+    // Transient session-list lens — not a Settings preference. Cleared on reload.
     const [sessionFilters, setSessionFilters] = useState<SessionListFilterState>(DEFAULT_SESSION_LIST_FILTER_STATE)
     const showScratchlistOnly = sessionFilters.scratchlist
     const {
