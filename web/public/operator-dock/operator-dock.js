@@ -2097,6 +2097,7 @@
         sendBtn.disabled = false;
         if (ok) {
           ta.value = '';
+          startReplyPolling();
           tick();
         }
       });
@@ -2122,11 +2123,39 @@
 
     var seen = {};
     var primed = false;
+    var pollErrorShown = false;
+    function startReplyPolling() {
+      if (replyPoll || !replies || !replies.isConnected) return;
+      replyPoll = setInterval(tick, 4000);
+    }
+    function stopReplyPolling() {
+      if (replyPoll) { clearInterval(replyPoll); replyPoll = null; }
+    }
+    function notifyPollError(msg) {
+      if (pollErrorShown) return;
+      pollErrorShown = true;
+      toast(msg, 'err');
+    }
     function tick() {
-      hapiGet('/api/sessions/' + encodeURIComponent(session) + '/messages?limit=25', secret)
-        .then(function (r) { return r.ok ? r.json() : null; })
+      var msgPath = '/api/sessions/' + encodeURIComponent(session) + '/messages?limit=25';
+      hapiGet(msgPath, secret)
+        .then(function (r) {
+          if (r.status === 401 || r.status === 403) {
+            stopReplyPolling();
+            return readRejectDetail(r, msgPath, session).then(function (d) {
+              onAuthRejected(d.status, d);
+              return null;
+            });
+          }
+          if (!r.ok) {
+            notifyPollError('Replies refresh failed ' + r.status);
+            return null;
+          }
+          return r.json().catch(function () { return null; });
+        })
         .then(function (d) {
           if (!d || !d.messages) return;
+          pollErrorShown = false;
           var items = d.messages.map(extractMessage).filter(Boolean);
           var fresh = items.filter(function (it) { return !seen[it.seq]; });
           if (fresh.length && body.textContent === 'Waiting for the agent…') body.textContent = '';
@@ -2143,11 +2172,12 @@
             }
           });
           primed = true;
-        }).catch(function () {});
+        }).catch(function (e) {
+          notifyPollError('Replies refresh failed: ' + (e && e.message || e || 'network error'));
+        });
     }
     tick();
-    replyPoll = setInterval(tick, 4000);
-    setTimeout(function () { if (replyPoll) { clearInterval(replyPoll); replyPoll = null; } }, 300000);
+    startReplyPolling();
   }
   function closeReplies() {
     if (replyPoll) { clearInterval(replyPoll); replyPoll = null; }
@@ -3254,7 +3284,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.12.22', // x-release-please-version
+    _version: '0.12.23', // x-release-please-version
     openCluster: function () { return openCluster(); },
     _stripRawJsonForDisplay: stripRawJsonForDisplay,
     _summarizeContextJson: summarizeContextJson,
