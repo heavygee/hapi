@@ -370,6 +370,38 @@ describe('PermissionAdapter', () => {
         });
     });
 
+    it('denies production mutation shell commands even in yolo mode', async () => {
+        const harness = createHarnessWithMode(() => 'yolo');
+        const cmd = 'ssh server "kill 1 && hapi-driver-db-prep.sh test && nohup bun run src/index.ts"';
+
+        harness.emitPermissionRequest(buildRequest({
+            id: 'perm-prod-block',
+            toolCallId: 'perm-prod-block',
+            title: cmd,
+            kind: 'execute',
+            options: [
+                { optionId: 'reject-once', name: 'Reject', kind: 'reject_once' },
+                { optionId: 'allow-once', name: 'Allow', kind: 'allow_once' }
+            ]
+        }));
+
+        await flushAsyncWork();
+
+        expect(harness.respondCalls).toEqual([
+            {
+                sessionId: 'session-1',
+                request: expect.objectContaining({ id: 'perm-prod-block', title: cmd }),
+                response: { outcome: 'selected', optionId: 'reject-once' }
+            }
+        ]);
+        expect(harness.getAgentState().completedRequests).toMatchObject({
+            'perm-prod-block': {
+                status: 'denied',
+                decision: 'denied'
+            }
+        });
+    });
+
     it('auto-approves read-only non-write tools but keeps writes pending', async () => {
         const harness = createHarnessWithMode(() => 'read-only');
 
