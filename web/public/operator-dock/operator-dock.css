@@ -109,6 +109,18 @@
 }
 .opdock-btn:hover { transform: translateY(-1px); }
 .opdock-btn:active { transform: scale(0.94); }
+.opdock-btn--version-unseen::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #ef4444;
+  box-shadow: 0 0 0 2px #6b21a8;
+  animation: opdock-dot-pulse 1.2s infinite;
+}
 
 /* #155: known-bad / missing gate — hide H + fan; secret sheet stays interactive */
 .opdock--gate-locked .opdock-btn {
@@ -416,6 +428,17 @@
   z-index: 1;
 }
 .opdock-sat svg { display: block; }
+.opdock-sat--version-unseen::after {
+  content: "";
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #ef4444;
+  box-shadow: 0 0 0 2px #4c1d95;
+}
 /* #107: expanded footprint is a continuous hit plate (hub + tools + gaps). No hover-open.
  * #112: positions from (R, count, arc) — JS sets --opdock-sat-tx/ty; CSS values below are
  * fallback only (R=108, 90°→180°, tx=R cos θ, ty=-R sin θ). Do not hand-pile new sats. */
@@ -487,11 +510,41 @@
 }
 .opdock-session-row:hover { background: rgba(124, 58, 237, 0.18); }
 .opdock-session-row--on { outline: 1px solid #7c3aed; }
+.opdock-row-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .opdock-session-meta { font-size: 11px; color: #9ca3af; }
 .opdock-unread-dot {
   width: 8px; height: 8px; border-radius: 999px; background: #a78bfa; flex-shrink: 0;
 }
 .opdock-unread-dot[hidden] { display: none !important; }
+.opdock-version-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #ef4444;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.opdock-version-dot--pulse {
+  animation: opdock-dot-pulse 1.2s infinite;
+}
+.opdock-version-dot--about,
+.opdock-version-dot--changelog {
+  box-shadow: 0 0 0 2px rgba(15, 17, 23, 0.9);
+}
+.opdock-changelog {
+  margin-top: 8px;
+}
+.opdock-changelog-list {
+  margin: 6px 0 12px 16px;
+  padding: 0;
+}
+.opdock-changelog-list li {
+  margin: 4px 0;
+}
 .opdock-secret-input {
   width: 100%;
   box-sizing: border-box;
@@ -509,3 +562,9 @@
   font-size: 12px;
 }
 .opdock-secret-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+
+@keyframes opdock-dot-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.65); }
+  70% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}

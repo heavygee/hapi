@@ -50,6 +50,8 @@
   var longPressTimer = null, longPressFired = false;
   var mediaRecorder = null, mediaStream = null, mediaChunks = [], mediaMime = '', mediaStopWait = null;
   var toolSheet = null;
+  var toolSheetStage = '';
+  var bundledChangelogPromise = null;
   // #154 / #209 / #212: keep draw clear of Cancel/Send only — not the FAB pad.
   // #271: markup has no Cancel/Send foot — draw uses the full viewport.
   var markupOpening = false;
@@ -118,6 +120,70 @@
       // TODO(2027-02-01): remove legacy storage key compatibility.
       localStorage.removeItem(LEGACY_SECRET_KEY);
     } catch (e) {}
+  }
+
+  function lastSeenVersionKey() {
+    return 'hapiInline.lastSeenVersion.' + ((cfg && cfg.appId) || 'unknown-app');
+  }
+  function currentDockVersion() {
+    // Served version is the canonical _version surface.
+    try { return String((window.HapiInline && window.HapiInline._version) || '').trim(); } catch (e) { return ''; }
+  }
+  function getLastSeenVersion() {
+    try { return String(localStorage.getItem(lastSeenVersionKey()) || '').trim(); } catch (e) { return ''; }
+  }
+  function setLastSeenVersion(version) {
+    try {
+      var v = String(version || '').trim();
+      if (v) localStorage.setItem(lastSeenVersionKey(), v);
+      else localStorage.removeItem(lastSeenVersionKey());
+    } catch (e) {}
+  }
+  function compareSemver(a, b) {
+    function parts(v) {
+      return String(v || '')
+        .split(/[^0-9]+/)
+        .filter(Boolean)
+        .map(function (n) { return parseInt(n, 10) || 0; });
+    }
+    var A = parts(a);
+    var B = parts(b);
+    var len = Math.max(A.length, B.length, 3);
+    for (var i = 0; i < len; i++) {
+      var ai = i < A.length ? A[i] : 0;
+      var bi = i < B.length ? B[i] : 0;
+      if (ai === bi) continue;
+      return ai > bi ? 1 : -1;
+    }
+    return 0;
+  }
+  function isVersionUnseen() {
+    var current = currentDockVersion(); // reads window.HapiInline._version
+    if (!current) return false;
+    var seen = getLastSeenVersion();
+    if (!seen) return true; // first visit on this browser
+    return compareSemver(current, seen) > 0;
+  }
+  function refreshVersionTrailUi() {
+    if (!dock) return;
+    var btn = dock.querySelector('.opdock-btn');
+    var settingsSat = dock.querySelector('.opdock-sat[data-tool="settings"]');
+    var unseen = isVersionUnseen();
+    var hasSheet = !!toolSheet;
+    var clusterOpen = dock.classList.contains('opdock--cluster-open');
+    var showHub = unseen && !hasSheet && !clusterOpen;
+    var showSettingsSat = unseen && !hasSheet && clusterOpen;
+
+    dock.classList.toggle('opdock--version-unseen-hub', showHub);
+    dock.classList.toggle('opdock--version-unseen-settings', showSettingsSat);
+    if (btn) btn.classList.toggle('opdock-btn--version-unseen', showHub);
+    if (settingsSat) settingsSat.classList.toggle('opdock-sat--version-unseen', showSettingsSat);
+  }
+  function markCurrentVersionSeen() {
+    var version = currentDockVersion(); // from HapiInline._version
+    if (!version) return;
+    setLastSeenVersion(version);
+    refreshVersionTrailUi();
   }
 
   function routingModeKey() {
@@ -711,6 +777,7 @@
     } else {
       dock.classList.remove('opdock--gate-locked');
     }
+    refreshVersionTrailUi();
   }
   function readRejectDetail(res, path, sessionId) {
     return res.json().catch(function () { return {}; }).then(function (body) {
@@ -811,6 +878,7 @@
     var reason = opts.reason === 'rejected' ? 'rejected' : 'missing';
     var detail = opts.detail || {};
     toolSheet = $('div', 'opdock-sheet opdock-secret-sheet');
+    toolSheetStage = 'secret';
     toolSheet.appendChild($('h3', null, reason === 'rejected' ? 'Credential rejected' : 'Unlock HAPI inline'));
     var meta = promptMessageForMode();
     if (detail.error || detail.path) meta = authRejectOperatorCopy(403, detail);
@@ -848,6 +916,7 @@
     actions.appendChild(save);
     toolSheet.appendChild(actions);
     dock.appendChild(toolSheet);
+    refreshVersionTrailUi();
     try { (hubInp || inp).focus(); } catch (e) {}
   }
   function ensureSecret() {
@@ -2706,6 +2775,8 @@
   }
   function closeToolSheet() {
     if (toolSheet) { toolSheet.remove(); toolSheet = null; }
+    toolSheetStage = '';
+    refreshVersionTrailUi();
   }
   // #112: even fan from (R, count, arc). Keep in sync with lib/fan-geometry.ts.
   var FAN_RADIUS_PX = 108;
@@ -2750,6 +2821,7 @@
     closeToolSheet();
     var btn = dock.querySelector('.opdock-btn');
     if (btn) btn.setAttribute('aria-expanded', 'false');
+    refreshVersionTrailUi();
   }
   function openCluster() {
     if (!ready || !dock || isGateLocked()) return false;
@@ -2760,6 +2832,7 @@
     dock.classList.add('opdock--cluster-open');
     var btn = dock.querySelector('.opdock-btn');
     if (btn) btn.setAttribute('aria-expanded', 'true');
+    refreshVersionTrailUi();
     return true;
   }
   function onHubClick() {
@@ -2798,6 +2871,7 @@
     closeToolSheet();
     if (!dock) return;
     toolSheet = $('div', 'opdock-sheet');
+    toolSheetStage = 'settings';
     // #249/#251: reopen once when operator prefs newly unlock spawn-per-send.
     var spawnReadyAtOpen = canSpawnPerSend();
     function refreshIfSpawnUnlocked() {
@@ -2846,6 +2920,18 @@
         pinnedLine.textContent = 'Pinned: ' + (label || operatorSessionLabel(null, 'pinned'));
       });
     }
+    toolSheet.appendChild($('h3', null, 'About'));
+    var aboutRow = $('button', 'opdock-session-row');
+    aboutRow.type = 'button';
+    var aboutBody = $('div');
+    var aboutTitle = $('div', 'opdock-row-title');
+    aboutTitle.appendChild($('span', null, 'About hapi-inline'));
+    if (isVersionUnseen()) aboutTitle.appendChild($('span', 'opdock-version-dot opdock-version-dot--about opdock-version-dot--pulse'));
+    aboutBody.appendChild(aboutTitle);
+    aboutBody.appendChild($('div', 'opdock-session-meta', 'Version ' + currentDockVersion() + ' · config summary · changelog'));
+    aboutRow.appendChild(aboutBody);
+    aboutRow.addEventListener('click', function () { openAboutSheet(); });
+    toolSheet.appendChild(aboutRow);
     // #249/#251: operator picks machine + directory; persist on change/blur (no Save button).
     var machineSelect = null;
     var dirInp = null;
@@ -3078,6 +3164,181 @@
     actions.appendChild(doneBtn);
     toolSheet.appendChild(actions);
     dock.appendChild(toolSheet);
+    refreshVersionTrailUi();
+  }
+  function stripMarkdownLinks(text) {
+    return String(text || '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+  }
+  function parseBundledChangelog(markdown) {
+    var lines = String(markdown || '').split(/\r?\n/);
+    var entries = [];
+    var entry = null;
+    var section = '';
+    function pushEntry() {
+      if (!entry) return;
+      if (entry.notes.length) entries.push(entry);
+      entry = null;
+      section = '';
+    }
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i] || '';
+      var head = line.match(/^##\s+\[?v?(\d+\.\d+\.\d+[^\]\s]*)/i);
+      if (head) {
+        pushEntry();
+        entry = { version: head[1], notes: [] };
+        continue;
+      }
+      if (!entry) continue;
+      var sec = line.match(/^###\s+(.+?)\s*$/);
+      if (sec) {
+        section = stripMarkdownLinks(sec[1]).trim();
+        continue;
+      }
+      var bullet = line.match(/^\s*[*-]\s+(.*\S)\s*$/);
+      if (bullet) {
+        var txt = stripMarkdownLinks(bullet[1]).replace(/\s+/g, ' ').trim();
+        if (!txt) continue;
+        entry.notes.push(section ? (section + ': ' + txt) : txt);
+      }
+    }
+    pushEntry();
+    return entries.slice(0, 16);
+  }
+  var BUNDLED_CHANGELOG_FALLBACK = [
+    '## [0.12.22]',
+    '### Bug Fixes',
+    '- dock: H/mic hittable over full-bleed markup',
+    '## [0.12.21]',
+    '### Bug Fixes',
+    '- dock: recording interaction — mic sends, H cancels',
+    '## [0.12.20]',
+    '### Bug Fixes',
+    '- dock: adopt chrome into host :modal',
+    '## [0.12.19]',
+    '### Bug Fixes',
+    '- dock: popover must not collapse FAB to 0×0',
+  ].join('\n');
+  function loadBundledChangelog() {
+    if (bundledChangelogPromise) return bundledChangelogPromise;
+    var url = (cfg && cfg.changelogUrl) ? String(cfg.changelogUrl) : '/CHANGELOG.md';
+    bundledChangelogPromise = fetch(url, {
+      headers: { 'Accept': 'text/markdown, text/plain, */*' },
+      cache: 'no-store',
+    }).then(function (res) {
+      if (!res.ok) throw new Error('changelog ' + res.status);
+      return res.text();
+    }).then(function (raw) {
+      var parsed = parseBundledChangelog(raw);
+      if (parsed.length) return parsed;
+      return parseBundledChangelog(BUNDLED_CHANGELOG_FALLBACK);
+    }).catch(function () {
+      return parseBundledChangelog(BUNDLED_CHANGELOG_FALLBACK);
+    });
+    return bundledChangelogPromise;
+  }
+  function aboutModeLabel() {
+    return cfg && cfg.mode === MODE_BROWSER_HUB ? 'browser-hub' : 'proxy';
+  }
+  function aboutHubSummary() {
+    if (cfg && cfg.mode === MODE_BROWSER_HUB) return hasValidHubOrigin() ? 'present' : 'not set';
+    return 'same-origin proxy';
+  }
+  function aboutSttSummary() {
+    syncEffectiveHubOrigin();
+    return cfg && cfg.sttUrl ? 'enabled' : 'not configured';
+  }
+  function renderChangelogList(host, entries) {
+    host.textContent = '';
+    if (!entries.length) {
+      host.appendChild($('div', 'opdock-session-meta', 'No bundled release notes were found.'));
+      return;
+    }
+    entries.forEach(function (entry) {
+      host.appendChild($('h3', null, 'v' + entry.version));
+      var list = $('ul', 'opdock-changelog-list');
+      entry.notes.slice(0, 8).forEach(function (note) {
+        list.appendChild($('li', null, note));
+      });
+      host.appendChild(list);
+    });
+  }
+  function openAboutSheet() {
+    closeToolSheet();
+    if (!dock) return;
+    toolSheet = $('div', 'opdock-sheet');
+    toolSheetStage = 'about';
+    toolSheet.appendChild($('h3', null, 'About hapi-inline'));
+    toolSheet.appendChild($('div', 'opdock-session-meta', 'Version: ' + (currentDockVersion() || '(unknown)')));
+    toolSheet.appendChild($('div', 'opdock-session-meta', 'Mode: ' + aboutModeLabel()));
+    toolSheet.appendChild($('div', 'opdock-session-meta', 'Hub: ' + aboutHubSummary()));
+    toolSheet.appendChild($('div', 'opdock-session-meta', 'STT: ' + aboutSttSummary()));
+    toolSheet.appendChild($('div', 'opdock-session-meta', 'Routing: ' + getRoutingMode()));
+    toolSheet.appendChild($('div', 'opdock-session-meta', 'Credits: hapi-inline by HeavyGee Projects'));
+
+    var changelogRow = $('button', 'opdock-session-row');
+    changelogRow.type = 'button';
+    var changelogBody = $('div');
+    var changelogTitle = $('div', 'opdock-row-title');
+    changelogTitle.appendChild($('span', null, 'Changelog'));
+    if (isVersionUnseen()) changelogTitle.appendChild($('span', 'opdock-version-dot opdock-version-dot--changelog opdock-version-dot--pulse'));
+    changelogBody.appendChild(changelogTitle);
+    changelogBody.appendChild($('div', 'opdock-session-meta', 'Open bundled release notes (no live GitHub fetch).'));
+    changelogRow.appendChild(changelogBody);
+    changelogRow.addEventListener('click', function () { openChangelogSheet(); });
+    toolSheet.appendChild(changelogRow);
+
+    var actions = $('div', 'opdock-actions');
+    var backBtn = $('button', 'opdock-btn2 opdock-secondary', 'Back');
+    backBtn.addEventListener('click', function () { openSettingsSheet(); });
+    actions.appendChild(backBtn);
+    if (isVersionUnseen()) {
+      var dismissBtn = $('button', 'opdock-btn2 opdock-secondary', 'Dismiss update');
+      dismissBtn.addEventListener('click', function () {
+        markCurrentVersionSeen();
+        openAboutSheet();
+      });
+      actions.appendChild(dismissBtn);
+    }
+    var doneBtn = $('button', 'opdock-btn2 opdock-send', 'Done');
+    doneBtn.addEventListener('click', function () { closeToolSheet(); });
+    actions.appendChild(doneBtn);
+    toolSheet.appendChild(actions);
+    dock.appendChild(toolSheet);
+    refreshVersionTrailUi();
+  }
+  function openChangelogSheet() {
+    closeToolSheet();
+    if (!dock) return;
+    toolSheet = $('div', 'opdock-sheet');
+    toolSheetStage = 'changelog';
+    // Opening changelog marks the current version as seen.
+    markCurrentVersionSeen();
+    toolSheet.appendChild($('h3', null, 'Changelog'));
+    toolSheet.appendChild($('div', 'opdock-session-meta', 'Bundled release notes from package CHANGELOG.md'));
+    var list = $('div', 'opdock-changelog');
+    list.appendChild($('div', 'opdock-session-meta', 'Loading bundled release notes…'));
+    toolSheet.appendChild(list);
+    var actions = $('div', 'opdock-actions');
+    var backBtn = $('button', 'opdock-btn2 opdock-secondary', 'Back');
+    backBtn.addEventListener('click', function () { openAboutSheet(); });
+    actions.appendChild(backBtn);
+    var doneBtn = $('button', 'opdock-btn2 opdock-send', 'Done');
+    doneBtn.addEventListener('click', function () {
+      markCurrentVersionSeen();
+      closeToolSheet();
+    });
+    actions.appendChild(doneBtn);
+    toolSheet.appendChild(actions);
+    dock.appendChild(toolSheet);
+    refreshVersionTrailUi();
+    loadBundledChangelog().then(function (entries) {
+      if (!toolSheet || !list.isConnected) return;
+      renderChangelogList(list, entries);
+    }).catch(function () {
+      if (!toolSheet || !list.isConnected) return;
+      list.textContent = '';
+      list.appendChild($('div', 'opdock-session-meta', 'Could not load bundled release notes.'));
+    });
   }
   function openSessionPicker() {
     closeToolSheet();
@@ -3085,6 +3346,7 @@
     var secret = ensureSecret();
     if (!secret) return;
     toolSheet = $('div', 'opdock-sheet');
+    toolSheetStage = 'sessions';
     toolSheet.appendChild($('h3', null, 'Project sessions'));
     var list = $('div');
     list.appendChild($('div', 'opdock-session-meta', 'Loading…'));
@@ -3095,6 +3357,7 @@
     actions.appendChild(doneBtn);
     toolSheet.appendChild(actions);
     dock.appendChild(toolSheet);
+    refreshVersionTrailUi();
     listProjectSessions(secret).then(function (sessions) {
       list.textContent = '';
       if (!sessions.length) {
@@ -3187,6 +3450,7 @@
       }, true);
     }
     ready = true;
+    refreshVersionTrailUi();
     // #124: native host ≠ hide mic sat. AndroidOperator is a bridge (STT / PixelCopy),
     // not chrome ownership. Native FAB may be hub (QAR openCluster) or mic (Jessica).
     // Hosts that own mic chrome call hideButton() (or CSS-hide the sat).
@@ -3284,7 +3548,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.12.23', // x-release-please-version
+    _version: '0.13.0', // x-release-please-version
     openCluster: function () { return openCluster(); },
     _stripRawJsonForDisplay: stripRawJsonForDisplay,
     _summarizeContextJson: summarizeContextJson,
