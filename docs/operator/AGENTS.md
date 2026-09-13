@@ -701,9 +701,9 @@ This app **vendors** [`heavygee/hapi-inline`](https://github.com/heavygee/hapi-i
 4. Merge gate is aggregate **`ci`**. `merge-on-green` is often SKIPPED — squash-merge when `ci` is green.
 5. Agent replies composer (package #169): type in Agent replies → abort + continue. Needs POST abort on the proxy allow-list at remat of that tag.
 
-Canon: `hapi-inline` → `docs/CONSUMER_CONTRACT.md`. App mic router: `docs/APP_ROUTER_AGENT.md`. Package gate session title: **hapi-inline ownership**.
+Canon: `hapi-inline` → `docs/CONSUMER_CONTRACT.md`. App mic router: `docs/APP_ROUTER_AGENT.md`. Package gate session title: **hapi-inline ownership oos** ([/sessions/40da5da5-a8ff-49af-a421-6323e26c2582](/sessions/40da5da5-a8ff-49af-a421-6323e26c2582)). **Do not** ping retired homelab `3e387783` (2026-09-13 cutover).
 
-**Package checkout / spawn host (2026-08-16):** `~/coding/hapi-inline` on **oos-linux** (hub/runner). Do not spawn package peers onto proxmox/homelab. The old ownership session on proxmox is archive context only.
+**Package checkout / spawn host (2026-08-16):** `~/coding/hapi-inline` on **oos-linux** (hub/runner). Do not spawn package peers onto proxmox/homelab. The old ownership session on proxmox / retired homelab gate is archive context only.
 
 ## hapi-inline — app router (this project)
 
@@ -713,7 +713,7 @@ This app's operator mic targets **this** session as the **app router** (not a gl
 |------|--------|
 | Domain | Triage asks for **this app**; spawn peers **in this project's workspace** for incremental work (parallel). |
 | Do not | Route every ask through one long implementer queue; lasting-edit vendored `operator-dock.*`. |
-| Dock/proxy/contract need | **Builder estate (us):** file issue on **`heavygee/hapi-inline`**; ping **hapi-inline ownership**. **External integrators:** not your backlog — authors own package changes. Never lasting-edit vendored dock. |
+| Dock/proxy/contract need | **Builder estate (us):** file issue on **`heavygee/hapi-inline`**; ping **hapi-inline ownership oos** (not retired `3e387783`). **External integrators:** not your backlog — authors own package changes. Never lasting-edit vendored dock. |
 | Standing order | Spawn peers for incremental mic/ops work in this app without re-asking each time. |
 
 Canon: `hapi-inline` → `docs/APP_ROUTER_AGENT.md` + `docs/CONSUMER_CONTRACT.md`.
