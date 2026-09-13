@@ -22,6 +22,7 @@ import { installOperatorDockSttJwtFetch } from '@/lib/operator-dock-stt-auth'
 import { clearMessageWindow, rewindMessageWindow, syncTailMessages } from '@/lib/message-window-store'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useTranslation } from '@/lib/use-translation'
+import { translateInputRequestTitle } from '@/lib/input-request-toast'
 import { VoiceProvider } from '@/lib/voice-context'
 import { GardenXrLauncherProvider, GardenXrOverlayHost } from '@/garden/GardenXrLauncher'
 import { requireHubUrlForLogin } from '@/lib/runtime-config'
@@ -342,6 +343,10 @@ function AppInner() {
     const translateIncomingToast = useCallback((title: string, body: string): { title: string; body: string } => {
         const normalizedTitle = title.trim()
         const normalizedBody = body.trim()
+        const inputTitle = translateInputRequestTitle(normalizedTitle, t)
+        if (inputTitle) {
+            return { title: inputTitle, body: normalizedBody }
+        }
 
         if (normalizedTitle === 'Ready for input') {
             const waitingMatch = normalizedBody.match(/^(.+)\s+is waiting in\s+(.+)$/i)

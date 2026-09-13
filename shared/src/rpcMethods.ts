@@ -55,6 +55,7 @@ export const RPC_METHODS = {
     BridgeModelError: 'bridge-model-error',
     RunnerSelfUpgrade: 'runner-self-upgrade',
     ClearConversation: 'clear-conversation',
+    ImplementCodexPlan: 'implement-codex-plan',
 } as const
 
 export const RPC_TARGET_MISSING_ERROR_CODE = 'rpc_target_missing' as const

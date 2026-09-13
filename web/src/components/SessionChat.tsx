@@ -707,6 +707,7 @@ function SessionChatInner(props: SessionChatProps) {
         props.session.metadata?.startingMode === 'pty' && props.session.active
     const [terminalVisible, setTerminalVisible] = useState(false)
     const normalizedCacheRef = useRef<Map<string, { source: DecryptedMessage; normalized: NormalizedMessage | null }>>(new Map())
+    const focusComposerRef = useRef<(() => void) | null>(null)
     const blocksByIdRef = useRef<Map<string, ChatBlock>>(new Map())
     const visibleGroupsRef = useRef<ToolGroupBlock[]>([])
     const [rememberedTailBoundary, setRememberedTailBoundary] = useState<{
@@ -2080,6 +2081,7 @@ function SessionChatInner(props: SessionChatProps) {
                         disabled={sessionInactive}
                         onRefresh={props.onRefresh}
                         onRetryMessage={props.onRetryMessage}
+                        onContinuePlan={() => focusComposerRef.current?.()}
                         historyActionPending={historyActionPending}
                         onForkConversation={controlledByUser ? undefined : onForkConversation}
                         onRewindConversation={controlledByUser ? undefined : onRewindConversation}
@@ -2174,6 +2176,7 @@ function SessionChatInner(props: SessionChatProps) {
                         </div>
 
                         <HappyComposer
+                        focusInputRef={focusComposerRef}
                         key={`composer-${props.session.id}`}
                         sessionId={props.session.id}
                         canRestoreAttachments={props.session.active}
